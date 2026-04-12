@@ -19,7 +19,8 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [references/formula-translation.md](references/formula-translation.md) | ThoughtSpot formula → SQL translation rules and untranslatable pattern handling |
 | [references/property-coverage.md](references/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
 | [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema and validation rules |
-| [references/thoughtspot-setup.md](references/thoughtspot-setup.md) | ThoughtSpot profile configuration, token persistence, API call patterns, and TML parsing pitfalls |
+| [references/thoughtspot-auth.md](references/thoughtspot-auth.md) | ThoughtSpot profile configuration, token persistence, and API call patterns |
+| [references/thoughtspot-tml.md](references/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [references/snowflake-setup.md](references/snowflake-setup.md) | Snowflake connection profiles, auth methods, execution options, and detection order |
 
 ---
@@ -385,7 +386,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [references/thoughtspot-setup.md](references/thoughtspot-setup.md) for details.
+never `"schema_"`. See [references/thoughtspot-tml.md](references/thoughtspot-tml.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it

@@ -1,7 +1,7 @@
-# ThoughtSpot Setup and API Reference
+# ThoughtSpot Authentication and API Reference
 
-How to authenticate with ThoughtSpot and make API calls. Covers profile configuration,
-token persistence patterns, and known parsing pitfalls.
+Profile configuration, token persistence patterns, and API call examples.
+Reusable across any skill that connects to ThoughtSpot.
 
 ---
 
@@ -50,13 +50,13 @@ export THOUGHTSPOT_SECRET_KEY_STAGING=your-staging-secret-key
 
 ---
 
-## ThoughtSpot Authentication — Token Persistence
+## Token Persistence
 
 Tokens obtained from `/api/rest/2.0/auth/token/full` are session-scoped. In Claude
 Code's Bash tool, **shell variables do not persist between separate tool invocations**.
 Use one of these patterns:
 
-**Pattern A — Temp file (recommended for this multi-step skill):**
+**Pattern A — Temp file (recommended for multi-step skills):**
 ```bash
 # Step 1: Fetch and persist
 TOKEN=$(curl -s -X POST "{BASE_URL}/api/rest/2.0/auth/token/full" \
@@ -87,13 +87,13 @@ curl -s -H "Authorization: Bearer $TOKEN" ...  # same invocation
 
 ---
 
-## ThoughtSpot API Calls
+## API Call Patterns
 
 All environments use the same ThoughtSpot REST API v2 endpoints.
 
 **Python `requests`:**
 ```python
-import requests, os
+import requests
 
 base_url = "https://myorg.thoughtspot.cloud"  # from profile
 token = "..."  # obtained from auth/token/full
@@ -115,59 +115,8 @@ data = response.json()
 
 **curl (Claude Code / terminal):**
 ```bash
-curl -s -X POST "{THOUGHTSPOT_BASE_URL}/api/rest/2.0/metadata/search" \
+curl -s -X POST "{base_url}/api/rest/2.0/metadata/search" \
   -H "Authorization: Bearer {token}" \
   -H "Content-Type: application/json" \
   -d '{"metadata": [{"type": "LOGICAL_TABLE"}]}'
 ```
-
----
-
-## Known Parsing Pitfalls
-
-### `schema` field name in PyYAML
-
-ThoughtSpot Table TML contains a top-level `schema` key inside the `table` object:
-```yaml
-table:
-  name: DM_DATE_DIM
-  db: DUNDERMIFFLIN
-  schema: PUBLIC          # <-- this field
-  db_table: DM_DATE_DIM
-```
-
-When parsed with PyYAML (`yaml.safe_load`) or converted to JSON, this field is stored
-as `"schema"` — **not** `"schema_"`. Always access it as:
-```python
-tbl.get("schema")    # correct
-tbl.get("schema_")   # wrong — always returns None
-```
-
-The underscore variant is a common mistake. If `schema` appears to be missing, always
-print `tbl.keys()` to verify the actual field names before concluding it is absent.
-
-### Schema IS exported by the API
-
-The `/api/rest/2.0/metadata/tml/export` endpoint with `export_fqn: true` and
-`export_associated: true` **does** include `schema` in every Table TML that has one
-set in ThoughtSpot. Do **not** prompt the user for the schema value unless:
-- The `schema` key is genuinely absent from the parsed dict, **and**
-- You have printed `tbl.keys()` to confirm it is not just a parsing artefact.
-
-### Non-printable characters in TML
-
-Some TML contains special characters (e.g. `#x0095`) that cause `yaml.safe_load` to
-raise a `ReaderError`. Strip them before parsing:
-```python
-import re
-cleaned = re.sub(r'[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD]', '', edoc)
-parsed = yaml.safe_load(cleaned)
-```
-
-### Debugging parsed TML structure
-
-When inspecting any parsed TML object, always emit all keys before filtering:
-```python
-print(f"Table keys: {list(tbl.keys())}")
-```
-This prevents silent misses caused by field name assumptions.
