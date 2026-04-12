@@ -285,53 +285,78 @@ Delete `/tmp/ts_token.txt` at the end of the session.
 
 ---
 
-### Step 2: Search and Select a Model
+### Step 2: Find and Select a Model
 
-**First, ask the user:** "Enter a keyword to search by name, or press Enter to browse
-all available worksheets and models."
-
-**API subtype note:** Both Worksheets and Models appear as `type: WORKSHEET` in the
-`metadata_header` of the search response. There is no separate `MODEL` subtype
-returned by this API. The actual TML format (`worksheet` vs `model` top-level key)
-is only determined after export in Step 3. `metadata_detail` is frequently `null`
-and must not be relied on for subtype filtering — use `metadata_header.type`.
-
-**Record limit:** The API caps `record_size` at 50 per request. Paginate using
-`record_offset` in increments of 50 until an empty page is returned. Fetch all
-pages before displaying results.
-
-**If keyword provided — server-side search:**
+**Present the following options to the user:**
 ```
-POST {THOUGHTSPOT_BASE_URL}/api/rest/2.0/metadata/search
+How would you like to find your model?
+  G — I have a GUID
+  S — Search (by name, author, tags, or a combination)
+  B — Browse all
+```
+
+---
+
+#### Option G — Direct GUID
+
+If the user provides a GUID, skip search entirely. Store it as `{selected_model_id}`.
+The model name will be confirmed from the TML export in Step 3.
+
+---
+
+#### Option S — Search
+
+Ask the user which filters to apply (they may provide any combination):
+
+```
+Enter search criteria (leave blank to skip):
+  Name keyword:
+  Author (username or email):
+  Tags (comma-separated):
+```
+
+Build the request body from whichever fields are provided. All supplied filters
+combine with AND semantics — results must satisfy every condition:
+
+```
+POST {base_url}/api/rest/2.0/metadata/search
 {
   "metadata": [{"type": "LOGICAL_TABLE"}],
-  "query_string": "{keyword}",
+  "query_string": "{name_keyword}",           // omit if blank
+  "created_by_user_identifiers": ["{author}"], // omit if blank; accepts username or GUID
+  "tag_identifiers": ["{tag1}", "{tag2}"],     // omit if blank; accepts tag name or GUID
   "record_size": 50,
   "record_offset": 0
 }
 ```
-Paginate this result set the same way. If zero results come back, fall through to
-client-side fuzzy search (see below).
 
-**If browsing all — paginate and collect:**
+Paginate in increments of 50 until an empty page is returned before displaying results.
+
+**Zero results fallback:** If a name-only search returns zero results, re-run with
+no `query_string`, collect all results, and apply case-insensitive substring matching
+against `metadata_name` client-side. Present matches or offer to browse all.
+
+---
+
+#### Option B — Browse All
+
 Fetch all pages (`record_offset` 0, 50, 100, …) until an empty page is returned.
-Filter the full list to `metadata_header.type == 'WORKSHEET'` and display with
-a numbered list.
+Filter to `metadata_header.type == 'WORKSHEET'` and display the full numbered list.
 
-**Client-side fuzzy search fallback:** If the user provides a keyword that returns
-zero server-side results, re-run with no `query_string`, collect all results, then
-apply case-insensitive substring matching against `metadata_name`. Present matches
-(if any) or inform the user none were found and offer to browse all.
+---
 
-Display results as a numbered list:
+#### Displaying Results
+
 ```
 1. [WORKSHEET] Retail Sales WS            id: e61c7c4c-...
 2. [WORKSHEET] TS: BI Server              id: eaab6de7-...
 ```
 
-After the user selects, confirm: "This object has type WORKSHEET in the API. Is
-this a Model or a Worksheet? (The TML export will confirm, but let me know if you
-are unsure.)"
+**API subtype note:** Both Worksheets and Models appear as `type: WORKSHEET` in the
+search response — there is no separate `MODEL` subtype. `metadata_detail` is
+frequently `null` and must not be relied on for subtype filtering. The actual TML
+format (`worksheet` vs `model` top-level key) is only determined after export in
+Step 3.
 
 Store `metadata_id` as `{selected_model_id}` and `metadata_name` as
 `{original_model_name}`.
