@@ -17,13 +17,15 @@ creates the view via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`.
 
 ## Installation
 
-1. Copy the skill directory into your Claude Code skills folder:
+### 1. Copy the skill
 
 ```bash
 cp -r thoughtspot-snowflake-semantic-view ~/.claude/skills/
 ```
 
-2. Configure your ThoughtSpot profile in `~/.claude/thoughtspot-profiles.json`:
+### 2. Configure ThoughtSpot
+
+Create `~/.claude/thoughtspot-profiles.json`:
 
 ```json
 {
@@ -38,14 +40,27 @@ cp -r thoughtspot-snowflake-semantic-view ~/.claude/skills/
 }
 ```
 
-3. Export the secret key in `~/.zshrc`:
+Export the secret key in `~/.zshrc` (or `~/.bashrc`):
 
 ```bash
 export THOUGHTSPOT_SECRET_KEY_PROD=your-secret-key
 ```
 
-4. Configure your Snowflake profile in `~/.claude/snowflake-profiles.json`:
+### 3. Configure Snowflake
 
+The skill connects to Snowflake using the **Python connector** — the recommended
+approach because Python is already required for the ThoughtSpot API calls and the
+skill's profile system integrates with it directly.
+
+Install the required packages:
+
+```bash
+pip install snowflake-connector-python cryptography
+```
+
+Create `~/.claude/snowflake-profiles.json`. Two auth methods are supported:
+
+**Key pair (recommended):**
 ```json
 {
   "profiles": [
@@ -55,6 +70,7 @@ export THOUGHTSPOT_SECRET_KEY_PROD=your-secret-key
       "username": "analyst",
       "auth": "key_pair",
       "private_key_path": "~/.ssh/snowflake_private_key.p8",
+      "private_key_passphrase_env": "",
       "default_warehouse": "MY_WAREHOUSE",
       "default_role": "MY_ROLE"
     }
@@ -62,11 +78,39 @@ export THOUGHTSPOT_SECRET_KEY_PROD=your-secret-key
 }
 ```
 
-5. Install Python packages for Snowflake connectivity (if not already present):
-
+To generate a key pair if you don't already have one:
 ```bash
-pip install snowflake-connector-python cryptography
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out ~/.ssh/snowflake_private_key.p8 -nocrypt
+openssl rsa -in ~/.ssh/snowflake_private_key.p8 -pubout -out ~/.ssh/snowflake_public_key.pub
 ```
+Then assign the public key to your Snowflake user:
+```sql
+ALTER USER analyst SET RSA_PUBLIC_KEY='<contents of snowflake_public_key.pub>';
+```
+
+**Password:**
+```json
+{
+  "profiles": [
+    {
+      "name": "My Snowflake Account",
+      "account": "myorg-myaccount",
+      "username": "analyst",
+      "auth": "password",
+      "password_env": "SNOWFLAKE_PASSWORD",
+      "default_warehouse": "MY_WAREHOUSE",
+      "default_role": "MY_ROLE"
+    }
+  ]
+}
+```
+
+Export the password in `~/.zshrc`:
+```bash
+export SNOWFLAKE_PASSWORD=your-password
+```
+
+> **Other connection methods:** If you have the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) (`snow`) or SnowSQL installed, the skill will detect and use them as fallbacks. However, those tools require their own separate auth configuration and are not covered here.
 
 ---
 
@@ -78,15 +122,11 @@ In Claude Code, invoke the skill with a natural language prompt such as:
 Convert my ThoughtSpot Retail Sales model to a Snowflake Semantic View
 ```
 
-or simply:
-
-```
-/thoughtspot-snowflake-semantic-view
-```
-
-The skill will guide you through selecting a ThoughtSpot model or worksheet,
-previewing the generated YAML at a checkpoint before anything is written to
-Snowflake, and then creating the view.
+The skill will guide you through:
+1. Selecting a ThoughtSpot model or worksheet (by GUID, search, or browse)
+2. Previewing the generated Semantic View YAML and an unmapped properties report
+3. Choosing where in Snowflake to create the view
+4. Creating the view (with a dry-run validation first)
 
 ---
 
@@ -99,3 +139,4 @@ Snowflake, and then creating the view.
 **Snowflake:**
 - Role with `CREATE SEMANTIC VIEW` privilege on the target schema
 - Snowflake account where Cortex Analyst / Semantic Views are enabled
+- Python 3.8+
