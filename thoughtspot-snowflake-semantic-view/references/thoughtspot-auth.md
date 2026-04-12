@@ -69,7 +69,7 @@ echo "$TOKEN" > /tmp/ts_token.txt
 TOKEN=$(cat /tmp/ts_token.txt)
 curl -s ... -H "Authorization: Bearer $TOKEN" ...
 
-# Cleanup at end of session
+# Cleanup — run at end of workflow regardless of outcome
 rm -f /tmp/ts_token.txt
 ```
 

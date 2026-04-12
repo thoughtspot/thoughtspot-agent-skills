@@ -286,7 +286,7 @@ Instead, use one of these strategies for every subsequent API call:
   within a single Bash invocation.
 
 The temp file approach is most reliable for the multi-step workflow in this skill.
-Delete `/tmp/ts_token.txt` at the end of the session.
+The token file is cleaned up automatically at the end of the workflow (Step 12).
 
 ---
 
@@ -655,6 +655,11 @@ Shall I create this Semantic View in Snowflake?
   EDIT — followed by changes to the YAML
 ```
 
+If the user selects **NO**, clean up and stop:
+```bash
+rm -f /tmp/ts_token.txt
+```
+
 ---
 
 ### Step 11: Validate
@@ -757,3 +762,9 @@ On failure: show the full Snowflake error. Do not retry automatically — ask th
 DROP SEMANTIC VIEW IF EXISTS {target_database}.{target_schema}.{semantic_view_name};
 ```
 Then re-run the CREATE call.
+
+**Cleanup — always run at the end of the workflow**, whether the view was created,
+the user cancelled, or execution failed:
+```bash
+rm -f /tmp/ts_token.txt
+```
