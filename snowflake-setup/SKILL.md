@@ -163,15 +163,8 @@ if r1.returncode != 0:
     print(f"Key generation failed: {r1.stderr.decode()}")
     sys.exit(1)
 
-import getpass
-passphrase = getpass.getpass("Enter a passphrase to protect the private key: ")
-if not passphrase:
-    print("ERROR: Passphrase is required — a private key without a passphrase gives anyone who reads ~/.ssh/ full Snowflake access.")
-    sys.exit(1)
-
 r2 = subprocess.run(
-    ["openssl", "pkcs8", "-topk8", "-inform", "PEM", "-out", key_path,
-     "-passout", f"pass:{passphrase}"],
+    ["openssl", "pkcs8", "-topk8", "-inform", "PEM", "-out", key_path, "-nocrypt"],
     input=r1.stdout, capture_output=True
 )
 if r2.returncode != 0:
@@ -179,7 +172,6 @@ if r2.returncode != 0:
     sys.exit(1)
 
 os.chmod(key_path, 0o600)
-print(f"Private key written to {key_path} (passphrase-protected).")
 
 r3 = subprocess.run(["openssl", "rsa", "-in", key_path, "-pubout", "-out", pub_path], capture_output=True)
 if r3.returncode != 0:
@@ -207,34 +199,6 @@ Let me know when you've done that.
 
 Wait for confirmation.
 
-Store the passphrase in the Keychain — ask the user to run this **in their own terminal**:
-
-```
-Run this in your terminal to store the key passphrase:
-
-  security add-generic-password \
-    -s "snowflake-key-{slug}" \
-    -a "{username}" \
-    -w "YOUR_PASSPHRASE_HERE"
-
-  source ~/.zshenv
-```
-
-After confirmation, verify:
-```python
-import subprocess
-r = subprocess.run(
-    ["security", "find-generic-password", "-s", "snowflake-key-{slug}", "-a", "{username}"],
-    capture_output=True
-)
-print("Stored." if r.returncode == 0 else "Not found.")
-```
-
-Add the passphrase export to `~/.zshenv`:
-```
-export SNOWFLAKE_KEY_PASSPHRASE_{SLUG}=$(security find-generic-password -s "snowflake-key-{slug}" -a "{username}" -w 2>/dev/null)
-```
-
 **Write the profile:**
 ```json
 {
@@ -244,7 +208,7 @@ export SNOWFLAKE_KEY_PASSPHRASE_{SLUG}=$(security find-generic-password -s "snow
   "username": "{username}",
   "auth": "key_pair",
   "private_key_path": "~/.ssh/snowflake_key.p8",
-  "private_key_passphrase_env": "SNOWFLAKE_KEY_PASSPHRASE_{SLUG}",
+  "private_key_passphrase_env": "",
   "default_warehouse": "{warehouse}",
   "default_role": "{role}"
 }
