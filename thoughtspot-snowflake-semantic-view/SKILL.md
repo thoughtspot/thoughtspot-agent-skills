@@ -19,7 +19,8 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [references/formula-translation.md](references/formula-translation.md) | ThoughtSpot formula → SQL translation rules and untranslatable pattern handling |
 | [references/property-coverage.md](references/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
 | [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema and validation rules |
-| [references/environment-setup.md](references/environment-setup.md) | Runtime environment detection and Snowflake connectivity options |
+| [references/thoughtspot-setup.md](references/thoughtspot-setup.md) | ThoughtSpot profile configuration, token persistence, API call patterns, and TML parsing pitfalls |
+| [references/snowflake-setup.md](references/snowflake-setup.md) | Snowflake connection profiles, auth methods, execution options, and detection order |
 
 ---
 
@@ -57,7 +58,7 @@ For the full coverage matrix including unmapped properties, see
 
 **Snowflake:**
 - Role with `CREATE SEMANTIC VIEW` on the target schema
-- A connection method available (see [references/environment-setup.md](references/environment-setup.md))
+- A connection method available (see [references/snowflake-setup.md](references/snowflake-setup.md))
 
 **Profile configuration** — preferred method:
 
@@ -233,7 +234,8 @@ Key differences from wrong patterns:
 
 ```
 Available ThoughtSpot profiles:
-  1. Champagne (staging) — damian.waldron@thoughtspot.com @ champagne-master-aws.thoughtspotstaging.cloud
+  1. Production — analyst@company.com @ myorg.thoughtspot.cloud
+  2. Staging    — analyst@company.com @ myorg-staging.thoughtspot.cloud
 
 Select a profile (or press Enter to use #1):
 ```
@@ -383,7 +385,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [environment-setup.md](environment-setup.md) for details.
+never `"schema_"`. See [references/thoughtspot-setup.md](references/thoughtspot-setup.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
@@ -669,7 +671,7 @@ Ask for Snowflake target if not already provided:
 **Warehouse:** If not specified in the profile, run `SHOW WAREHOUSES` after connecting
 and use the first available warehouse (preferring running over suspended).
 
-Use the connection method from [references/environment-setup.md](references/environment-setup.md).
+Use the connection method from [references/snowflake-setup.md](references/snowflake-setup.md).
 
 **Always run a dry-run first:**
 
