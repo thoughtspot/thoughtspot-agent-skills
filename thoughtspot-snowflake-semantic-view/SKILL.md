@@ -678,8 +678,34 @@ Report all failures together before retrying. Key checks:
 
 ### Step 12: Execute
 
-Ask for Snowflake target if not already provided:
-`target_database`, `target_schema`, `role`.
+**Target location — suggest from source tables:**
+
+Collect the unique `(database, schema)` pairs from the table map built in Step 5.
+Present them as numbered options so the user can pick with a single keypress:
+
+```
+Where should the Semantic View be created?
+
+  1. ANALYTICS.PUBLIC       (all 3 tables)
+  E. Enter a different database and schema
+
+Select (or press Enter for #1):
+```
+
+If the source tables span multiple databases or schemas, list each unique pair with
+the tables that belong to it:
+
+```
+Where should the Semantic View be created?
+
+  1. ANALYTICS.PUBLIC       (fact_sales, dim_product)
+  2. ANALYTICS.STAGING      (dim_customer)
+  E. Enter a different database and schema
+
+Select (or press Enter for #1):
+```
+
+If the user selects E, ask for `target_database` and `target_schema` explicitly.
 
 **Snowflake profile selection:**
 1. Read `~/.claude/snowflake-profiles.json`
@@ -687,6 +713,8 @@ Ask for Snowflake target if not already provided:
 3. If one profile: show it and confirm
 4. If no file: ask for account, username, auth method; offer to save profile for future use
 5. If `private_key_passphrase_env` is set, read passphrase from that env var at runtime
+
+**Role:** Use `default_role` from the profile if set; otherwise ask the user.
 
 **Warehouse:** If not specified in the profile, run `SHOW WAREHOUSES` after connecting
 and use the first available warehouse (preferring running over suspended).
