@@ -97,6 +97,15 @@ if token:
 
 Only show profile-selection prompts on the very first model of the session.
 
+**Stale token check — always run before writing a new token:**
+
+```python
+import os, time
+token_path = "/tmp/ts_token.txt"
+if os.path.exists(token_path) and time.time() - os.path.getmtime(token_path) > 23 * 3600:
+    os.remove(token_path)  # expired — re-authenticate
+```
+
 **Profile selection (first model only):**
 
 1. Read `~/.claude/thoughtspot-profiles.json` if it exists.
@@ -265,6 +274,27 @@ POST {THOUGHTSPOT_BASE_URL}/api/rest/2.0/metadata/tml/export
 }
 ```
 
+**Batch mode — export all models in one call:**
+
+When the user has selected multiple models for conversion (e.g. "convert all BIRD_
+models"), export all their TMLs in a single request rather than one per model:
+
+```json
+{
+  "metadata": [
+    {"identifier": "{model_guid_1}"},
+    {"identifier": "{model_guid_2}"}
+  ],
+  "export_fqn": true,
+  "export_associated": true
+}
+```
+
+Separate the combined response by top-level key (`worksheet`/`model` = primary objects;
+`table`/`sql_view` = associated objects). Cache associated table TMLs by GUID — if
+two models share a physical table, the TML is returned once and should not be
+re-fetched for the second model.
+
 **Non-printable characters:** Some TML contains special characters (e.g. `#x0095`)
 that cause `yaml.safe_load` to raise a `ReaderError`. Strip them before parsing:
 ```python
@@ -300,8 +330,14 @@ Convert a display name to a valid Snowflake identifier:
 ```python
 import re
 def to_snake(name):
-    return re.sub(r'_+', '_', re.sub(r'[^a-z0-9]', '_', name.lower())).strip('_')
+    s = re.sub(r'_+', '_', re.sub(r'[^a-z0-9]', '_', name.lower())).strip('_')
+    if not s:
+        s = 'field'
+    elif s[0].isdigit():
+        s = 'field_' + s
+    return s
 # Examples: "eye colour" → "eye_colour", "# of Products" → "of_products"
+#           "1st Quarter" → "field_1st_quarter", "$" → "field"
 ```
 
 Build a map: `logical_table_name → { database, schema, physical_table }`.
@@ -380,42 +416,88 @@ affect every `expr`, `base_table.schema`, and `base_table.table` value in the YA
 When Step 12 is reached, skip profile selection (already done) and proceed directly
 to target location selection.
 
-Run for every database/schema/table pair in the physical table map using the
-connection method from [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md).
+**Schema case — infer directly from the TML, no Snowflake query needed:**
+
+The `schema` field value exported by ThoughtSpot with `export_fqn: true` reflects
+exactly how the identifier was stored. If it is lowercase, it is case-sensitive and
+must be quoted:
+
+```python
+def is_cs(identifier):
+    return identifier != identifier.upper()
+
+# Example: "financial" → case-sensitive (quoted); "PUBLIC" → case-insensitive (bare)
+cs_schema = is_cs(tbl.get("schema", ""))
+schema_ref = f'"{schema}"' if cs_schema else schema
+```
+
+No `SHOW SCHEMAS` call is needed.
+
+**Column case — use a single `INFORMATION_SCHEMA.COLUMNS` query per schema:**
+
+Instead of running one `SHOW COLUMNS` per table (N round-trips), run a single
+`INFORMATION_SCHEMA.COLUMNS` query that returns all columns for all tables at once.
+`INFORMATION_SCHEMA` stores names as they were created, so lowercase = case-sensitive.
 
 **Python connector (`method: python`):**
 ```python
-cur.execute(f"SHOW SCHEMAS IN DATABASE {db}")
-cs_schemas = {r[1] for r in cur.fetchall() if r[1] != r[1].upper()}
-# names returned in lowercase by SHOW are case-sensitive and must be quoted
+table_names_sql = ", ".join(f"'{t.upper()}'" for t in all_physical_tables)
+cur.execute(f"""
+    SELECT table_name, column_name, data_type
+    FROM {db}.INFORMATION_SCHEMA.COLUMNS
+    WHERE table_schema = '{schema.upper()}'
+      AND table_name IN ({table_names_sql})
+    ORDER BY table_name, ordinal_position
+""")
+cs_columns = {}   # phys_table → set of case-sensitive column names
+col_types = {}    # (phys_table, col_name) → data_type
 
-for phys_table in all_physical_tables:
-    schema_ref = f'"{schema}"' if schema in cs_schemas else schema
-    cur.execute(f'SHOW COLUMNS IN TABLE {db}.{schema_ref}."{phys_table}"')
-    cs_columns[phys_table] = {r[2] for r in cur.fetchall() if r[2] != r[2].upper()}
+for table_name, col_name, data_type in cur.fetchall():
+    cs_columns.setdefault(table_name, set())
+    if col_name != col_name.upper():          # lowercase → case-sensitive
+        cs_columns[table_name].add(col_name)
+    col_types[(table_name, col_name)] = data_type
 ```
 
 **Snowflake CLI (`method: cli`):**
 ```python
 import subprocess, json
 
-def snow_json(cli_connection, query):
+def snow_json(snow_cmd, cli_connection, query):
     r = subprocess.run(
-        ['snow', 'sql', '-c', cli_connection, '--format', 'json', '-q', query],
+        [snow_cmd, 'sql', '-c', cli_connection, '--format', 'json', '-q', query],
         capture_output=True, text=True
     )
     return json.loads(r.stdout)
 
-rows = snow_json(cli_connection, f"SHOW SCHEMAS IN DATABASE {db}")
-cs_schemas = {r['name'] for r in rows if r['name'] != r['name'].upper()}
+table_names_sql = ", ".join(f"'{t.upper()}'" for t in all_physical_tables)
+rows = snow_json(snow_cmd, cli_connection, f"""
+    SELECT table_name, column_name, data_type
+    FROM {db}.INFORMATION_SCHEMA.COLUMNS
+    WHERE table_schema = '{schema.upper()}'
+      AND table_name IN ({table_names_sql})
+    ORDER BY table_name, ordinal_position
+""")
 
-for phys_table in all_physical_tables:
-    schema_ref = f'"{schema}"' if schema in cs_schemas else schema
-    rows = snow_json(cli_connection, f'SHOW COLUMNS IN TABLE {db}.{schema_ref}."{phys_table}"')
-    cs_columns[phys_table] = {r['column_name'] for r in rows if r['column_name'] != r['column_name'].upper()}
+cs_columns = {}
+col_types = {}
+for r in rows:
+    tbl_name = r['TABLE_NAME']
+    col_name = r['COLUMN_NAME']
+    cs_columns.setdefault(tbl_name, set())
+    if col_name != col_name.upper():
+        cs_columns[tbl_name].add(col_name)
+    col_types[(tbl_name, col_name)] = r['DATA_TYPE']
 ```
 
-**Rule:** lowercase in `SHOW` output → the identifier is case-sensitive.
+**Note:** `INFORMATION_SCHEMA` stores schema names in uppercase for case-insensitive
+schemas and lowercase for case-sensitive ones — use `schema.upper()` in the WHERE
+clause when querying a case-insensitive schema; use the literal value when case-sensitive.
+In practice, the `schema.upper()` form works for both because Snowflake normalises the
+comparison.
+
+**Rule:** lowercase column name in `INFORMATION_SCHEMA.COLUMNS` → the column is
+case-sensitive (created with a quoted identifier).
 
 Apply quoting as follows:
 
@@ -456,11 +538,40 @@ If `needs_wrapper` is True:
 3. Update `phys_map` to point at the new schema and uppercase table/column names
 4. All YAML identifiers will then be bare uppercase — no quoting needed anywhere
 
-Execute these DDL statements using the same method as the SHOW commands above
-(Python connector `cur.execute()` or CLI with a temp SQL file via
-`snow sql -c {cli_connection} -f /tmp/sv_query.sql` — see
-[~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the file-based
-CLI pattern).
+Execute these DDL statements using the same method as the column queries above.
+
+**Python connector — run wrapper view DDL in parallel:**
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def exec_ddl(connection_factory, ddl):
+    conn = connection_factory()
+    conn.cursor().execute(ddl)
+    conn.close()
+    return ddl.split('\n')[0][:60]  # first line for progress output
+
+ddl_list = [
+    f"CREATE OR REPLACE VIEW {db}.{TARGET_SCHEMA}_SV.{VIEW_NAME} AS SELECT ...",
+    # one entry per physical table
+]
+
+with ThreadPoolExecutor(max_workers=min(len(ddl_list), 8)) as pool:
+    futures = {pool.submit(exec_ddl, connection_factory, d): d for d in ddl_list}
+    for f in as_completed(futures):
+        print(f"  Created: {f.result()}")
+```
+
+**Snowflake CLI — write all DDL to one file, execute in a single call:**
+```python
+with open("/tmp/sv_wrappers.sql", "w") as f:
+    f.write(";\n".join(ddl_list) + ";")
+subprocess.run([snow_cmd, 'sql', '-c', cli_connection, '-f', '/tmp/sv_wrappers.sql'],
+               capture_output=True, text=True)
+import os; os.remove("/tmp/sv_wrappers.sql")
+```
+
+See [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the
+connection factory pattern and CLI file-based execution details.
 
 See [references/snowflake-schema.md](references/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
@@ -536,6 +647,21 @@ Note: `destination` in Table TML may be an object (`destination.name`) — handl
 **Parse `on` condition:** regex `\[([^\]:]+)::([^\]]+)\]\s*=\s*\[([^\]:]+)::([^\]]+)\]`
 → left_table, left_column, right_table, right_column.
 
+**Relationship naming — collision avoidance:**
+
+Generate the base name as `{left_table}_to_{right_table}`. If that name is already
+taken by a previously emitted relationship (two different join paths between the same
+table pair), append the left join column to disambiguate:
+
+```python
+base_name = f"{left_tbl}_to_{right_tbl}"
+if base_name in used_rel_names:
+    base_name = f"{left_tbl}_{to_snake(left_col)}_to_{right_tbl}"
+used_rel_names.add(base_name)
+```
+
+Initialise `used_rel_names = set()` before the relationship loop.
+
 For join type and cardinality mappings, see
 [references/mapping-rules.md](references/mapping-rules.md).
 
@@ -570,7 +696,11 @@ the Semantic View. Never derive the column list from Table TML.
    - If `DB_COLUMN_NAME` is case-sensitive (lowercase in `SHOW COLUMNS` output from
      Step 5), double-quote it: `table_name."column_name"`
    - Both rules may apply simultaneously: `table_name."date"` (reserved + lowercase)
-6. Use `db_column_properties.data_type` for date/time classification
+6. Use `db_column_properties.data_type` for date/time classification. If the
+   `col_types` map built in Step 5 (from `INFORMATION_SCHEMA.COLUMNS`) already
+   has the data type for this column, prefer it — it comes directly from Snowflake
+   and is authoritative. Fall back to `db_column_properties.data_type` from the
+   Table TML only when `col_types` doesn't have an entry (e.g. a sql_view column).
 
 **`connections.yaml` — do not consult proactively.** Only if Snowflake returns a
 column-not-found error after execution should you check `connections.yaml`, where
@@ -611,6 +741,18 @@ primary_key:
 6. Build the Snowflake field entry using the templates in
    [references/mapping-rules.md](references/mapping-rules.md)
 7. Append the field to the field list for its owning table
+
+---
+
+**TML temp file cleanup — do this now, before Step 9:**
+
+The exported TML files contain sensitive schema metadata (table names, column
+descriptions, join conditions, AI context). Delete them as soon as column mapping
+is complete — they are not needed after this point:
+
+```bash
+rm -f /tmp/ts_tml_*.json
+```
 
 ---
 

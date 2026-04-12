@@ -136,24 +136,35 @@ From `{profile_name}`:
 
 ### Store in Keychain
 
-Write to `/tmp/ts_keychain_store.py` and run `python3 /tmp/ts_keychain_store.py`:
+Ask the user to run this command **in their own terminal** (not here — credentials
+must not enter the Claude Code conversation or its history file):
 
-```python
-import subprocess, sys
-service    = "{keychain_service}"
-account    = "{username}"
-credential = "{credential_value}"
-subprocess.run(["security", "delete-generic-password", "-s", service, "-a", account], capture_output=True)
-result = subprocess.run(["security", "add-generic-password", "-s", service, "-a", account, "-w", credential], capture_output=True, text=True)
-if result.returncode != 0:
-    print(f"Keychain error: {result.stderr.strip()}")
-    sys.exit(1)
-print("Stored in Keychain.")
+```
+Run this in your terminal to store the credential securely:
+
+  security add-generic-password \
+    -s "{keychain_service}" \
+    -a "{username}" \
+    -w "YOUR_{CREDENTIAL_TYPE}_HERE"
+
+Replace YOUR_{CREDENTIAL_TYPE}_HERE with your actual value, then let me know when done.
 ```
 
-Remove: `rm -f /tmp/ts_keychain_store.py`
+Where `{CREDENTIAL_TYPE}` is `TOKEN`, `PASSWORD`, or `SECRET_KEY` depending on the
+auth method chosen. The value will not appear in this conversation.
 
-Stop if this fails — do not proceed without a confirmed Keychain write.
+After the user confirms, verify the entry was written:
+
+```python
+import subprocess
+r = subprocess.run(
+    ["security", "find-generic-password", "-s", "{keychain_service}", "-a", "{username}"],
+    capture_output=True
+)
+print("Stored." if r.returncode == 0 else "Not found — check the command ran without errors.")
+```
+
+Stop if verification fails — do not proceed without a confirmed Keychain write.
 
 ### Update ~/.zshenv
 
@@ -263,16 +274,29 @@ Update `username` in profile JSON. Return to menu.
 
 Show the auth method for the selected profile, then prompt for the new credential value (same prompt as Add step for that method).
 
-Store new value in Keychain (delete old, add new — same service and account):
+Ask the user to run this command **in their own terminal**:
+
+```
+Run this in your terminal to update the credential:
+
+  security delete-generic-password -s "{keychain_service}" -a "{username}"
+  security add-generic-password \
+    -s "{keychain_service}" \
+    -a "{username}" \
+    -w "YOUR_NEW_CREDENTIAL_HERE"
+
+Let me know when done.
+```
+
+After confirmation, verify:
 
 ```python
-import subprocess, sys
-subprocess.run(["security", "delete-generic-password", "-s", "{keychain_service}", "-a", "{username}"], capture_output=True)
-result = subprocess.run(["security", "add-generic-password", "-s", "{keychain_service}", "-a", "{username}", "-w", "{new_credential}"], capture_output=True, text=True)
-if result.returncode != 0:
-    print(f"Keychain error: {result.stderr.strip()}")
-    sys.exit(1)
-print("Credential updated in Keychain.")
+import subprocess
+r = subprocess.run(
+    ["security", "find-generic-password", "-s", "{keychain_service}", "-a", "{username}"],
+    capture_output=True
+)
+print("Updated." if r.returncode == 0 else "Not found — check the commands ran without errors.")
 ```
 
 No profile JSON or `~/.zshenv` changes needed (env var name stays the same).
@@ -449,9 +473,15 @@ else:
     print("No credential available — set the required env var first.")
     sys.exit(1)
 
-with open("/tmp/ts_token.txt", "w") as f:
+# Remove stale token file (older than 23 h) before writing
+import time
+token_path = "/tmp/ts_token.txt"
+if os.path.exists(token_path) and time.time() - os.path.getmtime(token_path) > 23 * 3600:
+    os.remove(token_path)
+
+with open(token_path, "w") as f:
     f.write(token)
-os.chmod("/tmp/ts_token.txt", stat.S_IRUSR | stat.S_IWUSR)  # 600
+os.chmod(token_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
 
 print("Authenticated.")  # never print the token value
 ```

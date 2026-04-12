@@ -70,11 +70,21 @@ When generating Snowflake field names from ThoughtSpot display names:
 2. Replace any sequence of non-alphanumeric characters (`spaces`, `/`, `-`, `(`, `)`,
    `#`, `%`, `@`, etc.) with a single underscore `_`.
 3. Strip leading and trailing underscores.
-4. If the result is empty or starts with a digit, prepend `field_`.
-5. Truncate to 255 characters if needed.
-6. **Check for semantic loss:** if the original name started with `#` or a symbol
+4. If the result is empty, use `field`.
+5. If the result starts with a digit, prepend `field_`.
+6. Truncate to 255 characters if needed.
+7. **Check for semantic loss:** if the original name started with `#` or a symbol
    that carried meaning (e.g. `# of Products` → `of_products`), flag at the checkpoint
    and suggest a more meaningful name (e.g. `product_count`).
+
+```python
+import re
+def to_snake(name):
+    s = re.sub(r'_+', '_', re.sub(r'[^a-z0-9]', '_', name.lower())).strip('_')
+    if not s:           s = 'field'
+    elif s[0].isdigit(): s = 'field_' + s
+    return s
+```
 
 | ThoughtSpot display name | Generated Snowflake name | Flag? |
 |---|---|---|
@@ -205,13 +215,17 @@ The Formula Translation Log entry should capture:
 ## Relationship Entry Template
 
 ```yaml
-- name: {LEFT_TABLE}_to_{RIGHT_TABLE}
+- name: {LEFT_TABLE}_to_{RIGHT_TABLE}    # append _{LEFT_COL} if name already used
   left_table: {LEFT_TABLE_ALIAS}
   right_table: {RIGHT_TABLE_ALIAS}
   relationship_columns:
   - left_column: {LEFT_PHYSICAL_COLUMN}      # bare identifier — never '"col"'
     right_column: {RIGHT_PHYSICAL_COLUMN}    # bare identifier — never '"col"'
 ```
+
+**Collision avoidance:** if `{LEFT_TABLE}_to_{RIGHT_TABLE}` is already used by a
+prior relationship (two join paths between the same pair), use
+`{LEFT_TABLE}_{LEFT_COL}_to_{RIGHT_TABLE}` instead. See Step 7 for the full algorithm.
 
 **Do not include** `relationship_type` or `join_type` — these fields are not supported
 and will cause a parse error.
