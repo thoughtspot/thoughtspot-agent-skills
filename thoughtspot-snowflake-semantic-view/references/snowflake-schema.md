@@ -121,23 +121,15 @@ case-sensitive objects appear in lowercase; case-insensitive objects appear in U
 **YAML encoding for Snowflake-quoted identifiers:**
 
 In the Semantic View YAML, Snowflake-quoted identifiers must be wrapped in single
-quotes containing the double-quoted value:
+quotes containing the double-quoted value — but **only in `base_table` fields and
+`expr` SQL expressions**. See the critical exception for `primary_key` and
+`relationship_columns` below.
 
 ```yaml
 # Schema (case-sensitive lowercase)
 base_table:
   schema: '"superhero"'    # ← single-quoted YAML string containing "superhero"
   table: '"colour"'        # ← same pattern for table names
-
-# primary_key columns
-primary_key:
-  columns:
-  - '"id"'                 # ← quoted column name
-
-# relationship columns
-relationship_columns:
-- left_column: '"alignment_id"'
-  right_column: '"id"'
 
 # expr fields — embed quotes directly in the SQL expression string
 expr: eye_colour."colour"  # ← table alias unquoted, column double-quoted inline
@@ -152,8 +144,48 @@ apply quoting accordingly.
 | `base_table.schema` | `schema: PUBLIC` | `schema: '"superhero"'` |
 | `base_table.table` | `table: FACT_SALES` | `table: '"colour"'` |
 | `expr` column ref | `expr: t.COLUMN_NAME` | `expr: t."column_name"` |
-| `primary_key.columns` | `- COLUMN_NAME` | `- '"column_name"'` |
-| `relationship_columns` | `left_column: COL` | `left_column: '"col"'` |
+| `primary_key.columns` | `- COLUMN_NAME` | `- column_name` ← see below |
+| `relationship_columns` | `left_column: COL` | `left_column: col` ← see below |
+
+**`primary_key.columns` and `relationship_columns` — never use `'"col"'` quoting:**
+
+Cortex Analyst's YAML identifier validator applies the pattern
+`^[A-Za-z_][A-Za-z0-9_$]*$` to these fields. It rejects any value containing `"`
+characters, so the `'"col"'` format that works for `base_table` fields will cause
+a 400 error:
+
+```
+invalid column name "id": name must start with an underscore or a letter,
+and only contain letters, underscores, decimal digits (0-9), and dollar signs ($).
+```
+
+Always emit bare unquoted identifiers in `primary_key.columns[]` and
+`relationship_columns[].left_column` / `.right_column`, even when the underlying
+physical column is case-sensitive lowercase:
+
+```yaml
+# CORRECT — bare identifier (case-sensitive lowercase column "id")
+primary_key:
+  columns:
+  - id
+
+relationship_columns:
+- left_column: alignment_id
+  right_column: id
+
+# WRONG — Cortex Analyst rejects the '"col"' format here
+primary_key:
+  columns:
+  - '"id"'                  # ← causes 400 error
+
+relationship_columns:
+- left_column: '"alignment_id"'   # ← causes 400 error
+  right_column: '"id"'
+```
+
+The Snowflake Semantic View framework resolves `primary_key` and
+`relationship_columns` identifiers case-insensitively against the physical table
+schema, so bare `id` or `ID` will correctly match a physical `"id"` column.
 
 ---
 
@@ -171,9 +203,10 @@ Run all checks before calling `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
 | Table refs in relationships | Every `left_table` and `right_table` matches a `name` in `tables[]` |
 | `primary_key` present | Every `right_table` in a relationship has `primary_key.columns` defined |
 | `primary_key` format | `primary_key:` with nested `columns:` list — NOT a bare list under `primary_key:` |
-| Case-sensitive identifiers | Lowercase schemas/tables/columns detected via SHOW and wrapped in `'"value"'` |
+| Case-sensitive identifiers | Lowercase schemas/tables detected via SHOW and wrapped in `'"value"'` in `base_table`; lowercase columns double-quoted inline in `expr` |
 | Reserved words quoted | Column names that are SQL reserved words are double-quoted in `expr` |
-| Relationship columns quoted | `left_column`/`right_column` use `'"col"'` if case-sensitive |
+| Relationship columns bare | `left_column`/`right_column` are always bare unquoted identifiers — never `'"col"'` (Cortex Analyst rejects quoted names here) |
+| Primary key columns bare | `primary_key.columns[]` entries are always bare unquoted identifiers — never `'"col"'` |
 | Unsupported fields absent | No `relationship_type`, `join_type`, `default_aggregation`, `sample_values` |
 | Valid `data_type` | One of: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN` |
 | No untranslatable formulas | Columns with untranslatable ThoughtSpot formulas are **omitted** entirely |

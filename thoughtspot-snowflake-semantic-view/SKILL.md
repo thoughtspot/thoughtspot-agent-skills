@@ -390,6 +390,7 @@ parsed = yaml.safe_load(cleaned)
 Parse every `edoc` string as YAML (with cleaning). Separate into:
 - **Primary object:** parsed YAML has top-level key `worksheet` or `model`
 - **Table objects:** parsed YAML has top-level key `table`
+- **SQL view objects:** parsed YAML has top-level key `sql_view` — collect separately for handling in Step 5
 
 ---
 
@@ -430,6 +431,46 @@ POST /api/rest/2.0/metadata/tml/export  { "metadata": [{"identifier": "{fqn}"}] 
 ```
 
 Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag them.
+
+**SQL view resolution:** For every `sql_view` object referenced in `model_tables[]`
+(or `table_paths[]` for Worksheet format), classify its `sql_query` using the logic
+in [references/thoughtspot-tml.md](references/thoughtspot-tml.md):
+
+*Simple* — `SELECT * FROM single_table [AS alias]`:
+- Extract the physical FQN from the FROM clause
+- Resolve `db`, `schema`, `db_table` from the FQN
+- Borrow column types from the matching physical table TML (run `SHOW COLUMNS` if
+  no matching table TML exists)
+- Treat the sql_view as a regular table for all subsequent steps
+- Note it in the Unmapped Properties Report under "SQL Views resolved automatically"
+
+*Complex* — anything else (WHERE, column list, JOIN, aggregation, subquery, UNION):
+- Do not attempt auto-resolution
+- At the **Step 10 checkpoint**, present the sql_query to the user and ask:
+
+  ```
+  sql_view "{name}" uses SQL that cannot be auto-mapped to a single physical table:
+    {sql_query}
+
+  How should this be handled?
+    C — Create a Snowflake VIEW from this SQL in the target schema, then reference it
+    M — Map to an existing Snowflake table or view (you provide the name)
+    S — Skip — omit all columns sourced from this view
+  ```
+
+  - **C (Create view):** Before executing the semantic view CREATE, run:
+    ```sql
+    CREATE OR REPLACE VIEW {target_db}.{target_schema}.{to_snake(sv_name)} AS
+    {sql_query};
+    ```
+    Then run `SHOW COLUMNS IN VIEW {target_db}.{target_schema}.{view_name}` to get
+    column types. Reference the new view as `base_table.table`.
+
+  - **M (Map to existing):** Ask for the fully-qualified Snowflake object name.
+    Run `SHOW COLUMNS` on it to get column types. Use as `base_table`.
+
+  - **S (Skip):** Omit all model columns whose `column_id` references this sql_view.
+    Log each omitted column in the Unmapped Properties Report under "SQL Views skipped".
 
 **Case-sensitivity detection:** After resolving physical table locations, run
 `SHOW SCHEMAS IN DATABASE {db}` and `SHOW COLUMNS IN TABLE {db}.{schema}.{table}`

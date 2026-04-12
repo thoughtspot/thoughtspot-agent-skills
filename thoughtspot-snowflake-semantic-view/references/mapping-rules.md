@@ -126,7 +126,7 @@ Do not include `sample_values` or `default_aggregation` — these are not suppor
     table: {PHYSICAL_TABLE_OR_QUOTED}   # e.g. FACT_SALES  or  '"colour"'
   primary_key:
     columns:
-    - {PK_COLUMN_OR_QUOTED}             # e.g. ORDER_ID  or  '"id"'
+    - {PK_COLUMN_BARE}                  # e.g. ORDER_ID  or  id  — NEVER '"id"'
   dimensions:
   - ...
   time_dimensions:
@@ -134,6 +134,12 @@ Do not include `sample_values` or `default_aggregation` — these are not suppor
   metrics:
   - ...
 ```
+
+**`primary_key.columns` must always be bare unquoted identifiers.** Cortex Analyst
+rejects the `'"col"'` quoting format with a 400 error, even when the physical column
+is case-sensitive lowercase. Use the plain column name (e.g. `id`, `alignment_id`)
+or its uppercase equivalent. The Snowflake Semantic View framework resolves these
+case-insensitively, so `id` and `ID` both match a physical `"id"` column.
 
 **Table entry (no primary_key — for the "left" / fact table that is never a join target):**
 ```yaml
@@ -228,18 +234,25 @@ The Formula Translation Log entry should capture:
   left_table: {LEFT_TABLE_ALIAS}
   right_table: {RIGHT_TABLE_ALIAS}
   relationship_columns:
-  - left_column: {LEFT_PHYSICAL_COLUMN}      # or '"left_col"' if case-sensitive
-    right_column: {RIGHT_PHYSICAL_COLUMN}    # or '"right_col"' if case-sensitive
+  - left_column: {LEFT_PHYSICAL_COLUMN}      # bare identifier — never '"col"'
+    right_column: {RIGHT_PHYSICAL_COLUMN}    # bare identifier — never '"col"'
 ```
 
 **Do not include** `relationship_type` or `join_type` — these fields are not supported
 and will cause a parse error.
 
-**Column quoting in relationship_columns:** Unlike `expr` (a SQL string where inline
-`"col"` works), `left_column` and `right_column` are plain string values. For
-case-sensitive (lowercase) columns, wrap in single quotes containing the double-quoted
-Snowflake identifier:
+**`relationship_columns` must always use bare unquoted identifiers.** Cortex Analyst
+rejects the `'"col"'` format with a 400 error. Even for case-sensitive lowercase
+columns, emit the plain name without any quoting:
 ```yaml
-  - left_column: '"alignment_id"'   # YAML single-quoted → Snowflake "alignment_id"
+  # CORRECT
+  - left_column: alignment_id
+    right_column: id
+
+  # WRONG — causes 400 error from Cortex Analyst
+  - left_column: '"alignment_id"'
     right_column: '"id"'
 ```
+The Snowflake Semantic View framework resolves these case-insensitively, so `id`
+matches a physical `"id"` column. Reserve `'"col"'` quoting for `base_table` fields
+only; use inline `"col"` quoting inside `expr` SQL strings.

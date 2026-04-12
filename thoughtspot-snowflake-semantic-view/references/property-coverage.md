@@ -15,6 +15,7 @@ of this skill over time.
 | Model / Worksheet `name` | `name` | snake_cased |
 | Model / Worksheet `description` | `description` | Passed through unchanged |
 | `model_tables[]` / `tables[]` | `tables[]` + `base_table` | Physical names from Table TML |
+| `sql_view` (simple `SELECT *`) | `tables[]` + `base_table` | Resolved to physical table — see thoughtspot-tml.md |
 | `joins[]` (inline `on`) | `relationships[]` | Direct parse |
 | `joins[]` (`referencing_join`) | `relationships[]` | Resolved from Table TML `joins_with` |
 | `ATTRIBUTE` column (non-date) | `dimensions[]` | |
@@ -65,6 +66,30 @@ map `ai_context` directly to it.
 
 Worksheet `table_paths` with multi-hop chains (`fact → dim_a → bridge → dim_b`) are
 unrolled into direct pair-wise relationships. Flag at the checkpoint for user review.
+
+---
+
+## Partial Migrations — SQL Views
+
+### `sql_view` (complex SQL)
+
+**Status: Partial — requires user decision**
+
+ThoughtSpot `sql_view` objects are virtual tables backed by an arbitrary SQL query.
+Simple `SELECT *` views are resolved automatically to the underlying physical table.
+Complex views (WHERE clauses, column aliases, JOINs, aggregations, subqueries) cannot
+be auto-mapped and require one of three user-directed options at the checkpoint:
+
+- **C (Create):** A Snowflake VIEW is created in the target schema using the
+  ThoughtSpot `sql_query` verbatim. Requires the Snowflake role to have `CREATE VIEW`
+  on the target schema.
+- **M (Map):** User provides an existing Snowflake table or view name to use as
+  `base_table`. Requires the named object to already exist and be accessible.
+- **S (Skip):** All model columns sourced from the sql_view are omitted and logged
+  in the Unmapped Report.
+
+**Future path:** Add SQL dialect translation for ThoughtSpot-specific syntax to
+improve portability of complex `sql_query` strings to Snowflake.
 
 ---
 
@@ -230,6 +255,21 @@ section that has no entries for the current model.
 | Column | Operator | Value |
 |---|---|---|
 | {col} | {op} | {val} |
+
+#### SQL Views Resolved Automatically
+| sql_view Name | sql_query | Resolved To |
+|---|---|---|
+| {name} | {sql_query} | {db}.{schema}.{db_table} |
+
+#### SQL Views Requiring User Decision (complex SQL)
+| sql_view Name | sql_query | Decision | Outcome |
+|---|---|---|---|
+| {name} | {sql_query} | C / M / S | Created view / Mapped to {name} / Skipped |
+
+#### SQL View Columns Skipped (if user chose S)
+| sql_view Name | Column | Reason |
+|---|---|---|
+| {name} | {column} | sql_view skipped by user |
 
 #### Formula Translation Log
 | Column | Original Expression | Status | Notes |

@@ -73,6 +73,80 @@ After export, separate parsed objects by top-level key:
 | `worksheet` | Worksheet (columns in `worksheet_columns[]`) |
 | `model` | Model (columns in `model.columns[]`, tables in `model_tables[]`) |
 | `table` | Physical table definition — provides `db`, `schema`, `db_table`, `columns[]` |
+| `sql_view` | Virtual table defined by a SQL query — no `db`/`schema`/`db_table`; provides `sql_query` and `sql_view_columns[]` |
 
 `metadata_detail` in the search response is frequently `null` — do not rely on it to
 distinguish Worksheets from Models. The actual type is only known after TML export.
+
+---
+
+## SQL View Objects (`sql_view`)
+
+A `sql_view` object represents a ThoughtSpot virtual table backed by a SQL query
+rather than a physical table. It does **not** have `db`, `schema`, or `db_table`
+fields. Key fields:
+
+```python
+sv = parsed['sql_view']
+sv['name']              # logical name (e.g. "Account District")
+sv['sql_query']         # Snowflake SQL string (e.g. "SELECT * FROM BIRD.\"financial\".\"district\"")
+sv['sql_view_columns']  # list of {name, sql_output_column, properties} — no data_type
+sv['connection']        # ThoughtSpot connection metadata (not needed for conversion)
+```
+
+**Column types are not in `sql_view_columns`.** If the view is a simple `SELECT *`
+from a known physical table, borrow types from that table's TML `columns[]`. For
+complex views, determine types by running `SHOW COLUMNS` against the Snowflake view
+after creating it.
+
+### Classifying sql_view complexity
+
+Apply this regex to `sql_query` (case-insensitive, strip whitespace first):
+
+```python
+import re
+
+SIMPLE_SELECT_STAR = re.compile(
+    r'^\s*select\s+\*\s+from\s+[\w".]+(?:\s+(?:as\s+)?\w+)?\s*$',
+    re.IGNORECASE
+)
+
+def classify_sql_view(sql_query: str) -> str:
+    """Returns 'simple' or 'complex'."""
+    q = sql_query.strip().rstrip(';')
+    if SIMPLE_SELECT_STAR.match(q):
+        return 'simple'
+    return 'complex'
+```
+
+**Simple** — `SELECT * FROM [db.]schema.table [AS alias]` with nothing else:
+- Extract the physical table FQN from the FROM clause
+- Resolve `db`, `schema`, `db_table` from that FQN
+- Treat the sql_view exactly like a regular `table` object going forward
+- Borrow column types from the matching physical table TML
+
+**Complex** — anything else (WHERE clauses, column lists, JOINs, aggregations,
+subqueries, UNION, etc.):
+- Cannot be safely auto-mapped to a physical table
+- Requires user decision at the Step 10 checkpoint (see SKILL.md Step 5)
+
+### Extracting physical table from a simple sql_view
+
+```python
+FQN_RE = re.compile(
+    r'from\s+((?:"[^"]+"|[\w]+)(?:\.(?:"[^"]+"|[\w]+)){0,2})',
+    re.IGNORECASE
+)
+
+def extract_fqn(sql_query: str):
+    """Returns (db, schema, table) tuple or None."""
+    m = FQN_RE.search(sql_query)
+    if not m:
+        return None
+    parts = [p.strip('"') for p in m.group(1).split('.')]
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    return None, None, parts[0]
+```
