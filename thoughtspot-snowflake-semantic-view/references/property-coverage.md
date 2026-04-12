@@ -46,9 +46,6 @@ not a directive. The `ai_context` text is merged into `description` with the pre
 **Action for users:** Review all AI context entries in the Unmapped Report and decide
 whether to rewrite them in Snowflake's documentation style.
 
-**Future path:** If Snowflake introduces a dedicated per-field AI instruction property,
-map `ai_context` directly to it.
-
 ---
 
 ### Multi-Column Joins (AND conditions)
@@ -88,9 +85,6 @@ be auto-mapped and require one of three user-directed options at the checkpoint:
 - **S (Skip):** All model columns sourced from the sql_view are omitted and logged
   in the Unmapped Report.
 
-**Future path:** Add SQL dialect translation for ThoughtSpot-specific syntax to
-improve portability of complex `sql_query` strings to Snowflake.
-
 ---
 
 ## Hard Blockers — No Migration Possible
@@ -102,11 +96,8 @@ improve portability of complex `sql_query` strings to Snowflake.
 ThoughtSpot parameters are runtime variables (date ranges, metric selectors, locale).
 No equivalent in Snowflake Semantic View.
 
-Impact: formulas referencing parameters emit `-- TODO` comments. All parameters are
+Impact: formulas referencing parameters are **omitted** from the YAML. All parameters are
 listed in the Unmapped Properties Report.
-
-**Future path:** Re-implement parameter logic as multiple concrete columns, or as
-Snowflake dynamic tables. Monitor Snowflake for parameterised expression support.
 
 ---
 
@@ -119,14 +110,14 @@ See [formula-translation.md](formula-translation.md) for guidance.
 
 ---
 
-### Time Intelligence Functions
+### Window, LOD, and Semi-Additive Functions
 
 **Status: Hard blocker — requires manual translation**
 
-`growth_rate`, `period_ago`, `moving_average`, `cumulative_sum`, `rank`, etc.
-Rewrite as Snowflake window functions. See [formula-translation.md](formula-translation.md).
-
-**Future path:** A companion formula translation skill could assist interactively.
+`moving_average`, `cumulative_sum`, `rank`, `group_aggregate`, `first_value`, `last_value`, etc.
+These require window functions, CTEs, or sub-aggregations that cannot be expressed as a
+Snowflake Semantic View `metrics` `expr`. See [formula-translation.md](formula-translation.md)
+for the complete list and Snowflake re-implementation approaches.
 
 ---
 
@@ -284,3 +275,14 @@ section that has no entries for the current model.
 | column_alias_udf.tml | Separate file | Not migrated — multilingual aliases require manual handling |
 | geo_config | {n} columns | Columns migrated as plain dimensions |
 ```
+
+---
+
+## Future Improvements
+
+| Area | Potential improvement |
+|---|---|
+| AI context | If Snowflake introduces a dedicated per-field AI instruction property, map `ai_context` directly to it instead of merging into `description`. |
+| Complex SQL views | Add SQL dialect translation for ThoughtSpot-specific syntax to improve portability of complex `sql_query` strings to Snowflake. |
+| Parameters | Re-implement parameter logic as multiple concrete columns, or as Snowflake dynamic tables. Monitor Snowflake for parameterised expression support. |
+| Window / LOD / semi-additive functions | A companion skill could assist interactively with window function rewrites, CTE generation, and semi-additive view creation. |

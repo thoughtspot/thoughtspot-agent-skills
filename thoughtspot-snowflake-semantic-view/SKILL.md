@@ -18,7 +18,8 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [references/mapping-rules.md](references/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
 | [references/formula-translation.md](references/formula-translation.md) | ThoughtSpot formula → SQL translation rules and untranslatable pattern handling |
 | [references/property-coverage.md](references/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema and validation rules |
+| [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
+| [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
 | [references/thoughtspot-auth.md](references/thoughtspot-auth.md) | ThoughtSpot profile configuration, token persistence, and API call patterns |
 | [references/thoughtspot-tml.md](references/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [references/snowflake-setup.md](references/snowflake-setup.md) | Snowflake connection profiles, auth methods, execution options, and detection order |
@@ -59,11 +60,12 @@ For the full coverage matrix including unmapped properties, see
 
 **Snowflake:**
 - Role with `CREATE SEMANTIC VIEW` on the target schema
-- A connection method available (see [references/snowflake-setup.md](references/snowflake-setup.md))
-- Python packages for connector-based execution:
-  ```bash
-  pip install snowflake-connector-python cryptography
-  ```
+- One of the following connection methods (see [references/snowflake-setup.md](references/snowflake-setup.md)):
+  - **Snowflake CLI** (`method: cli`) — install from https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation, configure `~/.snowflake/config.toml`
+  - **Python connector** (`method: python`) — install packages:
+    ```bash
+    pip install snowflake-connector-python cryptography
+    ```
 
 **Profile configuration** — preferred method:
 
@@ -99,134 +101,6 @@ THOUGHTSPOT_PASSWORD     # password auth     (alternative)
 
 ---
 
-## Worked Example
-
-### Input — ThoughtSpot Worksheet TML
-
-```yaml
-guid: 2ea7add9-0ccb-4ac1-90bb-231794ebb377
-worksheet:
-  name: Retail Sales
-  tables:
-  - name: fact_sales
-  - name: dim_product
-  joins:
-  - name: sales_to_product
-    source: fact_sales
-    destination: dim_product
-    type: INNER
-    is_one_to_one: false
-  table_paths:
-  - id: fact_sales_1
-    table: fact_sales
-    join_path:
-    - {}
-  - id: dim_product_1
-    table: dim_product
-    join_path:
-    - join:
-      - sales_to_product
-  formulas:
-  - name: '# of Products'
-    expr: "count ( [dim_product_1::product_id] )"
-  worksheet_columns:
-  - name: Product
-    column_id: dim_product_1::product_name
-    properties:
-      column_type: ATTRIBUTE
-      synonyms: [Item]
-  - name: Revenue
-    column_id: fact_sales_1::sales_amount
-    properties:
-      column_type: MEASURE
-      aggregation: SUM
-      synonyms: [Sales]
-      ai_context: Total transaction value for financial analysis.
-  - name: Sale Date
-    column_id: fact_sales_1::sale_date
-    properties:
-      column_type: ATTRIBUTE
-  - name: Product Count
-    formula_id: '# of Products'
-    properties:
-      column_type: MEASURE
-      aggregation: COUNT
-```
-
-Associated Table TML for `fact_sales` provides `db: ANALYTICS, schema: PUBLIC,
-db_table: FACT_SALES` and the join condition
-`"[fact_sales::product_id] = [dim_product::product_id]"`.
-
-### Output — Snowflake Semantic View YAML
-
-```yaml
-name: retail_sales
-description: "Migrated from ThoughtSpot: Retail Sales"
-
-tables:
-- name: fact_sales
-  base_table:
-    database: ANALYTICS
-    schema: PUBLIC
-    table: FACT_SALES
-  time_dimensions:
-  - name: sale_date
-    synonyms:
-    - "Sale Date"
-    description: ""
-    expr: fact_sales.SALE_DATE
-    data_type: DATE
-  metrics:
-  - name: revenue
-    synonyms:
-    - "Revenue"
-    - "Sales"
-    description: "[TS AI Context] Total transaction value for financial analysis."
-    expr: SUM(fact_sales.SALES_AMOUNT)
-    data_type: NUMBER
-
-- name: dim_product
-  base_table:
-    database: ANALYTICS
-    schema: PUBLIC
-    table: DIM_PRODUCT
-  primary_key:
-    columns:
-    - PRODUCT_ID
-  dimensions:
-  - name: product
-    synonyms:
-    - "Product"
-    - "Item"
-    description: ""
-    expr: dim_product.PRODUCT_NAME
-    data_type: TEXT
-  metrics:
-  - name: product_count
-    synonyms:
-    - "Product Count"
-    - "# of Products"
-    description: ""
-    expr: COUNT(dim_product.PRODUCT_ID)
-    data_type: NUMBER
-
-relationships:
-- name: sales_to_product
-  left_table: fact_sales
-  right_table: dim_product
-  relationship_columns:
-  - left_column: PRODUCT_ID
-    right_column: PRODUCT_ID
-```
-
-Key differences from wrong patterns:
-- `dimensions`, `time_dimensions`, `metrics` are **nested under their table**, not top-level
-- Keyword is `metrics`, not `measures`
-- `primary_key` is present on `dim_product` (the right-side join table)
-- No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation`
-
----
-
 ## Workflow
 
 ### Step 1: Authenticate
@@ -248,23 +122,27 @@ Select a profile (or press Enter to use #1):
 
 After profile is confirmed, resolve the secret key:
 - Read the `secret_key_env` field from the profile (e.g. `THOUGHTSPOT_SECRET_KEY_PROD`)
-- Read that env var's value at runtime
-- If the env var is unset or empty, **ask the user to paste the key directly** before proceeding:
-  `Secret key for {profile_name} is not set (expected env var: {secret_key_env}). Please paste your secret key:`
-  Then use the pasted value for this session only — do not write it to any file.
+- Read that env var's value at runtime via `os.environ.get(secret_key_env)`
+- **Never print, echo, or log the resolved key value or any bearer token.**
+- If the env var is unset or empty, prompt the user to set it in their shell session
+  **before** proceeding — do not ask them to paste it into the conversation:
+  ```
+  Secret key for {profile_name} is not set.
+  Please run this in your terminal, then re-run the skill:
+
+    ! export {secret_key_env}=your-secret-key
+  ```
+  If the user cannot set an env var and insists on pasting, warn them that the value
+  will be visible in the conversation, then use it for this session only — do not
+  write it to any file, and do not echo it back.
 
 Strip any trailing slash from `base_url` before constructing URLs.
 
-**Obtain a bearer token:**
-
-```
-POST {base_url}/api/rest/2.0/auth/token/full
-{
-  "username": "{username}",
-  "secret_key": "{secret_key}",   // or "password": "..."
-  "validity_time_in_sec": 3600
-}
-```
+**Obtain a bearer token** using Python so the secret key never appears in command text
+(see [references/thoughtspot-auth.md](references/thoughtspot-auth.md) — Pattern A):
+- Read the key from `os.environ.get(secret_key_env)` inside the script
+- Write the token to `/tmp/ts_token.txt` with `600` permissions
+- Print only `"Authenticated."` — never print the token value
 
 On 401/403 — stop and ask the user to verify credentials.
 
@@ -273,17 +151,17 @@ Bash tool calls do not share shell state between separate invocations. Never sto
 the token in a shell variable across calls — it will be empty in the next call.
 Instead, use one of these strategies for every subsequent API call:
 
-- **Inline fetch (preferred for single calls):** Fetch the token and make the API
-  call within the **same** `Bash` invocation using `$()` substitution.
-- **Temp file (preferred for multi-call scripts):** Write the token to
-  `/tmp/ts_token.txt` immediately after authenticating:
-  ```bash
-  TOKEN=$(curl -s ... | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
-  echo "$TOKEN" > /tmp/ts_token.txt
+- **Temp file (preferred for multi-call scripts):** Authenticate using Pattern A in
+  [references/thoughtspot-auth.md](references/thoughtspot-auth.md) — writes the token
+  to `/tmp/ts_token.txt` with `600` permissions. Read it back in subsequent calls:
+  ```python
+  with open("/tmp/ts_token.txt") as f:
+      token = f.read().strip()
   ```
-  Read it back in subsequent calls with `TOKEN=$(cat /tmp/ts_token.txt)`.
-- **Single pipeline:** Combine all API calls into one `python3` or `bash` script
-  within a single Bash invocation.
+- **Single pipeline:** Combine all API calls into one `python3` script within a single
+  Bash invocation. Authenticate at the top, reuse the token variable throughout.
+- **Never** pass the secret key or token as a shell argument or in a curl `-d` string —
+  the full command text is visible to the user.
 
 The temp file approach is most reliable for the multi-step workflow in this skill.
 The token file is cleaned up automatically at the end of the workflow (Step 12).
@@ -472,12 +350,97 @@ in [references/thoughtspot-tml.md](references/thoughtspot-tml.md):
   - **S (Skip):** Omit all model columns whose `column_id` references this sql_view.
     Log each omitted column in the Unmapped Properties Report under "SQL Views skipped".
 
-**Case-sensitivity detection:** After resolving physical table locations, run
-`SHOW SCHEMAS IN DATABASE {db}` and `SHOW COLUMNS IN TABLE {db}.{schema}.{table}`
-to determine which identifiers are case-sensitive (returned in lowercase by SHOW).
-Record a `case_sensitive` flag per schema, table, and column. This drives identifier
-quoting in all subsequent steps. See [references/snowflake-schema.md](references/snowflake-schema.md)
-for the `'"value"'` encoding pattern.
+**Case-sensitivity detection — connect to Snowflake now, before building the YAML:**
+
+This step requires a live Snowflake connection. If the Snowflake profile has not been
+selected yet, do it now (follow the profile selection logic from Step 12) so you can
+run `SHOW` commands against the source tables. Do not defer this to Step 12 — the
+quoting decisions made here affect every `expr`, `base_table.schema`, and
+`base_table.table` value in the YAML.
+
+Run for every database/schema/table pair in the physical table map using the
+connection method from [references/snowflake-setup.md](references/snowflake-setup.md).
+
+**Python connector (`method: python`):**
+```python
+cur.execute(f"SHOW SCHEMAS IN DATABASE {db}")
+cs_schemas = {r[1] for r in cur.fetchall() if r[1] != r[1].upper()}
+# names returned in lowercase by SHOW are case-sensitive and must be quoted
+
+for phys_table in all_physical_tables:
+    schema_ref = f'"{schema}"' if schema in cs_schemas else schema
+    cur.execute(f'SHOW COLUMNS IN TABLE {db}.{schema_ref}."{phys_table}"')
+    cs_columns[phys_table] = {r[2] for r in cur.fetchall() if r[2] != r[2].upper()}
+```
+
+**Snowflake CLI (`method: cli`):**
+```python
+import subprocess, json
+
+def snow_json(cli_connection, query):
+    r = subprocess.run(
+        ['snow', 'sql', '-c', cli_connection, '--format', 'json', '-q', query],
+        capture_output=True, text=True
+    )
+    return json.loads(r.stdout)
+
+rows = snow_json(cli_connection, f"SHOW SCHEMAS IN DATABASE {db}")
+cs_schemas = {r['name'] for r in rows if r['name'] != r['name'].upper()}
+
+for phys_table in all_physical_tables:
+    schema_ref = f'"{schema}"' if schema in cs_schemas else schema
+    rows = snow_json(cli_connection, f'SHOW COLUMNS IN TABLE {db}.{schema_ref}."{phys_table}"')
+    cs_columns[phys_table] = {r['column_name'] for r in rows if r['column_name'] != r['column_name'].upper()}
+```
+
+**Rule:** lowercase in `SHOW` output → the identifier is case-sensitive.
+
+Apply quoting as follows:
+
+| Location | Case-insensitive (UPPERCASE) | Case-sensitive (lowercase) |
+|---|---|---|
+| `base_table.schema` | `schema: PUBLIC` | `schema: '"superhero"'` |
+| `base_table.table` | `table: FACT_SALES` | `table: '"colour"'` |
+| `expr` column | `expr: t.HEIGHT_CM` | `expr: t."height_cm"` |
+| `primary_key.columns` | `- ID` | ⚠ see below |
+| `relationship_columns` | `left_column: PRODUCT_ID` | ⚠ see below |
+
+**`primary_key` and `relationship_columns` — Cortex Analyst conflict:**
+
+There is no single YAML format that satisfies both tools for case-sensitive columns
+in these two fields. `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` requires `'"id"'`;
+Cortex Analyst rejects `'"id"'` with error 392700.
+
+**If any `SHOW COLUMNS` result returns lowercase column names that are used as join
+keys or primary keys, you MUST create uppercase wrapper views before generating the
+YAML.** Do not proceed to Step 6 without resolving this:
+
+```python
+# Detect whether wrapper views are needed
+needs_wrapper = any(
+    cs_cols_map.get(phys['db_table'], set())   # any cs columns in join-key tables
+    for phys in phys_map.values()
+)
+```
+
+If `needs_wrapper` is True:
+1. Create a new uppercase schema: `CREATE SCHEMA IF NOT EXISTS {db}.{TARGET_SCHEMA}_SV`
+2. For each physical table, create a view that uppercases all column names:
+   ```sql
+   CREATE OR REPLACE VIEW {db}.{TARGET_SCHEMA}_SV.{TABLE_NAME} AS
+   SELECT "col1" AS COL1, "col2" AS COL2, ...
+   FROM {db}."{schema}"."{table}";
+   ```
+3. Update `phys_map` to point at the new schema and uppercase table/column names
+4. All YAML identifiers will then be bare uppercase — no quoting needed anywhere
+
+Execute these DDL statements using the same method as the SHOW commands above
+(Python connector `cur.execute()` or CLI with a temp SQL file via
+`snow sql -c {cli_connection} -f /tmp/sv_query.sql` — see
+[references/snowflake-setup.md](references/snowflake-setup.md) for the file-based
+CLI pattern).
+
+See [references/snowflake-schema.md](references/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
 
@@ -582,6 +545,9 @@ the Semantic View. Never derive the column list from Table TML.
 5. Build `expr` as `table_name.DB_COLUMN_NAME`
    - If `DB_COLUMN_NAME` is a SQL reserved word (e.g. `date`, `time`, `schema`),
      double-quote it: `table_name."date"`
+   - If `DB_COLUMN_NAME` is case-sensitive (lowercase in `SHOW COLUMNS` output from
+     Step 5), double-quote it: `table_name."column_name"`
+   - Both rules may apply simultaneously: `table_name."date"` (reserved + lowercase)
 6. Use `db_column_properties.data_type` for date/time classification
 
 **`connections.yaml` — do not consult proactively.** Only if Snowflake returns a
@@ -755,17 +721,24 @@ If the user selects E, ask for `target_database` and `target_schema` explicitly.
 
 **Snowflake profile selection:**
 1. Read `~/.claude/snowflake-profiles.json`
-2. If multiple profiles: display numbered list and ask user to select
-3. If one profile: show it and confirm
-4. If no file: ask for account, username, auth method; offer to save profile for future use
-5. If `private_key_passphrase_env` is set, read passphrase from that env var at runtime
+2. If multiple profiles: display a numbered list including each profile's `method`
+   (`cli` / `python`) so the user can distinguish them at a glance; ask user to select
+3. If one profile: show it (including method) and confirm
+4. If no file: ask for connection details and whether to use the CLI or Python
+   connector; offer to save profile for future use
+5. If `method: python` and `private_key_passphrase_env` is set, read passphrase
+   from that env var at runtime
 
 **Role:** Use `default_role` from the profile if set; otherwise ask the user.
 
-**Warehouse:** If not specified in the profile, run `SHOW WAREHOUSES` after connecting
-and use the first available warehouse (preferring running over suspended).
+**Warehouse:** If not specified in the profile:
+- Python: run `SHOW WAREHOUSES` via `cur.execute()` and pick the first non-suspended
+- CLI: run `snow sql -c {cli_connection} --format json -q "SHOW WAREHOUSES"` and
+  pick the first non-suspended warehouse from the JSON results
 
-Use the connection method from [references/snowflake-setup.md](references/snowflake-setup.md).
+Use the connection method and patterns from
+[references/snowflake-setup.md](references/snowflake-setup.md) — including the
+temp-file approach for CLI when executing the dry-run and CREATE calls.
 
 **Always run a dry-run first:**
 
@@ -792,6 +765,8 @@ $$);
 **Notes:**
 - Use `CALL`, not `SELECT`
 - First argument: fully-qualified target schema `'DATABASE.SCHEMA'`
+  - If the target schema is case-sensitive (lowercase in `SHOW SCHEMAS` output),
+    quote it: `'DATABASE."schema"'` — e.g. `'BIRD."superhero"'`
 - Second argument: YAML content in `$$` dollar-quotes (safe for YAML with single quotes)
 - Third argument `TRUE`: dry-run mode — validates without creating
 

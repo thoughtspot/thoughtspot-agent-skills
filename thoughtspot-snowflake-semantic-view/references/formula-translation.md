@@ -70,7 +70,6 @@ reference (single word, no `::` separator), not a column. See Untranslatable Pat
 | `month ( [date] )` | `MONTH(date)` |
 | `day ( [date] )` | `DAY(date)` |
 | `hour ( [date] )` | `HOUR(date)` |
-| `date_diff ( [a] , [b] )` | `DATEDIFF('day', b, a)` |
 | `diff_days ( [end] , [start] )` | `DATEDIFF('day', start, end)` |
 | `diff_months ( [end] , [start] )` | `DATEDIFF('month', start, end)` |
 | `diff_years ( [end] , [start] )` | `DATEDIFF('year', start, end)` |
@@ -86,7 +85,7 @@ If a formula references another model column by display name (e.g. `[Revenue]`):
 1. Look up that column name in the model's column list.
 2. Substitute its already-translated `expr` value inline.
 3. Apply recursively up to **3 levels deep**.
-4. If circular or deeper than 3 levels, emit a `-- TODO` comment.
+4. If circular or deeper than 3 levels, **omit the column entirely** and log it in the Formula Translation Log.
 
 ---
 
@@ -110,11 +109,9 @@ expr: '[locale]'
 expr: if ( [Date] = 'order date' ) then [DM_ORDER::ORDER_DATE] else [DM_ORDER::SHIPPED_DATE]
 ```
 
-Log entry format:
+Log entry (Unmapped Properties Report row):
 ```
--- TODO: formula uses parameter '[{param_name}]' — no Snowflake equivalent.
--- Original ThoughtSpot formula: {original_expr}
--- Suggestion: create separate concrete columns, or use a Snowflake session variable.
+| {column_name} | `{original_expr}` | ⚠ Parameter reference | OMITTED — `[{param_name}]` is a runtime parameter with no Snowflake equivalent. Suggestion: create concrete columns or use a session variable. |
 ```
 
 ### `sql_string_op`
@@ -130,38 +127,84 @@ Common patterns and their Snowflake equivalents:
 - Type casting → `CAST(col AS type)` or `col::type`
 - Other → inspect the template string and rewrite manually
 
-Log entry format:
+Log entry (Unmapped Properties Report row):
 ```
--- TODO: sql_string_op requires manual translation.
--- Original ThoughtSpot formula: {original_expr}
--- Template: {template_string}
--- Args: {arg1}, {arg2}
+| {column_name} | `{original_expr}` | ⚠ sql_string_op | OMITTED — requires manual translation. Template: `{template_string}`. Args: `{arg1}`, `{arg2}`. |
 ```
 
-### Time Intelligence Functions
+### Window and Analytical Functions
 
-These have no direct SQL equivalent and require window function rewrites.
+These are valid ThoughtSpot aggregate functions. They are untranslatable to a Snowflake
+Semantic View `metrics` entry because the `expr` field requires a plain SQL aggregate
+(`SUM`, `COUNT`, `AVG`, etc.) — window functions cannot be used there. Re-implement by
+creating a Snowflake view with the window calculation pre-computed, then point the
+semantic view's `base_table` at that view.
 
-| ThoughtSpot function | Intended behaviour | Snowflake window function approach |
-|---|---|---|
-| `growth_rate([x], n period)` | Period-over-period % change | `(x - LAG(x) OVER (...)) / LAG(x) OVER (...)` |
-| `period_ago([x], n period)` | Value from n periods ago | `LAG(x, n) OVER (ORDER BY date)` |
-| `last_period([x])` | Previous period value | `LAG(x, 1) OVER (ORDER BY date)` |
-| `vs_period([x])` | Difference vs prior period | `x - LAG(x, 1) OVER (ORDER BY date)` |
-| `moving_average([x], n, m)` | Rolling average | `AVG(x) OVER (ROWS BETWEEN n PRECEDING AND m FOLLOWING)` |
-| `moving_sum([x], n, m)` | Rolling sum | `SUM(x) OVER (ROWS BETWEEN n PRECEDING AND m FOLLOWING)` |
-| `moving_max` / `moving_min` | Rolling max/min | `MAX/MIN(x) OVER (ROWS BETWEEN ...)` |
-| `cumulative_sum([x])` | Running total | `SUM(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
-| `cumulative_max` / `min` | Running max/min | `MAX/MIN(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
-| `rank()` | Rank within group | `RANK() OVER (PARTITION BY ... ORDER BY ...)` |
-| `rank_percentile()` | Percentile rank | `PERCENT_RANK() OVER (...)` |
-| `running_count([x])` | Running count | `COUNT(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
+| ThoughtSpot function | Snowflake window function approach |
+|---|---|
+| `moving_average([x], n, m)` | `AVG(x) OVER (ROWS BETWEEN n PRECEDING AND m FOLLOWING)` |
+| `moving_sum([x], n, m)` | `SUM(x) OVER (ROWS BETWEEN n PRECEDING AND m FOLLOWING)` |
+| `moving_max([x], n, m)` | `MAX(x) OVER (ROWS BETWEEN n PRECEDING AND m FOLLOWING)` |
+| `moving_min([x], n, m)` | `MIN(x) OVER (ROWS BETWEEN n PRECEDING AND m FOLLOWING)` |
+| `cumulative_sum([x])` | `SUM(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
+| `cumulative_average([x])` | `AVG(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
+| `cumulative_max([x])` | `MAX(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
+| `cumulative_min([x])` | `MIN(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
+| `rank()` | `RANK() OVER (PARTITION BY ... ORDER BY ...)` |
+| `rank_percentile()` | `PERCENT_RANK() OVER (...)` |
 
-Log entry format:
+Log entry (Unmapped Properties Report row):
 ```
--- TODO: ThoughtSpot time intelligence function '{function_name}' requires manual translation.
--- Suggested Snowflake approach: {approach from table above}
--- Original ThoughtSpot formula: {original_expr}
+| {column_name} | `{original_expr}` | ⚠ Window function | OMITTED — `{function_name}` requires a window function; re-implement as a calculated column in a Snowflake view. |
+```
+
+---
+
+### Level of Detail (LOD) Functions
+
+ThoughtSpot LOD functions (`group_aggregate` and the `group_*` shorthand family) compute
+sub-aggregations at a fixed granularity by generating a SQL CTE. There is no equivalent
+in Snowflake Semantic Views — the `expr` field cannot contain a subquery or CTE.
+Re-implement by creating a Snowflake view with the CTE built in, then point the semantic
+view's `base_table` at that view.
+
+| ThoughtSpot function | Notes |
+|---|---|
+| `group_aggregate(agg(col), grouping, filter)` | Primary LOD function — generates a SQL CTE |
+| `group_sum([x], ...)` | Shorthand for `group_aggregate(sum(...), ...)` |
+| `group_average([x], ...)` | Shorthand for `group_aggregate(average(...), ...)` |
+| `group_count([x], ...)` | Shorthand for `group_aggregate(count(...), ...)` |
+| `group_max([x], ...)` | Shorthand for `group_aggregate(max(...), ...)` |
+| `group_min([x], ...)` | Shorthand for `group_aggregate(min(...), ...)` |
+| `group_stddev([x], ...)` | Shorthand for `group_aggregate(stddev(...), ...)` |
+| `group_variance([x], ...)` | Shorthand for `group_aggregate(variance(...), ...)` |
+| `group_unique_count([x], ...)` | Shorthand for `group_aggregate(unique count(...), ...)` |
+
+Log entry (Unmapped Properties Report row):
+```
+| {column_name} | `{original_expr}` | ⚠ LOD function | OMITTED — `{function_name}` generates a CTE subquery; re-implement as a Snowflake view. |
+```
+
+---
+
+### Semi-Additive Functions
+
+`first_value` and `last_value` are used for snapshot metrics (account balances, inventory,
+headcount) — measures that aggregate across most dimensions but require special handling
+for the time dimension. They use SQL window functions internally and cannot be expressed
+as a plain `expr` in a Snowflake Semantic View metric. Re-implement by creating a
+Snowflake view with the window function pre-computed.
+
+| ThoughtSpot function | Snowflake window function approach |
+|---|---|
+| `last_value([x], {grouping}, {filter})` | `LAST_VALUE(x) IGNORE NULLS OVER (PARTITION BY ... ORDER BY date)` |
+| `first_value([x], {grouping}, {filter})` | `FIRST_VALUE(x) IGNORE NULLS OVER (PARTITION BY ... ORDER BY date)` |
+| `last_value_in_period([x], ...)` | `LAST_VALUE(x) IGNORE NULLS OVER (PARTITION BY ... ORDER BY date)` scoped to period |
+| `first_value_in_period([x], ...)` | `FIRST_VALUE(x) IGNORE NULLS OVER (PARTITION BY ... ORDER BY date)` scoped to period |
+
+Log entry (Unmapped Properties Report row):
+```
+| {column_name} | `{original_expr}` | ⚠ Semi-additive | OMITTED — `{function_name}` uses a window function; re-implement as a calculated column in a Snowflake view. |
 ```
 
 ---
@@ -170,10 +213,10 @@ Log entry format:
 
 For every formula processed, include a row in the Unmapped Properties Report:
 
-| Column Name | Original ThoughtSpot Expression | Status | Snowflake Output |
+| Column Name | Original ThoughtSpot Expression | Status | Result |
 |---|---|---|---|
 | Days to Ship | `diff_days([SHIPPED_DATE], [ORDER_DATE])` | Translated | `DATEDIFF('day', DM_ORDER.ORDER_DATE, DM_ORDER.SHIPPED_DATE)` |
 | Employee Name | `concat([FIRST_NAME], ' ', [LAST_NAME])` | Translated | `CONCAT(DM_EMPLOYEE.FIRST_NAME, ' ', DM_EMPLOYEE.LAST_NAME)` |
-| Language | `[locale]` | ⚠ Parameter reference | `-- TODO` |
-| Master Date | `if ([Date] = 'order date') then ...` | ⚠ Parameter reference | `-- TODO` |
-| Locale Country | `sql_string_op(...)` | ⚠ sql_string_op | `-- TODO` |
+| Language | `[locale]` | ⚠ Parameter reference | OMITTED |
+| Master Date | `if ([Date] = 'order date') then ...` | ⚠ Parameter reference | OMITTED |
+| Locale Country | `sql_string_op(...)` | ⚠ sql_string_op | OMITTED |

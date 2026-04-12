@@ -5,6 +5,23 @@ Reusable across any skill that connects to ThoughtSpot.
 
 ---
 
+## Credential Safety Rules
+
+These rules apply everywhere in this skill:
+
+- **Never embed a secret key, password, or token value in a shell command.** When Claude
+  runs a Bash command, the full command text — including interpolated values — is visible
+  to the user. Always read secrets from env vars inside a Python script where the value
+  is never part of the command string.
+- **Never print or echo a secret key, password, or bearer token to the terminal.**
+  Confirm success with a neutral message (e.g. `"Authenticated."`) instead.
+- **Set `600` permissions on any temp file containing a token** so it is only readable
+  by the current user.
+- **The bearer token is a credential.** Treat it the same as the secret key — do not
+  log it, print it, or include it in error messages.
+
+---
+
 ## Profile Configuration
 
 Named profiles are stored in `~/.claude/thoughtspot-profiles.json`. Non-sensitive
@@ -57,30 +74,59 @@ Code's Bash tool, **shell variables do not persist between separate tool invocat
 Use one of these patterns:
 
 **Pattern A — Temp file (recommended for multi-step skills):**
+
+Use Python so the secret key is read from the environment and never appears in the
+command string. The token is written with `600` permissions so only the current user
+can read it.
+
+```python
+import os, stat, requests
+
+base_url   = "{base_url}".rstrip('/')          # from profile — not secret
+username   = "{username}"                       # from profile — not secret
+secret_key = os.environ.get("{secret_key_env}") # value never in command text
+
+resp = requests.post(
+    f"{base_url}/api/rest/2.0/auth/token/full",
+    json={"username": username, "secret_key": secret_key, "validity_time_in_sec": 3600},
+    headers={"Content-Type": "application/json"},
+)
+resp.raise_for_status()
+token = resp.json()["token"]
+
+with open("/tmp/ts_token.txt", "w") as f:
+    f.write(token)
+os.chmod("/tmp/ts_token.txt", stat.S_IRUSR | stat.S_IWUSR)  # 600
+
+print("Authenticated.")  # confirm success — never print the token value
+```
+
+Subsequent calls read the token from the file:
+```python
+with open("/tmp/ts_token.txt") as f:
+    token = f.read().strip()
+headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+```
+
+Cleanup — run at end of workflow regardless of outcome:
 ```bash
-# Step 1: Fetch and persist
-TOKEN=$(curl -s -X POST "{BASE_URL}/api/rest/2.0/auth/token/full" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"...","secret_key":"...","validity_time_in_sec":3600}' \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
-echo "$TOKEN" > /tmp/ts_token.txt
-
-# Subsequent calls: read from file
-TOKEN=$(cat /tmp/ts_token.txt)
-curl -s ... -H "Authorization: Bearer $TOKEN" ...
-
-# Cleanup — run at end of workflow regardless of outcome
 rm -f /tmp/ts_token.txt
 ```
 
 **Pattern B — Single pipeline script:**
-Combine all API calls into one `python3` or `bash` heredoc within a single Bash
-invocation. Fetch the token once at the top and reuse the variable throughout.
+Combine all API calls into one `python3` script within a single Bash invocation.
+Fetch the token once at the top, store it in a local variable, and reuse it throughout.
+The secret key is read via `os.environ.get()` — same rule applies.
 
-**Pattern C — Inline fetch per call (for one-off calls only):**
-```bash
-TOKEN=$(curl -s ... | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
-curl -s -H "Authorization: Bearer $TOKEN" ...  # same invocation
+**Pattern C — Inline fetch per call (one-off calls only):**
+```python
+import os, requests
+secret_key = os.environ.get("{secret_key_env}")
+token = requests.post(
+    f"{base_url}/api/rest/2.0/auth/token/full",
+    json={"username": "{username}", "secret_key": secret_key, "validity_time_in_sec": 3600},
+).json()["token"]
+# use token immediately in the same script — do not print it
 ```
 
 **Do not** set a variable in one Bash call and read it in the next — it will be empty.

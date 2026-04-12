@@ -144,48 +144,14 @@ apply quoting accordingly.
 | `base_table.schema` | `schema: PUBLIC` | `schema: '"superhero"'` |
 | `base_table.table` | `table: FACT_SALES` | `table: '"colour"'` |
 | `expr` column ref | `expr: t.COLUMN_NAME` | `expr: t."column_name"` |
-| `primary_key.columns` | `- COLUMN_NAME` | `- column_name` ← see below |
-| `relationship_columns` | `left_column: COL` | `left_column: col` ← see below |
+| `primary_key.columns` | `- COLUMN_NAME` | `- column_name` (bare — wrapper views normalize to uppercase) |
+| `relationship_columns` | `left_column: COL` | `left_column: col` (bare — wrapper views normalize to uppercase) |
 
-**`primary_key.columns` and `relationship_columns` — never use `'"col"'` quoting:**
-
-Cortex Analyst's YAML identifier validator applies the pattern
-`^[A-Za-z_][A-Za-z0-9_$]*$` to these fields. It rejects any value containing `"`
-characters, so the `'"col"'` format that works for `base_table` fields will cause
-a 400 error:
-
-```
-invalid column name "id": name must start with an underscore or a letter,
-and only contain letters, underscores, decimal digits (0-9), and dollar signs ($).
-```
-
-Always emit bare unquoted identifiers in `primary_key.columns[]` and
-`relationship_columns[].left_column` / `.right_column`, even when the underlying
-physical column is case-sensitive lowercase:
-
-```yaml
-# CORRECT — bare identifier (case-sensitive lowercase column "id")
-primary_key:
-  columns:
-  - id
-
-relationship_columns:
-- left_column: alignment_id
-  right_column: id
-
-# WRONG — Cortex Analyst rejects the '"col"' format here
-primary_key:
-  columns:
-  - '"id"'                  # ← causes 400 error
-
-relationship_columns:
-- left_column: '"alignment_id"'   # ← causes 400 error
-  right_column: '"id"'
-```
-
-The Snowflake Semantic View framework resolves `primary_key` and
-`relationship_columns` identifiers case-insensitively against the physical table
-schema, so bare `id` or `ID` will correctly match a physical `"id"` column.
+**`primary_key.columns` and `relationship_columns`** always use bare unquoted identifiers.
+Lowercase case-sensitive join key columns trigger wrapper view creation in Step 5, which
+normalizes all column names to uppercase before the YAML is generated. See
+*Known Snowflake Semantic View Limitations — Lowercase case-sensitive base table columns*
+at the bottom of this file.
 
 ---
 
@@ -205,8 +171,7 @@ Run all checks before calling `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
 | `primary_key` format | `primary_key:` with nested `columns:` list — NOT a bare list under `primary_key:` |
 | Case-sensitive identifiers | Lowercase schemas/tables detected via SHOW and wrapped in `'"value"'` in `base_table`; lowercase columns double-quoted inline in `expr` |
 | Reserved words quoted | Column names that are SQL reserved words are double-quoted in `expr` |
-| Relationship columns bare | `left_column`/`right_column` are always bare unquoted identifiers — never `'"col"'` (Cortex Analyst rejects quoted names here) |
-| Primary key columns bare | `primary_key.columns[]` entries are always bare unquoted identifiers — never `'"col"'` |
+| Join key identifiers | `primary_key.columns` and `relationship_columns` use bare identifiers — wrapper views (Step 5) ensure all are uppercase before this point |
 | Unsupported fields absent | No `relationship_type`, `join_type`, `default_aggregation`, `sample_values` |
 | Valid `data_type` | One of: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN` |
 | No untranslatable formulas | Columns with untranslatable ThoughtSpot formulas are **omitted** entirely |
@@ -309,3 +274,87 @@ DROP SEMANTIC VIEW IF EXISTS {database}.{schema}.{name};
 Do NOT use `INFORMATION_SCHEMA.SEMANTIC_VIEWS` — the column names vary by Snowflake
 version. Instead, proceed with the CREATE call and handle the "already exists"
 error if returned.
+
+---
+
+## Known Snowflake Semantic View Limitations
+
+### Lowercase case-sensitive base table columns (Cortex Analyst blocker)
+
+Cortex Analyst validates the semantic model YAML against a strict identifier pattern:
+`^[A-Za-z_][A-Za-z0-9_$]*$`. Any column name containing `"` characters is rejected
+with error 392700:
+
+```
+invalid column name "id": name must start with an underscore or a letter,
+and only contain letters, underscores, decimal digits (0-9), and dollar signs ($).
+```
+
+This surfaces when the underlying Snowflake tables were created with lowercase quoted
+identifiers (e.g. `"id"`, `"race_id"`). `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`
+requires `'"id"'` quoting to resolve these columns; Cortex Analyst then rejects that
+same encoding at query time. There is no YAML format that satisfies both tools.
+
+**Diagnosis:** Run `SHOW COLUMNS IN TABLE {db}.{schema}.{table}`. If any column name
+is returned in lowercase, those columns are case-sensitive and will trigger this issue.
+
+**Fix — create uppercase wrapper views (preferred):**
+
+Before generating the YAML in Step 10, create a new uppercase schema and views:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS {db}.{UPPERCASE_SCHEMA_NAME};
+
+CREATE OR REPLACE VIEW {db}.{UPPERCASE_SCHEMA_NAME}.{TABLE_NAME} AS
+SELECT "id" AS ID, "column_name" AS COLUMN_NAME, ...
+FROM {db}."{lowercase_schema}"."{table}";
+```
+
+Point the semantic view's `base_table` entries at the new schema and views. All
+identifiers become bare uppercase — no quoting needed anywhere in the YAML, and
+both `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` and Cortex Analyst accept the result.
+
+**Alternative fix — rename source columns:**
+
+```sql
+ALTER TABLE {db}."{schema}"."{table}" RENAME COLUMN "id" TO ID;
+```
+
+This is cleaner long-term but modifies the source schema and may break other
+queries or integrations that reference the lowercase column names. Use only if you
+control the source tables and have verified no downstream dependencies.
+
+---
+
+### Bridge / junction tables and multi-hop traversal
+
+Snowflake Semantic Views cannot traverse a two-hop path through a bridge table at
+query time. If the model contains a many-to-many pattern like:
+
+```
+superhero ← hero_power → superpower
+```
+
+Queries that request dimensions from both ends (e.g. `superhero_name` + `power_name`)
+fail with:
+
+```
+Invalid fact specified: The fact entity 'SUPERPOWER' must be related to and have
+an equal or lower level of granularity compared to the base metric or fact entity.
+```
+
+**What still works:** Queries anchored at one end of the bridge:
+- `superhero_name` + any lookup dimension (race, alignment, gender, publisher, colour)
+- `superhero_name` + `attribute_name` + `attribute_value` (via `hero_attribute`)
+
+**What doesn't work:** Any query that tries to reach a table on the far side of a
+bridge via the bridge table (e.g. `superhero_name` + `power_name`).
+
+**Workaround:** Use direct SQL against the physical tables with explicit JOINs and
+properly quoted case-sensitive identifiers (see case-sensitivity rules in Step 5).
+
+### `SELECT *` on a multi-fact semantic view
+
+`SELECT *` across a semantic view that contains multiple fact/bridge tables at
+different granularities will always fail with the granularity conflict above.
+Always select specific fields from a single granularity path.

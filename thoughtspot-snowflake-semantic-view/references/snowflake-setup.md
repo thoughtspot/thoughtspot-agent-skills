@@ -11,12 +11,23 @@ method throughout.
 Named profiles are stored in `~/.claude/snowflake-profiles.json`. This allows
 multiple accounts/roles to be configured without re-entering credentials each run.
 
+Each profile has a `method` field (`"cli"` or `"python"`) that controls how SQL is
+executed. If `method` is absent it defaults to `"python"`.
+
 **Profile file format:**
 ```json
 {
   "profiles": [
     {
-      "name": "My Snowflake Account",
+      "name": "My Account (CLI)",
+      "method": "cli",
+      "cli_connection": "myconnection",
+      "default_warehouse": "MY_WAREHOUSE",
+      "default_role": "MY_ROLE"
+    },
+    {
+      "name": "My Account (Python / key pair)",
+      "method": "python",
       "account": "myorg-myaccount",
       "username": "analyst",
       "auth": "key_pair",
@@ -26,7 +37,8 @@ multiple accounts/roles to be configured without re-entering credentials each ru
       "default_role": "MY_ROLE"
     },
     {
-      "name": "Production",
+      "name": "Production (Python / password)",
+      "method": "python",
       "account": "myorg-prod",
       "username": "analyst",
       "auth": "password",
@@ -36,13 +48,25 @@ multiple accounts/roles to be configured without re-entering credentials each ru
 }
 ```
 
-**Profile selection at Step 13:**
+**`cli_connection`** maps to a named connection in `~/.snowflake/config.toml`:
+```toml
+[connections.myconnection]
+account = "myorg-myaccount"
+user = "analyst"
+role = "MY_ROLE"
+warehouse = "MY_WAREHOUSE"
+```
+Auth credentials (key pair, SSO, password) are stored entirely in `config.toml`;
+the Claude profile only needs the connection name.
+
+**Profile selection:**
 1. Read `~/.claude/snowflake-profiles.json`
 2. If multiple profiles: display numbered list and ask user to select
 3. If one profile: show it and confirm before proceeding
-4. If no file: ask user for account, username, and auth method; offer to save as a profile
+4. If no file: ask user for account, username, auth method, and whether they prefer
+   the CLI or Python connector; offer to save as a profile
 
-**Auth methods:**
+**Python auth methods:**
 
 *Key pair (recommended):*
 ```python
@@ -112,13 +136,78 @@ print(result[0][0])
 
 ### Option 2: Snowflake CLI (`snow`)
 
+The CLI uses `~/.snowflake/config.toml` for auth. All commands pass `-c {cli_connection}`
+to select the named connection (omit if using the default connection).
+
+**Running SHOW commands and parsing output:**
+
+Always add `--format json` so output can be parsed with Python. The `name` field in
+SHOW SCHEMAS output and the `column_name` field in SHOW COLUMNS output are the
+relevant identifiers.
+
 ```bash
-snow sql \
-  --query "CALL SYSTEM\$CREATE_SEMANTIC_VIEW_FROM_YAML('DATABASE.SCHEMA', '\$\$\n{yaml_escaped}\n\$\$');" \
-  --database {database} \
-  --schema {schema} \
-  --role {role}
+# Detect case-sensitive schemas
+snow sql -c {cli_connection} \
+  --format json \
+  -q "SHOW SCHEMAS IN DATABASE {db}" \
+| python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+cs = [r['name'] for r in rows if r['name'] != r['name'].upper()]
+print('\n'.join(cs))
+"
+
+# Detect case-sensitive columns (schema_ref is quoted if schema is case-sensitive)
+snow sql -c {cli_connection} \
+  --format json \
+  -q 'SHOW COLUMNS IN TABLE {db}.{schema_ref}."{phys_table}"' \
+| python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+cs = [r['column_name'] for r in rows if r['column_name'] != r['column_name'].upper()]
+print('\n'.join(cs))
+"
+
+# List warehouses
+snow sql -c {cli_connection} --format json -q "SHOW WAREHOUSES"
 ```
+
+**Running CREATE / CALL statements:**
+
+Dollar-quoting (`$$`) is safe in SQL files. Use a Python-written temp file to avoid
+shell-escaping issues — especially important when the YAML itself contains `$`:
+
+```python
+import subprocess
+
+sql = f"""USE ROLE {role};
+USE DATABASE {target_db};
+USE SCHEMA {target_schema};
+CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{target_db}.{target_schema}', $${yaml_content}$$, TRUE);
+"""
+with open('/tmp/sv_query.sql', 'w') as f:
+    f.write(sql)
+
+result = subprocess.run(
+    ['snow', 'sql', '-c', cli_connection, '--format', 'json', '-f', '/tmp/sv_query.sql'],
+    capture_output=True, text=True
+)
+print(result.stdout)
+if result.returncode != 0:
+    print(result.stderr)
+```
+
+Replace `TRUE` with nothing (remove the third argument) for the actual CREATE call.
+
+**Cleanup:** Remove the temp SQL file after execution:
+```bash
+rm -f /tmp/sv_query.sql
+```
+
+**Role override:** If the connection's default role needs to be overridden, include
+`USE ROLE {role};` at the top of the SQL file (as shown above) rather than passing
+`--role` on the command line — the `--role` flag is not supported by all `snow sql`
+versions.
 
 ### Option 3: SnowSQL
 
@@ -160,13 +249,20 @@ ask the user to run it in the Snowflake UI or Snowsight.
 
 ## Detection Order
 
-Check in this order and use the first available:
-
-1. Are we inside a Snowflake Notebook? → Use Option 1 (Snowpark session)
-2. Is `snow` CLI available? (`snow --version`) → Use Option 2
-3. Is `snowsql` available? (`snowsql --version`) → Use Option 3
-4. Is `snowflake-connector-python` installed? (`python3 -c "import snowflake.connector"`) → Use Option 4
-5. None available → Use Option 5 (manual)
+1. Are we inside a Snowflake Notebook? → Use Option 1 (Snowpark session) regardless of profile
+2. Is the selected profile `method: cli`?
+   - Verify `snow` is available: `snow --version`
+   - If available → Use Option 2
+   - If not available → warn the user and fall through to step 4
+3. Is the selected profile `method: python` (or method absent)?
+   - Verify `snowflake-connector-python` is installed: `python3 -c "import snowflake.connector"`
+   - If available → Use Option 4
+   - If not available → fall through to step 5
+4. No profile / no preferred method? Check in order:
+   - `snow --version` succeeds → Use Option 2
+   - `snowsql --version` succeeds → Use Option 3
+   - `python3 -c "import snowflake.connector"` succeeds → Use Option 4
+5. None available → Use Option 5 (manual output)
 
 ---
 

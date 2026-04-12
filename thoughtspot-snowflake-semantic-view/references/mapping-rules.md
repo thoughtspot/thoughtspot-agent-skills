@@ -39,31 +39,6 @@ in the Snowflake Semantic View schema — the aggregation is embedded in the `ex
 
 ---
 
-## Join Types
-
-Snowflake Semantic Views do **not** support `join_type` or `relationship_type` in
-relationships. These fields must be **omitted entirely**. Only `relationship_columns`
-is used to define how tables join.
-
-*(This table is kept for reference only — do not emit these fields in output YAML.)*
-
-| ThoughtSpot `type` | Note |
-|---|---|
-| `INNER` | Omit — not supported |
-| `LEFT_OUTER` | Omit — not supported |
-| `RIGHT_OUTER` | Omit — not supported |
-| `FULL_OUTER` | Omit — not supported |
-
----
-
-## Cardinality / Relationship Types
-
-Snowflake Semantic Views do **not** support `relationship_type`. Omit it entirely.
-The relationship is defined only by `left_table`, `right_table`, and
-`relationship_columns`. The right-side table must have a `primary_key` section.
-
----
-
 ## Data Types
 
 Check `db_column_properties.data_type` first (Table TML — most reliable), then fall back
