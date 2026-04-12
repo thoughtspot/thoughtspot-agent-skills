@@ -345,7 +345,17 @@ Remove: `rm -f /tmp/sf_verify.py`
 
 Run: `snow --version 2>&1`
 
-If not found:
+If not found (exit code 127), search for the binary:
+```bash
+find /usr/local/bin /opt/homebrew/bin /usr/bin ~/.local/bin ~/Library/Python -name "snow" 2>/dev/null | head -5
+```
+
+If found at an alternate path, store it as `{snow_cmd}` (e.g. `~/Library/Python/3.9/bin/snow`) and use that path in all subsequent `snow` commands. Confirm to the user:
+```
+Found snow at {snow_cmd} (version X.Y.Z).
+```
+
+If not found anywhere:
 ```
 Snowflake CLI (snow) is not installed.
 
@@ -358,15 +368,23 @@ Stop here.
 
 #### B2 — Choose or Create a Connection
 
-Run: `snow connection list 2>&1`
+Run: `{snow_cmd} connection list 2>&1`
 
-Show the output and ask:
+Parse the connection names from the output and display them numbered:
 ```
-Which connection would you like to use?
-(Enter a connection name from the list, or type 'new' to create one):
+Available connections:
+
+  1  {connection_name_1}
+  2  {connection_name_2}
+  ...
+  N  Create a new connection
+
+Enter a number:
 ```
 
-**If existing connection:** store as `{cli_connection}`. Skip to B3.
+**If existing connection selected (1…N-1):** store the corresponding name as `{cli_connection}`. Skip to B3.
+
+**If N (new):** ask for connection name — that becomes `{cli_connection}`. Skip to new-connection flow below.
 
 **If 'new':** ask for connection name, account identifier, username, default role, default warehouse, and auth method (key pair path or browser SSO). Write the config block to `~/.snowflake/config.toml`, show it to the user, and confirm before appending.
 
@@ -376,21 +394,38 @@ Which connection would you like to use?
 Profile name for this connection: [Production]
 ```
 
+Then ask:
 ```
-Default warehouse (leave blank to use the CLI connection's default):
+Override the CLI connection's warehouse and role? (y/N):
 ```
 
+**If no (default):** set `{warehouse}` and `{role}` to `""` (empty — CLI connection defaults apply).
+
+**If yes:** ask:
 ```
-Default role (leave blank to use the CLI connection's default):
+Default warehouse:
+```
+```
+Default role:
 ```
 
 Store as `{profile_name}`, `{warehouse}`, `{role}`.
 
 #### B4 — Test CLI Connection
 
-Run: `snow connection test -c {cli_connection} 2>&1`
+Run: `{snow_cmd} connection test -c {cli_connection} 2>&1`
 
-Show output. If it fails, stop and ask the user to fix the CLI config before continuing.
+**If the test fails with `No such file or directory` on a key path:**
+
+Snow CLI 2.8.2 stores connections in `~/.snowflake/connections.toml` (separate from `config.toml`) and does NOT expand `~` in `private_key_path` — it joins the path literally with the CWD. Fix by replacing `~` with the absolute home path in `connections.toml`:
+
+```toml
+private_key_path = "/Users/username/.ssh/snowflake_private_key.p8"
+```
+
+Read `~/.snowflake/connections.toml`, update the `private_key_path` for the relevant connection, write it back, then re-run the test.
+
+Show output. If it still fails, stop and ask the user to fix the CLI config before continuing.
 
 #### B5 — Write Profile
 
@@ -399,10 +434,13 @@ Show output. If it fails, stop and ask the user to fix the CLI config before con
   "name": "{profile_name}",
   "method": "cli",
   "cli_connection": "{cli_connection}",
+  "snow_cmd": "{snow_cmd}",
   "default_warehouse": "{warehouse}",
   "default_role": "{role}"
 }
 ```
+
+`snow_cmd` is the resolved path to the `snow` binary (e.g. `~/Library/Python/3.9/bin/snow`). If `snow` was found on PATH, store `"snow"` as the value.
 
 ---
 
@@ -585,9 +623,19 @@ Write to `/tmp/sf_verify.py` (same script as A4, with values filled in for the s
 Run: `source ~/.zshenv && python3 /tmp/sf_verify.py 2>/dev/null`
 Remove: `rm -f /tmp/sf_verify.py`
 
+Show the result as a table (User / Role / Warehouse).
+
+On success: `Profile '{name}' — connection verified.` Return to menu.
+
 **Snowflake CLI:**
 
-Run: `snow connection test -c {cli_connection} 2>&1`
+Run: `{snow_cmd} connection test -c {cli_connection} 2>&1`
+
+If that succeeds, run a live SQL query to confirm real query execution:
+
+`{snow_cmd} sql -c {cli_connection} -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE()" 2>&1`
+
+Show the result as a table.
 
 On success: `Profile '{name}' — connection verified.` Return to menu.
 
@@ -670,7 +718,7 @@ with open('/tmp/sf_query.sql', 'w') as f:
     f.write(sql)
 
 result = subprocess.run(
-    ['snow', 'sql', '-c', cli_connection, '--format', 'json', '-f', '/tmp/sf_query.sql'],
+    [profile['snow_cmd'], 'sql', '-c', cli_connection, '--format', 'json', '-f', '/tmp/sf_query.sql'],
     capture_output=True, text=True
 )
 print(result.stdout)
@@ -696,9 +744,9 @@ cs_columns = {r[2] for r in cur.fetchall() if r[2] != r[2].upper()}
 ```python
 import subprocess, json
 
-def snow_json(cli_connection, query):
+def snow_json(cli_connection, query, snow_cmd='snow'):
     r = subprocess.run(
-        ['snow', 'sql', '-c', cli_connection, '--format', 'json', '-q', query],
+        [snow_cmd, 'sql', '-c', cli_connection, '--format', 'json', '-q', query],
         capture_output=True, text=True
     )
     return json.loads(r.stdout)

@@ -79,7 +79,25 @@ Can you log into ThoughtSpot in a browser (even via SSO)?
 
 ### Step 1: Authenticate
 
-**Profile selection:**
+**Session continuity — skip if already authenticated this session:**
+
+If ThoughtSpot and Snowflake profiles were already selected earlier in this
+conversation (e.g. for a previous model in a batch), skip profile selection entirely
+and reuse the same profiles. If `/tmp/ts_token.txt` is missing (e.g. it was cleaned
+up after the last model) but the profile's env var is set, re-authenticate silently:
+
+```python
+import os, stat
+token = os.environ.get("{token_env}", "")
+if token:
+    with open("/tmp/ts_token.txt", "w") as f: f.write(token)
+    os.chmod("/tmp/ts_token.txt", stat.S_IRUSR | stat.S_IWUSR)
+    # proceed — no user prompt needed
+```
+
+Only show profile-selection prompts on the very first model of the session.
+
+**Profile selection (first model only):**
 
 1. Read `~/.claude/thoughtspot-profiles.json` if it exists.
 2. If multiple profiles: display a numbered list and ask the user to select one.
@@ -783,8 +801,12 @@ DROP SEMANTIC VIEW IF EXISTS {target_database}.{target_schema}.{semantic_view_na
 ```
 Then re-run the CREATE call.
 
-**Cleanup — always run at the end of the workflow**, whether the view was created,
-the user cancelled, or execution failed:
+**Cleanup:**
+
+- If **more models remain** in the current batch, preserve `/tmp/ts_token.txt` for
+  the next iteration — do not delete it.
+- Delete it only after the **last model** in the session is done (or if the user
+  cancels the batch), whether the view was created successfully or not:
 ```bash
 rm -f /tmp/ts_token.txt
 ```
@@ -834,4 +856,25 @@ Claude Code
     "Using the {semantic_view_name} semantic view in {target_database}.{target_schema},
      {question}"
 ───────────────────────────────────────────────
+```
+
+**After completing a model — batch continuation:**
+
+If the user originally requested multiple models and more remain, immediately offer
+the next one without waiting to be asked:
+
+```
+✓ {semantic_view_name} created in {target_database}.{target_schema}
+
+Next up: {next_model_name}
+  Ready to convert? (Y / N):
+```
+
+If yes: go directly to Step 2 (model selection is already known — skip straight to
+Step 3: Export TML). Reuse the ThoughtSpot profile, Snowflake profile, warehouse,
+and role from this session. Do **not** re-run Step 1 profile prompts.
+
+If no (or no more models remain): run the final cleanup:
+```bash
+rm -f /tmp/ts_token.txt
 ```

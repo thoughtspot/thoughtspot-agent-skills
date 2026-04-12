@@ -6,12 +6,34 @@ A collection of Claude Code skills for working with ThoughtSpot.
 
 ## Skills
 
+### [`thoughtspot-setup`](thoughtspot-setup/)
+
+Manages ThoughtSpot connection profiles. Stores credentials securely in the macOS
+Keychain, wires up `~/.zshenv` for env var persistence, and verifies connections.
+Supports token, password, and secret key auth methods.
+
+Run with `/thoughtspot-setup`.
+
+### [`snowflake-setup`](snowflake-setup/)
+
+Manages Snowflake connection profiles. Supports two connection methods: Python
+connector (key pair or password auth) and Snowflake CLI. Tests the connection
+and saves the profile for use by other skills.
+
+Run with `/snowflake-setup`.
+
 ### [`thoughtspot-snowflake-semantic-view`](thoughtspot-snowflake-semantic-view/)
 
 Converts a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Exports
 the TML definition via the ThoughtSpot REST API, maps columns and joins to the
 Snowflake Semantic View YAML format, translates ThoughtSpot formulas to SQL, and
 creates the view via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`.
+
+Handles case-sensitive Snowflake identifiers, SQL view auto-resolution, multi-model
+batch conversion, and generates an Unmapped Properties Report for any ThoughtSpot
+features that cannot be represented in the Semantic View format.
+
+Run with `/thoughtspot-snowflake-semantic-view`.
 
 ---
 
@@ -36,10 +58,11 @@ For users who want to run the skill without managing a local repo.
 # Clone once to get the files, then copy them into place
 git clone https://github.com/<org>/thoughtspot-skills.git /tmp/thoughtspot-skills
 
-mkdir -p ~/.claude/skills ~/.claude/references
+mkdir -p ~/.claude/skills
 
+cp -r /tmp/thoughtspot-skills/thoughtspot-setup ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/snowflake-setup ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/thoughtspot-snowflake-semantic-view ~/.claude/skills/
-cp /tmp/thoughtspot-skills/references/*.md ~/.claude/references/
 
 rm -rf /tmp/thoughtspot-skills
 ```
@@ -74,13 +97,16 @@ git clone https://github.com/<org>/thoughtspot-skills.git ~/Dev/thoughtspot-skil
 ### 2. Create symlinks into Claude Code
 
 ```bash
-mkdir -p ~/.claude/skills ~/.claude/references
+mkdir -p ~/.claude/skills
+
+ln -s ~/Dev/thoughtspot-skills/thoughtspot-setup \
+      ~/.claude/skills/thoughtspot-setup
+
+ln -s ~/Dev/thoughtspot-skills/snowflake-setup \
+      ~/.claude/skills/snowflake-setup
 
 ln -s ~/Dev/thoughtspot-skills/thoughtspot-snowflake-semantic-view \
       ~/.claude/skills/thoughtspot-snowflake-semantic-view
-
-ln -s ~/Dev/thoughtspot-skills/references \
-      ~/.claude/references
 ```
 
 Claude Code reads through the symlinks automatically. Edits in `~/Dev/` take effect
@@ -111,9 +137,9 @@ In Claude Code, run:
 /thoughtspot-setup
 ```
 
-Claude will ask for your ThoughtSpot URL, username, and credential (one question at
-a time), store everything securely in the macOS Keychain, and verify the connection
-before finishing.
+Claude will ask for your ThoughtSpot URL, username, and auth method (one question at
+a time), store the credential securely in the macOS Keychain, wire up `~/.zshenv`,
+and verify the connection before finishing.
 
 Then run:
 
@@ -124,27 +150,36 @@ Then run:
 Claude will ask whether you're using the Python connector or Snowflake CLI, walk you
 through auth setup (key pair or password), and verify the connection.
 
+Both setup skills support multiple named profiles, so you can switch between
+environments (e.g. staging and production) without re-entering credentials.
+
 ---
 
 ## Usage
 
-In Claude Code, start the skill with:
+All skills are invoked with a slash command in Claude Code. You can also describe
+what you want in natural language and Claude will invoke the right skill.
 
-```
-/thoughtspot-snowflake-semantic-view
-```
+| Skill | Command | What it does |
+|---|---|---|
+| `thoughtspot-setup` | `/thoughtspot-setup` | Add, update, test, or delete ThoughtSpot profiles |
+| `snowflake-setup` | `/snowflake-setup` | Add, update, test, or delete Snowflake profiles |
+| `thoughtspot-snowflake-semantic-view` | `/thoughtspot-snowflake-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 
-Or describe what you want in natural language:
+Example for the conversion skill:
 
 ```
 Convert my ThoughtSpot Retail Sales model to a Snowflake Semantic View
 ```
 
-The skill will guide you through:
+The conversion skill will guide you through:
 1. Selecting a ThoughtSpot model or worksheet (by GUID, search, or browse)
 2. Choosing where in Snowflake to create the view
 3. Reviewing the generated YAML and any unmapped properties
 4. Dry-run validation, then creating the view
+
+You can convert multiple models in one session — the skill reuses your selected
+profiles and credentials across the batch.
 
 ---
 
@@ -160,4 +195,4 @@ The skill will guide you through:
 
 **Local:**
 - Python 3.8+
-- macOS (Keychain used for credential storage; see `references/credential-storage.md` for Linux alternatives)
+- macOS (Keychain used for credential storage)
