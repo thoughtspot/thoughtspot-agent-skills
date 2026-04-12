@@ -20,9 +20,9 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [references/property-coverage.md](references/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
 | [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
-| [references/thoughtspot-auth.md](references/thoughtspot-auth.md) | ThoughtSpot profile configuration, token persistence, and API call patterns |
 | [references/thoughtspot-tml.md](references/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
-| [references/snowflake-setup.md](references/snowflake-setup.md) | Snowflake connection profiles, auth methods, execution options, and detection order |
+| [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, token persistence (Pattern A), API patterns |
+| [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 
 ---
 
@@ -54,50 +54,24 @@ For the full coverage matrix including unmapped properties, see
 
 ## Prerequisites
 
-**ThoughtSpot:**
-- Instance v8.4 or later, REST API v2 enabled
-- User with `DATAMANAGEMENT` or `DEVELOPER` privilege, or trusted auth secret key
+### ThoughtSpot
 
-**Snowflake:**
+- ThoughtSpot Cloud instance, REST API v2 enabled
+- User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
+- Authentication configured — run `/thoughtspot-setup` if you haven't already
+
+**Quick auth decision:**
+```
+Can you log into ThoughtSpot in a browser (even via SSO)?
+  YES → token_env   — get a token from Developer Playground (no admin needed)
+  NO  → password_env or secret_key_env — see thoughtspot-setup.md
+```
+
+### Snowflake
+
 - Role with `CREATE SEMANTIC VIEW` on the target schema
-- One of the following connection methods (see [references/snowflake-setup.md](references/snowflake-setup.md)):
-  - **Snowflake CLI** (`method: cli`) — install from https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation, configure `~/.snowflake/config.toml`
-  - **Python connector** (`method: python`) — install packages:
-    ```bash
-    pip install snowflake-connector-python cryptography
-    ```
-
-**Profile configuration** — preferred method:
-
-Named profiles are stored in `~/.claude/thoughtspot-profiles.json`. Non-sensitive
-values (URL, username) live in the file; secret keys are referenced by env var name
-and must be exported in `~/.zshrc`:
-
-```json
-{
-  "profiles": [
-    {
-      "name": "Production",
-      "base_url": "https://myorg.thoughtspot.cloud",
-      "username": "analyst@company.com",
-      "secret_key_env": "THOUGHTSPOT_SECRET_KEY_PROD"
-    }
-  ]
-}
-```
-
-```bash
-# ~/.zshrc
-export THOUGHTSPOT_SECRET_KEY_PROD=your-secret-key
-```
-
-**Fallback** — if no profiles file exists, read from environment variables directly:
-```
-THOUGHTSPOT_BASE_URL     # e.g. https://myorg.thoughtspot.cloud  (no trailing slash)
-THOUGHTSPOT_USERNAME     # e.g. analyst@company.com
-THOUGHTSPOT_SECRET_KEY   # trusted auth key  (preferred)
-THOUGHTSPOT_PASSWORD     # password auth     (alternative)
-```
+- Connection configured — run `/snowflake-setup` if you haven't already
+- Not sure where to start? → Python connector + password auth has the fewest setup steps
 
 ---
 
@@ -120,31 +94,47 @@ Available ThoughtSpot profiles:
 Select a profile (or press Enter to use #1):
 ```
 
-After profile is confirmed, resolve the secret key:
-- Read the `secret_key_env` field from the profile (e.g. `THOUGHTSPOT_SECRET_KEY_PROD`)
-- Read that env var's value at runtime via `os.environ.get(secret_key_env)`
-- **Never print, echo, or log the resolved key value or any bearer token.**
-- If the env var is unset or empty, prompt the user to set it in their shell session
-  **before** proceeding — do not ask them to paste it into the conversation:
-  ```
-  Secret key for {profile_name} is not set.
-  Please run this in your terminal, then re-run the skill:
+After profile is confirmed, resolve credentials in priority order:
+`token_env` → `password_env` → `secret_key_env` (use the first field present).
 
-    ! export {secret_key_env}=your-secret-key
+- Read the env var value at runtime via `os.environ.get(env_var_name)`
+- **Never print, echo, or log any credential value or bearer token.**
+- If the env var is unset or empty, prompt the user to set it before proceeding:
   ```
-  If the user cannot set an env var and insists on pasting, warn them that the value
-  will be visible in the conversation, then use it for this session only — do not
-  write it to any file, and do not echo it back.
+  Credential for {profile_name} is not set ({env_var_name} is empty).
+  Store it in the macOS Keychain, then wire up ~/.zshenv and reload:
+
+    # Store (run in your terminal, not in Claude Code)
+    security add-generic-password -s "thoughtspot-{profile}" -a "{username}" -w "your-value"
+
+    # Add to ~/.zshenv
+    export {env_var_name}=$(security find-generic-password -s "thoughtspot-{profile}" -a "{username}" -w 2>/dev/null)
+
+    # Reload
+    source ~/.zshenv
+  ```
+  For `token_env`: also remind the user to get a fresh token from the ThoughtSpot
+  Developer Playground: Develop → REST Playground 2.0 → Authentication →
+  Get Current User Token → Try it out → Execute → copy the `token` value.
+  If the user cannot use the Keychain and insists on pasting, warn that the value
+  will be visible in the conversation, use it for this session only, and do not
+  write it to any file.
+- If no credential field is present in the profile, ask which auth method they want
+  to use and which env var name to read it from.
 
 Strip any trailing slash from `base_url` before constructing URLs.
 
-**Obtain a bearer token** using Python so the secret key never appears in command text
-(see [references/thoughtspot-auth.md](references/thoughtspot-auth.md) — Pattern A):
-- Read the key from `os.environ.get(secret_key_env)` inside the script
+**Obtain the bearer token** using Python so credentials never appear in command text
+(see [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) — Pattern A):
+- `token_env`: use the value directly as the token — no API call needed
+- `password_env` / `secret_key_env`: call `POST /api/rest/2.0/auth/token/full` with
+  `validity_time_in_sec: 3600`
 - Write the token to `/tmp/ts_token.txt` with `600` permissions
 - Print only `"Authenticated."` — never print the token value
 
-On 401/403 — stop and ask the user to verify credentials.
+On 401/403 for password auth — stop and inform the user that API password login may
+be disabled (MFA or SSO enforcement). Suggest using `token_env` from the Developer
+Playground, or asking their admin for the trusted auth secret key.
 
 **Claude Code shell context — token persistence:**
 Bash tool calls do not share shell state between separate invocations. Never store
@@ -152,7 +142,7 @@ the token in a shell variable across calls — it will be empty in the next call
 Instead, use one of these strategies for every subsequent API call:
 
 - **Temp file (preferred for multi-call scripts):** Authenticate using Pattern A in
-  [references/thoughtspot-auth.md](references/thoughtspot-auth.md) — writes the token
+  [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) — writes the token
   to `/tmp/ts_token.txt` with `600` permissions. Read it back in subsequent calls:
   ```python
   with open("/tmp/ts_token.txt") as f:
@@ -283,6 +273,19 @@ Parse every `edoc` string as YAML (with cleaning). Separate into:
 
 ### Step 5: Resolve Physical Table Names
 
+**`to_snake(name)` — used throughout this step and Step 7:**
+Convert a display name to a valid Snowflake identifier:
+1. Lowercase the string
+2. Replace any run of non-alphanumeric characters with `_`
+3. Strip leading/trailing underscores
+
+```python
+import re
+def to_snake(name):
+    return re.sub(r'_+', '_', re.sub(r'[^a-z0-9]', '_', name.lower())).strip('_')
+# Examples: "eye colour" → "eye_colour", "# of Products" → "of_products"
+```
+
 Build a map: `logical_table_name → { database, schema, physical_table }`.
 
 From each Table TML object extract:
@@ -352,14 +355,15 @@ in [references/thoughtspot-tml.md](references/thoughtspot-tml.md):
 
 **Case-sensitivity detection — connect to Snowflake now, before building the YAML:**
 
-This step requires a live Snowflake connection. If the Snowflake profile has not been
-selected yet, do it now (follow the profile selection logic from Step 12) so you can
-run `SHOW` commands against the source tables. Do not defer this to Step 12 — the
-quoting decisions made here affect every `expr`, `base_table.schema`, and
-`base_table.table` value in the YAML.
+This step requires a live Snowflake connection. Select the Snowflake profile and
+establish the connection now using the profile selection and auth logic described in
+Step 12 — do not wait until Step 12 to do this. The quoting decisions made here
+affect every `expr`, `base_table.schema`, and `base_table.table` value in the YAML.
+When Step 12 is reached, skip profile selection (already done) and proceed directly
+to target location selection.
 
 Run for every database/schema/table pair in the physical table map using the
-connection method from [references/snowflake-setup.md](references/snowflake-setup.md).
+connection method from [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md).
 
 **Python connector (`method: python`):**
 ```python
@@ -437,7 +441,7 @@ If `needs_wrapper` is True:
 Execute these DDL statements using the same method as the SHOW commands above
 (Python connector `cur.execute()` or CLI with a temp SQL file via
 `snow sql -c {cli_connection} -f /tmp/sv_query.sql` — see
-[references/snowflake-setup.md](references/snowflake-setup.md) for the file-based
+[~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the file-based
 CLI pattern).
 
 See [references/snowflake-schema.md](references/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
@@ -719,7 +723,7 @@ Select (or press Enter for #1):
 
 If the user selects E, ask for `target_database` and `target_schema` explicitly.
 
-**Snowflake profile selection:**
+**Snowflake profile selection** (skip if already connected in Step 5):
 1. Read `~/.claude/snowflake-profiles.json`
 2. If multiple profiles: display a numbered list including each profile's `method`
    (`cli` / `python`) so the user can distinguish them at a glance; ask user to select
@@ -737,7 +741,7 @@ If the user selects E, ask for `target_database` and `target_schema` explicitly.
   pick the first non-suspended warehouse from the JSON results
 
 Use the connection method and patterns from
-[references/snowflake-setup.md](references/snowflake-setup.md) — including the
+[~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) — including the
 temp-file approach for CLI when executing the dry-run and CREATE calls.
 
 **Always run a dry-run first:**
@@ -783,4 +787,51 @@ Then re-run the CREATE call.
 the user cancelled, or execution failed:
 ```bash
 rm -f /tmp/ts_token.txt
+```
+
+---
+
+### Step 13: Generate Test Questions
+
+After the view is successfully created, generate 5 natural language questions derived
+from the semantic view. Use the actual metrics, dimensions, and time dimensions that
+were mapped — not column names, but the `name` or `label` values from the YAML.
+
+**Question design — aim for variety:**
+
+| Type | Example pattern |
+|---|---|
+| Simple aggregation | "What is the total {metric} ?" |
+| Breakdown | "What is {metric} by {dimension} ?" |
+| Time trend | "How has {metric} changed over {time_dimension} ?" |
+| Ranking | "Which {dimension} has the highest {metric} ?" |
+| Multi-table / filtered | "What is {metric} for {dimension value} broken down by {dimension from joined table} ?" |
+
+Span multiple tables where possible to exercise the relationships. Keep phrasing
+conversational — these are for testing, not production reports.
+
+Present the questions as:
+
+```
+Test questions for {semantic_view_name}
+
+1. {question}
+2. {question}
+3. {question}
+4. {question}
+5. {question}
+
+───────────────────────────────────────────────
+Snowflake Cortex Analyst
+  In Snowsight: open Cortex Analyst, select the semantic view, and ask each question.
+
+ThoughtSpot Spotter
+  In your ThoughtSpot instance: open Spotter, select the original worksheet/model,
+  and ask each question.
+
+Claude Code
+  Ask Claude directly — for example:
+    "Using the {semantic_view_name} semantic view in {target_database}.{target_schema},
+     {question}"
+───────────────────────────────────────────────
 ```
