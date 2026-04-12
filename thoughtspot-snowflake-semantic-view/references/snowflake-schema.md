@@ -21,7 +21,8 @@ tables:                           # Required. At least one entry.
     table: string                 # Physical table or view name.
 
   primary_key:                    # Required on tables that appear as right_table
-    - string                      # in any relationship. List of physical column names.
+    columns:                      # in any relationship. List of physical column names.
+    - string
 
   dimensions:                     # Optional. Nested under the owning table.
   - name: string                  # Unique across ALL dimensions, time_dimensions,
@@ -213,7 +214,8 @@ tables:
     schema: PUBLIC
     table: DIM_PRODUCT
   primary_key:
-  - PRODUCT_ID
+    columns:
+    - PRODUCT_ID
   dimensions:
   - name: product
     synonyms:

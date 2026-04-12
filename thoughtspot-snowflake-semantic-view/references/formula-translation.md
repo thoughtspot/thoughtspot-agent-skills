@@ -92,7 +92,10 @@ If a formula references another model column by display name (e.g. `[Revenue]`):
 
 ## Untranslatable Patterns
 
-Replace with `-- TODO` comment and add to the Unmapped Properties Report.
+**Do not emit these columns in the YAML output.** Omit the field entirely and add a
+row to the Formula Translation Log in the Unmapped Properties Report (see Step 10).
+The formats below are for the log entry — they must never appear as the `expr` value
+in the generated YAML.
 
 ### Parameter References
 
@@ -107,7 +110,7 @@ expr: '[locale]'
 expr: if ( [Date] = 'order date' ) then [DM_ORDER::ORDER_DATE] else [DM_ORDER::SHIPPED_DATE]
 ```
 
-Output format:
+Log entry format:
 ```
 -- TODO: formula uses parameter '[{param_name}]' — no Snowflake equivalent.
 -- Original ThoughtSpot formula: {original_expr}
@@ -127,7 +130,7 @@ Common patterns and their Snowflake equivalents:
 - Type casting → `CAST(col AS type)` or `col::type`
 - Other → inspect the template string and rewrite manually
 
-Output format:
+Log entry format:
 ```
 -- TODO: sql_string_op requires manual translation.
 -- Original ThoughtSpot formula: {original_expr}
@@ -154,7 +157,7 @@ These have no direct SQL equivalent and require window function rewrites.
 | `rank_percentile()` | Percentile rank | `PERCENT_RANK() OVER (...)` |
 | `running_count([x])` | Running count | `COUNT(x) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)` |
 
-Output format:
+Log entry format:
 ```
 -- TODO: ThoughtSpot time intelligence function '{function_name}' requires manual translation.
 -- Suggested Snowflake approach: {approach from table above}

@@ -60,6 +60,10 @@ For the full coverage matrix including unmapped properties, see
 **Snowflake:**
 - Role with `CREATE SEMANTIC VIEW` on the target schema
 - A connection method available (see [references/snowflake-setup.md](references/snowflake-setup.md))
+- Python packages for connector-based execution:
+  ```bash
+  pip install snowflake-connector-python cryptography
+  ```
 
 **Profile configuration** — preferred method:
 
@@ -187,7 +191,8 @@ tables:
     schema: PUBLIC
     table: DIM_PRODUCT
   primary_key:
-  - PRODUCT_ID
+    columns:
+    - PRODUCT_ID
   dimensions:
   - name: product
     synonyms:
@@ -242,7 +247,7 @@ Select a profile (or press Enter to use #1):
 ```
 
 After profile is confirmed, resolve the secret key:
-- Read the `secret_key_env` field from the profile (e.g. `THOUGHTSPOT_SECRET_KEY_CHAMPAGNE`)
+- Read the `secret_key_env` field from the profile (e.g. `THOUGHTSPOT_SECRET_KEY_PROD`)
 - Read that env var's value at runtime
 - If the env var is unset or empty, **ask the user to paste the key directly** before proceeding:
   `Secret key for {profile_name} is not set (expected env var: {secret_key_env}). Please paste your secret key:`
@@ -285,7 +290,7 @@ Delete `/tmp/ts_token.txt` at the end of the session.
 
 ---
 
-### Step 2: Find and Select a Model
+### Step 2: Find and Select a Model or Worksheet
 
 **Present the following options to the user:**
 ```
@@ -560,7 +565,8 @@ in a relationship. Each such table entry must include a `primary_key` section li
 the physical column(s) used as the join key:
 ```yaml
 primary_key:
-- {PHYSICAL_COLUMN_NAME}
+  columns:
+  - {PHYSICAL_COLUMN_NAME}
 ```
 
 **For each model column:**
@@ -670,19 +676,7 @@ Report all failures together before retrying. Key checks:
 
 ---
 
-### Step 12: Check for Existing View
-
-**Skip the INFORMATION_SCHEMA check** — `INFORMATION_SCHEMA.SEMANTIC_VIEWS` and its
-column names vary by Snowflake version and may not exist. Instead, proceed directly
-to Step 13. If the view already exists, `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` will
-return an error indicating it exists — at that point offer the user:
-- DROP and recreate: `DROP SEMANTIC VIEW IF EXISTS {database}.{schema}.{name};`
-- Use a different name
-- Cancel
-
----
-
-### Step 13: Execute
+### Step 12: Execute
 
 Ask for Snowflake target if not already provided:
 `target_database`, `target_schema`, `role`.

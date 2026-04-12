@@ -19,8 +19,8 @@ of this skill over time.
 | `joins[]` (`referencing_join`) | `relationships[]` | Resolved from Table TML `joins_with` |
 | `ATTRIBUTE` column (non-date) | `dimensions[]` | |
 | `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` | Type from `db_column_properties.data_type` |
-| `MEASURE` column | `measures[]` | Aggregation mapped via mapping-rules.md |
-| Formula column (`formula_id`) | `measures[]` | Expression translated; see formula-translation.md |
+| `MEASURE` column | `metrics[]` | Aggregation mapped via mapping-rules.md |
+| Formula column (`formula_id`) | `metrics[]` | Expression translated; see formula-translation.md |
 | `synonyms[]` | `synonyms[]` | Passed through |
 | `column.description` | `description` | Passed through |
 | `ai_context` | `description` | **Partial** — see below |
