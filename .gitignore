@@ -1,0 +1,39 @@
+# Credential and profile files
+*.env
+.env.*
+*-profiles.json
+*_profiles.json
+
+# Private keys and certificates
+*.pem
+*.p8
+*.key
+*.pfx
+*.p12
+
+# Tokens and secrets
+*token*.txt
+*secret*.txt
+*credentials*.json
+*credentials*.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Temp / test output files
+/tmp/
+*.tmp
