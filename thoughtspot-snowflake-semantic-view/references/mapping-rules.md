@@ -10,9 +10,9 @@ Apply this decision tree to every column:
 
 ```
 Is formula_id set?
-  YES → measures
+  YES → metrics (if translatable) or OMIT (if untranslatable — see Step 9)
   NO  → Is column_type MEASURE?
-          YES → measures
+          YES → metrics
           NO  → Is db_column_type or column name a date/timestamp? (see Data Types below)
                   YES → time_dimensions
                   NO  → dimensions
@@ -22,43 +22,45 @@ Is formula_id set?
 
 ## Aggregation Functions
 
-| ThoughtSpot `aggregation` | Snowflake `expr` wrapper | `default_aggregation` |
-|---|---|---|
-| `SUM` | `SUM(expr)` | `sum` |
-| `COUNT` | `COUNT(expr)` | `count` |
-| `COUNT_DISTINCT` | `COUNT(DISTINCT expr)` | `count_distinct` |
-| `AVG` / `AVERAGE` | `AVG(expr)` | `avg` |
-| `MIN` | `MIN(expr)` | `min` |
-| `MAX` | `MAX(expr)` | `max` |
-| `STD_DEVIATION` | `STDDEV(expr)` | `avg` *(flag for review — no direct match)* |
-| `VARIANCE` | `VARIANCE(expr)` | `avg` *(flag for review — no direct match)* |
-| *(not set on MEASURE)* | `SUM(expr)` | `sum` *(default)* |
+Used in `expr` for `metrics` entries only. There is no `default_aggregation` field
+in the Snowflake Semantic View schema — the aggregation is embedded in the `expr`.
+
+| ThoughtSpot `aggregation` | Snowflake `expr` wrapper |
+|---|---|
+| `SUM` | `SUM(expr)` |
+| `COUNT` | `COUNT(expr)` |
+| `COUNT_DISTINCT` | `COUNT(DISTINCT expr)` |
+| `AVG` / `AVERAGE` | `AVG(expr)` |
+| `MIN` | `MIN(expr)` |
+| `MAX` | `MAX(expr)` |
+| `STD_DEVIATION` | `STDDEV(expr)` *(flag for review — no direct match)* |
+| `VARIANCE` | `VARIANCE(expr)` *(flag for review — no direct match)* |
+| *(not set on MEASURE)* | `SUM(expr)` *(default)* |
 
 ---
 
 ## Join Types
 
-| ThoughtSpot `type` | Snowflake `join_type` |
+Snowflake Semantic Views do **not** support `join_type` or `relationship_type` in
+relationships. These fields must be **omitted entirely**. Only `relationship_columns`
+is used to define how tables join.
+
+*(This table is kept for reference only — do not emit these fields in output YAML.)*
+
+| ThoughtSpot `type` | Note |
 |---|---|
-| `INNER` | `inner` |
-| `LEFT_OUTER` | `left` |
-| `RIGHT_OUTER` | `right` |
-| `FULL_OUTER` | `full` |
-| *(absent)* | `inner` *(default)* |
+| `INNER` | Omit — not supported |
+| `LEFT_OUTER` | Omit — not supported |
+| `RIGHT_OUTER` | Omit — not supported |
+| `FULL_OUTER` | Omit — not supported |
 
 ---
 
 ## Cardinality / Relationship Types
 
-| ThoughtSpot source | Snowflake `relationship_type` |
-|---|---|
-| `is_one_to_one: true` | `one_to_one` |
-| `is_one_to_one: false` *(default)* | `many_to_one` |
-| `cardinality: MANY_TO_ONE` | `many_to_one` |
-| `cardinality: ONE_TO_ONE` | `one_to_one` |
-| `cardinality: ONE_TO_MANY` | `one_to_many` |
-| `cardinality: MANY_TO_MANY` | `many_to_many` |
-| *(absent)* | `many_to_one` *(default)* |
+Snowflake Semantic Views do **not** support `relationship_type`. Omit it entirely.
+The relationship is defined only by `left_table`, `right_table`, and
+`relationship_columns`. The right-side table must have a `primary_key` section.
 
 ---
 
@@ -112,29 +114,76 @@ When generating Snowflake field names from ThoughtSpot display names:
 
 ## Snowflake Field Entry Templates
 
-**Dimension:**
+Fields are **nested under their owning table** in the output YAML, not at the top level.
+Do not include `sample_values` or `default_aggregation` — these are not supported.
+
+**Table entry (with primary_key — required when table is the right side of a relationship):**
+```yaml
+- name: {TABLE_ALIAS}
+  base_table:
+    database: {DATABASE}
+    schema: {SCHEMA_OR_QUOTED}          # e.g. PUBLIC  or  '"superhero"'
+    table: {PHYSICAL_TABLE_OR_QUOTED}   # e.g. FACT_SALES  or  '"colour"'
+  primary_key:
+    columns:
+    - {PK_COLUMN_OR_QUOTED}             # e.g. ORDER_ID  or  '"id"'
+  dimensions:
+  - ...
+  time_dimensions:
+  - ...
+  metrics:
+  - ...
+```
+
+**Table entry (no primary_key — for the "left" / fact table that is never a join target):**
+```yaml
+- name: {TABLE_ALIAS}
+  base_table:
+    database: {DATABASE}
+    schema: {SCHEMA_OR_QUOTED}
+    table: {PHYSICAL_TABLE_OR_QUOTED}
+  dimensions:
+  - ...
+  time_dimensions:
+  - ...
+  metrics:
+  - ...
+```
+
+**Case-sensitive identifier quoting:**
+- `SHOW SCHEMAS` / `SHOW TABLES` / `SHOW COLUMNS` returning lowercase → identifier is case-sensitive
+- Encode as `'"value"'` in YAML (single-quoted YAML string containing Snowflake double-quoted identifier)
+- Case-insensitive (UPPERCASE in SHOW output) → no quoting needed
+
+**Dimension (nested under its table):**
 ```yaml
 - name: {snake_case_name}
   synonyms:
   - "{display_name}"
   - "{...additional ThoughtSpot synonyms}"
   description: "{description or [TS AI Context] {ai_context} or empty string}"
-  expr: {table_alias}.{DB_COLUMN_NAME}
+  expr: {table_alias}.{DB_COLUMN_NAME}    # or {table_alias}."{db_column_name}" if case-sensitive
   data_type: {TEXT|NUMBER|BOOLEAN}
-  sample_values: []
 ```
 
-**Time dimension:**
+**Time dimension (nested under its table):**
 ```yaml
 - name: {snake_case_name}
   synonyms:
   - "{display_name}"
   description: "{description or empty string}"
-  expr: {table_alias}.{DB_COLUMN_NAME}
+  expr: {table_alias}.{DB_COLUMN_NAME}    # or {table_alias}."{db_column_name}" if case-sensitive
   data_type: {DATE|TIMESTAMP}
 ```
 
-**Measure (physical column):**
+**Column quoting in `expr`:** Double-quote the column name portion in the SQL expression when:
+- The column is a SQL reserved word (`date`, `time`, `id`, `name`, `schema`, `table`, `value`, etc.)
+- The column was created case-sensitively (appears lowercase in `SHOW COLUMNS`)
+```yaml
+  expr: {table_alias}."column_name"    # inline in the expression string (no YAML outer quotes needed)
+```
+
+**Metric — physical column (nested under its table):**
 ```yaml
 - name: {snake_case_name}
   synonyms:
@@ -143,10 +192,9 @@ When generating Snowflake field names from ThoughtSpot display names:
   description: "{description or empty string}"
   expr: {AGG}({table_alias}.{DB_COLUMN_NAME})
   data_type: NUMBER
-  default_aggregation: {sum|count|avg|min|max|count_distinct}
 ```
 
-**Measure (translated formula):**
+**Metric — translated formula (nested under its table):**
 ```yaml
 - name: {snake_case_name}
   synonyms:
@@ -154,16 +202,44 @@ When generating Snowflake field names from ThoughtSpot display names:
   description: "{description or empty string}"
   expr: {translated SQL expression}
   data_type: NUMBER
-  default_aggregation: sum
 ```
 
-**Measure (untranslatable formula):**
+**Untranslatable formula — OMIT ENTIRELY:**
+
+Do **not** include columns whose ThoughtSpot formula cannot be translated to SQL.
+Using placeholder `expr` values (e.g. `CAST(NULL AS TEXT)`, `-- TODO`, `NULL`)
+causes Snowflake parse errors or silent incorrect results.
+
+Instead:
+1. **Omit the column** from the generated YAML
+2. **Log it** in the Formula Translation Log section of the Unmapped Properties Report
+
+The Formula Translation Log entry should capture:
+- Column display name
+- Original ThoughtSpot formula expression
+- Reason it could not be translated (e.g. uses parameter, `sql_string_op`, time intelligence)
+
+---
+
+## Relationship Entry Template
+
 ```yaml
-- name: {snake_case_name}
-  synonyms:
-  - "{display_name}"
-  description: "{description or empty string}"
-  expr: "-- TODO: {reason}. Original ThoughtSpot formula: {original_expr}"
-  data_type: NUMBER
-  default_aggregation: sum
+- name: {LEFT_TABLE}_to_{RIGHT_TABLE}
+  left_table: {LEFT_TABLE_ALIAS}
+  right_table: {RIGHT_TABLE_ALIAS}
+  relationship_columns:
+  - left_column: {LEFT_PHYSICAL_COLUMN}      # or '"left_col"' if case-sensitive
+    right_column: {RIGHT_PHYSICAL_COLUMN}    # or '"right_col"' if case-sensitive
+```
+
+**Do not include** `relationship_type` or `join_type` — these fields are not supported
+and will cause a parse error.
+
+**Column quoting in relationship_columns:** Unlike `expr` (a SQL string where inline
+`"col"` works), `left_column` and `right_column` are plain string values. For
+case-sensitive (lowercase) columns, wrap in single quotes containing the double-quoted
+Snowflake identifier:
+```yaml
+  - left_column: '"alignment_id"'   # YAML single-quoted → Snowflake "alignment_id"
+    right_column: '"id"'
 ```

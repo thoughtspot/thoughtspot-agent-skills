@@ -28,13 +28,21 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | ThoughtSpot | Snowflake Semantic View |
 |---|---|
 | Worksheet / Model | Semantic View |
-| `ATTRIBUTE` column (non-date) | `dimensions[]` |
-| `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` |
-| `MEASURE` column | `measures[]` |
-| Formula column (`formula_id`) | `measures[]` — expression translated to SQL |
-| `joins[]` / `referencing_join` | `relationships[]` — conditions from Table TML |
+| `ATTRIBUTE` column (non-date) | `dimensions[]` — nested under owning table |
+| `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` — nested under owning table |
+| `MEASURE` column | `metrics[]` — nested under owning table |
+| Formula column (`formula_id`) — translatable | `metrics[]` — expression translated to SQL |
+| Formula column (`formula_id`) — untranslatable | **Omitted** — logged in Unmapped Report |
+| `joins[]` / `referencing_join` | `relationships[]` — top-level, no join/cardinality type |
+| Right-side join table | `primary_key` section on that table entry |
 | `synonyms[]` | `synonyms[]` |
 | `ai_context` | `description` — merged with `[TS AI Context]` prefix |
+
+**Key structural rule:** `dimensions`, `time_dimensions`, and `metrics` are nested
+under each `tables[]` entry — they are **not** top-level keys in the semantic view.
+
+**Key keyword:** Use `metrics`, not `measures`. `measures` is not a valid key and
+will cause a parse error.
 
 For the full coverage matrix including unmapped properties, see
 [references/property-coverage.md](references/property-coverage.md).
@@ -51,7 +59,31 @@ For the full coverage matrix including unmapped properties, see
 - Role with `CREATE SEMANTIC VIEW` on the target schema
 - A connection method available (see [references/environment-setup.md](references/environment-setup.md))
 
-**Environment variables** — confirm all are set before Step 1:
+**Profile configuration** — preferred method:
+
+Named profiles are stored in `~/.claude/thoughtspot-profiles.json`. Non-sensitive
+values (URL, username) live in the file; secret keys are referenced by env var name
+and must be exported in `~/.zshrc`:
+
+```json
+{
+  "profiles": [
+    {
+      "name": "Production",
+      "base_url": "https://myorg.thoughtspot.cloud",
+      "username": "analyst@company.com",
+      "secret_key_env": "THOUGHTSPOT_SECRET_KEY_PROD"
+    }
+  ]
+}
+```
+
+```bash
+# ~/.zshrc
+export THOUGHTSPOT_SECRET_KEY_PROD=your-secret-key
+```
+
+**Fallback** — if no profiles file exists, read from environment variables directly:
 ```
 THOUGHTSPOT_BASE_URL     # e.g. https://myorg.thoughtspot.cloud  (no trailing slash)
 THOUGHTSPOT_USERNAME     # e.g. analyst@company.com
@@ -124,53 +156,67 @@ db_table: FACT_SALES` and the join condition
 ```yaml
 name: retail_sales
 description: "Migrated from ThoughtSpot: Retail Sales"
+
 tables:
 - name: fact_sales
   base_table:
     database: ANALYTICS
     schema: PUBLIC
     table: FACT_SALES
+  time_dimensions:
+  - name: sale_date
+    synonyms:
+    - "Sale Date"
+    description: ""
+    expr: fact_sales.SALE_DATE
+    data_type: DATE
+  metrics:
+  - name: revenue
+    synonyms:
+    - "Revenue"
+    - "Sales"
+    description: "[TS AI Context] Total transaction value for financial analysis."
+    expr: SUM(fact_sales.SALES_AMOUNT)
+    data_type: NUMBER
+
 - name: dim_product
   base_table:
     database: ANALYTICS
     schema: PUBLIC
     table: DIM_PRODUCT
+  primary_key:
+  - PRODUCT_ID
+  dimensions:
+  - name: product
+    synonyms:
+    - "Product"
+    - "Item"
+    description: ""
+    expr: dim_product.PRODUCT_NAME
+    data_type: TEXT
+  metrics:
+  - name: product_count
+    synonyms:
+    - "Product Count"
+    - "# of Products"
+    description: ""
+    expr: COUNT(dim_product.PRODUCT_ID)
+    data_type: NUMBER
+
 relationships:
 - name: sales_to_product
   left_table: fact_sales
   right_table: dim_product
   relationship_columns:
-  - left_column: product_id
-    right_column: product_id
-  relationship_type: many_to_one
-  join_type: inner
-dimensions:
-- name: product
-  synonyms: ["Product", "Item"]
-  description: ""
-  expr: dim_product.PRODUCT_NAME
-  data_type: TEXT
-  sample_values: []
-time_dimensions:
-- name: sale_date
-  synonyms: ["Sale Date"]
-  description: ""
-  expr: fact_sales.SALE_DATE
-  data_type: DATE
-measures:
-- name: revenue
-  synonyms: ["Revenue", "Sales"]
-  description: "[TS AI Context] Total transaction value for financial analysis."
-  expr: SUM(fact_sales.SALES_AMOUNT)
-  data_type: NUMBER
-  default_aggregation: sum
-- name: product_count
-  synonyms: ["Product Count", "# of Products"]
-  description: ""
-  expr: COUNT(dim_product.PRODUCT_ID)
-  data_type: NUMBER
-  default_aggregation: count
+  - left_column: PRODUCT_ID
+    right_column: PRODUCT_ID
 ```
+
+Key differences from wrong patterns:
+- `dimensions`, `time_dimensions`, `metrics` are **nested under their table**, not top-level
+- Keyword is `metrics`, not `measures`
+- `primary_key` is present on `dim_product` (the right-side join table)
+- No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation`
 
 ---
 
@@ -178,40 +224,114 @@ measures:
 
 ### Step 1: Authenticate
 
-Confirm all environment variables are set. Obtain a bearer token:
+**Profile selection:**
+
+1. Read `~/.claude/thoughtspot-profiles.json` if it exists.
+2. If multiple profiles: display a numbered list and ask the user to select one.
+3. If exactly one profile: display it and ask the user to confirm before proceeding.
+4. If no profiles file: fall back to `THOUGHTSPOT_BASE_URL` / `THOUGHTSPOT_USERNAME` / `THOUGHTSPOT_SECRET_KEY` env vars.
 
 ```
-POST {THOUGHTSPOT_BASE_URL}/api/rest/2.0/auth/token/full
+Available ThoughtSpot profiles:
+  1. Champagne (staging) — damian.waldron@thoughtspot.com @ champagne-master-aws.thoughtspotstaging.cloud
+
+Select a profile (or press Enter to use #1):
+```
+
+After profile is confirmed, resolve the secret key:
+- Read the `secret_key_env` field from the profile (e.g. `THOUGHTSPOT_SECRET_KEY_CHAMPAGNE`)
+- Read that env var's value at runtime
+- If the env var is unset or empty, **ask the user to paste the key directly** before proceeding:
+  `Secret key for {profile_name} is not set (expected env var: {secret_key_env}). Please paste your secret key:`
+  Then use the pasted value for this session only — do not write it to any file.
+
+Strip any trailing slash from `base_url` before constructing URLs.
+
+**Obtain a bearer token:**
+
+```
+POST {base_url}/api/rest/2.0/auth/token/full
 {
-  "username": "{THOUGHTSPOT_USERNAME}",
-  "secret_key": "{THOUGHTSPOT_SECRET_KEY}",   // or "password": "..."
+  "username": "{username}",
+  "secret_key": "{secret_key}",   // or "password": "..."
   "validity_time_in_sec": 3600
 }
 ```
 
-Store `token` from the response. Use `Authorization: Bearer {token}` on all subsequent
-ThoughtSpot API calls. On 401/403 — stop and ask the user to verify credentials.
+On 401/403 — stop and ask the user to verify credentials.
+
+**Claude Code shell context — token persistence:**
+Bash tool calls do not share shell state between separate invocations. Never store
+the token in a shell variable across calls — it will be empty in the next call.
+Instead, use one of these strategies for every subsequent API call:
+
+- **Inline fetch (preferred for single calls):** Fetch the token and make the API
+  call within the **same** `Bash` invocation using `$()` substitution.
+- **Temp file (preferred for multi-call scripts):** Write the token to
+  `/tmp/ts_token.txt` immediately after authenticating:
+  ```bash
+  TOKEN=$(curl -s ... | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+  echo "$TOKEN" > /tmp/ts_token.txt
+  ```
+  Read it back in subsequent calls with `TOKEN=$(cat /tmp/ts_token.txt)`.
+- **Single pipeline:** Combine all API calls into one `python3` or `bash` script
+  within a single Bash invocation.
+
+The temp file approach is most reliable for the multi-step workflow in this skill.
+Delete `/tmp/ts_token.txt` at the end of the session.
 
 ---
 
 ### Step 2: Search and Select a Model
 
-Ask the user whether to browse all models or search by keyword.
+**First, ask the user:** "Enter a keyword to search by name, or press Enter to browse
+all available worksheets and models."
 
+**API subtype note:** Both Worksheets and Models appear as `type: WORKSHEET` in the
+`metadata_header` of the search response. There is no separate `MODEL` subtype
+returned by this API. The actual TML format (`worksheet` vs `model` top-level key)
+is only determined after export in Step 3. `metadata_detail` is frequently `null`
+and must not be relied on for subtype filtering — use `metadata_header.type`.
+
+**Record limit:** The API caps `record_size` at 50 per request. Paginate using
+`record_offset` in increments of 50 until an empty page is returned. Fetch all
+pages before displaying results.
+
+**If keyword provided — server-side search:**
 ```
 POST {THOUGHTSPOT_BASE_URL}/api/rest/2.0/metadata/search
 {
   "metadata": [{"type": "LOGICAL_TABLE"}],
+  "query_string": "{keyword}",
   "record_size": 50,
   "record_offset": 0
 }
 ```
+Paginate this result set the same way. If zero results come back, fall through to
+client-side fuzzy search (see below).
 
-Add `"query_string": "{keyword}"` to filter by name. Show only subtypes `WORKSHEET`
-or `MODEL` (filter on `metadata_detail.type`).
+**If browsing all — paginate and collect:**
+Fetch all pages (`record_offset` 0, 50, 100, …) until an empty page is returned.
+Filter the full list to `metadata_header.type == 'WORKSHEET'` and display with
+a numbered list.
 
-Display a numbered list and wait for the user to select one. Store `metadata_id` as
-`{selected_model_id}` and `metadata_name` as `{original_model_name}`.
+**Client-side fuzzy search fallback:** If the user provides a keyword that returns
+zero server-side results, re-run with no `query_string`, collect all results, then
+apply case-insensitive substring matching against `metadata_name`. Present matches
+(if any) or inform the user none were found and offer to browse all.
+
+Display results as a numbered list:
+```
+1. [WORKSHEET] Retail Sales WS            id: e61c7c4c-...
+2. [WORKSHEET] TS: BI Server              id: eaab6de7-...
+```
+
+After the user selects, confirm: "This object has type WORKSHEET in the API. Is
+this a Model or a Worksheet? (The TML export will confirm, but let me know if you
+are unsure.)"
+
+Store `metadata_id` as `{selected_model_id}` and `metadata_name` as
+`{original_model_name}`.
 
 ---
 
@@ -226,7 +346,15 @@ POST {THOUGHTSPOT_BASE_URL}/api/rest/2.0/metadata/tml/export
 }
 ```
 
-Parse every `edoc` string as YAML. Separate into:
+**Non-printable characters:** Some TML contains special characters (e.g. `#x0095`)
+that cause `yaml.safe_load` to raise a `ReaderError`. Strip them before parsing:
+```python
+import re
+cleaned = re.sub(r'[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD]', '', edoc)
+parsed = yaml.safe_load(cleaned)
+```
+
+Parse every `edoc` string as YAML (with cleaning). Separate into:
 - **Primary object:** parsed YAML has top-level key `worksheet` or `model`
 - **Table objects:** parsed YAML has top-level key `table`
 
@@ -250,17 +378,32 @@ From each Table TML object extract:
 table:
   name: fact_sales       # map key
   db: ANALYTICS
-  schema: PUBLIC
+  schema: PUBLIC         # accessed as tbl.get("schema") — NOT tbl.get("schema_")
   db_table: FACT_SALES
 ```
 
-If `db` or `schema` is absent, ask the user to provide them before continuing.
+**PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
+never `"schema_"`. See [environment-setup.md](environment-setup.md) for details.
+
+**Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
+the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
+appears missing, first verify with `tbl.keys()` — do not prompt the user until confirmed
+genuinely absent.
+
+If `db` or `schema` is confirmed absent after inspection, ask the user to provide them.
 If a table has no associated TML, fetch it separately using its FQN GUID:
 ```
 POST /api/rest/2.0/metadata/tml/export  { "metadata": [{"identifier": "{fqn}"}] }
 ```
 
 Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag them.
+
+**Case-sensitivity detection:** After resolving physical table locations, run
+`SHOW SCHEMAS IN DATABASE {db}` and `SHOW COLUMNS IN TABLE {db}.{schema}.{table}`
+to determine which identifiers are case-sensitive (returned in lowercase by SHOW).
+Record a `case_sensitive` flag per schema, table, and column. This drives identifier
+quoting in all subsequent steps. See [references/snowflake-schema.md](references/snowflake-schema.md)
+for the `'"value"'` encoding pattern.
 
 ---
 
@@ -281,6 +424,32 @@ table_paths:
 ### Step 7: Build Relationships
 
 For each join, obtain the `on` condition and produce a Snowflake relationship.
+
+**Scope filter — Model format only:** A model's `model_tables[]` is the authoritative
+list of tables in scope. Table TML `joins_with[]` entries may reference tables that
+are **not** in `model_tables` (e.g. a supplier or status lookup table that exists
+in Snowflake but was excluded from the model). Skip any join where either
+`left_table` or `right_table` is not in `model_tables`. Only emit relationships
+for joins where **both** tables are present in `model_tables`.
+
+**Table aliases in Model format:** `model_tables[]` entries can have an `alias` field:
+```yaml
+model_tables:
+- name: colour
+  alias: eye colour      # ← this is the identifier used in column_id references
+- name: colour
+  alias: hair colour
+- name: colour
+  alias: skin colour
+```
+When `alias` is present:
+- Use `to_snake(alias)` as the Snowflake table `name` (e.g. `eye_colour`)
+- Use the physical `db_table` as `base_table.table` (e.g. `colour`)
+- Build an `alias_to_sf_name` map for column_id resolution
+- Column references in `model.columns` use the alias: `column_id: eye colour::colour`
+- Relationship `with:` field also uses the alias: `with: eye colour`
+
+Deduplicate Snowflake table names if the same alias appears twice (append `_2`, `_3`).
 
 **Worksheet format:** Join `on` conditions are in Table TML `joins_with[]`. Match
 by `name` field across all Table TML objects.
@@ -315,19 +484,70 @@ For join type and cardinality mappings, see
 
 ### Step 8: Map Columns
 
-Iterate `worksheet.worksheet_columns[]` (Worksheet) or Table TML `columns[]` (Model).
+**Source of truth — hierarchy:**
 
-**For each column:**
+| Layer | Used for |
+|---|---|
+| `model.columns[]` | All Semantic View field definitions — name, description, type, aggregation, synonyms, ai_context, formula_id, column_id |
+| Table TML `columns[]` | Resolving `column_id` → `db_column_name` and `db_column_properties.data_type` |
+| Table TML root (`db`, `schema`, `db_table`) | Physical table location for `base_table` entries |
+| `connections.yaml` | Fallback only — if Snowflake reports column not found, `external_column` overrides `db_column_name` |
 
-1. Resolve physical column name from Table TML: `column_id: path_id::logical_name`
-   → look up path_id (Step 6) → table alias → look up logical_name → `db_column_name`
-2. Classify as dimension / time_dimension / measure using the decision tree in
+The model is the semantic layer and the single source of truth for what appears in
+the Semantic View. Never derive the column list from Table TML.
+
+**Column ID resolution:**
+
+`column_id` format: `TABLE_NAME::LOGICAL_COLUMN_NAME`
+
+1. Split on `::` → `table_name`, `logical_col_name`
+2. Find the Table TML for `table_name`
+3. Find the column in Table TML `columns[]` where `name == logical_col_name`
+4. That column's `db_column_name` is the physical Snowflake column name (in the
+   vast majority of cases — it is the actual DB column name)
+5. Build `expr` as `table_name.DB_COLUMN_NAME`
+   - If `DB_COLUMN_NAME` is a SQL reserved word (e.g. `date`, `time`, `schema`),
+     double-quote it: `table_name."date"`
+6. Use `db_column_properties.data_type` for date/time classification
+
+**`connections.yaml` — do not consult proactively.** Only if Snowflake returns a
+column-not-found error after execution should you check `connections.yaml`, where
+`external_column` may override `db_column_name` for a given column:
+```yaml
+column:
+- name: CATEGORY_ID           # = db_column_name in Table TML
+  external_column: CATEGORY_ID  # = actual physical column in Snowflake (may differ)
+```
+
+**Output structure — fields are table-scoped:**
+
+Each field must be placed under the `tables[]` entry for its owning table. Accumulate
+fields per table as you iterate columns, then emit the full table entry with nested
+`dimensions`, `time_dimensions`, and `metrics` sections.
+
+**`primary_key` — required for join target tables:**
+
+After building all relationships, identify every table that appears as `right_table`
+in a relationship. Each such table entry must include a `primary_key` section listing
+the physical column(s) used as the join key:
+```yaml
+primary_key:
+- {PHYSICAL_COLUMN_NAME}
+```
+
+**For each model column:**
+
+1. If `formula_id` set → translate formula in Step 9; if untranslatable, omit the
+   column and log it; do not include placeholder `expr` values
+2. If `column_id` set → resolve physical column name as above
+3. Classify as dimension / time_dimension / metric using the decision tree in
    [references/mapping-rules.md](references/mapping-rules.md)
-3. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
-4. Record any unmapped properties (format_pattern, default_date_bucket, custom_order,
-   column_groups, geo_config) for the Unmapped Properties Report
-5. Build the Snowflake field entry using the templates in
+4. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
+5. Record unmapped properties (format_pattern, default_date_bucket, custom_order,
+   data_panel_column_groups, geo_config) for the Unmapped Properties Report
+6. Build the Snowflake field entry using the templates in
    [references/mapping-rules.md](references/mapping-rules.md)
+7. Append the field to the field list for its owning table
 
 ---
 
@@ -340,9 +560,27 @@ For each formula column (`formula_id` is set):
    `[path_id::col]`, Model uses `[TABLE::col]`)
 3. Replace function names using
    [references/formula-translation.md](references/formula-translation.md)
-4. For untranslatable patterns (parameters, `sql_string_op`, time intelligence),
-   emit a `-- TODO` comment and add to the Formula Translation Log
-5. Handle nested references up to 3 levels deep
+4. Handle nested references up to 3 levels deep
+
+**Untranslatable formulas — omit entirely:**
+
+For formulas containing untranslatable patterns (ThoughtSpot parameters, `sql_string_op`,
+time intelligence functions, `runtime_filter`), **do not emit the column** in the YAML.
+Do NOT use `-- TODO`, `CAST(NULL AS TEXT)`, or any placeholder `expr` — these cause
+Snowflake parse errors or silent failures.
+
+Instead:
+- Skip the column in the output YAML
+- Add an entry to the Formula Translation Log in the Unmapped Properties Report:
+  ```
+  | {display_name} | OMITTED | {reason} | {original_expr} |
+  ```
+
+Untranslatable patterns to recognise:
+- `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
+- `sql_string_op(...)` — raw SQL injection pattern
+- `ts_first_day_of_week(...)`, `last_n_days(...)` — ThoughtSpot time intelligence
+- Any reference to a formula that is itself untranslatable (transitive)
 
 ---
 
@@ -358,9 +596,10 @@ Present the following three sections:
 ```
 - Tables:          {n}
 - Relationships:   {n}
-- Dimensions:      {n}
-- Time dimensions: {n}
-- Measures:        {n}  ({n} translated formulas, {n} with -- TODO)
+- Dimensions:      {n}  (across all tables)
+- Time dimensions: {n}  (across all tables)
+- Metrics:         {n}  ({n} translated formulas, {n} physical columns)
+- Omitted columns: {n}  (untranslatable formulas — see Formula Translation Log)
 ```
 
 **3. Unmapped Properties Report** — use the format defined in
@@ -389,44 +628,82 @@ Shall I create this Semantic View in Snowflake?
 Run all checks from [references/snowflake-schema.md](references/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
-- [ ] Field names unique across dimensions, time_dimensions, measures
-- [ ] All `expr` table prefixes match a `tables[]` entry
-- [ ] All relationship table references match a `tables[]` entry
-- [ ] No `-- TODO` placeholders (or user has acknowledged)
-- [ ] Valid Snowflake identifiers, `data_type`, `default_aggregation`, `join_type`, `relationship_type`
+- [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level
+- [ ] Keyword is `metrics` not `measures` anywhere in the YAML
+- [ ] Field names unique globally across all tables' dimensions, time_dimensions, metrics
+- [ ] All `expr` table prefixes match a `name` in `tables[]`
+- [ ] All relationship `left_table`/`right_table` values match a `name` in `tables[]`
+- [ ] Every `right_table` in a relationship has a `primary_key` section
+- [ ] Reserved words in column names are double-quoted in `expr`
+- [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
+- [ ] No untranslatable formula placeholders (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL`)
+- [ ] Valid Snowflake identifiers (view name, all field names): `^[A-Za-z_][A-Za-z0-9_]*$`
+- [ ] Valid `data_type` values: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`
 
 ---
 
 ### Step 12: Check for Existing View
 
-```sql
-SELECT COUNT(*) AS existing_count
-FROM INFORMATION_SCHEMA.SEMANTIC_VIEWS
-WHERE SEMANTIC_VIEW_NAME = UPPER('{semantic_view_name}')
-  AND TABLE_SCHEMA = UPPER('{target_schema}');
-```
-
-If exists, ask the user: DROP and recreate / use a different name / cancel.
+**Skip the INFORMATION_SCHEMA check** — `INFORMATION_SCHEMA.SEMANTIC_VIEWS` and its
+column names vary by Snowflake version and may not exist. Instead, proceed directly
+to Step 13. If the view already exists, `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` will
+return an error indicating it exists — at that point offer the user:
+- DROP and recreate: `DROP SEMANTIC VIEW IF EXISTS {database}.{schema}.{name};`
+- Use a different name
+- Cancel
 
 ---
 
 ### Step 13: Execute
 
 Ask for Snowflake target if not already provided:
-`semantic_view_name`, `target_database`, `target_schema`, `role`.
+`target_database`, `target_schema`, `role`.
 
-Use the appropriate connection method from
-[references/environment-setup.md](references/environment-setup.md).
+**Snowflake profile selection:**
+1. Read `~/.claude/snowflake-profiles.json`
+2. If multiple profiles: display numbered list and ask user to select
+3. If one profile: show it and confirm
+4. If no file: ask for account, username, auth method; offer to save profile for future use
+5. If `private_key_passphrase_env` is set, read passphrase from that env var at runtime
+
+**Warehouse:** If not specified in the profile, run `SHOW WAREHOUSES` after connecting
+and use the first available warehouse (preferring running over suspended).
+
+Use the connection method from [references/environment-setup.md](references/environment-setup.md).
+
+**Always run a dry-run first:**
 
 ```sql
 USE ROLE {role};
 USE DATABASE {target_database};
 USE SCHEMA {target_schema};
 
-SELECT SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML($$
+-- Step 1: Dry-run validation (third arg TRUE = validate only, do not create)
+CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{target_database}.{target_schema}', $$
+{yaml}
+$$, TRUE);
+```
+
+If dry-run succeeds, proceed to create:
+
+```sql
+-- Step 2: Create
+CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{target_database}.{target_schema}', $$
 {yaml}
 $$);
 ```
 
+**Notes:**
+- Use `CALL`, not `SELECT`
+- First argument: fully-qualified target schema `'DATABASE.SCHEMA'`
+- Second argument: YAML content in `$$` dollar-quotes (safe for YAML with single quotes)
+- Third argument `TRUE`: dry-run mode — validates without creating
+
 On success: report the created view name and location.
 On failure: show the full Snowflake error. Do not retry automatically — ask the user.
+
+**If the view already exists:**
+```sql
+DROP SEMANTIC VIEW IF EXISTS {target_database}.{target_schema}.{semantic_view_name};
+```
+Then re-run the CREATE call.
