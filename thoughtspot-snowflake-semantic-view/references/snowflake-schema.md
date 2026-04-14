@@ -49,7 +49,11 @@ tables:                           # Required. At least one entry.
     - string
     description: string
     expr: string                  # e.g. SUM(table_alias.COLUMN_NAME)
-    data_type: string             # NUMBER
+                                  # WARNING: Do NOT include data_type on metrics.
+                                  # SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML stores it in the
+                                  # Cortex Analyst (CA) extension JSON, which Cortex then
+                                  # rejects at query time with error 392700 "unknown field
+                                  # data_type". Omit data_type from metrics entirely.
 
 relationships:                    # Optional. Defined at the top level (not under tables).
 - name: string                    # Unique relationship name.
@@ -173,7 +177,7 @@ Run all checks before calling `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
 | Reserved words quoted | Column names that are SQL reserved words are double-quoted in `expr` |
 | Join key identifiers | `primary_key.columns` and `relationship_columns` use bare identifiers — wrapper views (Step 5) ensure all are uppercase before this point |
 | Unsupported fields absent | No `relationship_type`, `join_type`, `default_aggregation`, `sample_values` |
-| Valid `data_type` | One of: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN` |
+| Valid `data_type` | Dimensions/time_dimensions only: one of `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700. |
 | No untranslatable formulas | Columns with untranslatable ThoughtSpot formulas are **omitted** entirely |
 
 ---
@@ -197,7 +201,6 @@ tables:
     - "Sales"
     description: "[TS AI Context] Total transaction value for financial analysis."
     expr: SUM(fact_sales.SALES_AMOUNT)
-    data_type: NUMBER
   time_dimensions:
   - name: sale_date
     synonyms:
@@ -229,7 +232,6 @@ tables:
     - "# of Products"
     description: ""
     expr: COUNT(dim_product.PRODUCT_ID)
-    data_type: NUMBER
 
 relationships:
 - name: sales_to_product
@@ -352,6 +354,62 @@ bridge via the bridge table (e.g. `superhero_name` + `power_name`).
 
 **Workaround:** Use direct SQL against the physical tables with explicit JOINs and
 properly quoted case-sensitive identifiers (see case-sensitivity rules in Step 5).
+
+### Symmetric join keys (same column name on both FK and PK sides)
+
+Cortex Analyst requires every join key column to be exposed as a **named dimension**,
+and resolves join keys **by dimension name** (snake_case of the physical column name).
+Dimension names must be globally unique across the entire semantic view.
+
+When FK and PK columns share the same name (e.g. `TRANS.ACCOUNT_ID → ACCOUNT.ACCOUNT_ID`),
+you cannot expose both as `account_id` — Snowflake enforces global uniqueness.
+
+**Error:** `Join relationship X using join key 'account_id' which is not defined in
+logical table trans.` (error 392700)
+
+**Fix — rename FK columns in wrapper views before generating YAML:**
+
+In the wrapper view for each fact/bridge table, rename every FK column to include the
+source table prefix:
+
+```sql
+-- Before: "account_id" AS ACCOUNT_ID
+-- After:
+CREATE OR REPLACE VIEW TRANS AS
+SELECT "trans_id" AS TRANS_ID,
+       "account_id" AS TRANS_ACCOUNT_ID,   -- renamed FK
+       ...
+FROM source_schema.trans;
+```
+
+Then expose each renamed column as a dimension and update relationships:
+
+```yaml
+# TRANS table — dimension for the FK
+- name: trans_account_id
+  expr: trans.TRANS_ACCOUNT_ID
+  data_type: NUMBER
+
+# Relationship uses the renamed column
+relationships:
+- name: trans_to_account
+  left_table: trans
+  right_table: account
+  relationship_columns:
+  - left_column: TRANS_ACCOUNT_ID   # renamed FK in wrapper view
+    right_column: ACCOUNT_ID        # PK stays unchanged
+```
+
+When a physical table is aliased multiple times (e.g. `DISTRICT` used as both
+`client_district` and `account_district`), create **two separate wrapper views** with
+distinct PK column names (`CLIENT_DISTRICT_ID` and `ACCOUNT_DISTRICT_ID`) so each alias
+can satisfy Cortex's unique-name requirement independently.
+
+**Note:** This also applies to `primary_key` columns — the PK column must also be
+exposed as a dimension with a name matching snake_case(pk_column). For example, if
+the PK column is `DISP_ID`, the dimension must be named `disp_id`.
+
+---
 
 ### `SELECT *` on a multi-fact semantic view
 

@@ -728,6 +728,52 @@ primary_key:
   - {PHYSICAL_COLUMN_NAME}
 ```
 
+**Join key columns must be exposed as dimensions (Cortex Analyst requirement):**
+
+Cortex Analyst validates that every column used in a relationship is exposed as a
+**named dimension** in its table. It resolves join keys by dimension name using
+`snake_case(physical_column)`. Dimension names must be globally unique.
+
+This creates a conflict when FK and PK columns share the same name (e.g.
+`TRANS.ACCOUNT_ID → ACCOUNT.ACCOUNT_ID`) — you cannot expose both as `account_id`.
+
+**Fix: rename FK columns in wrapper views with a table-specific prefix**, then expose
+them as uniquely-named dimensions:
+
+```sql
+-- Instead of: "account_id" AS ACCOUNT_ID
+CREATE OR REPLACE VIEW TRANS AS
+SELECT "account_id" AS TRANS_ACCOUNT_ID, ...  -- prefixed FK
+FROM source.trans;
+```
+
+```yaml
+# In the trans table entry — FK dimension
+- name: trans_account_id       # unique name; snake_case(TRANS_ACCOUNT_ID)
+  expr: trans.TRANS_ACCOUNT_ID
+  data_type: NUMBER
+
+# In the account table entry — PK dimension (unchanged)
+- name: account_id
+  expr: account.ACCOUNT_ID
+  data_type: NUMBER
+
+# Relationship uses the renamed physical column
+- name: trans_to_account
+  relationship_columns:
+  - left_column: TRANS_ACCOUNT_ID   # renamed in wrapper view
+    right_column: ACCOUNT_ID
+```
+
+When a physical table is aliased multiple times (e.g. a shared DISTRICT table used
+as both `client_district` and `account_district`), create **separate wrapper views**
+for each alias with a distinct PK column name (e.g. `CLIENT_DISTRICT_ID` vs
+`ACCOUNT_DISTRICT_ID`) so each satisfies the unique-name requirement independently.
+
+Also expose PK columns as dimensions — `primary_key` alone is not sufficient for
+Cortex. The PK dimension name must equal `snake_case(pk_column)`. For example, if
+the PK is `DISP_ID`, there must be a dimension named `disp_id`.
+
 **For each model column:**
 
 1. If `formula_id` set → translate formula in Step 9; if untranslatable, omit the
@@ -848,7 +894,9 @@ Report all failures together before retrying. Key checks:
 - [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
 - [ ] No untranslatable formula placeholders (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL`)
 - [ ] Valid Snowflake identifiers (view name, all field names): `^[A-Za-z_][A-Za-z0-9_]*$`
-- [ ] Valid `data_type` values: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`
+- [ ] Valid `data_type` values on dimensions/time_dimensions: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700.
+- [ ] Every join key column (FK and PK) is exposed as a named dimension in its table, with name = `snake_case(physical_column)`
+- [ ] No two tables in a relationship share a join column name — if they do, rename FK columns in wrapper views with a table-specific prefix
 
 ---
 

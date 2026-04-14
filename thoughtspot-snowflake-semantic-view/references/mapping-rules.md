@@ -182,8 +182,10 @@ case-insensitively, so `id` and `ID` both match a physical `"id"` column.
   - "{...additional synonyms}"
   description: "{description or empty string}"
   expr: {AGG}({table_alias}.{DB_COLUMN_NAME})
-  data_type: NUMBER
 ```
+> **Do NOT include `data_type` on metrics.** `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` stores
+> it in the Cortex Analyst (CA) extension JSON; Cortex then rejects it at query time with
+> error 392700 "unknown field data_type". Only dimensions and time_dimensions use `data_type`.
 
 **Metric — translated formula (nested under its table):**
 ```yaml
@@ -192,7 +194,6 @@ case-insensitively, so `id` and `ID` both match a physical `"id"` column.
   - "{display_name}"
   description: "{description or empty string}"
   expr: {translated SQL expression}
-  data_type: NUMBER
 ```
 
 **Untranslatable formula — OMIT ENTIRELY:**

@@ -90,7 +90,6 @@ tables:
     - "Sales"
     description: "[TS AI Context] Total transaction value for financial analysis."
     expr: SUM(fact_sales.SALES_AMOUNT)
-    data_type: NUMBER
 
 - name: dim_product
   base_table:
@@ -115,7 +114,6 @@ tables:
     - "# of Products"
     description: ""
     expr: COUNT(dim_product.PRODUCT_ID)
-    data_type: NUMBER
 
 relationships:
 - name: sales_to_product
