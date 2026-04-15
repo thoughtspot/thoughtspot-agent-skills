@@ -22,6 +22,16 @@ and saves the profile for use by other skills.
 
 Run with `/snowflake-setup`.
 
+### [`thoughtspot-model-builder`](thoughtspot-model-builder/)
+
+Builds a ThoughtSpot Model from a Snowflake schema or an ERD diagram image. Browses
+Snowflake to select tables (or reads a hand-drawn diagram), ensures those tables are
+linked in the ThoughtSpot connection, creates logical Table objects, and generates the
+final Model with inferred or user-defined joins. Supports table-level and model-level
+join strategies. Only creates Models — Worksheets are legacy and are not generated.
+
+Run with `/thoughtspot-model-builder`.
+
 ### [`thoughtspot-snowflake-semantic-view`](thoughtspot-snowflake-semantic-view/)
 
 Converts a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Exports
@@ -105,6 +115,9 @@ ln -s ~/Dev/thoughtspot-skills/thoughtspot-setup \
 ln -s ~/Dev/thoughtspot-skills/snowflake-setup \
       ~/.claude/skills/snowflake-setup
 
+ln -s ~/Dev/thoughtspot-skills/thoughtspot-model-builder \
+      ~/.claude/skills/thoughtspot-model-builder
+
 ln -s ~/Dev/thoughtspot-skills/thoughtspot-snowflake-semantic-view \
       ~/.claude/skills/thoughtspot-snowflake-semantic-view
 ```
@@ -164,6 +177,7 @@ what you want in natural language and Claude will invoke the right skill.
 |---|---|---|
 | `thoughtspot-setup` | `/thoughtspot-setup` | Add, update, test, or delete ThoughtSpot profiles |
 | `snowflake-setup` | `/snowflake-setup` | Add, update, test, or delete Snowflake profiles |
+| `thoughtspot-model-builder` | `/thoughtspot-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
 | `thoughtspot-snowflake-semantic-view` | `/thoughtspot-snowflake-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 
 Example for the conversion skill:
@@ -196,3 +210,59 @@ profiles and credentials across the batch.
 **Local:**
 - Python 3.8+
 - macOS (Keychain used for credential storage)
+
+---
+
+## Contributing
+
+### Skill structure
+
+Each skill lives in its own directory with a `SKILL.md` as the entry point:
+
+```
+skill-name/
+  SKILL.md          — frontmatter + full skill instructions
+  references/       — supporting reference docs (optional)
+    open-items.md   — unknowns to test before the skill is complete
+    *.md            — lookup tables, schema references, worked examples
+```
+
+`SKILL.md` must start with YAML frontmatter:
+
+```yaml
+---
+name: skill-name
+description: One sentence shown in Claude Code's skill picker — be specific about inputs and outputs.
+---
+```
+
+Skills reference other skills by path (never by copying content):
+
+```markdown
+[~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md)
+```
+
+### Credential and secret handling
+
+- Credentials are never stored in skill files or passed through the Claude Code conversation
+- Passwords and tokens live in the macOS Keychain, exported via `~/.zshenv`
+- Temporary files written to `/tmp/` must be removed at the end of the skill
+- No API keys, tokens, passwords, profile JSON files, or `.env` files in commits — the `.gitignore` covers common patterns but use judgement
+
+### Tracking unknowns
+
+If a skill depends on API behaviour that hasn't been verified against a live instance,
+document it in `references/open-items.md` with:
+- What needs testing and why it matters
+- A self-contained test script
+- A space to record the finding
+
+Don't merge a skill with unresolved open items unless they are explicitly marked as
+low-risk or deferred.
+
+### Pull requests
+
+- One skill (or one coherent change to an existing skill) per PR
+- Update the skills table in this README for any new skill
+- Add the symlink command to the Developer Install section
+- If the skill requires a new Python dependency, add it to both install sections

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thoughtspot-cli"
+version = "0.1.0"
+description = "ThoughtSpot REST API CLI — wraps common operations used by Claude skills"
+requires-python = ">=3.9"
+dependencies = [
+    "typer>=0.12",
+    "requests>=2.28",
+]
+
+[project.scripts]
+ts = "ts_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ts_cli*"]

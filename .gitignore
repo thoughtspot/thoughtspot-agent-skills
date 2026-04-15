@@ -24,6 +24,9 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+*.egg-info/
+dist/
+build/
 
 # macOS
 .DS_Store
@@ -37,3 +40,11 @@ venv/
 # Temp / test output files
 /tmp/
 *.tmp
+
+# Local test data
+.data/
+
+# AI tool local settings
+.cursor/
+.claude/
+.gemini/

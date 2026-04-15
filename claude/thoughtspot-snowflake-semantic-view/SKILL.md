@@ -21,7 +21,7 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
 | [references/thoughtspot-tml.md](references/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
-| [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, token persistence (Pattern A), API patterns |
+| [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 
 ---
@@ -79,39 +79,15 @@ Can you log into ThoughtSpot in a browser (even via SSO)?
 
 ### Step 1: Authenticate
 
-**Session continuity — skip if already authenticated this session:**
-
-If ThoughtSpot and Snowflake profiles were already selected earlier in this
-conversation (e.g. for a previous model in a batch), skip profile selection entirely
-and reuse the same profiles. If `/tmp/ts_token.txt` is missing (e.g. it was cleaned
-up after the last model) but the profile's env var is set, re-authenticate silently:
-
-```python
-import os, stat
-token = os.environ.get("{token_env}", "")
-if token:
-    with open("/tmp/ts_token.txt", "w") as f: f.write(token)
-    os.chmod("/tmp/ts_token.txt", stat.S_IRUSR | stat.S_IWUSR)
-    # proceed — no user prompt needed
-```
-
-Only show profile-selection prompts on the very first model of the session.
-
-**Stale token check — always run before writing a new token:**
-
-```python
-import os, time
-token_path = "/tmp/ts_token.txt"
-if os.path.exists(token_path) and time.time() - os.path.getmtime(token_path) > 23 * 3600:
-    os.remove(token_path)  # expired — re-authenticate
-```
+**Session continuity:** If a ThoughtSpot profile was already confirmed earlier in
+this conversation (e.g. for a previous model in a batch), skip profile selection
+and reuse it.
 
 **Profile selection (first model only):**
 
-1. Read `~/.claude/thoughtspot-profiles.json` if it exists.
+1. Read `~/.claude/thoughtspot-profiles.json`.
 2. If multiple profiles: display a numbered list and ask the user to select one.
-3. If exactly one profile: display it and ask the user to confirm before proceeding.
-4. If no profiles file: fall back to `THOUGHTSPOT_BASE_URL` / `THOUGHTSPOT_USERNAME` / `THOUGHTSPOT_SECRET_KEY` env vars.
+3. If exactly one profile: display it and confirm before proceeding.
 
 ```
 Available ThoughtSpot profiles:
@@ -121,67 +97,34 @@ Available ThoughtSpot profiles:
 Select a profile (or press Enter to use #1):
 ```
 
-After profile is confirmed, resolve credentials in priority order:
-`token_env` → `password_env` → `secret_key_env` (use the first field present).
+After the profile is confirmed, verify the connection:
 
-- Read the env var value at runtime via `os.environ.get(env_var_name)`
-- **Never print, echo, or log any credential value or bearer token.**
-- If the env var is unset or empty, prompt the user to set it before proceeding:
-  ```
-  Credential for {profile_name} is not set ({env_var_name} is empty).
-  Store it in the macOS Keychain, then wire up ~/.zshenv and reload:
+```bash
+source ~/.zshenv && ts auth whoami --profile {profile_name}
+```
 
-    # Store (run in your terminal, not in Claude Code)
-    security add-generic-password -s "thoughtspot-{profile}" -a "{username}" -w "your-value"
+The CLI handles token caching, Keychain access, and expiry automatically.
+No temp files or manual token management needed in this skill.
 
-    # Add to ~/.zshenv
-    export {env_var_name}=$(security find-generic-password -s "thoughtspot-{profile}" -a "{username}" -w 2>/dev/null)
+If `ts auth whoami` returns 401, the token is expired. Ask the user to refresh it:
 
-    # Reload
-    source ~/.zshenv
-  ```
-  For `token_env`: also remind the user to get a fresh token from the ThoughtSpot
-  Developer Playground: Develop → REST Playground 2.0 → Authentication →
-  Get Current User Token → Try it out → Execute → copy the `token` value.
-  If the user cannot use the Keychain and insists on pasting, warn that the value
-  will be visible in the conversation, use it for this session only, and do not
-  write it to any file.
-- If no credential field is present in the profile, ask which auth method they want
-  to use and which env var name to read it from.
+```
+Your ThoughtSpot token has expired. To refresh:
+  1. Log into ThoughtSpot in your browser
+  2. Go to Develop → REST Playground 2.0 → Authentication → Get Current User Token
+  3. Click Try it out → Execute, then copy the token value
+  4. Run in your terminal:
+       security delete-generic-password -s "thoughtspot-{slug}" -a "{username}"
+       security add-generic-password -s "thoughtspot-{slug}" -a "{username}" -w "YOUR_TOKEN"
+  5. Let me know when done.
+```
 
-Strip any trailing slash from `base_url` before constructing URLs.
+Then clear the stale cache and retry:
 
-**Obtain the bearer token** using Python so credentials never appear in command text
-(see [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) — Pattern A):
-- `token_env`: use the value directly as the token — no API call needed
-- `password_env` / `secret_key_env`: call `POST /api/rest/2.0/auth/token/full` with
-  `validity_time_in_sec: 3600`
-- Write the token to `/tmp/ts_token.txt` with `600` permissions
-- Print only `"Authenticated."` — never print the token value
-
-On 401/403 for password auth — stop and inform the user that API password login may
-be disabled (MFA or SSO enforcement). Suggest using `token_env` from the Developer
-Playground, or asking their admin for the trusted auth secret key.
-
-**Claude Code shell context — token persistence:**
-Bash tool calls do not share shell state between separate invocations. Never store
-the token in a shell variable across calls — it will be empty in the next call.
-Instead, use one of these strategies for every subsequent API call:
-
-- **Temp file (preferred for multi-call scripts):** Authenticate using Pattern A in
-  [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) — writes the token
-  to `/tmp/ts_token.txt` with `600` permissions. Read it back in subsequent calls:
-  ```python
-  with open("/tmp/ts_token.txt") as f:
-      token = f.read().strip()
-  ```
-- **Single pipeline:** Combine all API calls into one `python3` script within a single
-  Bash invocation. Authenticate at the top, reuse the token variable throughout.
-- **Never** pass the secret key or token as a shell argument or in a curl `-d` string —
-  the full command text is visible to the user.
-
-The temp file approach is most reliable for the multi-step workflow in this skill.
-The token file is cleaned up automatically at the end of the workflow (Step 12).
+```bash
+ts auth logout --profile {profile_name}
+source ~/.zshenv && ts auth whoami --profile {profile_name}
+```
 
 ---
 
@@ -211,37 +154,35 @@ Ask the user which filters to apply (they may provide any combination):
 ```
 Enter search criteria (leave blank to skip):
   Name keyword:
-  Author (username or email):
   Tags (comma-separated):
 ```
 
-Build the request body from whichever fields are provided. All supplied filters
-combine with AND semantics — results must satisfy every condition:
+Run the search using the CLI:
 
-```
-POST {base_url}/api/rest/2.0/metadata/search
-{
-  "metadata": [{"type": "LOGICAL_TABLE"}],
-  "query_string": "{name_keyword}",           // omit if blank
-  "created_by_user_identifiers": ["{author}"], // omit if blank; accepts username or GUID
-  "tag_identifiers": ["{tag1}", "{tag2}"],     // omit if blank; accepts tag name or GUID
-  "record_size": 50,
-  "record_offset": 0
-}
+```bash
+source ~/.zshenv && ts metadata search --profile {profile_name} \
+  --subtype WORKSHEET \
+  --name "%{name_keyword}%" \
+  --all
 ```
 
-Paginate in increments of 50 until an empty page is returned before displaying results.
+Omit `--name` if no keyword was supplied. The `--all` flag auto-paginates.
+`--subtype WORKSHEET` restricts results to worksheets and models only.
 
-**Zero results fallback:** If a name-only search returns zero results, re-run with
-no `query_string`, collect all results, and apply case-insensitive substring matching
-against `metadata_name` client-side. Present matches or offer to browse all.
+**Zero results fallback:** If the search returns zero results, retry without `--name`
+and apply case-insensitive substring filtering against `metadata_name` client-side.
+
+**Tags** are not directly supported as a CLI filter — if the user supplies tags,
+run without `--name`, collect all results, and filter client-side by tag name
+in each result's `metadata_header.tags[]`.
 
 ---
 
 #### Option B — Browse All
 
-Fetch all pages (`record_offset` 0, 50, 100, …) until an empty page is returned.
-Filter to `metadata_header.type == 'WORKSHEET'` and display the full numbered list.
+```bash
+source ~/.zshenv && ts metadata search --profile {profile_name} --subtype WORKSHEET --all
+```
 
 ---
 
@@ -265,29 +206,17 @@ Store `metadata_id` as `{selected_model_id}` and `metadata_name` as
 
 ### Step 3: Export the TML
 
-```
-POST {THOUGHTSPOT_BASE_URL}/api/rest/2.0/metadata/tml/export
-{
-  "metadata": [{"identifier": "{selected_model_id}"}],
-  "export_fqn": true,
-  "export_associated": true
-}
+```bash
+source ~/.zshenv && ts tml export {selected_model_id} --profile {profile_name} --fqn --associated
 ```
 
 **Batch mode — export all models in one call:**
 
 When the user has selected multiple models for conversion (e.g. "convert all BIRD_
-models"), export all their TMLs in a single request rather than one per model:
+models"), pass all GUIDs to a single export call:
 
-```json
-{
-  "metadata": [
-    {"identifier": "{model_guid_1}"},
-    {"identifier": "{model_guid_2}"}
-  ],
-  "export_fqn": true,
-  "export_associated": true
-}
+```bash
+source ~/.zshenv && ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated
 ```
 
 Separate the combined response by top-level key (`worksheet`/`model` = primary objects;
@@ -361,8 +290,8 @@ genuinely absent.
 
 If `db` or `schema` is confirmed absent after inspection, ask the user to provide them.
 If a table has no associated TML, fetch it separately using its FQN GUID:
-```
-POST /api/rest/2.0/metadata/tml/export  { "metadata": [{"identifier": "{fqn}"}] }
+```bash
+source ~/.zshenv && ts tml export {fqn_guid} --profile {profile_name} --fqn
 ```
 
 Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag them.
@@ -872,10 +801,7 @@ Shall I create this Semantic View in Snowflake?
   EDIT — followed by changes to the YAML
 ```
 
-If the user selects **NO**, clean up and stop:
-```bash
-rm -f /tmp/ts_token.txt
-```
+If the user selects **NO**, stop. No cleanup needed — the CLI manages its own token cache.
 
 ---
 
@@ -993,13 +919,8 @@ Then re-run the CREATE call.
 
 **Cleanup:**
 
-- If **more models remain** in the current batch, preserve `/tmp/ts_token.txt` for
-  the next iteration — do not delete it.
-- Delete it only after the **last model** in the session is done (or if the user
-  cancels the batch), whether the view was created successfully or not:
-```bash
-rm -f /tmp/ts_token.txt
-```
+No ThoughtSpot token cleanup needed — the CLI manages its own cache automatically.
+If Snowflake temp files were written (e.g. `/tmp/sv_wrappers.sql`), remove them now.
 
 ---
 
@@ -1064,7 +985,5 @@ If yes: go directly to Step 2 (model selection is already known — skip straigh
 Step 3: Export TML). Reuse the ThoughtSpot profile, Snowflake profile, warehouse,
 and role from this session. Do **not** re-run Step 1 profile prompts.
 
-If no (or no more models remain): run the final cleanup:
-```bash
-rm -f /tmp/ts_token.txt
-```
+If no (or no more models remain): the session is complete. No ThoughtSpot token
+cleanup needed — the CLI manages its own cache.

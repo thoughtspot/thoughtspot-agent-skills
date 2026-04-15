@@ -361,52 +361,11 @@ Run this in your terminal to apply the ~/.zshenv change:
 
 Show numbered profile list (if more than one) and ask which to test. If only one, confirm and test it directly.
 
-Write to `/tmp/ts_verify.py` and run `source ~/.zshenv && python3 /tmp/ts_verify.py 2>/dev/null`:
+Run:
 
-```python
-import os, sys, requests
-
-base_url         = "{base_url}".rstrip("/")
-username         = "{username}"
-env_var          = "{env_var}"
-credential_field = "{credential_field}"
-
-credential = os.environ.get(env_var, "")
-if not credential:
-    print(f"ERROR: {env_var} is not set — run 'source ~/.zshenv' in your terminal first.")
-    sys.exit(1)
-
-if credential_field == "token_env":
-    token = credential
-else:
-    payload = {"username": username, "validity_time_in_sec": 60}
-    if credential_field == "password_env":
-        payload["password"] = credential
-    else:
-        payload["secret_key"] = credential
-    resp = requests.post(
-        f"{base_url}/api/rest/2.0/auth/token/full",
-        json=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    if resp.status_code in (401, 403):
-        print(f"AUTH FAILED ({resp.status_code}) — credential may be wrong or expired.")
-        sys.exit(1)
-    resp.raise_for_status()
-    token = resp.json()["token"]
-
-resp = requests.get(
-    f"{base_url}/api/rest/2.0/auth/session/user",
-    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-)
-if resp.status_code == 200:
-    print(f"Connected as: {resp.json().get('name', username)}")
-else:
-    print(f"ERROR {resp.status_code}: {resp.text[:200]}")
-    sys.exit(1)
+```bash
+source ~/.zshenv && ts auth whoami --profile {profile_name}
 ```
-
-Remove: `rm -f /tmp/ts_verify.py`
 
 On success: `Profile '{name}' — connection verified.` Return to menu.
 
@@ -418,102 +377,49 @@ On success: `Profile '{name}' — connection verified.` Return to menu.
 |---|---|
 | Keychain write fails | Show error. Ask user to check macOS login keychain is unlocked. |
 | Env var empty after source | Remind user to run `source ~/.zshenv` in a real terminal (not with `!`). |
-| 401 / 403 | Wrong or expired credential. Token: get a fresh one (U → Refresh credential). |
+| 401 / 403 on `ts auth whoami` | Wrong or expired credential. Token: get a fresh one (U → Refresh credential). Run `ts auth logout --profile {name}` to clear the stale cache first. |
 | DNS / connection refused | URL is wrong or instance unreachable. Check with U → Update URL. |
-| `requests` not found | `pip install requests` |
 
 ---
 
 ## Technical Reference — For Use by Other Skills
 
-### Pattern A — Auth Script (Token to Temp File)
+Other skills should use the `ts` CLI for all ThoughtSpot API calls. The CLI handles
+token caching, Keychain access, and expiry automatically — no manual auth scripts,
+temp files, or `source ~/.zshenv` wrangling needed in skill logic.
 
-Write to `/tmp/ts_auth.py`, run with `source ~/.zshenv && python3 /tmp/ts_auth.py`, then remove.
-The token is written to `/tmp/ts_token.txt` (permissions `600`) so subsequent Bash calls
-can read it without re-authenticating.
+### Authentication
 
-```python
-import os, stat, requests, sys
-
-base_url       = "{base_url}".rstrip('/')
-username       = "{username}"
-token_env      = "{token_env}"        # empty string if profile uses a different auth field
-password_env   = "{password_env}"     # empty string if not used
-secret_key_env = "{secret_key_env}"   # empty string if not used
-
-token      = os.environ.get(token_env,      "") if token_env      else ""
-password   = os.environ.get(password_env,   "") if password_env   else ""
-secret_key = os.environ.get(secret_key_env, "") if secret_key_env else ""
-
-if token:
-    pass  # pre-obtained bearer token — use directly, no API call needed
-elif password:
-    resp = requests.post(
-        f"{base_url}/api/rest/2.0/auth/token/full",
-        json={"username": username, "password": password, "validity_time_in_sec": 3600},
-        headers={"Content-Type": "application/json"},
-    )
-    if resp.status_code in (401, 403):
-        print("AUTH_FAILED — check password. If MFA/SSO is enforced, use token_env instead.")
-        sys.exit(1)
-    resp.raise_for_status()
-    token = resp.json()["token"]
-elif secret_key:
-    resp = requests.post(
-        f"{base_url}/api/rest/2.0/auth/token/full",
-        json={"username": username, "secret_key": secret_key, "validity_time_in_sec": 3600},
-        headers={"Content-Type": "application/json"},
-    )
-    if resp.status_code in (401, 403):
-        print("AUTH_FAILED — check secret key.")
-        sys.exit(1)
-    resp.raise_for_status()
-    token = resp.json()["token"]
-else:
-    print("No credential available — set the required env var first.")
-    sys.exit(1)
-
-# Remove stale token file (older than 23 h) before writing
-import time
-token_path = "/tmp/ts_token.txt"
-if os.path.exists(token_path) and time.time() - os.path.getmtime(token_path) > 23 * 3600:
-    os.remove(token_path)
-
-with open(token_path, "w") as f:
-    f.write(token)
-os.chmod(token_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
-
-print("Authenticated.")  # never print the token value
-```
-
-### Read Token in Subsequent Calls
-
-```python
-with open("/tmp/ts_token.txt") as f:
-    token = f.read().strip()
-headers = {
-    "Authorization": f"Bearer {token}",
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-}
-```
-
-### Cleanup
+Verify a profile is working:
 
 ```bash
-rm -f /tmp/ts_token.txt
+source ~/.zshenv && ts auth whoami --profile {profile_name}
 ```
 
-### API Call Pattern
+If this returns 401, the token is expired. Ask the user to refresh it (U → Refresh
+credential in this skill), then clear the stale cache:
 
-```python
-import requests
-
-response = requests.post(
-    f"{base_url}/api/rest/2.0/metadata/search",
-    json={"metadata": [{"type": "LOGICAL_TABLE"}]},
-    headers=headers,
-)
-response.raise_for_status()
-data = response.json()
+```bash
+ts auth logout --profile {profile_name}
 ```
+
+### Common API Calls
+
+```bash
+# Search for models/worksheets
+ts metadata search --profile {profile_name} --subtype WORKSHEET --name "%keyword%"
+
+# Export TML with FQN and associated table objects
+ts tml export {guid} --profile {profile_name} --fqn --associated
+
+# Import TML
+echo '["{tml_string}"]' | ts tml import --profile {profile_name} --policy ALL_OR_NONE
+
+# List Snowflake connections
+ts connections list --profile {profile_name}
+```
+
+### Token Cache
+
+The CLI stores tokens per profile in `/tmp/ts_token_{slug}.txt` (permissions 600)
+and refreshes them automatically on expiry. Skills do not need to manage this file.
