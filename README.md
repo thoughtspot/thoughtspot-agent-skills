@@ -11,7 +11,8 @@ runtimes: **Claude Code** and **Snowflake Cortex (CoCo)**.
 thoughtspot-skills/
 ├── claude/     — Claude Code skills (invoked via slash commands in Claude Code)
 ├── coco/       — Snowflake Cortex skills (deployed in Snowsight Workspaces)
-└── cli/        — ThoughtSpot CLI used by Claude Code skills at runtime
+└── tools/
+    └── ts-cli/ — ThoughtSpot CLI used by Claude Code skills at runtime
 ```
 
 ---
@@ -49,4 +50,4 @@ See **[coco/SETUP.md](coco/SETUP.md)** for Git repository setup and Workspace de
 ## ThoughtSpot CLI
 
 A lightweight Python CLI used by the Claude Code skills at runtime to authenticate
-with ThoughtSpot, search metadata, and export TML. Located in [`cli/`](cli/).
+with ThoughtSpot, search metadata, and export TML. Located in [`tools/ts-cli/`](tools/ts-cli/).

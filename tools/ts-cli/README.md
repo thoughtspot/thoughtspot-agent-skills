@@ -8,7 +8,7 @@ Claude Code skills to authenticate, search metadata, and export/import TML.
 ## Installation
 
 ```bash
-pip install -e /path/to/thoughtspot-skills/cli
+pip install -e /path/to/thoughtspot-skills/tools/ts-cli
 ```
 
 After install, the `ts` command is available on your PATH.

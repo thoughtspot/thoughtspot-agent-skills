@@ -66,7 +66,7 @@ Two scenarios are supported:
 - ThoughtSpot Cloud instance, REST API v2 enabled
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
 - Authentication configured — run `/thoughtspot-setup` if you haven't already
-- The `ts` CLI installed (`pip install -e /path/to/cli`)
+- The `ts` CLI installed (`pip install -e /path/to/tools/ts-cli`)
 
 ### Snowflake
 
