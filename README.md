@@ -25,7 +25,8 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | `thoughtspot-setup` | `/thoughtspot-setup` | Add, update, test, or delete ThoughtSpot profiles |
 | `snowflake-setup` | `/snowflake-setup` | Add, update, test, or delete Snowflake profiles |
 | `thoughtspot-model-builder` | `/thoughtspot-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
-| `thoughtspot-snowflake-semantic-view` | `/thoughtspot-snowflake-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `thoughtspot-model-to-semantic-view` | `/thoughtspot-model-to-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `thoughtspot-model-from-semantic-view` | `/thoughtspot-model-from-semantic-view` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 
 See **[claude/SETUP.md](claude/SETUP.md)** for installation, credential setup, and usage.
 
@@ -38,7 +39,8 @@ install required — runs entirely within Snowflake.
 
 | Skill | What it does |
 |---|---|
-| `thoughtspot-snowflake-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `thoughtspot-model-to-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `thoughtspot-model-from-semantic-view` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 
 See **[coco/SETUP.md](coco/SETUP.md)** for Git repository setup and Workspace deployment.
 
