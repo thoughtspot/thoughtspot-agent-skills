@@ -48,7 +48,7 @@ under each `tables[]` entry — they are **not** top-level keys in the semantic 
 will cause a parse error.
 
 For the full coverage matrix including unmapped properties, see
-[references/property-coverage.md](references/property-coverage.md).
+[~/.claude/mappings/ts-snowflake/property-coverage.md](~/.claude/mappings/ts-snowflake/property-coverage.md).
 
 ---
 
@@ -281,7 +281,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [references/thoughtspot-tml.md](references/thoughtspot-tml.md) for details.
+never `"schema_"`. See [~/.claude/shared/thoughtspot/thoughtspot-tml.md](~/.claude/shared/thoughtspot/thoughtspot-tml.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
@@ -298,7 +298,7 @@ Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag 
 
 **SQL view resolution:** For every `sql_view` object referenced in `model_tables[]`
 (or `table_paths[]` for Worksheet format), classify its `sql_query` using the logic
-in [references/thoughtspot-tml.md](references/thoughtspot-tml.md):
+in [~/.claude/shared/thoughtspot/thoughtspot-tml.md](~/.claude/shared/thoughtspot/thoughtspot-tml.md):
 
 *Simple* — `SELECT * FROM single_table [AS alias]`:
 - Extract the physical FQN from the FROM clause
@@ -502,7 +502,7 @@ import os; os.remove("/tmp/sv_wrappers.sql")
 See [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the
 connection factory pattern and CLI file-based execution details.
 
-See [references/snowflake-schema.md](references/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
+See [~/.claude/shared/snowflake/snowflake-schema.md](~/.claude/shared/snowflake/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
 
@@ -592,7 +592,7 @@ used_rel_names.add(base_name)
 Initialise `used_rel_names = set()` before the relationship loop.
 
 For join type and cardinality mappings, see
-[references/mapping-rules.md](references/mapping-rules.md).
+[~/.claude/mappings/ts-snowflake/mapping-rules.md](~/.claude/mappings/ts-snowflake/mapping-rules.md).
 
 ---
 
@@ -709,12 +709,12 @@ the PK is `DISP_ID`, there must be a dimension named `disp_id`.
    column and log it; do not include placeholder `expr` values
 2. If `column_id` set → resolve physical column name as above
 3. Classify as dimension / time_dimension / metric using the decision tree in
-   [references/mapping-rules.md](references/mapping-rules.md)
+   [~/.claude/mappings/ts-snowflake/mapping-rules.md](~/.claude/mappings/ts-snowflake/mapping-rules.md)
 4. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
 5. Record unmapped properties (format_pattern, default_date_bucket, custom_order,
    data_panel_column_groups, geo_config) for the Unmapped Properties Report
 6. Build the Snowflake field entry using the templates in
-   [references/mapping-rules.md](references/mapping-rules.md)
+   [~/.claude/mappings/ts-snowflake/mapping-rules.md](~/.claude/mappings/ts-snowflake/mapping-rules.md)
 7. Append the field to the field list for its owning table
 
 ---
@@ -739,7 +739,7 @@ For each formula column (`formula_id` is set):
 2. Resolve column references using the syntax rules for the TML format (Worksheet uses
    `[path_id::col]`, Model uses `[TABLE::col]`)
 3. Replace function names using
-   [references/formula-translation.md](references/formula-translation.md)
+   [~/.claude/mappings/ts-snowflake/formula-translation.md](~/.claude/mappings/ts-snowflake/formula-translation.md)
 4. Handle nested references up to 3 levels deep
 
 **Untranslatable formulas — omit entirely:**
@@ -783,7 +783,7 @@ Present the following three sections:
 ```
 
 **3. Unmapped Properties Report** — use the format defined in
-[references/property-coverage.md](references/property-coverage.md).
+[~/.claude/mappings/ts-snowflake/property-coverage.md](~/.claude/mappings/ts-snowflake/property-coverage.md).
 Include only sections that have entries. Common sections:
 - Parameters not migrated
 - Column groups not migrated
@@ -807,7 +807,7 @@ If the user selects **NO**, stop. No cleanup needed — the CLI manages its own 
 
 ### Step 11: Validate
 
-Run all checks from [references/snowflake-schema.md](references/snowflake-schema.md).
+Run all checks from [~/.claude/shared/snowflake/snowflake-schema.md](~/.claude/shared/snowflake/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
 - [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level
