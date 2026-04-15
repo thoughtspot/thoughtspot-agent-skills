@@ -118,7 +118,7 @@ class ThoughtSpotClient:
                 if time.time() * 1000 > expiry_ms - 60_000:
                     return None  # expires within 60 s — refresh
             except ValueError:
-                pass
+                return None  # corrupt expiry file — force fresh auth
         else:
             # No expiry file: treat as stale after 23 hours
             age = time.time() - token_path.stat().st_mtime
