@@ -32,7 +32,7 @@ join strategies. Only creates Models — Worksheets are legacy and are not gener
 
 Run with `/thoughtspot-model-builder`.
 
-### [`thoughtspot-model-to-semantic-view`](thoughtspot-model-to-semantic-view/)
+### [`ts-to-snowflake-sv`](ts-to-snowflake-sv/)
 
 Converts a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Exports
 the TML definition via the ThoughtSpot REST API, maps columns and joins to the
@@ -43,9 +43,9 @@ Handles case-sensitive Snowflake identifiers, SQL view auto-resolution, multi-mo
 batch conversion, and generates an Unmapped Properties Report for any ThoughtSpot
 features that cannot be represented in the Semantic View format.
 
-Run with `/thoughtspot-model-to-semantic-view`.
+Run with `/ts-to-snowflake-sv`.
 
-### [`thoughtspot-model-from-semantic-view`](thoughtspot-model-from-semantic-view/)
+### [`ts-from-snowflake-sv`](ts-from-snowflake-sv/)
 
 Reverse-engineers a Snowflake Semantic View into a ThoughtSpot Model. Reads the
 semantic view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics
@@ -56,7 +56,7 @@ Supports two scenarios: building on the underlying physical tables (reusing exis
 ThoughtSpot Table objects and joins) or building on the semantic view's base tables
 directly (creating new Table objects in the connection).
 
-Run with `/thoughtspot-model-from-semantic-view`.
+Run with `/ts-from-snowflake-sv`.
 
 ---
 
@@ -83,11 +83,15 @@ git clone https://github.com/<org>/thoughtspot-skills.git /tmp/thoughtspot-skill
 
 mkdir -p ~/.claude/skills
 
-cp -r /tmp/thoughtspot-skills/claude/thoughtspot-setup ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/claude/snowflake-setup ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/claude/thoughtspot-model-builder ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/claude/thoughtspot-model-to-semantic-view ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/claude/thoughtspot-model-from-semantic-view ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/thoughtspot-setup ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/snowflake-setup ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/thoughtspot-model-builder ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-to-snowflake-sv ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-from-snowflake-sv ~/.claude/skills/
+
+# Also copy shared reference files so skills can read them
+cp -r /tmp/thoughtspot-skills/shared ~/.claude/
+cp -r /tmp/thoughtspot-skills/mappings ~/.claude/
 
 rm -rf /tmp/thoughtspot-skills
 ```
@@ -124,20 +128,25 @@ git clone https://github.com/<org>/thoughtspot-skills.git ~/Dev/thoughtspot-skil
 ```bash
 mkdir -p ~/.claude/skills
 
-ln -s ~/Dev/thoughtspot-skills/claude/thoughtspot-setup \
+# Skills (agent-specific entry points)
+ln -s ~/Dev/thoughtspot-skills/agents/claude/thoughtspot-setup \
       ~/.claude/skills/thoughtspot-setup
 
-ln -s ~/Dev/thoughtspot-skills/claude/snowflake-setup \
+ln -s ~/Dev/thoughtspot-skills/agents/claude/snowflake-setup \
       ~/.claude/skills/snowflake-setup
 
-ln -s ~/Dev/thoughtspot-skills/claude/thoughtspot-model-builder \
+ln -s ~/Dev/thoughtspot-skills/agents/claude/thoughtspot-model-builder \
       ~/.claude/skills/thoughtspot-model-builder
 
-ln -s ~/Dev/thoughtspot-skills/claude/thoughtspot-model-to-semantic-view \
-      ~/.claude/skills/thoughtspot-model-to-semantic-view
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-to-snowflake-sv \
+      ~/.claude/skills/ts-to-snowflake-sv
 
-ln -s ~/Dev/thoughtspot-skills/claude/thoughtspot-model-from-semantic-view \
-      ~/.claude/skills/thoughtspot-model-from-semantic-view
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-from-snowflake-sv \
+      ~/.claude/skills/ts-from-snowflake-sv
+
+# Shared reference docs (mappings and platform knowledge)
+ln -s ~/Dev/thoughtspot-skills/mappings ~/.claude/mappings
+ln -s ~/Dev/thoughtspot-skills/shared ~/.claude/shared
 ```
 
 Claude Code reads through the symlinks automatically. Edits in `~/Dev/` take effect
@@ -196,8 +205,8 @@ what you want in natural language and Claude will invoke the right skill.
 | `thoughtspot-setup` | `/thoughtspot-setup` | Add, update, test, or delete ThoughtSpot profiles |
 | `snowflake-setup` | `/snowflake-setup` | Add, update, test, or delete Snowflake profiles |
 | `thoughtspot-model-builder` | `/thoughtspot-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
-| `thoughtspot-model-to-semantic-view` | `/thoughtspot-model-to-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `thoughtspot-model-from-semantic-view` | `/thoughtspot-model-from-semantic-view` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-to-snowflake-sv` | `/ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `ts-from-snowflake-sv` | `/ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 
 Example for the conversion skill:
 

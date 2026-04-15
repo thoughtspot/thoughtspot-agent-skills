@@ -102,4 +102,43 @@ def import_tml(
             "create_new": create_new,
         },
     )
-    print(json.dumps(resp.json()))
+    data = resp.json()
+
+    # ThoughtSpot often returns an empty object list despite a successful import.
+    # For each OK response with no GUID, search by name and back-fill the GUID.
+    items = data if isinstance(data, list) else [data]
+    for item in items:
+        response_block = item.get("response", {})
+        status = response_block.get("status", {})
+        if status.get("status_code") != "OK":
+            continue
+        obj_list = response_block.get("object", [])
+        if obj_list and obj_list[0].get("header", {}).get("id_guid"):
+            continue  # GUID already present
+        # Try to recover the GUID from the TML name field
+        idx = item.get("request_index", 0)
+        if idx < len(tmls):
+            import re as _re
+            m = _re.search(r"^\s*name:\s*(.+)$", tmls[idx], _re.MULTILINE)
+            if m:
+                obj_name = m.group(1).strip().strip("\"'")
+                search_resp = client.post(
+                    "/api/rest/2.0/metadata/search",
+                    json={
+                        "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": obj_name}],
+                        "record_size": 10,
+                        "record_offset": 0,
+                        "include_headers": True,
+                    },
+                )
+                results = search_resp.json()
+                if isinstance(results, list):
+                    for r in results:
+                        if r.get("metadata_name") == obj_name:
+                            # Back-fill into the response structure
+                            if not obj_list:
+                                response_block["object"] = [{"header": {}}]
+                            response_block["object"][0].setdefault("header", {})["id_guid"] = r["metadata_id"]
+                            break
+
+    print(json.dumps(data))

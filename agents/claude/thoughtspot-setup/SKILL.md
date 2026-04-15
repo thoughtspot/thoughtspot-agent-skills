@@ -379,6 +379,7 @@ On success: `Profile '{name}' — connection verified.` Return to menu.
 | Env var empty after source | Remind user to run `source ~/.zshenv` in a real terminal (not with `!`). |
 | 401 / 403 on `ts auth whoami` | Wrong or expired credential. Token: get a fresh one (U → Refresh credential). Run `ts auth logout --profile {name}` to clear the stale cache first. |
 | DNS / connection refused | URL is wrong or instance unreachable. Check with U → Update URL. |
+| `SSLCertVerificationError: certificate verify failed: self signed certificate` | Internal/dev cluster with a self-signed cert. Manually add `"verify_ssl": false` to the profile entry in `~/.claude/thoughtspot-profiles.json`. The CLI will skip certificate verification for that profile. Do not use on production instances. |
 
 ---
 

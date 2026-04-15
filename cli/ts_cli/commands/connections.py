@@ -99,12 +99,24 @@ def add_tables(
 
     client = ThoughtSpotClient(resolve_profile(profile))
 
-    # 1. Fetch current connection state (v1 — replace once v2 fetch is confirmed)
-    fetch_resp = client.post(
-        "/tspublic/v1/connection/fetchConnection",
-        json={"connection_id": connection_id, "includeColumns": True},
-    )
-    fetch_data = fetch_resp.json()
+    # 1. Fetch current connection state.
+    # Try v1 first; fall back to an empty hierarchy on 404 (newer ThoughtSpot
+    # instances have removed the v1 fetchConnection endpoint).
+    fetch_data: Dict[str, Any] = {}
+    try:
+        fetch_resp = client.post(
+            "/tspublic/v1/connection/fetchConnection",
+            json={"connection_id": connection_id, "includeColumns": True},
+        )
+        fetch_data = fetch_resp.json()
+    except Exception:
+        # 404 or other error — proceed with empty hierarchy (new tables only)
+        import sys as _sys
+        print(
+            "Warning: could not fetch existing connection state (v1 endpoint unavailable). "
+            "Proceeding without preserving existing registered tables.",
+            file=_sys.stderr,
+        )
 
     # 2. Merge new tables into the existing hierarchy
     merged = _merge_tables(fetch_data, new_tables)

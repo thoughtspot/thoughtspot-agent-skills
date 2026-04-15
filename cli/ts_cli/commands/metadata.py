@@ -116,6 +116,31 @@ def search(
     print(json.dumps(all_results))
 
 
+@app.command("delete")
+def delete_objects(
+    guids: List[str] = typer.Argument(..., help="One or more GUIDs to delete"),
+    type: str = typer.Option("LOGICAL_TABLE", "--type", "-t",
+                             help="Object type: LOGICAL_TABLE, LIVEBOARD, ANSWER"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Delete one or more ThoughtSpot objects by GUID.
+
+    Output: HTTP 204 on success (no body). Raises on error.
+
+    Examples:
+
+    \b
+      ts metadata delete abc-123
+      ts metadata delete abc-123 def-456 --type LIVEBOARD
+    """
+    client = ThoughtSpotClient(resolve_profile(profile))
+    client.post(
+        "/api/rest/2.0/metadata/delete",
+        json={"metadata": [{"identifier": g, "type": type} for g in guids]},
+    )
+    print(json.dumps({"deleted": guids}))
+
+
 @app.command("get")
 def get_object(
     guid: str = typer.Argument(..., help="Object GUID"),

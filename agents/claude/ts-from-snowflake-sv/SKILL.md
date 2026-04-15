@@ -1,5 +1,5 @@
 ---
-name: thoughtspot-model-from-semantic-view
+name: ts-from-snowflake-sv
 description: Convert a Snowflake Semantic View into a ThoughtSpot Model by reading the view DDL, mapping tables and joins, translating SQL expressions to ThoughtSpot formulas, and importing the model via the ThoughtSpot REST API.
 ---
 
@@ -24,7 +24,8 @@ Two scenarios are supported:
 
 | File | Purpose |
 |---|---|
-| [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md) | Semantic View DDL parsing, SQL → ThoughtSpot formula translation, model TML templates |
+| [~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
+| [~/.claude/mappings/ts-snowflake/formula-translation.md](~/.claude/mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
 | [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (Scenario B, inline joins, dual-role tables) |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns |
@@ -124,12 +125,22 @@ Store the returned DDL string in full — it will be parsed in the next step.
 If the call fails with "object does not exist", verify the fully-qualified name and
 the user's role has `USAGE` on the schema.
 
+**Converting multiple views from the same schema?** Get all DDLs in one query:
+```sql
+SELECT view_name,
+       GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.' || view_name) AS ddl
+FROM {database}.information_schema.views
+WHERE table_schema = '{schema}'
+  AND table_type = 'SEMANTIC VIEW';   -- Snowflake filter for semantic views only
+```
+Parse each DDL in Step 4 before switching Snowflake queries.
+
 ---
 
 ### Step 4: Parse the DDL
 
 Read and parse the DDL returned in Step 3. The DDL is a SQL `CREATE OR REPLACE
-SEMANTIC VIEW` statement. See [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md)
+SEMANTIC VIEW` statement. See [~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md)
 for the full format — it is NOT the hypothetical nested format; the real format has flat
 `dimensions` and `metrics` sections at the view level.
 
@@ -236,37 +247,46 @@ Log which aliases were merged. See reverse-mapping-rules.md for the dual-role pa
 
 ### Step 6B: Create ThoughtSpot Table objects for views (Scenario B)
 
-For each base table reference (which may be a Snowflake view):
+**Do all Snowflake introspection in two batch queries — not per-table calls.**
 
-1. Introspect columns from Snowflake:
+1. **Batch: get all column names and types for the entire schema in one query:**
    ```sql
-   SHOW COLUMNS IN TABLE {database}.{schema}.{table_or_view};
+   SELECT table_name, column_name, data_type
+   FROM {database}.information_schema.columns
+   WHERE table_schema = '{SCHEMA}'
+   ORDER BY table_name, ordinal_position;
    ```
-   For each column record: name, data type.
+   This returns every column for every table/view in the schema in one round-trip.
 
-2. Find the ThoughtSpot connection to use:
+2. **Batch: get all view DDLs for the schema in one query:**
+   ```sql
+   SELECT table_name,
+          GET_DDL('VIEW', '{database}.{SCHEMA}.' || table_name) AS ddl
+   FROM {database}.information_schema.views
+   WHERE table_schema = '{SCHEMA}';
+   ```
+   This replaces individual `GET_DDL('VIEW', ...)` calls per table. Parse each DDL
+   to confirm exact physical column names (the semantic view may reference aliases
+   that differ from what `information_schema.columns` shows).
+
+   **Only run this if column names from query 1 don't match the semantic view
+   dimension references.** When they match, skip it.
+
+3. Find the ThoughtSpot connection to use:
    ```bash
    ts connections list --profile {profile}
    ```
+   Note the connection GUID (not just name) — use `fqn` in table TML for reliability.
    Ask the user to confirm which connection to use (or auto-select if only one matches
    the semantic view's database).
 
-3. Register the views/tables in the connection:
+4. Create ThoughtSpot Table objects for all tables in one command:
    ```bash
-   echo '[{
-     "db": "{database}",
-     "schema": "{schema}",
-     "table": "{view_name}",
-     "type": "VIEW",
-     "columns": [{"name": "COL1", "type": "VARCHAR"}, ...]
-   }, ...]' | ts connections add-tables {connection_id} --profile {profile}
+   cat tables-spec.json | ts tables create --profile {profile}
    ```
-   Map Snowflake types to ThoughtSpot types using the table in
-   [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md).
-
-4. Create ThoughtSpot Table TML objects for each view/table and import them:
-   - Use `ts tml import --policy PARTIAL` for tables (allows partial success).
-   - Collect the assigned GUIDs for use in the model TML.
+   Where `tables-spec.json` is a JSON array built from the column data above.
+   See `ts tables create --help` for the spec format. This command handles
+   JDBC retry and GUID resolution automatically, and outputs `{name: guid}`.
 
 5. Inline joins will be defined directly in the model TML (no `referencing_join`).
 
@@ -303,7 +323,7 @@ ts tml export {guid1} {guid2} {guid3} --profile {profile}
 ### Step 8: Build the model TML
 
 Construct the model TML as a YAML string. Use the templates in
-[references/reverse-mapping-rules.md](references/reverse-mapping-rules.md).
+[~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md).
 
 **Model name:** `TEST_SV_{view_name_title_case}` — prefix indicates this is a
 test/converted model. Ask the user if they want a different name.
@@ -366,7 +386,7 @@ model:
     - name: "{join_name}"
       with: to_table        # REQUIRED — must equal `id` of the target entry
       on: "[from_table::{fk_col}] = [to_table::{pk_col}]"  # uses id values, physical cols
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
   - id: to_table            # matches `with` value above
     name: to_table
@@ -399,7 +419,7 @@ For each complex metric (formula expression):
 For each metric whose `EXPR` is not a simple `AGG(table.col)`:
 
 1. Apply the SQL → ThoughtSpot formula translation rules in
-   [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md).
+   [~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md).
 2. Replace column references: `table.COLUMN` → `[TABLE_ALIAS::COLUMN]`
 3. If the expression translates successfully → add a `formulas[]` entry.
 4. If the expression cannot be translated → omit the column and log it in the

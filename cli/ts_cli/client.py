@@ -94,6 +94,7 @@ class ThoughtSpotClient:
         self._profile_name = profile_name
         self._slug = _slugify(profile_name)
         self._base_url = self._profile["base_url"].rstrip("/")
+        self._verify_ssl: bool = self._profile.get("verify_ssl", True)
         self._token: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -193,6 +194,7 @@ class ThoughtSpotClient:
                 },
                 headers={"Content-Type": "application/json"},
                 timeout=30,
+                verify=self._verify_ssl,
             )
             if resp.status_code in (401, 403):
                 raise SystemExit(
@@ -214,6 +216,7 @@ class ThoughtSpotClient:
                 },
                 headers={"Content-Type": "application/json"},
                 timeout=30,
+                verify=self._verify_ssl,
             )
             if resp.status_code in (401, 403):
                 raise SystemExit(
@@ -259,6 +262,7 @@ class ThoughtSpotClient:
     def request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
         headers = kwargs.pop("headers", {})
         headers.update(self._auth_headers())
+        kwargs.setdefault("verify", self._verify_ssl)
         resp = requests.request(
             method,
             f"{self._base_url}{path}",

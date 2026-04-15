@@ -1,5 +1,5 @@
 ---
-name: thoughtspot-model-to-semantic-view
+name: ts-to-snowflake-sv
 description: Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View by exporting TML, mapping columns and joins, translating formulas, and creating the view via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
 ---
 
@@ -15,12 +15,12 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 
 | File | Purpose |
 |---|---|
-| [references/mapping-rules.md](references/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
-| [references/formula-translation.md](references/formula-translation.md) | ThoughtSpot formula → SQL translation rules and untranslatable pattern handling |
-| [references/property-coverage.md](references/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
+| [~/.claude/mappings/ts-snowflake/mapping-rules.md](~/.claude/mappings/ts-snowflake/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
+| [~/.claude/mappings/ts-snowflake/formula-translation.md](~/.claude/mappings/ts-snowflake/formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
+| [~/.claude/mappings/ts-snowflake/property-coverage.md](~/.claude/mappings/ts-snowflake/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
+| [~/.claude/shared/snowflake/snowflake-schema.md](~/.claude/shared/snowflake/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
-| [references/thoughtspot-tml.md](references/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
+| [~/.claude/shared/thoughtspot/thoughtspot-tml.md](~/.claude/shared/thoughtspot/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 

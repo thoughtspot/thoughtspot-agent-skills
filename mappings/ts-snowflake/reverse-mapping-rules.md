@@ -97,23 +97,29 @@ Correct column_id:   trans::account_id   ← NOT trans::TRANS_ACCOUNT_ID
 
 **How to get the correct physical column names:**
 
-1. Export ThoughtSpot Table TML for every table in the model (Step 6A / Step 7):
+1. **Always run `GET_DDL` on each view** before assuming column names match the
+   semantic view references. The semantic view DDL frequently uses aliases that
+   differ from the view's actual column names:
+   ```sql
+   SELECT GET_DDL('VIEW', 'DB.SCHEMA.VIEW_NAME');
+   ```
+   The view DDL shows the exact column names that ThoughtSpot will see.
+   Cross-check: if `information_schema.columns` shows `A2` but the semantic view
+   says `CLIENT_DISTRICT_NAME`, the physical column is `A2`.
+
+2. For Scenario A (existing ThoughtSpot table objects), export Table TMLs instead:
    ```bash
    ts tml export {guid1} {guid2} ... --profile {profile}
    ```
-   The TML `table.columns[].name` (or `db_column_name`) values are the correct names to use.
+   The TML `table.columns[].name` (or `db_column_name`) values are authoritative.
 
-2. Build a mapping per table: `semantic_view_col_name → ts_physical_col_name`
+3. Build a mapping per table: `semantic_view_col_name → physical_col_name`
    - Try an exact case-insensitive match first
-   - If no match, strip the table name prefix and retry
-     (e.g., `TRANS_ACCOUNT_ID` → strip `TRANS_` → `ACCOUNT_ID` → lowercase → `account_id`)
-   - If still no match, query the Snowflake view definition:
-     ```sql
-     SELECT GET_DDL('VIEW', 'DB.SCHEMA.VIEW_NAME');
-     ```
-     and trace the aliased column back to its source
+   - If no match, strip the table alias prefix and retry
+     (e.g., `TRANS_ACCOUNT_ID` → strip `TRANS_` → `ACCOUNT_ID`)
+   - If still no match, the view DDL from step 1 is the final answer
 
-3. Use the ThoughtSpot physical column name as `column_id` in the model TML.
+4. Use the physical column name as `column_id` in the model TML.
 
 **NEVER use semantic view alias names directly as column_id values.**
 
@@ -189,7 +195,13 @@ over a MEASURE with `COUNT_DISTINCT`, as the formula syntax is more reliable.
 
 ## SQL → ThoughtSpot Formula Translation
 
+> See **[formula-translation.md](formula-translation.md)** for the full bidirectional
+> translation reference (Snowflake SQL ↔ ThoughtSpot formulas), including window functions,
+> LOD expressions, and semi-additive patterns.
+
 Apply these rules when a metric EXPR is **not** a simple `AGG(view.col)`.
+The quick-reference tables below cover the most common cases; consult formula-translation.md
+for edge cases and complex expressions.
 
 **Column reference conversion:**
 ```
@@ -296,19 +308,50 @@ ThoughtSpot model column format:
 
 Used in Scenario B when creating Table TML objects.
 
-| Snowflake type | ThoughtSpot `db_column_type` |
+The `data_type` field in ThoughtSpot TML `db_column_properties` uses these values
+(**not** SQL type names — the API rejects `BIGINT`, `INTEGER`, etc.):
+
+| Snowflake type | ThoughtSpot `data_type` in TML |
 |---|---|
 | `TEXT`, `VARCHAR`, `CHAR`, `STRING` | `VARCHAR` |
-| `NUMBER`, `DECIMAL`, `INT`, `INTEGER`, `BIGINT` | `BIGINT` |
-| `FLOAT`, `DOUBLE`, `REAL` | `DOUBLE` |
+| `NUMBER`, `DECIMAL`, `INT`, `INTEGER`, `BIGINT` (scale=0) | `INT64` |
+| `FLOAT`, `DOUBLE`, `REAL`, `NUMBER` (scale>0) | `DOUBLE` |
 | `BOOLEAN` | `BOOLEAN` |
 | `DATE` | `DATE` |
 | `DATETIME`, `TIMESTAMP_NTZ`, `TIMESTAMP_LTZ`, `TIMESTAMP_TZ` | `DATETIME` |
 | `VARIANT`, `OBJECT`, `ARRAY` | `VARCHAR` *(flag for review)* |
 
+**Important:** Use `INT64` not `BIGINT` — ThoughtSpot will return
+`DataType BIGINT does not match CDW DataType` if you use SQL type names.
+When in doubt about NUMBER scale, use `INT64`; ThoughtSpot validates against
+the actual CDW column type and will report a mismatch if wrong.
+
 ---
 
 ## Model TML Templates
+
+### Table TML creation notes (Scenario B)
+
+**Use connection `fqn` (GUID), not `name`:**
+```yaml
+connection:
+  fqn: "f0bc76d5-077d-432b-8000-87a046c06bef"   # preferred — more reliable
+  # name: "apj"                                   # avoid — can cause JDBC errors
+```
+Get the connection GUID first with `ts connections list --profile {profile}`.
+
+**Transient JDBC errors:** ThoughtSpot occasionally returns
+`CONNECTION_METADATA_FETCH_ERROR / JDBC driver encountered a communication error`
+during table TML import. This is transient — retry up to 3 times with a 5-second
+delay before treating it as a real failure.
+
+**GUID after import:** The `ts tml import` response often returns an empty `object`
+list even on success. Always follow up with a metadata search to confirm the GUID:
+```bash
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --name '%{table_name}%' --profile {profile}
+```
+
+---
 
 ### Core rules that apply to ALL scenarios
 
@@ -382,7 +425,7 @@ model:
     - name: join_name
       with: to_table        # MUST match the `id` of the target entry below
       on: "[from_table::{fk_col}] = [to_table::{pk_col}]"   # uses id values, physical cols
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
   - id: to_table            # the id referenced in `with` and `on` above
     name: to_table          # ThoughtSpot table object name
@@ -417,17 +460,17 @@ model_tables:
   - name: sh_to_eye_colour
     with: colour            # the ONE colour entry
     on: "[superhero::eye_colour_id] = [colour::id]"
-    type: LEFT_OUTER
+    type: INNER
     cardinality: MANY_TO_ONE
   - name: sh_to_hair_colour
     with: colour            # same target
     on: "[superhero::hair_colour_id] = [colour::id]"
-    type: LEFT_OUTER
+    type: INNER
     cardinality: MANY_TO_ONE
   - name: sh_to_skin_colour
     with: colour            # same target
     on: "[superhero::skin_colour_id] = [colour::id]"
-    type: LEFT_OUTER
+    type: INNER
     cardinality: MANY_TO_ONE
 - id: colour                # ONE entry, not three
   name: colour

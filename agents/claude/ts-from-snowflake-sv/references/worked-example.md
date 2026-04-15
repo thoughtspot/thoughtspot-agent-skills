@@ -138,12 +138,12 @@ model:
     - name: ha_to_superhero
       with: superhero           # matches id of target entry
       on: "[hero_attribute::hero_id] = [superhero::id]"   # physical cols
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: ha_to_attribute
       with: attribute
       on: "[hero_attribute::attribute_id] = [attribute::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
   - id: hero_power
     name: hero_power
@@ -152,12 +152,12 @@ model:
     - name: hp_to_superhero
       with: superhero
       on: "[hero_power::hero_id] = [superhero::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: hp_to_superpower
       with: superpower
       on: "[hero_power::power_id] = [superpower::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
   - id: superhero
     name: superhero
@@ -166,37 +166,37 @@ model:
     - name: sh_to_alignment
       with: alignment
       on: "[superhero::alignment_id] = [alignment::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_colour
       with: colour
       on: "[superhero::eye_colour_id] = [colour::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_hair_colour
       with: colour
       on: "[superhero::hair_colour_id] = [colour::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_skin_colour
       with: colour
       on: "[superhero::skin_colour_id] = [colour::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_gender
       with: gender
       on: "[superhero::gender_id] = [gender::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_publisher
       with: publisher
       on: "[superhero::publisher_id] = [publisher::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_race
       with: race
       on: "[superhero::race_id] = [race::id]"
-      type: LEFT_OUTER
+      type: INNER
       cardinality: MANY_TO_ONE
   - id: alignment
     name: alignment

@@ -1,5 +1,5 @@
 ---
-name: thoughtspot-model-to-semantic-view
+name: ts-to-snowflake-sv
 description: Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View by exporting TML, mapping columns and joins, translating formulas, and creating the view via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
 ---
 
@@ -15,15 +15,13 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 
 | File | Purpose |
 |---|---|
-| [references/mapping-rules.md](references/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
-| [references/formula-translation.md](references/formula-translation.md) | ThoughtSpot formula → SQL translation rules and untranslatable pattern handling |
-| [references/property-coverage.md](references/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [references/snowflake-schema.md](references/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
+| [../../../mappings/ts-snowflake/mapping-rules.md](../../../mappings/ts-snowflake/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
+| [../../../mappings/ts-snowflake/formula-translation.md](../../../mappings/ts-snowflake/formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
+| [../../../mappings/ts-snowflake/property-coverage.md](../../../mappings/ts-snowflake/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
+| [../../../shared/snowflake/snowflake-schema.md](../../../shared/snowflake/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
-| [references/thoughtspot-tml.md](references/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
+| [../../../shared/thoughtspot/thoughtspot-tml.md](../../../shared/thoughtspot/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [references/direct-api-auth.md](references/direct-api-auth.md) | Direct API authentication fallback (CLI only — not for Snowsight Workspaces) |
-| [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, token persistence (Pattern A), API patterns |
-| [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 
 ---
 
@@ -49,7 +47,7 @@ under each `tables[]` entry — they are **not** top-level keys in the semantic 
 will cause a parse error.
 
 For the full coverage matrix including unmapped properties, see
-[references/property-coverage.md](references/property-coverage.md).
+[../../../mappings/ts-snowflake/property-coverage.md](../../../mappings/ts-snowflake/property-coverage.md).
 
 ---
 
@@ -453,7 +451,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [references/thoughtspot-tml.md](references/thoughtspot-tml.md) for details.
+never `"schema_"`. See [../../../shared/thoughtspot/thoughtspot-tml.md](../../../shared/thoughtspot/thoughtspot-tml.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
@@ -470,7 +468,7 @@ Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag 
 
 **SQL view resolution:** For every `sql_view` object referenced in `model_tables[]`
 (or `table_paths[]` for Worksheet format), classify its `sql_query` using the logic
-in [references/thoughtspot-tml.md](references/thoughtspot-tml.md):
+in [../../../shared/thoughtspot/thoughtspot-tml.md](../../../shared/thoughtspot/thoughtspot-tml.md):
 
 *Simple* — `SELECT * FROM single_table [AS alias]`:
 - Extract the physical FQN from the FROM clause
@@ -684,7 +682,7 @@ import os; os.remove("/tmp/sv_wrappers.sql")
 See [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the
 connection factory pattern and CLI file-based execution details.
 
-See [references/snowflake-schema.md](references/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
+See [../../../shared/snowflake/snowflake-schema.md](../../../shared/snowflake/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
 
@@ -774,7 +772,7 @@ used_rel_names.add(base_name)
 Initialise `used_rel_names = set()` before the relationship loop.
 
 For join type and cardinality mappings, see
-[references/mapping-rules.md](references/mapping-rules.md).
+[../../../mappings/ts-snowflake/mapping-rules.md](../../../mappings/ts-snowflake/mapping-rules.md).
 
 ---
 
@@ -891,12 +889,12 @@ the PK is `DISP_ID`, there must be a dimension named `disp_id`.
    column and log it; do not include placeholder `expr` values
 2. If `column_id` set → resolve physical column name as above
 3. Classify as dimension / time_dimension / metric using the decision tree in
-   [references/mapping-rules.md](references/mapping-rules.md)
+   [../../../mappings/ts-snowflake/mapping-rules.md](../../../mappings/ts-snowflake/mapping-rules.md)
 4. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
 5. Record unmapped properties (format_pattern, default_date_bucket, custom_order,
    data_panel_column_groups, geo_config) for the Unmapped Properties Report
 6. Build the Snowflake field entry using the templates in
-   [references/mapping-rules.md](references/mapping-rules.md)
+   [../../../mappings/ts-snowflake/mapping-rules.md](../../../mappings/ts-snowflake/mapping-rules.md)
 7. Append the field to the field list for its owning table
 
 ---
@@ -921,7 +919,7 @@ For each formula column (`formula_id` is set):
 2. Resolve column references using the syntax rules for the TML format (Worksheet uses
    `[path_id::col]`, Model uses `[TABLE::col]`)
 3. Replace function names using
-   [references/formula-translation.md](references/formula-translation.md)
+   [../../../mappings/ts-snowflake/formula-translation.md](../../../mappings/ts-snowflake/formula-translation.md)
 4. Handle nested references up to 3 levels deep
 
 **Untranslatable formulas — omit entirely:**
@@ -965,7 +963,7 @@ Present the following three sections:
 ```
 
 **3. Unmapped Properties Report** — use the format defined in
-[references/property-coverage.md](references/property-coverage.md).
+[../../../mappings/ts-snowflake/property-coverage.md](../../../mappings/ts-snowflake/property-coverage.md).
 Include only sections that have entries. Common sections:
 - Parameters not migrated
 - Column groups not migrated
@@ -992,7 +990,7 @@ rm -f /tmp/ts_token.txt
 
 ### Step 11: Validate
 
-Run all checks from [references/snowflake-schema.md](references/snowflake-schema.md).
+Run all checks from [../../../shared/snowflake/snowflake-schema.md](../../../shared/snowflake/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
 - [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level

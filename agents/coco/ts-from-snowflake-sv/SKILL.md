@@ -1,5 +1,5 @@
 ---
-name: thoughtspot-model-from-semantic-view
+name: ts-from-snowflake-sv
 description: Convert a Snowflake Semantic View into a ThoughtSpot Model by reading the view DDL, mapping tables and joins, translating SQL expressions to ThoughtSpot formulas, and importing the model via the ThoughtSpot REST API.
 ---
 
@@ -23,7 +23,8 @@ Two scenarios are supported:
 
 | File | Purpose |
 |---|---|
-| [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md) | Semantic View DDL parsing, SQL → ThoughtSpot formula translation, model TML templates |
+| [../../../mappings/ts-snowflake/reverse-mapping-rules.md](../../../mappings/ts-snowflake/reverse-mapping-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
+| [../../../mappings/ts-snowflake/formula-translation.md](../../../mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
 | [references/worked-example.md](references/worked-example.md) | End-to-end example: DUNDER_MIFFLIN_SALES → ThoughtSpot Model |
 
 ---
@@ -101,7 +102,7 @@ Store the token for use in subsequent API calls. Never print it.
 ### Step 2: Parse the DDL
 
 Parse the DDL string returned in Step 1. The DDL is a SQL `CREATE OR REPLACE
-SEMANTIC VIEW` statement. See [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md)
+SEMANTIC VIEW` statement. See [../../../mappings/ts-snowflake/reverse-mapping-rules.md](../../../mappings/ts-snowflake/reverse-mapping-rules.md)
 for the full DDL format.
 
 Extract:
@@ -173,7 +174,7 @@ Then call the ThoughtSpot REST API to:
 1. Add the tables to the connection (`POST /api/rest/2.0/connections/{id}/update`)
 2. Import Table TML objects for each table
 
-See [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md) for
+See [../../../mappings/ts-snowflake/reverse-mapping-rules.md](../../../mappings/ts-snowflake/reverse-mapping-rules.md) for
 the Snowflake → ThoughtSpot type mapping.
 
 ---
@@ -202,7 +203,7 @@ Parse each returned `edoc` YAML string. Find in the `joins` section the entry wh
 ### Step 6: Build and translate the model TML
 
 Apply all column, formula, and join mappings from
-[references/reverse-mapping-rules.md](references/reverse-mapping-rules.md) to build
+[../../../mappings/ts-snowflake/reverse-mapping-rules.md](../../../mappings/ts-snowflake/reverse-mapping-rules.md) to build
 the model TML dict. Serialise to a YAML string.
 
 For each metric in the semantic view:
