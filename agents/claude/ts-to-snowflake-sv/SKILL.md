@@ -18,9 +18,9 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [~/.claude/mappings/ts-snowflake/mapping-rules.md](~/.claude/mappings/ts-snowflake/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
 | [~/.claude/mappings/ts-snowflake/formula-translation.md](~/.claude/mappings/ts-snowflake/formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
 | [~/.claude/mappings/ts-snowflake/property-coverage.md](~/.claude/mappings/ts-snowflake/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [~/.claude/shared/snowflake/snowflake-schema.md](~/.claude/shared/snowflake/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
+| [~/.claude/schemas/snowflake-schema.md](~/.claude/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
-| [~/.claude/shared/thoughtspot/thoughtspot-tml.md](~/.claude/shared/thoughtspot/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
+| [~/.claude/schemas/thoughtspot-tml.md](~/.claude/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 
@@ -281,7 +281,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [~/.claude/shared/thoughtspot/thoughtspot-tml.md](~/.claude/shared/thoughtspot/thoughtspot-tml.md) for details.
+never `"schema_"`. See [~/.claude/schemas/thoughtspot-tml.md](~/.claude/schemas/thoughtspot-tml.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
@@ -298,7 +298,7 @@ Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag 
 
 **SQL view resolution:** For every `sql_view` object referenced in `model_tables[]`
 (or `table_paths[]` for Worksheet format), classify its `sql_query` using the logic
-in [~/.claude/shared/thoughtspot/thoughtspot-tml.md](~/.claude/shared/thoughtspot/thoughtspot-tml.md):
+in [~/.claude/schemas/thoughtspot-tml.md](~/.claude/schemas/thoughtspot-tml.md):
 
 *Simple* — `SELECT * FROM single_table [AS alias]`:
 - Extract the physical FQN from the FROM clause
@@ -502,7 +502,7 @@ import os; os.remove("/tmp/sv_wrappers.sql")
 See [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the
 connection factory pattern and CLI file-based execution details.
 
-See [~/.claude/shared/snowflake/snowflake-schema.md](~/.claude/shared/snowflake/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
+See [~/.claude/schemas/snowflake-schema.md](~/.claude/schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
 
@@ -807,7 +807,7 @@ If the user selects **NO**, stop. No cleanup needed — the CLI manages its own 
 
 ### Step 11: Validate
 
-Run all checks from [~/.claude/shared/snowflake/snowflake-schema.md](~/.claude/shared/snowflake/snowflake-schema.md).
+Run all checks from [~/.claude/schemas/snowflake-schema.md](~/.claude/schemas/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
 - [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level

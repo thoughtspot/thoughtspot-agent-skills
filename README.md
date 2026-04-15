@@ -9,10 +9,14 @@ runtimes: **Claude Code** and **Snowflake Cortex (CoCo)**.
 
 ```
 thoughtspot-skills/
-├── claude/     — Claude Code skills (invoked via slash commands in Claude Code)
-├── coco/       — Snowflake Cortex skills (deployed in Snowsight Workspaces)
+├── agents/
+│   ├── claude/     — Claude Code skills (invoked via slash commands in Claude Code)
+│   └── coco/       — Snowflake Cortex skills (deployed in Snowsight Workspaces)
+├── mappings/
+│   └── ts-snowflake/ — Column, join, formula, and property mapping rules
+├── schemas/          — Platform schema references (ThoughtSpot TML, Snowflake Semantic View)
 └── tools/
-    └── ts-cli/ — ThoughtSpot CLI used by Claude Code skills at runtime
+    └── ts-cli/       — ThoughtSpot CLI used by Claude Code skills at runtime
 ```
 
 ---
@@ -26,10 +30,10 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | `thoughtspot-setup` | `/thoughtspot-setup` | Add, update, test, or delete ThoughtSpot profiles |
 | `snowflake-setup` | `/snowflake-setup` | Add, update, test, or delete Snowflake profiles |
 | `thoughtspot-model-builder` | `/thoughtspot-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
-| `thoughtspot-model-to-semantic-view` | `/thoughtspot-model-to-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `thoughtspot-model-from-semantic-view` | `/thoughtspot-model-from-semantic-view` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-to-snowflake-sv` | `/ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `ts-from-snowflake-sv` | `/ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 
-See **[claude/SETUP.md](claude/SETUP.md)** for installation, credential setup, and usage.
+See **[agents/claude/SETUP.md](agents/claude/SETUP.md)** for installation, credential setup, and usage.
 
 ---
 
@@ -40,10 +44,10 @@ install required — runs entirely within Snowflake.
 
 | Skill | What it does |
 |---|---|
-| `thoughtspot-model-to-semantic-view` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `thoughtspot-model-from-semantic-view` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 
-See **[coco/SETUP.md](coco/SETUP.md)** for Git repository setup and Workspace deployment.
+See **[agents/coco/SETUP.md](agents/coco/SETUP.md)** for Git repository setup and Workspace deployment.
 
 ---
 

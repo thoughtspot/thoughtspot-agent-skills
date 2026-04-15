@@ -90,7 +90,7 @@ cp -r /tmp/thoughtspot-skills/agents/claude/ts-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-from-snowflake-sv ~/.claude/skills/
 
 # Also copy shared reference files so skills can read them
-cp -r /tmp/thoughtspot-skills/shared ~/.claude/
+cp -r /tmp/thoughtspot-skills/schemas ~/.claude/
 cp -r /tmp/thoughtspot-skills/mappings ~/.claude/
 
 rm -rf /tmp/thoughtspot-skills
@@ -146,7 +146,7 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-from-snowflake-sv \
 
 # Shared reference docs (mappings and platform knowledge)
 ln -s ~/Dev/thoughtspot-skills/mappings ~/.claude/mappings
-ln -s ~/Dev/thoughtspot-skills/shared ~/.claude/shared
+ln -s ~/Dev/thoughtspot-skills/schemas ~/.claude/schemas
 ```
 
 Claude Code reads through the symlinks automatically. Edits in `~/Dev/` take effect

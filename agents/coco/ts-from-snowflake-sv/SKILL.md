@@ -63,7 +63,7 @@ UI confirmation prompt. Minimise calls by batching related statements.
 ## Prerequisites
 
 - A Snowflake role with `USAGE` on the database/schema containing the semantic view
-- ThoughtSpot setup completed via `/thoughtspot-setup` (stored procedures in `SKILLS.PUBLIC`)
+- ThoughtSpot setup completed via `/thoughtspot-setup` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege in ThoughtSpot
 
 ---
@@ -76,7 +76,7 @@ Batch profile retrieval and DDL fetch in a single call:
 
 ```sql
 -- Batch: profile + DDL
-SELECT NAME, BASE_URL, USERNAME, TOKEN_ENV, PASSWORD_ENV, SECRET_KEY_ENV
+SELECT NAME, BASE_URL, USERNAME, SECRET_NAME, TOKEN_EXPIRES_AT
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
 LIMIT 1;
 
@@ -92,10 +92,25 @@ SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema};
 Display results as a numbered list and ask the user to select one.
 
 **Authenticate with ThoughtSpot** using the profile:
-- `token_env`: use value directly as bearer token
-- `password_env` / `secret_key_env`: call `POST /api/rest/2.0/auth/token/full`
 
-Store the token for use in subsequent API calls. Never print it.
+First check token expiry:
+```sql
+SELECT TOKEN_EXPIRES_AT > CURRENT_TIMESTAMP() AS is_valid
+FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
+WHERE NAME = '{profile_name}';
+```
+
+If `is_valid = FALSE` or `TOKEN_EXPIRES_AT IS NULL`: stop and tell the user:
+> "Your ThoughtSpot token has expired. Run `/thoughtspot-setup` → U → Refresh token, then retry."
+
+If valid, retrieve the bearer token:
+```sql
+SELECT SYSTEM$GET_SECRET_STRING('SKILLS.PUBLIC.' || SECRET_NAME) AS token
+FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
+WHERE NAME = '{profile_name}';
+```
+
+Store the token value for use in subsequent API calls. Never print it.
 
 ---
 

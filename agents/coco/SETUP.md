@@ -3,6 +3,13 @@
 This guide walks you through connecting the skill's Git repository to your Snowflake
 account so the skill files are available in Snowsight Workspaces.
 
+> **Path note:** Skills in this repository are stored under `agents/coco/<skill-name>/`.
+> Snowflake Cortex Code looks for skills at `.snowflake/cortex/skills/<skill-name>/`
+> within a Workspace. These paths do not match — after connecting the Git repository
+> and opening your Workspace, you must manually create the `.snowflake/cortex/skills/`
+> folder structure and copy the skill files into it (see
+> [Using the skill in a Workspace](#using-the-skill-in-a-workspace) below).
+
 ---
 
 ## Prerequisites
@@ -133,7 +140,9 @@ ALTER GIT REPOSITORY SKILLS.PUBLIC.SKILL_REPO FETCH;
 LS @SKILLS.PUBLIC.SKILL_REPO/branches/main;
 ```
 
-You should see the skill files including `.snowflake/cortex/skills/<skill-name>/SKILL.md`.
+You should see the skill files at `agents/coco/<skill-name>/SKILL.md`. They are not yet
+at the `.snowflake/cortex/skills/` path — see [Using the skill in a Workspace](#using-the-skill-in-a-workspace)
+for the copy step that makes them discoverable by Cortex Code.
 
 ---
 
@@ -195,14 +204,26 @@ and add the skill files manually.
 1. Open **Snowsight** → **Projects** → **Workspaces**
 2. Select **Create Workspace** → **Create from existing Git repository**
 3. Select your repository and branch
-4. The skill will be available at `.snowflake/cortex/skills/<skill-name>/`
+4. In the Workspace file tree, create the folder structure that Cortex Code expects:
+   ```
+   .snowflake/
+   └── cortex/
+       └── skills/
+           └── <skill-name>/
+   ```
+5. Copy the files from `agents/coco/<skill-name>/` into the new folder. For each file,
+   right-click the target folder → **New File** → paste the contents.
+6. Cortex Code will auto-detect the skill once `SKILL.md` is in place.
+
+> When a new version of the skill is available, fetch the repository
+> (`ALTER GIT REPOSITORY ... FETCH`) to update the `agents/coco/` source files, then
+> re-copy any changed files into `.snowflake/cortex/skills/<skill-name>/`.
 
 **From manual upload (Option E):**
 
-The skill is already in your Workspace — no additional steps needed.
+The skill is already in your Workspace at the correct path — no additional steps needed.
 
-Cortex Code automatically detects skills in the `.snowflake/cortex/skills/` directory
-regardless of whether the Workspace is backed by Git or created from scratch.
+Cortex Code automatically detects skills in the `.snowflake/cortex/skills/` directory.
 
 ---
 

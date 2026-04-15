@@ -18,9 +18,9 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [../../../mappings/ts-snowflake/mapping-rules.md](../../../mappings/ts-snowflake/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
 | [../../../mappings/ts-snowflake/formula-translation.md](../../../mappings/ts-snowflake/formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
 | [../../../mappings/ts-snowflake/property-coverage.md](../../../mappings/ts-snowflake/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [../../../shared/snowflake/snowflake-schema.md](../../../shared/snowflake/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
+| [../../../schemas/snowflake-schema.md](../../../schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
-| [../../../shared/thoughtspot/thoughtspot-tml.md](../../../shared/thoughtspot/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
+| [../../../schemas/thoughtspot-tml.md](../../../schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [references/direct-api-auth.md](references/direct-api-auth.md) | Direct API authentication fallback (CLI only — not for Snowsight Workspaces) |
 
 ---
@@ -98,7 +98,7 @@ calls by batching related statements together.
    ```sql
    SHOW PROCEDURES LIKE 'TS_SEARCH_MODELS' IN SCHEMA SKILLS.PUBLIC;
    SHOW PROCEDURES LIKE 'TS_EXPORT_TML' IN SCHEMA SKILLS.PUBLIC;
-   SELECT NAME FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
+   SELECT NAME, TOKEN_EXPIRES_AT FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
    ```
 
 3. **Combine TML metadata extraction.** After storing TML in a temp table, extract
@@ -156,11 +156,16 @@ The workflow calls the ThoughtSpot API in two places: Step 2 (search) and Step 3
 ```sql
 SHOW PROCEDURES LIKE 'TS_SEARCH_MODELS' IN SCHEMA SKILLS.PUBLIC;
 SHOW PROCEDURES LIKE 'TS_EXPORT_TML' IN SCHEMA SKILLS.PUBLIC;
-SELECT NAME, BASE_URL, USERNAME FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
+SELECT NAME, BASE_URL, USERNAME, TOKEN_EXPIRES_AT FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
 ```
 
 Run all three in a **single** `snowflake_sql_execute` call to minimise UI prompts.
 Parse the combined result to determine both `{api_method}` and `{profile_name}`.
+
+**Check token expiry immediately:** if `TOKEN_EXPIRES_AT <= CURRENT_TIMESTAMP()` or is NULL,
+stop and tell the user:
+> "Your ThoughtSpot token has expired. Run `/thoughtspot-setup` → U → Refresh token, then retry."
+Do not proceed to Step 1 until the token is valid.
 
 If both procedures exist, set `{api_method}` = `stored_procedure`.
 If either is missing, set `{api_method}` = `direct_api` and inform the user:
@@ -193,12 +198,12 @@ Always query the profiles table to get the exact profile name — never guess or
 construct it from convention (hyphens, underscores, casing may vary):
 
 ```sql
-SELECT PROFILE_NAME FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
+SELECT NAME FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
 ```
 
 If one profile: use it directly (confirm with user).
 If multiple: display a numbered list and ask the user to select.
-Store the exact `PROFILE_NAME` value as `{profile_name}` for all subsequent
+Store the exact `NAME` value as `{profile_name}` for all subsequent
 `CALL` statements — do not modify it.
 
 **When `{api_method}` = `direct_api`:**
@@ -451,7 +456,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [../../../shared/thoughtspot/thoughtspot-tml.md](../../../shared/thoughtspot/thoughtspot-tml.md) for details.
+never `"schema_"`. See [../../../schemas/thoughtspot-tml.md](../../../schemas/thoughtspot-tml.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
@@ -468,7 +473,7 @@ Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag 
 
 **SQL view resolution:** For every `sql_view` object referenced in `model_tables[]`
 (or `table_paths[]` for Worksheet format), classify its `sql_query` using the logic
-in [../../../shared/thoughtspot/thoughtspot-tml.md](../../../shared/thoughtspot/thoughtspot-tml.md):
+in [../../../schemas/thoughtspot-tml.md](../../../schemas/thoughtspot-tml.md):
 
 *Simple* — `SELECT * FROM single_table [AS alias]`:
 - Extract the physical FQN from the FROM clause
@@ -682,7 +687,7 @@ import os; os.remove("/tmp/sv_wrappers.sql")
 See [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the
 connection factory pattern and CLI file-based execution details.
 
-See [../../../shared/snowflake/snowflake-schema.md](../../../shared/snowflake/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
+See [../../../schemas/snowflake-schema.md](../../../schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
 
@@ -990,7 +995,7 @@ rm -f /tmp/ts_token.txt
 
 ### Step 11: Validate
 
-Run all checks from [../../../shared/snowflake/snowflake-schema.md](../../../shared/snowflake/snowflake-schema.md).
+Run all checks from [../../../schemas/snowflake-schema.md](../../../schemas/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
 - [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level
