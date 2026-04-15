@@ -25,7 +25,7 @@ Two scenarios are supported:
 | File | Purpose |
 |---|---|
 | [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md) | Semantic View DDL parsing, SQL → ThoughtSpot formula translation, model TML templates |
-| [references/worked-example.md](references/worked-example.md) | End-to-end example: DUNDER_MIFFLIN_SALES → ThoughtSpot Model |
+| [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (Scenario B, inline joins, dual-role tables) |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns |
 
@@ -33,27 +33,28 @@ Two scenarios are supported:
 
 ## Concept Mapping
 
-| Snowflake Semantic View | ThoughtSpot Model |
+| Snowflake Semantic View (real DDL format) | ThoughtSpot Model |
 |---|---|
-| `TABLES ( ... BASE TABLE db.schema.tbl )` | `model_tables[]` — one entry per table |
-| `PRIMARY KEY ( col )` | Identifies join target tables — not directly in model TML |
-| `DIMENSIONS ( col DATA_TYPE = TEXT )` | `columns[]` with `column_type: ATTRIBUTE` |
-| `DIMENSIONS ( col DATA_TYPE = DATE )` | `columns[]` with `column_type: ATTRIBUTE` (date type inferred) |
-| `DIMENSIONS ( col DATA_TYPE = TIMESTAMP )` | `columns[]` with `column_type: ATTRIBUTE` (datetime type) |
-| `METRICS ( name EXPR = AGG(tbl.col) )` | `columns[]` with `column_type: MEASURE` + aggregation |
-| `METRICS ( name EXPR = complex_sql )` | `formulas[]` with translated ThoughtSpot formula |
-| `RELATIONSHIPS ( ... FROM tbl KEY col TO tbl KEY col )` | `referencing_join` in model_tables (Scenario A) or inline joins (Scenario B) |
-| `ALIASES = ( alias1, alias2 )` | Display name override via `name:` in columns — first alias used as display name |
-| `EXTENSION = '{"cortex_analyst_context": ...}'` | Not mapped to ThoughtSpot — logged in report |
+| `tables ( DB.SCHEMA.TABLE [primary key (col)] )` | `model_tables[]` — one entry per **physical ThoughtSpot table** |
+| `primary key (col)` on a table | Identifies join target — not written into model TML directly |
+| `dimensions ( TABLE.COL as view.NAME [comment='...'] )` | `columns[]` with `column_type: ATTRIBUTE` |
+| Dimension with date/timestamp physical column | `columns[]` with `column_type: ATTRIBUTE` (ThoughtSpot infers date type) |
+| `metrics ( TABLE.COL as SUM(view.NAME) )` | `columns[]` with `column_type: MEASURE` + aggregation |
+| `metrics ( TABLE.COL as complex_sql_expr )` | `formulas[]` with translated ThoughtSpot formula |
+| `relationships ( REL as FROM(FK) references TO(PK) )` | `referencing_join` in model_tables (Scenario A, pre-defined joins) OR `joins[]` inline (Scenario B) |
+| `comment='...'` on a dimension/metric | ThoughtSpot column `name` (display name) |
+| `with extension (CA='...')` | Not mapped to ThoughtSpot — logged in report |
 
 **Key structural rules:**
-- The first alias in `ALIASES = (...)` becomes the model column `name` (display name).
-  The physical column name becomes the `column_id` pointer.
-- Simple metrics (`AGG(table.col)` — single column, single aggregation function) →
-  `MEASURE` column. Complex expressions → `formulas[]` entry.
-- In Scenario A, `referencing_join` in a model_table entry points to a join that was
-  pre-defined at the ThoughtSpot Table object level. Find it by exporting TML for the
-  "from" table in the relationship.
+- `column_id` must use the **physical column name from the ThoughtSpot table TML**,
+  NOT the semantic view alias. The view layer renames columns.
+- Simple metrics (`AGG(view.col)` — one column, one aggregate) → `MEASURE` column.
+  Complex expressions → `formulas[]` entry.
+- In Scenario A, `referencing_join` points to a join pre-defined at the ThoughtSpot
+  Table object level (found by exporting the FROM table's TML).
+- In Scenario B / hybrid, inline `joins[]` on the FROM table entry (requires `with` field).
+- One physical ThoughtSpot table can serve multiple semantic view roles (e.g., one
+  `colour` table for eye/hair/skin colour). Include it only ONCE in model_tables.
 
 ---
 
@@ -129,29 +130,33 @@ the user's role has `USAGE` on the schema.
 
 Read and parse the DDL returned in Step 3. The DDL is a SQL `CREATE OR REPLACE
 SEMANTIC VIEW` statement. See [references/reverse-mapping-rules.md](references/reverse-mapping-rules.md)
-for the full DDL format and parsing rules.
+for the full format — it is NOT the hypothetical nested format; the real format has flat
+`dimensions` and `metrics` sections at the view level.
 
 Extract the following:
 
 1. **View identity:** database, schema, view name.
 2. **Tables block:** for each table entry, record:
-   - Table alias (the name used inside the semantic view)
-   - Base table: `database.schema.physical_table` (or `database.schema.view_name` for Scenario B)
-   - Primary key column(s) (if present — marks this table as a join target)
-   - Dimensions: name, aliases, data_type, expr
-   - Time dimensions (if any): name, aliases, data_type (DATE / TIMESTAMP), expr
-   - Per-table metrics: name, aliases, expr
-3. **Relationships block:** for each relationship, record:
-   - Relationship name
-   - From table alias, from key column(s)
-   - To table alias, to key column(s)
-4. **Global metrics block** (metrics not nested under a table): name, aliases, expr
-5. **Extension JSON** (Cortex Analyst context): record as-is for the report; do not map to ThoughtSpot.
+   - Fully-qualified table reference (`DB.SCHEMA.TABLE`) — this is the Snowflake view/table
+   - Table alias (explicit `ALIAS as DB.SCHEMA.TABLE`, or defaults to last segment of the name)
+   - Primary key column(s) (if present — marks this as a join target)
+3. **Relationships block:** for each relationship (`REL_NAME as FROM(COL) references TO(COL)`), record:
+   - Relationship name, from table alias, from column, to table alias, to column
+4. **Dimensions block** (flat, all tables): for each entry (`TABLE.COL as view_alias.NAME [comment='...']`), record:
+   - Source: TABLE alias + VIEW column name (column in the Snowflake view layer)
+   - Semantic alias: `view_alias.NAME`
+   - Display name: value of `comment='...'`, or title-cased NAME
+5. **Metrics block** (flat): for each entry (`TABLE.COL as AGG(view_alias.NAME)`), record:
+   - Source: TABLE alias + VIEW column name
+   - Aggregation: extracted from `AGG(...)`
+   - Display name: from `comment='...'` or title-cased NAME
+6. **Extension JSON** (`with extension (CA='...')`): parse for column type confirmation
+   (dimensions / time_dimensions / metrics per table). Do not map to ThoughtSpot.
 
 Build an internal map:
-- `tables`: list of parsed table entries
-- `relationships`: list of parsed relationship entries
-- `columns` (flat): all dimensions, time_dimensions, and metrics across all tables and global
+- `tables`: list of parsed table entries (alias → fully-qualified ref, primary key)
+- `relationships`: list of (name, from_alias, from_col, to_alias, to_col)
+- `columns` (flat): all dimensions and metrics, keyed by (table_alias, view_col)
 
 ---
 
@@ -209,6 +214,23 @@ Build a map: `physical_table_name → {metadata_id, metadata_name}`.
 - Options: (1) skip the table from the model, (2) switch to Scenario B for that table,
   (3) abort and run the ThoughtSpot model-builder skill first to register the tables.
 - Do not proceed to import until all required tables are resolved.
+
+**After finding all GUIDs, export table TMLs and extract physical column names:**
+
+```bash
+ts tml export {guid1} {guid2} ... --profile {profile}
+```
+
+For each table, parse the `table.columns[].name` values from the returned TML.
+Build a column map per table: `table_name → [physical_col_name, ...]`.
+
+This is required because semantic view column names (e.g. `TRANS_ACCOUNT_ID`)
+are view-layer aliases that differ from the physical ThoughtSpot column names
+(e.g. `account_id`). The `column_id` field in the model TML must use physical names.
+
+**Detect dual-role tables:** If two semantic view table aliases resolve to the same
+ThoughtSpot GUID (same physical table), include that table only ONCE in `model_tables`.
+Log which aliases were merged. See reverse-mapping-rules.md for the dual-role pattern.
 
 ---
 
@@ -287,51 +309,83 @@ Construct the model TML as a YAML string. Use the templates in
 test/converted model. Ask the user if they want a different name.
 
 **Identify the fact table** (the table that is never on the "TO" side of any relationship)
-— it gets no `referencing_join`.
+— it gets no `referencing_join` and no `joins[]`.
 
-**Model TML skeleton (Scenario A):**
+**Critical `id` rules (applies to all scenarios):**
+- All `id` values must be **lowercase**
+- `id` values must be **unique** across all `model_tables` entries
+- `name` values must also be **unique** — ThoughtSpot rejects models where two tables
+  share the same `name` value ("Multiple tables have same alias")
+- `name` must match the ThoughtSpot table object's name exactly (usually lowercase)
+- If two semantic view tables map to the same ThoughtSpot table (same GUID), include
+  the physical table only ONCE and use ONE `id`/`name`
+
+**Model TML skeleton (Scenario A — pre-defined joins exist in table TML):**
 
 ```yaml
 model:
   name: "TEST_SV_{view_name}"
   model_tables:
-  - id: {FACT_TABLE_ALIAS}
-    name: {PHYSICAL_TABLE_NAME}
-    fqn: {fact_table_guid}           # GUID from Step 6A
-  - id: {DIM_TABLE_ALIAS}
-    name: {PHYSICAL_TABLE_NAME}
-    fqn: {dim_table_guid}            # GUID from Step 6A
-    referencing_join: {join_name}    # from Step 7
-  # ... one entry per table ...
+  - id: fact_table          # lowercase
+    name: fact_table        # ThoughtSpot table object name (lowercase)
+    fqn: "{fact_guid}"      # GUID from Step 6A
+  - id: dim_table           # lowercase
+    name: dim_table         # ThoughtSpot table object name (lowercase)
+    fqn: "{dim_guid}"       # GUID from Step 6A
+    referencing_join: "{join_name}"   # from Step 7
   columns:
   - name: "{display_name}"
-    column_id: {TABLE_ALIAS}::{PHYSICAL_COLUMN}
+    column_id: fact_table::{physical_col}  # uses id value + physical col from table TML
     properties:
       column_type: ATTRIBUTE
-  # ... one entry per dimension/time_dimension ...
-  # ... MEASURE columns for simple metrics ...
+  - name: "{display_name}"
+    column_id: fact_table::{physical_col}
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
   formulas:
   - name: "{display_name}"
     expr: "{thoughtspot_formula}"
     properties:
       column_type: MEASURE
-  # ... formula entries for complex metrics ...
+```
+
+**Model TML skeleton (Scenario B / Hybrid — inline joins, or no pre-defined table joins):**
+
+Use this when ThoughtSpot Table objects have no `joins_with` entries, or when creating
+new Table objects for views. Inline joins live on the **source (FROM) table** entry.
+
+```yaml
+model:
+  name: "TEST_SV_{view_name}"
+  model_tables:
+  - id: from_table          # lowercase, unique
+    name: from_table        # ThoughtSpot table object name
+    fqn: "{from_guid}"
+    joins:
+    - name: "{join_name}"
+      with: to_table        # REQUIRED — must equal `id` of the target entry
+      on: "[from_table::{fk_col}] = [to_table::{pk_col}]"  # uses id values, physical cols
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - id: to_table            # matches `with` value above
+    name: to_table
+    fqn: "{to_guid}"
+  columns:
+  # ... same pattern as Scenario A ...
 ```
 
 **Column entries:**
 
 For each dimension in the semantic view:
-- `name`: first ALIAS if present, otherwise the snake_case dimension name
-- `column_id`: `{TABLE_ALIAS}::{expr_column}` — extract the column name from the
-  EXPR (e.g. `DM_CUSTOMER.CUSTOMER_NAME` → `DM_CUSTOMER::CUSTOMER_NAME`)
+- `name`: value of `comment='...'` on the dimension, or title-cased dimension name
+- `column_id`: `{id}::{physical_col}` — where `id` is the model_tables `id` for that
+  table, and `physical_col` is from the ThoughtSpot table TML (NOT the semantic view alias)
 - `column_type: ATTRIBUTE`
 
-For each time_dimension (DATE / TIMESTAMP):
-- Same as dimension above.
-
-For each simple metric (`AGG(table.col)`):
-- `name`: first ALIAS if present, otherwise the metric name
-- `column_id`: `{TABLE_ALIAS}::{col}`
+For each simple metric (`AGG(view_alias.metric_name)`):
+- `name`: value of `comment='...'` on the metric, or title-cased metric name
+- `column_id`: `{id}::{physical_col}`
 - `column_type: MEASURE`
 - `aggregation`: mapped from the SQL aggregate function (see reverse-mapping-rules.md)
 
@@ -418,7 +472,11 @@ On success, parse the response JSON to extract the created model's GUID.
 | Error | Likely cause | Fix |
 |---|---|---|
 | `referencing_join not found` | Join name is wrong or join doesn't exist at table level | Export table TML again and verify join name |
-| `column_id not found` | Physical column name is wrong or table GUID is wrong | Check Table TML for the correct column name |
+| `column_id not found` | Physical column name is wrong — semantic view alias used instead of physical col | Check Table TML for the correct `db_column_name` value |
+| `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on an inline join | Add `with: {target_id}` to every inline join entry |
+| `{table_name} does not exist in schema` (on `with` field) | `with` value is wrong case or doesn't match any `id` | Ensure `with` matches the target's `id` exactly (lowercase) |
+| `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` in model_tables | Check that both `[table1::col]` refs in `on` use `id` values, not physical table names |
+| `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — if two aliases map to the same physical table, keep only one entry |
 | `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-run Step 6A to get fresh GUIDs |
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |

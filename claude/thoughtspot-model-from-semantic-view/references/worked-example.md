@@ -1,84 +1,56 @@
 # Worked Example — Snowflake Semantic View → ThoughtSpot Model
 
-End-to-end conversion of `DUNDERMIFFLIN.PUBLIC.DUNDER_MIFFLIN_SALES` to a
-ThoughtSpot Model named `TEST_SV_Dunder Mifflin Sales`. This is a Scenario A
-conversion (model built on the underlying physical tables, not views).
+End-to-end conversion of `BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV` to a ThoughtSpot
+Model named `TEST_SV_BIRD Superhero`. Scenario B (inline joins) — the underlying
+ThoughtSpot table objects have no pre-defined joins between them.
 
 ---
 
 ## Input — Semantic View DDL (abbreviated)
 
 ```sql
-create or replace semantic view DUNDERMIFFLIN.PUBLIC.DUNDER_MIFFLIN_SALES
-  tables (
-    DM_CUSTOMER base table DUNDERMIFFLIN.PUBLIC.DM_CUSTOMER
-      primary key ( CUSTOMER_ID )
-      dimensions (
-        CUSTOMER_ID data_type = NUMBER expr = DM_CUSTOMER.CUSTOMER_ID,
-        CUSTOMER_NAME aliases = ( "Customer Name", customer ) data_type = TEXT
-          expr = DM_CUSTOMER.CUSTOMER_NAME,
-        LOCALE data_type = TEXT expr = DM_CUSTOMER.LOCALE,
-        COUNTRY_NAME aliases = ( "Country" ) data_type = TEXT
-          expr = DM_LOCALE_COUNTRY.COUNTRY_NAME
-      ),
-    DM_LOCALE_COUNTRY base table DUNDERMIFFLIN.PUBLIC.DM_LOCALE_COUNTRY
-      primary key ( LOCALE )
-      dimensions (
-        LOCALE data_type = TEXT expr = DM_LOCALE_COUNTRY.LOCALE,
-        COUNTRY_NAME aliases = ( "Country Name" ) data_type = TEXT
-          expr = DM_LOCALE_COUNTRY.COUNTRY_NAME
-      ),
-    DM_ORDERS base table DUNDERMIFFLIN.PUBLIC.DM_ORDERS
-      dimensions (
-        ORDER_ID data_type = NUMBER expr = DM_ORDERS.ORDER_ID,
-        ORDER_DATE aliases = ( "Order Date" ) data_type = DATE
-          expr = DM_ORDERS.ORDER_DATE,
-        SHIP_DATE aliases = ( "Ship Date" ) data_type = DATE
-          expr = DM_ORDERS.SHIP_DATE,
-        CUSTOMER_ID data_type = NUMBER expr = DM_ORDERS.CUSTOMER_ID
-      )
-      metrics (
-        order_duration_days aliases = ( "Order Duration (Days)" )
-          expr = DATEDIFF( 'day', DM_ORDERS.ORDER_DATE, DM_ORDERS.SHIP_DATE )
-      ),
-    DM_ORDERDETAILS base table DUNDERMIFFLIN.PUBLIC.DM_ORDERDETAILS
-      dimensions (
-        ORDER_DETAIL_ID data_type = NUMBER expr = DM_ORDERDETAILS.ORDER_DETAIL_ID,
-        ORDER_ID data_type = NUMBER expr = DM_ORDERDETAILS.ORDER_ID,
-        PRODUCT_ID data_type = NUMBER expr = DM_ORDERDETAILS.PRODUCT_ID,
-        UNIT_PRICE aliases = ( "Unit Price" ) data_type = NUMBER
-          expr = DM_ORDERDETAILS.UNIT_PRICE,
-        QUANTITY aliases = ( "Quantity" ) data_type = NUMBER
-          expr = DM_ORDERDETAILS.QUANTITY
-      )
-      metrics (
-        total_revenue aliases = ( "Total Revenue" )
-          expr = SUM( DM_ORDERDETAILS.UNIT_PRICE * DM_ORDERDETAILS.QUANTITY )
-      ),
-    DM_PRODUCTS base table DUNDERMIFFLIN.PUBLIC.DM_PRODUCTS
-      primary key ( PRODUCT_ID )
-      dimensions (
-        PRODUCT_ID data_type = NUMBER expr = DM_PRODUCTS.PRODUCT_ID,
-        PRODUCT_NAME aliases = ( "Product Name" ) data_type = TEXT
-          expr = DM_PRODUCTS.PRODUCT_NAME,
-        CATEGORY aliases = ( "Category" ) data_type = TEXT
-          expr = DM_PRODUCTS.CATEGORY
-      )
-  )
-  relationships (
-    dm_orders_to_dm_customer
-      from DM_ORDERS key ( CUSTOMER_ID )
-      to   DM_CUSTOMER key ( CUSTOMER_ID ),
-    dm_customer_to_dm_locale_country
-      from DM_CUSTOMER key ( LOCALE )
-      to   DM_LOCALE_COUNTRY key ( LOCALE ),
-    dm_orderdetails_to_dm_orders
-      from DM_ORDERDETAILS key ( ORDER_ID )
-      to   DM_ORDERS key ( ORDER_ID ),
-    dm_orderdetails_to_dm_products
-      from DM_ORDERDETAILS key ( PRODUCT_ID )
-      to   DM_PRODUCTS key ( PRODUCT_ID )
-  );
+create or replace semantic view BIRD_SUPERHEROS_SV
+    tables (
+        BIRD.SUPERHERO_SV.SUPERHERO primary key (SUPERHERO_ID),
+        BIRD.SUPERHERO_SV.HERO_ATTRIBUTE,
+        BIRD.SUPERHERO_SV.HERO_POWER,
+        BIRD.SUPERHERO_SV.ALIGNMENT primary key (ALIGNMENT_ID),
+        BIRD.SUPERHERO_SV.ATTRIBUTE primary key (ATTRIBUTE_ID),
+        BIRD.SUPERHERO_SV.EYE_COLOUR primary key (EYE_COLOUR_PK_ID),
+        BIRD.SUPERHERO_SV.HAIR_COLOUR primary key (HAIR_COLOUR_PK_ID),
+        BIRD.SUPERHERO_SV.SKIN_COLOUR primary key (SKIN_COLOUR_PK_ID),
+        BIRD.SUPERHERO_SV.GENDER primary key (GENDER_ID),
+        BIRD.SUPERHERO_SV.PUBLISHER primary key (PUBLISHER_ID),
+        BIRD.SUPERHERO_SV.RACE primary key (RACE_ID),
+        BIRD.SUPERHERO_SV.SUPERPOWER primary key (SUPERPOWER_ID)
+    )
+    relationships (
+        SUPERHERO_TO_ALIGNMENT as SUPERHERO(SH_ALIGNMENT_ID) references ALIGNMENT(ALIGNMENT_ID),
+        SUPERHERO_TO_EYE_COLOUR as SUPERHERO(SH_EYE_COLOUR_ID) references EYE_COLOUR(EYE_COLOUR_PK_ID),
+        SUPERHERO_TO_GENDER as SUPERHERO(SH_GENDER_ID) references GENDER(GENDER_ID),
+        SUPERHERO_TO_HAIR_COLOUR as SUPERHERO(SH_HAIR_COLOUR_ID) references HAIR_COLOUR(HAIR_COLOUR_PK_ID),
+        SUPERHERO_TO_PUBLISHER as SUPERHERO(SH_PUBLISHER_ID) references PUBLISHER(PUBLISHER_ID),
+        SUPERHERO_TO_RACE as SUPERHERO(SH_RACE_ID) references RACE(RACE_ID),
+        SUPERHERO_TO_SKIN_COLOUR as SUPERHERO(SH_SKIN_COLOUR_ID) references SKIN_COLOUR(SKIN_COLOUR_PK_ID),
+        HERO_ATTRIBUTE_TO_ATTRIBUTE as HERO_ATTRIBUTE(HA_ATTRIBUTE_ID) references ATTRIBUTE(ATTRIBUTE_ID),
+        HERO_ATTRIBUTE_TO_SUPERHERO as HERO_ATTRIBUTE(HA_HERO_ID) references SUPERHERO(SUPERHERO_ID),
+        HERO_POWER_TO_SUPERHERO as HERO_POWER(HP_HERO_ID) references SUPERHERO(SUPERHERO_ID),
+        HERO_POWER_TO_SUPERPOWER as HERO_POWER(HP_POWER_ID) references SUPERPOWER(SUPERPOWER_ID)
+    )
+    dimensions (
+        SUPERHERO.SUPERHERO_ID as superhero.SUPERHERO_ID comment='the unique identifier of the superhero',
+        SUPERHERO.SUPERHERO_NAME as superhero.SUPERHERO_NAME comment='the name of the superhero',
+        SUPERHERO.FULL_NAME as superhero.FULL_NAME comment='the full name of the superhero',
+        SUPERHERO.HEIGHT_CM as superhero.HEIGHT_CM comment='the height of the superhero in centimeters',
+        SUPERHERO.WEIGHT_KG as superhero.WEIGHT_KG comment='the weight of the superhero in kilograms',
+        ...
+        ALIGNMENT.ALIGNMENT as alignment.ALIGNMENT comment='the alignment of the superhero (Good, Neutral, or Bad)',
+        ATTRIBUTE.ATTRIBUTE_NAME as attribute.ATTRIBUTE_NAME comment='the attribute that defines who they are',
+        EYE_COLOUR.EYE_COLOUR as eye_colour.COLOUR comment='the color of the superhero''s eye',
+        ...
+        SUPERPOWER.POWER_NAME as superpower.POWER_NAME comment='the superpower name'
+    )
+    with extension (CA='...');
 ```
 
 ---
@@ -87,165 +59,236 @@ create or replace semantic view DUNDERMIFFLIN.PUBLIC.DUNDER_MIFFLIN_SALES
 
 **Tables:**
 
-| Alias | Base Table | Primary Key | Is Join Target? |
+| Semantic Alias | Fully-Qualified Reference | Primary Key | Is Join Target? |
 |---|---|---|---|
-| DM_CUSTOMER | DUNDERMIFFLIN.PUBLIC.DM_CUSTOMER | CUSTOMER_ID | YES |
-| DM_LOCALE_COUNTRY | DUNDERMIFFLIN.PUBLIC.DM_LOCALE_COUNTRY | LOCALE | YES |
-| DM_ORDERS | DUNDERMIFFLIN.PUBLIC.DM_ORDERS | — | YES (from DM_ORDERDETAILS) |
-| DM_ORDERDETAILS | DUNDERMIFFLIN.PUBLIC.DM_ORDERDETAILS | — | NO (fact table) |
-| DM_PRODUCTS | DUNDERMIFFLIN.PUBLIC.DM_PRODUCTS | PRODUCT_ID | YES |
+| SUPERHERO | BIRD.SUPERHERO_SV.SUPERHERO | SUPERHERO_ID | YES (from HERO_ATTRIBUTE, HERO_POWER) |
+| HERO_ATTRIBUTE | BIRD.SUPERHERO_SV.HERO_ATTRIBUTE | — | NO |
+| HERO_POWER | BIRD.SUPERHERO_SV.HERO_POWER | — | NO |
+| ALIGNMENT | BIRD.SUPERHERO_SV.ALIGNMENT | ALIGNMENT_ID | YES |
+| ATTRIBUTE | BIRD.SUPERHERO_SV.ATTRIBUTE | ATTRIBUTE_ID | YES |
+| EYE_COLOUR | BIRD.SUPERHERO_SV.EYE_COLOUR | EYE_COLOUR_PK_ID | YES |
+| HAIR_COLOUR | BIRD.SUPERHERO_SV.HAIR_COLOUR | HAIR_COLOUR_PK_ID | YES |
+| SKIN_COLOUR | BIRD.SUPERHERO_SV.SKIN_COLOUR | SKIN_COLOUR_PK_ID | YES |
+| GENDER | BIRD.SUPERHERO_SV.GENDER | GENDER_ID | YES |
+| PUBLISHER | BIRD.SUPERHERO_SV.PUBLISHER | PUBLISHER_ID | YES |
+| RACE | BIRD.SUPERHERO_SV.RACE | RACE_ID | YES |
+| SUPERPOWER | BIRD.SUPERHERO_SV.SUPERPOWER | SUPERPOWER_ID | YES |
 
-**Fact table:** `DM_ORDERDETAILS` (not a `TO` target in any relationship).
-
-**Relationships:**
-
-| Name | From | From Key | To | To Key |
-|---|---|---|---|---|
-| dm_orders_to_dm_customer | DM_ORDERS | CUSTOMER_ID | DM_CUSTOMER | CUSTOMER_ID |
-| dm_customer_to_dm_locale_country | DM_CUSTOMER | LOCALE | DM_LOCALE_COUNTRY | LOCALE |
-| dm_orderdetails_to_dm_orders | DM_ORDERDETAILS | ORDER_ID | DM_ORDERS | ORDER_ID |
-| dm_orderdetails_to_dm_products | DM_ORDERDETAILS | PRODUCT_ID | DM_PRODUCTS | PRODUCT_ID |
-
----
-
-## Step 6A: ThoughtSpot Table Objects Found
-
-Query: `ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile champ-staging`
-
-| Physical Table | ThoughtSpot GUID |
-|---|---|
-| DM_CUSTOMER | `aaa-111` *(placeholder)* |
-| DM_LOCALE_COUNTRY | `aaa-222` *(placeholder)* |
-| DM_ORDERS | `aaa-333` *(placeholder)* |
-| DM_ORDERDETAILS | `aaa-444` *(placeholder)* |
-| DM_PRODUCTS | `aaa-555` *(placeholder)* |
+**Fact tables:** `HERO_ATTRIBUTE` and `HERO_POWER` (never appear on TO side).
+`SUPERHERO` also has outbound joins, making it an intermediate fact/bridge table.
 
 ---
 
-## Step 7: Join Names from Table TML
+## Step 6A: ThoughtSpot Table Objects Found + Column Names
 
-For each relationship, export TML of the FROM table and find the matching join:
+```
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile champ-staging
+```
 
-| Relationship | FROM table TML exported | Join name found |
-|---|---|---|
-| dm_orderdetails_to_dm_orders | DM_ORDERDETAILS | `dm_orderdetails_to_dm_orders` |
-| dm_orderdetails_to_dm_products | DM_ORDERDETAILS | `dm_orderdetails_to_dm_products` |
-| dm_orders_to_dm_customer | DM_ORDERS | `dm_orders_to_dm_customer` |
-| dm_customer_to_dm_locale_country | DM_CUSTOMER | `dm_customer_to_dm_locale_country` |
+**Important:** EYE_COLOUR, HAIR_COLOUR, and SKIN_COLOUR all resolve to the **same**
+ThoughtSpot table object `colour` (same GUID). This is a dual-role table — include it
+only once in model_tables.
 
----
-
-## Step 9: Formula Translations
-
-| Column | Semantic View EXPR | Type | Result |
+| Semantic Alias | ThoughtSpot Name | ThoughtSpot GUID | Physical Column Names (from TML) |
 |---|---|---|---|
-| Order Duration (Days) | `DATEDIFF('day', DM_ORDERS.ORDER_DATE, DM_ORDERS.SHIP_DATE)` | formula | `diff_days ( [DM_ORDERS::SHIP_DATE] , [DM_ORDERS::ORDER_DATE] )` |
-| Total Revenue | `SUM(DM_ORDERDETAILS.UNIT_PRICE * DM_ORDERDETAILS.QUANTITY)` | formula | `sum ( [DM_ORDERDETAILS::UNIT_PRICE] * [DM_ORDERDETAILS::QUANTITY] )` |
+| SUPERHERO | superhero | `18b70585-d020-4bc4-924e-977efcfbbcf7` | `id, name, full_name, height_cm, weight_kg, alignment_id, eye_colour_id, hair_colour_id, skin_colour_id, race_id, publisher_id, gender_id` |
+| HERO_ATTRIBUTE | hero_attribute | `e8a38c54-8026-4942-a9f5-0816aa1ccb2f` | `hero_id, attribute_id, attribute_value` |
+| HERO_POWER | hero_power | `f4b2e84a-1725-4b1d-b664-3486fc322eb5` | `hero_id, power_id` |
+| ALIGNMENT | alignment | `766b058f-e3a3-4061-9288-0fb9b45a5aa7` | `id, alignment` |
+| ATTRIBUTE | attribute | `41177cdc-60c7-4033-9182-badedfea93f0` | `id, attribute_name` |
+| EYE_COLOUR / HAIR_COLOUR / SKIN_COLOUR | colour | `6905b1d7-2eb1-482f-a7f9-296aff8f08a4` | `id, colour` |
+| GENDER | gender | `ef1360b0-c067-4328-977a-4ea28f766c75` | `id, gender` |
+| PUBLISHER | publisher | `a8ed13f2-962b-44e6-8056-0345c702d9c3` | `id, publisher_name` |
+| RACE | race | `2ad21b9a-2814-4013-ad7a-246ba39c8a83` | `id, race` |
+| SUPERPOWER | superpower | `fcc132c8-8131-4f2a-9267-79fbd91c956d` | `id, power_name` |
 
-Note: `DATEDIFF` args are **reversed** — ThoughtSpot `diff_days(end, start)` maps to
-`DATEDIFF('day', start, end)`.
+**Column name mapping (semantic view alias → ThoughtSpot physical name):**
+
+The semantic view uses the Snowflake view layer (`BIRD.SUPERHERO_SV.*`) which renames
+columns from the physical tables. Examples:
+
+| Semantic View Dimension | View Column | Physical Column (ThoughtSpot) | column_id |
+|---|---|---|---|
+| SUPERHERO.SUPERHERO_ID | SUPERHERO_ID (in SUPERHERO_SV view) | `id` (in physical superhero table) | `superhero::id` |
+| SUPERHERO.SUPERHERO_NAME | SUPERHERO_NAME | `name` | `superhero::name` |
+| SUPERHERO.SH_ALIGNMENT_ID | SH_ALIGNMENT_ID | `alignment_id` | `superhero::alignment_id` |
+| HERO_ATTRIBUTE.HA_HERO_ID | HA_HERO_ID | `hero_id` | `hero_attribute::hero_id` |
+| HERO_ATTRIBUTE.HA_ATTRIBUTE_ID | HA_ATTRIBUTE_ID | `attribute_id` | `hero_attribute::attribute_id` |
+| EYE_COLOUR.EYE_COLOUR | EYE_COLOUR | `colour` | `colour::colour` |
 
 ---
 
-## Output — ThoughtSpot Model TML
+## Step 7: Join Names (Scenario B — no pre-defined joins)
+
+Exporting ThoughtSpot table TMLs confirms that none of the tables have pre-defined
+`joins_with` entries. Use **inline joins** in the model TML instead of `referencing_join`.
+
+---
+
+## Output — ThoughtSpot Model TML (abbreviated)
 
 ```yaml
 model:
-  name: "TEST_SV_Dunder Mifflin Sales"
+  name: "TEST_SV_BIRD Superhero"
   model_tables:
-  - id: DM_ORDERDETAILS
-    name: DM_ORDERDETAILS
-    fqn: "aaa-444"
-  - id: DM_ORDERS
-    name: DM_ORDERS
-    fqn: "aaa-333"
-    referencing_join: dm_orderdetails_to_dm_orders
-  - id: DM_CUSTOMER
-    name: DM_CUSTOMER
-    fqn: "aaa-111"
-    referencing_join: dm_orders_to_dm_customer
-  - id: DM_LOCALE_COUNTRY
-    name: DM_LOCALE_COUNTRY
-    fqn: "aaa-222"
-    referencing_join: dm_customer_to_dm_locale_country
-  - id: DM_PRODUCTS
-    name: DM_PRODUCTS
-    fqn: "aaa-555"
-    referencing_join: dm_orderdetails_to_dm_products
+  - id: hero_attribute
+    name: hero_attribute
+    fqn: "e8a38c54-8026-4942-a9f5-0816aa1ccb2f"
+    joins:
+    - name: ha_to_superhero
+      with: superhero           # matches id of target entry
+      on: "[hero_attribute::hero_id] = [superhero::id]"   # physical cols
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: ha_to_attribute
+      with: attribute
+      on: "[hero_attribute::attribute_id] = [attribute::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - id: hero_power
+    name: hero_power
+    fqn: "f4b2e84a-1725-4b1d-b664-3486fc322eb5"
+    joins:
+    - name: hp_to_superhero
+      with: superhero
+      on: "[hero_power::hero_id] = [superhero::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: hp_to_superpower
+      with: superpower
+      on: "[hero_power::power_id] = [superpower::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - id: superhero
+    name: superhero
+    fqn: "18b70585-d020-4bc4-924e-977efcfbbcf7"
+    joins:
+    - name: sh_to_alignment
+      with: alignment
+      on: "[superhero::alignment_id] = [alignment::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: sh_to_colour
+      with: colour
+      on: "[superhero::eye_colour_id] = [colour::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: sh_to_hair_colour
+      with: colour
+      on: "[superhero::hair_colour_id] = [colour::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: sh_to_skin_colour
+      with: colour
+      on: "[superhero::skin_colour_id] = [colour::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: sh_to_gender
+      with: gender
+      on: "[superhero::gender_id] = [gender::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: sh_to_publisher
+      with: publisher
+      on: "[superhero::publisher_id] = [publisher::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+    - name: sh_to_race
+      with: race
+      on: "[superhero::race_id] = [race::id]"
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE
+  - id: alignment
+    name: alignment
+    fqn: "766b058f-e3a3-4061-9288-0fb9b45a5aa7"
+  - id: attribute
+    name: attribute
+    fqn: "41177cdc-60c7-4033-9182-badedfea93f0"
+  - id: colour               # ONE entry for EYE_COLOUR + HAIR_COLOUR + SKIN_COLOUR
+    name: colour
+    fqn: "6905b1d7-2eb1-482f-a7f9-296aff8f08a4"
+  - id: gender
+    name: gender
+    fqn: "ef1360b0-c067-4328-977a-4ea28f766c75"
+  - id: publisher
+    name: publisher
+    fqn: "a8ed13f2-962b-44e6-8056-0345c702d9c3"
+  - id: race
+    name: race
+    fqn: "2ad21b9a-2814-4013-ad7a-246ba39c8a83"
+  - id: superpower
+    name: superpower
+    fqn: "fcc132c8-8131-4f2a-9267-79fbd91c956d"
   columns:
-  - name: "Customer Name"
-    column_id: DM_CUSTOMER::CUSTOMER_NAME
+  - name: "Superhero Name"
+    column_id: superhero::name         # physical col 'name', not 'SUPERHERO_NAME'
     properties:
       column_type: ATTRIBUTE
-  - name: "Locale"
-    column_id: DM_CUSTOMER::LOCALE
+  - name: "Full Name"
+    column_id: superhero::full_name
     properties:
       column_type: ATTRIBUTE
-  - name: "Country Name"
-    column_id: DM_LOCALE_COUNTRY::COUNTRY_NAME
+  - name: "Height (cm)"
+    column_id: superhero::height_cm
     properties:
       column_type: ATTRIBUTE
-  - name: "Order Date"
-    column_id: DM_ORDERS::ORDER_DATE
+  - name: "Alignment"
+    column_id: alignment::alignment
     properties:
       column_type: ATTRIBUTE
-  - name: "Ship Date"
-    column_id: DM_ORDERS::SHIP_DATE
+  - name: "Attribute Name"
+    column_id: attribute::attribute_name
     properties:
       column_type: ATTRIBUTE
-  - name: "Unit Price"
-    column_id: DM_ORDERDETAILS::UNIT_PRICE
+  - name: "Attribute Value"
+    column_id: hero_attribute::attribute_value
     properties:
       column_type: ATTRIBUTE
-  - name: "Quantity"
-    column_id: DM_ORDERDETAILS::QUANTITY
+  - name: "Eye Colour"
+    column_id: colour::colour           # same physical col serves eye/hair/skin
     properties:
       column_type: ATTRIBUTE
-  - name: "Product Name"
-    column_id: DM_PRODUCTS::PRODUCT_NAME
+  - name: "Gender"
+    column_id: gender::gender
     properties:
       column_type: ATTRIBUTE
-  - name: "Category"
-    column_id: DM_PRODUCTS::CATEGORY
+  - name: "Publisher"
+    column_id: publisher::publisher_name
     properties:
       column_type: ATTRIBUTE
-  formulas:
-  - name: "Order Duration (Days)"
-    expr: "diff_days ( [DM_ORDERS::SHIP_DATE] , [DM_ORDERS::ORDER_DATE] )"
+  - name: "Race"
+    column_id: race::race
     properties:
-      column_type: MEASURE
-  - name: "Total Revenue"
-    expr: "sum ( [DM_ORDERDETAILS::UNIT_PRICE] * [DM_ORDERDETAILS::QUANTITY] )"
+      column_type: ATTRIBUTE
+  - name: "Power Name"
+    column_id: superpower::power_name
     properties:
-      column_type: MEASURE
+      column_type: ATTRIBUTE
 ```
-
-**Import command:**
-```bash
-cat model_tml.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
-```
-
-Where `model_tml.json` contains: `["{yaml_string_with_escaped_newlines}"]`
-
-**Result:** Model `TEST_SV_Dunder Mifflin Sales` created with GUID `e516d156-3275-4bf3-b335-d269a0f67c1f`.
 
 ---
 
 ## Key patterns from this example
 
-1. **`referencing_join` direction:** Each dimension table's entry in `model_tables`
-   has `referencing_join` pointing to the join defined in the fact side's Table TML.
+1. **Real DDL format:** Flat `dimensions` and `metrics` blocks at view level (not nested
+   per-table). Relationships use `REL_NAME as FROM(COL) references TO(COL)` syntax.
 
-2. **DATEDIFF arg reversal:** `DATEDIFF('day', ORDER_DATE, SHIP_DATE)` → `diff_days([SHIP_DATE], [ORDER_DATE])`.
-   The order is always (end, start) in ThoughtSpot, opposite of Snowflake.
+2. **Inline joins (Scenario B):** Required when ThoughtSpot tables have no pre-defined
+   `joins_with` entries. The `with` field is REQUIRED and must match the target table's `id`.
 
-3. **Multi-column formula metrics:** `SUM(UNIT_PRICE * QUANTITY)` → formula column,
-   not a simple MEASURE column, because it involves two columns.
+3. **`with` and `on` consistency:** `with: alignment` and `on: "[superhero::alignment_id] = [alignment::id]"`
+   both use the `id` value (`alignment`). `id` values must be lowercase.
 
-4. **Column IDs for aliased columns:** `COUNTRY_NAME` aliased as "Country" on the
-   DM_CUSTOMER table entry maps to `column_id: DM_LOCALE_COUNTRY::COUNTRY_NAME`
-   because the EXPR reveals it comes from `DM_LOCALE_COUNTRY.COUNTRY_NAME`.
+4. **Dual-role tables:** EYE_COLOUR, HAIR_COLOUR, SKIN_COLOUR all map to the same
+   ThoughtSpot `colour` table. Only ONE entry in model_tables; THREE joins from superhero
+   (each using a different FK column). Hair and skin colour columns are omitted — the
+   `colour` table appears only once in the column list.
 
-5. **Omit primary key dimensions from columns list:** `CUSTOMER_ID`, `ORDER_ID`,
-   `PRODUCT_ID` etc. are typically FK/PK columns not surfaced to end users — omit
-   them from the model columns unless the user explicitly wants them.
+5. **Physical column names:** `SUPERHERO_ID` (view alias) → `id` (physical column).
+   Always export the ThoughtSpot table TML and use those column names in `column_id`.
+
+6. **`name` uniqueness:** Using `id: colour` for all three colour roles prevents the
+   "Multiple tables have same alias" error that would occur with separate entries.
+
+7. **No metrics in this model:** The superhero semantic view has no metrics block —
+   all columns are dimensions (ATTRIBUTEs).

@@ -1,5 +1,5 @@
 ---
-name: thoughtspot-snowflake-semantic-view
+name: thoughtspot-model-to-semantic-view
 description: Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View by exporting TML, mapping columns and joins, translating formulas, and creating the view via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
 ---
 
