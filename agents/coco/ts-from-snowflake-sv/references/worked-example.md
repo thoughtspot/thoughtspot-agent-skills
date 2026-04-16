@@ -1,8 +1,9 @@
 # Worked Example — Snowflake Semantic View → ThoughtSpot Model
 
 End-to-end conversion of `BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV` to a ThoughtSpot
-Model named `TEST_SV_BIRD Superhero`. Scenario B (inline joins) — the underlying
-ThoughtSpot table objects have no pre-defined joins between them.
+Model named `TEST_SV_BIRD Superhero`. The ThoughtSpot table objects already exist
+(Scenario A — user answered **Y** at Step 3), but they have no pre-defined joins, so
+inline joins are used in the model TML rather than `referencing_join`.
 
 ---
 
@@ -130,6 +131,11 @@ Exporting ThoughtSpot table TMLs confirms that none of the tables have pre-defin
 ```yaml
 model:
   name: "TEST_SV_BIRD Superhero"
+  # guid: "{model_guid}"   # Omit on first import. Add on ALL subsequent reimports to
+  #                        # update in-place — without it ThoughtSpot creates a new model.
+  properties:
+    is_bypass_rls: false
+    join_progressive: true
   model_tables:
   - id: hero_attribute
     name: hero_attribute
@@ -298,21 +304,21 @@ model:
 
 ---
 
-## Scenario B — Creating tables from scratch
+## Creating tables from scratch (user answered N at Step 3)
 
 When the ThoughtSpot cluster has no existing table objects for the semantic view's
-base tables, follow this workflow instead of Step 6A:
+base tables, follow this workflow instead of Step 4A:
 
-1. **Ask the user for the connection name** (e.g. `APJ_BIRD`)
+1. **Ask the user for the connection** — get the GUID with `TS_SEARCH_MODELS` or via the API
 2. **Introspect columns** from Snowflake INFORMATION_SCHEMA
 3. **Build table TMLs** for each base table and import them in one batch
 4. **Then build the model TML** referencing the newly created tables
 
-**Key difference from Scenario A:** Column names in `column_id` will match the
-Snowflake view column names (e.g. `SUPERHERO::SUPERHERO_ID`) because the table
-objects are created from the view layer, not the underlying physical tables.
+**Key difference:** Column names in `column_id` will match the Snowflake view column
+names (e.g. `superhero::SUPERHERO_ID`) because the table objects are created from the
+view layer, not the underlying physical tables.
 
-Table TML format (note `properties:` wrapper for `column_type`):
+Table TML format (note `properties:` wrapper for `column_type`; use connection `fqn` not `name`):
 ```yaml
 table:
   name: TABLE_NAME
@@ -320,7 +326,7 @@ table:
   schema: SCHEMA
   db_table: TABLE_NAME
   connection:
-    name: CONNECTION_NAME
+    fqn: "{connection_guid}"    # Use GUID — connection name causes JDBC errors
   columns:
   - name: COL_NAME
     db_column_name: COL_NAME
