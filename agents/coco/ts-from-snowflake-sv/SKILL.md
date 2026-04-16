@@ -70,18 +70,36 @@ UI confirmation prompt. Minimise calls by batching related statements.
 
 ## Workflow
 
-### Step 1: Get profile and DDL
+### Step 1: Select profile and get DDL
 
-Batch profile retrieval and DDL fetch in a single call:
+**Select the ThoughtSpot profile:**
 
 ```sql
--- Batch: profile + DDL
 SELECT NAME, BASE_URL, USERNAME, AUTH_TYPE, SECRET_NAME, TOKEN_EXPIRES_AT
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
-LIMIT 1;
-
-SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{view_name}');
+ORDER BY NAME;
 ```
+
+- If multiple rows: display a numbered list (`#. name — auth_type — base_url`) and ask
+  the user to select one. Store the selected `NAME` as `{profile_name}`.
+- If exactly one row: display it and confirm before proceeding. Store as `{profile_name}`.
+
+**Validate the selected profile — branch by auth_type:**
+
+*Token auth:*
+```sql
+SELECT token_expires_at > CURRENT_TIMESTAMP() AS is_valid
+FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
+WHERE name = '{profile_name}';
+```
+- `is_valid = TRUE` → proceed
+- `is_valid = FALSE` → stop:
+  > "The token for profile '{profile_name}' has expired. Run `/thoughtspot-setup` →
+  > U → Refresh token, then retry."
+
+*Password auth:* no expiry check needed — proceed directly to credential retrieval.
+
+**Batch: retrieve credential + get DDL:**
 
 If the user has not named the semantic view, first list available views:
 
@@ -91,30 +109,18 @@ SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema};
 
 Display results as a numbered list and ask the user to select one.
 
-**Validate the ThoughtSpot profile:**
+Then fetch credential and DDL together:
 
 ```sql
-SELECT auth_type,
-       CASE WHEN auth_type = 'password' THEN TRUE
-            ELSE token_expires_at > CURRENT_TIMESTAMP()
-       END AS is_valid
-FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
-WHERE name = '{profile_name}';
-```
-
-- `auth_type = 'password'` and `is_valid = TRUE` → proceed (no expiry for password auth)
-- `auth_type = 'token'` and `is_valid = TRUE` → retrieve bearer token and proceed
-- `is_valid = FALSE` → stop and tell the user:
-  > "Your ThoughtSpot token has expired. Run `/thoughtspot-setup` → U → Refresh token, then retry."
-
-Retrieve the credential:
-```sql
+-- Batch: credential + DDL
 SELECT SYSTEM$GET_SECRET_STRING('SKILLS.PUBLIC.' || SECRET_NAME) AS secret_value
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
 WHERE name = '{profile_name}';
+
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{view_name}');
 ```
 
-Store the value for use in subsequent API calls via stored procedures. Never print it.
+Store `secret_value` for use in subsequent API calls via stored procedures. Never print it.
 
 ---
 
@@ -152,67 +158,86 @@ Identify the **fact table**: the table that never appears on the `TO` side of an
 
 ---
 
-### Step 3: Choose scenario
+### Step 3: Table registration question
 
-Present the user with a clear choice:
+After parsing, display the tables found and ask a single question:
 
 ```
-The semantic view references these base tables:
+The semantic view references {n} tables:
   {database}.{schema}.{TABLE_1}
   {database}.{schema}.{TABLE_2}
   ...
 
-How should the ThoughtSpot Model be built?
+Are these tables already registered in ThoughtSpot?
+  Y  Yes — use existing ThoughtSpot Table objects
+  N  No  — create new Table objects from scratch
+  ?  Not sure — search ThoughtSpot first
 
-  A) On the underlying physical tables (recommended if already in ThoughtSpot)
-  B) On these tables/views as-is (creates new ThoughtSpot Table objects)
-
-Select A or B:
+Enter Y / N / ?:
 ```
+
+- **Y** → go to Step 4A (verify existing tables, skip the search)
+- **N** → go to Step 4B (create new Table objects)
+- **?** → go to Step 4A (search + verify)
 
 ---
 
-### Step 4A: Find ThoughtSpot Table objects (Scenario A)
+### Step 4A: Discover and verify existing ThoughtSpot Table objects (Y and ? paths)
 
-**First, ask the user before searching:**
+Skip this step if the user answered **N** in Step 3 — go directly to Step 4B.
 
-```
-Do the base tables already exist as Table objects in ThoughtSpot?
-
-  Y) Yes — search ThoughtSpot to find them
-  N) No — I'll provide the connection name to use
-
-Enter Y or N:
-```
-
-**If Y:** Search ThoughtSpot for existing table objects:
+**Search ThoughtSpot for matching table objects:**
 
 ```sql
 CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', '{table_name}', FALSE);
 ```
 
-Filter results to match by database + schema + table name against the semantic
-view's `BASE TABLE` refs.
-
+Run once per base table. Filter results to match by database + schema + table name.
 Build map: `physical_table_name → {guid, metadata_name}`.
 
-**If N:** Ask for the connection name:
+**Export TMLs for all found tables in one call to verify columns:**
 
-```
-Which ThoughtSpot connection should be used for these tables?
-
-Connection name:
+```sql
+CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{guid1}', '{guid2}'));
 ```
 
-Store as `{connection_name}`. The tables will be added to this connection and
-Table TML objects will be created automatically (follow Step 4B for table creation,
-but use the named connection instead of creating a new one).
+Parse `table.columns[].name` from each returned TML. Build a column map per table:
+`table_name → [physical_col_name, ...]`. Compare against the columns referenced in
+the semantic view dimensions and metrics to identify any gaps.
+
+**Confirm the plan before making any changes:**
+
+```
+Table Plan:
+  ✓  {TABLE_1}  — found (GUID: {guid}) — all {n} columns present → use as-is
+  ⚠  {TABLE_2}  — found (GUID: {guid}) — missing {n} columns: {COL_A}, {COL_B} → update
+  ✗  {TABLE_3}  — not found in ThoughtSpot → create new
+
+Actions to be taken:
+  • Update {TABLE_2}: add {n} missing columns
+  • Create {TABLE_3}: {n} columns from Snowflake schema
+
+No changes have been made yet. Proceed? (yes/no):
+```
+
+Do not proceed until the user confirms. For any table **not found**, follow Step 4B.
+For any table with **missing columns**, add them before building the model.
 
 ---
 
 ### Step 4B: Create ThoughtSpot Table objects (Scenario B)
 
 **When tables don't exist in ThoughtSpot, create them first before the model.**
+
+Ask which ThoughtSpot connection to register them under:
+
+```
+Which ThoughtSpot connection should these tables be added to?
+
+Connection name:
+```
+
+Store as `{connection_name}`.
 
 For each base table reference, introspect columns:
 
@@ -426,7 +451,10 @@ On success, extract and display the created model GUID.
 
 After completing one conversion, offer to convert additional views.
 
-- **Session continuity:** If the ThoughtSpot profile was already validated earlier in
-  this conversation, skip the profile check and reuse the stored `secret_value`.
+- **Session continuity:** If the ThoughtSpot profile was already selected and validated
+  earlier in this conversation, skip the profile selection and validation. For token
+  auth, reuse the stored `secret_value` (tokens are valid for the session). For
+  password auth, re-retrieve the credential only if the stored value is no longer
+  available.
 - Do not re-authenticate between views.
 - Return to Step 1 (DDL fetch only) for the next view, skipping the profile SQL call.
