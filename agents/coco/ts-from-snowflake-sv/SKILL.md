@@ -152,45 +152,96 @@ Select A or B:
 
 ### Step 4A: Find ThoughtSpot Table objects (Scenario A)
 
-Call the ThoughtSpot metadata search API to find existing table objects:
+**First, ask the user before searching:**
 
 ```
-POST {base_url}/api/rest/2.0/metadata/search
-{
-  "metadata": [{"type": "LOGICAL_TABLE"}],
-  "include_details": false
-}
+Do the base tables already exist as Table objects in ThoughtSpot?
+
+  Y) Yes — search ThoughtSpot to find them
+  N) No — I'll provide the connection name to use
+
+Enter Y or N:
 ```
 
-Filter results for entries with `metadata_header.type = "ONE_TO_ONE_LOGICAL"` and
-match by database + schema + table name against the semantic view's `BASE TABLE` refs.
+**If Y:** Search ThoughtSpot for existing table objects:
 
-If stored procedures exist:
 ```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{token}', '{base_url}', 'LOGICAL_TABLE');
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', '{table_name}', FALSE);
 ```
+
+Filter results to match by database + schema + table name against the semantic
+view's `BASE TABLE` refs.
 
 Build map: `physical_table_name → {guid, metadata_name}`.
+
+**If N:** Ask for the connection name:
+
+```
+Which ThoughtSpot connection should be used for these tables?
+
+Connection name:
+```
+
+Store as `{connection_name}`. The tables will be added to this connection and
+Table TML objects will be created automatically (follow Step 4B for table creation,
+but use the named connection instead of creating a new one).
 
 ---
 
 ### Step 4B: Create ThoughtSpot Table objects (Scenario B)
 
+**When tables don't exist in ThoughtSpot, create them first before the model.**
+
 For each base table reference, introspect columns:
 
 ```sql
-SELECT COLUMN_NAME, DATA_TYPE
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
 FROM {database}.INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = '{schema}'
-  AND TABLE_NAME = '{table_or_view}';
+ORDER BY TABLE_NAME, ORDINAL_POSITION;
 ```
 
-Then call the ThoughtSpot REST API to:
-1. Add the tables to the connection (`POST /api/rest/2.0/connections/{id}/update`)
-2. Import Table TML objects for each table
+Build a table TML for each table and import them all in one batch:
 
-See [../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md) for
-the Snowflake → ThoughtSpot type mapping.
+```yaml
+table:
+  name: TABLE_NAME
+  db: DATABASE
+  schema: SCHEMA
+  db_table: TABLE_NAME
+  connection:
+    name: {connection_name}
+  columns:
+  - name: COL_NAME
+    db_column_name: COL_NAME
+    data_type: INT64        # or VARCHAR, DOUBLE, etc.
+    properties:
+      column_type: ATTRIBUTE
+  joins:                     # Only on tables that have FK relationships
+  - name: JOIN_NAME
+    destination: TARGET_TABLE
+    on: "[SOURCE::FK_COL] = [TARGET::PK_COL]"
+    type: LEFT_OUTER
+```
+
+Import all table TMLs in one call:
+```sql
+CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$...$$, $$...$$), TRUE);
+```
+
+**IMPORTANT:** Use `$$` dollar-quoting for each TML string to preserve YAML formatting.
+Do NOT use `\n` escape sequences — they are passed literally and break YAML parsing.
+
+Snowflake → ThoughtSpot type mapping:
+
+| Snowflake | ThoughtSpot |
+|---|---|
+| NUMBER, INT, INTEGER, BIGINT, SMALLINT, TINYINT | INT64 |
+| FLOAT, DOUBLE, REAL, DECIMAL, NUMERIC | DOUBLE |
+| VARCHAR, TEXT, STRING, CHAR | VARCHAR |
+| BOOLEAN | BOOL |
+| DATE | DATE |
+| TIMESTAMP, TIMESTAMP_NTZ, TIMESTAMP_LTZ, TIMESTAMP_TZ | DATE_TIME |
 
 ---
 
@@ -216,6 +267,50 @@ Parse each returned `edoc` YAML string. Find in the `joins` section the entry wh
 ---
 
 ### Step 6: Build and translate the model TML
+
+**IMPORTANT — TML format rules learned from production use:**
+
+1. **Table TML `column_type`** must be nested under `properties:`:
+   ```yaml
+   columns:
+   - name: COL_NAME
+     db_column_name: COL_NAME
+     data_type: INT64
+     properties:
+       column_type: ATTRIBUTE
+   ```
+   Bare `column_type: ATTRIBUTE` (without `properties:`) causes "No enum constant ColumnTypeEnum." error.
+
+2. **Model TML joins** use `with:` (not `destination:`), require `cardinality:`, and
+   `'on'` must be quoted in YAML:
+   ```yaml
+   joins:
+   - name: join_name
+     with: TARGET_TABLE
+     'on': '[SOURCE::FK_COL] = [TARGET::PK_COL]'
+     type: INNER
+     cardinality: MANY_TO_ONE
+   ```
+
+3. **Join type should default to `INNER`** (not `LEFT_OUTER`). Snowflake semantic views
+   don't specify join type, but ThoughtSpot models work best with INNER joins for
+   lookup/dimension tables. At the review checkpoint (Step 7), ask the user:
+   ```
+   Join type for all relationships:
+     1) INNER (recommended for dimension lookups)
+     2) LEFT_OUTER
+   ```
+
+4. **Column `column_id`** format is `TABLE_NAME::COLUMN_NAME` (not `db_column_name`).
+
+5. **Display names** should be title-cased (e.g. "Superhero Name" not "SUPERHERO_NAME").
+
+6. **Model `properties`** should include:
+   ```yaml
+   properties:
+     is_bypass_rls: false
+     join_progressive: true
+   ```
 
 Apply all column, formula, and join mappings from
 [../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md) to build
@@ -255,16 +350,15 @@ Proceed? (yes/no):
 
 ### Step 8: Import the model TML
 
-Call the ThoughtSpot TML import API:
+Import via the stored procedure:
 
+```sql
+CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$
+{model_tml_yaml}
+$$), TRUE);
 ```
-POST {base_url}/api/rest/2.0/metadata/tml/import
-{
-  "metadata_tmls": ["{yaml_string}"],
-  "import_policy": "ALL_OR_NONE",
-  "create_new": true
-}
-```
+
+**IMPORTANT:** Use `$$` dollar-quoting to preserve YAML formatting.
 
 On success, extract and display the created model GUID.
 

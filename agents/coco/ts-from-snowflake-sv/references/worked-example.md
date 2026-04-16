@@ -292,3 +292,43 @@ model:
 
 7. **No metrics in this model:** The superhero semantic view has no metrics block —
    all columns are dimensions (ATTRIBUTEs).
+
+8. **Join type should default to INNER** for dimension lookups (not LEFT_OUTER as shown
+   above). The example uses LEFT_OUTER but INNER is preferred. At the review checkpoint,
+   ask the user which join type to use.
+
+---
+
+## Scenario B — Creating tables from scratch
+
+When the ThoughtSpot cluster has no existing table objects for the semantic view's
+base tables, follow this workflow instead of Step 6A:
+
+1. **Ask the user for the connection name** (e.g. `APJ_BIRD`)
+2. **Introspect columns** from Snowflake INFORMATION_SCHEMA
+3. **Build table TMLs** for each base table and import them in one batch
+4. **Then build the model TML** referencing the newly created tables
+
+**Key difference from Scenario A:** Column names in `column_id` will match the
+Snowflake view column names (e.g. `SUPERHERO::SUPERHERO_ID`) because the table
+objects are created from the view layer, not the underlying physical tables.
+
+Table TML format (note `properties:` wrapper for `column_type`):
+```yaml
+table:
+  name: TABLE_NAME
+  db: DATABASE
+  schema: SCHEMA
+  db_table: TABLE_NAME
+  connection:
+    name: CONNECTION_NAME
+  columns:
+  - name: COL_NAME
+    db_column_name: COL_NAME
+    data_type: INT64
+    properties:
+      column_type: ATTRIBUTE
+```
+
+**IMPORTANT:** Use `$$` dollar-quoting in SQL for TML strings. Do NOT use `\n`
+escape sequences — they are passed literally and break YAML parsing.
