@@ -21,7 +21,6 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [../../../schemas/snowflake-schema.md](../../../schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
 | [../../../schemas/thoughtspot-tml.md](../../../schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
-| [references/direct-api-auth.md](references/direct-api-auth.md) | Direct API authentication fallback (CLI only — not for Snowsight Workspaces) |
 
 ---
 
@@ -213,9 +212,6 @@ Store the exact `NAME` value as `{profile_name}` for all subsequent
 > If the stored procedures are missing and you are in a Snowsight Workspace, inform
 > the user they must run `/thoughtspot-setup` first to create the stored procedures.
 > Do not attempt direct API calls.
-
-For full authentication details (profile selection, credential resolution, token
-persistence), see [references/direct-api-auth.md](references/direct-api-auth.md).
 
 ---
 

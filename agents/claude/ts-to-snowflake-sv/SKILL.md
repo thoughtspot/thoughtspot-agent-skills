@@ -23,6 +23,7 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [~/.claude/schemas/thoughtspot-tml.md](~/.claude/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
+| [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 
 ---
 

@@ -28,6 +28,7 @@ Two scenarios are supported:
 | [~/.claude/mappings/ts-snowflake/formula-translation.md](~/.claude/mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
 | [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (Scenario B, inline joins, dual-role tables) |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns |
 
 ---

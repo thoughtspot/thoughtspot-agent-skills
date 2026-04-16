@@ -181,15 +181,27 @@ and add the skill files manually.
 3. Create the following folder structure in the Workspace:
    ```
    .snowflake/
-   └── cortex/
-       └── skills/
-           └── <skill-name>/
-               ├── SKILL.md
-               └── references/
-                   └── ...
+   ├── cortex/
+   │   └── skills/
+   │       └── <skill-name>/
+   │           ├── SKILL.md
+   │           └── references/
+   │               └── ...
+   ├── mappings/
+   │   └── ts-snowflake/
+   │       ├── mapping-rules.md
+   │       ├── formula-translation.md
+   │       └── property-coverage.md
+   └── schemas/
+       ├── snowflake-schema.md
+       └── thoughtspot-tml.md
    ```
 4. For each file, right-click the target folder → **New File** → paste the contents
 5. Cortex Code will auto-detect the skill once all files are in place
+
+> **Path note:** Skills reference `mappings/` and `schemas/` via `../../../` — three
+> levels up from `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/`,
+> so these sit alongside `cortex/` inside `.snowflake/`.
 
 > **Note:** With this approach there is no automatic update mechanism. To get newer
 > versions of the skill, you must manually replace the files. Consider Options A–D
@@ -204,20 +216,33 @@ and add the skill files manually.
 1. Open **Snowsight** → **Projects** → **Workspaces**
 2. Select **Create Workspace** → **Create from existing Git repository**
 3. Select your repository and branch
-4. In the Workspace file tree, create the folder structure that Cortex Code expects:
+4. In the Workspace file tree, create the following structure:
    ```
    .snowflake/
-   └── cortex/
-       └── skills/
-           └── <skill-name>/
+   ├── cortex/
+   │   └── skills/
+   │       └── <skill-name>/
+   ├── mappings/
+   │   └── ts-snowflake/
+   │       ├── mapping-rules.md
+   │       ├── formula-translation.md
+   │       └── property-coverage.md
+   └── schemas/
+       ├── snowflake-schema.md
+       └── thoughtspot-tml.md
    ```
-5. Copy the files from `agents/coco/<skill-name>/` into the new folder. For each file,
-   right-click the target folder → **New File** → paste the contents.
+5. Copy the skill files from `agents/coco/<skill-name>/` into `.snowflake/cortex/skills/<skill-name>/`.
+   Copy `mappings/` and `schemas/` (repo root) into `.snowflake/mappings/` and `.snowflake/schemas/`.
+   For each file, right-click the target folder → **New File** → paste the contents.
 6. Cortex Code will auto-detect the skill once `SKILL.md` is in place.
 
+> **Path note:** Skills reference `mappings/` and `schemas/` via `../../../` — three
+> levels up from `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/`,
+> so these sit alongside `cortex/` inside `.snowflake/`.
+
 > When a new version of the skill is available, fetch the repository
-> (`ALTER GIT REPOSITORY ... FETCH`) to update the `agents/coco/` source files, then
-> re-copy any changed files into `.snowflake/cortex/skills/<skill-name>/`.
+> (`ALTER GIT REPOSITORY ... FETCH`) to update the source files, then re-copy any
+> changed files into their respective `.snowflake/` locations.
 
 **From manual upload (Option E):**
 
