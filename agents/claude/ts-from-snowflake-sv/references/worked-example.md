@@ -1,8 +1,13 @@
 # Worked Example — Snowflake Semantic View → ThoughtSpot Model
 
 End-to-end conversion of `BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV` to a ThoughtSpot
-Model named `TEST_SV_BIRD Superhero`. Scenario B (inline joins) — the underlying
-ThoughtSpot table objects have no pre-defined joins between them.
+Model named `TEST_SV_BIRD Superhero`.
+
+The semantic view references Snowflake objects in the `BIRD.SUPERHERO_SV` schema —
+in this case those objects are views, but a semantic view can equally reference
+physical tables or a mix of both. ThoughtSpot Table objects for these views already
+exist on the `se-thoughtspot` cluster (user answered **Y** at Step 3). The tables
+have no pre-defined joins, so inline joins are used in the model TML.
 
 ---
 
@@ -45,8 +50,10 @@ create or replace semantic view BIRD_SUPERHEROS_SV
         SUPERHERO.WEIGHT_KG as superhero.WEIGHT_KG comment='the weight of the superhero in kilograms',
         ...
         ALIGNMENT.ALIGNMENT as alignment.ALIGNMENT comment='the alignment of the superhero (Good, Neutral, or Bad)',
-        ATTRIBUTE.ATTRIBUTE_NAME as attribute.ATTRIBUTE_NAME comment='the attribute that defines who they are',
+        ATTRIBUTE.ATTRIBUTE_NAME as attribute.ATTRIBUTE_NAME comment='the attribute that defines who they are and what they are capable of',
         EYE_COLOUR.EYE_COLOUR as eye_colour.COLOUR comment='the color of the superhero''s eye',
+        HAIR_COLOUR.HAIR_COLOUR as hair_colour.COLOUR comment='the color of the superhero''s hair',
+        SKIN_COLOUR.SKIN_COLOUR as skin_colour.COLOUR comment='the color of the superhero''s skin',
         ...
         SUPERPOWER.POWER_NAME as superpower.POWER_NAME comment='the superpower name'
     )
@@ -74,51 +81,45 @@ create or replace semantic view BIRD_SUPERHEROS_SV
 | RACE | BIRD.SUPERHERO_SV.RACE | RACE_ID | YES |
 | SUPERPOWER | BIRD.SUPERHERO_SV.SUPERPOWER | SUPERPOWER_ID | YES |
 
-**Fact tables:** `HERO_ATTRIBUTE` and `HERO_POWER` (never appear on TO side).
-`SUPERHERO` also has outbound joins, making it an intermediate fact/bridge table.
+**Fact tables:** `HERO_ATTRIBUTE` and `HERO_POWER` (never appear on the TO side of any relationship).
+`SUPERHERO` is an intermediate table — it receives joins from the fact tables and sends joins to dimension tables.
 
 ---
 
-## Step 6A: ThoughtSpot Table Objects Found + Column Names
+## Step 6A: ThoughtSpot Table Objects Found
 
+```bash
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --name '%SUPERHERO_SV%' --profile se-thoughtspot
+# (repeat per table name as needed)
 ```
-ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile champ-staging
-```
 
-**Important:** EYE_COLOUR, HAIR_COLOUR, and SKIN_COLOUR all resolve to the **same**
-ThoughtSpot table object `colour` (same GUID). This is a dual-role table — include it
-only once in model_tables.
+The ThoughtSpot table objects point directly to the Snowflake objects in `BIRD.SUPERHERO_SV` —
+the same objects the semantic view references. Column names in the ThoughtSpot TMLs therefore
+match the column names those objects expose.
 
-| Semantic Alias | ThoughtSpot Name | ThoughtSpot GUID | Physical Column Names (from TML) |
+| Semantic Alias | ThoughtSpot Name | GUID | Columns (from TML) |
 |---|---|---|---|
-| SUPERHERO | superhero | `18b70585-d020-4bc4-924e-977efcfbbcf7` | `id, name, full_name, height_cm, weight_kg, alignment_id, eye_colour_id, hair_colour_id, skin_colour_id, race_id, publisher_id, gender_id` |
-| HERO_ATTRIBUTE | hero_attribute | `e8a38c54-8026-4942-a9f5-0816aa1ccb2f` | `hero_id, attribute_id, attribute_value` |
-| HERO_POWER | hero_power | `f4b2e84a-1725-4b1d-b664-3486fc322eb5` | `hero_id, power_id` |
-| ALIGNMENT | alignment | `766b058f-e3a3-4061-9288-0fb9b45a5aa7` | `id, alignment` |
-| ATTRIBUTE | attribute | `41177cdc-60c7-4033-9182-badedfea93f0` | `id, attribute_name` |
-| EYE_COLOUR / HAIR_COLOUR / SKIN_COLOUR | colour | `6905b1d7-2eb1-482f-a7f9-296aff8f08a4` | `id, colour` |
-| GENDER | gender | `ef1360b0-c067-4328-977a-4ea28f766c75` | `id, gender` |
-| PUBLISHER | publisher | `a8ed13f2-962b-44e6-8056-0345c702d9c3` | `id, publisher_name` |
-| RACE | race | `2ad21b9a-2814-4013-ad7a-246ba39c8a83` | `id, race` |
-| SUPERPOWER | superpower | `fcc132c8-8131-4f2a-9267-79fbd91c956d` | `id, power_name` |
+| SUPERHERO | SUPERHERO | `4c089346-7892-4cbb-925c-395f5c90302b` | SUPERHERO_ID, SUPERHERO_NAME, FULL_NAME, HEIGHT_CM, WEIGHT_KG, SH_GENDER_ID, SH_EYE_COLOUR_ID, SH_HAIR_COLOUR_ID, SH_SKIN_COLOUR_ID, SH_RACE_ID, SH_PUBLISHER_ID, SH_ALIGNMENT_ID |
+| HERO_ATTRIBUTE | HERO_ATTRIBUTE | `0d52f26c-9bcf-4c1f-8461-b1b9c5174f8b` | HA_HERO_ID, HA_ATTRIBUTE_ID, ATTRIBUTE_VALUE |
+| HERO_POWER | HERO_POWER | `aae49ef1-8b13-4891-b9fc-eeac65e0116a` | HP_HERO_ID, HP_POWER_ID |
+| ALIGNMENT | ALIGNMENT | `e0115940-7faa-4821-a840-68f0e6bf1b87` | ALIGNMENT_ID, ALIGNMENT |
+| ATTRIBUTE | ATTRIBUTE | `7d539ecb-0888-425d-b84c-f85d2acc6416` | ATTRIBUTE_ID, ATTRIBUTE_NAME |
+| EYE_COLOUR | EYE_COLOUR | `e21ffc4d-51f7-4141-b05e-0e314722cc2a` | EYE_COLOUR_PK_ID, COLOUR |
+| HAIR_COLOUR | HAIR_COLOUR | `02c48153-f640-4a81-bf55-11d58dfd2913` | HAIR_COLOUR_PK_ID, COLOUR |
+| SKIN_COLOUR | SKIN_COLOUR | `1dc0334f-a5df-443a-8bef-dd81174b6c39` | SKIN_COLOUR_PK_ID, COLOUR |
+| GENDER | GENDER | `bfd7596e-431f-4f6a-99f4-20cec611c16c` | GENDER_ID, GENDER |
+| PUBLISHER | PUBLISHER | `1e7dec84-6e8c-413c-b284-e1c285bd72a3` | PUBLISHER_ID, PUBLISHER_NAME |
+| RACE | RACE | `f2d74e25-e11c-44e6-bf0a-a7bfa39ccacd` | RACE_ID, RACE |
+| SUPERPOWER | SUPERPOWER | `fbd2de8f-dc23-4aaa-a14b-08e54cf3ccfc` | SUPERPOWER_ID, POWER_NAME |
 
-**Column name mapping (semantic view alias → ThoughtSpot physical name):**
-
-The semantic view uses the Snowflake view layer (`BIRD.SUPERHERO_SV.*`) which renames
-columns from the physical tables. Examples:
-
-| Semantic View Dimension | View Column | Physical Column (ThoughtSpot) | column_id |
-|---|---|---|---|
-| SUPERHERO.SUPERHERO_ID | SUPERHERO_ID (in SUPERHERO_SV view) | `id` (in physical superhero table) | `superhero::id` |
-| SUPERHERO.SUPERHERO_NAME | SUPERHERO_NAME | `name` | `superhero::name` |
-| SUPERHERO.SH_ALIGNMENT_ID | SH_ALIGNMENT_ID | `alignment_id` | `superhero::alignment_id` |
-| HERO_ATTRIBUTE.HA_HERO_ID | HA_HERO_ID | `hero_id` | `hero_attribute::hero_id` |
-| HERO_ATTRIBUTE.HA_ATTRIBUTE_ID | HA_ATTRIBUTE_ID | `attribute_id` | `hero_attribute::attribute_id` |
-| EYE_COLOUR.EYE_COLOUR | EYE_COLOUR | `colour` | `colour::colour` |
+**Column name note:** Always use the column names from the ThoughtSpot Table TML as the
+`column_id` value — not the left-hand side of the semantic view dimension. Some Snowflake
+objects rename columns internally. For example, the semantic view accesses `EYE_COLOUR.EYE_COLOUR`
+but the ThoughtSpot table exposes that column as `COLOUR` — so `column_id` is `eye_colour::COLOUR`.
 
 ---
 
-## Step 7: Join Names (Scenario B — no pre-defined joins)
+## Step 7: Join Names (no pre-defined joins — inline joins required)
 
 Exporting ThoughtSpot table TMLs confirms that none of the tables have pre-defined
 `joins_with` entries. Use **inline joins** in the model TML instead of `referencing_join`.
@@ -130,138 +131,161 @@ Exporting ThoughtSpot table TMLs confirms that none of the tables have pre-defin
 ```yaml
 model:
   name: "TEST_SV_BIRD Superhero"
+  # guid: "{model_guid}"   # Omit on first import. Add on ALL subsequent reimports to
+  #                        # update in-place — without it ThoughtSpot creates a new model.
+  properties:
+    is_bypass_rls: false
+    join_progressive: true
   model_tables:
-  - id: hero_attribute
-    name: hero_attribute
-    fqn: "e8a38c54-8026-4942-a9f5-0816aa1ccb2f"
+  - id: hero_attribute          # lowercase id — used in column_id and join on clauses
+    name: HERO_ATTRIBUTE        # exact ThoughtSpot table object name
+    fqn: "0d52f26c-9bcf-4c1f-8461-b1b9c5174f8b"
     joins:
     - name: ha_to_superhero
       with: superhero           # matches id of target entry
-      on: "[hero_attribute::hero_id] = [superhero::id]"   # physical cols
+      on: "[hero_attribute::HA_HERO_ID] = [superhero::SUPERHERO_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: ha_to_attribute
       with: attribute
-      on: "[hero_attribute::attribute_id] = [attribute::id]"
+      on: "[hero_attribute::HA_ATTRIBUTE_ID] = [attribute::ATTRIBUTE_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
   - id: hero_power
-    name: hero_power
-    fqn: "f4b2e84a-1725-4b1d-b664-3486fc322eb5"
+    name: HERO_POWER
+    fqn: "aae49ef1-8b13-4891-b9fc-eeac65e0116a"
     joins:
     - name: hp_to_superhero
       with: superhero
-      on: "[hero_power::hero_id] = [superhero::id]"
+      on: "[hero_power::HP_HERO_ID] = [superhero::SUPERHERO_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: hp_to_superpower
       with: superpower
-      on: "[hero_power::power_id] = [superpower::id]"
+      on: "[hero_power::HP_POWER_ID] = [superpower::SUPERPOWER_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
   - id: superhero
-    name: superhero
-    fqn: "18b70585-d020-4bc4-924e-977efcfbbcf7"
+    name: SUPERHERO
+    fqn: "4c089346-7892-4cbb-925c-395f5c90302b"
     joins:
     - name: sh_to_alignment
       with: alignment
-      on: "[superhero::alignment_id] = [alignment::id]"
+      on: "[superhero::SH_ALIGNMENT_ID] = [alignment::ALIGNMENT_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
-    - name: sh_to_colour
-      with: colour
-      on: "[superhero::eye_colour_id] = [colour::id]"
+    - name: sh_to_eye_colour
+      with: eye_colour
+      on: "[superhero::SH_EYE_COLOUR_ID] = [eye_colour::EYE_COLOUR_PK_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_hair_colour
-      with: colour
-      on: "[superhero::hair_colour_id] = [colour::id]"
+      with: hair_colour
+      on: "[superhero::SH_HAIR_COLOUR_ID] = [hair_colour::HAIR_COLOUR_PK_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_skin_colour
-      with: colour
-      on: "[superhero::skin_colour_id] = [colour::id]"
+      with: skin_colour
+      on: "[superhero::SH_SKIN_COLOUR_ID] = [skin_colour::SKIN_COLOUR_PK_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_gender
       with: gender
-      on: "[superhero::gender_id] = [gender::id]"
+      on: "[superhero::SH_GENDER_ID] = [gender::GENDER_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_publisher
       with: publisher
-      on: "[superhero::publisher_id] = [publisher::id]"
+      on: "[superhero::SH_PUBLISHER_ID] = [publisher::PUBLISHER_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_race
       with: race
-      on: "[superhero::race_id] = [race::id]"
+      on: "[superhero::SH_RACE_ID] = [race::RACE_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
   - id: alignment
-    name: alignment
-    fqn: "766b058f-e3a3-4061-9288-0fb9b45a5aa7"
+    name: ALIGNMENT
+    fqn: "e0115940-7faa-4821-a840-68f0e6bf1b87"
   - id: attribute
-    name: attribute
-    fqn: "41177cdc-60c7-4033-9182-badedfea93f0"
-  - id: colour               # ONE entry for EYE_COLOUR + HAIR_COLOUR + SKIN_COLOUR
-    name: colour
-    fqn: "6905b1d7-2eb1-482f-a7f9-296aff8f08a4"
+    name: ATTRIBUTE
+    fqn: "7d539ecb-0888-425d-b84c-f85d2acc6416"
+  - id: eye_colour
+    name: EYE_COLOUR
+    fqn: "e21ffc4d-51f7-4141-b05e-0e314722cc2a"
+  - id: hair_colour
+    name: HAIR_COLOUR
+    fqn: "02c48153-f640-4a81-bf55-11d58dfd2913"
+  - id: skin_colour
+    name: SKIN_COLOUR
+    fqn: "1dc0334f-a5df-443a-8bef-dd81174b6c39"
   - id: gender
-    name: gender
-    fqn: "ef1360b0-c067-4328-977a-4ea28f766c75"
+    name: GENDER
+    fqn: "bfd7596e-431f-4f6a-99f4-20cec611c16c"
   - id: publisher
-    name: publisher
-    fqn: "a8ed13f2-962b-44e6-8056-0345c702d9c3"
+    name: PUBLISHER
+    fqn: "1e7dec84-6e8c-413c-b284-e1c285bd72a3"
   - id: race
-    name: race
-    fqn: "2ad21b9a-2814-4013-ad7a-246ba39c8a83"
+    name: RACE
+    fqn: "f2d74e25-e11c-44e6-bf0a-a7bfa39ccacd"
   - id: superpower
-    name: superpower
-    fqn: "fcc132c8-8131-4f2a-9267-79fbd91c956d"
+    name: SUPERPOWER
+    fqn: "fbd2de8f-dc23-4aaa-a14b-08e54cf3ccfc"
   columns:
-  - name: "Superhero Name"
-    column_id: superhero::name         # physical col 'name', not 'SUPERHERO_NAME'
+  - name: "the name of the superhero"          # from comment='...'
+    column_id: superhero::SUPERHERO_NAME
     properties:
       column_type: ATTRIBUTE
-  - name: "Full Name"
-    column_id: superhero::full_name
+  - name: "the full name of the superhero"
+    column_id: superhero::FULL_NAME
     properties:
       column_type: ATTRIBUTE
-  - name: "Height (cm)"
-    column_id: superhero::height_cm
+  - name: "the height of the superhero in centimeters"
+    column_id: superhero::HEIGHT_CM
     properties:
       column_type: ATTRIBUTE
-  - name: "Alignment"
-    column_id: alignment::alignment
+  - name: "the weight of the superhero in kilograms"
+    column_id: superhero::WEIGHT_KG
     properties:
       column_type: ATTRIBUTE
-  - name: "Attribute Name"
-    column_id: attribute::attribute_name
+  - name: "the alignment of the superhero (Good, Neutral, or Bad)"
+    column_id: alignment::ALIGNMENT
     properties:
       column_type: ATTRIBUTE
-  - name: "Attribute Value"
-    column_id: hero_attribute::attribute_value
+  - name: "the attribute that defines who they are and what they are capable of"
+    column_id: attribute::ATTRIBUTE_NAME
     properties:
       column_type: ATTRIBUTE
-  - name: "Eye Colour"
-    column_id: colour::colour           # same physical col serves eye/hair/skin
+  - name: "the attribute value"
+    column_id: hero_attribute::ATTRIBUTE_VALUE
     properties:
       column_type: ATTRIBUTE
-  - name: "Gender"
-    column_id: gender::gender
+  - name: "the color of the superhero's eye"
+    column_id: eye_colour::COLOUR         # ThoughtSpot column name, not semantic view alias
     properties:
       column_type: ATTRIBUTE
-  - name: "Publisher"
-    column_id: publisher::publisher_name
+  - name: "the color of the superhero's hair"
+    column_id: hair_colour::COLOUR
     properties:
       column_type: ATTRIBUTE
-  - name: "Race"
-    column_id: race::race
+  - name: "the color of the superhero's skin"
+    column_id: skin_colour::COLOUR
     properties:
       column_type: ATTRIBUTE
-  - name: "Power Name"
-    column_id: superpower::power_name
+  - name: "the gender of the superhero"
+    column_id: gender::GENDER
+    properties:
+      column_type: ATTRIBUTE
+  - name: "the name of the publisher"
+    column_id: publisher::PUBLISHER_NAME
+    properties:
+      column_type: ATTRIBUTE
+  - name: "the race of the superhero"
+    column_id: race::RACE
+    properties:
+      column_type: ATTRIBUTE
+  - name: "the superpower name"
+    column_id: superpower::POWER_NAME
     properties:
       column_type: ATTRIBUTE
 ```
@@ -270,25 +294,61 @@ model:
 
 ## Key patterns from this example
 
-1. **Real DDL format:** Flat `dimensions` and `metrics` blocks at view level (not nested
-   per-table). Relationships use `REL_NAME as FROM(COL) references TO(COL)` syntax.
+1. **Semantic view objects are the ThoughtSpot table targets.** The `tables` block lists the
+   Snowflake objects (tables or views) the model should be built on. ThoughtSpot Table objects
+   point directly to those same objects — not to underlying physical tables.
 
-2. **Inline joins (Scenario B):** Required when ThoughtSpot tables have no pre-defined
-   `joins_with` entries. The `with` field is REQUIRED and must match the target table's `id`.
+2. **Column names match directly.** Because the ThoughtSpot tables point to the same Snowflake
+   objects as the semantic view, column names in `column_id` match what those objects expose.
+   Always confirm by exporting Table TMLs — some objects rename columns internally
+   (e.g., `EYE_COLOUR.EYE_COLOUR` in the semantic view → `COLOUR` in the ThoughtSpot TML).
 
-3. **`with` and `on` consistency:** `with: alignment` and `on: "[superhero::alignment_id] = [alignment::id]"`
-   both use the `id` value (`alignment`). `id` values must be lowercase.
+3. **Inline joins.** Required when ThoughtSpot tables have no pre-defined `joins_with` entries.
+   The `with` field is REQUIRED and must match the target table's `id` (lowercase).
 
-4. **Dual-role tables:** EYE_COLOUR, HAIR_COLOUR, SKIN_COLOUR all map to the same
-   ThoughtSpot `colour` table. Only ONE entry in model_tables; THREE joins from superhero
-   (each using a different FK column). Hair and skin colour columns are omitted — the
-   `colour` table appears only once in the column list.
+4. **`id` vs `name`.** `id` is a lowercase alias used in `with` and `on` clause references.
+   `name` must match the ThoughtSpot table object's name exactly (uppercase in this example).
 
-5. **Physical column names:** `SUPERHERO_ID` (view alias) → `id` (physical column).
-   Always export the ThoughtSpot table TML and use those column names in `column_id`.
+5. **`with` and `on` consistency.** Both use `id` values:
+   `with: alignment` and `on: "[superhero::SH_ALIGNMENT_ID] = [alignment::ALIGNMENT_ID]"`.
 
-6. **`name` uniqueness:** Using `id: colour` for all three colour roles prevents the
-   "Multiple tables have same alias" error that would occur with separate entries.
+6. **Display names from `comment=`.** The `comment='...'` value on each dimension becomes the
+   ThoughtSpot column display name. Where no comment exists, title-case the DIM_NAME.
 
-7. **No metrics in this model:** The superhero semantic view has no metrics block —
+7. **No metrics in this model.** The superhero semantic view has no metrics block —
    all columns are dimensions (ATTRIBUTEs).
+
+8. **Join type is INNER** for all dimension lookups.
+
+---
+
+## Creating tables from scratch (user answered N at Step 3)
+
+When no ThoughtSpot Table objects exist for the semantic view's referenced objects,
+create them before building the model:
+
+1. **Ask the user for the connection** — get the connection GUID via the ThoughtSpot
+   REST API (`POST /api/rest/2.0/connection/search` with `record_size: 500`)
+2. **Introspect columns** from Snowflake `INFORMATION_SCHEMA.COLUMNS` for the schema
+3. **Build table TMLs** for each object and import them in one batch
+4. **Then build the model TML** referencing the newly created tables
+
+Table TML format (use connection `fqn`, not `name`):
+```yaml
+table:
+  name: TABLE_NAME
+  db: DATABASE
+  schema: SCHEMA
+  db_table: TABLE_NAME
+  connection:
+    fqn: "{connection_guid}"    # Use GUID — connection name causes JDBC errors
+  columns:
+  - name: COL_NAME
+    db_column_name: COL_NAME
+    data_type: INT64
+    properties:
+      column_type: ATTRIBUTE
+```
+
+**IMPORTANT:** Use `$$` dollar-quoting in SQL for TML strings. Do NOT use `\n`
+escape sequences — they are passed literally and break YAML parsing.

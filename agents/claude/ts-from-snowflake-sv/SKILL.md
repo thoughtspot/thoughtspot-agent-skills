@@ -11,12 +11,10 @@ back to ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and
 imports the result via `ts tml import`.
 
 Two scenarios are supported:
-- **Scenario A (underlying tables):** Build the model on top of the physical tables
-  already registered in a ThoughtSpot connection. Reuses existing ThoughtSpot Table
-  objects and their pre-defined joins.
-- **Scenario B (views):** Build the model on top of the Snowflake views that the
-  semantic view's `base_table` references. Creates new ThoughtSpot Table objects
-  and registers the views in the connection.
+- **Scenario A (existing tables):** ThoughtSpot Table objects already exist for the
+  Snowflake objects the semantic view references. Reuses those existing Table objects.
+- **Scenario B (new tables):** No ThoughtSpot Table objects exist yet for the Snowflake
+  objects the semantic view references. Creates new Table objects pointing to those objects.
 
 ---
 
@@ -26,7 +24,7 @@ Two scenarios are supported:
 |---|---|
 | [~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
 | [~/.claude/mappings/ts-snowflake/formula-translation.md](~/.claude/mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
-| [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (Scenario B, inline joins, dual-role tables) |
+| [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns |
@@ -48,15 +46,13 @@ Two scenarios are supported:
 | `with extension (CA='...')` | Not mapped to ThoughtSpot — logged in report |
 
 **Key structural rules:**
-- `column_id` must use the **physical column name from the ThoughtSpot table TML**,
-  NOT the semantic view alias. The view layer renames columns.
+- `column_id` must use the **column name from the ThoughtSpot Table TML**. Export
+  Table TMLs to confirm — do not assume they match the semantic view left-hand side.
 - Simple metrics (`AGG(view.col)` — one column, one aggregate) → `MEASURE` column.
   Complex expressions → `formulas[]` entry.
 - In Scenario A, `referencing_join` points to a join pre-defined at the ThoughtSpot
   Table object level (found by exporting the FROM table's TML).
 - In Scenario B / hybrid, inline `joins[]` on the FROM table entry (requires `with` field).
-- One physical ThoughtSpot table can serve multiple semantic view roles (e.g., one
-  `colour` table for eye/hair/skin colour). Include it only ONCE in model_tables.
 
 ---
 
@@ -217,15 +213,11 @@ ts tml export {guid1} {guid2} ... --profile {profile}
 ```
 
 Parse `table.columns[].name` from each returned TML. Build a column map per table:
-`table_name → [physical_col_name, ...]`. Compare against the columns referenced in
+`table_name → [col_name, ...]`. Compare against the columns referenced in
 the semantic view dimensions and metrics to identify any column gaps.
 
-> Semantic view column names (e.g. `TRANS_ACCOUNT_ID`) are view-layer aliases that
-> differ from physical ThoughtSpot column names (e.g. `account_id`). The `column_id`
-> in the model TML must use the physical names from the ThoughtSpot table TML.
-
-**Detect dual-role tables:** If two semantic view aliases resolve to the same ThoughtSpot
-GUID, include that table only ONCE in `model_tables`. Log the merged aliases.
+> The `column_id` in the model TML must use the column names from the ThoughtSpot
+> Table TML — export the TMLs to confirm them.
 
 **Confirm the plan before making any changes:**
 
@@ -283,7 +275,7 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
 
 ### Step 6B: Create ThoughtSpot Table objects for views (Scenario B)
 
-**Do all Snowflake introspection in two batch queries — not per-table calls.**
+**Do all Snowflake introspection in a batch query — not per-table calls.**
 
 1. **Batch: get all column names and types for the entire schema in one query:**
    ```sql
@@ -294,21 +286,7 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    ```
    This returns every column for every table/view in the schema in one round-trip.
 
-2. **Batch: get all view DDLs for the schema in one query:**
-   ```sql
-   SELECT table_name,
-          GET_DDL('VIEW', '{database}.{SCHEMA}.' || table_name) AS ddl
-   FROM {database}.information_schema.views
-   WHERE table_schema = '{SCHEMA}';
-   ```
-   This replaces individual `GET_DDL('VIEW', ...)` calls per table. Parse each DDL
-   to confirm exact physical column names (the semantic view may reference aliases
-   that differ from what `information_schema.columns` shows).
-
-   **Only run this if column names from query 1 don't match the semantic view
-   dimension references.** When they match, skip it.
-
-3. Find the ThoughtSpot connection to use:
+2. Find the ThoughtSpot connection to use:
    ```bash
    ts connections list --profile {profile}
    ```
@@ -316,7 +294,7 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    Ask the user to confirm which connection to use (or auto-select if only one matches
    the semantic view's database).
 
-4. Create ThoughtSpot Table objects for all tables in one command:
+3. Create ThoughtSpot Table objects for all tables in one command:
    ```bash
    cat tables-spec.json | ts tables create --profile {profile}
    ```
@@ -324,7 +302,7 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    See `ts tables create --help` for the spec format. This command handles
    JDBC retry and GUID resolution automatically, and outputs `{name: guid}`.
 
-5. Inline joins will be defined directly in the model TML (no `referencing_join`).
+4. Inline joins will be defined directly in the model TML (no `referencing_join`).
 
 ---
 
@@ -368,7 +346,7 @@ test/converted model. Ask the user if they want a different name.
   share the same `name` value ("Multiple tables have same alias")
 - `name` must match the ThoughtSpot table object's name exactly (usually lowercase)
 - If two semantic view tables map to the same ThoughtSpot table (same GUID), include
-  the physical table only ONCE and use ONE `id`/`name`
+  it only ONCE and use ONE `id`/`name`
 
 **Model TML skeleton (Scenario A — pre-defined joins exist in table TML):**
 
@@ -385,11 +363,11 @@ model:
     referencing_join: "{join_name}"   # from Step 7
   columns:
   - name: "{display_name}"
-    column_id: fact_table::{physical_col}  # uses id value + physical col from table TML
+    column_id: fact_table::{col_name}  # col_name from ThoughtSpot Table TML
     properties:
       column_type: ATTRIBUTE
   - name: "{display_name}"
-    column_id: fact_table::{physical_col}
+    column_id: fact_table::{col_name}
     properties:
       column_type: MEASURE
       aggregation: SUM
@@ -415,7 +393,7 @@ model:
     joins:
     - name: "{join_name}"
       with: to_table        # REQUIRED — must equal `id` of the target entry
-      on: "[from_table::{fk_col}] = [to_table::{pk_col}]"  # uses id values, physical cols
+      on: "[from_table::{fk_col}] = [to_table::{pk_col}]"  # uses id values, col names from ThoughtSpot Table TML
       type: INNER
       cardinality: MANY_TO_ONE
   - id: to_table            # matches `with` value above
@@ -429,13 +407,13 @@ model:
 
 For each dimension in the semantic view:
 - `name`: value of `comment='...'` on the dimension, or title-cased dimension name
-- `column_id`: `{id}::{physical_col}` — where `id` is the model_tables `id` for that
-  table, and `physical_col` is from the ThoughtSpot table TML (NOT the semantic view alias)
+- `column_id`: `{id}::{col_name}` — where `id` is the model_tables `id` for that
+  table, and `col_name` is from the ThoughtSpot Table TML
 - `column_type: ATTRIBUTE`
 
 For each simple metric (`AGG(view_alias.metric_name)`):
 - `name`: value of `comment='...'` on the metric, or title-cased metric name
-- `column_id`: `{id}::{physical_col}`
+- `column_id`: `{id}::{col_name}`
 - `column_type: MEASURE`
 - `aggregation`: mapped from the SQL aggregate function (see reverse-mapping-rules.md)
 
@@ -458,7 +436,7 @@ For each metric whose `EXPR` is not a simple `AGG(table.col)`:
 **Column references in translated formulas:**
 
 Use the TABLE_ALIAS from `model_tables` (the `id` field, which matches the semantic
-view table alias). Column name is the physical column from the EXPR.
+view table alias). Column name is the column name from the EXPR (from the ThoughtSpot Table TML).
 
 Example:
 - Semantic view EXPR: `SUM(DM_ORDERDETAILS.UNIT_PRICE * DM_ORDERDETAILS.QUANTITY)`
@@ -534,11 +512,11 @@ required for any future reimports to update the model without creating a duplica
 | Error | Likely cause | Fix |
 |---|---|---|
 | `referencing_join not found` | Join name is wrong or join doesn't exist at table level | Export table TML again and verify join name |
-| `column_id not found` | Physical column name is wrong — semantic view alias used instead of physical col | Check Table TML for the correct `db_column_name` value |
+| `column_id not found` | Column name is wrong — left-hand side of semantic view dimension used instead of ThoughtSpot Table TML column name | Check Table TML for the correct column name |
 | `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on an inline join | Add `with: {target_id}` to every inline join entry |
 | `{table_name} does not exist in schema` (on `with` field) | `with` value is wrong case or doesn't match any `id` | Ensure `with` matches the target's `id` exactly (lowercase) |
-| `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` in model_tables | Check that both `[table1::col]` refs in `on` use `id` values, not physical table names |
-| `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — if two aliases map to the same physical table, keep only one entry |
+| `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` in model_tables | Check that both `[table1::col]` refs in `on` use `id` values, not Snowflake table names |
+| `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — if two aliases map to the same Snowflake object, keep only one entry |
 | `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-run Step 6A to get fresh GUIDs |
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |

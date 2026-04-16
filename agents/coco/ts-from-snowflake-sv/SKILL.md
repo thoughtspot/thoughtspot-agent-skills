@@ -11,11 +11,10 @@ back to ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and
 imports the result via the ThoughtSpot REST API.
 
 Two scenarios are supported:
-- **Scenario A (underlying tables):** Build the model on top of the physical tables
-  already registered in a ThoughtSpot connection. Reuses existing ThoughtSpot Table
-  objects and their pre-defined joins.
-- **Scenario B (views):** Build the model on top of the Snowflake views or tables
-  the semantic view's `base_table` references. Creates new ThoughtSpot Table objects.
+- **Scenario A (existing tables):** ThoughtSpot Table objects already exist for the
+  Snowflake objects the semantic view references. Reuses those existing Table objects.
+- **Scenario B (new tables):** No ThoughtSpot Table objects exist yet for the Snowflake
+  objects the semantic view references. Creates new Table objects pointing to those objects.
 
 ---
 
@@ -25,7 +24,7 @@ Two scenarios are supported:
 |---|---|
 | [../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
 | [../../shared/mappings/ts-snowflake/formula-translation.md](../../shared/mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
-| [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (Scenario B, inline joins, dual-role tables) |
+| [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 
 ---
 
@@ -202,8 +201,8 @@ CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{guid1}', '{
 ```
 
 Parse `table.columns[].name` from each returned TML. Build a column map per table:
-`table_name → [physical_col_name, ...]`. Compare against the columns referenced in
-the semantic view dimensions and metrics to identify any gaps.
+`table_name → [col_name, ...]`. Column names in the ThoughtSpot TML are what you use in
+`column_id` — always use the TML as the authoritative source.
 
 **Confirm the plan before making any changes:**
 
@@ -424,11 +423,11 @@ if you reimport to fix any errors.
 | Error | Likely cause | Fix |
 |---|---|---|
 | `referencing_join not found` | Join name wrong or join doesn't exist at table level | Re-export table TML and verify join name |
-| `column_id not found` | Semantic view alias used instead of physical column name | Check ThoughtSpot Table TML for correct `db_column_name` |
+| `column_id not found` | Semantic view left-side alias used instead of ThoughtSpot Table TML column name | Check ThoughtSpot Table TML for correct `db_column_name` |
 | `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on inline join | Add `with: {target_id}` to every inline join entry |
 | `{table_name} does not exist in schema` (on `with`) | `with` value doesn't match any `id` | Ensure `with` matches target `id` exactly (lowercase) |
 | `Invalid srcTable or destTable in join expression` | `on` clause uses table names instead of `id` values | Check both `[table::col]` refs use `id` values |
-| `Multiple tables have same alias {name}` | Two `model_tables` entries share the same `name` | Deduplicate — same physical table must appear only once |
+| `Multiple tables have same alias {name}` | Two `model_tables` entries share the same `name` | Deduplicate — same Snowflake object must appear only once |
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Review translated formula against formula-translation.md |
 | `fqn resolution failed` | Stale GUID | Re-run Step 4 to get fresh GUIDs |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars before serialising |
