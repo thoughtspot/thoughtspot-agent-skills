@@ -76,7 +76,7 @@ Batch profile retrieval and DDL fetch in a single call:
 
 ```sql
 -- Batch: profile + DDL
-SELECT NAME, BASE_URL, USERNAME, SECRET_NAME, TOKEN_EXPIRES_AT
+SELECT NAME, BASE_URL, USERNAME, AUTH_TYPE, SECRET_NAME, TOKEN_EXPIRES_AT
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
 LIMIT 1;
 
@@ -91,26 +91,30 @@ SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema};
 
 Display results as a numbered list and ask the user to select one.
 
-**Authenticate with ThoughtSpot** using the profile:
+**Validate the ThoughtSpot profile:**
 
-First check token expiry:
 ```sql
-SELECT TOKEN_EXPIRES_AT > CURRENT_TIMESTAMP() AS is_valid
+SELECT auth_type,
+       CASE WHEN auth_type = 'password' THEN TRUE
+            ELSE token_expires_at > CURRENT_TIMESTAMP()
+       END AS is_valid
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
-WHERE NAME = '{profile_name}';
+WHERE name = '{profile_name}';
 ```
 
-If `is_valid = FALSE` or `TOKEN_EXPIRES_AT IS NULL`: stop and tell the user:
-> "Your ThoughtSpot token has expired. Run `/thoughtspot-setup` → U → Refresh token, then retry."
+- `auth_type = 'password'` and `is_valid = TRUE` → proceed (no expiry for password auth)
+- `auth_type = 'token'` and `is_valid = TRUE` → retrieve bearer token and proceed
+- `is_valid = FALSE` → stop and tell the user:
+  > "Your ThoughtSpot token has expired. Run `/thoughtspot-setup` → U → Refresh token, then retry."
 
-If valid, retrieve the bearer token:
+Retrieve the credential:
 ```sql
-SELECT SYSTEM$GET_SECRET_STRING('SKILLS.PUBLIC.' || SECRET_NAME) AS token
+SELECT SYSTEM$GET_SECRET_STRING('SKILLS.PUBLIC.' || SECRET_NAME) AS secret_value
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
-WHERE NAME = '{profile_name}';
+WHERE name = '{profile_name}';
 ```
 
-Store the token value for use in subsequent API calls. Never print it.
+Store the value for use in subsequent API calls via stored procedures. Never print it.
 
 ---
 
@@ -118,13 +122,31 @@ Store the token value for use in subsequent API calls. Never print it.
 
 Parse the DDL string returned in Step 1. The DDL is a SQL `CREATE OR REPLACE
 SEMANTIC VIEW` statement. See [../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md)
-for the full DDL format.
+for the full format.
+
+> **Important:** The real DDL format has **flat** `dimensions` and `metrics` blocks at the
+> view level — NOT nested per-table. Relationships use `REL_NAME as FROM(COL) references TO(COL)` syntax.
 
 Extract:
-1. **Tables block:** alias, base table reference, primary key, dimensions, time_dimensions, per-table metrics
-2. **Relationships block:** name, from table/key, to table/key
-3. **Global metrics block:** name, aliases, expr
-4. **Extension JSON:** log but do not map to ThoughtSpot
+1. **Tables block:** for each entry, record:
+   - Fully-qualified table reference (`DB.SCHEMA.TABLE`)
+   - Table alias (explicit `ALIAS as DB.SCHEMA.TABLE`, or last segment of the name)
+   - Primary key column(s) — marks this as a join target
+2. **Relationships block:** for each entry, record:
+   - Relationship name, from table alias, from column, to table alias, to column
+3. **Dimensions block** (flat, all tables): for each entry (`TABLE.COL as view_alias.NAME [comment='...']`), record:
+   - Source: table alias + column name
+   - Display name: value of `comment='...'`, or title-cased NAME if no comment
+4. **Metrics block** (flat): for each entry, record:
+   - Source: table alias + column name
+   - Aggregation (from `AGG(...)`) or full expression
+   - Display name: from `comment='...'` or title-cased NAME
+5. **Extension JSON** (`with extension (CA='...')`): log but do not map to ThoughtSpot
+
+Build an internal map:
+- `tables`: list of `{alias, fqn, primary_key}`
+- `relationships`: list of `{name, from_alias, from_col, to_alias, to_col}`
+- `columns`: all dimensions and metrics keyed by `(table_alias, col_name)`
 
 Identify the **fact table**: the table that never appears on the `TO` side of any relationship.
 
@@ -221,7 +243,7 @@ table:
   - name: JOIN_NAME
     destination: TARGET_TABLE
     on: "[SOURCE::FK_COL] = [TARGET::PK_COL]"
-    type: LEFT_OUTER
+    type: INNER
 ```
 
 Import all table TMLs in one call:
@@ -292,14 +314,8 @@ Parse each returned `edoc` YAML string. Find in the `joins` section the entry wh
      cardinality: MANY_TO_ONE
    ```
 
-3. **Join type should default to `INNER`** (not `LEFT_OUTER`). Snowflake semantic views
-   don't specify join type, but ThoughtSpot models work best with INNER joins for
-   lookup/dimension tables. At the review checkpoint (Step 7), ask the user:
-   ```
-   Join type for all relationships:
-     1) INNER (recommended for dimension lookups)
-     2) LEFT_OUTER
-   ```
+3. **Join type is `INNER`** for all dimension lookups. ThoughtSpot models work correctly
+   with INNER joins for standard fact-to-dimension relationships.
 
 4. **Column `column_id`** format is `TABLE_NAME::COLUMN_NAME` (not `db_column_name`).
 
@@ -366,10 +382,15 @@ On success, extract and display the created model GUID.
 
 | Error | Likely cause | Fix |
 |---|---|---|
-| `referencing_join not found` | Join name is wrong | Re-export table TML and check join name |
-| `column_id not found` | Column name mismatch | Verify physical column name in table TML |
-| `fqn resolution failed` | Stale GUID | Re-run Step 4A |
-| YAML parse error | Non-printable characters | Strip before serialising |
+| `referencing_join not found` | Join name wrong or join doesn't exist at table level | Re-export table TML and verify join name |
+| `column_id not found` | Semantic view alias used instead of physical column name | Check ThoughtSpot Table TML for correct `db_column_name` |
+| `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on inline join | Add `with: {target_id}` to every inline join entry |
+| `{table_name} does not exist in schema` (on `with`) | `with` value doesn't match any `id` | Ensure `with` matches target `id` exactly (lowercase) |
+| `Invalid srcTable or destTable in join expression` | `on` clause uses table names instead of `id` values | Check both `[table::col]` refs use `id` values |
+| `Multiple tables have same alias {name}` | Two `model_tables` entries share the same `name` | Deduplicate — same physical table must appear only once |
+| `formula syntax error` | ThoughtSpot formula has invalid syntax | Review translated formula against formula-translation.md |
+| `fqn resolution failed` | Stale GUID | Re-run Step 4 to get fresh GUIDs |
+| YAML parse error | Non-printable characters in strings | Strip non-printable chars before serialising |
 
 ---
 
@@ -380,27 +401,32 @@ On success, extract and display the created model GUID.
 
 **Model:** TEST_SV_{view_name}
 **GUID:** {guid}
+**ThoughtSpot URL:** {base_url}/#/model/{guid}
 
 ### Columns Imported ({n})
 | Display Name | Type | Source |
 |---|---|---|
-| {name} | ATTRIBUTE | {TABLE}::{COL} |
-| {name} | MEASURE (SUM) | {TABLE}::{COL} |
-| {name} | formula | translated from SQL |
+| {name} | ATTRIBUTE | {table_id}::{COL} |
+| {name} | MEASURE ({agg}) | {table_id}::{COL} |
+| {name} | MEASURE (formula) | translated from SQL |
 
 ### Formula Translation Log
-| Column | Original SQL | Status |
-|---|---|---|
-| {name} | `{sql}` | ✓ Translated |
-| {name} | `{sql}` | ⚠ Omitted — {reason} |
+| Column | Original SQL | Status | ThoughtSpot Formula |
+|---|---|---|---|
+| {name} | `{sql}` | ✓ Translated | `{ts_formula}` |
+| {name} | `{sql}` | ⚠ Omitted | {reason} |
 
 ### Not Mapped
-- Extension JSON (Cortex Analyst context)
+- Extension JSON (Cortex Analyst context): not translated to ThoughtSpot
 ```
 
 ---
 
 ## Multiple semantic view conversion
 
-After completing one conversion, offer to convert additional views. Reuse the
-authenticated ThoughtSpot session (don't re-authenticate between views).
+After completing one conversion, offer to convert additional views.
+
+- **Session continuity:** If the ThoughtSpot profile was already validated earlier in
+  this conversation, skip the profile check and reuse the stored `secret_value`.
+- Do not re-authenticate between views.
+- Return to Step 1 (DDL fetch only) for the next view, skipping the profile SQL call.

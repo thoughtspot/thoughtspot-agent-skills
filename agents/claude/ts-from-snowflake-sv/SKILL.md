@@ -172,77 +172,112 @@ Build an internal map:
 
 ---
 
-### Step 5: Choose scenario
+### Step 5: Table registration question
 
-Present the user with a clear choice:
+After parsing, display the tables found and ask a single question:
 
 ```
-The semantic view references these base tables:
-  DUNDERMIFFLIN.PUBLIC.DM_ORDERS
-  DUNDERMIFFLIN.PUBLIC.DM_CUSTOMER
-  DUNDERMIFFLIN.PUBLIC.DM_PRODUCTS
+The semantic view references {n} tables:
+  {database}.{schema}.{TABLE_1}
+  {database}.{schema}.{TABLE_2}
   ...
 
-How should the ThoughtSpot Model be built?
+Are these tables already registered in ThoughtSpot?
+  Y  Yes — use existing ThoughtSpot Table objects
+  N  No  — create new Table objects from scratch
+  ?  Not sure — search ThoughtSpot first
 
-  A) On the underlying physical tables (recommended if these tables are already
-     registered in ThoughtSpot). Reuses existing ThoughtSpot Table objects and
-     their pre-defined joins.
-
-  B) On these tables as-is (creates new ThoughtSpot Table objects pointing
-     to the base table references above, adds them to the ThoughtSpot connection).
-
-Select A or B:
+Enter Y / N / ?:
 ```
+
+- **Y** → skip search, go to Step 6A (column verification only)
+- **N** → skip search, go to Step 6B (create)
+- **?** → go to Step 6A (search + verify)
 
 ---
 
-### Step 6A: Find existing ThoughtSpot Table objects (Scenario A)
+### Step 6A: Discover and verify existing ThoughtSpot Table objects (Y and ? paths)
 
-For each base table reference parsed in Step 4, find the matching ThoughtSpot Table
-object (subtype `ONE_TO_ONE_LOGICAL`).
+Skip this step if the user answered **N** in Step 5 — go directly to Step 6B.
 
-**Search by database + schema + table name:**
+**Search ThoughtSpot for all table objects:**
 
 ```bash
 ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile {profile}
 ```
 
-This returns all table objects. Filter the JSON to find entries where:
-- `metadata_header.database_stripes` matches the database name
-- `metadata_header.schema_stripes` matches the schema name
-- `metadata_name` matches the physical table name
-
-Alternatively, if a table name is distinctive, search directly:
-
-```bash
-ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
-```
-
+Filter the JSON to match each semantic view base table by database + schema + table name
+(`metadata_header.database_stripes`, `metadata_header.schema_stripes`, `metadata_name`).
 Build a map: `physical_table_name → {metadata_id, metadata_name}`.
 
-**If a table is not found:**
-- Warn the user: "Table `{db}.{schema}.{tbl}` has no matching ThoughtSpot object."
-- Options: (1) skip the table from the model, (2) switch to Scenario B for that table,
-  (3) abort and run the ThoughtSpot model-builder skill first to register the tables.
-- Do not proceed to import until all required tables are resolved.
-
-**After finding all GUIDs, export table TMLs and extract physical column names:**
+**Export TMLs for all found tables in one call to verify columns:**
 
 ```bash
 ts tml export {guid1} {guid2} ... --profile {profile}
 ```
 
-For each table, parse the `table.columns[].name` values from the returned TML.
-Build a column map per table: `table_name → [physical_col_name, ...]`.
+Parse `table.columns[].name` from each returned TML. Build a column map per table:
+`table_name → [physical_col_name, ...]`. Compare against the columns referenced in
+the semantic view dimensions and metrics to identify any column gaps.
 
-This is required because semantic view column names (e.g. `TRANS_ACCOUNT_ID`)
-are view-layer aliases that differ from the physical ThoughtSpot column names
-(e.g. `account_id`). The `column_id` field in the model TML must use physical names.
+> Semantic view column names (e.g. `TRANS_ACCOUNT_ID`) are view-layer aliases that
+> differ from physical ThoughtSpot column names (e.g. `account_id`). The `column_id`
+> in the model TML must use the physical names from the ThoughtSpot table TML.
 
-**Detect dual-role tables:** If two semantic view table aliases resolve to the same
-ThoughtSpot GUID (same physical table), include that table only ONCE in `model_tables`.
-Log which aliases were merged. See reverse-mapping-rules.md for the dual-role pattern.
+**Detect dual-role tables:** If two semantic view aliases resolve to the same ThoughtSpot
+GUID, include that table only ONCE in `model_tables`. Log the merged aliases.
+
+**Confirm the plan before making any changes:**
+
+Show the user a full status table and wait for confirmation:
+
+```
+Table Plan:
+  ✓  {TABLE_1}  — found (GUID: {guid}) — all {n} columns present → use as-is
+  ⚠  {TABLE_2}  — found (GUID: {guid}) — missing {n} columns: {COL_A}, {COL_B} → update
+  ✗  {TABLE_3}  — not found in ThoughtSpot → create new
+
+Actions to be taken:
+  • Update {TABLE_2}: add {n} missing columns
+  • Create {TABLE_3}: {n} columns from Snowflake schema
+
+No changes have been made yet. Proceed? (yes/no):
+```
+
+Do not proceed until the user confirms. If any table is **not found**, follow Step 6B
+for those tables. If any table has **missing columns**, follow Step 6C before building
+the model.
+
+---
+
+### Step 6C: Update existing tables with missing columns
+
+For each table from Step 6A with a column gap, introspect the Snowflake schema
+for the missing columns only:
+
+```sql
+SELECT table_name, column_name, data_type
+FROM {database}.information_schema.columns
+WHERE table_schema = '{SCHEMA}'
+  AND table_name IN ({comma_quoted_table_names})
+  AND column_name IN ({comma_quoted_missing_col_names})
+ORDER BY table_name, ordinal_position;
+```
+
+Map Snowflake types to ThoughtSpot types using `~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md`.
+
+Find the ThoughtSpot connection for those tables:
+```bash
+ts connections list --profile {profile}
+```
+
+Add the missing columns to the connection, then re-import the updated Table TML
+for each affected table (batch all imports in one call):
+```bash
+ts tml import --policy ALL_OR_NONE --profile {profile}
+```
+
+After import, re-export the updated TMLs to refresh the column map before Step 8.
 
 ---
 
@@ -298,26 +333,20 @@ Log which aliases were merged. See reverse-mapping-rules.md for the dual-role pa
 For each relationship in the semantic view, find the name of the pre-defined join
 in the ThoughtSpot Table objects.
 
+**Re-use the TMLs already exported in Step 6A** — do not make another export call.
+Parse the `edoc` YAML for each FROM table.
+
 For a relationship `FROM {from_table} KEY {from_col} TO {to_table} KEY {to_col}`:
 
-1. Identify the `from_table`'s ThoughtSpot GUID (from Step 6A).
-2. Export its TML:
-   ```bash
-   ts tml export {from_table_guid} --profile {profile}
-   ```
-3. Parse the returned `edoc` (YAML string). Find the `joins` section.
-4. Match the join where `destination` equals the `to_table` name.
-5. Record the join `name` — this is the `referencing_join` value for the `to_table`
+1. In the FROM table's `edoc` YAML, find the `joins` section.
+2. Match the entry where `destination` equals the TO table name.
+3. Record the join `name` — this is the `referencing_join` value for the `to_table`
    entry in the model TML.
 
-If no matching join is found, the tables may not have a pre-defined join. Options:
-- Use an inline join instead (switch this relationship to Scenario B behaviour).
-- Abort and define the join at the ThoughtSpot Table level first.
-
-**Export multiple table TMLs in one call to reduce API calls:**
-```bash
-ts tml export {guid1} {guid2} {guid3} --profile {profile}
-```
+If no matching join is found:
+- Warn the user: "No pre-defined join from `{from_table}` to `{to_table}`."
+- Options: (1) use an inline join instead (Scenario B for this relationship),
+  (2) abort and define the join at the ThoughtSpot Table level first.
 
 ---
 
