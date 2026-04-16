@@ -324,228 +324,24 @@ After confirmation, verify:
 SHOW EXTERNAL ACCESS INTEGRATIONS LIKE 'THOUGHTSPOT_API_ACCESS';
 ```
 
-### Step A8: Create permanent API procedures
+### Step A8: Install stored procedures
 
-These procedures are **permanent infrastructure** — created once during setup, reused
-by all skills. They live in `SKILLS.PUBLIC` (not TEMP).
+The stored procedures are managed by `/coco-setup`. After completing Step A7, prompt
+the user:
 
-**Search procedure:**
-
-```sql
-CREATE OR REPLACE PROCEDURE SKILLS.PUBLIC.TS_SEARCH_MODELS(
-    PROFILE_NAME VARCHAR,
-    QUERY_STRING VARCHAR,
-    OWNER_ONLY BOOLEAN
-)
-RETURNS VARIANT
-LANGUAGE PYTHON
-RUNTIME_VERSION = '3.11'
-PACKAGES = ('snowflake-snowpark-python', 'requests')
-HANDLER = 'run'
-EXTERNAL_ACCESS_INTEGRATIONS = (THOUGHTSPOT_API_ACCESS)
--- List ALL profile secrets here. When adding a new profile, add its secret.
--- Also update the get_secret_for_profile() mapping inside the procedure body.
-SECRETS = ('ts_secret_slug1' = SKILLS.PUBLIC.{secret_1}, 'ts_secret_slug2' = SKILLS.PUBLIC.{secret_2}, ...)
-AS
-$$
-import requests
-import json
-import _snowflake
-
-def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=True):
-    if auth_type == 'password':
-        s = requests.Session()
-        login_resp = s.post(
-            f"{base_url}/api/rest/2.0/auth/session/login",
-            json={"username": username, "password": secret_value},
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            verify=verify_ssl
-        )
-        if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run thoughtspot-setup to update password."
-        login_resp.raise_for_status()
-        return s, {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }, None
-    else:
-        return None, {
-            "Authorization": f"Bearer {secret_value}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }, None
-
-def get_secret_for_profile(secret_name):
-    # Map each secret_name to its SECRETS clause alias.
-    # When adding a new profile, add its secret here and in the SECRETS clause.
-    mapping = {
-        # 'THOUGHTSPOT_TOKEN_EXAMPLE': 'ts_secret_example',
-    }
-    key = mapping.get(secret_name)
-    if not key:
-        return None
-    return _snowflake.get_generic_secret_string(key)
-
-def run(session, profile_name, query_string, owner_only):
-    profile = session.sql(f"SELECT base_url, username, auth_type, secret_name FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}'").collect()
-    if not profile:
-        return {"error": f"Profile '{profile_name}' not found"}
-
-    row = profile[0].as_dict()
-    base_url = row['BASE_URL'].rstrip('/')
-    username = row['USERNAME']
-    auth_type = row.get('AUTH_TYPE', 'token')
-    secret_name = row['SECRET_NAME']
-    secret_value = get_secret_for_profile(secret_name)
-    if not secret_value:
-        return {"error": f"Secret '{secret_name}' not mapped. Recreate procedures via Step A8."}
-    verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
-
-    http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
-    if err:
-        return {"error": err}
-
-    def do_post(url, json_body):
-        if http_session:
-            return http_session.post(url, headers=headers, json=json_body, verify=verify_ssl)
-        return requests.post(url, headers=headers, json=json_body, verify=verify_ssl)
-
-    all_results = []
-    offset = 0
-
-    while True:
-        body = {
-            "metadata": [{"type": "LOGICAL_TABLE"}],
-            "record_size": 50,
-            "record_offset": offset
-        }
-        if query_string:
-            body["query_string"] = query_string
-        if owner_only:
-            body["created_by_user_identifiers"] = [username]
-
-        resp = do_post(f"{base_url}/api/rest/2.0/metadata/search", body)
-
-        if resp.status_code in (401, 403):
-            return {"error": "Unauthorized. Run thoughtspot-setup to refresh credentials."}
-
-        resp.raise_for_status()
-        page = resp.json()
-
-        if not page:
-            break
-
-        for item in page:
-            all_results.append({
-                "id": item.get("metadata_id"),
-                "name": item.get("metadata_name"),
-                "type": item.get("metadata_type"),
-                "author": item.get("author_name", ""),
-            })
-
-        if len(page) < 50:
-            break
-        offset += 50
-
-    if not all_results and query_string:
-        return run(session, profile_name, None, owner_only)
-
-    return {"count": len(all_results), "results": all_results}
-$$;
+```
+Profile '{profile_name}' is configured. Would you like to install or upgrade the
+ThoughtSpot stored procedures now? (yes/no)
 ```
 
-**TML Export procedure:**
+If yes, run `/coco-setup`. It will automatically detect the new profile's secret and
+embed it in all three procedures (TS_SEARCH_MODELS, TS_EXPORT_TML, TS_IMPORT_TML).
 
-```sql
-CREATE OR REPLACE PROCEDURE SKILLS.PUBLIC.TS_EXPORT_TML(
-    PROFILE_NAME VARCHAR,
-    GUIDS ARRAY
-)
-RETURNS VARIANT
-LANGUAGE PYTHON
-RUNTIME_VERSION = '3.11'
-PACKAGES = ('snowflake-snowpark-python', 'requests')
-HANDLER = 'run'
-EXTERNAL_ACCESS_INTEGRATIONS = (THOUGHTSPOT_API_ACCESS)
--- List ALL profile secrets here. When adding a new profile, add its secret.
--- Also update the get_secret_for_profile() mapping inside the procedure body.
-SECRETS = ('ts_secret_slug1' = SKILLS.PUBLIC.{secret_1}, 'ts_secret_slug2' = SKILLS.PUBLIC.{secret_2}, ...)
-AS
-$$
-import requests
-import json
-import _snowflake
+If no, remind the user:
 
-def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=True):
-    if auth_type == 'password':
-        s = requests.Session()
-        login_resp = s.post(
-            f"{base_url}/api/rest/2.0/auth/session/login",
-            json={"username": username, "password": secret_value},
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            verify=verify_ssl
-        )
-        if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run thoughtspot-setup to update password."
-        login_resp.raise_for_status()
-        return s, {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }, None
-    else:
-        return None, {
-            "Authorization": f"Bearer {secret_value}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }, None
-
-def get_secret_for_profile(secret_name):
-    mapping = {
-        # 'THOUGHTSPOT_TOKEN_EXAMPLE': 'ts_secret_example',
-    }
-    key = mapping.get(secret_name)
-    if not key:
-        return None
-    return _snowflake.get_generic_secret_string(key)
-
-def run(session, profile_name, guids):
-    profile = session.sql(f"SELECT base_url, username, auth_type, secret_name FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}'").collect()
-    if not profile:
-        return {"error": f"Profile '{profile_name}' not found"}
-
-    row = profile[0].as_dict()
-    base_url = row['BASE_URL'].rstrip('/')
-    username = row['USERNAME']
-    auth_type = row.get('AUTH_TYPE', 'token')
-    secret_name = row['SECRET_NAME']
-    secret_value = get_secret_for_profile(secret_name)
-    if not secret_value:
-        return {"error": f"Secret '{secret_name}' not mapped. Recreate procedures via Step A8."}
-    verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
-
-    http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
-    if err:
-        return {"error": err}
-
-    def do_post(url, json_body):
-        if http_session:
-            return http_session.post(url, headers=headers, json=json_body, verify=verify_ssl)
-        return requests.post(url, headers=headers, json=json_body, verify=verify_ssl)
-
-    body = {
-        "metadata": [{"identifier": g} for g in guids],
-        "export_fqn": True,
-        "export_associated": True
-    }
-
-    resp = do_post(f"{base_url}/api/rest/2.0/metadata/tml/export", body)
-
-    if resp.status_code in (401, 403):
-        return {"error": "Unauthorized. Run thoughtspot-setup to refresh credentials."}
-
-    resp.raise_for_status()
-    return resp.json()
-$$;
+```
+You can run /coco-setup at any time to install the procedures. They are required
+before using /ts-to-snowflake-sv or /ts-from-snowflake-sv.
 ```
 
 ### Step A9: Confirm
@@ -554,9 +350,10 @@ $$;
 ThoughtSpot profile '{profile_name}' configured.
   Secret:     SKILLS.PUBLIC.{secret_name}
   URL:        {base_url}
-  Expires at: {token_expires_at}
-  Procedures: SKILLS.PUBLIC.TS_SEARCH_MODELS, SKILLS.PUBLIC.TS_EXPORT_TML
+  Expires at: {token_expires_at}   (omit for password auth)
   Integration: THOUGHTSPOT_API_ACCESS
+
+Next step: run /coco-setup to install stored procedures.
 ```
 
 ---
@@ -693,7 +490,7 @@ WHERE name = '{profile_name}';
 
 If VALID, run a test search:
 ```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', NULL, TRUE);
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT(), TRUE);
 ```
 
 On success:
@@ -743,8 +540,10 @@ SHOW TABLES IN SCHEMA SKILLS.TEMP;
 ### Full removal
 
 ```sql
-DROP PROCEDURE IF EXISTS SKILLS.PUBLIC.TS_SEARCH_MODELS(VARCHAR, VARCHAR, BOOLEAN);
+DROP PROCEDURE IF EXISTS SKILLS.PUBLIC.TS_SEARCH_MODELS(VARCHAR, ARRAY, BOOLEAN);
 DROP PROCEDURE IF EXISTS SKILLS.PUBLIC.TS_EXPORT_TML(VARCHAR, ARRAY);
+DROP PROCEDURE IF EXISTS SKILLS.PUBLIC.TS_IMPORT_TML(VARCHAR, ARRAY, BOOLEAN);
+DROP TABLE IF EXISTS SKILLS.PUBLIC.SP_VERSIONS;
 DROP TABLE IF EXISTS SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
 DROP NETWORK RULE IF EXISTS SKILLS.PUBLIC.THOUGHTSPOT_API_RULE;
 -- Drop secrets:
@@ -767,7 +566,7 @@ DROP SCHEMA IF EXISTS SKILLS.TEMP;
 | 401 / 403 from ThoughtSpot API | Token expired or password incorrect — run Update to refresh |
 | Profile table missing | Re-run Add (table is auto-created) |
 | External Access Integration missing | Re-run Step A7 as ACCOUNTADMIN |
-| Procedure not found | Re-run Step A8 to recreate API procedures |
+| Procedure not found | Run `/coco-setup` to install or upgrade API procedures |
 
 ---
 
@@ -776,7 +575,14 @@ DROP SCHEMA IF EXISTS SKILLS.TEMP;
 ### Search for models
 
 ```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', '{query}', TRUE);
+-- Single keyword:
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT('{keyword}'), TRUE);
+
+-- Multiple keywords (batch — one API call):
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT('{kw1}', '{kw2}'), TRUE);
+
+-- Browse all:
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT(), TRUE);
 ```
 
 ### Export TML

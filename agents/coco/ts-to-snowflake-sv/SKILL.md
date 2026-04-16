@@ -95,9 +95,11 @@ calls by batching related statements together.
 2. **Combine independent reads.** When you need to check stored procedures, get
    profiles, and detect schemas — batch them:
    ```sql
-   SHOW PROCEDURES LIKE 'TS_SEARCH_MODELS' IN SCHEMA SKILLS.PUBLIC;
-   SHOW PROCEDURES LIKE 'TS_EXPORT_TML' IN SCHEMA SKILLS.PUBLIC;
-   SELECT NAME, TOKEN_EXPIRES_AT FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
+   SELECT PROCEDURE_NAME FROM SKILLS.INFORMATION_SCHEMA.PROCEDURES
+   WHERE PROCEDURE_SCHEMA = 'PUBLIC'
+     AND PROCEDURE_NAME IN ('TS_SEARCH_MODELS', 'TS_EXPORT_TML', 'TS_IMPORT_TML');
+
+   SELECT NAME, BASE_URL, USERNAME, TOKEN_EXPIRES_AT FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
    ```
 
 3. **Combine TML metadata extraction.** After storing TML in a temp table, extract
@@ -147,18 +149,20 @@ The workflow calls the ThoughtSpot API in two places: Step 2 (search) and Step 3
 
 | Method | When to use |
 |---|---|
-| **Stored procedures** (preferred) | When `SKILLS.PUBLIC.TS_SEARCH_MODELS` and `SKILLS.PUBLIC.TS_EXPORT_TML` exist — these were created during `/thoughtspot-setup` |
+| **Stored procedures** (preferred) | When `SKILLS.PUBLIC.TS_SEARCH_MODELS` and `SKILLS.PUBLIC.TS_EXPORT_TML` exist — installed via `/coco-setup` |
 | **Direct API** (fallback) | When the stored procedures do not exist (e.g. setup was not completed) — uses inline Python with `/tmp/ts_token.txt`. **Not available in Snowsight Workspaces** — requires CLI environment. |
 
 **Auto-detect at the start of the workflow (batch with profile query):**
 
 ```sql
-SHOW PROCEDURES LIKE 'TS_SEARCH_MODELS' IN SCHEMA SKILLS.PUBLIC;
-SHOW PROCEDURES LIKE 'TS_EXPORT_TML' IN SCHEMA SKILLS.PUBLIC;
+SELECT PROCEDURE_NAME FROM SKILLS.INFORMATION_SCHEMA.PROCEDURES
+WHERE PROCEDURE_SCHEMA = 'PUBLIC'
+  AND PROCEDURE_NAME IN ('TS_SEARCH_MODELS', 'TS_EXPORT_TML', 'TS_IMPORT_TML');
+
 SELECT NAME, BASE_URL, USERNAME, TOKEN_EXPIRES_AT FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
 ```
 
-Run all three in a **single** `snowflake_sql_execute` call to minimise UI prompts.
+Run both in a **single** `snowflake_sql_execute` call to minimise UI prompts.
 Parse the combined result to determine both `{api_method}` and `{profile_name}`.
 
 **Check token expiry immediately:** if `TOKEN_EXPIRES_AT <= CURRENT_TIMESTAMP()` or is NULL,
@@ -166,16 +170,16 @@ stop and tell the user:
 > "Your ThoughtSpot token has expired. Run `/thoughtspot-setup` → U → Refresh token, then retry."
 Do not proceed to Step 1 until the token is valid.
 
-If both procedures exist, set `{api_method}` = `stored_procedure`.
+If `TS_SEARCH_MODELS` and `TS_EXPORT_TML` both appear in the result, set `{api_method}` = `stored_procedure`.
 If either is missing, set `{api_method}` = `direct_api` and inform the user:
 
 ```
-Stored procedures not found in SKILLS.PUBLIC.
+Stored procedures not found in SKILLS.PUBLIC. Run /coco-setup to install them.
 ```
 
 > **Snowsight Workspace:** If running in a Snowsight Workspace, STOP here and tell
 > the user: "The stored procedures are required in Snowsight Workspaces. Please run
-> `/thoughtspot-setup` first to create them." The direct API fallback uses `python3`
+> `/coco-setup` to install them." The direct API fallback uses `python3`
 > and `curl` which are not available in this environment.
 
 The `{api_method}` selection applies to both Step 2 and Step 3.
@@ -193,12 +197,8 @@ which profile name to pass to the procedures).
 
 **Profile name discovery (mandatory before any CALL):**
 
-Always query the profiles table to get the exact profile name — never guess or
-construct it from convention (hyphens, underscores, casing may vary):
-
-```sql
-SELECT NAME FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
-```
+Use the profile rows already fetched in the auto-detect query above — do not query
+the profiles table again. The `NAME` column is the exact profile name.
 
 If one profile: use it directly (confirm with user).
 If multiple: display a numbered list and ask the user to select.
@@ -250,33 +250,21 @@ Enter search criteria (leave blank to skip):
 Use the `TS_SEARCH_MODELS` stored procedure:
 
 ```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', '{name_keyword}', {owner_only});
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT('{name_keyword}'), {owner_only});
 ```
 
 Parameters:
 - `profile_name`: the ThoughtSpot profile name selected in Step 1
-- `query_string`: the name keyword (pass `''` if blank — the procedure handles empty strings)
+- `ARRAY_CONSTRUCT('{name_keyword}')`: single-element array with the name keyword; pass `ARRAY_CONSTRUCT()` for browse-all
 - `owner_only`: `TRUE` to filter to models owned by the profile's user, `FALSE` for all
 
-The procedure returns a VARIANT containing an array of matching models.
+When a single keyword is supplied the procedure applies `name_pattern` substring
+matching server-side; results are already filtered to names containing the keyword.
 
-**Client-side filtering (mandatory):** The ThoughtSpot search API performs broad/fuzzy
-matching on `query_string` — it does NOT do exact prefix or substring filtering.
-A search for `BIRD` may return 100+ unrelated results. After receiving stored procedure
-results, **always** apply case-insensitive substring filtering client-side before
-displaying:
+Display the results as described in "Displaying Results" below.
+If no results are returned, inform the user and offer to browse all or refine the search.
 
-```
-Filter the returned models to only those where the model name contains
-the user's search keyword (case-insensitive). For example, if the user
-searched for "BIRD", keep only models whose name includes "BIRD".
-```
-
-Display only the filtered results as described in "Displaying Results" below.
-If filtering produces zero results, inform the user and offer to show unfiltered
-results or refine the search.
-
-Note: The stored procedure supports `query_string` and `owner_only` filtering. If the
+Note: The stored procedure supports name keyword and `owner_only` filtering. If the
 user also wants to filter by tags, fall back to the direct API approach for that search
 or apply tag filtering client-side on the stored procedure results.
 
@@ -288,8 +276,7 @@ combine with AND semantics — results must satisfy every condition:
 ```
 POST {base_url}/api/rest/2.0/metadata/search
 {
-  "metadata": [{"type": "LOGICAL_TABLE"}],
-  "query_string": "{name_keyword}",           // omit if blank
+  "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": "%{name_keyword}%"}],  // omit name_pattern if blank
   "created_by_user_identifiers": ["{author}"], // omit if blank; accepts username or GUID
   "tag_identifiers": ["{tag1}", "{tag2}"],     // omit if blank; accepts tag name or GUID
   "record_size": 50,
@@ -304,7 +291,7 @@ collecting all pages, apply case-insensitive substring filtering on model names
 using the user's search keyword. Display only matching results.
 
 **Zero results fallback (both methods):** If a name-only search returns zero results,
-re-run with no `query_string` (or empty string for stored procedure), collect all
+re-run with no name filter (or empty string for stored procedure), collect all
 results, and apply case-insensitive substring matching against `metadata_name`
 client-side. Present matches or offer to browse all.
 
@@ -315,7 +302,7 @@ client-side. Present matches or offer to browse all.
 **If `{api_method}` = `stored_procedure`:**
 
 ```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', '', FALSE);
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT(), FALSE);
 ```
 
 Filter the results to `type == 'WORKSHEET'` and display the full numbered list.
@@ -474,8 +461,9 @@ in [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tm
 *Simple* — `SELECT * FROM single_table [AS alias]`:
 - Extract the physical FQN from the FROM clause
 - Resolve `db`, `schema`, `db_table` from the FQN
-- Borrow column types from the matching physical table TML (run `SHOW COLUMNS` if
-  no matching table TML exists)
+- Borrow column types from the matching physical table TML or from the `col_types`
+  map already built via `INFORMATION_SCHEMA.COLUMNS` — no additional query needed
+  unless the physical table was genuinely absent from both
 - Treat the sql_view as a regular table for all subsequent steps
 - Note it in the Unmapped Properties Report under "SQL Views resolved automatically"
 
@@ -493,16 +481,26 @@ in [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tm
     S — Skip — omit all columns sourced from this view
   ```
 
-  - **C (Create view):** Before executing the semantic view CREATE, run:
+  - **C (Create view):** Collect all "C" views before executing any DDL. Batch the
+    CREATE statements into a single SQL call (same pattern as wrapper views):
     ```sql
-    CREATE OR REPLACE VIEW {target_db}.{target_schema}.{to_snake(sv_name)} AS
-    {sql_query};
+    CREATE OR REPLACE VIEW {target_db}.{target_schema}.{to_snake(sv_name_1)} AS {sql_query_1};
+    CREATE OR REPLACE VIEW {target_db}.{target_schema}.{to_snake(sv_name_2)} AS {sql_query_2};
     ```
-    Then run `SHOW COLUMNS IN VIEW {target_db}.{target_schema}.{view_name}` to get
-    column types. Reference the new view as `base_table.table`.
+    After all views are created, resolve column types for all of them in **one** query:
+    ```sql
+    SELECT table_name, column_name, data_type
+    FROM {target_db}.INFORMATION_SCHEMA.COLUMNS
+    WHERE table_schema = '{target_schema}'
+      AND table_name IN ('{view_name_1}', '{view_name_2}', ...)
+    ORDER BY table_name, ordinal_position;
+    ```
+    Reference each new view as `base_table.table`.
 
-  - **M (Map to existing):** Ask for the fully-qualified Snowflake object name.
-    Run `SHOW COLUMNS` on it to get column types. Use as `base_table`.
+  - **M (Map to existing):** Collect all "M" mappings before querying. Resolve column
+    types for all mapped objects in **one** `INFORMATION_SCHEMA.COLUMNS` query using
+    the same pattern as above (filter by schema and `table_name IN (...)`). Use each
+    as `base_table`.
 
   - **S (Skip):** Omit all model columns whose `column_id` references this sql_view.
     Log each omitted column in the Unmapped Properties Report under "SQL Views skipped".

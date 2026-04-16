@@ -48,14 +48,15 @@ Two scenarios are supported:
 **CRITICAL for Snowsight Workspaces:** Every `snowflake_sql_execute` call triggers a
 UI confirmation prompt. Minimise calls by batching related statements.
 
-**Target call budget:** Aim for **4–6 total SQL calls** per model:
+**Target call budget:** Aim for **4–5 total SQL calls** per model:
 
 | Call | Purpose |
 |---|---|
 | 1 | Get DDL + check profile |
-| 2 | Search ThoughtSpot for table objects (via stored procedure or API) |
-| 3 | Export Table TMLs to find join names (via stored procedure or API) |
-| 4 | Import model TML (via stored procedure or API) |
+| 2 | Search ThoughtSpot for **all** base tables in one batched call |
+| 3 | Export Table TMLs to find join names (one batched call) |
+| 4 | (Scenario B only) Introspect Snowflake columns for missing tables |
+| 5 | Import model TML |
 
 ---
 
@@ -71,28 +72,33 @@ UI confirmation prompt. Minimise calls by batching related statements.
 
 ### Step 1: Select profile and get DDL
 
-**Select the ThoughtSpot profile:**
+**Check procedures and select the ThoughtSpot profile in one call:**
 
 ```sql
+SELECT PROCEDURE_NAME FROM SKILLS.INFORMATION_SCHEMA.PROCEDURES
+WHERE PROCEDURE_SCHEMA = 'PUBLIC'
+  AND PROCEDURE_NAME IN ('TS_SEARCH_MODELS', 'TS_EXPORT_TML', 'TS_IMPORT_TML');
+
 SELECT NAME, BASE_URL, USERNAME, AUTH_TYPE, SECRET_NAME, TOKEN_EXPIRES_AT
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
 ORDER BY NAME;
 ```
 
+**Procedure check:** if any of the three procedures are missing from the first result,
+stop and tell the user:
+> "Required stored procedures are not installed. Run `/coco-setup` to install them,
+> then retry."
+
+**Profile selection:** using the rows from the second result:
 - If multiple rows: display a numbered list (`#. name — auth_type — base_url`) and ask
   the user to select one. Store the selected `NAME` as `{profile_name}`.
 - If exactly one row: display it and confirm before proceeding. Store as `{profile_name}`.
 
 **Validate the selected profile — branch by auth_type:**
 
-*Token auth:*
-```sql
-SELECT token_expires_at > CURRENT_TIMESTAMP() AS is_valid
-FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
-WHERE name = '{profile_name}';
-```
-- `is_valid = TRUE` → proceed
-- `is_valid = FALSE` → stop:
+*Token auth:* check the `TOKEN_EXPIRES_AT` value already returned above (no second query):
+- `TOKEN_EXPIRES_AT > CURRENT_TIMESTAMP()` → proceed
+- Otherwise → stop:
   > "The token for profile '{profile_name}' has expired. Run `/thoughtspot-setup` →
   > U → Refresh token, then retry."
 
@@ -187,11 +193,19 @@ Skip this step if the user answered **N** in Step 3 — go directly to Step 4B.
 
 **Search ThoughtSpot for matching table objects:**
 
+Search for all base tables in a **single** call by passing their names as an array:
+
 ```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', '{table_name}', FALSE);
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS(
+    '{profile_name}',
+    ARRAY_CONSTRUCT('{table_name_1}', '{table_name_2}', ...),
+    FALSE
+);
 ```
 
-Run once per base table. Filter results to match by database + schema + table name.
+The procedure fetches all ThoughtSpot objects and filters client-side to names
+containing any of the supplied keywords. Filter the returned results further to
+match by database + schema + table name (case-insensitive).
 Build map: `physical_table_name → {guid, metadata_name}`.
 
 **Export TMLs for all found tables in one call to verify columns:**
