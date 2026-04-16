@@ -1,6 +1,6 @@
 ---
 name: thoughtspot-setup
-description: Manage ThoughtSpot connection profiles for Snowflake workspaces — add, list, update, delete, and test profiles. Sets up External Access Integration, stored procedures for API calls, and stores credentials securely using Snowflake Secrets. Tokens expire after ~24 hours; checks exact expiry time.
+description: Manage ThoughtSpot connection profiles for Snowflake workspaces — add, list, update, delete, and test profiles. Supports both bearer token and password authentication. Sets up External Access Integration, stored procedures for API calls, and stores credentials securely using Snowflake Secrets. Token profiles expire after ~24 hours; password profiles remain valid until the password changes.
 ---
 
 # ThoughtSpot Setup (Snowflake Workspace)
@@ -89,7 +89,7 @@ SELECT * FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
 ```
 ThoughtSpot Profiles
 
-  1. {name}  —  token  —  {base_url}  —  {token_status}
+  1. {name}  —  {auth_type}  —  {base_url}  —  {token_status}
   ...
 
   L  List profiles
@@ -108,8 +108,9 @@ Enter L / A / U / D / T / Q:
 
 ```sql
 SELECT
-    name, base_url, username, secret_name, token_expires_at,
-    CASE WHEN token_expires_at <= CURRENT_TIMESTAMP() THEN 'EXPIRED'
+    name, base_url, username, auth_type, secret_name, token_expires_at,
+    CASE WHEN auth_type = 'password' THEN 'PASSWORD_AUTH'
+         WHEN token_expires_at <= CURRENT_TIMESTAMP() THEN 'EXPIRED'
          WHEN token_expires_at <= TIMESTAMPADD('minute', 5, CURRENT_TIMESTAMP()) THEN 'EXPIRING_SOON'
          ELSE 'VALID'
     END AS token_status,
@@ -123,8 +124,9 @@ Show each profile:
 Profile: {name}
   URL:        {base_url}
   Username:   {username}
+  Auth:       {auth_type}
   Secret:     {secret_name}
-  Expires at: {token_expires_at} ({token_status})
+  Expires at: {token_expires_at} ({token_status})   ← omit for password profiles
   Created:    {created_at}
   Updated:    {updated_at}
 ```
@@ -140,6 +142,7 @@ CREATE TABLE IF NOT EXISTS SKILLS.PUBLIC.THOUGHTSPOT_PROFILES (
     name VARCHAR NOT NULL,
     base_url VARCHAR NOT NULL,
     username VARCHAR NOT NULL,
+    auth_type VARCHAR NOT NULL DEFAULT 'token',
     secret_name VARCHAR NOT NULL,
     token_expires_at TIMESTAMP_NTZ,
     created_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
@@ -154,8 +157,16 @@ ThoughtSpot URL (e.g. https://myorg.thoughtspot.cloud):
 ```
 Strip trailing slash. Store as `{base_url}`.
 
+**⚠ Private IP validation:** If the URL contains a private IP (e.g. `172.x.x.x`,
+`10.x.x.x`, `192.168.x.x`), warn the user:
+> "Snowflake cannot reach private IP addresses from its cloud network. This will
+> only work if you have AWS PrivateLink / Azure Private Link configured between
+> Snowflake and your network. Do you want to continue?"
+
+If the user confirms, proceed. Otherwise ask for a public hostname.
+
 ```
-Username (email):
+Username (email or local username):
 ```
 Store as `{username}`.
 
@@ -164,7 +175,21 @@ Profile name: [Production]
 ```
 Default to `Production`. Store as `{profile_name}`.
 
-### Step A3: Obtain the token
+### Step A2b: Choose authentication type
+
+```
+Authentication method:
+  1  Bearer token (cloud clusters — recommended)
+  2  Password (on-premise / IP-based clusters)
+
+Enter 1 or 2:
+```
+
+Store as `{auth_type}`: `token` for option 1, `password` for option 2.
+
+### Step A3: Obtain credentials
+
+**If `{auth_type}` = `token`:**
 
 ```
 To get your token:
@@ -186,6 +211,15 @@ Paste the expiration_time_in_millis value (e.g. 1776293905878):
 ```
 Store as `{expiry_millis}`.
 
+**If `{auth_type}` = `password`:**
+
+```
+I'll need you to store your password as a Snowflake Secret (Step A5).
+No token expiry tracking is needed — the password remains valid until changed.
+```
+
+Set `{expiry_millis}` to `NULL`.
+
 ### Step A4: Derive names
 
 From `{profile_name}`:
@@ -197,6 +231,8 @@ From `{profile_name}`:
 
 **SECURITY: The user must run this SQL themselves.**
 
+**If `{auth_type}` = `token`:**
+
 ```
 Run this SQL to store your token securely. Replace <YOUR_TOKEN> with the token you copied:
 
@@ -206,7 +242,18 @@ Run this SQL to store your token securely. Replace <YOUR_TOKEN> with the token y
     COMMENT = 'ThoughtSpot bearer token for profile: {profile_name}';
 ```
 
-**IMPORTANT:** Do NOT execute this SQL on the user's behalf with the actual token.
+**If `{auth_type}` = `password`:**
+
+```
+Run this SQL to store your password securely. Replace <YOUR_PASSWORD> with your ThoughtSpot password:
+
+  CREATE OR REPLACE SECRET SKILLS.PUBLIC.{secret_name}
+    TYPE = GENERIC_STRING
+    SECRET_STRING = '<YOUR_PASSWORD>'
+    COMMENT = 'ThoughtSpot password for profile: {profile_name}';
+```
+
+**IMPORTANT:** Do NOT execute this SQL on the user's behalf with the actual credential.
 
 After confirmation, verify:
 ```sql
@@ -217,21 +264,37 @@ SHOW SECRETS LIKE '{secret_name}' IN SCHEMA SKILLS.PUBLIC;
 
 ```sql
 DELETE FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}';
-INSERT INTO SKILLS.PUBLIC.THOUGHTSPOT_PROFILES (name, base_url, username, secret_name, token_expires_at)
-SELECT '{profile_name}', '{base_url}', '{username}', '{secret_name}',
+
+-- For token auth:
+INSERT INTO SKILLS.PUBLIC.THOUGHTSPOT_PROFILES (name, base_url, username, auth_type, secret_name, token_expires_at)
+SELECT '{profile_name}', '{base_url}', '{username}', '{auth_type}', '{secret_name}',
        TO_TIMESTAMP({expiry_millis}::NUMBER / 1000);
+
+-- For password auth (expiry is NULL):
+INSERT INTO SKILLS.PUBLIC.THOUGHTSPOT_PROFILES (name, base_url, username, auth_type, secret_name, token_expires_at)
+SELECT '{profile_name}', '{base_url}', '{username}', 'password', '{secret_name}', NULL;
 ```
 
 ### Step A7: Set up External Access Integration
 
 Extract the hostname from `{base_url}` (e.g. `champagne-master-aws.thoughtspotstaging.cloud`).
 
-**Create the network rule:**
+**Create or update the network rule:**
+
+**IMPORTANT — Multi-profile support:** The network rule must include hostnames for
+**ALL** existing profiles, not just the new one. First query existing profiles:
+
+```sql
+SELECT DISTINCT base_url FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
+```
+
+Extract all hostnames (including the new one) and include them all:
+
 ```sql
 CREATE OR REPLACE NETWORK RULE SKILLS.PUBLIC.THOUGHTSPOT_API_RULE
   MODE = EGRESS
   TYPE = HOST_PORT
-  VALUE_LIST = ('{hostname}');
+  VALUE_LIST = ('{hostname_1}', '{hostname_2}', ...);
 ```
 
 **Create the External Access Integration (requires ACCOUNTADMIN):**
@@ -247,9 +310,10 @@ the current session cannot switch roles):
 ```sql
 USE ROLE ACCOUNTADMIN;
 
+-- Include ALL secrets from ALL profiles:
 CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION THOUGHTSPOT_API_ACCESS
   ALLOWED_NETWORK_RULES = (SKILLS.PUBLIC.THOUGHTSPOT_API_RULE)
-  ALLOWED_AUTHENTICATION_SECRETS = (SKILLS.PUBLIC.{secret_name})
+  ALLOWED_AUTHENTICATION_SECRETS = (SKILLS.PUBLIC.{secret_1}, SKILLS.PUBLIC.{secret_2}, ...)
   ENABLED = TRUE;
 
 GRANT USAGE ON INTEGRATION THOUGHTSPOT_API_ACCESS TO ROLE {user_role};
@@ -279,27 +343,72 @@ RUNTIME_VERSION = '3.11'
 PACKAGES = ('snowflake-snowpark-python', 'requests')
 HANDLER = 'run'
 EXTERNAL_ACCESS_INTEGRATIONS = (THOUGHTSPOT_API_ACCESS)
-SECRETS = ('ts_token' = SKILLS.PUBLIC.{secret_name})
+-- List ALL profile secrets here. When adding a new profile, add its secret.
+-- Also update the get_secret_for_profile() mapping inside the procedure body.
+SECRETS = ('ts_secret_slug1' = SKILLS.PUBLIC.{secret_1}, 'ts_secret_slug2' = SKILLS.PUBLIC.{secret_2}, ...)
 AS
 $$
 import requests
 import json
 import _snowflake
 
+def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=True):
+    if auth_type == 'password':
+        s = requests.Session()
+        login_resp = s.post(
+            f"{base_url}/api/rest/2.0/auth/session/login",
+            json={"username": username, "password": secret_value},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            verify=verify_ssl
+        )
+        if login_resp.status_code in (401, 403):
+            return None, None, "Invalid credentials. Run thoughtspot-setup to update password."
+        login_resp.raise_for_status()
+        return s, {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }, None
+    else:
+        return None, {
+            "Authorization": f"Bearer {secret_value}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }, None
+
+def get_secret_for_profile(secret_name):
+    # Map each secret_name to its SECRETS clause alias.
+    # When adding a new profile, add its secret here and in the SECRETS clause.
+    mapping = {
+        # 'THOUGHTSPOT_TOKEN_EXAMPLE': 'ts_secret_example',
+    }
+    key = mapping.get(secret_name)
+    if not key:
+        return None
+    return _snowflake.get_generic_secret_string(key)
+
 def run(session, profile_name, query_string, owner_only):
-    profile = session.sql(f"SELECT base_url, username FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}'").collect()
+    profile = session.sql(f"SELECT base_url, username, auth_type, secret_name FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}'").collect()
     if not profile:
         return {"error": f"Profile '{profile_name}' not found"}
 
-    base_url = profile[0]['BASE_URL'].rstrip('/')
-    username = profile[0]['USERNAME']
-    token = _snowflake.get_generic_secret_string('ts_token')
+    row = profile[0].as_dict()
+    base_url = row['BASE_URL'].rstrip('/')
+    username = row['USERNAME']
+    auth_type = row.get('AUTH_TYPE', 'token')
+    secret_name = row['SECRET_NAME']
+    secret_value = get_secret_for_profile(secret_name)
+    if not secret_value:
+        return {"error": f"Secret '{secret_name}' not mapped. Recreate procedures via Step A8."}
+    verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
 
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-    }
+    http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
+    if err:
+        return {"error": err}
+
+    def do_post(url, json_body):
+        if http_session:
+            return http_session.post(url, headers=headers, json=json_body, verify=verify_ssl)
+        return requests.post(url, headers=headers, json=json_body, verify=verify_ssl)
 
     all_results = []
     offset = 0
@@ -315,10 +424,10 @@ def run(session, profile_name, query_string, owner_only):
         if owner_only:
             body["created_by_user_identifiers"] = [username]
 
-        resp = requests.post(f"{base_url}/api/rest/2.0/metadata/search", headers=headers, json=body)
+        resp = do_post(f"{base_url}/api/rest/2.0/metadata/search", body)
 
         if resp.status_code in (401, 403):
-            return {"error": "Token expired or unauthorized. Run thoughtspot-setup to refresh."}
+            return {"error": "Unauthorized. Run thoughtspot-setup to refresh credentials."}
 
         resp.raise_for_status()
         page = resp.json()
@@ -358,26 +467,70 @@ RUNTIME_VERSION = '3.11'
 PACKAGES = ('snowflake-snowpark-python', 'requests')
 HANDLER = 'run'
 EXTERNAL_ACCESS_INTEGRATIONS = (THOUGHTSPOT_API_ACCESS)
-SECRETS = ('ts_token' = SKILLS.PUBLIC.{secret_name})
+-- List ALL profile secrets here. When adding a new profile, add its secret.
+-- Also update the get_secret_for_profile() mapping inside the procedure body.
+SECRETS = ('ts_secret_slug1' = SKILLS.PUBLIC.{secret_1}, 'ts_secret_slug2' = SKILLS.PUBLIC.{secret_2}, ...)
 AS
 $$
 import requests
 import json
 import _snowflake
 
+def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=True):
+    if auth_type == 'password':
+        s = requests.Session()
+        login_resp = s.post(
+            f"{base_url}/api/rest/2.0/auth/session/login",
+            json={"username": username, "password": secret_value},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            verify=verify_ssl
+        )
+        if login_resp.status_code in (401, 403):
+            return None, None, "Invalid credentials. Run thoughtspot-setup to update password."
+        login_resp.raise_for_status()
+        return s, {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }, None
+    else:
+        return None, {
+            "Authorization": f"Bearer {secret_value}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }, None
+
+def get_secret_for_profile(secret_name):
+    mapping = {
+        # 'THOUGHTSPOT_TOKEN_EXAMPLE': 'ts_secret_example',
+    }
+    key = mapping.get(secret_name)
+    if not key:
+        return None
+    return _snowflake.get_generic_secret_string(key)
+
 def run(session, profile_name, guids):
-    profile = session.sql(f"SELECT base_url FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}'").collect()
+    profile = session.sql(f"SELECT base_url, username, auth_type, secret_name FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}'").collect()
     if not profile:
         return {"error": f"Profile '{profile_name}' not found"}
 
-    base_url = profile[0]['BASE_URL'].rstrip('/')
-    token = _snowflake.get_generic_secret_string('ts_token')
+    row = profile[0].as_dict()
+    base_url = row['BASE_URL'].rstrip('/')
+    username = row['USERNAME']
+    auth_type = row.get('AUTH_TYPE', 'token')
+    secret_name = row['SECRET_NAME']
+    secret_value = get_secret_for_profile(secret_name)
+    if not secret_value:
+        return {"error": f"Secret '{secret_name}' not mapped. Recreate procedures via Step A8."}
+    verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
 
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-    }
+    http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
+    if err:
+        return {"error": err}
+
+    def do_post(url, json_body):
+        if http_session:
+            return http_session.post(url, headers=headers, json=json_body, verify=verify_ssl)
+        return requests.post(url, headers=headers, json=json_body, verify=verify_ssl)
 
     body = {
         "metadata": [{"identifier": g} for g in guids],
@@ -385,10 +538,10 @@ def run(session, profile_name, guids):
         "export_associated": True
     }
 
-    resp = requests.post(f"{base_url}/api/rest/2.0/metadata/tml/export", headers=headers, json=body)
+    resp = do_post(f"{base_url}/api/rest/2.0/metadata/tml/export", body)
 
     if resp.status_code in (401, 403):
-        return {"error": "Token expired or unauthorized. Run thoughtspot-setup to refresh."}
+        return {"error": "Unauthorized. Run thoughtspot-setup to refresh credentials."}
 
     resp.raise_for_status()
     return resp.json()
@@ -415,10 +568,14 @@ Show numbered profile list and ask which to update. Then show options:
 ```
   1  URL
   2  Username
-  3  Refresh token (token expired — provide a new one)
+  3  Refresh token (token auth — provide a new one)
+  4  Update password (password auth — provide a new one)
 
-Enter 1–3:
+Enter 1–4:
 ```
+
+Only show option 3 for `auth_type = 'token'` profiles.
+Only show option 4 for `auth_type = 'password'` profiles.
 
 ### U1 — Update URL
 
@@ -477,6 +634,34 @@ ALTER EXTERNAL ACCESS INTEGRATION THOUGHTSPOT_API_ACCESS
   SET ALLOWED_AUTHENTICATION_SECRETS = (SKILLS.PUBLIC.{secret_name});
 ```
 
+### U4 — Update Password
+
+For `auth_type = 'password'` profiles:
+
+```
+Run this SQL to update your password. Replace <YOUR_NEW_PASSWORD> with your new ThoughtSpot password:
+
+  CREATE OR REPLACE SECRET SKILLS.PUBLIC.{secret_name}
+    TYPE = GENERIC_STRING
+    SECRET_STRING = '<YOUR_NEW_PASSWORD>'
+    COMMENT = 'ThoughtSpot password for profile: {profile_name}';
+```
+
+**Also update the External Access Integration** to reference the refreshed secret
+(requires ACCOUNTADMIN):
+
+```sql
+ALTER EXTERNAL ACCESS INTEGRATION THOUGHTSPOT_API_ACCESS
+  SET ALLOWED_AUTHENTICATION_SECRETS = (SKILLS.PUBLIC.{secret_name});
+```
+
+Update the profile timestamp:
+```sql
+UPDATE SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
+SET updated_at = CURRENT_TIMESTAMP()
+WHERE name = '{profile_name}';
+```
+
 ---
 
 ## D — Delete
@@ -495,9 +680,10 @@ Check token status and verify secret is accessible:
 
 ```sql
 SELECT
-    name,
+    name, auth_type,
     token_expires_at,
-    CASE WHEN token_expires_at <= CURRENT_TIMESTAMP() THEN 'EXPIRED'
+    CASE WHEN auth_type = 'password' THEN 'PASSWORD_AUTH'
+         WHEN token_expires_at <= CURRENT_TIMESTAMP() THEN 'EXPIRED'
          WHEN token_expires_at <= TIMESTAMPADD('minute', 5, CURRENT_TIMESTAMP()) THEN 'EXPIRING_SOON'
          ELSE 'VALID'
     END AS token_status
@@ -521,12 +707,13 @@ Profile '{name}' — connected and verified.
 
 ## Token Expiry Handling
 
-Check token expiry **before** making any API call:
+Check token expiry **before** making any API call (token auth profiles only):
 
 ```sql
 SELECT
-    name, token_expires_at,
-    CASE WHEN token_expires_at <= CURRENT_TIMESTAMP() THEN 'EXPIRED'
+    name, auth_type, token_expires_at,
+    CASE WHEN auth_type = 'password' THEN 'PASSWORD_AUTH'
+         WHEN token_expires_at <= CURRENT_TIMESTAMP() THEN 'EXPIRED'
          WHEN token_expires_at <= TIMESTAMPADD('minute', 5, CURRENT_TIMESTAMP()) THEN 'EXPIRING_SOON'
          ELSE 'VALID'
     END AS token_status
@@ -534,6 +721,7 @@ FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
 WHERE name = '{profile_name}';
 ```
 
+- **PASSWORD_AUTH**: No expiry check needed — proceed with API calls
 - **EXPIRED** or **EXPIRING_SOON**: Prompt user to refresh (U → Refresh token)
 - **VALID**: Proceed with API calls
 
@@ -576,7 +764,7 @@ DROP SCHEMA IF EXISTS SKILLS.TEMP;
 |---|---|
 | Secret not found | Re-run Add or Update → Refresh token |
 | SYSTEM$GET_SECRET_STRING errors | Check role has USAGE on the secret |
-| 401 / 403 from ThoughtSpot API | Token expired — run Update → Refresh token |
+| 401 / 403 from ThoughtSpot API | Token expired or password incorrect — run Update to refresh |
 | Profile table missing | Re-run Add (table is auto-created) |
 | External Access Integration missing | Re-run Step A7 as ACCOUNTADMIN |
 | Procedure not found | Re-run Step A8 to recreate API procedures |
@@ -600,7 +788,10 @@ CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{guid1}', '{
 ### Token Freshness Check
 
 ```sql
-SELECT name, token_expires_at, token_expires_at > CURRENT_TIMESTAMP() AS is_valid
+SELECT name, auth_type, token_expires_at,
+    CASE WHEN auth_type = 'password' THEN TRUE
+         ELSE token_expires_at > CURRENT_TIMESTAMP()
+    END AS is_valid
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
 WHERE name = '{profile_name}';
 ```
@@ -609,9 +800,11 @@ WHERE name = '{profile_name}';
 
 ```sql
 SELECT
-    p.base_url, p.username, p.secret_name, p.token_expires_at,
-    token_expires_at > CURRENT_TIMESTAMP() AS is_valid,
-    SYSTEM$GET_SECRET_STRING('SKILLS.PUBLIC.' || p.secret_name) AS token
+    p.base_url, p.username, p.auth_type, p.secret_name, p.token_expires_at,
+    CASE WHEN p.auth_type = 'password' THEN TRUE
+         ELSE token_expires_at > CURRENT_TIMESTAMP()
+    END AS is_valid,
+    SYSTEM$GET_SECRET_STRING('SKILLS.PUBLIC.' || p.secret_name) AS secret_value
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES p
 WHERE p.name = '{profile_name}';
 ```
