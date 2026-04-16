@@ -46,7 +46,7 @@ create or replace semantic view BIRD_SUPERHEROS_SV
         SUPERHERO.WEIGHT_KG as superhero.WEIGHT_KG comment='the weight of the superhero in kilograms',
         ...
         ALIGNMENT.ALIGNMENT as alignment.ALIGNMENT comment='the alignment of the superhero (Good, Neutral, or Bad)',
-        ATTRIBUTE.ATTRIBUTE_NAME as attribute.ATTRIBUTE_NAME comment='the attribute that defines who they are',
+        ATTRIBUTE.ATTRIBUTE_NAME as attribute.ATTRIBUTE_NAME comment='the attribute that defines who they are and what they are capable of',
         EYE_COLOUR.EYE_COLOUR as eye_colour.COLOUR comment='the color of the superhero''s eye',
         ...
         SUPERPOWER.POWER_NAME as superpower.POWER_NAME comment='the superpower name'
@@ -119,7 +119,7 @@ columns from the physical tables. Examples:
 
 ---
 
-## Step 7: Join Names (Scenario B — no pre-defined joins)
+## Step 7: Join Names (no pre-defined joins — inline joins required)
 
 Exporting ThoughtSpot table TMLs confirms that none of the tables have pre-defined
 `joins_with` entries. Use **inline joins** in the model TML instead of `referencing_join`.
@@ -279,8 +279,8 @@ model:
 1. **Real DDL format:** Flat `dimensions` and `metrics` blocks at view level (not nested
    per-table). Relationships use `REL_NAME as FROM(COL) references TO(COL)` syntax.
 
-2. **Inline joins (Scenario B):** Required when ThoughtSpot tables have no pre-defined
-   `joins_with` entries. The `with` field is REQUIRED and must match the target table's `id`.
+2. **Inline joins:** Required when ThoughtSpot tables have no pre-defined `joins_with`
+   entries. The `with` field is REQUIRED and must match the target table's `id`.
 
 3. **`with` and `on` consistency:** `with: alignment` and `on: "[superhero::alignment_id] = [alignment::id]"`
    both use the `id` value (`alignment`). `id` values must be lowercase.
@@ -309,7 +309,7 @@ model:
 When the ThoughtSpot cluster has no existing table objects for the semantic view's
 base tables, follow this workflow instead of Step 4A:
 
-1. **Ask the user for the connection** — get the GUID with `TS_SEARCH_MODELS` or via the API
+1. **Ask the user for the connection** — get the connection GUID via the ThoughtSpot REST API connection search endpoint (`POST /api/rest/2.0/connection/search` with `record_size: 500`)
 2. **Introspect columns** from Snowflake INFORMATION_SCHEMA
 3. **Build table TMLs** for each base table and import them in one batch
 4. **Then build the model TML** referencing the newly created tables
