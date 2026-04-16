@@ -48,3 +48,6 @@ build/
 .cursor/
 .claude/
 .gemini/
+
+# Private skills (local only)
+agents/claude/thoughtspot-model-builder/
