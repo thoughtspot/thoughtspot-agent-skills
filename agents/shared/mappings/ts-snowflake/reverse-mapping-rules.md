@@ -185,11 +185,55 @@ For simple metric EXPR patterns (`AGG(view_alias.col)`):
 | `MIN(view.col)` | `MIN` | MEASURE |
 | `MAX(view.col)` | `MAX` | MEASURE |
 
-When the aggregation is COUNT_DISTINCT, prefer a formula column:
+When the aggregation is COUNT_DISTINCT, **always use a formula column** rather than a
+MEASURE with `COUNT_DISTINCT`:
 ```
 unique count ( [TABLE_ID::physical_col] )
 ```
-over a MEASURE with `COUNT_DISTINCT`, as the formula syntax is more reliable.
+This is required (not just preferred) when the same physical column is also used as an
+ATTRIBUTE dimension in `columns[]`. ThoughtSpot rejects models where the same
+`column_id` appears more than once — the duplicate `column_id` error fires even when
+the two entries have different `column_type` values. Moving COUNT_DISTINCT to
+`formulas[]` avoids this entirely.
+
+---
+
+## Computed Dimensions (ATTRIBUTE-type Formulas)
+
+Some semantic view dimensions are derived from SQL expressions rather than a single
+physical column. These are identified by a non-`view_alias.NAME` right-hand side:
+
+```sql
+-- Simple dimension (physical column):
+DM_ORDER.ORDER_DATE as dm_order.ORDER_DATE
+
+-- Computed dimension (SQL expression):
+DM_ORDER.DAYS_TO_SHIP as DATEDIFF('day', dm_order.ORDER_DATE, dm_order.SHIPPED_DATE)
+DM_EMPLOYEE.EMPLOYEE_NAME as CONCAT(dm_employee.FIRST_NAME, ' ', dm_employee.LAST_NAME)
+```
+
+Computed dimensions translate to `formulas[]` entries with `column_type: ATTRIBUTE`:
+
+```yaml
+formulas:
+- name: "Days To Ship"
+  expr: "diff_days ( [dm_order::SHIPPED_DATE] , [dm_order::ORDER_DATE] )"
+  properties:
+    column_type: ATTRIBUTE
+- name: "Employee Name"
+  expr: "concat ( [dm_employee::FIRST_NAME] , ' ' , [dm_employee::LAST_NAME] )"
+  properties:
+    column_type: ATTRIBUTE
+```
+
+These do NOT appear in `columns[]` — only in `formulas[]`. The formula translation
+rules (column references, function names) are identical to MEASURE formulas.
+
+**`diff_days` argument order:** ThoughtSpot uses `(end, start)` — the opposite of
+Snowflake's `DATEDIFF('day', start, end)`. Always check the arg order:
+```
+DATEDIFF('day', ORDER_DATE, SHIPPED_DATE)  →  diff_days ( [SHIPPED_DATE] , [ORDER_DATE] )
+```
 
 ---
 
@@ -340,6 +384,20 @@ connection:
 ```
 Get the connection GUID first with `ts connections list --profile {profile}`.
 
+**`ts connections list` is capped at 100 results:** The CLI silently returns only the
+first 100 connections. If the target connection isn't found, call the API directly:
+
+```python
+import requests
+resp = requests.post(
+    f"{base_url}/api/rest/2.0/connection/search",
+    json={"connection_type": "SNOWFLAKE", "record_size": 500, "record_offset": 0},
+    headers={"Authorization": f"Bearer {token}"}
+)
+conns = resp.json()
+match = next((c for c in conns if c["name"] == connection_name), None)
+```
+
 **Transient JDBC errors:** ThoughtSpot occasionally returns
 `CONNECTION_METADATA_FETCH_ERROR / JDBC driver encountered a communication error`
 during table TML import. This is transient — retry up to 3 times with a 5-second
@@ -350,6 +408,35 @@ list even on success. Always follow up with a metadata search to confirm the GUI
 ```bash
 ts metadata search --subtype ONE_TO_ONE_LOGICAL --name '%{table_name}%' --profile {profile}
 ```
+
+---
+
+### Updating an existing model (avoid duplicate creation)
+
+When reimporting a model to fix errors, ThoughtSpot creates a **new** object unless
+the TML includes a `guid` field identifying the existing object. Without it, every
+import produces a duplicate with the same name.
+
+**Always include `guid` on the model when updating:**
+```yaml
+model:
+  name: "{model_name}"
+  guid: "{existing_model_guid}"   # REQUIRED to update in-place, not create a new model
+  model_tables:
+  ...
+```
+
+Get the existing GUID via:
+```bash
+ts metadata search --subtype WORKSHEET --name '%{model_name}%' --profile {profile}
+```
+
+If you already have the GUID from a previous import (logged in the summary report),
+use it directly. If a duplicate was already created in error, delete the wrong one:
+```bash
+ts metadata delete {wrong_guid} --profile {profile}
+```
+Then add `guid: {correct_guid}` to future TML imports for that model.
 
 ---
 

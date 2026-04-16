@@ -496,6 +496,17 @@ Wait for user confirmation before proceeding.
 
 ### Step 11: Import the model
 
+**IMPORTANT — Updating vs creating:** Without a `guid` field in the TML, ThoughtSpot
+always creates a **new** object, even if a model with the same name already exists.
+To update an existing model in-place, add `guid` to the model dict:
+
+```python
+model_dict["guid"] = "{existing_model_guid}"   # omit on first import; required for all subsequent fixes
+```
+
+On the first import (new model), omit `guid`. After import, record the GUID from the
+response — you will need it if you reimport to fix any errors.
+
 Serialize the model TML dict to a YAML string, then import:
 
 ```python
@@ -515,7 +526,8 @@ if result.returncode != 0:
     print(result.stderr)
 ```
 
-On success, parse the response JSON to extract the created model's GUID.
+On success, parse the response JSON to extract the created model's GUID. **Save it** —
+required for any future reimports to update the model without creating a duplicate.
 
 **Common import errors:**
 

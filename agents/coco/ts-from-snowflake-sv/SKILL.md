@@ -25,7 +25,7 @@ Two scenarios are supported:
 |---|---|
 | [../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
 | [../../shared/mappings/ts-snowflake/formula-translation.md](../../shared/mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
-| [references/worked-example.md](references/worked-example.md) | End-to-end example: DUNDER_MIFFLIN_SALES → ThoughtSpot Model |
+| [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (Scenario B, inline joins, dual-role tables) |
 
 ---
 
@@ -391,6 +391,21 @@ Proceed? (yes/no):
 
 ### Step 8: Import the model TML
 
+**IMPORTANT — Updating vs creating:** Without a `guid` field in the TML, ThoughtSpot
+always creates a **new** object, even if a model with the same name already exists.
+To update an existing model, add `guid: {existing_model_guid}` directly under `name`:
+
+```yaml
+model:
+  name: "TEST_SV_{view_name}"
+  guid: "{existing_model_guid}"   # omit on first import; required for all subsequent fixes
+  model_tables:
+  ...
+```
+
+On the first import (new model), omit `guid` — it doesn't exist yet. After import,
+record the GUID from the response for all future updates.
+
 Import via the stored procedure:
 
 ```sql
@@ -401,7 +416,8 @@ $$), TRUE);
 
 **IMPORTANT:** Use `$$` dollar-quoting to preserve YAML formatting.
 
-On success, extract and display the created model GUID.
+On success, extract and display the created model GUID. **Save it** — you will need it
+if you reimport to fix any errors.
 
 **Common errors:**
 
