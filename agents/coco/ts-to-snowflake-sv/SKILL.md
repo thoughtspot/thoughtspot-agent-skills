@@ -19,7 +19,7 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
 | [../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
 | [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
-| [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
+| [../../shared/worked-examples/snowflake/ts-to-snowflake.md](../../shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
 | [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 
 ---

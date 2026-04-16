@@ -24,7 +24,7 @@ Two scenarios are supported:
 |---|---|
 | [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
 | [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
-| [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
+| [~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 | [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns |

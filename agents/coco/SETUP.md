@@ -189,14 +189,16 @@ and add the skill files manually.
    │   │       ├── ts-snowflake-formula-translation.md
    │   │       ├── ts-snowflake-properties.md
    │   │       └── ts-from-snowflake-rules.md
-   │   └── schemas/
-   │       ├── snowflake-schema.md
-   │       └── thoughtspot-tml.md
+   │   ├── schemas/
+   │   │   ├── snowflake-schema.md
+   │   │   └── thoughtspot-tml.md
+   │   └── worked-examples/
+   │       └── snowflake/
+   │           ├── ts-from-snowflake.md
+   │           └── ts-to-snowflake.md
    └── skills/
        └── <skill-name>/
-           ├── SKILL.md
-           └── references/
-               └── ...
+           └── SKILL.md
    ```
 4. For each file, right-click the target folder → **New File** → paste the contents
 5. Cortex Code will auto-detect the skill once all files are in place
@@ -223,13 +225,14 @@ and add the skill files manually.
    .snowflake/cortex/
    ├── shared/
    │   ├── mappings/ts-snowflake/
-   │   └── schemas/
+   │   ├── schemas/
+   │   └── worked-examples/snowflake/
    └── skills/
        └── <skill-name>/
    ```
 5. Copy the skill files from `agents/coco/<skill-name>/` into `.snowflake/cortex/skills/<skill-name>/`.
-   Copy `agents/shared/mappings/` and `agents/shared/schemas/` (repo) into
-   `.snowflake/cortex/shared/mappings/` and `.snowflake/cortex/shared/schemas/`.
+   Copy `agents/shared/mappings/`, `agents/shared/schemas/`, and `agents/shared/worked-examples/` (repo) into
+   `.snowflake/cortex/shared/mappings/`, `.snowflake/cortex/shared/schemas/`, and `.snowflake/cortex/shared/worked-examples/`.
    For each file, right-click the target folder → **New File** → paste the contents.
 6. Cortex Code will auto-detect the skill once `SKILL.md` is in place.
 
