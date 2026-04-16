@@ -62,7 +62,7 @@ create or replace semantic view BIRD_SUPERHEROS_SV
 
 ---
 
-## Step 4: DDL Parse Results
+## DDL Parse Results
 
 **Tables:**
 
@@ -86,7 +86,7 @@ create or replace semantic view BIRD_SUPERHEROS_SV
 
 ---
 
-## Step 6A: ThoughtSpot Table Objects Found
+## ThoughtSpot Table Objects Found
 
 **CoCo:**
 ```sql
@@ -126,7 +126,7 @@ but the ThoughtSpot table exposes that column as `COLOUR` — so `column_id` is 
 
 ---
 
-## Step 7: Join Names (no pre-defined joins — inline joins required)
+## Join Names (no pre-defined joins — inline joins required)
 
 Exporting ThoughtSpot table TMLs confirms that none of the tables have pre-defined
 `joins_with` entries. Use **inline joins** in the model TML instead of `referencing_join`.

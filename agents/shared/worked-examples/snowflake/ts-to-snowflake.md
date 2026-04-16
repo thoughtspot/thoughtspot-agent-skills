@@ -64,7 +64,7 @@ Join condition from `fact_sales` Table TML: `[fact_sales::product_id] = [dim_pro
 
 ---
 
-## Step 4: Parse the Worksheet TML
+## Parse the Worksheet TML
 
 **Tables and table_paths:**
 
@@ -93,7 +93,7 @@ and requires a `primary_key` in the semantic view.
 
 ---
 
-## Step 5: Fetch Table Details
+## Fetch Table Details
 
 Export Table TML for `fact_sales` and `dim_product` to get physical `db`, `schema`,
 `db_table` values and the join condition column names.
@@ -116,7 +116,7 @@ Export Table TML for `fact_sales` and `dim_product` to get physical `db`, `schem
 
 ---
 
-## Step 6: Classify Columns
+## Classify Columns
 
 Apply the classification decision tree to each column:
 
@@ -132,7 +132,7 @@ Apply the classification decision tree to each column:
 
 ---
 
-## Step 7: Translate Formulas
+## Translate Formulas
 
 **Formula: `# of Products`**
 
@@ -147,7 +147,7 @@ Translation:
 
 ---
 
-## Step 8: Generate Snowflake Names
+## Generate Snowflake Names
 
 Apply the name generation rules (lowercase, non-alphanumeric → underscore, strip ends):
 
@@ -172,7 +172,7 @@ User accepts `product_count`.
 
 ---
 
-## Step 9: Build Relationship
+## Build Relationship
 
 From the join: `sales_to_product` — `fact_sales` → `dim_product`, join column `PRODUCT_ID`.
 
@@ -190,7 +190,7 @@ relationships:
 
 ---
 
-## Step 10: Dry-Run Validation
+## Dry-Run Validation
 
 ```sql
 CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('ANALYTICS.PUBLIC', $$
