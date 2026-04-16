@@ -3,11 +3,12 @@
 This guide walks you through connecting the skill's Git repository to your Snowflake
 account so the skill files are available in Snowsight Workspaces.
 
-> **Path note:** Skills in this repository are stored under `agents/coco/<skill-name>/`.
-> Snowflake Cortex Code looks for skills at `.snowflake/cortex/skills/<skill-name>/`
-> within a Workspace. These paths do not match — after connecting the Git repository
-> and opening your Workspace, you must manually create the `.snowflake/cortex/skills/`
-> folder structure and copy the skill files into it (see
+> **Path note:** Skills are stored under `agents/coco/<skill-name>/` and shared
+> reference files under `agents/shared/` in this repository. Snowflake Cortex Code
+> looks for skills at `.snowflake/cortex/skills/<skill-name>/` within a Workspace.
+> After connecting the Git repository and opening your Workspace, you must manually
+> create the `.snowflake/cortex/skills/` and `.snowflake/cortex/shared/` folder
+> structures and copy files into them (see
 > [Using the skill in a Workspace](#using-the-skill-in-a-workspace) below).
 
 ---
@@ -180,28 +181,29 @@ and add the skill files manually.
 2. Select **Create Workspace** → **Create from scratch**
 3. Create the following folder structure in the Workspace:
    ```
-   .snowflake/
-   ├── cortex/
-   │   └── skills/
-   │       └── <skill-name>/
-   │           ├── SKILL.md
-   │           └── references/
-   │               └── ...
-   ├── mappings/
-   │   └── ts-snowflake/
-   │       ├── mapping-rules.md
-   │       ├── formula-translation.md
-   │       └── property-coverage.md
-   └── schemas/
-       ├── snowflake-schema.md
-       └── thoughtspot-tml.md
+   .snowflake/cortex/
+   ├── shared/
+   │   ├── mappings/
+   │   │   └── ts-snowflake/
+   │   │       ├── mapping-rules.md
+   │   │       ├── formula-translation.md
+   │   │       ├── property-coverage.md
+   │   │       └── reverse-mapping-rules.md
+   │   └── schemas/
+   │       ├── snowflake-schema.md
+   │       └── thoughtspot-tml.md
+   └── skills/
+       └── <skill-name>/
+           ├── SKILL.md
+           └── references/
+               └── ...
    ```
 4. For each file, right-click the target folder → **New File** → paste the contents
 5. Cortex Code will auto-detect the skill once all files are in place
 
-> **Path note:** Skills reference `mappings/` and `schemas/` via `../../../` — three
-> levels up from `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/`,
-> so these sit alongside `cortex/` inside `.snowflake/`.
+> **Path note:** Skills reference shared files via `../../shared/` — two levels up from
+> `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/cortex/`, so
+> `shared/` sits alongside `skills/` inside `.snowflake/cortex/`.
 
 > **Note:** With this approach there is no automatic update mechanism. To get newer
 > versions of the skill, you must manually replace the files. Consider Options A–D
@@ -218,27 +220,22 @@ and add the skill files manually.
 3. Select your repository and branch
 4. In the Workspace file tree, create the following structure:
    ```
-   .snowflake/
-   ├── cortex/
-   │   └── skills/
-   │       └── <skill-name>/
-   ├── mappings/
-   │   └── ts-snowflake/
-   │       ├── mapping-rules.md
-   │       ├── formula-translation.md
-   │       └── property-coverage.md
-   └── schemas/
-       ├── snowflake-schema.md
-       └── thoughtspot-tml.md
+   .snowflake/cortex/
+   ├── shared/
+   │   ├── mappings/ts-snowflake/
+   │   └── schemas/
+   └── skills/
+       └── <skill-name>/
    ```
 5. Copy the skill files from `agents/coco/<skill-name>/` into `.snowflake/cortex/skills/<skill-name>/`.
-   Copy `mappings/` and `schemas/` (repo root) into `.snowflake/mappings/` and `.snowflake/schemas/`.
+   Copy `agents/shared/mappings/` and `agents/shared/schemas/` (repo) into
+   `.snowflake/cortex/shared/mappings/` and `.snowflake/cortex/shared/schemas/`.
    For each file, right-click the target folder → **New File** → paste the contents.
 6. Cortex Code will auto-detect the skill once `SKILL.md` is in place.
 
-> **Path note:** Skills reference `mappings/` and `schemas/` via `../../../` — three
-> levels up from `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/`,
-> so these sit alongside `cortex/` inside `.snowflake/`.
+> **Path note:** Skills reference shared files via `../../shared/` — two levels up from
+> `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/cortex/`, so
+> `shared/` sits alongside `skills/` inside `.snowflake/cortex/`.
 
 > When a new version of the skill is available, fetch the repository
 > (`ALTER GIT REPOSITORY ... FETCH`) to update the source files, then re-copy any
