@@ -227,12 +227,12 @@ DATEDIFF('day', ORDER_DATE, SHIPPED_DATE)  →  diff_days ( [SHIPPED_DATE] , [OR
 
 ## SQL → ThoughtSpot Formula Translation
 
-> See **[formula-translation.md](formula-translation.md)** for the full bidirectional
+> See **[ts-snowflake-formula-translation.md](ts-snowflake-formula-translation.md)** for the full bidirectional
 > translation reference (Snowflake SQL ↔ ThoughtSpot formulas), including window functions,
 > LOD expressions, and semi-additive patterns.
 
 Apply these rules when a metric EXPR is **not** a simple `AGG(view.col)`.
-The quick-reference tables below cover the most common cases; consult formula-translation.md
+The quick-reference tables below cover the most common cases; consult ts-snowflake-formula-translation.md
 for edge cases and complex expressions.
 
 **Column reference conversion:**

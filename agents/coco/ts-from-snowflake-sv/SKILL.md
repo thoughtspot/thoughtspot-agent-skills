@@ -22,8 +22,8 @@ Two scenarios are supported:
 
 | File | Purpose |
 |---|---|
-| [../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
-| [../../shared/mappings/ts-snowflake/formula-translation.md](../../shared/mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
+| [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
+| [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
 | [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 
 ---
@@ -126,7 +126,7 @@ Store `secret_value` for use in subsequent API calls via stored procedures. Neve
 ### Step 2: Parse the DDL
 
 Parse the DDL string returned in Step 1. The DDL is a SQL `CREATE OR REPLACE
-SEMANTIC VIEW` statement. See [../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md)
+SEMANTIC VIEW` statement. See [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md)
 for the full format.
 
 > **Important:** The real DDL format has **flat** `dimensions` and `metrics` blocks at the
@@ -353,7 +353,7 @@ Parse each returned `edoc` YAML string. Find in the `joins` section the entry wh
    ```
 
 Apply all column, formula, and join mappings from
-[../../shared/mappings/ts-snowflake/reverse-mapping-rules.md](../../shared/mappings/ts-snowflake/reverse-mapping-rules.md) to build
+[../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md) to build
 the model TML dict. Serialise to a YAML string.
 
 For each metric in the semantic view:
@@ -428,7 +428,7 @@ if you reimport to fix any errors.
 | `{table_name} does not exist in schema` (on `with`) | `with` value doesn't match any `id` | Ensure `with` matches target `id` exactly (lowercase) |
 | `Invalid srcTable or destTable in join expression` | `on` clause uses table names instead of `id` values | Check both `[table::col]` refs use `id` values |
 | `Multiple tables have same alias {name}` | Two `model_tables` entries share the same `name` | Deduplicate — same Snowflake object must appear only once |
-| `formula syntax error` | ThoughtSpot formula has invalid syntax | Review translated formula against formula-translation.md |
+| `formula syntax error` | ThoughtSpot formula has invalid syntax | Review translated formula against ts-snowflake-formula-translation.md |
 | `fqn resolution failed` | Stale GUID | Re-run Step 4 to get fresh GUIDs |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars before serialising |
 

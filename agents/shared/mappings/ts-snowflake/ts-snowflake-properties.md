@@ -20,8 +20,8 @@ of this skill over time.
 | `joins[]` (`referencing_join`) | `relationships[]` | Resolved from Table TML `joins_with` |
 | `ATTRIBUTE` column (non-date) | `dimensions[]` | |
 | `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` | Type from `db_column_properties.data_type` |
-| `MEASURE` column | `metrics[]` | Aggregation mapped via mapping-rules.md |
-| Formula column (`formula_id`) | `metrics[]` | Expression translated; see formula-translation.md |
+| `MEASURE` column | `metrics[]` | Aggregation mapped via ts-to-snowflake-rules.md |
+| Formula column (`formula_id`) | `metrics[]` | Expression translated; see ts-snowflake-formula-translation.md |
 | `synonyms[]` | `synonyms[]` | Passed through |
 | `column.description` | `description` | Passed through |
 | `ai_context` | `description` | **Partial** — see below |
@@ -106,7 +106,7 @@ listed in the Unmapped Properties Report.
 **Status: Hard blocker — requires manual translation**
 
 ThoughtSpot-specific function for embedding SQL templates. Must be rewritten manually.
-See [formula-translation.md](formula-translation.md) for guidance.
+See [ts-snowflake-formula-translation.md](ts-snowflake-formula-translation.md) for guidance.
 
 ---
 
@@ -116,7 +116,7 @@ See [formula-translation.md](formula-translation.md) for guidance.
 
 `moving_average`, `cumulative_sum`, `rank`, `group_aggregate`, `first_value`, `last_value`, etc.
 These require window functions, CTEs, or sub-aggregations that cannot be expressed as a
-Snowflake Semantic View `metrics` `expr`. See [formula-translation.md](formula-translation.md)
+Snowflake Semantic View `metrics` `expr`. See [ts-snowflake-formula-translation.md](ts-snowflake-formula-translation.md)
 for the complete list and Snowflake re-implementation approaches.
 
 ---

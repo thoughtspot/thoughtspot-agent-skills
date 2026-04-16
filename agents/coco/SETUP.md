@@ -185,10 +185,10 @@ and add the skill files manually.
    ├── shared/
    │   ├── mappings/
    │   │   └── ts-snowflake/
-   │   │       ├── mapping-rules.md
-   │   │       ├── formula-translation.md
-   │   │       ├── property-coverage.md
-   │   │       └── reverse-mapping-rules.md
+   │   │       ├── ts-to-snowflake-rules.md
+   │   │       ├── ts-snowflake-formula-translation.md
+   │   │       ├── ts-snowflake-properties.md
+   │   │       └── ts-from-snowflake-rules.md
    │   └── schemas/
    │       ├── snowflake-schema.md
    │       └── thoughtspot-tml.md

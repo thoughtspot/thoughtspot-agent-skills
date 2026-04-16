@@ -15,9 +15,9 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 
 | File | Purpose |
 |---|---|
-| [../../shared/mappings/ts-snowflake/mapping-rules.md](../../shared/mappings/ts-snowflake/mapping-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
-| [../../shared/mappings/ts-snowflake/formula-translation.md](../../shared/mappings/ts-snowflake/formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
-| [../../shared/mappings/ts-snowflake/property-coverage.md](../../shared/mappings/ts-snowflake/property-coverage.md) | Full property coverage matrix, limitations, and Unmapped Report format |
+| [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
+| [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
+| [../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
 | [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [references/worked-example.md](references/worked-example.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
 | [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
@@ -46,7 +46,7 @@ under each `tables[]` entry — they are **not** top-level keys in the semantic 
 will cause a parse error.
 
 For the full coverage matrix including unmapped properties, see
-[../../shared/mappings/ts-snowflake/property-coverage.md](../../shared/mappings/ts-snowflake/property-coverage.md).
+[../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md).
 
 ---
 
@@ -773,7 +773,7 @@ used_rel_names.add(base_name)
 Initialise `used_rel_names = set()` before the relationship loop.
 
 For join type and cardinality mappings, see
-[../../shared/mappings/ts-snowflake/mapping-rules.md](../../shared/mappings/ts-snowflake/mapping-rules.md).
+[../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md).
 
 ---
 
@@ -890,12 +890,12 @@ the PK is `DISP_ID`, there must be a dimension named `disp_id`.
    column and log it; do not include placeholder `expr` values
 2. If `column_id` set → resolve physical column name as above
 3. Classify as dimension / time_dimension / metric using the decision tree in
-   [../../shared/mappings/ts-snowflake/mapping-rules.md](../../shared/mappings/ts-snowflake/mapping-rules.md)
+   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
 4. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
 5. Record unmapped properties (format_pattern, default_date_bucket, custom_order,
    data_panel_column_groups, geo_config) for the Unmapped Properties Report
 6. Build the Snowflake field entry using the templates in
-   [../../shared/mappings/ts-snowflake/mapping-rules.md](../../shared/mappings/ts-snowflake/mapping-rules.md)
+   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
 7. Append the field to the field list for its owning table
 
 ---
@@ -920,7 +920,7 @@ For each formula column (`formula_id` is set):
 2. Resolve column references using the syntax rules for the TML format (Worksheet uses
    `[path_id::col]`, Model uses `[TABLE::col]`)
 3. Replace function names using
-   [../../shared/mappings/ts-snowflake/formula-translation.md](../../shared/mappings/ts-snowflake/formula-translation.md)
+   [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 4. Handle nested references up to 3 levels deep
 
 **Untranslatable formulas — omit entirely:**
@@ -964,7 +964,7 @@ Present the following three sections:
 ```
 
 **3. Unmapped Properties Report** — use the format defined in
-[../../shared/mappings/ts-snowflake/property-coverage.md](../../shared/mappings/ts-snowflake/property-coverage.md).
+[../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md).
 Include only sections that have entries. Common sections:
 - Parameters not migrated
 - Column groups not migrated

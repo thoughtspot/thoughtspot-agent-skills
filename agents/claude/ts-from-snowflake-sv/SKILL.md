@@ -22,8 +22,8 @@ Two scenarios are supported:
 
 | File | Purpose |
 |---|---|
-| [~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
-| [~/.claude/mappings/ts-snowflake/formula-translation.md](~/.claude/mappings/ts-snowflake/formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
+| [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
+| [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
 | [references/worked-example.md](references/worked-example.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 | [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
@@ -137,7 +137,7 @@ Parse each DDL in Step 4 before switching Snowflake queries.
 ### Step 4: Parse the DDL
 
 Read and parse the DDL returned in Step 3. The DDL is a SQL `CREATE OR REPLACE
-SEMANTIC VIEW` statement. See [~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md)
+SEMANTIC VIEW` statement. See [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md)
 for the full format — it is NOT the hypothetical nested format; the real format has flat
 `dimensions` and `metrics` sections at the view level.
 
@@ -256,7 +256,7 @@ WHERE table_schema = '{SCHEMA}'
 ORDER BY table_name, ordinal_position;
 ```
 
-Map Snowflake types to ThoughtSpot types using `~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md`.
+Map Snowflake types to ThoughtSpot types using `~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md`.
 
 Find the ThoughtSpot connection for those tables:
 ```bash
@@ -331,7 +331,7 @@ If no matching join is found:
 ### Step 8: Build the model TML
 
 Construct the model TML as a YAML string. Use the templates in
-[~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md).
+[~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md).
 
 **Model name:** `TEST_SV_{view_name_title_case}` — prefix indicates this is a
 test/converted model. Ask the user if they want a different name.
@@ -415,7 +415,7 @@ For each simple metric (`AGG(view_alias.metric_name)`):
 - `name`: value of `comment='...'` on the metric, or title-cased metric name
 - `column_id`: `{id}::{col_name}`
 - `column_type: MEASURE`
-- `aggregation`: mapped from the SQL aggregate function (see reverse-mapping-rules.md)
+- `aggregation`: mapped from the SQL aggregate function (see ts-from-snowflake-rules.md)
 
 For each complex metric (formula expression):
 - See Step 9 for translation. Results go into `formulas[]`.
@@ -427,7 +427,7 @@ For each complex metric (formula expression):
 For each metric whose `EXPR` is not a simple `AGG(table.col)`:
 
 1. Apply the SQL → ThoughtSpot formula translation rules in
-   [~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md](~/.claude/mappings/ts-snowflake/reverse-mapping-rules.md).
+   [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md).
 2. Replace column references: `table.COLUMN` → `[TABLE_ALIAS::COLUMN]`
 3. If the expression translates successfully → add a `formulas[]` entry.
 4. If the expression cannot be translated → omit the column and log it in the
