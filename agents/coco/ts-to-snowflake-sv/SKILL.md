@@ -680,9 +680,6 @@ subprocess.run([snow_cmd, 'sql', '-c', cli_connection, '-f', '/tmp/sv_wrappers.s
 import os; os.remove("/tmp/sv_wrappers.sql")
 ```
 
-See [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the
-connection factory pattern and CLI file-based execution details.
-
 See [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
@@ -1057,10 +1054,6 @@ If the user selects E, ask for `target_database` and `target_schema` explicitly.
 - Python: run `SHOW WAREHOUSES` via `cur.execute()` and pick the first non-suspended
 - CLI: run `snow sql -c {cli_connection} --format json -q "SHOW WAREHOUSES"` and
   pick the first non-suspended warehouse from the JSON results
-
-Use the connection method and patterns from
-[~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) — including the
-temp-file approach for CLI when executing the dry-run and CREATE calls.
 
 **Always run a dry-run first:**
 
