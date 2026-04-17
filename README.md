@@ -14,7 +14,8 @@ thoughtspot-skills/
 │   ├── coco/       — Snowflake Cortex skills (deployed in Snowsight Workspaces)
 │   └── shared/     — Shared reference files used by both claude and coco skills
 │       ├── mappings/ts-snowflake/ — Column, join, formula, and property mapping rules
-│       └── schemas/               — Platform schema references (ThoughtSpot TML, Snowflake Semantic View)
+│       ├── schemas/               — Platform schema references (ThoughtSpot TML, Snowflake Semantic View)
+│       └── worked-examples/snowflake/ — End-to-end conversion examples
 └── tools/
     └── ts-cli/     — ThoughtSpot CLI used by Claude Code skills at runtime
 ```
@@ -27,8 +28,9 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 
 | Skill | Command | What it does |
 |---|---|---|
-| `thoughtspot-setup` | `/thoughtspot-setup` | Add, update, test, or delete ThoughtSpot profiles |
-| `snowflake-setup` | `/snowflake-setup` | Add, update, test, or delete Snowflake profiles |
+| `ts-profile-setup` | `/ts-profile-setup` | Add, update, test, or delete ThoughtSpot profiles |
+| `snowflake-profile-setup` | `/snowflake-profile-setup` | Add, update, test, or delete Snowflake profiles |
+| `ts-model-builder` | `/ts-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD diagram image |
 | `ts-to-snowflake-sv` | `/ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-from-snowflake-sv` | `/ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 

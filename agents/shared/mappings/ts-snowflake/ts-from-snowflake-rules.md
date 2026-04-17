@@ -304,18 +304,85 @@ ThoughtSpot:    [TABLE_ID::col_name]
 
 ---
 
+## Translatable Window Function Patterns
+
+`SUM/COUNT/AVG(x) OVER (PARTITION BY dims)` is **translatable** to ThoughtSpot LOD
+functions. Do NOT omit these as untranslatable.
+
+| Snowflake SQL pattern | ThoughtSpot formula | Notes |
+|---|---|---|
+| `SUM(x) OVER (PARTITION BY dim)` | `group_sum([table::x], [dim_table::dim])` | Use `[table::col]` references |
+| `SUM(x) OVER (PARTITION BY dim1, dim2)` | `group_sum([table::x], [t1::dim1], [t2::dim2])` | Multiple partition dims |
+| `DIV0(x, SUM(y) OVER (PARTITION BY dim))` | `safe_divide([table::x], group_sum([table::y], [dim_table::dim]))` | Contribution ratio |
+| `COUNT(DISTINCT x) OVER (PARTITION BY dim)` | `group_aggregate(unique count([table::x]), {[dim_table::dim]}, query_filters())` | No group_count_distinct shorthand |
+
+See [ts-snowflake-formula-translation.md](ts-snowflake-formula-translation.md) (LOD section) for full `group_aggregate` rules, `query_filters()` vs `{}` grouping, and the `sum(group_aggregate(...))` simplification.
+
+---
+
+## NON ADDITIVE BY → ThoughtSpot
+
+The Snowflake semantic view `NON ADDITIVE BY (date_col ASC NULLS LAST) SUM(table.col)`
+syntax translates to a ThoughtSpot formula using `last_value`:
+
+```
+last_value ( sum ( [fact_table::col] ) , query_groups ( ) , { [date_dim_table::date_col] } )
+```
+
+- `fact_table::col` = the measure column in the fact table
+- `date_dim_table::date_col` = the date column from the **joined date dimension table**
+  (NOT the fact table FK — look up which dimension table is in the `NON ADDITIVE BY` clause)
+- The sort argument uses `{ [col] }` syntax — square brackets **inside** curly braces
+
+Example — `NON ADDITIVE BY (DM_DATE_DIM.DATE_VALUE ASC NULLS LAST) SUM(DM_INVENTORY.FILLED_INVENTORY)`:
+```
+last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_DATE_DIM::DATE_VALUE] } )
+```
+
+Add this as a `formulas[]` entry with `column_type: MEASURE`.
+
+**YAML representation — block scalar required:**
+
+The `{ [col] }` syntax contains a `{` character which YAML interprets as a flow mapping
+start. In ThoughtSpot TML YAML, use a `>-` block scalar for the `expr` value to avoid
+this parsing issue:
+
+```yaml
+formulas:
+- name: "Inventory Balance"
+  expr: >-
+    last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_DATE_DIM::DATE_VALUE] } )
+  properties:
+    column_type: MEASURE
+```
+
+`>-` strips the trailing newline (folded block scalar, chomping strip). The formula is
+passed as a single-line string to ThoughtSpot. Do NOT quote the `expr:` value inline
+(e.g. `expr: "last_value(...)"`) when it contains curly braces — YAML may still
+misparse the `{` as a flow sequence start even inside double quotes in some parsers.
+
+**Note for Snowflake/CoCo context:** `>-` block scalars are NOT allowed in Snowflake
+Semantic View YAML (`CREATE SEMANTIC VIEW` DDL), but ARE valid in ThoughtSpot TML YAML.
+Do not confuse the two contexts.
+
+---
+
 ## Untranslatable SQL Patterns
 
 **Omit and log — do not include these as formula columns.**
 
 | Pattern | Example | Reason |
 |---|---|---|
-| Window functions | `AVG(x) OVER (PARTITION BY ...)` | No ThoughtSpot equivalent |
+| Complex window functions | `RANK() OVER (...)`, `ROW_NUMBER() OVER (...)`, `LAG(x, n)`, `LEAD(x, n)` | No ThoughtSpot equivalent |
+| Running/moving window | `SUM(x) OVER (... ROWS BETWEEN ...)` | Use `cumulative_*` / `moving_*` only if exact match — otherwise omit |
 | CTEs / subqueries | `(SELECT ... FROM ...)` | Cannot be embedded in a formula |
 | JSON/variant access | `col:key::type`, `GET_PATH(col, 'k')` | Snowflake-specific |
 | `TRY_CAST`, `PARSE_JSON` | — | Snowflake-specific |
 | `LISTAGG`, `ARRAY_AGG` | — | No ThoughtSpot equivalent |
 | Unknown functions | `HAVERSINE(...)` | Not in ThoughtSpot |
+
+**Note:** `SUM/COUNT/AVG(x) OVER (PARTITION BY dims)` is NOT in this table — it IS
+translatable. See the "Translatable Window Function Patterns" section above.
 
 ---
 
@@ -350,7 +417,7 @@ The `data_type` field in ThoughtSpot TML `db_column_properties` uses these value
 | `FLOAT`, `DOUBLE`, `REAL`, `NUMBER` (scale>0) | `DOUBLE` |
 | `BOOLEAN` | `BOOLEAN` |
 | `DATE` | `DATE` |
-| `DATETIME`, `TIMESTAMP_NTZ`, `TIMESTAMP_LTZ`, `TIMESTAMP_TZ` | `DATETIME` |
+| `DATETIME`, `TIMESTAMP_NTZ`, `TIMESTAMP_LTZ`, `TIMESTAMP_TZ` | `DATE_TIME` |
 | `VARIANT`, `OBJECT`, `ARRAY` | `VARCHAR` *(flag for review)* |
 
 **Important:** Use `INT64` not `BIGINT` — ThoughtSpot will return
@@ -360,162 +427,19 @@ the actual CDW column type and will report a mismatch if wrong.
 
 ---
 
-## Model TML Templates
+## ThoughtSpot TML Construction
 
-### Table TML creation notes (Scenario B)
+For Table TML and Model TML field references, templates, self-validation checklists,
+and common import errors, see the platform-agnostic schema references:
 
-**Use connection `fqn` (GUID), not `name`:**
-```yaml
-connection:
-  fqn: "f0bc76d5-077d-432b-8000-87a046c06bef"   # preferred — more reliable
-  # name: "apj"                                   # avoid — can cause JDBC errors
-```
-Get the connection GUID first with `ts connections list --profile {profile}`.
+- **[../../schemas/thoughtspot-table-tml.md](../../schemas/thoughtspot-table-tml.md)** — Table TML structure, connection reference, data types, GUID patterns, import errors
+- **[../../schemas/thoughtspot-model-tml.md](../../schemas/thoughtspot-model-tml.md)** — Model TML structure, join scenarios, formula visibility, self-validation checklist
+- **[../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md)** — ThoughtSpot formula syntax, function categories, LOD/window/semi-additive patterns, YAML encoding
 
-**`ts connections list` is capped at 100 results:** The CLI silently returns only the
-first 100 connections. If the target connection isn't found, call the API directly:
+**Snowflake / CoCo-specific notes:**
 
-```python
-import requests
-resp = requests.post(
-    f"{base_url}/api/rest/2.0/connection/search",
-    json={"connection_type": "SNOWFLAKE", "record_size": 500, "record_offset": 0},
-    headers={"Authorization": f"Bearer {token}"}
-)
-conns = resp.json()
-match = next((c for c in conns if c["name"] == connection_name), None)
-```
-
-**Transient JDBC errors:** ThoughtSpot occasionally returns
-`CONNECTION_METADATA_FETCH_ERROR / JDBC driver encountered a communication error`
-during table TML import. This is transient — retry up to 3 times with a 5-second
-delay before treating it as a real failure.
-
-**GUID after import:** The `ts tml import` response often returns an empty `object`
-list even on success. Always follow up with a metadata search to confirm the GUID:
-```bash
-ts metadata search --subtype ONE_TO_ONE_LOGICAL --name '%{table_name}%' --profile {profile}
-```
-
----
-
-### Updating an existing model (avoid duplicate creation)
-
-When reimporting a model to fix errors, ThoughtSpot creates a **new** object unless
-the TML includes a `guid` field identifying the existing object. Without it, every
-import produces a duplicate with the same name.
-
-**Always include `guid` on the model when updating:**
-```yaml
-model:
-  name: "{model_name}"
-  guid: "{existing_model_guid}"   # REQUIRED to update in-place, not create a new model
-  model_tables:
-  ...
-```
-
-Get the existing GUID via:
-```bash
-ts metadata search --subtype WORKSHEET --name '%{model_name}%' --profile {profile}
-```
-
-If you already have the GUID from a previous import (logged in the summary report),
-use it directly. If a duplicate was already created in error, delete the wrong one:
-```bash
-ts metadata delete {wrong_guid} --profile {profile}
-```
-Then add `guid: {correct_guid}` to future TML imports for that model.
-
----
-
-### Core rules that apply to ALL scenarios
-
-1. **`id` values must be lowercase** and must be unique across all `model_tables` entries.
-   The `id` is the alias you assign; it does not need to match anything in ThoughtSpot,
-   but it must be consistent — `with` and `on` clause references both use `id`.
-
-2. **`name` values must be unique** across all `model_tables` entries. `name` must match
-   the ThoughtSpot table object's name exactly (case-sensitive, usually lowercase).
-
-3. **`column_id` must use the column name from the ThoughtSpot Table TML**, not the semantic view
-   alias. Format: `{TABLE_ID}::{col_name}`.
-
-4. **`with` in an inline join** must equal the `id` of the target table entry.
-
-5. **`on` clause references** use `id` values: `[{from_id}::{col_name}] = [{to_id}::{col_name}]`.
-
----
-
-### Scenario A — On underlying tables (pre-defined joins exist)
-
-Use when the ThoughtSpot Table objects already have `joins_with` entries linking them together.
-
-```yaml
-model:
-  name: "{model_name}"
-  model_tables:
-  - id: fact_table          # lowercase, matches ThoughtSpot table name
-    name: fact_table        # exact ThoughtSpot table object name
-    fqn: "{fact_guid}"
-  - id: dim_table           # lowercase, unique alias
-    name: dim_table         # exact ThoughtSpot table object name
-    fqn: "{dim_guid}"
-    referencing_join: "{join_name_from_table_tml}"  # from Step 7
-  columns:
-  - name: "{display_name}"
-    column_id: fact_table::{col_name}  # col_name from ThoughtSpot Table TML
-    properties:
-      column_type: ATTRIBUTE
-  - name: "{display_name}"
-    column_id: fact_table::{col_name}
-    properties:
-      column_type: MEASURE
-      aggregation: SUM
-  formulas:
-  - name: "{display_name}"
-    expr: "{thoughtspot_formula}"
-    properties:
-      column_type: MEASURE
-```
-
-To find `referencing_join`: export TML for the FROM table → parse `joins_with[]` →
-find entry where `destination.name` matches the TO table → use `name` from that entry.
-
----
-
-### Scenario B — Inline joins (no pre-defined table joins, or new table objects)
-
-Use when ThoughtSpot Table objects have no `joins_with` entries, OR when creating new
-Table objects (views/tables not yet in ThoughtSpot). The `joins` array lives on the
-**source (FROM) table** entry — never on the target.
-
-```yaml
-model:
-  name: "{model_name}"
-  model_tables:
-  - id: from_table          # lowercase, unique
-    name: from_table        # ThoughtSpot table object name
-    fqn: "{from_guid}"
-    joins:
-    - name: join_name
-      with: to_table        # MUST match the `id` of the target entry below
-      on: "[from_table::{fk_col}] = [to_table::{pk_col}]"   # uses id values, col names from ThoughtSpot Table TML
-      type: INNER
-      cardinality: MANY_TO_ONE
-  - id: to_table            # the id referenced in `with` and `on` above
-    name: to_table          # ThoughtSpot table object name
-    fqn: "{to_guid}"
-  columns:
-  # ... same as Scenario A ...
-  formulas:
-  # ... same as Scenario A ...
-```
-
-**Inline join checklist:**
-- `with: to_table` — target `id`, lowercase, not the Snowflake table name
-- `on: "[from_table::fk] = [to_table::pk]"` — both references are `id` values
-- Target table entry has its own `model_tables` row with matching `id`
-- No `referencing_join` field when using inline joins
+- Do NOT search for a connection GUID — `TS_SEARCH_MODELS` only finds data objects, not connections. Use the connection name provided by the user directly.
+- **GUID after import (CoCo workflow):** Do NOT search by name after import. `TS_SEARCH_MODELS` returns tables from ALL connections, making it impossible to identify newly-created tables by name. Use the `OBJECT_AGG` extraction pattern from `RESULT_SCAN` — see the CoCo SKILL.md Step 4B.
 
 ---
 
@@ -549,17 +473,17 @@ For Scenario B / inline joins:
 
 ## Column ID Construction
 
-The `column_id` format is: `{TABLE_ID}::{col_name}`
+The `column_id` format is: `{TABLE_NAME}::{col_name}`
 
-- `TABLE_ID` = the `id` from the corresponding `model_tables` entry (lowercase)
-- `col_name` = the column name from the **ThoughtSpot Table TML** (Step 6A/7)
+- `TABLE_NAME` = the `name:` from the corresponding `model_tables[]` entry (exact case — copy verbatim)
+- `col_name` = the column name from the **ThoughtSpot Table TML** — export and read the Table TML; do not assume it matches the semantic view left-hand side
 
-The ThoughtSpot Table TML column `name` (or `db_column_name`) is the authoritative source.
-**Do not use** the semantic view dimension aliases (left side of `TABLE_REF.VIEW_COL`).
+**Do not use** the semantic view dimension aliases (left side of `TABLE_REF.VIEW_COL`) as the `col_name`. Some Snowflake views rename columns internally.
 
 Example:
 ```
 Semantic view dimension:    SUPERHERO.SUPERHERO_NAME as superhero.SUPERHERO_NAME
 ThoughtSpot Table TML col:  SUPERHERO_NAME
-Correct column_id:          superhero::SUPERHERO_NAME
+model_tables name:          SUPERHERO
+Correct column_id:          SUPERHERO::SUPERHERO_NAME
 ```

@@ -68,7 +68,7 @@ Can you log into ThoughtSpot in a browser (even via SSO)?
 ### Snowflake
 
 - Role with `CREATE SEMANTIC VIEW` on the target schema
-- Connection configured — run `/snowflake-setup` if you haven't already
+- Connection configured — run `/snowflake-profile-setup` if you haven't already
 - Not sure where to start? → Python connector + password auth has the fewest setup steps
 
 ---

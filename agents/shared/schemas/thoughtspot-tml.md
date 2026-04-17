@@ -3,6 +3,11 @@
 Known pitfalls when exporting and parsing ThoughtSpot TML via the REST API.
 Applies to any skill that calls `/api/rest/2.0/metadata/tml/export`.
 
+For **constructing** TML to import, see the companion references:
+- [thoughtspot-table-tml.md](thoughtspot-table-tml.md) — Table TML fields, data types, connection reference, import patterns
+- [thoughtspot-model-tml.md](thoughtspot-model-tml.md) — Model TML fields, joins, formulas, self-validation checklist
+- [thoughtspot-formula-patterns.md](thoughtspot-formula-patterns.md) — Formula syntax, all function categories, LOD/window/semi-additive patterns, YAML encoding
+
 ---
 
 ## Non-printable Characters

@@ -23,7 +23,7 @@ The CLI resolves which profile to use in this order:
 2. `TS_PROFILE` environment variable
 3. First profile in `~/.claude/thoughtspot-profiles.json`
 
-Profiles are created and managed by the `thoughtspot-setup` Claude Code skill.
+Profiles are created and managed by the `ts-profile-setup` Claude Code skill.
 Credentials are stored in the macOS Keychain — never in the profile file itself.
 
 Tokens are cached in `/tmp/ts_token_<slug>.txt` (permissions: `0600`) and reused
@@ -187,6 +187,27 @@ ts metadata get e61c7c4c-68a4-4174-b393-a0104ae3bd00 --profile champ-staging
 | `--type`, `-t` | `LOGICAL_TABLE` | Object type to search within |
 
 **Output:** Single metadata object (same structure as one element of `metadata search`).
+
+---
+
+### `ts metadata delete <guid> [<guid> ...]`
+
+Delete one or more ThoughtSpot objects by GUID.
+
+```bash
+ts metadata delete abc-123
+ts metadata delete abc-123 def-456 --type LIVEBOARD
+ts metadata delete abc-123 --profile se-thoughtspot
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | first profile | Profile to use |
+| `--type`, `-t` | `LOGICAL_TABLE` | Object type: `LOGICAL_TABLE`, `LIVEBOARD`, `ANSWER` |
+
+**Output:** `{"deleted": ["guid1", "guid2", ...]}` on success.
 
 ---
 

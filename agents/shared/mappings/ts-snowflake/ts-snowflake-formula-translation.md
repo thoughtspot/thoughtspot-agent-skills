@@ -10,6 +10,11 @@ models.
 > For other platforms (e.g. Databricks, BigQuery), create a separate translation
 > reference with platform-specific overrides.
 
+> **ThoughtSpot formula syntax:** For complete ThoughtSpot formula syntax reference
+> (column references, YAML encoding rules, LOD patterns, window functions,
+> semi-additive functions, runtime parameters), see
+> **[../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md)**.
+
 ---
 
 ## YAML Expression Formatting
@@ -114,6 +119,9 @@ These functions translate 1:1 in both directions.
 | `median ( [x] )` → `MEDIAN(x)` | `MEDIAN(x)` → `median ( [x] )` |
 | `stddev ( [x] )` → `STDDEV(x)` | `STDDEV(x)` → `stddev ( [x] )` |
 | `variance ( [x] )` → `VARIANCE(x)` | `VARIANCE(x)` → `variance ( [x] )` |
+| `greatest ( [a] , [b] , ... )` → `GREATEST(a, b, ...)` | `GREATEST(a, b, ...)` → `greatest ( [a] , [b] , ... )` |
+| `sum_if ( [cond] , [x] )` → `SUM(CASE WHEN cond THEN x END)` | `SUM(CASE WHEN cond THEN x END)` → `sum_if ( [cond] , [x] )` |
+| `unique_count_if ( [cond] , [x] )` → `COUNT(DISTINCT CASE WHEN cond THEN x END)` | `COUNT(DISTINCT CASE WHEN cond THEN x END)` → `unique_count_if ( [cond] , [x] )` |
 
 ### Conditional Functions
 
@@ -162,6 +170,9 @@ These functions translate 1:1 in both directions.
 | `concat ( [a] , ' ' , [b] )` → `CONCAT(a, ' ', b)` *(supports N args)* | `CONCAT(a, ' ', b)` → `concat ( [a] , ' ' , [b] )` |
 | `substr ( [x] , [start] , [len] )` → `SUBSTR(x, start, len)` | `SUBSTR(x, start, len)` → `substr ( [x] , [start] , [len] )` |
 | `strlen ( [x] )` → `LENGTH(x)` | `LENGTH(x)` → `strlen ( [x] )` |
+| `left ( [x] , [n] )` → `LEFT(x, n)` | `LEFT(x, n)` → `left ( [x] , [n] )` |
+| `right ( [x] , [n] )` → `RIGHT(x, n)` | `RIGHT(x, n)` → `right ( [x] , [n] )` |
+| `strpos ( [x] , 'val' )` → `POSITION('val' IN x)` | `POSITION('val' IN x)` → `strpos ( [x] , 'val' )` |
 | `upper ( [x] )` → `UPPER(x)` | `UPPER(x)` → `upper ( [x] )` |
 | `lower ( [x] )` → `LOWER(x)` | `LOWER(x)` → `lower ( [x] )` |
 | `trim ( [x] )` → `TRIM(x)` | `TRIM(x)` → `trim ( [x] )` |
@@ -183,12 +194,18 @@ These functions translate 1:1 in both directions.
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
 | `year ( [date] )` → `YEAR(date)` | `YEAR(date)` → `year ( [date] )` |
+| `year ( [date] , fiscal )` → **Untranslatable** — fiscal calendar has no Snowflake SV equivalent | — |
+| `quarter_number ( [date] )` → `QUARTER(date)` | `QUARTER(date)` → `quarter_number ( [date] )` |
+| `quarter_number ( [date] , fiscal )` → **Untranslatable** — fiscal calendar | — |
 | `month ( [date] )` → `MONTH(date)` | `MONTH(date)` → `month ( [date] )` |
 | `day ( [date] )` → `DAY(date)` | `DAY(date)` → `day ( [date] )` |
 | `hour ( [date] )` → `HOUR(date)` | `HOUR(date)` → `hour ( [date] )` |
+| `date ( [datetime] )` → `DATE(datetime)` | `DATE(datetime)` → `date ( [datetime] )` |
+| `start_of_month ( [date] )` → `DATE_TRUNC('MONTH', date)` | `DATE_TRUNC('MONTH', date)` → `start_of_month ( [date] )` |
 | `diff_days ( [end] , [start] )` → `DATEDIFF('day', start, end)` | `DATEDIFF('day', start, end)` → `diff_days ( [end] , [start] )` |
 | `diff_months ( [end] , [start] )` → `DATEDIFF('month', start, end)` | `DATEDIFF('month', start, end)` → `diff_months ( [end] , [start] )` |
 | `diff_years ( [end] , [start] )` → `DATEDIFF('year', start, end)` | `DATEDIFF('year', start, end)` → `diff_years ( [end] , [start] )` |
+| `diff_time ( [end] , [start] )` → `DATEDIFF('second', start, end)` | `DATEDIFF('second', start, end)` → `diff_time ( [end] , [start] )` |
 | `today ()` → `CURRENT_DATE()` | `CURRENT_DATE()` → `today ()` |
 | `now ()` → `CURRENT_TIMESTAMP()` | `CURRENT_TIMESTAMP()` → `now ()` |
 | `add_days ( [date] , [n] )` → `DATEADD('day', n, date)` | `DATEADD('day', n, date)` → `add_days ( [date] , [n] )` |
@@ -199,6 +216,8 @@ These functions translate 1:1 in both directions.
 Note: `DATEDIFF` argument order is reversed — ThoughtSpot uses `(end, start)`,
 Snowflake uses `(part, start, end)`. `DATEADD` argument order also differs —
 ThoughtSpot uses `(date, n)`, Snowflake uses `(part, n, date)`.
+
+**Fiscal calendar functions** (`year([date], fiscal)`, `quarter_number([date], fiscal)`) are **untranslatable** to Snowflake Semantic Views — there is no fiscal calendar parameter in Snowflake SV expressions. Log as untranslatable and omit.
 
 ---
 
@@ -216,6 +235,7 @@ Snowflake SQL, they can be translated directly by substituting column references
 | `sql_int_op(template, args...)` | INTEGER | Dimension |
 | `sql_bool_op(template, args...)` | BOOLEAN | Dimension |
 | `sql_double_op(template, args...)` | DOUBLE | Dimension |
+| `sql_date_op(template, args...)` | DATE | Dimension |
 | `sql_string_aggregate_op(template, args...)` | VARCHAR | Metric |
 | `sql_int_aggregate_op(template, args...)` | INTEGER | Metric |
 | `sql_number_aggregate_op(template, args...)` | NUMBER | Metric |
@@ -815,6 +835,23 @@ Log entry for untranslatable patterns:
 row to the Formula Translation Log in the Unmapped Properties Report (see Step 10).
 The formats below are for the log entry — they must never appear as the `expr` value
 in the generated YAML.
+
+### Hyperlink Markup (`{caption}` / `{/caption}`)
+
+ThoughtSpot supports a presentation markup pattern inside `concat()` formulas to create
+clickable hyperlinks in search results:
+
+```
+concat ( "{caption}" , "display text" , "{/caption}" , "https://..." )
+```
+
+The `{caption}` and `{/caption}` tags are ThoughtSpot-specific display hints — they have
+no SQL equivalent. These formulas are **untranslatable** to Snowflake Semantic Views.
+
+Log entry:
+```
+| {column_name} | `concat("{caption}", ...)` | ⚠ Hyperlink markup | OMITTED — ThoughtSpot-specific display markup |
+```
 
 ### Parameter References
 

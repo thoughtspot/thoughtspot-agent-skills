@@ -22,8 +22,11 @@ Two scenarios are supported:
 
 | File | Purpose |
 |---|---|
-| [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
+| [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Snowflake Semantic View DDL parsing, type mapping, formula translation, column classification |
 | [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
+| [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML structure, connection reference, data types, import patterns, common errors |
+| [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure, join scenarios, formula visibility, self-validation checklist |
+| [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula syntax, all function categories, LOD/window/semi-additive patterns, YAML encoding rules |
 | [../../shared/worked-examples/snowflake/ts-from-snowflake.md](../../shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 
 ---
@@ -220,6 +223,12 @@ containing any of the supplied keywords. Filter the returned results further to
 match by database + schema + table name (case-insensitive).
 Build map: `physical_table_name → {guid, metadata_name}`.
 
+**Multiple results with the same name:** `TS_SEARCH_MODELS` returns tables across ALL
+connections. If the same table name appears more than once (different connections), ask
+the user to confirm which connection their tables are on, then filter to matching
+connection. Do not guess — using a GUID from the wrong connection will cause
+`fqn resolution failed` when the model imports.
+
 Always use `owner_only=FALSE`. Token-authenticated users may not appear as the
 owner of objects they created, so `owner_only=TRUE` can return 0 results even for
 objects that exist.
@@ -319,15 +328,30 @@ table:
     type: INNER
 ```
 
-Validate all table TMLs first, then import:
+**BEFORE calling import — understand `validate_only`:**
+
+`TS_IMPORT_TML` takes a third boolean argument:
+- `TRUE` = **dry-run validation only** — no objects are created. The response will contain
+  a GUID, but that GUID is a **temporary test artifact** — the table does NOT exist in
+  ThoughtSpot and this GUID will fail on any subsequent export or reference. **Discard
+  the entire `TRUE` response.** Do not record GUIDs from it.
+- `FALSE` = **actual creation** — objects are created and GUIDs are real and persistent.
+
+**This is a two-call sequence — do not skip the second call:**
 
 ```sql
--- Validate (dry run)
+-- Call 1: Validate (dry run — no objects created)
 CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$...$$, $$...$$), TRUE);
+-- Check status = SUCCESS. If SUCCESS: proceed to Call 2. Discard all GUIDs from this response.
+-- If FAILURE: see error handling below before retrying.
+
+-- Call 2: Actual import (creates objects — run this after Call 1 succeeds)
+CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$...$$, $$...$$), FALSE);
+-- GUIDs from THIS response are real. Store them via RESULT_SCAN (see below).
 ```
 
-**If validation fails with a connection-related error** (e.g. "connection not found",
-"invalid connection name") — do NOT proceed to import. Call `TS_LIST_CONNECTIONS` to
+**If Call 1 (validation) fails with a connection-related error** (e.g. "connection not found",
+"invalid connection name") — do NOT proceed to Call 2. Call `TS_LIST_CONNECTIONS` to
 fetch available connections and ask the user to correct the name:
 
 ```sql
@@ -345,43 +369,89 @@ Enter the connection name to use:
 ```
 
 Update `{connection_name}` and **rebuild all table TMLs** with the corrected name
-(the connection field appears in every table TML), then re-validate before importing.
-
-**If validation passes**, proceed to the actual import.
-
-**Critical distinction:**
-- `validate_only=TRUE` — dry run only. No objects are created. Any GUIDs in the
-  response are temporary and must NOT be used. Discard this response entirely.
-- `validate_only=FALSE` — objects are created. GUIDs in this response are the real
-  persistent IDs. This is the only response to extract GUIDs from.
+(the connection field appears in every table TML), then re-run both calls.
 
 ```sql
 -- Actual import (creates objects)
 CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$...$$, $$...$$), FALSE);
 ```
 
+**Do NOT read the inline CALL response for GUIDs** — the inline response is often
+truncated when many objects are imported. Immediately run the next two SQL calls
+to store the complete result and extract GUIDs:
+
 ```sql
--- Store full response (column is always named after the procedure, uppercase)
+-- Store full response via RESULT_SCAN (separate call — must follow immediately)
 CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.TABLE_IMPORT_RESULT (result_data VARIANT);
 INSERT INTO SKILLS.TEMP.TABLE_IMPORT_RESULT
 SELECT PARSE_JSON("TS_IMPORT_TML") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
 ```
 
-Extract GUIDs directly from the import response — **do not** call `TS_SEARCH_MODELS`
-to find them. The response contains `response.header.id_guid` and `response.header.name`
-for each imported object:
-
 ```sql
-SELECT
-    value:response:header:name::STRING    AS table_name,
-    value:response:header:id_guid::STRING AS guid,
-    value:response:status:status_code::STRING AS status
+-- Extract all GUIDs as a single JSON object (one row — cannot be row-truncated)
+SELECT OBJECT_AGG(
+    value:response:header:name::STRING,
+    value:response:header:id_guid::STRING::VARIANT
+) AS guid_map
 FROM SKILLS.TEMP.TABLE_IMPORT_RESULT,
-LATERAL FLATTEN(input => result_data);
+LATERAL FLATTEN(input => result_data)
+WHERE value:response:status:status_code::STRING = 'OK';
 ```
 
-Build a map `table_name → guid` from this result for use in Step 5 (join name resolution)
-and Step 6 (model TML referencing_join lookup).
+This returns one row like `{"DM_ORDER": "guid1", "DM_DATE_DIM": "guid2", ...}`.
+Parse each key-value pair to build the `table_name → guid` map for use in Step 6.
+
+**If OBJECT_AGG returns no rows** (import procedure returned unexpected format), query
+individual tables by name from the temp table instead of searching:
+
+```sql
+-- Query one table's GUID by name from the temp table
+SELECT value:response:header:id_guid::STRING AS guid
+FROM SKILLS.TEMP.TABLE_IMPORT_RESULT,
+LATERAL FLATTEN(input => result_data)
+WHERE value:response:header:name::STRING = '{table_name}';
+```
+
+Run this once per table. Prefer this over searching.
+
+**Last resort — if the temp table is unavailable or empty:**
+
+Only if `SKILLS.TEMP.TABLE_IMPORT_RESULT` has no rows should you fall back to search.
+Do it in two batched calls — do NOT make one search call and one export call per table:
+
+```sql
+-- Call 1: Search for ALL table names in one call
+CALL SKILLS.PUBLIC.TS_SEARCH_MODELS(
+    '{profile_name}',
+    ARRAY_CONSTRUCT('TABLE_1', 'TABLE_2', 'TABLE_3', ...),   -- all table names
+    FALSE
+);
+```
+
+You will get multiple GUIDs per name (tables from different connections). Collect
+ALL candidate GUIDs across all results, then export them all in ONE call:
+
+```sql
+-- Call 2: Export ALL candidates in one call
+CALL SKILLS.PUBLIC.TS_EXPORT_TML(
+    '{profile_name}',
+    ARRAY_CONSTRUCT('guid_a', 'guid_b', 'guid_c', ...)   -- every candidate GUID
+);
+```
+
+Store via RESULT_SCAN, then filter: keep only TMLs where `table.connection.name` matches
+`{connection_name}`. The surviving GUIDs are the newly created tables. Do NOT make
+separate search or export calls per table — batch everything into two calls.
+
+**CRITICAL — do NOT call `TS_SEARCH_MODELS` as the first approach after import.**
+
+`TS_SEARCH_MODELS` searches by name across ALL connections. It returns pre-existing
+tables from other connections as well as the ones you just created. Use the temp table
+(OBJECT_AGG or per-name query) first. Only fall back to search if the temp table is
+genuinely empty — and even then, batch all searches and exports into two calls total.
+
+**Also record the join names** you defined in the Table TMLs during this step
+(e.g. `DM_ORDER_to_DM_CUSTOMER`). These are the `referencing_join` values for Step 6.
 
 **Only available procedures are:** `TS_SEARCH_MODELS`, `TS_EXPORT_TML`, `TS_IMPORT_TML`,
 `TS_LIST_CONNECTIONS`. Do not attempt to call any other procedure — none others exist.
@@ -404,7 +474,11 @@ Snowflake → ThoughtSpot type mapping:
 
 ### Step 5: Find join names (Scenario A only)
 
-For each relationship, find the pre-defined join name in the ThoughtSpot Table TML
+**Scenario B — skip this step entirely.** Join names were defined by you in the
+Table TMLs built in Step 4B. Use those same names as `referencing_join` values
+in Step 6. No search or export is needed. Go directly to Step 6.
+
+For Scenario A only — find the pre-defined join name in the ThoughtSpot Table TML
 of the `FROM` table. Export TMLs for all FROM tables in one call:
 
 ```
@@ -427,32 +501,50 @@ Parse each returned `edoc` YAML string. Find in the `joins` section the entry wh
 
 **IMPORTANT — TML format rules learned from production use:**
 
-1. **Table TML `column_type`** must be nested under `properties:`:
+1. **`column_type` must be nested under `properties:` in both Table TML and Model TML.**
+   This applies to `columns[]` entries AND `formulas[]` entries:
    ```yaml
+   # Model TML columns — correct format
    columns:
-   - name: COL_NAME
-     db_column_name: COL_NAME
-     data_type: INT64
+   - column_id: dm_order::ORDER_ID
+     name: "Order Id"
+     properties:
+       column_type: ATTRIBUTE
+   # Model TML formulas — correct format
+   formulas:
+   - name: "Employee"
+     expr: "concat ( [dm_employee::LAST_NAME] , ', ' , [dm_employee::FIRST_NAME] )"
      properties:
        column_type: ATTRIBUTE
    ```
    Bare `column_type: ATTRIBUTE` (without `properties:`) causes "No enum constant ColumnTypeEnum." error.
 
-2. **Model TML joins** use `with:` (not `destination:`), require `cardinality:`, and
-   `'on'` must be quoted in YAML:
+2. **Model TML joins belong INSIDE the source table's `model_tables[]` entry** — NOT
+   at the top level of the model. A `joins:` key directly under `model:` is wrong and
+   causes a "destination is missing" error. Joins live on the FROM table entry. The
+   `id:` field on `model_tables[]` entries is optional — ThoughtSpot uses `name:` as the
+   join reference target when `id:` is absent:
    ```yaml
-   joins:
-   - name: join_name
-     with: TARGET_TABLE
-     'on': '[SOURCE::FK_COL] = [TARGET::PK_COL]'
-     type: INNER
-     cardinality: MANY_TO_ONE
+   model:
+     model_tables:
+     - name: DM_ORDER_DETAIL  # FROM table — exact ThoughtSpot table name (often uppercase)
+       fqn: "{guid}"
+       joins:
+       - with: DM_ORDER        # must equal the `name:` of the target entry (case-sensitive)
+         'on': '[DM_ORDER_DETAIL::FK_COL] = [DM_ORDER::PK_COL]'
+         type: INNER
+         cardinality: MANY_TO_ONE
+     - name: DM_ORDER          # TO table — exact ThoughtSpot table name
+       fqn: "{guid}"
    ```
+   Fields: `with` (not `destination:`), `'on'` (quoted), `type`, `cardinality` — all required.
+   `with` must match the target's `name:` exactly — case-sensitive.
 
 3. **Join type is `INNER`** for all dimension lookups. ThoughtSpot models work correctly
    with INNER joins for standard fact-to-dimension relationships.
 
 4. **Column `column_id`** format is `TABLE_NAME::COLUMN_NAME` (not `db_column_name`).
+   `TABLE_NAME` is the value of the `name:` field in `model_tables[]`.
 
 5. **Display names** should be title-cased (e.g. "Superhero Name" not "SUPERHERO_NAME").
 
@@ -463,25 +555,37 @@ Parse each returned `edoc` YAML string. Find in the `joins` section the entry wh
      join_progressive: true
    ```
 
-7. **Formula columns must NOT have `aggregation:`** — only `columns[]` entries support
-   `aggregation`. Formulas are self-aggregating through their expression. Adding any
-   `aggregation:` value to a `formulas[]` entry causes a TML import error. Correct format:
+7. **Formula columns must NOT have `aggregation:`** in the `formulas[]` entry — formulas
+   are self-aggregating through their expression. A `columns[]` entry that references a
+   formula via `formula_id:` CAN have `aggregation:`. Correct `formulas[]` format:
    ```yaml
    formulas:
-   - name: "Num Orders"
-     expr: "count_distinct ( [dm_order::ORDER_ID] )"
-     id: num_orders
+   - id: formula_Num Orders
+     name: "Num Orders"
+     expr: "count_distinct ( [DM_ORDER::ORDER_ID] )"
      properties:
        column_type: MEASURE
    ```
    No `aggregation:` field — not even `aggregation: FORMULA`.
 
-8. **`table.name` in `model_tables[]` must exactly match the ThoughtSpot Table object
-   name (case-sensitive).** ThoughtSpot Table names are stored as-is; if tables were
-   imported with uppercase names (`DM_ORDER`, `DM_CUSTOMER`) then `model_tables` must
-   reference them as `DM_ORDER`, `DM_CUSTOMER` — not `dm_order`, `dm_customer`. Use the
-   exact names from the import response (Step 4B GUID extraction query) — never
-   lowercase or transform them.
+8. **Every formula must have a `columns[]` entry.** Add a `columns[]` entry with
+   `formula_id:` for every entry in `formulas[]`:
+   ```yaml
+   columns:
+   - name: "Num Orders"
+     formula_id: formula_Num Orders   # matches the formula's `id` field exactly
+     properties:
+       column_type: MEASURE
+       aggregation: COUNT
+       index_type: DONT_INDEX
+   ```
+   `formula_id` must match the formula's `id` exactly (case-sensitive, spaces included).
+   `aggregation:` is allowed on `columns[]` formula entries (unlike `formulas[]` entries).
+   `index_type: DONT_INDEX` is recommended for computed numeric measures.
+
+9. **`id` fields in `model_tables[]` are optional.** When present, `id` must equal `name`
+   exactly (same case). ThoughtSpot resolves `with` and `on` references against `name:`.
+   Omitting `id:` is simpler and avoids case-mismatch errors — use `name:` alone.
 
 Apply all column, formula, and join mappings from
 [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md) to build
@@ -525,10 +629,14 @@ and note the correction in the output.
 | 1 | YAML validity | Parse the TML string; confirm no syntax errors | Fix indentation or quoting |
 | 2 | `model_tables[].name` | Every name matches an entry in the `{table_name → guid}` map (verbatim, case-sensitive — from Step 4B import response or Step 4A export) | Replace with the exact name from the map |
 | 3 | `referencing_join` values | Every `referencing_join` value matches a join name from the exported Table TML (Step 5) | Replace with the verbatim join name from the export |
-| 4 | `column_id` table prefix | Each `column_id` prefix (before `::`) matches an `id` field in `model_tables[]` | Correct the prefix |
+| 4 | `column_id` table prefix | Each `column_id` prefix (before `::`) matches a `name:` field in `model_tables[]` | Correct the prefix |
 | 5 | `column_id` column suffix | Each suffix (after `::`) matches a column name in the ThoughtSpot Table TML for that table | Check Table TML; correct the suffix |
 | 6 | No duplicate `column_id` | No two `columns[]` entries share the same `column_id` value | If a COUNT_DISTINCT metric duplicates an ATTRIBUTE column_id, convert it to a formula |
 | 7 | No `aggregation:` on formulas | No `formulas[]` entry has an `aggregation:` field | Remove the field |
+| 8 | No duplicate display names | Every `name` value across all `columns[]` AND `formulas[]` is unique | FK columns sharing a display name with their PK counterpart (e.g. both called "Customer Id") need disambiguation — prefix the FK version: "Order Customer Id" |
+| 9 | `column_type` under `properties:` | Every column and formula entry has `properties: column_type:` — not bare `column_type:` | Nest under `properties:` |
+| 10 | Every formula has a `columns[]` entry | Every `id` in `formulas[]` has a corresponding `formula_id:` in `columns[]` | Add the missing `columns[]` entry |
+| 11 | `last_value` formula YAML encoding | Any `formulas[]` entry whose `expr` contains `{ [col] }` (curly braces) must use a `>-` block scalar for `expr:` — inline string assignment will cause a YAML parse error | Change `expr: "last_value(...)"` → `expr: >-\n  last_value(...)` |
 
 After all checks pass, show the user:
 
@@ -561,15 +669,19 @@ the import.
 
 **IMPORTANT — Updating vs creating:** Without a `guid` field in the TML, ThoughtSpot
 always creates a **new** object, even if a model with the same name already exists.
-To update an existing model, add `guid: {existing_model_guid}` directly under `name`:
+To update an existing model, add `guid` at the **document root** — as the very first
+line, BEFORE the `model:` key:
 
 ```yaml
+guid: "{existing_model_guid}"   # MUST be at document root — NOT inside model:
 model:
   name: "TEST_SV_{view_name}"
-  guid: "{existing_model_guid}"   # omit on first import; required for all subsequent fixes
   model_tables:
   ...
 ```
+
+**`guid` under `model:` (i.e. `model: { guid: ... }`) is silently ignored** — ThoughtSpot
+treats the import as a new object and creates a duplicate. Always place it at the top.
 
 On the first import (new model), omit `guid` — it doesn't exist yet. After import,
 record the GUID from the response for all future updates.
@@ -579,10 +691,23 @@ Import via the stored procedure:
 ```sql
 CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$
 {model_tml_yaml}
-$$), TRUE);
+$$), FALSE);
 ```
 
 **IMPORTANT:** Use `$$` dollar-quoting to preserve YAML formatting.
+
+**Validate first (dry-run), then import for real:**
+```sql
+-- Call 1: validate only (discard the GUID — it is a temporary artifact)
+CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$
+{model_tml_yaml}
+$$), TRUE);
+
+-- Call 2: actual import (only after Call 1 succeeds)
+CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$
+{model_tml_yaml}
+$$), FALSE);
+```
 
 On success, extract and display the created model GUID. **Save it** — you will need it
 if you reimport to fix any errors.
@@ -598,7 +723,11 @@ if you reimport to fix any errors.
 | `{table_name} does not exist in schema` (on `with`) | `with` value doesn't match any `id` | Ensure `with` matches target `id` exactly (lowercase) |
 | `Invalid srcTable or destTable in join expression` | `on` clause uses table names instead of `id` values | Check both `[table::col]` refs use `id` values |
 | `Multiple tables have same alias {name}` | Two `model_tables` entries share the same `name` | Deduplicate — same Snowflake object must appear only once |
+| `duplicate column name {name}` | Two columns or formulas share the same display `name` | FK column and its PK counterpart often produce the same display name — prefix FK version with source table (e.g. "Order Customer Id" vs "Customer Id") |
+| `destination is missing` on joins | Joins placed at the top level of the model instead of inside a `model_tables[]` entry | Move each `joins:` block inside the source table's `model_tables[]` entry |
+| `No enum constant ColumnTypeEnum` | `column_type:` is bare (not under `properties:`) | Nest under `properties: column_type:` on every column and formula entry |
 | `aggregation type FORMULA is not valid` | `aggregation:` field set on a `formulas[]` entry | Remove `aggregation:` from all formula entries — formulas must not have this field |
+| YAML mapping error / unexpected `{` in formula | `last_value` or other formula with `{ [col] }` written as inline string | Use `>-` block scalar for `expr:` — see NON ADDITIVE BY section in ts-from-snowflake-rules.md |
 | `table not found` or model references unresolved table | `table.name` in `model_tables[]` doesn't match ThoughtSpot Table name exactly | Use exact names from Step 4B import response — often uppercase; never lowercase or transform |
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Review translated formula against ts-snowflake-formula-translation.md |
 | `fqn resolution failed` | Stale GUID | Re-run Step 4 to get fresh GUIDs |

@@ -31,6 +31,10 @@ snow stage copy agents/shared/mappings/ts-snowflake/ts-snowflake-properties.md @
 snow stage copy agents/shared/mappings/ts-snowflake/ts-to-snowflake-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-snowflake/ --overwrite
 snow stage copy agents/shared/schemas/snowflake-schema.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/schemas/thoughtspot-connection.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/schemas/thoughtspot-table-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/schemas/thoughtspot-formula-patterns.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/schemas/thoughtspot-model-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 ```
@@ -79,7 +83,11 @@ without CLI access.
 │   │   └── ts-to-snowflake-rules.md
 │   ├── schemas/
 │   │   ├── snowflake-schema.md
-│   │   └── thoughtspot-tml.md
+│   │   ├── thoughtspot-tml.md
+│   │   ├── thoughtspot-connection.md
+│   │   ├── thoughtspot-table-tml.md
+│   │   ├── thoughtspot-model-tml.md
+│   │   └── thoughtspot-formula-patterns.md
 │   └── worked-examples/snowflake/
 │       ├── ts-from-snowflake.md
 │       └── ts-to-snowflake.md

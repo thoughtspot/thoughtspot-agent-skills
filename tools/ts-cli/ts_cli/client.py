@@ -17,7 +17,7 @@ PROFILES_PATH = Path.home() / ".claude" / "thoughtspot-profiles.json"
 def _slugify(name: str) -> str:
     """Derive the profile slug used for Keychain service names.
 
-    Matches the slug derivation in thoughtspot-setup/SKILL.md:
+    Matches the slug derivation in ts-profile-setup/SKILL.md:
       lowercase, non-alphanumeric → hyphens, collapsed and stripped.
     """
     s = name.lower()
@@ -36,14 +36,14 @@ def resolve_profile(profile: Optional[str]) -> str:
     if not PROFILES_PATH.exists():
         raise SystemExit(
             f"No profiles file found at {PROFILES_PATH}.\n"
-            "Run the thoughtspot-setup skill to create a profile first."
+            "Run /ts-profile-setup to create a profile first."
         )
     raw = json.loads(PROFILES_PATH.read_text())
     profiles = raw if isinstance(raw, list) else list(raw.values())
     if not profiles:
         raise SystemExit(
             "No ThoughtSpot profiles configured.\n"
-            "Run the thoughtspot-setup skill to add a profile."
+            "Run /ts-profile-setup to add a profile."
         )
     return profiles[0]["name"]
 
@@ -51,7 +51,7 @@ def resolve_profile(profile: Optional[str]) -> str:
 def load_profiles() -> Dict[str, Any]:
     """Load all profiles as a name → profile dict.
 
-    Handles three file formats produced by the thoughtspot-setup skill:
+    Handles three file formats produced by the ts-profile-setup skill:
       {"profiles": [{...}, ...]}   — wrapped list (current format)
       [{...}, ...]                 — bare list
       {"name": {...}, ...}         — dict keyed by profile name
@@ -72,13 +72,17 @@ def load_profiles() -> Dict[str, Any]:
 class ThoughtSpotClient:
     """Authenticated HTTP client for the ThoughtSpot REST API.
 
-    Auth flow (matches Pattern A from thoughtspot-setup/SKILL.md):
+    Auth flow (matches ts-profile-setup/SKILL.md):
       1. Check for a valid cached token in /tmp/ts_token_{slug}.txt
-      2. If none, read the credential from the environment variable in the
-         profile, with a fallback to reading directly from macOS Keychain.
+      2. If none, read the credential — first from the env var named in the
+         profile, then directly from macOS Keychain as fallback.
       3. If token_env: use the credential as the bearer token directly.
          If password_env / secret_key_env: exchange for a bearer token via
          POST /api/rest/2.0/auth/token/full and cache the result.
+
+    Credentials are managed exclusively through /ts-profile-setup.
+    Do not set credential env vars manually — use that skill to add, update,
+    or refresh credentials, which stores them in macOS Keychain.
     """
 
     def __init__(self, profile_name: str):
@@ -88,7 +92,7 @@ class ThoughtSpotClient:
             raise SystemExit(
                 f"Profile '{profile_name}' not found.\n"
                 f"Available profiles: {available}\n"
-                "Run the thoughtspot-setup skill to add a profile."
+                "Run /ts-profile-setup to add a profile."
             )
         self._profile = profiles[profile_name]
         self._profile_name = profile_name
@@ -151,12 +155,12 @@ class ThoughtSpotClient:
     # ------------------------------------------------------------------
 
     def _get_credential(self, env_var: str) -> str:
-        """Read a credential from the environment, falling back to Keychain."""
+        """Read a credential — env var first, Keychain fallback."""
         val = os.environ.get(env_var, "")
         if val:
             return val
 
-        # Keychain fallback — service name matches thoughtspot-setup derivation
+        # Keychain fallback — service name matches ts-profile-setup derivation
         service = f"thoughtspot-{self._slug}"
         username = self._profile.get("username", "")
         result = subprocess.run(
@@ -168,11 +172,9 @@ class ThoughtSpotClient:
             return result.stdout.strip()
 
         raise SystemExit(
-            f"Credential not available for profile '{self._profile_name}'.\n"
-            f"  Expected env var: {env_var}\n"
-            f"  Keychain service: {service}\n"
-            "Try running 'source ~/.zshenv' in your terminal, or re-add the profile\n"
-            "with the thoughtspot-setup skill."
+            f"No credential found for profile '{self._profile_name}'.\n"
+            "To fix: run /ts-profile-setup → U → Refresh credential,\n"
+            "then run 'source ~/.zshenv' in your terminal."
         )
 
     def _authenticate(self) -> Tuple[str, Optional[int]]:
@@ -198,8 +200,9 @@ class ThoughtSpotClient:
             )
             if resp.status_code in (401, 403):
                 raise SystemExit(
-                    f"Authentication failed ({resp.status_code}). "
-                    "Password may be wrong or expired."
+                    f"Authentication failed ({resp.status_code}) for profile '{self._profile_name}'.\n"
+                    "Password may be wrong or expired.\n"
+                    "Run /ts-profile-setup → U → Refresh credential."
                 )
             resp.raise_for_status()
             data = resp.json()
@@ -220,8 +223,9 @@ class ThoughtSpotClient:
             )
             if resp.status_code in (401, 403):
                 raise SystemExit(
-                    f"Authentication failed ({resp.status_code}). "
-                    "Secret key may be wrong or expired."
+                    f"Authentication failed ({resp.status_code}) for profile '{self._profile_name}'.\n"
+                    "Secret key may be wrong or expired.\n"
+                    "Run /ts-profile-setup → U → Refresh credential."
                 )
             resp.raise_for_status()
             data = resp.json()

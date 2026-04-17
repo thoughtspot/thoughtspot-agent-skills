@@ -103,7 +103,7 @@ def create_tables(
       }
     ]
 
-    Data types: INT64, DOUBLE, VARCHAR, DATE, DATETIME, BOOLEAN.
+    Data types: INT64, DOUBLE, VARCHAR, DATE, DATE_TIME, BOOLEAN.
     Column types: ATTRIBUTE (default) or MEASURE (adds aggregation: SUM).
 
     Auto-retries on transient JDBC errors. After each successful import,

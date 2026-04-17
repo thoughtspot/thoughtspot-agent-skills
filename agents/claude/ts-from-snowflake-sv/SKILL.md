@@ -22,8 +22,11 @@ Two scenarios are supported:
 
 | File | Purpose |
 |---|---|
-| [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Semantic View DDL parsing, model TML templates, type and aggregation mapping |
+| [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Snowflake Semantic View DDL parsing, type mapping, formula translation, column classification |
 | [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
+| [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Table TML structure, connection reference, data types, import patterns, common errors |
+| [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure, join scenarios, formula visibility, self-validation checklist |
+| [~/.claude/shared/schemas/thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula syntax, all function categories, LOD/window/semi-additive patterns, YAML encoding rules |
 | [~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 | [~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
@@ -286,13 +289,9 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    ```
    This returns every column for every table/view in the schema in one round-trip.
 
-2. Find the ThoughtSpot connection to use:
-   ```bash
-   ts connections list --profile {profile}
-   ```
-   Note the connection GUID (not just name) — use `fqn` in table TML for reliability.
-   Ask the user to confirm which connection to use (or auto-select if only one matches
-   the semantic view's database).
+2. Ask the user to confirm which ThoughtSpot connection to use (or auto-select if
+   only one matches the semantic view's database). Use the connection **name** directly
+   in table TML — no GUID lookup is needed or possible from available procedures.
 
 3. Create ThoughtSpot Table objects for all tables in one command:
    ```bash
@@ -316,8 +315,8 @@ Parse the `edoc` YAML for each FROM table.
 
 For a relationship `FROM {from_table} KEY {from_col} TO {to_table} KEY {to_col}`:
 
-1. In the FROM table's `edoc` YAML, find the `joins` section.
-2. Match the entry where `destination` equals the TO table name.
+1. In the FROM table's `edoc` YAML, find the `joins_with` section.
+2. Match the entry where `destination.name` (or `destination`) equals the TO table name.
 3. Record the join `name` — this is the `referencing_join` value for the `to_table`
    entry in the model TML.
 
@@ -340,11 +339,14 @@ test/converted model. Ask the user if they want a different name.
 — it gets no `referencing_join` and no `joins[]`.
 
 **Critical `id` rules (applies to all scenarios):**
-- All `id` values must be **lowercase**
+- **`id` must equal `name` exactly** (same case, same characters). ThoughtSpot resolves
+  `with` and `on` join references against the table's actual `name` — if `id` differs
+  in case (e.g. `id: dm_order` with `name: DM_ORDER`), joins fail with
+  "{table_name} does not exist in schema". Use the exact ThoughtSpot table object name
+  for both `id` and `name` (often uppercase for newly-created tables).
 - `id` values must be **unique** across all `model_tables` entries
 - `name` values must also be **unique** — ThoughtSpot rejects models where two tables
   share the same `name` value ("Multiple tables have same alias")
-- `name` must match the ThoughtSpot table object's name exactly (usually lowercase)
 - If two semantic view tables map to the same ThoughtSpot table (same GUID), include
   it only ONCE and use ONE `id`/`name`
 
@@ -354,11 +356,11 @@ test/converted model. Ask the user if they want a different name.
 model:
   name: "TEST_SV_{view_name}"
   model_tables:
-  - id: fact_table          # lowercase
-    name: fact_table        # ThoughtSpot table object name (lowercase)
+  - id: FACT_TABLE          # MUST equal name exactly (copy verbatim — often uppercase)
+    name: FACT_TABLE        # exact ThoughtSpot table object name
     fqn: "{fact_guid}"      # GUID from Step 6A
-  - id: dim_table           # lowercase
-    name: dim_table         # ThoughtSpot table object name (lowercase)
+  - id: DIM_TABLE           # MUST equal name exactly
+    name: DIM_TABLE         # exact ThoughtSpot table object name
     fqn: "{dim_guid}"       # GUID from Step 6A
     referencing_join: "{join_name}"   # from Step 7
   columns:
@@ -387,17 +389,17 @@ new Table objects for views. Inline joins live on the **source (FROM) table** en
 model:
   name: "TEST_SV_{view_name}"
   model_tables:
-  - id: from_table          # lowercase, unique
-    name: from_table        # ThoughtSpot table object name
+  - id: FROM_TABLE          # MUST equal name exactly (copy verbatim from import response)
+    name: FROM_TABLE        # exact ThoughtSpot table object name — never lowercase or transform
     fqn: "{from_guid}"
     joins:
     - name: "{join_name}"
-      with: to_table        # REQUIRED — must equal `id` of the target entry
-      on: "[from_table::{fk_col}] = [to_table::{pk_col}]"  # uses id values, col names from ThoughtSpot Table TML
+      with: TO_TABLE        # REQUIRED — must equal `id` (= `name`) of the target entry exactly
+      on: "[FROM_TABLE::{fk_col}] = [TO_TABLE::{pk_col}]"  # uses id values (= name values)
       type: INNER
       cardinality: MANY_TO_ONE
-  - id: to_table            # matches `with` value above
-    name: to_table
+  - id: TO_TABLE            # matches `with` value above — same case
+    name: TO_TABLE
     fqn: "{to_guid}"
   columns:
   # ... same pattern as Scenario A ...
@@ -419,6 +421,33 @@ For each simple metric (`AGG(view_alias.metric_name)`):
 
 For each complex metric (formula expression):
 - See Step 9 for translation. Results go into `formulas[]`.
+- **Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained
+  via their `expr`. ThoughtSpot rejects TML with `FORMULA is not a valid aggregation type`.
+
+**Every formula must have a `columns[]` entry.** Add a `columns[]` entry with
+`formula_id:` for every entry in `formulas[]`:
+
+```yaml
+formulas:
+- id: formula_Inventory Balance   # id: "formula_" + name (spaces preserved)
+  name: "Inventory Balance"
+  expr: >-
+    last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_DATE_DIM::DATE_VALUE] } )
+  properties:
+    column_type: MEASURE
+
+columns:
+# ... physical columns ...
+- name: "Inventory Balance"
+  formula_id: formula_Inventory Balance   # must match the formula's `id` exactly
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+    index_type: DONT_INDEX   # recommended for computed numeric measures
+```
+
+`aggregation:` on a `columns[]` formula entry is allowed (unlike in `formulas[]` entries
+where it causes an import error).
 
 ---
 
@@ -435,13 +464,42 @@ For each metric whose `EXPR` is not a simple `AGG(table.col)`:
 
 **Column references in translated formulas:**
 
-Use the TABLE_ALIAS from `model_tables` (the `id` field, which matches the semantic
-view table alias). Column name is the column name from the EXPR (from the ThoughtSpot Table TML).
+Use the `name:` from the corresponding `model_tables[]` entry (which matches the semantic
+view table alias). Column name is the column name from the ThoughtSpot Table TML.
 
 Example:
 - Semantic view EXPR: `SUM(DM_ORDERDETAILS.UNIT_PRICE * DM_ORDERDETAILS.QUANTITY)`
 - ThoughtSpot formula: `sum ( [DM_ORDERDETAILS::UNIT_PRICE] * [DM_ORDERDETAILS::QUANTITY] )`
 - Add as `formulas[]` entry with `column_type: MEASURE`
+
+**`last_value` / curly brace formulas — YAML block scalar required:**
+
+When the translated formula contains `{ [col] }` (curly braces), use a `>-` block scalar
+for the `expr` field. Inline YAML string assignment fails because `{` is a flow mapping
+start character:
+
+```yaml
+formulas:
+- name: "Inventory Balance"
+  expr: >-
+    last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_DATE_DIM::DATE_VALUE] } )
+  properties:
+    column_type: MEASURE
+```
+
+In Python, set the formula string in the dict as a plain string — `yaml.dump` will emit
+it as a block scalar automatically when the string contains `{`. If it doesn't, force it:
+
+```python
+from yaml.representer import SafeRepresenter
+
+def literal_representer(dumper, data):
+    if '{' in data or '\n' in data:
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='>')
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+yaml.add_representer(str, literal_representer)
+```
 
 ---
 
@@ -476,21 +534,31 @@ Wait for user confirmation before proceeding.
 
 **IMPORTANT — Updating vs creating:** Without a `guid` field in the TML, ThoughtSpot
 always creates a **new** object, even if a model with the same name already exists.
-To update an existing model in-place, add `guid` to the model dict:
+To update an existing model in-place, add `guid` at the **document root** — as a
+top-level key alongside `model:`, NOT nested inside `model:`:
 
 ```python
-model_dict["guid"] = "{existing_model_guid}"   # omit on first import; required for all subsequent fixes
+# CORRECT — guid at document root
+top_level = {"guid": "{existing_model_guid}", "model": model_dict}
+
+# WRONG — guid nested under model (silently ignored by ThoughtSpot)
+# model_dict["guid"] = "..."   ← do NOT do this
 ```
 
 On the first import (new model), omit `guid`. After import, record the GUID from the
 response — you will need it if you reimport to fix any errors.
 
-Serialize the model TML dict to a YAML string, then import:
+Serialize the top-level dict to a YAML string, then import:
 
 ```python
 import yaml, json, subprocess
 
-model_tml = yaml.dump({"model": model_dict}, default_flow_style=False, allow_unicode=True)
+# First import (new model):
+top_level = {"model": model_dict}
+# Update existing model:
+top_level = {"guid": existing_guid, "model": model_dict}
+
+model_tml = yaml.dump(top_level, default_flow_style=False, allow_unicode=True)
 payload = json.dumps([model_tml])
 
 result = subprocess.run(
@@ -514,11 +582,12 @@ required for any future reimports to update the model without creating a duplica
 | `referencing_join not found` | Join name is wrong or join doesn't exist at table level | Export table TML again and verify join name |
 | `column_id not found` | Column name is wrong — left-hand side of semantic view dimension used instead of ThoughtSpot Table TML column name | Check Table TML for the correct column name |
 | `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on an inline join | Add `with: {target_id}` to every inline join entry |
-| `{table_name} does not exist in schema` (on `with` field) | `with` value is wrong case or doesn't match any `id` | Ensure `with` matches the target's `id` exactly (lowercase) |
+| `{table_name} does not exist in schema` (on `with` field) | `with` value is wrong case or doesn't match any `id` | Ensure `with` matches the target's `id` exactly — same case as `name` |
 | `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` in model_tables | Check that both `[table1::col]` refs in `on` use `id` values, not Snowflake table names |
 | `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — if two aliases map to the same Snowflake object, keep only one entry |
 | `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-run Step 6A to get fresh GUIDs |
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
+| YAML mapping error on formula with `{` | `last_value` or similar formula with `{ [col] }` emitted as inline YAML string | Use `>-` block scalar for `expr` — see Step 9 for pattern |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |
 
 ---
