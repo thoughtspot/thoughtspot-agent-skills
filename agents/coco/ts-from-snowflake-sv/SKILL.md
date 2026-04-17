@@ -511,14 +511,31 @@ doubt, copy the string character-for-character from the API response.
 
 ---
 
-### Step 7: Review checkpoint
+### Step 7: Self-validation before import
 
-Show the user a summary **and the full TML text** before importing. The user must
-approve the TML directly — a summary alone is not sufficient because TML errors are
-always in the details.
+**Run this checklist against the model TML before showing the user anything.**
+Fix every issue found before moving on. Do not present a "✗ problem found" to the user
+and then ask whether to proceed — the user cannot evaluate TML errors. Fix them silently
+and note the correction in the output.
+
+**Checklist — run each check in order:**
+
+| # | Check | What to verify | Fix if wrong |
+|---|---|---|---|
+| 1 | YAML validity | Parse the TML string; confirm no syntax errors | Fix indentation or quoting |
+| 2 | `model_tables[].name` | Every name matches an entry in the `{table_name → guid}` map (verbatim, case-sensitive — from Step 4B import response or Step 4A export) | Replace with the exact name from the map |
+| 3 | `referencing_join` values | Every `referencing_join` value matches a join name from the exported Table TML (Step 5) | Replace with the verbatim join name from the export |
+| 4 | `column_id` table prefix | Each `column_id` prefix (before `::`) matches an `id` field in `model_tables[]` | Correct the prefix |
+| 5 | `column_id` column suffix | Each suffix (after `::`) matches a column name in the ThoughtSpot Table TML for that table | Check Table TML; correct the suffix |
+| 6 | No duplicate `column_id` | No two `columns[]` entries share the same `column_id` value | If a COUNT_DISTINCT metric duplicates an ATTRIBUTE column_id, convert it to a formula |
+| 7 | No `aggregation:` on formulas | No `formulas[]` entry has an `aggregation:` field | Remove the field |
+
+After all checks pass, show the user:
 
 ```
-Model to import: TEST_SV_{view_name}
+Model ready to import: TEST_SV_{view_name}
+
+Self-validation: all checks passed
 
 Tables ({n}):
   ✓ {FACT_TABLE}    — fact table
@@ -531,15 +548,12 @@ Formula translations:
   ✓ {name}: {sql} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
 
---- TML ---
-{full model_tml_yaml text}
------------
-
 Proceed with import? (yes/no):
 ```
 
-If the user says **no** or requests any change, apply the correction and return to the
-top of this step (re-display the updated TML) before importing.
+If any check **cannot be fixed** (e.g. required join name not found in any exported TML),
+report specifically what is missing and what step to re-run to resolve it — do not attempt
+the import.
 
 ---
 
