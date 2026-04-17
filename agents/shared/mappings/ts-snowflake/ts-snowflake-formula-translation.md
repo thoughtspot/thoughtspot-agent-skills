@@ -645,9 +645,16 @@ metrics:
 ```
 
 **Transitive dependencies:** If a second formula referenced this one as untranslatable,
-it can now also be translated. Example — a ratio that depends on `category_quantity`:
+it can now also be translated. When you resolve a previously-untranslatable formula,
+revisit any formula that was omitted due to a transitive dependency on it.
+
+**Two cases — do not confuse them:**
+
+**Case A — numerator and denominator are different metrics** (safe to inline):
 
 ThoughtSpot: `safe_divide(sum(Sales Amount), sum(group_aggregate(sum(Quantity), {Category Name}, query_filters())))`
+
+After resolving `[Category Quantity]` → `SUM(QUANTITY)`, inline and translate:
 
 ```yaml
 metrics:
@@ -657,8 +664,29 @@ metrics:
     expr: DIV0(SUM(dm_order_detail.AMOUNT), SUM(dm_order_detail.QUANTITY))
 ```
 
-When you resolve a previously-untranslatable formula, revisit any formula that was
-omitted due to a transitive dependency on it — it may now be translatable too.
+**Case B — same metric at different grains (contribution ratio):**
+
+ThoughtSpot: `safe_divide(sum(Quantity), [Category Quantity])`
+where `[Category Quantity]` = `sum(group_aggregate(sum(Quantity), {Category Name}, query_filters()))`
+
+**Do NOT inline** — `[Category Quantity]` simplifies to `SUM(QUANTITY)`, so inlining
+produces `DIV0(SUM(QUANTITY), SUM(QUANTITY))` which is always 1.0. The LOD grain is
+lost. Instead, treat this as a **Percentage Contribution** pattern (see above) and
+use the PARTITION BY window function:
+
+```yaml
+metrics:
+  - name: product_to_category_ratio
+    expr: >-
+      DIV0(
+        SUM(dm_order_detail.QUANTITY),
+        SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY categories.CATEGORY_NAME)
+      )
+```
+
+**How to identify Case B:** The formula references `[NamedMetric]` where that metric
+is `group_aggregate` of the **same underlying column** as the numerator. In that
+situation, the named reference must be re-expanded as a window function, not inlined.
 
 **This simplification applies only when the outer aggregate is `sum()`.**  
 `max(group_aggregate(...))`, `count(group_aggregate(...))`, etc. are still untranslatable
