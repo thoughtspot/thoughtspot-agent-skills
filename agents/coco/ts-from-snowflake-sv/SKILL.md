@@ -502,11 +502,20 @@ For each metric in the semantic view:
 
 **Model name:** `TEST_SV_{semantic_view_name}` (or user-specified).
 
+**CRITICAL — Never normalise names from API responses.** Names that came from
+`TS_EXPORT_TML` (join names, column names, table names) or from import response GUIDs
+must be used **exactly as returned** — no `.lower()`, no `.upper()`, no title-casing,
+no whitespace trimming. Any silent transformation will cause a lookup failure in the
+model TML (wrong `referencing_join`, wrong `table.name`, wrong `column_id`). When in
+doubt, copy the string character-for-character from the API response.
+
 ---
 
 ### Step 7: Review checkpoint
 
-Show the user a summary of the model before importing:
+Show the user a summary **and the full TML text** before importing. The user must
+approve the TML directly — a summary alone is not sufficient because TML errors are
+always in the details.
 
 ```
 Model to import: TEST_SV_{view_name}
@@ -522,8 +531,15 @@ Formula translations:
   ✓ {name}: {sql} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
 
-Proceed? (yes/no):
+--- TML ---
+{full model_tml_yaml text}
+-----------
+
+Proceed with import? (yes/no):
 ```
+
+If the user says **no** or requests any change, apply the correction and return to the
+top of this step (re-display the updated TML) before importing.
 
 ---
 
