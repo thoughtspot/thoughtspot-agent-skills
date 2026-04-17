@@ -616,11 +616,62 @@ metrics:
       )
 ```
 
+### Outer `sum()` wrapping `group_aggregate(..., query_filters())`
+
+When `sum()` wraps a `group_aggregate` that uses `query_filters()` as its filter
+argument, the entire expression simplifies to a plain `SUM(m)` metric.
+
+**Why this works:** In ThoughtSpot, `group_aggregate` requires explicit grain
+instructions because ThoughtSpot must know at what level to compute the sub-aggregation.
+In a semantic view, **grain is always determined at query time by Cortex Analyst** —
+the grouping is implicit in whatever dimensions are in the query. `query_filters()` is
+also redundant — Cortex Analyst applies all active query filters automatically.
+
+The outer `sum()` of the category-level total collapses to `SUM(m)` because Cortex
+Analyst computes the metric at the correct grain for the current query context.
+
+| ThoughtSpot | Semantic view | Note |
+|---|---|---|
+| `sum(group_aggregate(sum(m), {attr}, query_filters()))` | `SUM(m)` | Grain is implicit — Cortex handles it at query time |
+| `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | `SUM(m)` | `query_groups()` is already a plain metric |
+| `group_sum(m, attr)` used as a standalone metric (not in ratio) | `SUM(m)` | Same simplification applies |
+
+**Example — `sum(group_aggregate(sum(Quantity), {Category Name}, query_filters()))`:**
+
+```yaml
+metrics:
+  - name: category_quantity
+    expr: SUM(dm_order_detail.QUANTITY)
+```
+
+**Transitive dependencies:** If a second formula referenced this one as untranslatable,
+it can now also be translated. Example — a ratio that depends on `category_quantity`:
+
+ThoughtSpot: `safe_divide(sum(Sales Amount), sum(group_aggregate(sum(Quantity), {Category Name}, query_filters())))`
+
+```yaml
+metrics:
+  - name: category_quantity
+    expr: SUM(dm_order_detail.QUANTITY)
+  - name: sales_per_category_quantity
+    expr: DIV0(SUM(dm_order_detail.AMOUNT), SUM(dm_order_detail.QUANTITY))
+```
+
+When you resolve a previously-untranslatable formula, revisit any formula that was
+omitted due to a transitive dependency on it — it may now be translatable too.
+
+**This simplification applies only when the outer aggregate is `sum()`.**  
+`max(group_aggregate(...))`, `count(group_aggregate(...))`, etc. are still untranslatable
+— the maximum or count of category-level totals is semantically different from
+`MAX(m)` or `COUNT(m)`, so the simplification does not hold.
+
+---
+
 ### Untranslatable LOD Patterns
 
 | Pattern | Reason |
 |---|---|
-| `agg(group_{func}(...))` e.g. `max(group_sum(...))` | Window function metrics cannot be referenced by other metrics |
+| `max/min/avg/count(group_aggregate(...))` | Max/count of category totals ≠ max/count of rows — simplification does not hold (unlike `sum`) |
 | `group_aggregate(...)` with explicit filter | Semantic view metrics cannot contain filter clauses |
 | `group_aggregate(...)` with `query_groups() + {attr}` | No conditional include in semantic views |
 | `group_aggregate(...)` with `query_groups(attr1, attr2)` | No optional include in semantic views |
