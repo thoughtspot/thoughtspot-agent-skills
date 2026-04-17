@@ -278,6 +278,11 @@ Connection name:
 
 Store as `{connection_name}`.
 
+**Do NOT search for the connection using `TS_SEARCH_MODELS`** — that procedure only
+finds `LOGICAL_TABLE` objects (worksheets, models, tables). Connections are a different
+object type and are not returned. The connection is referenced by **name** directly in
+the Table TML — no GUID or lookup is needed.
+
 For each base table reference, introspect columns:
 
 ```sql
