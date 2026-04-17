@@ -18,16 +18,16 @@ Run from the repository root after any update:
 
 ```bash
 # Skill files
-snow stage copy agents/coco/SETUP.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/ --overwrite
-snow stage copy agents/coco/coco-setup/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/coco-setup/ --overwrite
-snow stage copy agents/coco/thoughtspot-setup/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/thoughtspot-setup/ --overwrite
-snow stage copy agents/coco/ts-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/ts-to-snowflake-sv/ --overwrite
-snow stage copy agents/coco/ts-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/ts-from-snowflake-sv/ --overwrite
+snow stage copy agents/coco/SETUP.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ --overwrite
+snow stage copy agents/coco/coco-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/coco-setup/ --overwrite
+snow stage copy agents/coco/thoughtspot-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/thoughtspot-setup/ --overwrite
+snow stage copy agents/coco/ts-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-to-snowflake-sv/ --overwrite
+snow stage copy agents/coco/ts-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-from-snowflake-sv/ --overwrite
 
 # Shared reference files (only needed when these change)
-snow stage copy "agents/shared/mappings/ts-snowflake/" @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/mappings/ts-snowflake/ --recursive --overwrite
-snow stage copy agents/shared/schemas/ @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/schemas/ --recursive --overwrite
-snow stage copy "agents/shared/worked-examples/snowflake/" @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --recursive --overwrite
+snow stage copy "agents/shared/mappings/ts-snowflake/" @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-snowflake/ --recursive --overwrite
+snow stage copy agents/shared/schemas/ @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --recursive --overwrite
+snow stage copy "agents/shared/worked-examples/snowflake/" @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --recursive --overwrite
 ```
 
 ### Step 2: Ask CoCo to deploy to Workspace
@@ -42,8 +42,8 @@ CoCo reads each file from the stage and writes it to the corresponding workspace
 
 | Stage path | Workspace path |
 |---|---|
-| `@SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/<name>/SKILL.md` | `.snowflake/cortex/skills/<name>/SKILL.md` |
-| `@SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/` | `.snowflake/cortex/shared/` |
+| `@SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/<name>/SKILL.md` | `.snowflake/cortex/skills/<name>/SKILL.md` |
+| `@SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/` | `.snowflake/cortex/shared/` |
 
 ### Step 3: Install or upgrade stored procedures
 

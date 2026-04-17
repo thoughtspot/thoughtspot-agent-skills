@@ -18,7 +18,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 If the user asks to deploy, update, or sync skill files from the stage, follow these
 steps **before** the procedure installation steps below.
 
-**Stage root:** `@SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/`
+**Stage root:** `@SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/`
 **Workspace root:** `.snowflake/cortex/`
 
 The mapping is direct — strip the stage prefix and write to the matching workspace path.
@@ -39,7 +39,7 @@ Read each file from the stage using SQL:
 
 ```sql
 SELECT LISTAGG($1, '\n') WITHIN GROUP (ORDER BY METADATA$FILE_ROW_NUMBER)
-FROM @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/{skill_name}/SKILL.md
+FROM @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/{skill_name}/SKILL.md
 (FILE_FORMAT => (TYPE = 'CSV' FIELD_DELIMITER = '\x01'
                  FIELD_OPTIONALLY_ENCLOSED_BY = NONE
                  ESCAPE_UNENCLOSED_FIELD = NONE));
@@ -54,7 +54,7 @@ Also deploy shared reference files if they have changed:
 
 ```sql
 -- List all shared files on the stage
-LS @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/;
+LS @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/;
 ```
 
 For each file returned, read its content (same SQL pattern above) and write to the
