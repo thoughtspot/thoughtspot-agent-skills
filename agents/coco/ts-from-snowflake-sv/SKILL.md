@@ -463,6 +463,26 @@ Parse each returned `edoc` YAML string. Find in the `joins` section the entry wh
      join_progressive: true
    ```
 
+7. **Formula columns must NOT have `aggregation:`** — only `columns[]` entries support
+   `aggregation`. Formulas are self-aggregating through their expression. Adding any
+   `aggregation:` value to a `formulas[]` entry causes a TML import error. Correct format:
+   ```yaml
+   formulas:
+   - name: "Num Orders"
+     expr: "count_distinct ( [dm_order::ORDER_ID] )"
+     id: num_orders
+     properties:
+       column_type: MEASURE
+   ```
+   No `aggregation:` field — not even `aggregation: FORMULA`.
+
+8. **`table.name` in `model_tables[]` must exactly match the ThoughtSpot Table object
+   name (case-sensitive).** ThoughtSpot Table names are stored as-is; if tables were
+   imported with uppercase names (`DM_ORDER`, `DM_CUSTOMER`) then `model_tables` must
+   reference them as `DM_ORDER`, `DM_CUSTOMER` — not `dm_order`, `dm_customer`. Use the
+   exact names from the import response (Step 4B GUID extraction query) — never
+   lowercase or transform them.
+
 Apply all column, formula, and join mappings from
 [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md) to build
 the model TML dict. Serialise to a YAML string.
@@ -548,6 +568,8 @@ if you reimport to fix any errors.
 | `{table_name} does not exist in schema` (on `with`) | `with` value doesn't match any `id` | Ensure `with` matches target `id` exactly (lowercase) |
 | `Invalid srcTable or destTable in join expression` | `on` clause uses table names instead of `id` values | Check both `[table::col]` refs use `id` values |
 | `Multiple tables have same alias {name}` | Two `model_tables` entries share the same `name` | Deduplicate — same Snowflake object must appear only once |
+| `aggregation type FORMULA is not valid` | `aggregation:` field set on a `formulas[]` entry | Remove `aggregation:` from all formula entries — formulas must not have this field |
+| `table not found` or model references unresolved table | `table.name` in `model_tables[]` doesn't match ThoughtSpot Table name exactly | Use exact names from Step 4B import response — often uppercase; never lowercase or transform |
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Review translated formula against ts-snowflake-formula-translation.md |
 | `fqn resolution failed` | Stale GUID | Re-run Step 4 to get fresh GUIDs |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars before serialising |
