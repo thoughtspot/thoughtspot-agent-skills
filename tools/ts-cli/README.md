@@ -294,7 +294,8 @@ per-object status and GUIDs of created/updated objects.
 
 ### `ts connections list`
 
-List available data connections.
+List all available data connections. Results are auto-paginated — all connections
+are returned regardless of how many exist on the instance.
 
 ```bash
 ts connections list
@@ -379,6 +380,58 @@ echo '[{"db":"MY_DB","schema":"MY_SCHEMA","table":"MY_TABLE","type":"TABLE","col
 > **Note:** Inherits the same v1 fetch limitation as `ts connections get` — may
 > fail with a 500 on some instances. Requires `CAN_CREATE_OR_EDIT_CONNECTIONS`
 > privilege.
+
+---
+
+### `ts tables create`
+
+Create ThoughtSpot logical table objects from a JSON spec.
+
+```bash
+cat tables.json | ts tables create --profile my-profile
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | first profile | Profile to use |
+| `--retries`, `-r` | 3 | Max retries per table on transient JDBC errors |
+| `--retry-delay` | 5.0 | Seconds between retries |
+
+**Input (stdin):** JSON array of table descriptors:
+
+```json
+[
+  {
+    "name": "FACT_SALES",
+    "db": "ANALYTICS",
+    "schema": "PUBLIC",
+    "db_table": "FACT_SALES",
+    "connection_name": "APJ_BIRD",
+    "columns": [
+      {"name": "SALE_ID",   "data_type": "INT64",   "column_type": "ATTRIBUTE"},
+      {"name": "AMOUNT",    "data_type": "DOUBLE",  "column_type": "MEASURE"},
+      {"name": "SALE_DATE", "data_type": "DATE",    "column_type": "ATTRIBUTE"},
+      {"name": "REGION",    "data_type": "VARCHAR", "column_type": "ATTRIBUTE"}
+    ]
+  }
+]
+```
+
+**Field notes:**
+- `connection_name` — the ThoughtSpot connection display name (string), not a GUID
+- `data_type` — one of: `INT64`, `DOUBLE`, `VARCHAR`, `DATE`, `DATE_TIME`, `BOOLEAN`
+- `column_type` — `ATTRIBUTE` (default) or `MEASURE` (adds `aggregation: SUM`)
+
+**Output:** JSON object mapping table name → GUID for all successfully created tables.
+Tables that failed after all retries are included with `null` as the GUID.
+
+```json
+{"FACT_SALES": "b1e360c4-d571-490f-bae2-e8dc7443c9fa"}
+```
+
+Auto-retries transient JDBC errors and resolves GUIDs via metadata search after import.
 
 ---
 

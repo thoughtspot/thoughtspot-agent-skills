@@ -265,8 +265,7 @@ Find the ThoughtSpot connection for those tables:
 ```bash
 ts connections list --profile {profile}
 ```
-**Note:** `ts connections list` is capped at 100 results. If the connection does not appear,
-use the paginated REST API fallback described in Step 6B.
+**Note:** `ts connections list` auto-paginates and returns all connections.
 
 Add the missing columns to the connection, then re-import the updated Table TML
 for each affected table (batch all imports in one call):
@@ -295,33 +294,8 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    only one matches the semantic view's database). Use the connection **name** directly
    in table TML — no GUID lookup is needed or possible from available procedures.
 
-   **`ts connections list` is capped at 100 results.** On instances with many connections
-   the target connection may not appear. If the connection the user names is not in the
-   list, fall back to the REST API with pagination:
-
-   ```python
-   import urllib.request, json, os, subprocess
-
-   base_url = "{base_url}"   # from the active ThoughtSpot profile
-   token = "{token}"         # from keychain / env var
-
-   all_conns, offset = [], 0
-   while True:
-       req = urllib.request.Request(
-           f"{base_url}/api/rest/2.0/connection/search",
-           data=json.dumps({"record_size": 500, "record_offset": offset}).encode(),
-           headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-           method="POST"
-       )
-       page = json.loads(urllib.request.urlopen(req).read())
-       all_conns.extend(page)
-       if len(page) < 500:
-           break
-       offset += 500
-
-   # Filter by keyword
-   matches = [c for c in all_conns if keyword.lower() in c["name"].lower()]
-   ```
+   `ts connections list` auto-paginates and returns all connections. Filter the
+   output by the user's connection name to confirm it exists.
 
    Display matching connections and ask the user to confirm. Once confirmed, use the
    exact `name` value from the API response.
