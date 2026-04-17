@@ -783,27 +783,41 @@ Initialise `used_rel_names = set()` before the relationship loop.
 For join type and cardinality mappings, see
 [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md).
 
-**`primary_key` — mark right-side tables as each relationship is built:**
+**`primary_key` — build the complete right_tables set BEFORE generating any table YAML:**
 
-As you emit each relationship, immediately record the `right_table` in a
-`right_tables` set. Do this inline — do not defer to a later step:
+**CRITICAL:** Do not generate table YAML until you have processed every relationship
+and know which tables are right_tables. If you generate table entries first and add
+`primary_key` later, it is easy to miss one — especially fact tables like `dm_order`
+that are both a source table and a join target.
+
+Correct order:
+1. Iterate all joins/relationships → collect `right_tables` set
+2. Then generate all table YAML — check membership in `right_tables` for every table entry
 
 ```python
+# Step 1 — build right_tables first
 right_tables = set()
+right_table_pk_col = {}   # right_table → physical PK column name
 for join in joins:
-    # ... build relationship ...
-    right_tables.add(right_tbl)  # track here, not later
+    right_tbl = resolve_right_table(join)
+    right_pk   = resolve_right_column(join)   # the right_column of the relationship
+    right_tables.add(right_tbl)
+    right_table_pk_col[right_tbl] = right_pk
+
+# Step 2 — generate table YAML, adding primary_key where needed
+for table in tables:
+    if table.name in right_tables:
+        emit primary_key section using right_table_pk_col[table.name]
 ```
 
-After the relationship loop is complete, add `primary_key` to every table entry
-in `right_tables`. Any table can be a right_table — including fact/transaction
-tables like `dm_order` that also have FK columns. Do not assume only lookup/dimension
-tables need `primary_key`.
+Any table can be a right_table — including fact/transaction tables like `dm_order`
+that also have FK columns pointing elsewhere. Never assume only dimension tables
+need `primary_key`.
 
 ```yaml
 primary_key:
   columns:
-  - {PHYSICAL_COLUMN_NAME}   # the column used as right_column in the relationship
+  - {PHYSICAL_COLUMN_NAME}   # the right_column value from the relationship
 ```
 
 ---
@@ -957,11 +971,31 @@ Instead:
   | {display_name} | OMITTED | {reason} | {original_expr} |
   ```
 
+**`last_value` formulas → `non_additive_dimensions` field (NOT inline in expr):**
+
+ThoughtSpot `last_value(sum(m), query_groups(), {date_col})` translates to a metric
+with a `non_additive_dimensions` structured field. **Never** put `NON ADDITIVE BY`
+inside the `expr` string — Snowflake's YAML parser rejects it.
+
+```yaml
+metrics:
+- name: inventory_balance
+  expr: "SUM(dm_inventory.FILLED_INVENTORY)"
+  non_additive_dimensions:
+  - table: dm_date_dim_inventory
+    dimension: balance_date
+    sort_direction: ascending
+```
+
+The `dimension` value must match the `name` of a `time_dimensions` entry in the
+referenced table. `sort_direction` is `ascending` for `last_value` (latest snapshot).
+
 Untranslatable patterns to recognise:
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
 - `sql_string_op(...)` — raw SQL injection pattern
 - `ts_first_day_of_week(...)`, `last_n_days(...)` — ThoughtSpot time intelligence
 - Any reference to a formula that is itself untranslatable (transitive)
+- `first_value(...)` — only `last_value` with `query_groups()` is translatable
 
 ---
 
@@ -1019,7 +1053,8 @@ Report all failures together before retrying. Key checks:
 - [ ] Field names unique globally across all tables' dimensions, time_dimensions, metrics
 - [ ] All `expr` table prefixes match a `name` in `tables[]`
 - [ ] All relationship `left_table`/`right_table` values match a `name` in `tables[]`
-- [ ] Every `right_table` in a relationship has a `primary_key` section
+- [ ] Every `right_table` in a relationship has a `primary_key` section — cross-check by listing every `right_table` value from `relationships[]` and confirming each appears in `tables[]` with a `primary_key` block
+- [ ] No `NON ADDITIVE BY` text inside any `expr` string — non-additive metrics use the `non_additive_dimensions` structured list field on the metric entry
 - [ ] Reserved words in column names are double-quoted in `expr`
 - [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
 - [ ] All `expr` values are single-line double-quoted strings — no `>-`, `|`, or any YAML block scalar (Snowflake rejects them)
