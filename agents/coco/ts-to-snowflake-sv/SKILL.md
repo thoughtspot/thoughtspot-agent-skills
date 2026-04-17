@@ -783,6 +783,29 @@ Initialise `used_rel_names = set()` before the relationship loop.
 For join type and cardinality mappings, see
 [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md).
 
+**`primary_key` — mark right-side tables as each relationship is built:**
+
+As you emit each relationship, immediately record the `right_table` in a
+`right_tables` set. Do this inline — do not defer to a later step:
+
+```python
+right_tables = set()
+for join in joins:
+    # ... build relationship ...
+    right_tables.add(right_tbl)  # track here, not later
+```
+
+After the relationship loop is complete, add `primary_key` to every table entry
+in `right_tables`. Any table can be a right_table — including fact/transaction
+tables like `dm_order` that also have FK columns. Do not assume only lookup/dimension
+tables need `primary_key`.
+
+```yaml
+primary_key:
+  columns:
+  - {PHYSICAL_COLUMN_NAME}   # the column used as right_column in the relationship
+```
+
 ---
 
 ### Step 8: Map Columns
@@ -834,17 +857,6 @@ column:
 Each field must be placed under the `tables[]` entry for its owning table. Accumulate
 fields per table as you iterate columns, then emit the full table entry with nested
 `dimensions`, `time_dimensions`, and `metrics` sections.
-
-**`primary_key` — required for join target tables:**
-
-After building all relationships, identify every table that appears as `right_table`
-in a relationship. Each such table entry must include a `primary_key` section listing
-the physical column(s) used as the join key:
-```yaml
-primary_key:
-  columns:
-  - {PHYSICAL_COLUMN_NAME}
-```
 
 **Join key columns must be exposed as dimensions (Cortex Analyst requirement):**
 

@@ -651,19 +651,23 @@ follow the same pattern as `group_aggregate`:
 2. Applies `LAST_VALUE(agg) OVER (PARTITION BY [coarser_date, other_dims] ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)` to pick the last date's value within each partition
 3. Re-aggregates at the query grain
 
-**Snowflake Semantic View equivalent — `NON ADDITIVE BY`:**
+**Snowflake Semantic View equivalent — `non_additive_dimensions`:**
 
-Semantic views support `NON ADDITIVE BY` on metrics, which tells Snowflake to take
-the last snapshot instead of summing across specified time dimensions.
+Semantic views support non-additive measures via the `non_additive_dimensions` field
+on a metric entry. This tells Snowflake to take the last snapshot instead of summing
+across the specified time dimensions.
+
+**Do not** write `NON ADDITIVE BY` inline in the `expr` string — the YAML parser
+rejects it. Always use `non_additive_dimensions` as a separate structured field.
 
 ### `last_value` with `query_groups()` — Translatable
 
 | ThoughtSpot | Semantic view |
 |---|---|
-| `last_value(sum(measure), query_groups(), {date_col})` | `SUM(measure) NON ADDITIVE BY (year_dim, month_dim, day_dim)` |
+| `last_value(sum(measure), query_groups(), {date_col})` | `expr: SUM(measure)` + `non_additive_dimensions: [date_dim.date_col]` |
 
-The `NON ADDITIVE BY` dimensions should be all time dimensions derived from the
-date column referenced in the ThoughtSpot formula.
+The `non_additive_dimensions` list should reference the time dimension(s) derived from
+the date column in the ThoughtSpot formula.
 
 **Example — `last_value(sum(Quantity), query_groups(), {tableDate})`:**
 
@@ -671,17 +675,18 @@ date column referenced in the ThoughtSpot formula.
 metrics:
   - name: quantity_last_value
     expr: SUM(order_detail.QUANTITY)
-      NON ADDITIVE BY (date_dim.year_dim, date_dim.month_dim, date_dim.day_dim)
+    non_additive_dimensions:
+      - date_dim.date_value
 ```
 
 **Reverse translation (semantic view → ThoughtSpot):**
 
 ```
-SUM(measure) NON ADDITIVE BY (year_dim, month_dim, day_dim)
+expr: SUM(measure) + non_additive_dimensions: [dim]
 → last_value(sum(measure), query_groups(), {date_column})
 ```
 
-Identify the date column from the time dimensions listed in `NON ADDITIVE BY`.
+Identify the date column from the dimension(s) listed in `non_additive_dimensions`.
 
 ### Untranslatable Semi-Additive Patterns
 
