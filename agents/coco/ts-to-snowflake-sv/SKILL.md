@@ -974,34 +974,38 @@ Instead:
 **`last_value` formulas → `non_additive_dimensions` field (NOT inline in expr):**
 
 ThoughtSpot `last_value(sum(m), query_groups(), {date_col})` translates to a metric
-with a `non_additive_dimensions` structured field. Three rules that must all be met:
+with a `non_additive_dimensions` structured field. The equivalent DDL syntax is:
+`TABLE.METRIC NON ADDITIVE BY (DATE_DIM.DATE_COL ASC NULLS LAST) AS SUM(fact.col)`
 
-1. **`expr` is the raw column — no aggregate function.** `SUM(...)` in expr causes:
-   *"A metric must directly refer to another aggregate-level expression without an aggregate."*
-2. **`non_additive_dimensions[].table` must be the same table the metric is defined on.**
-   Cross-table references cause a parse error. Use the FK date column on the fact
-   table itself — not the PK date column on the related date dimension table.
-3. **`dimension` must name a `time_dimensions` entry on that same table.**
+Rules:
+- `expr`: standard `SUM(fact_table.col)` aggregate — same as a regular metric
+- `non_additive_dimensions[].table`: the **date dimension table** (the joined table
+  whose PK is the date column) — NOT the fact table or its FK column
+- `non_additive_dimensions[].dimension`: the `time_dimensions` field name on that
+  date dimension table
+- `non_additive_dimensions[].sort_direction`: `ascending` for `last_value`
 
 ```yaml
 # For last_value(sum(FILLED_INVENTORY), query_groups(), {balance_date})
-# Metric is on dm_inventory — use the FK date column on dm_inventory itself
 tables:
-- name: dm_inventory
+- name: dm_date_dim_inventory          # date dimension table
+  primary_key:
+    columns:
+    - DATE_VALUE
   time_dimensions:
-  - name: dm_inventory_balance_date     # FK date on THIS table
-    expr: dm_inventory.DM_INVENTORY_BALANCE_DATE
+  - name: balance_date
+    expr: dm_date_dim_inventory.DATE_VALUE
     data_type: DATE
+
+- name: dm_inventory
   metrics:
   - name: inventory_balance
-    expr: dm_inventory.FILLED_INVENTORY  # raw column — NO SUM
+    expr: SUM(dm_inventory.FILLED_INVENTORY)   # standard SUM — same as regular metric
     non_additive_dimensions:
-    - table: dm_inventory                # same table as the metric
-      dimension: dm_inventory_balance_date
+    - table: dm_date_dim_inventory     # the DATE DIMENSION table — not the fact table
+      dimension: balance_date          # time_dimension name on that table
       sort_direction: ascending
 ```
-
-`sort_direction: ascending` for `last_value` (picks the latest snapshot).
 
 Untranslatable patterns to recognise:
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
@@ -1067,10 +1071,10 @@ Report all failures together before retrying. Key checks:
 - [ ] All `expr` table prefixes match a `name` in `tables[]`
 - [ ] All relationship `left_table`/`right_table` values match a `name` in `tables[]`
 - [ ] Every `right_table` in a relationship has a `primary_key` section — cross-check by listing every `right_table` value from `relationships[]` and confirming each appears in `tables[]` with a `primary_key` block
-- [ ] No `NON ADDITIVE BY` text inside any `expr` string — non-additive metrics use the `non_additive_dimensions` structured list field on the metric entry
-- [ ] Non-additive metric `expr` values are raw column references — no `SUM(...)` or any aggregate
-- [ ] `non_additive_dimensions[].table` matches the table the metric is defined on (not a related table)
-- [ ] `non_additive_dimensions[].dimension` matches a `time_dimensions` entry name on that same table
+- [ ] No `NON ADDITIVE BY` text inside any `expr` string — non-additive metrics use the `non_additive_dimensions` structured list field
+- [ ] Non-additive metric `expr` uses a standard `SUM(fact_table.col)` aggregate — same format as a regular metric
+- [ ] `non_additive_dimensions[].table` references the **date dimension table** (joined table with the date PK), not the fact table or its FK column
+- [ ] `non_additive_dimensions[].dimension` matches a `time_dimensions` field name on that date dimension table
 - [ ] Reserved words in column names are double-quoted in `expr`
 - [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
 - [ ] All `expr` values are single-line double-quoted strings — no `>-`, `|`, or any YAML block scalar (Snowflake rejects them)

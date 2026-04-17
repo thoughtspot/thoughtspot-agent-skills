@@ -718,53 +718,56 @@ Semantic views support non-additive measures via the `non_additive_dimensions` f
 on a metric entry. This tells Snowflake to take the last snapshot instead of summing
 across the specified time dimensions.
 
-Three strict rules for non-additive metrics:
-
-1. **`expr` must be a raw column reference — no aggregate function.** The
-   `non_additive_dimensions` field IS the aggregation instruction. Using
-   `SUM(table.col)` in `expr` causes: *"A metric must directly refer to another
-   aggregate-level expression without an aggregate."*
-2. **`non_additive_dimensions[].table` must be the same table as the metric.**
-   Referencing a dimension from a related/joined table causes a parse error.
-3. **`non_additive_dimensions[].dimension` must match a `time_dimensions` entry
-   name on that same table.** Use the FK date column on the fact table itself —
-   not the PK date column on the date dimension table.
-
 **Do not** write `NON ADDITIVE BY` inline in the `expr` string — the YAML parser
 rejects it. Always use `non_additive_dimensions` as a separate structured field.
+
+**Correct pattern — verified from DDL:**
+
+The DDL equivalent is:
+```sql
+TABLE.METRIC_NAME NON ADDITIVE BY (DATE_DIM_TABLE.DATE_COL ASC NULLS LAST) AS SUM(fact_table.measure_col)
+```
+
+The YAML equivalent:
+- `expr`: `SUM(fact_table.measure_col)` — standard aggregate, same as a regular metric
+- `non_additive_dimensions[].table`: the **date dimension table** (the joined table whose PK is the date column) — NOT the fact table's FK column
+- `non_additive_dimensions[].dimension`: the `time_dimensions` field name on that date dimension table
+- `non_additive_dimensions[].sort_direction`: `ascending` for `last_value` (latest snapshot)
 
 ### `last_value` with `query_groups()` — Translatable
 
 | ThoughtSpot | Semantic view |
 |---|---|
-| `last_value(sum(measure), query_groups(), {date_col})` | `expr: table.COLUMN` (raw) + `non_additive_dimensions` structured field |
+| `last_value(sum(measure), query_groups(), {date_col})` | `expr: SUM(fact_table.col)` + `non_additive_dimensions` referencing the date dimension table |
 
-**Example — `last_value(sum(Quantity), query_groups(), {tableDate})`:**
-
-The metric is on `order_detail`. The FK date column on `order_detail` must be exposed
-as a `time_dimensions` entry, then referenced in `non_additive_dimensions`:
+**Example — `last_value(sum(FILLED_INVENTORY), query_groups(), {balance_date})`:**
 
 ```yaml
 tables:
-- name: order_detail
+- name: dm_date_dim_inventory          # date dimension table
+  primary_key:
+    columns:
+    - DATE_VALUE
   time_dimensions:
-  - name: order_detail_date     # FK date column on THIS table — not the date dim table
-    expr: order_detail.ORDER_DATE
+  - name: balance_date
+    expr: dm_date_dim_inventory.DATE_VALUE
     data_type: DATE
+
+- name: dm_inventory                   # fact table with the metric
   metrics:
-  - name: quantity_last_value
-    expr: order_detail.QUANTITY  # raw column — NO SUM
+  - name: inventory_balance
+    expr: SUM(dm_inventory.FILLED_INVENTORY)   # standard SUM aggregate
     non_additive_dimensions:
-    - table: order_detail        # same table as the metric
-      dimension: order_detail_date  # time_dimension name on that table
+    - table: dm_date_dim_inventory     # the DATE DIMENSION table — not the fact table
+      dimension: balance_date          # time_dimension field name on that table
       sort_direction: ascending
 ```
 
 **Reverse translation (semantic view → ThoughtSpot):**
 
 ```
-expr: table.COLUMN (raw) + non_additive_dimensions: [{table, dimension, sort_direction}]
-→ last_value(sum(COLUMN), query_groups(), {date_dimension})
+expr: SUM(measure) + non_additive_dimensions: [{table: date_dim, dimension: date_field}]
+→ last_value(sum(measure), query_groups(), {date_column})
 ```
 
 Identify the date column from the `dimension` field in `non_additive_dimensions`.
