@@ -61,8 +61,8 @@ For the full coverage matrix including unmapped properties, see
 **Quick auth decision:**
 ```
 Can you log into ThoughtSpot in a browser (even via SSO)?
-  YES → token_env   — get a token from Developer Playground (no admin needed)
-  NO  → password_env or secret_key_env — see ts-profile-setup.md
+  YES → token    — get a bearer token from Developer Playground (no admin needed)
+  NO  → password — use username/password credentials — see /ts-profile-setup
 ```
 
 ### Snowflake

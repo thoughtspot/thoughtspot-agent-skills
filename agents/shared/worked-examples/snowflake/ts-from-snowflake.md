@@ -490,7 +490,7 @@ model_tables:
   fqn: "b1e360c4-d571-490f-bae2-e8dc7443c9fa"
   joins:
   - with: DM_ORDER               # matches name: DM_ORDER exactly (same case)
-    'on': '[DM_ORDER_DETAIL::RRDER_ID] = [DM_ORDER::ORDER_ID]'
+    'on': '[DM_ORDER_DETAIL::ORDER_ID] = [DM_ORDER::ORDER_ID]'
     type: INNER
     cardinality: MANY_TO_ONE
   - with: DM_PRODUCT

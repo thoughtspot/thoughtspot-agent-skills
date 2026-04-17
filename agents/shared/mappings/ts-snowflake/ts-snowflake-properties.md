@@ -112,12 +112,17 @@ See [ts-snowflake-formula-translation.md](ts-snowflake-formula-translation.md) f
 
 ### Window, LOD, and Semi-Additive Functions
 
-**Status: Hard blocker — requires manual translation**
+**Status: Partially translatable — review each formula against ts-snowflake-formula-translation.md**
 
 `moving_average`, `cumulative_sum`, `rank`, `group_aggregate`, `first_value`, `last_value`, etc.
-These require window functions, CTEs, or sub-aggregations that cannot be expressed as a
+Many of these translate directly to SQL window functions (`OVER (PARTITION BY)`) supported in
 Snowflake Semantic View `metrics` `expr`. See [ts-snowflake-formula-translation.md](ts-snowflake-formula-translation.md)
-for the complete list and Snowflake re-implementation approaches.
+for the complete pattern library.
+
+Untranslatable patterns (omit and log in Unmapped Report):
+- `first_value` and `agg(first_value(...))` — no direct Snowflake equivalent
+- `last_value_in_period` — period-scoped variants have no SV equivalent
+- Window functions with complex multi-dimension grouping not expressible as `PARTITION BY`
 
 ---
 

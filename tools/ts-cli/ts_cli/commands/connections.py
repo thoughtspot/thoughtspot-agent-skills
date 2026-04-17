@@ -21,10 +21,10 @@ def list_connections(
     type: str = typer.Option("SNOWFLAKE", "--type", "-t",
                              help="Data warehouse type filter (e.g. SNOWFLAKE, BIGQUERY)"),
 ) -> None:
-    """List available data connections.
+    """List all available data connections (auto-paginated).
 
-    Output: JSON array of connection objects from
-    POST /api/rest/2.0/connection/search.
+    Output: JSON array of all connection objects from
+    POST /api/rest/2.0/connection/search (all pages, not capped).
     """
     client = ThoughtSpotClient(resolve_profile(profile))
     all_connections: List[Dict[str, Any]] = []
@@ -122,11 +122,10 @@ def add_tables(
         fetch_data = fetch_resp.json()
     except Exception:
         # 404 or other error — proceed with empty hierarchy (new tables only)
-        import sys as _sys
         print(
             "Warning: could not fetch existing connection state (v1 endpoint unavailable). "
             "Proceeding without preserving existing registered tables.",
-            file=_sys.stderr,
+            file=sys.stderr,
         )
 
     # 2. Merge new tables into the existing hierarchy

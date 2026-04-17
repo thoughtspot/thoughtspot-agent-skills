@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import List, Optional
 
@@ -118,8 +119,7 @@ def import_tml(
         # Try to recover the GUID from the TML name field
         idx = item.get("request_index", 0)
         if idx < len(tmls):
-            import re as _re
-            m = _re.search(r"^\s*name:\s*(.+)$", tmls[idx], _re.MULTILINE)
+            m = re.search(r"^\s*name:\s*(.+)$", tmls[idx], re.MULTILINE)
             if m:
                 obj_name = m.group(1).strip().strip("\"'")
                 search_resp = client.post(

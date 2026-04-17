@@ -40,7 +40,7 @@ Two scenarios are supported:
 | `DIMENSIONS ( col DATA_TYPE = TEXT )` | `columns[]` with `column_type: ATTRIBUTE` |
 | `DIMENSIONS ( col DATA_TYPE = DATE )` | `columns[]` with `column_type: ATTRIBUTE` (date) |
 | `METRICS ( name EXPR = AGG(tbl.col) )` | `columns[]` with `column_type: MEASURE` + aggregation |
-| `METRICS ( name EXPR = complex_sql )` | `formulas[]` with translated ThoughtSpot formula |
+| `METRICS ( name EXPR = complex_sql )` | `formulas[]` with translated ThoughtSpot formula + matching `columns[]` entry with `formula_id:` |
 | `RELATIONSHIPS ( ... FROM tbl KEY col TO tbl KEY col )` | `referencing_join` (Scenario A) or inline joins (Scenario B) |
 | `ALIASES = ( alias1, alias2 )` | First alias → display name; additional aliases → synonyms |
 

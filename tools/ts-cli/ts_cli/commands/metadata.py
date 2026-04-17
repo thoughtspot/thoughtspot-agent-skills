@@ -42,7 +42,7 @@ def search(
                                                      "E.g. --subtype WORKSHEET to find worksheets and models."),
     name: Optional[str] = typer.Option(None, "--name", "-n",
                                        help="Filter by name using SQL LIKE syntax: "
-                                            "%% = any chars, _ = one char. E.g. '%%BIRD%%' or 'Sales_%%'"),
+                                            "% = any chars, _ = one char. E.g. '%BIRD%' or 'Sales_%'"),
     guid: Optional[str] = typer.Option(None, "--guid", "-g",
                                        help="Filter by GUID (exact match)"),
     tag: Optional[List[str]] = typer.Option(None, "--tag",
