@@ -347,11 +347,16 @@ Enter the connection name to use:
 Update `{connection_name}` and **rebuild all table TMLs** with the corrected name
 (the connection field appears in every table TML), then re-validate before importing.
 
-**If validation passes**, proceed to the actual import. The import response contains
-the GUIDs of all created objects — store it via RESULT_SCAN to avoid truncation:
+**If validation passes**, proceed to the actual import.
+
+**Critical distinction:**
+- `validate_only=TRUE` — dry run only. No objects are created. Any GUIDs in the
+  response are temporary and must NOT be used. Discard this response entirely.
+- `validate_only=FALSE` — objects are created. GUIDs in this response are the real
+  persistent IDs. This is the only response to extract GUIDs from.
 
 ```sql
--- Actual import
+-- Actual import (creates objects)
 CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$...$$, $$...$$), FALSE);
 ```
 
