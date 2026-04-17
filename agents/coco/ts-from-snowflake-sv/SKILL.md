@@ -468,7 +468,15 @@ Apply all column, formula, and join mappings from
 the model TML dict. Serialise to a YAML string.
 
 For each metric in the semantic view:
-- Simple `AGG(table.col)` → `MEASURE` column in `columns[]`
+- Simple `SUM/COUNT/AVG/MIN/MAX(table.col)` → `MEASURE` column in `columns[]`
+- `COUNT(DISTINCT table.col)` → **always** a formula in `formulas[]`, never a MEASURE column:
+  ```
+  unique count ( [TABLE_ID::col_name] )
+  ```
+  ThoughtSpot rejects models where the same `column_id` appears more than once.
+  A COUNT_DISTINCT MEASURE on a column that is also an ATTRIBUTE dimension will
+  cause a **duplicate column_id** error — even though the `column_type` values differ.
+  Using a formula avoids this entirely since formulas don't carry a `column_id`.
 - Complex expression → translate SQL to ThoughtSpot formula, add to `formulas[]`
 - Untranslatable → omit and log in report
 
@@ -533,6 +541,7 @@ if you reimport to fix any errors.
 
 | Error | Likely cause | Fix |
 |---|---|---|
+| `duplicate column_id` | Same physical column used as both ATTRIBUTE and COUNT_DISTINCT MEASURE | Convert the COUNT_DISTINCT metric to a formula: `unique count ( [TABLE::col] )` |
 | `referencing_join not found` | Join name wrong or join doesn't exist at table level | Re-export table TML and verify join name |
 | `column_id not found` | Semantic view left-side alias used instead of ThoughtSpot Table TML column name | Check ThoughtSpot Table TML for correct `db_column_name` |
 | `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on inline join | Add `with: {target_id}` to every inline join entry |
