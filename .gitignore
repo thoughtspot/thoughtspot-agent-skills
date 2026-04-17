@@ -48,3 +48,6 @@ build/
 .cursor/
 .claude/
 .gemini/
+
+# Work in progress — not ready for remote
+agents/claude/ts-model-builder/
