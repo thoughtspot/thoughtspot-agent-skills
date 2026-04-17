@@ -718,6 +718,18 @@ Semantic views support non-additive measures via the `non_additive_dimensions` f
 on a metric entry. This tells Snowflake to take the last snapshot instead of summing
 across the specified time dimensions.
 
+Three strict rules for non-additive metrics:
+
+1. **`expr` must be a raw column reference — no aggregate function.** The
+   `non_additive_dimensions` field IS the aggregation instruction. Using
+   `SUM(table.col)` in `expr` causes: *"A metric must directly refer to another
+   aggregate-level expression without an aggregate."*
+2. **`non_additive_dimensions[].table` must be the same table as the metric.**
+   Referencing a dimension from a related/joined table causes a parse error.
+3. **`non_additive_dimensions[].dimension` must match a `time_dimensions` entry
+   name on that same table.** Use the FK date column on the fact table itself —
+   not the PK date column on the date dimension table.
+
 **Do not** write `NON ADDITIVE BY` inline in the `expr` string — the YAML parser
 rejects it. Always use `non_additive_dimensions` as a separate structured field.
 
@@ -725,29 +737,37 @@ rejects it. Always use `non_additive_dimensions` as a separate structured field.
 
 | ThoughtSpot | Semantic view |
 |---|---|
-| `last_value(sum(measure), query_groups(), {date_col})` | `expr: SUM(measure)` + `non_additive_dimensions: [date_dim.date_col]` |
-
-The `non_additive_dimensions` list should reference the time dimension(s) derived from
-the date column in the ThoughtSpot formula.
+| `last_value(sum(measure), query_groups(), {date_col})` | `expr: table.COLUMN` (raw) + `non_additive_dimensions` structured field |
 
 **Example — `last_value(sum(Quantity), query_groups(), {tableDate})`:**
 
+The metric is on `order_detail`. The FK date column on `order_detail` must be exposed
+as a `time_dimensions` entry, then referenced in `non_additive_dimensions`:
+
 ```yaml
-metrics:
+tables:
+- name: order_detail
+  time_dimensions:
+  - name: order_detail_date     # FK date column on THIS table — not the date dim table
+    expr: order_detail.ORDER_DATE
+    data_type: DATE
+  metrics:
   - name: quantity_last_value
-    expr: SUM(order_detail.QUANTITY)
+    expr: order_detail.QUANTITY  # raw column — NO SUM
     non_additive_dimensions:
-      - date_dim.date_value
+    - table: order_detail        # same table as the metric
+      dimension: order_detail_date  # time_dimension name on that table
+      sort_direction: ascending
 ```
 
 **Reverse translation (semantic view → ThoughtSpot):**
 
 ```
-expr: SUM(measure) + non_additive_dimensions: [dim]
-→ last_value(sum(measure), query_groups(), {date_column})
+expr: table.COLUMN (raw) + non_additive_dimensions: [{table, dimension, sort_direction}]
+→ last_value(sum(COLUMN), query_groups(), {date_dimension})
 ```
 
-Identify the date column from the dimension(s) listed in `non_additive_dimensions`.
+Identify the date column from the `dimension` field in `non_additive_dimensions`.
 
 ### Untranslatable Semi-Additive Patterns
 

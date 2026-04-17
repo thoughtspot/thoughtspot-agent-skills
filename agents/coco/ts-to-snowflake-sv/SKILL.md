@@ -974,21 +974,34 @@ Instead:
 **`last_value` formulas → `non_additive_dimensions` field (NOT inline in expr):**
 
 ThoughtSpot `last_value(sum(m), query_groups(), {date_col})` translates to a metric
-with a `non_additive_dimensions` structured field. **Never** put `NON ADDITIVE BY`
-inside the `expr` string — Snowflake's YAML parser rejects it.
+with a `non_additive_dimensions` structured field. Three rules that must all be met:
+
+1. **`expr` is the raw column — no aggregate function.** `SUM(...)` in expr causes:
+   *"A metric must directly refer to another aggregate-level expression without an aggregate."*
+2. **`non_additive_dimensions[].table` must be the same table the metric is defined on.**
+   Cross-table references cause a parse error. Use the FK date column on the fact
+   table itself — not the PK date column on the related date dimension table.
+3. **`dimension` must name a `time_dimensions` entry on that same table.**
 
 ```yaml
-metrics:
-- name: inventory_balance
-  expr: "SUM(dm_inventory.FILLED_INVENTORY)"
-  non_additive_dimensions:
-  - table: dm_date_dim_inventory
-    dimension: balance_date
-    sort_direction: ascending
+# For last_value(sum(FILLED_INVENTORY), query_groups(), {balance_date})
+# Metric is on dm_inventory — use the FK date column on dm_inventory itself
+tables:
+- name: dm_inventory
+  time_dimensions:
+  - name: dm_inventory_balance_date     # FK date on THIS table
+    expr: dm_inventory.DM_INVENTORY_BALANCE_DATE
+    data_type: DATE
+  metrics:
+  - name: inventory_balance
+    expr: dm_inventory.FILLED_INVENTORY  # raw column — NO SUM
+    non_additive_dimensions:
+    - table: dm_inventory                # same table as the metric
+      dimension: dm_inventory_balance_date
+      sort_direction: ascending
 ```
 
-The `dimension` value must match the `name` of a `time_dimensions` entry in the
-referenced table. `sort_direction` is `ascending` for `last_value` (latest snapshot).
+`sort_direction: ascending` for `last_value` (picks the latest snapshot).
 
 Untranslatable patterns to recognise:
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
@@ -1055,6 +1068,9 @@ Report all failures together before retrying. Key checks:
 - [ ] All relationship `left_table`/`right_table` values match a `name` in `tables[]`
 - [ ] Every `right_table` in a relationship has a `primary_key` section — cross-check by listing every `right_table` value from `relationships[]` and confirming each appears in `tables[]` with a `primary_key` block
 - [ ] No `NON ADDITIVE BY` text inside any `expr` string — non-additive metrics use the `non_additive_dimensions` structured list field on the metric entry
+- [ ] Non-additive metric `expr` values are raw column references — no `SUM(...)` or any aggregate
+- [ ] `non_additive_dimensions[].table` matches the table the metric is defined on (not a related table)
+- [ ] `non_additive_dimensions[].dimension` matches a `time_dimensions` entry name on that same table
 - [ ] Reserved words in column names are double-quoted in `expr`
 - [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
 - [ ] All `expr` values are single-line double-quoted strings — no `>-`, `|`, or any YAML block scalar (Snowflake rejects them)
