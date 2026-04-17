@@ -3,7 +3,7 @@
 > **Snowsight Workspace limitation:** This fallback path uses `python3` and `curl`
 > via the Bash tool, which are **not available** in Snowsight Workspaces (only `ls`,
 > `dbt`, and `snow` commands are supported). If the stored procedures are missing and
-> you are in a Snowsight Workspace, inform the user they must run `/thoughtspot-setup`
+> you are in a Snowsight Workspace, inform the user they must run `/ts-profile-setup`
 > first to create the stored procedures. Do not attempt direct API calls.
 
 This file documents the direct API authentication flow used when the
@@ -87,7 +87,7 @@ Strip any trailing slash from `base_url` before constructing URLs.
 ## Obtain the bearer token
 
 Use Python so credentials never appear in command text
-(see [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) — Pattern A):
+(see [~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md) — Pattern A):
 - `token_env`: use the value directly as the token — no API call needed
 - `password_env` / `secret_key_env`: call `POST /api/rest/2.0/auth/token/full` with
   `validity_time_in_sec: 3600`
@@ -105,7 +105,7 @@ the token in a shell variable across calls — it will be empty in the next call
 Instead, use one of these strategies for every subsequent API call:
 
 - **Temp file (preferred for multi-call scripts):** Authenticate using Pattern A in
-  [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) — writes the token
+  [~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md) — writes the token
   to `/tmp/ts_token.txt` with `600` permissions. Read it back in subsequent calls:
   ```python
   with open("/tmp/ts_token.txt") as f:

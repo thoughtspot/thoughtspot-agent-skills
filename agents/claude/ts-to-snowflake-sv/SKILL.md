@@ -21,8 +21,8 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [~/.claude/schemas/snowflake-schema.md](~/.claude/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
 | [~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
 | [~/.claude/schemas/thoughtspot-tml.md](~/.claude/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
-| [~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
-| [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
+| [~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [~/.claude/skills/snowflake-profile-setup/SKILL.md](~/.claude/skills/snowflake-profile-setup/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 
 ---
@@ -59,19 +59,19 @@ For the full coverage matrix including unmapped properties, see
 
 - ThoughtSpot Cloud instance, REST API v2 enabled
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
-- Authentication configured — run `/thoughtspot-setup` if you haven't already
+- Authentication configured — run `/ts-profile-setup` if you haven't already
 
 **Quick auth decision:**
 ```
 Can you log into ThoughtSpot in a browser (even via SSO)?
   YES → token_env   — get a token from Developer Playground (no admin needed)
-  NO  → password_env or secret_key_env — see thoughtspot-setup.md
+  NO  → password_env or secret_key_env — see ts-profile-setup.md
 ```
 
 ### Snowflake
 
 - Role with `CREATE SEMANTIC VIEW` on the target schema
-- Connection configured — run `/snowflake-setup` if you haven't already
+- Connection configured — run `/snowflake-profile-setup` if you haven't already
 - Not sure where to start? → Python connector + password auth has the fewest setup steps
 
 ---
@@ -500,7 +500,7 @@ subprocess.run([snow_cmd, 'sql', '-c', cli_connection, '-f', '/tmp/sv_wrappers.s
 import os; os.remove("/tmp/sv_wrappers.sql")
 ```
 
-See [~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) for the
+See [~/.claude/skills/snowflake-profile-setup/SKILL.md](~/.claude/skills/snowflake-profile-setup/SKILL.md) for the
 connection factory pattern and CLI file-based execution details.
 
 See [~/.claude/schemas/snowflake-schema.md](~/.claude/schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
@@ -876,7 +876,7 @@ If the user selects E, ask for `target_database` and `target_schema` explicitly.
   pick the first non-suspended warehouse from the JSON results
 
 Use the connection method and patterns from
-[~/.claude/skills/snowflake-setup/SKILL.md](~/.claude/skills/snowflake-setup/SKILL.md) — including the
+[~/.claude/skills/snowflake-profile-setup/SKILL.md](~/.claude/skills/snowflake-profile-setup/SKILL.md) — including the
 temp-file approach for CLI when executing the dry-run and CREATE calls.
 
 **Always run a dry-run first:**

@@ -1,5 +1,5 @@
 ---
-name: snowflake-setup
+name: snowflake-profile-setup
 description: Manage Snowflake connection profiles — add, list, update, delete, and test profiles. Supports Python connector (key pair or password) and Snowflake CLI. Passwords stored securely in macOS Keychain. Run with no arguments to add your first profile or manage existing ones.
 ---
 
@@ -365,7 +365,7 @@ Snowflake CLI (snow) is not installed.
 Install it from:
 https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation
 
-Once installed, run `snow --version` to verify, then re-run /snowflake-setup.
+Once installed, run `snow --version` to verify, then re-run /snowflake-profile-setup.
 ```
 Stop here.
 

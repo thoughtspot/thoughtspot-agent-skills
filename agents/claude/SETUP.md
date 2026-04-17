@@ -6,23 +6,23 @@ A collection of Claude Code skills for working with ThoughtSpot.
 
 ## Skills
 
-### [`thoughtspot-setup`](thoughtspot-setup/)
+### [`ts-profile-setup`](ts-profile-setup/)
 
 Manages ThoughtSpot connection profiles. Stores credentials securely in the macOS
 Keychain, wires up `~/.zshenv` for env var persistence, and verifies connections.
 Supports token, password, and secret key auth methods.
 
-Run with `/thoughtspot-setup`.
+Run with `/ts-profile-setup`.
 
-### [`snowflake-setup`](snowflake-setup/)
+### [`snowflake-profile-setup`](snowflake-profile-setup/)
 
 Manages Snowflake connection profiles. Supports two connection methods: Python
 connector (key pair or password auth) and Snowflake CLI. Tests the connection
 and saves the profile for use by other skills.
 
-Run with `/snowflake-setup`.
+Run with `/snowflake-profile-setup`.
 
-### [`thoughtspot-model-builder`](thoughtspot-model-builder/)
+### [`ts-model-builder`](ts-model-builder/)
 
 Builds a ThoughtSpot Model from a Snowflake schema or an ERD diagram image. Browses
 Snowflake to select tables (or reads a hand-drawn diagram), ensures those tables are
@@ -30,7 +30,7 @@ linked in the ThoughtSpot connection, creates logical Table objects, and generat
 final Model with inferred or user-defined joins. Supports table-level and model-level
 join strategies. Only creates Models — Worksheets are legacy and are not generated.
 
-Run with `/thoughtspot-model-builder`.
+Run with `/ts-model-builder`.
 
 ### [`ts-to-snowflake-sv`](ts-to-snowflake-sv/)
 
@@ -83,9 +83,9 @@ git clone https://github.com/<org>/thoughtspot-skills.git /tmp/thoughtspot-skill
 
 mkdir -p ~/.claude/skills
 
-cp -r /tmp/thoughtspot-skills/agents/claude/thoughtspot-setup ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/snowflake-setup ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/thoughtspot-model-builder ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-setup ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/snowflake-profile-setup ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-model-builder ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-from-snowflake-sv ~/.claude/skills/
 
@@ -129,14 +129,14 @@ git clone https://github.com/<org>/thoughtspot-skills.git ~/Dev/thoughtspot-skil
 mkdir -p ~/.claude/skills
 
 # Skills (agent-specific entry points)
-ln -s ~/Dev/thoughtspot-skills/agents/claude/thoughtspot-setup \
-      ~/.claude/skills/thoughtspot-setup
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-setup \
+      ~/.claude/skills/ts-profile-setup
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/snowflake-setup \
-      ~/.claude/skills/snowflake-setup
+ln -s ~/Dev/thoughtspot-skills/agents/claude/snowflake-profile-setup \
+      ~/.claude/skills/snowflake-profile-setup
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/thoughtspot-model-builder \
-      ~/.claude/skills/thoughtspot-model-builder
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-model-builder \
+      ~/.claude/skills/ts-model-builder
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-to-snowflake-sv \
       ~/.claude/skills/ts-to-snowflake-sv
@@ -174,7 +174,7 @@ edit config files or construct shell commands.
 In Claude Code, run:
 
 ```
-/thoughtspot-setup
+/ts-profile-setup
 ```
 
 Claude will ask for your ThoughtSpot URL, username, and auth method (one question at
@@ -184,7 +184,7 @@ and verify the connection before finishing.
 Then run:
 
 ```
-/snowflake-setup
+/snowflake-profile-setup
 ```
 
 Claude will ask whether you're using the Python connector or Snowflake CLI, walk you
@@ -202,9 +202,9 @@ what you want in natural language and Claude will invoke the right skill.
 
 | Skill | Command | What it does |
 |---|---|---|
-| `thoughtspot-setup` | `/thoughtspot-setup` | Add, update, test, or delete ThoughtSpot profiles |
-| `snowflake-setup` | `/snowflake-setup` | Add, update, test, or delete Snowflake profiles |
-| `thoughtspot-model-builder` | `/thoughtspot-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
+| `ts-profile-setup` | `/ts-profile-setup` | Add, update, test, or delete ThoughtSpot profiles |
+| `snowflake-profile-setup` | `/snowflake-profile-setup` | Add, update, test, or delete Snowflake profiles |
+| `ts-model-builder` | `/ts-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
 | `ts-to-snowflake-sv` | `/ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-from-snowflake-sv` | `/ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 
@@ -267,7 +267,7 @@ description: One sentence shown in Claude Code's skill picker — be specific ab
 Skills reference other skills by path (never by copying content):
 
 ```markdown
-[~/.claude/skills/thoughtspot-setup/SKILL.md](~/.claude/skills/thoughtspot-setup/SKILL.md)
+[~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md)
 ```
 
 ### Credential and secret handling
