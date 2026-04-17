@@ -56,13 +56,13 @@ For the full coverage matrix including unmapped properties, see
 
 - ThoughtSpot Cloud instance, REST API v2 enabled
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
-- Authentication configured — run `/thoughtspot-setup` if you haven't already
+- Authentication configured — run `/ts-profile-setup` if you haven't already
 
 **Quick auth decision:**
 ```
 Can you log into ThoughtSpot in a browser (even via SSO)?
   YES → token_env   — get a token from Developer Playground (no admin needed)
-  NO  → password_env or secret_key_env — see thoughtspot-setup.md
+  NO  → password_env or secret_key_env — see ts-profile-setup.md
 ```
 
 ### Snowflake
@@ -149,7 +149,7 @@ The workflow calls the ThoughtSpot API in two places: Step 2 (search) and Step 3
 
 | Method | When to use |
 |---|---|
-| **Stored procedures** (preferred) | When `SKILLS.PUBLIC.TS_SEARCH_MODELS` and `SKILLS.PUBLIC.TS_EXPORT_TML` exist — installed via `/coco-setup` |
+| **Stored procedures** (preferred) | When `SKILLS.PUBLIC.TS_SEARCH_MODELS` and `SKILLS.PUBLIC.TS_EXPORT_TML` exist — installed via `/ts-sv-setup` |
 | **Direct API** (fallback) | When the stored procedures do not exist (e.g. setup was not completed) — uses inline Python with `/tmp/ts_token.txt`. **Not available in Snowsight Workspaces** — requires CLI environment. |
 
 **Auto-detect at the start of the workflow (batch with profile query):**
@@ -167,19 +167,19 @@ Parse the combined result to determine both `{api_method}` and `{profile_name}`.
 
 **Check token expiry immediately:** if `TOKEN_EXPIRES_AT <= CURRENT_TIMESTAMP()` or is NULL,
 stop and tell the user:
-> "Your ThoughtSpot token has expired. Run `/thoughtspot-setup` → U → Refresh token, then retry."
+> "Your ThoughtSpot token has expired. Run `/ts-profile-setup` → U → Refresh token, then retry."
 Do not proceed to Step 1 until the token is valid.
 
 If `TS_SEARCH_MODELS` and `TS_EXPORT_TML` both appear in the result, set `{api_method}` = `stored_procedure`.
 If either is missing, set `{api_method}` = `direct_api` and inform the user:
 
 ```
-Stored procedures not found in SKILLS.PUBLIC. Run /coco-setup to install them.
+Stored procedures not found in SKILLS.PUBLIC. Run /ts-sv-setup to install them.
 ```
 
 > **Snowsight Workspace:** If running in a Snowsight Workspace, STOP here and tell
 > the user: "The stored procedures are required in Snowsight Workspaces. Please run
-> `/coco-setup` to install them." The direct API fallback uses `python3`
+> `/ts-sv-setup` to install them." The direct API fallback uses `python3`
 > and `curl` which are not available in this environment.
 
 The `{api_method}` selection applies to both Step 2 and Step 3.
@@ -191,7 +191,7 @@ The `{api_method}` selection applies to both Step 2 and Step 3.
 **When `{api_method}` = `stored_procedure`:**
 
 Authentication is handled by the stored procedures themselves via the Snowflake
-`EXTERNAL_ACCESS_INTEGRATIONS` and `SECRETS` configured during `/thoughtspot-setup`.
+`EXTERNAL_ACCESS_INTEGRATIONS` and `SECRETS` configured during `/ts-profile-setup`.
 Skip the token file workflow below — only profile selection is needed (to determine
 which profile name to pass to the procedures).
 
@@ -210,7 +210,7 @@ Store the exact `NAME` value as `{profile_name}` for all subsequent
 > **Snowsight Workspace limitation:** The direct API fallback uses `python3` and
 > `curl` via the Bash tool, which are **not available** in Snowsight Workspaces.
 > If the stored procedures are missing and you are in a Snowsight Workspace, inform
-> the user they must run `/thoughtspot-setup` first to create the stored procedures.
+> the user they must run `/ts-profile-setup` first to create the stored procedures.
 > Do not attempt direct API calls.
 
 ---

@@ -63,7 +63,7 @@ UI confirmation prompt. Minimise calls by batching related statements.
 ## Prerequisites
 
 - A Snowflake role with `USAGE` on the database/schema containing the semantic view
-- ThoughtSpot setup completed via `/thoughtspot-setup` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
+- ThoughtSpot setup completed via `/ts-profile-setup` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege in ThoughtSpot
 
 ---
@@ -86,7 +86,7 @@ ORDER BY NAME;
 
 **Procedure check:** if any of the three procedures are missing from the first result,
 stop and tell the user:
-> "Required stored procedures are not installed. Run `/coco-setup` to install them,
+> "Required stored procedures are not installed. Run `/ts-sv-setup` to install them,
 > then retry."
 
 **Profile selection:** using the rows from the second result:
@@ -99,7 +99,7 @@ stop and tell the user:
 *Token auth:* check the `TOKEN_EXPIRES_AT` value already returned above (no second query):
 - `TOKEN_EXPIRES_AT > CURRENT_TIMESTAMP()` → proceed
 - Otherwise → stop:
-  > "The token for profile '{profile_name}' has expired. Run `/thoughtspot-setup` →
+  > "The token for profile '{profile_name}' has expired. Run `/ts-profile-setup` →
   > U → Refresh token, then retry."
 
 *Password auth:* no expiry check needed — proceed directly to credential retrieval.

@@ -19,8 +19,8 @@ Run from the repository root after any update:
 ```bash
 # Skill files
 snow stage copy agents/coco/SETUP.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ --overwrite
-snow stage copy agents/coco/coco-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/coco-setup/ --overwrite
-snow stage copy agents/coco/thoughtspot-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/thoughtspot-setup/ --overwrite
+snow stage copy agents/coco/ts-sv-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-sv-setup/ --overwrite
+snow stage copy agents/coco/ts-profile-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-profile-setup/ --overwrite
 snow stage copy agents/coco/ts-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-to-snowflake-sv/ --overwrite
 snow stage copy agents/coco/ts-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-from-snowflake-sv/ --overwrite
 
@@ -54,7 +54,7 @@ CoCo reads each file from the stage and writes it to the corresponding workspace
 
 After files are deployed, run:
 
-> /coco-setup
+> /ts-sv-setup
 
 ### Keeping updated
 
@@ -84,9 +84,9 @@ without CLI access.
 │       ├── ts-from-snowflake.md
 │       └── ts-to-snowflake.md
 └── skills/
-    ├── coco-setup/
+    ├── ts-sv-setup/
     │   └── SKILL.md
-    ├── thoughtspot-setup/
+    ├── ts-profile-setup/
     │   └── SKILL.md
     ├── ts-to-snowflake-sv/
     │   └── SKILL.md

@@ -1,9 +1,9 @@
 ---
-name: coco-setup
-description: Install and upgrade the ThoughtSpot stored procedures used by Snowflake Workspace skills (ts-to-snowflake-sv, ts-from-snowflake-sv). Also handles deploying updated skill files from the SKILLS.PUBLIC.SHARED stage to this workspace. Run this once after thoughtspot-setup, and again whenever prompted by another skill that detects an outdated or missing procedure.
+name: ts-sv-setup
+description: Install and upgrade the ThoughtSpot stored procedures used by the semantic view conversion skills (ts-to-snowflake-sv, ts-from-snowflake-sv). Also handles deploying updated skill files from the SKILLS.PUBLIC.SHARED stage to this workspace. Run this once after ts-profile-setup, and again whenever prompted by another skill that detects an outdated or missing procedure.
 ---
 
-# CoCo Setup — ThoughtSpot Stored Procedures
+# ThoughtSpot SV Skills Setup
 
 Installs or upgrades the ThoughtSpot API stored procedures that the other CoCo skills
 depend on. Also deploys updated skill files from the `@SKILLS.PUBLIC.SHARED` stage to
@@ -29,8 +29,8 @@ For each skill file, read the content from the stage and write it to the workspa
 
 | Stage path | Workspace path |
 |---|---|
-| `.../skills/coco-setup/SKILL.md` | `.snowflake/cortex/skills/coco-setup/SKILL.md` |
-| `.../skills/thoughtspot-setup/SKILL.md` | `.snowflake/cortex/skills/thoughtspot-setup/SKILL.md` |
+| `.../skills/ts-sv-setup/SKILL.md` | `.snowflake/cortex/skills/ts-sv-setup/SKILL.md` |
+| `.../skills/ts-profile-setup/SKILL.md` | `.snowflake/cortex/skills/ts-profile-setup/SKILL.md` |
 | `.../skills/ts-to-snowflake-sv/SKILL.md` | `.snowflake/cortex/skills/ts-to-snowflake-sv/SKILL.md` |
 | `.../skills/ts-from-snowflake-sv/SKILL.md` | `.snowflake/cortex/skills/ts-from-snowflake-sv/SKILL.md` |
 | `.../skills/SETUP.md` | `.snowflake/cortex/skills/SETUP.md` |
@@ -66,8 +66,8 @@ After writing all files, display:
 
 ```
 Skill files deployed from @SKILLS.PUBLIC.SHARED:
-  ✓ .snowflake/cortex/skills/coco-setup/SKILL.md
-  ✓ .snowflake/cortex/skills/thoughtspot-setup/SKILL.md
+  ✓ .snowflake/cortex/skills/ts-sv-setup/SKILL.md
+  ✓ .snowflake/cortex/skills/ts-profile-setup/SKILL.md
   ✓ .snowflake/cortex/skills/ts-to-snowflake-sv/SKILL.md
   ✓ .snowflake/cortex/skills/ts-from-snowflake-sv/SKILL.md
   ✓ .snowflake/cortex/skills/SETUP.md
@@ -149,8 +149,8 @@ SELECT name, secret_name FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES ORDER BY name;
 **If no profiles are returned:** stop and tell the user:
 
 ```
-No ThoughtSpot profiles found. Run `/thoughtspot-setup` first to add at least
-one profile, then re-run coco-setup.
+No ThoughtSpot profiles found. Run `/ts-profile-setup` first to add at least
+one profile, then re-run ts-sv-setup.
 ```
 
 **If profiles exist:** build the secrets mapping used in every procedure definition.
@@ -195,7 +195,7 @@ These secrets must exist before proceeding. Verify:
 SHOW SECRETS LIKE '%THOUGHTSPOT%' IN SCHEMA SKILLS.PUBLIC;
 ```
 
-If any secrets are missing, stop and direct the user to `/thoughtspot-setup` to create them.
+If any secrets are missing, stop and direct the user to `/ts-profile-setup` to create them.
 
 ---
 
@@ -266,7 +266,7 @@ def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=
             verify=verify_ssl
         )
         if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run thoughtspot-setup to update password."
+            return None, None, "Invalid credentials. Run ts-profile-setup to update password."
         login_resp.raise_for_status()
         return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
     else:
@@ -298,7 +298,7 @@ def run(session, profile_name, name_keywords, owner_only):
     secret_name = row['SECRET_NAME']
     secret_value = get_secret_for_profile(secret_name)
     if not secret_value:
-        return {"error": f"Secret '{secret_name}' not mapped. Run /coco-setup to reinstall procedures."}
+        return {"error": f"Secret '{secret_name}' not mapped. Run /ts-sv-setup to reinstall procedures."}
     verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
 
     http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
@@ -333,7 +333,7 @@ def run(session, profile_name, name_keywords, owner_only):
 
         resp = do_post(f"{base_url}/api/rest/2.0/metadata/search", body)
         if resp.status_code in (401, 403):
-            return {"error": "Unauthorized. Run thoughtspot-setup to refresh credentials."}
+            return {"error": "Unauthorized. Run ts-profile-setup to refresh credentials."}
         resp.raise_for_status()
         page = resp.json()
         if not page:
@@ -394,7 +394,7 @@ def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=
             verify=verify_ssl
         )
         if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run thoughtspot-setup to update password."
+            return None, None, "Invalid credentials. Run ts-profile-setup to update password."
         login_resp.raise_for_status()
         return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
     else:
@@ -426,7 +426,7 @@ def run(session, profile_name, guids):
     secret_name = row['SECRET_NAME']
     secret_value = get_secret_for_profile(secret_name)
     if not secret_value:
-        return {"error": f"Secret '{secret_name}' not mapped. Run /coco-setup to reinstall procedures."}
+        return {"error": f"Secret '{secret_name}' not mapped. Run /ts-sv-setup to reinstall procedures."}
     verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
 
     http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
@@ -446,7 +446,7 @@ def run(session, profile_name, guids):
 
     resp = do_post(f"{base_url}/api/rest/2.0/metadata/tml/export", body)
     if resp.status_code in (401, 403):
-        return {"error": "Unauthorized. Run thoughtspot-setup to refresh credentials."}
+        return {"error": "Unauthorized. Run ts-profile-setup to refresh credentials."}
     resp.raise_for_status()
     return resp.json()
 $$;
@@ -487,7 +487,7 @@ def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=
             verify=verify_ssl
         )
         if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run thoughtspot-setup to update password."
+            return None, None, "Invalid credentials. Run ts-profile-setup to update password."
         login_resp.raise_for_status()
         return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
     else:
@@ -519,7 +519,7 @@ def run(session, profile_name, tmls, validate_only):
     secret_name = row['SECRET_NAME']
     secret_value = get_secret_for_profile(secret_name)
     if not secret_value:
-        return {"error": f"Secret '{secret_name}' not mapped. Run /coco-setup to reinstall procedures."}
+        return {"error": f"Secret '{secret_name}' not mapped. Run /ts-sv-setup to reinstall procedures."}
     verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
 
     http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
@@ -539,7 +539,7 @@ def run(session, profile_name, tmls, validate_only):
 
     resp = do_post(f"{base_url}/api/rest/2.0/metadata/tml/import", body)
     if resp.status_code in (401, 403):
-        return {"error": "Unauthorized. Run thoughtspot-setup to refresh credentials."}
+        return {"error": "Unauthorized. Run ts-profile-setup to refresh credentials."}
     resp.raise_for_status()
     return resp.json()
 $$;
@@ -584,10 +584,10 @@ You can now use /ts-to-snowflake-sv and /ts-from-snowflake-sv.
 
 ---
 
-## When to re-run coco-setup
+## When to re-run ts-sv-setup
 
 Re-run this skill when:
-- A new ThoughtSpot profile is added via `/thoughtspot-setup` — the new profile's secret
+- A new ThoughtSpot profile is added via `/ts-profile-setup` — the new profile's secret
   must be added to the SECRETS clause of every procedure
 - Another skill reports "Stored procedure not found" or "Secret not mapped"
 - A new version of the skill is deployed (the other skills will show ↑ in their Step 1 check)
