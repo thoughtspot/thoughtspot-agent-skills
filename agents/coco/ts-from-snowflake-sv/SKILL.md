@@ -114,16 +114,28 @@ SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema};
 
 Display results as a numbered list and ask the user to select one.
 
-Then fetch credential and DDL together:
+Then fetch credential and store the full DDL. The DDL can be very long and is
+truncated when read inline — always store it via `CREATE TABLE AS SELECT`:
 
 ```sql
--- Batch: credential + DDL
+-- Batch call: credential + DDL stored in temp table (two statements, one confirmation)
 SELECT SYSTEM$GET_SECRET_STRING('SKILLS.PUBLIC.' || SECRET_NAME) AS secret_value
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES
 WHERE name = '{profile_name}';
 
-SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{view_name}');
+CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.SV_DDL AS
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{view_name}') AS ddl_text;
 ```
+
+Read the full DDL from the temp table in the next step:
+```sql
+SELECT ddl_text FROM SKILLS.TEMP.SV_DDL;
+```
+
+**Do not** use `SELECT GET_DDL(...)` directly — the result will be truncated.
+Do not use `SUBSTR` chunking — that requires multiple extra SQL calls.
+`GET_DDL` is a function (not a stored procedure), so `CREATE TABLE AS SELECT` works
+and stores the complete result in one call.
 
 Store `secret_value` for use in subsequent API calls via stored procedures. Never print it.
 
