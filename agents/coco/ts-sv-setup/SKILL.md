@@ -87,6 +87,7 @@ If yes, continue to Step 1 below. If no, stop here.
 | `TS_SEARCH_MODELS` | **1.1.0** | Search ThoughtSpot for Table/Model objects by name keyword(s) |
 | `TS_EXPORT_TML` | **1.0.0** | Export TML definitions from ThoughtSpot (batch) |
 | `TS_IMPORT_TML` | **1.0.0** | Import TML definitions into ThoughtSpot (batch) |
+| `TS_LIST_CONNECTIONS` | **1.0.0** | List all ThoughtSpot connections (name, type, GUID) |
 
 ---
 
@@ -101,8 +102,9 @@ SELECT p.PROCEDURE_NAME,
        p.EXPECTED_VERSION
 FROM (
     SELECT 'TS_SEARCH_MODELS' AS PROCEDURE_NAME, '1.1.0' AS EXPECTED_VERSION
-    UNION ALL SELECT 'TS_EXPORT_TML',  '1.0.0'
-    UNION ALL SELECT 'TS_IMPORT_TML',  '1.0.0'
+    UNION ALL SELECT 'TS_EXPORT_TML',       '1.0.0'
+    UNION ALL SELECT 'TS_IMPORT_TML',       '1.0.0'
+    UNION ALL SELECT 'TS_LIST_CONNECTIONS', '1.0.0'
 ) p
 LEFT JOIN SKILLS.PUBLIC.SP_VERSIONS v ON v.PROCEDURE_NAME = p.PROCEDURE_NAME
 ORDER BY p.PROCEDURE_NAME;
@@ -208,7 +210,8 @@ The call must contain, in order:
 2. `CREATE OR REPLACE PROCEDURE SKILLS.PUBLIC.TS_SEARCH_MODELS` (v1.1.0)
 3. `CREATE OR REPLACE PROCEDURE SKILLS.PUBLIC.TS_EXPORT_TML` (v1.0.0)
 4. `CREATE OR REPLACE PROCEDURE SKILLS.PUBLIC.TS_IMPORT_TML` (v1.0.0)
-5. `MERGE INTO SKILLS.PUBLIC.SP_VERSIONS` (update version tracking)
+5. `CREATE OR REPLACE PROCEDURE SKILLS.PUBLIC.TS_LIST_CONNECTIONS` (v1.0.0)
+6. `MERGE INTO SKILLS.PUBLIC.SP_VERSIONS` (update version tracking)
 
 Substitute `{SECRETS_CLAUSE}` and `{SECRET_MAPPING}` (built in Step 2) into each
 procedure definition below before executing.
@@ -547,16 +550,122 @@ $$;
 
 ---
 
+### TS_LIST_CONNECTIONS — v1.0.0
+
+Returns all ThoughtSpot connections (name, type, GUID). Used as a fallback when
+a connection name supplied by the user is rejected during TML import.
+
+```sql
+CREATE OR REPLACE PROCEDURE SKILLS.PUBLIC.TS_LIST_CONNECTIONS(
+    PROFILE_NAME VARCHAR
+)
+RETURNS VARIANT
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python', 'requests')
+HANDLER = 'run'
+EXTERNAL_ACCESS_INTEGRATIONS = (THOUGHTSPOT_API_ACCESS)
+{SECRETS_CLAUSE}
+AS
+$$
+import requests
+import _snowflake
+
+_VERSION = '1.0.0'
+
+def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=True):
+    if auth_type == 'password':
+        s = requests.Session()
+        login_resp = s.post(
+            f"{base_url}/api/rest/2.0/auth/session/login",
+            json={"username": username, "password": secret_value},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            verify=verify_ssl
+        )
+        if login_resp.status_code in (401, 403):
+            return None, None, "Invalid credentials. Run ts-profile-setup to update password."
+        login_resp.raise_for_status()
+        return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
+    else:
+        return None, {
+            "Authorization": f"Bearer {secret_value}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }, None
+
+def get_secret_for_profile(secret_name):
+    {SECRET_MAPPING}
+    key = mapping.get(secret_name)
+    if not key:
+        return None
+    return _snowflake.get_generic_secret_string(key)
+
+def run(session, profile_name):
+    profile = session.sql(
+        f"SELECT base_url, username, auth_type, secret_name "
+        f"FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES WHERE name = '{profile_name}'"
+    ).collect()
+    if not profile:
+        return {"error": f"Profile '{profile_name}' not found"}
+
+    row = profile[0].as_dict()
+    base_url    = row['BASE_URL'].rstrip('/')
+    username    = row['USERNAME']
+    auth_type   = row.get('AUTH_TYPE', 'token')
+    secret_name = row['SECRET_NAME']
+    secret_value = get_secret_for_profile(secret_name)
+    if not secret_value:
+        return {"error": f"Secret '{secret_name}' not mapped. Run /ts-sv-setup to reinstall procedures."}
+    verify_ssl = not base_url.startswith('https://172.') and not base_url.startswith('https://10.')
+
+    http_session, headers, err = get_session_headers(base_url, username, secret_value, auth_type, verify_ssl)
+    if err:
+        return {"error": err}
+
+    def do_post(url, json_body):
+        if http_session:
+            return http_session.post(url, headers=headers, json=json_body, verify=verify_ssl)
+        return requests.post(url, headers=headers, json=json_body, verify=verify_ssl)
+
+    all_results = []
+    offset = 0
+
+    while True:
+        body = {"record_offset": offset, "record_size": 50}
+        resp = do_post(f"{base_url}/api/rest/2.0/connection/search", body)
+        if resp.status_code in (401, 403):
+            return {"error": "Unauthorized. Run ts-profile-setup to refresh credentials."}
+        resp.raise_for_status()
+        page = resp.json()
+        if not page:
+            break
+        for item in page:
+            all_results.append({
+                "id":   item.get("id"),
+                "name": item.get("name"),
+                "type": item.get("type", "")
+            })
+        if len(page) < 50:
+            break
+        offset += 50
+
+    return {"count": len(all_results), "results": all_results}
+$$;
+```
+
+---
+
 ### SP_VERSIONS update
 
-After all three `CREATE OR REPLACE PROCEDURE` statements, record the installed versions:
+After all four `CREATE OR REPLACE PROCEDURE` statements, record the installed versions:
 
 ```sql
 MERGE INTO SKILLS.PUBLIC.SP_VERSIONS AS t
 USING (
     SELECT 'TS_SEARCH_MODELS' AS procedure_name, '1.1.0' AS version
-    UNION ALL SELECT 'TS_EXPORT_TML',  '1.0.0'
-    UNION ALL SELECT 'TS_IMPORT_TML',  '1.0.0'
+    UNION ALL SELECT 'TS_EXPORT_TML',       '1.0.0'
+    UNION ALL SELECT 'TS_IMPORT_TML',       '1.0.0'
+    UNION ALL SELECT 'TS_LIST_CONNECTIONS', '1.0.0'
 ) AS s ON t.procedure_name = s.procedure_name
 WHEN MATCHED THEN UPDATE SET
     t.version      = s.version,
@@ -575,9 +684,10 @@ Display final status:
 ```
 Stored procedures installed successfully.
 
-  TS_SEARCH_MODELS  v1.1.0   ✓
-  TS_EXPORT_TML     v1.0.0   ✓
-  TS_IMPORT_TML     v1.0.0   ✓
+  TS_SEARCH_MODELS    v1.1.0   ✓
+  TS_EXPORT_TML       v1.0.0   ✓
+  TS_IMPORT_TML       v1.0.0   ✓
+  TS_LIST_CONNECTIONS v1.0.0   ✓
 
 You can now use /ts-to-snowflake-sv and /ts-from-snowflake-sv.
 ```

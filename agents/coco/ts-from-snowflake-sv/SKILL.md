@@ -476,6 +476,29 @@ if you reimport to fix any errors.
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Review translated formula against ts-snowflake-formula-translation.md |
 | `fqn resolution failed` | Stale GUID | Re-run Step 4 to get fresh GUIDs |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars before serialising |
+| Connection not found / invalid connection | Connection name entered in Step 4B does not match any ThoughtSpot connection | See below |
+
+**Connection not found — fetch available connections:**
+
+Only run this if a connection-related error is returned. Do NOT call proactively.
+
+```sql
+CALL SKILLS.PUBLIC.TS_LIST_CONNECTIONS('{profile_name}');
+```
+
+Display the results as a numbered list:
+
+```
+Available ThoughtSpot connections:
+  1. APJ_BIRD          (SNOWFLAKE)
+  2. PROD_SNOWFLAKE    (SNOWFLAKE)
+  3. DEV_BIGQUERY      (BIGQUERY)
+
+Enter the connection name to use:
+```
+
+Update `{connection_name}`, rebuild the affected Table TMLs with the corrected name,
+and re-import.
 
 ---
 
