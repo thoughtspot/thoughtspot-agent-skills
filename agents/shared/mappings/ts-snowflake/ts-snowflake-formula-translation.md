@@ -12,6 +12,29 @@ models.
 
 ---
 
+## YAML Expression Formatting
+
+**CRITICAL:** Snowflake Semantic View YAML does not support YAML block scalars.
+Every `expr` value must be a **single-line double-quoted string**, regardless of length.
+
+```yaml
+# CORRECT
+expr: "SUM(tbl.col) OVER (PARTITION BY EXCLUDING dim.attr ORDER BY dim.attr ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
+
+# WRONG — Snowflake rejects block scalars
+expr: >-
+  SUM(tbl.col) OVER (
+    PARTITION BY EXCLUDING dim.attr
+    ORDER BY dim.attr
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  )
+```
+
+This applies to all `expr` fields in `dimensions`, `time_dimensions`, and `metrics`.
+All examples in this document use the correct single-line format.
+
+---
+
 ## Translation Decision Flowchart
 
 Use this to quickly determine which section to consult for a given formula:
@@ -212,9 +235,7 @@ Snowflake SQL, they can be translated directly by substituting column references
 ```yaml
 metrics:
   - name: product_list
-    expr: >-
-      LISTAGG(products.PRODUCT_NAME, ' - ')
-      WITHIN GROUP (ORDER BY products.PRODUCT_NAME DESC)
+    expr: "LISTAGG(products.PRODUCT_NAME, ' - ') WITHIN GROUP (ORDER BY products.PRODUCT_NAME DESC)"
 ```
 
 **Example — `sql_int_aggregate_op("rank() over (partition by {0} order by sum({1}) desc)", Category Name, Quantity)`:**
@@ -222,11 +243,7 @@ metrics:
 ```yaml
 metrics:
   - name: category_quantity_rank
-    expr: >-
-      RANK() OVER (
-        PARTITION BY categories.CATEGORY_NAME
-        ORDER BY SUM(order_detail.QUANTITY) DESC
-      )
+    expr: "RANK() OVER (PARTITION BY categories.CATEGORY_NAME ORDER BY SUM(order_detail.QUANTITY) DESC)"
 ```
 
 **Example — `sql_string_op("get({0},{1})::text", json_col, locale)`:**
@@ -296,12 +313,7 @@ metrics:
   - name: line_total
     expr: SUM(order_detail.LINE_TOTAL)
   - name: cumulative_line_total
-    expr: >-
-      SUM(order_detail.line_total) OVER (
-        PARTITION BY EXCLUDING customers.customer_code, products.product_name
-        ORDER BY customers.customer_code, products.product_name
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-      )
+    expr: "SUM(order_detail.line_total) OVER (PARTITION BY EXCLUDING customers.customer_code, products.product_name ORDER BY customers.customer_code, products.product_name ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
 ```
 
 **How `PARTITION BY EXCLUDING` mimics ThoughtSpot's dynamic behavior:**
@@ -377,12 +389,7 @@ metrics:
   - name: line_total
     expr: SUM(order_detail.LINE_TOTAL)
   - name: moving_sum_line_total
-    expr: >-
-      SUM(order_detail.line_total) OVER (
-        PARTITION BY EXCLUDING date_dim.order_date
-        ORDER BY date_dim.order_date
-        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
-      )
+    expr: "SUM(order_detail.line_total) OVER (PARTITION BY EXCLUDING date_dim.order_date ORDER BY date_dim.order_date ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)"
 ```
 
 **Example — `moving_sum(Amount, 1, -1, order date, Customer Code)`:**
@@ -392,12 +399,7 @@ metrics:
   - name: line_total
     expr: SUM(order_detail.LINE_TOTAL)
   - name: moving_sum_line_total
-    expr: >-
-      SUM(order_detail.line_total) OVER (
-        PARTITION BY EXCLUDING date_dim.order_date, customers.customer_code
-        ORDER BY date_dim.order_date, customers.customer_code
-        ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING
-      )
+    expr: "SUM(order_detail.line_total) OVER (PARTITION BY EXCLUDING date_dim.order_date, customers.customer_code ORDER BY date_dim.order_date, customers.customer_code ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)"
 ```
 
 **Dynamic PARTITION BY behavior (same as cumulative functions):**
@@ -547,10 +549,7 @@ metrics:
   - name: total_quantity
     expr: SUM(order_detail.QUANTITY)
   - name: category_total_quantity
-    expr: >-
-      SUM(order_detail.total_quantity) OVER (
-        PARTITION BY categories.category_name
-      )
+    expr: "SUM(order_detail.total_quantity) OVER (PARTITION BY categories.category_name)"
 ```
 
 **Example — `group_aggregate(sum(Quantity), {}, query_filters())` (grand total):**
@@ -588,17 +587,9 @@ metrics:
   - name: total_quantity
     expr: SUM(order_detail.QUANTITY)
   - name: category_total_quantity
-    expr: >-
-      SUM(order_detail.total_quantity) OVER (
-        PARTITION BY categories.category_name
-      )
+    expr: "SUM(order_detail.total_quantity) OVER (PARTITION BY categories.category_name)"
   - name: pct_of_category
-    expr: >-
-      DIV0(order_detail.total_quantity,
-        SUM(order_detail.total_quantity) OVER (
-          PARTITION BY categories.category_name
-        )
-      )
+    expr: "DIV0(order_detail.total_quantity, SUM(order_detail.total_quantity) OVER (PARTITION BY categories.category_name))"
 ```
 
 **For dynamic exclusion (% of total excluding the current dimension):**
@@ -608,12 +599,7 @@ ThoughtSpot: `safe_divide(sum(Quantity), group_aggregate(sum(Quantity), query_gr
 ```yaml
 metrics:
   - name: pct_contribution
-    expr: >-
-      DIV0(order_detail.total_quantity,
-        SUM(order_detail.total_quantity) OVER (
-          PARTITION BY EXCLUDING products.product_name
-        )
-      )
+    expr: "DIV0(order_detail.total_quantity, SUM(order_detail.total_quantity) OVER (PARTITION BY EXCLUDING products.product_name))"
 ```
 
 ### Outer `sum()` wrapping `group_aggregate(..., query_filters())`
@@ -677,11 +663,7 @@ use the PARTITION BY window function:
 ```yaml
 metrics:
   - name: product_to_category_ratio
-    expr: >-
-      DIV0(
-        SUM(dm_order_detail.QUANTITY),
-        SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY categories.CATEGORY_NAME)
-      )
+    expr: "DIV0(SUM(dm_order_detail.QUANTITY), SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY categories.CATEGORY_NAME))"
 ```
 
 **How to identify Case B:** The formula references `[NamedMetric]` where that metric

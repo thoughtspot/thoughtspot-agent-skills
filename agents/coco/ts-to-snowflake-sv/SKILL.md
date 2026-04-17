@@ -1022,6 +1022,7 @@ Report all failures together before retrying. Key checks:
 - [ ] Every `right_table` in a relationship has a `primary_key` section
 - [ ] Reserved words in column names are double-quoted in `expr`
 - [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
+- [ ] All `expr` values are single-line double-quoted strings — no `>-`, `|`, or any YAML block scalar (Snowflake rejects them)
 - [ ] No untranslatable formula placeholders (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL`)
 - [ ] Valid Snowflake identifiers (view name, all field names): `^[A-Za-z_][A-Za-z0-9_]*$`
 - [ ] Valid `data_type` values on dimensions/time_dimensions: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700.
