@@ -220,6 +220,10 @@ containing any of the supplied keywords. Filter the returned results further to
 match by database + schema + table name (case-insensitive).
 Build map: `physical_table_name → {guid, metadata_name}`.
 
+Always use `owner_only=FALSE`. Token-authenticated users may not appear as the
+owner of objects they created, so `owner_only=TRUE` can return 0 results even for
+objects that exist.
+
 **Export TMLs for all found tables in one call to verify columns:**
 
 The CALL result can be truncated when read inline. Always store via RESULT_SCAN.
@@ -343,12 +347,39 @@ Enter the connection name to use:
 Update `{connection_name}` and **rebuild all table TMLs** with the corrected name
 (the connection field appears in every table TML), then re-validate before importing.
 
-**If validation passes**, proceed to the actual import:
+**If validation passes**, proceed to the actual import. The import response contains
+the GUIDs of all created objects — store it via RESULT_SCAN to avoid truncation:
 
 ```sql
 -- Actual import
 CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$...$$, $$...$$), FALSE);
 ```
+
+```sql
+-- Store full response (column is always named after the procedure, uppercase)
+CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.TABLE_IMPORT_RESULT (result_data VARIANT);
+INSERT INTO SKILLS.TEMP.TABLE_IMPORT_RESULT
+SELECT PARSE_JSON("TS_IMPORT_TML") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+```
+
+Extract GUIDs directly from the import response — **do not** call `TS_SEARCH_MODELS`
+to find them. The response contains `response.header.id_guid` and `response.header.name`
+for each imported object:
+
+```sql
+SELECT
+    value:response:header:name::STRING    AS table_name,
+    value:response:header:id_guid::STRING AS guid,
+    value:response:status:status_code::STRING AS status
+FROM SKILLS.TEMP.TABLE_IMPORT_RESULT,
+LATERAL FLATTEN(input => result_data);
+```
+
+Build a map `table_name → guid` from this result for use in Step 5 (join name resolution)
+and Step 6 (model TML referencing_join lookup).
+
+**Only available procedures are:** `TS_SEARCH_MODELS`, `TS_EXPORT_TML`, `TS_IMPORT_TML`,
+`TS_LIST_CONNECTIONS`. Do not attempt to call any other procedure — none others exist.
 
 **IMPORTANT:** Use `$$` dollar-quoting for each TML string to preserve YAML formatting.
 Do NOT use `\n` escape sequences — they are passed literally and break YAML parsing.
