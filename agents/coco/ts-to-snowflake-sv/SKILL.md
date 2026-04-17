@@ -336,17 +336,30 @@ Store `metadata_id` as `{selected_model_id}` and `metadata_name` as
 
 **If `{api_method}` = `stored_procedure`:**
 
+The CALL result can be truncated when read inline. Always store via RESULT_SCAN.
+These must be **two separate SQL calls** — RESULT_SCAN depends on LAST_QUERY_ID().
+
 ```sql
+-- Call 1: export
 CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{selected_model_id}'));
 ```
 
-For batch mode (multiple models):
+```sql
+-- Call 2: store full result (column is always named after the procedure, uppercase)
+CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.TML_RAW (tml_data VARIANT);
+INSERT INTO SKILLS.TEMP.TML_RAW
+SELECT PARSE_JSON("TS_EXPORT_TML") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+```
+
+For batch mode (multiple models), same pattern — just pass multiple GUIDs in Call 1:
 ```sql
 CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{model_guid_1}', '{model_guid_2}'));
 ```
 
-The procedure returns a VARIANT containing the exported TML data. Parse the result
-and proceed to the separation logic below.
+**Do not** use the procedure in a FROM clause or as a UDF — it is a stored procedure,
+not a function. FLATTEN and direct SELECT from the CALL result will not work.
+
+Proceed to the separation logic below using `tml_data` from `SKILLS.TEMP.TML_RAW`.
 
 **If `{api_method}` = `direct_api`:** *(CLI only — not available in Snowsight Workspaces)*
 

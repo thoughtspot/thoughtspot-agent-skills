@@ -210,9 +210,23 @@ Build map: `physical_table_name → {guid, metadata_name}`.
 
 **Export TMLs for all found tables in one call to verify columns:**
 
+The CALL result can be truncated when read inline. Always store via RESULT_SCAN.
+These must be **two separate SQL calls** — RESULT_SCAN depends on LAST_QUERY_ID().
+
 ```sql
+-- Call 1: export
 CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{guid1}', '{guid2}'));
 ```
+
+```sql
+-- Call 2: store full result (column is always named after the procedure, uppercase)
+CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.TML_RAW (tml_data VARIANT);
+INSERT INTO SKILLS.TEMP.TML_RAW
+SELECT PARSE_JSON("TS_EXPORT_TML") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+```
+
+**Do not** use the procedure in a FROM clause or as a UDF — it is a stored procedure,
+not a function. FLATTEN and direct SELECT from the CALL result will not work.
 
 Parse `table.columns[].name` from each returned TML. Build a column map per table:
 `table_name → [col_name, ...]`. Column names in the ThoughtSpot TML are what you use in
