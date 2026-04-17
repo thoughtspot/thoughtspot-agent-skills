@@ -142,7 +142,7 @@ These functions translate 1:1 in both directions.
 
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
-| `safe_divide ( [a] , [b] )` → `(a) / NULLIF(b, 0)` | `(a) / NULLIF(b, 0)` → `safe_divide ( [a] , [b] )` |
+| `safe_divide ( [a] , [b] )` → `DIV0(a, b)` | `DIV0(a, b)` → `safe_divide ( [a] , [b] )` |
 | `round ( [x] , [n] )` → `ROUND(x, n)` | `ROUND(x, n)` → `round ( [x] , [n] )` |
 | `floor ( [x] )` → `FLOOR(x)` | `FLOOR(x)` → `floor ( [x] )` |
 | `ceil ( [x] )` → `CEIL(x)` | `CEIL(x)` → `ceil ( [x] )` |
@@ -728,11 +728,24 @@ The DDL equivalent is:
 TABLE.METRIC_NAME NON ADDITIVE BY (DATE_DIM_TABLE.DATE_COL ASC NULLS LAST) AS SUM(fact_table.measure_col)
 ```
 
-The YAML equivalent:
-- `expr`: `SUM(fact_table.measure_col)` — standard aggregate, same as a regular metric
-- `non_additive_dimensions[].table`: the **date dimension table** (the joined table whose PK is the date column) — NOT the fact table's FK column
-- `non_additive_dimensions[].dimension`: the `time_dimensions` field name on that date dimension table
-- `non_additive_dimensions[].sort_direction`: `ascending` for `last_value` (latest snapshot)
+**YAML requirements for `non_additive_dimensions`:**
+
+1. **`expr` is a standard `SUM(fact_table.col)` aggregate** — same format as a regular
+   metric. No `facts` section is needed unless a name collision forces it (see rule 4).
+
+2. **`non_additive_dimensions[].table` is the joined date dimension table** (the table
+   whose PK is the date column) — NOT a local FK column on the fact table. Use a
+   **single shared date dimension table** when multiple fact tables join to the same
+   date table — this enables cross-domain queries (e.g. "sales and inventory balance
+   last quarter") through one shared time dimension.
+
+3. **Include `nulls_position: last`** to match ThoughtSpot `last_value` behaviour.
+
+4. **Metric name must not collide (case-insensitive) with the physical column name.**
+   Snowflake cycle detection is case-insensitive. If the column is `FILLED_INVENTORY`,
+   don't name the metric `filled_inventory` — use a distinct name like
+   `inventory_balance`. If a collision is unavoidable, introduce a `facts` entry as
+   an intermediary to break the cycle.
 
 ### `last_value` with `query_groups()` — Translatable
 
@@ -744,23 +757,29 @@ The YAML equivalent:
 
 ```yaml
 tables:
-- name: dm_date_dim_inventory          # date dimension table
+- name: dm_date_dim                    # single shared date dimension table
   primary_key:
     columns:
     - DATE_VALUE
   time_dimensions:
-  - name: balance_date
-    expr: dm_date_dim_inventory.DATE_VALUE
+  - name: date_value
+    synonyms: ["Transaction Date", "Order Date", "Balance Date", "Inventory Date"]
+    expr: dm_date_dim.DATE_VALUE
     data_type: DATE
 
 - name: dm_inventory                   # fact table with the metric
   metrics:
-  - name: inventory_balance
-    expr: SUM(dm_inventory.FILLED_INVENTORY)   # standard SUM aggregate
+  - name: total_filled_inventory       # distinct name from physical column FILLED_INVENTORY
+    synonyms: ["Filled Inventory"]
+    expr: SUM(dm_inventory.FILLED_INVENTORY)
+  - name: inventory_balance            # name avoids collision with FILLED_INVENTORY
+    synonyms: ["Inventory Balance"]
+    expr: SUM(dm_inventory.FILLED_INVENTORY)
     non_additive_dimensions:
-    - table: dm_date_dim_inventory     # the DATE DIMENSION table — not the fact table
-      dimension: balance_date          # time_dimension field name on that table
+    - table: dm_date_dim               # joined date dimension table — not the fact table
+      dimension: date_value            # time_dimension field name on that table
       sort_direction: ascending
+      nulls_position: last             # matches ThoughtSpot last_value behaviour
 ```
 
 **Reverse translation (semantic view → ThoughtSpot):**
