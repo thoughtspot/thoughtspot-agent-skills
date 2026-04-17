@@ -358,6 +358,10 @@ fetch available connections and ask the user to correct the name:
 CALL SKILLS.PUBLIC.TS_LIST_CONNECTIONS('{profile_name}');
 ```
 
+**Note:** `TS_LIST_CONNECTIONS` may return a partial list if the ThoughtSpot instance
+has many connections. If the user's connection does not appear, ask them to enter the
+exact name directly — ThoughtSpot validates the name at import time.
+
 Display results as a numbered list and ask the user to select:
 
 ```
@@ -601,8 +605,8 @@ For each metric in the semantic view:
   A COUNT_DISTINCT MEASURE on a column that is also an ATTRIBUTE dimension will
   cause a **duplicate column_id** error — even though the `column_type` values differ.
   Using a formula avoids this entirely since formulas don't carry a `column_id`.
-- Complex expression → translate SQL to ThoughtSpot formula, add to `formulas[]`
-- Untranslatable → omit and log in report
+- Complex expression → **read [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) first**, then translate SQL to ThoughtSpot formula using the Snowflake → ThoughtSpot reverse-translation sections; add to `formulas[]`. Do not classify as untranslatable based on SQL syntax recognition alone — patterns like `NON ADDITIVE BY`, `OVER (PARTITION BY ...)`, and `PARTITION BY EXCLUDING` all have documented ThoughtSpot equivalents.
+- Untranslatable (confirmed after consulting reference) → omit and log in report
 
 **Model name:** `TEST_SV_{semantic_view_name}` (or user-specified).
 

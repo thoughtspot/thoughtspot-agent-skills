@@ -27,11 +27,22 @@ def list_connections(
     POST /api/rest/2.0/connection/search.
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-    resp = client.post(
-        "/api/rest/2.0/connection/search",
-        json={"data_warehouse_types": [type], "record_size": 100, "record_offset": 0},
-    )
-    print(json.dumps(resp.json()))
+    all_connections: List[Dict[str, Any]] = []
+    offset = 0
+    page_size = 500
+    while True:
+        resp = client.post(
+            "/api/rest/2.0/connection/search",
+            json={"data_warehouse_types": [type], "record_size": page_size, "record_offset": offset},
+        )
+        page = resp.json()
+        if not isinstance(page, list) or not page:
+            break
+        all_connections.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+    print(json.dumps(all_connections))
 
 
 @app.command("get")

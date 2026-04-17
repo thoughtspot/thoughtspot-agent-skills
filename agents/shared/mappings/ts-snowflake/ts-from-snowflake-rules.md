@@ -214,8 +214,24 @@ formulas:
     column_type: ATTRIBUTE
 ```
 
-These do NOT appear in `columns[]` — only in `formulas[]`. The formula translation
-rules (column references, function names) are identical to MEASURE formulas.
+Like MEASURE formulas, computed ATTRIBUTE dimensions **do appear in `columns[]`** — add a
+`columns[]` entry with `formula_id:` for each one (no `aggregation` needed for ATTRIBUTE
+entries). The formula translation rules (column references, function names) are identical
+to MEASURE formulas.
+
+```yaml
+columns:
+- name: "Employee Name"
+  formula_id: formula_Employee Name
+  properties:
+    column_type: ATTRIBUTE
+formulas:
+- id: formula_Employee Name
+  name: "Employee Name"
+  expr: "concat ( [dm_employee::FIRST_NAME] , ' ' , [dm_employee::LAST_NAME] )"
+  properties:
+    column_type: ATTRIBUTE
+```
 
 **`diff_days` argument order:** ThoughtSpot uses `(end, start)` — the opposite of
 Snowflake's `DATEDIFF('day', start, end)`. Always check the arg order:

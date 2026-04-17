@@ -44,7 +44,7 @@ def _build_table_tml(spec: Dict[str, Any]) -> str:
             "db": spec["db"],
             "schema": spec["schema"],
             "db_table": spec["db_table"],
-            "connection": {"fqn": spec["connection_fqn"]},
+            "connection": {"name": spec["connection_name"]},
             "columns": columns,
         }
     }
@@ -93,7 +93,7 @@ def create_tables(
         "db": "BIRD",
         "schema": "FINANCIAL_SV",
         "db_table": "TRANS",
-        "connection_fqn": "f0bc76d5-077d-432b-8000-87a046c06bef",
+        "connection_name": "APJ_BIRD",
         "columns": [
           {"name": "TRANS_ID",     "data_type": "INT64",   "column_type": "ATTRIBUTE"},
           {"name": "TRANS_AMOUNT", "data_type": "INT64",   "column_type": "MEASURE"},

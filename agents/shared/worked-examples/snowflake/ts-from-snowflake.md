@@ -311,13 +311,17 @@ model:
    (e.g., `EYE_COLOUR.EYE_COLOUR` in the semantic view → `COLOUR` in the ThoughtSpot TML).
 
 3. **Inline joins.** Required when ThoughtSpot tables have no pre-defined `joins_with` entries.
-   The `with` field is REQUIRED and must match the target table's `id` (lowercase).
+   The `with` field is REQUIRED and must match the target table's `id` — or, if `id` is
+   omitted, its `name`.
 
-4. **`id` vs `name`.** `id` is a lowercase alias used in `with` and `on` clause references.
-   `name` must match the ThoughtSpot table object's name exactly (uppercase in this example).
+4. **`id` is optional.** When `id` is present it must equal `name` exactly (same case).
+   When `id` is absent, ThoughtSpot uses `name` as the join reference target — `with` and
+   `on` clauses then reference the `name` value directly. Omitting `id` is simpler and avoids
+   case-mismatch errors.
 
-5. **`with` and `on` consistency.** Both use `id` values:
-   `with: alignment` and `on: "[superhero::SH_ALIGNMENT_ID] = [alignment::ALIGNMENT_ID]"`.
+5. **`with` and `on` consistency.** Both must reference the same identifier (either the `id`
+   if present, or the `name` if `id` is omitted). In the superhero example, `id` is set to
+   lowercase and both use it: `with: alignment` and `on: "[superhero::SH_ALIGNMENT_ID] = [alignment::ALIGNMENT_ID]"`.
 
 6. **Display names from `comment=`.** The `comment='...'` value on each dimension becomes the
    ThoughtSpot column display name. Where no comment exists, title-case the DIM_NAME.
@@ -340,7 +344,7 @@ create them before building the model:
 3. **Build table TMLs** for each object and import them in one batch
 4. **Then build the model TML** referencing the newly created tables
 
-Table TML format (use connection `fqn`, not `name`):
+Table TML format:
 ```yaml
 table:
   name: TABLE_NAME
@@ -348,14 +352,170 @@ table:
   schema: SCHEMA
   db_table: TABLE_NAME
   connection:
-    fqn: "{connection_guid}"    # Use GUID — connection name causes JDBC errors
+    name: "{connection_name}"   # Exact ThoughtSpot connection name — case-sensitive
   columns:
   - name: COL_NAME
-    db_column_name: COL_NAME
-    data_type: INT64
+    db_column_name: COL_NAME    # Always include db_column_name — required on all instances
     properties:
       column_type: ATTRIBUTE
+      db_column_properties:
+        data_type: INT64        # or VARCHAR, DOUBLE, DATE, BOOL, DATE_TIME
 ```
 
 **IMPORTANT:** Use `$$` dollar-quoting in SQL for TML strings. Do NOT use `\n`
 escape sequences — they are passed literally and break YAML parsing.
+
+---
+
+## Formula columns — Dunder Mifflin Sales & Inventory example
+
+The BIRD Superhero example above has no formula columns. This section documents the
+patterns for semantic views that include computed metrics, window functions, and
+semi-additive measures, using `DUNDERMIFFLIN.PUBLIC.DUNDER_MIFFLIN_SALES_INVENTORY`
+as the source.
+
+### Metric types requiring formulas
+
+| Semantic view metric | SQL expression | Translation type |
+|---|---|---|
+| `EMPLOYEE` (dim) | `CONCAT(LAST_NAME, ', ', FIRST_NAME)` | ATTRIBUTE formula |
+| `EMPLOYEES` | `COUNT(DM_ORDER_EMPLOYEE_ID)` — same col also ATTRIBUTE | COUNT formula (avoids duplicate `column_id`) |
+| `CATEGORY_QUANTITY` | `SUM(qty) OVER (PARTITION BY category)` | `group_sum` window formula |
+| `PRODUCT_TO_CATEGORY_CONTRIBUTION_RATIO` | `DIV0(qty, SUM(qty) OVER (PARTITION BY category))` | `safe_divide` + inline `group_sum` |
+| `INVENTORY_BALANCE` | `SUM(col) NON ADDITIVE BY (date ASC NULLS LAST)` | `last_value` semi-additive formula |
+
+### Rule 1 — Every formula needs a `columns[]` entry (ATTRIBUTE and MEASURE both)
+
+```yaml
+columns:
+- name: "Employee"                        # ATTRIBUTE formula — no aggregation needed
+  formula_id: formula_Employee
+  properties:
+    column_type: ATTRIBUTE
+- name: "Category Quantity"               # MEASURE formula
+  formula_id: formula_Category Quantity
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+    index_type: DONT_INDEX
+formulas:
+- id: formula_Employee
+  name: "Employee"
+  expr: "concat ( [DM_EMPLOYEE::LAST_NAME] , ', ' , [DM_EMPLOYEE::FIRST_NAME] )"
+  properties:
+    column_type: ATTRIBUTE
+- id: formula_Category Quantity
+  name: "Category Quantity"
+  expr: "group_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_CATEGORY::CATEGORY_NAME] )"
+  properties:
+    column_type: MEASURE
+```
+
+### Rule 2 — Duplicate `column_id`: use a formula for COUNT when the column is also an ATTRIBUTE
+
+`DM_ORDER_EMPLOYEE_ID` appears as both an ATTRIBUTE dimension and the basis for the
+`# Employees` COUNT metric. ThoughtSpot rejects duplicate `column_id` values even across
+different `column_type` values. Solution: keep the ATTRIBUTE `column_id` entry and make
+`# Employees` a formula:
+
+```yaml
+columns:
+- name: "Dm Order Employee Id"
+  column_id: DM_ORDER::DM_ORDER_EMPLOYEE_ID
+  properties:
+    column_type: ATTRIBUTE
+    is_hidden: true
+- name: "# Employees"
+  formula_id: "formula_# Employees"
+  properties:
+    column_type: MEASURE
+    aggregation: COUNT
+    index_type: DONT_INDEX
+formulas:
+- id: "formula_# Employees"
+  name: "# Employees"
+  expr: "count ( [DM_ORDER::DM_ORDER_EMPLOYEE_ID] )"
+  properties:
+    column_type: MEASURE
+```
+
+### Rule 3 — Window function: `SUM(...) OVER (PARTITION BY dim)` → `group_sum`
+
+Use the ThoughtSpot **column name** for the PARTITION BY dimension (e.g., `CATEGORY_NAME`),
+not the semantic view alias (`product_category`):
+
+```yaml
+- id: formula_Category Quantity
+  name: "Category Quantity"
+  expr: "group_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_CATEGORY::CATEGORY_NAME] )"
+  properties:
+    column_type: MEASURE
+```
+
+### Rule 4 — Contribution ratio: inline the window function, do not reference another formula
+
+```yaml
+- id: formula_Product to Category Contribution Ratio
+  name: "Product to Category Contribution Ratio"
+  expr: "safe_divide ( [DM_ORDER_DETAIL::QUANTITY] , group_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_CATEGORY::CATEGORY_NAME] ) )"
+  properties:
+    column_type: MEASURE
+```
+
+Do NOT attempt to reference `[Category Quantity]` inside this formula — ThoughtSpot does
+not allow formula-referencing-formula. Inline the `group_sum(...)` directly.
+
+### Rule 5 — `last_value` (NON ADDITIVE BY): block scalar required
+
+`{ [col] }` in the formula contains `{` which YAML interprets as a flow mapping start.
+Always use a `>-` block scalar for any formula `expr` containing curly braces:
+
+```yaml
+- id: formula_Inventory Balance
+  name: "Inventory Balance"
+  expr: >-
+    last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_DATE_DIM::DATE] } )
+  properties:
+    column_type: MEASURE
+```
+
+The `>-` (folded, strip) emits the value as a single line with no trailing newline —
+correct for ThoughtSpot formula parsing.
+
+### Rule 6 — `id` can be omitted; `name` becomes the join reference target
+
+```yaml
+model_tables:
+- name: DM_ORDER_DETAIL          # no id field — name is the reference target
+  fqn: "b1e360c4-d571-490f-bae2-e8dc7443c9fa"
+  joins:
+  - with: DM_ORDER               # matches name: DM_ORDER exactly (same case)
+    'on': '[DM_ORDER_DETAIL::RRDER_ID] = [DM_ORDER::ORDER_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+  - with: DM_PRODUCT
+    'on': '[DM_ORDER_DETAIL::DM_ORDER_DETAIL_PRODUCT_ID] = [DM_PRODUCT::PRODUCT_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+- name: DM_ORDER
+  fqn: "3a9faf5d-5bde-4299-81f6-0706eb6c1535"
+  joins:
+  - with: DM_CUSTOMER
+    'on': '[DM_ORDER::DM_ORDER_CUSTOMER_ID] = [DM_CUSTOMER::CUSTOMER_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+  - with: DM_DATE_DIM
+    'on': '[DM_ORDER::ORDER_DATE] = [DM_DATE_DIM::DATE]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+  - with: DM_EMPLOYEE
+    'on': '[DM_ORDER::DM_ORDER_EMPLOYEE_ID] = [DM_EMPLOYEE::EMPLOYEE_ID]'
+    type: INNER
+    cardinality: MANY_TO_ONE
+- name: DM_CUSTOMER
+  fqn: "32c062cb-e23a-4bd3-a02c-8b7c1048d57f"
+- name: DM_DATE_DIM
+  fqn: "a8b75478-4286-46d2-9f59-22f0a74c588b"
+- name: DM_EMPLOYEE
+  fqn: "09f37d71-1c8f-4650-8cd6-64c18bf3367b"
+```

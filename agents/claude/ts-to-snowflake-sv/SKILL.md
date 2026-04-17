@@ -736,21 +736,35 @@ rm -f /tmp/ts_tml_*.json
 
 ### Step 9: Translate Formulas
 
+> **MANDATORY — read the reference before assessing any formula:**
+> Open [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+> and use its **Decision Flowchart** to classify every formula. Do **not** classify
+> a formula as untranslatable based on function name recognition alone. Patterns
+> that appear ThoughtSpot-specific have documented Snowflake equivalents — for example:
+>
+> | Looks untranslatable | Actually translatable as |
+> |---|---|
+> | `last_value(agg, query_groups(), {date_col})` | `SUM(col)` + `non_additive_dimensions` on the date table |
+> | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
+> | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
+> | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
+>
+> Consult the reference. Never reason from first principles about ThoughtSpot functions.
+
 For each formula column (`formula_id` is set):
 
 1. Look up formula expression from `formulas[]` by `id` or `name`
 2. Resolve column references using the syntax rules for the TML format (Worksheet uses
    `[path_id::col]`, Model uses `[TABLE::col]`)
-3. Replace function names using
-   [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+3. Classify using the Decision Flowchart in the formula translation reference, then
+   translate using the rules in that file
 4. Handle nested references up to 3 levels deep
 
 **Untranslatable formulas — omit entirely:**
 
-For formulas containing untranslatable patterns (ThoughtSpot parameters, `sql_string_op`,
-time intelligence functions, `runtime_filter`), **do not emit the column** in the YAML.
-Do NOT use `-- TODO`, `CAST(NULL AS TEXT)`, or any placeholder `expr` — these cause
-Snowflake parse errors or silent failures.
+For formulas confirmed untranslatable after consulting the reference, **do not emit
+the column** in the YAML. Do NOT use `-- TODO`, `CAST(NULL AS TEXT)`, or any placeholder
+`expr` — these cause Snowflake parse errors or silent failures.
 
 Instead:
 - Skip the column in the output YAML
@@ -759,11 +773,15 @@ Instead:
   | {display_name} | OMITTED | {reason} | {original_expr} |
   ```
 
-Untranslatable patterns to recognise:
+Confirmed untranslatable patterns (after checking the reference):
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
-- `sql_string_op(...)` — raw SQL injection pattern
-- `ts_first_day_of_week(...)`, `last_n_days(...)` — ThoughtSpot time intelligence
-- Any reference to a formula that is itself untranslatable (transitive)
+- `ts_first_day_of_week(...)`, `last_n_days(...)`, `last_value_in_period(...)` — period-scoped time intelligence with no Snowflake equivalent
+- `first_value(...)` — `NON ADDITIVE BY` only supports last-value semantics
+- `group_aggregate(...)` with any filter argument other than `query_filters()` — hardcoded/selective filters unsupported
+- `group_aggregate(...)` with `query_groups() + {attr}` or `query_groups(attr1, attr2)` grouping
+- `max/min/avg/count(group_aggregate(...))` — outer non-sum aggregate prevents simplification
+- Hyperlink markup: `concat("{caption}", ..., "{/caption}", ...)` — ThoughtSpot display hint
+- Any reference to a formula that is itself confirmed untranslatable (transitive)
 
 ---
 

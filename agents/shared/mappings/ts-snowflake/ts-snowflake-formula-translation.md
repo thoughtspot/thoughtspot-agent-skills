@@ -622,32 +622,37 @@ metrics:
     expr: "DIV0(order_detail.total_quantity, SUM(order_detail.total_quantity) OVER (PARTITION BY EXCLUDING products.product_name))"
 ```
 
-### Outer `sum()` wrapping `group_aggregate(..., query_filters())`
+### `group_aggregate` and `group_sum` — Fixed vs Dynamic Grain
 
-When `sum()` wraps a `group_aggregate` that uses `query_filters()` as its filter
-argument, the entire expression simplifies to a plain `SUM(m)` metric.
-
-**Why this works:** In ThoughtSpot, `group_aggregate` requires explicit grain
-instructions because ThoughtSpot must know at what level to compute the sub-aggregation.
-In a semantic view, **grain is always determined at query time by Cortex Analyst** —
-the grouping is implicit in whatever dimensions are in the query. `query_filters()` is
-also redundant — Cortex Analyst applies all active query filters automatically.
-
-The outer `sum()` of the category-level total collapses to `SUM(m)` because Cortex
-Analyst computes the metric at the correct grain for the current query context.
+The translation depends entirely on the **grouping argument**, not on the presence of
+an outer `sum()`. Fixed-grain grouping (`{attr}`) always requires a window function to
+preserve the grain; dynamic grouping (`query_groups()`) simplifies to a plain metric.
 
 | ThoughtSpot | Semantic view | Note |
 |---|---|---|
-| `sum(group_aggregate(sum(m), {attr}, query_filters()))` | `SUM(m)` | Grain is implicit — Cortex handles it at query time |
-| `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | `SUM(m)` | `query_groups()` is already a plain metric |
-| `group_sum(m, attr)` used as a standalone metric (not in ratio) | `SUM(m)` | Same simplification applies |
+| `group_aggregate(sum(m), {attr}, query_filters())` | `SUM(m) OVER (PARTITION BY attr)` | Fixed grain — preserve as window function |
+| `group_sum(m, attr)` standalone | `SUM(m) OVER (PARTITION BY attr)` | Shorthand for `{attr}` grouping — same rule |
+| `sum(group_aggregate(sum(m), {attr}, query_filters()))` | `SUM(m) OVER (PARTITION BY attr)` | Outer `sum()` does not change fixed-grain semantics |
+| `group_aggregate(sum(m), query_groups(), query_filters())` | `SUM(m)` | Dynamic grain — simplifies to plain metric |
+| `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | `SUM(m)` | `query_groups()` is dynamic grain — same simplification |
 
-**Example — `sum(group_aggregate(sum(Quantity), {Category Name}, query_filters()))`:**
+**Why `{attr}` needs a window function:** Fixed grouping (`{attr}`) means the
+sub-aggregation is always computed at the `attr` grain regardless of what dimensions
+are in the query. Plain `SUM(m)` would compute at whatever grain the current query
+uses, losing the intended fixed-grain behavior.
+
+**Why `query_groups()` simplifies:** `query_groups()` means "use whatever dimensions
+are in the query" — which is exactly what `SUM(m)` does in a semantic view. Cortex
+Analyst applies query filters automatically, so `query_filters()` is always redundant.
+
+**Example — `group_sum(Quantity, Category Name)` (standalone fixed-grain LOD):**
 
 ```yaml
 metrics:
   - name: category_quantity
-    expr: SUM(dm_order_detail.QUANTITY)
+    expr: "SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.product_category)"
+    synonyms:
+    - Category Quantity
 ```
 
 **Transitive dependencies:** If a second formula referenced this one as untranslatable,
@@ -656,29 +661,28 @@ revisit any formula that was omitted due to a transitive dependency on it.
 
 **Two cases — do not confuse them:**
 
-**Case A — numerator and denominator are different metrics** (safe to inline):
+**Case A — numerator and denominator are different metrics:**
 
 ThoughtSpot: `safe_divide(sum(Sales Amount), sum(group_aggregate(sum(Quantity), {Category Name}, query_filters())))`
 
-After resolving `[Category Quantity]` → `SUM(QUANTITY)`, inline and translate:
+The denominator is a fixed-grain LOD — translate it as a window function in the ratio:
 
 ```yaml
 metrics:
-  - name: category_quantity
-    expr: SUM(dm_order_detail.QUANTITY)
   - name: sales_per_category_quantity
-    expr: DIV0(SUM(dm_order_detail.AMOUNT), SUM(dm_order_detail.QUANTITY))
+    expr: "DIV0(SUM(dm_order_detail.AMOUNT), SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.product_category))"
 ```
+
+If `category_quantity` is also needed as a standalone metric, define it separately
+using the window function pattern above.
 
 **Case B — same metric at different grains (contribution ratio):**
 
 ThoughtSpot: `safe_divide(sum(Quantity), [Category Quantity])`
-where `[Category Quantity]` = `sum(group_aggregate(sum(Quantity), {Category Name}, query_filters()))`
+where `[Category Quantity]` = `group_sum(Quantity, Category Name)`
 
-**Do NOT inline** — `[Category Quantity]` simplifies to `SUM(QUANTITY)`, so inlining
-produces `DIV0(SUM(QUANTITY), SUM(QUANTITY))` which is always 1.0. The LOD grain is
-lost. Instead, treat this as a **Percentage Contribution** pattern (see above) and
-use the PARTITION BY window function:
+The denominator is the category-level total of the same column used in the numerator.
+Use the **Percentage Contribution** pattern — inline the window function directly:
 
 ```yaml
 metrics:

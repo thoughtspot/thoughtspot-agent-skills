@@ -265,6 +265,8 @@ Find the ThoughtSpot connection for those tables:
 ```bash
 ts connections list --profile {profile}
 ```
+**Note:** `ts connections list` is capped at 100 results. If the connection does not appear,
+use the paginated REST API fallback described in Step 6B.
 
 Add the missing columns to the connection, then re-import the updated Table TML
 for each affected table (batch all imports in one call):
@@ -292,6 +294,37 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
 2. Ask the user to confirm which ThoughtSpot connection to use (or auto-select if
    only one matches the semantic view's database). Use the connection **name** directly
    in table TML — no GUID lookup is needed or possible from available procedures.
+
+   **`ts connections list` is capped at 100 results.** On instances with many connections
+   the target connection may not appear. If the connection the user names is not in the
+   list, fall back to the REST API with pagination:
+
+   ```python
+   import urllib.request, json, os, subprocess
+
+   base_url = "{base_url}"   # from the active ThoughtSpot profile
+   token = "{token}"         # from keychain / env var
+
+   all_conns, offset = [], 0
+   while True:
+       req = urllib.request.Request(
+           f"{base_url}/api/rest/2.0/connection/search",
+           data=json.dumps({"record_size": 500, "record_offset": offset}).encode(),
+           headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+           method="POST"
+       )
+       page = json.loads(urllib.request.urlopen(req).read())
+       all_conns.extend(page)
+       if len(page) < 500:
+           break
+       offset += 500
+
+   # Filter by keyword
+   matches = [c for c in all_conns if keyword.lower() in c["name"].lower()]
+   ```
+
+   Display matching connections and ask the user to confirm. Once confirmed, use the
+   exact `name` value from the API response.
 
 3. Create ThoughtSpot Table objects for all tables in one command:
    ```bash
@@ -453,14 +486,31 @@ where it causes an import error).
 
 ### Step 9: Translate SQL expressions → ThoughtSpot formulas
 
+> **MANDATORY — read the reference before assessing any expression:**
+> Open [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+> and use its **Reverse translation** sections for each SQL pattern. Do **not** classify
+> an expression as untranslatable based on SQL syntax recognition alone. Patterns that
+> appear Snowflake-specific have documented ThoughtSpot equivalents — for example:
+>
+> | Looks untranslatable | Actually translatable as |
+> |---|---|
+> | `SUM(col)` + `NON ADDITIVE BY (date ASC NULLS LAST)` | `last_value ( sum ( [col] ) , query_groups ( ) , { [date_col] } )` |
+> | `SUM(m) OVER (PARTITION BY dim1, dim2)` | `group_sum ( measure, dim1, dim2 )` |
+> | `SUM(m) OVER (PARTITION BY EXCLUDING dim1)` | `group_aggregate ( sum(m), query_groups()-{dim1}, query_filters() )` |
+> | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` | `safe_divide ( sum(m), group_sum(m, dim) )` — contribution ratio |
+> | `SUM(m) OVER (PARTITION BY EXCLUDING dim ORDER BY dim ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` | `cumulative_sum ( measure, dim )` |
+>
+> Consult the reference. Never reason from first principles about SQL window functions.
+
 For each metric whose `EXPR` is not a simple `AGG(table.col)`:
 
 1. Apply the SQL → ThoughtSpot formula translation rules in
-   [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md).
+   [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+   (bidirectional reference — use the **Snowflake → ThoughtSpot** direction).
 2. Replace column references: `table.COLUMN` → `[TABLE_ALIAS::COLUMN]`
 3. If the expression translates successfully → add a `formulas[]` entry.
-4. If the expression cannot be translated → omit the column and log it in the
-   Formula Translation Log (for the summary report in Step 12).
+4. If the expression is confirmed untranslatable after consulting the reference →
+   omit the column and log it in the Formula Translation Log (for the summary report in Step 12).
 
 **Column references in translated formulas:**
 

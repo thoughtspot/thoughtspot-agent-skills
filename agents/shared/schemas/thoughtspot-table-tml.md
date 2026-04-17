@@ -23,7 +23,7 @@ table:
     name: "{connection_name}" # exact ThoughtSpot connection name — case-sensitive
   columns:
   - name: COL_NAME             # display name in ThoughtSpot
-    db_column_name: COL_NAME  # physical column name — omit when it equals name
+    db_column_name: COL_NAME  # physical column name — always include even when equal to name
     description: "Optional description or source column alias"
     properties:
       column_type: ATTRIBUTE  # ATTRIBUTE or MEASURE
@@ -69,7 +69,7 @@ table:
 | Field | Required | Notes |
 |---|---|---|
 | `name` | Yes | Display name — also used as `column_id` suffix in model TML (`TABLE::name`) |
-| `db_column_name` | No | Physical column name in the warehouse. Omit when it equals `name`. Required when the display name differs from the physical column name. |
+| `db_column_name` | Yes | Physical column name in the warehouse. **Always include**, even when it equals `name` — some ThoughtSpot instances reject import if absent. |
 | `description` | No | Optional description. Sometimes used to record the original db column name when `name` is a friendly alias (e.g. `"description": "RECVDATE"` on a column named `"Received Date"`). |
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
 | `db_column_properties.data_type` | Yes | ThoughtSpot type value — see type mapping below |
@@ -203,7 +203,6 @@ sql_view:
   name: Working_Day_Index_Dim
   connection:
     name: "{connection_name}"
-    fqn: "{connection_guid}"
   sql_query: "SELECT DISTINCT date, ROW_NUMBER() OVER (ORDER BY date) AS workingDayIndex FROM ..."
   sql_view_columns:
   - name: date
