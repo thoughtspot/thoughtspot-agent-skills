@@ -1,15 +1,82 @@
 ---
 name: coco-setup
-description: Install and upgrade the ThoughtSpot stored procedures used by Snowflake Workspace skills (ts-to-snowflake-sv, ts-from-snowflake-sv). Run this once after thoughtspot-setup, and again whenever prompted by another skill that detects an outdated or missing procedure.
+description: Install and upgrade the ThoughtSpot stored procedures used by Snowflake Workspace skills (ts-to-snowflake-sv, ts-from-snowflake-sv). Also handles deploying updated skill files from the SKILLS.PUBLIC.SHARED stage to this workspace. Run this once after thoughtspot-setup, and again whenever prompted by another skill that detects an outdated or missing procedure.
 ---
 
 # CoCo Setup — ThoughtSpot Stored Procedures
 
 Installs or upgrades the ThoughtSpot API stored procedures that the other CoCo skills
-depend on. Procedures live in `SKILLS.PUBLIC` and are shared by all skills and all
-ThoughtSpot profiles.
+depend on. Also deploys updated skill files from the `@SKILLS.PUBLIC.SHARED` stage to
+this workspace when requested.
 
 Ask one question at a time. Wait for each answer before proceeding.
+
+---
+
+## Deploying Skill Files from Stage
+
+If the user asks to deploy, update, or sync skill files from the stage, follow these
+steps **before** the procedure installation steps below.
+
+**Stage root:** `@SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/`
+**Workspace root:** `.snowflake/cortex/`
+
+The mapping is direct — strip the stage prefix and write to the matching workspace path.
+
+### Skills to deploy
+
+For each skill file, read the content from the stage and write it to the workspace:
+
+| Stage path | Workspace path |
+|---|---|
+| `.../skills/coco-setup/SKILL.md` | `.snowflake/cortex/skills/coco-setup/SKILL.md` |
+| `.../skills/thoughtspot-setup/SKILL.md` | `.snowflake/cortex/skills/thoughtspot-setup/SKILL.md` |
+| `.../skills/ts-to-snowflake-sv/SKILL.md` | `.snowflake/cortex/skills/ts-to-snowflake-sv/SKILL.md` |
+| `.../skills/ts-from-snowflake-sv/SKILL.md` | `.snowflake/cortex/skills/ts-from-snowflake-sv/SKILL.md` |
+| `.../skills/SETUP.md` | `.snowflake/cortex/skills/SETUP.md` |
+
+Read each file from the stage using SQL:
+
+```sql
+SELECT LISTAGG($1, '\n') WITHIN GROUP (ORDER BY METADATA$FILE_ROW_NUMBER)
+FROM @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/{skill_name}/SKILL.md
+(FILE_FORMAT => (TYPE = 'CSV' FIELD_DELIMITER = '\x01'
+                 FIELD_OPTIONALLY_ENCLOSED_BY = NONE
+                 ESCAPE_UNENCLOSED_FIELD = NONE));
+```
+
+Write the returned string to the corresponding workspace file, replacing any existing
+content. Create parent directories if they do not exist.
+
+### Shared reference files to deploy
+
+Also deploy shared reference files if they have changed:
+
+```sql
+-- List all shared files on the stage
+LS @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/;
+```
+
+For each file returned, read its content (same SQL pattern above) and write to the
+matching workspace path under `.snowflake/cortex/shared/`.
+
+### Confirm deployment
+
+After writing all files, display:
+
+```
+Skill files deployed from @SKILLS.PUBLIC.SHARED:
+  ✓ .snowflake/cortex/skills/coco-setup/SKILL.md
+  ✓ .snowflake/cortex/skills/thoughtspot-setup/SKILL.md
+  ✓ .snowflake/cortex/skills/ts-to-snowflake-sv/SKILL.md
+  ✓ .snowflake/cortex/skills/ts-from-snowflake-sv/SKILL.md
+  ✓ .snowflake/cortex/skills/SETUP.md
+  ✓ shared reference files ({n} files)
+
+Proceed to install/upgrade stored procedures? (yes/no):
+```
+
+If yes, continue to Step 1 below. If no, stop here.
 
 ---
 

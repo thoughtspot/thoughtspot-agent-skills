@@ -1,270 +1,107 @@
 # Setup Guide — Snowflake Cortex Skills
 
-This guide walks you through connecting the skill's Git repository to your Snowflake
-account so the skill files are available in Snowsight Workspaces.
-
-> **Path note:** Skills are stored under `agents/coco/<skill-name>/` and shared
-> reference files under `agents/shared/` in this repository. Snowflake Cortex Code
-> looks for skills at `.snowflake/cortex/skills/<skill-name>/` within a Workspace.
-> After connecting the Git repository and opening your Workspace, you must manually
-> create the `.snowflake/cortex/skills/` and `.snowflake/cortex/shared/` folder
-> structures and copy files into them (see
-> [Using the skill in a Workspace](#using-the-skill-in-a-workspace) below).
-
 ---
 
-## Prerequisites
+## Option 1: Stage-based (recommended)
 
-- A Snowflake account with a role that can create API integrations and Git repositories
-  (typically `ACCOUNTADMIN` or a role with the required grants)
-- The Git repository URL for this skill (HTTPS)
+Push files from the repository to a Snowflake internal stage, then ask CoCo to
+deploy them to your Workspace. This is the fastest approach for ongoing updates.
 
----
+### Prerequisites
 
-## Option A: Automated (Snowflake CLI)
+- Snowflake CLI (`snow`) installed and configured with your account
+- Stage `SKILLS.PUBLIC.SHARED` exists in your account
 
-The `snow git setup` command walks you through the full setup interactively. It creates
-the secret, API integration, and Git repository clone in one flow.
+### Step 1: Push files to the stage
+
+Run from the repository root after any update:
 
 ```bash
-snow git setup SKILL_REPO \
-  --database SKILLS \
-  --schema PUBLIC
+# Skill files
+snow stage copy agents/coco/SETUP.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/ --overwrite
+snow stage copy agents/coco/coco-setup/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/coco-setup/ --overwrite
+snow stage copy agents/coco/thoughtspot-setup/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/thoughtspot-setup/ --overwrite
+snow stage copy agents/coco/ts-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/ts-to-snowflake-sv/ --overwrite
+snow stage copy agents/coco/ts-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/ts-from-snowflake-sv/ --overwrite
+
+# Shared reference files (only needed when these change)
+snow stage copy "agents/shared/mappings/ts-snowflake/" @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/mappings/ts-snowflake/ --recursive --overwrite
+snow stage copy agents/shared/schemas/ @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/schemas/ --recursive --overwrite
+snow stage copy "agents/shared/worked-examples/snowflake/" @SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --recursive --overwrite
 ```
 
-You will be prompted for:
-- **Origin URL:** `https://github.com/<your-org>/<your-repo>.git`
-- **Use secret for authentication?** `y` for private repos, `n` for public
-- **Username / token:** your GitHub username and a personal access token (if private)
-- **API integration identifier:** press Enter to accept the default or provide an existing one
+### Step 2: Ask CoCo to deploy to Workspace
 
-Once complete, fetch the latest files:
+In your Snowsight Workspace, ask:
 
-```bash
-snow git execute @SKILLS.PUBLIC.SKILL_REPO fetch
-```
+> "Deploy skill files from @SKILLS.PUBLIC.SHARED to this workspace"
+
+CoCo reads each file from the stage and writes it to the corresponding workspace path.
+
+**Stage → Workspace path mapping:**
+
+| Stage path | Workspace path |
+|---|---|
+| `@SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/skills/<name>/SKILL.md` | `.snowflake/cortex/skills/<name>/SKILL.md` |
+| `@SKILLS.PUBLIC.SHARED/shared/skills/.snowflake/cortex/shared/` | `.snowflake/cortex/shared/` |
+
+### Step 3: Install or upgrade stored procedures
+
+After files are deployed, run:
+
+> /coco-setup
+
+### Keeping updated
+
+When a new version is pushed to the stage — repeat Step 2 and Step 3.
 
 ---
 
-## Option B: Snowsight UI (OAuth — GitHub only)
+## Option 2: Manual upload (no tooling required)
 
-This is the simplest method if your repository is hosted on GitHub. It uses the
-built-in Snowflake GitHub App for OAuth authentication — no secrets or tokens needed.
+Paste file contents directly into the Workspace. Suitable for first-time setup
+without CLI access.
 
-### Step 1: Create an API integration with OAuth
+### Workspace file structure
 
-```sql
-USE ROLE ACCOUNTADMIN;
-
-CREATE OR REPLACE API INTEGRATION skill_git_api_integration
-  API_PROVIDER = git_https_api
-  API_ALLOWED_PREFIXES = ('https://github.com/<your-org>')
-  API_USER_AUTHENTICATION = (TYPE = SNOWFLAKE_GITHUB_APP)
-  ENABLED = TRUE;
+```
+.snowflake/cortex/
+├── shared/
+│   ├── mappings/ts-snowflake/
+│   │   ├── ts-from-snowflake-rules.md
+│   │   ├── ts-snowflake-formula-translation.md
+│   │   ├── ts-snowflake-properties.md
+│   │   └── ts-to-snowflake-rules.md
+│   ├── schemas/
+│   │   ├── snowflake-schema.md
+│   │   └── thoughtspot-tml.md
+│   └── worked-examples/snowflake/
+│       ├── ts-from-snowflake.md
+│       └── ts-to-snowflake.md
+└── skills/
+    ├── coco-setup/
+    │   └── SKILL.md
+    ├── thoughtspot-setup/
+    │   └── SKILL.md
+    ├── ts-to-snowflake-sv/
+    │   └── SKILL.md
+    └── ts-from-snowflake-sv/
+        └── SKILL.md
 ```
 
-Grant usage to the role that will use the skill:
+For each file: right-click the target folder in the Workspace file tree →
+**New File** → paste the contents from the `agents/coco/` and `agents/shared/`
+directories of this repository.
 
-```sql
-GRANT USAGE ON INTEGRATION skill_git_api_integration TO ROLE <your_role>;
-```
+Cortex Code auto-detects skills once `SKILL.md` is in place at the correct path.
 
-### Step 2: Create the Git repository in Snowsight
-
-1. Open **Snowsight** → **Catalog** → **Database Explorer**
-2. Navigate to the database and schema where you want the repository (e.g. `SKILLS.PUBLIC`)
-3. Select **Create** → **Git Repository**
-4. Fill in:
-   - **Repository Name:** `SKILL_REPO`
-   - **Origin:** `https://github.com/<your-org>/<your-repo>.git`
-   - **API Integration:** select `SKILL_GIT_API_INTEGRATION`
-5. Select **Create**
-6. You will be prompted to authorize via GitHub OAuth
+> **Note:** No automatic update mechanism with this approach. To update, manually
+> replace the changed files.
 
 ---
 
-## Option C: Manual SQL (token-based auth)
+## Path note
 
-Use this for private repos on any Git provider (GitHub, GitLab, Bitbucket, etc.).
-
-### Step 1: Create a secret with your credentials
-
-```sql
-USE ROLE ACCOUNTADMIN;
-
-CREATE OR REPLACE SECRET SKILLS.PUBLIC.SKILL_GIT_SECRET
-  TYPE = password
-  USERNAME = '<your_git_username>'
-  PASSWORD = '<your_personal_access_token>';
-```
-
-> **GitHub PAT:** Generate one at GitHub → Settings → Developer settings →
-> Personal access tokens → Fine-grained tokens. Grant `Contents: Read-only` access
-> to the repository.
->
-> **Bitbucket:** Use `x-token-auth` as the username value.
-
-### Step 2: Create an API integration
-
-```sql
-CREATE OR REPLACE API INTEGRATION skill_git_api_integration
-  API_PROVIDER = git_https_api
-  API_ALLOWED_PREFIXES = ('https://github.com/<your-org>')
-  ALLOWED_AUTHENTICATION_SECRETS = (SKILLS.PUBLIC.SKILL_GIT_SECRET)
-  ENABLED = TRUE;
-```
-
-### Step 3: Grant access to your role
-
-```sql
-GRANT USAGE ON INTEGRATION skill_git_api_integration TO ROLE <your_role>;
-GRANT USAGE ON SECRET SKILLS.PUBLIC.SKILL_GIT_SECRET TO ROLE <your_role>;
-GRANT CREATE GIT REPOSITORY ON SCHEMA SKILLS.PUBLIC TO ROLE <your_role>;
-```
-
-### Step 4: Create the Git repository clone
-
-```sql
-USE ROLE <your_role>;
-
-CREATE OR REPLACE GIT REPOSITORY SKILLS.PUBLIC.SKILL_REPO
-  API_INTEGRATION = skill_git_api_integration
-  GIT_CREDENTIALS = SKILLS.PUBLIC.SKILL_GIT_SECRET
-  ORIGIN = 'https://github.com/<your-org>/<your-repo>.git';
-```
-
-### Step 5: Fetch and verify
-
-```sql
-ALTER GIT REPOSITORY SKILLS.PUBLIC.SKILL_REPO FETCH;
-
-LS @SKILLS.PUBLIC.SKILL_REPO/branches/main;
-```
-
-You should see the skill files at `agents/coco/<skill-name>/SKILL.md`. They are not yet
-at the `.snowflake/cortex/skills/` path — see [Using the skill in a Workspace](#using-the-skill-in-a-workspace)
-for the copy step that makes them discoverable by Cortex Code.
-
----
-
-## Option D: Public repository (no authentication)
-
-If the repository is public, no secret is needed:
-
-```sql
-USE ROLE ACCOUNTADMIN;
-
-CREATE OR REPLACE API INTEGRATION skill_git_api_integration
-  API_PROVIDER = git_https_api
-  API_ALLOWED_PREFIXES = ('https://github.com/<your-org>')
-  ENABLED = TRUE;
-
-GRANT USAGE ON INTEGRATION skill_git_api_integration TO ROLE <your_role>;
-
-USE ROLE <your_role>;
-
-CREATE OR REPLACE GIT REPOSITORY SKILLS.PUBLIC.SKILL_REPO
-  API_INTEGRATION = skill_git_api_integration
-  ORIGIN = 'https://github.com/<your-org>/<your-repo>.git';
-
-ALTER GIT REPOSITORY SKILLS.PUBLIC.SKILL_REPO FETCH;
-```
-
----
-
-## Option E: Manual upload (no Git required)
-
-If you don't want to connect a Git repository, you can create a Workspace from scratch
-and add the skill files manually.
-
-1. Open **Snowsight** → **Projects** → **Workspaces**
-2. Select **Create Workspace** → **Create from scratch**
-3. Create the following folder structure in the Workspace:
-   ```
-   .snowflake/cortex/
-   ├── shared/
-   │   ├── mappings/
-   │   │   └── ts-snowflake/
-   │   │       ├── ts-to-snowflake-rules.md
-   │   │       ├── ts-snowflake-formula-translation.md
-   │   │       ├── ts-snowflake-properties.md
-   │   │       └── ts-from-snowflake-rules.md
-   │   ├── schemas/
-   │   │   ├── snowflake-schema.md
-   │   │   └── thoughtspot-tml.md
-   │   └── worked-examples/
-   │       └── snowflake/
-   │           ├── ts-from-snowflake.md
-   │           └── ts-to-snowflake.md
-   └── skills/
-       └── <skill-name>/
-           └── SKILL.md
-   ```
-4. For each file, right-click the target folder → **New File** → paste the contents
-5. Cortex Code will auto-detect the skill once all files are in place
-
-> **Path note:** Skills reference shared files via `../../shared/` — two levels up from
-> `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/cortex/`, so
-> `shared/` sits alongside `skills/` inside `.snowflake/cortex/`.
-
-> **Note:** With this approach there is no automatic update mechanism. To get newer
-> versions of the skill, you must manually replace the files. Consider Options A–D
-> if you want to stay up to date with `ALTER GIT REPOSITORY ... FETCH`.
-
----
-
-## Using the skill in a Workspace
-
-**From a Git repository (Options A–D):**
-
-1. Open **Snowsight** → **Projects** → **Workspaces**
-2. Select **Create Workspace** → **Create from existing Git repository**
-3. Select your repository and branch
-4. In the Workspace file tree, create the following structure:
-   ```
-   .snowflake/cortex/
-   ├── shared/
-   │   ├── mappings/ts-snowflake/
-   │   ├── schemas/
-   │   └── worked-examples/snowflake/
-   └── skills/
-       └── <skill-name>/
-   ```
-5. Copy the skill files from `agents/coco/<skill-name>/` into `.snowflake/cortex/skills/<skill-name>/`.
-   Copy `agents/shared/mappings/`, `agents/shared/schemas/`, and `agents/shared/worked-examples/` (repo) into
-   `.snowflake/cortex/shared/mappings/`, `.snowflake/cortex/shared/schemas/`, and `.snowflake/cortex/shared/worked-examples/`.
-   For each file, right-click the target folder → **New File** → paste the contents.
-6. Cortex Code will auto-detect the skill once `SKILL.md` is in place.
-
-> **Path note:** Skills reference shared files via `../../shared/` — two levels up from
-> `.snowflake/cortex/skills/<skill-name>/SKILL.md` lands at `.snowflake/cortex/`, so
-> `shared/` sits alongside `skills/` inside `.snowflake/cortex/`.
-
-> When a new version of the skill is available, fetch the repository
-> (`ALTER GIT REPOSITORY ... FETCH`) to update the source files, then re-copy any
-> changed files into their respective `.snowflake/` locations.
-
-**From manual upload (Option E):**
-
-The skill is already in your Workspace at the correct path — no additional steps needed.
-
-Cortex Code automatically detects skills in the `.snowflake/cortex/skills/` directory.
-
----
-
-## Keeping the skill updated
-
-**Git-backed Workspaces (Options A–D):**
-
-To pull the latest version of the skill:
-
-```sql
-ALTER GIT REPOSITORY SKILLS.PUBLIC.SKILL_REPO FETCH;
-```
-
-In Snowsight Workspaces, you can also use the **Fetch** button on the Git Repository
-details page.
-
-**Manual Workspaces (Option E):**
-
-Replace the files manually when a new version is available.
+Skills reference shared files via `../../shared/`. Two levels up from
+`.snowflake/cortex/skills/<skill-name>/SKILL.md` reaches `.snowflake/cortex/`,
+where `shared/` sits alongside `skills/`.
