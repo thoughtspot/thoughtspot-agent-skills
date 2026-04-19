@@ -16,8 +16,11 @@ thoughtspot-skills/
 │       ├── mappings/ts-snowflake/ — Column, join, formula, and property mapping rules
 │       ├── schemas/               — Platform schema references (ThoughtSpot TML, Snowflake Semantic View)
 │       └── worked-examples/snowflake/ — End-to-end conversion examples
+├── scripts/        — Deployment helpers (pre-commit hook, deploy gate, stage sync)
 └── tools/
-    └── ts-cli/     — ThoughtSpot CLI used by Claude Code skills at runtime
+    ├── ts-cli/     — ThoughtSpot CLI used by Claude Code skills at runtime
+    ├── validate/   — Static structural validators for SV YAML and TML (run by pre-commit hook)
+    └── smoke-tests/ — End-to-end smoke tests requiring live ThoughtSpot and Snowflake credentials
 ```
 
 ---
