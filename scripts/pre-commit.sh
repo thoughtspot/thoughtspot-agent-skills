@@ -37,6 +37,7 @@ run_check() {
 }
 
 # Always run these — they're fast and catch the most common mistakes
+run_check "secrets"              "tools/validate/check_secrets.py --root $REPO_ROOT"
 run_check "reference paths"      "tools/validate/check_references.py --root $REPO_ROOT"
 run_check "anti-patterns"        "tools/validate/check_patterns.py --root $REPO_ROOT --staged"
 run_check "version sync"         "tools/validate/check_version_sync.py --root $REPO_ROOT"

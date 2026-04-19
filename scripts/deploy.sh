@@ -46,6 +46,7 @@ deploy_check() {
   fi
 }
 
+deploy_check "secrets"              "tools/validate/check_secrets.py --root $SCRIPT_DIR/.. --all"
 deploy_check "reference paths"      "tools/validate/check_references.py --root $SCRIPT_DIR/.."
 deploy_check "anti-patterns"        "tools/validate/check_patterns.py --root $SCRIPT_DIR/.."
 deploy_check "SV YAML structure"    "tools/validate/check_sv_yaml.py --root $SCRIPT_DIR/.."
