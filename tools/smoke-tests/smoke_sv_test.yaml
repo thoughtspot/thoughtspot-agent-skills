@@ -1,0 +1,22 @@
+name: skills_smoke_test_sv
+description: Minimal smoke test Semantic View targeting SKILLS.PUBLIC.SP_VERSIONS
+tables:
+  - name: sp_versions
+    base_table:
+      database: SKILLS
+      schema: PUBLIC
+      table: SP_VERSIONS
+    dimensions:
+      - name: procedure_name
+        expr: sp_versions.PROCEDURE_NAME
+        data_type: TEXT
+      - name: version
+        expr: sp_versions.VERSION
+        data_type: TEXT
+    time_dimensions:
+      - name: installed_at
+        expr: sp_versions.INSTALLED_AT
+        data_type: TIMESTAMP
+    metrics:
+      - name: procedure_count
+        expr: COUNT(sp_versions.PROCEDURE_NAME)

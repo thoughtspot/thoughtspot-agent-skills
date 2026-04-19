@@ -168,6 +168,36 @@ def snow_json(snow_cmd: str, cli_connection: str, query: str) -> list[dict]:
         ) from e
 
 
+def snow_json_file(snow_cmd: str, cli_connection: str, sql: str) -> list[dict]:
+    """
+    Like snow_json but writes SQL to a temp file and uses -f instead of -q.
+    Required for SQL that embeds multiline content (e.g. YAML in CALL statements)
+    where shell quoting via -q is unreliable.
+    """
+    import os
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sql", delete=False) as f:
+        f.write(sql)
+        tmp_path = f.name
+    try:
+        result = subprocess.run(
+            [snow_cmd, "sql", "-c", cli_connection, "--format", "json", "-f", tmp_path],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"snow sql failed:\n{result.stderr.strip() or result.stdout.strip()}"
+            )
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"snow sql returned non-JSON:\n{result.stdout[:300]}"
+            ) from e
+    finally:
+        os.unlink(tmp_path)
+
+
 def snow_exec(snow_cmd: str, cli_connection: str, sql: str) -> None:
     """
     Execute one or more SQL statements via the Snowflake CLI.

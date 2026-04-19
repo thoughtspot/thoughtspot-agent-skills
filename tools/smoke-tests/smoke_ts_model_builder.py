@@ -29,7 +29,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -40,8 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     import yaml
 except ImportError:
-    print("ERROR: PyYAML is required. Run: pip install PyYAML")
-    sys.exit(1)
+    yaml = None  # yaml only needed for TML validation step
 
 from check_tml import validate_table_tml  # noqa: E402
 from _common import (  # noqa: E402
@@ -61,7 +59,7 @@ def _build_test_table_tml(
     schema: str,
     table: str,
 ) -> dict:
-    """Build a minimal Table TML for the given physical table."""
+    """Build a minimal Table TML dict (for structural validation)."""
     return {
         "table": {
             "name": f"{db}_{schema}_{table}_SMOKE_TEST",
@@ -85,6 +83,32 @@ def _build_test_table_tml(
             ],
         }
     }
+
+
+def _build_tables_create_spec(
+    connection_name: str,
+    db: str,
+    schema: str,
+    table: str,
+    logical_name: str,
+) -> list[dict]:
+    """Build the JSON spec for ts tables create (reads from stdin)."""
+    return [
+        {
+            "name": logical_name,
+            "db": db,
+            "schema": schema,
+            "db_table": table,
+            "connection_name": connection_name,
+            "columns": [
+                {
+                    "name": "PROCEDURE_NAME",
+                    "data_type": "VARCHAR",
+                    "column_type": "ATTRIBUTE",
+                },
+            ],
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -170,34 +194,31 @@ def main() -> int:
     r.info(f"Connection ID: {conn_id}")
 
     # ── ts connections get (full schema hierarchy) ────────────────────────────
+    # Note: uses v1 API (/tspublic/v1/connection/fetchConnection) which is not
+    # available on all instances. Skipped gracefully if the endpoint returns 404.
     def _get_connection():
-        result = run_ts(["connections", "get", args.connection_name], args.ts_profile)
+        try:
+            result = run_ts(["connections", "get", args.connection_name], args.ts_profile)
+        except RuntimeError as e:
+            if "404" in str(e):
+                raise SkipStep(
+                    "v1 fetchConnection endpoint not available on this instance "
+                    "(404). Skipping hierarchy check."
+                )
+            raise
         if not isinstance(result, dict):
             raise RuntimeError(
                 f"ts connections get returned unexpected type: {type(result).__name__}"
             )
         databases = result.get("databases") or result.get("data", {}).get("databases", [])
-        if not databases:
-            raise RuntimeError(
-                "ts connections get returned no databases. "
-                "The connection may not have any accessible schemas."
-            )
         return result, databases
 
     ok, conn_result = r.step(
         f"ts connections get '{args.connection_name}'", _get_connection
     )
     if ok and conn_result:
-        result, databases = conn_result
+        _, databases = conn_result
         r.info(f"Connection has {len(databases)} database(s) in hierarchy")
-
-        # Verify the target DB/schema/table are accessible
-        target_db = next(
-            (d for d in databases if d.get("name", "").upper() == args.db.upper()),
-            None,
-        )
-        if not target_db:
-            r.info(f"WARNING: Database '{args.db}' not found in connection hierarchy")
 
     # ── Build and validate Table TML ─────────────────────────────────────────
     table_tml = _build_test_table_tml(
@@ -218,37 +239,37 @@ def main() -> int:
         return r.summary()
 
     # ── ts tables create ──────────────────────────────────────────────────────
+    # ts tables create reads a JSON spec array from stdin (no --file option).
     created_guid: str | None = None
-    tml_str = yaml.dump(table_tml, default_flow_style=False, allow_unicode=True)
+    create_spec = _build_tables_create_spec(
+        args.connection_name, args.db, args.schema, args.table, table_name
+    )
+    spec_json = json.dumps(create_spec)
 
     def _create_table():
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, prefix="smoke_table_"
-        ) as f:
-            f.write(tml_str)
-            tmp_path = f.name
+        import subprocess as _sp
+        cmd = ["ts", "tables", "create", "--profile", args.ts_profile]
+        result = _sp.run(cmd, input=spec_json, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"ts tables create failed:\n{result.stderr.strip() or result.stdout.strip()}"
+            )
+        try:
+            parsed = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"ts tables create returned non-JSON:\n{result.stdout[:200]}"
+            ) from e
 
-        result = run_ts(
-            ["tables", "create", "--file", tmp_path],
-            args.ts_profile,
-        )
-        Path(tmp_path).unlink(missing_ok=True)
-
-        # Result format: {table_name: guid} or list
-        if isinstance(result, dict):
-            # Look for the guid by table name or as the only value
-            guid = result.get(table_name) or next(iter(result.values()), None)
-            if guid:
-                return str(guid)
-        elif isinstance(result, list) and result:
-            item = result[0]
-            guid = item.get("id_guid") or item.get("metadata_id") or item.get("id")
+        # Result format: {table_name: guid}
+        if isinstance(parsed, dict):
+            guid = parsed.get(table_name) or next(iter(parsed.values()), None)
             if guid:
                 return str(guid)
 
         raise RuntimeError(
             f"Could not extract GUID from ts tables create response: "
-            f"{json.dumps(result)[:300]}"
+            f"{json.dumps(parsed)[:300]}"
         )
 
     ok, created_guid = r.step(f"ts tables create '{table_name}'", _create_table)

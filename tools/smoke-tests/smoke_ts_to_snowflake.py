@@ -54,7 +54,7 @@ from check_sv_yaml import validate_sv_yaml  # noqa: E402
 from _common import (  # noqa: E402
     SmokeTestResult, SkipStep,
     ts_auth_check, run_ts,
-    load_sf_profile, get_snow_cmd, snow_json, snow_exec,
+    load_sf_profile, get_snow_cmd, snow_json_file, snow_exec,
 )
 
 
@@ -97,14 +97,6 @@ def _extract_sv_yaml_from_md(md_path: Path) -> dict:
         "The file must contain a ```yaml block with 'name' and 'tables' keys."
     )
 
-
-def _find_first_metric(sv_data: dict) -> str | None:
-    """Return the name of the first metric in the SV (any table)."""
-    for table in sv_data.get("tables", []):
-        metrics = table.get("metrics", [])
-        if metrics and metrics[0].get("name"):
-            return metrics[0]["name"]
-    return None
 
 
 def _find_model_guid(ts_profile: str, model_name: str) -> str:
@@ -268,11 +260,10 @@ def main() -> int:
 
     # ── Dry-run validation ───────────────────────────────────────────────────
     def _dry_run():
-        escaped = sv_yaml_str.replace("\\", "\\\\")
-        rows = snow_json(
+        rows = snow_json_file(
             snow_cmd, cli_conn,
             f"CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML("
-            f"'{args.sf_target_db}.{args.sf_target_schema}', $${sv_yaml_str}$$, TRUE)"
+            f"'{args.sf_target_db}.{args.sf_target_schema}', $${sv_yaml_str}$$, TRUE);"
         )
         # Success returns something like [{"SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML": "..."}]
         if rows:
@@ -296,10 +287,10 @@ def main() -> int:
 
     # ── Create the Semantic View ──────────────────────────────────────────────
     def _create_sv():
-        rows = snow_json(
+        rows = snow_json_file(
             snow_cmd, cli_conn,
             f"CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML("
-            f"'{args.sf_target_db}.{args.sf_target_schema}', $${sv_yaml_str}$$)"
+            f"'{args.sf_target_db}.{args.sf_target_schema}', $${sv_yaml_str}$$);"
         )
         if rows:
             val = list(rows[0].values())[0] if rows[0] else ""
@@ -312,7 +303,7 @@ def main() -> int:
 
     # ── Confirm view exists via SHOW ─────────────────────────────────────────
     def _show_sv():
-        rows = snow_json(
+        rows = snow_json_file(
             snow_cmd, cli_conn,
             f"SHOW SEMANTIC VIEWS LIKE '{view_name}' "
             f"IN SCHEMA {args.sf_target_db}.{args.sf_target_schema};"
@@ -333,26 +324,10 @@ def main() -> int:
     if ok and sv_row:
         r.info(f"View row: name={sv_row.get('name')}, owner={sv_row.get('owner')}")
 
-    # ── Spot-check: SELECT first metric LIMIT 1 ──────────────────────────────
-    first_metric = _find_first_metric(sv_data)
-    if first_metric:
-        def _spot_check():
-            rows = snow_json(
-                snow_cmd, cli_conn,
-                f"SELECT {first_metric} "
-                f"FROM {args.sf_target_db}.{args.sf_target_schema}.{view_name} "
-                f"LIMIT 1;"
-            )
-            # A result (even empty) is a pass — we just need no error
-            return rows
-
-        ok, spot_rows = r.step(
-            f"Spot-check SELECT {first_metric} LIMIT 1", _spot_check
-        )
-        if ok:
-            r.info(f"Returned {len(spot_rows or [])} row(s)")
-    else:
-        r.info("No metrics found in SV — skipping spot-check SELECT")
+    # Note: Snowflake Semantic Views created via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML
+    # are NOT directly queryable with SQL SELECT — they are a semantic layer definition
+    # consumed by Cortex Analyst, not a regular SQL view. SHOW SEMANTIC VIEWS above
+    # is the correct confirmation that the view was created successfully.
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
     if args.no_cleanup:
