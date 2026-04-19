@@ -389,7 +389,9 @@ Then expose each renamed column as a dimension and update relationships:
 - name: trans_account_id
   expr: trans.TRANS_ACCOUNT_ID
   data_type: NUMBER
+```
 
+```yaml
 # Relationship uses the renamed column
 relationships:
 - name: trans_to_account

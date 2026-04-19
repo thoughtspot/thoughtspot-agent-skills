@@ -162,6 +162,14 @@ pip install requests pyyaml
 pip install snowflake-connector-python cryptography
 ```
 
+### 4. Install the pre-commit hook
+
+Runs validation checks automatically before every commit:
+
+```bash
+ln -s ../../scripts/pre-commit.sh .git/hooks/pre-commit
+```
+
 Then complete [Credential Setup](#credential-setup) below.
 
 ---
@@ -287,6 +295,20 @@ document it in `references/open-items.md` with:
 
 Don't merge a skill with unresolved open items unless they are explicitly marked as
 low-risk or deferred.
+
+### Before committing changes
+
+Run the validation suite to catch common issues before they reach GitHub:
+
+```bash
+python tools/validate/check_references.py     # verify all file paths in SKILL.md files exist
+python tools/validate/check_patterns.py       # detect known TML and code anti-patterns
+python tools/validate/check_yaml.py           # validate YAML code blocks in .md files
+python tools/validate/check_version_sync.py   # confirm ts-cli version is in sync
+pytest tools/ts-cli/tests/                    # unit tests for CLI functions (no live API needed)
+```
+
+All checks should pass before opening a PR. See `tools/validate/README.md` for details.
 
 ### Pull requests
 

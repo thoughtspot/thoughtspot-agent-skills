@@ -242,7 +242,7 @@ joins_with:
 guid: "{existing_model_guid}"   # MUST be first key in the document
 model:
   name: MODEL_NAME
-  ...
+  # ...
 ```
 
 `guid` nested under `model:` (e.g. `model: { guid: ... }`) is **silently ignored** —

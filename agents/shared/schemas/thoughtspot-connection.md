@@ -82,7 +82,7 @@ table:
   connection:
     name: "APJ_BIRD"   # exact name from ts connections list — case-sensitive
   columns:
-  ...
+  # ...
 ```
 
 ---

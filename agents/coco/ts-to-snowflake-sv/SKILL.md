@@ -1198,6 +1198,56 @@ rm -f /tmp/ts_token.txt
 
 ---
 
+### Step 12b: Verify Creation
+
+After a successful `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` response, confirm the view
+exists and is queryable before reporting success.
+
+**1. Confirm the view exists:**
+
+```sql
+SHOW SEMANTIC VIEWS LIKE '{semantic_view_name}' IN SCHEMA {target_database}.{target_schema};
+```
+
+Expected: exactly one row returned with `name = '{semantic_view_name}'`.
+
+If zero rows returned: the stored procedure reported success but the view was not created.
+Report this discrepancy verbatim — do not proceed to test questions.
+
+**2. Spot-check — SELECT the first metric:**
+
+```sql
+SELECT {first_metric_name}
+FROM {target_database}.{target_schema}.{semantic_view_name}
+LIMIT 1;
+```
+
+Replace `{first_metric_name}` with the first entry in the `metrics:` list in the
+generated YAML. If this returns an error, report it verbatim and do not silently skip.
+
+Common errors at this stage and their causes:
+
+| Error | Cause | Fix |
+|---|---|---|
+| `error 392700 "unknown field data_type"` | A metric has `data_type:` set | Remove `data_type` from all `metrics:` entries |
+| `invalid column name "id"` | Lowercase case-sensitive column not wrapped in a view | Create uppercase wrapper view (Step 5 / Step 6) |
+| `semantic view not found` | SHOW result name has different casing | Check exact `name:` value used in the YAML |
+| `The fact entity … must be … lower granularity` | Bridge/junction table traversal hit | Use direct SQL instead; see Known Limitations in snowflake-schema.md |
+
+**3. Report location:**
+
+```
+Semantic View created successfully.
+
+  Name:    {semantic_view_name}
+  Schema:  {target_database}.{target_schema}
+  Tables:  {n} table(s), {m} metric(s)
+```
+
+After the spot-check passes, proceed to Step 13 (Generate Test Questions).
+
+---
+
 ### Step 13: Generate Test Questions
 
 After the view is successfully created, generate 5 natural language questions derived

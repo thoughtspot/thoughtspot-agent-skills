@@ -445,8 +445,8 @@ If strategy is table-level (option 1), update each source Table TML to add `join
 
 ```yaml
 joins_with:
-- name: {left_table}_to_{right_table}
-  destination: {right_table_name}
+- name: "{left_table}_to_{right_table}"
+  destination: "{right_table_name}"
   type: LEFT_OUTER
   on: "[{left_table}::{left_col}] = [{right_table}::{right_col}]"
   is_one_to_one: false
@@ -462,40 +462,40 @@ reference them.
 
 ```yaml
 model:
-  name: {MODEL_NAME}
+  name: "{MODEL_NAME}"
   description: ""
   model_tables:
-  - name: {TABLE_1_NAME}
-    id: {TABLE_1_NAME}_1
-  - name: {TABLE_2_NAME}
-    id: {TABLE_2_NAME}_1
+  - name: "{TABLE_1_NAME}"
+    id: "{TABLE_1_NAME}_1"
+  - name: "{TABLE_2_NAME}"
+    id: "{TABLE_2_NAME}_1"
   # ... one entry per table
 
   joins:                              # OMIT if using table-level joins (see open-item #5)
-  - name: {left}_to_{right}
-    source: {LEFT_TABLE}_1
-    destination: {RIGHT_TABLE}_1
+  - name: "{left}_to_{right}"
+    source: "{LEFT_TABLE}_1"
+    destination: "{RIGHT_TABLE}_1"
     type: LEFT_OUTER
     on: "[{LEFT_TABLE}_1::{left_col}] = [{RIGHT_TABLE}_1::{right_col}]"
     is_one_to_one: false
 
   table_paths:
-  - id: {FACT_TABLE}_1
-    table: {FACT_TABLE}
+  - id: "{FACT_TABLE}_1"
+    table: "{FACT_TABLE}"
     join_path:
     - {}                              # fact table has empty join_path
-  - id: {DIM_TABLE}_1
-    table: {DIM_TABLE}
+  - id: "{DIM_TABLE}_1"
+    table: "{DIM_TABLE}"
     join_path:
     - join:
-      - {fact}_to_{dim}              # join name from joins section above
+      - "{fact}_to_{dim}"            # join name from joins section above
 
   columns:
-  - name: {DISPLAY_NAME}
-    column_id: {TABLE_PATH_ID}::{PHYSICAL_COLUMN_NAME}
+  - name: "{DISPLAY_NAME}"
+    column_id: "{TABLE_PATH_ID}::{PHYSICAL_COLUMN_NAME}"
     properties:
-      column_type: {ATTRIBUTE|MEASURE}
-      aggregation: {SUM|COUNT|...}   # MEASURE only
+      column_type: "{ATTRIBUTE|MEASURE}"
+      aggregation: "{SUM|COUNT|...}"   # MEASURE only
 ```
 
 ### 5E — Review checkpoint

@@ -412,7 +412,7 @@ If no comment is present, convert the DIM_NAME to title case (e.g., `trans_id` â
 ThoughtSpot model column format:
 ```yaml
 - name: "{display_name}"              # From comment or title-cased DIM_NAME
-  column_id: {TABLE_ID}::{col_name}  # TABLE_ID = id in model_tables, col_name from ThoughtSpot Table TML
+  column_id: "{TABLE_ID}::{col_name}"  # TABLE_ID = id in model_tables, col_name from ThoughtSpot Table TML
   properties:
     column_type: ATTRIBUTE
 ```

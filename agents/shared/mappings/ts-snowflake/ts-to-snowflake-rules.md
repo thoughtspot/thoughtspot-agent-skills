@@ -148,40 +148,40 @@ case-insensitively, so `id` and `ID` both match a physical `"id"` column.
 
 **Dimension (nested under its table):**
 ```yaml
-- name: {snake_case_name}
+- name: "{snake_case_name}"
   synonyms:
   - "{display_name}"
   - "{...additional ThoughtSpot synonyms}"
   description: "{description or [TS AI Context] {ai_context} or empty string}"
-  expr: {table_alias}.{DB_COLUMN_NAME}    # or {table_alias}."{db_column_name}" if case-sensitive
-  data_type: {TEXT|NUMBER|BOOLEAN}
+  expr: "{table_alias}.{DB_COLUMN_NAME}"    # or {table_alias}."{db_column_name}" if case-sensitive
+  data_type: "{TEXT|NUMBER|BOOLEAN}"
 ```
 
 **Time dimension (nested under its table):**
 ```yaml
-- name: {snake_case_name}
+- name: "{snake_case_name}"
   synonyms:
   - "{display_name}"
   description: "{description or empty string}"
-  expr: {table_alias}.{DB_COLUMN_NAME}    # or {table_alias}."{db_column_name}" if case-sensitive
-  data_type: {DATE|TIMESTAMP}
+  expr: "{table_alias}.{DB_COLUMN_NAME}"    # or {table_alias}."{db_column_name}" if case-sensitive
+  data_type: "{DATE|TIMESTAMP}"
 ```
 
 **Column quoting in `expr`:** Double-quote the column name portion in the SQL expression when:
 - The column is a SQL reserved word (`date`, `time`, `id`, `name`, `schema`, `table`, `value`, etc.)
 - The column was created case-sensitively (appears lowercase in `SHOW COLUMNS`)
 ```yaml
-  expr: {table_alias}."column_name"    # inline in the expression string (no YAML outer quotes needed)
+  expr: '{table_alias}."column_name"'    # inline in the expression string (no YAML outer quotes needed)
 ```
 
 **Metric — physical column (nested under its table):**
 ```yaml
-- name: {snake_case_name}
+- name: "{snake_case_name}"
   synonyms:
   - "{display_name}"
   - "{...additional synonyms}"
   description: "{description or empty string}"
-  expr: {AGG}({table_alias}.{DB_COLUMN_NAME})
+  expr: "{AGG}({table_alias}.{DB_COLUMN_NAME})"
 ```
 > **Do NOT include `data_type` on metrics.** `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` stores
 > it in the Cortex Analyst (CA) extension JSON; Cortex then rejects it at query time with
@@ -216,12 +216,12 @@ The Formula Translation Log entry should capture:
 ## Relationship Entry Template
 
 ```yaml
-- name: {LEFT_TABLE}_to_{RIGHT_TABLE}    # append _{LEFT_COL} if name already used
-  left_table: {LEFT_TABLE_ALIAS}
-  right_table: {RIGHT_TABLE_ALIAS}
+- name: "{LEFT_TABLE}_to_{RIGHT_TABLE}"    # append _{LEFT_COL} if name already used
+  left_table: "{LEFT_TABLE_ALIAS}"
+  right_table: "{RIGHT_TABLE_ALIAS}"
   relationship_columns:
-  - left_column: {LEFT_PHYSICAL_COLUMN}      # bare identifier — never '"col"'
-    right_column: {RIGHT_PHYSICAL_COLUMN}    # bare identifier — never '"col"'
+  - left_column: "{LEFT_PHYSICAL_COLUMN}"      # bare identifier — never '"col"'
+    right_column: "{RIGHT_PHYSICAL_COLUMN}"    # bare identifier — never '"col"'
 ```
 
 **Collision avoidance:** if `{LEFT_TABLE}_to_{RIGHT_TABLE}` is already used by a

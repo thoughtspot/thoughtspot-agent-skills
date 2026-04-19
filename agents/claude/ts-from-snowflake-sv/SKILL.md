@@ -616,6 +616,48 @@ required for any future reimports to update the model without creating a duplica
 
 ---
 
+### Step 11b: Verify Import
+
+After a successful import response, confirm the model was indexed and has the expected
+shape — not just that the API returned 200.
+
+**1. Search for the model by GUID:**
+
+```bash
+ts metadata search --subtype WORKSHEET --name "%TEST_SV_{view_name}%" --profile {profile}
+```
+
+The GUID returned by the import response must appear in the results. If it is absent,
+the import succeeded at the API level but indexing is delayed — wait 5 seconds and
+retry once.
+
+**2. Export the imported model and count columns:**
+
+```bash
+ts tml export {created_guid} --fqn --profile {profile}
+```
+
+Parse the returned TML and count `model.columns[]` entries. This count must be ≥ the
+number of translatable fields from the semantic view (i.e. total dimensions + metrics,
+minus any omitted from the untranslatable list in Step 9).
+
+If the column count is lower than expected: compare the exported TML against the TML
+sent in Step 11 to identify which columns ThoughtSpot silently dropped, and investigate.
+
+**3. Report the model URL:**
+
+```
+Model imported successfully.
+
+  Name:    TEST_SV_{view_name}
+  GUID:    {created_guid}
+  URL:     {base_url}/#/model/{created_guid}
+
+Open the URL in a browser to verify the model appears in the ThoughtSpot Data panel.
+```
+
+---
+
 ### Step 12: Produce summary report
 
 After a successful import, output:

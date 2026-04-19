@@ -44,7 +44,12 @@ build/
 # Local test data
 .data/
 
-# AI tool local settings
+# AI tool local settings — ignore personal config, track shared project config
+# (.claude/agents/ and .claude/rules/ are committed; settings.local.json is not)
 .cursor/
-.claude/
+.claude/settings.local.json
+.claude/settings.json
 .gemini/
+
+# Deployment state (local only — tracks last Snowflake stage sync)
+.snowflake-deploy-sha

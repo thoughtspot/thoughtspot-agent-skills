@@ -681,7 +681,7 @@ guid: "{existing_model_guid}"   # MUST be at document root — NOT inside model:
 model:
   name: "TEST_SV_{view_name}"
   model_tables:
-  ...
+  # ...
 ```
 
 **`guid` under `model:` (i.e. `model: { guid: ... }`) is silently ignored** — ThoughtSpot

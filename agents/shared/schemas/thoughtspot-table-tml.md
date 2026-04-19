@@ -146,7 +146,7 @@ endpoint.
 guid: "{existing_table_guid}"   # TOP of document
 table:
   name: TABLE_NAME
-  ...
+  # ...
 ```
 
 `guid` nested inside `table:` is silently ignored — ThoughtSpot creates a new
