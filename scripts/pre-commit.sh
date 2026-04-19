@@ -61,6 +61,12 @@ if echo "$STAGED" | grep -q 'open-items\.md'; then
   run_check "open items"         "tools/validate/check_open_items.py --root $REPO_ROOT --warn"
 fi
 
+# Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
+# Ensures README skills table, SETUP.md symlink/stage steps stay in sync with repo structure
+if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then
+  run_check "consistency"        "tools/validate/check_consistency.py --root $REPO_ROOT --staged"
+fi
+
 # Only run unit tests if Python source files are staged
 if echo "$STAGED" | grep -q '\.py$'; then
   printf "  %-30s " "unit tests"

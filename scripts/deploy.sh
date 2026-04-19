@@ -51,6 +51,7 @@ deploy_check "anti-patterns"        "tools/validate/check_patterns.py --root $SC
 deploy_check "SV YAML structure"    "tools/validate/check_sv_yaml.py --root $SCRIPT_DIR/.."
 deploy_check "TML structure"        "tools/validate/check_tml.py --root $SCRIPT_DIR/.."
 deploy_check "version sync"         "tools/validate/check_version_sync.py --root $SCRIPT_DIR/.."
+deploy_check "consistency"          "tools/validate/check_consistency.py --root $SCRIPT_DIR/.."
 
 # Open items: warn but don't block deploy (items may be in-flight)
 printf "  %-32s " "open items"
