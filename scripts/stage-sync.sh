@@ -61,18 +61,20 @@ while IFS= read -r file; do
 
   if [[ "$file" == agents/coco/* ]]; then
     rel="${file#agents/coco/}"
-    dest_dir="$STAGE/skills/$(dirname "$rel")/"
+    rel_dir="$(dirname "$rel")"
+    dest_dir="$STAGE/skills/$( [ "$rel_dir" = "." ] && echo "" || echo "$rel_dir/" )"
 
   elif [[ "$file" == agents/shared/* ]]; then
     rel="${file#agents/shared/}"
-    dest_dir="$STAGE/shared/$(dirname "$rel")/"
+    rel_dir="$(dirname "$rel")"
+    dest_dir="$STAGE/shared/$( [ "$rel_dir" = "." ] && echo "" || echo "$rel_dir/" )"
 
   else
     continue
   fi
 
   printf "  uploading %-60s → %s\n" "$file" "$dest_dir"
-  if snow stage copy "$file" "$dest_dir" --overwrite --quiet 2>/dev/null; then
+  if snow stage copy "$file" "$dest_dir" --overwrite --silent 2>/dev/null; then
     SYNCED=$((SYNCED + 1))
   else
     echo "  ERROR: failed to upload $file" >&2
