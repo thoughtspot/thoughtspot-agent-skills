@@ -37,6 +37,12 @@ snow stage copy agents/shared/schemas/thoughtspot-formula-patterns.md @SKILLS.PU
 snow stage copy agents/shared/schemas/thoughtspot-model-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
+
+# Unity Catalog reference files (used by ts-to-unity-catalog; CoCo/Genie port pending)
+snow stage copy agents/shared/schemas/unity-catalog-schema.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/mappings/ts-unity-catalog/ts-to-unity-catalog-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-unity-catalog/ --overwrite
+snow stage copy agents/shared/mappings/ts-unity-catalog/ts-unity-catalog-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-unity-catalog/ --overwrite
+snow stage copy agents/shared/mappings/ts-unity-catalog/ts-unity-catalog-properties.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-unity-catalog/ --overwrite
 ```
 
 ### Step 2: Ask CoCo to deploy to Workspace
