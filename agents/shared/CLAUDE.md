@@ -24,6 +24,9 @@ schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference
   thoughtspot-model-tml.md            — model TML construction reference
+  thoughtspot-answer-tml.md           — Answer TML structure (formulas, parameters, sets, data source lookup) — verified
+  thoughtspot-liveboard-tml.md        — Liveboard TML structure (visualizations, filters, layout, tabs) — verified
+  thoughtspot-sets-tml.md             — Set TML structure (bins, groups, query sets; answer-level vs reusable)
   thoughtspot-formula-patterns.md     — ThoughtSpot formula syntax reference
   thoughtspot-connection.md           — connection object structure
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
