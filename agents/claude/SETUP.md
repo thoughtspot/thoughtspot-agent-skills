@@ -66,6 +66,17 @@ against a configured SQL warehouse. Required before running `/ts-to-unity-catalo
 
 Run with `/databricks-profile-setup`.
 
+### [`ts-promote-answer-to-model`](ts-promote-answer-to-model/)
+
+Promotes formulas and parameters from a saved ThoughtSpot Answer into a Model
+definition. Exports the Answer TML to extract formula expressions and parameters, maps
+column references from the Answer context to the Model's table paths, validates the
+updated Model TML against the self-validation checklist, and imports the change in-place.
+Supports parameter promotion, formula inter-dependency detection, duplicate name
+handling, and permission checking before import.
+
+Run with `/ts-promote-answer-to-model`.
+
 ### [`ts-to-unity-catalog`](ts-to-unity-catalog/)
 
 Converts a ThoughtSpot Worksheet or Model into a Databricks Unity Catalog Metric View.
@@ -113,6 +124,7 @@ cp -r /tmp/thoughtspot-skills/agents/claude/ts-model-builder ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-from-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-to-unity-catalog ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-promote-answer-to-model ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
 cp -r /tmp/thoughtspot-skills/agents/shared ~/.claude/shared
@@ -177,6 +189,9 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/databricks-profile-setup \
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-to-unity-catalog \
       ~/.claude/skills/ts-to-unity-catalog
+
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-promote-answer-to-model \
+      ~/.claude/skills/ts-promote-answer-to-model
 
 # Shared reference docs (schemas, mappings, worked-examples)
 ln -s ~/Dev/thoughtspot-skills/agents/shared ~/.claude/shared

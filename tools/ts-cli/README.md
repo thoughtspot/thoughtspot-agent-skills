@@ -235,11 +235,12 @@ ts tml export abc-123 def-456 --format JSON
 |---|---|---|
 | `--profile`, `-p` | first profile | Profile to use |
 | `--fqn` | false | Include fully-qualified names in output |
-| `--associated` | false | Export associated objects (e.g. tables for a worksheet) |
+| `--associated` | false | Export associated objects (e.g. tables for a model) |
 | `--format`, `-f` | `YAML` | Output format: `YAML` or `JSON` |
+| `--parse` | false | Parse each `edoc` string into a structured JSON object (see below) |
 
-**Output:** JSON array from `POST /api/rest/2.0/metadata/tml/export`. Each element
-contains `info` (metadata) and `edoc` (the TML string).
+**Output (default):** JSON array from `POST /api/rest/2.0/metadata/tml/export`. Each element
+contains `info` (metadata) and `edoc` (the raw TML string).
 
 ```json
 [
@@ -254,10 +255,38 @@ contains `info` (metadata) and `edoc` (the TML string).
 ]
 ```
 
-**Note:** Using `--associated` on a worksheet exports the worksheet plus all
-referenced tables. For example, `--fqn --associated` on `Retail Sales WS`
-returned 4 objects: 1 worksheet + 3 tables (`DIM_RETAPP_STORES`,
-`FACT_RETAPP_SALES`, `DIM_RETAPP_PRODUCTS`).
+**Output (with `--parse`):** Each `edoc` is parsed from YAML into a structured object.
+Non-printable characters are stripped automatically. The `edoc` field is replaced by
+`type`, `guid`, and `tml`.
+
+```json
+[
+  {
+    "type": "model",
+    "guid": "3b0de9da-8753-4def-b5a4-1be6b7f66991",
+    "tml": {
+      "guid": "3b0de9da-8753-4def-b5a4-1be6b7f66991",
+      "model": {
+        "name": "Retail Sales WS",
+        "formulas": [...],
+        "columns": [...]
+      }
+    },
+    "info": {
+      "name": "Retail Sales WS",
+      "id": "3b0de9da-8753-4def-b5a4-1be6b7f66991",
+      "type": "model"
+    }
+  }
+]
+```
+
+Skills that use `--parse` replace the standard three-step parse boilerplate
+(`json.loads` → strip non-printable → `yaml.safe_load`) with a single `json.loads`
+on the CLI output.
+
+**Note:** Using `--associated` on a model exports the model plus all referenced tables.
+For example, `--fqn --associated` on a model with 3 tables returns 4 objects total.
 
 ---
 
@@ -447,6 +476,10 @@ ts metadata search --subtype WORKSHEET --name "%Retail%" \
 # Export TML and extract the edoc string
 ts tml export e61c7c4c-68a4-4174-b393-a0104ae3bd00 \
   | jq -r '.[0].edoc'
+
+# Export and parse — get the model's formula list directly
+ts tml export e61c7c4c-68a4-4174-b393-a0104ae3bd00 --fqn --parse \
+  | jq '.[0].tml.model.formulas'
 
 # Get all worksheet names
 ts metadata search --subtype WORKSHEET --all \

@@ -7,6 +7,7 @@ import sys
 from typing import List, Optional
 
 import typer
+import yaml
 
 from ts_cli.client import ThoughtSpotClient, resolve_profile
 
@@ -14,6 +15,58 @@ app = typer.Typer(help="TML export and import commands.")
 
 _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
                                help="Profile name (default: first profile or TS_PROFILE env var)")
+
+# Non-printable characters that cause YAML parse errors in ThoughtSpot edoc output.
+# Keeps: tab (09), LF (0A), CR (0D), printable ASCII (20-7E), NEL (85),
+# non-breaking space (A0), and BMP chars up to FFFD.
+_NONPRINTABLE_RE = re.compile(r'[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uFFFD]')
+
+# Top-level keys that identify TML object types in a parsed edoc.
+_TML_TYPE_KEYS = frozenset({
+    "model", "table", "answer", "liveboard", "worksheet",
+    "view", "pinboard", "sql_view",
+})
+
+
+def strip_nonprintable(text: str) -> str:
+    """Remove non-printable characters from a TML edoc string before parsing."""
+    return _NONPRINTABLE_RE.sub("", text)
+
+
+def detect_tml_type(parsed: dict) -> str:
+    """Return the TML object type from the top-level key (excluding 'guid').
+
+    ThoughtSpot TML has exactly one top-level key that names the object type
+    (e.g. 'model', 'table', 'answer'). The optional 'guid' key at document
+    root is excluded from the search.
+
+    Returns 'unknown' if no recognised type key is found.
+    """
+    # Prefer known type keys first for determinism
+    for key in _TML_TYPE_KEYS:
+        if key in parsed:
+            return key
+    # Fallback: first non-guid key
+    for key in parsed:
+        if key != "guid":
+            return key
+    return "unknown"
+
+
+def parse_edoc(edoc: str, format: str = "YAML") -> dict:
+    """Parse a TML edoc string into a Python dict.
+
+    Strips non-printable characters before parsing. Supports YAML (default)
+    and JSON formats matching the --format flag on ts tml export.
+
+    Raises:
+        yaml.YAMLError: if YAML parsing fails.
+        json.JSONDecodeError: if JSON parsing fails.
+    """
+    cleaned = strip_nonprintable(edoc)
+    if format.upper() == "JSON":
+        return json.loads(cleaned)
+    return yaml.safe_load(cleaned)
 
 
 @app.command("export")
@@ -25,6 +78,13 @@ def export_tml(
                                     help="Export associated objects (e.g. tables for a model)"),
     format: str = typer.Option("YAML", "--format", "-f",
                                help="Output format: YAML or JSON"),
+    parse: bool = typer.Option(False, "--parse",
+                               help=(
+                                   "Parse each edoc string into a structured JSON object. "
+                                   "Output changes from [{edoc: '...', info: {...}}] to "
+                                   "[{type: '...', guid: '...', tml: {...}, info: {...}}]. "
+                                   "Handles non-printable character stripping automatically."
+                               )),
 ) -> None:
     """Export TML for one or more objects.
 
@@ -32,11 +92,16 @@ def export_tml(
     The response contains an array of objects with 'edoc' (the TML string)
     and metadata about each exported object.
 
+    With --parse, each edoc is parsed from YAML (or JSON) into a structured
+    object. Non-printable characters are stripped automatically. This
+    eliminates the boilerplate parse loop that every skill otherwise needs.
+
     Examples:
 
     \b
       ts tml export abc-123
       ts tml export abc-123 --fqn --associated
+      ts tml export abc-123 --fqn --associated --parse
       ts tml export abc-123 def-456 --format JSON
     """
     client = ThoughtSpotClient(resolve_profile(profile))
@@ -49,7 +114,31 @@ def export_tml(
             "formattype": format,
         },
     )
-    print(json.dumps(resp.json()))
+    data = resp.json()
+
+    if not parse:
+        print(json.dumps(data))
+        return
+
+    result = []
+    for item in data:
+        edoc = item.get("edoc", "")
+        info = item.get("info", {})
+        obj_name = info.get("name", "unknown")
+        try:
+            parsed_tml = parse_edoc(edoc, format)
+        except Exception as exc:
+            raise SystemExit(
+                f"--parse: failed to parse edoc for '{obj_name}': {exc}"
+            ) from exc
+        result.append({
+            "type": detect_tml_type(parsed_tml),
+            "guid": parsed_tml.get("guid", ""),
+            "tml": parsed_tml,
+            "info": info,
+        })
+
+    print(json.dumps(result))
 
 
 @app.command("import")

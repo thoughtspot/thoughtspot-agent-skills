@@ -240,20 +240,13 @@ source ~/.zshenv && ts tml export {selected_model_id} --profile {profile_name} -
 When the user has selected multiple models, pass all GUIDs to a single export call:
 
 ```bash
-source ~/.zshenv && ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated
+source ~/.zshenv && ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated --parse
 ```
 
-Separate the combined response by top-level key (`worksheet`/`model` = primary objects;
-`table`/`sql_view` = associated objects). Cache associated table TMLs by GUID.
+`--parse` returns structured JSON directly — non-printable character stripping and
+YAML parsing are handled by the CLI. Cache associated table TMLs by GUID.
 
-**Non-printable characters:** Strip before parsing:
-```python
-import re
-cleaned = re.sub(r'[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD]', '', edoc)
-parsed = yaml.safe_load(cleaned)
-```
-
-Parse every `edoc` string as YAML (with cleaning). Separate into:
+Separate into:
 - **Primary object:** parsed YAML has top-level key `worksheet` or `model`
 - **Table objects:** parsed YAML has top-level key `table`
 - **SQL view objects:** parsed YAML has top-level key `sql_view` — collect separately

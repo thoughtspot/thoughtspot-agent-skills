@@ -39,6 +39,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | `ts-to-snowflake-sv` | `/ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-from-snowflake-sv` | `/ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 | `ts-to-unity-catalog` | `/ts-to-unity-catalog` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
+| `ts-promote-answer-to-model` | `/ts-promote-answer-to-model` | Promote formulas and parameters from a saved Answer into a Model |
 
 See **[agents/claude/SETUP.md](agents/claude/SETUP.md)** for installation, credential setup, and usage.
 

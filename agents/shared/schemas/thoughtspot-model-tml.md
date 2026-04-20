@@ -141,6 +141,11 @@ model:
 their `expr`. Adding `aggregation:` causes `FORMULA is not a valid aggregation type`.
 Add `aggregation:` to the corresponding `columns[]` entry instead.
 
+**`aggregation:` on formula `columns[]` entries is ignored at query time.** ThoughtSpot
+evaluates the formula `expr` directly — the column-level `aggregation` does not re-aggregate
+the result. Use `SUM` as the convention for all MEASURE formula columns; do not attempt to
+infer a "correct" aggregation from the expression shape (e.g. ratio vs. sum).
+
 ### Geo Config
 
 Assign a geographic role so ThoughtSpot can render map charts:

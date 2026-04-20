@@ -216,10 +216,11 @@ Build a map: `physical_table_name → {metadata_id, metadata_name}`.
 **Export TMLs for all found tables in one call to verify columns:**
 
 ```bash
-ts tml export {guid1} {guid2} ... --profile {profile}
+ts tml export {guid1} {guid2} ... --profile {profile} --parse
 ```
 
-Parse `table.columns[].name` from each returned TML. Build a column map per table:
+`--parse` returns structured JSON — access columns via `item["tml"]["table"]["columns"]`
+directly. Parse `table.columns[].name` from each returned item. Build a column map per table:
 `table_name → [col_name, ...]`. Compare against the columns referenced in
 the semantic view dimensions and metrics to identify any column gaps.
 
@@ -322,11 +323,11 @@ For each relationship in the semantic view, find the name of the pre-defined joi
 in the ThoughtSpot Table objects.
 
 **Re-use the TMLs already exported in Step 6A** — do not make another export call.
-Parse the `edoc` YAML for each FROM table.
+The `--parse` output gives `item["tml"]["table"]` directly for each FROM table.
 
 For a relationship `FROM {from_table} KEY {from_col} TO {to_table} KEY {to_col}`:
 
-1. In the FROM table's `edoc` YAML, find the `joins_with` section.
+1. In the FROM table's parsed TML (`item["tml"]["table"]`), find the `joins_with` section.
 2. Match the entry where `destination.name` (or `destination`) equals the TO table name.
 3. Record the join `name` — this is the `referencing_join` value for the `to_table`
    entry in the model TML.
