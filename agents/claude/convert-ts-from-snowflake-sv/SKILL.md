@@ -1,5 +1,5 @@
 ---
-name: ts-from-snowflake-sv
+name: convert-ts-from-snowflake-sv
 description: Convert a Snowflake Semantic View into a ThoughtSpot Model by reading the view DDL, mapping tables and joins, translating SQL expressions to ThoughtSpot formulas, and importing the model via the ThoughtSpot REST API.
 ---
 
@@ -28,9 +28,9 @@ Two scenarios are supported:
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure, join scenarios, formula visibility, self-validation checklist |
 | [~/.claude/shared/schemas/thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula syntax, all function categories, LOD/window/semi-additive patterns, YAML encoding rules |
 | [~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
-| [~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [~/.claude/skills/setup-ts-profile/SKILL.md](~/.claude/skills/setup-ts-profile/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
-| [~/.claude/skills/snowflake-profile-setup/SKILL.md](~/.claude/skills/snowflake-profile-setup/SKILL.md) | Snowflake connection code, SQL execution patterns |
+| [~/.claude/skills/setup-snowflake-profile/SKILL.md](~/.claude/skills/setup-snowflake-profile/SKILL.md) | Snowflake connection code, SQL execution patterns |
 
 ---
 
@@ -65,7 +65,7 @@ Two scenarios are supported:
 
 - ThoughtSpot Cloud instance, REST API v2 enabled
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege — **only required for import**
-- Authentication configured — run `/ts-profile-setup` if you haven't already
+- Authentication configured — run `/setup-ts-profile` if you haven't already
 - The `ts` CLI installed (`pip install -e /path/to/tools/ts-cli`)
 
 **No ThoughtSpot import access?** You can still run this skill in **file-only mode** —
@@ -75,7 +75,7 @@ at the Step 10 checkpoint or say "file only" at any point before Step 11.
 ### Snowflake
 
 - Role with `USAGE` on the database and schema containing the semantic view
-- Connection configured — run `/snowflake-profile-setup` if you haven't already
+- Connection configured — run `/setup-snowflake-profile` if you haven't already
 - For Scenario B: role with `CREATE TABLE` or connection modification rights
 
 ---

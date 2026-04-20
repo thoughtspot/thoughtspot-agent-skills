@@ -30,16 +30,28 @@ thoughtspot-skills/
 
 Skills invoked via slash commands in Claude Code. Requires Claude Code and Python.
 
+**Conversion** — move semantic models between ThoughtSpot and data platforms
+
 | Skill | Command | What it does |
 |---|---|---|
-| `ts-profile-setup` | `/ts-profile-setup` | Add, update, test, or delete ThoughtSpot profiles |
-| `snowflake-profile-setup` | `/snowflake-profile-setup` | Add, update, test, or delete Snowflake profiles |
-| `databricks-profile-setup` | `/databricks-profile-setup` | Add, update, test, or delete Databricks profiles (PAT auth, SQL warehouse) |
-| `ts-model-builder` | `/ts-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD diagram image |
-| `ts-to-snowflake-sv` | `/ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-from-snowflake-sv` | `/ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
-| `ts-to-unity-catalog` | `/ts-to-unity-catalog` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
-| `ts-promote-answer-to-model` | `/ts-promote-answer-to-model` | Promote formulas and parameters from a saved Answer into a Model |
+| `convert-ts-to-snowflake-sv` | `/convert-ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `convert-ts-from-snowflake-sv` | `/convert-ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `convert-ts-to-unity-catalog` | `/convert-ts-to-unity-catalog` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
+
+**ThoughtSpot Objects** — author and manage ThoughtSpot Models
+
+| Skill | Command | What it does |
+|---|---|---|
+| `object-ts-model-builder` | `/object-ts-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD diagram image |
+| `object-ts-model-promote` | `/object-ts-model-promote` | Promote formulas and parameters from a saved Answer into a Model |
+
+**Setup** — manage connection profiles and credentials
+
+| Skill | Command | What it does |
+|---|---|---|
+| `setup-ts-profile` | `/setup-ts-profile` | Add, update, test, or delete ThoughtSpot profiles |
+| `setup-snowflake-profile` | `/setup-snowflake-profile` | Add, update, test, or delete Snowflake profiles |
+| `setup-databricks-profile` | `/setup-databricks-profile` | Add, update, test, or delete Databricks profiles (PAT auth, SQL warehouse) |
 
 See **[agents/claude/SETUP.md](agents/claude/SETUP.md)** for installation, credential setup, and usage.
 
@@ -52,10 +64,10 @@ install required — runs entirely within Snowflake.
 
 | Skill | What it does |
 |---|---|
-| `ts-profile-setup` | Add, update, test, or delete ThoughtSpot profiles |
-| `ts-sv-setup` | Install or upgrade stored procedures required by the other skills |
-| `ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `setup-ts-profile` | Add, update, test, or delete ThoughtSpot profiles |
+| `setup-ts-sv` | Install or upgrade stored procedures required by the other skills |
+| `convert-ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `convert-ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
 
 See **[agents/coco/SETUP.md](agents/coco/SETUP.md)** for stage setup and Workspace deployment.
 

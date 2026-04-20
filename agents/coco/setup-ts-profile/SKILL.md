@@ -1,5 +1,5 @@
 ---
-name: ts-profile-setup
+name: setup-ts-profile
 description: Manage ThoughtSpot connection profiles for Snowflake workspaces — add, list, update, delete, and test profiles. Supports both bearer token and password authentication. Sets up External Access Integration and stores credentials securely using Snowflake Secrets. Token profiles expire after ~24 hours; password profiles remain valid until the password changes.
 ---
 
@@ -326,7 +326,7 @@ SHOW EXTERNAL ACCESS INTEGRATIONS LIKE 'THOUGHTSPOT_API_ACCESS';
 
 ### Step A8: Install stored procedures
 
-The stored procedures are managed by `/ts-sv-setup`. After completing Step A7, prompt
+The stored procedures are managed by `/setup-ts-sv`. After completing Step A7, prompt
 the user:
 
 ```
@@ -334,14 +334,14 @@ Profile '{profile_name}' is configured. Would you like to install or upgrade the
 ThoughtSpot stored procedures now? (yes/no)
 ```
 
-If yes, run `/ts-sv-setup`. It will automatically detect the new profile's secret and
+If yes, run `/setup-ts-sv`. It will automatically detect the new profile's secret and
 embed it in all three procedures (TS_SEARCH_MODELS, TS_EXPORT_TML, TS_IMPORT_TML).
 
 If no, remind the user:
 
 ```
-You can run /ts-sv-setup at any time to install the procedures. They are required
-before using /ts-to-snowflake-sv or /ts-from-snowflake-sv.
+You can run /setup-ts-sv at any time to install the procedures. They are required
+before using /convert-ts-to-snowflake-sv or /convert-ts-from-snowflake-sv.
 ```
 
 ### Step A9: Confirm
@@ -353,7 +353,7 @@ ThoughtSpot profile '{profile_name}' configured.
   Expires at: {token_expires_at}   (omit for password auth)
   Integration: THOUGHTSPOT_API_ACCESS
 
-Next step: run /ts-sv-setup to install stored procedures.
+Next step: run /setup-ts-sv to install stored procedures.
 ```
 
 ---
@@ -566,7 +566,7 @@ DROP SCHEMA IF EXISTS SKILLS.TEMP;
 | 401 / 403 from ThoughtSpot API | Token expired or password incorrect — run Update to refresh |
 | Profile table missing | Re-run Add (table is auto-created) |
 | External Access Integration missing | Re-run Step A7 as ACCOUNTADMIN |
-| Procedure not found | Run `/ts-sv-setup` to install or upgrade API procedures |
+| Procedure not found | Run `/setup-ts-sv` to install or upgrade API procedures |
 
 ---
 

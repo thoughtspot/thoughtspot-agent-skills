@@ -1,5 +1,5 @@
 ---
-name: ts-from-snowflake-sv
+name: convert-ts-from-snowflake-sv
 description: Convert a Snowflake Semantic View into a ThoughtSpot Model by reading the view DDL, mapping tables and joins, translating SQL expressions to ThoughtSpot formulas, and importing the model via the ThoughtSpot REST API.
 ---
 
@@ -66,7 +66,7 @@ UI confirmation prompt. Minimise calls by batching related statements.
 ## Prerequisites
 
 - A Snowflake role with `USAGE` on the database/schema containing the semantic view
-- ThoughtSpot setup completed via `/ts-profile-setup` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
+- ThoughtSpot setup completed via `/setup-ts-profile` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege in ThoughtSpot — **only required for import**
 
 **No ThoughtSpot import access?** You can still run this skill in **file-only mode** —
@@ -93,7 +93,7 @@ ORDER BY NAME;
 
 **Procedure check:** if any of the three procedures are missing from the first result,
 stop and tell the user:
-> "Required stored procedures are not installed. Run `/ts-sv-setup` to install them,
+> "Required stored procedures are not installed. Run `/setup-ts-sv` to install them,
 > then retry."
 
 **Profile selection:** using the rows from the second result:
@@ -106,7 +106,7 @@ stop and tell the user:
 *Token auth:* check the `TOKEN_EXPIRES_AT` value already returned above (no second query):
 - `TOKEN_EXPIRES_AT > CURRENT_TIMESTAMP()` → proceed
 - Otherwise → stop:
-  > "The token for profile '{profile_name}' has expired. Run `/ts-profile-setup` →
+  > "The token for profile '{profile_name}' has expired. Run `/setup-ts-profile` →
   > U → Refresh token, then retry."
 
 *Password auth:* no expiry check needed — proceed directly to credential retrieval.

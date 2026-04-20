@@ -1,7 +1,7 @@
 # Mapping Rules Reference — ThoughtSpot → Unity Catalog
 
 ThoughtSpot → Unity Catalog Metric View conversion tables. Consult during Steps 7–9
-of the ts-to-unity-catalog skill.
+of the convert-ts-to-unity-catalog skill.
 
 ---
 

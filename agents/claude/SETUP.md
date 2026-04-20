@@ -6,23 +6,23 @@ A collection of Claude Code skills for working with ThoughtSpot.
 
 ## Skills
 
-### [`ts-profile-setup`](ts-profile-setup/)
+### [`setup-ts-profile`](setup-ts-profile/)
 
 Manages ThoughtSpot connection profiles. Stores credentials securely in the macOS
 Keychain, wires up `~/.zshenv` for env var persistence, and verifies connections.
 Supports token, password, and secret key auth methods.
 
-Run with `/ts-profile-setup`.
+Run with `/setup-ts-profile`.
 
-### [`snowflake-profile-setup`](snowflake-profile-setup/)
+### [`setup-snowflake-profile`](setup-snowflake-profile/)
 
 Manages Snowflake connection profiles. Supports two connection methods: Python
 connector (key pair or password auth) and Snowflake CLI. Tests the connection
 and saves the profile for use by other skills.
 
-Run with `/snowflake-profile-setup`.
+Run with `/setup-snowflake-profile`.
 
-### [`ts-model-builder`](ts-model-builder/)
+### [`object-ts-model-builder`](object-ts-model-builder/)
 
 Builds a ThoughtSpot Model from a Snowflake schema or an ERD diagram image. Browses
 Snowflake to select tables (or reads a hand-drawn diagram), ensures those tables are
@@ -30,9 +30,9 @@ linked in the ThoughtSpot connection, creates logical Table objects, and generat
 final Model with inferred or user-defined joins. Supports table-level and model-level
 join strategies. Only creates Models — Worksheets are legacy and are not generated.
 
-Run with `/ts-model-builder`.
+Run with `/object-ts-model-builder`.
 
-### [`ts-to-snowflake-sv`](ts-to-snowflake-sv/)
+### [`convert-ts-to-snowflake-sv`](convert-ts-to-snowflake-sv/)
 
 Converts a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Exports
 the TML definition via the ThoughtSpot REST API, maps columns and joins to the
@@ -43,9 +43,9 @@ Handles case-sensitive Snowflake identifiers, SQL view auto-resolution, multi-mo
 batch conversion, and generates an Unmapped Properties Report for any ThoughtSpot
 features that cannot be represented in the Semantic View format.
 
-Run with `/ts-to-snowflake-sv`.
+Run with `/convert-ts-to-snowflake-sv`.
 
-### [`ts-from-snowflake-sv`](ts-from-snowflake-sv/)
+### [`convert-ts-from-snowflake-sv`](convert-ts-from-snowflake-sv/)
 
 Reverse-engineers a Snowflake Semantic View into a ThoughtSpot Model. Reads the
 semantic view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics
@@ -56,17 +56,17 @@ Supports two scenarios: building on the underlying physical tables (reusing exis
 ThoughtSpot Table objects and joins) or building on the semantic view's base tables
 directly (creating new Table objects in the connection).
 
-Run with `/ts-from-snowflake-sv`.
+Run with `/convert-ts-from-snowflake-sv`.
 
-### [`databricks-profile-setup`](databricks-profile-setup/)
+### [`setup-databricks-profile`](setup-databricks-profile/)
 
 Manages Databricks connection profiles for Unity Catalog skills. Stores PAT tokens
 securely in the macOS Keychain, wires up `~/.zshenv`, and verifies the connection
-against a configured SQL warehouse. Required before running `/ts-to-unity-catalog`.
+against a configured SQL warehouse. Required before running `/convert-ts-to-unity-catalog`.
 
-Run with `/databricks-profile-setup`.
+Run with `/setup-databricks-profile`.
 
-### [`ts-promote-answer-to-model`](ts-promote-answer-to-model/)
+### [`object-ts-model-promote`](object-ts-model-promote/)
 
 Promotes formulas and parameters from a saved ThoughtSpot Answer into a Model
 definition. Exports the Answer TML to extract formula expressions and parameters, maps
@@ -75,9 +75,9 @@ updated Model TML against the self-validation checklist, and imports the change 
 Supports parameter promotion, formula inter-dependency detection, duplicate name
 handling, and permission checking before import.
 
-Run with `/ts-promote-answer-to-model`.
+Run with `/object-ts-model-promote`.
 
-### [`ts-to-unity-catalog`](ts-to-unity-catalog/)
+### [`convert-ts-to-unity-catalog`](convert-ts-to-unity-catalog/)
 
 Converts a ThoughtSpot Worksheet or Model into a Databricks Unity Catalog Metric View.
 Exports the TML definition via the ThoughtSpot REST API, identifies the fact/source
@@ -90,7 +90,7 @@ Handles multi-hop snowflake schemas, SQL view auto-resolution, multi-model batch
 conversion, and generates an Unmapped Properties Report for any ThoughtSpot features
 that cannot be represented in the Metric View format.
 
-Run with `/ts-to-unity-catalog`.
+Run with `/convert-ts-to-unity-catalog`.
 
 ---
 
@@ -117,14 +117,14 @@ git clone https://github.com/djwaldo/thoughtspot-skills.git /tmp/thoughtspot-ski
 
 mkdir -p ~/.claude/skills
 
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-setup ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/snowflake-profile-setup ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/databricks-profile-setup ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-model-builder ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-to-snowflake-sv ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-from-snowflake-sv ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-to-unity-catalog ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-promote-answer-to-model ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/setup-ts-profile ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/setup-snowflake-profile ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/setup-databricks-profile ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/object-ts-model-builder ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/convert-ts-to-snowflake-sv ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/convert-ts-from-snowflake-sv ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/convert-ts-to-unity-catalog ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/object-ts-model-promote ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
 cp -r /tmp/thoughtspot-skills/agents/shared ~/.claude/shared
@@ -145,7 +145,7 @@ pip install requests pyyaml
 # Required only if connecting to Snowflake via Python connector (not needed for Snowflake CLI)
 pip install snowflake-connector-python cryptography
 
-# Required for Databricks Unity Catalog skills (ts-to-unity-catalog)
+# Required for Databricks Unity Catalog skills (convert-ts-to-unity-catalog)
 pip install databricks-sql-connector
 ```
 
@@ -169,29 +169,29 @@ git clone https://github.com/djwaldo/thoughtspot-skills.git ~/Dev/thoughtspot-sk
 mkdir -p ~/.claude/skills
 
 # Skills (agent-specific entry points)
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-setup \
-      ~/.claude/skills/ts-profile-setup
+ln -s ~/Dev/thoughtspot-skills/agents/claude/setup-ts-profile \
+      ~/.claude/skills/setup-ts-profile
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/snowflake-profile-setup \
-      ~/.claude/skills/snowflake-profile-setup
+ln -s ~/Dev/thoughtspot-skills/agents/claude/setup-snowflake-profile \
+      ~/.claude/skills/setup-snowflake-profile
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-model-builder \
-      ~/.claude/skills/ts-model-builder
+ln -s ~/Dev/thoughtspot-skills/agents/claude/object-ts-model-builder \
+      ~/.claude/skills/object-ts-model-builder
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-to-snowflake-sv \
-      ~/.claude/skills/ts-to-snowflake-sv
+ln -s ~/Dev/thoughtspot-skills/agents/claude/convert-ts-to-snowflake-sv \
+      ~/.claude/skills/convert-ts-to-snowflake-sv
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-from-snowflake-sv \
-      ~/.claude/skills/ts-from-snowflake-sv
+ln -s ~/Dev/thoughtspot-skills/agents/claude/convert-ts-from-snowflake-sv \
+      ~/.claude/skills/convert-ts-from-snowflake-sv
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/databricks-profile-setup \
-      ~/.claude/skills/databricks-profile-setup
+ln -s ~/Dev/thoughtspot-skills/agents/claude/setup-databricks-profile \
+      ~/.claude/skills/setup-databricks-profile
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-to-unity-catalog \
-      ~/.claude/skills/ts-to-unity-catalog
+ln -s ~/Dev/thoughtspot-skills/agents/claude/convert-ts-to-unity-catalog \
+      ~/.claude/skills/convert-ts-to-unity-catalog
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-promote-answer-to-model \
-      ~/.claude/skills/ts-promote-answer-to-model
+ln -s ~/Dev/thoughtspot-skills/agents/claude/object-ts-model-promote \
+      ~/.claude/skills/object-ts-model-promote
 
 # Shared reference docs (schemas, mappings, worked-examples)
 ln -s ~/Dev/thoughtspot-skills/agents/shared ~/.claude/shared
@@ -210,7 +210,7 @@ pip install requests pyyaml
 # Required only if connecting to Snowflake via Python connector (not needed for Snowflake CLI)
 pip install snowflake-connector-python cryptography
 
-# Required for Databricks Unity Catalog skills (ts-to-unity-catalog)
+# Required for Databricks Unity Catalog skills (convert-ts-to-unity-catalog)
 pip install databricks-sql-connector
 ```
 
@@ -234,7 +234,7 @@ edit config files or construct shell commands.
 In Claude Code, run:
 
 ```
-/ts-profile-setup
+/setup-ts-profile
 ```
 
 Claude will ask for your ThoughtSpot URL, username, and auth method (one question at
@@ -244,7 +244,7 @@ and verify the connection before finishing.
 Then run:
 
 ```
-/snowflake-profile-setup
+/setup-snowflake-profile
 ```
 
 Claude will ask whether you're using the Python connector or Snowflake CLI, walk you
@@ -253,7 +253,7 @@ through auth setup (key pair or password), and verify the connection.
 If you'll be using the Databricks Unity Catalog skills, also run:
 
 ```
-/databricks-profile-setup
+/setup-databricks-profile
 ```
 
 Claude will ask for your workspace hostname, SQL warehouse HTTP path, and guide you
@@ -269,15 +269,28 @@ environments (e.g. staging and production) without re-entering credentials.
 All skills are invoked with a slash command in Claude Code. You can also describe
 what you want in natural language and Claude will invoke the right skill.
 
+**Conversion** — move semantic models between ThoughtSpot and data platforms
+
 | Skill | Command | What it does |
 |---|---|---|
-| `ts-profile-setup` | `/ts-profile-setup` | Add, update, test, or delete ThoughtSpot profiles |
-| `snowflake-profile-setup` | `/snowflake-profile-setup` | Add, update, test, or delete Snowflake profiles |
-| `databricks-profile-setup` | `/databricks-profile-setup` | Add, update, test, or delete Databricks profiles (PAT, SQL warehouse) |
-| `ts-model-builder` | `/ts-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
-| `ts-to-snowflake-sv` | `/ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-from-snowflake-sv` | `/ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
-| `ts-to-unity-catalog` | `/ts-to-unity-catalog` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
+| `convert-ts-to-snowflake-sv` | `/convert-ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| `convert-ts-from-snowflake-sv` | `/convert-ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `convert-ts-to-unity-catalog` | `/convert-ts-to-unity-catalog` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
+
+**ThoughtSpot Objects** — author and manage ThoughtSpot Models
+
+| Skill | Command | What it does |
+|---|---|---|
+| `object-ts-model-builder` | `/object-ts-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
+| `object-ts-model-promote` | `/object-ts-model-promote` | Promote formulas and parameters from a saved Answer into a Model |
+
+**Setup** — manage connection profiles and credentials
+
+| Skill | Command | What it does |
+|---|---|---|
+| `setup-ts-profile` | `/setup-ts-profile` | Add, update, test, or delete ThoughtSpot profiles |
+| `setup-snowflake-profile` | `/setup-snowflake-profile` | Add, update, test, or delete Snowflake profiles |
+| `setup-databricks-profile` | `/setup-databricks-profile` | Add, update, test, or delete Databricks profiles (PAT, SQL warehouse) |
 
 Example for the conversion skill:
 
@@ -306,7 +319,7 @@ profiles and credentials across the batch.
 - Role with `CREATE SEMANTIC VIEW` privilege on the target schema
 - Snowflake account with Cortex Analyst / Semantic Views enabled
 
-**Databricks (for ts-to-unity-catalog):**
+**Databricks (for convert-ts-to-unity-catalog):**
 - Databricks workspace with Unity Catalog enabled
 - SQL warehouse running and accessible
 - Personal Access Token with `CREATE TABLE` on the target UC schema
@@ -343,7 +356,7 @@ description: One sentence shown in Claude Code's skill picker — be specific ab
 Skills reference other skills by path (never by copying content):
 
 ```markdown
-[~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md)
+[~/.claude/skills/setup-ts-profile/SKILL.md](~/.claude/skills/setup-ts-profile/SKILL.md)
 ```
 
 ### Credential and secret handling

@@ -19,10 +19,10 @@ Run from the repository root after any update:
 ```bash
 # Skill files
 snow stage copy agents/coco/SETUP.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ --overwrite
-snow stage copy agents/coco/ts-sv-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-sv-setup/ --overwrite
-snow stage copy agents/coco/ts-profile-setup/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-profile-setup/ --overwrite
-snow stage copy agents/coco/ts-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-to-snowflake-sv/ --overwrite
-snow stage copy agents/coco/ts-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-from-snowflake-sv/ --overwrite
+snow stage copy agents/coco/setup-ts-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/setup-ts-sv/ --overwrite
+snow stage copy agents/coco/setup-ts-profile/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/setup-ts-profile/ --overwrite
+snow stage copy agents/coco/convert-ts-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/convert-ts-to-snowflake-sv/ --overwrite
+snow stage copy agents/coco/convert-ts-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/convert-ts-from-snowflake-sv/ --overwrite
 
 # Shared reference files (only needed when these change)
 snow stage copy agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-snowflake/ --overwrite
@@ -41,7 +41,7 @@ snow stage copy agents/shared/schemas/thoughtspot-sets-tml.md @SKILLS.PUBLIC.SHA
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 
-# Unity Catalog reference files (used by ts-to-unity-catalog; CoCo/Genie port pending)
+# Unity Catalog reference files (used by convert-ts-to-unity-catalog; CoCo/Genie port pending)
 snow stage copy agents/shared/schemas/unity-catalog-schema.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/mappings/ts-unity-catalog/ts-to-unity-catalog-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-unity-catalog/ --overwrite
 snow stage copy agents/shared/mappings/ts-unity-catalog/ts-unity-catalog-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-unity-catalog/ --overwrite
@@ -67,7 +67,7 @@ CoCo reads each file from the stage and writes it to the corresponding workspace
 
 After files are deployed, run:
 
-> /ts-sv-setup
+> /setup-ts-sv
 
 ### Keeping updated
 
@@ -101,13 +101,13 @@ without CLI access.
 │       ├── ts-from-snowflake.md
 │       └── ts-to-snowflake.md
 └── skills/
-    ├── ts-sv-setup/
+    ├── setup-ts-sv/
     │   └── SKILL.md
-    ├── ts-profile-setup/
+    ├── setup-ts-profile/
     │   └── SKILL.md
-    ├── ts-to-snowflake-sv/
+    ├── convert-ts-to-snowflake-sv/
     │   └── SKILL.md
-    └── ts-from-snowflake-sv/
+    └── convert-ts-from-snowflake-sv/
         └── SKILL.md
 ```
 

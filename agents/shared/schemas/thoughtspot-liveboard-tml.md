@@ -233,4 +233,4 @@ for viz in lb.get("visualizations", []):
 - R and Python-powered visualizations cannot be exported or imported via TML.
 - Changing a viz's `name` and `expr` in the same TML import requires two separate imports.
 - Liveboard-embedded viz formulas cannot be directly promoted to a Model — export the
-  Liveboard TML, find the viz, extract `answer.formulas[]`, and use `/ts-promote-answer-to-model`.
+  Liveboard TML, find the viz, extract `answer.formulas[]`, and use `/object-ts-model-promote`.

@@ -1,4 +1,4 @@
-# Open Items — ts-to-unity-catalog
+# Open Items — convert-ts-to-unity-catalog
 
 Unverified Unity Catalog Metric View API behaviors. Each item has a test script that
 can be run against a live Databricks instance to confirm the finding. Update the

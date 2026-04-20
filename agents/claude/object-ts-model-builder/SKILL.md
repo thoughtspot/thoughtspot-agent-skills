@@ -1,5 +1,5 @@
 ---
-name: ts-model-builder
+name: object-ts-model-builder
 description: Build a ThoughtSpot Model from a Snowflake schema or ERD image. Browses Snowflake databases and tables (or reads a diagram), ensures tables exist in a ThoughtSpot connection, creates logical Table objects, and generates a Model with inferred or user-defined joins.
 ---
 
@@ -23,15 +23,15 @@ Ask one question at a time. Wait for each answer before proceeding.
 | File | Purpose |
 |---|---|
 | [references/open-items.md](references/open-items.md) | Unknowns that must be tested before this skill is complete — check before implementing each step |
-| [~/.claude/skills/ts-profile-setup/SKILL.md](~/.claude/skills/ts-profile-setup/SKILL.md) | ThoughtSpot auth, profile config, token persistence (Pattern A), API call patterns |
-| [~/.claude/skills/snowflake-profile-setup/SKILL.md](~/.claude/skills/snowflake-profile-setup/SKILL.md) | Snowflake connection patterns, SQL execution, SHOW commands |
+| [~/.claude/skills/setup-ts-profile/SKILL.md](~/.claude/skills/setup-ts-profile/SKILL.md) | ThoughtSpot auth, profile config, token persistence (Pattern A), API call patterns |
+| [~/.claude/skills/setup-snowflake-profile/SKILL.md](~/.claude/skills/setup-snowflake-profile/SKILL.md) | Snowflake connection patterns, SQL execution, SHOW commands |
 
 ---
 
 ## Prerequisites
 
-- ThoughtSpot profile configured — run `/ts-profile-setup` if not
-- Snowflake profile configured — run `/snowflake-profile-setup` if not (required for Snowflake source; not needed for image source)
+- ThoughtSpot profile configured — run `/setup-ts-profile` if not
+- Snowflake profile configured — run `/setup-snowflake-profile` if not (required for Snowflake source; not needed for image source)
 - Python packages: `requests`, `pyyaml`, `snowflake-connector-python`
 - ThoughtSpot user must have `DATAMANAGEMENT` or `DEVELOPER` privilege and `CAN_CREATE_OR_EDIT_CONNECTIONS` if adding tables to a connection
 
@@ -59,7 +59,7 @@ Enter number:
 
 If multiple Snowflake profiles exist (and Snowflake source is chosen), ask the same for Snowflake.
 
-Authenticate ThoughtSpot using Pattern A from `ts-profile-setup/SKILL.md`. Token written to `/tmp/ts_token.txt`.
+Authenticate ThoughtSpot using Pattern A from `setup-ts-profile/SKILL.md`. Token written to `/tmp/ts_token.txt`.
 
 ### 2. Choose source
 
