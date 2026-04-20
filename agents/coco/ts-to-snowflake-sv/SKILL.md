@@ -67,9 +67,13 @@ Can you log into ThoughtSpot in a browser (even via SSO)?
 
 ### Snowflake
 
-- Role with `CREATE SEMANTIC VIEW` on the target schema
+- Role with `CREATE SEMANTIC VIEW` on the target schema — **only required if creating live**
 - Connection configured — run `/snowflake-profile-setup` if you haven't already
 - Not sure where to start? → Python connector + password auth has the fewest setup steps
+
+**No `CREATE SEMANTIC VIEW` access?** You can still run this skill in **file-only mode** — it
+generates the Semantic View YAML in a code block for you to create manually later. Select **FILE**
+at the Step 10 checkpoint or say "file only" at any point before Step 12.
 
 ---
 
@@ -1068,12 +1072,12 @@ Shall I create this Semantic View in Snowflake?
   YES  — proceed
   NO   — cancel
   EDIT — followed by changes to the YAML
+  FILE — output the YAML without creating it in Snowflake
 ```
 
-If the user selects **NO**, clean up and stop:
-```bash
-rm -f /tmp/ts_token.txt
-```
+If the user selects **NO**, stop.
+
+If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-file-only-mode).
 
 ---
 
@@ -1100,6 +1104,49 @@ Report all failures together before retrying. Key checks:
 - [ ] Valid `data_type` values on dimensions/time_dimensions: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700.
 - [ ] Every join key column (FK and PK) is exposed as a named dimension in its table, with name = `snake_case(physical_column)`
 - [ ] No two tables in a relationship share a join column name — if they do, rename FK columns in wrapper views with a table-specific prefix
+
+---
+
+### Step 12-FILE: Output YAML (file-only mode)
+
+This path is used when the user selected **FILE** at the Step 10 checkpoint, explicitly
+said "file only", or has no `CREATE SEMANTIC VIEW` permission.
+
+**1. Present the YAML for copy-paste:**
+
+Display the full Semantic View YAML in a fenced code block labelled `yaml`:
+
+````
+```yaml
+{full sv yaml content here}
+```
+````
+
+**2. Provide the creation SQL:**
+
+```
+To create this Semantic View in Snowflake when you have access, run in a Snowsight worksheet:
+
+  USE DATABASE {suggested_db};
+  USE SCHEMA {suggested_schema};
+  CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
+    '{suggested_db}.{suggested_schema}',
+    $$ <paste YAML content here> $$
+  );
+
+Run a dry-run first to validate (add TRUE as a third argument):
+  CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
+    '{suggested_db}.{suggested_schema}',
+    $$ <paste YAML content here> $$,
+    TRUE
+  );
+```
+
+Use the database and schema from the table map built in Step 5 as suggestions (or
+`YOUR_DATABASE.YOUR_SCHEMA` if ambiguous).
+
+**3. Proceed to Step 13** (Generate Test Questions) — the test questions help the user
+know what to verify once they create the view manually.
 
 ---
 

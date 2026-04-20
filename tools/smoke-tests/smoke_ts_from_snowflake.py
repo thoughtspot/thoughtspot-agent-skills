@@ -66,8 +66,19 @@ def _parse_sv_name(ddl: str) -> str:
 
 
 def _count_sv_tables(ddl: str) -> int:
-    """Count the number of TABLE definitions in the SV DDL."""
-    return len(re.findall(r'\bTABLE\b', ddl, re.IGNORECASE))
+    """Count table entries in the SV DDL's TABLES(...) block.
+
+    The DDL uses 'TABLES' (plural) as the section keyword — 'TABLE' (singular)
+    does NOT appear as a standalone keyword in the Semantic View DDL format.
+    Each entry in the TABLES block has the form 'alias AS DB.SCHEMA.TABLE_NAME'.
+    """
+    tables_block = re.search(r'\bTABLES\s*\((.*?)\)', ddl, re.IGNORECASE | re.DOTALL)
+    if not tables_block:
+        return 0
+    block = tables_block.group(1)
+    # Count 'AS' keywords — one per table entry (alias AS FQN)
+    as_count = len(re.findall(r'\bAS\b', block, re.IGNORECASE))
+    return max(as_count, 1) if block.strip() else 0
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +98,12 @@ def _build_minimal_model_tml(model_name: str, table_guids: list[tuple[str, str]]
     """
     Build the simplest valid Model TML that can be imported.
     table_guids: list of (table_name, guid)
+
+    Per ThoughtSpot TML rules: `id` must equal `name` exactly (ThoughtSpot resolves
+    join references against `id`). The GUID goes in `fqn`, not `id`.
     """
     model_tables = [
-        {"name": name, "id": guid}
+        {"name": name, "id": name, "fqn": guid}
         for name, guid in table_guids
     ]
     return {
@@ -217,21 +231,32 @@ def main() -> int:
     def _validate_ddl():
         if "SEMANTIC VIEW" not in ddl.upper():
             raise RuntimeError("DDL does not contain 'SEMANTIC VIEW' — not a semantic view DDL")
+        if "TABLES" not in ddl.upper():
+            raise RuntimeError(
+                "DDL has no TABLES section — unexpected DDL format. "
+                f"First 200 chars: {ddl[:200]!r}"
+            )
         if table_count == 0:
-            raise RuntimeError("No TABLE definitions found in DDL")
+            raise RuntimeError(
+                "No table entries found in the TABLES section of the DDL. "
+                f"First 200 chars: {ddl[:200]!r}"
+            )
 
     ok, _ = r.step("Confirm DDL is a Semantic View", _validate_ddl)
     if not ok:
         return r.summary()
 
     # ── Find ThoughtSpot table objects for the first table in the SV ─────────
-    # Extract table names from DDL (heuristic: TABLE <name> AS SELECT)
-    ts_table_names = re.findall(
-        r'TABLE\s+(\w+)\s+AS\s+SELECT', ddl, re.IGNORECASE
-    )
-    if not ts_table_names:
-        # Fallback: TABLE <name> followed by any content
-        ts_table_names = re.findall(r'TABLE\s+(\w+)', ddl, re.IGNORECASE)
+    # Extract table names from the TABLES block.
+    # Real DDL format: TABLES ( alias AS DB.SCHEMA.PHYSICAL_TABLE [primary key (...)] )
+    # We extract alias names (the left-hand side before AS).
+    tables_block_m = re.search(r'\bTABLES\s*\((.*?)\)', ddl, re.IGNORECASE | re.DOTALL)
+    if tables_block_m:
+        ts_table_names = re.findall(
+            r'(\w+)\s+AS\s+\w+\.\w+\.\w+', tables_block_m.group(1), re.IGNORECASE
+        )
+    else:
+        ts_table_names = []
 
     found_tables: list[tuple[str, str]] = []
     if ts_table_names:

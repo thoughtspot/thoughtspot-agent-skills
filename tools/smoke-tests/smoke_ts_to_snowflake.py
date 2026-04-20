@@ -10,7 +10,7 @@ Verifies the full path:
   5. Dry-run SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML (validate: TRUE)
   6. Create the Semantic View
   7. Confirm it appears in SHOW SEMANTIC VIEWS
-  8. Run a spot-check SELECT on the first metric
+  8. DESCRIBE SEMANTIC VIEW — confirm structure is well-formed
   9. Cleanup (unless --no-cleanup)
 
 This script is intentionally NOT a pytest test — it has side effects (creates and
@@ -324,10 +324,36 @@ def main() -> int:
     if ok and sv_row:
         r.info(f"View row: name={sv_row.get('name')}, owner={sv_row.get('owner')}")
 
+    # ── Describe the Semantic View (confirm structure is well-formed) ─────────
+    # DESCRIBE SEMANTIC VIEW returns one row per element (dimensions, metrics, etc.)
+    # and confirms the view was created with the expected content, not just that an
+    # entry exists in the catalog.
+    if ok:
+        def _describe_sv():
+            rows = snow_json_file(
+                snow_cmd, cli_conn,
+                f"DESCRIBE SEMANTIC VIEW "
+                f"{args.sf_target_db}.{args.sf_target_schema}.{view_name};"
+            )
+            if not rows:
+                raise RuntimeError(
+                    f"DESCRIBE SEMANTIC VIEW returned no rows for '{view_name}'. "
+                    "The view may be structurally empty or malformed."
+                )
+            return rows
+
+        ok, desc_rows = r.step(
+            f"DESCRIBE SEMANTIC VIEW '{view_name}' is well-formed", _describe_sv
+        )
+        if ok and desc_rows:
+            r.info(f"Semantic View has {len(desc_rows)} described element(s)")
+
     # Note: Snowflake Semantic Views created via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML
     # are NOT directly queryable with SQL SELECT — they are a semantic layer definition
-    # consumed by Cortex Analyst, not a regular SQL view. SHOW SEMANTIC VIEWS above
-    # is the correct confirmation that the view was created successfully.
+    # consumed by Cortex Analyst, not a regular SQL view. SHOW SEMANTIC VIEWS +
+    # DESCRIBE SEMANTIC VIEW are the correct confirmations that the view was created
+    # and is well-formed. To test Cortex Analyst end-to-end, upload the YAML to a
+    # Snowflake stage and call the Cortex Analyst REST API directly.
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
     if args.no_cleanup:

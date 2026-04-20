@@ -50,6 +50,13 @@ VALID_AGGREGATIONS = {
     "COUNT_DISTINCT", "NONE", "STD_DEVIATION", "VARIANCE",
 }
 
+# Valid join type values for model TML inline joins (model_tables[].joins[].type).
+# Note: FULL_OUTER is NOT valid here — ThoughtSpot raises:
+#   "Invalid value FULL_OUTER of field worksheet->model_tables->joins->type.
+#    Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER"
+# Table TML joins_with[].type does allow FULL_OUTER; this set only applies to model TML.
+VALID_MODEL_JOIN_TYPES = {"INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER"}
+
 
 # ---------------------------------------------------------------------------
 # Table TML validator
@@ -149,8 +156,16 @@ def validate_table_tml(data: dict) -> list[str]:
                     f"is invalid — must be one of {sorted(VALID_COLUMN_TYPES)}"
                 )
 
-        db_props = col.get("db_column_properties", {})
-        if isinstance(db_props, dict):
+        # db_column_properties is required on every column
+        db_props = col.get("db_column_properties")
+        if db_props is None:
+            errors.append(
+                f"Column '{col_name}' missing 'db_column_properties' — "
+                "required on every table column. ThoughtSpot raises "
+                "'Compulsory Field table->columns->db_column_properties is not populated' "
+                "when absent."
+            )
+        elif isinstance(db_props, dict):
             dt = db_props.get("data_type")
             if dt and isinstance(dt, str) and dt.upper() in SQL_ONLY_TYPES:
                 errors.append(
@@ -222,6 +237,26 @@ def validate_model_tml(data: dict) -> list[str]:
         table_aliases.add(alias)
         if entry_id:
             table_aliases.add(entry_id)
+
+        # Validate inline joins[].type — FULL_OUTER is invalid in model TML
+        for j, join in enumerate(entry.get("joins") or []):
+            if not isinstance(join, dict):
+                continue
+            join_type = join.get("type")
+            if join_type and isinstance(join_type, str):
+                if join_type.upper() == "FULL_OUTER":
+                    errors.append(
+                        f"model_tables['{t_name}'].joins[{j}] type='FULL_OUTER' — "
+                        "ThoughtSpot model TML uses 'OUTER' for full outer joins. "
+                        "FULL_OUTER is rejected: 'Invalid value FULL_OUTER of field "
+                        "worksheet->model_tables->joins->type'."
+                    )
+                elif join_type.upper() not in VALID_MODEL_JOIN_TYPES:
+                    errors.append(
+                        f"model_tables['{t_name}'].joins[{j}] has invalid "
+                        f"type='{join_type}' — must be one of "
+                        f"{sorted(VALID_MODEL_JOIN_TYPES)}"
+                    )
 
     columns = inner.get("columns") or []
     formulas = inner.get("formulas") or []

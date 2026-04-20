@@ -72,9 +72,13 @@ Can you log into ThoughtSpot in a browser (even via SSO)?
 
 ### Snowflake
 
-- Role with `CREATE SEMANTIC VIEW` on the target schema
+- Role with `CREATE SEMANTIC VIEW` on the target schema — **only required if creating live**
 - Connection configured — run `/snowflake-profile-setup` if you haven't already
 - Not sure where to start? → Python connector + password auth has the fewest setup steps
+
+**No Snowflake access?** You can still run this skill in **file-only mode** — it generates
+the Semantic View YAML and writes it to a file you can create manually later. Select **FILE**
+at the Step 10 checkpoint or say "file only" at any point before Step 12.
 
 ---
 
@@ -820,9 +824,12 @@ Shall I create this Semantic View in Snowflake?
   YES  — proceed
   NO   — cancel
   EDIT — followed by changes to the YAML
+  FILE — write the YAML to a file without creating it in Snowflake
 ```
 
 If the user selects **NO**, stop. No cleanup needed — the CLI manages its own token cache.
+
+If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-file-only-mode).
 
 ---
 
@@ -847,6 +854,53 @@ Report all failures together before retrying. Key checks:
 - [ ] No YAML block scalar syntax (`>-` or `|`) in any `expr` value — all expr values must be single-line double-quoted strings; block scalars cause Snowflake parse errors
 - [ ] Every `right_table` in `relationships[]` has a `primary_key` block — cross-check the full list before finalising YAML
 - [ ] `non_additive_dimensions` metrics: expr uses `SUM(...)`, the `table` field references the joined date dimension (not the fact table), and `nulls_position: last` is present
+
+---
+
+### Step 12-FILE: Output YAML file (file-only mode)
+
+This path is used when the user selected **FILE** at the Step 10 checkpoint, explicitly
+said "file only", or has no Snowflake access or `CREATE SEMANTIC VIEW` permission.
+
+**1. Determine the output filename:**
+
+Use `{semantic_view_name}.yaml` (the `name:` value from the generated YAML). If the
+current working directory contains a `semantic-views/` or `output/` subdirectory, write
+there; otherwise write to the current directory.
+
+**2. Write the file:**
+
+```python
+from pathlib import Path
+out_path = Path(f"{semantic_view_name}.yaml")
+out_path.write_text(sv_yaml_str, encoding="utf-8")
+```
+
+**3. Report:**
+
+```
+Semantic View YAML written to: {semantic_view_name}.yaml
+
+To create it in Snowflake when you have access:
+  1. In Snowsight, open a worksheet and run:
+
+       USE DATABASE {suggested_db};
+       USE SCHEMA {suggested_schema};
+       CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
+         '{suggested_db}.{suggested_schema}',
+         $$ <paste YAML content here> $$
+       );
+
+  2. Or via CLI using the same CALL statement with the YAML passed in $$...$$
+     dollar-quote delimiters.
+```
+
+Use the database and schema from the table map built in Step 5 as the suggested
+target (or `YOUR_DATABASE.YOUR_SCHEMA` if ambiguous). These are suggestions only —
+the user fills in the actual target when they run the command.
+
+**4. Proceed to Step 13** (Generate Test Questions) — the test questions help the user
+know what to verify once they create the view.
 
 ---
 

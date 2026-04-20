@@ -64,9 +64,13 @@ Two scenarios are supported:
 ### ThoughtSpot
 
 - ThoughtSpot Cloud instance, REST API v2 enabled
-- User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
+- User account with `DATAMANAGEMENT` or `DEVELOPER` privilege — **only required for import**
 - Authentication configured — run `/ts-profile-setup` if you haven't already
 - The `ts` CLI installed (`pip install -e /path/to/tools/ts-cli`)
+
+**No ThoughtSpot import access?** You can still run this skill in **file-only mode** —
+it generates the Table and Model TML files for you to import manually. Select **FILE**
+at the Step 10 checkpoint or say "file only" at any point before Step 11.
 
 ### Snowflake
 
@@ -547,10 +551,73 @@ Formula translations:
   ✓ {name}: {sql_expr} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
 
-Proceed with import? (yes/no):
+Proceed with import?
+  yes  — import to ThoughtSpot
+  no   — cancel
+  file — write TML files without importing (for environments where you lack
+          DATAMANAGEMENT access, or to review the TML before committing)
 ```
 
 Wait for user confirmation before proceeding.
+
+If the user selects **file**, skip to [Step 10-FILE](#step-10-file-output-tml-files-file-only-mode).
+
+---
+
+### Step 10-FILE: Output TML files (file-only mode)
+
+This path is used when the user selected **file** at the Step 10 checkpoint, explicitly
+said "file only", or has no ThoughtSpot `DATAMANAGEMENT` access.
+
+**1. Determine output filenames:**
+
+- Model TML: `{model_name}.model.tml`
+- Any new Table TMLs created in Step 6B (Scenario B): `{table_name}.table.tml`
+
+**2. Write the files:**
+
+```python
+from pathlib import Path
+import yaml
+
+# Model TML
+model_tml_str = yaml.dump(
+    {"model": model_dict}, default_flow_style=False, allow_unicode=True
+)
+Path(f"{model_name}.model.tml").write_text(model_tml_str, encoding="utf-8")
+
+# Table TMLs (Scenario B only)
+for tbl_name, tbl_dict in new_table_tmls.items():
+    tbl_str = yaml.dump(
+        {"table": tbl_dict}, default_flow_style=False, allow_unicode=True
+    )
+    Path(f"{tbl_name}.table.tml").write_text(tbl_str, encoding="utf-8")
+```
+
+**3. Report:**
+
+```
+TML files written:
+  {model_name}.model.tml    — ThoughtSpot Model TML
+  {table_name}.table.tml   — ThoughtSpot Table TML (if new tables were needed)
+
+To import to ThoughtSpot when you have access:
+
+  1. Package all .tml files into a zip:
+       zip {model_name}_tml.zip *.tml
+
+  2. In ThoughtSpot: Data → TML Import → upload the zip
+     (table TMLs will import first, then the model)
+
+  3. Or import via CLI:
+       ts tml import --file {model_name}.model.tml --policy ALL_OR_NONE --profile {profile}
+
+  Note: On first import, omit `guid` from the TML (already omitted here). ThoughtSpot
+  will assign a GUID — save it from the import response if you need to update the model later.
+```
+
+**4. Proceed to Step 12** (Produce summary report) — include the formula translation log
+and column summary so the user has the full picture before importing.
 
 ---
 

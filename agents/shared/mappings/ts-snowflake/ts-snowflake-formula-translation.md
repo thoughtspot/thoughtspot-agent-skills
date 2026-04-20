@@ -114,12 +114,11 @@ These functions translate 1:1 in both directions.
 | `count_distinct ( [x] )` → `COUNT(DISTINCT x)` | `COUNT(DISTINCT x)` → `count_distinct ( [x] )` |
 | `unique count ( [x] )` → `COUNT(DISTINCT x)` | *(same as above)* |
 | `average ( [x] )` → `AVG(x)` | `AVG(x)` → `average ( [x] )` |
-| `min ( [x] )` → `MIN(x)` | `MIN(x)` → `min ( [x] )` |
-| `max ( [x] )` → `MAX(x)` | `MAX(x)` → `max ( [x] )` |
+| `min ( [x] )` → `MIN(x)` | `MIN(x)` → `min ( [x] )` — **aggregate only** (see scalar trap note below) |
+| `max ( [x] )` → `MAX(x)` | `MAX(x)` → `max ( [x] )` — **aggregate only** (see scalar trap note below) |
 | `median ( [x] )` → `MEDIAN(x)` | `MEDIAN(x)` → `median ( [x] )` |
 | `stddev ( [x] )` → `STDDEV(x)` | `STDDEV(x)` → `stddev ( [x] )` |
 | `variance ( [x] )` → `VARIANCE(x)` | `VARIANCE(x)` → `variance ( [x] )` |
-| `greatest ( [a] , [b] , ... )` → `GREATEST(a, b, ...)` | `GREATEST(a, b, ...)` → `greatest ( [a] , [b] , ... )` |
 | `sum_if ( [cond] , [x] )` → `SUM(CASE WHEN cond THEN x END)` | `SUM(CASE WHEN cond THEN x END)` → `sum_if ( [cond] , [x] )` |
 | `unique_count_if ( [cond] , [x] )` → `COUNT(DISTINCT CASE WHEN cond THEN x END)` | `COUNT(DISTINCT CASE WHEN cond THEN x END)` → `unique_count_if ( [cond] , [x] )` |
 
@@ -161,6 +160,15 @@ These functions translate 1:1 in both directions.
 | `ln ( [x] )` → `LN(x)` | `LN(x)` → `ln ( [x] )` |
 | `log2 ( [x] )` → `LOG(2, x)` | `LOG(2, x)` → `log2 ( [x] )` |
 | `log10 ( [x] )` → `LOG(10, x)` | `LOG(10, x)` → `log10 ( [x] )` |
+| `least ( [a] , [b] , ... )` → `LEAST(a, b, ...)` | `LEAST(a, b, ...)` → `least ( [a] , [b] , ... )` |
+| `greatest ( [a] , [b] , ... )` → `GREATEST(a, b, ...)` | `GREATEST(a, b, ...)` → `greatest ( [a] , [b] , ... )` |
+
+**Scalar MIN/MAX trap:** ThoughtSpot `min`/`max` are **aggregate-only** — they reduce a
+column to a single value, not compare two columns row-by-row. Snowflake's scalar
+`LEAST(a, b)` / `GREATEST(a, b)` map to ThoughtSpot's `least` / `greatest`, NOT to
+`min` / `max`. The reverse also applies: when converting a Snowflake Semantic View metric
+whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
+**dimension** (non-aggregate), not a measure.
 
 ### String Functions
 
@@ -188,6 +196,10 @@ These functions translate 1:1 in both directions.
 | `to_integer ( [x] )` → `CAST(x AS INTEGER)` | `CAST(x AS INTEGER)` → `to_integer ( [x] )` |
 | `to_double ( [x] )` → `CAST(x AS DOUBLE)` | `CAST(x AS DOUBLE)` → `to_double ( [x] )` |
 | `to_string ( [x] )` → `CAST(x AS VARCHAR)` | `CAST(x AS VARCHAR)` → `to_string ( [x] )` |
+| *(no direct equivalent)* | `CAST(x AS TEXT)` → `to_string ( [x] )` — TEXT is an alias for VARCHAR in Snowflake |
+| *(no direct equivalent)* | `TO_CHAR(x)` → `to_string ( [x] )` — Snowflake formatting alias |
+| *(no direct equivalent)* | `TRY_CAST(x AS INTEGER)` → `to_integer ( [x] )` — TRY_ variants produce NULL on failure; ThoughtSpot `to_integer` also produces NULL on failure |
+| *(no direct equivalent)* | `TRUNC(x, 0)` → `round ( [x] , 0 )` — ThoughtSpot has no direct truncate; `floor` for negatives |
 
 ### Date Functions
 

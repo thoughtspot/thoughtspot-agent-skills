@@ -173,6 +173,10 @@ def snow_json_file(snow_cmd: str, cli_connection: str, sql: str) -> list[dict]:
     Like snow_json but writes SQL to a temp file and uses -f instead of -q.
     Required for SQL that embeds multiline content (e.g. YAML in CALL statements)
     where shell quoting via -q is unreliable.
+
+    Note: the snow CLI's --format json swallows EXPRESSION_ERROR messages from CALL
+    statements (returns empty stdout+stderr with RC=1). When that happens we re-run
+    without --format json to recover the actual error text for the exception message.
     """
     import os
     import tempfile
@@ -185,9 +189,24 @@ def snow_json_file(snow_cmd: str, cli_connection: str, sql: str) -> list[dict]:
             capture_output=True, text=True,
         )
         if result.returncode != 0:
-            raise RuntimeError(
-                f"snow sql failed:\n{result.stderr.strip() or result.stdout.strip()}"
-            )
+            error_detail = result.stderr.strip() or result.stdout.strip()
+            if not error_detail:
+                # --format json silently drops CALL/EXPRESSION_ERROR messages.
+                # Re-run without --format json to recover the human-readable error.
+                fallback = subprocess.run(
+                    [snow_cmd, "sql", "-c", cli_connection, "-f", tmp_path],
+                    capture_output=True, text=True,
+                )
+                error_detail = fallback.stderr.strip() or fallback.stdout.strip()
+                # Trim the echoed SQL from the output — keep only from "exception" onwards
+                for marker in ("Exception message:", "exception of type", "SQL compilation error"):
+                    idx = error_detail.lower().find(marker.lower())
+                    if idx != -1:
+                        error_detail = error_detail[idx:].strip()
+                        break
+                if not error_detail:
+                    error_detail = "(no error detail available — try running with snow sql --debug)"
+            raise RuntimeError(f"snow sql failed:\n{error_detail}")
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as e:

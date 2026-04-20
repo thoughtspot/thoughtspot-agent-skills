@@ -1,0 +1,112 @@
+# Minimal Semantic View for smoke testing smoke_ts_to_snowflake.py.
+#
+# Uses only tables confirmed to exist in DUNDERMIFFLIN.PUBLIC_SV as of 2026-04,
+# with column names verified against INFORMATION_SCHEMA.COLUMNS.
+# Does NOT depend on DM_CUSTOMER or DM_CATEGORY (dropped from the environment).
+#
+# Verified column names:
+#   DM_DATE_DIM:      DATE
+#   DM_ORDER:         ORDER_ID, ORDER_DATE, FREIGHT, SHIP_CITY, SHIP_COUNTRY
+#   DM_ORDER_DETAIL:  RRDER_ID (FK to ORDER_ID), DM_ORDER_DETAIL_PRODUCT_ID, QUANTITY, LINE_TOTAL
+#   DM_PRODUCT:       PRODUCT_ID, PRODUCT_NAME, UNIT_PRICE
+
+name: smoke_test_orders_sv
+description: "Smoke test Semantic View — order detail with product and date dimensions."
+
+tables:
+- name: dm_order_detail
+  base_table:
+    database: DUNDERMIFFLIN
+    schema: PUBLIC_SV
+    table: DM_ORDER_DETAIL
+  dimensions:
+  - name: dm_order_detail_order_fk
+    expr: dm_order_detail.RRDER_ID
+    data_type: NUMBER
+  - name: dm_order_detail_product_fk
+    expr: dm_order_detail.DM_ORDER_DETAIL_PRODUCT_ID
+    data_type: NUMBER
+  metrics:
+  - name: total_quantity
+    expr: SUM(dm_order_detail.QUANTITY)
+  - name: total_line_revenue
+    expr: SUM(dm_order_detail.LINE_TOTAL)
+
+- name: dm_order
+  base_table:
+    database: DUNDERMIFFLIN
+    schema: PUBLIC_SV
+    table: DM_ORDER
+  primary_key:
+    columns:
+    - ORDER_ID
+  dimensions:
+  - name: order_id
+    expr: dm_order.ORDER_ID
+    data_type: NUMBER
+  - name: order_date_fk
+    expr: dm_order.ORDER_DATE
+    data_type: DATE
+  - name: ship_country
+    expr: dm_order.SHIP_COUNTRY
+    data_type: TEXT
+  - name: ship_city
+    expr: dm_order.SHIP_CITY
+    data_type: TEXT
+  metrics:
+  - name: total_freight
+    expr: SUM(dm_order.FREIGHT)
+
+- name: dm_product
+  base_table:
+    database: DUNDERMIFFLIN
+    schema: PUBLIC_SV
+    table: DM_PRODUCT
+  primary_key:
+    columns:
+    - PRODUCT_ID
+  dimensions:
+  - name: product_id
+    expr: dm_product.PRODUCT_ID
+    data_type: NUMBER
+  - name: product_name
+    expr: dm_product.PRODUCT_NAME
+    data_type: TEXT
+  - name: product_unit_price
+    expr: dm_product.UNIT_PRICE
+    data_type: NUMBER
+
+- name: dm_date_dim
+  base_table:
+    database: DUNDERMIFFLIN
+    schema: PUBLIC_SV
+    table: DM_DATE_DIM
+  primary_key:
+    columns:
+    - DATE
+  time_dimensions:
+  - name: order_date
+    expr: dm_date_dim.DATE
+    data_type: DATE
+
+relationships:
+- name: detail_to_order
+  left_table: dm_order_detail
+  right_table: dm_order
+  relationship_columns:
+  - left_column: RRDER_ID
+    right_column: ORDER_ID
+
+- name: detail_to_product
+  left_table: dm_order_detail
+  right_table: dm_product
+  relationship_columns:
+  - left_column: DM_ORDER_DETAIL_PRODUCT_ID
+    right_column: PRODUCT_ID
+
+- name: order_to_date
+  left_table: dm_order
+  right_table: dm_date_dim
+  relationship_columns:
+  - left_column: ORDER_DATE
+    right_column: DATE

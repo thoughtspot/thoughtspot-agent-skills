@@ -67,7 +67,11 @@ UI confirmation prompt. Minimise calls by batching related statements.
 
 - A Snowflake role with `USAGE` on the database/schema containing the semantic view
 - ThoughtSpot setup completed via `/ts-profile-setup` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
-- User account with `DATAMANAGEMENT` or `DEVELOPER` privilege in ThoughtSpot
+- User account with `DATAMANAGEMENT` or `DEVELOPER` privilege in ThoughtSpot — **only required for import**
+
+**No ThoughtSpot import access?** You can still run this skill in **file-only mode** —
+it generates the Table and Model TML in code blocks for you to import manually. Select **file**
+at the Step 7 checkpoint or say "file only" at any point before Step 8.
 
 ---
 
@@ -318,9 +322,10 @@ table:
   columns:
   - name: COL_NAME
     db_column_name: COL_NAME
-    data_type: INT64        # or VARCHAR, DOUBLE, etc.
     properties:
       column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: INT64      # or VARCHAR, DOUBLE, etc.
   joins:                     # Only on tables that have FK relationships
   - name: JOIN_NAME
     destination: TARGET_TABLE
@@ -660,12 +665,73 @@ Formula translations:
   ✓ {name}: {sql} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
 
-Proceed with import? (yes/no):
+Proceed with import?
+  yes  — import to ThoughtSpot via TS_IMPORT_TML
+  no   — cancel
+  file — output TML in code blocks without importing (for environments where you lack
+          DATAMANAGEMENT access, or to review the TML before committing)
 ```
+
+If the user selects **file**, skip to [Step 7-FILE](#step-7-file-output-tml-file-only-mode).
 
 If any check **cannot be fixed** (e.g. required join name not found in any exported TML),
 report specifically what is missing and what step to re-run to resolve it — do not attempt
 the import.
+
+---
+
+### Step 7-FILE: Output TML (file-only mode)
+
+This path is used when the user selected **file** at the import prompt, explicitly said
+"file only", or has no ThoughtSpot `DATAMANAGEMENT` access.
+
+**1. Present the Model TML for copy-paste:**
+
+Display the full model TML YAML in a fenced code block labelled `yaml`:
+
+````
+```yaml
+{full model TML content here}
+```
+````
+
+**2. Present any new Table TMLs (Scenario B only):**
+
+If new table TMLs were built in Step 4B, display each one in its own labelled code block:
+
+````
+```yaml
+# {table_name}.table.tml
+{full table TML content here}
+```
+````
+
+**3. Provide import instructions:**
+
+```
+To import to ThoughtSpot when you have access:
+
+  1. In the Snowsight Workspace, call the import procedure with each TML:
+
+       -- Import table TMLs first (Scenario B only):
+       CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$
+       {table_tml_yaml}
+       $$), FALSE);
+
+       -- Then import the model TML:
+       CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$
+       {model_tml_yaml}
+       $$), FALSE);
+
+  2. Run with TRUE as the third argument first for a dry-run validation:
+       CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT($$...$$), TRUE);
+
+  Note: On first import, omit `guid` from the TML (already omitted here). ThoughtSpot
+  will assign a GUID — save it from the import response if you need to update the model later.
+```
+
+**4. Proceed to Step 9** (Summary report) — include the formula translation log and
+column summary so the user has the full picture before importing manually.
 
 ---
 

@@ -102,8 +102,8 @@ def _build_tables_create_spec(
             "connection_name": connection_name,
             "columns": [
                 {
-                    "name": "PROCEDURE_NAME",
-                    "data_type": "VARCHAR",
+                    "name": "ORDER_ID",
+                    "data_type": "INT64",
                     "column_type": "ATTRIBUTE",
                 },
             ],
