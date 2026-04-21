@@ -1,4 +1,4 @@
-# Open Items — ts-object-model-promote
+# Open Items — ts-object-answer-promote
 
 Unverified or partially verified API behaviors. Each item includes a status, test
 procedure, and findings recorded against `champ-staging` (champagne-master-aws.thoughtspotstaging.cloud).

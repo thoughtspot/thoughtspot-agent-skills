@@ -207,8 +207,8 @@ To convert an answer-level set to a reusable standalone set:
 3. Import via `ts tml import --policy ALL_OR_NONE`.
 4. After import, the set has its own GUID and can be used in any Answer on the same Model.
 
-**Status of this promotion path:** UNTESTED — see `ts-object-model-promote`
-[open-items.md](../claude/ts-object-model-promote/references/open-items.md) Item 5.
+**Status of this promotion path:** UNTESTED — see `ts-object-answer-promote`
+[open-items.md](../claude/ts-object-answer-promote/references/open-items.md) Item 5.
 
 ---
 

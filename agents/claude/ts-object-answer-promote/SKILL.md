@@ -1,5 +1,5 @@
 ---
-name: ts-object-model-promote
+name: ts-object-answer-promote
 description: Promote formulas and parameters from a saved ThoughtSpot Answer into a Model — makes them available to all users who search against it.
 ---
 

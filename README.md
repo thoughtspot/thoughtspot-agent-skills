@@ -43,7 +43,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-object-model-builder` | `/ts-object-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD diagram image |
-| `ts-object-model-promote` | `/ts-object-model-promote` | Promote formulas and parameters from a saved Answer into a Model |
+| `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
 
 **Setup** — manage connection profiles and credentials
 

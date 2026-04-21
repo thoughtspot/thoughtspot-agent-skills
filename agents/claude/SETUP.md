@@ -66,7 +66,7 @@ against a configured SQL warehouse. Required before running `/ts-convert-to-data
 
 Run with `/ts-profile-databricks`.
 
-### [`ts-object-model-promote`](ts-object-model-promote/)
+### [`ts-object-answer-promote`](ts-object-answer-promote/)
 
 Promotes formulas and parameters from a saved ThoughtSpot Answer into a Model
 definition. Exports the Answer TML to extract formula expressions and parameters, maps
@@ -75,7 +75,7 @@ updated Model TML against the self-validation checklist, and imports the change 
 Supports parameter promotion, formula inter-dependency detection, duplicate name
 handling, and permission checking before import.
 
-Run with `/ts-object-model-promote`.
+Run with `/ts-object-answer-promote`.
 
 ### [`ts-convert-to-databricks-mv`](ts-convert-to-databricks-mv/)
 
@@ -124,7 +124,7 @@ cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-model-builder ~/.claude/sk
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-databricks-mv ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-model-promote ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
 cp -r /tmp/thoughtspot-skills/agents/shared ~/.claude/shared
@@ -190,8 +190,8 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-databricks \
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-to-databricks-mv \
       ~/.claude/skills/ts-convert-to-databricks-mv
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-model-promote \
-      ~/.claude/skills/ts-object-model-promote
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-answer-promote \
+      ~/.claude/skills/ts-object-answer-promote
 
 # Shared reference docs (schemas, mappings, worked-examples)
 ln -s ~/Dev/thoughtspot-skills/agents/shared ~/.claude/shared
@@ -282,7 +282,7 @@ what you want in natural language and Claude will invoke the right skill.
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-object-model-builder` | `/ts-object-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
-| `ts-object-model-promote` | `/ts-object-model-promote` | Promote formulas and parameters from a saved Answer into a Model |
+| `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
 
 **Setup** — manage connection profiles and credentials
 
