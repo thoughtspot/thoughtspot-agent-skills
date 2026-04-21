@@ -23,7 +23,7 @@ The CLI resolves which profile to use in this order:
 2. `TS_PROFILE` environment variable
 3. First profile in `~/.claude/thoughtspot-profiles.json`
 
-Profiles are created and managed by the `setup-ts-profile` Claude Code skill.
+Profiles are created and managed by the `ts-setup-profile` Claude Code skill.
 Credentials are stored in the macOS Keychain — never in the profile file itself.
 
 Tokens are cached in `/tmp/ts_token_<slug>.txt` (permissions: `0600`) and reused

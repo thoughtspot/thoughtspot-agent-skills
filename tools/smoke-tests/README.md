@@ -14,12 +14,12 @@ effects and require live credentials.
 
 ## Prerequisites
 
-1. **ThoughtSpot profile** — configured via `/setup-ts-profile`. Check with:
+1. **ThoughtSpot profile** — configured via `/ts-setup-profile`. Check with:
    ```bash
    ts auth whoami --profile <name>
    ```
 
-2. **Snowflake profile** — configured via `/setup-snowflake-profile`. Must use `method: cli`
+2. **Snowflake profile** — configured via `/ts-setup-snowflake-profile`. Must use `method: cli`
    (Snowflake CLI connection). Check with:
    ```bash
    snow connection test -c <connection_name>
@@ -62,7 +62,7 @@ python tools/smoke-tests/smoke_ts_from_snowflake.py \
     --sv-fqn "BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV"
 ```
 
-### object-ts-model-builder (create a ThoughtSpot table object)
+### ts-object-model-builder (create a ThoughtSpot table object)
 
 ```bash
 python tools/smoke-tests/smoke_ts_model_builder.py \
@@ -79,7 +79,7 @@ Each script prints a step-by-step report:
 
 ```
 ============================================================
-Smoke test: convert-ts-to-snowflake-sv
+Smoke test: ts-convert-to-snowflake-sv
 ============================================================
   ThoughtSpot profile:  production
   Snowflake profile:    production

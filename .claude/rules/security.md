@@ -22,7 +22,7 @@ behind one API and is already a viable replacement for `security` calls in skill
 **Never accept a credential in the Claude Code conversation.** Instructions to the user to
 enter a token, password, or key must always direct them to run the command in their own
 terminal. The credential must not appear in any message the user sends or Claude echoes.
-See `agents/claude/setup-ts-profile/SKILL.md` (Add section) for the exact pattern.
+See `agents/claude/ts-setup-profile/SKILL.md` (Add section) for the exact pattern.
 
 **Never write credentials to files inside the repo.** Even to `/tmp/` — tokens cached to
 `/tmp/` must be cleaned up at skill end and must not be inside the working directory.
@@ -54,7 +54,7 @@ THOUGHTSPOT_SECRET_KEY_{SLUG}  ← secret key auth
 
 Example: profile name `"My Staging"` → slug `my-staging` → env var `THOUGHTSPOT_TOKEN_MY_STAGING`.
 
-Full pattern: `agents/claude/setup-ts-profile/SKILL.md` (Derive names section).
+Full pattern: `agents/claude/ts-setup-profile/SKILL.md` (Derive names section).
 
 ## Token cache
 
@@ -65,7 +65,7 @@ from skill code. If a token needs to be invalidated, use `ts auth logout --profi
 ## Adding a new external service
 
 If a new skill adds credentials for a service other than ThoughtSpot or Snowflake:
-1. Follow the same Keychain + env var pattern (see setup-ts-profile for reference)
+1. Follow the same Keychain + env var pattern (see ts-setup-profile for reference)
 2. Add a new `<service>-profiles.json` to `.gitignore` before writing any code
 3. Use a distinct Keychain service name prefix to avoid collisions
 4. Document the credential type and env var convention in the skill's SKILL.md

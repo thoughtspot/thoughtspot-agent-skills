@@ -56,6 +56,6 @@ stored procedure usage, Snowsight UI instructions).
 
 ## Stored procedures
 
-Adding or changing a stored procedure requires the user to run `/setup-ts-sv` in their
+Adding or changing a stored procedure requires the user to run `/ts-setup-sv` in their
 Workspace after deploying. Document this requirement in the PR description and in the
 relevant SKILL.md step.

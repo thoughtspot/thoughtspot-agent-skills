@@ -1,5 +1,5 @@
 ---
-name: setup-ts-profile
+name: ts-setup-profile
 description: Manage ThoughtSpot connection profiles — add, list, update, delete, and test profiles. Stores credentials securely in macOS Keychain. Run with no arguments to add your first profile or manage existing ones.
 ---
 
@@ -100,7 +100,7 @@ To get your token:
   5. Click Get Current User Token → Try it out → Execute
   6. Copy the token value from the response body
 
-Tokens are valid for ~24 hours. When yours expires, run /setup-ts-profile,
+Tokens are valid for ~24 hours. When yours expires, run /ts-setup-profile,
 choose U (Update), then Refresh credential.
 
 Paste your token (will not be displayed):

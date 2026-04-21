@@ -29,8 +29,8 @@ git commit -m "<descriptive message>"
 
 Commit message format: `<verb>: <what changed> — <why if non-obvious>`
 Examples:
-- `fix: convert-ts-from-snowflake-sv join cardinality default — was MANY_TO_MANY, should be MANY_TO_ONE`
-- `add: object-ts-model-builder skill (Claude + CoCo)`
+- `fix: ts-convert-from-snowflake-sv join cardinality default — was MANY_TO_MANY, should be MANY_TO_ONE`
+- `add: ts-object-model-builder skill (Claude + CoCo)`
 - `update: formula translation reference — add safe_divide pattern`
 
 ### Step 3: Push to GitHub
@@ -68,7 +68,7 @@ Stage sync: <list of files uploaded> | No sync needed
 
 Next steps (if applicable):
 - Reload your Snowsight Workspace to pick up skill changes
-- Run /setup-ts-sv if stored procedures changed
+- Run /ts-setup-sv if stored procedures changed
 ```
 
 ## Guardrails

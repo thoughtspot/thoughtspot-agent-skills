@@ -162,7 +162,7 @@ answer:
 | `fqn` | GUID of the underlying Model or Worksheet — use this to look up the data source |
 
 Most Answers have exactly one entry. The GUID in `fqn` is the direct lookup key for
-finding the Model in Step 5 of `object-ts-model-promote`.
+finding the Model in Step 5 of `ts-object-model-promote`.
 
 ### `formulas[]` fields
 
@@ -179,7 +179,7 @@ Model, you must infer or ask the user for `column_type` and `aggregation`.
 
 **Column reference format in Answer formulas:** Bare display names (`[Revenue]`) or
 formula IDs (`[formula_Vivun Deliverables Count(all)]`). Not the `[TABLE::column]`
-format used internally in Models. See open-items.md #3 in `object-ts-model-promote` for
+format used internally in Models. See open-items.md #3 in `ts-object-model-promote` for
 whether bare names work in Model formulas.
 
 **Formula inter-references:** When a formula references another formula, the expression

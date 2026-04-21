@@ -1,5 +1,5 @@
 ---
-name: object-ts-model-promote
+name: ts-object-model-promote
 description: Promote formulas and parameters from a saved ThoughtSpot Answer into a Model — makes them available to all users who search against it.
 ---
 
@@ -22,7 +22,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 | File | Purpose |
 |---|---|
 | [references/open-items.md](references/open-items.md) | Verified and unverified API behaviors — read before implementing each step |
-| [~/.claude/skills/setup-ts-profile/SKILL.md](~/.claude/skills/setup-ts-profile/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
+| [~/.claude/skills/ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
 | [~/.claude/shared/schemas/thoughtspot-answer-tml.md](~/.claude/shared/schemas/thoughtspot-answer-tml.md) | Answer TML structure — verified field reference for formulas, parameters, sets, data source lookup |
 | [~/.claude/shared/schemas/thoughtspot-liveboard-tml.md](~/.claude/shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — needed for Liveboard fallback path in Step 2 |
 | [~/.claude/shared/schemas/thoughtspot-sets-tml.md](~/.claude/shared/schemas/thoughtspot-sets-tml.md) | Set TML structure — bin sets, group sets, query sets; answer-level vs reusable |
@@ -34,7 +34,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 ## Prerequisites
 
-- ThoughtSpot profile configured — run `/setup-ts-profile` if not
+- ThoughtSpot profile configured — run `/ts-setup-profile` if not
 - `ts` CLI installed: `pip install -e tools/ts-cli`
 - Python package: `pyyaml` (`pip install pyyaml`)
 - ThoughtSpot user must have **MODIFY** or **FULL** access on the target Model
@@ -44,7 +44,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 ## Step 1 — Authenticate
 
 Read `~/.claude/thoughtspot-profiles.json`. If the file is missing or empty, prompt the
-user to run `/setup-ts-profile` first.
+user to run `/ts-setup-profile` first.
 
 If multiple profiles exist, ask:
 
@@ -66,7 +66,7 @@ source ~/.zshenv && ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
-[setup-ts-profile/SKILL.md](~/.claude/skills/setup-ts-profile/SKILL.md) for the token
+[ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md) for the token
 refresh procedure.
 
 Save `{base_url}` (strip trailing slash) and `{profile_name}` for all subsequent steps.
@@ -346,7 +346,7 @@ is a legacy Worksheet (not upgraded), inform the user:
 
 ```
 "{name}" is a legacy Worksheet. This skill promotes formulas to Models only.
-Consider migrating the Worksheet to a Model first using /object-ts-model-builder,
+Consider migrating the Worksheet to a Model first using /ts-object-model-builder,
 then re-run this skill.
 ```
 
@@ -781,9 +781,9 @@ To verify, open the Model URL above and check the Columns section for the new fo
 
 | Symptom | Action |
 |---|---|
-| `ts auth whoami` returns 401 | Token expired — follow the refresh steps in `/setup-ts-profile` |
+| `ts auth whoami` returns 401 | Token expired — follow the refresh steps in `/ts-setup-profile` |
 | Answer TML has no `formulas[]` | Answer may not have custom formulas — see Step 3 |
-| Data source is a Worksheet | Worksheets are legacy — inform user, suggest `/object-ts-model-builder` to migrate first |
+| Data source is a Worksheet | Worksheets are legacy — inform user, suggest `/ts-object-model-builder` to migrate first |
 | Import returns 403 / UNAUTHORIZED | User lacks edit access on the Model — see Step 6 |
 | Import: `FORMULA is not a valid aggregation type` | `aggregation:` is in a `formulas[]` entry — move it to the matching `columns[]` entry |
 | Import: `duplicate column name` | A promoted formula name conflicts with an existing column — rename or skip it in Step 8 |

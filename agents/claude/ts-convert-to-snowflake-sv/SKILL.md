@@ -1,5 +1,5 @@
 ---
-name: convert-ts-to-snowflake-sv
+name: ts-convert-to-snowflake-sv
 description: Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View by exporting TML, mapping columns and joins, translating formulas, and creating the view via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
 ---
 
@@ -15,12 +15,17 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 
 | File | Purpose |
 |---|---|
-| [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
-| [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
-| [../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
-| [../../shared/worked-examples/snowflake/ts-to-snowflake.md](../../shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
-| [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
+| [~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
+| [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
+| [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
+| [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
+| [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
+| [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Table TML field reference — column types, data types, joins_with structure |
+| [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML field reference — model_tables, columns, formulas, join scenarios |
+| [~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
+| [~/.claude/skills/ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [~/.claude/skills/ts-setup-snowflake-profile/SKILL.md](~/.claude/skills/ts-setup-snowflake-profile/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
+| [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 
 ---
 
@@ -46,7 +51,7 @@ under each `tables[]` entry — they are **not** top-level keys in the semantic 
 will cause a parse error.
 
 For the full coverage matrix including unmapped properties, see
-[../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md).
+[~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md).
 
 ---
 
@@ -56,166 +61,77 @@ For the full coverage matrix including unmapped properties, see
 
 - ThoughtSpot Cloud instance, REST API v2 enabled
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
-- Authentication configured — run `/setup-ts-profile` if you haven't already
+- Authentication configured — run `/ts-setup-profile` if you haven't already
 
 **Quick auth decision:**
 ```
 Can you log into ThoughtSpot in a browser (even via SSO)?
-  YES → token    — get a bearer token from Developer Playground (no admin needed)
-  NO  → password — use username/password credentials — see /setup-ts-profile
+  YES → token_env   — get a token from Developer Playground (no admin needed)
+  NO  → password_env or secret_key_env — see ts-setup-profile.md
 ```
 
 ### Snowflake
 
 - Role with `CREATE SEMANTIC VIEW` on the target schema — **only required if creating live**
-- Connection configured — run `/setup-snowflake-profile` if you haven't already
+- Connection configured — run `/ts-setup-snowflake-profile` if you haven't already
 - Not sure where to start? → Python connector + password auth has the fewest setup steps
 
-**No `CREATE SEMANTIC VIEW` access?** You can still run this skill in **file-only mode** — it
-generates the Semantic View YAML in a code block for you to create manually later. Select **FILE**
+**No Snowflake access?** You can still run this skill in **file-only mode** — it generates
+the Semantic View YAML and writes it to a file you can create manually later. Select **FILE**
 at the Step 10 checkpoint or say "file only" at any point before Step 12.
 
 ---
 
 ## Workflow
 
-### SQL Call Batching (Minimise UI Confirmations)
-
-**CRITICAL for Snowsight Workspaces:** Every `snowflake_sql_execute` call triggers a
-UI confirmation prompt that the user must click. Minimise the number of separate SQL
-calls by batching related statements together.
-
-**Rules:**
-
-1. **Combine independent queries into one call.** Use semicolons to separate multiple
-   statements in a single `snowflake_sql_execute` invocation. For example, instead of
-   12 separate `CREATE VIEW` calls, combine all into one multi-statement call:
-   ```sql
-   CREATE OR REPLACE VIEW A AS SELECT ...;
-   CREATE OR REPLACE VIEW B AS SELECT ...;
-   CREATE OR REPLACE VIEW C AS SELECT ...;
-   ```
-
-2. **Combine independent reads.** When you need to check stored procedures, get
-   profiles, and detect schemas — batch them:
-   ```sql
-   SELECT PROCEDURE_NAME FROM SKILLS.INFORMATION_SCHEMA.PROCEDURES
-   WHERE PROCEDURE_SCHEMA = 'PUBLIC'
-     AND PROCEDURE_NAME IN ('TS_SEARCH_MODELS', 'TS_EXPORT_TML', 'TS_IMPORT_TML');
-
-   SELECT NAME, BASE_URL, USERNAME, TOKEN_EXPIRES_AT FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
-   ```
-
-3. **Combine TML metadata extraction.** After storing TML in a temp table, extract
-   model_tables, joins, columns, and table physical details in a single query using
-   CTEs or UNION ALL rather than one query per aspect:
-   ```sql
-   -- All model metadata in one query
-   SELECT 'model_tables' AS section, ... FROM ... 
-   UNION ALL
-   SELECT 'joins' AS section, ... FROM ...
-   UNION ALL
-   SELECT 'columns' AS section, ... FROM ...;
-   ```
-
-4. **Batch wrapper view DDL.** All `CREATE OR REPLACE VIEW` statements for wrapper
-   views MUST be combined into a single multi-statement SQL call — never one call per
-   view.
-
-5. **Batch schema + column inspection.** Combine `SHOW SCHEMAS` and
-   `INFORMATION_SCHEMA.COLUMNS` queries where possible.
-
-6. **Combine dry-run with prerequisite DDL.** When dropping an existing semantic view
-   before re-creating, combine the DROP + dry-run CALL in one statement.
-
-**Target call budget per model:** Aim for **5–8 total SQL calls** per model conversion:
-
-| Call | Purpose |
-|---|---|
-| 1 | Setup: check stored procedures + get profile |
-| 2 | Search for models |
-| 3 | Export TML + store in temp table |
-| 4 | Extract all metadata (tables, joins, columns, table details) |
-| 5 | Check Snowflake schemas + column case (INFORMATION_SCHEMA) |
-| 6 | Create all wrapper views (one batched call) |
-| 7 | Dry-run validation |
-| 8 | Create semantic view |
-
-For batch conversions of N models that share the same schema, calls 1, 2, and 5 are
-only needed once — not per model.
-
----
-
-**API method selection:**
-
-The workflow calls the ThoughtSpot API in two places: Step 2 (search) and Step 3
-(TML export). There are two ways to make these calls:
-
-| Method | When to use |
-|---|---|
-| **Stored procedures** (preferred) | When `SKILLS.PUBLIC.TS_SEARCH_MODELS` and `SKILLS.PUBLIC.TS_EXPORT_TML` exist — installed via `/setup-ts-sv` |
-| **Direct API** (fallback) | When the stored procedures do not exist (e.g. setup was not completed) — uses inline Python with `/tmp/ts_token.txt`. **Not available in Snowsight Workspaces** — requires CLI environment. |
-
-**Auto-detect at the start of the workflow (batch with profile query):**
-
-```sql
-SELECT PROCEDURE_NAME FROM SKILLS.INFORMATION_SCHEMA.PROCEDURES
-WHERE PROCEDURE_SCHEMA = 'PUBLIC'
-  AND PROCEDURE_NAME IN ('TS_SEARCH_MODELS', 'TS_EXPORT_TML', 'TS_IMPORT_TML');
-
-SELECT NAME, BASE_URL, USERNAME, TOKEN_EXPIRES_AT FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES;
-```
-
-Run both in a **single** `snowflake_sql_execute` call to minimise UI prompts.
-Parse the combined result to determine both `{api_method}` and `{profile_name}`.
-
-**Check token expiry immediately:** if `TOKEN_EXPIRES_AT <= CURRENT_TIMESTAMP()` or is NULL,
-stop and tell the user:
-> "Your ThoughtSpot token has expired. Run `/setup-ts-profile` → U → Refresh token, then retry."
-Do not proceed to Step 1 until the token is valid.
-
-If `TS_SEARCH_MODELS` and `TS_EXPORT_TML` both appear in the result, set `{api_method}` = `stored_procedure`.
-If either is missing, set `{api_method}` = `direct_api` and inform the user:
-
-```
-Stored procedures not found in SKILLS.PUBLIC. Run /setup-ts-sv to install them.
-```
-
-> **Snowsight Workspace:** If running in a Snowsight Workspace, STOP here and tell
-> the user: "The stored procedures are required in Snowsight Workspaces. Please run
-> `/setup-ts-sv` to install them." The direct API fallback uses `python3`
-> and `curl` which are not available in this environment.
-
-The `{api_method}` selection applies to both Step 2 and Step 3.
-
----
-
 ### Step 1: Authenticate
 
-**When `{api_method}` = `stored_procedure`:**
+**Session continuity:** If a ThoughtSpot profile was already confirmed earlier in
+this conversation (e.g. for a previous model in a batch), skip profile selection
+and reuse it.
 
-Authentication is handled by the stored procedures themselves via the Snowflake
-`EXTERNAL_ACCESS_INTEGRATIONS` and `SECRETS` configured during `/setup-ts-profile`.
-Skip the token file workflow below — only profile selection is needed (to determine
-which profile name to pass to the procedures).
+**Profile selection (first model only):**
 
-**Profile name discovery (mandatory before any CALL):**
+1. Read `~/.claude/thoughtspot-profiles.json`.
+2. If multiple profiles: display a numbered list and ask the user to select one.
+3. If exactly one profile: display it and confirm before proceeding.
 
-Use the profile rows already fetched in the auto-detect query above — do not query
-the profiles table again. The `NAME` column is the exact profile name.
+```
+Available ThoughtSpot profiles:
+  1. Production — analyst@company.com @ myorg.thoughtspot.cloud
+  2. Staging    — analyst@company.com @ myorg-staging.thoughtspot.cloud
 
-If one profile: use it directly (confirm with user).
-If multiple: display a numbered list and ask the user to select.
-Store the exact `NAME` value as `{profile_name}` for all subsequent
-`CALL` statements — do not modify it.
+Select a profile (or press Enter to use #1):
+```
 
-**When `{api_method}` = `direct_api`:**
+After the profile is confirmed, verify the connection:
 
-> **Snowsight Workspace limitation:** The direct API fallback uses `python3` and
-> `curl` via the Bash tool, which are **not available** in Snowsight Workspaces.
-> If the stored procedures are missing and you are in a Snowsight Workspace, inform
-> the user they must run `/setup-ts-profile` first to create the stored procedures.
-> Do not attempt direct API calls.
+```bash
+source ~/.zshenv && ts auth whoami --profile {profile_name}
+```
+
+The CLI handles token caching, Keychain access, and expiry automatically.
+No temp files or manual token management needed in this skill.
+
+If `ts auth whoami` returns 401, the token is expired. Ask the user to refresh it:
+
+```
+Your ThoughtSpot token has expired. To refresh:
+  1. Log into ThoughtSpot in your browser
+  2. Go to Develop → REST Playground 2.0 → Authentication → Get Current User Token
+  3. Click Try it out → Execute, then copy the token value
+  4. Run in your terminal:
+       security delete-generic-password -s "thoughtspot-{slug}" -a "{username}"
+       security add-generic-password -s "thoughtspot-{slug}" -a "{username}" -w "YOUR_TOKEN"
+  5. Let me know when done.
+```
+
+Then clear the stale cache and retry:
+
+```bash
+ts auth logout --profile {profile_name}
+source ~/.zshenv && ts auth whoami --profile {profile_name}
+```
 
 ---
 
@@ -245,76 +161,35 @@ Ask the user which filters to apply (they may provide any combination):
 ```
 Enter search criteria (leave blank to skip):
   Name keyword:
-  Author (username or email):
   Tags (comma-separated):
 ```
 
-**If `{api_method}` = `stored_procedure`:**
+Run the search using the CLI:
 
-Use the `TS_SEARCH_MODELS` stored procedure:
-
-```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT('{name_keyword}'), {owner_only});
+```bash
+source ~/.zshenv && ts metadata search --profile {profile_name} \
+  --subtype WORKSHEET \
+  --name "%{name_keyword}%" \
+  --all
 ```
 
-Parameters:
-- `profile_name`: the ThoughtSpot profile name selected in Step 1
-- `ARRAY_CONSTRUCT('{name_keyword}')`: single-element array with the name keyword; pass `ARRAY_CONSTRUCT()` for browse-all
-- `owner_only`: `TRUE` to filter to models owned by the profile's user, `FALSE` for all
+Omit `--name` if no keyword was supplied. The `--all` flag auto-paginates.
+`--subtype WORKSHEET` restricts results to worksheets and models only.
 
-When a single keyword is supplied the procedure applies `name_pattern` substring
-matching server-side; results are already filtered to names containing the keyword.
+**Zero results fallback:** If the search returns zero results, retry without `--name`
+and apply case-insensitive substring filtering against `metadata_name` client-side.
 
-Display the results as described in "Displaying Results" below.
-If no results are returned, inform the user and offer to browse all or refine the search.
-
-Note: The stored procedure supports name keyword and `owner_only` filtering. If the
-user also wants to filter by tags, fall back to the direct API approach for that search
-or apply tag filtering client-side on the stored procedure results.
-
-**If `{api_method}` = `direct_api`:** *(CLI only — not available in Snowsight Workspaces)*
-
-Build the request body from whichever fields are provided. All supplied filters
-combine with AND semantics — results must satisfy every condition:
-
-```
-POST {base_url}/api/rest/2.0/metadata/search
-{
-  "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": "%{name_keyword}%"}],  // omit name_pattern if blank
-  "created_by_user_identifiers": ["{author}"], // omit if blank; accepts username or GUID
-  "tag_identifiers": ["{tag1}", "{tag2}"],     // omit if blank; accepts tag name or GUID
-  "record_size": 50,
-  "record_offset": 0
-}
-```
-
-Paginate in increments of 50 until an empty page is returned before displaying results.
-
-**Client-side filtering (mandatory — same as stored procedure method):** After
-collecting all pages, apply case-insensitive substring filtering on model names
-using the user's search keyword. Display only matching results.
-
-**Zero results fallback (both methods):** If a name-only search returns zero results,
-re-run with no name filter (or empty string for stored procedure), collect all
-results, and apply case-insensitive substring matching against `metadata_name`
-client-side. Present matches or offer to browse all.
+**Tags** are not directly supported as a CLI filter — if the user supplies tags,
+run without `--name`, collect all results, and filter client-side by tag name
+in each result's `metadata_header.tags[]`.
 
 ---
 
 #### Option B — Browse All
 
-**If `{api_method}` = `stored_procedure`:**
-
-```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', ARRAY_CONSTRUCT(), FALSE);
+```bash
+source ~/.zshenv && ts metadata search --profile {profile_name} --subtype WORKSHEET --all
 ```
-
-Filter the results to `type == 'WORKSHEET'` and display the full numbered list.
-
-**If `{api_method}` = `direct_api`:** *(CLI only — not available in Snowsight Workspaces)*
-
-Fetch all pages (`record_offset` 0, 50, 100, …) until an empty page is returned.
-Filter to `metadata_header.type == 'WORKSHEET'` and display the full numbered list.
 
 ---
 
@@ -338,76 +213,25 @@ Store `metadata_id` as `{selected_model_id}` and `metadata_name` as
 
 ### Step 3: Export the TML
 
-**If `{api_method}` = `stored_procedure`:**
-
-The CALL result can be truncated when read inline. Always store via RESULT_SCAN.
-These must be **two separate SQL calls** — RESULT_SCAN depends on LAST_QUERY_ID().
-
-```sql
--- Call 1: export
-CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{selected_model_id}'));
-```
-
-```sql
--- Call 2: store full result (column is always named after the procedure, uppercase)
-CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.TML_RAW (tml_data VARIANT);
-INSERT INTO SKILLS.TEMP.TML_RAW
-SELECT PARSE_JSON("TS_EXPORT_TML") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
-```
-
-For batch mode (multiple models), same pattern — just pass multiple GUIDs in Call 1:
-```sql
-CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{model_guid_1}', '{model_guid_2}'));
-```
-
-**Do not** use the procedure in a FROM clause or as a UDF — it is a stored procedure,
-not a function. FLATTEN and direct SELECT from the CALL result will not work.
-
-Proceed to the separation logic below using `tml_data` from `SKILLS.TEMP.TML_RAW`.
-
-**If `{api_method}` = `direct_api`:** *(CLI only — not available in Snowsight Workspaces)*
-
-```
-POST {THOUGHTSPOT_BASE_URL}/api/rest/2.0/metadata/tml/export
-{
-  "metadata": [{"identifier": "{selected_model_id}"}],
-  "export_fqn": true,
-  "export_associated": true
-}
+```bash
+source ~/.zshenv && ts tml export {selected_model_id} --profile {profile_name} --fqn --associated
 ```
 
 **Batch mode — export all models in one call:**
 
 When the user has selected multiple models for conversion (e.g. "convert all BIRD_
-models"), export all their TMLs in a single request rather than one per model:
+models"), pass all GUIDs to a single export call:
 
-```json
-{
-  "metadata": [
-    {"identifier": "{model_guid_1}"},
-    {"identifier": "{model_guid_2}"}
-  ],
-  "export_fqn": true,
-  "export_associated": true
-}
+```bash
+source ~/.zshenv && ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated --parse
 ```
 
-**Processing (both methods):**
+`--parse` returns structured JSON directly — non-printable character stripping and
+YAML parsing are handled by the CLI. Separate by `type` field. Cache associated table
+TMLs by GUID — if two models share a physical table, the TML is returned once and
+should not be re-fetched for the second model.
 
-Separate the combined response by top-level key (`worksheet`/`model` = primary objects;
-`table`/`sql_view` = associated objects). Cache associated table TMLs by GUID — if
-two models share a physical table, the TML is returned once and should not be
-re-fetched for the second model.
-
-**Non-printable characters:** Some TML contains special characters (e.g. `#x0095`)
-that cause `yaml.safe_load` to raise a `ReaderError`. Strip them before parsing:
-```python
-import re
-cleaned = re.sub(r'[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD]', '', edoc)
-parsed = yaml.safe_load(cleaned)
-```
-
-Parse every `edoc` string as YAML (with cleaning). Separate into:
+Separate into:
 - **Primary object:** parsed YAML has top-level key `worksheet` or `model`
 - **Table objects:** parsed YAML has top-level key `table`
 - **SQL view objects:** parsed YAML has top-level key `sql_view` — collect separately for handling in Step 5
@@ -456,7 +280,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) for details.
+never `"schema_"`. See [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
@@ -465,22 +289,21 @@ genuinely absent.
 
 If `db` or `schema` is confirmed absent after inspection, ask the user to provide them.
 If a table has no associated TML, fetch it separately using its FQN GUID:
-```
-POST /api/rest/2.0/metadata/tml/export  { "metadata": [{"identifier": "{fqn}"}] }
+```bash
+source ~/.zshenv && ts tml export {fqn_guid} --profile {profile_name} --fqn
 ```
 
 Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag them.
 
 **SQL view resolution:** For every `sql_view` object referenced in `model_tables[]`
 (or `table_paths[]` for Worksheet format), classify its `sql_query` using the logic
-in [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md):
+in [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md):
 
 *Simple* — `SELECT * FROM single_table [AS alias]`:
 - Extract the physical FQN from the FROM clause
 - Resolve `db`, `schema`, `db_table` from the FQN
-- Borrow column types from the matching physical table TML or from the `col_types`
-  map already built via `INFORMATION_SCHEMA.COLUMNS` — no additional query needed
-  unless the physical table was genuinely absent from both
+- Borrow column types from the matching physical table TML (run `SHOW COLUMNS` if
+  no matching table TML exists)
 - Treat the sql_view as a regular table for all subsequent steps
 - Note it in the Unmapped Properties Report under "SQL Views resolved automatically"
 
@@ -498,26 +321,16 @@ in [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tm
     S — Skip — omit all columns sourced from this view
   ```
 
-  - **C (Create view):** Collect all "C" views before executing any DDL. Batch the
-    CREATE statements into a single SQL call (same pattern as wrapper views):
+  - **C (Create view):** Before executing the semantic view CREATE, run:
     ```sql
-    CREATE OR REPLACE VIEW {target_db}.{target_schema}.{to_snake(sv_name_1)} AS {sql_query_1};
-    CREATE OR REPLACE VIEW {target_db}.{target_schema}.{to_snake(sv_name_2)} AS {sql_query_2};
+    CREATE OR REPLACE VIEW {target_db}.{target_schema}.{to_snake(sv_name)} AS
+    {sql_query};
     ```
-    After all views are created, resolve column types for all of them in **one** query:
-    ```sql
-    SELECT table_name, column_name, data_type
-    FROM {target_db}.INFORMATION_SCHEMA.COLUMNS
-    WHERE table_schema = '{target_schema}'
-      AND table_name IN ('{view_name_1}', '{view_name_2}', ...)
-    ORDER BY table_name, ordinal_position;
-    ```
-    Reference each new view as `base_table.table`.
+    Then run `SHOW COLUMNS IN VIEW {target_db}.{target_schema}.{view_name}` to get
+    column types. Reference the new view as `base_table.table`.
 
-  - **M (Map to existing):** Collect all "M" mappings before querying. Resolve column
-    types for all mapped objects in **one** `INFORMATION_SCHEMA.COLUMNS` query using
-    the same pattern as above (filter by schema and `table_name IN (...)`). Use each
-    as `base_table`.
+  - **M (Map to existing):** Ask for the fully-qualified Snowflake object name.
+    Run `SHOW COLUMNS` on it to get column types. Use as `base_table`.
 
   - **S (Skip):** Omit all model columns whose `column_id` references this sql_view.
     Log each omitted column in the Unmapped Properties Report under "SQL Views skipped".
@@ -653,16 +466,6 @@ If `needs_wrapper` is True:
 3. Update `phys_map` to point at the new schema and uppercase table/column names
 4. All YAML identifiers will then be bare uppercase — no quoting needed anywhere
 
-**IMPORTANT — batch all wrapper DDL into one call:** Combine the `CREATE SCHEMA` and
-all `CREATE OR REPLACE VIEW` statements into a **single** multi-statement SQL call.
-This reduces N+1 UI confirmations to just 1:
-```sql
-CREATE SCHEMA IF NOT EXISTS {db}.{TARGET_SCHEMA}_SV;
-CREATE OR REPLACE VIEW {db}.{TARGET_SCHEMA}_SV.TABLE_A AS SELECT ...;
-CREATE OR REPLACE VIEW {db}.{TARGET_SCHEMA}_SV.TABLE_B AS SELECT ...;
-CREATE OR REPLACE VIEW {db}.{TARGET_SCHEMA}_SV.TABLE_C AS SELECT ...;
-```
-
 Execute these DDL statements using the same method as the column queries above.
 
 **Python connector — run wrapper view DDL in parallel:**
@@ -695,7 +498,10 @@ subprocess.run([snow_cmd, 'sql', '-c', cli_connection, '-f', '/tmp/sv_wrappers.s
 import os; os.remove("/tmp/sv_wrappers.sql")
 ```
 
-See [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
+See [~/.claude/skills/ts-setup-snowflake-profile/SKILL.md](~/.claude/skills/ts-setup-snowflake-profile/SKILL.md) for the
+connection factory pattern and CLI file-based execution details.
+
+See [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
 
@@ -785,44 +591,7 @@ used_rel_names.add(base_name)
 Initialise `used_rel_names = set()` before the relationship loop.
 
 For join type and cardinality mappings, see
-[../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md).
-
-**`primary_key` — build the complete right_tables set BEFORE generating any table YAML:**
-
-**CRITICAL:** Do not generate table YAML until you have processed every relationship
-and know which tables are right_tables. If you generate table entries first and add
-`primary_key` later, it is easy to miss one — especially fact tables like `dm_order`
-that are both a source table and a join target.
-
-Correct order:
-1. Iterate all joins/relationships → collect `right_tables` set
-2. Then generate all table YAML — check membership in `right_tables` for every table entry
-
-```python
-# Step 1 — build right_tables first
-right_tables = set()
-right_table_pk_col = {}   # right_table → physical PK column name
-for join in joins:
-    right_tbl = resolve_right_table(join)
-    right_pk   = resolve_right_column(join)   # the right_column of the relationship
-    right_tables.add(right_tbl)
-    right_table_pk_col[right_tbl] = right_pk
-
-# Step 2 — generate table YAML, adding primary_key where needed
-for table in tables:
-    if table.name in right_tables:
-        emit primary_key section using right_table_pk_col[table.name]
-```
-
-Any table can be a right_table — including fact/transaction tables like `dm_order`
-that also have FK columns pointing elsewhere. Never assume only dimension tables
-need `primary_key`.
-
-```yaml
-primary_key:
-  columns:
-  - {PHYSICAL_COLUMN_NAME}   # the right_column value from the relationship
-```
+[~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md).
 
 ---
 
@@ -876,6 +645,17 @@ Each field must be placed under the `tables[]` entry for its owning table. Accum
 fields per table as you iterate columns, then emit the full table entry with nested
 `dimensions`, `time_dimensions`, and `metrics` sections.
 
+**`primary_key` — required for join target tables:**
+
+After building all relationships, identify every table that appears as `right_table`
+in a relationship. Each such table entry must include a `primary_key` section listing
+the physical column(s) used as the join key:
+```yaml
+primary_key:
+  columns:
+  - {PHYSICAL_COLUMN_NAME}
+```
+
 **Join key columns must be exposed as dimensions (Cortex Analyst requirement):**
 
 Cortex Analyst validates that every column used in a relationship is exposed as a
@@ -928,12 +708,12 @@ the PK is `DISP_ID`, there must be a dimension named `disp_id`.
    column and log it; do not include placeholder `expr` values
 2. If `column_id` set → resolve physical column name as above
 3. Classify as dimension / time_dimension / metric using the decision tree in
-   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
+   [~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md)
 4. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
 5. Record unmapped properties (format_pattern, default_date_bucket, custom_order,
    data_panel_column_groups, geo_config) for the Unmapped Properties Report
 6. Build the Snowflake field entry using the templates in
-   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
+   [~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md)
 7. Append the field to the field list for its owning table
 
 ---
@@ -953,14 +733,14 @@ rm -f /tmp/ts_tml_*.json
 ### Step 9: Translate Formulas
 
 > **MANDATORY — read the reference before assessing any formula:**
-> Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+> Open [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 > and use its **Decision Flowchart** to classify every formula. Do **not** classify
 > a formula as untranslatable based on function name recognition alone. Patterns
 > that appear ThoughtSpot-specific have documented Snowflake equivalents — for example:
 >
 > | Looks untranslatable | Actually translatable as |
 > |---|---|
-> | `last_value(agg, query_groups(), {date_col})` | `SUM(col)` + `non_additive_dimensions` on the date table (see below) |
+> | `last_value(agg, query_groups(), {date_col})` | `SUM(col)` + `non_additive_dimensions` on the date table |
 > | `sum(group_aggregate(sum(m), {attr}, query_filters()))` | Plain `SUM(m)` — outer sum + query_filters() simplifies |
 > | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | Plain `SUM(m)` |
 > | `safe_divide(sum(m), [NamedMetric])` where NamedMetric is same measure at coarser grain | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` — contribution ratio pattern |
@@ -988,42 +768,6 @@ Instead:
   ```
   | {display_name} | OMITTED | {reason} | {original_expr} |
   ```
-
-**`last_value` formulas → `non_additive_dimensions` field (NOT inline in expr):**
-
-ThoughtSpot `last_value(sum(m), query_groups(), {date_col})` translates to a metric
-with a `non_additive_dimensions` structured field. The equivalent DDL syntax is:
-`TABLE.METRIC NON ADDITIVE BY (DATE_DIM.DATE_COL ASC NULLS LAST) AS SUM(fact.col)`
-
-Rules:
-- `expr`: standard `SUM(fact_table.col)` aggregate — same as a regular metric
-- `non_additive_dimensions[].table`: the **date dimension table** (the joined table
-  whose PK is the date column) — NOT the fact table or its FK column
-- `non_additive_dimensions[].dimension`: the `time_dimensions` field name on that
-  date dimension table
-- `non_additive_dimensions[].sort_direction`: `ascending` for `last_value`
-
-```yaml
-# For last_value(sum(FILLED_INVENTORY), query_groups(), {balance_date})
-tables:
-- name: dm_date_dim_inventory          # date dimension table
-  primary_key:
-    columns:
-    - DATE_VALUE
-  time_dimensions:
-  - name: balance_date
-    expr: dm_date_dim_inventory.DATE_VALUE
-    data_type: DATE
-
-- name: dm_inventory
-  metrics:
-  - name: inventory_balance
-    expr: SUM(dm_inventory.FILLED_INVENTORY)   # standard SUM — same as regular metric
-    non_additive_dimensions:
-    - table: dm_date_dim_inventory     # the DATE DIMENSION table — not the fact table
-      dimension: balance_date          # time_dimension name on that table
-      sort_direction: ascending
-```
 
 Confirmed untranslatable patterns (after checking the reference):
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
@@ -1056,7 +800,7 @@ Present the following three sections:
 ```
 
 **3. Unmapped Properties Report** — use the format defined in
-[../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md).
+[~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md).
 Include only sections that have entries. Common sections:
 - Parameters not migrated
 - Column groups not migrated
@@ -1072,10 +816,10 @@ Shall I create this Semantic View in Snowflake?
   YES  — proceed
   NO   — cancel
   EDIT — followed by changes to the YAML
-  FILE — output the YAML without creating it in Snowflake
+  FILE — write the YAML to a file without creating it in Snowflake
 ```
 
-If the user selects **NO**, stop.
+If the user selects **NO**, stop. No cleanup needed — the CLI manages its own token cache.
 
 If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-file-only-mode).
 
@@ -1083,7 +827,7 @@ If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-f
 
 ### Step 11: Validate
 
-Run all checks from [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md).
+Run all checks from [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
 - [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level
@@ -1091,62 +835,64 @@ Report all failures together before retrying. Key checks:
 - [ ] Field names unique globally across all tables' dimensions, time_dimensions, metrics
 - [ ] All `expr` table prefixes match a `name` in `tables[]`
 - [ ] All relationship `left_table`/`right_table` values match a `name` in `tables[]`
-- [ ] Every `right_table` in a relationship has a `primary_key` section — cross-check by listing every `right_table` value from `relationships[]` and confirming each appears in `tables[]` with a `primary_key` block
-- [ ] No `NON ADDITIVE BY` text inside any `expr` string — non-additive metrics use the `non_additive_dimensions` structured list field
-- [ ] Non-additive metric `expr` uses a standard `SUM(fact_table.col)` aggregate — same format as a regular metric
-- [ ] `non_additive_dimensions[].table` references the **date dimension table** (joined table with the date PK), not the fact table or its FK column
-- [ ] `non_additive_dimensions[].dimension` matches a `time_dimensions` field name on that date dimension table
+- [ ] Every `right_table` in a relationship has a `primary_key` section
 - [ ] Reserved words in column names are double-quoted in `expr`
 - [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
-- [ ] All `expr` values are single-line double-quoted strings — no `>-`, `|`, or any YAML block scalar (Snowflake rejects them)
 - [ ] No untranslatable formula placeholders (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL`)
 - [ ] Valid Snowflake identifiers (view name, all field names): `^[A-Za-z_][A-Za-z0-9_]*$`
 - [ ] Valid `data_type` values on dimensions/time_dimensions: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700.
 - [ ] Every join key column (FK and PK) is exposed as a named dimension in its table, with name = `snake_case(physical_column)`
 - [ ] No two tables in a relationship share a join column name — if they do, rename FK columns in wrapper views with a table-specific prefix
+- [ ] No YAML block scalar syntax (`>-` or `|`) in any `expr` value — all expr values must be single-line double-quoted strings; block scalars cause Snowflake parse errors
+- [ ] Every `right_table` in `relationships[]` has a `primary_key` block — cross-check the full list before finalising YAML
+- [ ] `non_additive_dimensions` metrics: expr uses `SUM(...)`, the `table` field references the joined date dimension (not the fact table), and `nulls_position: last` is present
 
 ---
 
-### Step 12-FILE: Output YAML (file-only mode)
+### Step 12-FILE: Output YAML file (file-only mode)
 
 This path is used when the user selected **FILE** at the Step 10 checkpoint, explicitly
-said "file only", or has no `CREATE SEMANTIC VIEW` permission.
+said "file only", or has no Snowflake access or `CREATE SEMANTIC VIEW` permission.
 
-**1. Present the YAML for copy-paste:**
+**1. Determine the output filename:**
 
-Display the full Semantic View YAML in a fenced code block labelled `yaml`:
+Use `{semantic_view_name}.yaml` (the `name:` value from the generated YAML). If the
+current working directory contains a `semantic-views/` or `output/` subdirectory, write
+there; otherwise write to the current directory.
 
-````
-```yaml
-{full sv yaml content here}
-```
-````
+**2. Write the file:**
 
-**2. Provide the creation SQL:**
-
-```
-To create this Semantic View in Snowflake when you have access, run in a Snowsight worksheet:
-
-  USE DATABASE {suggested_db};
-  USE SCHEMA {suggested_schema};
-  CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
-    '{suggested_db}.{suggested_schema}',
-    $$ <paste YAML content here> $$
-  );
-
-Run a dry-run first to validate (add TRUE as a third argument):
-  CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
-    '{suggested_db}.{suggested_schema}',
-    $$ <paste YAML content here> $$,
-    TRUE
-  );
+```python
+from pathlib import Path
+out_path = Path(f"{semantic_view_name}.yaml")
+out_path.write_text(sv_yaml_str, encoding="utf-8")
 ```
 
-Use the database and schema from the table map built in Step 5 as suggestions (or
-`YOUR_DATABASE.YOUR_SCHEMA` if ambiguous).
+**3. Report:**
 
-**3. Proceed to Step 13** (Generate Test Questions) — the test questions help the user
-know what to verify once they create the view manually.
+```
+Semantic View YAML written to: {semantic_view_name}.yaml
+
+To create it in Snowflake when you have access:
+  1. In Snowsight, open a worksheet and run:
+
+       USE DATABASE {suggested_db};
+       USE SCHEMA {suggested_schema};
+       CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
+         '{suggested_db}.{suggested_schema}',
+         $$ <paste YAML content here> $$
+       );
+
+  2. Or via CLI using the same CALL statement with the YAML passed in $$...$$
+     dollar-quote delimiters.
+```
+
+Use the database and schema from the table map built in Step 5 as the suggested
+target (or `YOUR_DATABASE.YOUR_SCHEMA` if ambiguous). These are suggestions only —
+the user fills in the actual target when they run the command.
+
+**4. Proceed to Step 13** (Generate Test Questions) — the test questions help the user
+know what to verify once they create the view.
 
 ---
 
@@ -1198,18 +944,27 @@ If the user selects E, ask for `target_database` and `target_schema` explicitly.
 - CLI: run `snow sql -c {cli_connection} --format json -q "SHOW WAREHOUSES"` and
   pick the first non-suspended warehouse from the JSON results
 
+Use the connection method and patterns from
+[~/.claude/skills/ts-setup-snowflake-profile/SKILL.md](~/.claude/skills/ts-setup-snowflake-profile/SKILL.md) — including the
+temp-file approach for CLI when executing the dry-run and CREATE calls.
+
 **Always run a dry-run first:**
 
 ```sql
+USE ROLE {role};
+USE DATABASE {target_database};
+USE SCHEMA {target_schema};
+
+-- Step 1: Dry-run validation (third arg TRUE = validate only, do not create)
 CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{target_database}.{target_schema}', $$
 {yaml}
 $$, TRUE);
 ```
 
-If dry-run succeeds, combine the DROP (if needed) and CREATE into a **single** call:
+If dry-run succeeds, proceed to create:
 
 ```sql
-DROP SEMANTIC VIEW IF EXISTS {target_database}.{target_schema}.{semantic_view_name};
+-- Step 2: Create
 CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{target_database}.{target_schema}', $$
 {yaml}
 $$);
@@ -1232,16 +987,10 @@ DROP SEMANTIC VIEW IF EXISTS {target_database}.{target_schema}.{semantic_view_na
 ```
 Then re-run the CREATE call.
 
-**Cleanup (direct_api mode only — skip if using stored procedures):**
-*(CLI only — not applicable in Snowsight Workspaces)*
+**Cleanup:**
 
-- If **more models remain** in the current batch, preserve `/tmp/ts_token.txt` for
-  the next iteration — do not delete it.
-- Delete it only after the **last model** in the session is done (or if the user
-  cancels the batch), whether the view was created successfully or not:
-```bash
-rm -f /tmp/ts_token.txt
-```
+No ThoughtSpot token cleanup needed — the CLI manages its own cache automatically.
+If Snowflake temp files were written (e.g. `/tmp/sv_wrappers.sql`), remove them now.
 
 ---
 
@@ -1258,8 +1007,8 @@ SHOW SEMANTIC VIEWS LIKE '{semantic_view_name}' IN SCHEMA {target_database}.{tar
 
 Expected: exactly one row returned with `name = '{semantic_view_name}'`.
 
-If zero rows returned: the stored procedure reported success but the view was not created.
-Report this discrepancy verbatim — do not proceed to test questions.
+If zero rows returned: the stored procedure reported success but the view was not
+created. Report this discrepancy verbatim — do not proceed to test questions.
 
 **2. Spot-check — SELECT the first metric:**
 
@@ -1356,7 +1105,5 @@ If yes: go directly to Step 2 (model selection is already known — skip straigh
 Step 3: Export TML). Reuse the ThoughtSpot profile, Snowflake profile, warehouse,
 and role from this session. Do **not** re-run Step 1 profile prompts.
 
-If no (or no more models remain) and `{api_method}` = `direct_api` (CLI only):
-```bash
-rm -f /tmp/ts_token.txt
-```
+If no (or no more models remain): the session is complete. No ThoughtSpot token
+cleanup needed — the CLI manages its own cache.

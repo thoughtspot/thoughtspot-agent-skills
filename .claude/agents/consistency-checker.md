@@ -72,7 +72,7 @@ consistency-checker results
 ===========================
 
 [PASS] Broken references: all paths resolved
-[FAIL] Stage copy completeness: agents/coco/setup-ts-sv/SKILL.md not listed in SETUP.md (line 24)
+[FAIL] Stage copy completeness: agents/coco/ts-setup-sv/SKILL.md not listed in SETUP.md (line 24)
 [PASS] README skills table: all skills present
 [PASS] SETUP.md symlink steps: all skills covered
 [FAIL] Anti-patterns: tools/ts-cli/ts_cli/commands/metadata.py:44 — "%%" in help string
