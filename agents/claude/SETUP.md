@@ -62,7 +62,7 @@ Run with `/convert-ts-from-snowflake-sv`.
 
 Manages Databricks connection profiles for Unity Catalog skills. Stores PAT tokens
 securely in the macOS Keychain, wires up `~/.zshenv`, and verifies the connection
-against a configured SQL warehouse. Required before running `/convert-ts-to-unity-catalog`.
+against a configured SQL warehouse. Required before running `/convert-ts-to-databricks-mv`.
 
 Run with `/setup-databricks-profile`.
 
@@ -77,7 +77,7 @@ handling, and permission checking before import.
 
 Run with `/object-ts-model-promote`.
 
-### [`convert-ts-to-unity-catalog`](convert-ts-to-unity-catalog/)
+### [`convert-ts-to-databricks-mv`](convert-ts-to-databricks-mv/)
 
 Converts a ThoughtSpot Worksheet or Model into a Databricks Unity Catalog Metric View.
 Exports the TML definition via the ThoughtSpot REST API, identifies the fact/source
@@ -90,7 +90,7 @@ Handles multi-hop snowflake schemas, SQL view auto-resolution, multi-model batch
 conversion, and generates an Unmapped Properties Report for any ThoughtSpot features
 that cannot be represented in the Metric View format.
 
-Run with `/convert-ts-to-unity-catalog`.
+Run with `/convert-ts-to-databricks-mv`.
 
 ---
 
@@ -123,7 +123,7 @@ cp -r /tmp/thoughtspot-skills/agents/claude/setup-databricks-profile ~/.claude/s
 cp -r /tmp/thoughtspot-skills/agents/claude/object-ts-model-builder ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/convert-ts-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/convert-ts-from-snowflake-sv ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/convert-ts-to-unity-catalog ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/convert-ts-to-databricks-mv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/object-ts-model-promote ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
@@ -145,7 +145,7 @@ pip install requests pyyaml
 # Required only if connecting to Snowflake via Python connector (not needed for Snowflake CLI)
 pip install snowflake-connector-python cryptography
 
-# Required for Databricks Unity Catalog skills (convert-ts-to-unity-catalog)
+# Required for Databricks Unity Catalog skills (convert-ts-to-databricks-mv)
 pip install databricks-sql-connector
 ```
 
@@ -187,8 +187,8 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/convert-ts-from-snowflake-sv \
 ln -s ~/Dev/thoughtspot-skills/agents/claude/setup-databricks-profile \
       ~/.claude/skills/setup-databricks-profile
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/convert-ts-to-unity-catalog \
-      ~/.claude/skills/convert-ts-to-unity-catalog
+ln -s ~/Dev/thoughtspot-skills/agents/claude/convert-ts-to-databricks-mv \
+      ~/.claude/skills/convert-ts-to-databricks-mv
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/object-ts-model-promote \
       ~/.claude/skills/object-ts-model-promote
@@ -210,7 +210,7 @@ pip install requests pyyaml
 # Required only if connecting to Snowflake via Python connector (not needed for Snowflake CLI)
 pip install snowflake-connector-python cryptography
 
-# Required for Databricks Unity Catalog skills (convert-ts-to-unity-catalog)
+# Required for Databricks Unity Catalog skills (convert-ts-to-databricks-mv)
 pip install databricks-sql-connector
 ```
 
@@ -275,7 +275,7 @@ what you want in natural language and Claude will invoke the right skill.
 |---|---|---|
 | `convert-ts-to-snowflake-sv` | `/convert-ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `convert-ts-from-snowflake-sv` | `/convert-ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
-| `convert-ts-to-unity-catalog` | `/convert-ts-to-unity-catalog` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
+| `convert-ts-to-databricks-mv` | `/convert-ts-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
@@ -319,7 +319,7 @@ profiles and credentials across the batch.
 - Role with `CREATE SEMANTIC VIEW` privilege on the target schema
 - Snowflake account with Cortex Analyst / Semantic Views enabled
 
-**Databricks (for convert-ts-to-unity-catalog):**
+**Databricks (for convert-ts-to-databricks-mv):**
 - Databricks workspace with Unity Catalog enabled
 - SQL warehouse running and accessible
 - Personal Access Token with `CREATE TABLE` on the target UC schema

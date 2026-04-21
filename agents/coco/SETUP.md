@@ -41,7 +41,7 @@ snow stage copy agents/shared/schemas/thoughtspot-sets-tml.md @SKILLS.PUBLIC.SHA
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 
-# Unity Catalog reference files (used by convert-ts-to-unity-catalog; CoCo/Genie port pending)
+# Unity Catalog reference files (used by convert-ts-to-databricks-mv; CoCo/Genie port pending)
 snow stage copy agents/shared/schemas/unity-catalog-schema.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/mappings/ts-unity-catalog/ts-to-unity-catalog-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-unity-catalog/ --overwrite
 snow stage copy agents/shared/mappings/ts-unity-catalog/ts-unity-catalog-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-unity-catalog/ --overwrite

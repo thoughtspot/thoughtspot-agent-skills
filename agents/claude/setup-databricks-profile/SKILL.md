@@ -6,7 +6,7 @@ description: Manage Databricks connection profiles — add, list, update, delete
 # Databricks Setup
 
 Manage Databricks connection profiles stored in `~/.claude/databricks-profiles.json`.
-Profiles are used by `convert-ts-to-unity-catalog` and other skills that connect to Databricks.
+Profiles are used by `convert-ts-to-databricks-mv` and other skills that connect to Databricks.
 
 Ask one question at a time. Wait for each answer before moving on.
 

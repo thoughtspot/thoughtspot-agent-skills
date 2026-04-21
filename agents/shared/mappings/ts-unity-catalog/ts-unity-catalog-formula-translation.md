@@ -473,7 +473,7 @@ entirely** from the UC YAML. Do NOT use placeholder `expr` values.
 ## Open Items — Verify Against Live Instance
 
 The following behaviors have not been verified against a live Databricks UC instance.
-See `agents/claude/convert-ts-to-unity-catalog/references/open-items.md` for test scripts.
+See `agents/claude/convert-ts-to-databricks-mv/references/open-items.md` for test scripts.
 
 1. **Composed measure ordering:** Can `MEASURE(m)` reference a measure defined later in the
    YAML, or must it be defined first? Test with forward-reference vs. in-order.

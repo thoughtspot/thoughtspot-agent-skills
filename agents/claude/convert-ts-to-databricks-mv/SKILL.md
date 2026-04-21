@@ -1,5 +1,5 @@
 ---
-name: convert-ts-to-unity-catalog
+name: convert-ts-to-databricks-mv
 description: Convert a ThoughtSpot Worksheet or Model into a Databricks Unity Catalog Metric View by exporting TML, mapping columns and joins, translating formulas, and creating the view via CREATE VIEW WITH METRICS LANGUAGE YAML.
 ---
 

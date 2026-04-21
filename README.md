@@ -36,7 +36,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 |---|---|---|
 | `convert-ts-to-snowflake-sv` | `/convert-ts-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `convert-ts-from-snowflake-sv` | `/convert-ts-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
-| `convert-ts-to-unity-catalog` | `/convert-ts-to-unity-catalog` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
+| `convert-ts-to-databricks-mv` | `/convert-ts-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
