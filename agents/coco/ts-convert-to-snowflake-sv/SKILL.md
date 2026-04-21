@@ -56,19 +56,19 @@ For the full coverage matrix including unmapped properties, see
 
 - ThoughtSpot Cloud instance, REST API v2 enabled
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
-- Authentication configured — run `/ts-setup-profile` if you haven't already
+- Authentication configured — run `/ts-profile-thoughtspot` if you haven't already
 
 **Quick auth decision:**
 ```
 Can you log into ThoughtSpot in a browser (even via SSO)?
   YES → token    — get a bearer token from Developer Playground (no admin needed)
-  NO  → password — use username/password credentials — see /ts-setup-profile
+  NO  → password — use username/password credentials — see /ts-profile-thoughtspot
 ```
 
 ### Snowflake
 
 - Role with `CREATE SEMANTIC VIEW` on the target schema — **only required if creating live**
-- Connection configured — run `/ts-setup-snowflake-profile` if you haven't already
+- Connection configured — run `/ts-profile-snowflake` if you haven't already
 - Not sure where to start? → Python connector + password auth has the fewest setup steps
 
 **No `CREATE SEMANTIC VIEW` access?** You can still run this skill in **file-only mode** — it
@@ -171,7 +171,7 @@ Parse the combined result to determine both `{api_method}` and `{profile_name}`.
 
 **Check token expiry immediately:** if `TOKEN_EXPIRES_AT <= CURRENT_TIMESTAMP()` or is NULL,
 stop and tell the user:
-> "Your ThoughtSpot token has expired. Run `/ts-setup-profile` → U → Refresh token, then retry."
+> "Your ThoughtSpot token has expired. Run `/ts-profile-thoughtspot` → U → Refresh token, then retry."
 Do not proceed to Step 1 until the token is valid.
 
 If `TS_SEARCH_MODELS` and `TS_EXPORT_TML` both appear in the result, set `{api_method}` = `stored_procedure`.
@@ -195,7 +195,7 @@ The `{api_method}` selection applies to both Step 2 and Step 3.
 **When `{api_method}` = `stored_procedure`:**
 
 Authentication is handled by the stored procedures themselves via the Snowflake
-`EXTERNAL_ACCESS_INTEGRATIONS` and `SECRETS` configured during `/ts-setup-profile`.
+`EXTERNAL_ACCESS_INTEGRATIONS` and `SECRETS` configured during `/ts-profile-thoughtspot`.
 Skip the token file workflow below — only profile selection is needed (to determine
 which profile name to pass to the procedures).
 
@@ -214,7 +214,7 @@ Store the exact `NAME` value as `{profile_name}` for all subsequent
 > **Snowsight Workspace limitation:** The direct API fallback uses `python3` and
 > `curl` via the Bash tool, which are **not available** in Snowsight Workspaces.
 > If the stored procedures are missing and you are in a Snowsight Workspace, inform
-> the user they must run `/ts-setup-profile` first to create the stored procedures.
+> the user they must run `/ts-profile-thoughtspot` first to create the stored procedures.
 > Do not attempt direct API calls.
 
 ---

@@ -1,5 +1,5 @@
 ---
-name: ts-setup-profile
+name: ts-profile-thoughtspot
 description: Manage ThoughtSpot connection profiles for Snowflake workspaces — add, list, update, delete, and test profiles. Supports both bearer token and password authentication. Sets up External Access Integration and stores credentials securely using Snowflake Secrets. Token profiles expire after ~24 hours; password profiles remain valid until the password changes.
 ---
 

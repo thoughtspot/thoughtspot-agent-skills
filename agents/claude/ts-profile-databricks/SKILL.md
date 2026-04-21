@@ -1,5 +1,5 @@
 ---
-name: ts-setup-databricks-profile
+name: ts-profile-databricks
 description: Manage Databricks connection profiles — add, list, update, delete, and test profiles. Stores PAT tokens securely in macOS Keychain. Run with no arguments to add your first profile or manage existing ones.
 ---
 
@@ -479,7 +479,7 @@ profiles_file = Path.home() / '.claude' / 'databricks-profiles.json'
 profiles = json.loads(profiles_file.read_text()) if profiles_file.exists() else []
 
 if not profiles:
-    print("No Databricks profiles configured. Run /ts-setup-databricks-profile first.")
+    print("No Databricks profiles configured. Run /ts-profile-databricks first.")
     exit()
 elif len(profiles) == 1:
     profile = profiles[0]
@@ -501,5 +501,5 @@ with an authentication error, the token may have expired. Ask the user to:
 Your Databricks token may have expired. To refresh:
   1. Open Databricks workspace → Settings → Developer → Access Tokens
   2. Revoke the old token and generate a new one
-  3. Run /ts-setup-databricks-profile → T (Test) or U → Refresh token
+  3. Run /ts-profile-databricks → T (Test) or U → Refresh token
 ```

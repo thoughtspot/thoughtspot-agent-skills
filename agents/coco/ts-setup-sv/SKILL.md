@@ -1,6 +1,6 @@
 ---
 name: ts-setup-sv
-description: Install and upgrade the ThoughtSpot stored procedures used by the semantic view conversion skills (ts-convert-to-snowflake-sv, ts-convert-from-snowflake-sv). Also handles deploying updated skill files from the SKILLS.PUBLIC.SHARED stage to this workspace. Run this once after ts-setup-profile, and again whenever prompted by another skill that detects an outdated or missing procedure.
+description: Install and upgrade the ThoughtSpot stored procedures used by the semantic view conversion skills (ts-convert-to-snowflake-sv, ts-convert-from-snowflake-sv). Also handles deploying updated skill files from the SKILLS.PUBLIC.SHARED stage to this workspace. Run this once after ts-profile-thoughtspot, and again whenever prompted by another skill that detects an outdated or missing procedure.
 ---
 
 # ThoughtSpot SV Skills Setup
@@ -30,7 +30,7 @@ For each skill file, read the content from the stage and write it to the workspa
 | Stage path | Workspace path |
 |---|---|
 | `.../skills/ts-setup-sv/SKILL.md` | `.snowflake/cortex/skills/ts-setup-sv/SKILL.md` |
-| `.../skills/ts-setup-profile/SKILL.md` | `.snowflake/cortex/skills/ts-setup-profile/SKILL.md` |
+| `.../skills/ts-profile-thoughtspot/SKILL.md` | `.snowflake/cortex/skills/ts-profile-thoughtspot/SKILL.md` |
 | `.../skills/ts-convert-to-snowflake-sv/SKILL.md` | `.snowflake/cortex/skills/ts-convert-to-snowflake-sv/SKILL.md` |
 | `.../skills/ts-convert-from-snowflake-sv/SKILL.md` | `.snowflake/cortex/skills/ts-convert-from-snowflake-sv/SKILL.md` |
 | `.../skills/SETUP.md` | `.snowflake/cortex/skills/SETUP.md` |
@@ -67,7 +67,7 @@ After writing all files, display:
 ```
 Skill files deployed from @SKILLS.PUBLIC.SHARED:
   ✓ .snowflake/cortex/skills/ts-setup-sv/SKILL.md
-  ✓ .snowflake/cortex/skills/ts-setup-profile/SKILL.md
+  ✓ .snowflake/cortex/skills/ts-profile-thoughtspot/SKILL.md
   ✓ .snowflake/cortex/skills/ts-convert-to-snowflake-sv/SKILL.md
   ✓ .snowflake/cortex/skills/ts-convert-from-snowflake-sv/SKILL.md
   ✓ .snowflake/cortex/skills/SETUP.md
@@ -151,7 +151,7 @@ SELECT name, secret_name FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES ORDER BY name;
 **If no profiles are returned:** stop and tell the user:
 
 ```
-No ThoughtSpot profiles found. Run `/ts-setup-profile` first to add at least
+No ThoughtSpot profiles found. Run `/ts-profile-thoughtspot` first to add at least
 one profile, then re-run ts-setup-sv.
 ```
 
@@ -197,7 +197,7 @@ These secrets must exist before proceeding. Verify:
 SHOW SECRETS LIKE '%THOUGHTSPOT%' IN SCHEMA SKILLS.PUBLIC;
 ```
 
-If any secrets are missing, stop and direct the user to `/ts-setup-profile` to create them.
+If any secrets are missing, stop and direct the user to `/ts-profile-thoughtspot` to create them.
 
 ---
 
@@ -269,7 +269,7 @@ def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=
             verify=verify_ssl
         )
         if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run ts-setup-profile to update password."
+            return None, None, "Invalid credentials. Run ts-profile-thoughtspot to update password."
         login_resp.raise_for_status()
         return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
     else:
@@ -336,7 +336,7 @@ def run(session, profile_name, name_keywords, owner_only):
 
         resp = do_post(f"{base_url}/api/rest/2.0/metadata/search", body)
         if resp.status_code in (401, 403):
-            return {"error": "Unauthorized. Run ts-setup-profile to refresh credentials."}
+            return {"error": "Unauthorized. Run ts-profile-thoughtspot to refresh credentials."}
         resp.raise_for_status()
         page = resp.json()
         if not page:
@@ -397,7 +397,7 @@ def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=
             verify=verify_ssl
         )
         if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run ts-setup-profile to update password."
+            return None, None, "Invalid credentials. Run ts-profile-thoughtspot to update password."
         login_resp.raise_for_status()
         return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
     else:
@@ -449,7 +449,7 @@ def run(session, profile_name, guids):
 
     resp = do_post(f"{base_url}/api/rest/2.0/metadata/tml/export", body)
     if resp.status_code in (401, 403):
-        return {"error": "Unauthorized. Run ts-setup-profile to refresh credentials."}
+        return {"error": "Unauthorized. Run ts-profile-thoughtspot to refresh credentials."}
     resp.raise_for_status()
     return resp.json()
 $$;
@@ -490,7 +490,7 @@ def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=
             verify=verify_ssl
         )
         if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run ts-setup-profile to update password."
+            return None, None, "Invalid credentials. Run ts-profile-thoughtspot to update password."
         login_resp.raise_for_status()
         return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
     else:
@@ -542,7 +542,7 @@ def run(session, profile_name, tmls, validate_only):
 
     resp = do_post(f"{base_url}/api/rest/2.0/metadata/tml/import", body)
     if resp.status_code in (401, 403):
-        return {"error": "Unauthorized. Run ts-setup-profile to refresh credentials."}
+        return {"error": "Unauthorized. Run ts-profile-thoughtspot to refresh credentials."}
     resp.raise_for_status()
     return resp.json()
 $$;
@@ -583,7 +583,7 @@ def get_session_headers(base_url, username, secret_value, auth_type, verify_ssl=
             verify=verify_ssl
         )
         if login_resp.status_code in (401, 403):
-            return None, None, "Invalid credentials. Run ts-setup-profile to update password."
+            return None, None, "Invalid credentials. Run ts-profile-thoughtspot to update password."
         login_resp.raise_for_status()
         return s, {"Content-Type": "application/json", "Accept": "application/json"}, None
     else:
@@ -634,7 +634,7 @@ def run(session, profile_name):
         body = {"record_offset": offset, "record_size": 50}
         resp = do_post(f"{base_url}/api/rest/2.0/connection/search", body)
         if resp.status_code in (401, 403):
-            return {"error": "Unauthorized. Run ts-setup-profile to refresh credentials."}
+            return {"error": "Unauthorized. Run ts-profile-thoughtspot to refresh credentials."}
         resp.raise_for_status()
         page = resp.json()
         if not page:
@@ -697,7 +697,7 @@ You can now use /ts-convert-to-snowflake-sv and /ts-convert-from-snowflake-sv.
 ## When to re-run ts-setup-sv
 
 Re-run this skill when:
-- A new ThoughtSpot profile is added via `/ts-setup-profile` — the new profile's secret
+- A new ThoughtSpot profile is added via `/ts-profile-thoughtspot` — the new profile's secret
   must be added to the SECRETS clause of every procedure
 - Another skill reports "Stored procedure not found" or "Secret not mapped"
 - A new version of the skill is deployed (the other skills will show ↑ in their Step 1 check)

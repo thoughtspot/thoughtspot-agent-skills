@@ -20,7 +20,7 @@ Run from the repository root after any update:
 # Skill files
 snow stage copy agents/coco/SETUP.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ --overwrite
 snow stage copy agents/coco/ts-setup-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-setup-sv/ --overwrite
-snow stage copy agents/coco/ts-setup-profile/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-setup-profile/ --overwrite
+snow stage copy agents/coco/ts-profile-thoughtspot/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-profile-thoughtspot/ --overwrite
 snow stage copy agents/coco/ts-convert-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-convert-to-snowflake-sv/ --overwrite
 snow stage copy agents/coco/ts-convert-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-convert-from-snowflake-sv/ --overwrite
 
@@ -103,7 +103,7 @@ without CLI access.
 └── skills/
     ├── ts-setup-sv/
     │   └── SKILL.md
-    ├── ts-setup-profile/
+    ├── ts-profile-thoughtspot/
     │   └── SKILL.md
     ├── ts-convert-to-snowflake-sv/
     │   └── SKILL.md

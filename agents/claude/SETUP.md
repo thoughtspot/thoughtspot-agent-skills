@@ -6,21 +6,21 @@ A collection of Claude Code skills for working with ThoughtSpot.
 
 ## Skills
 
-### [`ts-setup-profile`](ts-setup-profile/)
+### [`ts-profile-thoughtspot`](ts-profile-thoughtspot/)
 
 Manages ThoughtSpot connection profiles. Stores credentials securely in the macOS
 Keychain, wires up `~/.zshenv` for env var persistence, and verifies connections.
 Supports token, password, and secret key auth methods.
 
-Run with `/ts-setup-profile`.
+Run with `/ts-profile-thoughtspot`.
 
-### [`ts-setup-snowflake-profile`](ts-setup-snowflake-profile/)
+### [`ts-profile-snowflake`](ts-profile-snowflake/)
 
 Manages Snowflake connection profiles. Supports two connection methods: Python
 connector (key pair or password auth) and Snowflake CLI. Tests the connection
 and saves the profile for use by other skills.
 
-Run with `/ts-setup-snowflake-profile`.
+Run with `/ts-profile-snowflake`.
 
 ### [`ts-object-model-builder`](ts-object-model-builder/)
 
@@ -58,13 +58,13 @@ directly (creating new Table objects in the connection).
 
 Run with `/ts-convert-from-snowflake-sv`.
 
-### [`ts-setup-databricks-profile`](ts-setup-databricks-profile/)
+### [`ts-profile-databricks`](ts-profile-databricks/)
 
 Manages Databricks connection profiles for Unity Catalog skills. Stores PAT tokens
 securely in the macOS Keychain, wires up `~/.zshenv`, and verifies the connection
 against a configured SQL warehouse. Required before running `/ts-convert-to-databricks-mv`.
 
-Run with `/ts-setup-databricks-profile`.
+Run with `/ts-profile-databricks`.
 
 ### [`ts-object-model-promote`](ts-object-model-promote/)
 
@@ -117,9 +117,9 @@ git clone https://github.com/djwaldo/thoughtspot-skills.git /tmp/thoughtspot-ski
 
 mkdir -p ~/.claude/skills
 
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-setup-profile ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-setup-snowflake-profile ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-setup-databricks-profile ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-thoughtspot ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-snowflake ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-databricks ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-model-builder ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
@@ -169,11 +169,11 @@ git clone https://github.com/djwaldo/thoughtspot-skills.git ~/Dev/thoughtspot-sk
 mkdir -p ~/.claude/skills
 
 # Skills (agent-specific entry points)
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-setup-profile \
-      ~/.claude/skills/ts-setup-profile
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-thoughtspot \
+      ~/.claude/skills/ts-profile-thoughtspot
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-setup-snowflake-profile \
-      ~/.claude/skills/ts-setup-snowflake-profile
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-snowflake \
+      ~/.claude/skills/ts-profile-snowflake
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-model-builder \
       ~/.claude/skills/ts-object-model-builder
@@ -184,8 +184,8 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv \
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv \
       ~/.claude/skills/ts-convert-from-snowflake-sv
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-setup-databricks-profile \
-      ~/.claude/skills/ts-setup-databricks-profile
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-databricks \
+      ~/.claude/skills/ts-profile-databricks
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-to-databricks-mv \
       ~/.claude/skills/ts-convert-to-databricks-mv
@@ -234,7 +234,7 @@ edit config files or construct shell commands.
 In Claude Code, run:
 
 ```
-/ts-setup-profile
+/ts-profile-thoughtspot
 ```
 
 Claude will ask for your ThoughtSpot URL, username, and auth method (one question at
@@ -244,7 +244,7 @@ and verify the connection before finishing.
 Then run:
 
 ```
-/ts-setup-snowflake-profile
+/ts-profile-snowflake
 ```
 
 Claude will ask whether you're using the Python connector or Snowflake CLI, walk you
@@ -253,7 +253,7 @@ through auth setup (key pair or password), and verify the connection.
 If you'll be using the Databricks Unity Catalog skills, also run:
 
 ```
-/ts-setup-databricks-profile
+/ts-profile-databricks
 ```
 
 Claude will ask for your workspace hostname, SQL warehouse HTTP path, and guide you
@@ -288,9 +288,9 @@ what you want in natural language and Claude will invoke the right skill.
 
 | Skill | Command | What it does |
 |---|---|---|
-| `ts-setup-profile` | `/ts-setup-profile` | Add, update, test, or delete ThoughtSpot profiles |
-| `ts-setup-snowflake-profile` | `/ts-setup-snowflake-profile` | Add, update, test, or delete Snowflake profiles |
-| `ts-setup-databricks-profile` | `/ts-setup-databricks-profile` | Add, update, test, or delete Databricks profiles (PAT, SQL warehouse) |
+| `ts-profile-thoughtspot` | `/ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
+| `ts-profile-snowflake` | `/ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles |
+| `ts-profile-databricks` | `/ts-profile-databricks` | Add, update, test, or delete Databricks profiles (PAT, SQL warehouse) |
 
 Example for the conversion skill:
 
@@ -356,7 +356,7 @@ description: One sentence shown in Claude Code's skill picker — be specific ab
 Skills reference other skills by path (never by copying content):
 
 ```markdown
-[~/.claude/skills/ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md)
+[~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md)
 ```
 
 ### Credential and secret handling

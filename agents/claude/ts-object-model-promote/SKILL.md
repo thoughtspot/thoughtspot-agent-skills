@@ -22,7 +22,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 | File | Purpose |
 |---|---|
 | [references/open-items.md](references/open-items.md) | Verified and unverified API behaviors — read before implementing each step |
-| [~/.claude/skills/ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
+| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
 | [~/.claude/shared/schemas/thoughtspot-answer-tml.md](~/.claude/shared/schemas/thoughtspot-answer-tml.md) | Answer TML structure — verified field reference for formulas, parameters, sets, data source lookup |
 | [~/.claude/shared/schemas/thoughtspot-liveboard-tml.md](~/.claude/shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — needed for Liveboard fallback path in Step 2 |
 | [~/.claude/shared/schemas/thoughtspot-sets-tml.md](~/.claude/shared/schemas/thoughtspot-sets-tml.md) | Set TML structure — bin sets, group sets, query sets; answer-level vs reusable |
@@ -34,7 +34,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 ## Prerequisites
 
-- ThoughtSpot profile configured — run `/ts-setup-profile` if not
+- ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
 - `ts` CLI installed: `pip install -e tools/ts-cli`
 - Python package: `pyyaml` (`pip install pyyaml`)
 - ThoughtSpot user must have **MODIFY** or **FULL** access on the target Model
@@ -44,7 +44,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 ## Step 1 — Authenticate
 
 Read `~/.claude/thoughtspot-profiles.json`. If the file is missing or empty, prompt the
-user to run `/ts-setup-profile` first.
+user to run `/ts-profile-thoughtspot` first.
 
 If multiple profiles exist, ask:
 
@@ -66,7 +66,7 @@ source ~/.zshenv && ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
-[ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md) for the token
+[ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) for the token
 refresh procedure.
 
 Save `{base_url}` (strip trailing slash) and `{profile_name}` for all subsequent steps.
@@ -781,7 +781,7 @@ To verify, open the Model URL above and check the Columns section for the new fo
 
 | Symptom | Action |
 |---|---|
-| `ts auth whoami` returns 401 | Token expired — follow the refresh steps in `/ts-setup-profile` |
+| `ts auth whoami` returns 401 | Token expired — follow the refresh steps in `/ts-profile-thoughtspot` |
 | Answer TML has no `formulas[]` | Answer may not have custom formulas — see Step 3 |
 | Data source is a Worksheet | Worksheets are legacy — inform user, suggest `/ts-object-model-builder` to migrate first |
 | Import returns 403 / UNAUTHORIZED | User lacks edit access on the Model — see Step 6 |

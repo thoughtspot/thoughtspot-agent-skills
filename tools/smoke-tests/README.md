@@ -14,12 +14,12 @@ effects and require live credentials.
 
 ## Prerequisites
 
-1. **ThoughtSpot profile** — configured via `/ts-setup-profile`. Check with:
+1. **ThoughtSpot profile** — configured via `/ts-profile-thoughtspot`. Check with:
    ```bash
    ts auth whoami --profile <name>
    ```
 
-2. **Snowflake profile** — configured via `/ts-setup-snowflake-profile`. Must use `method: cli`
+2. **Snowflake profile** — configured via `/ts-profile-snowflake`. Must use `method: cli`
    (Snowflake CLI connection). Check with:
    ```bash
    snow connection test -c <connection_name>

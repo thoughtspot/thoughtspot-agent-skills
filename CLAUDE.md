@@ -53,7 +53,7 @@ Credentials are never stored in files, env files, or git. Pattern used throughou
 - Env var → `~/.zshenv` export line: `export THOUGHTSPOT_TOKEN_{SLUG}=$(security find-generic-password ...)`
 - Profile JSON → `~/.claude/thoughtspot-profiles.json` (not in repo) stores `{token_env: "THOUGHTSPOT_TOKEN_{SLUG}"}`
 
-Canonical source for full auth flow: `agents/claude/ts-setup-profile/SKILL.md` (Technical Reference section).
+Canonical source for full auth flow: `agents/claude/ts-profile-thoughtspot/SKILL.md` (Technical Reference section).
 
 ## Critical TML invariants
 

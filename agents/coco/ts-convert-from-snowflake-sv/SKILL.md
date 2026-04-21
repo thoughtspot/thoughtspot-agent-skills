@@ -66,7 +66,7 @@ UI confirmation prompt. Minimise calls by batching related statements.
 ## Prerequisites
 
 - A Snowflake role with `USAGE` on the database/schema containing the semantic view
-- ThoughtSpot setup completed via `/ts-setup-profile` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
+- ThoughtSpot setup completed via `/ts-profile-thoughtspot` — `SKILLS.PUBLIC.THOUGHTSPOT_PROFILES` table must exist with at least one profile
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege in ThoughtSpot — **only required for import**
 
 **No ThoughtSpot import access?** You can still run this skill in **file-only mode** —
@@ -106,7 +106,7 @@ stop and tell the user:
 *Token auth:* check the `TOKEN_EXPIRES_AT` value already returned above (no second query):
 - `TOKEN_EXPIRES_AT > CURRENT_TIMESTAMP()` → proceed
 - Otherwise → stop:
-  > "The token for profile '{profile_name}' has expired. Run `/ts-setup-profile` →
+  > "The token for profile '{profile_name}' has expired. Run `/ts-profile-thoughtspot` →
   > U → Refresh token, then retry."
 
 *Password auth:* no expiry check needed — proceed directly to credential retrieval.

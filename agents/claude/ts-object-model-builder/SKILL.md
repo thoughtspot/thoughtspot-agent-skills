@@ -23,15 +23,15 @@ Ask one question at a time. Wait for each answer before proceeding.
 | File | Purpose |
 |---|---|
 | [references/open-items.md](references/open-items.md) | Unknowns that must be tested before this skill is complete — check before implementing each step |
-| [~/.claude/skills/ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md) | ThoughtSpot auth, profile config, token persistence (Pattern A), API call patterns |
-| [~/.claude/skills/ts-setup-snowflake-profile/SKILL.md](~/.claude/skills/ts-setup-snowflake-profile/SKILL.md) | Snowflake connection patterns, SQL execution, SHOW commands |
+| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence (Pattern A), API call patterns |
+| [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake connection patterns, SQL execution, SHOW commands |
 
 ---
 
 ## Prerequisites
 
-- ThoughtSpot profile configured — run `/ts-setup-profile` if not
-- Snowflake profile configured — run `/ts-setup-snowflake-profile` if not (required for Snowflake source; not needed for image source)
+- ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
+- Snowflake profile configured — run `/ts-profile-snowflake` if not (required for Snowflake source; not needed for image source)
 - Python packages: `requests`, `pyyaml`, `snowflake-connector-python`
 - ThoughtSpot user must have `DATAMANAGEMENT` or `DEVELOPER` privilege and `CAN_CREATE_OR_EDIT_CONNECTIONS` if adding tables to a connection
 
@@ -59,7 +59,7 @@ Enter number:
 
 If multiple Snowflake profiles exist (and Snowflake source is chosen), ask the same for Snowflake.
 
-Authenticate ThoughtSpot using Pattern A from `ts-setup-profile/SKILL.md`. Token written to `/tmp/ts_token.txt`.
+Authenticate ThoughtSpot using Pattern A from `ts-profile-thoughtspot/SKILL.md`. Token written to `/tmp/ts_token.txt`.
 
 ### 2. Choose source
 

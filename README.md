@@ -49,9 +49,9 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 
 | Skill | Command | What it does |
 |---|---|---|
-| `ts-setup-profile` | `/ts-setup-profile` | Add, update, test, or delete ThoughtSpot profiles |
-| `ts-setup-snowflake-profile` | `/ts-setup-snowflake-profile` | Add, update, test, or delete Snowflake profiles |
-| `ts-setup-databricks-profile` | `/ts-setup-databricks-profile` | Add, update, test, or delete Databricks profiles (PAT auth, SQL warehouse) |
+| `ts-profile-thoughtspot` | `/ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
+| `ts-profile-snowflake` | `/ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles |
+| `ts-profile-databricks` | `/ts-profile-databricks` | Add, update, test, or delete Databricks profiles (PAT auth, SQL warehouse) |
 
 See **[agents/claude/SETUP.md](agents/claude/SETUP.md)** for installation, credential setup, and usage.
 
@@ -64,7 +64,7 @@ install required — runs entirely within Snowflake.
 
 | Skill | What it does |
 |---|---|
-| `ts-setup-profile` | Add, update, test, or delete ThoughtSpot profiles |
+| `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-setup-sv` | Install or upgrade stored procedures required by the other skills |
 | `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-convert-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |

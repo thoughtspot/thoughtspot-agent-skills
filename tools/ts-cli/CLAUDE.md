@@ -40,7 +40,7 @@ in table TML. Passing a GUID where a name is expected will silently produce inva
 
 Tokens are cached per-profile in `/tmp/ts_token_<slug>.txt` (permissions 0600) and managed
 by `client.py`. Do not change this path without updating the auth documentation in
-`agents/claude/ts-setup-profile/SKILL.md` (Technical Reference section).
+`agents/claude/ts-profile-thoughtspot/SKILL.md` (Technical Reference section).
 
 ## v1 API limitation
 

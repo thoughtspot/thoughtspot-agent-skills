@@ -24,8 +24,8 @@ formulas to Databricks SQL, and creates the view via
 | [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Table TML field reference — column types, data types, joins_with structure |
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML field reference — model_tables, columns, formulas, join scenarios |
-| [~/.claude/skills/ts-setup-profile/SKILL.md](~/.claude/skills/ts-setup-profile/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
-| [~/.claude/skills/ts-setup-databricks-profile/SKILL.md](~/.claude/skills/ts-setup-databricks-profile/SKILL.md) | Databricks connection code, SQL execution patterns, token refresh |
+| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [~/.claude/skills/ts-profile-databricks/SKILL.md](~/.claude/skills/ts-profile-databricks/SKILL.md) | Databricks connection code, SQL execution patterns, token refresh |
 | [./references/open-items.md](./references/open-items.md) | Unverified UC API behaviors with test scripts |
 
 ---
@@ -61,13 +61,13 @@ table and flat `dimensions:` / `measures:` arrays. There are no `tables[]` or
 
 - ThoughtSpot Cloud instance, REST API v2 enabled
 - User account with `DATAMANAGEMENT` or `DEVELOPER` privilege
-- Authentication configured — run `/ts-setup-profile` if you haven't already
+- Authentication configured — run `/ts-profile-thoughtspot` if you haven't already
 
 **Quick auth decision:**
 ```
 Can you log into ThoughtSpot in a browser (even via SSO)?
   YES → token_env — get a token from Developer Playground (no admin needed)
-  NO  → password_env or secret_key_env — see ts-setup-profile
+  NO  → password_env or secret_key_env — see ts-profile-thoughtspot
 ```
 
 ### Databricks
@@ -76,7 +76,7 @@ Can you log into ThoughtSpot in a browser (even via SSO)?
 - SQL warehouse running and accessible
 - Personal Access Token (PAT) with `CREATE TABLE` privilege on the target schema
   (Unity Catalog `CREATE TABLE` covers metric views in UC-enabled workspaces)
-- Connection configured — run `/ts-setup-databricks-profile` if you haven't already
+- Connection configured — run `/ts-profile-databricks` if you haven't already
 
 **No Databricks access?** You can still run this skill in **file-only mode** — it generates
 the Metric View YAML and writes it to a file you can create manually later. Select **FILE**
@@ -162,7 +162,7 @@ print(f"Databricks: {row[0]} @ {profile['hostname']}")
 ```
 
 If the connection fails, see the error handling table in
-[~/.claude/skills/ts-setup-databricks-profile/SKILL.md](~/.claude/skills/ts-setup-databricks-profile/SKILL.md).
+[~/.claude/skills/ts-profile-databricks/SKILL.md](~/.claude/skills/ts-profile-databricks/SKILL.md).
 
 ---
 
@@ -780,7 +780,7 @@ If the spot-check returns an error, report it verbatim. Common errors at this st
 | `MEASURE() can only be used with metric views` | DDL succeeded but `WITH METRICS` was lost | Verify DDL includes `WITH METRICS LANGUAGE YAML` |
 | `Reference to undefined measure` | `MEASURE(name)` references a misspelled measure | Fix measure name spelling in YAML |
 | `Ambiguous column reference` | Column name conflict between source and join | Qualify the column in `expr` with the join alias |
-| `[DATABRICKS_TOKEN_*] is empty` | Token expired | See token refresh instructions in ts-setup-databricks-profile |
+| `[DATABRICKS_TOKEN_*] is empty` | Token expired | See token refresh instructions in ts-profile-databricks |
 
 **3. Report location:**
 
