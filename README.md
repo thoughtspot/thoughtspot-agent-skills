@@ -14,7 +14,7 @@ thoughtspot-skills/
 │   ├── coco/       — Snowflake Cortex skills (deployed in Snowsight Workspaces)
 │   └── shared/     — Shared reference files used by both claude and coco skills
 │       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules (Snowflake)
-│       ├── mappings/ts-unity-catalog/   — Column, join, formula, and property mapping rules (Databricks UC)
+│       ├── mappings/ts-databricks/   — Column, join, formula, and property mapping rules (Databricks UC)
 │       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV, UC Metric View)
 │       └── worked-examples/snowflake/   — End-to-end Snowflake conversion examples
 ├── scripts/        — Deployment helpers (pre-commit hook, deploy gate, stage sync)

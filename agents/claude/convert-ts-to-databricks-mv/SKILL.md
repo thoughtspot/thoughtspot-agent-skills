@@ -17,10 +17,10 @@ formulas to Databricks SQL, and creates the view via
 
 | File | Purpose |
 |---|---|
-| [~/.claude/mappings/ts-unity-catalog/ts-to-unity-catalog-rules.md](~/.claude/mappings/ts-unity-catalog/ts-to-unity-catalog-rules.md) | Column classification, source table identification, join tree construction, data type, name generation lookup tables |
-| [~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-formula-translation.md](~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-formula-translation.md) | ThoughtSpot formula → Databricks SQL translation rules (and untranslatable pattern handling) |
-| [~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-properties.md](~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [~/.claude/shared/schemas/unity-catalog-schema.md](~/.claude/shared/schemas/unity-catalog-schema.md) | Unity Catalog Metric View YAML schema, validation rules, and known limitations |
+| [~/.claude/mappings/ts-databricks/ts-to-databricks-mv-rules.md](~/.claude/mappings/ts-databricks/ts-to-databricks-mv-rules.md) | Column classification, source table identification, join tree construction, data type, name generation lookup tables |
+| [~/.claude/mappings/ts-databricks/ts-databricks-formula-translation.md](~/.claude/mappings/ts-databricks/ts-databricks-formula-translation.md) | ThoughtSpot formula → Databricks SQL translation rules (and untranslatable pattern handling) |
+| [~/.claude/mappings/ts-databricks/ts-databricks-properties.md](~/.claude/mappings/ts-databricks/ts-databricks-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
+| [~/.claude/shared/schemas/databricks-schema.md](~/.claude/shared/schemas/databricks-schema.md) | Unity Catalog Metric View YAML schema, validation rules, and known limitations |
 | [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Table TML field reference — column types, data types, joins_with structure |
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML field reference — model_tables, columns, formulas, join scenarios |
@@ -366,7 +366,7 @@ This step is unique to UC's `source:` + nested `joins:` structure.
 **Identify the source (fact) table:**
 
 Follow the source table identification algorithm in
-[~/.claude/mappings/ts-unity-catalog/ts-to-unity-catalog-rules.md](~/.claude/mappings/ts-unity-catalog/ts-to-unity-catalog-rules.md).
+[~/.claude/mappings/ts-databricks/ts-to-databricks-mv-rules.md](~/.claude/mappings/ts-databricks/ts-to-databricks-mv-rules.md).
 
 If the model has no joins (single table), that table is trivially the source.
 
@@ -506,7 +506,7 @@ rm -f /tmp/ts_tml_*.json
 ### Step 9: Translate Formulas
 
 > **MANDATORY — read the reference before assessing any formula:**
-> Open [~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-formula-translation.md](~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-formula-translation.md)
+> Open [~/.claude/mappings/ts-databricks/ts-databricks-formula-translation.md](~/.claude/mappings/ts-databricks/ts-databricks-formula-translation.md)
 > and use its **Translation Decision Flowchart** to classify every formula. Do **not**
 > classify a formula as untranslatable based on function name recognition alone.
 >
@@ -593,7 +593,7 @@ Present the following three sections:
 ```
 
 **3. Unmapped Properties Report** — use the format defined in
-[~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-properties.md](~/.claude/mappings/ts-unity-catalog/ts-unity-catalog-properties.md).
+[~/.claude/mappings/ts-databricks/ts-databricks-properties.md](~/.claude/mappings/ts-databricks/ts-databricks-properties.md).
 Include only sections that have entries.
 
 Then ask:
@@ -613,7 +613,7 @@ If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-f
 
 ### Step 11: Validate
 
-Run all checks from [~/.claude/shared/schemas/unity-catalog-schema.md](~/.claude/shared/schemas/unity-catalog-schema.md).
+Run all checks from [~/.claude/shared/schemas/databricks-schema.md](~/.claude/shared/schemas/databricks-schema.md).
 Report all failures together before retrying. Key checks:
 
 - [ ] `version: "1.1"` is present at the top level
