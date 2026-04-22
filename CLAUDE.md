@@ -1,4 +1,4 @@
-# thoughtspot-skills
+# thoughtspot-agent-skills
 
 A collection of skills and tools for creating semantic models in ThoughtSpot and Snowflake,
 packaged for two runtimes: **Claude Code** (via `~/.claude/` symlinks) and **Snowflake Cortex /

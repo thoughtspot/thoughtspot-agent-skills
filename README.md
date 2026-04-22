@@ -1,4 +1,4 @@
-# ThoughtSpot Skills
+# ThoughtSpot Agent Skills
 
 A collection of skills and tools for working with ThoughtSpot, packaged for two
 runtimes: **Claude Code** and **Snowflake Cortex (CoCo)**.
@@ -8,14 +8,13 @@ runtimes: **Claude Code** and **Snowflake Cortex (CoCo)**.
 ## Repository Structure
 
 ```
-thoughtspot-skills/
+thoughtspot-agent-skills/
 ├── agents/
 │   ├── claude/     — Claude Code skills (invoked via slash commands in Claude Code)
 │   ├── coco/       — Snowflake Cortex skills (deployed in Snowsight Workspaces)
 │   └── shared/     — Shared reference files used by both claude and coco skills
 │       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules (Snowflake)
-│       ├── mappings/ts-databricks/   — Column, join, formula, and property mapping rules (Databricks UC)
-│       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV, UC Metric View)
+│       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV)
 │       └── worked-examples/snowflake/   — End-to-end Snowflake conversion examples
 ├── scripts/        — Deployment helpers (pre-commit hook, deploy gate, stage sync)
 └── tools/
