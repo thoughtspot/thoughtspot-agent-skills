@@ -29,6 +29,15 @@ def _get_staged_names(repo_root: Path) -> list[str]:
     return result.stdout.splitlines()
 
 
+def _get_tracked_paths(repo_root: Path) -> set[str]:
+    """Return set of repo-relative paths currently tracked by git (not gitignored)."""
+    result = subprocess.run(
+        ["git", "ls-files"],
+        capture_output=True, text=True, cwd=repo_root,
+    )
+    return set(result.stdout.splitlines())
+
+
 def _staged_touches_agents_or_setup(staged: list[str]) -> bool:
     """Return True if staged files include anything that would affect cross-file consistency."""
     for f in staged:
@@ -47,18 +56,21 @@ def _staged_touches_agents_or_setup(staged: list[str]) -> bool:
 
 def check_readme_skills(repo_root: Path) -> list[str]:
     """
-    Every directory under agents/claude/ and agents/coco/ that contains a SKILL.md
+    Every directory under agents/claude/ and agents/coco/ that contains a tracked SKILL.md
     must appear in the README.md skills tables.
+    Gitignored/untracked skill directories are skipped.
     """
     failures = []
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    tracked = _get_tracked_paths(repo_root)
 
     for runtime in ("claude", "coco"):
         agent_dir = repo_root / "agents" / runtime
         if not agent_dir.is_dir():
             continue
         for skill_dir in sorted(agent_dir.iterdir()):
-            if not (skill_dir / "SKILL.md").exists():
+            skill_md_rel = f"agents/{runtime}/{skill_dir.name}/SKILL.md"
+            if skill_md_rel not in tracked:
                 continue
             skill_name = skill_dir.name
             # Check skill name appears somewhere in README (table row, backtick, or plain)
@@ -76,8 +88,9 @@ def check_readme_skills(repo_root: Path) -> list[str]:
 
 def check_claude_setup_symlinks(repo_root: Path) -> list[str]:
     """
-    Every directory under agents/claude/ that contains a SKILL.md must have
+    Every directory under agents/claude/ that contains a tracked SKILL.md must have
     a corresponding ln -s step in agents/claude/SETUP.md.
+    Gitignored/untracked skill directories are skipped.
     """
     failures = []
     setup_path = repo_root / "agents" / "claude" / "SETUP.md"
@@ -86,9 +99,11 @@ def check_claude_setup_symlinks(repo_root: Path) -> list[str]:
 
     setup_text = setup_path.read_text(encoding="utf-8")
     agent_dir = repo_root / "agents" / "claude"
+    tracked = _get_tracked_paths(repo_root)
 
     for skill_dir in sorted(agent_dir.iterdir()):
-        if not (skill_dir / "SKILL.md").exists():
+        skill_md_rel = f"agents/claude/{skill_dir.name}/SKILL.md"
+        if skill_md_rel not in tracked:
             continue
         skill_name = skill_dir.name
         # Look for ln -s line containing the skill directory name

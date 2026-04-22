@@ -53,3 +53,8 @@ build/
 
 # Deployment state (local only — tracks last Snowflake stage sync)
 .snowflake-deploy-sha
+
+# Skills pending testing — not yet published to remote
+agents/claude/ts-profile-databricks/
+agents/claude/ts-convert-to-databricks-mv/
+agents/claude/ts-object-model-builder/

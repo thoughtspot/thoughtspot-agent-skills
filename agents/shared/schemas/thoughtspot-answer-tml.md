@@ -269,7 +269,7 @@ The only additional field is `format:` for display formatting (PERCENTAGE, NUMBE
 | Formula inter-refs | `[formula_formula_id]` using the id field | `[formula_name]` using the display name |
 | Parameters | Answer-level, scoped to Answer | Model-level, reusable |
 | Sets | `cohorts[]` — answer-level only | Not in Model TML (sets reference Models) |
-| `was_auto_generated` | Present on formulas | Absent |
+| `was_auto_generated` | Present on formulas — `true` = AI-created, `false` = user-created | Rare — only present when ThoughtSpot auto-generated the formula; absent on all user-created model formulas |
 | Data source | `tables[].fqn` GUID | `model_tables[].fqn` GUID |
 
 ---

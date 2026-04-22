@@ -78,6 +78,7 @@ model:
 | Field | Required | Notes |
 |---|---|---|
 | `guid` | On update only | Document root — NOT inside `model:`. Omit on first import. |
+| `obj_id` | No | Document root — ThoughtSpot-assigned content ID (e.g. `DunderMifflinSales-0e4406c7`). Appears after export; do not set manually on import. To change it, use the "Change Object ID" option in the ThoughtSpot UI. |
 | `model.name` | Yes | Display name in ThoughtSpot |
 | `model.description` | No | Optional description |
 | `model.model_tables` | Yes | One entry per physical ThoughtSpot table |
@@ -106,7 +107,7 @@ model:
 |---|---|---|
 | `with` | Yes | Must equal the `name:` of the target `model_tables[]` entry exactly (case-sensitive) |
 | `on` | Yes | Quote with `'on':` — `on` is a YAML reserved word. Format: `[FROM::fk] = [TO::pk]` |
-| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, `FULL_OUTER`, or `OUTER` (bare — legacy/internal ThoughtSpot value seen on referencing_join style) |
+| `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. `FULL_OUTER` is **not valid** in model TML inline joins — ThoughtSpot raises "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". Use `OUTER` for full outer joins. |
 | `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins |
 
 ### `columns[]` fields
@@ -126,7 +127,12 @@ model:
 | `properties.geo_config` | No | Geographic role for the column. See Geo Config below. |
 | `properties.spotiq_preference` | No | `"EXCLUDE"` removes the column from SpotIQ auto-analysis (use on lat/long, internal IDs). |
 | `properties.search_iq_preferred` | No | `true` flags this column as preferred in Search IQ / natural language queries. |
-| `synonyms` | No | Array of alternative names for search. May include `synonym_type: "AUTO_GENERATED"` on auto-inferred synonyms. |
+| `properties.ai_context` | No | Free-text description used by Spotter (AI search) to understand the column's business meaning. Appears on most columns in AI-enriched models. Pass through on round-trips; safe to omit when constructing new models. |
+| `properties.custom_order` | No | Array of attribute values in custom display order. Used to control sort order in visualizations (e.g. `[USA, UK, France]`). ATTRIBUTE columns only. |
+| `properties.default_date_bucket` | No | Default time granularity for date columns. Values: `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `YEARLY`, `AUTO`. Omit for ThoughtSpot default. |
+| `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred synonyms. Only present when synonyms exist. |
+| `synonyms` | No | Array of alternative names for search. |
+| `data_panel_column_groups` | No | Assigns the column to one or more data panel folders. Map of `{folder_name: ''}` — values are always empty string. A column can appear in multiple folders. Folder names must match entries in `column_groups[].column_group_info[].name`. Pass through on round-trips. |
 
 ### `formulas[]` fields
 
@@ -136,6 +142,7 @@ model:
 | `name` | Yes | Display name |
 | `expr` | Yes | ThoughtSpot formula expression. Use `>-` block scalar if expression contains `{ }` curly braces. |
 | `properties.column_type` | No | `ATTRIBUTE` or `MEASURE`. Optional in the `formulas[]` entry itself. |
+| `was_auto_generated` | No | `true` when ThoughtSpot auto-generated this formula (e.g. AI-derived). `false` or absent = user-created. Pass through on round-trips; never set to `true` when constructing new formulas. |
 
 **Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained through
 their `expr`. Adding `aggregation:` causes `FORMULA is not a valid aggregation type`.
@@ -183,12 +190,56 @@ properties:
 
 Runtime input parameters that users can set at query time. Referenced in `formulas[].expr` using bracket notation: `[Parameter Name]` (same syntax as a column reference but with no `TABLE::` prefix).
 
+| Field | Notes |
+|---|---|
+| `id` | UUID assigned by ThoughtSpot. Omit on first import; ThoughtSpot assigns it. |
+| `name` | Display name — referenced in formulas as `[Parameter Name]` |
+| `data_type` | `INT64`, `DOUBLE`, `CHAR`, `VARCHAR`, `DATE`, `BOOL` |
+| `default_value` | Always a string in TML regardless of `data_type` |
+| `description` | Optional description |
+| `list_config` | Restricts values to a fixed list. Contains `list_choice[]` with `value` and optional `display_name`. |
+| `range_config` | Restricts values to a numeric range. Contains `range_min`, `range_max`, `include_min`, `include_max`. |
+
+Only one of `list_config` or `range_config` may be present. Omit both for a free-form parameter.
+
 ```yaml
 parameters:
-- id: "4aa0677f-b1e6-40c2-a33e-7da656820710"  # UUID assigned by ThoughtSpot
+# Free-form numeric parameter
+- id: "4aa0677f-b1e6-40c2-a33e-7da656820710"
   name: FTE Hourly Rate
-  data_type: INT64        # INT64 | DOUBLE | DATE | VARCHAR
-  default_value: "40"    # always a string in TML regardless of data_type
+  data_type: INT64
+  default_value: "40"
+  description: ""
+
+# List parameter (user picks from fixed choices)
+- id: "7fec5e34-7d01-4ba7-ac1a-6803b57bd6dd"
+  name: Date
+  data_type: CHAR
+  default_value: ship date
+  list_config:
+    list_choice:
+    - value: order date
+      display_name: order date
+    - value: ship date
+      display_name: ship date
+  description: ""
+
+# Date parameter (free-form date input)
+- id: "a3a83826-7fc5-46bd-b1b6-fc2d71c26dfc"
+  name: End Date
+  data_type: DATE
+  default_value: 12/31/2024
+  description: ""
+
+# Boolean list parameter
+- id: "65ed55ca-d66f-4205-b547-bc495bb6fb9f"
+  name: Master Date Filter
+  data_type: BOOL
+  default_value: 'false'
+  list_config:
+    list_choice:
+    - value: 'true'
+    - value: 'false'
   description: ""
 ```
 
@@ -198,20 +249,47 @@ Parameter references in formula expressions: `[FTE Hourly Rate]` — no `TABLE::
 
 Model-level pre-filters applied before any query. Column references use display name (not `column_id`).
 
+| Field | Required | Notes |
+|---|---|---|
+| `column` | Yes | List of column display names the filter applies to |
+| `oper` | No | Comparison operator — see values below |
+| `values` | No | Filter values as strings. Date values use `MM/DD/YYYY` format. |
+| `display_name` | No | Human-readable label for the filter. Pass through on round-trips. |
+| `is_mandatory` | No | `true` prevents users from removing this filter. Default false. |
+| `is_single_value` | No | `true` restricts the filter to a single value. Default false. |
+| `apply_on_tables` | No | List of table aliases (from `model_tables[]`) this filter applies to. If absent, the filter applies to all tables. Use on multi-fact models to scope a filter to one fact table. |
+
+Valid `oper` values: `=`, `!=`, `>`, `>=`, `<`, `<=`, `between`, `in`, `not_in`
+
 ```yaml
 filters:
+# Value filter
 - column:
   - "Query Stats Is System"   # display name of the column to filter on
-  oper: in                    # in | not_in | between | eq | ne | lt | le | gt | ge
+  oper: in
   values:
   - "false"
+
+# Numeric comparison
+- column:
+  - Quantity
+  oper: '>'
+  values:
+  - '100'
+
+# Date comparison — date values as MM/DD/YYYY strings
+- column:
+  - ship date
+  oper: '>='
+  values:
+  - 04/08/2026
 
 # Range filter
 - column:
   - "Order Date"
   oper: between
   values:
-  - "03/01/2000"
+  - "01/01/2000"
   - "03/01/2025"
 
 # Formula-backed boolean filter
@@ -220,7 +298,70 @@ filters:
   oper: in
   values:
   - "true"
+
+# Table-scoped filter (multi-fact model — only applies to the sales table)
+- column:
+  - Region
+  oper: in
+  values:
+  - APAC
+  apply_on_tables:
+  - sales
+  is_mandatory: true
 ```
+
+### `column_groups[]`
+
+Defines the data panel folder structure shown in the ThoughtSpot search bar. Each column is assigned to one or more folders via `data_panel_column_groups` on the column entry.
+
+| Field | Notes |
+|---|---|
+| `type` | `DATA_PANEL` — the only observed value. Controls the search bar data panel grouping. |
+| `properties.status` | `ENABLE` to show the grouped panel; `DISABLE` to hide it. |
+| `properties.default_sort` | `ENABLE` sorts columns within each folder alphabetically by default. |
+| `column_group_info[].name` | Folder display name. Must match keys used in `data_panel_column_groups` on columns. |
+| `column_group_info[].include_ungrouped_columns` | `true` on exactly one entry (the catch-all folder) — columns with no `data_panel_column_groups` entry appear there. |
+
+```yaml
+column_groups:
+- type: DATA_PANEL
+  properties:
+    status: ENABLE
+    default_sort: ENABLE
+  column_group_info:
+  - name: Dates
+    include_ungrouped_columns: false
+  - name: Measures
+    include_ungrouped_columns: false
+  - name: Products
+    include_ungrouped_columns: false
+  - name: Customers
+    include_ungrouped_columns: false
+  - name: Orders
+    include_ungrouped_columns: false
+  - name: Ungrouped      # catch-all — columns with no data_panel_column_groups appear here
+    include_ungrouped_columns: true
+```
+
+Assigning columns to folders — on each column entry:
+```yaml
+- name: Amount
+  column_id: DM_ORDER_DETAIL::LINE_TOTAL
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+  data_panel_column_groups: {Measures: ''}   # single folder
+
+- name: State
+  column_id: DM_CUSTOMER::STATE
+  properties:
+    column_type: ATTRIBUTE
+  data_panel_column_groups: {Products: '', Customers: ''}  # two folders — map values always ''
+```
+
+Pass through `column_groups` and `data_panel_column_groups` on round-trips. Do not construct from scratch unless the user explicitly wants folder organisation.
+
+---
 
 ### `joins_with[]` at model level
 
@@ -236,6 +377,108 @@ joins_with:
   type: LEFT_OUTER
   is_one_to_one: true
 ```
+
+---
+
+## `constraints`
+
+Rolling date window constraints applied at query time. Distinct from `filters[]` — constraints define a dynamic "last N periods" window rather than a static value predicate. Used primarily for performance: they limit how far back ThoughtSpot scans on large fact tables.
+
+The outer key is `constraints:`, which contains a single `constraint:` list (not a list at the top level).
+
+`date_range_condition` fields:
+
+| Field | Notes |
+|---|---|
+| `column` | Display name of the date column (not `TABLE::col` format) |
+| `duration` | Integer number of time periods (e.g. `1` = last 1 year) |
+| `bucket` | Time granularity: `DAY`, `WEEK`, `MONTH`, `QUARTER`, `YEAR` |
+
+**Single table — one date column:**
+```yaml
+constraints:
+  constraint:
+  - table: DM_ORDER_DETAIL
+    condition:
+    - date_range_condition:
+        column: date
+        duration: 1
+        bucket: YEAR
+```
+
+**Multi-fact — each fact table independently windowed:**
+```yaml
+constraints:
+  constraint:
+  - table: sales
+    condition:
+    - date_range_condition:
+        column: date
+        duration: 1
+        bucket: YEAR
+  - table: inventory
+    condition:
+    - date_range_condition:
+        column: date
+        duration: 1
+        bucket: YEAR
+```
+
+**AND — same table, different date columns (both conditions must be met):**
+```yaml
+# Repeating table entries for the same table = AND logic
+constraints:
+  constraint:
+  - table: sales
+    condition:
+    - date_range_condition:
+        column: ship date
+        duration: 1
+        bucket: YEAR
+  - table: sales
+    condition:
+    - date_range_condition:
+        column: order date
+        duration: 1
+        bucket: YEAR
+```
+
+**OR — multiple conditions within one table entry (either condition met):**
+```yaml
+# Multiple date_range_condition entries within one condition: list = OR logic
+constraints:
+  constraint:
+  - table: sales
+    condition:
+    - date_range_condition:
+        column: ship date
+        duration: 1
+        bucket: YEAR
+    - date_range_condition:
+        column: order date
+        duration: 1
+        bucket: YEAR
+```
+
+Pass through `constraints` on round-trips. Do not add constraints when constructing new models unless the user explicitly requests a rolling date window.
+
+---
+
+## `aggregated_models`
+
+Associates pre-aggregated "aggregate models" with this base model for query switching. ThoughtSpot evaluates these at query time — when a query matches the aggregation level of an aggregate model, it automatically routes to that model instead of the base model (a performance optimization).
+
+```yaml
+aggregated_models:
+- id: "{aggregate_model_guid}"
+  date_aggregation_info:
+  - column_id: order date    # display name of the date column
+    bucket: MONTHLY          # DAY | WEEK | MONTH | QUARTER | YEAR
+```
+
+**Always pass through `aggregated_models` on round-trips.** Stripping this field silently removes the query routing optimisation — ThoughtSpot falls back to the base model for all queries with no error.
+
+Do not construct `aggregated_models` from scratch; aggregate model associations are managed in the ThoughtSpot UI.
 
 ---
 

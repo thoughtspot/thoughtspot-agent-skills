@@ -36,13 +36,11 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 |---|---|---|
 | `ts-convert-to-snowflake-sv` | `/ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
-| `ts-convert-to-databricks-mv` | `/ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
 | Skill | Command | What it does |
 |---|---|---|
-| `ts-object-model-builder` | `/ts-object-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD diagram image |
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
 
 **Setup** — manage connection profiles and credentials
@@ -51,7 +49,6 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 |---|---|---|
 | `ts-profile-thoughtspot` | `/ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | `/ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles |
-| `ts-profile-databricks` | `/ts-profile-databricks` | Add, update, test, or delete Databricks profiles (PAT auth, SQL warehouse) |
 
 See **[agents/claude/SETUP.md](agents/claude/SETUP.md)** for installation, credential setup, and usage.
 
