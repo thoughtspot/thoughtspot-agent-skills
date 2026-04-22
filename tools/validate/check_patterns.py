@@ -169,7 +169,16 @@ def main() -> int:
             f for f in repo_root.glob("**/*.py")
             if not any(p in f.parts for p in skip_dirs)
         )
-        skill_md_files = sorted(repo_root.glob("agents/claude/*/SKILL.md"))
+        # Only check SKILL.md files that are tracked by git (skip gitignored pending skills)
+        import subprocess as _sp
+        _tracked = set(
+            _sp.run(["git", "ls-files", "agents/claude"],
+                    capture_output=True, text=True, cwd=repo_root).stdout.splitlines()
+        )
+        skill_md_files = sorted(
+            f for f in repo_root.glob("agents/claude/*/SKILL.md")
+            if str(f.relative_to(repo_root)) in _tracked
+        )
 
     total_hits = 0
 
