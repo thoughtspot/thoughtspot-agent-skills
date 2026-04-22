@@ -225,8 +225,9 @@ Sets require separate promotion to standalone set objects. This skill handles fo
 ```
 
 After formula selection, **check for parameter references.** A formula that references
-`[Param Name]` where `Param Name` matches a `parameters[].name` entry cannot be cleanly
-promoted — Answer-level parameters don't exist in the Model.
+`[Param Name]` where `Param Name` matches a `parameters[].name` entry needs its parameter
+promoted to the Model as well — Model formulas can reference `model.parameters[]` entries
+using the same `[Param Name]` bracket syntax.
 
 ```python
 import re
@@ -234,27 +235,65 @@ import re
 def extract_refs(expr):
     return re.findall(r'\[([^\]]+)\]', expr)
 
+# Build a lookup of Answer parameters by name for quick access
+params_by_name = {p["name"]: p for p in parameters}
+
+# Collect all parameters referenced by selected formulas
+params_needed = {}   # name → parameter dict
 for f in selected_formulas:
-    param_refs = [r for r in extract_refs(f["expr"]) if r in param_names]
-    if param_refs:
-        # warn the user
+    for ref in extract_refs(f["expr"]):
+        if ref in params_by_name:
+            params_needed[ref] = params_by_name[ref]
 ```
 
-If any selected formula references a parameter:
+If any selected formula references a parameter, for each such parameter:
 
 ```
-Warning — parameter reference in "{formula_name}":
+Parameter reference in "{formula_name}":
 
-  The expression references [Answer Paramerer], which is an Answer-level parameter.
-  Answer parameters cannot be promoted to a Model.
+  The expression references [today], which is an Answer-level parameter.
+  To promote this formula, the parameter must also exist in the target Model.
 
   Options:
-    E  Edit the expression now — replace [Answer Paramerer] with a fixed value or column
-    M  The Model already has a parameter with this name — promote as-is and it will resolve
+    P  Promote the parameter to the Model along with the formula (recommended)
+    M  The Model already has a parameter named "today" — promote formula as-is and it will resolve
+    E  Edit the expression now — replace [today] with a fixed value or column
     S  Skip this formula
 
-Enter E / M / S:
+Enter P / M / E / S:
 ```
+
+For **P — Promote the parameter:** Add the parameter to `params_to_promote` (a list
+collected across all formula checks). Each entry is the Answer parameter dict — the
+Answer-level UUID is dropped on import; ThoughtSpot assigns a new one.
+
+Build the parameter entry for the Model, handling both `default_value` and
+`dynamic_default_date` (some DATE parameters use the latter instead of a static string):
+
+```python
+params_to_promote = []   # populated across all formula checks
+
+def build_model_param_entry(answer_param):
+    entry = {
+        "name": answer_param["name"],
+        "data_type": answer_param["data_type"],
+        "description": answer_param.get("description", ""),
+    }
+    if "default_value" in answer_param:
+        entry["default_value"] = answer_param["default_value"]
+    elif "dynamic_default_date" in answer_param:
+        # Keep dynamic default (e.g. TODAY) — ThoughtSpot supports this at model level
+        entry["dynamic_default_date"] = answer_param["dynamic_default_date"]
+    return entry
+```
+
+For **M — already in Model:** leave `params_to_promote` unchanged; the formula expression
+needs no rewriting since the existing Model parameter will resolve it.
+
+For **E — edit expression:** prompt for the replacement expression inline; remove the
+parameter reference from `params_needed` for this formula.
+
+For **S — skip formula:** remove the formula from the promotion list entirely.
 
 After parameter handling, **check for formula inter-dependencies**: scan each selected
 formula's `expr` for `[token]` references that match other Answer formulas not yet selected.
@@ -455,10 +494,9 @@ if any(t.get("alias") for t in model_tables):
 
 ---
 
-## Step 8 — Detect Duplicate Formula Names
+## Step 8 — Detect Duplicate Formula and Parameter Names
 
-Before building the updated TML, check whether any selected formula name already exists
-in the Model:
+**Formulas:** Check whether any selected formula name already exists in the Model:
 
 ```python
 duplicates = [f for f in selected_formulas if f["name"] in formula_names_in_model]
@@ -476,7 +514,7 @@ For each duplicate, choose:
   O  Overwrite — replace the existing Model formula with the Answer version
   S  Skip — leave the existing Model formula unchanged
 
-"Profit Margin": 
+"Profit Margin":
 ```
 
 For **Rename**: prompt for the new name, then check it does not also conflict with existing
@@ -487,6 +525,32 @@ the `columns[]` `name:` field, and the `columns[]` `formula_id:` field. The `id`
 Remove skipped formulas from the promotion list. Mark overwrite formulas — their existing
 `formulas[]` and `columns[]` entries will be removed before the new entries are added in
 Step 10.
+
+**Parameters:** Check whether any parameter in `params_to_promote` already exists in the Model:
+
+```python
+param_names_in_model = {p["name"] for p in model.get("parameters", [])}
+param_duplicates = [p for p in params_to_promote if p["name"] in param_names_in_model]
+```
+
+If parameter duplicates exist:
+
+```
+The following parameters already exist in "{model_name}":
+
+  - "today"
+
+For each duplicate, choose:
+  K  Keep existing — the Model parameter is already there; formula will resolve against it
+  O  Overwrite — replace the existing Model parameter with the Answer version
+
+"today":
+```
+
+For **K — Keep existing:** remove the parameter from `params_to_promote` (it's already
+in the Model; no change needed).
+For **O — Overwrite:** mark it; the existing `parameters[]` entry will be removed before
+the new one is added in Step 10.
 
 ---
 
@@ -654,6 +718,17 @@ if overwrite_names:
 # Append new formulas and columns
 m.setdefault("formulas", []).extend(new_formula_entries)
 m["columns"].extend(new_column_entries)
+
+# Merge parameters
+if params_to_promote:
+    overwrite_param_names = {p["name"] for p in params_to_overwrite}
+    if overwrite_param_names:
+        m["parameters"] = [
+            x for x in m.get("parameters", [])
+            if x.get("name") not in overwrite_param_names
+        ]
+    new_param_entries = [build_model_param_entry(p) for p in params_to_promote]
+    m.setdefault("parameters", []).extend(new_param_entries)
 ```
 
 **Run the self-validation checklist** from
@@ -705,6 +780,12 @@ Ready to update "{model_name}":
 
   Formulas to overwrite:
     ~ High Value Flag  ATTRIBUTE  →  if ( [Revenue] > 10000 ) then 'High' else 'Low'
+
+  Parameters to add:       (shown only when params_to_promote is non-empty)
+    + today    DATE    dynamic default: TODAY
+
+  Parameters to overwrite: (shown only when any param is marked overwrite)
+    ~ rate     INT64   default: 40
 
   Source Answer:   "{answer_name}"
   Target Model:    "{model_name}"
@@ -792,6 +873,8 @@ To verify, open the Model URL above and check the Columns section for the new fo
 | Import creates a duplicate model instead of updating | `--no-create-new` flag is missing from the import command — add it and delete the duplicate |
 | Import: `Found multiple data sources with same name` | Model TML was exported without `--fqn` — `model_tables[]` entries lack `fqn:` GUIDs. Re-export with `--fqn` (Step 7 already specifies this) |
 | `pyyaml` not installed | `pip install pyyaml` |
+| Import: `parameter not found` or formula resolves to NULL after import | Parameter name in the formula expression does not match a `model.parameters[].name` — verify the promoted parameter name matches exactly (case-sensitive) |
+| `dynamic_default_date` rejected on import | Older ThoughtSpot instances may not support `dynamic_default_date` at the model level. Fall back to a static `default_value` — ask the user for a sensible default (e.g. today's date as a string `"2026-04-22"` for a DATE parameter). |
 
 ---
 

@@ -262,6 +262,48 @@ answer-level set to a reusable set:
 
 ---
 
+## Item 7 — Parameter promotion to Model TML
+
+**Skill steps affected:** Step 4, Step 8, Step 10
+
+**Status:** VERIFIED ✓ — tested against 172.32.68.104:8443 (Snowflakeddpmodel)
+
+**Why it matters:** Answer-level parameters are scoped to the Answer. When a formula
+references a parameter (e.g. `[today]`), promoting just the formula without the
+parameter leaves a dangling reference in the Model — the formula will fail at query time.
+
+The fix (implemented): on choosing P in Step 4, the Answer parameter is copied into
+`model.parameters[]` with the same `name`, `data_type`, `description`, and either
+`default_value` or `dynamic_default_date`. The Answer-level UUID is omitted — ThoughtSpot
+assigns a new one on import.
+
+**Test procedure:**
+
+1. Find an Answer with a formula that references a parameter (e.g. `[today]`).
+2. Run the skill and choose **P** when prompted.
+3. Verify the import succeeds and the parameter appears in the Model's Columns section.
+4. Open a new Answer on the Model — confirm the parameter is available and the formula resolves.
+
+**What to record:**
+- [ ] Does ThoughtSpot accept `dynamic_default_date` in `model.parameters[]` on import?
+- [ ] If not, does falling back to a static `default_value` work?
+- [ ] Does the formula correctly resolve against the new Model-level parameter at query time?
+- [ ] What happens if the parameter name in the Model already exists but with a different `data_type`?
+
+**Finding:**
+
+- `dynamic_default_date` is accepted in `model.parameters[]` on import ✓
+- Formula resolves correctly against the promoted Model-level parameter ✓
+- Import response: `status_code: OK`, `columns_added: 1`
+- Tested with Answer parameter `today` (DATE, `dynamic_default_date.type: TODAY`) and formula `form today` expr `[today]`
+
+Open items resolved:
+- [x] `dynamic_default_date` accepted at model level on import
+- [ ] Confirmed formula resolves at query time (visual verification pending — user to open Model URL)
+- [ ] Behaviour when parameter already exists with different `data_type` still untested
+
+---
+
 ## Item 6 — `--subtype MODEL` not valid on all instance versions
 
 **Skill steps affected:** Step 5 (Find target Model)

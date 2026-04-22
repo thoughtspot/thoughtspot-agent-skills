@@ -204,9 +204,11 @@ to this Answer only and are not reusable.
 | `description` | Optional description |
 
 **Promotion impact:** A formula that references `[Parameter Name]` (where `Parameter Name`
-matches an entry in `parameters[]`) cannot be cleanly promoted to a Model. The Model would
-need a matching parameter with the same name. Answer-level parameters cannot be promoted —
-they are scoped to the Answer only.
+matches an entry in `parameters[]`) requires a matching parameter in `model.parameters[]`
+to resolve at query time. To promote such a formula, copy the Answer parameter into the
+Model TML: same `name`, `data_type`, `description`, and `default_value` or
+`dynamic_default_date`. Omit the Answer-level UUID — ThoughtSpot assigns a new one on
+import. See `ts-object-answer-promote` Step 4 (option P) for the full promotion flow.
 
 ### `cohorts[]` fields — Sets
 
