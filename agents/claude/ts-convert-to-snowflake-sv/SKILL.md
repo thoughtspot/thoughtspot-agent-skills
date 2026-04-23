@@ -1,13 +1,13 @@
 ---
 name: ts-convert-to-snowflake-sv
-description: Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View by exporting TML, mapping columns and joins, translating formulas, and creating the view via SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
+description: Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View by exporting TML, mapping columns and joins, translating formulas, and creating the view via CREATE OR REPLACE SEMANTIC VIEW DDL.
 ---
 
 # ThoughtSpot → Snowflake Semantic View
 
 Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Searches
 ThoughtSpot for available models, exports the TML definition, maps it to the Snowflake
-Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`.
+Semantic View DDL format, and creates it via `CREATE OR REPLACE SEMANTIC VIEW`.
 
 ---
 
@@ -18,11 +18,11 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | [~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
 | [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
 | [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema, validation rules, and known limitations |
+| [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) | Snowflake Semantic View DDL syntax, validation rules, and known limitations |
 | [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
 | [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Table TML field reference — column types, data types, joins_with structure |
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML field reference — model_tables, columns, formulas, join scenarios |
-| [~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View YAML |
+| [~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View DDL |
 | [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
@@ -31,24 +31,75 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 
 ## Concept Mapping
 
-| ThoughtSpot | Snowflake Semantic View |
+| ThoughtSpot | Snowflake Semantic View DDL |
 |---|---|
 | Worksheet / Model | Semantic View |
-| `ATTRIBUTE` column (non-date) | `dimensions[]` — nested under owning table |
-| `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` — nested under owning table |
-| `MEASURE` column | `metrics[]` — nested under owning table |
-| Formula column (`formula_id`) — translatable | `metrics[]` — expression translated to SQL |
-| Formula column (`formula_id`) — untranslatable | **Omitted** — logged in Unmapped Report |
-| `joins[]` / `referencing_join` | `relationships[]` — top-level, no join/cardinality type |
-| Right-side join table | `primary_key` section on that table entry |
-| `synonyms[]` | `synonyms[]` |
-| `ai_context` | `description` — merged with `[TS AI Context]` prefix |
+| `ATTRIBUTE` column (non-date) | `dimensions()` clause — `TABLE.ALIAS as table.COL with synonyms=(...)` |
+| `ATTRIBUTE` column (date/timestamp) | `dimensions()` clause — same as above; flagged as `time_dimensions` in CA extension JSON only |
+| `MEASURE` column (SUM/AVG/MIN/MAX) | `metrics()` clause — `TABLE.ALIAS as AGG(table.COL) with synonyms=(...)` |
+| `MEASURE` COUNT_DISTINCT column | `metrics()` clause — `TABLE.ALIAS as COUNT(DISTINCT table.COL)` |
+| Formula column — translatable MEASURE | `metrics()` clause — expression translated to SQL aggregation |
+| Formula column — translatable ATTRIBUTE | `dimensions()` clause — expression as computed column alias |
+| Formula column — `last_value(sum(m), query_groups(), {date})` | `metrics()` with `non additive by (DATE_TABLE.COL direction nulls last)` modifier |
+| Formula column — untranslatable | **Omitted** — logged in Unmapped Report |
+| `joins[]` / `referencing_join` | `relationships()` clause — `rel_name as LEFT(col) references RIGHT(col)` |
+| Right-side join table | `primary key (COL)` in the `tables()` declaration for that table |
+| `synonyms[]` | `with synonyms=('...', '...')` on the dimension or metric entry |
+| `ai_context` / model `description` | `comment='...'` on the semantic view |
+| Semantic layer structure | `with extension (CA='...')` — JSON mapping each table's columns to dimension/time_dimension/metric |
 
-**Key structural rule:** `dimensions`, `time_dimensions`, and `metrics` are nested
-under each `tables[]` entry — they are **not** top-level keys in the semantic view.
+## DDL Format Reference
 
-**Key keyword:** Use `metrics`, not `measures`. `measures` is not a valid key and
-will cause a parse error.
+The output is a `CREATE OR REPLACE SEMANTIC VIEW` statement. Full structure:
+
+```sql
+CREATE OR REPLACE SEMANTIC VIEW {sv_name}
+  tables (
+    {DB}.{SCHEMA}.{TABLE} [primary key ({PK_COL})],
+    ...
+  )
+  relationships (
+    {left_table}_to_{right_table} as {LEFT_TABLE}({fk_col}) references {RIGHT_TABLE}({pk_col}),
+    ...
+  )
+  dimensions (
+    {TABLE}.{ALIAS} as {table_lower}.{PHYSICAL_COL} [with synonyms=('{display_name}')],
+    {TABLE}.{ALIAS} as {SQL_EXPRESSION} [with synonyms=('{display_name}')],  -- formula dim
+    ...
+  )
+  metrics (
+    {TABLE}.{ALIAS} as {AGG}({table_lower}.{COL}) [with synonyms=('{display_name}')],
+    {TABLE}.{ALIAS} non additive by ({TIME_TABLE}.{TIME_COL} {asc|desc} nulls last) as SUM({table_lower}.{COL}) [with synonyms=(...)],
+    {TABLE}.{ALIAS} as DIV0({table_lower}.{metric_alias}, {table_lower}.{other_metric_alias}) [...],  -- ratio: reference metric aliases not raw aggregates
+    ...
+  )
+  comment='{description}'
+  with extension (CA='{ca_json}')
+```
+
+**DDL rules:**
+- All non-metric columns (including dates, FK columns) go in `dimensions()`. There is no `time_dimensions` clause in the DDL — date classification lives only in the CA extension JSON.
+- Metric expressions reference **column aliases** (lowercase, as defined in `dimensions()` or earlier `metrics()` entries), not raw physical column names. For ratio metrics, reference the previously-defined aggregated metric alias: `DIV0(tbl.amount, tbl.quantity)` — do not nest `SUM()` calls directly.
+- Relationship names: `{left_table}_to_{right_table}` (lowercase). Disambiguate duplicates by appending the FK column: `{left_table}_{fk_col}_to_{right_table}`.
+- Column alias format: `TABLE_NAME.DESCRIPTIVE_ALIAS` (uppercase, e.g. `DM_ORDER.ORDER_ID`). Reference the alias with lowercase table and alias: `dm_order.ORDER_ID` or `dm_order.order_id`.
+- `with extension (CA='...')` is a JSON string that maps each table's columns into `dimensions[]`, `time_dimensions[]`, and `metrics[]` by alias name (lowercase). Required for Cortex Analyst to understand the semantic structure. Relationship names are also listed here.
+
+**CA extension JSON structure:**
+```json
+{
+  "tables": [
+    {
+      "name": "dm_order",
+      "dimensions": [{"name": "order_id"}, {"name": "fk_col"}],
+      "time_dimensions": [{"name": "order_date"}],
+      "metrics": [{"name": "employees"}]
+    }
+  ],
+  "relationships": [
+    {"name": "dm_order_to_dm_customer"}
+  ]
+}
+```
 
 For the full coverage matrix including unmapped properties, see
 [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md).
@@ -77,8 +128,9 @@ Can you log into ThoughtSpot in a browser (even via SSO)?
 - Not sure where to start? → Python connector + password auth has the fewest setup steps
 
 **No Snowflake access?** You can still run this skill in **file-only mode** — it generates
-the Semantic View YAML and writes it to a file you can create manually later. Select **FILE**
-at the Step 10 checkpoint or say "file only" at any point before Step 12.
+the `CREATE OR REPLACE SEMANTIC VIEW` DDL and writes it to a `.sql` file you can run
+manually in Snowsight later. Select **FILE** at the Step 10 checkpoint or say "file only"
+at any point before Step 12.
 
 ---
 
@@ -730,68 +782,56 @@ column:
   external_column: CATEGORY_ID  # = actual physical column in Snowflake (may differ)
 ```
 
-**Output structure — fields are table-scoped:**
+**Output structure — DDL clauses:**
 
-Each field must be placed under the `tables[]` entry for its owning table. Accumulate
-fields per table as you iterate columns, then emit the full table entry with nested
-`dimensions`, `time_dimensions`, and `metrics` sections.
+Accumulate four lists as you iterate columns: `tables_clause`, `relationships_clause`,
+`dimensions_clause`, `metrics_clause`. Then emit them in order as the final DDL.
 
-**`primary_key` — required for join target tables:**
+**`tables()` clause — primary key for join target tables:**
 
-After building all relationships, identify every table that appears as `right_table`
-in a relationship. Each such table entry must include a `primary_key` section listing
-the physical column(s) used as the join key:
-```yaml
-primary_key:
-  columns:
-  - {PHYSICAL_COLUMN_NAME}
+After building all relationships, identify every table that appears on the right side
+of a relationship. That table's entry in `tables()` must declare its PK:
+```sql
+DB.SCHEMA.DM_ORDER primary key (ORDER_ID),
+DB.SCHEMA.DM_ORDER_DETAIL,   -- no PK: left-side only, nothing joins to it
 ```
 
-**Join key columns must be exposed as dimensions (Cortex Analyst requirement):**
+**`dimensions()` clause — all non-metric columns including dates and FK columns:**
 
-Cortex Analyst validates that every column used in a relationship is exposed as a
-**named dimension** in its table. It resolves join keys by dimension name using
-`snake_case(physical_column)`. Dimension names must be globally unique.
+Every column that is not a metric goes here — including date/timestamp columns (which
+are distinguished as time_dimensions only in the CA extension JSON, not in the DDL).
+Format: `TABLE.ALIAS as table_lower.PHYSICAL_COL [with synonyms=('display_name')]`
 
-This creates a conflict when FK and PK columns share the same name (e.g.
-`TRANS.ACCOUNT_ID → ACCOUNT.ACCOUNT_ID`) — you cannot expose both as `account_id`.
+FK columns (join keys) must also appear in `dimensions()` so Cortex Analyst can
+resolve relationships. Alias names must be globally unique across the entire view.
 
-**Fix: rename FK columns in wrapper views with a table-specific prefix**, then expose
-them as uniquely-named dimensions:
+When FK and PK columns share the same physical name (e.g. `TRANS.ACCOUNT_ID →
+ACCOUNT.ACCOUNT_ID`), they would collide as dimension aliases. Fix by renaming FK
+columns in wrapper views with a table-specific prefix:
 
 ```sql
--- Instead of: "account_id" AS ACCOUNT_ID
-CREATE OR REPLACE VIEW TRANS AS
-SELECT "account_id" AS TRANS_ACCOUNT_ID, ...  -- prefixed FK
-FROM source.trans;
+-- Wrapper view renames the FK to avoid alias collision
+CREATE OR REPLACE VIEW DB.SCHEMA_SV.TRANS AS
+SELECT "account_id" AS TRANS_ACCOUNT_ID, ...
+FROM DB.SCHEMA.TRANS;
+
+-- dimensions() entries — now globally unique
+TRANS.TRANS_ACCOUNT_ID as trans.TRANS_ACCOUNT_ID,  -- FK dim
+ACCOUNT.ACCOUNT_ID as account.ACCOUNT_ID,           -- PK dim
+
+-- relationships() entry uses the renamed physical column
+trans_to_account as TRANS(TRANS_ACCOUNT_ID) references ACCOUNT(ACCOUNT_ID)
 ```
 
-```yaml
-# In the trans table entry — FK dimension
-- name: trans_account_id       # unique name; snake_case(TRANS_ACCOUNT_ID)
-  expr: trans.TRANS_ACCOUNT_ID
-  data_type: NUMBER
+When a physical table is aliased multiple times, create separate wrapper views for
+each alias with distinct PK column names so each satisfies the unique-name requirement.
 
-# In the account table entry — PK dimension (unchanged)
-- name: account_id
-  expr: account.ACCOUNT_ID
-  data_type: NUMBER
+**`metrics()` clause — ordering matters:**
 
-# Relationship uses the renamed physical column
-- name: trans_to_account
-  relationship_columns:
-  - left_column: TRANS_ACCOUNT_ID   # renamed in wrapper view
-    right_column: ACCOUNT_ID
-```
-
-When a physical table is aliased multiple times (e.g. a shared DISTRICT table used
-as both `client_district` and `account_district`), create **separate wrapper views**
-for each alias with a distinct PK column name (e.g. `CLIENT_DISTRICT_ID` vs
-`ACCOUNT_DISTRICT_ID`) so each satisfies the unique-name requirement independently.
-
-Also expose PK columns as dimensions — `primary_key` alone is not sufficient for
-Cortex. The PK dimension name must equal `snake_case(pk_column)`. For example, if
-the PK is `DISP_ID`, there must be a dimension named `disp_id`.
+Metrics are evaluated in order. A metric that references another metric's alias (e.g.
+a ratio `DIV0(tbl.amount, tbl.quantity)`) must appear **after** the metrics it
+references. Always emit base aggregate metrics before derived/ratio metrics for the
+same table.
 
 **For each model column:**
 
@@ -884,11 +924,10 @@ show the combined prompt once covering all domains.
 
 ---
 
-**1. Generated YAML** — full content in a code block.
+**1. Generated DDL** — full `CREATE OR REPLACE SEMANTIC VIEW` statement in a SQL code block.
 
 *Split mode:* label each block — e.g. `### Domain 1 — sales_inventory_dm_order`.
-Include the `domain.sv_name` as the YAML `name:` value; remind the user they may rename
-it before creating.
+Include the `domain.sv_name` as the view name; remind the user they may rename it before creating.
 
 **2. Conversion Summary:**
 ```
@@ -931,13 +970,13 @@ Shall I create this Semantic View in Snowflake?
 Shall I create all {N} Semantic Views in Snowflake?
   YES       — create all {N} views
   NO        — cancel
-  EDIT {n}  — edit domain n's YAML before creating (e.g. EDIT 1)
-  FILE      — write all {N} YAMLs to files without creating them
+  EDIT {n}  — edit domain n's DDL before creating (e.g. EDIT 1)
+  FILE      — write all {N} DDL files without creating them
 ```
 
 If the user selects **NO**, stop. No cleanup needed — the CLI manages its own token cache.
 
-If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-file-only-mode).
+If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-ddl-file-only-mode).
 
 ---
 
@@ -946,26 +985,24 @@ If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-f
 Run all checks from [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
-- [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level
-- [ ] Keyword is `metrics` not `measures` anywhere in the YAML
-- [ ] Field names unique globally across all tables' dimensions, time_dimensions, metrics
-- [ ] All `expr` table prefixes match a `name` in `tables[]`
-- [ ] All relationship `left_table`/`right_table` values match a `name` in `tables[]`
-- [ ] Every `right_table` in a relationship has a `primary_key` section
-- [ ] Reserved words in column names are double-quoted in `expr`
-- [ ] No `relationship_type`, `join_type`, `sample_values`, or `default_aggregation` fields
-- [ ] No untranslatable formula placeholders (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL`)
-- [ ] Valid Snowflake identifiers (view name, all field names): `^[A-Za-z_][A-Za-z0-9_]*$`
-- [ ] Valid `data_type` values on dimensions/time_dimensions: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700.
-- [ ] Every join key column (FK and PK) is exposed as a named dimension in its table, with name = `snake_case(physical_column)`
-- [ ] No two tables in a relationship share a join column name — if they do, rename FK columns in wrapper views with a table-specific prefix
-- [ ] No YAML block scalar syntax (`>-` or `|`) in any `expr` value — all expr values must be single-line double-quoted strings; block scalars cause Snowflake parse errors
-- [ ] Every `right_table` in `relationships[]` has a `primary_key` block — cross-check the full list before finalising YAML
-- [ ] `non_additive_dimensions` metrics: expr uses `SUM(...)`, the `table` field references the joined date dimension (not the fact table), and `nulls_position: last` is present
+- [ ] Every table referenced in `relationships()`, `dimensions()`, or `metrics()` appears in `tables()`
+- [ ] Every table that is a relationship right-side has `primary key (COL)` in its `tables()` entry
+- [ ] Every FK column used in a relationship left-side appears as a dimension alias in its table
+- [ ] Dimension aliases are globally unique across the entire view (no two tables share an alias name)
+- [ ] Metric expressions reference **metric aliases** for derived/ratio metrics — not nested `SUM()` calls: `DIV0(tbl.amount, tbl.quantity)` not `DIV0(SUM(tbl.LINE_TOTAL), SUM(tbl.QUANTITY))`
+- [ ] Metrics that reference other metric aliases appear **after** those aliases in the `metrics()` clause
+- [ ] `non additive by` metrics: modifier is `{TABLE}.{COL} {asc|desc} nulls last`, expression is `SUM(...)`, the TABLE is a joined date dimension
+- [ ] Formula dimension expressions use `table_lower.ALIAS` references, not physical column names if those differ
+- [ ] Reserved SQL words used as column names are double-quoted in expressions: `table."date"`, `table."schema"`
+- [ ] CA extension JSON: every alias defined in `dimensions()` and `metrics()` appears in the correct category (`dimensions`, `time_dimensions`, or `metrics`) under its table; date columns go in `time_dimensions`
+- [ ] CA extension JSON: every relationship name defined in `relationships()` appears in the `relationships[]` array
+- [ ] Valid Snowflake identifiers for view name and all aliases: `^[A-Za-z_][A-Za-z0-9_]*$`
+- [ ] No untranslatable formula placeholders anywhere in the DDL (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL AS`)
+- [ ] `comment=` value is a single-quoted SQL string — escape any embedded single quotes by doubling them
 
 ---
 
-### Step 12-FILE: Output YAML file (file-only mode)
+### Step 12-FILE: Output DDL file (file-only mode)
 
 This path is used when the user selected **FILE** at the Step 10 checkpoint, explicitly
 said "file only", or has no Snowflake access or `CREATE SEMANTIC VIEW` permission.
@@ -975,40 +1012,33 @@ the filename. Report each file written before moving to the next domain.
 
 **1. Determine the output filename:**
 
-Use `{semantic_view_name}.yaml` (the `name:` value from the generated YAML). If the
-current working directory contains a `semantic-views/` or `output/` subdirectory, write
-there; otherwise write to the current directory.
+Use `{semantic_view_name}.sql`. If the current working directory contains a
+`semantic-views/` or `output/` subdirectory, write there; otherwise write to the
+current directory.
 
 **2. Write the file:**
 
 ```python
 from pathlib import Path
-out_path = Path(f"{semantic_view_name}.yaml")
-out_path.write_text(sv_yaml_str, encoding="utf-8")
+out_path = Path(f"{semantic_view_name}.sql")
+out_path.write_text(sv_ddl_str, encoding="utf-8")
 ```
 
 **3. Report:**
 
 ```
-Semantic View YAML written to: {semantic_view_name}.yaml
+Semantic View DDL written to: {semantic_view_name}.sql
 
 To create it in Snowflake when you have access:
-  1. In Snowsight, open a worksheet and run:
+  1. In Snowsight, open a worksheet, set context to {suggested_db}.{suggested_schema},
+     and paste + run the contents of {semantic_view_name}.sql.
 
-       USE DATABASE {suggested_db};
-       USE SCHEMA {suggested_schema};
-       CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
-         '{suggested_db}.{suggested_schema}',
-         $$ <paste YAML content here> $$
-       );
-
-  2. Or via CLI using the same CALL statement with the YAML passed in $$...$$
-     dollar-quote delimiters.
+  2. Or via Snowflake CLI:
+       snow sql -c {cli_connection} -f {semantic_view_name}.sql
 ```
 
-Use the database and schema from the table map built in Step 5 as the suggested
-target (or `YOUR_DATABASE.YOUR_SCHEMA` if ambiguous). These are suggestions only —
-the user fills in the actual target when they run the command.
+Use the database and schema from the table map built in Step 5 as the suggested target
+(or `YOUR_DATABASE.YOUR_SCHEMA` if ambiguous).
 
 **4. Proceed to Step 13** (Generate Test Questions) — the test questions help the user
 know what to verify once they create the view.
@@ -1018,14 +1048,13 @@ know what to verify once they create the view.
 ### Step 12: Execute
 
 **Split mode:** run this entire step once per domain in sequence. Use `domain.sv_name`
-as the view name for each iteration. If one domain fails the dry-run or CREATE, report
-the error and ask: `Retry / Skip and continue with the remaining domains / Cancel all?`
-before proceeding.
+as the view name for each iteration. If one domain fails, report the error and ask:
+`Retry / Skip and continue with the remaining domains / Cancel all?` before proceeding.
 
-**Target location — suggest from source tables:**
+**Target location** (skip if already confirmed by the user — e.g. they named a schema
+earlier in the conversation):
 
-Collect the unique `(database, schema)` pairs from the table map built in Step 5.
-Present them as numbered options so the user can pick with a single keypress:
+Present the unique `(database, schema)` pairs from the table map as numbered options:
 
 ```
 Where should the Semantic View be created?
@@ -1036,80 +1065,55 @@ Where should the Semantic View be created?
 Select (or press Enter for #1):
 ```
 
-If the source tables span multiple databases or schemas, list each unique pair with
-the tables that belong to it:
-
-```
-Where should the Semantic View be created?
-
-  1. ANALYTICS.PUBLIC       (fact_sales, dim_product)
-  2. ANALYTICS.STAGING      (dim_customer)
-  E. Enter a different database and schema
-
-Select (or press Enter for #1):
-```
-
 If the user selects E, ask for `target_database` and `target_schema` explicitly.
 
 **Snowflake profile selection** (skip if already connected in Step 5):
 1. Read `~/.claude/snowflake-profiles.json`
 2. If multiple profiles: display a numbered list including each profile's `method`
-   (`cli` / `python`) so the user can distinguish them at a glance; ask user to select
+   (`cli` / `python`) so the user can distinguish them; ask user to select
 3. If one profile: show it (including method) and confirm
-4. If no file: ask for connection details and whether to use the CLI or Python
-   connector; offer to save profile for future use
-5. If `method: python` and `private_key_passphrase_env` is set, read passphrase
-   from that env var at runtime
+4. If no file: ask for connection details; offer to save profile for future use
+5. If `method: python` and `private_key_passphrase_env` is set, read passphrase from that env var
 
 **Role:** Use `default_role` from the profile if set; otherwise ask the user.
 
 **Warehouse:** If not specified in the profile:
-- Python: run `SHOW WAREHOUSES` via `cur.execute()` and pick the first non-suspended
-- CLI: run `snow sql -c {cli_connection} --format json -q "SHOW WAREHOUSES"` and
-  pick the first non-suspended warehouse from the JSON results
+- Python: `SHOW WAREHOUSES` via `cur.execute()` — pick first non-suspended
+- CLI: `snow sql -c {cli_connection} --format json -q "SHOW WAREHOUSES"` — pick first non-suspended
 
 Use the connection method and patterns from
-[~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) — including the
-temp-file approach for CLI when executing the dry-run and CREATE calls.
+[~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md).
 
-**Always run a dry-run first:**
+**Execute the CREATE:**
 
-```sql
-USE ROLE {role};
-USE DATABASE {target_database};
-USE SCHEMA {target_schema};
-
--- Step 1: Dry-run validation (third arg TRUE = validate only, do not create)
-CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{target_database}.{target_schema}', $$
-{yaml}
-$$, TRUE);
+```python
+# Python connector
+cur.execute(f"USE ROLE {role}")
+cur.execute(f"USE DATABASE {target_database}")
+cur.execute(f"USE SCHEMA {target_schema}")
+cur.execute(sv_ddl)   # the full CREATE OR REPLACE SEMANTIC VIEW ... statement
+result = cur.fetchone()
+print(result[0] if result else "OK")
 ```
 
-If dry-run succeeds, proceed to create:
-
-```sql
--- Step 2: Create
-CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML('{target_database}.{target_schema}', $$
-{yaml}
-$$);
+```python
+# Snowflake CLI — write DDL to temp file, execute in one call
+import subprocess, os
+with open("/tmp/sv_create.sql", "w") as f:
+    f.write(f"USE ROLE {role};\nUSE DATABASE {target_database};\nUSE SCHEMA {target_schema};\n")
+    f.write(sv_ddl)
+subprocess.run([snow_cmd, "sql", "-c", cli_connection, "-f", "/tmp/sv_create.sql"],
+               capture_output=True, text=True)
+os.remove("/tmp/sv_create.sql")
 ```
 
 **Notes:**
-- Use `CALL`, not `SELECT`
-- First argument: fully-qualified target schema `'DATABASE.SCHEMA'`
-  - If the target schema is case-sensitive (lowercase in `SHOW SCHEMAS` output),
-    quote it: `'DATABASE."schema"'` — e.g. `'BIRD."superhero"'`
-- Second argument: YAML content in `$$` dollar-quotes (safe for YAML with single quotes)
-- Third argument `TRUE`: dry-run mode — validates without creating
+- `CREATE OR REPLACE SEMANTIC VIEW` is idempotent — no need to `DROP` first
+- The `comment=` value is a single-quoted SQL string; escape embedded single quotes by doubling: `''`
+- The `with extension (CA='...')` JSON uses double quotes internally — no escaping needed
 
 On success: report the created view name and location.
 On failure: show the full Snowflake error. Do not retry automatically — ask the user.
-
-**If the view already exists:**
-```sql
-DROP SEMANTIC VIEW IF EXISTS {target_database}.{target_schema}.{semantic_view_name};
-```
-Then re-run the CREATE call.
 
 **Cleanup:**
 
@@ -1120,7 +1124,7 @@ If Snowflake temp files were written (e.g. `/tmp/sv_wrappers.sql`), remove them 
 
 ### Step 12b: Verify Creation
 
-After a successful `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` response, confirm the view
+After a successful `CREATE OR REPLACE SEMANTIC VIEW` execution, confirm the view
 exists and is queryable before reporting success.
 
 **Split mode:** run this step after each domain's CREATE call. After all domains are
@@ -1175,7 +1179,7 @@ After the spot-check passes, proceed to Step 13 (Generate Test Questions).
 
 After the view is successfully created, generate 5 natural language questions derived
 from the semantic view. Use the actual metrics, dimensions, and time dimensions that
-were mapped — not column names, but the `name` or `label` values from the YAML.
+were mapped — not column names, but the synonym or alias values from the DDL.
 
 **Split mode:** generate 5 questions per domain view, each labelled with the view name.
 Include at least one question per domain that could NOT be answered by querying the
