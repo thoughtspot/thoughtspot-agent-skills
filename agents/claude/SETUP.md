@@ -80,22 +80,22 @@ For users who want to run the skill without managing a local repo.
 
 ```bash
 # Clone once to get the files, then copy them into place
-git clone https://github.com/djwaldo/thoughtspot-skills.git /tmp/thoughtspot-skills
+git clone https://github.com/djwaldo/thoughtspot-agent-skills.git /tmp/thoughtspot-agent-skills
 
 mkdir -p ~/.claude/skills
 
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-thoughtspot ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-snowflake ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
-cp -r /tmp/thoughtspot-skills/agents/claude/semantic-layer-compare ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-profile-thoughtspot ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/semantic-layer-compare ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
-cp -r /tmp/thoughtspot-skills/agents/shared ~/.claude/shared
-cp -r /tmp/thoughtspot-skills/agents/shared/mappings ~/.claude/mappings
+cp -r /tmp/thoughtspot-agent-skills/agents/shared ~/.claude/shared
+cp -r /tmp/thoughtspot-agent-skills/agents/shared/mappings ~/.claude/mappings
 
-rm -rf /tmp/thoughtspot-skills
+rm -rf /tmp/thoughtspot-agent-skills
 ```
 
 > To update the skill later, repeat the above steps. Your profile and credential
@@ -123,7 +123,7 @@ For users who want to modify the skill, track changes in git, or contribute back
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/djwaldo/thoughtspot-skills.git ~/Dev/thoughtspot-skills
+git clone https://github.com/djwaldo/thoughtspot-agent-skills.git ~/Dev/thoughtspot-agent-skills
 ```
 
 ### 2. Create symlinks into Claude Code
@@ -132,27 +132,27 @@ git clone https://github.com/djwaldo/thoughtspot-skills.git ~/Dev/thoughtspot-sk
 mkdir -p ~/.claude/skills
 
 # Skills (agent-specific entry points)
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-thoughtspot \
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-profile-thoughtspot \
       ~/.claude/skills/ts-profile-thoughtspot
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-snowflake \
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \
       ~/.claude/skills/ts-profile-snowflake
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv \
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-convert-to-snowflake-sv \
       ~/.claude/skills/ts-convert-to-snowflake-sv
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv \
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-convert-from-snowflake-sv \
       ~/.claude/skills/ts-convert-from-snowflake-sv
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-answer-promote \
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-object-answer-promote \
       ~/.claude/skills/ts-object-answer-promote
 
-ln -s ~/Dev/thoughtspot-skills/agents/claude/semantic-layer-compare \
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/semantic-layer-compare \
       ~/.claude/skills/semantic-layer-compare
 
 # Shared reference docs (schemas, mappings, worked-examples)
-ln -s ~/Dev/thoughtspot-skills/agents/shared ~/.claude/shared
-ln -s ~/Dev/thoughtspot-skills/agents/shared/mappings ~/.claude/mappings
+ln -s ~/Dev/thoughtspot-agent-skills/agents/shared ~/.claude/shared
+ln -s ~/Dev/thoughtspot-agent-skills/agents/shared/mappings ~/.claude/mappings
 ```
 
 Claude Code reads through the symlinks automatically. Edits in `~/Dev/` take effect

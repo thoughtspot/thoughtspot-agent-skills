@@ -1,6 +1,6 @@
 # Validation Scripts
 
-Lightweight validation tools for the thoughtspot-skills repo. Run before every commit
+Lightweight validation tools for the thoughtspot-agent-skills repo. Run before every commit
 to catch integration problems, anti-patterns, and consistency issues without needing
 a live ThoughtSpot or Snowflake instance.
 

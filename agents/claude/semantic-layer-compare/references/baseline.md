@@ -141,5 +141,5 @@ The 3 additional features in v2 are OSI-native (OSI-001: interchange format, OSI
 
 `~/Dev/semantic-layer-research/semantic-layer-properties.csv`
 
-Kept outside the `thoughtspot-skills` repo because it is a research output, not a skill
+Kept outside the `thoughtspot-agent-skills` repo because it is a research output, not a skill
 reference file. The skill produces it; the skill does not consume it.
