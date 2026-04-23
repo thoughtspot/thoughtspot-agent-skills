@@ -16,16 +16,149 @@ of this skill over time.
 | Model / Worksheet `description` | `description` | Passed through unchanged |
 | `model_tables[]` / `tables[]` | `tables[]` + `base_table` | Physical names from Table TML |
 | `sql_view` (simple `SELECT *`) | `tables[]` + `base_table` | Resolved to physical table — see thoughtspot-tml.md |
-| `joins[]` (inline `on`) | `relationships[]` | Direct parse |
-| `joins[]` (`referencing_join`) | `relationships[]` | Resolved from Table TML `joins_with` |
-| `ATTRIBUTE` column (non-date) | `dimensions[]` | |
-| `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` | Type from `db_column_properties.data_type` |
-| `MEASURE` column | `metrics[]` | Aggregation mapped via ts-to-snowflake-rules.md |
-| Formula column (`formula_id`) | `metrics[]` | Expression translated; see ts-snowflake-formula-translation.md |
-| `synonyms[]` | `synonyms[]` | Passed through |
+| `joins[]` (inline `on`) | `relationships[]` | Sub-fields: `left_table`, `right_table`, `relationship_columns[].left_column/.right_column` |
+| `joins[]` (`referencing_join`) | `relationships[]` | Resolved from Table TML `joins_with`; same sub-field names |
+| `ATTRIBUTE` column (non-date) | `dimensions[]` | Expression in `dimensions[].expr` |
+| `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` | Type from `db_column_properties.data_type`; expression in `time_dimensions[].expr` |
+| `MEASURE` column | `metrics[]` | Aggregation in `metrics[].expr`; see `facts[]` note in Field Reference section below |
+| Formula column (`formula_id`) | `metrics[]` | Expression in `metrics[].expr`; see ts-snowflake-formula-translation.md |
+| `synonyms[]` | `synonyms[]` | Column/metric-level; table-level synonyms also supported by SV but not populated — see Field Reference section |
 | `column.description` | `description` | Passed through |
 | `ai_context` | `description` | **Partial** — see below |
 | `db_column_properties.data_type` | `data_type` | Preferred over `db_column_type` |
+
+---
+
+## Snowflake SV YAML Field Reference
+
+Field names confirmed against the OSI → Snowflake converter (`tgao-snowflake-converter`, commit `1e36581`).
+
+### Expression field: `expr`
+
+SQL expressions use `expr` at every level — not `expression`, `formula`, or `sql`:
+
+```yaml
+tables:
+  - name: orders
+    dimensions:
+      - name: status
+        expr: "status"                      # dimensions[].expr
+    time_dimensions:
+      - name: created_at
+        expr: "created_at"                  # time_dimensions[].expr
+    facts:
+      - name: amount
+        expr: "amount"                      # facts[].expr (see facts[] note below)
+metrics:
+  - name: total_revenue
+    expr: "SUM(orders.amount)"              # metrics[].expr
+```
+
+Cross-table references in `metrics[].expr` use `table_name.column_name` dot notation:
+`SUM(store_sales.ss_ext_sales_price) / COUNT(DISTINCT customer.c_customer_sk)`
+
+---
+
+### `base_table` sub-structure
+
+`base_table` is a nested dict, not a flat string:
+
+```yaml
+tables:
+  - name: orders
+    base_table:
+      database: MY_DB    # uppercased if the identifier was unquoted in the source
+      schema: PUBLIC
+      table: ORDERS
+```
+
+For subquery sources (`sql_view` complex SQL):
+```yaml
+    base_table:
+      definition: "SELECT * FROM ..."
+```
+
+---
+
+### `relationships[]` sub-structure
+
+Snowflake SV uses `left_table`/`right_table`, not `from`/`to` (OSI naming):
+
+```yaml
+relationships:
+  - name: orders_to_customers
+    left_table: orders
+    right_table: customers
+    relationship_columns:
+      - left_column: customer_id
+        right_column: id
+```
+
+`AND`-conditions on a single join produce multiple `relationship_columns` entries.
+
+---
+
+### `facts[]` — raw numeric columns vs. `metrics[]`
+
+Snowflake SV supports a `facts[]` array on each table for raw numeric columns that carry
+no pre-defined aggregation. This is distinct from the top-level `metrics[]` array.
+
+```yaml
+tables:
+  - name: orders
+    facts:
+      - name: amount
+        expr: "amount"     # raw column — Cortex Analyst can aggregate ad-hoc
+metrics:
+  - name: total_revenue
+    expr: "SUM(orders.amount)"   # pre-defined aggregation
+```
+
+**Our converter's choice:** All TS `MEASURE` columns are mapped to top-level `metrics[]`
+with an explicit aggregation wrapper (e.g. `SUM(table.col)`). This is valid Snowflake SV
+and works with Cortex Analyst, but it pre-determines the aggregation. Using `facts[]`
+instead would let Cortex Analyst compose aggregations freely at query time.
+
+This is a deliberate trade-off, not an error. See Future Improvements below.
+
+---
+
+### `synonyms[]` — table-level and column-level
+
+`synonyms[]` is valid at both table scope and column/metric scope:
+
+```yaml
+tables:
+  - name: orders
+    synonyms:
+      - "sales transactions"    # table-level — not populated from TS (TS has no table synonym concept)
+    dimensions:
+      - name: status
+        synonyms:
+          - "order status"      # column-level — populated from TS column synonyms[]
+```
+
+Table-level synonyms are left absent in TS→SV conversions. See Future Improvements.
+
+---
+
+### `primary_key` and `unique_keys`
+
+Snowflake SV supports key declarations; ThoughtSpot TML has no equivalent:
+
+```yaml
+tables:
+  - name: customers
+    primary_key:
+      columns:
+        - customer_id
+    unique_keys:
+      - columns:
+          - email
+```
+
+These fields are never populated in a TS→SV conversion and are silently absent from
+the output. They are not logged in the Unmapped Report — TS has no source data for them.
 
 ---
 
@@ -41,7 +174,12 @@ It is an AI instruction, not a human-facing description.
 
 Snowflake `description` is human-facing and also read by Cortex Analyst, but it is
 not a directive. The `ai_context` text is merged into `description` with the prefix
-`[TS AI Context]`.
+`[TS AI Context]` followed by a newline.
+
+Note: the OSI Snowflake converter appends `ai_context` with a bare `\n` separator and
+no prefix label. Our `[TS AI Context]` prefix is more legible in the Snowflake UI and
+makes the merged section easy to identify and remove later if Snowflake adds a dedicated
+AI instruction field.
 
 **Action for users:** Review all AI context entries in the Unmapped Report and decide
 whether to rewrite them in Snowflake's documentation style.
@@ -288,6 +426,9 @@ section that has no entries for the current model.
 | Area | Potential improvement |
 |---|---|
 | AI context | If Snowflake introduces a dedicated per-field AI instruction property, map `ai_context` directly to it instead of merging into `description`. |
+| `facts[]` vs `metrics[]` | Emit raw TS MEASURE columns (no formula) as `facts[]` rather than `metrics[]` to preserve Cortex Analyst's ad-hoc aggregation flexibility. Pre-defined formula MEASUREs would still go to `metrics[]`. |
+| Table-level synonyms | Populate `tables[].synonyms[]` from the model's table description or TML table name variants; currently left absent. |
+| `primary_key` / `unique_keys` | If ThoughtSpot ever exposes PK declarations in TML (or if they can be inferred from connection metadata), populate these for better Cortex Analyst query planning. |
 | Complex SQL views | Add SQL dialect translation for ThoughtSpot-specific syntax to improve portability of complex `sql_query` strings to Snowflake. |
 | Parameters | Re-implement parameter logic as multiple concrete columns, or as Snowflake dynamic tables. Monitor Snowflake for parameterised expression support. |
 | Window / LOD / semi-additive functions | A companion skill could assist interactively with window function rewrites, CTE generation, and semi-additive view creation. |
