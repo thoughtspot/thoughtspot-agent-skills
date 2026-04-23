@@ -71,6 +71,8 @@ These branches are pushed to remote for backup but never merged to main until ve
 3. Update README.md, SETUP.md, and coco/SETUP.md to include the skill (consistency checker enforces this)
 4. `git push -u origin wip/<skill-name>`
 
+**Session-start protocol:** see `.claude/rules/branching.md` — check your branch before making any edits.
+
 ## Auth and secrets
 
 Credentials are never stored in files, env files, or git. Pattern used throughout:
