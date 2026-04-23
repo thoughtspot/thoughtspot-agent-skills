@@ -1,0 +1,132 @@
+---
+description: Convert a Snowflake Semantic View into a ThoughtSpot Model. Invoked when the user asks to reverse-engineer a Semantic View, import a Snowflake Semantic View into ThoughtSpot, or create a ThoughtSpot Model from a Semantic View DDL.
+alwaysApply: false
+---
+
+# Snowflake Semantic View → ThoughtSpot Model
+
+Reverse-engineers a Snowflake Semantic View into a ThoughtSpot Model. Reads the
+semantic view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics
+back to ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and
+imports the result via `ts tml import`.
+
+Two scenarios are supported:
+- **Scenario A (existing tables):** ThoughtSpot Table objects already exist for the
+  Snowflake objects the semantic view references. Reuses those existing Table objects.
+- **Scenario B (new tables):** No ThoughtSpot Table objects exist yet. Creates new
+  Table objects pointing to the Snowflake objects.
+
+---
+
+## References
+
+Read these files before starting. Do not guess DDL parsing rules, type mappings,
+or TML structure from memory.
+
+| File | Purpose |
+|---|---|
+| `~/.cursor/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` | DDL parsing, type mapping, formula translation, column classification |
+| `~/.cursor/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` | SQL → ThoughtSpot formula translation (bidirectional reference) |
+| `~/.cursor/shared/schemas/thoughtspot-table-tml.md` | Table TML structure, connection reference, data types, import patterns, common errors |
+| `~/.cursor/shared/schemas/thoughtspot-model-tml.md` | Model TML structure, join scenarios, formula visibility, self-validation checklist |
+| `~/.cursor/shared/schemas/thoughtspot-formula-patterns.md` | ThoughtSpot formula syntax, all function categories, LOD/window patterns, YAML encoding |
+| `~/.cursor/shared/worked-examples/snowflake/ts-from-snowflake.md` | End-to-end example: Semantic View → ThoughtSpot Model |
+| `~/.cursor/rules/ts-profile-thoughtspot.mdc` | ThoughtSpot auth methods, CLI usage |
+| `~/.cursor/rules/ts-profile-snowflake.mdc` | Snowflake connection code, SHOW commands for case-sensitivity |
+
+---
+
+## Prerequisites
+
+1. ThoughtSpot profile configured — run "set up my ThoughtSpot profile" if needed.
+2. Snowflake profile configured — run "set up my Snowflake profile" if needed.
+3. `ts` CLI installed: `pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli`
+
+Ask one question at a time. Wait for each answer before proceeding.
+
+---
+
+## Step 1 — Identify the Semantic View
+
+Ask for the Snowflake Semantic View to convert (database, schema, view name).
+
+---
+
+## Step 2 — Read the DDL
+
+Using the Snowflake profile, execute:
+
+```sql
+SELECT GET_DDL('semantic_view', '{db}.{schema}.{sv_name}', TRUE);
+```
+
+Parse the DDL. Before processing, read `~/.cursor/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md`
+for the authoritative parsing and mapping rules.
+
+---
+
+## Step 3 — Choose Scenario
+
+Ask whether ThoughtSpot Table objects already exist for the Snowflake tables the
+semantic view references.
+
+- **Scenario A:** existing tables — search ThoughtSpot for them and reuse
+- **Scenario B:** new tables — create Table TML objects as part of the import
+
+---
+
+## Step 4 — Scenario A: Reuse Existing Tables
+
+Search ThoughtSpot for the relevant Table objects:
+```bash
+ts metadata search --profile {ts_profile} --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%"
+```
+
+Match each Snowflake table reference to a ThoughtSpot Table GUID. Record the GUIDs —
+they become the `fqn:` values in the Model's `model_tables`.
+
+---
+
+## Step 4 — Scenario B: Create New Tables
+
+For each physical Snowflake table referenced by the semantic view:
+1. Use the connection code in `~/.cursor/rules/ts-profile-snowflake.mdc` to run
+   `SHOW COLUMNS IN TABLE ...` and detect case-sensitive column names.
+2. Generate Table TML following `~/.cursor/shared/schemas/thoughtspot-table-tml.md`.
+3. Import via `ts tml import`.
+4. Capture the assigned GUIDs.
+
+---
+
+## Step 5 — Generate Model TML
+
+Read `~/.cursor/shared/schemas/thoughtspot-model-tml.md` and
+`~/.cursor/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` in full.
+
+Map the Semantic View DDL to ThoughtSpot Model TML:
+- Dimensions → ATTRIBUTE columns
+- Metrics → MEASURE columns with formula expressions
+- Relationships → `joins_with` entries
+- SQL expressions → ThoughtSpot formulas (use the formula translation reference)
+
+Run the self-validation checklist from `thoughtspot-model-tml.md` before importing.
+
+---
+
+## Step 6 — Import
+
+```bash
+ts tml import --profile {ts_profile} --policy ALL_OR_NONE
+```
+
+On success, show the ThoughtSpot Model GUID and a summary of imported objects.
+
+---
+
+## Step 7 — Report
+
+Show:
+- Model imported: `{model_name}` (GUID: `{guid}`)
+- Tables: {n} reused / {n} created
+- Dimensions: {n}, Metrics: {n}, Formulas: {n}
+- Any formula translation notes (untranslatable expressions left as SQL passthrough)

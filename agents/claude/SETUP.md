@@ -104,12 +104,14 @@ rm -rf /tmp/thoughtspot-agent-skills
 ### 2. Install Python dependencies
 
 ```bash
-# Required for all installs (ThoughtSpot API calls)
-pip install requests pyyaml
+# Required for all installs (ThoughtSpot API calls + cross-platform credential store)
+pip install requests pyyaml keyring
 
 # Required only if connecting to Snowflake via Python connector (not needed for Snowflake CLI)
 pip install snowflake-connector-python cryptography
 
+# Linux only — Secret Service backend for keyring
+pip install secretstorage
 ```
 
 Then complete [Credential Setup](#credential-setup) below.
@@ -161,12 +163,14 @@ immediately — no copy step needed.
 ### 3. Install Python dependencies
 
 ```bash
-# Required for all installs (ThoughtSpot API calls)
-pip install requests pyyaml
+# Required for all installs (ThoughtSpot API calls + cross-platform credential store)
+pip install requests pyyaml keyring
 
 # Required only if connecting to Snowflake via Python connector (not needed for Snowflake CLI)
 pip install snowflake-connector-python cryptography
 
+# Linux only — Secret Service backend for keyring
+pip install secretstorage
 ```
 
 ### 4. Install the pre-commit hook
@@ -193,8 +197,8 @@ In Claude Code, run:
 ```
 
 Claude will ask for your ThoughtSpot URL, username, and auth method (one question at
-a time), store the credential securely in the macOS Keychain, wire up `~/.zshenv`,
-and verify the connection before finishing.
+a time), store the credential securely in your OS credential store, wire up your shell
+profile (macOS/Linux), and verify the connection before finishing.
 
 Then run:
 
@@ -263,8 +267,8 @@ profiles and credentials across the batch.
 - Snowflake account with Cortex Analyst / Semantic Views enabled
 
 **Local:**
-- Python 3.8+
-- macOS (Keychain used for credential storage)
+- Python 3.9+
+- macOS, Windows 10+, or Linux (with Secret Service / KWallet for keyring)
 
 ---
 
@@ -300,7 +304,7 @@ Skills reference other skills by path (never by copying content):
 ### Credential and secret handling
 
 - Credentials are never stored in skill files or passed through the Claude Code conversation
-- Passwords and tokens live in the macOS Keychain, exported via `~/.zshenv`
+- Passwords and tokens live in the OS credential store (macOS Keychain, Windows Credential Manager, Linux Secret Service), with optional export via shell profile (`~/.zshenv` on macOS/Linux)
 - Temporary files written to `/tmp/` must be removed at the end of the skill
 - No API keys, tokens, passwords, profile JSON files, or `.env` files in commits — the `.gitignore` covers common patterns but use judgement
 

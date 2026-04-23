@@ -165,12 +165,43 @@ def check_coco_setup_stage_copy(repo_root: Path) -> list[str]:
 # Check 4: README.md structure section mentions key tool subdirectories
 # ---------------------------------------------------------------------------
 
+
 _KNOWN_DIRS = [
     # (relative path in repo, label to check for in README)
     ("scripts", "scripts"),
     ("tools/validate", "validate"),
     ("tools/smoke-tests", "smoke-tests"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Check 5: agents/cursor/SETUP.md lists every rule in agents/cursor/rules/
+# ---------------------------------------------------------------------------
+
+def check_cursor_setup_rules(repo_root: Path) -> list[str]:
+    """
+    Every .mdc file in agents/cursor/rules/ must be mentioned in
+    agents/cursor/SETUP.md (by skill name, e.g. 'ts-profile-thoughtspot').
+    """
+    rules_dir = repo_root / "agents" / "cursor" / "rules"
+    if not rules_dir.is_dir():
+        return []  # Cursor agent not present — skip
+
+    setup_path = repo_root / "agents" / "cursor" / "SETUP.md"
+    if not setup_path.exists():
+        return ["agents/cursor/SETUP.md not found — create it or run the cursor setup"]
+
+    setup_text = setup_path.read_text(encoding="utf-8")
+    failures = []
+
+    for mdc_file in sorted(rules_dir.glob("*.mdc")):
+        skill_name = mdc_file.stem  # e.g. "ts-profile-thoughtspot"
+        if skill_name not in setup_text:
+            failures.append(
+                f"agents/cursor/SETUP.md: rule '{skill_name}' not listed — add an entry for it"
+            )
+
+    return failures
 
 
 def check_readme_structure(repo_root: Path) -> list[str]:
@@ -221,6 +252,7 @@ def main() -> int:
         ("SETUP.md symlink steps",        check_claude_setup_symlinks),
         ("stage copy list",               check_coco_setup_stage_copy),
         ("README structure section",      check_readme_structure),
+        ("Cursor SETUP.md rule entries",  check_cursor_setup_rules),
     ]
 
     for label, fn in checks:

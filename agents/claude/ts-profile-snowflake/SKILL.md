@@ -1,6 +1,6 @@
 ---
 name: ts-profile-snowflake
-description: Manage Snowflake connection profiles — add, list, update, delete, and test profiles. Supports Python connector (key pair or password) and Snowflake CLI. Passwords stored securely in macOS Keychain. Run with no arguments to add your first profile or manage existing ones.
+description: Manage Snowflake connection profiles — add, list, update, delete, and test profiles. Supports Python connector (key pair or password) and Snowflake CLI. Passwords stored securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Run with no arguments to add your first profile or manage existing ones.
 ---
 
 # Snowflake Setup
@@ -225,9 +225,9 @@ Derive names from `{profile_name}`:
 - `{SLUG}` — slug uppercased, hyphens → underscores
 - `{env_var}` — `SNOWFLAKE_PASSWORD_{SLUG}`
 
-**Store in Keychain** — ask the user to run this **in their own terminal** so the
-password is never written into the Claude Code conversation or history file:
+**Store credential** — detect platform first (`python -c "import platform; print(platform.system())"`), then ask the user to run **in their own terminal** so the password is never written into the conversation or history file:
 
+**macOS** (`Darwin`):
 ```
 Run this in your terminal:
 
@@ -239,8 +239,27 @@ Run this in your terminal:
 Let me know when done.
 ```
 
+**Windows** (PowerShell):
+```
+Run this in PowerShell:
+
+  python -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_PASSWORD_HERE')"
+
+Let me know when done.
+```
+
+**Linux**:
+```
+Run this in your terminal:
+
+  python3 -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_PASSWORD_HERE')"
+
+Let me know when done.
+```
+
 After confirmation, verify:
 
+**macOS:**
 ```python
 import subprocess
 r = subprocess.run(
@@ -250,29 +269,39 @@ r = subprocess.run(
 print("Stored." if r.returncode == 0 else "Not found — check the command ran without errors.")
 ```
 
-Stop if verification fails — do not proceed without a confirmed Keychain write.
+**Windows / Linux:**
+```python
+import keyring
+stored = keyring.get_password("{keychain_service}", "{username}")
+print("Stored." if stored else "Not found — check the command ran without errors.")
+```
 
-**Update ~/.zshenv**
+Stop if verification fails — do not proceed without a confirmed credential write.
 
-Export line:
+**Update shell profile**
+
+**macOS** — export line for `~/.zshenv`:
 ```
 export {env_var}=$(security find-generic-password -s "{keychain_service}" -a "{username}" -w 2>/dev/null)
 ```
 
-Read `~/.zshenv` (empty string if missing).
-- Line already exports `{env_var}` → replace it.
-- Not present → append (preceded by a blank line if file is non-empty).
-
-Tell the user:
+**Linux** — export line for `~/.zshenv` (or `~/.bashrc`):
 ```
-~/.zshenv updated. Run this in your terminal:
-
-  source ~/.zshenv
-
-Let me know when done.
+export {env_var}=$(python3 -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')" 2>/dev/null)
 ```
 
-Wait for confirmation.
+For both: read the shell profile (empty string if missing). If the line already exports `{env_var}`, replace it. Otherwise append (preceded by a blank line if file is non-empty). Tell the user to run `source ~/.zshenv` and wait for confirmation.
+
+**Windows** — set a permanent user environment variable:
+```
+Run this in PowerShell:
+
+  $val = python -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')"
+  [System.Environment]::SetEnvironmentVariable('{env_var}', $val, 'User')
+
+Restart your terminal after, then let me know when done.
+```
+Note: on Windows this step is optional — the connector reads from Windows Credential Manager via `keyring` at runtime.
 
 **Write the profile:**
 ```json
@@ -337,8 +366,9 @@ except Exception as e:
     sys.exit(1)
 ```
 
-Run: `source ~/.zshenv && python3 /tmp/sf_verify.py 2>/dev/null`
-Remove: `rm -f /tmp/sf_verify.py`
+**macOS / Linux:** `source ~/.zshenv && python3 /tmp/sf_verify.py 2>/dev/null`
+**Windows:** `python /tmp/sf_verify.py 2>/dev/null`
+Remove: `rm -f /tmp/sf_verify.py` (macOS/Linux) or `del /tmp/sf_verify.py` (Windows)
 
 ---
 
@@ -516,47 +546,79 @@ Enter 1–3:
 New {field}: [{current_value}]
 ```
 
-Update the field in profile JSON. For username changes on password profiles:
-- Read existing credential from Keychain (`security find-generic-password -s "{keychain_service}" -a "{old_username}" -w`)
-- Delete old Keychain entry, add new one with same credential under new username
-- Update `username` in profile JSON
+Update the field in profile JSON. For username changes on password profiles, migrate the stored credential:
+
+**macOS:**
+```python
+import subprocess
+r = subprocess.run(["security", "find-generic-password", "-s", "{keychain_service}", "-a", "{old_username}", "-w"], capture_output=True, text=True)
+credential = r.stdout.strip()
+subprocess.run(["security", "delete-generic-password", "-s", "{keychain_service}", "-a", "{old_username}"], capture_output=True)
+subprocess.run(["security", "add-generic-password", "-s", "{keychain_service}", "-a", "{new_username}", "-w", credential], capture_output=True)
+```
+
+**Windows / Linux:**
+```python
+import keyring
+credential = keyring.get_password("{keychain_service}", "{old_username}")
+if credential:
+    keyring.delete_password("{keychain_service}", "{old_username}")
+    keyring.set_password("{keychain_service}", "{new_username}", credential)
+```
+
+Update `username` in profile JSON.
 
 Confirm: `{Field} updated.`
 
 ### U — Refresh Password
 
-Show the profile's auth details, then:
+Show the profile's auth details, then detect platform (`platform.system()`) and ask the user to run **in their own terminal**:
 
+**macOS** (`Darwin`):
 ```
-New Snowflake password (will not be displayed):
-```
+Run this in your terminal to update the password:
 
-Write to `/tmp/sf_keychain_refresh.py`:
+  security delete-generic-password -s "{keychain_service}" -a "{username}"
+  security add-generic-password \
+    -s "{keychain_service}" \
+    -a "{username}" \
+    -w "YOUR_NEW_PASSWORD_HERE"
 
-```python
-import subprocess, sys
-service    = "{keychain_service}"
-account    = "{username}"
-credential = "{new_credential}"
-subprocess.run(["security", "delete-generic-password", "-s", service, "-a", account], capture_output=True)
-result = subprocess.run(["security", "add-generic-password", "-s", service, "-a", account, "-w", credential], capture_output=True, text=True)
-if result.returncode != 0:
-    print(f"Keychain error: {result.stderr.strip()}")
-    sys.exit(1)
-print("Password updated in Keychain.")
+Let me know when done.
 ```
 
-Run: `python3 /tmp/sf_keychain_refresh.py`
-Remove: `rm -f /tmp/sf_keychain_refresh.py`
+**Windows** (PowerShell):
+```
+Run this in PowerShell to update the password:
 
-No profile JSON or `~/.zshenv` changes needed.
+  python -c "import keyring; keyring.delete_password('{keychain_service}', '{username}')"
+  python -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_NEW_PASSWORD_HERE')"
 
-Tell the user:
+Let me know when done.
+```
+
+**Linux**:
+```
+Run this in your terminal to update the password:
+
+  python3 -c "import keyring; keyring.delete_password('{keychain_service}', '{username}')"
+  python3 -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_NEW_PASSWORD_HERE')"
+
+Let me know when done.
+```
+
+After confirmation, verify using the platform-specific check from the Add flow.
+
+No profile JSON or shell profile changes needed (env var name stays the same).
+
+**macOS / Linux:** Tell the user:
 ```
 Password updated. Run this in your terminal to apply:
 
   source ~/.zshenv
 ```
+
+**Windows:** `Password updated in Windows Credential Manager. Restart your terminal for the change to take effect (or it will be read directly from the credential store at next use).`
 
 ### U — Change Auth Method
 
@@ -589,24 +651,37 @@ If confirmed:
 
 1. **Remove from profile JSON** — filter out the entry with matching `name`. Write the updated file (or delete the file if no profiles remain).
 
-2. **If password auth — remove Keychain entry:**
-```bash
-security delete-generic-password -s "{keychain_service}" -a "{username}"
-```
-If not found, continue silently.
+2. **If password auth — remove credential store entry:**
 
-3. **If password auth — remove export line from ~/.zshenv** — read the file, filter out any line that exports `{password_env}`, write back.
+   **macOS:**
+   ```bash
+   security delete-generic-password -s "{keychain_service}" -a "{username}"
+   ```
+
+   **Windows / Linux:**
+   ```python
+   import keyring
+   try:
+       keyring.delete_password("{keychain_service}", "{username}")
+   except Exception:
+       pass
+   ```
+
+   If not found, continue silently.
+
+3. **If password auth — remove export line from shell profile** (macOS/Linux only) — read `~/.zshenv` (or `~/.bashrc`), filter out any line that exports `{password_env}`, write back. Skip on Windows.
 
 4. Tell the user:
 ```
 Profile '{name}' deleted.
 ```
-If password auth, add:
+If password auth on **macOS / Linux**, add:
 ```
-Run this in your terminal to apply the ~/.zshenv change:
+Run this in your terminal to apply the shell profile change:
 
   source ~/.zshenv
 ```
+If password auth on **Windows**: no shell profile reload needed.
 If key pair auth, add:
 ```
 Note: the key file ~/.ssh/snowflake_key.p8 was not removed — it may be used by
@@ -623,8 +698,9 @@ Show numbered profile list (if more than one) and ask which to test. If only one
 
 Write to `/tmp/sf_verify.py` (same script as A4, with values filled in for the selected profile).
 
-Run: `source ~/.zshenv && python3 /tmp/sf_verify.py 2>/dev/null`
-Remove: `rm -f /tmp/sf_verify.py`
+**macOS / Linux:** `source ~/.zshenv && python3 /tmp/sf_verify.py 2>/dev/null`
+**Windows:** `python /tmp/sf_verify.py 2>/dev/null`
+Remove: `rm -f /tmp/sf_verify.py` (macOS/Linux) or `del /tmp/sf_verify.py` (Windows)
 
 Show the result as a table (User / Role / Warehouse).
 
@@ -651,8 +727,8 @@ On success: `Profile '{name}' — connection verified.` Return to menu.
 | `snow` not found | Direct user to install CLI; stop |
 | Key generation fails | Show openssl error; check openssl is installed (`openssl version`) |
 | `ALTER USER` not confirmed | Wait; remind user the key pair won't work until this step is done |
-| Keychain write fails | Show error. Ask user to check macOS login keychain is unlocked. |
-| Password env var empty after source | Remind user to run `source ~/.zshenv` in a real terminal (not with `!`) |
+| Credential write fails | macOS: check the login keychain is unlocked. Windows: ensure `keyring` is installed (`pip install keyring`). Linux: ensure a Secret Service backend is running (`pip install keyring secretstorage`). |
+| Password env var empty after source | macOS/Linux: remind user to run `source ~/.zshenv` in a real terminal (not with `!`). Windows: env var is optional — connector reads from Credential Manager via `keyring`. |
 | Snowflake 250001 / auth error | Check account identifier, username, role, warehouse are all correct |
 | `snowflake.connector` not found | `pip install snowflake-connector-python cryptography` |
 

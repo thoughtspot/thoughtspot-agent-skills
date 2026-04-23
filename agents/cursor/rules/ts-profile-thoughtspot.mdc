@@ -1,6 +1,6 @@
 ---
-name: ts-profile-thoughtspot
-description: Manage ThoughtSpot connection profiles — add, list, update, delete, and test profiles. Stores credentials securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Run with no arguments to add your first profile or manage existing ones.
+description: Manage ThoughtSpot connection profiles — add, list, update, delete, and test profiles. Stores credentials securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Invoked when the user asks to set up ThoughtSpot credentials, add or update a ThoughtSpot profile, or test a ThoughtSpot connection.
+alwaysApply: false
 ---
 
 # ThoughtSpot Setup
@@ -50,7 +50,7 @@ Profile: {name}
   Username: {username}
   Auth:     {auth_method_label}
   Env var:  {env_var_name}
-  Status:   {SET — credential loaded | NOT SET — run 'source ~/.zshenv' (macOS/Linux) or restart terminal (Windows), or re-add credential}
+  Status:   {SET — credential loaded | NOT SET — reload shell or re-add credential}
 ```
 
 To check status: read `os.environ.get("{env_var_name}", "")` — non-empty = SET.
@@ -100,8 +100,7 @@ To get your token:
   5. Click Get Current User Token → Try it out → Execute
   6. Copy the token value from the response body
 
-Tokens are valid for ~24 hours. When yours expires, run /ts-profile-thoughtspot,
-choose U (Update), then Refresh credential.
+Tokens are valid for ~24 hours. When yours expires, run Update → Refresh credential.
 
 Paste your token (will not be displayed):
 ```
@@ -143,7 +142,7 @@ print(platform.system())  # Darwin = macOS, Windows, Linux
 ```
 
 Ask the user to run this command **in their own terminal** (not here — credentials
-must not enter the Claude Code conversation or its history file):
+must not enter the AI conversation or its history):
 
 **macOS** (`Darwin`):
 ```
@@ -175,8 +174,7 @@ Run this in your terminal to store the credential securely:
 Replace YOUR_{CREDENTIAL_TYPE}_HERE with your actual value, then let me know when done.
 ```
 
-Where `{CREDENTIAL_TYPE}` is `TOKEN`, `PASSWORD`, or `SECRET_KEY` depending on the
-auth method chosen. The value will not appear in this conversation.
+Where `{CREDENTIAL_TYPE}` is `TOKEN`, `PASSWORD`, or `SECRET_KEY`. The value will not appear in this conversation.
 
 After the user confirms, verify the entry was written:
 
@@ -201,7 +199,7 @@ Stop if verification fails — do not proceed without a confirmed credential wri
 
 ### Update shell profile
 
-**macOS** (`Darwin`) — export line for `~/.zshenv`:
+**macOS** — export line for `~/.zshenv`:
 ```
 export {env_var}=$(security find-generic-password -s "{keychain_service}" -a "{username}" -w 2>/dev/null)
 ```
@@ -217,24 +215,22 @@ Let me know when done.
 ```
 Wait for confirmation.
 
-**Linux** — export line for `~/.zshenv` (or `~/.bashrc` if that is the user's shell profile):
+**Linux** — export line for `~/.zshenv` (or `~/.bashrc`):
 ```
 export {env_var}=$(python3 -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')" 2>/dev/null)
 ```
-Apply the same read/replace/append logic as macOS. Tell the user to run `source ~/.zshenv` (or the appropriate profile file).
+Apply the same read/replace/append logic. Tell the user to run `source ~/.zshenv`.
 
-**Windows** — set a permanent user environment variable via PowerShell:
+**Windows** — the env var step is **optional**; the `ts` CLI reads from Windows Credential Manager
+directly via `keyring`. Skip unless the user needs the env var for other tools. If needed:
 ```
 Run this in PowerShell to persist the credential as an env var:
 
   $val = python -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')"
   [System.Environment]::SetEnvironmentVariable('{env_var}', $val, 'User')
 
-Let me know when done, then restart your terminal for the change to take effect.
+Restart your terminal, then let me know when done.
 ```
-Note: on Windows the env var step is **optional** — the `ts` CLI reads credentials
-directly from Windows Credential Manager at runtime. Skip this step if the user only
-needs `ts` commands; advise it only if they need `{env_var}` available in other tools.
 
 ### Save profile
 
@@ -255,14 +251,12 @@ Profile entry:
 
 ### Test and confirm
 
-Run the [Test](#test-a-profile) flow for this profile.
+Run the [Test](#t--test) flow for this profile.
 
 On success:
 ```
 ThoughtSpot profile '{profile_name}' configured and verified.
 ```
-
-Return to menu (or exit if this was the first-run flow).
 
 ---
 
@@ -291,7 +285,7 @@ Enter 1–4:
 New URL: [{current_base_url}]
 ```
 
-Update `base_url` in the profile JSON. No Keychain or env var changes needed.
+Update `base_url` in the profile JSON. No credential or shell profile changes needed.
 
 Confirm: `URL updated.`
 
@@ -301,16 +295,13 @@ Confirm: `URL updated.`
 New username: [{current_username}]
 ```
 
-If username changes:
-- The credential store entry is keyed by username — migrate it to the new username:
+If username changes, migrate the credential to the new username:
 
 **macOS:**
 ```python
 import subprocess
-# Read existing credential
 r = subprocess.run(["security", "find-generic-password", "-s", "{keychain_service}", "-a", "{old_username}", "-w"], capture_output=True, text=True)
 credential = r.stdout.strip()
-# Delete old, add new
 subprocess.run(["security", "delete-generic-password", "-s", "{keychain_service}", "-a", "{old_username}"], capture_output=True)
 subprocess.run(["security", "add-generic-password", "-s", "{keychain_service}", "-a", "{new_username}", "-w", credential], capture_output=True)
 print("Keychain entry updated.")
@@ -332,9 +323,7 @@ Update `username` in profile JSON. Return to menu.
 
 ### U3 — Refresh Credential
 
-Show the auth method for the selected profile, then prompt for the new credential value (same prompt as Add step for that method).
-
-Detect platform (`platform.system()`), then ask the user to run **in their own terminal**:
+Detect platform, then ask the user to run **in their own terminal**:
 
 **macOS** (`Darwin`):
 ```
@@ -369,26 +358,18 @@ Run this in your terminal to update the credential:
 Let me know when done.
 ```
 
-After confirmation, verify (re-use the platform-specific verification block from the Add flow).
+After confirmation, verify using the platform-specific check from the Add flow.
 
 No profile JSON changes needed (env var name stays the same).
 
-**macOS / Linux:** Tell the user:
-```
-Credential updated. Run this in your terminal to apply:
-
-  source ~/.zshenv
-```
-
-**Windows:** Tell the user: `Credential updated in Windows Credential Manager. Restart your terminal for the change to take effect (or it will be read directly from the credential store at next use).`
+**macOS / Linux:** `Credential updated. Run source ~/.zshenv in your terminal.`
+**Windows:** `Credential updated in Windows Credential Manager. Restart your terminal for the change to take effect.`
 
 ### U4 — Change Auth Method
 
-Run the full credential setup section of [Add](#add) for this profile (auth method selection → credential prompt → Keychain store → ~/.zshenv update → profile JSON update).
-
-The old Keychain entry and env var are cleaned up as part of the new setup:
-- Delete old Keychain entry.
-- Replace old export line in `~/.zshenv` with new one.
+Run the full credential setup section of [Add](#a--add) for this profile. Clean up the old credential:
+- Delete old credential store entry.
+- Replace old export line in `~/.zshenv` with new one (macOS/Linux).
 - Update profile JSON with new `{credential_field}` and `{env_var}`.
 
 ---
@@ -403,7 +384,7 @@ Which profile would you like to delete? (enter number):
 Confirm:
 ```
 Delete profile '{name}'?
-This will remove it from the profile file, the macOS Keychain, and ~/.zshenv.
+This will remove it from the profile file, the OS credential store, and the shell profile.
 
 Y / N:
 ```
@@ -430,25 +411,20 @@ If confirmed:
 
    If not found, continue silently.
 
-3. **Remove export line from ~/.zshenv** — read the file, filter out any line that exports `{env_var}`, write back.
+3. **Remove export line from shell profile** (macOS/Linux only) — read `~/.zshenv`, filter out any line that exports `{env_var}`, write back. Skip on Windows.
 
 4. Tell the user:
-```
-Profile '{name}' deleted.
-```
-**macOS / Linux:** also tell the user:
-```
-Run this in your terminal to apply the ~/.zshenv change:
-
-  source ~/.zshenv
-```
-**Windows:** no shell profile reload needed.
+   ```
+   Profile '{name}' deleted.
+   ```
+   **macOS / Linux:** also tell the user to run `source ~/.zshenv`.
+   **Windows:** no shell reload needed.
 
 ---
 
 ## T — Test
 
-Show numbered profile list (if more than one) and ask which to test. If only one, confirm and test it directly.
+Show numbered profile list (if more than one) and ask which to test. If only one, confirm and test directly.
 
 **macOS / Linux:**
 ```bash
@@ -459,7 +435,6 @@ source ~/.zshenv && ts auth whoami --profile {profile_name}
 ```bash
 ts auth whoami --profile {profile_name}
 ```
-(No source step needed — credentials are read from Windows Credential Manager directly.)
 
 On success: `Profile '{name}' — connection verified.` Return to menu.
 
@@ -470,56 +445,30 @@ On success: `Profile '{name}' — connection verified.` Return to menu.
 | Symptom | Action |
 |---|---|
 | Credential write fails | macOS: check the login keychain is unlocked. Windows: ensure `keyring` is installed (`pip install keyring`). Linux: ensure a Secret Service backend is running (`pip install keyring secretstorage`). |
-| Env var empty after source | macOS/Linux: remind user to run `source ~/.zshenv` in a real terminal (not with `!`). Windows: the env var is optional — `ts` reads from Credential Manager directly. |
+| Env var empty after source | macOS/Linux: remind user to run `source ~/.zshenv` in a real terminal (not with `!`). Windows: env var is optional — `ts` reads from Credential Manager directly. |
 | 401 / 403 on `ts auth whoami` | Wrong or expired credential. Token: get a fresh one (U → Refresh credential). Run `ts auth logout --profile {name}` to clear the stale cache first. |
 | DNS / connection refused | URL is wrong or instance unreachable. Check with U → Update URL. |
-| `SSLCertVerificationError: certificate verify failed: self signed certificate` | Internal/dev cluster with a self-signed cert. Manually add `"verify_ssl": false` to the profile entry in `~/.claude/thoughtspot-profiles.json`. The CLI will skip certificate verification for that profile. Do not use on production instances. |
+| `SSLCertVerificationError` | Internal/dev cluster with self-signed cert. Manually add `"verify_ssl": false` to the profile entry in `~/.claude/thoughtspot-profiles.json`. Do not use on production instances. |
 
 ---
 
-## Technical Reference — For Use by Other Skills
+## Technical Reference
 
-Other skills should use the `ts` CLI for all ThoughtSpot API calls. The CLI handles
-token caching, Keychain access, and expiry automatically — no manual auth scripts,
-temp files, or `source ~/.zshenv` wrangling needed in skill logic.
-
-### Authentication
-
-Verify a profile is working:
+Other skills use the `ts` CLI for all ThoughtSpot API calls. The CLI handles token
+caching, credential store access, and expiry automatically.
 
 ```bash
-# macOS / Linux
+# macOS / Linux — verify profile
 source ~/.zshenv && ts auth whoami --profile {profile_name}
 
-# Windows (no source step — credentials read from Credential Manager directly)
+# Windows
 ts auth whoami --profile {profile_name}
-```
 
-If this returns 401, the token is expired. Ask the user to refresh it (U → Refresh
-credential in this skill), then clear the stale cache:
-
-```bash
-ts auth logout --profile {profile_name}
-```
-
-### Common API Calls
-
-```bash
-# Search for models/worksheets
+# Common API calls
 ts metadata search --profile {profile_name} --subtype WORKSHEET --name "%keyword%"
-
-# Export TML with FQN and associated table objects
 ts tml export {guid} --profile {profile_name} --fqn --associated
-
-# Import TML
-echo '["{tml_string}"]' | ts tml import --profile {profile_name} --policy ALL_OR_NONE
-
-# List Snowflake connections
 ts connections list --profile {profile_name}
 ```
 
-### Token Cache
-
-The CLI stores tokens per profile in the OS temp directory (`tempfile.gettempdir()/ts_token_{slug}.txt`,
-permissions 600 on POSIX) and refreshes them automatically on expiry. Skills do not
-need to manage this file.
+Token cache: `tempfile.gettempdir()/ts_token_{slug}.txt` (permissions 600 on POSIX).
+Skills do not manage this file — use `ts auth logout --profile {name}` to invalidate.

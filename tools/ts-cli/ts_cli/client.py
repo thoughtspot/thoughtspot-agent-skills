@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -72,17 +72,19 @@ def load_profiles() -> Dict[str, Any]:
 class ThoughtSpotClient:
     """Authenticated HTTP client for the ThoughtSpot REST API.
 
-    Auth flow (matches ts-profile-setup/SKILL.md):
-      1. Check for a valid cached token in /tmp/ts_token_{slug}.txt
+    Auth flow (matches ts-profile-thoughtspot/SKILL.md):
+      1. Check for a valid cached token in the OS temp directory.
       2. If none, read the credential — first from the env var named in the
-         profile, then directly from macOS Keychain as fallback.
+         profile, then directly from the OS credential store via keyring as
+         fallback (macOS Keychain, Windows Credential Manager, Linux Secret
+         Service).
       3. If token_env: use the credential as the bearer token directly.
          If password_env / secret_key_env: exchange for a bearer token via
          POST /api/rest/2.0/auth/token/full and cache the result.
 
-    Credentials are managed exclusively through /ts-profile-setup.
+    Credentials are managed exclusively through /ts-profile-thoughtspot.
     Do not set credential env vars manually — use that skill to add, update,
-    or refresh credentials, which stores them in macOS Keychain.
+    or refresh credentials, which stores them in the OS credential store.
     """
 
     def __init__(self, profile_name: str):
@@ -106,10 +108,10 @@ class ThoughtSpotClient:
     # ------------------------------------------------------------------
 
     def _token_path(self) -> Path:
-        return Path(f"/tmp/ts_token_{self._slug}.txt")
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._slug}.txt"
 
     def _expiry_path(self) -> Path:
-        return Path(f"/tmp/ts_token_{self._slug}_expiry.txt")
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._slug}_expiry.txt"
 
     def _read_cached_token(self) -> Optional[str]:
         token_path = self._token_path()
@@ -155,26 +157,31 @@ class ThoughtSpotClient:
     # ------------------------------------------------------------------
 
     def _get_credential(self, env_var: str) -> str:
-        """Read a credential — env var first, Keychain fallback."""
+        """Read a credential — env var first, OS credential store fallback.
+
+        The OS credential store fallback uses the `keyring` library, which
+        delegates to macOS Keychain, Windows Credential Manager, or Linux
+        Secret Service depending on the platform.
+        """
         val = os.environ.get(env_var, "")
         if val:
             return val
 
-        # Keychain fallback — service name matches ts-profile-setup derivation
+        # OS credential store fallback — service name matches ts-profile-thoughtspot derivation
         service = f"thoughtspot-{self._slug}"
         username = self._profile.get("username", "")
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", service, "-a", username, "-w"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
+        try:
+            import keyring  # deferred import — graceful if not installed
+            stored = keyring.get_password(service, username)
+            if stored:
+                return stored
+        except Exception:
+            pass
 
         raise SystemExit(
             f"No credential found for profile '{self._profile_name}'.\n"
-            "To fix: run /ts-profile-setup → U → Refresh credential,\n"
-            "then run 'source ~/.zshenv' in your terminal."
+            "To fix: run /ts-profile-thoughtspot → U → Refresh credential,\n"
+            "then reload your shell (macOS/Linux: source ~/.zshenv | Windows: restart terminal)."
         )
 
     def _authenticate(self) -> Tuple[str, Optional[int]]:

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-check_references.py — verify all file paths referenced in SKILL.md files exist in the repo.
+check_references.py — verify all file paths referenced in SKILL.md and .mdc files exist.
 
-Scans every SKILL.md in agents/claude/ and agents/coco/ for markdown links [text](path)
-and maps runtime-specific path prefixes back to repo paths before checking existence.
+Scans every SKILL.md in agents/claude/ and agents/coco/, and every .mdc in
+agents/cursor/rules/, for markdown links [text](path) and maps runtime-specific
+path prefixes back to repo paths before checking existence.
 
 Path mappings:
   Claude skills  (~/.claude/...):
@@ -13,6 +14,11 @@ Path mappings:
 
   CoCo skills (relative ../../shared/...):
     ../../shared/             → agents/shared/   (from skill dir two levels deep)
+
+  Cursor rules  (~/.cursor/...):
+    ~/.cursor/shared/         → agents/shared/
+    ~/.cursor/shared/mappings/ → agents/shared/mappings/
+    ~/.cursor/rules/          → agents/cursor/rules/
 
 Usage:
     python tools/validate/check_references.py
@@ -38,6 +44,21 @@ COCO_PREFIX_MAP = {
     "../../shared/": "agents/shared/",
 }
 
+CURSOR_PREFIX_MAP = {
+    "~/.cursor/shared/mappings/": "agents/shared/mappings/",
+    "~/.cursor/shared/": "agents/shared/",
+    "~/.cursor/rules/": "agents/cursor/rules/",
+}
+
+
+def _prefix_map_for(skill_file: Path) -> dict:
+    path_str = str(skill_file)
+    if "agents/coco" in path_str:
+        return COCO_PREFIX_MAP
+    if "agents/cursor" in path_str:
+        return CURSOR_PREFIX_MAP
+    return CLAUDE_PREFIX_MAP
+
 
 def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | None:
     """Resolve a markdown link target to a repo-absolute path. Returns None if unresolvable."""
@@ -50,12 +71,11 @@ def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | 
     if not path_part:
         return None
 
-    runtime = "coco" if "agents/coco" in str(skill_file) else "claude"
-    prefix_map = COCO_PREFIX_MAP if runtime == "coco" else CLAUDE_PREFIX_MAP
+    prefix_map = _prefix_map_for(skill_file)
 
-    # Apply prefix mappings
+    # Apply prefix mappings (longest-prefix-first to avoid partial matches)
     resolved = path_part
-    for prefix, replacement in prefix_map.items():
+    for prefix, replacement in sorted(prefix_map.items(), key=lambda x: -len(x[0])):
         if resolved.startswith(prefix):
             resolved = replacement + resolved[len(prefix):]
             return repo_root / resolved
@@ -84,16 +104,19 @@ def check_skill_file(skill_file: Path, repo_root: Path) -> list[tuple[int, str, 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check SKILL.md file references.")
+    parser = argparse.ArgumentParser(description="Check SKILL.md and .mdc file references.")
     parser.add_argument("--root", default=".", help="Repo root directory (default: current dir)")
     args = parser.parse_args()
 
     repo_root = Path(args.root).resolve()
-    skill_files = list(repo_root.glob("agents/claude/*/SKILL.md")) + \
-                  list(repo_root.glob("agents/coco/*/SKILL.md"))
+    skill_files = (
+        list(repo_root.glob("agents/claude/*/SKILL.md")) +
+        list(repo_root.glob("agents/coco/*/SKILL.md")) +
+        list(repo_root.glob("agents/cursor/rules/*.mdc"))
+    )
 
     if not skill_files:
-        print("No SKILL.md files found.")
+        print("No SKILL.md or .mdc files found.")
         return 1
 
     total_broken = 0

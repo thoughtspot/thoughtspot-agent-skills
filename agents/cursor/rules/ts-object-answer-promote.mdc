@@ -1,0 +1,130 @@
+---
+description: Promote formulas and parameters from a saved ThoughtSpot Answer into a Model — makes them available to all users who search against it. Invoked when the user asks to promote formulas, move formulas from an Answer to a Model, or make Answer formulas available to the team.
+alwaysApply: false
+---
+
+# ThoughtSpot: Promote Answer Objects to Model
+
+Move one or more formulas and parameters from a saved ThoughtSpot Answer into a Model.
+Formulas defined in an Answer are private to that Answer. Once promoted, they appear in
+the search bar for everyone who has access to the Model.
+
+Ask one question at a time. Wait for each answer before proceeding.
+
+---
+
+## Prerequisites
+
+- ThoughtSpot profile configured — run "set up my ThoughtSpot profile" if needed.
+- `ts` CLI installed: `pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli`
+
+---
+
+## Step 1 — Identify the Answer
+
+Ask for the Answer to promote from. Accept a GUID or a search term.
+
+If searching:
+```bash
+ts metadata search --profile {ts_profile} --subtype ANSWER --name "%{keyword}%"
+```
+
+Show results numbered. Ask the user to select one. Store `{answer_guid}` and `{answer_name}`.
+
+---
+
+## Step 2 — Export Answer TML
+
+```bash
+ts tml export {answer_guid} --profile {ts_profile} --fqn
+```
+
+Parse the TML. Extract:
+- All formula definitions from `formulas[]` — capture `id`, `name`, `expr`, and any dependencies
+- All parameter definitions — capture name, default value, type, allowed values
+- The Answer's `model` or `table` path references (for mapping column references)
+
+---
+
+## Step 3 — Identify the Target Model
+
+Ask which Model to promote into. Accept a GUID or search term.
+
+If searching:
+```bash
+ts metadata search --profile {ts_profile} --subtype WORKSHEET --name "%{keyword}%"
+```
+
+Export the Model TML:
+```bash
+ts tml export {model_guid} --profile {ts_profile} --fqn
+```
+
+---
+
+## Step 4 — Select Formulas and Parameters to Promote
+
+Show the list of formulas and parameters found in the Answer. Ask the user which ones to promote (all or a subset).
+
+For each selected formula, check for inter-dependencies (does formula A reference formula B?). If yes, both must be promoted together — show a warning and ask for confirmation.
+
+---
+
+## Step 5 — Map Column References
+
+Answer formulas reference columns using the Answer's column context. The Model may use
+different column paths or `id:` values. For each formula expression:
+
+1. Identify column name references in the expression.
+2. Match them to columns in the Model TML (by name or `db_column_name`).
+3. Rewrite the expression to use the Model's column references if they differ.
+
+Show the user any mappings that required rewriting and ask for confirmation.
+
+---
+
+## Step 6 — Check Permissions
+
+Before modifying the Model, verify the user has edit access:
+
+```bash
+ts metadata search --profile {ts_profile} --subtype WORKSHEET --name "{model_name}" --show-permissions
+```
+
+If edit access is not confirmed, stop and tell the user they need `DATAMANAGEMENT` or
+edit sharing on this Model to proceed.
+
+---
+
+## Step 7 — Update Model TML
+
+Add the selected formulas and parameters to the Model TML:
+
+- Formulas: append to the `formulas[]` array with a unique `id:` (derive from name if not set)
+- Add a corresponding entry to `columns[]` for each formula with:
+  - `name:` matching the formula name
+  - `formula_id:` matching the formula `id:`
+  - `type: MEASURE` and `aggregation: SUM` for numeric formulas; `type: ATTRIBUTE` otherwise
+- Parameters: append to `parameters[]` if the Model TML supports them
+
+Run the self-validation checklist:
+- Every `formula_id:` in `columns[]` must match an `id:` in `formulas[]`
+- No `aggregation:` inside `formulas[]` entries (only in `columns[]`)
+- No duplicate formula `id:` values
+
+---
+
+## Step 8 — Import Updated Model
+
+```bash
+ts tml import --profile {ts_profile} --policy ALL_OR_NONE
+```
+
+On success:
+```
+Promoted {n} formula(s) and {n} parameter(s) to model '{model_name}'.
+They are now available in ThoughtSpot search for all users with access to this model.
+```
+
+On error: show the import error, diagnose the cause (most common: `formula_id` mismatch
+or duplicate name), fix the TML, and re-import.

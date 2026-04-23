@@ -9,8 +9,9 @@ CoCo** (via Snowflake internal stage). Both runtimes consume the same shared ref
 ```
 agents/claude/    — Claude Code skills; symlinked into ~/.claude/skills/
 agents/coco/      — Snowflake Cortex skills; deployed via snow stage copy to @SKILLS.PUBLIC.SHARED
-agents/shared/    — Reference files consumed by BOTH runtimes (schemas, mappings, worked examples)
-tools/ts-cli/     — Python CLI used by Claude skills at runtime for ThoughtSpot API calls
+agents/cursor/    — Cursor AI rules; installed via agents/cursor/scripts/install.sh into .cursor/rules/
+agents/shared/    — Reference files consumed by ALL runtimes (schemas, mappings, worked examples)
+tools/ts-cli/     — Python CLI used by Claude and Cursor skills at runtime for ThoughtSpot API calls
 scripts/          — Deployment helpers (deploy.sh, stage-sync.sh)
 ```
 
@@ -24,13 +25,15 @@ or patch files there directly.
 
 | Changed area | Also update |
 |---|---|
-| Any SKILL.md (new command or step) | README.md skills table; agents/claude/SETUP.md if install/symlink step changed |
+| Any SKILL.md (new command or step) | README.md skills table; agents/claude/SETUP.md if install/symlink step changed; corresponding agents/cursor/rules/*.mdc |
 | agents/shared/* | snow stage copy for that file (see agents/coco/SETUP.md); worked example if output changes |
-| tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md that uses that command |
-| agents/claude/ skill logic | Corresponding agents/coco/ skill if logic applies to both runtimes |
+| tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md and .mdc that uses that command |
+| agents/claude/ skill logic | Corresponding agents/coco/ skill AND agents/cursor/rules/*.mdc if logic applies |
 | agents/coco/ skill logic | Corresponding agents/claude/ skill if logic applies to both runtimes |
-| Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list) |
-| Add a new shared schema/mapping | agents/coco/SETUP.md stage copy list; both SKILL.md files that reference it |
+| agents/cursor/rules/*.mdc | Corresponding agents/claude/ SKILL.md (keep in sync) |
+| Credential storage steps | agents/claude/ts-profile-{thoughtspot,snowflake}/SKILL.md; agents/cursor/rules/ts-profile-{thoughtspot,snowflake}.mdc; .claude/rules/security.md |
+| Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file) |
+| Add a new shared schema/mapping | agents/coco/SETUP.md stage copy list; all SKILL.md and .mdc files that reference it |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.
 
@@ -72,11 +75,14 @@ These branches are pushed to remote for backup but never merged to main until ve
 
 Credentials are never stored in files, env files, or git. Pattern used throughout:
 
-- Credential → macOS Keychain (`security add-generic-password -s "thoughtspot-{slug}" -a "{username}"`)
-- Env var → `~/.zshenv` export line: `export THOUGHTSPOT_TOKEN_{SLUG}=$(security find-generic-password ...)`
+- Credential → OS credential store via `keyring` (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+  - macOS: `security add-generic-password -s "thoughtspot-{slug}" -a "{username}"` (also readable via `keyring`)
+  - Windows/Linux: `python -c "import keyring; keyring.set_password('thoughtspot-{slug}', username, value)"`
+- Env var → `~/.zshenv` export line (macOS/Linux) or permanent user env var (Windows — optional)
 - Profile JSON → `~/.claude/thoughtspot-profiles.json` (not in repo) stores `{token_env: "THOUGHTSPOT_TOKEN_{SLUG}"}`
 
 Canonical source for full auth flow: `agents/claude/ts-profile-thoughtspot/SKILL.md` (Technical Reference section).
+Platform policy: `.claude/rules/security.md`.
 
 ## Critical TML invariants
 
