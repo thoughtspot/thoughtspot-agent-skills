@@ -1,6 +1,6 @@
 ---
 name: semantic-layer-compare
-description: Research and generate a cross-platform semantic layer property comparison CSV in long (key-value) format — one row per feature × platform. Covers ThoughtSpot, Snowflake SV, Databricks UC, dbt MetricFlow, Cube.dev, LookML, AtScale SML, Power BI / Fabric, Governance Platforms, and OSI. Output goes to ~/Dev/semantic-layer-research/.
+description: Research and generate a cross-platform semantic layer property comparison CSV in long (key-value) format — one row per feature × platform. Covers ThoughtSpot, Snowflake SV, Databricks UC, dbt MetricFlow, Cube.dev, LookML, AtScale SML, Power BI / Fabric, Governance Platforms, and OSI. Importance and platform support scored 1–5. Output goes to ~/Dev/semantic-layer-research/.
 ---
 
 # Semantic Layer Property Comparison
@@ -46,25 +46,26 @@ to overwrite, add a new platform, or refresh specific platform rows.
 feature_id, category, sub_category, property, description,
 human_importance, human_importance_notes,
 agentic_importance, agentic_importance_notes,
-platform, platform_equivalent, platform_notes
+platform, platform_equivalent, platform_notes, platform_score
 ```
 
 **Column definitions:**
 
 | Column | Format / Values |
 |---|---|
-| `feature_id` | Stable prefix-coded ID: `MDL-001`, `COL-001`, `JON-001`, etc. Never renumber existing IDs. |
+| `feature_id` | Stable prefix-coded ID: `MDL-001`, `COL-001`, `ARC-001`, etc. Never renumber existing IDs. |
 | `category` | Broad grouping — one of the canonical categories listed below |
 | `sub_category` | Finer functional type within category — see sub-category list below |
 | `property` | Canonical concept name; for platform-specific rows, use the platform's own term |
 | `description` | 1–2 sentences; platform-agnostic explanation of what the property does |
-| `human_importance` | `High` / `Medium` / `Low` / `N/A` |
+| `human_importance` | `1`–`5` (or `0` for N/A) — see Importance ratings below |
 | `human_importance_notes` | Brief rationale for the human importance rating |
-| `agentic_importance` | `High` / `Medium` / `Low` / `N/A` |
+| `agentic_importance` | `1`–`5` (or `0` for N/A) — see Importance ratings below |
 | `agentic_importance_notes` | Brief rationale for the agentic importance rating |
 | `platform` | Exactly one of the platform names listed below |
-| `platform_equivalent` | Feature name/form in this platform; `None` if absent; `Partial` if limited |
+| `platform_equivalent` | Feature name/form in this platform; `None` if absent |
 | `platform_notes` | Pros, cons, limitations, gaps, or "No equivalent in {platform}" |
+| `platform_score` | `1`–`5` — how well this platform supports this feature (see scale below) |
 
 Every feature must have a row for every platform — even when `platform_equivalent` is `None`.
 A row with `None` is informative: it tells readers the feature does not exist on that platform.
@@ -126,6 +127,14 @@ A row with `None` is informative: it tells readers the feature does not exist on
 | `documentation` | README, announcements, dataset descriptions |
 | `time-intelligence` | time granularity, offset windows, YTD/MTD, rolling windows |
 | `configuration` | catch-all for properties that do not fit another sub-category |
+| `i18n` | multi-language labels, locale-keyed translations, model localization |
+| `model-inheritance` | extends, refinements, base models, partial models, overrides |
+| `metric-registry` | central metric definitions, cross-model reuse, metrics store |
+| `writeback` | data writeback, action support, planning scenarios, annotation insertion |
+| `federation` | multi-source joins, cross-cloud, cross-database, virtual federation |
+| `cicd` | Git-native development, PR review, linting, environment promotion, CI pipelines |
+| `testing` | automated semantic model tests, data tests, metric regression tests |
+| `streaming` | real-time / near-real-time data, streaming ingestion, sub-minute freshness |
 
 ---
 
@@ -150,16 +159,34 @@ Every feature must have a row for each of these platforms:
 
 ## Importance ratings
 
-Rate `human_importance` and `agentic_importance` independently using `High / Medium / Low / N/A`.
+Rate `human_importance` and `agentic_importance` independently on a **1–5 numeric scale**.
+Use `0` for N/A (feature is not applicable to this dimension at all).
 
-| Rating | Meaning |
+| Score | Meaning |
 |---|---|
-| `High` | Directly affects query correctness, metric definition, or comprehension — absence breaks things |
-| `Medium` | Improves usability or accuracy; absence degrades but does not break |
-| `Low` | Cosmetic, administrative, or rarely determinative |
-| `N/A` | Not applicable to this platform row (e.g., human rating for a purely agent-facing artifact) |
+| `5` | Critical — directly affects query correctness, metric definition, or trust; absence breaks things |
+| `4` | High — strong impact on usability or accuracy; absence meaningfully degrades experience |
+| `3` | Medium — useful, improves quality; absence is noticeable but not breaking |
+| `2` | Low — cosmetic, administrative, or rarely determinative |
+| `1` | Minimal — edge-case relevance; almost never matters in practice |
+| `0` | N/A — not applicable to this dimension (e.g., human rating for a purely agent-facing artifact) |
 
-**Key contrast principle:** Human and Agentic importance diverge significantly for some categories.
+## Platform score
+
+Rate `platform_score` per row to indicate how well a given platform supports the feature:
+
+| Score | Meaning |
+|---|---|
+| `5` | Native, full support — first-class feature, no limitations |
+| `4` | Native with minor gaps — supported natively but with documented limitations |
+| `3` | Partial support / workaround — achievable via workaround or partially supported |
+| `2` | Limited — complex workaround or significant gaps; fragile |
+| `1` | Not supported — no equivalent; cannot be achieved on this platform |
+
+**Shortcut rule for existing rows:** native platform → `5`; has a non-None equivalent → `3`; no equivalent → `1`.
+Use explicit values in the 4 and 2 ranges only when you have specific evidence.
+
+**Key contrast principle:** Human and Agentic importance diverge intentionally for some categories.
 Properties that are invisible to humans (ai_context, verified queries) are often the highest-value
 agentic properties. Properties that are highly visible to humans (folder groupings, display names)
 may be low-value for agents that iterate programmatically.
@@ -188,8 +215,26 @@ Prefix codes for stable feature IDs:
 | `PBI` | Power BI / Fabric–native features |
 | `SAI` | Supplementary AI artifact features |
 | `OSI` | OSI-native features |
+| `ARC` | Cross-platform architecture capabilities (chasm/fan traps, custom calendar, i18n, model inheritance, metric registry, aggregate awareness, RLS, writeback, federation, CI/CD, testing, streaming) |
 
 Never renumber existing IDs. If a row is removed, leave a gap rather than renumbering.
+
+### ARC feature index
+
+| ID | Feature |
+|---|---|
+| `ARC-001` | Chasm trap and fan trap prevention — automatic double-counting protection for multi-fact-table joins |
+| `ARC-002` | Custom calendar support — fiscal year, 4-4-5, 4-5-4, retail, ISO week, non-Gregorian calendars |
+| `ARC-003` | Multi-language / i18n — locale-keyed display labels, descriptions, synonyms in one model |
+| `ARC-004` | Model inheritance and extension — extends, refinements, base models, single-point-of-definition |
+| `ARC-005` | Central metric / column definitions — metrics store, cross-model reuse, single source of truth |
+| `ARC-006` | Aggregate awareness / pre-aggregation routing — automatic routing to summary tables |
+| `ARC-007` | Row-level security at semantic layer — RLS enforced by the semantic layer across all tools |
+| `ARC-008` | Writeback and action support — data writeback, planning scenarios, workflow triggers |
+| `ARC-009` | Multi-source / cross-platform data federation — joins across databases, schemas, cloud providers |
+| `ARC-010` | CI/CD and Git-native development — code-first, PR review, linting, environment promotion |
+| `ARC-011` | Automated testing framework — data tests, metric regression tests, semantic correctness tests |
+| `ARC-012` | Real-time / streaming data support — sub-5-minute freshness, streaming ingestion, event-time |
 
 ---
 
@@ -272,7 +317,7 @@ Research platforms in parallel to reduce elapsed time.
 
 ### 5. Write the CSV
 
-- Write the header row first: `feature_id, category, sub_category, property, description, human_importance, human_importance_notes, agentic_importance, agentic_importance_notes, platform, platform_equivalent, platform_notes`
+- Write the header row first: `feature_id, category, sub_category, property, description, human_importance, human_importance_notes, agentic_importance, agentic_importance_notes, platform, platform_equivalent, platform_notes, platform_score`
 - For each feature, write 10 rows (one per platform) before moving to the next feature
 - Group features by category in this order: Model → Column → Structural → Calculation → Filtering → Platform Extension → Governance → AI / Transport
 - Within Platform Extension, group by originating platform (Snowflake SV features together, etc.)
