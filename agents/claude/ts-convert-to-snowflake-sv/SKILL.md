@@ -1084,27 +1084,74 @@ If the user selects E, ask for `target_database` and `target_schema` explicitly.
 Use the connection method and patterns from
 [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md).
 
-**Execute the CREATE:**
+**Execute the CREATE — branch on `profile.method`:**
+
+**`method: python`** — re-establish the connector (the Step 5 connection is closed by
+this point) and execute the DDL:
 
 ```python
-# Python connector
-cur.execute(f"USE ROLE {role}")
-cur.execute(f"USE DATABASE {target_database}")
-cur.execute(f"USE SCHEMA {target_schema}")
-cur.execute(sv_ddl)   # the full CREATE OR REPLACE SEMANTIC VIEW ... statement
-result = cur.fetchone()
-print(result[0] if result else "OK")
+import snowflake.connector
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key, Encoding, PrivateFormat, NoEncryption)
+from cryptography.hazmat.backends import default_backend
+import os
+
+# Rebuild connection from profile (same auth as Step 5)
+pk_path = os.path.expanduser(profile["private_key_path"])
+with open(pk_path, "rb") as f:
+    pk_data = f.read()
+passphrase = None
+if profile.get("private_key_passphrase_env"):
+    passphrase = os.environ.get(profile["private_key_passphrase_env"], "").encode() or None
+private_key = load_pem_private_key(pk_data, password=passphrase, backend=default_backend())
+pk_der = private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+
+conn = snowflake.connector.connect(
+    account=profile["account"],
+    user=profile["username"],
+    private_key=pk_der,
+    warehouse=warehouse,
+    role=role,
+    database=target_database,
+    schema=target_schema
+)
+cur = conn.cursor()
+try:
+    cur.execute(sv_ddl)  # CREATE OR REPLACE SEMANTIC VIEW ... (USE statements not needed — set in connect())
+    result = cur.fetchone()
+    print(result[0] if result else "Created successfully")
+except Exception as e:
+    print(f"ERROR: {e}")
+    raise
+finally:
+    cur.close()
+    conn.close()
 ```
 
+**`method: cli`** — write the DDL to a temp file and execute with `snow sql -f`:
+
 ```python
-# Snowflake CLI — write DDL to temp file, execute in one call
 import subprocess, os
+
+sql_script = (
+    f"USE ROLE {role};\n"
+    f"USE DATABASE {target_database};\n"
+    f"USE SCHEMA {target_schema};\n"
+    f"{sv_ddl};"
+)
 with open("/tmp/sv_create.sql", "w") as f:
-    f.write(f"USE ROLE {role};\nUSE DATABASE {target_database};\nUSE SCHEMA {target_schema};\n")
-    f.write(sv_ddl)
-subprocess.run([snow_cmd, "sql", "-c", cli_connection, "-f", "/tmp/sv_create.sql"],
-               capture_output=True, text=True)
+    f.write(sql_script)
+
+result = subprocess.run(
+    [snow_cmd, "sql", "-c", cli_connection, "-f", "/tmp/sv_create.sql"],
+    capture_output=True, text=True
+)
 os.remove("/tmp/sv_create.sql")
+
+if result.returncode != 0:
+    print(f"ERROR: {result.stderr or result.stdout}")
+    raise RuntimeError(result.stderr)
+print(result.stdout or "Created successfully")
 ```
 
 **Notes:**
