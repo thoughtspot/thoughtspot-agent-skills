@@ -16,9 +16,7 @@ rating each by its importance for human BI interaction and agentic AI interactio
 |---|---|
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | ThoughtSpot Model TML — full field reference, all property types |
 | [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema |
-| [~/.claude/shared/schemas/databricks-schema.md](~/.claude/shared/schemas/databricks-schema.md) | Databricks Unity Catalog Metric View YAML schema (v1.1) |
 | [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md) | ThoughtSpot ↔ Snowflake property coverage matrix |
-| [~/.claude/mappings/ts-databricks/ts-databricks-properties.md](~/.claude/mappings/ts-databricks/ts-databricks-properties.md) | ThoughtSpot ↔ Databricks property coverage matrix |
 | [~/.claude/skills/semantic-layer-compare/references/baseline.md](references/baseline.md) | Column definitions, category taxonomy, and rationale for importance ratings |
 
 For platforms not covered by local reference files (dbt MetricFlow, Cube.dev, LookML,
@@ -116,14 +114,12 @@ If extending or refreshing, read the existing CSV first to avoid duplicating row
 
 ### 2. Read local reference files
 
-Read these files before writing any ThoughtSpot, Snowflake, or Databricks rows.
+Read these files before writing any ThoughtSpot or Snowflake rows.
 Do not write rows from memory — pull property names and descriptions from the source:
 
 - `~/.claude/shared/schemas/thoughtspot-model-tml.md` — all TML model properties
 - `~/.claude/shared/schemas/snowflake-schema.md` — all Snowflake SV properties
-- `~/.claude/shared/schemas/databricks-schema.md` — all Databricks UC properties
 - `~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md` — Snowflake coverage matrix
-- `~/.claude/mappings/ts-databricks/ts-databricks-properties.md` — Databricks coverage matrix
 
 ### 3. Research external platforms
 
