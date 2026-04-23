@@ -144,11 +144,15 @@ def check_coco_setup_stage_copy(repo_root: Path) -> list[str]:
             )
 
     # Check agents/shared/ files (exclude CLAUDE.md — internal docs, not staged to Snowflake)
+    # Only check tracked files — gitignored content (e.g. Databricks files) is not deployed.
+    tracked = _get_tracked_paths(repo_root)
     shared_dir = repo_root / "agents" / "shared"
     for shared_file in sorted(shared_dir.rglob("*.md")):
         if shared_file.name == "CLAUDE.md":
             continue
         rel_path = str(shared_file.relative_to(repo_root))
+        if rel_path not in tracked:
+            continue
         if rel_path not in setup_text:
             failures.append(
                 f"agents/coco/SETUP.md: no 'snow stage copy' found for '{rel_path}'"

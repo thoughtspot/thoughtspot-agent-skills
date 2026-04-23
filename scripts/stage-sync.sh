@@ -12,7 +12,9 @@
 
 set -euo pipefail
 
-STAGE="@SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex"
+# Stage location — override with SNOW_STAGE env var if your account uses a different stage.
+# Example: export SNOW_STAGE="@MY_DB.MY_SCHEMA.MY_STAGE/skills/.snowflake/cortex"
+STAGE="${SNOW_STAGE:-@SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex}"
 SHA_FILE=".snowflake-deploy-sha"
 FORCE_ALL=false
 

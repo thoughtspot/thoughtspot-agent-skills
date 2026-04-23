@@ -30,9 +30,11 @@ Always run after `git commit + git push`. Forgetting to stage means CoCo runs st
 
 ## Stage path mapping
 
+The default stage is `@SKILLS.PUBLIC.SHARED`; override with `SNOW_STAGE` env var (see SETUP.md).
+
 ```
-agents/coco/                 → @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/
-agents/shared/               → @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/
+agents/coco/                 → $SNOW_STAGE/skills/
+agents/shared/               → $SNOW_STAGE/shared/
 ```
 
 In the Workspace, skills land at `.snowflake/cortex/skills/<skill-name>/SKILL.md`.

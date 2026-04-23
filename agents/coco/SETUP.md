@@ -10,7 +10,19 @@ deploy them to your Workspace. This is the fastest approach for ongoing updates.
 ### Prerequisites
 
 - Snowflake CLI (`snow`) installed and configured with your account
-- Stage `SKILLS.PUBLIC.SHARED` exists in your account
+- A Snowflake internal stage for the skill files (default: `SKILLS.PUBLIC.SHARED`)
+
+**Using a different stage?**
+The scripts default to `@SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex`. To use a
+different stage, set the `SNOW_STAGE` environment variable before running:
+
+```bash
+export SNOW_STAGE="@MY_DB.MY_SCHEMA.MY_STAGE/skills/.snowflake/cortex"
+./scripts/stage-sync.sh
+```
+
+The manual `snow stage copy` commands below use `@SKILLS.PUBLIC.SHARED` — substitute
+your stage path if you're running them directly.
 
 ### Step 1: Push files to the stage
 
@@ -40,12 +52,6 @@ snow stage copy agents/shared/schemas/thoughtspot-liveboard-tml.md @SKILLS.PUBLI
 snow stage copy agents/shared/schemas/thoughtspot-sets-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
-
-# Unity Catalog reference files (used by ts-convert-to-databricks-mv; CoCo/Genie port pending)
-snow stage copy agents/shared/schemas/databricks-schema.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
-snow stage copy agents/shared/mappings/ts-databricks/ts-to-databricks-mv-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-databricks/ --overwrite
-snow stage copy agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-databricks/ --overwrite
-snow stage copy agents/shared/mappings/ts-databricks/ts-databricks-properties.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-databricks/ --overwrite
 ```
 
 ### Step 2: Ask CoCo to deploy to Workspace
