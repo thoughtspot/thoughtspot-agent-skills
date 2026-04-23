@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(python3:*)",
+      "Bash(ts:*)",
+      "WebFetch(domain:docs.anthropic.com)"
+    ]
+  }
+}
+
+// ── How to use this file ──────────────────────────────────────────────────────
+//
+// 1. Copy this file: cp .claude/settings.local.json.example .claude/settings.local.json
+// 2. Add your personal bash allowlists and WebFetch domains
+// 3. NEVER commit settings.local.json — it is gitignored
+//
+// ── Model ─────────────────────────────────────────────────────────────────────
+//
+// settings.json pins claude-opus-4-6 — appropriate for this repo (formula
+// translation, domain detection, multi-step TML generation all need deep
+// reasoning). Override only to downgrade for simple authoring sessions:
+//
+//   "model": "claude-sonnet-4-6"
+//
+// ── Common additions ──────────────────────────────────────────────────────────
+//
+// ThoughtSpot instance domains (add yours to allow WebFetch calls):
+//   "WebFetch(domain:yourorg.thoughtspot.cloud)"
+//
+// Snowflake CLI and connector tools:
+//   "Bash(snow:*)"
+//
+// ── Hook events ───────────────────────────────────────────────────────────────
+//
+// Add personal hooks here (not in shared settings.json):
+//
+//   "hooks": {
+//     "Notification": [{ "hooks": [{ "type": "command", "command": "..." }] }]
+//   }
