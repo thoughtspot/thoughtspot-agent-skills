@@ -51,10 +51,10 @@ Trigger by asking: "Promote formulas from this Answer to the Model".
 
 ```bash
 # macOS / Linux
-git clone https://github.com/djwaldo/thoughtspot-agent-skills.git ~/Dev/thoughtspot-agent-skills
+git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/Dev/thoughtspot-agent-skills
 
 # Windows (PowerShell)
-git clone https://github.com/djwaldo/thoughtspot-agent-skills.git "$env:USERPROFILE\Dev\thoughtspot-agent-skills"
+git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git "$env:USERPROFILE\Dev\thoughtspot-agent-skills"
 ```
 
 ### 2. Install Python dependencies

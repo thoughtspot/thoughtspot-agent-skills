@@ -80,7 +80,7 @@ For users who want to run the skill without managing a local repo.
 
 ```bash
 # Clone once to get the files, then copy them into place
-git clone https://github.com/djwaldo/thoughtspot-agent-skills.git /tmp/thoughtspot-agent-skills
+git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git /tmp/thoughtspot-agent-skills
 
 mkdir -p ~/.claude/skills
 
@@ -125,7 +125,7 @@ For users who want to modify the skill, track changes in git, or contribute back
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/djwaldo/thoughtspot-agent-skills.git ~/Dev/thoughtspot-agent-skills
+git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/Dev/thoughtspot-agent-skills
 ```
 
 ### 2. Create symlinks into Claude Code
