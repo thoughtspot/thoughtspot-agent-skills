@@ -1,12 +1,14 @@
 ---
 name: semantic-layer-compare
-description: Research and generate a cross-platform semantic layer property comparison CSV, covering ThoughtSpot, Snowflake SV, Databricks UC, dbt MetricFlow, Cube.dev, LookML, AtScale SML, Power BI, and supplementary AI artifacts. Output goes to ~/Dev/semantic-layer-research/.
+description: Research and generate a cross-platform semantic layer property comparison CSV in long (key-value) format — one row per feature × platform. Covers ThoughtSpot, Snowflake SV, Databricks UC, dbt MetricFlow, Cube.dev, LookML, AtScale SML, Power BI / Fabric, Governance Platforms, and OSI. Output goes to ~/Dev/semantic-layer-research/.
 ---
 
 # Semantic Layer Property Comparison
 
 Research and produce a CSV that maps every semantic layer property across platforms,
 rating each by its importance for human BI interaction and agentic AI interaction.
+The output uses a long (key-value) format — one row per feature × platform — so new
+platforms can be added as additional rows without restructuring the file.
 
 ---
 
@@ -17,11 +19,14 @@ rating each by its importance for human BI interaction and agentic AI interactio
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | ThoughtSpot Model TML — full field reference, all property types |
 | [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema |
 | [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md) | ThoughtSpot ↔ Snowflake property coverage matrix |
-| [~/.claude/skills/semantic-layer-compare/references/baseline.md](references/baseline.md) | Column definitions, category taxonomy, and rationale for importance ratings |
+| [~/.claude/skills/semantic-layer-compare/references/baseline.md](references/baseline.md) | Column definitions, category/sub-category taxonomy, importance rationale, and schema history |
+
+If `~/Dev/semantic-layer-research/transform.py` exists, it can be used to perform a wide→long
+format transformation in bulk when adding a new platform to an existing CSV.
 
 For platforms not covered by local reference files (dbt MetricFlow, Cube.dev, LookML,
-AtScale SML, Power BI), use web research to read current official documentation before
-writing any rows. Do not rely on training knowledge alone for versioned YAML schemas.
+AtScale SML, Power BI, OSI), fetch current official documentation before writing any rows.
+Do not rely on training knowledge alone for versioned YAML schemas or emerging standards.
 
 ---
 
@@ -30,74 +35,187 @@ writing any rows. Do not rely on training knowledge alone for versioned YAML sch
 Default output directory: `~/Dev/semantic-layer-research/`
 Default filename: `semantic-layer-properties.csv`
 
-If the output directory does not exist, create it before writing.
-If the file already exists and the user has not asked for a full regeneration, ask
-whether to overwrite or extend with new rows only.
+If the file already exists and the user has not asked for a full regeneration, ask whether
+to overwrite, add a new platform, or refresh specific platform rows.
 
 ---
 
-## CSV column structure
+## CSV column structure (long format)
 
 ```
-Category, Property, Description, Agentic / Semantic Layer Importance,
-Human Importance, Agentic Importance,
-Snowflake SV Equivalent, Snowflake Notes / Pros & Cons,
-Databricks UC Equivalent, Databricks Notes / Pros & Cons,
-dbt MetricFlow Equivalent, Cube.dev Equivalent,
-Other Platform Notes
+feature_id, category, sub_category, property, description,
+human_importance, human_importance_notes,
+agentic_importance, agentic_importance_notes,
+platform, platform_equivalent, platform_notes
 ```
 
 **Column definitions:**
 
-| Column | Format |
+| Column | Format / Values |
 |---|---|
-| Category | One of the canonical categories listed below |
-| Property | Short name matching the platform's own terminology |
-| Description | 1–2 sentences; what the property does |
-| Agentic / Semantic Layer Importance | Free-form; why it matters for semantic layers generally |
-| Human Importance | `High/Medium/Low — brief rationale` |
-| Agentic Importance | `High/Medium/Low — brief rationale` |
-| Snowflake SV Equivalent | Property name, or `None`, or `Partial` |
-| Snowflake Notes / Pros & Cons | Limitations, gaps, or advantages vs. ThoughtSpot |
-| Databricks UC Equivalent | Property name, or `None`, or `Partial` |
-| Databricks Notes / Pros & Cons | Limitations, gaps, or advantages vs. ThoughtSpot |
-| dbt MetricFlow Equivalent | Property name, or `None`, or `Partial` |
-| Cube.dev Equivalent | Property name, or `None`, or `Partial` |
-| Other Platform Notes | LookML, AtScale SML, Power BI, Governance — one clause per platform |
+| `feature_id` | Stable prefix-coded ID: `MDL-001`, `COL-001`, `JON-001`, etc. Never renumber existing IDs. |
+| `category` | Broad grouping — one of the canonical categories listed below |
+| `sub_category` | Finer functional type within category — see sub-category list below |
+| `property` | Canonical concept name; for platform-specific rows, use the platform's own term |
+| `description` | 1–2 sentences; platform-agnostic explanation of what the property does |
+| `human_importance` | `High` / `Medium` / `Low` / `N/A` |
+| `human_importance_notes` | Brief rationale for the human importance rating |
+| `agentic_importance` | `High` / `Medium` / `Low` / `N/A` |
+| `agentic_importance_notes` | Brief rationale for the agentic importance rating |
+| `platform` | Exactly one of the platform names listed below |
+| `platform_equivalent` | Feature name/form in this platform; `None` if absent; `Partial` if limited |
+| `platform_notes` | Pros, cons, limitations, gaps, or "No equivalent in {platform}" |
 
-**Importance rating guidance:**
-
-- **High** — directly affects query correctness, metric definition, or AI comprehension
-- **Medium** — improves usability or discoverability; absence degrades but doesn't break
-- **Low** — cosmetic, administrative, or edge-case; rarely determinative
-
-Human Importance and Agentic Importance are rated independently. A property can be
-High for one and Low for the other (e.g., `column_groups[]` is High for humans navigating
-a data panel, Low for agents that iterate all columns programmatically).
+Every feature must have a row for every platform — even when `platform_equivalent` is `None`.
+A row with `None` is informative: it tells readers the feature does not exist on that platform.
 
 ---
 
 ## Canonical categories
 
-Use exactly these category names. Do not invent new ones without a clear gap:
-
 | Category | Covers |
 |---|---|
-| Model-Level | Top-level model properties (name, description, spotter_config, ai_context, etc.) |
-| Column-Level | Column definition properties (name, type, aggregation, synonyms, ai_context, etc.) |
-| Join | Join definition and cardinality properties |
-| Formula | Calculated columns and formula metadata |
-| Parameter | User-parameterized filter and formula inputs |
-| Table | Table-level references and configuration |
-| Snowflake-Only | Properties that exist in Snowflake SV with no direct TS equivalent |
-| Databricks-Only | Properties that exist in Databricks UC with no direct TS equivalent |
-| dbt MetricFlow-Only | Properties specific to dbt MetricFlow |
-| Cube.dev-Only | Properties specific to Cube.dev |
-| LookML-Only | Properties specific to Looker / LookML |
-| AtScale SML-Only | Properties specific to AtScale SML |
-| Governance-Only | Catalog-layer metadata (glossary, certification, PII, popularity) |
-| Power BI-Only | Properties specific to Power BI / Fabric semantic models |
-| Supplementary AI Artifact | Constructs that sit alongside the semantic model (verified queries, AI context files, MCP, etc.) |
+| `Model` | Top-level model configuration, identity, access-control, optimization |
+| `Column` | Column/field/dimension/measure definitions and properties |
+| `Structural` | Joins, relationships, entity declarations, cardinality |
+| `Calculation` | Formulas, derived metrics, expressions, calculation groups |
+| `Filtering` | Filters, parameters, RLS, mandatory conditions |
+| `Governance` | Catalog-layer metadata: certification, glossary, quality, popularity |
+| `Platform Extension` | Properties with no ThoughtSpot equivalent (specific to one platform) |
+| `AI / Transport` | AI context directives, verified queries, sample data, MCP, OSI interchange standard |
+
+---
+
+## Canonical sub-categories
+
+| Sub-category | Typical properties |
+|---|---|
+| `identity` | name, description, guid, model identity |
+| `type` | column_type, ATTRIBUTE/MEASURE classification, data_type |
+| `aggregation` | aggregation function, semi-additive, non-additive, window |
+| `join` | join conditions, cardinality, role-play, relationship declarations |
+| `filter` | pre-filters, RLS, mandatory filters, access filters |
+| `formula` | formula expressions, derived metrics, calculation methods |
+| `parameter` | runtime parameters, allowed values, range constraints |
+| `synonym` | synonyms, aliases, linguistic schema, Q&A vocabulary |
+| `ai-context` | ai_context directives, AI instructions, model-level NL directives |
+| `verified-query` | verified queries, golden queries, sample questions, verified answers |
+| `sample-data` | sample_values, value-level semantic search |
+| `transport-standard` | MCP protocol, OSI interchange format, semantic manifest |
+| `display` | format strings, display names, currency, custom sort, i18n |
+| `display-folder` | column groups, folder structure, group labels |
+| `visibility` | hidden flags, is_hidden, search indexing, public/private |
+| `semantic-type` | geo_config, dataCategory, URL, ImageURL semantic hints |
+| `table-reference` | model_tables, base_table, dataset objects, source references |
+| `connection` | database connections, profiles |
+| `hierarchy` | level attributes, hierarchy definitions, default members |
+| `calculation-group` | calculation groups, time intelligence templates |
+| `perspective` | audience scoping, perspectives, view facades |
+| `drillthrough` | drillthrough paths, drill fields |
+| `pre-aggregation` | aggregate tables, pre-aggregations, query routing |
+| `materialization` | PDTs, derived tables, materialization schedules |
+| `access-control` | bypass_rls, access_policy, row_security |
+| `entity` | entity declarations, foreign keys, entity graphs |
+| `export` | saved queries, semantic manifest, export configs |
+| `extensibility` | meta fields, custom_extensions, extends, composite models |
+| `model-config` | sets, refinements, datagroups, LookML tests |
+| `certification` | certificate status, endorsement |
+| `glossary` | glossary terms, term definitions |
+| `data-quality` | PII tags, DQ scores |
+| `usage` | popularity signals, query frequency |
+| `documentation` | README, announcements, dataset descriptions |
+| `time-intelligence` | time granularity, offset windows, YTD/MTD, rolling windows |
+| `configuration` | catch-all for properties that do not fit another sub-category |
+
+---
+
+## Platform list
+
+Every feature must have a row for each of these platforms:
+
+| Platform | What it covers |
+|---|---|
+| `ThoughtSpot` | TML model properties; the source definition for most features |
+| `Snowflake SV` | CREATE SEMANTIC VIEW DDL / YAML |
+| `Databricks UC` | Unity Catalog Metric View YAML v1.1 |
+| `dbt MetricFlow` | semantic_models, metrics, saved_queries |
+| `Cube.dev` | cubes, views, dimensions, measures, pre_aggregations |
+| `LookML` | explores, views, dimensions, measures, derived_table, refinements |
+| `AtScale SML` | dataset, dimension, metric, metric_calc, model, composite_model |
+| `Power BI / Fabric` | TMDL semantic model + LSDL AI artifacts |
+| `Governance Platforms` | Alation, Atlan, Collibra — catalog-layer governance metadata |
+| `OSI` | Open Semantic Interchange v1.0 (Jan 2026) — multi-platform interchange YAML |
+
+---
+
+## Importance ratings
+
+Rate `human_importance` and `agentic_importance` independently using `High / Medium / Low / N/A`.
+
+| Rating | Meaning |
+|---|---|
+| `High` | Directly affects query correctness, metric definition, or comprehension — absence breaks things |
+| `Medium` | Improves usability or accuracy; absence degrades but does not break |
+| `Low` | Cosmetic, administrative, or rarely determinative |
+| `N/A` | Not applicable to this platform row (e.g., human rating for a purely agent-facing artifact) |
+
+**Key contrast principle:** Human and Agentic importance diverge significantly for some categories.
+Properties that are invisible to humans (ai_context, verified queries) are often the highest-value
+agentic properties. Properties that are highly visible to humans (folder groupings, display names)
+may be low-value for agents that iterate programmatically.
+
+---
+
+## Feature ID conventions
+
+Prefix codes for stable feature IDs:
+
+| Prefix | Category |
+|---|---|
+| `MDL` | Model-level ThoughtSpot properties |
+| `COL` | Column-level ThoughtSpot properties |
+| `JON` | Join properties |
+| `FRM` | Formula properties |
+| `PRM` | Parameter properties |
+| `TBL` | Table-reference properties |
+| `SFV` | Snowflake SV–native features |
+| `DBX` | Databricks UC–native features |
+| `DBT` | dbt MetricFlow–native features |
+| `CUB` | Cube.dev–native features |
+| `LKL` | LookML–native features |
+| `ATS` | AtScale SML–native features |
+| `GOV` | Governance platform–native features |
+| `PBI` | Power BI / Fabric–native features |
+| `SAI` | Supplementary AI artifact features |
+| `OSI` | OSI-native features |
+
+Never renumber existing IDs. If a row is removed, leave a gap rather than renumbering.
+
+---
+
+## OSI coverage summary (v1.0, Jan 2026)
+
+Use these coverage notes when writing OSI rows:
+
+**OSI v1.0 supports:**
+- `semantic_model` — name, description, top-level container
+- `datasets[]` — source, primary_key, unique_key, incremental build config
+- `fields[]` — row-level attributes for grouping and filtering
+- `dimensions[]` — categorical attributes (Where / When / Who)
+- `measures[]` — aggregations with aggregate_function; can span datasets
+- `relationships[]` — many-to-one or one-to-one FK joins (equality-only)
+- `ai_context` — native first-class field on all objects
+- `custom_extensions` — vendor metadata (Snowflake, Salesforce, dbt, Databricks)
+- Multi-dialect SQL expressions (ANSI, Snowflake, MDX, Tableau, Databricks)
+
+**OSI v1.0 does NOT support (note as "None — [reason]"):**
+filters, RLS, parameters, hierarchies, calculation groups, synonyms, pre-aggregations,
+perspectives, verified queries, governance metadata, display formatting, semantic type hints,
+time intelligence patterns (YTD/MTD), materialization, saved queries, i18n
+
+**OSI governance:** Snowflake-led; 50+ partners including ThoughtSpot, Databricks, dbt Labs,
+Cube, AtScale, Alation, Atlan, Collibra. Phase 2 (mid-2026) planned for domain-specific
+extensions and expanded coverage.
 
 ---
 
@@ -105,86 +223,99 @@ Use exactly these category names. Do not invent new ones without a clear gap:
 
 ### 1. Determine scope
 
-Ask the user whether to:
-- **Regenerate** — produce the full CSV from scratch across all platforms (default)
-- **Extend** — add rows for a new platform or category to an existing CSV
-- **Refresh** — re-research a specific platform's rows and update them in place
+Ask the user:
+- **Regenerate** — produce the full CSV from scratch (all platforms, all features)
+- **Add platform** — add rows for a new platform to an existing CSV
+- **Refresh platform** — update rows for a specific platform (e.g., after a spec update)
+- **Add features** — add rows for newly discovered features to all platforms
 
-If extending or refreshing, read the existing CSV first to avoid duplicating rows.
+For "Add platform" or "Refresh platform": read the existing CSV first.
 
-### 2. Read local reference files
+### 2. Proactively review platform landscape
 
-Read these files before writing any ThoughtSpot or Snowflake rows.
-Do not write rows from memory — pull property names and descriptions from the source:
+Before starting work, run a brief web search to check whether any significant semantic
+layer platforms should be added or updated. Specifically check for:
 
-- `~/.claude/shared/schemas/thoughtspot-model-tml.md` — all TML model properties
-- `~/.claude/shared/schemas/snowflake-schema.md` — all Snowflake SV properties
-- `~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md` — Snowflake coverage matrix
+- New major releases (version bumps, new properties) from platforms already covered
+- Platforms that have gained traction in the semantic layer space since the last run
+  (e.g., Sigma Computing, Lightdash, Omni, GoodData, Malloy, Superset semantic layer)
+- Platforms that have announced OSI compatibility, MCP servers, or AI semantic layer features
+- Platforms the user may have mentioned in prior context
 
-### 3. Research external platforms
+Report any significant findings before generating the CSV so the user can confirm scope.
 
-For each platform not covered by local files, fetch current official documentation:
+### 3. Read local reference files
+
+Read these files before writing any ThoughtSpot, Snowflake, or Databricks rows.
+Extract property names and descriptions from the source — do not write from memory:
+
+- `~/.claude/shared/schemas/thoughtspot-model-tml.md`
+- `~/.claude/shared/schemas/snowflake-schema.md`
+- `~/.claude/shared/schemas/databricks-schema.md`
+- `~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md`
+- `~/.claude/mappings/ts-databricks/ts-databricks-properties.md`
+
+### 4. Research external platforms
+
+For platforms not covered by local files, fetch current documentation:
 
 | Platform | What to research |
 |---|---|
-| dbt MetricFlow | semantic_models, metrics (all types), saved_queries, semantic_manifest.json, MCP server |
+| dbt MetricFlow | semantic_models, all metric types, saved_queries, semantic_manifest.json, MCP server |
 | Cube.dev | cubes, views, dimensions, measures, segments, pre_aggregations, access_policy, meta.ai |
-| LookML | explores, views, dimensions/measures/filters, dimension_groups, parameter fields, derived_table, datagroups, aggregate_table, refinements, LookML tests, Conversational Analytics Golden Queries, Agent System Instructions |
-| AtScale SML | All object types: catalog, package, connection, dataset, dimension (hierarchies, level_attributes, role_play, calculation_groups), row_security, metric (semi_additive, calculation_method), metric_calc, model (perspectives, drillthroughs, aggregates), composite_model |
-| Power BI / Fabric | Calculation groups, perspectives, translations, dataCategory, Q&A linguistic schema, LSDL (AI Data Schema, AI Instructions, Verified Answers) |
-| Supplementary artifacts | Snowflake legacy semantic_model.yaml, Verified Query Repository, ThoughtSpot Data Model Instructions, Looker Golden Queries, Cube meta.ai.searchable, MCP protocol (Model Context Protocol) |
+| LookML | all field types, dimension_group, parameter, derived_table, datagroups, aggregate_table, refinements, LookML tests, Conversational Analytics (Golden Queries, Agent System Instructions) |
+| AtScale SML | all object types: dataset, dimension (with hierarchies, level_attributes, role_play, calculation_groups), row_security, metric, metric_calc, model (perspectives, drillthroughs, aggregates), composite_model |
+| Power BI / Fabric | TMDL semantic model, LSDL (AI Data Schema, AI Instructions, Verified Answers), calculation groups, perspectives, translations, linguistic schema |
+| OSI | github.com/open-semantic-interchange/OSI — spec.yaml, README, active branches |
 
-Research each platform in parallel where possible to reduce elapsed time.
+Research platforms in parallel to reduce elapsed time.
 
-### 4. Write the CSV
+### 5. Write the CSV
 
-- Write the header row first
-- Group rows by Category (ThoughtSpot-native categories first, then platform-specific, then Supplementary AI Artifact last)
-- Within each Category, order rows by conceptual importance (core identity fields before optional/advanced)
-- Enclose every field value in double quotes
-- Escape any literal double quotes inside a value as `""`
-- Do not add trailing commas or blank rows between categories
+- Write the header row first: `feature_id, category, sub_category, property, description, human_importance, human_importance_notes, agentic_importance, agentic_importance_notes, platform, platform_equivalent, platform_notes`
+- For each feature, write 10 rows (one per platform) before moving to the next feature
+- Group features by category in this order: Model → Column → Structural → Calculation → Filtering → Platform Extension → Governance → AI / Transport
+- Within Platform Extension, group by originating platform (Snowflake SV features together, etc.)
+- Enclose every field in double quotes; escape literal double quotes as `""`
+- `platform_notes` must not be empty when `platform_equivalent` is `None` — always explain why
 
-### 5. Verify and report
+### 6. Verify and report
 
 After writing:
-- Report the total row count (header + data)
-- List the categories and row counts
-- Note any properties you could not find authoritative documentation for
-- Note any platforms where documentation was outdated or ambiguous
+- Report total row count and breakdown by platform (should be equal across all platforms)
+- List any features with unusual importance ratings that warrant review
+- Note any platforms where documentation was ambiguous or out of date
+- Flag any newly discovered platforms that should be added in a future run
 
 ---
 
-## Extending to new platforms
+## Adding a new platform
 
-When the user asks to add a platform not already in the CSV:
+1. Run a web search to find the platform's current semantic model specification
+2. Assign a new prefix code (extend the table above)
+3. For each existing feature, add one new row with the new platform name
+4. `platform_equivalent` = the platform's feature name, `None`, or `Partial`
+5. `platform_notes` = pros/cons/limitations for this platform
+6. Also check whether any new platform-specific features should be added
+   (features the new platform has that no existing platform covers)
+7. If yes, add those features with rows for ALL existing platforms (most will be `None`)
 
-1. Research that platform's full property specification via web search
-2. Add a new `{Platform}-Only` category for properties with no TS equivalent
-3. Add the platform as a new column in `Other Platform Notes` for existing rows where relevant
-   — do this by reading the existing CSV and updating affected rows, not by appending duplicates
-4. If adding a column requires restructuring the CSV header, regenerate the full file
-
-New columns beyond the current 13 require user confirmation before adding, as they affect
-all existing rows.
+The transform.py script at `~/Dev/semantic-layer-research/transform.py` provides a
+reference implementation for bulk platform addition via Python.
 
 ---
 
-## Key distinctions to preserve
+## Key distinctions to maintain
 
-**Human vs. Agentic importance is not the same thing.** Rate them independently.
-Properties that are invisible to humans (like `ai_context` or verified query repositories)
-are often the highest-value agentic properties. Properties that are highly visible to
-humans (like folder groupings or display labels) may be low-value for agents that iterate
-programmatically.
+**Human vs Agentic importance diverge intentionally.** Do not rate them the same unless
+they genuinely are. Column_groups is High human / Low agentic. ai_context is Low human /
+High agentic. The divergence is the signal.
 
-**Supplementary AI Artifacts are a distinct category from model properties.** These are
-constructs that live alongside the semantic model — verified queries, AI instruction files,
-sample questions, Golden Queries, MCP configurations. They are not part of the core model
-YAML but are critical for agentic interaction. Keep them in their own category; do not
-merge them into platform-specific rows.
+**Platform Extension features need ThoughtSpot rows.** A feature in the Snowflake-Only
+category still needs a ThoughtSpot row with `platform_equivalent: None` and a brief note.
+The `None` row makes the gap explicit.
 
-**Platform-only rows capture capability gaps, not just differences.** A Snowflake-Only
-row means ThoughtSpot cannot represent this concept at all (e.g., `AI_VERIFIED_QUERIES`
-at the view level). A row with `Partial` in an equivalent column means the concept exists
-but with meaningful limitations. Be precise.
+**OSI is an interchange standard, not a BI platform.** Rate it for its portability value
+to multi-platform agent deployments, not for feature parity with BI tools. Many `None`
+ratings on OSI are intentional — OSI v1.0 covers ~80% of analytics work and leaves 20%
+for future versions.
