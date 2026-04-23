@@ -89,6 +89,7 @@ cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-snowflake ~/.claude/skill
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/semantic-layer-compare ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
 cp -r /tmp/thoughtspot-skills/agents/shared ~/.claude/shared
@@ -145,6 +146,9 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv \
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-answer-promote \
       ~/.claude/skills/ts-object-answer-promote
+
+ln -s ~/Dev/thoughtspot-skills/agents/claude/semantic-layer-compare \
+      ~/.claude/skills/semantic-layer-compare
 
 # Shared reference docs (schemas, mappings, worked-examples)
 ln -s ~/Dev/thoughtspot-skills/agents/shared ~/.claude/shared

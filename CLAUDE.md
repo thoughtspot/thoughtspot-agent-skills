@@ -45,6 +45,29 @@ Three steps, always together:
 
 Claude Code changes (via symlinks) take effect immediately — no step 2 needed for `agents/claude/` only.
 
+## Branching conventions
+
+In-progress skills that require live-instance testing before shipping live on `wip/*` branches.
+These branches are pushed to remote for backup but never merged to main until verified.
+
+| Branch | Contents |
+|---|---|
+| `main` | Clean, published — what users clone |
+| `wip/databricks` | Databricks profile + conversion skills; Databricks shared content |
+| `wip/model-builder` | `ts-object-model-builder` (pending Snowflake + ThoughtSpot live testing) |
+
+**Working on a wip branch:**
+- Pre-commit hook runs on every commit (same as main)
+- `deploy.sh` is blocked on non-main branches — use `stage-sync.sh` to test CoCo content
+- Validators can be run manually before a stage sync: `python3 tools/validate/check_*.py --root .`
+- Merge criteria: all `references/open-items.md` items are VERIFIED, smoke tests pass, all validators clean
+
+**Starting a new wip skill:**
+1. `git checkout -b wip/<skill-name>` from current main
+2. Remove the skill's `.gitignore` entry on that branch only
+3. Update README.md, SETUP.md, and coco/SETUP.md to include the skill (consistency checker enforces this)
+4. `git push -u origin wip/<skill-name>`
+
 ## Auth and secrets
 
 Credentials are never stored in files, env files, or git. Pattern used throughout:
