@@ -16,9 +16,7 @@ rating each by its importance for human BI interaction and agentic AI interactio
 |---|---|
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | ThoughtSpot Model TML — full field reference, all property types |
 | [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) | Snowflake Semantic View YAML schema |
-| [~/.claude/shared/schemas/databricks-schema.md](~/.claude/shared/schemas/databricks-schema.md) | Databricks Unity Catalog Metric View YAML schema (v1.1) |
 | [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md) | ThoughtSpot ↔ Snowflake property coverage matrix |
-| [~/.claude/mappings/ts-databricks/ts-databricks-properties.md](~/.claude/mappings/ts-databricks/ts-databricks-properties.md) | ThoughtSpot ↔ Databricks property coverage matrix |
 | [~/.claude/skills/semantic-layer-compare/references/baseline.md](references/baseline.md) | Column definitions, category taxonomy, and rationale for importance ratings |
 
 For platforms not covered by local reference files (dbt MetricFlow, Cube.dev, LookML,

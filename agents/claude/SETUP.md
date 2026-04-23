@@ -59,6 +59,15 @@ handling, and permission checking before import.
 
 Run with `/ts-object-answer-promote`.
 
+### [`ts-object-model-builder`](ts-object-model-builder/)
+
+Builds a ThoughtSpot Model from a Snowflake schema or ERD image. Browses Snowflake
+databases and tables (or reads a diagram), ensures tables exist in a ThoughtSpot
+connection, creates logical Table objects, and generates a Model with inferred or
+user-defined joins.
+
+Run with `/ts-object-model-builder`.
+
 ---
 
 ## Installation
@@ -89,6 +98,7 @@ cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-snowflake ~/.claude/skill
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-model-builder ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/semantic-layer-compare ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
@@ -146,6 +156,9 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv \
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-answer-promote \
       ~/.claude/skills/ts-object-answer-promote
+
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-model-builder \
+      ~/.claude/skills/ts-object-model-builder
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/semantic-layer-compare \
       ~/.claude/skills/semantic-layer-compare
@@ -227,6 +240,7 @@ what you want in natural language and Claude will invoke the right skill.
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
+| `ts-object-model-builder` | `/ts-object-model-builder` | Build a ThoughtSpot Model from a Snowflake schema or ERD image |
 
 **Setup** — manage connection profiles and credentials
 
