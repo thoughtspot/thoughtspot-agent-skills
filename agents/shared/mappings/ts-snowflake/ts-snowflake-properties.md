@@ -20,8 +20,10 @@ of this skill over time.
 | `joins[]` (`referencing_join`) | `relationships[]` | Resolved from Table TML `joins_with`; same sub-field names |
 | `ATTRIBUTE` column (non-date) | `dimensions[]` | Expression in `dimensions[].expr` |
 | `ATTRIBUTE` column (date/timestamp) | `time_dimensions[]` | Type from `db_column_properties.data_type`; expression in `time_dimensions[].expr` |
-| `MEASURE` column | `metrics[]` | Aggregation in `metrics[].expr`; see `facts[]` note in Field Reference section below |
-| Formula column (`formula_id`) | `metrics[]` | Expression in `metrics[].expr`; see ts-snowflake-formula-translation.md |
+| `MEASURE` column (`aggregation: SUM/AVG/MIN/MAX`) | `facts[]` | Raw numeric column; `aggregation:` hint is informational and is not carried over — Cortex Analyst aggregates freely |
+| `MEASURE` column (`aggregation: COUNT_DISTINCT`) | `metrics[]` | `expr: COUNT(DISTINCT table.column)` — preserves specific aggregation intent |
+| `MEASURE` column (`aggregation: NONE`) | `dimensions[]` or `facts[]` | Use `dimensions[]` if column is used as a grouping key; `facts[]` if used as a raw numeric |
+| Formula column (`formula_id`) | `metrics[]` | Expression in `metrics[].expr`; aggregation is baked into the formula — see ts-snowflake-formula-translation.md |
 | `synonyms[]` | `synonyms[]` | Column/metric-level; table-level synonyms also supported by SV but not populated — see Field Reference section |
 | `column.description` | `description` | Passed through |
 | `ai_context` | `description` | **Partial** — see below |
@@ -100,26 +102,36 @@ relationships:
 
 ### `facts[]` — raw numeric columns vs. `metrics[]`
 
-Snowflake SV supports a `facts[]` array on each table for raw numeric columns that carry
-no pre-defined aggregation. This is distinct from the top-level `metrics[]` array.
+Snowflake SV supports a `facts[]` array on each table for raw numeric columns with no
+pre-defined aggregation. Cortex Analyst can aggregate these freely at query time.
+`facts[]` has no default aggregation field — the aggregation intent is left entirely
+to the query engine.
+
+This maps to the distinction ThoughtSpot makes between raw MEASURE columns and formula
+MEASURE columns:
+
+| ThoughtSpot | → | Snowflake SV | Reason |
+|---|---|---|---|
+| MEASURE column (`aggregation: SUM/AVG/MIN/MAX`) | | `facts[]` | Raw numeric value; `aggregation:` is a query-time hint in TS, not a stored expression |
+| MEASURE column (`aggregation: COUNT_DISTINCT`) | | `metrics[]` with `COUNT(DISTINCT ...)` | Distinct-count intent is too specific to leave to Cortex Analyst's discretion |
+| Formula column (`sum(amount)`, etc.) | | `metrics[]` | Aggregation is already baked into the formula expression |
 
 ```yaml
 tables:
   - name: orders
     facts:
       - name: amount
-        expr: "amount"     # raw column — Cortex Analyst can aggregate ad-hoc
+        expr: "amount"                         # raw MEASURE with SUM/AVG/MIN/MAX default
 metrics:
-  - name: total_revenue
-    expr: "SUM(orders.amount)"   # pre-defined aggregation
+  - name: unique_customers
+    expr: "COUNT(DISTINCT orders.customer_id)" # MEASURE with COUNT_DISTINCT default
+  - name: fxAmount
+    expr: "SUM(orders.amount)"                 # formula column
 ```
 
-**Our converter's choice:** All TS `MEASURE` columns are mapped to top-level `metrics[]`
-with an explicit aggregation wrapper (e.g. `SUM(table.col)`). This is valid Snowflake SV
-and works with Cortex Analyst, but it pre-determines the aggregation. Using `facts[]`
-instead would let Cortex Analyst compose aggregations freely at query time.
-
-This is a deliberate trade-off, not an error. See Future Improvements below.
+**Note:** The ThoughtSpot `aggregation:` value for `SUM/AVG/MIN/MAX` MEASURE columns is
+intentionally not propagated to Snowflake SV. It was a default hint for ThoughtSpot's
+search engine; Cortex Analyst determines aggregation from context.
 
 ---
 
@@ -426,7 +438,7 @@ section that has no entries for the current model.
 | Area | Potential improvement |
 |---|---|
 | AI context | If Snowflake introduces a dedicated per-field AI instruction property, map `ai_context` directly to it instead of merging into `description`. |
-| `facts[]` vs `metrics[]` | Emit raw TS MEASURE columns (no formula) as `facts[]` rather than `metrics[]` to preserve Cortex Analyst's ad-hoc aggregation flexibility. Pre-defined formula MEASUREs would still go to `metrics[]`. |
+| `facts[]` vs `metrics[]` — converter update | Current converter emits all MEASUREs to `metrics[]` with SUM wrappers. Update to follow the documented rule: SUM/AVG/MIN/MAX MEASUREs → `facts[]`; COUNT_DISTINCT MEASUREs and formula MEASUREs → `metrics[]`. |
 | Table-level synonyms | Populate `tables[].synonyms[]` from the model's table description or TML table name variants; currently left absent. |
 | `primary_key` / `unique_keys` | If ThoughtSpot ever exposes PK declarations in TML (or if they can be inferred from connection metadata), populate these for better Cortex Analyst query planning. |
 | Complex SQL views | Add SQL dialect translation for ThoughtSpot-specific syntax to improve portability of complex `sql_query` strings to Snowflake. |
