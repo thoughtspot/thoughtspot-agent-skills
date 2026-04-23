@@ -595,7 +595,98 @@ For join type and cardinality mappings, see
 
 ---
 
+### Step 7.5: Multi-Domain Analysis
+
+**Trigger:** Run this step whenever `model_tables[]` contains ≥2 tables and Step 7 produced
+at least one join. Skip (proceed to Step 8) if the model has 0 or 1 fact tables.
+
+**Algorithm:**
+
+**1. Build a directed join graph** from the joins resolved in Step 7:
+- Nodes: every table in `model_tables[]`
+- Directed edges: one edge per resolved join, pointing from the FK table (source —
+  the table whose `joins[]` array declared the join) to the PK table (target)
+
+**2. Identify fact tables and dimension tables:**
+- **Fact table**: any table with ≥1 outbound edge (it appears as the source of at
+  least one join)
+- **Dimension table**: any table with zero outbound edges (only ever a join target)
+
+**3. Check the fact-table count:**
+- 0 or 1 fact table → skip this step. Proceed to Step 8 as normal.
+- ≥2 fact tables → continue.
+
+**4. For each fact table, traverse its reachable dimension set** via BFS through its
+outbound joins. A dimension table is "reachable from fact F" if you can reach it by
+following directed edges from F.
+
+**5. Identify shared dimensions:** any dimension table reachable from 2+ distinct fact
+roots. Dimensions reachable from only one fact belong exclusively to that domain.
+
+**6. Present the domain map to the user:**
+
+```
+I detected {N} logical domains in this model:
+
+  Domain 1 — {FACT_TABLE_ROOT}
+    Fact tables:  {list}
+    Dimensions:   {list; flag shared dims with "(shared)"}
+
+  Domain 2 — {FACT_TABLE_ROOT}
+    Fact tables:  {list}
+    Dimensions:   {list; flag shared dims with "(shared)"}
+
+  Shared dimensions (included in each view if you split): {list}
+
+How would you like to proceed?
+  SPLIT   — Create {N} separate Semantic Views (one per domain)
+  SINGLE  — Create one combined Semantic View (current behaviour)
+  CUSTOM  — I'll assign tables to groups manually
+```
+
+**7a. SINGLE:** Set `split_mode = False`. Proceed to Step 8 with no change in scope.
+
+**7b. SPLIT:** Set `split_mode = True`. For each domain:
+- `domain.tables` = fact table(s) + all reachable dimensions (including shared ones,
+  duplicated into every domain that reaches them)
+- `domain.joins` = all relationships where **both** left_table and right_table are in
+  `domain.tables`
+- Default `domain.sv_name` = `{model_name}_{snake_case(primary_fact_table)}`
+  (e.g. model `sales_inventory`, fact `DM_ORDER` → `sales_inventory_dm_order`).
+  User may rename at the Step 10 checkpoint.
+- Proceed to Step 8 and run it **once per domain** in sequence.
+
+**7c. CUSTOM:** Display a numbered list of all tables. User types group assignments,
+for example: `1,2,3 → Group A; 4,5,6 → Group B`. Validate that each group forms a
+connected subgraph (every table reachable from at least one other table in its group).
+If a group is disconnected, ask the user to revise. Treat each group as a domain and
+proceed as SPLIT.
+
+**Cross-domain formula columns (split mode only):**
+
+A formula whose expression references column IDs from tables in multiple domains cannot
+be cleanly split. Assign it to the domain containing the **most** of its referenced
+tables. Log it in the Unmapped Properties Report under a new section:
+
+```
+#### Cross-Domain Formulas (assigned to primary domain)
+| Formula | Assigned To | References tables in |
+|---|---|---|
+| {name} | {domain_name} | {other_domain_name} |
+```
+
+---
+
 ### Step 8: Map Columns
+
+**Split mode:** If `split_mode = True` (set in Step 7.5), run this entire step once per
+domain. On each pass, restrict scope to the current domain:
+- Only include columns whose `column_id` prefix (the `TABLE_NAME::` part) is a table
+  in `domain.tables`
+- Only use `domain.joins` as the relationship set (already scoped in Step 7.5)
+- Use `domain.sv_name` as the output view name
+
+If `split_mode = False`, run once with the full scope as normal.
 
 **Source of truth — hierarchy:**
 
@@ -785,9 +876,19 @@ Confirmed untranslatable patterns (after checking the reference):
 
 **Do not proceed without explicit user confirmation.**
 
-Present the following three sections:
+**Single mode (`split_mode = False`):** present the following three sections.
+
+**Split mode (`split_mode = True`):** present one labelled block per domain (Domain 1,
+Domain 2, …). Each block contains the three sections below for that domain. At the end,
+show the combined prompt once covering all domains.
+
+---
 
 **1. Generated YAML** — full content in a code block.
+
+*Split mode:* label each block — e.g. `### Domain 1 — sales_inventory_dm_order`.
+Include the `domain.sv_name` as the YAML `name:` value; remind the user they may rename
+it before creating.
 
 **2. Conversion Summary:**
 ```
@@ -798,6 +899,9 @@ Present the following three sections:
 - Metrics:         {n}  ({n} translated formulas, {n} physical columns)
 - Omitted columns: {n}  (untranslatable formulas — see Formula Translation Log)
 ```
+*Split mode:* show per-domain counts, then a totals row.
+If shared dimensions were duplicated, note: `Shared dimensions duplicated into each view:
+{list} — updates to these must be applied to all {N} views.`
 
 **3. Unmapped Properties Report** — use the format defined in
 [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md).
@@ -808,15 +912,27 @@ Include only sections that have entries. Common sections:
 - Format patterns not migrated
 - Default date buckets not migrated
 - Formula Translation Log (all formulas, translated and untranslated)
+- Cross-Domain Formulas (split mode only — if any exist)
 - Other dropped properties
 
-Then ask:
+---
+
+**Single mode prompt:**
 ```
 Shall I create this Semantic View in Snowflake?
   YES  — proceed
   NO   — cancel
   EDIT — followed by changes to the YAML
   FILE — write the YAML to a file without creating it in Snowflake
+```
+
+**Split mode prompt:**
+```
+Shall I create all {N} Semantic Views in Snowflake?
+  YES       — create all {N} views
+  NO        — cancel
+  EDIT {n}  — edit domain n's YAML before creating (e.g. EDIT 1)
+  FILE      — write all {N} YAMLs to files without creating them
 ```
 
 If the user selects **NO**, stop. No cleanup needed — the CLI manages its own token cache.
@@ -853,6 +969,9 @@ Report all failures together before retrying. Key checks:
 
 This path is used when the user selected **FILE** at the Step 10 checkpoint, explicitly
 said "file only", or has no Snowflake access or `CREATE SEMANTIC VIEW` permission.
+
+**Split mode:** repeat steps 1–3 for each domain in sequence, using `domain.sv_name` as
+the filename. Report each file written before moving to the next domain.
 
 **1. Determine the output filename:**
 
@@ -897,6 +1016,11 @@ know what to verify once they create the view.
 ---
 
 ### Step 12: Execute
+
+**Split mode:** run this entire step once per domain in sequence. Use `domain.sv_name`
+as the view name for each iteration. If one domain fails the dry-run or CREATE, report
+the error and ask: `Retry / Skip and continue with the remaining domains / Cancel all?`
+before proceeding.
 
 **Target location — suggest from source tables:**
 
@@ -999,6 +1123,9 @@ If Snowflake temp files were written (e.g. `/tmp/sv_wrappers.sql`), remove them 
 After a successful `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` response, confirm the view
 exists and is queryable before reporting success.
 
+**Split mode:** run this step after each domain's CREATE call. After all domains are
+verified, report a combined summary listing every view created.
+
 **1. Confirm the view exists:**
 
 ```sql
@@ -1049,6 +1176,10 @@ After the spot-check passes, proceed to Step 13 (Generate Test Questions).
 After the view is successfully created, generate 5 natural language questions derived
 from the semantic view. Use the actual metrics, dimensions, and time dimensions that
 were mapped — not column names, but the `name` or `label` values from the YAML.
+
+**Split mode:** generate 5 questions per domain view, each labelled with the view name.
+Include at least one question per domain that could NOT be answered by querying the
+other domain's view alone — to demonstrate the value of the split and its scope.
 
 **Question design — aim for variety:**
 

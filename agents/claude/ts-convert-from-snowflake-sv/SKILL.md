@@ -100,9 +100,42 @@ at the Step 10 checkpoint or say "file only" at any point before Step 11.
 
 ---
 
+### Step 1.5: Session Mode
+
+```
+Choose a conversion mode:
+  A — Convert ONE Semantic View → one ThoughtSpot Model  (default)
+  B — Merge MULTIPLE Semantic Views → one ThoughtSpot Model
+```
+
+If the user selects **A** (or presses Enter): set `merge_mode = False`. Continue with
+the workflow unchanged — Steps 2 through 13 run exactly as documented.
+
+If the user selects **B**: set `merge_mode = True`. The modified Steps 2, 3, and new
+Step 3.5 below apply; Steps 4–13 then run on the merged result exactly once.
+
+---
+
 ### Step 2: Identify the semantic view
 
-If the user has named the semantic view, proceed directly to Step 3.
+**Single mode (`merge_mode = False`):** proceed as documented below.
+
+**Merge mode (`merge_mode = True`):**
+
+1. Also ask for the output ThoughtSpot Model name now:
+   ```
+   Output ThoughtSpot Model name: _______
+   ```
+2. Ask the user to list the Semantic Views to merge. Accept either:
+   - A comma-separated list of names: `SALES_SV, INVENTORY_SV`
+   - A wildcard/prefix — Claude will run:
+     ```sql
+     SHOW SEMANTIC VIEWS LIKE '{prefix}%' IN SCHEMA {database}.{schema};
+     ```
+     and display matches for user confirmation before proceeding
+3. Confirm the final list before proceeding to Step 3.
+
+**Single mode:** If the user has named the semantic view, proceed directly to Step 3.
 
 Otherwise, list available semantic views so the user can choose:
 
@@ -119,6 +152,12 @@ Display results as a numbered list. Ask the user to select one (or enter a full
 ---
 
 ### Step 3: Get the semantic view DDL
+
+**Single mode:** run as documented below.
+
+**Merge mode:** execute `GET_DDL` for each SV in the confirmed list. Parse each DDL
+independently using the Step 4 logic and store as a separate parse result object before
+proceeding to Step 3.5.
 
 ```sql
 SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{view_name}');
@@ -138,6 +177,64 @@ WHERE table_schema = '{schema}'
   AND table_type = 'SEMANTIC VIEW';   -- Snowflake filter for semantic views only
 ```
 Parse each DDL in Step 4 before switching Snowflake queries.
+
+---
+
+### Step 3.5: Merge and Deduplication (merge mode only)
+
+**Skip this step if `merge_mode = False`.**
+
+Combine all parse results from Step 3 into a single merged result that Steps 4–13
+will treat as if it came from one Semantic View.
+
+**1. Tables** — union of all `tables[]` entries across all SVs.
+- Deduplicate by **physical identity**: two entries with the same
+  `base_table.database + schema + table` represent the same Snowflake table. Keep one.
+- If their column definitions differ (different dimensions, different data types for
+  the same column name), flag as a **column conflict** — list each conflicting column
+  and ask the user which definition wins before continuing.
+
+**2. Relationships** — union of all `relationships[]`.
+- Deduplicate by (left_table, right_table, left_column, right_column) — exact match
+  on all four fields. Keep one entry.
+- If the same table pair has conflicting relationship definitions (different column
+  pairs), flag as a **relationship conflict** for user resolution.
+
+**3. Metrics** — union of all `metrics[]`.
+- Deduplicate by (name, expr) — exact match on both. Keep one entry.
+- If same name but different expr: flag as a **metric conflict**. User must choose
+  which definition wins or rename one before the merge can proceed. Do not silently
+  prefer either definition.
+
+**4. Dimensions / time_dimensions / facts** — union across all tables, deduplicated
+by (table_name, column_name).
+
+**5. Fact table identification in merged context** — re-run the fact-table detection
+algorithm (tables with no incoming relationships in the merged relationship set = fact
+tables). If a table was a fact in one SV but gains an incoming relationship from
+another SV in the merged graph, present it to the user:
+```
+{TABLE} had no incoming joins in {SV1} but gains one from {SV2} in the merged model.
+Treat as:  F — Fact table   D — Dimension table
+```
+
+**6. Present merge summary and require confirmation before continuing:**
+```
+Merging {M} Semantic Views:
+
+  {SV1}:  {n} tables, {n} relationships, {n} metrics
+  {SV2}:  {n} tables, {n} relationships, {n} metrics
+  ...
+
+Merged result:  {n} tables ({x} deduplicated), {n} relationships, {n} metrics
+Conflicts:      {None / list of conflicts to resolve}
+
+Output model name: {name from Step 2}
+Proceed? YES / NO
+```
+
+If there are unresolved conflicts, require all to be resolved before accepting YES.
+After confirmation, continue with Step 4 using the merged result.
 
 ---
 
@@ -772,8 +869,10 @@ unless the user explicitly requests a logout.
 
 ## Multiple semantic view conversion
 
-If the user wants to convert more than one semantic view in the same session:
+**Sequential (separate models):** After completing Step 12 for one view, ask:
+"Convert another semantic view?" If yes: return to Step 2. Reuse the already-confirmed
+ThoughtSpot and Snowflake profiles. Do not re-authenticate between views.
 
-1. After completing Step 12 for the first view, ask: "Convert another semantic view?"
-2. If yes: return to Step 2. Reuse the already-confirmed ThoughtSpot and Snowflake profiles.
-3. Do not re-authenticate between views.
+**Merge into one model:** Use `merge_mode = True` (Step 1.5 → B). All Semantic Views
+are ingested in Step 3, merged in Step 3.5, and converted into a single ThoughtSpot
+Model in one pass through Steps 4–13.
