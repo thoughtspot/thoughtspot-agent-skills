@@ -48,6 +48,23 @@ directly (creating new Table objects in the connection).
 
 Run with `/ts-convert-from-snowflake-sv`.
 
+### [`ts-profile-databricks`](ts-profile-databricks/)
+
+Manages Databricks connection profiles. Stores PAT tokens securely in the macOS
+Keychain and wires up `~/.zshenv` for env var persistence. Supports add, list,
+update, delete, and test operations.
+
+Run with `/ts-profile-databricks`.
+
+### [`ts-convert-to-databricks-mv`](ts-convert-to-databricks-mv/)
+
+Converts a ThoughtSpot Worksheet or Model into a Databricks Unity Catalog Metric
+View. Exports the TML definition via the ThoughtSpot REST API, maps columns and
+joins to the UC Metric View YAML format, translates ThoughtSpot formulas to SQL,
+and creates the view via `CREATE VIEW WITH METRICS LANGUAGE YAML`.
+
+Run with `/ts-convert-to-databricks-mv`.
+
 ### [`ts-object-answer-promote`](ts-object-answer-promote/)
 
 Promotes formulas and parameters from a saved ThoughtSpot Answer into a Model
@@ -89,6 +106,8 @@ cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-snowflake ~/.claude/skill
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-profile-databricks ~/.claude/skills/
+cp -r /tmp/thoughtspot-skills/agents/claude/ts-convert-to-databricks-mv ~/.claude/skills/
 cp -r /tmp/thoughtspot-skills/agents/claude/semantic-layer-compare ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
@@ -146,6 +165,12 @@ ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-from-snowflake-sv \
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-object-answer-promote \
       ~/.claude/skills/ts-object-answer-promote
+
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-profile-databricks \
+      ~/.claude/skills/ts-profile-databricks
+
+ln -s ~/Dev/thoughtspot-skills/agents/claude/ts-convert-to-databricks-mv \
+      ~/.claude/skills/ts-convert-to-databricks-mv
 
 ln -s ~/Dev/thoughtspot-skills/agents/claude/semantic-layer-compare \
       ~/.claude/skills/semantic-layer-compare
@@ -221,6 +246,7 @@ what you want in natural language and Claude will invoke the right skill.
 |---|---|---|
 | `ts-convert-to-snowflake-sv` | `/ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-convert-to-databricks-mv` | `/ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
@@ -234,6 +260,7 @@ what you want in natural language and Claude will invoke the right skill.
 |---|---|---|
 | `ts-profile-thoughtspot` | `/ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | `/ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles |
+| `ts-profile-databricks` | `/ts-profile-databricks` | Add, update, test, or delete Databricks profiles |
 
 Example for the conversion skill:
 

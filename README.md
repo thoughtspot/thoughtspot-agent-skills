@@ -14,7 +14,8 @@ thoughtspot-agent-skills/
 │   ├── coco/       — Snowflake Cortex skills (deployed in Snowsight Workspaces)
 │   └── shared/     — Shared reference files used by both claude and coco skills
 │       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules (Snowflake)
-│       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV)
+│       ├── mappings/ts-databricks/      — Column, join, formula, and property mapping rules (Databricks UC)
+│       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV, Databricks UC)
 │       └── worked-examples/snowflake/   — End-to-end Snowflake conversion examples
 ├── scripts/        — Deployment helpers (pre-commit hook, deploy gate, stage sync)
 └── tools/
@@ -35,6 +36,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 |---|---|---|
 | `ts-convert-to-snowflake-sv` | `/ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-convert-to-databricks-mv` | `/ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Unity Catalog Metric View |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
@@ -54,6 +56,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 |---|---|---|
 | `ts-profile-thoughtspot` | `/ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | `/ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles |
+| `ts-profile-databricks` | `/ts-profile-databricks` | Add, update, test, or delete Databricks profiles |
 
 See **[agents/claude/SETUP.md](agents/claude/SETUP.md)** for installation, credential setup, and usage.
 

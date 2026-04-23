@@ -52,6 +52,12 @@ snow stage copy agents/shared/schemas/thoughtspot-liveboard-tml.md @SKILLS.PUBLI
 snow stage copy agents/shared/schemas/thoughtspot-sets-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
+
+# Databricks UC reference files
+snow stage copy agents/shared/schemas/databricks-schema.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/mappings/ts-databricks/ts-to-databricks-mv-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-databricks/ --overwrite
+snow stage copy agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-databricks/ --overwrite
+snow stage copy agents/shared/mappings/ts-databricks/ts-databricks-properties.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-databricks/ --overwrite
 ```
 
 ### Step 2: Ask CoCo to deploy to Workspace
