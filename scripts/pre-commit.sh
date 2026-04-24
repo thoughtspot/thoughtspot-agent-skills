@@ -68,6 +68,12 @@ if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then
   run_check "consistency"        "tools/validate/check_consistency.py --root $REPO_ROOT --staged"
 fi
 
+# Skill versioning — runs when any SKILL.md is touched
+# Ensures every skill has a ## Changelog section with at least one semver entry
+if echo "$STAGED" | grep -q 'SKILL\.md'; then
+  run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
+fi
+
 # Only run unit tests if Python source files are staged
 if echo "$STAGED" | grep -q '\.py$'; then
   printf "  %-30s " "unit tests"

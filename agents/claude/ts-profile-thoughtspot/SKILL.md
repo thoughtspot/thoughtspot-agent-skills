@@ -523,3 +523,11 @@ ts connections list --profile {profile_name}
 The CLI stores tokens per profile in the OS temp directory (`tempfile.gettempdir()/ts_token_{slug}.txt`,
 permissions 600 on POSIX) and refreshes them automatically on expiry. Skills do not
 need to manage this file.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

@@ -876,3 +876,11 @@ ThoughtSpot and Snowflake profiles. Do not re-authenticate between views.
 **Merge into one model:** Use `merge_mode = True` (Step 1.5 → B). All Semantic Views
 are ingested in Step 3, merged in Step 3.5, and converted into a single ThoughtSpot
 Model in one pass through Steps 4–13.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

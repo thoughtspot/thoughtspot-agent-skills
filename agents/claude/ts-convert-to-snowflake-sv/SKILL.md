@@ -1289,3 +1289,11 @@ and role from this session. Do **not** re-run Step 1 profile prompts.
 
 If no (or no more models remain): the session is complete. No ThoughtSpot token
 cleanup needed — the CLI manages its own cache.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |
