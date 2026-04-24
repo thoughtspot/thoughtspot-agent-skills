@@ -69,8 +69,10 @@ if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then
 fi
 
 # Skill versioning — runs when any SKILL.md is touched
-# Ensures every skill has a ## Changelog section with at least one semver entry
+# Step 1: interactively suggest a changelog entry if one is missing (TTY only)
+# Step 2: validate that every staged skill has a changelog entry
 if echo "$STAGED" | grep -q 'SKILL\.md'; then
+  python3 tools/validate/suggest_skill_version.py --root $REPO_ROOT
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
