@@ -59,6 +59,17 @@ handling, and permission checking before import.
 
 Run with `/ts-object-answer-promote`.
 
+### [`ts-dependency-manager`](ts-dependency-manager/)
+
+Safely removes or renames columns and repoints objects across a ThoughtSpot environment.
+Scans all Answers, Liveboards, and Models for dependencies on the source object, generates
+a risk-rated impact report with hyperlinks, takes TML backups before any change, and
+supports full rollback. Supports three operations: remove column(s) from a connection table
+or Model, rename a column and propagate the change to all dependents, or repoint Answers
+and Liveboards to a different Model with column-gap detection.
+
+Run with `/ts-dependency-manager`.
+
 ---
 
 ## Installation
@@ -227,6 +238,7 @@ what you want in natural language and Claude will invoke the right skill.
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
+| `ts-dependency-manager` | `/ts-dependency-manager` | Remove or rename columns and repoint objects — with impact report, TML backup, and rollback |
 
 **Setup** — manage connection profiles and credentials
 

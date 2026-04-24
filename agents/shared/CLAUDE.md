@@ -26,6 +26,9 @@ schemas/
   thoughtspot-model-tml.md            — model TML construction reference
   thoughtspot-answer-tml.md           — Answer TML structure (formulas, parameters, sets, data source lookup) — verified
   thoughtspot-liveboard-tml.md        — Liveboard TML structure (visualizations, filters, layout, tabs) — verified
+  thoughtspot-view-tml.md             — View (AGGR_WORKSHEET) TML structure — view_columns, joins, table_paths, search_query
+  thoughtspot-alert-tml.md            — Monitor Alert TML structure — metric_id references, personalised_view_info
+  thoughtspot-feedback-tml.md         — NLS Feedback/Coaching TML structure — search_tokens, formula_info column references
   thoughtspot-sets-tml.md             — Set TML structure (bins, groups, query sets; answer-level vs reusable)
   thoughtspot-formula-patterns.md     — ThoughtSpot formula syntax reference
   thoughtspot-connection.md           — connection object structure

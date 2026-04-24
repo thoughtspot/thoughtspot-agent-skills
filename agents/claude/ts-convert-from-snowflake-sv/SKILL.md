@@ -80,6 +80,40 @@ at the Step 10 checkpoint or say "file only" at any point before Step 11.
 
 ---
 
+## Step 0 — Overview
+
+On skill invocation, display this plan before doing any work:
+
+---
+**ts-convert-from-snowflake-sv** — reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model, translating tables, joins, and SQL expressions.
+
+Steps:
+  1.   Authenticate (ThoughtSpot + Snowflake) ............. auto
+  1.5. Choose session mode (single view / merge mode) ..... you choose
+  2.   Identify the semantic view ......................... you choose
+  3.   Get the semantic view DDL .......................... auto
+  4.   Parse the DDL ..................................... auto
+  5.   Table registration question (reuse or create) ...... you choose
+  6.   Discover / create ThoughtSpot Table objects ........ auto (may ask for clarification)
+  7.   Find join names (Scenario A) ...................... auto
+  8.   Build the model TML ............................... auto
+  9.   Translate SQL expressions → ThoughtSpot formulas ... auto
+ 10.   Review checkpoint — inspect TML before import ...... you confirm
+ 11.   Import the model into ThoughtSpot .................. auto
+ 12.   Verify import and produce summary report ........... auto
+
+File-only mode: at Step 10, choose FILE to write TML files for manual import.
+
+Confirmation required: Steps 1.5, 5, 10
+Auto-executed: all others
+
+Ready to start? [Y / N]
+---
+
+Do not begin Step 1 until the user confirms.
+
+---
+
 ## Workflow
 
 ### Step 1: Authenticate
@@ -883,4 +917,5 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

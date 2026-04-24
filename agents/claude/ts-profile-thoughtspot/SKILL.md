@@ -13,6 +13,8 @@ Ask one question at a time. Wait for each answer before moving on.
 
 ## Entry Point
 
+Manage ThoughtSpot connection profiles — add, list, update, delete, or test a profile.
+
 Read `~/.claude/thoughtspot-profiles.json`.
 
 **If no profiles file or empty profiles array:** go directly to [Add](#add).
@@ -530,4 +532,5 @@ need to manage this file.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-04-24 | Add one-line context before menu |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

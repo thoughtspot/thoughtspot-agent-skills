@@ -134,6 +134,37 @@ at any point before Step 12.
 
 ---
 
+## Step 0 — Overview
+
+On skill invocation, display this plan before doing any work:
+
+---
+**ts-convert-to-snowflake-sv** — export a ThoughtSpot Worksheet or Model and create a matching Snowflake Semantic View.
+
+Steps:
+  1.   Authenticate (ThoughtSpot) ......................... auto
+  2.   Find and select the model / worksheet .............. you choose
+  3.   Export and parse the TML ........................... auto
+  4–9. Map columns, joins, and formulas → DDL ............. auto
+ 10.   Validate the generated DDL ......................... auto
+ 11.   Checkpoint — review DDL before Snowflake execution .. you confirm
+ 12.   CREATE OR REPLACE SEMANTIC VIEW in Snowflake ........ auto
+ 12b.  Verify creation .................................... auto
+ 13.   Generate example test questions ..................... auto
+
+File-only mode: at Step 11, choose FILE instead of executing — generates a .sql file
+for manual import in Snowsight.
+
+Confirmation required: Step 11 (DDL review)
+Auto-executed: all others
+
+Ready to start? [Y / N]
+---
+
+Do not begin Step 1 until the user confirms.
+
+---
+
 ## Workflow
 
 ### Step 1: Authenticate
@@ -1296,4 +1327,5 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

@@ -6,7 +6,10 @@ Checks:
   1. README.md skills tables — every skill in agents/claude/ and agents/coco/ is listed
   2. agents/claude/SETUP.md symlink steps — every claude skill has an ln -s step
   3. agents/coco/SETUP.md stage copy list — every coco SKILL.md and agents/shared/ file is listed
-  4. README.md structure section — known tool subdirectories are mentioned
+  4. README.md structure section — scripts/ and every subdirectory of tools/ is mentioned
+  5. agents/cursor/SETUP.md rule entries — every .mdc in agents/cursor/rules/ is listed
+  6. README.md cursor coverage — every .mdc rule in agents/cursor/rules/ is mentioned in README
+  7. agents/shared/CLAUDE.md coverage — every tracked file in agents/shared/ is listed there
 
 Usage:
     python tools/validate/check_consistency.py
@@ -166,14 +169,6 @@ def check_coco_setup_stage_copy(repo_root: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-_KNOWN_DIRS = [
-    # (relative path in repo, label to check for in README)
-    ("scripts", "scripts"),
-    ("tools/validate", "validate"),
-    ("tools/smoke-tests", "smoke-tests"),
-]
-
-
 # ---------------------------------------------------------------------------
 # Check 5: agents/cursor/SETUP.md lists every rule in agents/cursor/rules/
 # ---------------------------------------------------------------------------
@@ -204,21 +199,92 @@ def check_cursor_setup_rules(repo_root: Path) -> list[str]:
     return failures
 
 
+def check_readme_cursor_rules(repo_root: Path) -> list[str]:
+    """
+    Every .mdc file in agents/cursor/rules/ must be mentioned in README.md.
+    Complements check_cursor_setup_rules (which checks cursor/SETUP.md).
+    """
+    rules_dir = repo_root / "agents" / "cursor" / "rules"
+    if not rules_dir.is_dir():
+        return []
+
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    failures = []
+
+    for mdc_file in sorted(rules_dir.glob("*.mdc")):
+        skill_name = mdc_file.stem
+        if skill_name not in readme:
+            failures.append(
+                f"README.md: cursor rule '{skill_name}' not listed — "
+                f"add it to the Cursor AI Rules table"
+            )
+
+    return failures
+
+
 def check_readme_structure(repo_root: Path) -> list[str]:
     """
-    If a known tool/script directory exists in the repo, it must be mentioned
-    in README.md (in the repository structure section or elsewhere).
+    Every subdirectory under tools/ must be mentioned in README.md.
+    If scripts/ exists at repo root, it must also be mentioned.
+    Dynamic scan — no hardcoded list, so new tool directories are caught automatically.
     """
     failures = []
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
-    for rel_dir, label in _KNOWN_DIRS:
-        if (repo_root / rel_dir).is_dir():
-            if label not in readme:
+    # scripts/ at repo root
+    if (repo_root / "scripts").is_dir() and "scripts" not in readme:
+        failures.append(
+            "README.md: scripts/ directory exists but is not mentioned — "
+            "add it to the Repository Structure section"
+        )
+
+    # Every subdirectory of tools/ — dynamic, no hardcoded list
+    tools_dir = repo_root / "tools"
+    if tools_dir.is_dir():
+        for subdir in sorted(tools_dir.iterdir()):
+            if not subdir.is_dir():
+                continue
+            if subdir.name.startswith(".") or subdir.name.startswith("__"):
+                continue
+            if subdir.name not in readme:
                 failures.append(
-                    f"README.md: directory '{rel_dir}' exists but is not mentioned — "
+                    f"README.md: tools/{subdir.name}/ exists but is not mentioned — "
                     f"add it to the Repository Structure section"
                 )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Check 7: agents/shared/CLAUDE.md lists every tracked file in agents/shared/
+# ---------------------------------------------------------------------------
+
+def check_shared_claude_md(repo_root: Path) -> list[str]:
+    """
+    Every tracked file in agents/shared/ (excluding CLAUDE.md itself) must be
+    mentioned by filename in agents/shared/CLAUDE.md's directory map.
+    Catches schema or mapping files added without updating the directory listing.
+    """
+    claude_md_path = repo_root / "agents" / "shared" / "CLAUDE.md"
+    if not claude_md_path.exists():
+        return []  # No shared CLAUDE.md — skip (e.g. template projects)
+
+    claude_text = claude_md_path.read_text(encoding="utf-8")
+    tracked = _get_tracked_paths(repo_root)
+    failures = []
+
+    shared_dir = repo_root / "agents" / "shared"
+    for f in sorted(shared_dir.rglob("*.md")):
+        if f.name == "CLAUDE.md":
+            continue
+        rel_path = str(f.relative_to(repo_root))
+        if rel_path not in tracked:
+            continue
+        if f.name not in claude_text:
+            failures.append(
+                f"agents/shared/CLAUDE.md: '{rel_path}' not in directory map — "
+                f"add an entry for '{f.name}'"
+            )
 
     return failures
 
@@ -253,6 +319,8 @@ def main() -> int:
         ("stage copy list",               check_coco_setup_stage_copy),
         ("README structure section",      check_readme_structure),
         ("Cursor SETUP.md rule entries",  check_cursor_setup_rules),
+        ("README cursor coverage",        check_readme_cursor_rules),
+        ("shared/CLAUDE.md coverage",     check_shared_claude_md),
     ]
 
     for label, fn in checks:
