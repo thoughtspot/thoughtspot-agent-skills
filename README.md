@@ -42,12 +42,6 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 |---|---|---|
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
 
-**Research** — cross-platform semantic layer analysis
-
-| Skill | Command | What it does |
-|---|---|---|
-| `semantic-layer-compare` | `/semantic-layer-compare` | Generate a cross-platform semantic layer property comparison CSV |
-
 **Setup** — manage connection profiles and credentials
 
 | Skill | Command | What it does |
