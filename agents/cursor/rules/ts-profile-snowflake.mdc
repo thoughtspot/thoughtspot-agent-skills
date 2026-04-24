@@ -498,3 +498,11 @@ conn = snowflake.connector.connect(
     password=password, role=role, warehouse=warehouse,
 )
 ```
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

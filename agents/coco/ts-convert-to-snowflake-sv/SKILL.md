@@ -1360,3 +1360,11 @@ If no (or no more models remain) and `{api_method}` = `direct_api` (CLI only):
 ```bash
 rm -f /tmp/ts_token.txt
 ```
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

@@ -614,3 +614,11 @@ SELECT
 FROM SKILLS.PUBLIC.THOUGHTSPOT_PROFILES p
 WHERE p.name = '{profile_name}';
 ```
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

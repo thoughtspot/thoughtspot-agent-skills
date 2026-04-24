@@ -60,10 +60,17 @@ def detect_significant_changes(staged_lines: list[str]) -> list[tuple[str, str]]
             continue
         status, path = parts[0].strip(), parts[1].strip()
 
-        # New SKILL.md added
-        if status == "A" and path.endswith("/SKILL.md") and path.startswith("agents/claude/"):
+        # New SKILL.md added (any runtime)
+        if status == "A" and path.endswith("/SKILL.md") and path.startswith("agents/"):
             skill_name = path.split("/")[2]
-            changes.append(("new-skill", f"feat: add {skill_name} skill"))
+            runtime = path.split("/")[1]
+            label = f"feat: add {skill_name} skill" + (f" [{runtime}]" if runtime != "claude" else "")
+            changes.append(("new-skill", label))
+
+        # New .mdc Cursor rule added
+        elif status == "A" and path.startswith("agents/cursor/rules/") and path.endswith(".mdc"):
+            skill_name = Path(path).stem
+            changes.append(("new-skill", f"feat: add {skill_name} Cursor rule"))
 
         # ts-cli version bump
         elif status == "M" and path in (
