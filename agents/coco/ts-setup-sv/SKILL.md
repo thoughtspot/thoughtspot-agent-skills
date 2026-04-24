@@ -701,3 +701,11 @@ Re-run this skill when:
   must be added to the SECRETS clause of every procedure
 - Another skill reports "Stored procedure not found" or "Secret not mapped"
 - A new version of the skill is deployed (the other skills will show ↑ in their Step 1 check)
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

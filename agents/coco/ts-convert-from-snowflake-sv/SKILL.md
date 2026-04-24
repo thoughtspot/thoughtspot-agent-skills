@@ -844,3 +844,11 @@ After completing one conversion, offer to convert additional views.
   available.
 - Do not re-authenticate between views.
 - Return to Step 1 (DDL fetch only) for the next view, skipping the profile SQL call.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

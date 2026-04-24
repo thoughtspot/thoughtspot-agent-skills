@@ -472,3 +472,11 @@ ts connections list --profile {profile_name}
 
 Token cache: `tempfile.gettempdir()/ts_token_{slug}.txt` (permissions 600 on POSIX).
 Skills do not manage this file — use `ts auth logout --profile {name}` to invalidate.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

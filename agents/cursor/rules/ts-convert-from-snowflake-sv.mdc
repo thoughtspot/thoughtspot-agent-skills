@@ -130,3 +130,11 @@ Show:
 - Tables: {n} reused / {n} created
 - Dimensions: {n}, Metrics: {n}, Formulas: {n}
 - Any formula translation notes (untranslatable expressions left as SQL passthrough)
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

@@ -128,3 +128,12 @@ They are now available in ThoughtSpot search for all users with access to this m
 
 On error: show the import error, diagnose the cause (most common: `formula_id` mismatch
 or duplicate name), fix the TML, and re-import.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.1.0 | 2026-04-22 | Add parameter promotion support |
+| 1.0.0 | 2026-04-24 | Initial versioned release |

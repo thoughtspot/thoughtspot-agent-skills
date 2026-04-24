@@ -141,3 +141,11 @@ Show:
 
 If the user wants to convert multiple models, repeat Steps 1–8 for each. Reuse the
 same ThoughtSpot and Snowflake profiles across the batch.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

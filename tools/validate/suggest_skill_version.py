@@ -226,7 +226,11 @@ def main() -> int:
     staged = result.stdout.splitlines()
     staged_skills = [
         repo_root / p for p in staged
-        if p.startswith("agents/claude/") and p.endswith("/SKILL.md")
+        if (
+            (p.startswith("agents/claude/") and p.endswith("/SKILL.md"))
+            or (p.startswith("agents/coco/") and p.endswith("/SKILL.md"))
+            or (p.startswith("agents/cursor/rules/") and p.endswith(".mdc"))
+        )
     ]
 
     if not staged_skills:
