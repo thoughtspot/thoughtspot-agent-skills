@@ -1,7 +1,7 @@
 # ThoughtSpot Agent Skills
 
 A collection of skills and tools for working with ThoughtSpot, packaged for two
-runtimes: **Claude Code** and **Snowflake Cortex (CoCo)**.
+runtimes: **Claude Code** and **Snowflake Cortex (CoCo)**. <!-- test PR -->
 
 ---
 
