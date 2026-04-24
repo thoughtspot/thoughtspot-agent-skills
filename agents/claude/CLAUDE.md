@@ -24,6 +24,62 @@ description: One sentence shown in the skill picker — be specific about inputs
 ---
 ```
 
+## Skill intro
+
+Every skill with 4 or more steps, or any confirmation gate, must begin with a
+**Step 0** that displays the session plan before doing any work. Read any prerequisite
+reference files in the background first, but output nothing to the user until Step 0 is
+shown.
+
+### Step 0 format
+
+Display:
+1. **Skill name** — the one-sentence `description` from the frontmatter
+2. A numbered list of the major steps, each annotated as `auto`, `you choose`, or `you confirm`
+3. A one-line summary of which steps require confirmation and which are auto-executed
+4. `Ready to start? [Y / N]`
+
+Do not begin Step 1 until the user confirms. If the user declines, offer to explain the
+skill in more detail or exit.
+
+### Template
+
+```markdown
+## Step 0 — Overview
+
+On skill invocation, display:
+
+---
+**{skill-name}** — {description from frontmatter}
+
+Steps:
+  1. {step name} ........... auto
+  2. {step name} ........... you choose
+  ...
+  N. {step name} ........... you confirm
+
+Confirmation required: Steps M, N
+Auto-executed: all others
+
+Ready to start? [Y / N]
+---
+
+Do not begin Step 1 until the user confirms.
+```
+
+### Profile skills and other menu-driven skills
+
+Profile management skills (`ts-profile-*`) display an interactive menu on invocation.
+Add a one-sentence context line before the menu — no confirmation gate needed.
+These skills are exempt from Step 0 because the menu IS the entry point.
+
+### Research-only skills
+
+Skills that perform only read operations (no API writes, no file modifications) should
+show the plan but may proceed without waiting for explicit confirmation.
+
+---
+
 ## Reference paths (Claude Code convention)
 
 Claude skills reference shared files via symlink-resolved paths:
@@ -61,6 +117,14 @@ open items.
 
 Any `/tmp/ts_token_*.txt` written during a skill session must be cleaned up at skill end.
 The `ts` CLI manages its own token cache — skills should not create additional token files.
+
+## Personal references
+
+Internal URLs, environment-specific GUIDs, and other personal context that should not
+be committed to this repo belong in the Claude Code memory system
+(`~/.claude/projects/.../memory/`), not in skill files or shared references. Use the
+`reference` memory type for pointers to internal resources (e.g. internal source control
+URLs, private API playgrounds). This keeps the repo clean and public-safe.
 
 ## Adding a skill
 

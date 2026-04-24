@@ -39,14 +39,18 @@ If this map is getting outdated, update the table — do not prompt the author t
 
 ## Commit + deploy protocol
 
-Three steps, always together:
+**Never push directly to `main`.** All changes — including hotfixes and docs-only edits —
+must go through a pull request. `main` has branch protection; direct pushes bypass it and
+skip review.
 
-1. `git commit` + `git push origin main`
-2. For any changed `agents/coco/` or `agents/shared/` file: `./scripts/stage-sync.sh`
-   (exact commands in agents/coco/SETUP.md if running manually)
-3. For `tools/ts-cli/` changes: `pip install -e tools/ts-cli` in the affected environment
+Workflow for every change:
+1. Work on a feature or wip branch (`feat/<slug>` or `wip/<skill>`)
+2. `git push -u origin <branch>` and open a PR against `main`
+3. After the PR merges:
+   - For any changed `agents/coco/` or `agents/shared/` file: `./scripts/stage-sync.sh`
+   - For `tools/ts-cli/` changes: `pip install -e tools/ts-cli` in the affected environment
 
-Claude Code changes (via symlinks) take effect immediately — no step 2 needed for `agents/claude/` only.
+Claude Code changes (via symlinks) take effect immediately — no step needed for `agents/claude/` only.
 
 ## Branching conventions
 

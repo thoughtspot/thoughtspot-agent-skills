@@ -12,39 +12,35 @@ Then apply these rules before touching any file:
 
 | Current branch | Intended work | Action |
 |---|---|---|
-| `main` | New skill, new feature, or any change needing live-instance testing | `git checkout -b wip/<skill-name>` from main first |
-| `main` | Hotfix to an existing, shipped skill | Acceptable to work directly on main |
-| `main` | Docs-only change (README, SETUP.md, CLAUDE.md) | Acceptable to work directly on main |
+| `main` | Any change | Create a branch first — **never commit or push directly to main** |
 | `wip/*` (correct branch for the work) | Continuing in-progress work | Proceed |
 | `wip/*` (wrong branch) | Work belongs on a different branch | Switch branches before making changes |
 
-**Default: if in doubt, create a wip branch.** It costs nothing and keeps main clean.
-
-## Never commit directly to main for
-
-- New skills or skill extensions under active development
-- Any change that requires live ThoughtSpot or Snowflake testing before shipping
-- Multi-step changes that span more than one session
+**All changes to `main` go through a pull request — no exceptions.**
+This includes hotfixes, docs-only edits, and single-line changes. `main` has branch
+protection; direct pushes bypass review and bypass the PR-gated pre-commit checks.
 
 ## Branch naming
 
+Use `feat/<slug>` for changes ready to PR immediately, `wip/<skill>` for in-progress work:
+
 ```
+feat/<slug>            e.g. feat/skill-intros, feat/step0-convention
 wip/<skill-name>       e.g. wip/model-builder, wip/databricks
-wip/<feature-slug>     e.g. wip/sv-split-merge, wip/snowflake-osi
 ```
 
-## Merging to main
+## Merging wip to main
 
-Merge criteria (all must be true):
+Criteria (all must be true before opening a PR):
 1. All `references/open-items.md` items in changed skills are **VERIFIED**
 2. All validators pass: `python3 tools/validate/check_*.py --root .`
 3. Changes have been tested against a live instance where required
 
-Merge steps:
+Steps:
 ```bash
-git checkout main
-git merge wip/<branch> --ff-only   # fast-forward keeps history clean
-git push origin main
+git push -u origin wip/<branch>
+# Open a PR on GitHub — do not merge locally
+# After the PR is merged on GitHub:
 git branch -d wip/<branch>
 git push origin --delete wip/<branch>
 ```
@@ -55,3 +51,4 @@ git push origin --delete wip/<branch>
 |---|---|---|
 | `wip/model-builder` | `ts-object-model-builder` — TS-native split/merge modes | In progress |
 | `wip/databricks` | Databricks profile + conversion skills | In progress |
+| `wip/ts-dependency-manager` | `ts-dependency-manager` — column removal, rename, repoint with impact report and rollback | In progress |

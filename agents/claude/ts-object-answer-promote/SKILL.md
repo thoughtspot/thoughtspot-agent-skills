@@ -41,6 +41,38 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 ---
 
+## Step 0 — Overview
+
+On skill invocation, display this plan before doing any work:
+
+---
+**ts-object-answer-promote** — promote formulas and parameters from a saved ThoughtSpot Answer into a Model, making them available to all users who search against it.
+
+Steps:
+  1.  Authenticate ..................................... auto
+  2.  Find the Answer .................................. you choose
+  3.  Export and parse the Answer TML .................. auto
+  4.  Select formulas (and parameters) to promote ...... you choose
+  5.  Find the target Model ............................ you choose
+  6.  Check edit permissions on the Model .............. auto
+  7.  Export and parse the Model TML ................... auto
+  8.  Detect duplicate formula and parameter names ..... auto
+  9.  Map formula column references to the Model ........ auto (may ask for clarification)
+ 10.  Build the updated Model TML ...................... auto
+ 11.  Checkpoint — review changes before import ......... you confirm
+ 12.  Import the updated Model TML ..................... auto
+ 13.  Verify and report ............................... auto
+
+Confirmation required: Steps 4, 5, 11
+Auto-executed: Steps 1, 3, 6, 7, 8, 9, 10, 12, 13
+
+Ready to start? [Y / N]
+---
+
+Do not begin Step 1 until the user confirms.
+
+---
+
 ## Step 1 — Authenticate
 
 Read `~/.claude/thoughtspot-profiles.json`. If the file is missing or empty, prompt the
@@ -890,5 +922,6 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.1.0 | 2026-04-22 | Add parameter promotion (option P in Step 4, duplicate detection, merging) |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

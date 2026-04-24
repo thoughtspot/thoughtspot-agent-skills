@@ -100,4 +100,71 @@ if [ "$FAILED" -gt 0 ]; then
   exit 1
 fi
 
+# ── Main branch skill audit ───────────────────────────────────────────────────
+# On any commit to main that touches agents/claude/, show the full skill inventory
+# and require explicit confirmation that every skill belongs in this repo.
+# This prevents accidentally committing skills that live in other projects.
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+
+if [ "$CURRENT_BRANCH" = "main" ] && echo "$STAGED" | grep -qE '^agents/claude/'; then
+  # What skill-level changes are in this commit?
+  ADDING=$(git diff --cached --name-only --diff-filter=A \
+    | grep -E '^agents/claude/[^/]+/SKILL\.md$' \
+    | sed 's|agents/claude/||;s|/SKILL\.md||' | sort)
+  REMOVING=$(git diff --cached --name-only --diff-filter=D \
+    | grep -E '^agents/claude/[^/]+/SKILL\.md$' \
+    | sed 's|agents/claude/||;s|/SKILL\.md||' | sort)
+  UPDATING=$(git diff --cached --name-only \
+    | grep -E '^agents/claude/[^/]+/' \
+    | sed 's|agents/claude/||;s|/.*||' | sort -u \
+    | grep -vxF "$ADDING" | grep -vxF "$REMOVING")
+
+  # Skills on disk after staging (find reflects the post-staged filesystem state)
+  ALL_SKILLS=$(find agents/claude -maxdepth 2 -name 'SKILL.md' 2>/dev/null \
+    | sed 's|^agents/claude/||;s|/SKILL\.md$||' | sort)
+
+  echo "  ── Main branch skill audit ──────────────────────────────────────"
+  echo ""
+
+  if [ -n "$ADDING" ]; then
+    while IFS= read -r s; do echo "  + Adding:   $s"; done <<< "$ADDING"
+  fi
+  if [ -n "$REMOVING" ]; then
+    while IFS= read -r s; do echo "  - Removing: $s"; done <<< "$REMOVING"
+  fi
+  if [ -n "$UPDATING" ]; then
+    while IFS= read -r s; do echo "  ~ Updating: $s"; done <<< "$UPDATING"
+  fi
+
+  echo ""
+  echo "  Skills in this repo after commit:"
+  if [ -n "$ALL_SKILLS" ]; then
+    while IFS= read -r s; do echo "    $s"; done <<< "$ALL_SKILLS"
+  else
+    echo "    (none)"
+  fi
+  echo ""
+  printf "  All of the above belong in thoughtspot-agent-skills? [y/N] "
+
+  if [ -e /dev/tty ]; then
+    read -r confirm < /dev/tty
+  else
+    echo ""
+    echo "  Non-interactive terminal — cannot prompt. Aborting commit to main."
+    echo "  Use --no-verify only if you are certain this is correct."
+    exit 1
+  fi
+
+  case "$confirm" in
+    y|Y) ;;
+    *)
+      echo ""
+      echo "  Commit to main cancelled."
+      echo "  Remove any skills that don't belong, then re-stage and commit."
+      exit 1
+      ;;
+  esac
+  echo ""
+fi
+
 echo "All checks passed."
