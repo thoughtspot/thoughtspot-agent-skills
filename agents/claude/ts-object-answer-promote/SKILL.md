@@ -883,3 +883,12 @@ To verify, open the Model URL above and check the Columns section for the new fo
 ```bash
 rm -f /tmp/ts_promote_formula_model.yaml
 ```
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.1.0 | 2026-04-22 | Add parameter promotion (option P in Step 4, duplicate detection, merging) |
+| 1.0.0 | 2026-04-24 | Initial versioned release |

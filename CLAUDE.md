@@ -25,14 +25,14 @@ or patch files there directly.
 
 | Changed area | Also update |
 |---|---|
-| Any SKILL.md (new command or step) | README.md skills table; agents/claude/SETUP.md if install/symlink step changed; corresponding agents/cursor/rules/*.mdc |
+| Any SKILL.md (new command or step) | README.md skills table; agents/claude/SETUP.md if install/symlink step changed; corresponding agents/cursor/rules/*.mdc; bump version in SKILL.md ## Changelog |
 | agents/shared/* | snow stage copy for that file (see agents/coco/SETUP.md); worked example if output changes |
-| tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md and .mdc that uses that command |
+| tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md and .mdc that uses that command; CHANGELOG.md entry if version bumped |
 | agents/claude/ skill logic | Corresponding agents/coco/ skill AND agents/cursor/rules/*.mdc if logic applies |
 | agents/coco/ skill logic | Corresponding agents/claude/ skill if logic applies to both runtimes |
 | agents/cursor/rules/*.mdc | Corresponding agents/claude/ SKILL.md (keep in sync) |
 | Credential storage steps | agents/claude/ts-profile-{thoughtspot,snowflake}/SKILL.md; agents/cursor/rules/ts-profile-{thoughtspot,snowflake}.mdc; .claude/rules/security.md |
-| Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file) |
+| Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file); add ## Changelog starting at 1.0.0; CHANGELOG.md entry |
 | Add a new shared schema/mapping | agents/coco/SETUP.md stage copy list; all SKILL.md and .mdc files that reference it |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.

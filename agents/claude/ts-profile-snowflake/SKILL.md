@@ -847,3 +847,11 @@ Lowercase in `SHOW` output = case-sensitive identifier = must be quoted in SQL.
 - Second argument: YAML in `$$` dollar-quotes
 - Third argument `TRUE`: dry-run (validates without creating) — always run first
 - Remove the third argument (or pass `FALSE`) for the actual CREATE
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-24 | Initial versioned release |

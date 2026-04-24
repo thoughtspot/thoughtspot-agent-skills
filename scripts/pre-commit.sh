@@ -68,6 +68,18 @@ if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then
   run_check "consistency"        "tools/validate/check_consistency.py --root $REPO_ROOT --staged"
 fi
 
+# Skill versioning — runs when any SKILL.md is touched
+# Step 1: interactively suggest a changelog entry if one is missing (TTY only)
+# Step 2: validate that every staged skill has a changelog entry
+if echo "$STAGED" | grep -q 'SKILL\.md'; then
+  python3 tools/validate/suggest_skill_version.py --root $REPO_ROOT
+  run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
+fi
+
+# Repo changelog — suggests a CHANGELOG.md entry for significant staged changes:
+# new skills, ts-cli version bumps, new shared reference files (TTY only)
+python3 tools/validate/suggest_repo_changelog.py --root $REPO_ROOT
+
 # Only run unit tests if Python source files are staged
 if echo "$STAGED" | grep -q '\.py$'; then
   printf "  %-30s " "unit tests"
