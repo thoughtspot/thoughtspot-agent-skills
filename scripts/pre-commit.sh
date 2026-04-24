@@ -76,6 +76,10 @@ if echo "$STAGED" | grep -q 'SKILL\.md'; then
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
+# Repo changelog — suggests a CHANGELOG.md entry for significant staged changes:
+# new skills, ts-cli version bumps, new shared reference files (TTY only)
+python3 tools/validate/suggest_repo_changelog.py --root $REPO_ROOT
+
 # Only run unit tests if Python source files are staged
 if echo "$STAGED" | grep -q '\.py$'; then
   printf "  %-30s " "unit tests"

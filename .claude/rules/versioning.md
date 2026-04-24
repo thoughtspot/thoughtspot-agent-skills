@@ -1,4 +1,4 @@
-# Skill Versioning
+# Versioning
 
 Every skill must have a `## Changelog` section at the bottom of its `SKILL.md`.
 The pre-commit hook validates this — commits touching a SKILL.md will fail if the
@@ -48,3 +48,42 @@ python3 tools/validate/check_skill_versions.py --root .
 ```
 
 Runs automatically in the pre-commit hook when any `SKILL.md` is staged.
+
+---
+
+## Repo changelog (CHANGELOG.md)
+
+`CHANGELOG.md` at the repo root tracks **repo-level** changes — things that affect
+users of the whole collection, not just one skill.
+
+### What belongs in CHANGELOG.md
+
+| Event | Example entry |
+|---|---|
+| New skill ships to main | `feat: add ts-dependency-manager skill` |
+| ts-cli version bump | `chore: bump ts-cli to v0.4.0` |
+| New shared schema/mapping | `docs: add thoughtspot-view-tml shared reference` |
+| Significant infrastructure change | `feat: add interactive changelog prompt to pre-commit hook` |
+
+### What does NOT belong in CHANGELOG.md
+
+- Individual skill fixes or minor updates — those go in the skill's own `## Changelog`
+- Refactoring with no user-visible change
+- Internal tooling that doesn't affect skill consumers
+
+### Format
+
+```markdown
+## YYYY-MM-DD
+- feat: add ts-dependency-manager skill
+- chore: bump ts-cli to v0.4.0
+```
+
+Entries are dated, not versioned — this repo ships continuously, not in releases.
+Newest date at the top. Multiple entries per date are fine.
+
+### Automation
+
+The pre-commit hook runs `suggest_repo_changelog.py` on every commit. It detects
+new SKILL.md files, ts-cli version bumps, and new shared files, then prompts
+accept/edit/skip. If you've already updated CHANGELOG.md today, it exits silently.
