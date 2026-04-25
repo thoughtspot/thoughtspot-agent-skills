@@ -42,6 +42,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
+| `ts-dependency-manager` (WIP) | `/ts-dependency-manager` | Audit dependencies, then safely remove, rename, or repoint columns across Models, Views, Answers, Liveboards, and Sets — with TML backup and rollback |
 
 **Setup** — manage connection profiles and credentials
 
