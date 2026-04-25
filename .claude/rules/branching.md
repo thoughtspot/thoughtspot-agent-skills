@@ -32,9 +32,10 @@ wip/<skill-name>       e.g. wip/model-builder, wip/databricks
 ## Merging wip to main
 
 Criteria (all must be true before opening a PR):
-1. All `references/open-items.md` items in changed skills are **VERIFIED**
+1. All `references/open-items.md` items in changed skills are **VERIFIED** (or explicitly deferred to a follow-up open item)
 2. All validators pass: `python3 tools/validate/check_*.py --root .`
-3. Changes have been tested against a live instance where required
+3. **A smoke test exists for every new or modified Claude skill** in `tools/smoke-tests/smoke_<skill>.py` — or the skill is on the `ALLOWLIST` in `tools/validate/check_smoke_tests.py` with a justification comment. The validator (`check_smoke_tests.py`) runs in the pre-commit hook
+4. Changes have been tested against a live instance where required (use the smoke test from #3 as the entry point)
 
 Steps:
 ```bash
