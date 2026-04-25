@@ -42,6 +42,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
+| `ts-coach-model` | `/ts-coach-model` | Comprehensively prepare a Model for Spotter — review existing AI Context / synonyms / description, mine dependent Liveboards/Answers and (optionally) Snowflake query history, then generate Column AI Context, Synonyms, Reference Questions, Business Terms, and a Data Model Instructions draft |
 
 **Setup** — manage connection profiles and credentials
 

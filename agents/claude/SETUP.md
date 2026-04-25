@@ -70,6 +70,18 @@ and Liveboards to a different Model with column-gap detection.
 
 Run with `/ts-dependency-manager`.
 
+### [`ts-coach-model`](ts-coach-model/)
+
+Comprehensively prepares a ThoughtSpot Model for Spotter. Reviews existing AI Context,
+synonyms, and description critically with KEEP/ADD/REFINE/REWRITE deltas; mines
+dependent Liveboards/Answers (and optionally the underlying Snowflake query history)
+for real business language; then generates the user's chosen mix of Column AI Context,
+Column Synonyms, Reference Questions, Business Terms, and a Data Model Instructions
+draft. Supports an up-front scope menu and per-row Method overrides during review
+(Method A: Synonym, Method B: Business Term, Method C: Reference Question).
+
+Run with `/ts-coach-model`.
+
 ---
 
 ## Installation
@@ -100,6 +112,7 @@ cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake ~/.claude
 cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-convert-to-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-coach-model ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
 cp -r /tmp/thoughtspot-agent-skills/agents/shared ~/.claude/shared
@@ -158,6 +171,9 @@ ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-convert-from-snowflake-sv 
 
 ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-object-answer-promote \
       ~/.claude/skills/ts-object-answer-promote
+
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-coach-model \
+      ~/.claude/skills/ts-coach-model
 
 # Shared reference docs (schemas, mappings, worked-examples)
 ln -s ~/Dev/thoughtspot-agent-skills/agents/shared ~/.claude/shared
@@ -239,6 +255,7 @@ what you want in natural language and Claude will invoke the right skill.
 |---|---|---|
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
 | `ts-dependency-manager` | `/ts-dependency-manager` | Remove or rename columns and repoint objects — with impact report, TML backup, and rollback |
+| `ts-coach-model` | `/ts-coach-model` | Comprehensively prepare a Model for Spotter: review existing AI assets, mine dependent objects + Snowflake history, generate Column AI Context / Synonyms / Reference Questions / Business Terms / Data Model Instructions draft |
 
 **Setup** — manage connection profiles and credentials
 
