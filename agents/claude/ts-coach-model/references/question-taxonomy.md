@@ -94,16 +94,26 @@ arbitrary pairs.
 
 | Pattern ID | Template | Example | Tokens (rough) | Formula |
 |---|---|---|---|---|
-| `t4.yoy` | `{M} YoY growth by {D}` | "Revenue YoY growth by region" | `[D] [M_yoy]` | `( [M] - group_aggregate(sum, [M], [T_year]-1) ) / group_aggregate(...)` |
-| `t4.mom` | `{M} MoM change` | "Revenue MoM change" | `[T] [M_mom]` | Similar to YoY at month grain |
+| `t4.yoy_compare` | `{M} this year vs last year by {D}` | "Revenue this year vs last year by region" | `[D] [M] this year [M] last year` | None — uses search-bar `this year`/`last year` keywords |
+| `t4.mom_compare` | `{M} this month vs last month` | "Revenue this month vs last month" | `[T] [M] this month [M] last month` | None — uses search-bar keywords |
 | `t4.conditional_agg` | `{M} from {D = condition}` | "Revenue from new customers only" | `[M_new]` | `sum_if([M], [D_status]='new')` |
 | `t4.window_rank` | `{D} rank by {M} within {D2}` | "Customer rank by revenue within region" | `[D] [D2] [M_rank]` | `rank([M], {[D2]})` |
 | `t4.cross_join_metric` | `{M1} per {M2} (different fact tables)` | "Conversion rate (orders / sessions)" | `[M_conversion]` | `[M1] / [M2]` (relies on Model joins) |
 
-**Generation rule:** emit `t4.yoy` once for the top measure if `T` exists. Emit
+**Generation rule:** emit `t4.yoy_compare` once for the top measure if `T` exists. Emit
 `t4.conditional_agg` for any attribute that has a status-like name (`status`, `type`,
 `flag`, `category` ≤ 5 distinct values) and the top measure. Emit `t4.cross_join_metric`
 only if the Model has ≥2 fact tables joined; pair the two largest measures.
+
+> **Note on YoY/MoM growth %.** An earlier version of this taxonomy emitted formula-bearing
+> `t4.yoy` / `t4.mom` rows using `group_aggregate(sum, [M], { [T] - 1 })`. The `[T] - 1`
+> operator on a date column inside a grouping argument is **not valid TS formula syntax** —
+> `group_aggregate`'s third argument is a `query_filters()` expression, not a date offset.
+> A verified period-over-period growth-% formula has not been documented in
+> [thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md);
+> the keyword-based comparison above is the safe fallback (produces two side-by-side KPIs,
+> one per period, with no formula required). Tracked in
+> [open-items.md](open-items.md) until a verified pattern lands.
 
 **Formula generation** — full expression building rules and a worked example for each
 T4 pattern are in [token-mapping-rules.md](token-mapping-rules.md) (Section 4).

@@ -449,6 +449,61 @@ update it with empirical guidance.
 
 ---
 
+## #13 — Verified TS period-over-period growth-% formula — OPEN
+
+**Symptom that prompted this entry.** The `t4.yoy` and `t4.mom` rows in the original
+question-taxonomy + token-mapping-rules used a formula template:
+
+```
+( [M] - group_aggregate ( sum , [M] , { [T] - 1 } ) ) / group_aggregate ( sum , [M] , { [T] - 1 } )
+```
+
+The `[T] - 1` operator on a date column inside a `group_aggregate` grouping argument is
+**not valid TS formula syntax** — the third argument of `group_aggregate` is a
+`query_filters()` expression, not a date offset. There is no documented way to express
+"prior-period value of M for the same scope" in
+[thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md).
+Caught in conversation 2026-04-27 while running the skill against the Dunder Mifflin
+Sales & Inventory Model — the user (a TS employee) flagged it before any TML import.
+
+### Interim fix (already applied)
+
+The taxonomy now emits keyword-based comparisons instead — `t4.yoy_compare` and
+`t4.mom_compare` produce two side-by-side KPIs (`[M] this year [M] last year` /
+`[M] this month [M] last month`) and require no formula. This mirrors the existing
+`t2.this_vs_last` pattern.
+
+### Test (when re-investigating)
+
+Investigate three candidate approaches against a live instance:
+
+1. **`growth_of` keyword** — Spotter's search bar accepts phrasings like
+   `revenue growth of order date last year`. Check whether the same keyword produces a
+   valid `search_tokens` entry that imports cleanly into `nls_feedback`.
+
+2. **`safe_divide` + `sum_if(year_diff([T], today()) = 1, [M])`** — express the
+   prior-period value via `sum_if` against a date-diff predicate. Verify both
+   syntax acceptance and result correctness against a known dataset.
+
+3. **Date-shifted column synonym** — define a Model formula like
+   `Prior Year [M]: sum_if ( year ( [T] ) = year ( today() ) - 1 , [M] )`, then write
+   a normal `( [M] - [Prior Year M] ) / [Prior Year M]` answer formula. The work
+   shifts from the answer formula to the Model — acceptable if the Model is being
+   coached anyway.
+
+Record findings here. If approach 1 works, the keyword-based comparison can be
+upgraded from "two KPIs" to "true growth %" without re-introducing a formula.
+
+### Action when verified
+
+Restore `t4.yoy` / `t4.mom` patterns in
+[question-taxonomy.md](question-taxonomy.md) and
+[token-mapping-rules.md](token-mapping-rules.md) with the verified formula or
+keyword string. Until then, `t4.yoy_compare` / `t4.mom_compare` (no formula) is the
+only safe pattern.
+
+---
+
 ## Verification matrix
 
 | Item | Required for merge to main | Required for v2 | Owner |
@@ -463,6 +518,7 @@ update it with empirical guidance.
 | #7 coaching index refresh latency | No (informational) | Yes (sets expectations) | Damian |
 | #8 volume calibration | No | Yes (drives default target) | Damian |
 | #9 synonyms vs BUSINESS_TERM equivalence | No (theory holds for v1) | Yes (refines explainer) | Damian |
+| #13 verified period-over-period growth-% formula | No (keyword fallback in place) | Yes (re-enables true t4.yoy / t4.mom) | Damian |
 
 **Merge blockers:** #2 and #3. Both are short tests against champ-staging on the
 Dunder Mifflin Model.

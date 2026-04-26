@@ -65,7 +65,7 @@ existing Model columns alone. Mapping by tier (from
 | T1 | none |
 | T2 | `t2.cumulative` |
 | T3 | `t3.avg_per`, `t3.ratio`, `t3.share_of_total` |
-| T4 | all (`t4.yoy`, `t4.mom`, `t4.conditional_agg`, `t4.window_rank`, `t4.cross_join_metric`) |
+| T4 | `t4.conditional_agg`, `t4.window_rank`, `t4.cross_join_metric` (`t4.yoy_compare` and `t4.mom_compare` use search-bar `this period`/`last period` keywords — no formula) |
 
 ### Expression syntax
 
@@ -95,11 +95,19 @@ The functions used by the taxonomy patterns:
 | `t3.avg_per` | `[M_total] / unique count ( [D] )` |
 | `t3.ratio` (margin) | `( [M1] - [M2] ) / [M1]` |
 | `t3.share_of_total` | `[M] / group_aggregate ( sum , [M] , { } )` |
-| `t4.yoy` | `( [M] - group_aggregate ( sum , [M] , { [T] - 1 } ) ) / group_aggregate ( sum , [M] , { [T] - 1 } )` |
-| `t4.mom` | Same shape as YoY at month grain |
 | `t4.conditional_agg` | `sum_if ( [M] , [D_status] = 'new' )` |
 | `t4.window_rank` | `rank ( [M] , { [D2] } )` |
 | `t4.cross_join_metric` | `[M1] / [M2]` (model joins resolve the cross-fact) |
+
+> **YoY/MoM growth-% formulas removed.** The previous templates relied on
+> `group_aggregate ( sum , [M] , { [T] - 1 } )`. The `[T] - 1` operator on a date column
+> inside a grouping argument is not valid TS formula syntax —
+> `group_aggregate`'s third argument is a `query_filters()` expression, not a date offset.
+> Use the keyword-based `t4.yoy_compare` and `t4.mom_compare` patterns from
+> [question-taxonomy.md](question-taxonomy.md) instead, which produce two side-by-side
+> KPIs (this period and last period) with no formula required. A verified TS
+> period-over-period growth-% formula is tracked as an open item in
+> [open-items.md](open-items.md).
 
 ### Formula `name` field
 
