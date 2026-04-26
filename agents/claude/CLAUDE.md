@@ -108,10 +108,15 @@ ts tables create --profile {name}   # reads JSON spec from stdin
 
 ## open-items.md pattern
 
-If a skill depends on API behaviour that hasn't been verified against a live instance,
-document it in `references/open-items.md` with the question, a self-contained test
-script, and space to record the finding. Do not ship skills with unresolved high-risk
-open items.
+Before filing an open-item, query the SpotterCode MCP first — `get-rest-api-reference`
+for endpoint shape, `get-developer-docs-reference` as fallback for broader concepts.
+Most "what does this endpoint do?" questions are answerable from the spec without
+a live instance. See `.claude/rules/api-research.md` for precedence and finding format.
+
+If the MCP doesn't answer the question — or the question is build/version-specific
+behaviour that needs live verification — document it in `references/open-items.md`
+with the question, a self-contained test script, and space to record the finding.
+Do not ship skills with unresolved high-risk open items.
 
 ## Temp file hygiene
 
