@@ -52,3 +52,4 @@ git push origin --delete wip/<branch>
 | `wip/model-builder` | `ts-object-model-builder` — TS-native split/merge modes | In progress |
 | `wip/databricks` | Databricks profile + conversion skills | In progress |
 | `wip/ts-dependency-manager` | `ts-dependency-manager` — column removal, rename, repoint with impact report and rollback | In progress |
+| `wip/github-actions-ci` | GitHub Actions workflow to run pre-commit checks on PRs (placeholder — see `.github/CI_DESIGN_NOTES.md`) | Placeholder |
