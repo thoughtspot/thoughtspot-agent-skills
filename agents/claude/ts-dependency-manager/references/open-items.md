@@ -1121,21 +1121,82 @@ The actual cause is reflected in `error_code` (14518 = invalid filter column,
 **Implication for the skill:** the Step 9 import loop must NOT match on error message
 text. It must read `error_code` to classify failures and surface the right remediation.
 
+**2026-04-26 update — UPDATED FINDING after live test on champ-staging:**
+
+Tested by stripping a known column ("Customer Zipcode") from
+TEST_DEPENDENCY_MANAGEMENT (e5c84be6-...) — which has a verified Answer and
+Liveboard dependency — and attempting import via every variant of the TML import
+endpoint. The response on this build does **NOT include `error_code`** in any
+form, AND does not include a dependent list. Tested variants (all returned the
+identical "Invalid YAML/JSON syntax in file" body):
+
+- `/api/rest/2.0/metadata/tml/import` with `import_policy: ALL_OR_NONE`
+- `/api/rest/2.0/metadata/tml/import` with `import_policy: PARTIAL`
+- `/api/rest/2.0/metadata/tml/import` with `validate_only: true`
+- `/api/rest/2.0/metadata/tml/import` with `dry_run: true`
+- `/callosum/v1/metadata/tml/import` (returns nginx 500 — not routed)
+
+Response shape is exactly:
+
+```json
+[
+  {
+    "response": {
+      "status": {
+        "error_message": "Invalid YAML/JSON syntax in file.",
+        "status_code": "ERROR"
+      }
+    },
+    "request_index": 0
+  }
+]
+```
+
+There is no `error_code`, no `details`, no `dependents`, no `diagnostics`. The
+`PARTIAL_OBJECT_REJECTED_ON_ERROR` policy was rejected as not a valid enum value.
+
+**Implications:**
+
+1. **Skill cannot rely on `error_code` for branching on champ-staging** — the
+   field isn't returned. The contributor who originally documented these codes
+   (14516/14518/14544) must have been working from a different build, or from
+   internal logs not exposed via the API.
+
+2. **"Just try the delete" approach (Q from user, 2026-04-26) does not work as
+   a replacement for the dep walk** — TS does block the change (so the ✅/❌
+   signal is reliable), but tells us nothing about WHY. This means the skill
+   must continue to do its own dep discovery to produce a meaningful impact
+   report.
+
+3. **"Try the delete" IS still useful as a Step-9 safety net** — after applying
+   all planned fixes, the source change attempt either succeeds (no missed
+   deps) or fails cleanly with ALL_OR_NONE (nothing applied; user re-investigates).
+   Recommend adding this as an explicit final correctness check.
+
 **Resolution:**
-1. Build a mapping table of TS error codes → cause/remediation
-2. Update `import_status()` helper in Step 9b to extract `error_code` and pair it with
-   the message
-3. Surface error_code in the Change Report (Step 10) so users can look up the cause
+1. ~Build a mapping table of TS error codes → cause/remediation~ — not viable on
+   this build (codes not returned)
+2. Update `import_status()` helper in Step 9b to extract `error_code` IF
+   present (forward-compatibility); otherwise fall back to the message text.
+3. Surface error_code (when present) in the Change Report (Step 10) so users
+   can look up the cause.
+4. Add explicit "post-change correctness check" to Step 9: after the source
+   import succeeds, if any dependent fixes failed, surface that the source
+   change was ALSO blocked. (TS rejected the source change in ALL_OR_NONE mode
+   when deps still reference the column.)
+5. Re-test on a newer Cloud build (26.4+) to see if `error_code` is exposed
+   there — would unblock proper error-code branching.
 
-**Witnessed error codes (partial):**
+**Witnessed error codes (documented but not surfaced via API on this build):**
 
-| Code  | Meaning |
-|-------|---------|
-| 14516 | Duplicate cohort name |
-| 14518 | Invalid filter column (column referenced by filter doesn't exist) |
-| 14544 | Deleted columns have dependents (cascade block) |
+| Code  | Meaning | Source |
+|-------|---------|--------|
+| 14516 | Duplicate cohort name | (legacy doc; not seen in API) |
+| 14518 | Invalid filter column (column referenced by filter doesn't exist) | (legacy doc; not seen in API) |
+| 14544 | Deleted columns have dependents (cascade block) | (legacy doc; not seen in API) |
 
-**Status:** Catalog the codes by triggering known failures; document per-code remediation.
+**Status:** UPDATED FINDING 2026-04-26 — error_code is not present in champ-staging
+TML import responses. Skill must use dep walk as primary discovery, not error parsing.
 
 ---
 
