@@ -504,6 +504,77 @@ only safe pattern.
 
 ---
 
+## #14 — `ai_context` character limit — OPEN
+
+**Question:** what is the character / byte limit on `properties.ai_context`?
+The TML schema documents the field as "free text" but specifies no upper bound.
+With the structured-YAML AI Context proposal (axes: meaning, unit, includes,
+excludes, source, time_basis, null_zero, watch_out, formula), a fully populated
+column block can run 600–1200 bytes. We need to confirm the field tolerates
+this without truncation.
+
+### Test (run against champ-staging Dunder Mifflin Sales & Inventory)
+
+```python
+import json, urllib.request
+sizes = [1024, 4096, 16384, 65536]
+for n in sizes:
+    payload = "x" * n  # known-length string
+    # Patch a single column's ai_context to payload via Model TML import
+    # Round-trip via ts tml export and measure how much survives
+    # Record: bytes_sent, bytes_returned, status_code, error_message
+```
+
+### Why it matters
+
+If the limit is below ~2KB, the structured-YAML AI Context proposal needs
+defensive truncation per axis (e.g., cap each axis at 200 chars, prioritise
+`meaning` + `unit` + `source` if the budget is tight). If the limit is ≥ 64KB,
+no defensive logic is needed.
+
+Until verified, the skill should generate AI Context normally but log a
+warning if any column's payload exceeds 2KB so the user can spot truncation
+risk before import.
+
+---
+
+## #15 — Cross-Model consistency heuristic calibration — OPEN
+
+The Step 4.5 cross-Model consistency scan
+([cross-model-consistency.md](cross-model-consistency.md)) uses heuristics
+to propose a default RouteAction (`RENAME` / `ALIGN` / `DOCUMENT_DIFFERENCE` /
+etc.) for each detected collision. The heuristics have NOT been calibrated
+against a live tenant — until calibration, the skill defaults every
+collision to `NEEDS_REVIEW` rather than the heuristic's pick.
+
+### Test (run against champ-staging or se-thoughtspot)
+
+1. Run `ts-coach-model` Step 4.5 against a Model with ≥ 5 known
+   cross-Model collisions
+2. For each collision, record:
+   - Heuristic-proposed RouteAction
+   - Domain-expert-correct RouteAction (from the user)
+   - Whether the heuristic was right, wrong, or close
+3. Aggregate to a calibration scorecard: `correct / wrong / close × 100`
+
+### Pass criteria
+
+- ≥ 70% correct OR ≥ 90% (correct + close) for the heuristic to become the
+  default proposal
+- Below that — keep `NEEDS_REVIEW` as the default; the heuristic appears
+  in the "Suggested" column only as a hint
+
+### Specific signals to tune
+
+- The "canonical Model" heuristic for `ALIGN` proposals (creation_time vs
+  modified_time vs ai_context-completeness)
+- The substring-conflict heuristic for `ai_context` divergence (how
+  aggressive should it be? false-positive rate currently unknown)
+- `db_column_name` exact-match — confirm this is the right granularity (vs
+  matching at table-level)
+
+---
+
 ## Verification matrix
 
 | Item | Required for merge to main | Required for v2 | Owner |
@@ -519,6 +590,8 @@ only safe pattern.
 | #8 volume calibration | No | Yes (drives default target) | Damian |
 | #9 synonyms vs BUSINESS_TERM equivalence | No (theory holds for v1) | Yes (refines explainer) | Damian |
 | #13 verified period-over-period growth-% formula | No (keyword fallback in place) | Yes (re-enables true t4.yoy / t4.mom) | Damian |
+| #14 ai_context character limit | No (proposal still functional with warning logging) | Yes (structured-YAML AI Context default) | Damian |
+| #15 cross-Model consistency heuristic calibration | No (defaults to NEEDS_REVIEW) | Yes (heuristic-driven defaults reduce review load) | Damian |
 
 **Merge blockers:** #2 and #3. Both are short tests against champ-staging on the
 Dunder Mifflin Model.

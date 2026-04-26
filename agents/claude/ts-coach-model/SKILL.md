@@ -43,6 +43,8 @@ Ask one question at a time. Wait for each answer before proceeding.
 | [references/prose-mining-rules.md](references/prose-mining-rules.md) | How to extract business phrases from Model description, Answer/Liveboard prose, tile names |
 | [references/ai-asset-review-rules.md](references/ai-asset-review-rules.md) | Critique heuristics for existing ai_context / synonyms / description |
 | [references/synonym-strategy-explainer.md](references/synonym-strategy-explainer.md) | Inline explainer for column synonyms vs BUSINESS_TERM coaching (shown to the user) |
+| [references/review-explainers.md](references/review-explainers.md) | 3-section explainer blocks (purpose / signals checked / outcome rules) prepended to every Step 7 review file |
+| [references/cross-model-consistency.md](references/cross-model-consistency.md) | Cross-Model column collision detection — purpose, signals, decision tree, output format (powers Step 4.5) |
 | [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake auth (optional) |
 | [~/.claude/shared/schemas/thoughtspot-feedback-tml.md](~/.claude/shared/schemas/thoughtspot-feedback-tml.md) | Coaching TML structure (output for surfaces 3 + 4) |
@@ -76,14 +78,15 @@ Steps:
   2.  Export Model TML; extract schema and existing AI assets . auto
   3.  Mine candidate sources (Liveboards/Answers, prose, Snowflake) . auto
   4.  Review existing AI assets — produce critique + deltas .. auto
+  4.5 Cross-Model consistency scan — flag column-name collisions across other Models . auto
   5.  Show critique; pick which surfaces to generate ......... you confirm
   6.  Generate proposals per selected surface ................. auto
-  7.  Per-surface review + worked-example explainer ........... you confirm
+  7.  Per-surface review with explainer blocks (purpose / signals / outcome rules) . you confirm
   8.  Build merged TML, backup, final import gate ............. you confirm
   9.  Import + smoke test ..................................... auto
 
 Confirmation required: Steps 1, 5, 7, 8
-Auto-executed: Steps 2, 3, 4, 6, 9
+Auto-executed: Steps 2, 3, 4, 4.5, 6, 9
 
 Ready to start? [Y / N]
 ---
@@ -431,6 +434,70 @@ each `REFINE` or `REWRITE` in Step 7. Save the critique to `{run_dir}/existing_r
 
 ---
 
+## Step 4.5 — Cross-Model Consistency Scan
+
+Spotter doesn't disambiguate between same-named columns across Models the user
+can reach. The same query may return different numbers depending on which Model
+the user happens to hit — the central failure mode in enterprise text-to-SQL
+(Axius, *"The 7-Table Fallacy"*, 2026). Full implementation rules in
+[cross-model-consistency.md](references/cross-model-consistency.md). Summary:
+
+For each column in this Model, search all Models the user can read in the org
+and compare on:
+
+1. `db_column_name` — different warehouse source ⇒ almost always different meaning
+2. `column_type` — measure vs attribute mismatch
+3. `aggregation` — sum vs avg = different semantics
+4. Formula expression — for formula columns, does the math agree?
+5. `ai_context` text — substring conflict heuristic
+
+```python
+# Enumerate readable Models. The CLI subtype filter pulls both Worksheets and
+# Models — filter to Models via metadata_header.contentUpgradeId.
+import subprocess, json
+res = subprocess.check_output([
+    "ts", "metadata", "search",
+    "--subtype", "WORKSHEET",
+    "--profile", profile_name,
+])
+all_models = [r for r in json.loads(res)
+              if r["metadata_header"].get("contentUpgradeId") != "WORKSHEET_TO_MODEL_UPGRADE"
+              and r["metadata_header"].get("worksheetVersion") != "V1"
+              and r["metadata_id"] != model_guid]
+
+# For each Model, export TML cached on (guid, modified_time_in_millis)
+cache_dir = pathlib.Path.home() / ".cache" / "ts-coach-model" / "tml-corpus"
+cache_dir.mkdir(parents=True, exist_ok=True)
+corpus = []
+for m in all_models:
+    cache_key = f"{m['metadata_id']}-{m['metadata_header']['modified']}.json"
+    cache_path = cache_dir / cache_key
+    if not cache_path.exists():
+        # Stale entries for this guid get cleared on miss
+        for old in cache_dir.glob(f"{m['metadata_id']}-*.json"):
+            old.unlink()
+        subprocess.check_call([
+            "ts", "tml", "export", m["metadata_id"],
+            "--profile", profile_name, "--fqn", "--parse",
+        ], stdout=open(cache_path, "w"))
+    corpus.append(json.loads(cache_path.read_text()))
+```
+
+Build the column-name → collisions index, run the divergence checks per
+[cross-model-consistency.md](references/cross-model-consistency.md), and
+write `{run_dir}/cross_model_consistency.md` with the explainer block from
+[review-explainers.md](references/review-explainers.md) Block 6 prepended.
+
+Until the heuristic is calibrated against a live tenant
+([open-items.md](references/open-items.md) #15), default the proposed
+RouteAction to `NEEDS_REVIEW` for every collision — let the user pick.
+
+The scan output is referenced from the Step 5 critique summary; users can
+defer review by picking `0` from the surface menu or skip it via the cross-Model
+checkbox.
+
+---
+
 ## Step 5 — Show Critique; Pick Which Surfaces to Generate
 
 Display the critique summary, ask about USER feedback inclusion, then show the
@@ -446,6 +513,13 @@ Column Synonyms:                 0 / 19 columns populated
 Existing feedback (GLOBAL):      0 entries        — used as input signal
 Existing feedback (USER):        0 entries        — private to creator
 Spotter enabled:                 ✅
+
+Cross-Model consistency scan:
+  Scanned 47 Models you can read.
+  Of this Model's 19 columns, 5 have name collisions in other Models.
+  Of those, 2 look genuinely divergent (different db_column_name or formula),
+  3 are duplicates with identical definitions.
+  → cross_model_consistency.md generated; review in Step 7.
 ```
 
 If `existing_feedback_user` is non-empty, ask:
@@ -469,14 +543,16 @@ Then show the surface menu:
 ```
 What would you like to generate or improve? (tick all that apply)
 
-  [ ] 1. Column AI Context        — propose a 2-3 sentence business description per column
-  [ ] 2. Column Synonyms          — propose alternative names per column (parser-level)
-  [ ] 3. Reference Questions      — full NL question → tokenised search mappings (target ~15)
-  [ ] 4. Business Terms           — phrase → column mappings (coaching-layer alternative)
-  [ ] 5. Data Model Instructions   — global rules draft (manual paste — TML location TBD)
-  [ ] 6. Improve Model description — only shown when Step 4 critique is REWRITE/EXPAND
+  [ ] 1. Column AI Context           — propose a 2-3 sentence business description per column
+  [ ] 2. Column Synonyms             — propose alternative names per column (parser-level)
+  [ ] 3. Reference Questions         — full NL question → tokenised search mappings (target ~15)
+  [ ] 4. Business Terms              — phrase → column mappings (coaching-layer alternative)
+  [ ] 5. Data Model Instructions     — global rules draft (manual paste — TML location TBD)
+  [ ] 6. Improve Model description   — only shown when Step 4 critique is REWRITE/EXPAND
+  [ ] 7. Cross-Model consistency     — review same-named-column collisions in other Models
+                                        (only shown when Step 4.5 found ≥ 1 collision)
 
-Enter numbers (e.g. "1,3,5") or "all":
+Enter numbers (e.g. "1,3,5"), "all", or "0" to skip generation but still review #7:
 ```
 
 If the user selects **any** of #2 (Column Synonyms), #3 (Reference Questions), or #4
@@ -597,54 +673,91 @@ Generate a single proposed replacement description, mentioning all primary
 measures + dimensions present in the Model and any business context surfaced from
 mined prose.
 
+### 6.7 — Cross-Model Consistency Report
+
+Format the collisions detected in Step 4.5 into the review file
+`{run_dir}/cross_model_consistency.md`. Per
+[cross-model-consistency.md](references/cross-model-consistency.md):
+
+- Prepend the explainer block (Block 6 in
+  [review-explainers.md](references/review-explainers.md))
+- One row per column with ≥ 1 collision (skip columns with zero collisions —
+  the file's purpose is to surface divergence, not enumerate non-issues)
+- Default RouteAction = `NEEDS_REVIEW` until the heuristic is calibrated
+  ([open-items.md #15](references/open-items.md))
+- Auto-generate the "Suggested rationale" column from the heuristic; the user
+  edits it during review
+
+If a column is marked `DOCUMENT_DIFFERENCE`, append a `# CONFLICTS_WITH:`
+annotation to that column's `ai_context` block during Step 8 build (uses
+the rationale text from the review file). Future runs detect this annotation
+and skip re-flagging the same collision unless underlying definitions change.
+
 ---
 
-## Step 7 — Per-Surface Review with Method Reminder
+## Step 7 — Per-Surface Review with Explainer Blocks
 
 For each generated surface, write a markdown file the user can edit directly.
 
-**Prepend a Method-summary header** to each review file — a short plain-English
-reminder of the Method that surface uses, with one concrete example drawn from the
-file's first row. The full explainer template lives in
-[synonym-strategy-explainer.md](references/synonym-strategy-explainer.md) (Per-surface
-review header section). Display it verbatim so the user is never staring at a row
-without knowing what accepting it means.
+**Prepend a 3-section explainer block** to each review file — *what this is for*,
+*what we checked*, *rules for the outcomes you can pick*. The canonical text per
+surface lives in [review-explainers.md](references/review-explainers.md). Display
+it verbatim with placeholder substitutions (`{N_columns}`, `{N_filled}`,
+`{N_models_scanned}`, etc.) so the user can pick decisions without re-reading
+SKILL.md.
+
+The Method labels (A/B/C) live within the relevant surface's explainer rather
+than as separate headers — e.g. `synonyms.md` is Method A, `mappings.md` is
+Method C. The full Method reasoning (when to use each, decision tree) is in
+[synonym-strategy-explainer.md](references/synonym-strategy-explainer.md) and
+is shown once at Step 5 before the surface menu.
 
 Per-surface format:
 
-| Surface | File | Method label | Header content |
+| Surface | File | Explainer block | Notes |
 |---|---|---|---|
-| AI Context | `ai_context.md` | (no method label — direct write) | Table: column, current value, proposed value, action (ADD/REFINE/KEEP), confidence |
-| Synonyms | `synonyms.md` | **METHOD A — Synonym** | Method-A reminder + first-row example. Table: column, current synonyms, proposed additions, action |
-| Reference Questions | `candidates.md` then `mappings.md` | **METHOD C — Reference Question** | Method-C reminder + first-row example. Two-stage: confirm questions, then confirm token mapping |
-| Business Terms | `business_terms.md` | **METHOD B — Business Term + formula** | Method-B reminder + first-row example. Table: phrase, target formula, justification |
-| Data Model Instructions | `instructions.md` | (no method label — manual paste) | Free-form draft + manual-paste guidance |
-| Description | `description.md` | (no method label — direct write) | Before/after diff |
+| AI Context | `ai_context.md` | Block 1 in [review-explainers.md](references/review-explainers.md) | Table: column, current value, proposed YAML, action, slots filled (X / 9) |
+| Synonyms | `synonyms.md` | Block 2 | METHOD A. Table: column, current synonyms, proposed additions, action |
+| Reference Questions, Stage 1 | `candidates.md` | Block 3 | METHOD C — confirm questions |
+| Reference Questions, Stage 2 | `mappings.md` | Block 4 | METHOD C — confirm tokens, variants, formulas |
+| Business Terms | `business_terms.md` | Block 5 | METHOD B. Table: phrase, target formula, justification |
+| Cross-Model Consistency | `cross_model_consistency.md` | Block 6 | Always shown when Step 4.5 found ≥ 1 collision |
+| Description | `description.md` | Block 7 | Before/after diff |
+| Data Model Instructions | `instructions.md` | Block 8 | Free-form draft + manual-paste guidance |
 
-Each row also has a `RouteAction` column (default `KEEP`). Allowed values:
+Each row has a `RouteAction` column with surface-specific allowed values. The
+*per-surface* allowed values, defaults, and what each one does are in the
+explainer block at the top of the file (Block 1–8 in
+[review-explainers.md](references/review-explainers.md)). The shared / common
+shape:
 
-| RouteAction | Meaning |
-|---|---|
-| `KEEP` (default) | Apply this row using the surface's Method |
-| `DROP` | Don't apply this row |
-| `MOVE_TO_A` | Re-route this phrase to be a Synonym (only if the target is a column) |
-| `MOVE_TO_B` | Re-route this phrase to be a Business Term + formula |
-| `MOVE_TO_C` | Re-route this phrase to be a Reference Question |
-| `EDIT` | The user has edited the proposed value; treat as the new authoritative value |
+| RouteAction | Available on | Meaning |
+|---|---|---|
+| `KEEP` | All surfaces (default) | Apply this row using the surface's Method |
+| `DROP` | All surfaces | Don't apply this row |
+| `EDIT` | All surfaces | The user has edited the proposed value; treat as the new authoritative value |
+| `MOVE_TO_A` | Synonyms, Reference Questions, Business Terms | Re-route this phrase to be a column synonym |
+| `MOVE_TO_B` | Synonyms, Reference Questions | Re-route to be a Business Term + formula |
+| `MOVE_TO_C` | Synonyms, Business Terms | Re-route to be a Reference Question |
+| `MOVE_TO_NEW_FORMULA` | Business Terms only | Target formula doesn't exist; user runs `/ts-object-answer-promote` first |
+| `KEEP_AS_IS` / `ALIGN` / `RENAME` / `DOCUMENT_DIFFERENCE` / `INTENTIONAL_DIFFERENCE` / `NEEDS_REVIEW` | Cross-Model Consistency only | See Block 6 |
+| `EXPAND` / `REWRITE` | Description only | See Block 7 |
+| `DEFER` | AI Context only | Skip this column this run; flag again next run |
 
-This per-row override is the user's full control surface — there's no global strategy
-choice. A phrase the user disagrees with as a Synonym can be moved to a Business Term
-or Reference Question without leaving the review file.
+This per-row override is the user's full control surface — there's no global
+strategy choice. A phrase the user disagrees with as a Synonym can be moved to
+a Business Term or Reference Question without leaving the review file.
 
 Wait for the user to type `done` (or per-file `done`), re-read each file, parse the
 RouteAction column, apply the routing, and ask for final confirmation per surface:
 
 ```
-ai_context.md      — kept 12 ADDs, 2 REFINEs, 5 KEEPs. Proceed? (Y / N):
-synonyms.md         — kept 18 ADDs, 6 routed to Method C, 11 dropped. Proceed? (Y / N):
-business_terms.md   — kept 4 ADDs, 1 routed to Method A, 0 dropped. Proceed? (Y / N):
-mappings.md         — kept 28 questions, 4 routed to Method A. Proceed? (Y / N):
-instructions.md     — kept 7 rules. Save for manual paste? (Y / N):
+ai_context.md                 — kept 12 ADDs, 2 REFINEs, 5 KEEPs. Proceed? (Y / N):
+synonyms.md                    — kept 18 ADDs, 6 routed to Method C, 11 dropped. Proceed? (Y / N):
+business_terms.md              — kept 4 ADDs, 1 routed to Method A, 0 dropped. Proceed? (Y / N):
+mappings.md                    — kept 28 questions, 4 routed to Method A. Proceed? (Y / N):
+cross_model_consistency.md     — 2 RENAMEs, 1 DOCUMENT_DIFFERENCE, 2 KEEP_AS_IS. Proceed? (Y / N):
+instructions.md                — kept 7 rules. Save for manual paste? (Y / N):
 ```
 
 ---
