@@ -476,13 +476,21 @@ rate in test environments where Models commonly rename columns).
 import json, subprocess
 
 def v2_dependents(guid, type_str, profile_name):
-    """Returns the dependents bucket dict {LOGICAL_TABLE: [...], QUESTION_ANSWER_BOOK: [...],
-    PINBOARD_ANSWER_BOOK: [...], COHORT: [...], FEEDBACK: [...]}.
+    """Query v2 dependents. Returns (buckets, access_flags).
+
+    buckets       — {LOGICAL_TABLE: [...], QUESTION_ANSWER_BOOK: [...], ...}
+                    Empty buckets are omitted (the API does not return empty keys).
+    access_flags  — {hasInaccessibleDependents: bool, areInaccessibleDependentsReturned: bool}
+                    These are STOP-condition signals: when hasInaccessibleDependents is
+                    True the calling user lacks visibility into some dependents that
+                    WOULD be affected by the change but won't appear in the impact
+                    report. The skill must surface this in Step 5 and require explicit
+                    acknowledgment before proceeding (Fix #1, 2026-04-26).
 
     Wraps `ts metadata dependents <guid> --type <type> --raw --profile <name>`
     (ts-cli >= 0.4.0). The CLI handles auth/token caching; we ask for `--raw`
-    here because we want the bucket structure for the alias-aware classification
-    below. See `tools/ts-cli/README.md` for the flat output shape used elsewhere.
+    here because we want the bucket structure + access flags for the alias-aware
+    classification below.
     """
     r = subprocess.run(
         ["bash", "-c",
@@ -491,12 +499,20 @@ def v2_dependents(guid, type_str, profile_name):
         capture_output=True, text=True,
     )
     if r.returncode != 0 or not r.stdout.strip():
-        return {}
+        return {}, {"hasInaccessibleDependents": False,
+                    "areInaccessibleDependentsReturned": False}
     arr = json.loads(r.stdout)
     if not arr:
-        return {}
+        return {}, {"hasInaccessibleDependents": False,
+                    "areInaccessibleDependentsReturned": False}
     item = arr[0]
-    return ((item.get("dependent_objects") or {}).get("dependents") or {}).get(guid) or {}
+    dep_obj = item.get("dependent_objects") or {}
+    buckets = (dep_obj.get("dependents") or {}).get(guid) or {}
+    flags = {
+        "hasInaccessibleDependents":         bool(dep_obj.get("hasInaccessibleDependents", False)),
+        "areInaccessibleDependentsReturned": bool(dep_obj.get("areInaccessibleDependentsReturned", False)),
+    }
+    return buckets, flags
 
 def tml_export_one(guid, profile_name):
     """Export a single object's TML. Returns the parsed item dict, or None on failure."""
@@ -514,14 +530,62 @@ def tml_export_one(guid, profile_name):
         return None
 
 # === Phase 1: direct dependents ===========================================
-src_buckets = v2_dependents(source_guid, "LOGICAL_TABLE", profile_name)
+src_buckets, src_access_flags = v2_dependents(source_guid, "LOGICAL_TABLE", profile_name)
 print(f"Source dependent buckets: {[(k, len(v)) for k, v in src_buckets.items()]}")
+
+# Aggregate inaccessible-dependents signal across the source + every Set sub-query.
+# Surface this in Step 5 STOP CONDITIONS so the user knows there are dependents the
+# scan cannot see (cross-org, RLS-restricted, sharing not granted to the calling user).
+inaccessible_dependents_seen = src_access_flags["hasInaccessibleDependents"]
+inaccessible_returned        = src_access_flags["areInaccessibleDependentsReturned"]
 
 candidate_models   = src_buckets.get("LOGICAL_TABLE",         []) or []
 candidate_answers  = src_buckets.get("QUESTION_ANSWER_BOOK",  []) or []
 candidate_lbs      = src_buckets.get("PINBOARD_ANSWER_BOOK",  []) or []
 candidate_cohorts  = src_buckets.get("COHORT",                []) or []
 direct_feedback    = src_buckets.get("FEEDBACK",              []) or []
+
+
+# Capture modified timestamps for drift detection at Step 9 (Fix #3, 2026-04-26).
+# `metadata_header.modified` is a Unix-millis timestamp returned by metadata search.
+# We snapshot it for every dependent at scan time; before each Step 9 import we
+# re-query and abort the per-object change if the timestamp has moved (someone
+# else edited the object between scan and apply). The dep walk's analysis (chart
+# roles, alias chain, etc.) was based on the Step-4 TML — applying it to a newer
+# version can clobber unrelated edits or miss new column references.
+def get_modified_ts(item_dict):
+    """Best-effort extraction of the modified timestamp from a v2 dependents entry
+    (the inner objects in QUESTION_ANSWER_BOOK / LOGICAL_TABLE / etc. buckets)."""
+    return int(
+        item_dict.get("modified")
+        or item_dict.get("modificationTimeInMillis")
+        or (item_dict.get("metadata_header") or {}).get("modified", 0)
+        or 0
+    )
+
+modified_at_scan = {}  # guid → epoch-millis at Step-4 scan time
+for entry in (candidate_models + candidate_answers + candidate_lbs + candidate_cohorts):
+    ts = get_modified_ts(entry)
+    if ts:
+        modified_at_scan[entry["id"]] = ts
+# Source object too — captured via metadata get since v2 dependents response
+# returns the source's metadata_id but not necessarily its modified field
+src_meta_proc = subprocess.run(
+    ["bash", "-c", f"source ~/.zshenv && ts metadata get {source_guid} "
+     f"--type {('LOGICAL_TABLE' if source_type == 'TABLE' else 'LOGICAL_TABLE')} "
+     f"--profile '{profile_name}'"],
+    capture_output=True, text=True,
+)
+if src_meta_proc.returncode == 0 and src_meta_proc.stdout.strip():
+    try:
+        src_meta = json.loads(src_meta_proc.stdout)
+        modified_at_scan[source_guid] = int(
+            (src_meta.get("metadata_header") or {}).get("modified", 0)
+        )
+    except json.JSONDecodeError:
+        modified_at_scan[source_guid] = 0
+print(f"  Captured modified timestamps for {len(modified_at_scan)} object(s) "
+      f"(drift check at Step 9)")
 
 # Track totals for the Scan Coverage section in the impact report
 scan_totals = {
@@ -920,8 +984,14 @@ if operation in ("REMOVE", "RENAME"):
         # already in `dependents` to make the Set its parent in the tree.
         consumers = []
         try:
-            cohort_buckets = v2_dependents(set_guid, "LOGICAL_COLUMN", profile_name)
+            cohort_buckets, cohort_flags = v2_dependents(set_guid, "LOGICAL_COLUMN", profile_name)
             scan_totals["endpoint_calls"] += 1
+            # If the calling user can't see all of this Set's consumers, escalate the
+            # source-level signal — the impact report must warn before any change.
+            if cohort_flags["hasInaccessibleDependents"]:
+                inaccessible_dependents_seen = True
+            if cohort_flags["areInaccessibleDependentsReturned"]:
+                inaccessible_returned = True
             for type_key in ("QUESTION_ANSWER_BOOK", "PINBOARD_ANSWER_BOOK"):
                 for it in (cohort_buckets.get(type_key) or []):
                     consumers.append({
@@ -1031,6 +1101,35 @@ requires explicit user confirmation — it cannot be undone). If any dependents 
 `action == "REMOVE_CHART"`, show them in the STOP CONDITIONS block too. Include an
 ACTION column in every dependent table so the user can see what will happen to each object.
 
+**If `inaccessible_dependents_seen` is True**, render an INACCESSIBLE_DEPENDENTS STOP
+condition. The v2 dependents response sets this flag when the calling user lacks
+visibility into some objects that depend on the source — typically cross-org objects,
+RLS-restricted Liveboards, or objects shared only with other principals. These objects
+WOULD be affected by the change but won't appear in the impact report, so the impact
+shown is incomplete. Block the run until the user explicitly acknowledges this.
+
+```python
+if inaccessible_dependents_seen:
+    print("  ⛔  INACCESSIBLE DEPENDENTS — visibility-limited dependent set")
+    print("     The v2 dependents API flagged that some dependents of the source are")
+    print("     NOT visible to the calling user. Likely causes:")
+    print("       - Objects in other orgs the calling user is not a member of")
+    print("       - Objects with RLS or column-security rules excluding this user")
+    print("       - Objects shared only with other principals (no MODIFY on this user)")
+    print("     The impact report below is INCOMPLETE — those hidden dependents will")
+    print("     still be affected by the source change but cannot be enumerated, fixed,")
+    print("     backed up, or rolled back by the skill.")
+    if not inaccessible_returned:
+        print("     (areInaccessibleDependentsReturned=false — even the GUIDs are hidden)")
+    print()
+    print("     Mitigation options:")
+    print("       a. Run the skill as a user with broader access (an admin / source owner)")
+    print("       b. Pre-share the source object with this user before retrying")
+    print("       c. Accept the incomplete impact and proceed (NOT recommended for")
+    print("          REMOVE/RENAME — TS error 14544 may still block the source change")
+    print("          on the hidden dependents, leaving the run partially applied)")
+```
+
 Before rendering, compute per-type found counts for the Scan Coverage section:
 
 ```python
@@ -1066,6 +1165,12 @@ Change:   {change_description}
    You will choose an action for each in Step 6.
      - Q4 Sales Overview / Revenue Trend  (Y axis: Legacy Region)  [LIVEBOARD]
      - Sales by Region Q4                 (Y axis: Legacy Region)  [ANSWER — skip only]
+
+   INACCESSIBLE DEPENDENTS (visibility-limited dependent set):  (when set)
+   The v2 API reports dependents the calling user cannot see. The impact below
+   is INCOMPLETE — hidden dependents will still be affected by the source change
+   but cannot be enumerated, fixed, backed up, or rolled back by the skill.
+   Re-run as a higher-permission user, or accept incomplete impact.
 
 {N} dependent object(s) found:
   {HIGH_count} HIGH   {MEDIUM_count} MEDIUM   {LOW_count} LOW
@@ -1230,6 +1335,7 @@ Review the STOP CONDITIONS above.
 
   {J} join condition(s) in "{source_name}" will be permanently removed.
   {C} visualization(s) require a per-chart decision in Step 6.
+  {I} INACCESSIBLE DEPENDENTS detected — impact report is incomplete.   (when set)
 
   Y  Acknowledge and continue to Step 6
   N  Stop — exit without making any changes
@@ -1237,7 +1343,20 @@ Review the STOP CONDITIONS above.
 Enter Y / N:
 ```
 
-If N, stop immediately. No changes have been made.
+If `inaccessible_dependents_seen` is True AND the user picks Y, require an additional
+typed confirmation before continuing — this is a destructive change with unknown blast
+radius:
+
+```
+You are proceeding despite INACCESSIBLE_DEPENDENTS being flagged. Hidden dependents
+WILL be affected but cannot be enumerated, backed up, or rolled back.
+
+Type "ACCEPT INCOMPLETE IMPACT" (in capitals, exactly) to confirm:
+```
+
+Reject anything that doesn't match the literal string and re-prompt or exit.
+
+If N at the first prompt, stop immediately. No changes have been made.
 
 **URL patterns by object type:**
 
@@ -1986,6 +2105,88 @@ Each import is atomic (ALL_OR_NONE per object). A failure on one item does not r
 previously successful operations — track all results in a single `results` dict for the
 Step 10 Change Report.
 
+### Drift check helper (Fix #3, 2026-04-26)
+
+Before applying any change to a specific object, re-query its `metadata_header.modified`
+and compare against the value snapshotted in Step 4 (`modified_at_scan[guid]`). If the
+timestamp moved, someone else edited the object between scan and apply — the dep walk's
+analysis (chart roles, alias chain, removed-column references) is now stale. Skip the
+import and report DRIFT_DETECTED.
+
+```python
+def check_drift(guid, type_str, profile_name, snapshot):
+    """Returns (has_drift: bool, current_modified: int, error: Optional[str]).
+
+    `snapshot` is the int from `modified_at_scan[guid]`. If we cannot re-query
+    (network failure, deleted object), return has_drift=True with the error so
+    the caller skips the import — better to fail safe than to clobber.
+    """
+    r = subprocess.run(
+        ["bash", "-c",
+         f"source ~/.zshenv && ts metadata get {guid} --type {type_str} --profile '{profile_name}'"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        return True, 0, (r.stderr.strip() or "metadata get returned no output")
+    try:
+        meta = json.loads(r.stdout)
+    except json.JSONDecodeError as e:
+        return True, 0, f"JSON decode error: {e}"
+    current = int((meta.get("metadata_header") or {}).get("modified", 0))
+    if not snapshot:
+        # No snapshot to compare against — be conservative and allow the import.
+        # Source-not-found cases will surface naturally as the import proceeds.
+        return False, current, None
+    return (current != snapshot), current, None
+
+
+def v2_type_for(skill_type):
+    """Map skill type label to v2 metadata type."""
+    return {
+        "ANSWER": "ANSWER", "LIVEBOARD": "LIVEBOARD",
+        "SET": "LOGICAL_COLUMN", "COHORT": "LOGICAL_COLUMN",
+    }.get(skill_type.upper(), "LOGICAL_TABLE")
+
+
+def assert_no_drift_or_skip(guid, skill_type, profile_name, snapshot, results,
+                            phase, name=None):
+    """Returns True if safe to proceed; False if drift detected (caller must skip).
+    Logs the skip into `results['skipped']` with reason DRIFT_DETECTED."""
+    has_drift, current, err = check_drift(guid, v2_type_for(skill_type), profile_name, snapshot)
+    if has_drift:
+        reason = (f"DRIFT_DETECTED — modified at scan was {snapshot}, "
+                  f"now {current}" + (f"; query error: {err}" if err else ""))
+        results.setdefault("skipped", []).append({
+            "guid": guid, "name": name or guid, "type": skill_type,
+            "phase": phase, "reason": reason,
+        })
+        print(f"  ⚠ Skip {skill_type} {name or guid} — {reason}")
+        return False
+    return True
+```
+
+**Source drift is a hard stop.** If the source object has drifted between Step 4 and
+Step 9, abort the entire run before touching any dependent — the Step 6 plan was
+computed against the old source, and applying it could remove columns that were
+re-purposed in the meantime.
+
+```python
+# Run this BEFORE 9a/9b/9c
+if not assert_no_drift_or_skip(source_guid, source_type, profile_name,
+                               modified_at_scan.get(source_guid, 0),
+                               results, phase="drift_pre_check",
+                               name=source_name):
+    raise SystemExit(
+        "Source object has drifted since Step 4 — aborting the entire run. "
+        "No changes applied. Re-run /ts-dependency-manager from Step 1 to "
+        "rebuild the impact plan against the current source state."
+    )
+```
+
+For dependent objects, drift detection skips that one object and continues with
+the rest. The user sees DRIFT_DETECTED entries in the Change Report and can re-run
+the skill on the affected dependents.
+
 ### 9a — Delete objects marked for deletion
 
 Skip this section entirely if `objects_to_delete` is empty.
@@ -2032,6 +2233,14 @@ for dep in sorted_deletes:
     if not v2_type:
         results["failed"].append({**dep, "error": f"no v2 type mapping for {dep['type']}",
                                   "phase": "delete"})
+        continue
+
+    # Drift check before deleting (Fix #3). If the object has been modified since
+    # Step 4, the user's selection at Step 6 may have been based on stale state —
+    # skip the delete and let the user re-scan.
+    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
+                                   modified_at_scan.get(dep["guid"], 0),
+                                   results, phase="delete", name=dep["name"]):
         continue
 
     # IMPLEMENTATION NOTE: The `ts metadata delete` CLI command is broken (open-items.md
@@ -2200,7 +2409,9 @@ for formula in section.get("formulas", []):
     )
 ```
 
-Import the source object:
+Import the source object — but only after the source-drift hard-stop check above
+has passed. The pre-check uses `assert_no_drift_or_skip` and aborts the entire run
+on drift; if we get here, the source is still at the timestamp we scanned.
 
 ```python
 print(f"  Updating source: {source_name}...")
@@ -2444,6 +2655,12 @@ def rename_column_in_set(set_tml, old_name, new_name):
 
 ```python
 for dep in [d for d in objects_to_fix if d["type"] == "ANSWER"]:
+    # Drift check — skip this Answer if it's been edited since the Step-4 scan
+    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
+                                   modified_at_scan.get(dep["guid"], 0),
+                                   results, phase="fix", name=dep["name"]):
+        continue
+
     updated = copy.deepcopy(dep["tml"])
     answer  = updated.get("answer", {})
 
@@ -2473,6 +2690,12 @@ field layout before modifying.
 
 ```python
 for dep in [d for d in objects_to_fix if d["type"] == "LIVEBOARD"]:
+    # Drift check (Fix #3)
+    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
+                                   modified_at_scan.get(dep["guid"], 0),
+                                   results, phase="fix", name=dep["name"]):
+        continue
+
     updated   = copy.deepcopy(dep["tml"])
     liveboard = updated.get("liveboard", {})
 
@@ -2608,6 +2831,12 @@ Apply to Views in the update loop:
 
 ```python
 for dep in [d for d in objects_to_fix if d["type"] == "VIEW"]:
+    # Drift check (Fix #3)
+    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
+                                   modified_at_scan.get(dep["guid"], 0),
+                                   results, phase="fix", name=dep["name"]):
+        continue
+
     updated = copy.deepcopy(dep["tml"])
     view    = updated.get("view", {})
 
@@ -2628,6 +2857,13 @@ to get the current feedback state, then strip stale entries:
 
 ```python
 for dep in [d for d in objects_to_fix if d["type"] == "FEEDBACK"]:
+    # Drift check (Fix #3) — feedback shares the Model GUID, so we re-check
+    # the Model's timestamp; a moved Model invalidates the feedback we exported
+    if not assert_no_drift_or_skip(dep["guid"], "MODEL", profile_name,
+                                   modified_at_scan.get(dep["guid"], 0),
+                                   results, phase="fix", name=dep["name"]):
+        continue
+
     updated   = copy.deepcopy(dep["tml"])
     feedback  = updated.get("nls_feedback", {})
     target    = columns_to_remove if operation == "REMOVE" else [current_col_name]
@@ -2709,12 +2945,35 @@ delete step — the `ts metadata delete` command for Sets is unverified.
 **For REMOVE — delete sets that operated on the removed column:**
 
 Sets with `action == "DELETE_SAFE"` have no consumers and can be deleted immediately.
-Sets with `action == "DELETE_AFTER_DEPENDENTS"` had consumers that have now been updated
-(or skipped) — proceed with deletion.
+Sets with `action == "DELETE_AFTER_DEPENDENTS"` had consumers that should have been
+updated in 9c — but only delete the Set if every consumer fix actually succeeded.
+Deleting a Set whose consumer fixes failed leaves the consumers pointing at a missing
+Set GUID (silent breakage). Skip the Set delete in that case and surface in the
+Change Report so the user can investigate.
 
 ```python
+# Index 9c results by guid for O(1) lookup
+fix_results_by_guid = {r.get("guid"): r for r in results["succeeded"]
+                       if r.get("phase") in ("fix", None)}
+fix_failed_guids = {r["guid"] for r in results["failed"]
+                    if r.get("phase") in ("fix", None) and r.get("guid")}
+
 for s in affected_sets:
     if s["action"] not in ("DELETE_SAFE", "DELETE_AFTER_DEPENDENTS"):
+        continue
+
+    # GUARD (Fix #2, 2026-04-26): if any consumer fix failed in 9c, do NOT delete the
+    # Set. Deleting it would silently break the failed consumer (now points at a
+    # missing GUID with no chance for the skill to detect or restore).
+    consumer_guids = set(s.get("in_use_by", []))
+    failed_consumers = consumer_guids & fix_failed_guids
+    if failed_consumers:
+        msg = (f"skipped — {len(failed_consumers)} consumer fix(es) failed in 9c; "
+               f"deleting the Set would dangle those consumers. "
+               f"Failed consumer GUIDs: {sorted(failed_consumers)}")
+        print(f"  ⚠ Skip delete '{s['name']}' ({s['guid']}): {msg}")
+        results["skipped"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
+                                   "phase": "set_delete", "reason": msg})
         continue
 
     print(f"  Deleting set '{s['name']}' ({s['guid']})...")
@@ -2727,12 +2986,12 @@ for s in affected_sets:
     if result.returncode == 0:
         print(f"  ✓ Deleted set: {s['name']}")
         results["succeeded"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
-                                     "action": "deleted"})
+                                     "phase": "set_delete", "action": "deleted"})
     else:
         err = result.stderr.strip() or result.stdout.strip()
         print(f"  ✗ Failed to delete set '{s['name']}': {err}")
         results["failed"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
-                                  "error": err})
+                                  "phase": "set_delete", "error": err})
 ```
 
 **For RENAME — update sets that referenced the renamed column:**
@@ -2740,6 +2999,12 @@ for s in affected_sets:
 ```python
 for s in affected_sets:
     if s["action"] != "UPDATE_SET":
+        continue
+
+    # Drift check (Fix #3)
+    if not assert_no_drift_or_skip(s["guid"], "SET", profile_name,
+                                   modified_at_scan.get(s["guid"], 0),
+                                   results, phase="set_update", name=s["name"]):
         continue
 
     updated_set = rename_column_in_set(s["tml"], current_col_name, new_col_name)
@@ -2785,6 +3050,11 @@ Source:     {source_name} ({source_type})
 
  ─ Skipped ({K}):
    - Old Trend Liveboard      (LIVEBOARD) — not selected
+   - Q3 Sales Liveboard       (LIVEBOARD) — DRIFT_DETECTED: modified at scan was
+                              1714123456000, now 1714234567890. Re-run the skill
+                              to refresh the impact plan against the current state.
+   - Customer Segment Set     (SET) — set_cascade: 1 consumer fix(es) failed in 9c;
+                              deleting the Set would dangle those consumers.
 
 Backup location: {backup_dir}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2950,6 +3220,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 0.1.4 | 2026-04-26 | Pre-merge correctness fixes from PR #6 review: (Fix #1) `hasInaccessibleDependents` and `areInaccessibleDependentsReturned` flags from the v2 dependents response are now captured at Step 4, surfaced as a STOP CONDITION in Step 5, and require a typed "ACCEPT INCOMPLETE IMPACT" confirmation before the run continues. (Fix #2) Step 9d Set deletes are guarded — the skill skips the Set delete when any of its consumer fixes in 9c failed, preventing silent dangling Set references. (Fix #3) Object-version drift detection: every dependent's `metadata_header.modified` timestamp is captured at Step 4; before each Step 9 import the skill re-queries and aborts the per-object change (skip + report DRIFT_DETECTED) if the timestamp has moved. Source-object drift is a hard stop — aborts the entire run before touching any dependent. Adds `assert_no_drift_or_skip()` helper and threads it through 9a deletes, 9b/9c fix loops, and 9d Set updates |
 | 0.1.3 | 2026-04-26 | Drive coverage messaging from the canonical `references/dependency-types.md` status table via a new `references/build_coverage.py` helper. Step 0 now includes a "Coverage at a glance" block (auto-detected / partial / informational / no-action breakdown) that re-renders when statuses change in dep-types.md. Step 5 Scan Coverage block likewise generated from the helper instead of being hardcoded — fixes the previous drift where #6 (Alerts), #7 (RLS), #8 (ACLs) had moved to VERIFIED in open-items.md but the skill text still labelled them "not yet implemented" |
 | 0.1.2 | 2026-04-26 | Step 4 rewrite — replace bulk environment scan (10k+ TML exports, ~30 min) with v2 dependents API (~3s, single call). Add alias propagation: for each Model/View dependent, extract what alias the target column is exposed as (e.g. ZIPCODE → "Customer Zipcode"), then match Answers/Liveboards/Sets against the alias of the Model they query — caught ~30% more dependents in test environments. Fix tree hierarchy: Answers/Liveboards now attach to the Model they query (via tables[].fqn); Set consumers re-parent under the Set; Views handled correctly via view_columns + search_query. Mermaid DAG escapes & and special chars. Add Step 0 dependency hierarchy diagram. Add risk-rating legend inline in impact report |
 | 0.1.1 | 2026-04-26 | Add references/dependency-types.md (status table, hierarchy diagram, sample impact report); update open-items.md #6 (alerts VERIFIED via Liveboard --associated), #7 (RLS VERIFIED inline in table TML), #9 (CSR structure documented; retrieval unverified), #10 (column_alias TML structure documented; retrieval unverified); add suggest_dependency_types.py soft pre-commit nudge |
