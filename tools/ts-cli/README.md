@@ -190,6 +190,71 @@ ts metadata get e61c7c4c-68a4-4174-b393-a0104ae3bd00 --profile champ-staging
 
 ---
 
+### `ts metadata dependents <guid> [<guid> ...]`
+
+List all objects that depend on the given source GUID(s). Wraps the v2
+`metadata/search` endpoint with `include_dependent_objects=true,
+dependent_object_version=V2`.
+
+```bash
+# Models / Liveboards / Answers / Sets / Feedback that reference this table
+ts metadata dependents 32c062cb-9586-43ff-bc66-bceed7529caf
+
+# Same shape, but for a Set/Cohort GUID — must use --type LOGICAL_COLUMN
+ts metadata dependents 7f9179af-0a13-4d6f-9a87-2c8099a5c73d --type LOGICAL_COLUMN
+
+# Get the unmodified v2 response (e.g. to read hasInaccessibleDependents)
+ts metadata dependents abc-123 --raw
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | first profile | Profile to use |
+| `--type`, `-t` | `LOGICAL_TABLE` | Source type: `LOGICAL_TABLE` (table/model/view) or `LOGICAL_COLUMN` (column or set/cohort GUID) |
+| `--raw` | off | Emit the v2 response untouched instead of the flat normalized list |
+
+**Output (default — flat, one row per dependent):**
+
+```json
+[
+  {
+    "source_guid": "32c062cb-9586-43ff-bc66-bceed7529caf",
+    "guid": "e5c84be6-ebbc-4ef0-9522-e124f0d29827",
+    "name": "TEST_DEPENDENCY_MANAGEMENT",
+    "type": "LOGICAL_TABLE",
+    "raw_bucket": "LOGICAL_TABLE",
+    "author_id": "f6336c00-1b9f-4119-a2be-79747234e19d",
+    "author_display_name": "damian.waldron"
+  },
+  {
+    "source_guid": "32c062cb-...",
+    "guid": "62d8c5ef-9c92-4755-a691-9741322d8e2c",
+    "name": "ADDRESS set, ZIPCODE, COMPANY_NAME, CITY",
+    "type": "ANSWER",
+    "raw_bucket": "QUESTION_ANSWER_BOOK",
+    ...
+  }
+]
+```
+
+**Type mapping:**
+
+| v2 bucket | Output type |
+|---|---|
+| `QUESTION_ANSWER_BOOK` | `ANSWER` |
+| `PINBOARD_ANSWER_BOOK` | `LIVEBOARD` |
+| `LOGICAL_TABLE` | `LOGICAL_TABLE` (caller distinguishes Model/View/Table via subtype) |
+| `COHORT` | `SET` |
+| `FEEDBACK` | `FEEDBACK` |
+
+**Not covered by v2 dependents:** RLS rules (in source table TML), Alerts (via
+Liveboard `--associated`), column aliases, column security TML. See the
+`ts-dependency-manager` skill's `references/open-items.md` for the workarounds.
+
+---
+
 ### `ts metadata delete <guid> [<guid> ...]`
 
 Delete one or more ThoughtSpot objects by GUID.

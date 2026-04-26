@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-04-26
+- feat: add `ts metadata dependents <guid>` to ts-cli (v0.4.0) — wraps v2 metadata/search with `include_dependent_objects=true`; default flat output (one row per dep) or `--raw` for the full v2 response
+- feat: ts-dependency-manager v0.1.2 — replace bulk environment scan in Step 4 with the new `ts metadata dependents` command; add alias propagation so dependents that reference renamed columns (e.g. ZIPCODE → "Customer Zipcode") are correctly detected; fix tree hierarchy (Answers attach to their Model; Set consumers under the Set); escape `&` and other special chars in mermaid output
+
 ## 2026-04-24
 - feat: add skill versioning — every SKILL.md now has a `## Changelog` section with semver tracking
 - feat: add interactive changelog prompt to pre-commit hook (`suggest_skill_version.py`)
