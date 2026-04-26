@@ -127,13 +127,15 @@ buckets  = ((item.get("dependent_objects") or {}).get("dependents") or {}).get(s
 
 ### Action
 
-- [ ] Replace the TML batch-scan block in SKILL.md Step 4 with the v2 search call above
+- [x] Replace the TML batch-scan block in SKILL.md Step 4 with the v2 search call above (2026-04-26, v0.1.2)
+- [x] Update the SKILL.md Step 4 narrative — changed "(~30 s in large environments)" to
+      "(~3 s — single API call + per-dep TML check)" (2026-04-26, v0.1.2)
+- [x] Add alias propagation: for each Model/View, extract the alias the target column is
+      exposed as; match Answers/Liveboards/Sets against alias-not-base-name (2026-04-26, v0.1.2)
 - [ ] Add `ts metadata dependents <guid> [<guid>...]` command to ts-cli wrapping the v2 call;
       v1 endpoint as Software/on-prem fallback path (auto-detect via 404 on v2)
-- [ ] Update the SKILL.md Step 4 narrative — change "(~30 s in large environments)" to
-      "(~2 s, single API call)"
-- [ ] Keep the cohort scan (item #11), alert scan (#6), RLS/security/alias scans (#7–#10)
-      as separate steps — v2 dependents does not cover them
+- [x] Keep the cohort scan (item #11), alert scan (#6), RLS/security/alias scans (#7–#10)
+      as separate steps — v2 dependents does not cover them (decision retained)
 
 **Availability:** v2 metadata search verified on ThoughtSpot Cloud (se-thoughtspot,
 2026-04-25). v1 endpoint: ThoughtSpot Cloud ts7.aug.cl onwards; Software 7.1.1 onwards.

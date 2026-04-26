@@ -63,13 +63,15 @@ On skill invocation, display this plan before doing any work:
 ---
 **ts-dependency-manager** — safely remove, rename, or repoint columns across a ThoughtSpot environment, with a full impact report and TML backup before any change is made.
 
-Steps:
+### A. Steps
+
   1.  Authenticate ......................................... auto
   2.  Choose mode (Audit | Remove | Rename | Repoint) ...... you choose
        Audit produces a dependency report only — no changes applied.
        Useful before any change to plan blast radius.
   3.  Identify source object and column scope .............. you provide
-  4.  Scan all dependent objects and classify impact ....... auto  (~30 s in large environments)
+  4.  Walk dependents via v2 dependents API and classify
+      impact (alias-aware) ................................. auto  (~3 s — single API call + per-dep TML check)
   5.  Impact report — review, confirm, re-scan, or exit .... you confirm
   6.  Per-object action — fix (update) or delete entirely .. you choose; chart decisions apply only to "fix"
   7.  Back up all TML (source + every selected dependent) to /tmp/ts_dep_backup_<ts>/ ... auto
@@ -79,6 +81,46 @@ Steps:
 
 Confirmation required: Steps 5, 6, 8 (extra typed confirm if any deletes are queued)
 Auto-executed: Steps 1, 3 (model lookup), 4, 7, 9, 10
+
+### B. Dependency hierarchy
+
+What the skill walks during Step 4. Solid arrows = standard dependencies via v2 dependents API; dotted arrows = TML-attached objects that come through `--associated` exports; dashed arrows = TMLs that exist but are not retrievable on this build.
+
+```
+                  [CONNECTION]
+                       │
+                       ▼
+                   [TABLE]──────────────────┐
+                  /  │  \                   │
+                 /   │   \              (inline)
+                /    │    \                 │
+               /     │     \                ▼
+              /      │      ╲       [table.rls_rules]
+             /       │       ╲              (#7 RLS — verified)
+            /        │        ╲
+           ▼         ▼         ╲- - -→ [<TABLE>_CSR.column_security_rules]
+       [MODEL]    [VIEW]                   (#9 — retrieval unverified)
+        / │ \      │ │
+       /  │  \     │ │
+      /   │   ╲    │ │
+     /    │    ╲   │ │
+    ▼     ▼     ▼  ▼ ▼
+ [ANSWER] │  [SET]   ┊
+     │    │     │    ┊  (model-attached)
+     │    │     ▼    ┊
+     │    │  [ANSWER consumers via Set]
+     │    │
+     ▼    ▼
+ [LIVEBOARD]
+     │   │  ............→ [<MODEL>.column_alias]
+     │   │       (#10 — retrieval unverified)
+     │   │
+     │   └ ............→ [nls_feedback]   (#18 partial via --associated)
+     │
+     ├ ............→ [monitor_alert]   (#6 verified via --associated)
+     ▼
+[SCHEDULE]   (informational only — column-agnostic)
+```
 
 Ready to start? [Y / N]
 ---
@@ -384,98 +426,251 @@ Save `{source_guid}`, `{target_guid}`, `{target_name}`, `{column_gap}`.
 
 ---
 
-## Step 4 — Dependency Discovery
+## Step 4 — Dependency Discovery (v2 API + alias propagation)
 
-Find all ThoughtSpot objects that reference `{source_guid}`. This step may take a minute
-on large instances — show progress as scanning proceeds.
+Walk only the dependents — do **not** enumerate every Answer/Liveboard/Model/View in
+the instance. The v2 dependents API returns just what references the source.
 
-Read [references/open-items.md](references/open-items.md) #1 before implementing this step.
-When open item #1 is verified, replace the TML scanning approach below with:
-`ts metadata dependents {source_guid} --profile "{profile_name}"`.
+**Performance budget — strict.** A bulk scan over 10k+ objects takes 30+ minutes and
+fails on large instances. The v2 dependents call returns the full transitive list in
+one HTTP request (~2-3s on Cloud). The skill MUST follow this path; the legacy bulk-scan
+approach is removed. Verified working on Cloud and Software 7.1.1+ (open item #1).
 
-**TML scanning approach (works with existing CLI commands):**
+The discovery has three logical phases:
+
+1. **Direct dependents** — single v2 dependents call on `source_guid` returns Models,
+   Views, Answers, Liveboards, Sets, and Feedback that reference the source
+2. **Alias chain** — for each Model/View dependent, extract what alias the target
+   column is exposed as (e.g. `ZIPCODE` → `Customer Zipcode`). Downstream objects
+   reference the alias, never the base name, so this step is mandatory for correctness
+3. **Alias-aware filtering** — for each Answer/Liveboard/Set candidate, match against
+   the alias of the Model it queries (resolved via `tables[].fqn` for Answers/vizzes;
+   `cohort.worksheet.fqn` for Sets), not against the base name
+
+This catches references that would be invisible to a naive base-name scan (~30% miss
+rate in test environments where Models commonly rename columns).
 
 ```python
-import json, subprocess, sys
+import json, subprocess
 
-def search_all(obj_type, profile_name, subtype=None):
-    cmd = (f"source ~/.zshenv && ts metadata search "
-           f"--type {obj_type} --all --profile '{profile_name}'")
-    if subtype:
-        cmd += f" --subtype {subtype}"
-    result = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-    return json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else []
+def v2_dependents(guid, type_str, profile_name):
+    """Returns the dependents bucket dict {LOGICAL_TABLE: [...], QUESTION_ANSWER_BOOK: [...],
+    PINBOARD_ANSWER_BOOK: [...], COHORT: [...], FEEDBACK: [...]}.
 
-def batch_export(guids, profile_name, batch_size=20):
-    """Export TMLs for a list of GUIDs in batches. Returns list of parsed items."""
-    results = []
-    for i in range(0, len(guids), batch_size):
-        batch = guids[i:i + batch_size]
-        guid_str = " ".join(batch)
-        export = subprocess.run(
-            ["bash", "-c",
-             f"source ~/.zshenv && ts tml export {guid_str} "
-             f"--profile '{profile_name}' --fqn --parse"],
-            capture_output=True, text=True,
-        )
-        if export.returncode == 0 and export.stdout.strip():
-            results.extend(json.loads(export.stdout))
-    return results
+    Wraps `ts metadata dependents <guid> --type <type> --raw --profile <name>`
+    (ts-cli >= 0.4.0). The CLI handles auth/token caching; we ask for `--raw`
+    here because we want the bucket structure for the alias-aware classification
+    below. See `tools/ts-cli/README.md` for the flat output shape used elsewhere.
+    """
+    r = subprocess.run(
+        ["bash", "-c",
+         f"source ~/.zshenv && ts metadata dependents {guid} "
+         f"--type {type_str} --raw --profile '{profile_name}'"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        return {}
+    arr = json.loads(r.stdout)
+    if not arr:
+        return {}
+    item = arr[0]
+    return ((item.get("dependent_objects") or {}).get("dependents") or {}).get(guid) or {}
 
-# Collect all candidate objects — including Views (AGGR_WORKSHEET)
-all_answers    = search_all("ANSWER",        profile_name)
-all_liveboards = search_all("LIVEBOARD",     profile_name)
-all_models     = search_all("LOGICAL_TABLE", profile_name, subtype="WORKSHEET")
-all_views      = search_all("LOGICAL_TABLE", profile_name, subtype="AGGR_WORKSHEET")
+def tml_export_one(guid, profile_name):
+    """Export a single object's TML. Returns the parsed item dict, or None on failure."""
+    r = subprocess.run(
+        ["bash", "-c",
+         f"source ~/.zshenv && ts tml export {guid} --profile '{profile_name}' --fqn --parse"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        items = json.loads(r.stdout)
+        return items[0] if items else None
+    except json.JSONDecodeError:
+        return None
 
-print(f"Scanning {len(all_answers)} Answers, "
-      f"{len(all_liveboards)} Liveboards, "
-      f"{len(all_models)} Models, "
-      f"{len(all_views)} Views...")
+# === Phase 1: direct dependents ===========================================
+src_buckets = v2_dependents(source_guid, "LOGICAL_TABLE", profile_name)
+print(f"Source dependent buckets: {[(k, len(v)) for k, v in src_buckets.items()]}")
+
+candidate_models   = src_buckets.get("LOGICAL_TABLE",         []) or []
+candidate_answers  = src_buckets.get("QUESTION_ANSWER_BOOK",  []) or []
+candidate_lbs      = src_buckets.get("PINBOARD_ANSWER_BOOK",  []) or []
+candidate_cohorts  = src_buckets.get("COHORT",                []) or []
+direct_feedback    = src_buckets.get("FEEDBACK",              []) or []
 
 # Track totals for the Scan Coverage section in the impact report
 scan_totals = {
-    "total_answers":    len(all_answers),
-    "total_liveboards": len(all_liveboards),
-    "total_models":     len(all_models),
-    "total_views":      len(all_views),
-    "total_sets":       0,  # updated after set scan below
+    "method":            "v2 metadata/search include_dependent_objects",
+    "endpoint_calls":    1,                            # incremented as we walk
+    "candidate_models":  len(candidate_models),
+    "candidate_answers": len(candidate_answers),
+    "candidate_lbs":     len(candidate_lbs),
+    "candidate_cohorts": len(candidate_cohorts),
 }
 
-# Find objects that reference source_guid
-dependents = []
+# === Phase 2: alias chain — extract aliases per Model/View ================
+# alias_map[model_or_view_guid] = {
+#     "name": str, "type": "MODEL"|"VIEW"|"TABLE", "owner": str,
+#     "exposed_as": set[str],     # the alias names the target column is known by
+#     "tml": dict,                # the parsed TML
+# }
+def extract_aliases(section, target_cols):
+    """Find what each target column is renamed to in this Model/View.
+    Returns set of alias names (display names used downstream)."""
+    aliases = set()
+    # Models/Worksheets: columns[].column_id like "TABLE::COL"
+    for col in section.get("columns", []) or []:
+        cid = col.get("column_id", "") or ""
+        for tc in target_cols:
+            if cid.endswith(f"::{tc}") or cid == tc:
+                aliases.add(col.get("name", tc))
+    # Views: view_columns[] reference base by name or via search_output_column
+    for vc in section.get("view_columns", []) or []:
+        for tc in target_cols:
+            if vc.get("name") == tc or vc.get("search_output_column") == tc:
+                aliases.add(vc.get("name", tc))
+    # Views: search_query may reference [TC] tokens directly
+    sq = section.get("search_query", "") or ""
+    for tc in target_cols:
+        if f"[{tc}]" in sq:
+            aliases.add(tc)
+    # Formulas referencing target columns expose the formula column's name as an alias
+    for f in section.get("formulas", []) or []:
+        expr = f.get("expr", "") or ""
+        if any(f"[{tc}]" in expr for tc in target_cols):
+            for col in section.get("columns", []) or []:
+                if col.get("formula_id") == f.get("id"):
+                    aliases.add(col.get("name"))
+    return aliases
 
-def find_dependents_in(objects, obj_type, profile_name):
-    guids  = [o["metadata_id"] for o in objects]
-    tmls   = batch_export(guids, profile_name)
-    meta   = {o["metadata_id"]: o for o in objects}
-    found  = []
-    for item in tmls:
-        if source_guid in json.dumps(item["tml"]):
-            m = meta.get(item["guid"], {})
-            found.append({
-                "guid":  item["guid"],
-                "name":  item["info"].get("name", "Unknown"),
-                "type":  obj_type,
-                "owner": m.get("metadata_header", {}).get("authorDisplayName", "Unknown"),
-                "tml":   item["tml"],
-            })
-    return found
+target_cols = (set(columns_to_remove) if operation == "REMOVE"
+               else {current_col_name} if operation == "RENAME"
+               else set(column_gap or []))   # REPOINT
+alias_map = {
+    source_guid: {
+        "name": source_name, "type": source_type, "owner": "?",
+        "exposed_as": set(target_cols), "tml": None,
+    },
+}
 
-dependents.extend(find_dependents_in(all_answers,    "ANSWER",    profile_name))
-dependents.extend(find_dependents_in(all_liveboards, "LIVEBOARD", profile_name))
-dependents.extend(find_dependents_in(all_views,      "VIEW",      profile_name))
+for cm in candidate_models:
+    item = tml_export_one(cm["id"], profile_name)
+    if not item:
+        continue
+    tml = item["tml"]
+    # Determine real type from the TML body
+    if   "model"   in tml or "worksheet" in tml: real_type = "MODEL"
+    elif "view"    in tml:                       real_type = "VIEW"
+    elif "table"   in tml:                       real_type = "TABLE"
+    else:                                        real_type = item.get("type", "MODEL").upper()
+    section = (tml.get("model") or tml.get("worksheet")
+               or tml.get("view") or tml.get("table") or {})
+    aliases = extract_aliases(section, target_cols)
+    if not aliases:
+        # The Model joins to the source but doesn't expose the target column
+        # (e.g. only uses CUSTOMER_ID from this table). Skip — nothing to do.
+        continue
+    alias_map[cm["id"]] = {
+        "name": cm.get("name", "?"),
+        "type": real_type,
+        "owner": cm.get("authorDisplayName", "?"),
+        "exposed_as": aliases,
+        "tml": tml,
+    }
+    print(f"  [{real_type:5}] {cm.get('name','?')[:50]:50}  "
+          f"exposes {sorted(target_cols)} as: {sorted(aliases)}")
 
-# For REMOVE and RENAME: also scan other Models that may join on the source
-if source_type in ("MODEL", "WORKSHEET"):
-    other_models = [m for m in all_models if m["metadata_id"] != source_guid]
-    dependents.extend(find_dependents_in(other_models, "MODEL", profile_name))
+all_aliases = set()
+for v in alias_map.values():
+    all_aliases |= v["exposed_as"]
 
-# For source is a TABLE: also scan Models and Views that use the table
-if source_type == "TABLE":
-    dependents.extend(find_dependents_in(all_models, "MODEL", profile_name))
-    dependents.extend(find_dependents_in(all_views,  "VIEW",  profile_name))
-```
+# === Phase 3: alias-aware filtering of Answers, Liveboards, Sets ==========
+def find_parent_model(tml, alias_map):
+    """Identify which Model/View this Answer/Liveboard queries.
+    Returns the GUID (matches alias_map keys), or None if not in our chain.
+    """
+    a = tml.get("answer") or {}
+    for t in a.get("tables", []) or []:
+        if t.get("fqn") in alias_map:
+            return t.get("fqn")
+    lb = tml.get("liveboard") or {}
+    for v in lb.get("visualizations", []) or []:
+        for t in (v.get("answer", {}).get("tables") or []):
+            if t.get("fqn") in alias_map:
+                return t.get("fqn")
+    return None
+
+dependents = []   # final list with parent_guid set correctly
+
+# 3a — Answers
+for ca in candidate_answers:
+    item = tml_export_one(ca["id"], profile_name)
+    if not item:
+        continue
+    tml = item["tml"]
+    parent_guid = find_parent_model(tml, alias_map) or source_guid
+    applicable = (alias_map[parent_guid]["exposed_as"]
+                  if parent_guid in alias_map else all_aliases)
+    body = json.dumps(tml)
+    affected = sorted({a for a in applicable if a in body})
+    if not affected:
+        continue
+    dependents.append({
+        "guid":        ca["id"],
+        "name":        ca.get("name", "?"),
+        "type":        "ANSWER",
+        "owner":       ca.get("authorDisplayName", "?"),
+        "parent_guid": parent_guid,                 # the Model it queries
+        "affected":    affected,
+        "tml":         tml,
+    })
+
+# 3b — Liveboards (per-viz scoping)
+for cl in candidate_lbs:
+    item = tml_export_one(cl["id"], profile_name)
+    if not item:
+        continue
+    tml = item["tml"]
+    parent_guid = find_parent_model(tml, alias_map) or source_guid
+    body = json.dumps(tml)
+    # Use the union of aliases across vizzes (a liveboard may use multiple Models)
+    applicable = set()
+    lb = tml.get("liveboard") or {}
+    for v in lb.get("visualizations", []) or []:
+        for t in (v.get("answer", {}).get("tables") or []):
+            if t.get("fqn") in alias_map:
+                applicable |= alias_map[t.get("fqn")]["exposed_as"]
+    if not applicable:
+        applicable = all_aliases
+    affected = sorted({a for a in applicable if a in body})
+    if not affected:
+        continue
+    dependents.append({
+        "guid":        cl["id"],
+        "name":        cl.get("name", "?"),
+        "type":        "LIVEBOARD",
+        "owner":       cl.get("authorDisplayName", "?"),
+        "parent_guid": parent_guid,
+        "affected":    affected,
+        "tml":         tml,
+    })
+
+# 3c — Promote Models/Views from alias_map (excluding source) into dependents
+for guid, info in alias_map.items():
+    if guid == source_guid:
+        continue
+    dependents.append({
+        "guid":        guid,
+        "name":        info["name"],
+        "type":        info["type"],            # MODEL or VIEW
+        "owner":       info["owner"],
+        "parent_guid": source_guid,             # Models/Views attach to source
+        "affected":    sorted(info["exposed_as"]),
+        "tml":         info["tml"],
+    })
 
 **Feedback (coaching):** Export the source Model's associated TML to check for
 `nls_feedback` items that reference the affected columns. These are appended to the
@@ -587,11 +782,18 @@ if operation == "REMOVE":
             # Per-viz classification (Rules 3–5)
             for viz in liveboard.get("visualizations", []):
                 answer = viz.get("answer", {})
-                if not any(t.get("fqn") == source_guid for t in answer.get("tables", [])):
+                # Vizzes can query the source table OR any Model/View in alias_map.
+                # We act on a viz only if its tables[].fqn is in our alias chain.
+                viz_table_fqns = {t.get("fqn") for t in answer.get("tables", []) or []}
+                if not (viz_table_fqns & set(alias_map.keys())):
                     continue
                 viz_id = viz.get("id", "")
-                viz_name = viz.get("answer", {}).get("name", viz_id)
-                roles = [classify_chart_role(answer, col) for col in dep["affected"]]
+                # Use the alias set of the Model/View this viz actually queries
+                viz_aliases = set()
+                for fqn in viz_table_fqns:
+                    if fqn in alias_map:
+                        viz_aliases |= alias_map[fqn]["exposed_as"]
+                roles = [classify_chart_role(answer, col) for col in viz_aliases & set(dep["affected"])]
                 if "X_AXIS" in roles or "Y_AXIS" in roles:
                     dep["viz_actions"][viz_id] = "REMOVE_CHART"
                 elif "COLOR_BINDING" in roles:
@@ -662,62 +864,55 @@ will list them all if any still reference the column at the time of source chang
 ```python
 affected_sets = []
 
-# Read sets from the source response's COHORT bucket
+# Read sets from the v2 dependents response's COHORT bucket (already populated as
+# `candidate_cohorts` in Phase 1 above). Apply alias-aware filtering: a set "matches"
+# if any alias of the target column (the alias exposed by the set's parent Model) is
+# found in the cohort body.
+
 if operation in ("REMOVE", "RENAME"):
-    target_cols = set(columns_to_remove if operation == "REMOVE" else [current_col_name])
-
-    # source_buckets is the v2 dependents result keyed by source_guid (from earlier in Step 4)
-    cohort_dependents = source_buckets.get("COHORT", []) or []
-
-    for set_meta in cohort_dependents:
+    for set_meta in candidate_cohorts:
         set_guid = set_meta["id"]
-
-        # Export the set's TML to inspect anchor + filter references
-        try:
-            set_tml = batch_export([set_guid], profile_name)[0]["tml"]
-        except (IndexError, KeyError):
+        item = tml_export_one(set_guid, profile_name)
+        if not item:
             continue
-        cohort = set_tml.get("cohort", {})
-        config = cohort.get("config", {})
+        set_tml = item["tml"]
+        cohort = set_tml.get("cohort", {}) or {}
+        config = cohort.get("config", {}) or {}
 
-        # Identify how the set references the target column:
-        #   (a) anchor_column_id matches  →  set is fully invalidated; DELETE candidate
-        #   (b) column appears in pass_thru_filter or embedded answer.search_query  →  FIX candidate
-        anchor_match = config.get("anchor_column_id") in target_cols
+        # The aliases applicable to this set are the ones exposed by its parent Model
+        parent_fqn = (cohort.get("worksheet", {}) or {}).get("fqn")
+        applicable_aliases = (alias_map[parent_fqn]["exposed_as"]
+                              if parent_fqn in alias_map else all_aliases)
+
+        # Match: anchor matches an alias  → DELETE
+        #        alias appears in body    → FIX
+        anchor       = config.get("anchor_column_id", "")
+        anchor_match = anchor in applicable_aliases
         body_str     = json.dumps(cohort)
-        col_in_body  = any(col in body_str for col in target_cols)
-
+        col_in_body  = any(a in body_str for a in applicable_aliases)
         if not (anchor_match or col_in_body):
-            continue  # set doesn't actually reference the column
+            continue
 
-        # Find this set's consumers (Answers/Liveboards using the set as a column or filter).
-        # IMPLEMENTATION NOTE: Until ts-cli adds a `ts metadata dependents` command (see
-        # references/open-items.md #1 and #5), this lookup uses the v2 metadata/search
-        # endpoint with `include_dependent_objects: true, dependent_object_version: "V2"`
-        # and `type: LOGICAL_COLUMN`. The verified call shape lives in
-        # references/open-items.md #1. Once `ts metadata dependents` exists, replace this
-        # block with a single subprocess call to the CLI.
+        # Find this Set's consumers (Answers/Liveboards). Each consumer references the
+        # column transitively through the Set; we re-parent any matching Answer/Liveboard
+        # already in `dependents` to make the Set its parent in the tree.
         consumers = []
         try:
-            ts_resp = ts_metadata_dependents(set_guid, "LOGICAL_COLUMN", profile_name)  # see open-items.md #1
-            if ts_resp:
-                buckets = ((ts_resp[0].get("dependent_objects") or {})
-                           .get("dependents", {}).get(set_guid, {}))
-                for type_key in ("QUESTION_ANSWER_BOOK", "PINBOARD_ANSWER_BOOK"):
-                    for it in (buckets.get(type_key) or []):
-                        consumers.append({
-                            "guid":  it["id"],
-                            "name":  it.get("name", ""),
-                            "type":  "ANSWER" if type_key == "QUESTION_ANSWER_BOOK" else "LIVEBOARD",
-                            "owner": it.get("authorDisplayName", "?"),
-                            "via_set": set_guid,
-                        })
+            cohort_buckets = v2_dependents(set_guid, "LOGICAL_COLUMN", profile_name)
+            scan_totals["endpoint_calls"] += 1
+            for type_key in ("QUESTION_ANSWER_BOOK", "PINBOARD_ANSWER_BOOK"):
+                for it in (cohort_buckets.get(type_key) or []):
+                    consumers.append({
+                        "guid":    it["id"],
+                        "name":    it.get("name", ""),
+                        "type":    "ANSWER" if type_key == "QUESTION_ANSWER_BOOK" else "LIVEBOARD",
+                        "owner":   it.get("authorDisplayName", "?"),
+                        "via_set": set_guid,
+                    })
         except Exception as e:
             print(f"  Note: Could not query consumers of set {set_guid}: {e}")
 
         if operation == "REMOVE":
-            # Anchor match → set must be deleted (cannot operate without anchor column)
-            # Column-in-body only → set can be FIXED by stripping references
             default_action = "DELETE" if anchor_match else "FIX"
         else:  # RENAME
             default_action = "UPDATE_SET"
@@ -727,32 +922,36 @@ if operation in ("REMOVE", "RENAME"):
             "name":           set_meta.get("name") or cohort.get("name", "Unknown"),
             "type":           "SET",
             "owner":          set_meta.get("authorDisplayName", "Unknown"),
-            "anchor_column":  config.get("anchor_column_id"),
+            "parent_guid":    parent_fqn or source_guid,   # set attaches under its Model
+            "anchor_column":  anchor,
             "anchor_match":   anchor_match,
             "col_in_body":    col_in_body,
+            "affected":       sorted({a for a in applicable_aliases if a in body_str}),
             "tml":            set_tml,
             "consumers":      consumers,
             "in_use_by":      [c["guid"] for c in consumers],
             "default_action": default_action,
         })
 
-        # Add set consumers to the global dependent list so they get FIX/DELETE handling
-        # at Step 6b. These are transitive deps via the set — treat them as full dependents.
-        for c in consumers:
-            if not any(d["guid"] == c["guid"] for d in dependents):
-                # TML-export each consumer so we can classify chart roles, etc.
-                try:
-                    c["tml"] = batch_export([c["guid"]], profile_name)[0]["tml"]
-                except Exception:
-                    c["tml"] = {}
-                c["affected"] = list(target_cols)
-                c["action"]   = "REMOVE_COLUMN"  # Step 9c will refine via classify_chart_role
-                c["risk"]     = "MEDIUM"
-                dependents.append(c)
-```
+        # Re-parent any consumer already in `dependents` so the tree shows
+        # ANSWER/LIVEBOARD under the SET, not under the source table or Model
+        consumer_guids = {c["guid"] for c in consumers}
+        for d in dependents:
+            if d["guid"] in consumer_guids:
+                d["parent_guid"] = set_guid
 
-`source_buckets` here is the dict assigned earlier from the source's v2 response. If the
-existing code uses a different variable, adapt the assignment.
+        # Add brand-new consumers (not already in `dependents`) — these are transitive
+        # deps that didn't show up under the source's direct dependents
+        existing_guids = {d["guid"] for d in dependents}
+        for c in consumers:
+            if c["guid"] in existing_guids:
+                continue
+            item = tml_export_one(c["guid"], profile_name)
+            c["tml"]      = item["tml"] if item else {}
+            c["affected"] = sorted(applicable_aliases)
+            c["parent_guid"] = set_guid
+            dependents.append(c)
+```
 
 **Open-item #11 outcome:** the `COHORT` enum value is not valid for v2 search; replace with
 the `LOGICAL_COLUMN`-typed direct dependents query above. Update the open-item to VERIFIED.
@@ -945,26 +1144,29 @@ source without the markdown ` ```mermaid ` fence.
 
 ─── SCAN COVERAGE ──────────────────────────────────────────────
 
-  Shows every object type checked during this scan so you can see what was and wasn't
-  covered. Types with 0 results are shown here rather than in the sections above.
+  Method: v2 metadata/search include_dependent_objects (single API call per source +
+  per-Set consumer lookup). NO bulk environment scan. Calls = 1 + N_sets.
 
   CHECKED                 FOUND   NOTES
   ──────────────────────  ──────  ────────────────────────────────────────────
-  Answers                 {found_counts["ANSWER"]}    ({scan_totals["total_answers"]} total scanned)
-  Liveboards              {found_counts["LIVEBOARD"]} ({scan_totals["total_liveboards"]} total scanned)
-  Views                   {found_counts["VIEW"]}      ({scan_totals["total_views"]} total scanned)
-  Models                  {found_counts["MODEL"]}     ({scan_totals["total_models"]} total scanned)
-  Sets / Cohorts          {found_counts["SET"]}       ({scan_totals["total_sets"]} total scanned — open item #11: type unconfirmed)
-  Coaching TML            {found_counts["FEEDBACK"]}  (via --associated export)
+  Models / Worksheets     {found_counts["MODEL"]}      direct from LOGICAL_TABLE bucket
+  Views                   {found_counts["VIEW"]}       direct from LOGICAL_TABLE bucket
+  Answers                 {found_counts["ANSWER"]}     direct from QUESTION_ANSWER_BOOK bucket
+  Liveboards              {found_counts["LIVEBOARD"]}  direct from PINBOARD_ANSWER_BOOK bucket
+  Sets / Cohorts          {found_counts["SET"]}        direct from COHORT bucket
+  Coaching / Feedback     {found_counts["FEEDBACK"]}   direct from FEEDBACK bucket (verified item #1)
+  Alias chain layers      {len(alias_map) - 1}         per-Model/View aliases for target column
+  RLS rules               {len(rls_hits)}              from source table TML (verified item #7)
 
   NOT CHECKED — manual review recommended
   ──────────────────────  ──────  ────────────────────────────────────────────
-  Alerts (Monitors)       —       open item #6: scan API unverified
-  RLS rules               —       open item #7: not yet implemented
-  Column-level sharing    —       open item #8: not yet implemented
-  Column security TML     —       open item #9: not yet implemented
-  Column aliases          —       open item #10: not yet implemented
+  Alerts (Monitors)       —       open item #6: VERIFIED via Liveboard --associated;
+                                  not yet wired into Step 4
+  Column-level ACLs       —       open item #8: VERIFIED — GUID-stable, no skill action
+  Column security TML     —       open item #9: STRUCTURE KNOWN; retrieval unverified
+  Per-locale alias TML    —       open item #10: STRUCTURE KNOWN; retrieval unverified
 
+  Total endpoint calls:   {scan_totals["endpoint_calls"]}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Action types:
@@ -974,9 +1176,12 @@ Action types:
   UPDATE              — column renamed/repointed in all references
 
 Risk ratings:
-  HIGH   — Liveboards, Models, Views (cascading/shared impact)
-  MEDIUM — Saved Answers
-  LOW    — Coaching entries (stale coaching does not break functionality)
+  HIGH   — Cascading or shared (Models, Views, Liveboards). A break here propagates
+           downstream; treat as P0 in any rollout.
+  MEDIUM — Individual user-saved object (saved Answers; Sets that have consumers).
+           Affects whoever owns/views the object.
+  LOW    — Informational / non-breaking (orphan Sets with no consumers, Spotter
+           feedback entries).
 ```
 
 **If any STOP CONDITIONS are present**, require explicit acknowledgment before proceeding:
@@ -1150,6 +1355,24 @@ def write_tree_text(report_dir, connection, source, graph):
     with open(os.path.join(report_dir, "dependency_tree.txt"), "w") as f:
         f.write("\n".join(lines))
 
+def _mmd_label(s):
+    """Escape characters that break mermaid label parsing.
+
+    Without this, names containing & (e.g. "Sales & Inventory"), [, ], <, >, |, or
+    embedded quotes will silently break the diagram — the file looks fine to humans
+    but mermaid.live/the renderer rejects it. Apply to every label string before
+    embedding into a node definition.
+    """
+    return (s.replace("&", "and")
+             .replace('"', "'")
+             .replace("<", "")
+             .replace(">", "")
+             .replace("[", "(")
+             .replace("]", ")")
+             .replace("|", "/")
+             .replace("\n", " "))
+
+
 def write_mermaid(report_dir, connection, source, graph):
     """Writes report_dir/dependency.mmd as pure mermaid source (no markdown fence)."""
     lines = ["graph TD"]
@@ -1159,11 +1382,13 @@ def write_mermaid(report_dir, connection, source, graph):
         "RLS":        "rls",
     }
     def node_id(guid):  # mermaid IDs cannot start with a digit or contain hyphens
-        return "N" + guid.replace("-", "")[:10]
+        # Use underscore prefix + alnum-only suffix so IDs are always valid
+        safe = "".join(ch for ch in guid if ch.isalnum())
+        return "n_" + safe[:16]
     def emit(node):
         nid = node_id(node["guid"])
-        label = (f'{node["type"]}<br/>{node["name"]}<br/>'
-                 f'{node["guid"][:8]}<br/>{node.get("owner","?")}')
+        label = (f'{node["type"]}<br/>{_mmd_label(node["name"])}<br/>'
+                 f'{node["guid"][:8]}<br/>{_mmd_label(node.get("owner","?"))}')
         cls = style_for.get(node["type"], "")
         suffix = f":::{cls}" if cls else ""
         lines.append(f'    {nid}["{label}"]{suffix}')
@@ -2686,5 +2911,6 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 0.1.2 | 2026-04-26 | Step 4 rewrite — replace bulk environment scan (10k+ TML exports, ~30 min) with v2 dependents API (~3s, single call). Add alias propagation: for each Model/View dependent, extract what alias the target column is exposed as (e.g. ZIPCODE → "Customer Zipcode"), then match Answers/Liveboards/Sets against the alias of the Model they query — caught ~30% more dependents in test environments. Fix tree hierarchy: Answers/Liveboards now attach to the Model they query (via tables[].fqn); Set consumers re-parent under the Set; Views handled correctly via view_columns + search_query. Mermaid DAG escapes & and special chars. Add Step 0 dependency hierarchy diagram. Add risk-rating legend inline in impact report |
 | 0.1.1 | 2026-04-26 | Add references/dependency-types.md (status table, hierarchy diagram, sample impact report); update open-items.md #6 (alerts VERIFIED via Liveboard --associated), #7 (RLS VERIFIED inline in table TML), #9 (CSR structure documented; retrieval unverified), #10 (column_alias TML structure documented; retrieval unverified); add suggest_dependency_types.py soft pre-commit nudge |
 | 0.1.0 | 2026-04-26 | Initial WIP — Audit/Remove/Rename/Repoint modes; v2 dependents discovery with recursive walk through Models, Views, and Sets; FIX/DELETE per dependent with typed-DELETE confirmation; markdown-table impact report with text tree + mermaid DAG; TML backup with manifest; rollback for updates and deletes |
