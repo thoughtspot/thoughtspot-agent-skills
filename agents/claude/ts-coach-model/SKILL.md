@@ -116,6 +116,12 @@ Mark each result `[MODEL]` or `[WORKSHEET]` using `metadata_header.contentUpgrad
 This skill targets **Models only** — recommend `/ts-object-model-builder` to upgrade
 legacy Worksheets and stop.
 
+**Display format.** Show results as a markdown table with columns
+`# | Name | Owner | GUID | Modified`. The Owner column is the
+`metadata_header.authorDisplayName` (fall back to `authorName` if the display name is
+absent). On shared instances, name collisions across authors are common; without the
+Owner column the user often picks the wrong object.
+
 Save `{model_guid}` and `{model_name}`.
 
 **Optional Snowflake profile.** Ask:
@@ -190,27 +196,75 @@ for j in joins:
 
 ### 2b. Existing AI assets (drives the critique in Step 4)
 
-Split existing feedback by **access level** — `GLOBAL` entries are curated and
-shared, `USER` entries are private and unreviewed. The two are treated differently
-in Steps 4 and 5.
+Pull two categories of existing assets:
+
+1. **Model TML assets** (`model.description`, `columns[].properties.ai_context`,
+   `columns[].properties.synonyms[]`) — read directly from the bundle parsed in 2a.
+2. **Existing feedback entries** — NOT in the bundle. `ts tml export --associated`
+   does not surface `nls_feedback` (verified, see
+   [open-items.md](references/open-items.md) #2). Enumerate via the metadata
+   dependents API:
 
 ```python
-all_feedback = next((i["tml"]["nls_feedback"]["feedback"]
-                     for i in data if i["type"]=="nls_feedback"), [])
+import urllib.request
+req = urllib.request.Request(
+    f"{base_url}/api/rest/2.0/metadata/search", method="POST",
+    headers={"Authorization": f"Bearer {token}", "X-Requested-By": "ThoughtSpot",
+             "Content-Type": "application/json"},
+    data=json.dumps({
+        "metadata": [{"identifier": model_guid, "type": "LOGICAL_TABLE"}],
+        "include_dependent_objects": True,
+        "dependent_object_version":  "V2",
+    }).encode(),
+)
+body = json.loads(urllib.request.urlopen(req, timeout=60).read())
+fb_entries = body[0]["dependent_objects"]["dependents"][model_guid].get("FEEDBACK", []) or []
 
-existing_feedback_global = [e for e in all_feedback if e.get("access") == "GLOBAL"]
-existing_feedback_user   = [e for e in all_feedback if e.get("access") == "USER"]
+# Each entry has: id, name (= feedback_phrase), description (= type:
+# REFERENCE_QUESTION / BUSINESS_TERM), authorName, authorDisplayName, modified.
+# The full feedback content (search_tokens, formula_info, access level, chart_type,
+# display_mode) is NOT exposed by this endpoint and is currently NOT retrievable on
+# Cloud — see [open-items.md](references/open-items.md) #2 "Feedback content
+# retrieval" sub-section, cross-referenced with ts-dependency-manager #18.
+```
 
+**Header-only fallback.** Since search_tokens and access level are unavailable, the
+skill cannot:
+- Split existing feedback into GLOBAL vs USER (Step 5 USER opt-in collapses to a
+  no-op; treat as if no USER entries exist for signal purposes)
+- Use existing `feedback_phrase` strings as paraphrase variants in Step 6.3 (no
+  matching `search_tokens` to anchor them to)
+- Critique stale references in Step 4 §4b (no tokens to validate against the
+  current schema)
+
+What the skill CAN still do header-only:
+- Deduplicate by exact `feedback_phrase` match in Step 6 (case-insensitive)
+- Show counts and a phrase preview in the Step 5 critique summary
+- Surface entries whose `name`/phrase references columns no longer in the Model as
+  a soft warning ("phrase mentions a column not on the Model — review manually")
+
+When feedback content retrieval is restored (open-item #2 follow-up), this section
+should re-enable the GLOBAL/USER split, paraphrase variant generation, and full
+stale-reference critique.
+
+```python
 existing = {
     "model_description": model.get("description", "").strip(),
     "spotter_enabled":   model.get("properties",{}).get("spotter_config",{}).get("is_spotter_enabled", False),
     "columns_with_ai_context": [(c["name"], c["properties"]["ai_context"])
                                  for c in columns if c.get("properties",{}).get("ai_context")],
-    "columns_with_synonyms":   [(c["name"], c.get("synonyms", []),
+    "columns_with_synonyms":   [(c["name"], c.get("properties",{}).get("synonyms", []),
                                  c.get("properties",{}).get("synonym_type", ""))
-                                 for c in columns if c.get("synonyms")],
-    "existing_feedback_global": existing_feedback_global,   # high-quality input signal
-    "existing_feedback_user":   existing_feedback_user,     # gated behind Step 5 opt-in
+                                 for c in columns if c.get("properties",{}).get("synonyms")],
+    "existing_feedback_headers": [
+        {"id": e["id"], "phrase": e["name"], "type": e.get("description","UNKNOWN"),
+         "author": e.get("authorName"), "modified": e.get("modified")}
+        for e in fb_entries
+    ],
+    "feedback_content_retrievable": False,  # see open-items.md #2 follow-up
+    # Reserved for when content retrieval is restored:
+    "existing_feedback_global": [],
+    "existing_feedback_user":   [],
 }
 ```
 
@@ -225,8 +279,10 @@ Three sub-steps — run all that apply.
 ### 3a. Dependent Liveboards/Answers via verified v2 API
 
 The CLI `ts metadata search` does not yet expose `--include-dependent-objects`. Use the
-verified API from
-[ts-dependency-manager open-items #1](~/.claude/skills/ts-dependency-manager/references/open-items.md) — fast (~2s), VERIFIED on Cloud:
+verified API contract documented in this skill's
+[open-items.md](references/open-items.md) #1 (independently verified for the
+ts-dependency-manager skill on the `wip/ts-dependency-manager` branch) — fast (~2s),
+VERIFIED on Cloud:
 
 ```python
 import urllib.request, json, os
@@ -360,6 +416,7 @@ Summary:
 | `column.synonyms` | Empty; missing high-frequency phrases from mined prose; redundant with display name | `ADD_PHRASES` / `REMOVE_REDUNDANT` / `KEEP` |
 | `nls_feedback` GLOBAL entries | Stale references; downvoted entries; matches new candidate | `KEEP` / `FLAG_FOR_HUMAN` |
 | `nls_feedback` USER entries | Out of scope by default; surface count only | `KEEP_OUT_OF_SCOPE` (default) |
+| `nls_feedback` (header-only mode) | Phrase mentions a column not on the Model | `FLAG_FOR_HUMAN` (soft warning only — token-level critique unavailable; see [open-items.md](references/open-items.md) #2 sub) |
 
 Per [ai-asset-review-rules.md §4](references/ai-asset-review-rules.md):
 - **GLOBAL feedback** is treated as authoritative — preserved, used as input signal

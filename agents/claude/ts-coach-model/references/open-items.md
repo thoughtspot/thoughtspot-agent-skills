@@ -103,6 +103,54 @@ Surfaces 3 (Reference Questions) and 4 (Business Terms) ARE fully automatable vi
 TML import. No manual-entry workaround is required for v1. The earlier conclusion
 that "standalone import is broken" was wrong — caused by checking the wrong API.
 
+### Feedback content retrieval — OPEN — 2026-04-26 (degrades skill, non-blocking)
+
+Enumeration via the dependents API returns entry **headers only** (`id`, `name` =
+phrase, `description` = type, author, modified). The full content
+(`search_tokens`, `formula_info`, `access` level, `chart_type`, `display_mode`)
+is not surfaced anywhere on champ-staging. Verified 2026-04-26 against the Dunder
+Mifflin Model — none of the following return content:
+
+| Endpoint / approach | Result |
+|---|---|
+| `ts tml export <feedback_guid>` | error 10002 — "Specified identifier doesn't exist" |
+| `POST /api/rest/2.0/metadata/tml/export` with `type=FEEDBACK` | 400 — same error |
+| `POST /api/rest/2.0/metadata/search` with `type=FEEDBACK` | 400 — `FEEDBACK` not in `SearchMetadataType` enum |
+| `GET /api/rest/2.0/metadata/feedback/{id}` | 500 |
+| `GET /api/rest/2.0/metadata/{id}` (where id is feedback guid) | 500 |
+| `POST /api/rest/2.0/sage/feedback/list` | 500 |
+| `POST /api/rest/2.0/spotter/feedback/list` (with model identifier) | 500 |
+| `POST /api/rest/2.0/metadata/nls_feedback/export` | 500 |
+| `tml/export` of model with `export_feedback`, `include_feedback`, `export_nls_feedback`, `export_dependent` flags | All return 9 items (model + 8 tables); never include `nls_feedback` |
+
+This is the same root cause as
+[ts-dependency-manager open-item #18](~/.claude/skills/ts-dependency-manager/references/open-items.md) —
+the correct content endpoint is unknown across both skills.
+
+#### Header-only fallback (skill behaviour while this is open)
+
+The skill **degrades gracefully** when content is unretrievable:
+
+| Surface / step | With content | Header-only fallback |
+|---|---|---|
+| Step 2b GLOBAL/USER split | Split by `access` field | All entries treated as `UNKNOWN_ACCESS`; Step 5 USER opt-in collapses to no-op |
+| Step 3d input signal | Existing `search_tokens` seed paraphrase variants | Skip — no tokens available |
+| Step 4 §4b stale-reference critique | Cross-check tokens vs current schema | Soft warning when entry phrase mentions a column not on the Model |
+| Step 6 dedup | By `feedback_phrase` exact match (lower-cased) | Same — phrase IS exposed in headers |
+| Step 6.3 paraphrase variants from existing entries | Reuse existing `feedback_phrase` for matching `search_tokens` | Skip — no token mapping to anchor variants |
+
+When the correct endpoint is identified, restore the full Step 2b GLOBAL/USER split
+and re-enable variant generation in Step 6.3. SKILL.md Step 2b includes the fallback
+flag `feedback_content_retrievable: False` so downstream steps key off it cleanly.
+
+#### Action
+
+- Probe ThoughtSpot v2 OpenAPI doc once accessible — there must be a content endpoint
+- Ask ThoughtSpot engineering for the correct path — same question as
+  ts-dependency-manager #18
+- Once verified, update Step 2b code, remove the fallback branch, mark this
+  sub-item VERIFIED
+
 ---
 
 ## #3 — Column `ai_context` and `synonyms` round-trip — VERIFIED — 2026-04-26
@@ -406,8 +454,9 @@ update it with empirical guidance.
 | Item | Required for merge to main | Required for v2 | Owner |
 |---|---|---|---|
 | #1 dependent search via v2 API | Yes — VERIFIED | — | Damian |
-| #2 standalone nls_feedback import | **Yes — BLOCKING** | — | Damian |
-| #3 ai_context / synonyms round-trip on Model TML | **Yes — BLOCKING** | — | Damian |
+| #2 standalone nls_feedback import | **Yes — BLOCKING (VERIFIED)** | — | Damian |
+| #2 sub: feedback content retrieval | No — header-only fallback in v1 | Yes — restores GLOBAL/USER split + variant generation | Damian |
+| #3 ai_context / synonyms round-trip on Model TML | **Yes — BLOCKING (VERIFIED)** | — | Damian |
 | #4 Data Model Instructions TML location | No (deferred to v1.1; markdown draft only) | Yes | Damian |
 | #5 ACCOUNT_USAGE access | Yes — VERIFIED | — | — |
 | #6 searchdata dry-run | No | Yes (promote to `ts searchdata` command) | Damian |
@@ -417,3 +466,9 @@ update it with empirical guidance.
 
 **Merge blockers:** #2 and #3. Both are short tests against champ-staging on the
 Dunder Mifflin Model.
+
+The #2 sub-item (feedback content retrieval) is **NOT a merge blocker** — the v1
+skill operates header-only and degrades gracefully. It becomes blocking for v2 when
+GLOBAL/USER differentiation and paraphrase variant reuse are promoted from "nice to
+have" to "core". Cross-track with
+[ts-dependency-manager open-item #18](~/.claude/skills/ts-dependency-manager/references/open-items.md).

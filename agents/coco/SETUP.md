@@ -50,6 +50,7 @@ snow stage copy agents/shared/schemas/thoughtspot-model-tml.md @SKILLS.PUBLIC.SH
 snow stage copy agents/shared/schemas/thoughtspot-answer-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-liveboard-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-sets-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/schemas/thoughtspot-feedback-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 ```
@@ -102,6 +103,7 @@ without CLI access.
 │   │   ├── thoughtspot-connection.md
 │   │   ├── thoughtspot-table-tml.md
 │   │   ├── thoughtspot-model-tml.md
+│   │   ├── thoughtspot-feedback-tml.md
 │   │   └── thoughtspot-formula-patterns.md
 │   └── worked-examples/snowflake/
 │       ├── ts-from-snowflake.md
