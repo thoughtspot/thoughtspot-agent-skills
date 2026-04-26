@@ -278,27 +278,181 @@ Bump ts-cli version in both `__init__.py` and `pyproject.toml`.
 
 ---
 
-## #6 — Finding Alerts that reference affected Answers/Liveboards (Step 4) — VERIFIED (Option C confirmed)
+## #6 — Finding Alerts that reference affected Answers/Liveboards (Step 4) — VERIFIED 2026-04-26
 
-**2026-04-26 test against champ-staging — verified findings:**
+**Alerts ARE returned as `monitor_alert` TML when exporting a Liveboard with
+`--associated`.** Verified against TEST_DEPENDENCY_LIVEBOARD (`2fa59781-...`) on
+champ-staging — `--associated --fqn --parse` returns 11 docs including a
+`monitor_alert` document with both alerts attached to the liveboard's KPI viz.
 
-- **v2 `SearchMetadataType` enum** does NOT contain any alert-like type. Tested:
-  `ALERT`, `MONITOR`, `MONITOR_ALERT`, `MONITOR_RULE`, `KPI_ALERT`, `ANSWER_ALERT`,
-  `LIVEBOARD_ALERT`, `SCHEDULED_ALERT`, `NOTIFICATION`, `WATCH`, `ANOMALY`,
-  `METRIC`, `KPI`, `SUBSCRIPTION`, `SCHEDULE`, `SCHEDULED`, `RULE`. All rejected as
-  invalid enum values (HTTP 400).
+The previously-recorded conclusion (Option C, manual review only) was **wrong** — earlier
+probing missed the CLI's `--associated` flag because the v2 endpoint's flag is named
+`export_associated` (not `export_associated_objects`). The CLI passes `export_associated:true`
+which DOES include monitor_alert docs in the response.
 
-- **v2 alert/monitor REST endpoints** return 500 on champ-staging:
-  `/api/rest/2.0/alerts`, `/api/rest/2.0/alerts/search`,
-  `/api/rest/2.0/monitor/alert/search`, `/api/rest/2.0/monitor/search`,
-  `/api/rest/2.0/notifications/search`. Only `/api/rest/2.0/schedules/search` works,
-  but schedules are scheduled-report deliveries, not value-threshold alerts.
+### Verified TML structure
 
-- **v2 dependents response** does NOT surface alerts in any bucket. Tested with
-  TEST_DEPENDENCY_LIVEBOARD — buckets returned were empty (`has_inacc: False`).
+```yaml
+# info.filename: "Alerts.tml"
+# info.type:     "monitor_alerts"
+# tml root key:  monitor_alert  (a list — multiple alerts on one liveboard come back together)
+monitor_alert:
+  - guid: 05e270a6-fec6-46e4-b725-ba81c66c3fa3
+    name: "Alert on Total Amount by Daily Balance Date"
+    frequency_spec:
+      cron:
+        second: "0"
+        minute: "0"
+        hour: "9"
+        day_of_month: "*"
+        month: "*"
+        day_of_week: "1,2,3,4,5"
+      time_zone: "UTC"
+      start_time: 1777136381
+      end_time: 0
+      frequency_granularity: "DAILY"
+    creator:
+      username: damian.waldron@thoughtspot.com
+      user_email: damian.waldron@thoughtspot.com
+    condition:
+      percentage_change_condition:
+        comparator: "PERCENTAGE_CHANGE_COMPARATOR_CHANGES_BY"
+        threshold: { value: 5.0 }
+    metric_id:
+      pinboard_viz_id:
+        pinboard_id: 2fa59781-ef39-4755-906c-310968709094  # ← liveboard GUID
+        viz_id:      b5e803c6-75f7-4c03-b824-55ef574f87f4  # ← visualization id
+      personalised_view_id: 4ed497ac-...
+    subscribed_user:
+      - { username: ..., user_email: ... }
+    customMessage: ""
+    personalised_view_info:                                # ← COLUMN REFERENCES LIVE HERE
+      tables:
+        - id: TEST_DEPENDENCY_MANAGEMENT
+          name: TEST_DEPENDENCY_MANAGEMENT
+          fqn: e5c84be6-ebbc-4ef0-9522-e124f0d29827
+      filters:
+        - column: ["TEST_DEPENDENCY_MANAGEMENT::Customer Zipcode"]   # ← TABLE::COL_NAME
+          is_mandatory: false
+          is_single_value: false
+          display_name: ""
+        - column: ["TEST_DEPENDENCY_MANAGEMENT::Customer Name"]
+          oper: "in"
+          values: ["Ainyx"]
+          is_mandatory: false
+          is_single_value: false
+          display_name: ""
+    alert_type: "Threshold"   # also "Anomaly"
+```
 
-**Conclusion: Option C — alerts cannot be programmatically discovered on this build.**
-The skill MUST fall back to a manual-review caveat in the impact report.
+### Key column-reference locations
+
+When a column on a Model used by an alerted Answer/Liveboard is renamed or removed:
+
+1. **`personalised_view_info.filters[].column[]`** — strings of form `"TABLE_NAME::COLUMN_NAME"`.
+   Multiple alerts can each have multiple filters. Each filter's `column` is a list (usually
+   length 1, but can be longer for multi-column filters).
+2. The alert is anchored to a specific viz via `metric_id.pinboard_viz_id.viz_id` (or
+   `metric_id.answer_id` for standalone Answers). If the viz itself is deleted as part of
+   a `REMOVE_CHART` decision in Step 6, the alert is orphaned and must also be deleted.
+
+The metric being monitored is the visualization's primary measure — the alert doesn't
+encode it as a column reference (it's whatever the viz computes). If the column underlying
+the metric is removed without a `REMOVE_CHART` decision on the viz, the alert continues
+to exist but its filter set is broken.
+
+### Detection logic for Step 4
+
+```python
+def find_alert_column_uses(monitor_alert_tml, target_columns, source_model_name=None):
+    """
+    Returns list of {alert_guid, alert_name, viz_id, filter_index, column} for every
+    filter in any alert that references a column in target_columns.
+
+    target_columns is the set of model-level column names being removed/renamed
+    (e.g. {"Customer Zipcode"}).
+    """
+    hits = []
+    for i, alert in enumerate(monitor_alert_tml.get("monitor_alert", [])):
+        viz_id = (alert.get("metric_id", {})
+                       .get("pinboard_viz_id", {})
+                       .get("viz_id", ""))
+        for j, filt in enumerate(alert.get("personalised_view_info", {}).get("filters", [])):
+            for col_ref in filt.get("column", []):
+                # col_ref looks like "TABLE_NAME::COLUMN_NAME"
+                parts = col_ref.rsplit("::", 1)
+                if len(parts) != 2:
+                    continue
+                tbl, col = parts
+                if col in target_columns:
+                    if source_model_name and tbl != source_model_name:
+                        continue   # filter is on a different table; skip
+                    hits.append({
+                        "alert_guid": alert.get("guid"),
+                        "alert_name": alert.get("name"),
+                        "viz_id":     viz_id,
+                        "filter_index": j,
+                        "column":     col,
+                        "table":      tbl,
+                    })
+    return hits
+```
+
+### Update logic for Step 9 (RENAME)
+
+```python
+def rename_alert_columns(monitor_alert_tml, table_name, old_col, new_col):
+    """Update column refs in alert filters for a column rename."""
+    old_ref = f"{table_name}::{old_col}"
+    new_ref = f"{table_name}::{new_col}"
+    for alert in monitor_alert_tml.get("monitor_alert", []):
+        for filt in alert.get("personalised_view_info", {}).get("filters", []):
+            filt["column"] = [new_ref if c == old_ref else c for c in filt.get("column", [])]
+    return monitor_alert_tml
+```
+
+### Update logic for Step 9 (REMOVE)
+
+For REMOVE, drop filters whose column lists become empty after column removal. If an
+alert ends up with zero filters AND its viz was marked for removal in Step 6, prompt
+the user to delete the alert too (it has nothing left to filter on).
+
+```python
+def remove_alert_columns(monitor_alert_tml, table_name, removed_cols):
+    """Strip filters whose column refs target a removed column."""
+    removed_refs = {f"{table_name}::{c}" for c in removed_cols}
+    for alert in monitor_alert_tml.get("monitor_alert", []):
+        new_filters = []
+        for filt in alert.get("personalised_view_info", {}).get("filters", []):
+            kept = [c for c in filt.get("column", []) if c not in removed_refs]
+            if kept:
+                filt["column"] = kept
+                new_filters.append(filt)
+        alert["personalised_view_info"]["filters"] = new_filters
+    return monitor_alert_tml
+```
+
+### Action
+
+- [x] Verify alert TML structure on champ-staging
+- [ ] Add alert scan to Step 4 — for each Liveboard/Answer dependent, also export with
+      `--associated` and check for `monitor_alert` docs
+- [ ] Add alert section to Step 5 impact report (separate from manual-review caveat —
+      we can now actually find them)
+- [ ] Add update logic to Step 9 RENAME and REMOVE flows
+- [ ] Add re-import path for the modified `monitor_alert` TML — note: it has no GUID at
+      the document root; the import endpoint handles list-of-alerts updates
+- [ ] Confirm via test: does TS reject a re-import of monitor_alert TML where a filter
+      references a column that no longer exists on the underlying model? (probably yes —
+      same family as the search_query and join validation)
+- [ ] Create `~/.claude/shared/schemas/thoughtspot-alert-tml.md` (currently missing)
+      documenting the structure above
+
+### Test fixture
+
+TEST_DEPENDENCY_LIVEBOARD on champ-staging (`2fa59781-ef39-4755-906c-310968709094`) has
+2 alerts referencing "Customer Zipcode" via `TEST_DEPENDENCY_MANAGEMENT::Customer Zipcode`.
+Use this for end-to-end testing of the alert detection + update path.
 
 **Action (already implemented):**
 - Step 5 impact report has an "Alerts (manual review required)" section listing the
@@ -324,198 +478,472 @@ in case alerts become queryable in a later release.
 
 ---
 
-## #7 — RLS (Row Level Security) column usage detection (Step 4) — OPEN
+## #7 — RLS (Row Level Security) column usage detection (Step 4) — VERIFIED 2026-04-26
 
-**Question:** If a column being removed is referenced in an RLS rule, removing it from
-the model will silently break access control. How can the skill detect this before proceeding?
+**RLS rules ARE in the table TML** — no separate API needed. Verified against
+`DM_CUSTOMER_BIRD` (32c062cb-...) on champ-staging via
+`ts tml export <table_guid> --fqn --parse`. The rule structure is fully self-describing
+and easy to scan: `table_paths[].column[]` lists the referenced columns explicitly, and
+`rules[].expr` references them via `[path_id::COL_NAME]` syntax.
 
-**Why it matters:** RLS rules are applied at query time. If the column used in an RLS
-condition is removed, the rule may evaluate incorrectly or fail silently, potentially
-exposing data to unauthorized users. This is a **STOP condition** (Rule 7) — the skill
-must detect RLS usage and prevent the removal until the RLS rule is updated.
+### Verified TML structure
 
-**Options to investigate:**
-
-Option A — TML export of the model: Does the model TML include RLS rule definitions
-directly, or are they stored separately?
-
-Option B — Dedicated RLS API: Is there a v1 or v2 endpoint for listing RLS rules by
-table or column?
-
-Option C — metadata search for RLS object type: Try `ts metadata search --type ROW_SECURITY_RULE`
-(or equivalent) to discover RLS objects referencing the source model.
-
-**Test script:**
-
-```bash
-# Check if ROW_SECURITY_RULE is a valid metadata type
-source ~/.zshenv && ts auth token --profile '{profile_name}' | read TOKEN && \
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Requested-By: ThoughtSpot" \
-  -H "Content-Type: application/json" \
-  "{base_url}/api/rest/2.0/metadata/search" \
-  -d '{"metadata":[{"type":"ROW_SECURITY_RULE"}],"record_size":10}' \
-  | python3 -m json.tool | head -50
+```yaml
+table:
+  name: DM_CUSTOMER_BIRD
+  columns: [...]
+  rls_rules:
+    tables:                          # (Always references self for single-table rules)
+      - name: DM_CUSTOMER_BIRD
+        fqn:  32c062cb-...
+    table_paths:                     # Each path is a reusable identifier within the rule
+      - id:     DM_CUSTOMER_BIRD_1
+        table:  DM_CUSTOMER_BIRD
+        column: [ZIPCODE]            # ← EXPLICIT column list — primary detection target
+    rules:
+      - name: testRLS
+        expr: "[DM_CUSTOMER_BIRD_1::ZIPCODE] = ts_groups_int "  # ← path_id::COL_NAME
 ```
 
-Also check the model TML export with `--associated` flag — look for any `rls_rules`
-or `row_security` keys in the output:
+### Detection logic for Step 4
 
-```bash
-source ~/.zshenv && ts tml export {model_guid} \
-  --profile '{profile_name}' --fqn --associated --parse \
-  | python3 -c "
-import json, sys
-docs = json.load(sys.stdin)
-for d in docs:
-    if 'rls' in str(d).lower() or 'row_security' in str(d).lower() or 'row_level' in str(d).lower():
-        print(d['type'], json.dumps(d, indent=2)[:500])
-"
+```python
+def find_rls_column_uses(table_tml, target_columns):
+    """
+    Returns a list of {rule_name, path_id, column, expr} for every RLS rule that
+    references any column in target_columns.
+    """
+    rls = table_tml.get("table", {}).get("rls_rules", {})
+    paths = {p["id"]: p for p in rls.get("table_paths", [])}
+    hits = []
+    for rule in rls.get("rules", []):
+        expr = rule.get("expr", "")
+        for path_id, p in paths.items():
+            for col in p.get("column", []):
+                if col not in target_columns:
+                    continue
+                # Confirm the column actually appears in the rule expression
+                if f"{path_id}::{col}" in expr or f"[{col}]" in expr:
+                    hits.append({
+                        "rule_name": rule["name"],
+                        "path_id":   path_id,
+                        "column":    col,
+                        "expr":      expr,
+                    })
+    return hits
 ```
 
-**Finding:** _(not yet tested)_
+### Update logic for Step 9 (RENAME)
 
-**Action when VERIFIED:**
-- If RLS rules are discoverable: add RLS scan to Step 4; add RLS column usage as a
-  STOP condition in the impact report and require user to update the RLS rule first
-- If not detectable: add a mandatory warning in the impact report that RLS rules
-  cannot be automatically detected and must be manually reviewed
+```python
+def rename_rls_column(table_tml, old_name, new_name):
+    """Update column references in table.rls_rules for a column rename."""
+    rls = table_tml.get("table", {}).get("rls_rules", {})
+    # Update path column lists
+    for p in rls.get("table_paths", []):
+        p["column"] = [new_name if c == old_name else c for c in p.get("column", [])]
+    # Update rule expressions: [path_id::OLD_NAME] -> [path_id::NEW_NAME]
+    for rule in rls.get("rules", []):
+        expr = rule.get("expr", "")
+        rule["expr"] = re.sub(
+            r'(::)' + re.escape(old_name) + r'(\])',
+            lambda m: m.group(1) + new_name + m.group(2),
+            expr,
+        )
+    return table_tml
+```
+
+### Behavior on REMOVE
+
+A removed column referenced by an RLS rule is a **STOP condition** — silently breaks
+access control. The skill must:
+
+1. **Detect** at Step 4 — scan the source table's `table.rls_rules` (and any join-target
+   tables in the model) for the column
+2. **Block** at Step 5 — show in STOP CONDITIONS section with the rule name and expr
+3. **Require explicit user resolution** — either remove the rule first via UI, or
+   acknowledge that the column will be dropped and the rule will fail (TS may also
+   reject the table TML import; not yet tested)
+
+**Note on join-target tables:** When the source is a Model that joins to multiple base
+tables, RLS rules can live on any of the joined tables. Step 4's RLS scan must walk every
+table in `model.model_tables[].fqn` (resolve to its TML and check `rls_rules`), not just
+the source table.
+
+### Action
+
+- [x] Verified RLS structure on champ-staging
+- [ ] Add `find_rls_column_uses()` to Step 4 of SKILL.md
+- [ ] Add RLS section to Step 5 STOP CONDITIONS
+- [ ] Add `rename_rls_column()` to Step 9 RENAME path
+- [ ] Add RLS scan across all `model_tables[]` (not just source table)
+- [ ] Confirm via test: does TS reject a table TML import that has RLS rule referencing
+      a removed column? (probably yes — same pattern as #4 join conditions and #12 filters)
 
 ---
 
-## #8 — Column-level sharing / access control detection (Step 4) — OPEN
+## #8 — Column-level sharing / access control detection (Step 4) — VERIFIED 2026-04-26 (no skill action needed)
 
-**Question:** ThoughtSpot supports column-level access control (restricting which users
-can see specific columns). If a column is being renamed, references in column-level
-sharing rules may become stale. How are these rules stored and can they be detected
-via TML or API?
+**Verified findings on champ-staging (2026-04-26):** Column-level ACLs exist as ORM
+records, NOT as TML. They are accessible via the v2 endpoint
+`POST /api/rest/2.0/security/metadata/fetch-permissions` with
+`type: LOGICAL_COLUMN` and the column GUID. Response shape mirrors the table-level
+permissions response: principal-by-principal grants of `MODIFY` / `VIEW` / `NO_ACCESS`.
 
-**Why it matters:** Renaming a column that appears in a column-level sharing rule may
-silently remove that column from the rule, potentially exposing restricted data.
+**Critical observation: ACLs are keyed by column GUID, not by name.** Implications for
+the skill:
 
-**Options to investigate:**
+- **RENAME** — column GUID is stable across a name change, so column ACLs follow the
+  rename automatically. **No skill action required.**
+- **REMOVE** — when a column is deleted, its ACL records become orphaned. They are
+  inert (no column to grant access to) and cause no security exposure. **No skill
+  action required.**
+- **REPOINT** — column GUIDs change because the dependent objects now reference
+  columns from a different table. ACLs on the OLD column are unaffected; the user's
+  visibility into the new repointed object is determined by the target table's ACLs.
+  **No skill action required** — this is the existing behavior of repoint operations.
 
-Option A — Column-level security in model TML: Are column access restrictions stored
-inline in the model TML (e.g., `columns[].access_type` or similar)?
+### What the skill could optionally do
 
-Option B — Separate security TML type: Is there a distinct TML object type for
-column-level security policies?
+Show column ACL counts in the impact report as informational metadata (e.g.,
+"3 principals have explicit access to this column"). This is purely advisory; it
+doesn't change the operation's safety. Probably not worth the API call latency in
+typical use.
 
-Option C — v2 REST API: Is there a `/api/rest/2.0/` endpoint for column-level security?
+### Probes ruled out
 
-**Test script:**
+`MASKING_POLICY`, `DATA_MASK`, `COLUMN_SECURITY`, `RLS_POLICY`, `DATA_POLICY_RULE`,
+`COLUMN_PROPERTY` — all rejected by v2 metadata search enum. There is no separate
+"column security TML" object on this build. The user-facing concept of column-level
+security is implemented entirely as ACL records on the column GUID, which the skill
+does not need to inspect or update.
 
-```bash
-# Export model TML and look for access / permission / security keys
-source ~/.zshenv && ts tml export {model_guid} \
-  --profile '{profile_name}' --fqn --parse \
-  | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-model = data[0]['tml']
-# Look for access-related fields
-tml_str = json.dumps(model)
-for keyword in ['access', 'permission', 'security', 'sharing', 'visibility']:
-    if keyword in tml_str.lower():
-        print(f'Found keyword: {keyword}')
-"
-```
-
-**Finding:** _(not yet tested)_
-
-**Action when VERIFIED:**
-- Document the column-level sharing TML structure
-- Add detection to Step 4 impact report
-- Add update logic to Step 9 for RENAME operations
+**Status:** VERIFIED. No skill changes required. The original open item asked the wrong
+question ("how do we find column security TML?"); the actual answer is that there is no
+such TML and no action is needed because GUIDs are stable.
 
 ---
 
-## #9 — Column security rule TML structure (Step 9) — OPEN
+## #9 — Column security rule TML structure (Step 9) — STRUCTURE KNOWN; RETRIEVAL UNVERIFIED 2026-04-26
 
-**Question:** ThoughtSpot has a concept of column-level security rules stored as separate
-TML objects. What is the TML type name, structure, and how does it reference columns
-from a parent model?
+ThoughtSpot has a per-table `column_security_rules` TML type (filename pattern
+`<TABLE_NAME>_CSR.column_security_rules`). It controls which user groups can see which
+columns of the table — distinct from #8 (which is column ACLs keyed by GUID).
 
-**Why it matters:** When removing or renaming a column, any column security rule TML
-that references that column must also be updated. The skill currently has no mechanism
-to find or update these objects (Rule 9).
+The TML structure is documented and detection/update logic is mechanical. The
+**retrieval mechanism** is the open question: on champ-staging, the v2
+`/api/rest/2.0/metadata/tml/export` endpoint with `export_associated:true`
+**does not return** these TML files for any model tested (TEST_DEPENDENCY_MANAGEMENT,
+canonical Dunder Mifflin Sales, Aliasing Testing model). The CSR file appears only when
+exporting via the ThoughtSpot UI's Download TML zip path or via the `vcs/git/branches/commit`
+workflow that pushes a full bundle to a configured git repo.
 
-**Options to investigate:**
+### Verified TML structure (per user-provided example, 2026-04-26)
 
-Option A — `--associated` export: Does exporting a model with `--associated` include
-any security rule TML documents? Check the `type` field of all returned documents.
-
-Option B — metadata search: Try variations of the type string (`COLUMN_SECURITY_RULE`,
-`DATA_POLICY`, `SECURITY_RULE`) against the metadata search endpoint.
-
-**Test script:**
-
-```bash
-# Export model with --associated and list all returned TML types
-source ~/.zshenv && ts tml export {model_guid} \
-  --profile '{profile_name}' --fqn --associated --parse \
-  | python3 -c "
-import json, sys
-docs = json.load(sys.stdin)
-for d in docs:
-    print(d.get('type'), list(d.get('tml', {}).keys())[:5])
-"
+```yaml
+# Filename pattern: <TABLE_NAME>_CSR.column_security_rules
+# Lives at table scope; references columns by name.
+column_security_rules:
+  table:
+    name: DM_CUSTOMER_BIRD
+    obj_id: DM_CUSTOMER-32c062cb     # ← <table>-<short_id>; not a raw GUID
+  rules:
+    - column_name: CUSTOMER_CODE     # ← references base TABLE column name (not model alias)
+      accessible_groups:
+        group_name:
+          - "123"
+          - all_users
+    - column_name: STATE
+      accessible_groups:
+        group_name:
+          - all_users
+    - column_name: ZIPCODE           # ← target column for our skill's REMOVE/RENAME ops
+      accessible_groups:
+        group_name:
+          - admaxi
+          - "123"
+          - all_users
 ```
 
-**Finding:** _(not yet tested)_
+**Important properties:**
+- One CSR file per table that has any column-level rules. A table with no rules has no CSR file.
+- `column_name` references the **base table column name** (e.g. `ZIPCODE`), NOT a model-level
+  alias (e.g. `Customer Zipcode`). This matters: removing `Customer Zipcode` at the model layer
+  does not affect CSR; renaming the underlying `ZIPCODE` column at the table layer does.
+- `accessible_groups.group_name` is a list of group names (strings).
+- A column referenced in CSR but missing from the table → access falls through to default
+  table-level sharing (column becomes visible/invisible based on table ACL, not CSR rules).
 
-**Action when VERIFIED:**
-- Document the column security rule TML structure in `agents/shared/schemas/`
-- Add scan to Step 4 to find security rule documents referencing the affected column
-- Add update logic to Step 9: for REMOVE, remove the column from the rule; for RENAME,
-  update the column reference
+### Detection logic for Step 4 (when CSR file is available)
+
+```python
+def find_csr_column_uses(csr_tml, target_columns):
+    """
+    target_columns is the set of base-table column names being removed/renamed.
+    Returns list of {table, column, accessible_groups} for each rule that references
+    a column in target_columns.
+    """
+    csr = csr_tml.get("column_security_rules", {})
+    table_name = csr.get("table", {}).get("name", "")
+    hits = []
+    for rule in csr.get("rules", []):
+        col = rule.get("column_name")
+        if col in target_columns:
+            hits.append({
+                "table":             table_name,
+                "column":            col,
+                "accessible_groups": rule.get("accessible_groups", {}).get("group_name", []),
+            })
+    return hits
+```
+
+### Update logic for Step 9
+
+**RENAME** — update `column_name` in matching rules:
+
+```python
+def rename_csr_column(csr_tml, old_name, new_name):
+    for rule in csr_tml.get("column_security_rules", {}).get("rules", []):
+        if rule.get("column_name") == old_name:
+            rule["column_name"] = new_name
+    return csr_tml
+```
+
+**REMOVE** — drop rules referencing the removed column. **STOP CONDITION**: if any
+rule is about to be deleted, surface in the impact report as a security-impact warning,
+since dropping the rule changes who can see related data on the table:
+
+```python
+def remove_csr_column(csr_tml, removed_cols):
+    rules = csr_tml.get("column_security_rules", {}).get("rules", [])
+    csr_tml["column_security_rules"]["rules"] = [
+        r for r in rules if r.get("column_name") not in removed_cols
+    ]
+    return csr_tml
+```
+
+### Retrieval mechanism — UNVERIFIED on champ-staging via v2 API
+
+**What was tried and failed:**
+- v2 `metadata/tml/export` with `export_associated:true` — returns model + tables only;
+  no CSR docs even on tables (DM_CUSTOMER_BIRD) or models known to use them
+- 17 additional flag combinations on the same endpoint (`export_dependent`,
+  `export_full`, `export_metadata_associations`, `export_locale`,
+  `export_column_security_rules`, `include_internal_metadata`, etc.) — all return
+  exactly the same 9 docs as the baseline call
+- v2 `metadata/tml/export-zip` and similar paths — 500 (not routed)
+- v1 `callosum/v1/metadata/tml/export` with `export_associated=true` — 500
+- v2 `metadata/search` enum — `COLUMN_SECURITY_RULES`, `COLUMN_SECURITY`, `RLS_POLICY`,
+  `DATA_POLICY_RULE`, etc. all rejected with 400
+- The cs_tools repo (https://github.com/thoughtspot/cs_tools), which is the canonical
+  community tooling for TS, has zero references to `column_security_rules`,
+  `column_alias`, or `monitor_alert` TML types in any code path
+
+**Likely retrieval paths to investigate:**
+- TS UI "Download TML" button → produces a multi-file zip including CSR; this is
+  the path the user was almost certainly using when generating their example
+- `/api/rest/2.0/vcs/git/branches/commit` → pushes a full TML bundle to git, which
+  would include CSR if the source table has rules. This requires a configured git remote
+  (which we don't have on champ-staging in this skill's context)
+- A v2 build on a newer Cloud version (26.4.0+) that adds CSR to the standard
+  `--associated` export — testing on champ-staging gave consistent results suggesting
+  this build doesn't enable it
+
+### Action
+
+- [x] Document TML structure (this entry)
+- [x] Document detection/update logic (above)
+- [ ] Confirm retrieval mechanism — ask user to share the exact UI action or REST call
+      that produced their example CSR file
+- [ ] If UI-only: skill must rely on user pre-export. Document a "bring your own CSR
+      bundle" mode where the user points the skill at a directory of TML files
+- [ ] If git-commit-only: skill could trigger a vcs commit, fetch the resulting bundle,
+      detect/update CSR, then re-import. Heavy lift; only worth doing if there's no
+      direct API path
+- [ ] Re-test on a Cloud cluster running 26.4.0+ to see if `--associated` returns CSR
+      there (champ-staging build version unknown; may be older)
 
 ---
 
-## #10 — Column aliasing in TML (Step 4 / Step 9) — OPEN
+## #10 — Column alias TML (Step 4 / Step 9) — STRUCTURE KNOWN; RETRIEVAL UNVERIFIED 2026-04-26
 
-**Question:** ThoughtSpot allows columns to be aliased (displayed under a different name
-than the underlying column ID). When a column is renamed or removed, are alias references
-updated automatically, or do they need to be found and updated explicitly?
+ThoughtSpot has TWO distinct alias mechanisms — both are real and both need to be
+handled by the skill:
 
-**Why it matters:** If aliases are stored as separate references (e.g., in answer TML as
-a `custom_name` field or in a separate alias mapping), the skill's current rename logic
-may miss them, leaving stale display names after a column rename.
+1. **Inline aliases** (already implementable) — Model `columns[].name` vs `column_id`,
+   Table `columns[].name` vs `db_column_name`, View `view_columns[].name` vs
+   `search_output_column`. These come back in standard `--associated` exports and can
+   be detected/updated using TML field rewrites.
+2. **Per-locale alias TML** — a separate `column_alias` TML file at model scope, holding
+   per-locale, per-org, per-group display names for each model column. **Retrieval via
+   v2 API not verified** — same status as #9 (CSR).
 
-**Options to investigate:**
+### Mechanism 1: Inline aliases (verified)
 
-Option A — Inline in answer_columns: Do `answer_columns[]` entries have a `custom_name`
-or `alias` field separate from `name` that stores an alias?
+**Layer A — Table TML**: `columns[].name` (TS-side label) vs `db_column_name` (DB column).
+**Layer B — Model TML**: `columns[].name` (model-level alias) vs `column_id`
+(`TABLE::DB_COL_NAME`).
+**Layer C — View TML**: `view_columns[].name` vs `search_output_column`.
+**Layer D (NOT a layer)** — Answer/Liveboard `answer_columns[].name` and
+`chart.chart_columns[].column_id` reference the **model alias** directly. No second-level
+aliasing inside Answers.
 
-Option B — In chart config: Are aliases stored in `chart.chart_columns[].name` vs.
-`chart.chart_columns[].column_id` (i.e., is `name` the alias and `column_id` the actual reference)?
+Verified on TEST_DEPENDENCY_MANAGEMENT: 28 model columns with `name != column_id-suffix`
+(e.g. `"Customer Zipcode"` → `"DM_CUSTOMER_BIRD::ZIPCODE"`). The skill's existing
+`rename_column_in_set()` already handles the `column_id.endswith("::OLD")` → `"::NEW"`
+rewrite. View handling needs an extension (`search_output_column` is currently missed).
 
-Option C — In model TML: Does the model TML store column aliases in a `display_name`
-field separate from `name`?
+### Mechanism 2: Per-locale alias TML (structure documented; retrieval unverified)
 
-**Test script:**
+This is a separate file at model scope. Filename pattern unknown but likely
+`<MODEL_NAME>.column_alias` or similar (per user's example file). Holds per-locale,
+per-org, per-group display name overrides for every aliased model column.
 
-```bash
-# Export an answer that uses a column known to have a custom alias
-# and inspect the full answer_columns and chart structure
-source ~/.zshenv && ts tml export {answer_guid} \
-  --profile '{profile_name}' --fqn --parse \
-  | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-answer = data[0]['tml']['answer']
-print('answer_columns:', json.dumps(answer.get('answer_columns', [])[:5], indent=2))
-print('chart_columns:', json.dumps(answer.get('chart', {}).get('chart_columns', [])[:5], indent=2))
-"
+```yaml
+# Filename pattern: <MODEL_NAME>.column_alias  (best guess)
+# Lives at model scope; references columns by the model-level ALIAS (Mechanism 1 layer B).
+column_alias:
+  model:
+    name: "Dunder Mifflin Sales"
+    obj_id: DunderMifflinSales-0e4406c7   # ← <model>-<short_id>; not a raw GUID
+  columns:
+    - name: "Order ID"                     # ← references model.columns[].name (the alias)
+      locales:
+        - name: de-DE
+          orgs:
+            - name: Primary
+              groups:
+                - name: TS_WILDCARD_ALL    # ← all users in the org by default
+                  entries:
+                    - alias: "Bestellungs-ID"   # ← localized display name
+                      description: ""
+        - name: sv-SE
+          orgs:
+            - name: Primary
+              groups:
+                - name: TS_WILDCARD_ALL
+                  entries:
+                    - alias: "OrderId"
+                      description: ""
+        - name: en-AU
+          orgs:
+            - name: Primary
+              groups:
+                - name: TS_WILDCARD_ALL
+                  entries:
+                    - alias: "Order ID"        # ← matches the model-level name
+                      description: ""
+        - name: fr-FR
+          orgs:
+            - name: Primary
+              groups:
+                - name: TS_WILDCARD_ALL
+                  entries:
+                    - alias: "ID Commande"
+                      description: ""
+    - name: "zipcode"     # ← target column for our skill (case-sensitive vs model alias?)
+      locales: ...
+    # ...one entry per aliased column on the model
 ```
 
-**Finding:** _(not yet tested)_
+**Important properties:**
+- The `columns[].name` references the **model alias** (e.g. `"Order ID"`), NOT the
+  underlying table column (`ORDER_ID`) and NOT the model column_id (`DM_ORDER::ORDER_ID`).
+- Each column has a `locales[]` list, with one entry per supported locale (de-DE, sv-SE,
+  en-AU, fr-FR in the example).
+- Each locale has `orgs[]` for multi-org tenants, then `groups[]` for per-group overrides.
+  `TS_WILDCARD_ALL` is the default applies-to-everyone group.
+- Each `entries[]` element has `alias` (the localized display string) and `description`.
+- The `locales[].name` should match the user's `preferred_locale` (the user's auth payload
+  from `/auth/session/user` exposes this — e.g. `en-AU` for the test user).
+- A column not present in `column_alias.columns[]` falls through to its model-level `name`
+  (Mechanism 1).
 
-**Action when VERIFIED:**
-- Document where aliases are stored in the TML structure
-- Update `rename_column_in_answer()` and `rename_column_in_view()` to handle alias fields
-- Update the impact report to show aliased column names alongside internal names
+### Detection logic for Step 4 (when alias TML is available)
+
+```python
+def find_alias_column_uses(alias_tml, target_columns):
+    """
+    target_columns is the set of MODEL-LEVEL alias names being removed/renamed
+    (e.g. {"Customer Zipcode"}).
+    """
+    cols = alias_tml.get("column_alias", {}).get("columns", [])
+    return [c for c in cols if c.get("name") in target_columns]
+```
+
+### Update logic for Step 9
+
+**RENAME (model alias)** — update the matching `columns[].name`:
+
+```python
+def rename_alias_column(alias_tml, old_name, new_name):
+    for c in alias_tml.get("column_alias", {}).get("columns", []):
+        if c.get("name") == old_name:
+            c["name"] = new_name
+        # The localized strings inside locales[].entries[].alias may also
+        # need updating IF the user wants the localized aliases to track the
+        # base name. By default the localized strings are independent of the
+        # base name (e.g. "Order ID" → "Bestellungs-ID" doesn't change just
+        # because the base name changes). Don't auto-rewrite localized aliases.
+    return alias_tml
+```
+
+**REMOVE** — drop the entire `columns[]` entry for the removed column. The localized
+aliases die with it; that's correct (the column doesn't exist anymore):
+
+```python
+def remove_alias_columns(alias_tml, removed_cols):
+    cols = alias_tml.get("column_alias", {}).get("columns", [])
+    alias_tml["column_alias"]["columns"] = [
+        c for c in cols if c.get("name") not in removed_cols
+    ]
+    return alias_tml
+```
+
+### Retrieval mechanism — UNVERIFIED on champ-staging via v2 API
+
+**Same probes as #9 — the v2 `--associated` flag does not return `column_alias` TML
+files for any model tested.** Tested:
+- `0e4406c7-d978-4be7-abd7-c34e8f7da835` (canonical Dunder Mifflin Sales — the model
+  matching the user's example obj_id)
+- `565032d4-f5d9-42c9-a6a4-91d5abef93f7` ("Aliasing Testing - Dunder Mifflin Sales & Inventory")
+- `e5c84be6-ebbc-4ef0-9522-e124f0d29827` (TEST_DEPENDENCY_MANAGEMENT)
+
+All three returned only model + base tables (8-9 docs). cs_tools has no references
+to `column_alias`. Same retrieval-path candidates as #9: UI download, VCS commit
+bundle, or a Cloud build version that enables this in `--associated`.
+
+### Implications for the skill's RENAME logic
+
+The current SKILL.md Step 3-N treats "rename a column" as a single concept. With both
+inline aliases (Mechanism 1) AND localized alias TML (Mechanism 2) in play, RENAME has
+multiple meanings:
+
+| Source object the user picked | What "rename" means | Files to update |
+|---|---|---|
+| TABLE | rename `db_column_name` (or both `name` and `db_column_name` if they were equal) | table TML; every Model's `column_id` suffix |
+| MODEL alias | rename `columns[].name` only | model TML; every Answer/Liveboard `answer_columns[].name`, `chart_columns[].column_id`, model formulas; **column_alias TML if present** |
+| VIEW alias | rename `view_columns[].name` and `search_output_column` | view TML; consumers of the view |
+
+Step 3-N currently picks "rename" without distinguishing. For a TABLE source, it's
+unambiguous (DB column rename). For a MODEL source, the user should be asked whether
+they want to also propagate through the column_alias TML (if one exists).
+
+### Action
+
+- [x] Document Mechanism 1 (inline) — already mostly implementable
+- [x] Document Mechanism 2 (column_alias TML) per user-provided example
+- [x] Document detection/update logic for Mechanism 2
+- [ ] Confirm retrieval mechanism for Mechanism 2 — pending the same answer as #9
+- [ ] Update SKILL.md Step 3-N to explicitly distinguish DB-column rename vs. alias rename
+      when the source is a TABLE with `name != db_column_name`
+- [ ] Update `rename_column_in_view()` to handle `search_output_column` in addition to
+      `name` (currently only handles `name`)
+- [ ] If the column_alias TML becomes retrievable: add detection to Step 4 and update
+      logic to Step 9 RENAME path (REMOVE is automatic — drop the column entry)
+- [ ] Decide: when localized aliases exist, should RENAME of the base name auto-rewrite
+      the localized strings? Default to "no — they're independent" but make this a Step 6
+      user choice when localizations exist for the renamed column
 
 ---
 

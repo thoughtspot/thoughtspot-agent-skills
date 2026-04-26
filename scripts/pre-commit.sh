@@ -76,6 +76,12 @@ if echo "$STAGED" | grep -q 'SKILL\.md'; then
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
+# ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
+# also staging references/dependency-types.md. Never blocks. (TTY only)
+if echo "$STAGED" | grep -qE '^agents/claude/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
+  python3 tools/validate/suggest_dependency_types.py --root $REPO_ROOT
+fi
+
 # Repo changelog — suggests a CHANGELOG.md entry for significant staged changes:
 # new skills, ts-cli version bumps, new shared reference files (TTY only)
 python3 tools/validate/suggest_repo_changelog.py --root $REPO_ROOT

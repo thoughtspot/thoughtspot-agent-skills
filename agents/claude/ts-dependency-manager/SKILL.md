@@ -33,6 +33,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 | File | Purpose |
 |---|---|
+| [references/dependency-types.md](references/dependency-types.md) | Status of every dependency type (Implementable / Partial / Manual / GUID-stable / Informational), the dependency hierarchy the skill walks in Step 4, and a worked sample of the Step 5 impact report — read before adding new dep handling or changing how Step 4 walks the graph |
 | [references/open-items.md](references/open-items.md) | Dependency API, search_query and join constraints, Alert scan, RLS/security/aliasing open items — read before implementing Steps 4 and 9 |
 | [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure — column and formula placement rules, self-validation checklist |
@@ -2685,4 +2686,5 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 0.1.1 | 2026-04-26 | Add references/dependency-types.md (status table, hierarchy diagram, sample impact report); update open-items.md #6 (alerts VERIFIED via Liveboard --associated), #7 (RLS VERIFIED inline in table TML), #9 (CSR structure documented; retrieval unverified), #10 (column_alias TML structure documented; retrieval unverified); add suggest_dependency_types.py soft pre-commit nudge |
 | 0.1.0 | 2026-04-26 | Initial WIP — Audit/Remove/Rename/Repoint modes; v2 dependents discovery with recursive walk through Models, Views, and Sets; FIX/DELETE per dependent with typed-DELETE confirmation; markdown-table impact report with text tree + mermaid DAG; TML backup with manifest; rollback for updates and deletes |
