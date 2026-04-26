@@ -32,7 +32,7 @@ or patch files there directly.
 | agents/coco/ skill logic | Corresponding agents/claude/ skill if logic applies to both runtimes |
 | agents/cursor/rules/*.mdc | Corresponding agents/claude/ SKILL.md (keep in sync) |
 | Credential storage steps | agents/claude/ts-profile-{thoughtspot,snowflake}/SKILL.md; agents/cursor/rules/ts-profile-{thoughtspot,snowflake}.mdc; .claude/rules/security.md |
-| Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file); add ## Changelog starting at 1.0.0; CHANGELOG.md entry |
+| Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file); **tools/smoke-tests/smoke_<skill>.py** (or add to ALLOWLIST in tools/validate/check_smoke_tests.py with justification); add ## Changelog starting at 1.0.0; CHANGELOG.md entry |
 | Add a new shared schema/mapping | agents/coco/SETUP.md stage copy list; all SKILL.md and .mdc files that reference it |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.
