@@ -228,3 +228,19 @@ The pre-commit hook ([scripts/pre-commit.sh](../../../../scripts/pre-commit.sh))
 when SKILL.md or `references/open-items.md` is staged without this file — soft nudge,
 not a hard fail. The reviewer's checklist is in the repo's
 [CLAUDE.md change impact map](../../../../CLAUDE.md).
+
+### What re-renders automatically
+
+The skill's user-facing coverage messages are **generated** from the section A status
+column by [build_coverage.py](build_coverage.py):
+
+| Surface in SKILL.md | Generator command |
+|---|---|
+| Step 0 — coverage at-a-glance line shown before user confirms | `python3 references/build_coverage.py --summary` |
+| Step 5 — Scan Coverage block in the impact report | `python3 references/build_coverage.py --scan-coverage` |
+
+So when a status moves here, the skill output follows on the next run — no SKILL.md
+edit needed for the coverage messaging itself. If the renderer's bucketing logic needs
+to change (e.g. introducing a new bucket), update `STATUS_TO_BUCKET` in
+[build_coverage.py](build_coverage.py) and the unit test in [tests/](#) (when the test
+file is added; currently smoke-tested via `--list`).
