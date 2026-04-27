@@ -13,10 +13,17 @@ exactly what to change, takes TML backups, and provides rollback capability.
 
 - **Remove columns** — remove one or more columns from a connection table or Model, then
   clean up all dependent Answers, Liveboards, and Models that reference them
-- **Rename a column** — rename a column in a connection table or Model and propagate the
-  rename to all dependent objects
 - **Repoint objects** — redirect Answers or Liveboards to a different table or Model,
   with column-gap detection and mapping
+
+> **Note: RENAME mode is intentionally not supported by this skill.** Smoke testing
+> on champ-staging (2026-04-27) demonstrated that ThoughtSpot's TML import API
+> sometimes applies a column rename despite returning `status_code: ERROR` —
+> leaving source and dependents out of sync with no atomicity guarantee. Until
+> TS resolves the misleading-error issue (open-item #15) and the skill has a
+> reliable post-import verification path (added v0.2.0), RENAME is excluded.
+> Use the ThoughtSpot UI to rename columns; this skill stays focused on the
+> safe-to-automate operations.
 
 **When to use this skill:**
 
@@ -66,7 +73,7 @@ On skill invocation, display this plan before doing any work:
 ### A. Steps
 
   1.  Authenticate ......................................... auto
-  2.  Choose mode (Audit | Remove | Rename | Repoint) ...... you choose
+  2.  Choose mode (Audit | Remove | Repoint) ............... you choose
        Audit produces a dependency report only — no changes applied.
        Useful before any change to plan blast radius.
   3.  Identify source object and column scope .............. you provide
@@ -196,15 +203,18 @@ What would you like to do?
 
   Apply changes:
     R  Remove column(s)  — remove one or more columns and clean up all dependents
-    N  Rename a column   — rename and propagate the new name to every dependent
     P  Repoint objects   — redirect Answers / Liveboards to a different
                            Model, View, or connection Table
 
-Enter A / R / N / P:
+Enter A / R / P:
 ```
 
-Save `{operation}` (`AUDIT` / `REMOVE` / `RENAME` / `REPOINT`) and branch to the
-appropriate Step 3 sub-section.
+Save `{operation}` (`AUDIT` / `REMOVE` / `REPOINT`) and branch to the appropriate
+Step 3 sub-section.
+
+> **RENAME mode is not supported** — see the rationale at the top of this file. If
+> the user types `N`, respond with the warning explaining why and prompt them to
+> pick A/R/P or use the ThoughtSpot UI for renames.
 
 **Audit (A) is read-only.** No backups taken, no objects modified. The audit produces
 the same report files as R/N/P (impact_plan.json, impact_report.csv, dependency_tree.txt,
@@ -351,31 +361,6 @@ Columns selected for removal from "{source_name}":
 
 Correct? (Y / N):
 ```
-
----
-
-## Step 3-N — Identify Column to Rename
-
-Use the same object search and TML export as Step 3-R. After showing the column list, ask:
-
-```
-Which column would you like to rename? Enter a number:
-```
-
-Then ask:
-
-```
-New name for "{current_col_name}":
-```
-
-Validate that the new name does not already exist in the object's column list. If it does:
-
-```
-A column named "{new_col_name}" already exists in "{source_name}".
-Please enter a different name:
-```
-
-Save `{current_col_name}`, `{new_col_name}`, `{source_guid}`, `{source_name}`, `{source_type}`.
 
 ---
 
@@ -633,7 +618,6 @@ def extract_aliases(section, target_cols):
     return aliases
 
 target_cols = (set(columns_to_remove) if operation == "REMOVE"
-               else {current_col_name} if operation == "RENAME"
                else set(column_gap or []))   # REPOINT
 alias_map = {
     source_guid: {
@@ -763,8 +747,8 @@ for guid, info in alias_map.items():
 dependents list with type `"FEEDBACK"` and shown as LOW-risk informational items.
 
 ```python
-# For REMOVE/RENAME on a Model: also check feedback items in --associated export
-if source_type in ("MODEL", "WORKSHEET") and operation in ("REMOVE", "RENAME"):
+# For REMOVE on a Model: also check feedback items in --associated export
+if source_type in ("MODEL", "WORKSHEET") and operation == "REMOVE":
     assoc_result = subprocess.run(
         ["bash", "-c",
          f"source ~/.zshenv && ts tml export {source_guid} "
@@ -775,7 +759,7 @@ if source_type in ("MODEL", "WORKSHEET") and operation in ("REMOVE", "RENAME"):
         for item in json.loads(assoc_result.stdout):
             if item["type"] == "nls_feedback":
                 # Check if any feedback entry references the target columns
-                target = columns_to_remove if operation == "REMOVE" else [current_col_name]
+                target = columns_to_remove
                 if any(col in json.dumps(item["tml"]) for col in target):
                     dependents.append({
                         "guid":    source_guid,   # feedback shares the model GUID
@@ -790,7 +774,7 @@ if source_type in ("MODEL", "WORKSHEET") and operation in ("REMOVE", "RENAME"):
 that item is verified, note in the impact report that Alerts referencing affected
 Answers or Liveboards cannot be automatically detected and should be reviewed manually.
 
-For **REMOVE** and **RENAME** operations, also identify which specific columns within each
+For the **REMOVE** operation, also identify which specific columns within each
 dependent are affected (so the impact report can show them):
 
 ```python
@@ -802,8 +786,6 @@ def find_affected_columns(tml_dict, target_columns):
 for dep in dependents:
     if operation == "REMOVE":
         dep["affected"] = find_affected_columns(dep["tml"], columns_to_remove)
-    elif operation == "RENAME":
-        dep["affected"] = [current_col_name] if current_col_name in json.dumps(dep["tml"]) else []
     else:  # REPOINT
         dep["affected"] = list(column_gap) if column_gap else []
 ```
@@ -895,7 +877,7 @@ if operation == "REMOVE":
             else:
                 dep["action"] = "REMOVE_COLUMN"
         else:
-            dep["action"] = "UPDATE"  # RENAME, REPOINT, VIEW, MODEL, FEEDBACK
+            dep["action"] = "UPDATE"  # REPOINT, VIEW, MODEL, FEEDBACK
 ```
 
 **Check for join conditions in the source object that reference the removed column**
@@ -955,7 +937,7 @@ affected_sets = []
 # if any alias of the target column (the alias exposed by the set's parent Model) is
 # found in the cohort body.
 
-if operation in ("REMOVE", "RENAME"):
+if operation == "REMOVE":
     for set_meta in candidate_cohorts:
         set_guid = set_meta["id"]
         item = tml_export_one(set_guid, profile_name)
@@ -1004,10 +986,8 @@ if operation in ("REMOVE", "RENAME"):
         except Exception as e:
             print(f"  Note: Could not query consumers of set {set_guid}: {e}")
 
-        if operation == "REMOVE":
-            default_action = "DELETE" if anchor_match else "FIX"
-        else:  # RENAME
-            default_action = "UPDATE_SET"
+        # REMOVE-only path: anchor match → DELETE the set; column-in-body → FIX
+        default_action = "DELETE" if anchor_match else "FIX"
 
         affected_sets.append({
             "guid":           set_guid,
@@ -1126,7 +1106,7 @@ if inaccessible_dependents_seen:
     print("       a. Run the skill as a user with broader access (an admin / source owner)")
     print("       b. Pre-share the source object with this user before retrying")
     print("       c. Accept the incomplete impact and proceed (NOT recommended for")
-    print("          REMOVE/RENAME — TS error 14544 may still block the source change")
+    print("          REMOVE — TS error 14544 may still block the source change")
     print("          on the hidden dependents, leaving the run partially applied)")
 ```
 
@@ -1618,7 +1598,7 @@ End the skill. No backups taken, no objects modified.
 
 ---
 
-**Action menu (operation in REMOVE / RENAME / REPOINT)** — shown after the report is written:
+**Action menu (operation in REMOVE / REPOINT)** — shown after the report is written:
 
 ```
 What would you like to do?
@@ -2322,13 +2302,129 @@ def import_tml(tml_dict, guid, profile_name, policy="ALL_OR_NONE", create_new=Fa
     return json.loads(result.stdout) if result.stdout.strip() else {}
 
 def import_status(resp):
-    """Extract (ok: bool, error_msg: str) from an import response."""
+    """Extract (ok: bool, error_msg: str) from an import response.
+
+    NOTE: do not trust this in isolation. TS sometimes returns status_code=ERROR
+    while still applying the change (open-item #15 + 2026-04-27 smoke test on
+    TEST_DEPENDENCY_MANAGEMENT). Always pair with `verify_change_applied()`
+    before reporting a per-object outcome.
+    """
     try:
         status = resp["object"][0]["response"]["status"]
         ok     = status.get("status_code") == "OK"
         return ok, status.get("error_message", "Unknown error")
     except (KeyError, IndexError):
         return False, str(resp)
+
+
+def verify_change_applied(guid, skill_type, profile_name, *,
+                          operation, columns_to_remove=None,
+                          target_guid=None, column_gap=None):
+    """Re-export the object's TML and confirm the expected change was applied.
+
+    Returns (verified_applied: bool, detail: str). The skill calls this AFTER
+    every Step 9 import (regardless of import_status) and decides what to do
+    based on the matrix:
+
+      api=OK + verified=True    → SUCCESS
+      api=OK + verified=False   → FAIL (silent rejection — rare)
+      api=ERROR + verified=True → SUCCESS_WITH_WARNING (open-item #15: TS
+                                  applied the change despite returning ERROR;
+                                  log the warning, treat as succeeded, continue)
+      api=ERROR + verified=False → FAIL (genuine rejection — current behaviour)
+
+    Why this matters: smoke-test 2026-04-27 had TS return error_message
+    "Invalid YAML/JSON syntax in file" while applying the rename. Without
+    post-import verification the skill thought the import failed and aborted —
+    leaving source and dependents out of sync.
+
+    Per-operation verification:
+      REMOVE  — none of the columns_to_remove may appear in the exported TML
+      REPOINT — every reference to source_guid in tables[].fqn must now point
+                at target_guid; columns in column_gap (if any) must be absent
+    """
+    cmd = (f"source ~/.zshenv && ts tml export {guid} "
+           f"--profile '{profile_name}' --fqn --parse")
+    r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        return False, f"verification re-export failed: {r.stderr[:200]}"
+    try:
+        items = json.loads(r.stdout)
+        if not items:
+            return False, "verification re-export returned no items"
+        body = json.dumps(items[0]["tml"])
+    except (json.JSONDecodeError, KeyError) as e:
+        return False, f"verification parse error: {e}"
+
+    if operation == "REMOVE":
+        cols = list(columns_to_remove or [])
+        # Check both the bracketed token form ("[col]") and TABLE::col form
+        leftover = [
+            c for c in cols
+            if (f'"{c}"' in body) or (f"[{c}]" in body) or (f"::{c}" in body)
+        ]
+        if leftover:
+            return False, f"REMOVE not applied — still references: {leftover}"
+        return True, f"REMOVE verified — none of {cols} appear in TML"
+
+    if operation == "REPOINT":
+        # Source GUID must no longer appear in tables[].fqn references
+        if target_guid and target_guid not in body:
+            return False, f"REPOINT not applied — target {target_guid[:8]} not in TML"
+        if column_gap:
+            still_present = [c for c in column_gap if (f"[{c}]" in body) or (f"::{c}" in body)]
+            if still_present:
+                return False, f"REPOINT partial — gap columns still present: {still_present}"
+        return True, "REPOINT verified — target referenced; gap columns absent"
+
+    # Unknown operation: treat as not-verifiable (return True so we don't block)
+    return True, f"verification skipped for operation={operation}"
+
+
+def import_and_verify(tml_dict, guid, skill_type, profile_name,
+                      operation, results, phase, name=None,
+                      columns_to_remove=None, target_guid=None, column_gap=None):
+    """Single entry point that wraps import_tml + import_status + verify_change_applied
+    and writes the right entry to `results`. Use this at every Step 9 call site.
+
+    Returns one of: "SUCCESS", "SUCCESS_WITH_WARNING", "FAIL_VERIFIED",
+    "FAIL_SILENT" (api=OK but change didn't apply).
+    """
+    resp = import_tml(tml_dict, guid, profile_name)
+    api_ok, api_err = import_status(resp)
+    verified, verify_detail = verify_change_applied(
+        guid, skill_type, profile_name,
+        operation=operation,
+        columns_to_remove=columns_to_remove,
+        target_guid=target_guid, column_gap=column_gap,
+    )
+
+    label = name or guid
+    record = {"guid": guid, "name": label, "type": skill_type, "phase": phase,
+              "api_status": "OK" if api_ok else "ERROR",
+              "api_error": None if api_ok else api_err,
+              "verified": verified, "verify_detail": verify_detail}
+
+    if api_ok and verified:
+        results["succeeded"].append(record)
+        return "SUCCESS"
+    if (not api_ok) and verified:
+        # TS lied — change was applied despite the error. Log + treat as success.
+        record["warning"] = ("api returned ERROR but verification confirms the "
+                             "change applied (open-item #15)")
+        results["succeeded"].append(record)
+        print(f"  ⚠ {skill_type} {label} — api=ERROR, verified=True. "
+              f"Treating as success per open-item #15. err={api_err[:120]}")
+        return "SUCCESS_WITH_WARNING"
+    if api_ok and (not verified):
+        record["error"] = f"api=OK but change not applied — {verify_detail}"
+        results["failed"].append(record)
+        print(f"  ✗ {skill_type} {label} — silent rejection. {verify_detail}")
+        return "FAIL_SILENT"
+    # Both ERROR and not verified — true failure
+    record["error"] = f"{api_err}  ({verify_detail})"
+    results["failed"].append(record)
+    return "FAIL_VERIFIED"
 ```
 
 **REMOVE — source is a Model or Worksheet:**
@@ -2385,44 +2481,26 @@ table_section["columns"] = [
 ]
 ```
 
-**RENAME — Model, Worksheet, or Table:**
-
-```python
-updated_source = copy.deepcopy(source_export_item["tml"])
-section = (updated_source.get("model") or updated_source.get("worksheet")
-           or updated_source.get("table", {}))
-
-# Rename in columns[]
-for col in section.get("columns", []):
-    if col.get("name") == current_col_name:
-        col["name"] = new_col_name
-    # column_id format may be TABLE::COL_NAME — update the column name part
-    if col.get("column_id", "").endswith(f"::{current_col_name}"):
-        col["column_id"] = col["column_id"].rsplit("::", 1)[0] + f"::{new_col_name}"
-
-# For Models/Worksheets: update formula expressions referencing the old name
-for formula in section.get("formulas", []):
-    formula["expr"] = re.sub(
-        r'\[' + re.escape(current_col_name) + r'\]',
-        f'[{new_col_name}]',
-        formula.get("expr", ""),
-    )
-```
-
 Import the source object — but only after the source-drift hard-stop check above
 has passed. The pre-check uses `assert_no_drift_or_skip` and aborts the entire run
 on drift; if we get here, the source is still at the timestamp we scanned.
 
 ```python
 print(f"  Updating source: {source_name}...")
-resp = import_tml(updated_source, source_guid, profile_name)
-ok, err = import_status(resp)
-if not ok:
-    print(f"  ✗ Source update failed: {err}")
-    print("  No dependent objects will be updated. Backup is at {backup_dir}.")
-    # Stop — do not proceed to dependent updates
+outcome = import_and_verify(
+    updated_source, source_guid, source_type, profile_name,
+    operation=operation, results=results, phase="source",
+    name=source_name,
+    columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
+    target_guid=target_guid if operation == "REPOINT" else None,
+    column_gap=column_gap if operation == "REPOINT" else None,
+)
+if outcome in ("FAIL_VERIFIED", "FAIL_SILENT"):
+    print(f"  ✗ Source update failed ({outcome}). "
+          f"No dependent objects will be updated. Backup is at {backup_dir}.")
     return
-print(f"  ✓ {source_name}")
+# SUCCESS or SUCCESS_WITH_WARNING — proceed to dependents
+print(f"  ✓ {source_name} ({outcome})")
 ```
 
 ### 9c — Modify and import dependent objects
@@ -2539,56 +2617,6 @@ def remove_columns_from_answer(answer_dict, cols_to_remove):
     return a
 ```
 
-**For RENAME — update column references in an Answer or Liveboard viz:**
-
-```python
-def rename_column_in_answer(answer_dict, old_name, new_name):
-    a = answer_dict
-
-    # search_query — MUST be updated or stale reference will fail on import (open-items.md #3)
-    if a.get("search_query"):
-        a["search_query"] = rename_in_search_query(a["search_query"], old_name, new_name)
-
-    # answer_columns[].name
-    for col in a.get("answer_columns", []):
-        if col.get("name") == old_name:
-            col["name"] = new_name
-
-    # table.ordered_column_ids
-    tbl = a.get("table", {})
-    tbl["ordered_column_ids"] = [
-        new_name if c == old_name else c
-        for c in tbl.get("ordered_column_ids", [])
-    ]
-    for tc in tbl.get("table_columns", []):
-        if tc.get("column_id") == old_name:
-            tc["column_id"] = new_name
-
-    # chart
-    chart = a.get("chart", {})
-    for cc in chart.get("chart_columns", []):
-        if cc.get("column_id") == old_name:
-            cc["column_id"] = new_name
-    for axis in chart.get("axis_configs", []):
-        for key in ("x", "y", "color", "size", "shape"):
-            if key in axis and isinstance(axis[key], list):
-                axis[key] = [new_name if v == old_name else v for v in axis[key]]
-
-    # formulas: update expr references
-    for formula in a.get("formulas", []):
-        formula["expr"] = re.sub(
-            r'\[' + re.escape(old_name) + r'\]',
-            f'[{new_name}]',
-            formula.get("expr", ""),
-        )
-
-    # display_headline_column (KPI tiles)
-    if a.get("display_headline_column") == old_name:
-        a["display_headline_column"] = new_name
-
-    return a
-```
-
 **For REPOINT — change the data source reference and remove gap columns:**
 
 ```python
@@ -2605,50 +2633,6 @@ def repoint_answer(answer_dict, source_guid, target_guid, target_name, column_ga
         a = remove_columns_from_answer(a, column_gap)
 
     return a
-```
-
-**For RENAME — update column references in a reusable Set (cohort) TML:**
-
-See [~/.claude/shared/schemas/thoughtspot-sets-tml.md](~/.claude/shared/schemas/thoughtspot-sets-tml.md)
-for the full field layout. The column name appears in `anchor_column_id`, group condition
-`column_name` fields, `return_column_id` (COLUMN_BASED sets), pass-through filter column
-lists, and the embedded answer section.
-
-```python
-def rename_column_in_set(set_tml, old_name, new_name):
-    """Update all column references in a reusable set (cohort) TML dict."""
-    s = copy.deepcopy(set_tml)
-    cohort = s.get("cohort", {})
-    config = cohort.get("config", {})
-
-    # anchor_column_id — the primary column reference
-    if config.get("anchor_column_id") == old_name:
-        config["anchor_column_id"] = new_name
-
-    # return_column_id (COLUMN_BASED query sets)
-    if config.get("return_column_id") == old_name:
-        config["return_column_id"] = new_name
-
-    # group conditions (GROUP_BASED sets)
-    for group in config.get("groups", []):
-        for cond in group.get("conditions", []):
-            if cond.get("column_name") == old_name:
-                cond["column_name"] = new_name
-
-    # pass_thru_filter column lists (COLUMN_BASED sets)
-    ptf = config.get("pass_thru_filter", {})
-    ptf["include_column_ids"] = [
-        new_name if c == old_name else c for c in ptf.get("include_column_ids", [])
-    ]
-    ptf["exclude_column_ids"] = [
-        new_name if c == old_name else c for c in ptf.get("exclude_column_ids", [])
-    ]
-
-    # embedded answer (COLUMN_BASED query sets only)
-    if "answer" in cohort:
-        cohort["answer"] = rename_column_in_answer(cohort["answer"], old_name, new_name)
-
-    return s
 ```
 
 **Apply to Answers:**
@@ -2670,15 +2654,17 @@ for dep in [d for d in objects_to_fix if d["type"] == "ANSWER"]:
         if dep.get("action") == "REMOVE_CHART":
             answer = convert_answer_to_table(answer)
         answer = remove_columns_from_answer(answer, columns_to_remove)
-    elif operation == "RENAME":
-        answer = rename_column_in_answer(answer, current_col_name, new_col_name)
     elif operation == "REPOINT":
         answer = repoint_answer(answer, source_guid, target_guid, target_name, column_gap)
 
     updated["answer"] = answer
-    resp = import_tml(updated, dep["guid"], profile_name)
-    ok, err = import_status(resp)
-    ...
+    import_and_verify(
+        updated, dep["guid"], dep["type"], profile_name,
+        operation=operation, results=results, phase="fix", name=dep["name"],
+        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
+        target_guid=target_guid if operation == "REPOINT" else None,
+        column_gap=column_gap if operation == "REPOINT" else None,
+    )
 ```
 
 **Apply to Liveboards:**
@@ -2722,8 +2708,6 @@ for dep in [d for d in objects_to_fix if d["type"] == "LIVEBOARD"]:
                 # CONVERT_TO_TABLE: switch this viz's display_mode and strip the column
                 answer = convert_answer_to_table(answer)
             answer = remove_columns_from_answer(answer, columns_to_remove)
-        elif operation == "RENAME":
-            answer = rename_column_in_answer(answer, current_col_name, new_col_name)
         elif operation == "REPOINT":
             answer = repoint_answer(answer, source_guid, target_guid, target_name, column_gap)
 
@@ -2736,13 +2720,8 @@ for dep in [d for d in objects_to_fix if d["type"] == "LIVEBOARD"]:
             if v.get("id") not in vizes_to_remove
         ]
 
-    # Liveboard-level filter updates
-    if operation == "RENAME":
-        # Update column names in liveboard filters
-        for f in liveboard.get("filters", []):
-            f["column"] = [new_col_name if c == current_col_name else c
-                           for c in f.get("column", [])]
-    elif operation == "REMOVE":
+    # Liveboard-level filter updates (REMOVE only)
+    if operation == "REMOVE":
         # Remove filter entries for removed columns (Rule 1)
         # A filter whose column list is fully emptied is dropped entirely
         updated_filters = []
@@ -2753,9 +2732,13 @@ for dep in [d for d in objects_to_fix if d["type"] == "LIVEBOARD"]:
                 updated_filters.append(filt)
         liveboard["filters"] = updated_filters
 
-    resp = import_tml(updated, dep["guid"], profile_name)
-    ok, err = import_status(resp)
-    ...
+    import_and_verify(
+        updated, dep["guid"], dep["type"], profile_name,
+        operation=operation, results=results, phase="fix", name=dep["name"],
+        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
+        target_guid=target_guid if operation == "REPOINT" else None,
+        column_gap=column_gap if operation == "REPOINT" else None,
+    )
 ```
 
 **Apply to Views:**
@@ -2797,34 +2780,6 @@ def remove_columns_from_view(view_dict, cols_to_remove):
     ]
 
     return v
-
-def rename_column_in_view(view_dict, old_name, new_name):
-    """Rename a column reference in a View TML dict (the view: section)."""
-    v = view_dict
-
-    if v.get("search_query"):
-        v["search_query"] = rename_in_search_query(v["search_query"], old_name, new_name)
-
-    # view_columns[].column_id — update the column name part after ::
-    for col in v.get("view_columns", []):
-        if col.get("name") == old_name:
-            col["name"] = new_name
-        if col.get("column_id", "").endswith(f"::{old_name}"):
-            col["column_id"] = col["column_id"].rsplit("::", 1)[0] + f"::{new_name}"
-
-    # formulas[].expr
-    for formula in v.get("formulas", []):
-        formula["expr"] = re.sub(
-            r'\[' + re.escape(old_name) + r'\]',
-            f'[{new_name}]',
-            formula.get("expr", ""),
-        )
-
-    # joins[].on — replace column name in join expressions
-    for join in v.get("joins", []):
-        join["on"] = join.get("on", "").replace(f"::{old_name}]", f"::{new_name}]")
-
-    return v
 ```
 
 Apply to Views in the update loop:
@@ -2841,13 +2796,16 @@ for dep in [d for d in objects_to_fix if d["type"] == "VIEW"]:
     view    = updated.get("view", {})
 
     if   operation == "REMOVE":  view = remove_columns_from_view(view, columns_to_remove)
-    elif operation == "RENAME":  view = rename_column_in_view(view, current_col_name, new_col_name)
     elif operation == "REPOINT": view = repoint_view(view, source_guid, target_guid, target_name, column_gap)
 
     updated["view"] = view
-    resp = import_tml(updated, dep["guid"], profile_name)
-    ok, err = import_status(resp)
-    ...
+    import_and_verify(
+        updated, dep["guid"], dep["type"], profile_name,
+        operation=operation, results=results, phase="fix", name=dep["name"],
+        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
+        target_guid=target_guid if operation == "REPOINT" else None,
+        column_gap=column_gap if operation == "REPOINT" else None,
+    )
 ```
 
 **Apply to Feedback:**
@@ -2866,7 +2824,7 @@ for dep in [d for d in objects_to_fix if d["type"] == "FEEDBACK"]:
 
     updated   = copy.deepcopy(dep["tml"])
     feedback  = updated.get("nls_feedback", {})
-    target    = columns_to_remove if operation == "REMOVE" else [current_col_name]
+    target    = columns_to_remove
 
     entries = feedback.get("feedback", [])
     if operation == "REMOVE":
@@ -2874,14 +2832,13 @@ for dep in [d for d in objects_to_fix if d["type"] == "FEEDBACK"]:
             e for e in entries
             if not any(col in json.dumps(e) for col in target)
         ]
-    elif operation == "RENAME":
-        for e in entries:
-            e["search_tokens"] = rename_in_search_query(e.get("search_tokens", ""), current_col_name, new_col_name)
     feedback["feedback"] = entries
     updated["nls_feedback"] = feedback
-    resp = import_tml(updated, dep["guid"], profile_name)
-    ok, err = import_status(resp)
-    ...
+    import_and_verify(
+        updated, dep["guid"], "MODEL", profile_name,
+        operation=operation, results=results, phase="fix", name=dep["name"],
+        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
+    )
 ```
 
 **Apply to dependent Models:**
@@ -2992,31 +2949,6 @@ for s in affected_sets:
         print(f"  ✗ Failed to delete set '{s['name']}': {err}")
         results["failed"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
                                   "phase": "set_delete", "error": err})
-```
-
-**For RENAME — update sets that referenced the renamed column:**
-
-```python
-for s in affected_sets:
-    if s["action"] != "UPDATE_SET":
-        continue
-
-    # Drift check (Fix #3)
-    if not assert_no_drift_or_skip(s["guid"], "SET", profile_name,
-                                   modified_at_scan.get(s["guid"], 0),
-                                   results, phase="set_update", name=s["name"]):
-        continue
-
-    updated_set = rename_column_in_set(s["tml"], current_col_name, new_col_name)
-    resp = import_tml(updated_set, s["guid"], profile_name)
-    ok, err = import_status(resp)
-    if ok:
-        print(f"  ✓ Updated set: {s['name']}")
-        results["succeeded"].append({"name": s["name"], "type": "SET", "guid": s["guid"]})
-    else:
-        print(f"  ✗ Failed to update set '{s['name']}': {err}")
-        results["failed"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
-                                  "error": err})
 ```
 
 ---
@@ -3220,6 +3152,8 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 0.2.0 | 2026-04-27 | **Breaking:** RENAME mode removed entirely (Step 3-N, all `rename_*` helpers, `elif operation == "RENAME"` branches). Smoke testing on champ-staging revealed TS sometimes returns `status_code: ERROR` while still applying a rename — leaving source and dependents out of sync with no atomicity guarantee. Until TS resolves the misleading-error issue (open-item #15), RENAME stays out of scope. AUDIT, REMOVE, REPOINT remain. **Adds (Option A) post-import verification:** every Step 9 import is followed by a re-export-and-check via the new `verify_change_applied()` and `import_and_verify()` helpers. The helpers handle the four-cell matrix: api=OK ∧ verified=True → SUCCESS, api=OK ∧ verified=False → silent rejection (FAIL), api=ERROR ∧ verified=True → SUCCESS_WITH_WARNING (TS lied), api=ERROR ∧ verified=False → genuine FAIL. Without this, the same TML-API error pattern that broke the RENAME smoke test would also affect REMOVE/REPOINT. |
+| 0.1.5 | 2026-04-27 | RENAME on a Model now rewrites column references in `model.filters[]` — both on the source rewrite (Step 9b) and via a new `rename_in_model()` helper for dependent Models in Step 9c. (Reverted in 0.2.0 along with the rest of RENAME.) |
 | 0.1.4 | 2026-04-26 | Pre-merge correctness fixes from PR #6 review: (Fix #1) `hasInaccessibleDependents` and `areInaccessibleDependentsReturned` flags from the v2 dependents response are now captured at Step 4, surfaced as a STOP CONDITION in Step 5, and require a typed "ACCEPT INCOMPLETE IMPACT" confirmation before the run continues. (Fix #2) Step 9d Set deletes are guarded — the skill skips the Set delete when any of its consumer fixes in 9c failed, preventing silent dangling Set references. (Fix #3) Object-version drift detection: every dependent's `metadata_header.modified` timestamp is captured at Step 4; before each Step 9 import the skill re-queries and aborts the per-object change (skip + report DRIFT_DETECTED) if the timestamp has moved. Source-object drift is a hard stop — aborts the entire run before touching any dependent. Adds `assert_no_drift_or_skip()` helper and threads it through 9a deletes, 9b/9c fix loops, and 9d Set updates |
 | 0.1.3 | 2026-04-26 | Drive coverage messaging from the canonical `references/dependency-types.md` status table via a new `references/build_coverage.py` helper. Step 0 now includes a "Coverage at a glance" block (auto-detected / partial / informational / no-action breakdown) that re-renders when statuses change in dep-types.md. Step 5 Scan Coverage block likewise generated from the helper instead of being hardcoded — fixes the previous drift where #6 (Alerts), #7 (RLS), #8 (ACLs) had moved to VERIFIED in open-items.md but the skill text still labelled them "not yet implemented" |
 | 0.1.2 | 2026-04-26 | Step 4 rewrite — replace bulk environment scan (10k+ TML exports, ~30 min) with v2 dependents API (~3s, single call). Add alias propagation: for each Model/View dependent, extract what alias the target column is exposed as (e.g. ZIPCODE → "Customer Zipcode"), then match Answers/Liveboards/Sets against the alias of the Model they query — caught ~30% more dependents in test environments. Fix tree hierarchy: Answers/Liveboards now attach to the Model they query (via tables[].fqn); Set consumers re-parent under the Set; Views handled correctly via view_columns + search_query. Mermaid DAG escapes & and special chars. Add Step 0 dependency hierarchy diagram. Add risk-rating legend inline in impact report |
