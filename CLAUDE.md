@@ -34,6 +34,8 @@ or patch files there directly.
 | Credential storage steps | agents/claude/ts-profile-{thoughtspot,snowflake}/SKILL.md; agents/cursor/rules/ts-profile-{thoughtspot,snowflake}.mdc; .claude/rules/security.md |
 | Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file); **tools/smoke-tests/smoke_<skill>.py** (or add to ALLOWLIST in tools/validate/check_smoke_tests.py with justification); add ## Changelog starting at 1.0.0; CHANGELOG.md entry |
 | Add a new shared schema/mapping | agents/coco/SETUP.md stage copy list; all SKILL.md and .mdc files that reference it |
+| `.mcp.json` (MCP server wiring) or `.claude/rules/api-research.md` | Update the other if precedence/usage rules change; check that `agents/claude/CLAUDE.md` "open-items.md pattern" and `.claude/rules/ts-cli.md` (v1 migration trigger, "When a skill needs an API call") still reference the rule correctly |
+| ts-dependency-manager: changes to Step 4 walking, Step 5 impact-report, or any open-items.md status | Also update agents/claude/ts-dependency-manager/references/dependency-types.md (status table, hierarchy, or sample output as relevant) — these must stay in sync; pre-commit prompts soft when one changes without the other |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.
 

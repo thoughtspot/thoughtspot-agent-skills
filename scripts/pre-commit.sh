@@ -82,6 +82,12 @@ if echo "$STAGED" | grep -qE '(agents/claude/.*/SKILL\.md|tools/smoke-tests/)'; 
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
 fi
 
+# ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
+# also staging references/dependency-types.md. Never blocks. (TTY only)
+if echo "$STAGED" | grep -qE '^agents/claude/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
+  python3 tools/validate/suggest_dependency_types.py --root $REPO_ROOT
+fi
+
 # Repo changelog — suggests a CHANGELOG.md entry for significant staged changes:
 # new skills, ts-cli version bumps, new shared reference files (TTY only)
 python3 tools/validate/suggest_repo_changelog.py --root $REPO_ROOT

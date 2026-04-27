@@ -47,11 +47,15 @@ the skill that prompted it, add unit tests, bump version in both files.
 
 ## When a skill needs an API call that ts-cli doesn't have yet
 
-1. Write the call in `references/open-items.md` as a test script — not inline in SKILL.md
-2. Verify it against a live ThoughtSpot instance; record the finding in open-items.md
-3. Add the command to ts-cli (see above)
-4. Replace the open-items.md test script reference in SKILL.md with the `ts` command
-5. Keep the open-items.md entry until the skill has been tested end-to-end with the new command
+1. Query the SpotterCode MCP for the endpoint spec — `get-rest-api-reference(apiName: "...")`
+   if you know the operation ID, otherwise `query: "..."`. Record the canonical request/
+   response shape from the spec before writing any code. See `.claude/rules/api-research.md`.
+2. Write the call in `references/open-items.md` as a test script — not inline in SKILL.md.
+   Reference the MCP finding so the next reader can re-verify.
+3. Verify it against a live ThoughtSpot instance; record the finding in open-items.md
+4. Add the command to ts-cli (see above)
+5. Replace the open-items.md test script reference in SKILL.md with the `ts` command
+6. Keep the open-items.md entry until the skill has been tested end-to-end with the new command
 
 Do not ship a skill with inline `requests` calls where a CLI command could exist.
 
@@ -105,6 +109,7 @@ python tools/validate/check_version_sync.py
 (`/tspublic/v1/connection/fetchConnection`). Migrate to v2 when:
 
 1. A v2 endpoint returning the full database/schema/table hierarchy is confirmed
-   in the ThoughtSpot REST Playground
+   via `get-rest-api-reference(query: "connection fetch database schema table hierarchy")`
+   (or by exact `apiName:` if you know the operation ID)
 2. Update the command, its docstring, and `tools/ts-cli/README.md`
 3. Bump the version in both `__init__.py` and `pyproject.toml`
