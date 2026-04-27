@@ -1,8 +1,36 @@
 # Versioning
 
-Every skill must have a `## Changelog` section at the bottom of its `SKILL.md`.
-The pre-commit hook validates this — commits touching a SKILL.md will fail if the
-changelog is missing or has no valid entries.
+Every skill must have a `## Changelog` section at the bottom of its `SKILL.md`. The
+`check_skill_versions.py` validator runs in the pre-commit hook and enforces the format.
+
+## When to bump
+
+**Version bumps happen at PR time — not during wip development.** Open a PR to main with
+the version bump and changelog entry as part of that PR. A wip branch may accumulate
+weeks of work without touching the version; the version reflects what is on main, not
+what is in progress.
+
+The mechanics:
+
+| Lifecycle stage | Version field | Changelog |
+|---|---|---|
+| New skill, on a wip branch | `1.0.0` (no changelog needed yet) | None — the skill hasn't shipped |
+| New skill, opening PR to main | `1.0.0`, date = PR creation date | One entry: initial release summary |
+| Existing skill on wip, work in progress | Unchanged from main | Unchanged |
+| Existing skill, opening PR to main | Bumped per semver below | New entry at top, dated PR creation date |
+| Hotfix on main directly (rare — see branching.md) | Bumped on the commit | New entry on the same commit |
+
+**Rationale:** the changelog is for shipped history. Bumping during wip churns the
+diff, creates conflicts when two wip branches both bump, and makes the version
+meaningless until merge. Bumping at PR time keeps the changelog tied to actual releases.
+
+## Semver rules
+
+| Change type | Version bump | Example |
+|---|---|---|
+| Breaking change — removed step, changed command interface, incompatible output format | MAJOR | Rename a required `ts` subcommand |
+| New capability — new option, new step, new output field | MINOR | Add a new conversion mode |
+| Fix or clarification — corrected instructions, typo, updated example | PATCH | Fix wrong flag name in example |
 
 ## Format
 
@@ -18,28 +46,17 @@ changelog is missing or has no valid entries.
 ```
 
 - Versions follow semver: `MAJOR.MINOR.PATCH`
-- Dates are ISO 8601: `YYYY-MM-DD`
+- Dates are ISO 8601: `YYYY-MM-DD`, the date of the merge commit (or PR creation if
+  merging the same day)
 - Newest entry at the top
-- One row per meaningful change — not per commit
-
-## When to bump
-
-| Change type | Version bump | Example |
-|---|---|---|
-| Breaking change — removed step, changed command interface, incompatible output format | MAJOR | Rename a required `ts` subcommand |
-| New capability — new option, new step, new output field | MINOR | Add a new conversion mode |
-| Fix or clarification — corrected instructions, typo, updated example | PATCH | Fix wrong flag name in example |
+- One row per shipped change — not per commit, not per wip iteration
 
 ## When NOT to bump
 
 - Reformatting or reordering content with no semantic change
-- Updating a cross-reference path that was broken (fix the path, PATCH bump)
+- Updating a cross-reference path that was broken (fix the path, PATCH bump on next merge)
 - Updating shared reference files (schemas, mappings) — those don't have their own version; bump the skill(s) that reference them if the change affects skill behaviour
-
-## New skills
-
-Start at `1.0.0` when the skill first ships to `main`. Work-in-progress skills on
-`wip/*` branches do not need a changelog until they merge.
+- Mid-wip refinements that the user will see as one shipped change
 
 ## Validator
 
@@ -47,7 +64,9 @@ Start at `1.0.0` when the skill first ships to `main`. Work-in-progress skills o
 python3 tools/validate/check_skill_versions.py --root .
 ```
 
-Runs automatically in the pre-commit hook when any `SKILL.md` is staged.
+Runs automatically in the pre-commit hook when any `SKILL.md` is staged. New wip
+skills without a changelog yet are exempt; the validator only flags skills that have
+shipped at least one version and are missing the section.
 
 ---
 

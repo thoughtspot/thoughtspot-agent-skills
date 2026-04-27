@@ -76,6 +76,12 @@ if echo "$STAGED" | grep -q 'SKILL\.md'; then
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
+# Smoke tests — every Claude skill (not on the allowlist) must have a smoke test
+# Runs when a SKILL.md or smoke test is touched
+if echo "$STAGED" | grep -qE '(agents/claude/.*/SKILL\.md|tools/smoke-tests/)'; then
+  run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/claude/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then

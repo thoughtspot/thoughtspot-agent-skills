@@ -42,7 +42,8 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-object-answer-promote` | `/ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
-| `ts-dependency-manager` (WIP) | `/ts-dependency-manager` | Audit dependencies, then safely remove, rename, or repoint columns across Models, Views, Answers, Liveboards, and Sets — with TML backup and rollback |
+| `ts-coach-model` | `/ts-coach-model` | Comprehensively prepare a Model for Spotter — review existing AI Context / synonyms / description, mine dependent Liveboards/Answers and (optionally) Snowflake query history, then generate Column AI Context, Synonyms, Reference Questions, Business Terms, and a Data Model Instructions draft |
+| `ts-dependency-manager` (WIP) | `/ts-dependency-manager` | Audit dependencies, then safely remove or repoint columns across Models, Views, Answers, Liveboards, and Sets — with TML backup, post-import verification, and rollback |
 
 **Setup** — manage connection profiles and credentials
 

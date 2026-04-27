@@ -105,6 +105,7 @@ without CLI access.
 │   │   ├── thoughtspot-connection.md
 │   │   ├── thoughtspot-table-tml.md
 │   │   ├── thoughtspot-model-tml.md
+│   │   ├── thoughtspot-feedback-tml.md
 │   │   └── thoughtspot-formula-patterns.md
 │   └── worked-examples/snowflake/
 │       ├── ts-from-snowflake.md
