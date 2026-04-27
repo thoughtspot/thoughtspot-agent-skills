@@ -454,10 +454,13 @@ and compare on:
 ```python
 # Enumerate readable Models. The CLI subtype filter pulls both Worksheets and
 # Models — filter to Models via metadata_header.contentUpgradeId.
+# `--all` is required: ts metadata search paginates at 50/page by default and
+# the target Model can land past page 1 on tenants with many Models.
 import subprocess, json
 res = subprocess.check_output([
     "ts", "metadata", "search",
     "--subtype", "WORKSHEET",
+    "--all",
     "--profile", profile_name,
 ])
 all_models = [r for r in json.loads(res)

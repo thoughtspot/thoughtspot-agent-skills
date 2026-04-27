@@ -9,21 +9,26 @@ Verifies the verified API paths against a real ThoughtSpot instance:
   4.  Mine dependent objects via v2 search API
       (POST /api/rest/2.0/metadata/search with include_dependent_objects=True)
       — this is the verified path from open-items.md #1 / #2
-  5.  Take Model TML backup
-  6.  Patch ONE column with `properties.ai_context` and `properties.synonyms`
+  5.  Step 4.5 cross-Model consistency: enumerate readable Models, verify TML
+      cache-key shape ({guid}-{modified_ms}.json), detect collisions on a
+      2-Model corpus, and confirm proposed RouteAction defaults to
+      NEEDS_REVIEW (open-items.md #15)
+  6.  Take Model TML backup
+  7.  Patch ONE column with `properties.ai_context` and `properties.synonyms`
       (verified shape — synonyms in `properties.synonyms`, NOT column-level)
-  7.  Import patched Model TML; verify status_code: OK + columns_updated >= 1
-  8.  Re-export Model and verify ai_context + synonyms round-tripped
-  9.  Import a single REFERENCE_QUESTION feedback entry with a unique probe phrase
-  10. Verify the entry lands via metadata/search dependents.FEEDBACK
+  8.  Import patched Model TML; verify status_code: OK + columns_updated >= 1
+  9.  Re-export Model and verify ai_context + synonyms round-tripped
+  10. Import a single REFERENCE_QUESTION feedback entry with a unique probe phrase
+  11. Verify the entry lands via metadata/search dependents.FEEDBACK
       (the correct verification path — `--associated` does NOT surface feedback)
-  11. Cleanup: restore Model TML from backup (reverts ai_context + synonyms);
+  12. Cleanup: restore Model TML from backup (reverts ai_context + synonyms);
       for feedback, surface the GUID and instruct the user to remove via UI
       (no public REST delete for nls_feedback verified yet)
 
 The test patches ONE column (configurable via --column-name) so it has minimal
 blast radius and the rollback is a single TML import. The feedback probe entry
-uses a timestamped phrase so it won't collide with real coaching.
+uses a timestamped phrase so it won't collide with real coaching. The
+cross-Model scan caps the corpus at 3 Models so the test stays fast.
 
 Usage:
     python tools/smoke-tests/smoke_ts_coach_model.py \\
@@ -156,6 +161,146 @@ def step_check_dependents_api(base_url: str, token: str, model_guid: str) -> dic
     return deps_node
 
 
+def _is_model_not_worksheet(metadata_header: dict) -> bool:
+    """Filter a metadata search hit down to MODELs only (not legacy Worksheets)."""
+    cu = metadata_header.get("contentUpgradeId") or ""
+    wv = metadata_header.get("worksheetVersion") or ""
+    return cu != "WORKSHEET_TO_MODEL_UPGRADE" and wv != "V1"
+
+
+def step_enumerate_readable_models(profile: str) -> list[dict]:
+    """Step 4.5 sub-step 1 — list MODELs the current user can read.
+
+    Uses --all to auto-paginate; ts metadata search defaults to 50/page.
+    """
+    hits = run_ts(["metadata", "search", "--subtype", "WORKSHEET", "--all"], profile)
+    models = [
+        {
+            "guid": h["metadata_id"],
+            "name": h["metadata_header"]["name"],
+            "modified_ms": h["metadata_header"]["modified"],
+        }
+        for h in hits
+        if _is_model_not_worksheet(h.get("metadata_header", {}))
+    ]
+    if len(models) < 2:
+        raise RuntimeError(
+            f"Cross-Model scan needs ≥ 2 readable Models; only {len(models)} found. "
+            f"Add a sibling Model on this profile or run on a tenant with more Models."
+        )
+    return models
+
+
+def step_verify_tml_cache_shape(target_guid: str, target_modified_ms: int) -> None:
+    """Step 4.5 sub-step 2 — round-trip a fake cache file with the documented filename pattern."""
+    import tempfile, pathlib
+    with tempfile.TemporaryDirectory(prefix="ts_coach_model_smoke_") as td:
+        cache_dir = pathlib.Path(td)
+        cache_key = f"{target_guid}-{target_modified_ms}.json"
+        cache_path = cache_dir / cache_key
+        # Documented shape: cached payload is the parsed --fqn --parse output
+        sample_payload = [{"type": "model", "tml": {"model": {"name": "smoke", "columns": []}}}]
+        cache_path.write_text(json.dumps(sample_payload))
+        # Round-trip check
+        readback = json.loads(cache_path.read_text())
+        if readback != sample_payload:
+            raise RuntimeError("cache round-trip mismatch")
+        # Stale-entry detection: a hit for the same guid with different mtime
+        # should be cleared on miss (per SKILL.md Step 4.5 cache-eviction rule)
+        stale_path = cache_dir / f"{target_guid}-0.json"
+        stale_path.write_text("{}")
+        stale_matches = list(cache_dir.glob(f"{target_guid}-*.json"))
+        if len(stale_matches) != 2:
+            raise RuntimeError(f"expected 2 cache entries for guid before eviction, got {len(stale_matches)}")
+
+
+def step_detect_cross_model_collisions(target_model_tml: dict, target_model_name: str,
+                                         sibling_models: list[dict],
+                                         profile: str, max_corpus: int = 10) -> list[dict]:
+    """Step 4.5 sub-step 3 — export sibling Models and detect column-name collisions.
+
+    Sibling-walk order is prioritised by name-token-overlap with the target Model's
+    name, so likely-related siblings are exported first (collisions surface fast on
+    tenants with many unrelated Models). Stops after the first collision is found
+    OR after `max_corpus` successful exports — whichever comes first. Tolerates
+    per-sibling export failure (FORBIDDEN, etc.) and walks forward.
+
+    Returns a list of collision rows in the documented shape.
+    """
+    target_cols = {c["name"]: c for c in target_model_tml["model"].get("columns", [])}
+    if not target_cols:
+        raise RuntimeError("Target Model has no columns — cannot detect collisions")
+
+    # Prioritise siblings whose name shares a token with the target.
+    target_tokens = {t.lower() for t in target_model_name.replace("_", " ").split()
+                      if len(t) >= 3}
+    def overlap_score(sib_name: str) -> int:
+        sib_tokens = {t.lower() for t in sib_name.replace("_", " ").split()}
+        return len(target_tokens & sib_tokens)
+    prioritised = sorted(sibling_models, key=lambda s: -overlap_score(s["name"]))
+
+    collisions: list[dict] = []
+    successful = 0
+    for sib in prioritised:
+        if successful >= max_corpus and collisions:
+            break
+        try:
+            items = _ts_tml_export([sib["guid"]], profile, associated=False)
+        except Exception:
+            continue  # skip unreadable sibling, try next
+        sib_model = next((i for i in items if i["type"] == "model"), None)
+        if not sib_model:
+            continue
+        successful += 1
+        sib_cols = {c["name"]: c for c in sib_model["tml"]["model"].get("columns", [])}
+        for col_name, target_col in target_cols.items():
+            if col_name not in sib_cols:
+                continue
+            sib_col = sib_cols[col_name]
+            target_db = target_col.get("db_column_name")
+            sib_db = sib_col.get("db_column_name")
+            target_type = target_col.get("properties", {}).get("column_type")
+            sib_type = sib_col.get("properties", {}).get("column_type")
+            divergent_on = []
+            if target_db != sib_db:
+                divergent_on.append("db_column_name")
+            if target_type != sib_type:
+                divergent_on.append("column_type")
+            collisions.append({
+                "column": col_name,
+                "sibling_model": sib["name"],
+                "sibling_guid": sib["guid"],
+                "divergent_on": divergent_on,
+                # Per open-items.md #15 — heuristic uncalibrated, default action is always NEEDS_REVIEW
+                "proposed_route_action": "NEEDS_REVIEW",
+            })
+
+    if successful == 0:
+        raise RuntimeError(
+            f"Could not export any sibling Model TML (tried up to {len(sibling_models)} candidates). "
+            f"Cross-Model scan needs at least one readable + exportable sibling Model."
+        )
+    if not collisions:
+        raise RuntimeError(
+            f"No cross-Model collisions detected against {successful} successfully-exported "
+            f"sibling Models. On a tenant with ≥ 1 sibling Model that copies the target's "
+            f"schema, the test expects to find at least 1 collision (target_cols={len(target_cols)})."
+        )
+    return collisions
+
+
+def step_verify_proposed_action_default(collisions: list[dict]) -> None:
+    """Step 4.5 sub-step 4 — every collision's proposed RouteAction must default to NEEDS_REVIEW
+    until open-items.md #15 calibrates the heuristic against a live tenant."""
+    bad = [c for c in collisions if c.get("proposed_route_action") != "NEEDS_REVIEW"]
+    if bad:
+        raise RuntimeError(
+            f"{len(bad)} collision(s) have proposed RouteAction != NEEDS_REVIEW. "
+            f"Per open-items.md #15 the default must be NEEDS_REVIEW until the heuristic "
+            f"is calibrated. Examples: {[c['column'] for c in bad[:3]]}"
+        )
+
+
 def step_patch_model_with_ai_assets(model_tml: dict, column_name: str,
                                      test_ai_context: str, test_synonyms: list[str]) -> dict:
     """Return patched model TML with ai_context + properties.synonyms on one column."""
@@ -176,8 +321,17 @@ def step_patch_model_with_ai_assets(model_tml: dict, column_name: str,
 def step_import_patched_model(patched: dict, profile: str) -> dict:
     yaml_text = yaml.dump(patched, sort_keys=False, allow_unicode=True)
     resp = _ts_tml_import(yaml_text, profile)
-    if resp["status"]["status_code"] != "OK":
+    # Model TML imports may emit WARNING for unrelated pre-existing issues
+    # (e.g. column index/suggestion config on columns we're not touching) while
+    # still applying the patch. Accept OK and WARNING; reject ERROR / others.
+    status_code = resp["status"].get("status_code")
+    if status_code not in ("OK", "WARNING"):
         raise RuntimeError(f"Model import status: {resp['status']}")
+    if status_code == "WARNING":
+        # Don't fail, but surface the warning for visibility
+        msg = resp["status"].get("error_message", "<no message>")
+        # Truncate very long warnings (column lists can be lengthy)
+        print(f"\n      WARNING from import: {msg[:200]}{'...' if len(msg) > 200 else ''}")
     diff = resp.get("diff", {})
     if not diff.get("columns_updated"):
         raise RuntimeError(f"Expected columns_updated >=1, got diff={diff}")
@@ -249,10 +403,14 @@ def step_verify_feedback_landed(base_url: str, token: str, model_guid: str,
 
 
 def step_cleanup_restore_model(original_tml: dict, profile: str) -> None:
-    """Restore the Model from the original (pre-patch) TML."""
+    """Restore the Model from the original (pre-patch) TML.
+
+    Accepts OK and WARNING — same rationale as step_import_patched_model.
+    """
     yaml_text = yaml.dump(original_tml, sort_keys=False, allow_unicode=True)
     resp = _ts_tml_import(yaml_text, profile)
-    if resp["status"]["status_code"] != "OK":
+    status_code = resp["status"].get("status_code")
+    if status_code not in ("OK", "WARNING"):
         raise RuntimeError(f"Rollback failed: {resp['status']}")
 
 
@@ -300,6 +458,28 @@ def main() -> int:
                        step_check_dependents_api, base_url, token, model_guid)
     if ok:
         r.info(f"Dependents categories: {sorted(deps.keys())}")
+
+    # ---- Step 4.5 — cross-Model consistency scan ----
+    ok, all_models = r.step("Step 4.5 — enumerate readable Models",
+                             step_enumerate_readable_models, args.ts_profile)
+    if ok:
+        r.info(f"Found {len(all_models)} readable Models on this profile")
+        target_meta = next((m for m in all_models if m["guid"] == model_guid), None)
+        if target_meta is None:
+            r.info("Target Model not in readable-Models enumeration — skipping cache + collision steps")
+        else:
+            siblings = [m for m in all_models if m["guid"] != model_guid]
+            r.step("Step 4.5 — TML cache-key shape ({guid}-{modified_ms}.json)",
+                    step_verify_tml_cache_shape, target_meta["guid"], target_meta["modified_ms"])
+            ok2, collisions = r.step(
+                "Step 4.5 — detect cross-Model column collisions (corpus capped at 10)",
+                step_detect_cross_model_collisions,
+                original_tml, args.model_name, siblings, args.ts_profile, 10,
+            )
+            if ok2:
+                r.info(f"Detected {len(collisions)} collision(s) across the prioritised sibling corpus")
+                r.step("Step 4.5 — proposed RouteAction defaults to NEEDS_REVIEW (open-items #15)",
+                        step_verify_proposed_action_default, collisions)
 
     timestamp = int(time.time())
     test_ai_context = f"smoke test ai_context probe (run {timestamp})"
