@@ -1,5 +1,34 @@
 # Question Taxonomy and Ranking — `ts-coach-model`
 
+> **Pattern import status (revised 2026-04-27 after corpus mining; see
+> [feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md)):**
+>
+> | Pattern | Status | Verified-working tokens example |
+> |---|---|---|
+> | `t1.total` | ✅ Importable | `[Amount]` |
+> | `t1.by_dim` | ✅ Importable | `[Customer Name] [Amount]` |
+> | `t1.top_n` | ✅ Importable | `top 10 [Customer Name] [Amount]` *(keyword first)* |
+> | `t1.distinct_count` | ⚠ Untested — `count [Col]` not yet observed; probe needed | (skip until verified) |
+> | `t2.by_time` | ✅ Importable | `[Order Date].monthly [Amount]` |
+> | `t2.recent_period` | ⚠ Untested — `[Date].'last 30 days'` plausible | (skip until verified) |
+> | `t2.this_vs_last` | ✅ Importable | `[Amount] [Order Date] = 'this year' vs [Order Date] = 'last year'` |
+> | `t2.trend_by_dim` | ✅ Importable | `[Order Date].monthly [Product Category] [Amount]` |
+> | `t2.cumulative` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t3.dim_filter` | ✅ Importable | `[Amount] [Category] = 'printers'` |
+> | `t3.year_filter` | ✅ Importable | `[Order Date] = '2025' [Amount]` |
+> | `t3.avg_per` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t3.ratio` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t3.share_of_total` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t4.*` (all) | ❌ All require formula_info — use Model-formula workaround | [#17](open-items.md) |
+>
+> Workaround for ❌ patterns: define the required formula as a Model formula
+> first (via `/ts-object-answer-promote` or manual TML edit), then reference
+> the formula's display name in `search_tokens`. The skill emits a
+> `MOVE_TO_NEW_FORMULA` action for these rather than attempting inline import.
+>
+> Untested ⚠ patterns remain in the generator but are routed to `DEFER` until
+> the verified-patterns reference adds them to the import-safe whitelist.
+
 Deterministic patterns for generating and scoring candidate reference questions from a
 ThoughtSpot Model. Used in [SKILL.md Step 4](../SKILL.md). The goal is to systematically
 cover measure × dimension × time-grain × pattern combinations, then prune by signal so
@@ -94,16 +123,26 @@ arbitrary pairs.
 
 | Pattern ID | Template | Example | Tokens (rough) | Formula |
 |---|---|---|---|---|
-| `t4.yoy` | `{M} YoY growth by {D}` | "Revenue YoY growth by region" | `[D] [M_yoy]` | `( [M] - group_aggregate(sum, [M], [T_year]-1) ) / group_aggregate(...)` |
-| `t4.mom` | `{M} MoM change` | "Revenue MoM change" | `[T] [M_mom]` | Similar to YoY at month grain |
+| `t4.yoy_compare` | `{M} this year vs last year by {D}` | "Revenue this year vs last year by region" | `[D] [M] this year [M] last year` | None — uses search-bar `this year`/`last year` keywords |
+| `t4.mom_compare` | `{M} this month vs last month` | "Revenue this month vs last month" | `[T] [M] this month [M] last month` | None — uses search-bar keywords |
 | `t4.conditional_agg` | `{M} from {D = condition}` | "Revenue from new customers only" | `[M_new]` | `sum_if([M], [D_status]='new')` |
 | `t4.window_rank` | `{D} rank by {M} within {D2}` | "Customer rank by revenue within region" | `[D] [D2] [M_rank]` | `rank([M], {[D2]})` |
 | `t4.cross_join_metric` | `{M1} per {M2} (different fact tables)` | "Conversion rate (orders / sessions)" | `[M_conversion]` | `[M1] / [M2]` (relies on Model joins) |
 
-**Generation rule:** emit `t4.yoy` once for the top measure if `T` exists. Emit
+**Generation rule:** emit `t4.yoy_compare` once for the top measure if `T` exists. Emit
 `t4.conditional_agg` for any attribute that has a status-like name (`status`, `type`,
 `flag`, `category` ≤ 5 distinct values) and the top measure. Emit `t4.cross_join_metric`
 only if the Model has ≥2 fact tables joined; pair the two largest measures.
+
+> **Note on YoY/MoM growth %.** An earlier version of this taxonomy emitted formula-bearing
+> `t4.yoy` / `t4.mom` rows using `group_aggregate(sum, [M], { [T] - 1 })`. The `[T] - 1`
+> operator on a date column inside a grouping argument is **not valid TS formula syntax** —
+> `group_aggregate`'s third argument is a `query_filters()` expression, not a date offset.
+> A verified period-over-period growth-% formula has not been documented in
+> [thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md);
+> the keyword-based comparison above is the safe fallback (produces two side-by-side KPIs,
+> one per period, with no formula required). Tracked in
+> [open-items.md](open-items.md) until a verified pattern lands.
 
 **Formula generation** — full expression building rules and a worked example for each
 T4 pattern are in [token-mapping-rules.md](token-mapping-rules.md) (Section 4).

@@ -38,23 +38,47 @@ The example structure is verified in
 
 ### Keyword vocabulary (search-bar tokens that are not column references)
 
-| Intent | Keyword(s) |
-|---|---|
-| Top / Bottom N | `top N`, `bottom N` |
-| Time grain | `daily`, `weekly`, `monthly`, `quarterly`, `yearly` |
-| Relative time | `last N days`, `last N weeks`, `this quarter`, `last quarter`, `this month`, `last month`, `this year`, `last year`, `ytd`, `mtd`, `qtd` |
-| Filters (literal) | `[Col] = 'value'`, `[Col] > N`, `[Col] in ('a', 'b')` |
-| Distinct count | `unique count [Col]` |
-| Sort | `sort by [Col]`, `descending`, `ascending` |
-| Limit | `top N`, `bottom N` (preferred over numeric limits) |
+> **Authoritative source for verified-working keyword positions and syntax:**
+> [feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md). The
+> initial v1 finding (every non-bracket keyword REJECTED) was over-broad —
+> the rejections were caused by **wrong syntax positions / missing quotes**,
+> not by keyword banning. See [open-items.md #16](open-items.md) for the
+> recategorisation.
 
-If a question implies a keyword not in this list, prefer paraphrasing the question to
-something searchable rather than coining a new keyword. ThoughtSpot's parser will reject
-unknown keywords.
+| Intent | Verified-working form | Common mistake (v1 emitted, REJECTED) |
+|---|---|---|
+| Top / Bottom N | `top N [Col]` *(keyword BEFORE the column refs)* | `[Col] [Col] top N` *(after — REJECTED)* |
+| Time grain (date bucket) | `[Date Col].monthly` *(dot-suffix, attached to col)* | `[Date Col] monthly` *(standalone — REJECTED)* |
+| Multi-word date bucket | `[Date Col].'month of year'` *(quoted)* | `month of year [Date Col]` *(REJECTED)* |
+| Relative time | `[Date Col] = 'this year' vs [Date Col] = 'last year'` *(quoted period as filter value)* | `[Col] this year` *(bare keyword — REJECTED)* |
+| Year filter | `[Date Col] = '2025'` *(quoted)* | `[Date Col] = 2025` *(unquoted — REJECTED)* |
+| Filter equality | `[Col] = 'value'` *(single-quoted literal)* | bare equals — REJECTED |
+| Multiple filters | `[Col] = 'a' [Col] = 'b'` *(implicit OR-set)* | — |
+| Aggregation prefix | `sum [Col]`, `sum [Col] [Group]` *(verified)* | — |
+| Sort | `[Col] sort by [Col]` *(verified)* | — |
+| Compare clauses | `<filter clause> vs <filter clause>` *(verified)* | — |
+| Bracketed column references | `[Customer Name] [Amount]` *(any number 1+)* | — |
+
+**Practical rule for v1 generators:** match the verified-working forms above
+exactly. When an intent isn't in the table, treat it as untested — drop the
+question or route via `DEFER` rather than emit a guess.
 
 ---
 
 ## 2. `formula_info[]` — when to generate, expression syntax
+
+> **Verified 2026-04-27 ([open-items.md #17](open-items.md)):** `formula_info[]`
+> on `REFERENCE_QUESTION` is REJECTED by the same parser bug that affects
+> `BUSINESS_TERM` (per [#12](open-items.md)). The parser tries to evaluate the
+> formula expression as a search query and fails. Until #17 lands a verified
+> syntax, generators must NOT emit `formula_info` on either entry type — instead
+> emit a `MOVE_TO_NEW_FORMULA` proposal that routes the user to define the
+> formula on the Model first (via `/ts-object-answer-promote`), then reference
+> the formula's display name in `search_tokens`.
+>
+> The mapping below documents the eventual target syntax for when #17 is
+> verified — but the current import path is to drop these questions and
+> use the Model-formula workaround.
 
 Generate `formula_info[]` when the question's mathematical intent cannot be expressed by
 existing Model columns alone. Mapping by tier (from
@@ -65,7 +89,7 @@ existing Model columns alone. Mapping by tier (from
 | T1 | none |
 | T2 | `t2.cumulative` |
 | T3 | `t3.avg_per`, `t3.ratio`, `t3.share_of_total` |
-| T4 | all (`t4.yoy`, `t4.mom`, `t4.conditional_agg`, `t4.window_rank`, `t4.cross_join_metric`) |
+| T4 | `t4.conditional_agg`, `t4.window_rank`, `t4.cross_join_metric` (`t4.yoy_compare` and `t4.mom_compare` use search-bar `this period`/`last period` keywords — no formula) |
 
 ### Expression syntax
 
@@ -95,11 +119,19 @@ The functions used by the taxonomy patterns:
 | `t3.avg_per` | `[M_total] / unique count ( [D] )` |
 | `t3.ratio` (margin) | `( [M1] - [M2] ) / [M1]` |
 | `t3.share_of_total` | `[M] / group_aggregate ( sum , [M] , { } )` |
-| `t4.yoy` | `( [M] - group_aggregate ( sum , [M] , { [T] - 1 } ) ) / group_aggregate ( sum , [M] , { [T] - 1 } )` |
-| `t4.mom` | Same shape as YoY at month grain |
 | `t4.conditional_agg` | `sum_if ( [M] , [D_status] = 'new' )` |
 | `t4.window_rank` | `rank ( [M] , { [D2] } )` |
 | `t4.cross_join_metric` | `[M1] / [M2]` (model joins resolve the cross-fact) |
+
+> **YoY/MoM growth-% formulas removed.** The previous templates relied on
+> `group_aggregate ( sum , [M] , { [T] - 1 } )`. The `[T] - 1` operator on a date column
+> inside a grouping argument is not valid TS formula syntax —
+> `group_aggregate`'s third argument is a `query_filters()` expression, not a date offset.
+> Use the keyword-based `t4.yoy_compare` and `t4.mom_compare` patterns from
+> [question-taxonomy.md](question-taxonomy.md) instead, which produce two side-by-side
+> KPIs (this period and last period) with no formula required. A verified TS
+> period-over-period growth-% formula is tracked as an open item in
+> [open-items.md](open-items.md).
 
 ### Formula `name` field
 
