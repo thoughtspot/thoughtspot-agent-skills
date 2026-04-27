@@ -451,12 +451,45 @@ and compare on:
 4. Formula expression — for formula columns, does the math agree?
 5. `ai_context` text — substring conflict heuristic
 
+### Pre-scan gate
+
+The scan is the only step that scales with tenant size, not target size. Show the
+user the cost estimate and let them choose the scope before any work starts:
+
+```
+Step 4.5 — Cross-Model Consistency Scan
+
+Found {N_models} readable Models on this profile.
+
+First-run scan exports TML for each Model in parallel (4-way concurrent),
+cached locally on (guid, modified_time). Subsequent runs only re-export
+Models that have been modified since the last run.
+
+  Estimated time:  ~{est_seconds // 60} minute(s) first run, seconds thereafter
+  Cache location:  ~/.cache/ts-coach-model/tml-corpus/
+
+Proceed?
+  [Y]              run full scan (default)
+  [filter <name>]  scope-by-name LIKE pattern (e.g., "filter Dunder")
+  [N]              skip Step 4.5 entirely
+
+Choose:
+```
+
+Time estimate: assume ~1.5s per uncached Model export at 4-way parallel
+(`N / 4 * 1.5s`). A scan of 343 Models lands at ~2 min wall time first run.
+
+If the user picks `filter <name>`, re-run the metadata search with
+`--name "%<name>%"` and recompute the count. Skip option (`N`) writes an
+empty `cross_model_consistency.md` and proceeds to Step 5 normally.
+
+### Implementation
+
 ```python
-# Enumerate readable Models. The CLI subtype filter pulls both Worksheets and
-# Models — filter to Models via metadata_header.contentUpgradeId.
-# `--all` is required: ts metadata search paginates at 50/page by default and
-# the target Model can land past page 1 on tenants with many Models.
-import subprocess, json
+import json, pathlib, subprocess, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# 1. Enumerate readable Models (--all auto-paginates; default page size is 50).
 res = subprocess.check_output([
     "ts", "metadata", "search",
     "--subtype", "WORKSHEET",
@@ -468,22 +501,72 @@ all_models = [r for r in json.loads(res)
               and r["metadata_header"].get("worksheetVersion") != "V1"
               and r["metadata_id"] != model_guid]
 
-# For each Model, export TML cached on (guid, modified_time_in_millis)
+# 2. Resolve cache dirs and load FORBIDDEN cache (24h TTL).
 cache_dir = pathlib.Path.home() / ".cache" / "ts-coach-model" / "tml-corpus"
 cache_dir.mkdir(parents=True, exist_ok=True)
-corpus = []
+forbidden_cache_path = cache_dir.parent / "forbidden.json"
+forbidden_cache = {}
+if forbidden_cache_path.exists():
+    raw = json.loads(forbidden_cache_path.read_text())
+    cutoff_ms = (time.time() - 24 * 3600) * 1000
+    forbidden_cache = {g: e for g, e in raw.items() if e.get("ts_ms", 0) > cutoff_ms}
+
+# 3. Split into "hit cache", "skip — known-FORBIDDEN", and "needs export".
+to_export, corpus = [], []
 for m in all_models:
+    if m["metadata_id"] in forbidden_cache:
+        continue  # silently skip — user can clear ~/.cache/ts-coach-model/forbidden.json to retry
     cache_key = f"{m['metadata_id']}-{m['metadata_header']['modified']}.json"
     cache_path = cache_dir / cache_key
-    if not cache_path.exists():
-        # Stale entries for this guid get cleared on miss
+    if cache_path.exists():
+        corpus.append(json.loads(cache_path.read_text()))
+    else:
+        # Evict stale entries for this guid before re-exporting
         for old in cache_dir.glob(f"{m['metadata_id']}-*.json"):
             old.unlink()
-        subprocess.check_call([
-            "ts", "tml", "export", m["metadata_id"],
-            "--profile", profile_name, "--fqn", "--parse",
-        ], stdout=open(cache_path, "w"))
-    corpus.append(json.loads(cache_path.read_text()))
+        to_export.append((m, cache_path))
+
+# 4. Parallel export with progress reporting.
+def _export_one(m, cache_path):
+    try:
+        out = subprocess.check_output(
+            ["ts", "tml", "export", m["metadata_id"],
+             "--profile", profile_name, "--fqn", "--parse"],
+            stderr=subprocess.PIPE, timeout=60,
+        )
+        cache_path.write_bytes(out)
+        return ("ok", m, json.loads(out))
+    except subprocess.CalledProcessError as e:
+        err = e.stderr.decode("utf-8", "replace")
+        if "FORBIDDEN" in err or "UNAUTHORIZED" in err:
+            return ("forbidden", m, err[:200])
+        return ("error", m, err[:200])
+    except Exception as e:
+        return ("error", m, str(e)[:200])
+
+if to_export:
+    print(f"  Exporting {len(to_export)} Model(s) — {len(corpus)} cached, "
+          f"{len(forbidden_cache)} skipped (known FORBIDDEN).")
+    completed = 0
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(_export_one, m, p): m for m, p in to_export}
+        for future in as_completed(futures):
+            completed += 1
+            status, m, payload = future.result()
+            if status == "ok":
+                corpus.append(payload)
+            elif status == "forbidden":
+                forbidden_cache[m["metadata_id"]] = {
+                    "ts_ms": int(time.time() * 1000),
+                    "name": m["metadata_header"]["name"],
+                    "error": payload,
+                }
+            # ("error", ...) — log and skip; will retry next run
+            if completed % 25 == 0 or completed == len(to_export):
+                print(f"  Exporting {completed}/{len(to_export)}...")
+
+# 5. Persist FORBIDDEN cache for the next run.
+forbidden_cache_path.write_text(json.dumps(forbidden_cache, indent=2))
 ```
 
 Build the column-name → collisions index, run the divergence checks per
@@ -498,6 +581,18 @@ RouteAction to `NEEDS_REVIEW` for every collision — let the user pick.
 The scan output is referenced from the Step 5 critique summary; users can
 defer review by picking `0` from the surface menu or skip it via the cross-Model
 checkbox.
+
+> **Performance notes.**
+>
+> - **`max_workers=4`** is chosen to be polite to the API while delivering ~4x
+>   speedup. The endpoint tolerates higher concurrency, but 4 keeps the run
+>   well under any sensible rate limit even on smaller TS instances.
+> - **FORBIDDEN cache TTL is 24 h** to handle daily permission changes without
+>   re-paying the discovery cost on every run. Clear
+>   `~/.cache/ts-coach-model/forbidden.json` to force a re-check.
+> - **Successful TML caches do not expire** — they're keyed on `modified_time`,
+>   so a Model edit naturally invalidates its entry. Stale entries for the
+>   same guid are evicted on miss.
 
 ---
 

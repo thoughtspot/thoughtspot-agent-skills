@@ -239,41 +239,55 @@ def step_detect_cross_model_collisions(target_model_tml: dict, target_model_name
         return len(target_tokens & sib_tokens)
     prioritised = sorted(sibling_models, key=lambda s: -overlap_score(s["name"]))
 
-    collisions: list[dict] = []
-    successful = 0
-    for sib in prioritised:
-        if successful >= max_corpus and collisions:
-            break
+    # Parallel export — same path as the skill's production Step 4.5
+    # (ThreadPoolExecutor max_workers=4). This step also serves as a live
+    # thread-safety check on the ts CLI: 4 concurrent TML exports against
+    # the same profile.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    candidates = prioritised[: max_corpus * 3]  # over-fetch to absorb FORBIDDEN losses
+
+    def _try_export(sib: dict):
         try:
             items = _ts_tml_export([sib["guid"]], profile, associated=False)
+            sib_model = next((i for i in items if i["type"] == "model"), None)
+            return (sib, sib_model)
         except Exception:
-            continue  # skip unreadable sibling, try next
-        sib_model = next((i for i in items if i["type"] == "model"), None)
-        if not sib_model:
-            continue
-        successful += 1
-        sib_cols = {c["name"]: c for c in sib_model["tml"]["model"].get("columns", [])}
-        for col_name, target_col in target_cols.items():
-            if col_name not in sib_cols:
+            return (sib, None)
+
+    collisions: list[dict] = []
+    successful = 0
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(_try_export, sib) for sib in candidates]
+        for future in as_completed(futures):
+            if successful >= max_corpus and collisions:
+                break
+            sib, sib_model = future.result()
+            if sib_model is None:
                 continue
-            sib_col = sib_cols[col_name]
-            target_db = target_col.get("db_column_name")
-            sib_db = sib_col.get("db_column_name")
-            target_type = target_col.get("properties", {}).get("column_type")
-            sib_type = sib_col.get("properties", {}).get("column_type")
-            divergent_on = []
-            if target_db != sib_db:
-                divergent_on.append("db_column_name")
-            if target_type != sib_type:
-                divergent_on.append("column_type")
-            collisions.append({
-                "column": col_name,
-                "sibling_model": sib["name"],
-                "sibling_guid": sib["guid"],
-                "divergent_on": divergent_on,
-                # Per open-items.md #15 — heuristic uncalibrated, default action is always NEEDS_REVIEW
-                "proposed_route_action": "NEEDS_REVIEW",
-            })
+            successful += 1
+            sib_cols = {c["name"]: c for c in sib_model["tml"]["model"].get("columns", [])}
+            for col_name, target_col in target_cols.items():
+                if col_name not in sib_cols:
+                    continue
+                sib_col = sib_cols[col_name]
+                target_db = target_col.get("db_column_name")
+                sib_db = sib_col.get("db_column_name")
+                target_type = target_col.get("properties", {}).get("column_type")
+                sib_type = sib_col.get("properties", {}).get("column_type")
+                divergent_on = []
+                if target_db != sib_db:
+                    divergent_on.append("db_column_name")
+                if target_type != sib_type:
+                    divergent_on.append("column_type")
+                collisions.append({
+                    "column": col_name,
+                    "sibling_model": sib["name"],
+                    "sibling_guid": sib["guid"],
+                    "divergent_on": divergent_on,
+                    # Per open-items.md #15 — heuristic uncalibrated, default action is always NEEDS_REVIEW
+                    "proposed_route_action": "NEEDS_REVIEW",
+                })
 
     if successful == 0:
         raise RuntimeError(

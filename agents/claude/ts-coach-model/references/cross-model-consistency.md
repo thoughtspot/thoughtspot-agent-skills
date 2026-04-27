@@ -70,10 +70,26 @@ ts tml export {guid} --profile {profile_name} --fqn
 #    column_block, formula_block, ai_context, db_column_name)
 ```
 
-**Cost.** A tenant with 50 Models means 50 TML exports. Cache each export by
-`(model_guid, modified_time_in_millis)` — re-running the skill on a Model
-that hasn't changed is free. First run is slow; subsequent runs cost
-~1 export per Model that's been touched since the last run.
+**Cost.** A tenant with 50 Models means 50 TML exports — but they run in
+parallel (4-way concurrent via `ThreadPoolExecutor`), and successful exports
+are cached locally on `(guid, modified_time)`. Realistic numbers:
+
+| Tenant size | First run (cold cache) | Subsequent runs (warm) |
+|---|---|---|
+| 50 Models | ~20s | seconds |
+| 343 Models (champ-staging today) | ~2 min | seconds–tens of seconds |
+| 1000 Models | ~6 min | depends on edit churn |
+
+The user is shown a pre-scan gate before the export loop starts (count,
+estimated time, and the option to scope by name pattern or skip entirely)
+so a 6-minute run never starts as a surprise. Per-25-Model progress lines
+keep the run visibly alive.
+
+**FORBIDDEN exports.** Some Models are visible to `metadata search` but
+return `FORBIDDEN` on TML export. These are cached separately in
+`~/.cache/ts-coach-model/forbidden.json` with a 24-hour TTL so a tenant
+with many unreadable Models doesn't pay the discovery cost on every run.
+Clear that file to force re-checking.
 
 **Permissions.** The check only sees Models the *current user* can read. If
 canonical Models exist in another org or under a different ownership, they
