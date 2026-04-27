@@ -38,23 +38,44 @@ The example structure is verified in
 
 ### Keyword vocabulary (search-bar tokens that are not column references)
 
-| Intent | Keyword(s) |
-|---|---|
-| Top / Bottom N | `top N`, `bottom N` |
-| Time grain | `daily`, `weekly`, `monthly`, `quarterly`, `yearly` |
-| Relative time | `last N days`, `last N weeks`, `this quarter`, `last quarter`, `this month`, `last month`, `this year`, `last year`, `ytd`, `mtd`, `qtd` |
-| Filters (literal) | `[Col] = 'value'`, `[Col] > N`, `[Col] in ('a', 'b')` |
-| Distinct count | `unique count [Col]` |
-| Sort | `sort by [Col]`, `descending`, `ascending` |
-| Limit | `top N`, `bottom N` (preferred over numeric limits) |
+> **Verified 2026-04-27 ([open-items.md #16](open-items.md)):** every non-bracket
+> keyword in this table is REJECTED by the `nls_feedback` import parser with
+> `EDOC_FEEDBACK_TML_INVALID — Invalid value token: <keyword>`. The TS search bar
+> accepts these keywords on its UI input, but the feedback TML parser does not.
+> **Until #16 lands a verified syntax, generators must strip every non-bracket
+> token from `search_tokens` before TML build.**
 
-If a question implies a keyword not in this list, prefer paraphrasing the question to
-something searchable rather than coining a new keyword. ThoughtSpot's parser will reject
-unknown keywords.
+| Intent | Keyword(s) | Verified status |
+|---|---|---|
+| Top / Bottom N | `top N`, `bottom N` | ❌ REJECTED — verified 2026-04-27 |
+| Time grain | `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | ❌ REJECTED — verified 2026-04-27 |
+| Relative time | `last N days`, `this quarter`, `last quarter`, etc. | ❌ REJECTED — verified 2026-04-27 |
+| Filters (literal) | `[Col] = 'value'`, `[Col] > N`, `[Col] in ('a', 'b')` | ❌ REJECTED — verified 2026-04-27 |
+| Distinct count | `unique count [Col]` | ❌ Likely REJECTED (untested but `unique`/`count` are non-bracket tokens) |
+| Sort | `sort by [Col]`, `descending`, `ascending` | ❌ Likely REJECTED |
+| Bracketed column references | `[Customer Name] [Amount]` | ✅ VERIFIED ACCEPTED — only safe shape |
+
+**Practical rule for v1 generators:** `search_tokens` should contain bracketed
+display-name references separated by spaces, with no other content. Question
+shape and chart_type/display_mode handle the visualisation hint; Spotter's
+similarity matcher uses `feedback_phrase` for the natural-language match.
 
 ---
 
 ## 2. `formula_info[]` — when to generate, expression syntax
+
+> **Verified 2026-04-27 ([open-items.md #17](open-items.md)):** `formula_info[]`
+> on `REFERENCE_QUESTION` is REJECTED by the same parser bug that affects
+> `BUSINESS_TERM` (per [#12](open-items.md)). The parser tries to evaluate the
+> formula expression as a search query and fails. Until #17 lands a verified
+> syntax, generators must NOT emit `formula_info` on either entry type — instead
+> emit a `MOVE_TO_NEW_FORMULA` proposal that routes the user to define the
+> formula on the Model first (via `/ts-object-answer-promote`), then reference
+> the formula's display name in `search_tokens`.
+>
+> The mapping below documents the eventual target syntax for when #17 is
+> verified — but the current import path is to drop these questions and
+> use the Model-formula workaround.
 
 Generate `formula_info[]` when the question's mathematical intent cannot be expressed by
 existing Model columns alone. Mapping by tier (from

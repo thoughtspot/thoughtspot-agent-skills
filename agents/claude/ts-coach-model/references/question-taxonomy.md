@@ -1,5 +1,29 @@
 # Question Taxonomy and Ranking — `ts-coach-model`
 
+> **Verified 2026-04-27 — patterns currently NOT importable in v1:**
+>
+> | Pattern | Reason | Tracked in |
+> |---|---|---|
+> | `t1.top_n` | Requires `top N` keyword in tokens — keyword vocabulary rejected | [open-items.md #16](open-items.md) |
+> | `t1.distinct_count` | Requires `unique count` keyword — likely rejected | [open-items.md #16](open-items.md) (untested but expected) |
+> | `t2.recent_period` | Requires `last 30 days` keyword — rejected | [open-items.md #16](open-items.md) |
+> | `t2.this_vs_last` | Requires `this/last quarter` keywords — rejected | [open-items.md #16](open-items.md) |
+> | `t2.cumulative` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
+> | `t3.dim_filter` | Requires literal-value filter — rejected | [open-items.md #16](open-items.md) |
+> | `t3.year_filter` | Requires `= 2025` literal-value filter — rejected | [open-items.md #16](open-items.md) |
+> | `t3.avg_per` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
+> | `t3.ratio` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
+> | `t3.share_of_total` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
+> | `t4.*` (all) | All require `formula_info` — rejected | [open-items.md #17](open-items.md) |
+>
+> **Patterns currently importable** (verified 2026-04-27): `t1.total`,
+> `t1.by_dim`, `t2.by_time` (semi — loses time-grain hint), `t2.trend_by_dim`
+> (semi — loses monthly hint).
+>
+> The deferred patterns can still be GENERATED into review files (the user
+> may export to Excel, manually paste into the Spotter UI, etc.) — but
+> the skill's automated import path drops them.
+
 Deterministic patterns for generating and scoring candidate reference questions from a
 ThoughtSpot Model. Used in [SKILL.md Step 4](../SKILL.md). The goal is to systematically
 cover measure × dimension × time-grain × pattern combinations, then prune by signal so

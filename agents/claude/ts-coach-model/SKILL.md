@@ -908,9 +908,51 @@ Run the Model TML self-validation checklist from
 [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md)
 before serialising.
 
-### 8c. Build the merged feedback TML (surfaces 3, 4)
+### 8c. Build the feedback TML (surfaces 3, 4) — DESTRUCTIVE BY API DESIGN
 
-Merge new entries with existing ones; never blow them away:
+> **⚠ Verified 2026-04-27 ([open-items.md #18](references/open-items.md)):**
+> the `nls_feedback` TML import REPLACES every existing feedback entry on the
+> Model with the payload contents. There is no append/merge mode. Combined
+> with [#2 sub](references/open-items.md) (full content of existing feedback
+> is not retrievable on Cloud), this means **without a mitigation, importing
+> any feedback TML wipes out previously-coached entries**.
+>
+> Until #18 mitigation lands, this skill MUST surface this destruction
+> explicitly to the user at the Step 8e gate. Do not let users discover the
+> loss after the fact.
+
+#### Pre-import warning gate (REQUIRED until #18 mitigated)
+
+```python
+existing_count = len(existing_feedback_headers)
+if existing_count > 0:
+    smoke_residue = sum(1 for e in existing_feedback_headers
+                         if e["phrase"].startswith("SMOKE_TEST_PROBE_"))
+    other_authors = sorted({e["author"] for e in existing_feedback_headers
+                             if e["author"] != current_author})
+    print(f"\n⚠ DESTRUCTIVE IMPORT WARNING")
+    print(f"  This Model has {existing_count} existing feedback entries.")
+    print(f"  The TS API does NOT support feedback append/merge — importing this run's")
+    print(f"  payload will REPLACE every entry, including:")
+    if smoke_residue:
+        print(f"    - {smoke_residue} smoke-test residue entries (lossless to remove)")
+    if other_authors:
+        print(f"    - entries authored by: {other_authors}")
+    print(f"  Detail in open-items.md #18.\n")
+    print(f"  Type 'I understand existing entries will be replaced' to proceed:")
+    confirm = input().strip()
+    if confirm != "I understand existing entries will be replaced":
+        raise SystemExit("Aborted at #18 destructive-import gate.")
+```
+
+#### Build the feedback payload
+
+The API will replace the Model's feedback entirely with this payload — so the
+payload must include **everything you want to keep**, not just new entries.
+Until the workaround for #18 lands, the skill cannot retrieve existing
+content (#2 sub) so cannot preserve unknown entries; entries authored by
+this run's user with a recognised skill-tag in `feedback_phrase` are the
+only ones we can rebuild from the run dir.
 
 ```python
 def next_id(used_ids):
@@ -918,13 +960,15 @@ def next_id(used_ids):
     while str(n) in used_ids: n += 1
     return str(n)
 
-merged = list(existing_feedback_entries)
-used_ids = {str(e.get("id","")) for e in merged}
+# Skill-managed entries only — existing entries from prior runs that we
+# can reconstruct from the run dir (or the current run's proposals)
+managed = list(reconstructable_existing_entries)  # may be empty
+used_ids = {str(e.get("id","")) for e in managed}
 for e in new_reference_questions + new_business_terms:
     e["id"] = next_id(used_ids); used_ids.add(e["id"])
-    merged.append(e)
+    managed.append(e)
 
-feedback_tml = {"guid": model_guid, "nls_feedback": {"feedback": merged}}
+feedback_tml = {"guid": model_guid, "nls_feedback": {"feedback": managed}}
 ```
 
 ### 8d. Save instructions.md (surface 5 — manual paste)
@@ -939,8 +983,18 @@ feedback_tml = {"guid": model_guid, "nls_feedback": {"feedback": merged}}
 Ready to apply coaching to "{model_name}":
 
   Column AI Context updates:    {N_ai_add} ADDs, {N_ai_refine} REFINEs
+                                 (each ai_context payload validated ≤ 400 chars
+                                  — see open-items.md #14)
   Column Synonyms updates:      {N_syn_add} ADDs, {N_syn_keep} KEEPs
   Reference Questions to add:   {N_ref}      (existing: {N_existing_ref})
+                                 ⚠ {N_existing_ref} existing entries WILL BE
+                                  REPLACED by the import — see open-items.md #18
+                                 ⚠ Formula-bearing tiers (t2.cumulative,
+                                  t3.avg_per, t3.ratio, t3.share_of_total, t4.*)
+                                  DEFERRED until #17 verified
+                                 ⚠ Keyword-bearing tiers (t1.top_n,
+                                  t2.recent_period, t2.this_vs_last,
+                                  t3.year_filter) DEFERRED until #16 verified
   Business Terms to add:        {N_bt}        (existing: {N_existing_bt})
   Model description:            {DESCRIPTION_ACTION}
   Data Model Instructions:      {N_instr} draft rule(s) — for manual paste

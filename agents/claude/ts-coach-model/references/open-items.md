@@ -504,37 +504,55 @@ only safe pattern.
 
 ---
 
-## #14 — `ai_context` character limit — OPEN
+## #14 — `ai_context` character limit — VERIFIED — 2026-04-27
 
-**Question:** what is the character / byte limit on `properties.ai_context`?
-The TML schema documents the field as "free text" but specifies no upper bound.
-With the structured-YAML AI Context proposal (axes: meaning, unit, includes,
-excludes, source, time_basis, null_zero, watch_out, formula), a fully populated
-column block can run 600–1200 bytes. We need to confirm the field tolerates
-this without truncation.
+**The limit is 400 characters per column.** Verified on champ-staging during
+end-to-end run on TEST_SV_Dunder Mifflin Sales & Inventory. The API returns:
 
-### Test (run against champ-staging Dunder Mifflin Sales & Inventory)
-
-```python
-import json, urllib.request
-sizes = [1024, 4096, 16384, 65536]
-for n in sizes:
-    payload = "x" * n  # known-length string
-    # Patch a single column's ai_context to payload via Model TML import
-    # Round-trip via ts tml export and measure how much survives
-    # Record: bytes_sent, bytes_returned, status_code, error_message
+```
+status_code: ERROR
+OBJECT_INVALID_STATE: AI column context exceeds maximum length of 400 characters
+for column: <comma-separated list of over-length columns>
 ```
 
-### Why it matters
+The error names every offending column on a single import attempt — no
+truncation, the import fails ALL-OR-NONE.
 
-If the limit is below ~2KB, the structured-YAML AI Context proposal needs
-defensive truncation per axis (e.g., cap each axis at 200 chars, prioritise
-`meaning` + `unit` + `source` if the budget is tight). If the limit is ≥ 64KB,
-no defensive logic is needed.
+### Implication for the structured-YAML AI Context schema
 
-Until verified, the skill should generate AI Context normally but log a
-warning if any column's payload exceeds 2KB so the user can spot truncation
-risk before import.
+The full 8-axis schema (meaning + unit + includes + excludes + source +
+time_basis + null_zero + watch_out + formula) easily runs 600–1200 chars.
+**400 chars forces a terse single-line-per-axis format.** Pattern that fits:
+
+```yaml
+meaning: <one line, ≤ 80 chars>
+unit:    <one line, ≤ 30 chars>
+source:  <table.column, ≤ 60 chars>
+time:    <one line, ≤ 50 chars (when relevant)>
+nulls:   <one line, ≤ 40 chars (when relevant)>
+watch:   <one line, ≤ 80 chars>
+formula: <one line for formula columns>
+```
+
+Verified working on all 20 columns of the Dunder Mifflin Model, with lengths
+ranging 148–313 chars (all under the 400 limit).
+
+### Where the verbose prose lives instead
+
+`column.description` (separate field) — confirmed during the same end-to-end
+run to accept the longer prose-style descriptions (lengths 200-400 chars
+tested without rejection). Verified upper bound of `column.description` is
+NOT yet tested; if it has its own limit it has not been hit in practice.
+
+### Action taken
+
+- Generators must cap `properties.ai_context` at 400 chars and validate
+  before import
+- If the structured-YAML schema cannot fit, drop axes in this priority
+  order: `excludes` → `includes` → `null_zero` → `time_basis` → `unit`
+  (preserve `meaning` + `source` + `watch` as last to drop)
+- Detailed prose belongs in `column.description`, not duplicated in
+  `ai_context`
 
 ---
 
@@ -575,6 +593,212 @@ collision to `NEEDS_REVIEW` rather than the heuristic's pick.
 
 ---
 
+## #16 — Search-bar keyword vocabulary in `nls_feedback.search_tokens` — VERIFIED REJECTED — 2026-04-27
+
+**The keyword vocabulary documented in
+[token-mapping-rules.md](token-mapping-rules.md) §1 is aspirational, not
+verified.** Every non-bracket token tested in `search_tokens` is rejected by
+the feedback parser with `EDOC_FEEDBACK_TML_INVALID — Invalid value token: <kw>`.
+
+### Tested on champ-staging 2026-04-27 (end-to-end run)
+
+| Token (in `search_tokens`) | Documented in token-mapping-rules.md | Verified outcome |
+|---|---|---|
+| `monthly` | ✓ Time grain | ❌ Invalid value token: monthly |
+| `last 30 days` | ✓ Relative time | ❌ Invalid value token: last |
+| `this quarter` | ✓ Relative time | ❌ Invalid value token: this |
+| `last quarter` | ✓ Relative time | ❌ Invalid value token: last |
+| `top 10` | ✓ Top/Bottom N | ❌ Invalid value token: top |
+| `= 2025` | ✓ Filter | ❌ Invalid value token (parser doesn't accept literal filter) |
+| `[Column]` (bracketed display name) | ✓ Column ref | ✅ Accepted |
+
+The verified-safe shape is **bracketed column references only** (with no
+keywords / operators / filters). Spaces between tokens are accepted.
+
+### Implication for question generation
+
+The Tier 1 / Tier 2 / Tier 3 patterns in
+[question-taxonomy.md](question-taxonomy.md) lose meaningful semantics when
+keywords are stripped:
+
+| Pattern | search_tokens after stripping | Spotter behavior |
+|---|---|---|
+| `t1.top_n` | `[Customer Name] [Amount]` | Same as `t1.by_dim` (no top-N anchor) |
+| `t2.by_time` | `[Order Date] [Amount]` | Loses month-grain hint |
+| `t2.recent_period` | `[Amount]` | Loses date filter — collapses to `t1.total` |
+| `t2.this_vs_last` | `[Amount] [Amount]` | Nonsense |
+| `t3.year_filter` | `[Order Date] [Amount]` | Loses year filter |
+
+This means **`t1.top_n`, `t2.recent_period`, `t2.this_vs_last`, `t3.year_filter`
+are not currently importable as distinct Reference Questions** — their tokens
+collapse to redundant or nonsensical column-only forms. Only `t1.total`,
+`t1.by_dim`, `t1.distinct_count`, `t2.by_time` (semi), `t2.trend_by_dim` (semi),
+and `t3.dim_filter` (when value-free) work cleanly.
+
+### Test (when re-investigating)
+
+The TS search bar accepts these keywords on its UI input. The disconnect is
+in the `nls_feedback` import parser, not the search bar itself. Likely
+candidates to test:
+
+1. **Quoted keywords**: `"monthly"`, `'top 10'` — does quoting bypass validation?
+2. **Different token positions**: e.g. `[Order Date].monthly [Amount]` —
+   does keyword-after-dot syntax work as a column-modifier?
+3. **Wildcards**: `[Order Date]:month [Amount]`
+4. **Date-bucket function calls**: `month([Order Date]) [Amount]`
+
+Until verified, the skill should strip keywords before building feedback TML
+and warn the user that question semantics are degraded.
+
+### Action taken
+
+- Generator strips non-bracket tokens before TML build (verified working
+  during the end-to-end run)
+- `t1.top_n`, `t2.recent_period`, `t2.this_vs_last`, `t3.year_filter`,
+  and `t3.dim_filter` (with values) marked as DEFERRED until verification
+- The keyword vocabulary table in
+  [token-mapping-rules.md](token-mapping-rules.md) §1 should be revised
+  to mark every non-`[Col]` row as UNVERIFIED
+
+---
+
+## #17 — `formula_info` on `REFERENCE_QUESTION` rejected by parser — VERIFIED REJECTED — 2026-04-27
+
+**The same parser bug documented in [#12](#12) for BUSINESS_TERM also affects
+REFERENCE_QUESTION when `formula_info[]` is present.** The parser tries to
+treat `formula_info[].expression` as a search query rather than a formula,
+fails, and rejects the entire entry with:
+
+```
+status_code: ERROR
+EDOC_FEEDBACK_TML_INVALID: Search did not find "<expression suffix>" in your data
+or metadata. Expecting one of the valid keywords, such as, "(", "-", "abs" etc.
+```
+
+Verified on champ-staging 2026-04-27 with two formula-bearing Reference
+Questions:
+
+| Question | Formula expression | Outcome |
+|---|---|---|
+| Cumulative Amount by month | `cumulative_sum ( [Amount] , [Order Date] )` | ❌ Rejected |
+| Product Category share of total Amount | `[Amount] / group_aggregate ( sum , [Amount] , { } )` | ❌ Rejected |
+
+This contradicts the documented examples in
+[token-mapping-rules.md](token-mapping-rules.md) §2 and §6.
+
+### Implication for the question taxonomy
+
+Every formula-bearing tier becomes **non-importable in this skill's current
+single-step path**:
+
+- `t2.cumulative` — needs `cumulative_sum`
+- `t3.avg_per` — needs `[M] / unique count([D])`
+- `t3.ratio` — needs `( [M1] - [M2] ) / [M1]`
+- `t3.share_of_total` — needs `[M] / group_aggregate(sum, [M], {})`
+- `t4.window_rank` — needs `rank([M], {[D2]})`
+- `t4.conditional_agg` — needs `sum_if(...)`
+- `t4.cross_join_metric` — needs `[M1] / [M2]`
+
+### Workaround
+
+Define the formula as a Model formula FIRST (via `/ts-object-answer-promote` or
+manual TML edit), then reference it by display name in `search_tokens`:
+
+```yaml
+# 1. Add formula to Model:
+#    [Cumulative Amount] = cumulative_sum( [Amount] , [Order Date] )
+# 2. Then create the Reference Question without formula_info:
+search_tokens: "[Order Date] [Cumulative Amount]"
+# (no formula_info field)
+```
+
+This is the same constraint already documented for BUSINESS_TERM in
+[#12](#12). The skill should treat both surfaces consistently.
+
+### Test (when re-investigating)
+
+Try the YAML folded-block-scalar (`>-`) form documented in token-mapping-rules.md
+§2 (required for `{ }` curly-brace expressions). Try without quoting. Try the
+`expr` field name vs `expression`. Verify on Cloud vs on-prem (parser may
+differ between deployment types).
+
+### Action taken
+
+- Generator drops formula-bearing questions before feedback TML build
+- The skill emits a `MOVE_TO_NEW_FORMULA` proposal for those questions
+  (same as the existing BUSINESS_TERM workflow per #12), routing the user
+  to define the formula on the Model first, then re-run
+
+---
+
+## #18 — Feedback TML import REPLACES rather than MERGES — VERIFIED — 2026-04-27
+
+**Importing an `nls_feedback` TML payload silently REPLACES every existing
+feedback entry on the Model.** The SKILL.md Step 8c statement *"Merge new
+entries with existing ones; never blow them away"* is **incorrect** for the
+verified API behavior.
+
+Verified on champ-staging 2026-04-27 during the end-to-end run on
+TEST_SV_Dunder Mifflin Sales & Inventory:
+
+- Before import: 5 `SMOKE_TEST_PROBE_*` entries on the Model (residue from
+  prior smoke runs)
+- Import payload: 40 new entries (new IDs, no overlap with existing IDs)
+- After import: 40 entries total — the 5 SMOKE_TEST_PROBE entries are **gone**
+
+The `--policy ALL_OR_NONE --no-create-new` flags don't change this — the
+import wholesale replaces the Model's `nls_feedback.feedback[]` collection
+with whatever the payload contains.
+
+### Why this is a SAFETY ISSUE
+
+A second run of `ts-coach-model` on the same Model would silently destroy
+every feedback entry created since the prior run — including entries added
+manually via the UI. This contradicts the skill's stated invariant ("existing
+values are never silently overwritten").
+
+### Compounded by #2 sub (content retrieval)
+
+The skill cannot **preserve** existing entries by re-fetching them and
+including them in the merged payload, because per
+[#2 sub-item](#2-feedback-content-retrieval), the full content
+(`search_tokens`, `formula_info`, `chart_type`, `display_mode`, `access`) of
+existing feedback is NOT retrievable via any verified API. Only the headers
+(id, name, type, author, modified) come back.
+
+This means: **without a fix, every run of `ts-coach-model` destroys any
+manually-added or previously-coached feedback entries.**
+
+### Mitigations to add before this is safe to ship
+
+1. **Pre-import warning gate** — enumerate existing feedback headers before
+   import; if any non-skill-managed entries exist, force the user to either:
+   a) export/document them manually first, or b) explicitly acknowledge they
+   will be lost
+2. **Per-author guard** — if any existing entry has an author other than the
+   current run's author, abort with explicit confirmation required
+3. **Track skill-managed entries** — write a tag or convention into
+   `feedback_phrase` (e.g. `[ts-coach-model:run_id]`) so subsequent runs can
+   distinguish skill-added from human-added entries
+
+### Action taken
+
+- This is now a **MERGE BLOCKER** for `wip/ts-coach-model` → `main` until
+  one of the mitigations above is implemented
+- SKILL.md Step 8c language ("merge with existing; never blow them away")
+  must be corrected to reflect verified replace-behavior
+- The user-facing Step 8e import gate must surface the loss explicitly
+
+### Test (to confirm fix lands)
+
+After mitigation:
+1. Add a manual feedback entry via the Spotter UI to the test Model
+2. Run `ts-coach-model` end-to-end with one new Reference Question
+3. Verify the manual entry is still present after import
+4. Verify the new entry is also present
+
+---
+
 ## Verification matrix
 
 | Item | Required for merge to main | Required for v2 | Owner |
@@ -590,11 +814,15 @@ collision to `NEEDS_REVIEW` rather than the heuristic's pick.
 | #8 volume calibration | No | Yes (drives default target) | Damian |
 | #9 synonyms vs BUSINESS_TERM equivalence | No (theory holds for v1) | Yes (refines explainer) | Damian |
 | #13 verified period-over-period growth-% formula | No (keyword fallback in place) | Yes (re-enables true t4.yoy / t4.mom) | Damian |
-| #14 ai_context character limit | No (proposal still functional with warning logging) | Yes (structured-YAML AI Context default) | Damian |
+| #14 ai_context character limit (400 chars) | Yes — VERIFIED — generators must cap at 400 | — | Damian |
 | #15 cross-Model consistency heuristic calibration | No (defaults to NEEDS_REVIEW) | Yes (heuristic-driven defaults reduce review load) | Damian |
+| #16 search-bar keyword vocabulary in feedback parser | Yes — VERIFIED REJECTED — generator strips keywords; affected tiers DEFERRED | Yes — re-enable t1.top_n / t2.recent_period / t2.this_vs_last / t3.year_filter when verified | Damian |
+| #17 formula_info on REFERENCE_QUESTION rejected | Yes — VERIFIED REJECTED — formula-bearing tiers DEFERRED in v1 (use Model-formula workaround) | Yes — re-enable t2.cumulative / t3.avg_per / t3.ratio / t3.share_of_total / t4.* when verified | Damian |
+| #18 feedback TML import REPLACES, doesn't merge | **Yes — BLOCKING** — destroys existing feedback; mitigation required before merge | — | Damian |
 
-**Merge blockers:** #2 and #3. Both are short tests against champ-staging on the
-Dunder Mifflin Model.
+**Merge blockers:** #2, #3, and **#18 (newly verified)**. #18 is the only
+genuinely unsafe item — without mitigation, every run of the skill destroys
+any feedback added since the previous run.
 
 The #2 sub-item (feedback content retrieval) is **NOT a merge blocker** — the v1
 skill operates header-only and degrades gracefully. It becomes blocking for v2 when
