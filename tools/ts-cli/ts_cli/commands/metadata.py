@@ -167,3 +167,124 @@ def get_object(
     if not results:
         raise SystemExit(f"No {type} object found with GUID '{guid}'.")
     print(json.dumps(results[0]))
+
+
+# ---------------------------------------------------------------------------
+# `ts metadata dependents` — list all objects that reference the given GUID(s)
+# ---------------------------------------------------------------------------
+
+# Per-bucket mapping from the v2 dependents response key to the canonical
+# normalized type label emitted in the flat output.
+_BUCKET_TO_TYPE = {
+    "QUESTION_ANSWER_BOOK": "ANSWER",
+    "PINBOARD_ANSWER_BOOK": "LIVEBOARD",
+    "LOGICAL_TABLE":        "LOGICAL_TABLE",  # Models / Views / Tables — caller can subtype
+    "COHORT":               "SET",
+    "FEEDBACK":             "FEEDBACK",
+}
+
+
+def _build_dependents_payload(guids: List[str], type_str: str) -> dict:
+    """Build the request body for the v2 dependents query.
+
+    Splits out so it can be unit-tested without hitting the network.
+    See references/open-items.md #1 for the verified shape.
+    """
+    return {
+        "metadata":                  [{"identifier": g, "type": type_str} for g in guids],
+        "include_dependent_objects": True,
+        "dependent_object_version":  "V2",
+    }
+
+
+def _normalize_dependents_response(resp_json) -> list:
+    """Flatten the v2 dependents response into one row per dependent.
+
+    Input shape (per source GUID, per bucket):
+      [
+        {"metadata_id": "<guid>", ...,
+         "dependent_objects": {
+           "dependents": {"<guid>": {"QUESTION_ANSWER_BOOK": [{"id":..., "name":...}, ...],
+                                     "PINBOARD_ANSWER_BOOK": [...], "LOGICAL_TABLE": [...],
+                                     "COHORT": [...], "FEEDBACK": [...]}}}
+        }
+      ]
+
+    Output:
+      [{"source_guid": "<guid>", "guid": "<dep_guid>", "name": "...",
+        "type": "ANSWER|LIVEBOARD|LOGICAL_TABLE|SET|FEEDBACK",
+        "raw_bucket": "QUESTION_ANSWER_BOOK|...",
+        "author_id": "...", "author_display_name": "..."},
+       ...]
+
+    Empty buckets are omitted (the API does not return empty keys, but we still skip
+    defensively in case the shape changes).
+    """
+    if not isinstance(resp_json, list):
+        return []
+    rows = []
+    for item in resp_json:
+        source_guid = item.get("metadata_id") or item.get("identifier") or ""
+        deps = ((item.get("dependent_objects") or {}).get("dependents") or {}).get(source_guid) or {}
+        for bucket, entries in deps.items():
+            mapped_type = _BUCKET_TO_TYPE.get(bucket, bucket)
+            for entry in entries or []:
+                rows.append({
+                    "source_guid":          source_guid,
+                    "guid":                 entry.get("id"),
+                    "name":                 entry.get("name"),
+                    "type":                 mapped_type,
+                    "raw_bucket":           bucket,
+                    "author_id":            entry.get("author"),
+                    "author_display_name":  entry.get("authorDisplayName"),
+                })
+    return rows
+
+
+@app.command("dependents")
+def dependents(
+    guids: List[str] = typer.Argument(..., help="One or more source GUIDs to query"),
+    type: str = typer.Option("LOGICAL_TABLE", "--type", "-t",
+                             help="Source type: LOGICAL_TABLE (table/model/view) or "
+                                  "LOGICAL_COLUMN (column or set/cohort GUID)"),
+    raw: bool = typer.Option(False, "--raw",
+                             help="Emit the unmodified v2 response array instead of the "
+                                  "flat normalized list"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """List all objects that depend on the given source GUID(s).
+
+    Wraps POST /api/rest/2.0/metadata/search with include_dependent_objects=true,
+    dependent_object_version=V2. Returns Models/Views/Answers/Liveboards/Sets/Feedback
+    that reference the source.
+
+    Default output (one row per dependent, flat):
+
+        [{"source_guid": "...", "guid": "...", "name": "...", "type": "ANSWER",
+          "raw_bucket": "QUESTION_ANSWER_BOOK", "author_id": "...",
+          "author_display_name": "..."}, ...]
+
+    With --raw, returns the v2 response untouched (useful for getting at
+    `hasInaccessibleDependents` or other meta-fields).
+
+    For Sets / Cohorts, query with `--type LOGICAL_COLUMN`. RLS rules, alerts, column
+    aliases, and column security TML are NOT covered by v2 dependents — see
+    `agents/claude/ts-dependency-manager/references/open-items.md` for those.
+
+    Examples:
+
+    \b
+      ts metadata dependents 32c062cb-9586-43ff-bc66-bceed7529caf
+      ts metadata dependents 32c062cb-9586-43ff-bc66-bceed7529caf --type LOGICAL_COLUMN
+      ts metadata dependents abc def ghi --raw
+    """
+    client = ThoughtSpotClient(resolve_profile(profile))
+    resp = client.post(
+        "/api/rest/2.0/metadata/search",
+        json=_build_dependents_payload(guids, type),
+    )
+    data = resp.json()
+    if raw:
+        print(json.dumps(data))
+        return
+    print(json.dumps(_normalize_dependents_response(data)))
