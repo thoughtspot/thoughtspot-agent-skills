@@ -70,6 +70,14 @@ and Liveboards to a different Model with column-gap detection.
 
 Run with `/ts-dependency-manager`.
 
+### [`ts-timezone-variable`](ts-timezone-variable/)
+
+Manages the `ts_user_timezone` template variable — search current assignments, set a
+timezone for an org or user (IANA format), or remove a previously set value. Supports
+org-level and user-level assignments.
+
+Run with `/ts-timezone-variable`.
+
 ### [`ts-coach-model`](ts-coach-model/)
 
 Comprehensively prepares a ThoughtSpot Model for Spotter. Reviews existing AI Context,
@@ -113,6 +121,7 @@ cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-convert-to-snowflake-sv ~/.
 cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-convert-from-snowflake-sv ~/.claude/skills/
 cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-object-answer-promote ~/.claude/skills/
 cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-coach-model ~/.claude/skills/
+cp -r /tmp/thoughtspot-agent-skills/agents/claude/ts-timezone-variable ~/.claude/skills/
 
 # Copy shared reference files (schemas, mappings, worked-examples) so skills can read them
 cp -r /tmp/thoughtspot-agent-skills/agents/shared ~/.claude/shared
@@ -174,6 +183,9 @@ ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-object-answer-promote \
 
 ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-coach-model \
       ~/.claude/skills/ts-coach-model
+
+ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-timezone-variable \
+      ~/.claude/skills/ts-timezone-variable
 
 # Shared reference docs (schemas, mappings, worked-examples)
 ln -s ~/Dev/thoughtspot-agent-skills/agents/shared ~/.claude/shared

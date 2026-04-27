@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-04-27
+- feat: add `ts-timezone-variable` skill — manage `ts_user_timezone` variable at org and user level
+
 ## 2026-04-24
 - feat: add skill versioning — every SKILL.md now has a `## Changelog` section with semver tracking
 - feat: add interactive changelog prompt to pre-commit hook (`suggest_skill_version.py`)
