@@ -45,6 +45,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 | [references/synonym-strategy-explainer.md](references/synonym-strategy-explainer.md) | Inline explainer for column synonyms vs BUSINESS_TERM coaching (shown to the user) |
 | [references/review-explainers.md](references/review-explainers.md) | 3-section explainer blocks (purpose / signals checked / outcome rules) prepended to every Step 7 review file |
 | [references/cross-model-consistency.md](references/cross-model-consistency.md) | Cross-Model column collision detection — purpose, signals, decision tree, output format (powers Step 4.5) |
+| [references/feedback-tml-verified-patterns.md](references/feedback-tml-verified-patterns.md) | Verified `nls_feedback` syntax patterns (search_tokens shapes, chart_type/display_mode values, axis_config notation) mined from real coached Models — authoritative reference for Step 6 + Step 8c generation |
 | [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake auth (optional) |
 | [~/.claude/shared/schemas/thoughtspot-feedback-tml.md](~/.claude/shared/schemas/thoughtspot-feedback-tml.md) | Coaching TML structure (output for surfaces 3 + 4) |
@@ -908,51 +909,46 @@ Run the Model TML self-validation checklist from
 [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md)
 before serialising.
 
-### 8c. Build the feedback TML (surfaces 3, 4) — DESTRUCTIVE BY API DESIGN
+### 8c. Build the merged feedback TML (surfaces 3, 4)
 
-> **⚠ Verified 2026-04-27 ([open-items.md #18](references/open-items.md)):**
-> the `nls_feedback` TML import REPLACES every existing feedback entry on the
-> Model with the payload contents. There is no append/merge mode. Combined
-> with [#2 sub](references/open-items.md) (full content of existing feedback
-> is not retrievable on Cloud), this means **without a mitigation, importing
-> any feedback TML wipes out previously-coached entries**.
->
-> Until #18 mitigation lands, this skill MUST surface this destruction
-> explicitly to the user at the Step 8e gate. Do not let users discover the
-> loss after the fact.
+> **Verified API behaviour (2026-04-27):** the `nls_feedback` TML import
+> wholesale REPLACES the Model's feedback collection with the payload. There
+> is no append/merge mode at the API. Per
+> [open-items.md #18](references/open-items.md) the skill simulates
+> merge-with-preservation by fetching existing entries first, then including
+> them in the import payload alongside the new ones.
 
-#### Pre-import warning gate (REQUIRED until #18 mitigated)
+#### Step 1 — Fetch existing feedback content (full, not headers)
+
+Per [open-items.md #2 sub](references/open-items.md) (verified retrievable
+2026-04-27), use `tml/export` with `type=FEEDBACK` against the Model GUID:
 
 ```python
-existing_count = len(existing_feedback_headers)
-if existing_count > 0:
-    smoke_residue = sum(1 for e in existing_feedback_headers
-                         if e["phrase"].startswith("SMOKE_TEST_PROBE_"))
-    other_authors = sorted({e["author"] for e in existing_feedback_headers
-                             if e["author"] != current_author})
-    print(f"\n⚠ DESTRUCTIVE IMPORT WARNING")
-    print(f"  This Model has {existing_count} existing feedback entries.")
-    print(f"  The TS API does NOT support feedback append/merge — importing this run's")
-    print(f"  payload will REPLACE every entry, including:")
-    if smoke_residue:
-        print(f"    - {smoke_residue} smoke-test residue entries (lossless to remove)")
-    if other_authors:
-        print(f"    - entries authored by: {other_authors}")
-    print(f"  Detail in open-items.md #18.\n")
-    print(f"  Type 'I understand existing entries will be replaced' to proceed:")
-    confirm = input().strip()
-    if confirm != "I understand existing entries will be replaced":
-        raise SystemExit("Aborted at #18 destructive-import gate.")
+import urllib.request, json, yaml
+req = urllib.request.Request(
+    f"{base_url}/api/rest/2.0/metadata/tml/export", method="POST",
+    headers={"Authorization": f"Bearer {token}", "X-Requested-By": "ThoughtSpot",
+             "Content-Type": "application/json"},
+    data=json.dumps({
+        "metadata": [{"identifier": model_guid, "type": "FEEDBACK"}],
+        "edoc_format": "YAML",
+    }).encode(),
+)
+body = json.loads(urllib.request.urlopen(req, timeout=30).read())
+edoc = body[0].get("edoc") if body else ""
+existing_payload = yaml.safe_load(edoc) if edoc else {"nls_feedback": {"feedback": []}}
+existing_entries = existing_payload.get("nls_feedback", {}).get("feedback", []) or []
 ```
 
-#### Build the feedback payload
+`existing_entries` now contains the full content (`search_tokens`,
+`formula_info`, `chart_type`, `display_mode`, `parent_question`, `access`,
+`rating`, `axis_config`, etc.) — ready to round-trip back into the import.
 
-The API will replace the Model's feedback entirely with this payload — so the
-payload must include **everything you want to keep**, not just new entries.
-Until the workaround for #18 lands, the skill cannot retrieve existing
-content (#2 sub) so cannot preserve unknown entries; entries authored by
-this run's user with a recognised skill-tag in `feedback_phrase` are the
-only ones we can rebuild from the run dir.
+#### Step 2 — Build the merged payload
+
+Re-id the new entries to avoid collision with existing IDs, then concatenate.
+The API will "replace" the collection, but the collection now contains
+everything we want to keep:
 
 ```python
 def next_id(used_ids):
@@ -960,16 +956,23 @@ def next_id(used_ids):
     while str(n) in used_ids: n += 1
     return str(n)
 
-# Skill-managed entries only — existing entries from prior runs that we
-# can reconstruct from the run dir (or the current run's proposals)
-managed = list(reconstructable_existing_entries)  # may be empty
-used_ids = {str(e.get("id","")) for e in managed}
+merged = list(existing_entries)
+used_ids = {str(e.get("id","")) for e in merged}
 for e in new_reference_questions + new_business_terms:
     e["id"] = next_id(used_ids); used_ids.add(e["id"])
-    managed.append(e)
+    merged.append(e)
 
-feedback_tml = {"guid": model_guid, "nls_feedback": {"feedback": managed}}
+feedback_tml = {"guid": model_guid, "nls_feedback": {"feedback": merged}}
 ```
+
+#### Step 3 — Generated entries must use verified-only syntax
+
+Every emitted `search_tokens`, `chart_type`, `display_mode`, and `axis_config`
+value must follow the verified-working forms in
+[feedback-tml-verified-patterns.md](references/feedback-tml-verified-patterns.md).
+Forms not yet verified (untested keywords / positions) must NOT be emitted —
+either drop the question or route via `MOVE_TO_NEW_FORMULA` (per
+[#17](references/open-items.md)) / `DEFER`.
 
 ### 8d. Save instructions.md (surface 5 — manual paste)
 

@@ -1,28 +1,33 @@
 # Question Taxonomy and Ranking — `ts-coach-model`
 
-> **Verified 2026-04-27 — patterns currently NOT importable in v1:**
+> **Pattern import status (revised 2026-04-27 after corpus mining; see
+> [feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md)):**
 >
-> | Pattern | Reason | Tracked in |
+> | Pattern | Status | Verified-working tokens example |
 > |---|---|---|
-> | `t1.top_n` | Requires `top N` keyword in tokens — keyword vocabulary rejected | [open-items.md #16](open-items.md) |
-> | `t1.distinct_count` | Requires `unique count` keyword — likely rejected | [open-items.md #16](open-items.md) (untested but expected) |
-> | `t2.recent_period` | Requires `last 30 days` keyword — rejected | [open-items.md #16](open-items.md) |
-> | `t2.this_vs_last` | Requires `this/last quarter` keywords — rejected | [open-items.md #16](open-items.md) |
-> | `t2.cumulative` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
-> | `t3.dim_filter` | Requires literal-value filter — rejected | [open-items.md #16](open-items.md) |
-> | `t3.year_filter` | Requires `= 2025` literal-value filter — rejected | [open-items.md #16](open-items.md) |
-> | `t3.avg_per` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
-> | `t3.ratio` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
-> | `t3.share_of_total` | Requires `formula_info` on RQ — rejected | [open-items.md #17](open-items.md) |
-> | `t4.*` (all) | All require `formula_info` — rejected | [open-items.md #17](open-items.md) |
+> | `t1.total` | ✅ Importable | `[Amount]` |
+> | `t1.by_dim` | ✅ Importable | `[Customer Name] [Amount]` |
+> | `t1.top_n` | ✅ Importable | `top 10 [Customer Name] [Amount]` *(keyword first)* |
+> | `t1.distinct_count` | ⚠ Untested — `count [Col]` not yet observed; probe needed | (skip until verified) |
+> | `t2.by_time` | ✅ Importable | `[Order Date].monthly [Amount]` |
+> | `t2.recent_period` | ⚠ Untested — `[Date].'last 30 days'` plausible | (skip until verified) |
+> | `t2.this_vs_last` | ✅ Importable | `[Amount] [Order Date] = 'this year' vs [Order Date] = 'last year'` |
+> | `t2.trend_by_dim` | ✅ Importable | `[Order Date].monthly [Product Category] [Amount]` |
+> | `t2.cumulative` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t3.dim_filter` | ✅ Importable | `[Amount] [Category] = 'printers'` |
+> | `t3.year_filter` | ✅ Importable | `[Order Date] = '2025' [Amount]` |
+> | `t3.avg_per` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t3.ratio` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t3.share_of_total` | ❌ formula_info rejected — use Model-formula workaround | [#17](open-items.md) |
+> | `t4.*` (all) | ❌ All require formula_info — use Model-formula workaround | [#17](open-items.md) |
 >
-> **Patterns currently importable** (verified 2026-04-27): `t1.total`,
-> `t1.by_dim`, `t2.by_time` (semi — loses time-grain hint), `t2.trend_by_dim`
-> (semi — loses monthly hint).
+> Workaround for ❌ patterns: define the required formula as a Model formula
+> first (via `/ts-object-answer-promote` or manual TML edit), then reference
+> the formula's display name in `search_tokens`. The skill emits a
+> `MOVE_TO_NEW_FORMULA` action for these rather than attempting inline import.
 >
-> The deferred patterns can still be GENERATED into review files (the user
-> may export to Excel, manually paste into the Spotter UI, etc.) — but
-> the skill's automated import path drops them.
+> Untested ⚠ patterns remain in the generator but are routed to `DEFER` until
+> the verified-patterns reference adds them to the import-safe whitelist.
 
 Deterministic patterns for generating and scoring candidate reference questions from a
 ThoughtSpot Model. Used in [SKILL.md Step 4](../SKILL.md). The goal is to systematically

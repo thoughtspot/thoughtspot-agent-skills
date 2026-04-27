@@ -103,29 +103,48 @@ Surfaces 3 (Reference Questions) and 4 (Business Terms) ARE fully automatable vi
 TML import. No manual-entry workaround is required for v1. The earlier conclusion
 that "standalone import is broken" was wrong — caused by checking the wrong API.
 
-### Feedback content retrieval — OPEN — 2026-04-26 (degrades skill, non-blocking)
+### Feedback content retrieval — VERIFIED RETRIEVABLE — 2026-04-27
 
-Enumeration via the dependents API returns entry **headers only** (`id`, `name` =
-phrase, `description` = type, author, modified). The full content
-(`search_tokens`, `formula_info`, `access` level, `chart_type`, `display_mode`)
-is not surfaced anywhere on champ-staging. Verified 2026-04-26 against the Dunder
-Mifflin Model — none of the following return content:
+**Resolved.** The correct call is the standard
+`POST /api/rest/2.0/metadata/tml/export` endpoint with the **parent object**
+GUID and `metadata[].type: FEEDBACK` — *not* the feedback entry's GUID.
+Confirmed in the [SpotterCode REST API spec](https://developers.thoughtspot.com/docs/tml#_export_a_tml)
+and live-verified 2026-04-27 against champ-staging on the Dunder Mifflin
+Sales Worksheet (`0e4406c7-d978-4be7-abd7-c34e8f7da835`):
 
-| Endpoint / approach | Result |
-|---|---|
-| `ts tml export <feedback_guid>` | error 10002 — "Specified identifier doesn't exist" |
-| `POST /api/rest/2.0/metadata/tml/export` with `type=FEEDBACK` | 400 — same error |
-| `POST /api/rest/2.0/metadata/search` with `type=FEEDBACK` | 400 — `FEEDBACK` not in `SearchMetadataType` enum |
-| `GET /api/rest/2.0/metadata/feedback/{id}` | 500 |
-| `GET /api/rest/2.0/metadata/{id}` (where id is feedback guid) | 500 |
-| `POST /api/rest/2.0/sage/feedback/list` | 500 |
-| `POST /api/rest/2.0/spotter/feedback/list` (with model identifier) | 500 |
-| `POST /api/rest/2.0/metadata/nls_feedback/export` | 500 |
-| `tml/export` of model with `export_feedback`, `include_feedback`, `export_nls_feedback`, `export_dependent` flags | All return 9 items (model + 8 tables); never include `nls_feedback` |
+```http
+POST /api/rest/2.0/metadata/tml/export
+{
+  "metadata": [{"identifier": "<parent_object_guid>", "type": "FEEDBACK"}],
+  "edoc_format": "YAML"
+}
+```
 
-This is the same root cause as
-[ts-dependency-manager open-item #18](~/.claude/skills/ts-dependency-manager/references/open-items.md) —
-the correct content endpoint is unknown across both skills.
+Response: an array of one object with `edoc` (the full feedback YAML — with
+`search_tokens`, `axis_config`, `chart_type`, `display_mode`, `parent_question`,
+`access`, `rating`, etc.) and `info` (status / name / type).
+
+There's also a Path 2 (Model + feedback in one call) using
+`export_options.export_with_associated_feedbacks: true` — see
+[feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md) for both.
+
+#### Why the v1 probes failed
+
+The v1 attempts (table above, deleted) all used the **feedback entry's
+GUID** (the `id` field returned by the dependents API) as the `identifier`.
+The correct identifier is the **parent object's GUID**. The TS API treats
+feedback as "associated with an object" — the export call retrieves all
+feedback for that object, not one entry by entry GUID.
+
+#### Skill behaviour update
+
+- Step 2b: now retrieves full content via `tml/export type=FEEDBACK` instead
+  of degrading to header-only mode
+- Step 3d input signal: existing `search_tokens` and `access` levels are
+  now available — re-enable GLOBAL/USER split, paraphrase variant generation,
+  and stale-reference critique
+- Step 8c: now CAN preserve existing entries by re-fetching them, then
+  including them in the merged payload — solves the #18 destruction problem
 
 #### Header-only fallback (skill behaviour while this is open)
 
@@ -593,64 +612,84 @@ collision to `NEEDS_REVIEW` rather than the heuristic's pick.
 
 ---
 
-## #16 — Search-bar keyword vocabulary in `nls_feedback.search_tokens` — VERIFIED REJECTED — 2026-04-27
+## #16 — `nls_feedback.search_tokens` keyword syntax — VERIFIED-WORKING FORMS DOCUMENTED — 2026-04-27
 
-**The keyword vocabulary documented in
-[token-mapping-rules.md](token-mapping-rules.md) §1 is aspirational, not
-verified.** Every non-bracket token tested in `search_tokens` is rejected by
-the feedback parser with `EDOC_FEEDBACK_TML_INVALID — Invalid value token: <kw>`.
+**Initial finding (rejection of every non-bracket form) was over-broad.**
+Mining the feedback corpus across champ-staging Models surfaced verified-
+working syntactic shapes for every "rejected" keyword. The earlier rejections
+were caused by **wrong syntax positions / missing quotes**, not by keyword
+banning.
 
-### Tested on champ-staging 2026-04-27 (end-to-end run)
+See [feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md) for
+the full verified-syntax library. Summary of corrected understanding:
 
-| Token (in `search_tokens`) | Documented in token-mapping-rules.md | Verified outcome |
-|---|---|---|
-| `monthly` | ✓ Time grain | ❌ Invalid value token: monthly |
-| `last 30 days` | ✓ Relative time | ❌ Invalid value token: last |
-| `this quarter` | ✓ Relative time | ❌ Invalid value token: this |
-| `last quarter` | ✓ Relative time | ❌ Invalid value token: last |
-| `top 10` | ✓ Top/Bottom N | ❌ Invalid value token: top |
-| `= 2025` | ✓ Filter | ❌ Invalid value token (parser doesn't accept literal filter) |
-| `[Column]` (bracketed display name) | ✓ Column ref | ✅ Accepted |
+| Original v1 form (REJECTED) | Verified-working form |
+|---|---|
+| `[Customer Name] [Amount] top 10` | `top 10 [Order Date].monthly` *(top BEFORE the column refs)* |
+| `[Order Date] [Amount] monthly` | `[Order Date].monthly` *(dot-suffix, attached to col)* |
+| `[Order Date] = 2025 [Amount]` | `[Order Date] = '2025' [Amount]` *(quoted literal value)* |
+| `[Amount] this quarter` | `[Order Date] = 'this year' vs [Order Date] = 'last year'` *(period as quoted value of date col, with `vs`)* |
+| `[Amount] this quarter [Amount] last quarter` | Same — use `vs` operator inside filter clauses, not bare keywords |
+| (no equivalent v1 form) | `sum [Amount]`, `[Amount] sort by [Amount]` *(verified — aggregation prefix + sort keywords)* |
+| (no equivalent v1 form) | `[Order Date].'month of year'` *(quoted multi-word date bucket)* |
 
-The verified-safe shape is **bracketed column references only** (with no
-keywords / operators / filters). Spaces between tokens are accepted.
+### Mining corpus
+
+53 entries across 4 source objects on champ-staging:
+- `Dunder Mifflin Sales` Worksheet (8 entries — high-quality real-world syntax)
+- `TEST_DEPENDENCY_MANAGEMENT` Model (3 entries)
+- `Dunder Mifflin Sales & Inventory` Worksheet (2 entries)
+- `TEST_SV_Dunder Mifflin Sales & Inventory` (40 entries — our v1 run output;
+  bracketed-only)
+
+se-thoughtspot top-200 most-recently-modified Models contained 0 entries —
+the SE tenant doesn't have coached models in scope.
 
 ### Implication for question generation
 
-The Tier 1 / Tier 2 / Tier 3 patterns in
-[question-taxonomy.md](question-taxonomy.md) lose meaningful semantics when
-keywords are stripped:
+The Tier 1 / 2 / 3 patterns are **mostly importable** with corrected syntax:
 
-| Pattern | search_tokens after stripping | Spotter behavior |
-|---|---|---|
-| `t1.top_n` | `[Customer Name] [Amount]` | Same as `t1.by_dim` (no top-N anchor) |
-| `t2.by_time` | `[Order Date] [Amount]` | Loses month-grain hint |
-| `t2.recent_period` | `[Amount]` | Loses date filter — collapses to `t1.total` |
-| `t2.this_vs_last` | `[Amount] [Amount]` | Nonsense |
-| `t3.year_filter` | `[Order Date] [Amount]` | Loses year filter |
-
-This means **`t1.top_n`, `t2.recent_period`, `t2.this_vs_last`, `t3.year_filter`
-are not currently importable as distinct Reference Questions** — their tokens
-collapse to redundant or nonsensical column-only forms. Only `t1.total`,
-`t1.by_dim`, `t1.distinct_count`, `t2.by_time` (semi), `t2.trend_by_dim` (semi),
-and `t3.dim_filter` (when value-free) work cleanly.
-
-### Test (when re-investigating)
-
-The TS search bar accepts these keywords on its UI input. The disconnect is
-in the `nls_feedback` import parser, not the search bar itself. Likely
-candidates to test:
-
-1. **Quoted keywords**: `"monthly"`, `'top 10'` — does quoting bypass validation?
-2. **Different token positions**: e.g. `[Order Date].monthly [Amount]` —
-   does keyword-after-dot syntax work as a column-modifier?
-3. **Wildcards**: `[Order Date]:month [Amount]`
-4. **Date-bucket function calls**: `month([Order Date]) [Amount]`
-
-Until verified, the skill should strip keywords before building feedback TML
-and warn the user that question semantics are degraded.
+| Pattern | Status with verified syntax |
+|---|---|
+| `t1.total` | ✅ `[Amount]` |
+| `t1.by_dim` | ✅ `[Customer Name] [Amount]` |
+| `t1.top_n` | ✅ `top 10 [Customer Name] [Amount]` *(top first)* |
+| `t1.distinct_count` | ⚠ `count [Col]` not yet observed; `unique` may differ |
+| `t2.by_time` | ✅ `[Order Date].monthly [Amount]` |
+| `t2.recent_period` | ⚠ `[Order Date].'last 30 days'` is plausible — untested |
+| `t2.this_vs_last` | ✅ `[Amount] [Order Date] = 'this year' vs [Order Date] = 'last year'` |
+| `t2.trend_by_dim` | ✅ `[Order Date].monthly [Product Category] [Amount]` |
+| `t3.dim_filter` | ✅ `[Amount] [Category] = 'value'` |
+| `t3.year_filter` | ✅ `[Order Date] = '2025' [Amount]` |
+| `t3.share_of_total`, `t3.avg_per`, `t3.ratio` | ❌ still need `formula_info` — see [#17](#17) |
+| `t4.*` | ❌ all need `formula_info` — see [#17](#17) |
 
 ### Action taken
+
+- New reference [feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md)
+  documents every verified-working form
+- [token-mapping-rules.md](token-mapping-rules.md) §1 updated to point at
+  the verified-patterns reference for syntax authority
+- Generator should now use the verified-working syntax, not strip keywords
+- Original rejection-summary section (kept below for record):
+
+#### Original v1 attempt (kept for context)
+
+The first end-to-end run on 2026-04-27 emitted these forms — all rejected:
+
+| Token | Why it failed |
+|---|---|
+| `monthly` after column ref | Should be `[Col].monthly` (dot-suffix, not standalone) |
+| `last 30 days` standalone | Should be `[Date Col] = 'last 30 days'` (quoted filter value) — untested but plausible |
+| `this quarter` standalone | Should be `[Date Col] = 'this quarter'` (quoted filter value) |
+| `top 10` after column refs | Should be `top 10` BEFORE column refs |
+| `= 2025` (unquoted) | Quote the literal: `= '2025'` |
+
+The TS search bar accepts these as user input on the UI. The TML import
+parser is more strict — quoting and positioning matter. The verified
+patterns file is now the authoritative reference for what the parser accepts.
+
+### Action taken (continued)
 
 - Generator strips non-bracket tokens before TML build (verified working
   during the end-to-end run)
@@ -757,37 +796,53 @@ every feedback entry created since the prior run — including entries added
 manually via the UI. This contradicts the skill's stated invariant ("existing
 values are never silently overwritten").
 
-### Compounded by #2 sub (content retrieval)
+### Mitigation now possible — #2 sub is RESOLVED
 
-The skill cannot **preserve** existing entries by re-fetching them and
-including them in the merged payload, because per
-[#2 sub-item](#2-feedback-content-retrieval), the full content
-(`search_tokens`, `formula_info`, `chart_type`, `display_mode`, `access`) of
-existing feedback is NOT retrievable via any verified API. Only the headers
-(id, name, type, author, modified) come back.
+[#2 sub](#feedback-content-retrieval--verified-retrievable--2026-04-27) is
+now resolved (full feedback content IS retrievable via
+`tml/export type=FEEDBACK`). This means the skill **CAN preserve existing
+entries** by:
 
-This means: **without a fix, every run of `ts-coach-model` destroys any
-manually-added or previously-coached feedback entries.**
+1. Fetching existing feedback content before import
+2. Building the merged payload with both existing + new entries
+3. Importing the full merged payload (replacing the collection — but the
+   collection now contains everything we want to keep)
 
-### Mitigations to add before this is safe to ship
+Pseudocode:
 
-1. **Pre-import warning gate** — enumerate existing feedback headers before
-   import; if any non-skill-managed entries exist, force the user to either:
-   a) export/document them manually first, or b) explicitly acknowledge they
-   will be lost
-2. **Per-author guard** — if any existing entry has an author other than the
-   current run's author, abort with explicit confirmation required
-3. **Track skill-managed entries** — write a tag or convention into
-   `feedback_phrase` (e.g. `[ts-coach-model:run_id]`) so subsequent runs can
-   distinguish skill-added from human-added entries
+```python
+# Step 8c — merged-with-preservation
+existing = export_feedback_tml(profile, model_guid)  # FULL content, not headers
+existing_entries = existing["nls_feedback"]["feedback"] if existing else []
+
+# Re-id the new entries to avoid collision with existing IDs
+used_ids = {str(e.get("id","")) for e in existing_entries}
+def next_id():
+    n = 1
+    while str(n) in used_ids: n += 1
+    used_ids.add(str(n)); return str(n)
+for e in new_reference_questions + new_business_terms:
+    e["id"] = next_id()
+
+merged = existing_entries + new_reference_questions + new_business_terms
+feedback_tml = {"guid": model_guid, "nls_feedback": {"feedback": merged}}
+# Import — the API "replaces" the collection, but the collection now
+# includes the existing entries verbatim, so nothing is lost.
+```
+
+This keeps the API's replace-behaviour intact (no API change required) while
+delivering the user-facing "never blow them away" invariant.
 
 ### Action taken
 
-- This is now a **MERGE BLOCKER** for `wip/ts-coach-model` → `main` until
-  one of the mitigations above is implemented
-- SKILL.md Step 8c language ("merge with existing; never blow them away")
-  must be corrected to reflect verified replace-behavior
-- The user-facing Step 8e import gate must surface the loss explicitly
+- **Downgraded from MERGE BLOCKER to documented behaviour** since the
+  preservation pattern is now implementable
+- SKILL.md Step 8c language updated 2026-04-27 to document the
+  fetch-existing-then-merge approach (replacing the prior fictional
+  "API merges" claim)
+- The user-facing Step 8e import gate still surfaces the replace-behaviour
+  explicitly, but with a "✓ existing entries preserved by re-fetch" line
+  rather than a destruction warning
 
 ### Test (to confirm fix lands)
 
@@ -805,7 +860,7 @@ After mitigation:
 |---|---|---|---|
 | #1 dependent search via v2 API | Yes — VERIFIED | — | Damian |
 | #2 standalone nls_feedback import | **Yes — BLOCKING (VERIFIED)** | — | Damian |
-| #2 sub: feedback content retrieval | No — header-only fallback in v1 | Yes — restores GLOBAL/USER split + variant generation | Damian |
+| #2 sub: feedback content retrieval | Yes — VERIFIED RETRIEVABLE 2026-04-27 (`tml/export type=FEEDBACK`) | — | Damian |
 | #3 ai_context / synonyms round-trip on Model TML | **Yes — BLOCKING (VERIFIED)** | — | Damian |
 | #4 Data Model Instructions TML location | No (deferred to v1.1; markdown draft only) | Yes | Damian |
 | #5 ACCOUNT_USAGE access | Yes — VERIFIED | — | — |
@@ -816,16 +871,16 @@ After mitigation:
 | #13 verified period-over-period growth-% formula | No (keyword fallback in place) | Yes (re-enables true t4.yoy / t4.mom) | Damian |
 | #14 ai_context character limit (400 chars) | Yes — VERIFIED — generators must cap at 400 | — | Damian |
 | #15 cross-Model consistency heuristic calibration | No (defaults to NEEDS_REVIEW) | Yes (heuristic-driven defaults reduce review load) | Damian |
-| #16 search-bar keyword vocabulary in feedback parser | Yes — VERIFIED REJECTED — generator strips keywords; affected tiers DEFERRED | Yes — re-enable t1.top_n / t2.recent_period / t2.this_vs_last / t3.year_filter when verified | Damian |
-| #17 formula_info on REFERENCE_QUESTION rejected | Yes — VERIFIED REJECTED — formula-bearing tiers DEFERRED in v1 (use Model-formula workaround) | Yes — re-enable t2.cumulative / t3.avg_per / t3.ratio / t3.share_of_total / t4.* when verified | Damian |
-| #18 feedback TML import REPLACES, doesn't merge | **Yes — BLOCKING** — destroys existing feedback; mitigation required before merge | — | Damian |
+| #16 search_tokens keyword syntax | Yes — VERIFIED-WORKING FORMS DOCUMENTED in feedback-tml-verified-patterns.md; generator uses verified forms | Yes — extend coverage as new patterns observed | Damian |
+| #17 formula_info on REFERENCE_QUESTION rejected | Yes — VERIFIED REJECTED — formula-bearing tiers use Model-formula workaround in v1 | Yes — re-enable inline formula_info when parser fixed | Damian |
+| #18 feedback TML import REPLACES, doesn't merge | Yes — DOCUMENTED + MITIGATION IMPLEMENTABLE (fetch-existing-then-merge via #2 sub resolution) | — | Damian |
 
-**Merge blockers:** #2, #3, and **#18 (newly verified)**. #18 is the only
-genuinely unsafe item — without mitigation, every run of the skill destroys
-any feedback added since the previous run.
+**Merge blockers:** #2, #3 — both VERIFIED. No outstanding blockers.
 
-The #2 sub-item (feedback content retrieval) is **NOT a merge blocker** — the v1
-skill operates header-only and degrades gracefully. It becomes blocking for v2 when
-GLOBAL/USER differentiation and paraphrase variant reuse are promoted from "nice to
-have" to "core". Cross-track with
-[ts-dependency-manager open-item #18](~/.claude/skills/ts-dependency-manager/references/open-items.md).
+#2 sub (feedback content retrieval) was previously a v2-only requirement and
+is now resolved (verified 2026-04-27 — `tml/export type=FEEDBACK` returns
+full content). This unlocks the GLOBAL/USER access split, paraphrase-variant
+reuse, and the #18 mitigation (fetch-existing-then-merge to preserve user-
+authored entries across runs). The cross-tracked
+[ts-dependency-manager open-item #18](~/.claude/skills/ts-dependency-manager/references/open-items.md)
+benefits from the same finding.

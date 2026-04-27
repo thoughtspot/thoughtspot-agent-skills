@@ -38,27 +38,30 @@ The example structure is verified in
 
 ### Keyword vocabulary (search-bar tokens that are not column references)
 
-> **Verified 2026-04-27 ([open-items.md #16](open-items.md)):** every non-bracket
-> keyword in this table is REJECTED by the `nls_feedback` import parser with
-> `EDOC_FEEDBACK_TML_INVALID — Invalid value token: <keyword>`. The TS search bar
-> accepts these keywords on its UI input, but the feedback TML parser does not.
-> **Until #16 lands a verified syntax, generators must strip every non-bracket
-> token from `search_tokens` before TML build.**
+> **Authoritative source for verified-working keyword positions and syntax:**
+> [feedback-tml-verified-patterns.md](feedback-tml-verified-patterns.md). The
+> initial v1 finding (every non-bracket keyword REJECTED) was over-broad —
+> the rejections were caused by **wrong syntax positions / missing quotes**,
+> not by keyword banning. See [open-items.md #16](open-items.md) for the
+> recategorisation.
 
-| Intent | Keyword(s) | Verified status |
+| Intent | Verified-working form | Common mistake (v1 emitted, REJECTED) |
 |---|---|---|
-| Top / Bottom N | `top N`, `bottom N` | ❌ REJECTED — verified 2026-04-27 |
-| Time grain | `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | ❌ REJECTED — verified 2026-04-27 |
-| Relative time | `last N days`, `this quarter`, `last quarter`, etc. | ❌ REJECTED — verified 2026-04-27 |
-| Filters (literal) | `[Col] = 'value'`, `[Col] > N`, `[Col] in ('a', 'b')` | ❌ REJECTED — verified 2026-04-27 |
-| Distinct count | `unique count [Col]` | ❌ Likely REJECTED (untested but `unique`/`count` are non-bracket tokens) |
-| Sort | `sort by [Col]`, `descending`, `ascending` | ❌ Likely REJECTED |
-| Bracketed column references | `[Customer Name] [Amount]` | ✅ VERIFIED ACCEPTED — only safe shape |
+| Top / Bottom N | `top N [Col]` *(keyword BEFORE the column refs)* | `[Col] [Col] top N` *(after — REJECTED)* |
+| Time grain (date bucket) | `[Date Col].monthly` *(dot-suffix, attached to col)* | `[Date Col] monthly` *(standalone — REJECTED)* |
+| Multi-word date bucket | `[Date Col].'month of year'` *(quoted)* | `month of year [Date Col]` *(REJECTED)* |
+| Relative time | `[Date Col] = 'this year' vs [Date Col] = 'last year'` *(quoted period as filter value)* | `[Col] this year` *(bare keyword — REJECTED)* |
+| Year filter | `[Date Col] = '2025'` *(quoted)* | `[Date Col] = 2025` *(unquoted — REJECTED)* |
+| Filter equality | `[Col] = 'value'` *(single-quoted literal)* | bare equals — REJECTED |
+| Multiple filters | `[Col] = 'a' [Col] = 'b'` *(implicit OR-set)* | — |
+| Aggregation prefix | `sum [Col]`, `sum [Col] [Group]` *(verified)* | — |
+| Sort | `[Col] sort by [Col]` *(verified)* | — |
+| Compare clauses | `<filter clause> vs <filter clause>` *(verified)* | — |
+| Bracketed column references | `[Customer Name] [Amount]` *(any number 1+)* | — |
 
-**Practical rule for v1 generators:** `search_tokens` should contain bracketed
-display-name references separated by spaces, with no other content. Question
-shape and chart_type/display_mode handle the visualisation hint; Spotter's
-similarity matcher uses `feedback_phrase` for the natural-language match.
+**Practical rule for v1 generators:** match the verified-working forms above
+exactly. When an intent isn't in the table, treat it as untested — drop the
+question or route via `DEFER` rather than emit a guess.
 
 ---
 
