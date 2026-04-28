@@ -76,6 +76,9 @@ table:
 | `properties.aggregation` | No | For MEASURE columns: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT` |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text search indexing — recommended for measures and date/FK columns. Omit for default (indexed). |
 | `properties.value_casing` | No | For VARCHAR columns: `UPPER`, `LOWER`, `MIXED`, or `UNKNOWN`. Only present when ThoughtSpot has detected or assigned a casing convention. |
+| `properties.synonyms` | No | Array of alternative names for natural-language search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |
+| `properties.synonym_type` | No | Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
+| `table.description` | No | Table-level description (top-level under `table:`). Maps from Snowflake Semantic View `tables (...)` table-comment clauses. |
 
 ### `joins_with[]` fields
 

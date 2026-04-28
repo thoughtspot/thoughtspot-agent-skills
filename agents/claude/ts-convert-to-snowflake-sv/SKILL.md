@@ -40,7 +40,11 @@ Semantic View DDL format, and creates it via `CREATE OR REPLACE SEMANTIC VIEW`.
 | `MEASURE` COUNT_DISTINCT column | `metrics()` clause — `TABLE.ALIAS as COUNT(DISTINCT table.COL)` |
 | Formula column — translatable MEASURE | `metrics()` clause — expression translated to SQL aggregation |
 | Formula column — translatable ATTRIBUTE | `dimensions()` clause — expression as computed column alias |
-| Formula column — `last_value(sum(m), query_groups(), {date})` | `metrics()` with `non additive by (DATE_TABLE.COL direction nulls last)` modifier |
+| Formula column — `last_value(sum(m), query_groups(), {date})` | `metrics()` with `non additive by (DATE_TABLE.COL asc nulls last)` modifier |
+| Formula column — `first_value(sum(m), query_groups(), {date})` | `metrics()` with `non additive by (DATE_TABLE.COL desc nulls last)` modifier |
+| Column / formula `properties.synonyms` (NOT top-level `synonyms`) | First synonym → `with synonyms=('First',...)`, all others appended. Top-level `synonyms:` is silently dropped on TS import; always read from `properties.synonyms`. |
+| Column / formula `description` | `comment='...'` on the dimension or metric entry |
+| Table-level `description` (Table TML) | `comment='...'` on the table entry in the `tables()` block |
 | Formula column — untranslatable | **Omitted** — logged in Unmapped Report |
 | `joins[]` / `referencing_join` | `relationships()` clause — `rel_name as LEFT(col) references RIGHT(col)` |
 | Right-side join table | `primary key (COL)` in the `tables()` declaration for that table |
@@ -933,8 +937,8 @@ Instead:
 
 Confirmed untranslatable patterns (after checking the reference):
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
-- `ts_first_day_of_week(...)`, `last_n_days(...)`, `last_value_in_period(...)` — period-scoped time intelligence with no Snowflake equivalent
-- `first_value(...)` — `NON ADDITIVE BY` only supports last-value semantics
+- `ts_first_day_of_week(...)`, `last_n_days(...)`, `last_value_in_period(...)`, `first_value_in_period(...)` — period-scoped time intelligence with no Snowflake equivalent
+- `agg(last_value(...))` and `agg(first_value(...))` — cannot re-aggregate a `NON ADDITIVE BY` metric
 - `group_aggregate(...)` with any filter argument other than `query_filters()` — hardcoded/selective filters unsupported
 - `group_aggregate(...)` with `query_groups() + {attr}` or `query_groups(attr1, attr2)` grouping
 - `max/min/avg/count(group_aggregate(...))` — outer non-sum aggregate prevents simplification

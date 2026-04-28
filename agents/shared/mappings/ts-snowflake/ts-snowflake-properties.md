@@ -270,9 +270,15 @@ Snowflake Semantic View `metrics` `expr`. See [ts-snowflake-formula-translation.
 for the complete pattern library.
 
 Untranslatable patterns (omit and log in Unmapped Report):
-- `first_value` and `agg(first_value(...))` — no direct Snowflake equivalent
-- `last_value_in_period` — period-scoped variants have no SV equivalent
+- `agg(first_value(...))` and `agg(last_value(...))` — cannot re-aggregate a `NON ADDITIVE BY` metric
+- `last_value_in_period` and `first_value_in_period` — period-scoped variants have no SV equivalent
 - Window functions with complex multi-dimension grouping not expressible as `PARTITION BY`
+
+**Translatable (do NOT log as untranslatable):**
+- `last_value(sum(m), query_groups(), {date})` → `non additive by (DATE asc nulls last) as SUM(...)`
+- `first_value(sum(m), query_groups(), {date})` → `non additive by (DATE desc nulls last) as SUM(...)`
+- `cumulative_sum`, `cumulative_average` → `OVER (PARTITION BY EXCLUDING ... ORDER BY ... ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`
+- `group_sum`, `group_aggregate` with `query_groups()`-based grouping → `OVER (PARTITION BY ...)` or `OVER (PARTITION BY EXCLUDING ...)`
 
 ---
 

@@ -402,20 +402,54 @@ translatable. See the "Translatable Window Function Patterns" section above.
 
 ---
 
-## Display Name Resolution
+## Display Name, Synonyms, and Description Resolution
 
-For each dimension/metric in the semantic view DDL:
+The Snowflake Semantic View DDL has three optional metadata clauses on each dimension
+and metric. Map them to ThoughtSpot as follows:
 
-The `comment='...'` value on the right-hand side is the intended display name.
-If no comment is present, convert the DIM_NAME to title case (e.g., `trans_id` → `Trans Id`).
+| SV DDL | ThoughtSpot field |
+|---|---|
+| `with synonyms=('Display Name','Alt 1','Alt 2',...)` | First value → column `name`. Remaining values → `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`). |
+| `comment='...'` (on a dimension or metric) | column `description` |
+| `comment='...'` (on a table in the `tables (...)` block) | TS Table TML `table.description` |
+| Top-level `comment='...'` (after the metrics block) | Model TML `model.description` |
 
-ThoughtSpot model column format:
+**Display-name precedence:**
+1. **First synonym** in `with synonyms=(...)` if present
+2. Else: title-cased DIM_NAME / METRIC_NAME (e.g., `STOCK_ON_HAND` → `Stock On Hand`)
+
+**Synonyms placement — CRITICAL:** synonyms in TS Model and Table TML go under
+**`properties.synonyms`**, NOT at the column root. Top-level `synonyms:` is silently
+dropped on import. Always emit `properties.synonym_type: USER_DEFINED` alongside.
+
 ```yaml
-- name: "{display_name}"              # From comment or title-cased DIM_NAME
-  column_id: "{TABLE_ID}::{col_name}"  # TABLE_ID = id in model_tables, col_name from ThoughtSpot Table TML
+# CORRECT
+- name: "Customer Name"
+  column_id: "DM_CUSTOMER::COMPANY_NAME"
+  description: "Full company name of the customer"
+  properties:
+    column_type: ATTRIBUTE
+    synonyms:
+    - "Client"
+    - "Account"
+    - "Company Name"
+    synonym_type: USER_DEFINED
+
+# WRONG — synonyms at root are silently dropped
+- name: "Customer Name"
+  column_id: "DM_CUSTOMER::COMPANY_NAME"
+  synonyms: ["Client", "Account"]   # ← lost on import
   properties:
     column_type: ATTRIBUTE
 ```
+
+**Table-level `comment='...'` mapping:** when the SV `tables (...)` block has a comment
+on a base table, push it onto the corresponding ThoughtSpot Table TML as
+`table.description`. This is a separate import (Table TML, with `--no-create-new` to
+update in place) — do this before importing the model.
+
+**Per-column `comment='...'`** maps to model column `description`. ThoughtSpot model
+TML allows `description` at column root.
 
 ---
 

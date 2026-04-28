@@ -28,6 +28,7 @@ Two scenarios are supported:
 | [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure, join scenarios, formula visibility, self-validation checklist |
 | [~/.claude/shared/schemas/thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula syntax, all function categories, LOD/window/semi-additive patterns, YAML encoding rules |
 | [~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
+| [~/.claude/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md](~/.claude/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md) | End-to-end example: DUNDER_MIFFLIN_SALES_INVENTORY → TS Model. Exercises multi-value synonyms, per-column descriptions, table comments, semi-additive metrics (closing/opening), `unique count` formula, and `concat()` for strings. |
 | [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 | [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake connection code, SQL execution patterns |
@@ -40,12 +41,17 @@ Two scenarios are supported:
 |---|---|
 | `tables ( DB.SCHEMA.TABLE [primary key (col)] )` | `model_tables[]` — one entry per **physical ThoughtSpot table** |
 | `primary key (col)` on a table | Identifies join target — not written into model TML directly |
+| `tables ( DB.SCHEMA.TABLE ... comment='...' )` | TS **Table** TML `table.description` — applied as a separate Table-TML update |
 | `dimensions ( TABLE.COL as view.NAME [comment='...'] )` | `columns[]` with `column_type: ATTRIBUTE` |
 | Dimension with date/timestamp physical column | `columns[]` with `column_type: ATTRIBUTE` (ThoughtSpot infers date type) |
 | `metrics ( TABLE.COL as SUM(view.NAME) )` | `columns[]` with `column_type: MEASURE` + aggregation |
 | `metrics ( TABLE.COL as complex_sql_expr )` | `formulas[]` with translated ThoughtSpot formula |
+| `metrics ( TABLE.COL non additive by (D.col asc nulls last) as SUM(...) )` | `formulas[]` with `last_value(sum(...), query_groups(), {date})` |
+| `metrics ( TABLE.COL non additive by (D.col desc nulls last) as SUM(...) )` | `formulas[]` with `first_value(sum(...), query_groups(), {date})` |
 | `relationships ( REL as FROM(FK) references TO(PK) )` | `referencing_join` in model_tables (Scenario A, pre-defined joins) OR `joins[]` inline (Scenario B) |
-| `comment='...'` on a dimension/metric | ThoughtSpot column `name` (display name) |
+| `with synonyms=('Display Name','Alt 1','Alt 2',...)` on a dimension/metric | First → column `name`. Rest → `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`). |
+| `comment='...'` on a dimension/metric | column `description` |
+| Top-level `comment='...'` (after metrics block) | Model TML `model.description` |
 | `with extension (CA='...')` | Not mapped to ThoughtSpot — logged in report |
 
 **Key structural rules:**
@@ -92,19 +98,21 @@ Steps:
   1.5. Choose session mode (single view / merge mode) ..... you choose
   2.   Identify the semantic view ......................... you choose
   3.   Get the semantic view DDL .......................... auto
-  4.   Parse the DDL ..................................... auto
+  4.   Parse the DDL (incl. synonyms, descriptions) ....... auto
   5.   Table registration question (reuse or create) ...... you choose
   6.   Discover / create ThoughtSpot Table objects ........ auto (may ask for clarification)
+  6D.  Apply SV table descriptions to TS Table TMLs ....... auto (when SV has table comments)
   7.   Find join names (Scenario A) ...................... auto
-  8.   Build the model TML ............................... auto
+  8.   Build the model TML (incl. column synonyms/desc) ... auto
   9.   Translate SQL expressions → ThoughtSpot formulas ... auto
+  9.5. Confirm Spotter enablement (default: enabled) ...... you choose
  10.   Review checkpoint — inspect TML before import ...... you confirm
  11.   Import the model into ThoughtSpot .................. auto
  12.   Verify import and produce summary report ........... auto
 
 File-only mode: at Step 10, choose FILE to write TML files for manual import.
 
-Confirmation required: Steps 1.5, 5, 10
+Confirmation required: Steps 1.5, 5, 9.5, 10
 Auto-executed: all others
 
 Ready to start? [Y / N]
@@ -282,27 +290,37 @@ for the full format — it is NOT the hypothetical nested format; the real forma
 Extract the following:
 
 1. **View identity:** database, schema, view name.
+   - Top-level `comment='...'` (after the metrics block, before `with extension`) → Model description.
 2. **Tables block:** for each table entry, record:
    - Fully-qualified table reference (`DB.SCHEMA.TABLE`) — this is the Snowflake view/table
    - Table alias (explicit `ALIAS as DB.SCHEMA.TABLE`, or defaults to last segment of the name)
    - Primary key column(s) (if present — marks this as a join target)
+   - **Table-level `comment='...'`** if present → maps to TS Table TML `table.description`.
 3. **Relationships block:** for each relationship (`REL_NAME as FROM(COL) references TO(COL)`), record:
    - Relationship name, from table alias, from column, to table alias, to column
-4. **Dimensions block** (flat, all tables): for each entry (`TABLE.COL as view_alias.NAME [comment='...']`), record:
+4. **Dimensions block** (flat, all tables): for each entry (`TABLE.COL as view_alias.NAME [with synonyms=(...)] [comment='...']`), record:
    - Source: TABLE alias + VIEW column name (column in the Snowflake view layer)
    - Semantic alias: `view_alias.NAME`
-   - Display name: value of `comment='...'`, or title-cased NAME
-5. **Metrics block** (flat): for each entry (`TABLE.COL as AGG(view_alias.NAME)`), record:
-   - Source: TABLE alias + VIEW column name
-   - Aggregation: extracted from `AGG(...)`
-   - Display name: from `comment='...'` or title-cased NAME
+   - **Synonyms** list from `with synonyms=(...)` — first → display name, rest → `properties.synonyms`
+   - **Description** from `comment='...'` → column `description`
+   - If no synonyms: title-cased NAME → display name
+5. **Metrics block** (flat): for each entry, record:
+   - Simple: `TABLE.COL as AGG(view_alias.NAME)` — extract source column + aggregation
+   - **Semi-additive**: `TABLE.COL non additive by (DATE.col asc|desc nulls last) as SUM(view_alias.col)`
+     — translates to a `last_value` (asc) or `first_value` (desc) formula. See the
+     formula reference's Semi-additive section for the full DDL → TS mapping.
+   - **Window function**: `... OVER (PARTITION BY ...)` — translates to `group_sum`,
+     `safe_divide(..., group_sum(...))` for contribution ratios, etc.
+   - **Synonyms** + **description** mapping: same rule as dimensions.
 6. **Extension JSON** (`with extension (CA='...')`): parse for column type confirmation
    (dimensions / time_dimensions / metrics per table). Do not map to ThoughtSpot.
 
 Build an internal map:
-- `tables`: list of parsed table entries (alias → fully-qualified ref, primary key)
+- `tables`: alias → fully-qualified ref, primary key, **table description**
 - `relationships`: list of (name, from_alias, from_col, to_alias, to_col)
-- `columns` (flat): all dimensions and metrics, keyed by (table_alias, view_col)
+- `columns` (flat): all dimensions and metrics, keyed by (table_alias, view_col), with
+  display name, synonyms[], and description fields populated.
+- `model_description`: from the top-level `comment='...'` clause
 
 ---
 
@@ -378,6 +396,28 @@ No changes have been made yet. Proceed? (yes/no):
 Do not proceed until the user confirms. If any table is **not found**, follow Step 6B
 for those tables. If any table has **missing columns**, follow Step 6C before building
 the model.
+
+---
+
+### Step 6D: Apply SV table-level metadata to ThoughtSpot Table TMLs
+
+If the SV `tables (...)` block has `comment='...'` on any base table, push those
+descriptions onto the corresponding ThoughtSpot Table objects before building the
+model. This is a separate Table TML import, run with `--no-create-new` so existing
+tables are updated in place.
+
+**Per table that has an SV table-comment:**
+1. Take the parsed Table TML from Step 6A.
+2. Set `table.description` to the SV table comment.
+3. Verify `table.schema` matches the actual Snowflake schema — older Table objects
+   sometimes claim a different schema than the live object, which breaks import
+   validation. If there's a mismatch, also fix `table.schema` here.
+4. Wrap with `{guid: ..., table: ...}` at top level so `--no-create-new` updates the
+   existing object.
+
+Batch all updates into one `ts tml import --policy ALL_OR_NONE --no-create-new` call.
+
+If the SV does not put `comment='...'` on any table, skip this step.
 
 ---
 
@@ -548,18 +588,29 @@ model:
   # ... same pattern as Scenario A ...
 ```
 
-**Column entries:**
+**Column entries — display name, synonyms, description:**
 
-For each dimension in the semantic view:
-- `name`: value of `comment='...'` on the dimension, or title-cased dimension name
+For each dimension or metric in the semantic view, populate metadata as follows:
+
+| SV DDL field | TS column field |
+|---|---|
+| `with synonyms=('Display Name','Alt 1','Alt 2',...)` (1st value) | `name` |
+| `with synonyms=(...)` (remaining values) | `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`) |
+| `comment='...'` | `description` (at column root) |
+| (no synonyms clause) | `name` = title-cased SV alias (LHS) |
+
+**Critical placement:** synonyms live under `properties.synonyms`, NOT at column root.
+A top-level `synonyms:` field is silently dropped on import. Always pair with
+`properties.synonym_type: USER_DEFINED`.
+
+For each dimension:
 - `column_id`: `{id}::{col_name}` — where `id` is the model_tables `id` for that
   table, and `col_name` is from the ThoughtSpot Table TML
-- `column_type: ATTRIBUTE`
+- `properties.column_type: ATTRIBUTE`
 
 For each simple metric (`AGG(view_alias.metric_name)`):
-- `name`: value of `comment='...'` on the metric, or title-cased metric name
 - `column_id`: `{id}::{col_name}`
-- `column_type: MEASURE`
+- `properties.column_type: MEASURE`
 - `aggregation`: mapped from the SQL aggregate function (see ts-from-snowflake-rules.md)
 
 For each complex metric (formula expression):
@@ -663,6 +714,34 @@ yaml.add_representer(str, literal_representer)
 
 ---
 
+### Step 9.5: Spotter enablement
+
+Before assembling the final TML, ask whether Spotter (AI search) should be enabled
+for this model. Default is **yes** — Spotter is the primary natural-language
+interface for Models, and a converted SV usually exists to be queried this way.
+
+```
+Enable Spotter (AI search) for this model? [Y / n] (default: Y)
+```
+
+Apply the answer to the model TML's properties block:
+
+```yaml
+model:
+  name: TEST_SV_{view_name}
+  # ... model_tables, columns, formulas, etc.
+  properties:
+    spotter_config:
+      is_spotter_enabled: true   # or false based on answer
+```
+
+If the user answers `n` or `no`, set `is_spotter_enabled: false`. Pre-existing
+models being updated in place (Step 11): if the user does not explicitly answer,
+preserve the existing setting from the previously-exported model TML rather than
+overwriting it with a default.
+
+---
+
 ### Step 10: Review checkpoint
 
 Before importing, show the user a summary:
@@ -682,6 +761,8 @@ Columns ({n} total):
 Formula translations:
   ✓ {name}: {sql_expr} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
+
+Spotter (AI search): enabled / disabled
 
 Proceed with import?
   yes  — import to ThoughtSpot
@@ -917,5 +998,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-04-28 | Add Step 9.5 — confirm Spotter (AI search) enablement before import. Default Y; preserves existing setting on in-place updates. |
+| 1.2.0 | 2026-04-28 | Map SV synonyms/descriptions to TS Model + Table TMLs. Add Step 6D for table-description updates. Document `non additive by ... desc` → `first_value`. Fix synonyms placement (`properties.synonyms` not column root). |
 | 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

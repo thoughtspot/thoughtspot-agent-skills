@@ -66,8 +66,7 @@ the start of an inline map. Always use `>-` when curly braces appear in the expr
 |---|---|---|
 | `sum` | `sum ( [TABLE::col] )` | Sum of all values |
 | `count` | `count ( [TABLE::col] )` | Count of non-null values |
-| `count_distinct` | `count_distinct ( [TABLE::col] )` | Distinct count |
-| `unique count` | `unique count ( [TABLE::col] )` | Alias for `count_distinct` — spaced, no underscore |
+| `unique count` | `unique count ( [TABLE::col] )` | **Distinct count — use this form.** Note the space, not an underscore. `count_distinct` is **not a valid TS formula function** — it is rejected by the formula parser ("Search did not find count_distinct(...)"). Use `unique count` exclusively. |
 | `average` | `average ( [TABLE::col] )` | Mean |
 | `min` | `min ( [TABLE::col] )` | Minimum |
 | `max` | `max ( [TABLE::col] )` | Maximum |
@@ -138,7 +137,7 @@ else 0
 
 | Function | Syntax | Notes |
 |---|---|---|
-| `concat` | `concat ( [a] , [b] , ... )` | N arguments supported |
+| `concat` | `concat ( [a] , [b] , ... )` | N arguments supported. **`+` does NOT concatenate strings** in TS formulas — it is numeric-only. The TS parser rejects `[a] + ', ' + [b]` with "Search did not find + ', ' +". Always use `concat()` for string joining, including for SQL `CONCAT(a, ', ', b)` translations. |
 | `substr` | `substr ( [x] , [start] , [len] )` | Zero-indexed start |
 | `left` | `left ( [x] , [n] )` | First N characters |
 | `right` | `right ( [x] , [n] )` | Last N characters |
@@ -300,7 +299,7 @@ Sugar for `group_aggregate` with `query_filters()` as the filter argument:
 | `group_count(m, attr)` | `group_aggregate(count(m), {attr}, query_filters())` |
 | `group_max(m, attr)` | `group_aggregate(max(m), {attr}, query_filters())` |
 | `group_min(m, attr)` | `group_aggregate(min(m), {attr}, query_filters())` |
-| `group_unique_count(m, attr)` | `group_aggregate(count_distinct(m), {attr}, query_filters())` |
+| `group_unique_count(m, attr)` | `group_aggregate(unique count(m), {attr}, query_filters())` |
 | `group_stddev(m, attr)` | `group_aggregate(stddev(m), {attr}, query_filters())` |
 | `group_variance(m, attr)` | `group_aggregate(variance(m), {attr}, query_filters())` |
 

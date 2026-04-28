@@ -109,6 +109,28 @@ Map the Semantic View DDL to ThoughtSpot Model TML:
 - Relationships → `joins_with` entries
 - SQL expressions → ThoughtSpot formulas (use the formula translation reference)
 
+**Metadata mapping (synonyms / descriptions / table comments):**
+- `with synonyms=('First','Alt 1','Alt 2',...)` → first → column `name`; rest → `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`). Synonyms MUST live under `properties:`; top-level `synonyms:` is silently dropped.
+- `comment='...'` on a dimension/metric → column `description`
+- `comment='...'` on a `tables (...)` table entry → TS Table TML `table.description` (apply via a separate Table-TML update with `--no-create-new` before importing the model)
+- Top-level `comment='...'` (after metrics block) → Model TML `model.description`
+
+**Semi-additive metrics:**
+- `non additive by (col asc nulls last) as SUM(...)` → `last_value(sum(...), query_groups(), {date})` formula
+- `non additive by (col desc nulls last) as SUM(...)` → `first_value(sum(...), query_groups(), {date})` formula
+
+**Aggregations:**
+- For distinct count, use the formula `unique count ( [TABLE::col] )` — note the **space**, not underscore. `count_distinct(...)` is rejected by the TS formula parser.
+- Use `concat(a, ', ', b)` for string concatenation — `+` does NOT concatenate strings in TS formulas.
+
+**Spotter enablement (ask the user before generating the final TML):**
+
+```
+Enable Spotter (AI search) for this model? [Y / n] (default: Y)
+```
+
+Apply to `model.properties.spotter_config.is_spotter_enabled`. On in-place updates, preserve the existing value if the user does not answer; on first import default to `true`.
+
 Run the self-validation checklist from `thoughtspot-model-tml.md` before importing.
 
 ---
@@ -137,4 +159,6 @@ Show:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-04-28 | Add Spotter-enablement confirmation step (default Y). |
+| 1.1.0 | 2026-04-28 | Add SV synonyms/descriptions/table-comments mapping. Document `non additive by ... desc` → `first_value`. Note that `count_distinct(...)` and `+` for strings are invalid TS formula syntax. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

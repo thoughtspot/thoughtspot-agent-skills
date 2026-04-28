@@ -36,7 +36,8 @@ schemas/
 
 worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)
-  ts-from-snowflake.md                — end-to-end SV → TS conversion (verified against live instance)
+  ts-from-snowflake.md                — end-to-end SV → TS conversion — BIRD_SUPERHEROS_SV (verified against live instance)
+  ts-from-snowflake-dunder.md         — end-to-end SV → TS conversion — DUNDER_MIFFLIN_SALES_INVENTORY (multi-value synonyms, descriptions, semi-additive, unique count, concat; verified against live instance)
 ```
 
 ## Worked examples are ground truth
