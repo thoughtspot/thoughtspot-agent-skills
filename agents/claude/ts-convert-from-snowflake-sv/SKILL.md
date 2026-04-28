@@ -105,13 +105,14 @@ Steps:
   7.   Find join names (Scenario A) ...................... auto
   8.   Build the model TML (incl. column synonyms/desc) ... auto
   9.   Translate SQL expressions → ThoughtSpot formulas ... auto
+  9.5. Confirm Spotter enablement (default: enabled) ...... you choose
  10.   Review checkpoint — inspect TML before import ...... you confirm
  11.   Import the model into ThoughtSpot .................. auto
  12.   Verify import and produce summary report ........... auto
 
 File-only mode: at Step 10, choose FILE to write TML files for manual import.
 
-Confirmation required: Steps 1.5, 5, 10
+Confirmation required: Steps 1.5, 5, 9.5, 10
 Auto-executed: all others
 
 Ready to start? [Y / N]
@@ -713,6 +714,34 @@ yaml.add_representer(str, literal_representer)
 
 ---
 
+### Step 9.5: Spotter enablement
+
+Before assembling the final TML, ask whether Spotter (AI search) should be enabled
+for this model. Default is **yes** — Spotter is the primary natural-language
+interface for Models, and a converted SV usually exists to be queried this way.
+
+```
+Enable Spotter (AI search) for this model? [Y / n] (default: Y)
+```
+
+Apply the answer to the model TML's properties block:
+
+```yaml
+model:
+  name: TEST_SV_{view_name}
+  # ... model_tables, columns, formulas, etc.
+  properties:
+    spotter_config:
+      is_spotter_enabled: true   # or false based on answer
+```
+
+If the user answers `n` or `no`, set `is_spotter_enabled: false`. Pre-existing
+models being updated in place (Step 11): if the user does not explicitly answer,
+preserve the existing setting from the previously-exported model TML rather than
+overwriting it with a default.
+
+---
+
 ### Step 10: Review checkpoint
 
 Before importing, show the user a summary:
@@ -732,6 +761,8 @@ Columns ({n} total):
 Formula translations:
   ✓ {name}: {sql_expr} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
+
+Spotter (AI search): enabled / disabled
 
 Proceed with import?
   yes  — import to ThoughtSpot
@@ -967,6 +998,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-04-28 | Add Step 9.5 — confirm Spotter (AI search) enablement before import. Default Y; preserves existing setting on in-place updates. |
 | 1.2.0 | 2026-04-28 | Map SV synonyms/descriptions to TS Model + Table TMLs. Add Step 6D for table-description updates. Document `non additive by ... desc` → `first_value`. Fix synonyms placement (`properties.synonyms` not column root). |
 | 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

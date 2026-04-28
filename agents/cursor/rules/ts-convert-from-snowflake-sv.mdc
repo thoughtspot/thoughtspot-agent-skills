@@ -123,6 +123,14 @@ Map the Semantic View DDL to ThoughtSpot Model TML:
 - For distinct count, use the formula `unique count ( [TABLE::col] )` — note the **space**, not underscore. `count_distinct(...)` is rejected by the TS formula parser.
 - Use `concat(a, ', ', b)` for string concatenation — `+` does NOT concatenate strings in TS formulas.
 
+**Spotter enablement (ask the user before generating the final TML):**
+
+```
+Enable Spotter (AI search) for this model? [Y / n] (default: Y)
+```
+
+Apply to `model.properties.spotter_config.is_spotter_enabled`. On in-place updates, preserve the existing value if the user does not answer; on first import default to `true`.
+
 Run the self-validation checklist from `thoughtspot-model-tml.md` before importing.
 
 ---
@@ -151,5 +159,6 @@ Show:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-04-28 | Add Spotter-enablement confirmation step (default Y). |
 | 1.1.0 | 2026-04-28 | Add SV synonyms/descriptions/table-comments mapping. Document `non additive by ... desc` → `first_value`. Note that `count_distinct(...)` and `+` for strings are invalid TS formula syntax. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

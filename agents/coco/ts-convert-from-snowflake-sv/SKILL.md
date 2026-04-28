@@ -657,6 +657,16 @@ and note the correction in the output.
 | 10 | Every formula has a `columns[]` entry | Every `id` in `formulas[]` has a corresponding `formula_id:` in `columns[]` | Add the missing `columns[]` entry |
 | 11 | `last_value` formula YAML encoding | Any `formulas[]` entry whose `expr` contains `{ [col] }` (curly braces) must use a `>-` block scalar for `expr:` — inline string assignment will cause a YAML parse error | Change `expr: "last_value(...)"` → `expr: >-\n  last_value(...)` |
 
+**Spotter enablement (ask before showing the review summary):**
+
+```
+Enable Spotter (AI search) for this model? [Y / n] (default: Y)
+```
+
+Apply the answer to `model.properties.spotter_config.is_spotter_enabled`. On
+in-place updates of an existing model, if the user does not answer explicitly,
+preserve the existing value rather than overwriting with a default.
+
 After all checks pass, show the user:
 
 ```
@@ -674,6 +684,8 @@ Columns: {n} ATTRIBUTE, {n} MEASURE, {n} formulas
 Formula translations:
   ✓ {name}: {sql} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
+
+Spotter (AI search): enabled / disabled
 
 Proceed with import?
   yes  — import to ThoughtSpot via TS_IMPORT_TML
@@ -861,5 +873,6 @@ After completing one conversion, offer to convert additional views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-04-28 | Add Spotter-enablement confirmation step (default Y) before the review checkpoint. |
 | 1.1.0 | 2026-04-28 | Map SV synonyms/descriptions/table-comments to TS Model + Table TMLs. Add `non additive by ... desc` → `first_value` mapping. Note `count_distinct(...)` and `+` string-concat are invalid TS formula syntax. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

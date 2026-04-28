@@ -233,6 +233,29 @@ created a duplicate model (`55d6d77c-...`) which was deleted before retry. Alway
 Update Table TMLs first (descriptions, schema fixes), then import the model. The
 model import would otherwise see stale Table metadata and fail to resolve column IDs.
 
+### Spotter enablement
+
+Before assembling the final TML, the skill prompts:
+
+```
+Enable Spotter (AI search) for this model? [Y / n] (default: Y)
+```
+
+For this conversion the user accepted the default, producing (excerpt):
+
+```
+model:
+  name: TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY
+  # ... tables, columns, formulas elided ...
+  properties:
+    spotter_config:
+      is_spotter_enabled: true
+```
+
+On in-place updates the existing setting is preserved if the user does not
+explicitly answer — Spotter doesn't get silently re-enabled or disabled on a
+re-run.
+
 ---
 
 ## Final Result
