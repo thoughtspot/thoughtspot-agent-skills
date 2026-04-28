@@ -90,6 +90,14 @@ if echo "$STAGED" | grep -qE '(agents/(claude|coco)/.*/SKILL\.md|agents/cursor/r
   run_check "skill naming"       "tools/validate/check_skill_naming.py --root $REPO_ROOT"
 fi
 
+# Runtime coverage — Cursor mirrors Claude; CoCo's divergences are documented
+# in EXPECTED_DIVERGENCES (see .claude/rules/runtime-coverage.md).
+# Runs whenever a skill file is added or renamed in any runtime, or when the
+# rule/validator itself changes.
+if echo "$STAGED" | grep -qE '(agents/(claude|coco)/.*/SKILL\.md|agents/cursor/rules/.*\.mdc|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)'; then
+  run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root $REPO_ROOT"
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/claude/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
