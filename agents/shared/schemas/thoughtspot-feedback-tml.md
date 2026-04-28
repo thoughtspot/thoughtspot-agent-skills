@@ -59,7 +59,7 @@ Imports use `ts tml import --policy ALL_OR_NONE` exactly like other TML types.
 | `feedback_phrase` | Yes | string | The natural-language phrase the user types |
 | `parent_question` | No (BUSINESS_TERM only) | string | Links this BT to a canonical REFERENCE_QUESTION; the parent's phrase is the value. Used for "this phrase is part of question X" coaching grouping |
 | `search_tokens` | Yes | string | The tokenised search bar query — bracketed column names, operators, literals. See [Search tokens](#search-tokens) |
-| `formula_info` | No (REFERENCE_QUESTION only — see open-items) | object | Inline formula definition; **rejected on BUSINESS_TERM** with `EDOC_FEEDBACK_TML_INVALID` (verified — see `ts-coach-model/references/open-items.md` #12) |
+| `formula_info` | No (REFERENCE_QUESTION only — see open-items) | object | Inline formula definition; **rejected on BUSINESS_TERM** with `EDOC_FEEDBACK_TML_INVALID` (verified — see `ts-object-model-coach/references/open-items.md` #12) |
 | `rating` | Yes | `UPVOTE` \| `DOWNVOTE` | DOWNVOTE is anti-coaching — Spotter avoids the mapping. Preserve on import; never silently flip |
 | `display_mode` | Yes | `CHART_MODE` \| `TABLE_MODE` \| `UNDEFINED` | How the answer is rendered. `UNDEFINED` is the safe default |
 | `chart_type` | Yes | enum — see [Chart type](#chart-type) | Required even on BUSINESS_TERM (verified — `open-items.md` #12). `KPI` is the universally safe default |
@@ -111,7 +111,7 @@ For REFERENCE_QUESTION entries, `search_tokens` is the full canonical query:
 ## Chart type
 
 Verified valid values (probed on champ-staging 2026-04-26, see
-`ts-coach-model/references/open-items.md` #11):
+`ts-object-model-coach/references/open-items.md` #11):
 
 | Value | Use for |
 |---|---|
@@ -244,7 +244,7 @@ For a phrase that maps to a column / formula but isn't tied to a parent question
   chart_type: KPI
 ```
 
-Per `ts-coach-model/references/open-items.md` #12: BUSINESS_TERM cannot define a
+Per `ts-object-model-coach/references/open-items.md` #12: BUSINESS_TERM cannot define a
 new formula inline. `search_tokens` must reference artifacts already on the
 Model.
 
@@ -352,4 +352,4 @@ or when more example exports are collected:
   or whether the calculation parses inline.
 
 When the proto becomes accessible, reconcile this file and update
-`ts-coach-model/references/open-items.md` accordingly.
+`ts-object-model-coach/references/open-items.md` accordingly.

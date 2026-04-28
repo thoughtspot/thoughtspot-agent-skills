@@ -1,5 +1,5 @@
 ---
-name: ts-coach-model
+name: ts-object-model-coach
 description: Comprehensively prepare a ThoughtSpot Model for Spotter — review existing AI context, synonyms, and description for quality; mine dependent Liveboards/Answers and (optionally) Snowflake history for real business language; then generate the user's chosen mix of column AI Context, column Synonyms, Reference Questions, Business Terms, and a Data Model Instructions draft.
 ---
 
@@ -72,7 +72,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 On skill invocation, display:
 
 ---
-**ts-coach-model** — comprehensively prepare a Model for Spotter: review existing AI context/synonyms/description, mine dependent objects + (optionally) Snowflake history, then generate your chosen mix of column AI Context, Synonyms, Reference Questions, Business Terms, and a Data Model Instructions draft.
+**ts-object-model-coach** — comprehensively prepare a Model for Spotter: review existing AI context/synonyms/description, mine dependent objects + (optionally) Snowflake history, then generate your chosen mix of column AI Context, Synonyms, Reference Questions, Business Terms, and a Data Model Instructions draft.
 
 Steps:
   1.  Authenticate and pick the Model ........................ you choose
@@ -467,7 +467,7 @@ cached locally on (guid, modified_time). Subsequent runs only re-export
 Models that have been modified since the last run.
 
   Estimated time:  ~{est_seconds // 60} minute(s) first run, seconds thereafter
-  Cache location:  ~/.cache/ts-coach-model/tml-corpus/
+  Cache location:  ~/.cache/ts-object-model-coach/tml-corpus/
 
 Proceed?
   [Y]              run full scan (default)
@@ -503,7 +503,7 @@ all_models = [r for r in json.loads(res)
               and r["metadata_id"] != model_guid]
 
 # 2. Resolve cache dirs and load FORBIDDEN cache (24h TTL).
-cache_dir = pathlib.Path.home() / ".cache" / "ts-coach-model" / "tml-corpus"
+cache_dir = pathlib.Path.home() / ".cache" / "ts-object-model-coach" / "tml-corpus"
 cache_dir.mkdir(parents=True, exist_ok=True)
 forbidden_cache_path = cache_dir.parent / "forbidden.json"
 forbidden_cache = {}
@@ -516,7 +516,7 @@ if forbidden_cache_path.exists():
 to_export, corpus = [], []
 for m in all_models:
     if m["metadata_id"] in forbidden_cache:
-        continue  # silently skip — user can clear ~/.cache/ts-coach-model/forbidden.json to retry
+        continue  # silently skip — user can clear ~/.cache/ts-object-model-coach/forbidden.json to retry
     cache_key = f"{m['metadata_id']}-{m['metadata_header']['modified']}.json"
     cache_path = cache_dir / cache_key
     if cache_path.exists():
@@ -590,7 +590,7 @@ checkbox.
 >   well under any sensible rate limit even on smaller TS instances.
 > - **FORBIDDEN cache TTL is 24 h** to handle daily permission changes without
 >   re-paying the discovery cost on every run. Clear
->   `~/.cache/ts-coach-model/forbidden.json` to force a re-check.
+>   `~/.cache/ts-object-model-coach/forbidden.json` to force a re-check.
 > - **Successful TML caches do not expire** — they're keyed on `modified_time`,
 >   so a Model edit naturally invalidates its entry. Stale entries for the
 >   same guid are evicted on miss.
@@ -735,7 +735,7 @@ doesn't exist on the Model:
    default-KEEP BT entry
 2. The user is directed to add the formula via `/ts-object-answer-promote` (or
    manually) first
-3. On a subsequent run of `ts-coach-model`, the BT can target the new formula
+3. On a subsequent run of `ts-object-model-coach`, the BT can target the new formula
    directly
 
 **Required fields on every BT entry:**
@@ -1144,4 +1144,5 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.0 | 2026-04-28 | **BREAKING:** skill renamed `ts-coach-model` → `ts-object-model-coach` to align with the `ts-object-{type}-{verb}` family pattern (see `.claude/rules/skill-naming.md`). Slash command, directory, smoke-test filename, and cache directory (`~/.cache/ts-object-model-coach/`) all change. Anyone with scripts or aliases pointing at the old name must update. Also formalises the cross-Model consistency scan (Step 4.5), per-surface explainer-block pattern, parallel TML export with progress + cache + pre-scan gate, and verified-pattern library mined from real coached Models — all of which landed in PR #9. |
 | 1.0.0 | 2026-04-26 | Initial release — full Spotter coaching prep across five surfaces (Column AI Context, Column Synonyms, Reference Questions, Business Terms, Data Model Instructions draft). Reviews existing assets critically with KEEP/ADD/REFINE/REWRITE deltas; treats existing GLOBAL feedback as primary input signal with USER feedback gated behind explicit opt-in; mines schema + dependent Liveboard/Answer prose + (optional) Snowflake query history; up-front scope menu; worked-example explainer using the user's data; synonym-strategy explainer when both column synonyms and BUSINESS_TERM are selected. |
