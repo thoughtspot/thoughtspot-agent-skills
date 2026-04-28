@@ -90,6 +90,17 @@ Read the reference files in full before proceeding:
 
 Map each TML element to the Semantic View DDL following the rules in those files.
 
+**Metadata mapping (synonyms / descriptions):**
+- Read column synonyms from `properties.synonyms` (NOT top-level `synonyms:` — TS drops it). Combine with the column display name and emit as `with synonyms=('Name','Alt 1',...)` in the SV.
+- Column `description` → `comment='...'` on the dimension or metric entry.
+- Table TML `table.description` → `comment='...'` on the table entry in the `tables(...)` block.
+- Model `description` → top-level `comment='...'` after the metrics block.
+
+**Semi-additive metrics (TS → SV):**
+- `last_value(sum(m), query_groups(), {date})` → `non additive by (DATE_TABLE.COL asc nulls last) as SUM(...)`
+- `first_value(sum(m), query_groups(), {date})` → `non additive by (DATE_TABLE.COL desc nulls last) as SUM(...)`
+- The `non_additive_dimensions` YAML form (used by `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`) uses `sort_direction: ascending|descending`, `nulls_position: last`.
+
 For any ThoughtSpot features that cannot be represented in the Semantic View format,
 collect them into an **Unmapped Properties Report** (format in `ts-snowflake-properties.md`).
 
@@ -148,4 +159,5 @@ same ThoughtSpot and Snowflake profiles across the batch.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-04-28 | Document `properties.synonyms` (vs top-level), table comments, and `first_value` → `desc nulls last` mapping. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

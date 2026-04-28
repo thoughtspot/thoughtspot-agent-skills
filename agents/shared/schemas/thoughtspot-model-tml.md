@@ -130,8 +130,8 @@ model:
 | `properties.ai_context` | No | Free-text description used by Spotter (AI search) to understand the column's business meaning. Appears on most columns in AI-enriched models. Pass through on round-trips; safe to omit when constructing new models. |
 | `properties.custom_order` | No | Array of attribute values in custom display order. Used to control sort order in visualizations (e.g. `[USA, UK, France]`). ATTRIBUTE columns only. |
 | `properties.default_date_bucket` | No | Default time granularity for date columns. Values: `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `YEARLY`, `AUTO`. Omit for ThoughtSpot default. |
-| `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred synonyms. Only present when synonyms exist. |
-| `synonyms` | No | Array of alternative names for search. |
+| `properties.synonyms` | No | Array of alternative names for search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |
+| `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred. Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
 | `data_panel_column_groups` | No | Assigns the column to one or more data panel folders. Map of `{folder_name: ''}` — values are always empty string. A column can appear in multiple folders. Folder names must match entries in `column_groups[].column_group_info[].name`. Pass through on round-trips. |
 
 ### `formulas[]` fields

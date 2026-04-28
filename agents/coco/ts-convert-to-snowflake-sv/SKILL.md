@@ -36,7 +36,8 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | Formula column (`formula_id`) — untranslatable | **Omitted** — logged in Unmapped Report |
 | `joins[]` / `referencing_join` | `relationships[]` — top-level, no join/cardinality type |
 | Right-side join table | `primary_key` section on that table entry |
-| `synonyms[]` | `synonyms[]` |
+| `properties.synonyms[]` (NOT top-level `synonyms`) | `synonyms[]` — TS stores synonyms under `properties:`; top-level is silently dropped |
+| `description` (column / table / model) | `description` (or `comment='...'` in DDL form) |
 | `ai_context` | `description` — merged with `[TS AI Context]` prefix |
 
 **Key structural rule:** `dimensions`, `time_dimensions`, and `metrics` are nested
@@ -1022,13 +1023,21 @@ tables:
     non_additive_dimensions:
     - table: dm_date_dim_inventory     # the DATE DIMENSION table — not the fact table
       dimension: balance_date          # time_dimension name on that table
-      sort_direction: ascending
+      sort_direction: ascending        # ascending = last_value (most recent); descending = first_value (earliest)
+      nulls_position: last
 ```
+
+**Direction matrix (TS → SV):**
+
+| ThoughtSpot | `non_additive_dimensions.sort_direction` | DDL inline form |
+|---|---|---|
+| `last_value(sum(m), query_groups(), {date})` | `ascending` | `non additive by (DATE.col asc nulls last) as SUM(...)` |
+| `first_value(sum(m), query_groups(), {date})` | `descending` | `non additive by (DATE.col desc nulls last) as SUM(...)` |
 
 Confirmed untranslatable patterns (after checking the reference):
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
-- `ts_first_day_of_week(...)`, `last_n_days(...)`, `last_value_in_period(...)` — period-scoped time intelligence with no Snowflake equivalent
-- `first_value(...)` — `NON ADDITIVE BY` only supports last-value semantics
+- `ts_first_day_of_week(...)`, `last_n_days(...)`, `last_value_in_period(...)`, `first_value_in_period(...)` — period-scoped time intelligence with no Snowflake equivalent
+- `agg(last_value(...))` and `agg(first_value(...))` — cannot re-aggregate a `NON ADDITIVE BY` metric
 - `group_aggregate(...)` with any filter argument other than `query_filters()` — hardcoded/selective filters unsupported
 - `group_aggregate(...)` with `query_groups() + {attr}` or `query_groups(attr1, attr2)` grouping
 - `max/min/avg/count(group_aggregate(...))` — outer non-sum aggregate prevents simplification
@@ -1367,4 +1376,5 @@ rm -f /tmp/ts_token.txt
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-04-28 | Document `first_value` ↔ `desc nulls last` mapping and `properties.synonyms` placement (vs top-level which TS drops). |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

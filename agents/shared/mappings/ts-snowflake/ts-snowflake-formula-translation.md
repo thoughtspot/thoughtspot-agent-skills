@@ -111,8 +111,7 @@ These functions translate 1:1 in both directions.
 |---|---|
 | `sum ( [x] )` → `SUM(x)` | `SUM(x)` → `sum ( [x] )` |
 | `count ( [x] )` → `COUNT(x)` | `COUNT(x)` → `count ( [x] )` |
-| `count_distinct ( [x] )` → `COUNT(DISTINCT x)` | `COUNT(DISTINCT x)` → `count_distinct ( [x] )` |
-| `unique count ( [x] )` → `COUNT(DISTINCT x)` | *(same as above)* |
+| `unique count ( [x] )` → `COUNT(DISTINCT x)` | `COUNT(DISTINCT x)` → `unique count ( [x] )` — note the **space**, not an underscore. `count_distinct(...)` is rejected by the TS formula parser; always use `unique count`. |
 | `average ( [x] )` → `AVG(x)` | `AVG(x)` → `average ( [x] )` |
 | `min ( [x] )` → `MIN(x)` | `MIN(x)` → `min ( [x] )` — **aggregate only** (see scalar trap note below) |
 | `max ( [x] )` → `MAX(x)` | `MAX(x)` → `max ( [x] )` — **aggregate only** (see scalar trap note below) |
@@ -783,7 +782,34 @@ TABLE.METRIC_NAME NON ADDITIVE BY (DATE_DIM_TABLE.DATE_COL ASC NULLS LAST) AS SU
    `inventory_balance`. If a collision is unavoidable, introduce a `facts` entry as
    an intermediary to break the cycle.
 
-### `last_value` with `query_groups()` — Translatable
+### Semi-additive — `last_value` and `first_value`
+
+ThoughtSpot `last_value` and `first_value` map to the SV's non-additive metric clause.
+The `sort_direction` (or DDL `asc`/`desc`) determines which extreme is selected:
+
+| ThoughtSpot | DDL inline form (from `GET_DDL`) | YAML / structured form | Selects |
+|---|---|---|---|
+| `last_value(sum(m), query_groups(), {date_col})` | `METRIC non additive by (DATE_DIM.DATE asc nulls last) as SUM(fact.m)` | `non_additive_dimensions: [{... sort_direction: ascending, nulls_position: last}]` | Most-recent (max date) — closing snapshot |
+| `first_value(sum(m), query_groups(), {date_col})` | `METRIC non additive by (DATE_DIM.DATE desc nulls last) as SUM(fact.m)` | `non_additive_dimensions: [{... sort_direction: descending, nulls_position: last}]` | Earliest (min date) — opening snapshot |
+
+`asc` → "take the LAST value when sorted ASC" → max date → `last_value`
+`desc` → "take the LAST value when sorted DESC" → min date → `first_value`
+
+**DDL → ThoughtSpot reverse translation:** when you see `non additive by (T.COL <DIR> nulls last)`
+in `GET_DDL` output, parse the direction and emit the corresponding TS function.
+
+**Example DDL → TS:**
+```
+DM_INVENTORY.CLOSING_STOCK_BALANCE non additive by (DM_INVENTORY.BALANCE_DATE asc nulls last) as SUM(dm_inventory.FILLED_INVENTORY)
+→ last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_INVENTORY::BALANCE_DATE] } )
+
+DM_INVENTORY.OPENING_STOCK_BALANCE non additive by (DM_INVENTORY.BALANCE_DATE desc nulls last) as SUM(dm_inventory.FILLED_INVENTORY)
+→ first_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_INVENTORY::BALANCE_DATE] } )
+```
+
+The date column for the `{...}` argument may reference either the joined date
+dimension (`DM_DATE_DIM.DATE`) or the local fact column (`DM_INVENTORY.BALANCE_DATE`).
+Use whichever the DDL specifies.
 
 | ThoughtSpot | Semantic view |
 |---|---|
@@ -831,9 +857,8 @@ Identify the date column from the `dimension` field in `non_additive_dimensions`
 
 | Pattern | Reason |
 |---|---|
-| `first_value(agg(measure), grouping, {date_col})` | `NON ADDITIVE BY` only supports last-value semantics |
 | `agg(last_value(...))` e.g. `max(last_value(...))` | Cannot nest/re-aggregate a `NON ADDITIVE BY` metric |
-| `agg(first_value(...))` e.g. `max(first_value(...))` | `first_value` is untranslatable; nesting compounds it |
+| `agg(first_value(...))` e.g. `max(first_value(...))` | Cannot nest/re-aggregate a `NON ADDITIVE BY` metric |
 | `last_value(...)` with non-`query_groups()` grouping | Same grouping limitations as `group_aggregate` |
 | `last_value_in_period(...)` | Period-scoped: returns the last snapshot value only if the partition's last date matches the overall period's last date; returns NULL otherwise. This date-completeness check has no semantic view equivalent. |
 | `first_value_in_period(...)` | Period-scoped: same completeness check but for the first date in the period. No semantic view equivalent. |

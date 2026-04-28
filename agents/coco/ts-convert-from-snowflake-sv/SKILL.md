@@ -33,16 +33,26 @@ Two scenarios are supported:
 
 ## Concept Mapping
 
-| Snowflake Semantic View | ThoughtSpot Model |
+| Snowflake Semantic View (real `GET_DDL` format) | ThoughtSpot Model |
 |---|---|
-| `TABLES ( ... BASE TABLE db.schema.tbl )` | `model_tables[]` — one entry per table |
-| `PRIMARY KEY ( col )` | Identifies join target tables — not directly in model TML |
-| `DIMENSIONS ( col DATA_TYPE = TEXT )` | `columns[]` with `column_type: ATTRIBUTE` |
-| `DIMENSIONS ( col DATA_TYPE = DATE )` | `columns[]` with `column_type: ATTRIBUTE` (date) |
-| `METRICS ( name EXPR = AGG(tbl.col) )` | `columns[]` with `column_type: MEASURE` + aggregation |
-| `METRICS ( name EXPR = complex_sql )` | `formulas[]` with translated ThoughtSpot formula + matching `columns[]` entry with `formula_id:` |
-| `RELATIONSHIPS ( ... FROM tbl KEY col TO tbl KEY col )` | `referencing_join` (Scenario A) or inline joins (Scenario B) |
-| `ALIASES = ( alias1, alias2 )` | First alias → display name; additional aliases → synonyms |
+| `tables ( DB.SCHEMA.TABLE [primary key (col)] )` | `model_tables[]` — one entry per **physical ThoughtSpot table** |
+| `primary key (col)` on a table | Identifies join target — not written into model TML directly |
+| `tables ( DB.SCHEMA.TABLE ... comment='...' )` | TS **Table** TML `table.description` — apply via a separate `TS_IMPORT_TML` Table-TML update before importing the model |
+| `dimensions ( TABLE.COL as view.NAME [comment='...'] )` | `columns[]` with `column_type: ATTRIBUTE` |
+| Dimension with date/timestamp physical column | `columns[]` with `column_type: ATTRIBUTE` (ThoughtSpot infers date type) |
+| `metrics ( TABLE.COL as SUM(view.NAME) )` | `columns[]` with `column_type: MEASURE` + aggregation |
+| `metrics ( TABLE.COL as complex_sql_expr )` | `formulas[]` with translated ThoughtSpot formula + matching `columns[]` entry with `formula_id:` |
+| `metrics ( TABLE.COL non additive by (D.col asc nulls last) as SUM(...) )` | `formulas[]` with `last_value(sum(...), query_groups(), {date})` |
+| `metrics ( TABLE.COL non additive by (D.col desc nulls last) as SUM(...) )` | `formulas[]` with `first_value(sum(...), query_groups(), {date})` |
+| `relationships ( REL as FROM(FK) references TO(PK) )` | `referencing_join` (Scenario A) or inline joins (Scenario B) |
+| `with synonyms=('Display Name','Alt 1','Alt 2',...)` on a dimension/metric | First → column `name`. Rest → `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`). **Synonyms MUST live under `properties:`** — top-level `synonyms:` is silently dropped on TS import. |
+| `comment='...'` on a dimension/metric | column `description` |
+| Top-level `comment='...'` (after metrics block) | Model TML `model.description` |
+| `with extension (CA='...')` | Not mapped to ThoughtSpot — logged in report |
+
+**Distinct count formula:** use `unique count ( [TABLE::col] )` — note the **space**, not an underscore. `count_distinct(...)` is rejected by the TS formula parser.
+
+**String concatenation:** use `concat(a, ', ', b)` in TS formulas — `+` does NOT concatenate strings.
 
 ---
 
@@ -851,4 +861,5 @@ After completing one conversion, offer to convert additional views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-04-28 | Map SV synonyms/descriptions/table-comments to TS Model + Table TMLs. Add `non additive by ... desc` → `first_value` mapping. Note `count_distinct(...)` and `+` string-concat are invalid TS formula syntax. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |
