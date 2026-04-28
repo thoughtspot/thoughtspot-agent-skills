@@ -82,10 +82,11 @@ if echo "$STAGED" | grep -qE '(agents/claude/.*/SKILL\.md|tools/smoke-tests/)'; 
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
 fi
 
-# Skill naming — every skill directory under agents/{claude,coco}/ must match a
-# documented family pattern (see .claude/rules/skill-naming.md).
-# Runs when a SKILL.md is added or a skill directory is renamed.
-if echo "$STAGED" | grep -qE '(agents/(claude|coco)/.*/SKILL\.md|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
+# Skill naming — every skill across all runtimes (Claude / CoCo / Cursor) must
+# match a documented family pattern (see .claude/rules/skill-naming.md).
+# Runs when a SKILL.md, a Cursor .mdc rule, the rule itself, or the validator
+# is added/renamed.
+if echo "$STAGED" | grep -qE '(agents/(claude|coco)/.*/SKILL\.md|agents/cursor/rules/.*\.mdc|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
   run_check "skill naming"       "tools/validate/check_skill_naming.py --root $REPO_ROOT"
 fi
 

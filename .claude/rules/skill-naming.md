@@ -125,12 +125,21 @@ skill can't be renamed. Mass-allowlisting is a smell.
 
 ---
 
-## Cross-runtime note
+## Cross-runtime coverage
 
-The same family rule applies to `agents/coco/` skills. Where a skill exists
-in both `agents/claude/` AND `agents/coco/`, both copies must share the
-same name (so `agents/claude/ts-convert-to-snowflake-sv` and
-`agents/coco/ts-convert-to-snowflake-sv` are both present and both pass).
+The same family rule applies to **every runtime** the repo serves:
+
+| Runtime | Layout | Validator check |
+|---|---|---|
+| `agents/claude/` | `<skill>/SKILL.md` | Directory name |
+| `agents/coco/` | `<skill>/SKILL.md` | Directory name |
+| `agents/cursor/` | `rules/<skill>.mdc` (flat) | File stem (`.mdc` removed) |
+
+Where a skill exists in multiple runtimes, all copies must share the same
+name — `agents/claude/ts-convert-to-snowflake-sv`,
+`agents/coco/ts-convert-to-snowflake-sv`, and
+`agents/cursor/rules/ts-convert-to-snowflake-sv.mdc` are all the same skill.
+The validator catches new skills added to ANY of these locations.
 
 ---
 

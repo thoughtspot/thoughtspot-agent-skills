@@ -61,17 +61,37 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
 ALLOWLIST: set[str] = set()
 
 
-def find_skills(root: Path) -> list[Path]:
-    """Return every skill directory (one with a SKILL.md inside) under
-    agents/claude/ and agents/coco/."""
-    found: list[Path] = []
-    for runtime in ("agents/claude", "agents/coco"):
-        runtime_dir = root / runtime
+def find_skills(root: Path) -> list[tuple[str, str, Path]]:
+    """Return every skill name across all runtimes.
+
+    Each entry is a tuple of (runtime_label, skill_name, path_for_error).
+
+    Runtimes covered:
+      - agents/claude/<skill>/SKILL.md  (directory layout)
+      - agents/coco/<skill>/SKILL.md    (directory layout)
+      - agents/cursor/rules/<skill>.mdc (flat .mdc layout — name = stem)
+
+    The cursor layout is checked too because nothing prevents a contributor
+    from adding `agents/cursor/rules/ts-bad-name.mdc`. The skill-name rules
+    apply regardless of which runtime serves the skill.
+    """
+    found: list[tuple[str, str, Path]] = []
+
+    # Claude + CoCo: <skill>/SKILL.md
+    for runtime in ("claude", "coco"):
+        runtime_dir = root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue
         for child in sorted(runtime_dir.iterdir()):
             if child.is_dir() and (child / "SKILL.md").is_file():
-                found.append(child)
+                found.append((runtime, child.name, child))
+
+    # Cursor: agents/cursor/rules/<skill>.mdc
+    cursor_rules = root / "agents" / "cursor" / "rules"
+    if cursor_rules.is_dir():
+        for child in sorted(cursor_rules.glob("*.mdc")):
+            found.append(("cursor", child.stem, child))
+
     return found
 
 
@@ -94,13 +114,11 @@ def main() -> int:
     root = Path(args.root).resolve()
     skills = find_skills(root)
     if not skills:
-        print(f"No skills found under {root}/agents/{{claude,coco}}/. Nothing to check.")
+        print(f"No skills found under {root}/agents/{{claude,coco,cursor}}/. Nothing to check.")
         return 0
 
     failures: list[tuple[str, Path]] = []
-    for skill_dir in skills:
-        name = skill_dir.name
-        runtime = skill_dir.parent.name  # 'claude' or 'coco'
+    for runtime, name, path in skills:
         if name in ALLOWLIST:
             if args.verbose:
                 print(f"  OK   ({runtime}) {name} — allowlisted")
@@ -110,7 +128,7 @@ def main() -> int:
             if args.verbose:
                 print(f"  OK   ({runtime}) {name} — matches {family}")
         else:
-            failures.append((name, skill_dir))
+            failures.append((name, path))
 
     if failures:
         print(f"\n{len(failures)} skill(s) violate the naming convention:\n")
