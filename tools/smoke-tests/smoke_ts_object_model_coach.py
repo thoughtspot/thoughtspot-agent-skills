@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-smoke_ts_coach_model.py — live smoke test for ts-coach-model.
+smoke_ts_object_model_coach.py — live smoke test for ts-object-model-coach.
 
 Verifies the verified API paths against a real ThoughtSpot instance:
   1.  ThoughtSpot auth
@@ -31,7 +31,7 @@ uses a timestamped phrase so it won't collide with real coaching. The
 cross-Model scan caps the corpus at 3 Models so the test stays fast.
 
 Usage:
-    python tools/smoke-tests/smoke_ts_coach_model.py \\
+    python tools/smoke-tests/smoke_ts_object_model_coach.py \\
         --ts-profile champ-staging \\
         --model-name "Dunder Mifflin Sales & Inventory" \\
         --column-name "Inventory Balance" \\
@@ -194,7 +194,7 @@ def step_enumerate_readable_models(profile: str) -> list[dict]:
 def step_verify_tml_cache_shape(target_guid: str, target_modified_ms: int) -> None:
     """Step 4.5 sub-step 2 — round-trip a fake cache file with the documented filename pattern."""
     import tempfile, pathlib
-    with tempfile.TemporaryDirectory(prefix="ts_coach_model_smoke_") as td:
+    with tempfile.TemporaryDirectory(prefix="ts_object_model_coach_smoke_") as td:
         cache_dir = pathlib.Path(td)
         cache_key = f"{target_guid}-{target_modified_ms}.json"
         cache_path = cache_dir / cache_key
@@ -441,7 +441,7 @@ def main() -> int:
                         help="Skip Model rollback (useful for debugging)")
     args = parser.parse_args()
 
-    print(f"smoke_ts_coach_model — target: {args.model_name!r}, column: {args.column_name!r}")
+    print(f"smoke_ts_object_model_coach — target: {args.model_name!r}, column: {args.column_name!r}")
     print()
 
     r = SmokeTestResult()
