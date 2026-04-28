@@ -43,6 +43,30 @@ them available to all users who search against it.
 
 Trigger by asking: "Promote formulas from this Answer to the Model".
 
+### `ts-object-model-coach`
+
+Comprehensively prepares a ThoughtSpot Model for Spotter — reviews existing AI Context /
+synonyms / description, mines dependent Answers and Liveboards (and optionally Snowflake
+history) for business language, then generates Column AI Context, Synonyms, Reference
+Questions, Business Terms, and Data Model Instructions.
+
+Trigger by asking: "Coach this Model for Spotter" or "Prepare this Model for Spotter".
+
+> Untested in Cursor — best-effort condensation of the Claude version. See the rule
+> file's header for details.
+
+### `ts-dependency-manager`
+
+Safely removes columns or repoints Answers/Liveboards across a ThoughtSpot environment,
+generating a risk-rated impact report with TML backup and rollback support before any
+change is applied.
+
+Trigger by asking: "Audit dependencies for this column" or "Safely remove this column
+across ThoughtSpot".
+
+> Untested in Cursor — best-effort condensation of the Claude version. See the rule
+> file's header for details.
+
 ---
 
 ## Installation

@@ -1,0 +1,308 @@
+---
+description: Safely remove columns or repoint Answers/Liveboards across a ThoughtSpot environment — generates a risk-rated impact report, backs up TML before any change, and supports full rollback. Invoked when columns are being deprecated, schemas are being restructured, or a blast-radius audit is needed.
+alwaysApply: false
+---
+
+> **Untested in Cursor.** This file was authored as a best-effort mirror of
+> `agents/claude/ts-dependency-manager/SKILL.md` by someone without a Cursor
+> install. The condensation below may have lost necessary detail. Cursor users
+> should validate against a real Cursor session and file a follow-up PR if
+> anything is wrong. The Claude SKILL.md remains the authoritative source —
+> in particular, the dep-walking, alias-propagation, and rollback-semantics
+> rules are documented in detail there.
+
+# ThoughtSpot: Dependency Manager
+
+Safely make changes that affect dependent objects in ThoughtSpot. Before any
+modification, generates a full impact report with hyperlinks and risk ratings,
+lets you choose exactly what to change, takes TML backups, and provides
+rollback capability.
+
+## Supported operations
+
+- **Audit** — dependency report only, no changes applied. Useful before any
+  change to plan blast radius
+- **Remove columns** — remove one or more columns from a connection table or
+  Model, then clean up dependent Answers, Liveboards, and Models that reference
+  them
+- **Repoint objects** — redirect Answers or Liveboards to a different table or
+  Model, with column-gap detection and mapping
+
+> **RENAME mode is NOT supported.** Smoke testing on champ-staging
+> (2026-04-27) demonstrated that ThoughtSpot's TML import API sometimes
+> applies a column rename despite returning `status_code: ERROR`, leaving
+> source and dependents out of sync with no atomicity guarantee. Use the
+> ThoughtSpot UI to rename columns until the API is fixed.
+
+Ask one question at a time. Wait for each answer before proceeding.
+
+---
+
+## References
+
+| File | Purpose |
+|---|---|
+| `~/.cursor/shared/schemas/thoughtspot-model-tml.md` | Model TML structure — column and formula placement rules |
+| `~/.cursor/shared/schemas/thoughtspot-answer-tml.md` | Answer TML structure — answer_columns, search_query layout |
+| `~/.cursor/shared/schemas/thoughtspot-sets-tml.md` | Set (cohort) TML structure |
+| `~/.cursor/shared/schemas/thoughtspot-liveboard-tml.md` | Liveboard TML — visualizations, filters, layout |
+| `~/.cursor/shared/schemas/thoughtspot-view-tml.md` | View TML — view_columns, joins, table_paths |
+| `~/.cursor/shared/schemas/thoughtspot-table-tml.md` | Connection table TML — column definitions |
+| `~/.cursor/rules/ts-profile-thoughtspot.mdc` | Auth, profile config, token persistence |
+
+For the dependency-type coverage matrix and the alias-propagation rules,
+refer to the Claude version's
+`agents/claude/ts-dependency-manager/references/dependency-types.md` in the repo.
+
+---
+
+## Prerequisites
+
+- ThoughtSpot profile configured — run "set up my ThoughtSpot profile" if needed
+- `ts` CLI installed: `pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli`
+- Python: `pip install pyyaml`
+- ThoughtSpot user must have **MODIFY** or **FULL** access on all objects being changed
+
+---
+
+## Step 1 — Authenticate
+
+```bash
+ts auth whoami --profile {ts_profile}
+```
+
+---
+
+## Step 2 — Choose mode
+
+Ask the user: `Audit` / `Remove` / `Repoint`?
+
+- **Audit** = produce report, no changes (Steps 1–5 only)
+- **Remove** = full pipeline (Steps 1–10)
+- **Repoint** = full pipeline (Steps 1–10) with target object selection
+
+---
+
+## Step 3 — Identify scope
+
+### Audit / Remove path
+
+Ask for the source object (Model, Connection table, View). Accept GUID or search:
+
+```bash
+ts metadata search --profile {ts_profile} --subtype WORKSHEET --name "%{kw}%"
+ts metadata search --profile {ts_profile} --subtype CONNECTION --name "%{kw}%"
+```
+
+Export the source TML:
+
+```bash
+ts tml export {source_guid} --profile {ts_profile} --fqn --associated --parse
+```
+
+For Remove mode, ask which columns to remove. List columns from the source TML;
+let the user pick by name or number.
+
+### Repoint path
+
+Ask for the source Answer/Liveboard and the target Model/Table. Export both
+TMLs. Detect column gaps (columns referenced in source that don't exist in
+target) and propose mappings before proceeding.
+
+---
+
+## Step 4 — Walk dependencies (alias-aware, v2 API)
+
+### Direct dependents (one v2 call)
+
+```http
+POST /api/rest/2.0/metadata/search
+{"metadata": [{"identifier": "{source_guid}", "type": "LOGICAL_TABLE"}],
+ "include_dependent_objects": true,
+ "dependent_object_version": "V2"}
+```
+
+Returns `dependent_objects.dependents.{source_guid}` with keys:
+- `LOGICAL_TABLE[]` — Models / Views derived from the source
+- `QUESTION_ANSWER_BOOK[]` — Answers
+- `PINBOARD_ANSWER_BOOK[]` — Liveboards
+- `LOGICAL_COLUMN[]` — column dependents
+- `FEEDBACK[]` — coaching entries
+- `INSIGHT[]` — Sets / cohorts (if surfaced)
+
+### Alias propagation (critical)
+
+Direct dependents only show level-1. Models that derive from this Model can
+RENAME columns at the join boundary — those aliases need to be propagated
+when walking dependents of the derived Model. For each derived Model in the
+dependent list:
+1. Export its TML
+2. Build the alias map: source-column-name → derived-column-display-name
+3. Re-walk that Model's dependents using the aliased names
+
+This catches Answers/Liveboards on derived Models that reference the original
+column under its aliased name. Skipping this step misses ~30% of real-world
+deps (per the alias-propagation memory).
+
+### Capture timestamps for drift detection
+
+Snapshot `metadata_header.modified` for every dependent at scan time. Before
+each Step 9 import, re-query the timestamp and abort the per-object change if
+it has moved (someone else edited the object between scan and apply).
+
+### Inaccessible-dependents signal
+
+Aggregate the count of dependents that returned partial info (cross-org,
+RLS-restricted, sharing not granted to the calling user). Surface this in
+Step 5 STOP CONDITIONS.
+
+---
+
+## Step 5 — Impact report
+
+Generate a markdown report with:
+
+- **Per-dependent classification** — Implementable / Partial / Manual / GUID-stable
+  / Informational (see `dependency-types.md` for the full matrix)
+- **Risk rating** per object (low / medium / high based on type + change scope)
+- **Hyperlinks** to the ThoughtSpot UI for manual review
+- **Dependency tree** in indented markdown
+- **Dependency DAG** as a mermaid diagram
+- **Scan coverage** — what was reachable, what was not, and why
+- **STOP CONDITIONS** — list any reasons the user should not proceed
+  (inaccessible deps, alias gaps, RLS exclusions)
+
+Write the report to `/tmp/ts_dep_report_<ts>.md`. Show the first ~200 chars
+inline; tell the user where the full report is. Ask `Proceed / re-scan /
+exit?`
+
+For Audit mode: stop here. Print the report path and exit.
+
+---
+
+## Step 6 — Per-object action
+
+For each affected dependent:
+
+### 6a. Select objects to change
+
+User chooses from a numbered list. `all` selects everything reachable.
+
+### 6b. Choose action: fix or delete
+
+- **Fix** — update the TML to remove the column reference (or repoint to the
+  new target)
+- **Delete** — remove the entire dependent object (requires typed `DELETE`
+  confirmation in Step 8)
+
+### 6b.1 Set cascade
+
+If a Set (cohort) is affected, either fix or delete propagates to every
+Answer/Liveboard that uses the Set. Show the cascade impact and confirm.
+
+### 6c. Chart-on-axis decisions (fix only)
+
+When a removed column is on an Answer's chart axis, ask the user how to
+handle: drop the axis entirely, replace with a default measure/dim, or keep
+the chart in TABLE_MODE.
+
+---
+
+## Step 7 — TML backup
+
+**Announce backup location BEFORE running** (so the user knows where to find
+the rollback files if something fails):
+
+```
+Backing up source + N dependents to /tmp/ts_dep_backup_<ts>/
+```
+
+For each selected object, export TML to that dir. Include a manifest
+(`manifest.json`) with object GUID, name, type, modified_time, and the
+backup file path.
+
+---
+
+## Step 8 — Pre-change confirmation
+
+Display the change plan:
+
+```
+Source object: {name}                 — change: {operation}
+Dependents to FIX:    {N}
+Dependents to DELETE: {M} (typed confirmation required)
+Dependents to SKIP:   {K}
+Backup at: /tmp/ts_dep_backup_<ts>/
+Drift detection: ENABLED (any dep modified since scan will abort that step)
+Proceed? (Y / N)
+```
+
+If any deletes are queued, also require: `Type DELETE to confirm:`.
+
+---
+
+## Step 9 — Apply changes
+
+Order matters:
+
+1. **Deletes first** — call `DELETE /api/rest/2.0/metadata/{guid}` for each
+   marked-for-delete object. Re-check `modified` timestamp first; abort the
+   single-object delete if drift detected.
+2. **Updates second** — `ts tml import` for each fix. Re-check timestamp;
+   abort the single-object update if drift detected.
+3. **Source change last** — apply the column removal / repoint to the source
+   itself.
+
+For each step:
+- Accept `OK` and `WARNING` status codes (the import API surfaces unrelated
+  pre-existing issues as WARNING but still applies the patch)
+- On `ERROR`: trigger Step 10 rollback
+- On unexpected exception: trigger Step 10 rollback
+
+---
+
+## Step 10 — Rollback on failure
+
+If any Step 9 substep fails:
+
+1. Read the manifest from `/tmp/ts_dep_backup_<ts>/`
+2. For each successfully-applied object so far, re-import the backup TML to
+   restore the previous state
+3. For deleted objects, re-create from the backup TML (use
+   `--policy ALL_OR_NONE` without `--no-create-new`)
+4. Surface a clear error message with: which step failed, what was rolled
+   back, and which objects need manual review (anything that couldn't be
+   restored — typically deleted objects that other users have started
+   referencing in the meantime)
+
+---
+
+## Common errors
+
+| Symptom | Action |
+|---|---|
+| `ts auth whoami` returns 401 | Token expired — refresh profile |
+| Source GUID returns 403 / FORBIDDEN | User lacks edit access on the source — surface clearly, stop |
+| `column not found` on Step 9 import | Source TML edited between scan and apply — re-run Step 4 |
+| Dependent TML import returns ERROR with "Specified entity has no version" | Object was deleted by someone else; mark as MANUAL_CLEANUP and continue |
+| Set TML import returns ERROR on cohort | Set cascade rules likely violated — re-check Step 6b.1 |
+| Step 9 partial failure | Step 10 rollback runs automatically; check for manual-review items in the final report |
+
+---
+
+## Cleanup
+
+The backup dir at `/tmp/ts_dep_backup_<ts>/` is preserved deliberately —
+needed for rollback verification. Auto-clean older runs:
+
+```bash
+find /tmp -maxdepth 1 -name "ts_dep_backup_*" -mtime +7 -type d -exec rm -rf {} \;
+```
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-dependency-manager/SKILL.md` (Claude v0.1.3). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |

@@ -1,0 +1,413 @@
+---
+description: Comprehensively prepare a ThoughtSpot Model for Spotter — review existing AI Context / synonyms / description, mine dependent Answers and Liveboards (and optionally Snowflake history) for business language, then generate Column AI Context, Synonyms, Reference Questions, Business Terms, and Data Model Instructions.
+alwaysApply: false
+---
+
+> **Untested in Cursor.** This file was authored as a best-effort mirror of
+> `agents/claude/ts-object-model-coach/SKILL.md` by someone without a Cursor
+> install. The condensation below may have lost necessary detail. Cursor users
+> should validate against a real Cursor session and file a follow-up PR if
+> anything is wrong. The Claude SKILL.md remains the authoritative source.
+
+# ThoughtSpot: Coach a Model (Comprehensive Spotter Preparation)
+
+Prepare a ThoughtSpot Model for Spotter across five coaching surfaces:
+
+| Surface | Where it lives | What it does |
+|---|---|---|
+| Column AI Context | `model.columns[].properties.ai_context` (≤ 400 chars per column) | Per-column meaning — Spotter's primary disambiguation signal |
+| Column Synonyms | `model.columns[].synonyms[]` | Schema-level alternative names; the parser substitutes them |
+| Reference Questions | `nls_feedback.feedback[type=REFERENCE_QUESTION]` | Whole-question → tokenised-search mappings |
+| Business Terms | `nls_feedback.feedback[type=BUSINESS_TERM]` | Phrase → existing column or formula |
+| Data Model Instructions | Model-level free text (TML location TBD) | Global rules ("when I say last month, use last 30 days") |
+
+Existing AI assets are critiqued + improved, never silently overwritten. The user
+picks which surfaces to generate via a single up-front menu.
+
+Ask one question at a time. Wait for each answer before proceeding.
+
+---
+
+## References
+
+| File | Purpose |
+|---|---|
+| `~/.cursor/shared/schemas/thoughtspot-model-tml.md` | Model TML structure: `ai_context`, `synonyms`, `description` field locations |
+| `~/.cursor/shared/schemas/thoughtspot-feedback-tml.md` | `nls_feedback` TML structure: `search_tokens`, `chart_type`, `display_mode`, `axis_config` |
+| `~/.cursor/shared/schemas/thoughtspot-answer-tml.md` | Answer TML — `name`, `description`, `search_query` mining input |
+| `~/.cursor/shared/schemas/thoughtspot-liveboard-tml.md` | Liveboard TML — visualization names + tile descriptions for prose mining |
+| `~/.cursor/rules/ts-profile-thoughtspot.mdc` | Auth, profile config, token persistence |
+| `~/.cursor/rules/ts-profile-snowflake.mdc` | Snowflake auth (optional, for query-history mining) |
+
+For verified `nls_feedback` syntax patterns (working `search_tokens` shapes,
+`chart_type` whitelist, `axis_config` notation), refer to the Claude version's
+`agents/claude/ts-object-model-coach/references/feedback-tml-verified-patterns.md`
+in the repo.
+
+---
+
+## Prerequisites
+
+- ThoughtSpot profile configured — run "set up my ThoughtSpot profile" if needed
+- Snowflake profile configured (optional) — only for Snowflake query-history mining
+- `ts` CLI installed: `pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli`
+- Python: `pip install pyyaml`
+- ThoughtSpot user must have **MODIFY** or **FULL** access on the target Model
+
+---
+
+## Step 1 — Authenticate and pick the Model
+
+```bash
+ts auth whoami --profile {ts_profile}
+```
+
+Pick the Model — accept GUID or search:
+
+```bash
+ts metadata search --profile {ts_profile} --subtype WORKSHEET --name "%{search_term}%"
+```
+
+Mark each result `[MODEL]` or `[WORKSHEET]` using `metadata_header.contentUpgradeId` /
+`worksheetVersion`. This skill targets **Models only** — Worksheets need to be
+upgraded first.
+
+Show results with columns: `# | Name | Owner | GUID | Modified`. Owner column
+prevents picking the wrong object on shared instances. Save `{model_guid}` and
+`{model_name}`.
+
+Optional: ask whether to mine Snowflake query history (Y/N, default N).
+
+Create a run dir: `~/Dev/coaching-runs/{slug(model_name)}-{timestamp}/`.
+
+---
+
+## Step 2 — Export Model TML and extract schema + existing AI assets
+
+```bash
+ts tml export {model_guid} --profile {ts_profile} --fqn --associated --parse \
+  > {run_dir}/model_bundle.json
+```
+
+Parse and extract:
+
+1. **Schema** — column types, formulas, joins (`model.model_tables[].joins`),
+   measures vs attributes, date dims (by name pattern OR `data_type` ∈
+   {DATE, DATE_TIME, TIMESTAMP}).
+2. **Existing AI assets** — `model.description`, `columns[].properties.ai_context`,
+   `columns[].properties.synonyms`.
+3. **Existing feedback** — fetched separately via:
+   ```http
+   POST /api/rest/2.0/metadata/tml/export
+   {"metadata": [{"identifier": "{model_guid}", "type": "FEEDBACK"}],
+    "edoc_format": "YAML"}
+   ```
+   The response's `edoc` is the full feedback YAML with `search_tokens`,
+   `formula_info`, `axis_config`, `parent_question`, `access`, `rating` etc.
+
+---
+
+## Step 3 — Mine candidate sources
+
+### 3a. Dependent Answers / Liveboards (verified v2 API)
+
+```http
+POST /api/rest/2.0/metadata/search
+{"metadata": [{"identifier": "{model_guid}", "type": "LOGICAL_TABLE"}],
+ "include_dependent_objects": true,
+ "dependent_object_version": "V2"}
+```
+
+Walks `dependent_objects.dependents.{model_guid}.QUESTION_ANSWER_BOOK[]` and
+`PINBOARD_ANSWER_BOOK[]`. Export each, harvest `search_query`, `name`,
+`description`, and per-tile descriptions.
+
+### 3b. Snowflake query history (optional)
+
+If a Snowflake profile is set AND Model is Snowflake-backed, use
+`SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY` filtered to the Model's tables. Demo
+accounts often return 0 useful patterns (workload is TS internal indexing) —
+log empty and proceed.
+
+### 3c. Prose mining
+
+Extract noun phrases from mined Answer/Liveboard names + descriptions; match
+against Model column display names with stem overlap ≥ 0.6. Emit synonym
+candidates per column and question seeds.
+
+---
+
+## Step 4 — Critique existing AI assets
+
+For each existing asset:
+
+| Asset | Critique signals | Delta types |
+|---|---|---|
+| `model.description` | < 100 chars; missing key entities | KEEP / EXPAND / REWRITE |
+| `column.ai_context` | Empty or < 30 chars; doesn't mention purpose | ADD / REFINE / KEEP |
+| `column.synonyms` | Empty; missing high-frequency mined phrases; redundant with display name | ADD_PHRASES / REMOVE_REDUNDANT / KEEP |
+| Existing GLOBAL feedback | Treat as input signal (paraphrase variants, ranking +4) | KEEP |
+| Existing USER feedback | Out of scope by default; user opts in at Step 5 | KEEP_OUT_OF_SCOPE |
+
+GLOBAL feedback is authoritative — never silently overwritten. Stale references
+(entries pointing to columns no longer on the Model) get FLAG_FOR_HUMAN.
+
+---
+
+## Step 4.5 — Cross-Model consistency scan
+
+Spotter doesn't disambiguate same-named columns across Models. Walk readable
+Models and compare:
+
+1. `db_column_name` — different warehouse source ⇒ different meaning
+2. `column_type` — measure vs attribute mismatch
+3. `aggregation` — sum vs avg
+4. Formula expression — for formula columns
+5. `ai_context` substring — contradictory descriptions
+
+Pre-scan gate: show the user the corpus size and estimated time, offer
+scope-by-name (`%Dunder%`) or skip. Use `ts metadata search --subtype WORKSHEET --all`
+(— `--all` is required, default page size is 50). Export TML in parallel
+(4-way concurrent), cache on `(guid, modified_time)`. Cache FORBIDDEN exports
+separately with 24h TTL.
+
+Default RouteAction = `NEEDS_REVIEW` until the heuristic is calibrated.
+Allowed outcomes: KEEP_AS_IS / ALIGN / RENAME / DOCUMENT_DIFFERENCE /
+INTENTIONAL_DIFFERENCE / NEEDS_REVIEW.
+
+---
+
+## Step 5 — Show critique; pick which surfaces to generate
+
+Display the critique summary and offer the surface menu:
+
+  1. Column AI Context
+  2. Column Synonyms
+  3. Reference Questions (target ~15)
+  4. Business Terms
+  5. Data Model Instructions
+  6. Improve Model description (only if Step 4 critique is REWRITE/EXPAND)
+  7. Cross-Model consistency review (only if Step 4.5 found ≥ 1 collision)
+
+Auto-routing: phrases targeting a column → Method A (Synonym); targeting an
+existing Model formula → Method B (BUSINESS_TERM); whole-sentence
+conversational phrasings → Method C (REFERENCE_QUESTION). User can override
+per row in Step 7.
+
+If existing USER feedback exists, ask whether to include it as input signal
+(default N).
+
+---
+
+## Step 6 — Generate proposals per selected surface
+
+### 6.1 Column AI Context
+
+Each column's `ai_context` is **capped at 400 characters** (verified API limit).
+Use a terse single-line-per-axis YAML:
+
+```yaml
+meaning: <≤80 chars>
+unit:    <≤30 chars>
+source:  <table.column, ≤60 chars>
+time:    <≤50 chars (when relevant)>
+nulls:   <≤40 chars (when relevant)>
+watch:   <≤80 chars>
+formula: <one line for formula columns>
+```
+
+If evidence is insufficient for an axis, emit `# REVIEW_REQUIRED` so the question
+is asked, not guessed. Write longer prose to `column.description` instead — that
+field has no observed character limit.
+
+### 6.2 Column Synonyms
+
+Per column, candidates from prose mining (stem overlap ≥ 0.6) + business
+shorthand. Reject phrases that are exact substrings/supersets of the display name.
+
+### 6.3 Reference Questions
+
+Generate ~30 candidates across T1–T4 patterns; score on mined-search match (+5),
+join key (+2), tier T1/T2 (+1), formula required (+1). Select top ~15 with tier
+minimums (≥ 3 T1, ≥ 2 T2, ≥ 2 T3, ≥ 1 T4). Generate 2–3 paraphrase variants per
+kept question.
+
+**Verified-working `search_tokens` syntax:**
+- Bracketed columns: `[Customer Name] [Amount]`
+- Top N: `top 10 [Col]` (keyword BEFORE the column refs)
+- Date bucket: `[Order Date].monthly`
+- Multi-word date bucket: `[Order Date].'month of year'`
+- Filter equality: `[Col] = 'value'` (single-quoted literal)
+- Compare clauses: `[Col] = 'this year' vs [Col] = 'last year'`
+- Aggregation prefix: `sum [Col]`
+- Sort: `[Col] sort by [Col]`
+
+**Verified rejected:** keywords AFTER columns (`[Col] top 10`), bare
+date-period filters without quotes (`= 2025`), `formula_info[]` on
+REFERENCE_QUESTION (parser treats it as a search query).
+
+### 6.4 Business Terms
+
+Phrase → **existing** Model column or formula. Required fields:
+
+```yaml
+- type: BUSINESS_TERM
+  access: GLOBAL
+  feedback_phrase: "stock"
+  parent_question: "stock"
+  search_tokens: "[Inventory Balance]"   # MUST reference existing column or formula
+  rating: UPVOTE
+  display_mode: UNDEFINED                # REQUIRED
+  chart_type: KPI                        # REQUIRED — KPI is universally safe
+```
+
+BUSINESS_TERMs cannot define new formulas inline (verified rejected). When a
+phrase needs a calculation that doesn't yet exist on the Model, emit
+`MOVE_TO_NEW_FORMULA` and direct the user to add the formula via
+`/ts-object-answer-promote` first.
+
+### 6.5 Data Model Instructions
+
+Output as plain markdown for manual paste — TML location not yet documented.
+
+### 6.6 Improved Model description
+
+Single proposed replacement mentioning all primary measures + dimensions and
+business context from mined prose.
+
+---
+
+## Step 7 — Per-surface review with explainer blocks
+
+For each generated surface, write a markdown file the user can edit. Each file
+opens with a 3-section explainer:
+
+1. **WHAT THIS IS FOR** — the purpose of this Spotter coaching surface
+2. **WHAT WE CHECKED** — signals/heuristics used to produce the proposals
+3. **RULES FOR THE OUTCOMES YOU CAN PICK** — every allowed RouteAction value
+
+Surface files:
+
+| Surface | File | Method |
+|---|---|---|
+| AI Context | `ai_context.md` | Both `description` (prose) + `ai_context` (structured YAML) per column |
+| Synonyms | `synonyms.md` | METHOD A |
+| Reference Questions | `candidates.md` then `mappings.md` | METHOD C, two-stage |
+| Business Terms | `business_terms.md` | METHOD B |
+| Cross-Model Consistency | `cross_model_consistency.md` | (always shown if Step 4.5 found ≥ 1 collision) |
+| Description | `description.md` | KEEP default (explicit opt-in for REWRITE) |
+| Data Model Instructions | `instructions.md` | Free-form for manual paste |
+
+Per-row override actions: KEEP / DROP / EDIT / MOVE_TO_A / MOVE_TO_B / MOVE_TO_C
+/ MOVE_TO_NEW_FORMULA / DEFER / (cross-model) KEEP_AS_IS / ALIGN / RENAME /
+DOCUMENT_DIFFERENCE / INTENTIONAL_DIFFERENCE / NEEDS_REVIEW.
+
+Wait for the user to type `done` (or `accept all`), re-read each file, parse
+the RouteAction column, apply the routing, and ask for final per-surface confirmation.
+
+---
+
+## Step 8 — Build merged TML, backup, final import gate
+
+### 8a. Backup current state
+
+Save the original Model TML and existing feedback TML to `{run_dir}/before/`.
+
+### 8b. Build patched Model TML (surfaces 1, 2, 6)
+
+Deep-copy the original; apply per-column `description` and
+`properties.ai_context` deltas (each ai_context validated ≤ 400 chars); merge
+`properties.synonyms` (preserve existing, skip smoke-test residue). Apply
+`model.description` only if delta is EXPAND/REWRITE.
+
+### 8c. Build merged feedback TML (surfaces 3, 4)
+
+> The `nls_feedback` TML import REPLACES the Model's feedback collection
+> wholesale — there is no append/merge mode at the API. The skill simulates
+> merge-with-preservation by fetching existing entries (Step 2 already did
+> this) and including them in the import payload.
+
+```python
+merged = list(existing_feedback_entries)  # full content from Step 2 fetch
+used_ids = {str(e.get("id","")) for e in merged}
+def next_id():
+    n = 1
+    while str(n) in used_ids: n += 1
+    used_ids.add(str(n)); return str(n)
+for e in new_reference_questions + new_business_terms:
+    e["id"] = next_id()
+    merged.append(e)
+feedback_tml = {"guid": model_guid, "nls_feedback": {"feedback": merged}}
+```
+
+### 8d. Final confirmation gate
+
+Display the import plan with explicit counts and the existing-feedback
+preservation count. Ask `Proceed with import? (Y / N)`.
+
+---
+
+## Step 9 — Import and smoke-test
+
+Patched Model TML:
+```bash
+ts tml import --profile {ts_profile} --policy ALL_OR_NONE --no-create-new \
+  < {run_dir}/after/model.tml
+```
+
+Then feedback TML:
+```bash
+ts tml import --profile {ts_profile} --policy ALL_OR_NONE --no-create-new \
+  < {run_dir}/after/feedback.tml
+```
+
+Accept `OK` and `WARNING` (Model imports surface unrelated index/suggestion
+config issues as WARNING but still apply the patch). Reject `ERROR`.
+
+Verify Model changes via re-export:
+```bash
+ts tml export {model_guid} --profile {ts_profile} --fqn --associated --parse
+```
+
+Verify feedback via:
+```http
+POST /api/rest/2.0/metadata/search
+{"metadata": [{"identifier": "{model_guid}", "type": "LOGICAL_TABLE"}],
+ "include_dependent_objects": true,
+ "dependent_object_version": "V2"}
+```
+
+Final report shows counts applied, run dir for rollback (`ts tml import` of
+`before/model.tml` and `before/feedback.tml`), and the `instructions.md` path
+for manual paste into the Spotter UI.
+
+---
+
+## Common errors
+
+| Symptom | Action |
+|---|---|
+| `ts auth whoami` returns 401 | Token expired — refresh profile |
+| Selected data source is a Worksheet | Recommend upgrading to Model first; stop |
+| ai_context > 400 chars | Reduce — drop axes in priority order: excludes → includes → null_zero → time_basis → unit |
+| `Invalid value token: <kw>` on feedback import | Bad search_tokens syntax — see verified patterns above; common mistake is `top 10` AFTER columns instead of before |
+| `EDOC_FEEDBACK_TML_INVALID — Search did not find <expr>` | `formula_info` on RQ — drop the question or use Model-formula workaround |
+| `chart_type: TABLE` rejected | Use `chart_type: COLUMN` + `display_mode: TABLE_MODE` instead |
+
+---
+
+## Cleanup
+
+Run dir at `~/Dev/coaching-runs/{slug}-{ts}/` is preserved for rollback.
+
+```bash
+find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
+```
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-object-model-coach/SKILL.md` (Claude v2.0.0). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |
