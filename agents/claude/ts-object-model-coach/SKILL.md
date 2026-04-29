@@ -15,7 +15,7 @@ content critically rather than blindly adding more.
 
 | # | Surface | Where it lives | What it does |
 |---|---|---|---|
-| 1 | **Column AI Context** | `model.columns[].properties.ai_context` (free text, per column) | Tells Spotter the business meaning of one column |
+| 1 | **Column AI Context** | `model.columns[].properties.ai_context` (structured YAML — closed enums + refs only; ≤ 400 chars) | Declares the constraints downstream LLMs need to write correct SQL: `additivity`, `time_basis`, `source`, `grain_keys`. See [ai-context-schema.md](references/ai-context-schema.md). Prose context lives in `column.description`. |
 | 2 | **Column Synonyms** | `model.columns[].synonyms[]` (array, per column) | Schema-level alternative names — used by the parser |
 | 3 | **Reference Questions** | `nls_feedback.feedback[type=REFERENCE_QUESTION]` | Per-question NL → tokenised search mappings |
 | 4 | **Business Terms** | `nls_feedback.feedback[type=BUSINESS_TERM]` | Coaching-layer phrase → column/formula mappings |
@@ -689,15 +689,108 @@ Save the surface selection set and the user's confirmation as `{run_dir}/scope.j
 
 Per surface (only those selected in Step 5):
 
-### 6.1 — Column AI Context
+### 6.1 — Column AI Context (structured) + Column Description (prose)
 
-For each column lacking `ai_context` (or marked for refinement):
+`ai_context` is **structured-only** — closed enums and refs, never prose. The full
+spec is in [ai-context-schema.md](references/ai-context-schema.md); concrete worked
+examples are in [ai-context-examples.md](references/ai-context-examples.md). Step 6.1
+generates two surfaces in parallel:
 
-1. Aggregate evidence from prose mining: phrases that appear near this column reference
-2. Build a 2–3 sentence description following the template in
-   [ai-asset-review-rules.md](references/ai-asset-review-rules.md#ai-context-template):
-   `{purpose} {grain/cardinality} {business significance from mined prose}`
-3. Propose with confidence score; flag low-confidence cases for explicit review
+| Surface | Form | What goes here |
+|---|---|---|
+| `properties.ai_context` | Structured YAML — closed enums + refs only | Constraints the LLM needs to write correct SQL. Allowed keys: `additivity`, `non_additive_dimension`, `time_basis`, `source`, `grain_keys`, `unit`, `null_semantics`, `role` |
+| `column.description` | Prose, 1–2 sentences (≤ 200 chars) | Business meaning, gotchas, edge cases, grain-in-words — the human-readable context |
+
+#### Bootstrapping measures
+
+For each measure column, bootstrap the **mandatory tier** (`additivity`,
+`time_basis`, `grain_keys`) deterministically:
+
+1. **`additivity`** — first-pass guess from `aggregation`:
+   - `SUM` ⇒ `additive` unless mined evidence flags "snapshot" / "balance" /
+     "closing" / "filled" → `semi_additive` candidate
+   - `MAX` / `MIN` over a date column ⇒ `semi_additive` candidate
+   - `COUNT_DISTINCT` and ratios/divisions ⇒ `non_additive`
+2. **For `additivity: semi_additive`** — populate `non_additive_dimension`
+   (the time-grain column the snapshot is anchored on). `additive_dimensions`
+   is **NOT** an axis any more (removed 2026-04-29 — redundant with
+   `non_additive_dimension`).
+3. **`time_basis`** — for formula columns, infer from `formulas[]`
+   `query_groups({DATE_DIM.DATE})`-style references. **Never copy formula text
+   into `ai_context`.** Prefer the conformed shared date dim when one exists in
+   the Model join graph. May be legitimately absent for time-agnostic measures.
+4. **`grain_keys`** — list of column refs that uniquely identify one fact row.
+   Derive from the table's primary key + the time_basis column.
+5. **`source`** — **conditional override only.** Omit when `column_id: TABLE::COL`
+   resolves cleanly via the table's `fqn`. Required when the column_id doesn't
+   match the physical path (renamed/aliased columns, view-backed columns).
+
+For optional axes on measures:
+- **`unit`** — closed enum: `currency` / `count` / `ratio` / `percentage` /
+  `duration`. Inferred from column name patterns and the underlying type.
+- **`null_semantics`** — closed enum: `zero` / `unknown` / `no_snapshot`. For
+  snapshot/balance measures, default to `no_snapshot`.
+
+#### Bootstrapping dimensions
+
+Dimensions get **at most three axes** in `ai_context`: `source` (conditional),
+`null_semantics` (when NULL has business meaning), and `role` (the primary
+dimensional axis).
+
+| Dimension shape | What to populate |
+|---|---|
+| Has an id/code/label/key sibling on the same table (e.g. `Product Category` + `Product Category ID`) | `role:` on each — closed enum: `label` / `id` / `code` / `key` |
+| Stand-alone label where NULL has business meaning | `role: label` + `null_semantics: unknown` |
+| Renamed/aliased — `column_id` doesn't resolve | `source:` override (+ optionally `role:`) |
+| Sole, unambiguous, resolves cleanly, no NULL semantics | **Empty.** `column.description` carries any prose. |
+| Surrogate key, never user-facing | **Empty.** |
+
+The `role` axis prevents the Test 3 Q-010 failure mode (LLM picked
+`category_id` when the user asked for "category"). Combined with the system-prompt
+rule below, it also reinforces the prevention of phantom dimension tables
+(`DM_CATEGORY` etc.) when paired with the description prose.
+
+#### Bootstrapping `column.description` (prose)
+
+In parallel, generate `column.description` (prose, ≤ 200 chars) from:
+- `mined_prose_extract.ai_context_evidence_per_column` (Step 3c)
+- Existing `column.description` if present (preserve as primary signal)
+- Mined Liveboard / Answer prose near the column reference
+
+`column.description` is where business meaning, gotchas, and grain-in-words
+live. Do not duplicate this content into `ai_context`.
+
+#### Generator system-prompt rule
+
+Include this clause **verbatim** in any LLM prompt that consumes TML + `ai_context`
+(Spotter coaching prompts, third-party agent prompts, downstream SQL agents):
+
+> *"This TML mixes ThoughtSpot DSL with metadata. Distinguish them when emitting SQL:*
+>
+> 1. *The `formulas[]` block contains **ThoughtSpot formula DSL**, not SQL.
+>    Functions like `last_value(...)`, `query_groups(...)`, `growth_rate(...)`,
+>    `cumulative_sum(...)` and any other TS-specific formula functions are **not**
+>    SQL functions. Re-implement the formula's intent in target SQL from scratch —
+>    never copy or partially translate the DSL.*
+> 2. *Square-bracket column refs (`[Amount]`, `[Stock Quantity]`) and curly-brace
+>    dim refs (`{DM_DATE_DIM.DATE}`) are **TS logical references**, not SQL
+>    identifiers. Resolve each to its physical path via `column_id: TABLE::COL`
+>    plus the table's `fqn` (or via an explicit `source:` axis when present, which
+>    overrides column_id).*
+> 3. *Column and table **display names** (e.g. `Total Sales`, `Inventory Balance`,
+>    `Product Category`) are **TS logical names**. They are never valid SQL
+>    identifiers — resolve them to physical paths the same way as bracket refs.*
+> 4. *The `ai_context` block declares constraints on the column's result
+>    (additivity, time_basis, grain_keys, role). Respect them when writing SQL; do
+>    not infer constraints that are not declared. All prose context for a column
+>    lives in `column.description`, not `ai_context`."*
+
+#### Output and review
+
+Propose each surface with a confidence score; flag low-confidence cases for
+explicit review in Step 7. Low-confidence drivers: mined evidence is sparse,
+`additivity` guess conflicts with mined evidence, no shared date dim detected for
+`time_basis`, or an id/label/code/key sibling pair lacks a clear `role` assignment.
 
 ### 6.2 — Column Synonyms
 
@@ -756,15 +849,84 @@ Do NOT include `formula_info` on BT entries — verified rejected by the API.
 See [token-mapping-rules.md §4](references/token-mapping-rules.md) for the full Method B
 specification.
 
-### 6.5 — Data Model Instructions
+### 6.5 — Data Model Instructions (structured)
 
-Generate rule candidates from observed patterns in mined searches and Snowflake
-history. Examples grounded in mined evidence:
-- *"When users say 'last month' or 'past month', interpret as the last 30 days
-  (Transaction Date is at the day grain)."*
-- *"For revenue questions, use the Amount column unless explicitly asked about gross."*
+`model_instructions` is **structured-only** — closed enums and refs, never prose.
+The full spec is in
+[model-instructions-schema.md](references/model-instructions-schema.md). Follows
+the same declarative-only discipline as per-column `ai_context`, just at Model
+scope.
 
-Output as plain markdown — no TML construction (see open-items.md #4).
+**Boundary** — only **untriggered global rules** belong here. Phrase-triggered
+behavior ("when users say X, do Y") goes to `nls_feedback` (Surfaces 3 and 4),
+not here. See
+[model-instructions-schema.md § Boundary](references/model-instructions-schema.md#boundary--what-does-not-belong-here).
+
+#### Bootstrapping the 5 categories
+
+| Category | Bootstrap source |
+|---|---|
+| `exclusion_rules` | Mined prose mentioning "exclude", "ignore", "filter out"; existing CASE WHEN patterns in mined Snowflake SQL; analyst input on business semantics |
+| `aggregation_defaults` | Columns with `column_type: ATTRIBUTE` whose name suggests an entity (`Customer Name`, `Order ID`) — bootstrap `count_distinct`. Mined query history showing repeated aggregation patterns. |
+| `time_defaults` | Mined query window heuristics (the modal time range across mined queries); fiscal year metadata if present in connection settings |
+| `output_formatting` | One rule per `ai_context.unit` value present in the Model — bootstrap conservative defaults (currency: no decimals, percentage: one decimal) |
+| `schema_assumptions` | **`denormalized_attributes`**: every dimension column whose `column_id` lives on a parent table (rather than a dedicated dim table) is added — this is the meta-level reinforcement of the per-column phantom-table prevention. **`shared_conformed_date_dim`**: detect from `joins_with` graph — if multiple facts join through one date dim, it's the conformed anchor. **`surrogate_keys_only`**: tables whose PK columns have `column_id` like `*_KEY` and no business meaning. **`chasm_attribution`**: detect from `joins_with` graph — for each pair of fact tables (tables with MEASURE columns), compute shared dims (dims both join to) and unique dims; if `shared ≥ 1` AND (`A-only ≥ 1` OR `B-only ≥ 1`) emit a proposal. Default RouteAction `KEEP`; flag pairs with only one shared dim as `NEEDS_REVIEW` (single-shared-dim chasms have higher false-positive risk — analyst should confirm intent). See [model-instructions-schema.md § How `chasm_attribution` enables (and clarifies) cross-fact queries](references/model-instructions-schema.md#how-chasm_attribution-enables-and-clarifies-cross-fact-queries). |
+
+#### Output
+
+Generate the structured form to `{run_dir}/model_instructions.yaml` AND emit
+the prose `instructions.md` for **manual paste** until
+[open-items.md #4](references/open-items.md) verifies the TML location for
+Model-level instructions. Once the location is verified, Step 9 will write
+directly via `tml/import` and the manual-paste step becomes obsolete.
+
+#### Validation
+
+Same deploy-time validation as `ai_context` (Step 8b), applied at Model scope:
+closed-key check, ref resolution, enum check, ≤ 80 char `note:` and `reason:`
+fields. Validation failures block import.
+
+#### Worked example
+
+For Dunder Mifflin, a fully populated `model_instructions` is ~30 lines and
+covers the Model-scope failure clusters from Test 4 plus the `chasm_attribution`
+rule for the Inventory ↔ Order Detail pair (which has shared Product + Date but
+no shared Customer/Region) — see
+[model-instructions-schema.md § Worked example](references/model-instructions-schema.md#worked-example--full-model_instructions-for-dunder-mifflin).
+
+#### Chasm-attribution detection algorithm (sketch)
+
+```python
+# Run after Step 2 (TML export) — operates on the parsed model graph.
+fact_tables = [t for t in model["tables"] if any(
+    c.get("properties", {}).get("column_type") == "MEASURE" for c in t["columns"])]
+
+dim_joins_by_table = {}  # table_name -> set of dim col_refs it joins to
+for jw in model.get("joins_with", []):
+    a, b = parse_join_endpoints(jw["on"])  # e.g. "DM_INVENTORY::BALANCE_DATE = DM_DATE_DIM::DATE"
+    dim_joins_by_table.setdefault(a.table, set()).add(b)
+    dim_joins_by_table.setdefault(b.table, set()).add(a)
+
+proposals = []
+for fact_a, fact_b in itertools.combinations(fact_tables, 2):
+    shared = dim_joins_by_table[fact_a.name] & dim_joins_by_table[fact_b.name]
+    a_only = dim_joins_by_table[fact_a.name] - dim_joins_by_table[fact_b.name]
+    b_only = dim_joins_by_table[fact_b.name] - dim_joins_by_table[fact_a.name]
+    if len(shared) >= 1 and (a_only or b_only):
+        confidence = "high" if len(shared) >= 2 else "low"
+        proposals.append({
+            "assumption": "chasm_attribution",
+            "facts": [fact_a.name, fact_b.name],
+            "shared_dims": sorted(shared),
+            "note": f"non-shared values repeat across the other fact's unique dims",
+            "_route_action": "KEEP" if confidence == "high" else "NEEDS_REVIEW",
+        })
+```
+
+Pairs with **0 shared dims** are NOT chasm attributions (they have no bridging
+dim) — never emit a proposal. Pairs with **1 shared dim** are flagged
+`NEEDS_REVIEW` because single-shared-dim attributions have higher false-positive
+risk (the analyst should confirm the cross-fact attribution is intended).
 
 ### 6.6 — Improved Model Description
 
@@ -885,11 +1047,67 @@ Deep-copy the original Model TML and apply each accepted delta:
 patched = copy.deepcopy(model_tml)
 m = patched["model"]
 
-# Surface 1 — column ai_context
+# Surface 1 — column ai_context (structured-only) + column.description (prose)
 for col in m.get("columns", []):
     delta = ai_context_deltas.get(col["name"])
     if delta and delta["action"] in ("ADD","REFINE"):
         col.setdefault("properties", {})["ai_context"] = delta["proposed_value"]
+    desc_delta = description_deltas.get(col["name"])
+    if desc_delta and desc_delta["action"] in ("ADD","REFINE"):
+        col["description"] = desc_delta["proposed_value"]
+
+# Validate ai_context per ai-context-schema.md § Safeguards. Block import on failure.
+ALLOWED_KEYS = {"additivity","non_additive_dimension","time_basis","source",
+                "grain_keys","unit","null_semantics","role"}
+ENUM_ADDITIVITY = {"additive","semi_additive","non_additive"}
+ENUM_UNIT = {"currency","count","ratio","percentage","duration"}
+ENUM_NULL = {"zero","unknown","no_snapshot"}
+ENUM_ROLE = {"label","id","code","key"}
+errors = []
+for col in m.get("columns", []):
+    raw = col.get("properties", {}).get("ai_context")
+    if not raw:
+        continue
+    if len(raw) > 400:
+        errors.append(f"{col['name']}: ai_context exceeds 400 chars ({len(raw)})")
+    parsed = yaml.safe_load(raw) if isinstance(raw, str) else raw
+    if not isinstance(parsed, dict):
+        errors.append(f"{col['name']}: ai_context must be a structured map, not prose")
+        continue
+    unknown = set(parsed.keys()) - ALLOWED_KEYS
+    if unknown:
+        errors.append(f"{col['name']}: unknown keys {unknown}; allowed: {ALLOWED_KEYS}")
+    if "additivity" in parsed and parsed["additivity"] not in ENUM_ADDITIVITY:
+        errors.append(f"{col['name']}: additivity must be one of {ENUM_ADDITIVITY}")
+    if parsed.get("additivity") == "semi_additive" and "non_additive_dimension" not in parsed:
+        errors.append(f"{col['name']}: semi_additive requires non_additive_dimension")
+    if "unit" in parsed and parsed["unit"] not in ENUM_UNIT:
+        errors.append(f"{col['name']}: unit must be one of {ENUM_UNIT}")
+    if "null_semantics" in parsed and parsed["null_semantics"] not in ENUM_NULL:
+        errors.append(f"{col['name']}: null_semantics must be one of {ENUM_NULL}")
+    if "role" in parsed and parsed["role"] not in ENUM_ROLE:
+        errors.append(f"{col['name']}: role must be one of {ENUM_ROLE}")
+    # Reject prose: any string value containing whitespace + alpha words that don't match a ref shape
+    enum_keys = ("additivity","unit","null_semantics","role")
+    for k, v in parsed.items():
+        if k in enum_keys:
+            continue  # enums already validated
+        values = v if isinstance(v, list) else [v]
+        for item in values:
+            if isinstance(item, str) and " " in item and "." not in item:
+                errors.append(f"{col['name']}.{k}: free-text value rejected — use enums/refs only")
+    # source / time_basis / non_additive_dimension resolution checked against schema
+    src = parsed.get("source")
+    if src and not _resolve_physical_column(src):
+        errors.append(f"{col['name']}.source: '{src}' does not resolve to a physical column")
+    tb = parsed.get("time_basis")
+    if tb and not _resolve_model_column(m, tb):
+        errors.append(f"{col['name']}.time_basis: '{tb}' is not a Model column")
+    nad = parsed.get("non_additive_dimension")
+    if nad and not _resolve_model_column(m, nad):
+        errors.append(f"{col['name']}.non_additive_dimension: '{nad}' is not a Model column")
+if errors:
+    raise SystemExit("ai_context validation failed:\n  " + "\n  ".join(errors))
 
 # Surface 2 — column synonyms
 for col in m.get("columns", []):
@@ -986,8 +1204,11 @@ either drop the question or route via `MOVE_TO_NEW_FORMULA` (per
 Ready to apply coaching to "{model_name}":
 
   Column AI Context updates:    {N_ai_add} ADDs, {N_ai_refine} REFINEs
-                                 (each ai_context payload validated ≤ 400 chars
-                                  — see open-items.md #14)
+                                 (structured-only — declarative validation +
+                                  ≤ 400 chars per column; see ai-context-schema.md
+                                  § Safeguards)
+  Column Description updates:   {N_desc_add} ADDs, {N_desc_refine} REFINEs
+                                 (prose surface; ai_context contains no prose)
   Column Synonyms updates:      {N_syn_add} ADDs, {N_syn_keep} KEEPs
   Reference Questions to add:   {N_ref}      (existing: {N_existing_ref})
                                  ⚠ {N_existing_ref} existing entries WILL BE
@@ -1144,5 +1365,6 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.1.0 | 2026-04-29 | **`ai_context` overhaul.** Structured-only — closed enums and refs; free-form prose moves to `column.description`. Allowed keys: `additivity`, `non_additive_dimension`, `time_basis`, `source` (conditional override), `grain_keys`, `unit`, `null_semantics`, `role`. Removed: `formula` axis (caused TS DSL transliteration failures in `agent-expressibility-eval` Test 4), `additive_dimensions` (redundant with `non_additive_dimension`). Added: `role` axis for dimensions (closed enum `label`/`id`/`code`/`key`) — addresses the Test 3 Q-010 id-vs-label confusion. `source` is now a conditional override — omit when `column_id: TABLE::COL` resolves cleanly via the table's `fqn`. New `references/ai-context-schema.md` is the authoritative spec; `references/ai-context-examples.md` collects 8 worked examples per failure cluster. Step 6.1 generates both `ai_context` (structured) and `column.description` (prose) in parallel and embeds a four-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers — don't infer phantom tables like `DM_CATEGORY` from column names; `ai_context` is authoritative). Step 8b adds deploy-time validation: closed-key check, enum check (incl. `role`), ref resolution, ≤ 400 chars, no prose values. Mandatory measure tier (`additivity`, `time_basis`, `grain_keys`) is never dropped under budget pressure. **`model_instructions` introduced.** Step 6.5 now generates a structured 5-category schema (`exclusion_rules`, `aggregation_defaults`, `time_defaults`, `output_formatting`, `schema_assumptions`) — same declarative-only discipline as `ai_context`, applied at Model scope. `schema_assumptions.denormalized_attributes` provides Model-level reinforcement of phantom-table prevention (lists denormalized columns once per Model rather than per-column). `schema_assumptions.chasm_attribution` declares fact-table pairs that share some dims but not all — encodes ThoughtSpot's chasm-trap attribution capability so external SQL agents handle fulfillment and marketing-attribution queries correctly (each fact aggregated at its own grain, attributed via shared dims with intentional value repetition across non-shared dims). Step 6.5 includes auto-detection from the `joins_with` graph; pairs with one shared dim are flagged `NEEDS_REVIEW`, pairs with ≥ 2 shared dims default to `KEEP`. Boundary: only untriggered global rules belong here; phrase-triggered rules (term aliases, default-by-phrase) are deferred to `nls_feedback` until a feedback-bundling decision lands. New `references/model-instructions-schema.md` is the authoritative spec. Cursor mirror bumped to v1.1.0 to match. |
 | 2.0.0 | 2026-04-28 | **BREAKING:** skill renamed `ts-coach-model` → `ts-object-model-coach` to align with the `ts-object-{type}-{verb}` family pattern (see `.claude/rules/skill-naming.md`). Slash command, directory, smoke-test filename, and cache directory (`~/.cache/ts-object-model-coach/`) all change. Anyone with scripts or aliases pointing at the old name must update. Also formalises the cross-Model consistency scan (Step 4.5), per-surface explainer-block pattern, parallel TML export with progress + cache + pre-scan gate, and verified-pattern library mined from real coached Models — all of which landed in PR #9. |
 | 1.0.0 | 2026-04-26 | Initial release — full Spotter coaching prep across five surfaces (Column AI Context, Column Synonyms, Reference Questions, Business Terms, Data Model Instructions draft). Reviews existing assets critically with KEEP/ADD/REFINE/REWRITE deltas; treats existing GLOBAL feedback as primary input signal with USER feedback gated behind explicit opt-in; mines schema + dependent Liveboard/Answer prose + (optional) Snowflake query history; up-front scope menu; worked-example explainer using the user's data; synonym-strategy explainer when both column synonyms and BUSINESS_TERM are selected. |

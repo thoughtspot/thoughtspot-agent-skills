@@ -71,49 +71,50 @@ Do not exceed 600 characters.
 
 ## 2. Reviewing per-column `ai_context`
 
+`ai_context` is **structured-only** — closed enums and refs, never prose. The
+authoritative spec is [ai-context-schema.md](ai-context-schema.md). This section
+covers the critique signals used in Step 4 and 7 review passes.
+
 ### Critique signals (per column)
 
-| Signal | Threshold | Implies |
-|---|---|---|
-| Empty | — | `ADD` |
-| Length | < 30 chars | `REFINE` — too thin |
-| Doesn't mention column purpose | No verb of measurement / classification | `REFINE` |
-| Generic phrasing | "This is a column for X" / "Stores X data" | `REWRITE` |
-| Contradicts mined evidence | ai_context says "monthly grain" but mined queries use day-grain filters | `REWRITE` (with explicit reason) |
-| Mentions specific business rules | "Excludes returns", "Net of discount" | Strong — `KEEP` |
-| Length 80 – 250 chars and specific | — | `KEEP` |
-
-### AI Context template
-
-The structure that consistently produces good Spotter results:
-
-```
-{Sentence 1: what the column represents in business terms}
-{Sentence 2: how it is measured / where it comes from / its grain}
-{Sentence 3 (optional): notable filters, edge cases, or business rules}
-```
-
-Worked example for `Inventory Balance`:
-
-| Layer | Content |
+| Signal | Implies |
 |---|---|
-| What it represents | "Current quantity of product on hand at the end of each period." |
-| How measured / grain | "Calculated as a closing balance from `DM_INVENTORY` filled records, by `Transaction Date`." |
-| Business rules | "Reflects warehouse position, not in-transit stock." |
+| Empty on a measure | `ADD` — bootstrap mandatory tier (additivity, time_basis, source, grain_keys) |
+| Empty on a self-explanatory key/ID | `KEEP` — empty is fine |
+| Contains free-form prose / sentences | `REWRITE` — move prose to `column.description`; rebuild structured `ai_context` |
+| Contains a `formula:` axis with TS DSL text | `REWRITE` — drop the formula axis; populate `additivity` + `time_basis` + `source` instead |
+| Uses keys outside the closed allowed-key list | `REWRITE` — strip unknown keys |
+| Missing mandatory axis on a measure (e.g. no `additivity`) | `REFINE` — add the missing axis |
+| `additivity: semi_additive` without `additive_dimensions` + `non_additive_dimension` | `REFINE` — populate the sub-fields |
+| `source:` doesn't resolve to a real physical column | `REWRITE` — fix the path or drop |
+| `time_basis:` doesn't reference a real date dim in the Model | `REWRITE` — re-anchor |
+| Total payload > 400 chars | `REFINE` — drop optional tier (`null_semantics` → `unit`); never drop mandatory |
+| Mandatory tier present, all values lex-clean as enums/refs, ≤ 400 chars | `KEEP` |
 
-→ ai_context: *"Current quantity of product on hand at the end of each period.
-Calculated as a closing balance from inventory records, by Transaction Date. Reflects
-warehouse position, not in-transit stock."*
+### Where prose goes
+
+Prose context that used to live in `ai_context` (business meaning, gotchas, edge
+cases, grain-in-words) now lives in `column.description`. Step 6.1 generates both
+surfaces; this section's critique applies only to `ai_context`. Critique for
+`column.description` follows the standard "specific and grounded vs. generic" test.
 
 ### Sourcing the content
 
-Pull from `mined_prose_extract.ai_context_evidence_per_column` (from Step 3c). Combine
-with structural facts from the schema:
-- `column_type` (MEASURE / ATTRIBUTE) → choose verb pattern
-- `aggregation` (SUM / AVG / etc.) → mention measurement method for measures
-- Underlying `db_column_name` and table → grain/source hint for measures
-- Any existing `description` field on the underlying physical column → highest-priority
-  authoritative content (rare but valuable)
+Pull from `mined_prose_extract.ai_context_evidence_per_column` (Step 3c) and combine
+with structural facts from the schema. The mapping is deterministic for most axes:
+
+| Source | Axis it populates |
+|---|---|
+| `column_type` (MEASURE / ATTRIBUTE) | Whether mandatory tier applies |
+| `aggregation` (SUM / AVG / MIN / MAX / COUNT_DISTINCT) | First-pass `additivity` guess |
+| Mined evidence flagging "snapshot" / "balance" / "closing" | Override SUM-implies-additive → `semi_additive` candidate |
+| Underlying `db_column_name` + table | `source:` (deterministic — no LLM needed) |
+| `formulas[]` block (formula columns) | Infer `time_basis:` from `query_groups({DATE_DIM.DATE})` refs — **never copy formula text** |
+| Model join graph | Prefer the conformed shared date dim for `time_basis` if one exists |
+| Existing `description` field on the underlying physical column | Seed `column.description` (prose), not `ai_context` |
+
+See [ai-context-schema.md § Worked example](ai-context-schema.md#worked-example---inventory-balance)
+for a full populated example.
 
 ---
 
