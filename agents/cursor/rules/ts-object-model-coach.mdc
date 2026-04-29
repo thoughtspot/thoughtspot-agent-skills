@@ -347,6 +347,14 @@ Output: write structured form to `{run_dir}/model_instructions.yaml` AND prose
 `{run_dir}/instructions.md` for manual paste until TML location verified
 (open-items.md #4).
 
+**Total payload ≤ 3000 chars** — verified hard limit on the
+Settings → Coach Spotter → Instructions field. If the generated structured
+form exceeds 3000 chars, drop in this order: `output_formatting` rules first,
+then trim `note:` / `reason:` text, then collapse multiple
+`aggregation_defaults` to highest-frequency entities. Mandatory tier
+(`schema_assumptions`, `exclusion_rules`, `time_defaults`) is never dropped.
+Step 8e gate displays `{N_instr_bytes}/3000 chars`.
+
 For full spec see `references/model-instructions-schema.md` (Claude repo).
 
 ### 6.6 Improved Model description
@@ -491,5 +499,6 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-04-29 | Mirror of Claude v2.1.1: documents the **3000-char hard limit** on the Settings → Coach Spotter → Instructions field. Step 6.5 now lists the budget-trim order (drop `output_formatting` first → trim `note:` / `reason:` → collapse `aggregation_defaults`; never drop mandatory tier of `schema_assumptions` / `exclusion_rules` / `time_defaults`) and the Step 8e gate display (`{N_instr_bytes}/3000 chars`). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
 | 1.1.0 | 2026-04-29 | Mirror of Claude v2.1.0 schema overhaul: `ai_context` is structured-only (closed enums + refs), 8 keys (`additivity`/`non_additive_dimension`/`time_basis`/`source`/`grain_keys`/`unit`/`null_semantics`/`role`); `formula` and `additive_dimensions` removed; `role` added for dimensions; `source` is conditional override. New 4-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers, do not infer phantom tables; `ai_context` is authoritative). Step 6.5 Model Instructions is now a structured 5-category schema (`exclusion_rules`/`aggregation_defaults`/`time_defaults`/`output_formatting`/`schema_assumptions`). `schema_assumptions` enum: `denormalized_attributes` (phantom-table reinforcement), `shared_conformed_date_dim`, `surrogate_keys_only`, `chasm_attribution` (declares fact-pair attribution patterns — ThoughtSpot's chasm-trap capability for fulfillment and marketing-attribution queries; auto-detected from `joins_with` graph). Prose lives in `column.description` and `model.description`. Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
 | 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-object-model-coach/SKILL.md` (Claude v2.0.0). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |

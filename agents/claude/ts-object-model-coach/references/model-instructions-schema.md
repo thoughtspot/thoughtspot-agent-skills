@@ -412,6 +412,13 @@ Before TML import, validate:
 - `chasm_attribution` rules require **≥ 2 distinct fact tables in `facts:` and ≥ 1 shared dim in `shared_dims:`** — pairs with zero shared dims are not chasm attributions
 - `note:` and `reason:` fields are ≤ 80 chars
 - Top-level keys are from the allowed-key list
+- **Total `model_instructions` payload ≤ 3000 chars** — verified hard limit on
+  the Spotter UI Settings → Coach Spotter → Instructions field. Generators must
+  budget; if the structured form exceeds 3000 chars, drop `output_formatting`
+  rules first (they're the lowest-impact category), then trim `note:` /
+  `reason:` text, then collapse multiple `aggregation_defaults` to the
+  highest-frequency entities. Mandatory tier (`schema_assumptions`,
+  `exclusion_rules`, `time_defaults`) is never dropped under budget pressure.
 
 Validation failures block import; the user is shown the offending rule and the
 specific failure.

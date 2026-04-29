@@ -884,7 +884,10 @@ directly via `tml/import` and the manual-paste step becomes obsolete.
 
 Same deploy-time validation as `ai_context` (Step 8b), applied at Model scope:
 closed-key check, ref resolution, enum check, ≤ 80 char `note:` and `reason:`
-fields. Validation failures block import.
+fields, **total payload ≤ 3000 chars** (verified hard limit on the
+Settings → Coach Spotter → Instructions field). Validation failures block
+import. See [model-instructions-schema.md § Safeguards #3](references/model-instructions-schema.md#3-deploy-time-validation)
+for the budget-trim order when a generated payload exceeds 3000 chars.
 
 #### Worked example
 
@@ -1221,7 +1224,9 @@ Ready to apply coaching to "{model_name}":
                                   t3.year_filter) DEFERRED until #16 verified
   Business Terms to add:        {N_bt}        (existing: {N_existing_bt})
   Model description:            {DESCRIPTION_ACTION}
-  Data Model Instructions:      {N_instr} draft rule(s) — for manual paste
+  Data Model Instructions:      {N_instr} draft rule(s), {N_instr_bytes}/3000
+                                  chars — for manual paste (verified hard
+                                  limit on Settings → Coach Spotter field)
 
   Backup saved to:   {run_dir}/before/
   Patched files at:  {run_dir}/after/
@@ -1365,6 +1370,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.1.1 | 2026-04-29 | Document the **3000-char hard limit** on the Settings → Coach Spotter → Instructions field (verified during a Dunder Mifflin coaching run on se-thoughtspot). `references/model-instructions-schema.md` Safeguard #3 adds the validation rule plus the budget-trim order (drop `output_formatting` first, then trim `note:` / `reason:` text, then collapse `aggregation_defaults`; never drop the mandatory tier of `schema_assumptions` / `exclusion_rules` / `time_defaults`). Step 6.5 Validation block points at the safeguard; Step 8e gate now displays `{N_instr_bytes}/3000 chars` so the user sees their headroom before pasting. Cursor mirror v1.1.1 syncs the same. |
 | 2.1.0 | 2026-04-29 | **`ai_context` overhaul.** Structured-only — closed enums and refs; free-form prose moves to `column.description`. Allowed keys: `additivity`, `non_additive_dimension`, `time_basis`, `source` (conditional override), `grain_keys`, `unit`, `null_semantics`, `role`. Removed: `formula` axis (caused TS DSL transliteration failures in `agent-expressibility-eval` Test 4), `additive_dimensions` (redundant with `non_additive_dimension`). Added: `role` axis for dimensions (closed enum `label`/`id`/`code`/`key`) — addresses the Test 3 Q-010 id-vs-label confusion. `source` is now a conditional override — omit when `column_id: TABLE::COL` resolves cleanly via the table's `fqn`. New `references/ai-context-schema.md` is the authoritative spec; `references/ai-context-examples.md` collects 8 worked examples per failure cluster. Step 6.1 generates both `ai_context` (structured) and `column.description` (prose) in parallel and embeds a four-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers — don't infer phantom tables like `DM_CATEGORY` from column names; `ai_context` is authoritative). Step 8b adds deploy-time validation: closed-key check, enum check (incl. `role`), ref resolution, ≤ 400 chars, no prose values. Mandatory measure tier (`additivity`, `time_basis`, `grain_keys`) is never dropped under budget pressure. **`model_instructions` introduced.** Step 6.5 now generates a structured 5-category schema (`exclusion_rules`, `aggregation_defaults`, `time_defaults`, `output_formatting`, `schema_assumptions`) — same declarative-only discipline as `ai_context`, applied at Model scope. `schema_assumptions.denormalized_attributes` provides Model-level reinforcement of phantom-table prevention (lists denormalized columns once per Model rather than per-column). `schema_assumptions.chasm_attribution` declares fact-table pairs that share some dims but not all — encodes ThoughtSpot's chasm-trap attribution capability so external SQL agents handle fulfillment and marketing-attribution queries correctly (each fact aggregated at its own grain, attributed via shared dims with intentional value repetition across non-shared dims). Step 6.5 includes auto-detection from the `joins_with` graph; pairs with one shared dim are flagged `NEEDS_REVIEW`, pairs with ≥ 2 shared dims default to `KEEP`. Boundary: only untriggered global rules belong here; phrase-triggered rules (term aliases, default-by-phrase) are deferred to `nls_feedback` until a feedback-bundling decision lands. New `references/model-instructions-schema.md` is the authoritative spec. Cursor mirror bumped to v1.1.0 to match. |
 | 2.0.0 | 2026-04-28 | **BREAKING:** skill renamed `ts-coach-model` → `ts-object-model-coach` to align with the `ts-object-{type}-{verb}` family pattern (see `.claude/rules/skill-naming.md`). Slash command, directory, smoke-test filename, and cache directory (`~/.cache/ts-object-model-coach/`) all change. Anyone with scripts or aliases pointing at the old name must update. Also formalises the cross-Model consistency scan (Step 4.5), per-surface explainer-block pattern, parallel TML export with progress + cache + pre-scan gate, and verified-pattern library mined from real coached Models — all of which landed in PR #9. |
 | 1.0.0 | 2026-04-26 | Initial release — full Spotter coaching prep across five surfaces (Column AI Context, Column Synonyms, Reference Questions, Business Terms, Data Model Instructions draft). Reviews existing assets critically with KEEP/ADD/REFINE/REWRITE deltas; treats existing GLOBAL feedback as primary input signal with USER feedback gated behind explicit opt-in; mines schema + dependent Liveboard/Answer prose + (optional) Snowflake query history; up-front scope menu; worked-example explainer using the user's data; synonym-strategy explainer when both column synonyms and BUSINESS_TERM are selected. |
