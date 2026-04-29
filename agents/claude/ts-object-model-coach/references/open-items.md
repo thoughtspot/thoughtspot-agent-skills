@@ -222,9 +222,16 @@ API probing (against champ-staging 2026-04-25) returned 500 on:
 (500 = backend reached but errored, vs 404 = no route. Suggests routes exist but our
 payload/method is wrong.)
 
-**v1 behaviour (current):** generate proposed instructions as plain markdown in
-`{run_dir}/instructions.md`; the user copy-pastes them into the Spotter UI under
-*Settings → Coach Spotter → Instructions*. No TML import.
+**v1 behaviour (current):** Step 6.5 generates the **structured 5-category form**
+defined in [model-instructions-schema.md](model-instructions-schema.md) to
+`{run_dir}/model_instructions.yaml`, AND a prose `{run_dir}/instructions.md` for
+copy-paste into *Settings → Coach Spotter → Instructions*. No TML import yet.
+
+**Why the structured form lands now even without a TML home:** the schema is
+forward-compatible — once the TML field is found, Step 8b can serialize the
+existing `model_instructions.yaml` into TML directly with no re-authoring. It
+also lets external agents that consume the run directory get the structured
+form alongside the prose.
 
 **v1.1 work needed:**
 1. Find the TML field by:
@@ -233,10 +240,16 @@ payload/method is wrong.)
    - Asking ThoughtSpot engineering for the field path
    - Inspecting the v2 OpenAPI doc once accessible
 2. Add the field to `thoughtspot-model-tml.md` schema
-3. Update Step 8b to write the proposed instructions into the Model TML
+3. Update Step 8b to write `model_instructions.yaml` content into the Model TML
 4. Update Step 9a to confirm round-trip on re-export
 
 **Acceptance for v1.1:** instructions imported via TML, round-trip preserves them.
+
+**Deferred (separate item, not blocking v1.1):** phrase-triggered patterns (term
+aliases, phrase-default measures/dimensions) are scoped to `nls_feedback`, not
+`model_instructions`. Bundling Model TML + Feedback TML for external-agent
+consumption is a separate decision — see the architectural discussion captured
+in `ai-context-schema.md` § "How to read this TML".
 
 ---
 
@@ -537,24 +550,15 @@ for column: <comma-separated list of over-length columns>
 The error names every offending column on a single import attempt — no
 truncation, the import fails ALL-OR-NONE.
 
-### Implication for the structured-YAML AI Context schema
+### Implication for the AI Context schema
 
-The full 8-axis schema (meaning + unit + includes + excludes + source +
-time_basis + null_zero + watch_out + formula) easily runs 600–1200 chars.
-**400 chars forces a terse single-line-per-axis format.** Pattern that fits:
-
-```yaml
-meaning: <one line, ≤ 80 chars>
-unit:    <one line, ≤ 30 chars>
-source:  <table.column, ≤ 60 chars>
-time:    <one line, ≤ 50 chars (when relevant)>
-nulls:   <one line, ≤ 40 chars (when relevant)>
-watch:   <one line, ≤ 80 chars>
-formula: <one line for formula columns>
-```
-
-Verified working on all 20 columns of the Dunder Mifflin Model, with lengths
-ranging 148–313 chars (all under the 400 limit).
+The 400-char hard limit drives the structured-only schema documented in
+[ai-context-schema.md](ai-context-schema.md). The mandatory tier for measures
+(`additivity`, `time_basis`, `grain_keys`) plus optional axes (`unit`,
+`null_semantics`) fits comfortably — typical populated payload is ~170 chars.
+Dimensional `ai_context` (just `role` and optionally `null_semantics`) is far
+smaller. See [ai-context-examples.md](ai-context-examples.md) for representative
+sizings across measure and dimension shapes.
 
 ### Where the verbose prose lives instead
 
@@ -563,15 +567,37 @@ run to accept the longer prose-style descriptions (lengths 200-400 chars
 tested without rejection). Verified upper bound of `column.description` is
 NOT yet tested; if it has its own limit it has not been hit in practice.
 
+`column.description` is the **load-bearing prose surface**: business meaning,
+gotchas, edge cases, grain-in-words. `ai_context` is structured-only — no
+prose, ever (see [ai-context-schema.md § The hard rule](ai-context-schema.md#the-hard-rule-structured-only-no-prose)).
+
 ### Action taken
 
 - Generators must cap `properties.ai_context` at 400 chars and validate
-  before import
-- If the structured-YAML schema cannot fit, drop axes in this priority
-  order: `excludes` → `includes` → `null_zero` → `time_basis` → `unit`
-  (preserve `meaning` + `source` + `watch` as last to drop)
+  before import.
+- `ai_context` is structured-only. No prose values. Allowed keys:
+  `additivity`, `non_additive_dimension`, `time_basis`, `source`, `grain_keys`,
+  `unit`, `null_semantics`, `role`. Anything else is rejected.
+- `source` is a conditional override — omit when `column_id: TABLE::COL` resolves
+  cleanly via the table's `fqn`; required when the column_id doesn't match the
+  physical path.
+- If the budget is tight, drop **optional tier first**, in order:
+  `null_semantics` → `unit` → `role`. **Mandatory measure tier (`additivity`,
+  `time_basis`, `grain_keys`) is never dropped.** This supersedes the earlier
+  drop-priority order in this item, which incorrectly listed `time_basis` as
+  droppable and included `formula` / `meaning` / `watch` / `additive_dimensions`
+  axes that have since been removed from the schema.
 - Detailed prose belongs in `column.description`, not duplicated in
-  `ai_context`
+  `ai_context`.
+
+### Why the schema changed (2026-04-29)
+
+The `agent-expressibility-eval` Test 3 vs Test 4 runs showed that the previous
+prose-based `ai_context` actively hurt downstream LLM accuracy: Claude
+transliterated TS DSL formula text and invented dimension tables. The
+structured-only schema (mandatory: additivity / time_basis / source /
+grain_keys) directly addresses the four failure clusters. Full motivation in
+[ai-context-schema.md § Motivation](ai-context-schema.md#motivation--why-this-schema-exists).
 
 ---
 

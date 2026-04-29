@@ -15,11 +15,11 @@ Prepare a ThoughtSpot Model for Spotter across five coaching surfaces:
 
 | Surface | Where it lives | What it does |
 |---|---|---|
-| Column AI Context | `model.columns[].properties.ai_context` (≤ 400 chars per column) | Per-column meaning — Spotter's primary disambiguation signal |
+| Column AI Context | `model.columns[].properties.ai_context` (structured YAML — closed enums + refs only; ≤ 400 chars) | Declares constraints downstream LLMs need: `additivity`, `time_basis`, `grain_keys`, `role`. See `references/ai-context-schema.md` (Claude repo). Prose lives in `column.description`. |
 | Column Synonyms | `model.columns[].synonyms[]` | Schema-level alternative names; the parser substitutes them |
 | Reference Questions | `nls_feedback.feedback[type=REFERENCE_QUESTION]` | Whole-question → tokenised-search mappings |
 | Business Terms | `nls_feedback.feedback[type=BUSINESS_TERM]` | Phrase → existing column or formula |
-| Data Model Instructions | Model-level free text (TML location TBD) | Global rules ("when I say last month, use last 30 days") |
+| Data Model Instructions | `model_instructions` (structured 5-category YAML; TML location TBD per `references/open-items.md` #4) | Global, untriggered rules: exclusion filters, aggregation defaults, time defaults, output formatting, schema assumptions (incl. phantom-table prevention). See `references/model-instructions-schema.md`. Phrase-triggered rules go to feedback. |
 
 Existing AI assets are critiqued + improved, never silently overwritten. The user
 picks which surfaces to generate via a single up-front menu.
@@ -201,24 +201,47 @@ If existing USER feedback exists, ask whether to include it as input signal
 
 ## Step 6 — Generate proposals per selected surface
 
-### 6.1 Column AI Context
+### 6.1 Column AI Context (structured) + Column Description (prose)
 
-Each column's `ai_context` is **capped at 400 characters** (verified API limit).
-Use a terse single-line-per-axis YAML:
+`ai_context` is **structured-only** — closed enums and refs, never prose. Capped
+at **400 chars** (verified API limit). Allowed keys (closed):
 
-```yaml
-meaning: <≤80 chars>
-unit:    <≤30 chars>
-source:  <table.column, ≤60 chars>
-time:    <≤50 chars (when relevant)>
-nulls:   <≤40 chars (when relevant)>
-watch:   <≤80 chars>
-formula: <one line for formula columns>
+```
+additivity            # additive | semi_additive | non_additive
+non_additive_dimension # required when additivity: semi_additive
+time_basis            # <col_ref> to a date dim (use shared conformed dim if exists)
+source                # conditional override — omit when column_id resolves cleanly
+grain_keys            # list of <col_ref> uniquely identifying one fact row
+unit                  # currency | count | ratio | percentage | duration
+null_semantics        # zero | unknown | no_snapshot
+role                  # label | id | code | key (for dimensions, primarily)
 ```
 
-If evidence is insufficient for an axis, emit `# REVIEW_REQUIRED` so the question
-is asked, not guessed. Write longer prose to `column.description` instead — that
-field has no observed character limit.
+**Mandatory tier for measures:** `additivity`, `time_basis`, `grain_keys`. Plus
+`non_additive_dimension` if semi-additive. Drop priority under budget pressure:
+`null_semantics` → `unit` → `role`. Never drop the mandatory tier.
+
+**For dimensions:** at most three axes — `role` (recommended on id/label/code/key
+sibling pairs), `null_semantics` (when NULL has business meaning), `source`
+(override only). For sole, unambiguous dims, `ai_context` may be empty.
+
+**Forbidden** in `ai_context`: free-form prose, `formula` (TS DSL), `synonyms`,
+`example_question`, `additive_dimensions`, `unit_label`, TS object cross-refs.
+
+In parallel, generate `column.description` (prose, ≤ 200 chars) for each column
+— this is where business meaning, gotchas, and grain-in-words live.
+
+**Generator system-prompt rule** (include verbatim in any LLM prompt that
+consumes TML + ai_context):
+
+> *"This TML mixes ThoughtSpot DSL with metadata. Distinguish them when emitting SQL:*
+> 1. *`formulas[]` is **TS DSL**, not SQL. Functions like `last_value(...)`, `query_groups(...)` are **not** SQL — re-implement intent from scratch.*
+> 2. *Bracket refs (`[Amount]`) and curly-brace dim refs (`{DM_DATE_DIM.DATE}`) are **TS logical references**. Resolve via `column_id: TABLE::COL` + table `fqn`.*
+> 3. *Display names (`Total Sales`, `Product Category`) are **TS logical names** — never SQL identifiers. Don't infer SQL tables from column display names (e.g. don't invent `DM_CATEGORY` from `Product Category` — find the column via `column_id`).*
+> 4. *`ai_context` is authoritative. Don't infer constraints not declared. Prose lives in `column.description`."*
+
+For full spec see `references/ai-context-schema.md` (Claude repo); worked
+examples in `references/ai-context-examples.md`.
 
 ### 6.2 Column Synonyms
 
@@ -266,9 +289,56 @@ phrase needs a calculation that doesn't yet exist on the Model, emit
 `MOVE_TO_NEW_FORMULA` and direct the user to add the formula via
 `/ts-object-answer-promote` first.
 
-### 6.5 Data Model Instructions
+### 6.5 Data Model Instructions (structured)
 
-Output as plain markdown for manual paste — TML location not yet documented.
+`model_instructions` is **structured-only** — 5 closed categories. Boundary:
+**only untriggered global rules** belong here; phrase-triggered behavior goes to
+`nls_feedback` (Surfaces 6.3 / 6.4).
+
+```yaml
+model_instructions:
+
+  # 1. Always-applied filters
+  exclusion_rules:
+    - applies_to: <measure_ref>
+      exclude_when: <SQL predicate>
+      reason: <≤80 chars>
+
+  # 2. Default agg for ambiguous columns
+  aggregation_defaults:
+    - column: <col_ref>
+      default_agg: sum | avg | min | max | count | count_distinct
+
+  # 3. Global time defaults
+  time_defaults:
+    default_period: <text>
+    default_grain: day | week | month | quarter | year
+    fiscal_year_start: <YYYY-MM-DD>
+
+  # 4. Output formatting (keyed by ai_context.unit)
+  output_formatting:
+    - apply_to_unit: currency | count | ratio | percentage | duration
+      format: <≤80 chars>
+
+  # 5. Meta — schema assumptions (incl. phantom-table reinforcement)
+  schema_assumptions:
+    - assumption: denormalized_attributes | shared_conformed_date_dim | surrogate_keys_only
+      columns: [<col_ref>, ...]      # for column-targeted assumptions
+      dim: <col_ref>                 # for date-dim assumptions
+      tables: [<table_ref>, ...]     # for table-targeted assumptions
+      note: <≤80 chars>
+```
+
+`schema_assumptions.denormalized_attributes` is the **Model-level reinforcement
+of phantom-table prevention** — list every dimension column whose `column_id`
+lives on a parent table (no separate dim table). Reinforces the per-column
+`column_id` resolution.
+
+Output: write structured form to `{run_dir}/model_instructions.yaml` AND prose
+`{run_dir}/instructions.md` for manual paste until TML location verified
+(open-items.md #4).
+
+For full spec see `references/model-instructions-schema.md` (Claude repo).
 
 ### 6.6 Improved Model description
 
@@ -389,7 +459,9 @@ for manual paste into the Spotter UI.
 |---|---|
 | `ts auth whoami` returns 401 | Token expired — refresh profile |
 | Selected data source is a Worksheet | Recommend upgrading to Model first; stop |
-| ai_context > 400 chars | Reduce — drop axes in priority order: excludes → includes → null_zero → time_basis → unit |
+| ai_context > 400 chars | Reduce — drop optional axes only: `null_semantics` → `unit` → `role`. Mandatory measure tier (`additivity`, `time_basis`, `grain_keys`) never drops. |
+| ai_context contains free text | Move prose to `column.description`; rebuild `ai_context` as structured enums + refs only |
+| `ai_context` deploy validation rejects unknown key | Strip — only the 8 closed keys are allowed (see Step 6.1) |
 | `Invalid value token: <kw>` on feedback import | Bad search_tokens syntax — see verified patterns above; common mistake is `top 10` AFTER columns instead of before |
 | `EDOC_FEEDBACK_TML_INVALID — Search did not find <expr>` | `formula_info` on RQ — drop the question or use Model-formula workaround |
 | `chart_type: TABLE` rejected | Use `chart_type: COLUMN` + `display_mode: TABLE_MODE` instead |
@@ -410,4 +482,5 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-04-29 | Mirror of Claude v2.1.0 schema overhaul: `ai_context` is structured-only (closed enums + refs), 8 keys (`additivity`/`non_additive_dimension`/`time_basis`/`source`/`grain_keys`/`unit`/`null_semantics`/`role`); `formula` and `additive_dimensions` removed; `role` added for dimensions; `source` is conditional override. New 4-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers, do not infer phantom tables; `ai_context` is authoritative). Step 6.5 Model Instructions is now a structured 5-category schema (`exclusion_rules`/`aggregation_defaults`/`time_defaults`/`output_formatting`/`schema_assumptions`) with `schema_assumptions.denormalized_attributes` as Model-level phantom-table reinforcement. Prose lives in `column.description` and `model.description`. Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
 | 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-object-model-coach/SKILL.md` (Claude v2.0.0). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |
