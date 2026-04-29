@@ -870,7 +870,7 @@ not here. See
 | `aggregation_defaults` | Columns with `column_type: ATTRIBUTE` whose name suggests an entity (`Customer Name`, `Order ID`) — bootstrap `count_distinct`. Mined query history showing repeated aggregation patterns. |
 | `time_defaults` | Mined query window heuristics (the modal time range across mined queries); fiscal year metadata if present in connection settings |
 | `output_formatting` | One rule per `ai_context.unit` value present in the Model — bootstrap conservative defaults (currency: no decimals, percentage: one decimal) |
-| `schema_assumptions` | **`denormalized_attributes`**: every dimension column whose `column_id` lives on a parent table (rather than a dedicated dim table) is added — this is the meta-level reinforcement of the per-column phantom-table prevention. **`shared_conformed_date_dim`**: detect from `joins_with` graph — if multiple facts join through one date dim, it's the conformed anchor. **`surrogate_keys_only`**: tables whose PK columns have `column_id` like `*_KEY` and no business meaning. |
+| `schema_assumptions` | **`denormalized_attributes`**: every dimension column whose `column_id` lives on a parent table (rather than a dedicated dim table) is added — this is the meta-level reinforcement of the per-column phantom-table prevention. **`shared_conformed_date_dim`**: detect from `joins_with` graph — if multiple facts join through one date dim, it's the conformed anchor. **`surrogate_keys_only`**: tables whose PK columns have `column_id` like `*_KEY` and no business meaning. **`chasm_attribution`**: detect from `joins_with` graph — for each pair of fact tables (tables with MEASURE columns), compute shared dims (dims both join to) and unique dims; if `shared ≥ 1` AND (`A-only ≥ 1` OR `B-only ≥ 1`) emit a proposal. Default RouteAction `KEEP`; flag pairs with only one shared dim as `NEEDS_REVIEW` (single-shared-dim chasms have higher false-positive risk — analyst should confirm intent). See [model-instructions-schema.md § How `chasm_attribution` enables (and clarifies) cross-fact queries](references/model-instructions-schema.md#how-chasm_attribution-enables-and-clarifies-cross-fact-queries). |
 
 #### Output
 
@@ -888,10 +888,45 @@ fields. Validation failures block import.
 
 #### Worked example
 
-For Dunder Mifflin, a fully populated `model_instructions` is ~25 lines and
-covers the four Test 4 failure clusters that operate at Model scope (phantom
-tables, chasm fanout, time interpretation, output formatting) — see
+For Dunder Mifflin, a fully populated `model_instructions` is ~30 lines and
+covers the Model-scope failure clusters from Test 4 plus the `chasm_attribution`
+rule for the Inventory ↔ Order Detail pair (which has shared Product + Date but
+no shared Customer/Region) — see
 [model-instructions-schema.md § Worked example](references/model-instructions-schema.md#worked-example--full-model_instructions-for-dunder-mifflin).
+
+#### Chasm-attribution detection algorithm (sketch)
+
+```python
+# Run after Step 2 (TML export) — operates on the parsed model graph.
+fact_tables = [t for t in model["tables"] if any(
+    c.get("properties", {}).get("column_type") == "MEASURE" for c in t["columns"])]
+
+dim_joins_by_table = {}  # table_name -> set of dim col_refs it joins to
+for jw in model.get("joins_with", []):
+    a, b = parse_join_endpoints(jw["on"])  # e.g. "DM_INVENTORY::BALANCE_DATE = DM_DATE_DIM::DATE"
+    dim_joins_by_table.setdefault(a.table, set()).add(b)
+    dim_joins_by_table.setdefault(b.table, set()).add(a)
+
+proposals = []
+for fact_a, fact_b in itertools.combinations(fact_tables, 2):
+    shared = dim_joins_by_table[fact_a.name] & dim_joins_by_table[fact_b.name]
+    a_only = dim_joins_by_table[fact_a.name] - dim_joins_by_table[fact_b.name]
+    b_only = dim_joins_by_table[fact_b.name] - dim_joins_by_table[fact_a.name]
+    if len(shared) >= 1 and (a_only or b_only):
+        confidence = "high" if len(shared) >= 2 else "low"
+        proposals.append({
+            "assumption": "chasm_attribution",
+            "facts": [fact_a.name, fact_b.name],
+            "shared_dims": sorted(shared),
+            "note": f"non-shared values repeat across the other fact's unique dims",
+            "_route_action": "KEEP" if confidence == "high" else "NEEDS_REVIEW",
+        })
+```
+
+Pairs with **0 shared dims** are NOT chasm attributions (they have no bridging
+dim) — never emit a proposal. Pairs with **1 shared dim** are flagged
+`NEEDS_REVIEW` because single-shared-dim attributions have higher false-positive
+risk (the analyst should confirm the cross-fact attribution is intended).
 
 ### 6.6 — Improved Model Description
 
@@ -1330,6 +1365,6 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
-| 2.1.0 | 2026-04-29 | **`ai_context` overhaul.** Structured-only — closed enums and refs; free-form prose moves to `column.description`. Allowed keys: `additivity`, `non_additive_dimension`, `time_basis`, `source` (conditional override), `grain_keys`, `unit`, `null_semantics`, `role`. Removed: `formula` axis (caused TS DSL transliteration failures in `agent-expressibility-eval` Test 4), `additive_dimensions` (redundant with `non_additive_dimension`). Added: `role` axis for dimensions (closed enum `label`/`id`/`code`/`key`) — addresses the Test 3 Q-010 id-vs-label confusion. `source` is now a conditional override — omit when `column_id: TABLE::COL` resolves cleanly via the table's `fqn`. New `references/ai-context-schema.md` is the authoritative spec; `references/ai-context-examples.md` collects 8 worked examples per failure cluster. Step 6.1 generates both `ai_context` (structured) and `column.description` (prose) in parallel and embeds a four-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers — don't infer phantom tables like `DM_CATEGORY` from column names; `ai_context` is authoritative). Step 8b adds deploy-time validation: closed-key check, enum check (incl. `role`), ref resolution, ≤ 400 chars, no prose values. Mandatory measure tier (`additivity`, `time_basis`, `grain_keys`) is never dropped under budget pressure. **`model_instructions` introduced.** Step 6.5 now generates a structured 5-category schema (`exclusion_rules`, `aggregation_defaults`, `time_defaults`, `output_formatting`, `schema_assumptions`) — same declarative-only discipline as `ai_context`, applied at Model scope. `schema_assumptions.denormalized_attributes` provides Model-level reinforcement of phantom-table prevention (lists denormalized columns once per Model rather than per-column). Boundary: only untriggered global rules belong here; phrase-triggered rules (term aliases, default-by-phrase) are deferred to `nls_feedback` until a feedback-bundling decision lands. New `references/model-instructions-schema.md` is the authoritative spec. Cursor mirror bumped to v1.1.0 to match. |
+| 2.1.0 | 2026-04-29 | **`ai_context` overhaul.** Structured-only — closed enums and refs; free-form prose moves to `column.description`. Allowed keys: `additivity`, `non_additive_dimension`, `time_basis`, `source` (conditional override), `grain_keys`, `unit`, `null_semantics`, `role`. Removed: `formula` axis (caused TS DSL transliteration failures in `agent-expressibility-eval` Test 4), `additive_dimensions` (redundant with `non_additive_dimension`). Added: `role` axis for dimensions (closed enum `label`/`id`/`code`/`key`) — addresses the Test 3 Q-010 id-vs-label confusion. `source` is now a conditional override — omit when `column_id: TABLE::COL` resolves cleanly via the table's `fqn`. New `references/ai-context-schema.md` is the authoritative spec; `references/ai-context-examples.md` collects 8 worked examples per failure cluster. Step 6.1 generates both `ai_context` (structured) and `column.description` (prose) in parallel and embeds a four-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers — don't infer phantom tables like `DM_CATEGORY` from column names; `ai_context` is authoritative). Step 8b adds deploy-time validation: closed-key check, enum check (incl. `role`), ref resolution, ≤ 400 chars, no prose values. Mandatory measure tier (`additivity`, `time_basis`, `grain_keys`) is never dropped under budget pressure. **`model_instructions` introduced.** Step 6.5 now generates a structured 5-category schema (`exclusion_rules`, `aggregation_defaults`, `time_defaults`, `output_formatting`, `schema_assumptions`) — same declarative-only discipline as `ai_context`, applied at Model scope. `schema_assumptions.denormalized_attributes` provides Model-level reinforcement of phantom-table prevention (lists denormalized columns once per Model rather than per-column). `schema_assumptions.chasm_attribution` declares fact-table pairs that share some dims but not all — encodes ThoughtSpot's chasm-trap attribution capability so external SQL agents handle fulfillment and marketing-attribution queries correctly (each fact aggregated at its own grain, attributed via shared dims with intentional value repetition across non-shared dims). Step 6.5 includes auto-detection from the `joins_with` graph; pairs with one shared dim are flagged `NEEDS_REVIEW`, pairs with ≥ 2 shared dims default to `KEEP`. Boundary: only untriggered global rules belong here; phrase-triggered rules (term aliases, default-by-phrase) are deferred to `nls_feedback` until a feedback-bundling decision lands. New `references/model-instructions-schema.md` is the authoritative spec. Cursor mirror bumped to v1.1.0 to match. |
 | 2.0.0 | 2026-04-28 | **BREAKING:** skill renamed `ts-coach-model` → `ts-object-model-coach` to align with the `ts-object-{type}-{verb}` family pattern (see `.claude/rules/skill-naming.md`). Slash command, directory, smoke-test filename, and cache directory (`~/.cache/ts-object-model-coach/`) all change. Anyone with scripts or aliases pointing at the old name must update. Also formalises the cross-Model consistency scan (Step 4.5), per-surface explainer-block pattern, parallel TML export with progress + cache + pre-scan gate, and verified-pattern library mined from real coached Models — all of which landed in PR #9. |
 | 1.0.0 | 2026-04-26 | Initial release — full Spotter coaching prep across five surfaces (Column AI Context, Column Synonyms, Reference Questions, Business Terms, Data Model Instructions draft). Reviews existing assets critically with KEEP/ADD/REFINE/REWRITE deltas; treats existing GLOBAL feedback as primary input signal with USER feedback gated behind explicit opt-in; mines schema + dependent Liveboard/Answer prose + (optional) Snowflake query history; up-front scope menu; worked-example explainer using the user's data; synonym-strategy explainer when both column synonyms and BUSINESS_TERM are selected. |

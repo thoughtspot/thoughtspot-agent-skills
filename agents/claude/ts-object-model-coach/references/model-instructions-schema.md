@@ -173,6 +173,8 @@ schema_assumptions:
     columns: [<col_ref>, ...]           # for column-targeted assumptions
     dim: <col_ref>                      # for date-dim assumptions
     tables: [<table_ref>, ...]          # for table-targeted assumptions
+    facts: [<table_ref>, <table_ref>]   # for chasm-attribution assumptions
+    shared_dims: [<col_ref>, ...]       # for chasm-attribution assumptions
     note: <≤ 80 chars prose>            # optional — short reinforcement
 ```
 
@@ -183,8 +185,9 @@ schema_assumptions:
 | `denormalized_attributes` | These columns live on parent tables — no separate dim tables exist | `columns`, `note` |
 | `shared_conformed_date_dim` | All time-anchored measures should join through this dim | `dim`, `note` |
 | `surrogate_keys_only` | These tables expose surrogate primary keys; don't show them to users | `tables`, `note` |
+| `chasm_attribution` | Two fact tables share some dims but not all; queries combining them attribute via shared dims and values repeat across non-shared dims (this is intentional, not a fanout bug — it's how ThoughtSpot's chasm-trap handling works) | `facts` (≥ 2), `shared_dims` (≥ 1), `note` |
 
-**Example (where phantom-table reinforcement lives):**
+**Example (where phantom-table and chasm-attribution reinforcement live):**
 
 ```yaml
 schema_assumptions:
@@ -197,7 +200,112 @@ schema_assumptions:
   - assumption: surrogate_keys_only
     tables: [DM_ORDER_DETAIL, DM_INVENTORY]
     note: primary keys are surrogate; do not expose in user-facing output
+  - assumption: chasm_attribution
+    facts: [DM_INVENTORY, DM_ORDER_DETAIL]
+    shared_dims: [Product, DM_DATE_DIM.Date]
+    note: Inventory has no Customer/Region link; values repeat per customer for fulfillment queries
 ```
+
+---
+
+## How `chasm_attribution` enables (and clarifies) cross-fact queries
+
+A **chasm trap** exists when two fact tables share *some* dimensions but not all
+— e.g., `DM_INVENTORY` (per Product, per Date) and `DM_ORDER_DETAIL` (per
+Product, per Date, per Customer, per Region). They share Product and Date, but
+Inventory has no Customer or Region link.
+
+ThoughtSpot's engine handles chasm traps natively as a **first-class capability**
+(see [TS docs on attribution and chasm traps](https://community.thoughtspot.com/s/article/What-is-Attribution-and-Chasm-Traps)).
+A question like *"customer sales + inventory by SKU=123, region=West, this
+month"* aggregates each fact at its own grain, then attributes inventory across
+customers via the shared (Product, Date) keys. The repeating inventory value
+per customer is intentional — useful for fulfillment-checking, valid for
+attribution analyses (e.g., marketing spend → sales).
+
+External SQL agents don't know this. Without a structured signal, two failure
+modes appear:
+
+| Failure | What happens without `chasm_attribution` |
+|---|---|
+| Direct fact-to-fact join | Agent invents a join condition between facts that have no shared key — fanout, garbage results |
+| Refusal | Agent recognizes there's no join path and refuses the question, even though TS would handle it correctly |
+
+`chasm_attribution` is the structured signal:
+
+- **Facts** that have no direct join — listed
+- **Shared dims** that bridge them — listed
+- **Note** explaining the attribution semantics — short prose
+
+The agent reads this and knows: aggregate each fact at its own grain (filtered
+by the shared dims and the user's filters), then `LEFT JOIN` via shared dims at
+output time. Non-shared dims will see repeated values from the other fact —
+that's the attribution working correctly.
+
+### Worked example — fulfillment query
+
+For Dunder Mifflin with `chasm_attribution: [DM_INVENTORY, DM_ORDER_DETAIL]`,
+question *"customer sales + inventory by SKU=123, region=West, this month":*
+
+```sql
+WITH cust_sales AS (
+  SELECT C.CUSTOMER_NAME, P.PRODUCT_SKU, OD.PRODUCT_ID,
+         DATE_TRUNC('MONTH', D.DATE) AS MONTH,
+         SUM(OD.AMOUNT) AS TOTAL_SALES
+  FROM DUNDERMIFFLIN.PUBLIC_SV.DM_ORDER_DETAIL OD
+  JOIN DUNDERMIFFLIN.PUBLIC_SV.DM_CUSTOMER C ON OD.CUSTOMER_ID = C.CUSTOMER_ID
+  JOIN DUNDERMIFFLIN.PUBLIC_SV.DM_PRODUCT  P ON OD.PRODUCT_ID  = P.PRODUCT_ID
+  JOIN DUNDERMIFFLIN.PUBLIC_SV.DM_DATE_DIM D ON OD.ORDER_DATE  = D.DATE
+  WHERE P.PRODUCT_SKU = '123' AND C.REGION = 'West'
+    AND D.DATE >= DATE_TRUNC('MONTH', CURRENT_DATE)
+  GROUP BY C.CUSTOMER_NAME, P.PRODUCT_SKU, OD.PRODUCT_ID, MONTH
+),
+inv_balance AS (
+  SELECT INV.PRODUCT_ID,
+         DATE_TRUNC('MONTH', INV.BALANCE_DATE) AS MONTH,
+         INV.FILLED_INVENTORY AS BALANCE,
+         ROW_NUMBER() OVER (PARTITION BY INV.PRODUCT_ID,
+                                          DATE_TRUNC('MONTH', INV.BALANCE_DATE)
+                            ORDER BY INV.BALANCE_DATE DESC) AS rn
+  FROM DUNDERMIFFLIN.PUBLIC_SV.DM_INVENTORY INV
+  WHERE INV.BALANCE_DATE >= DATE_TRUNC('MONTH', CURRENT_DATE)
+)
+SELECT cs.CUSTOMER_NAME, cs.PRODUCT_SKU, cs.TOTAL_SALES,
+       ib.BALANCE AS INVENTORY_BALANCE   -- repeats per customer (intentional)
+FROM cust_sales cs
+LEFT JOIN inv_balance ib
+  ON ib.PRODUCT_ID = cs.PRODUCT_ID
+  AND ib.MONTH = cs.MONTH
+  AND ib.rn = 1
+ORDER BY cs.TOTAL_SALES DESC
+```
+
+The repeating `INVENTORY_BALANCE` per customer is the chasm-attribution
+behavior — semantically valid for the fulfillment-check use case the user is
+performing.
+
+### Marketing attribution — the same shape covers it
+
+The classic chasm-attribution use case is attributing marketing spend (no
+direct customer link) to actual customer sales via shared Date + Region:
+
+```yaml
+- assumption: chasm_attribution
+  facts: [DM_MARKETING_SPEND, DM_ORDER_DETAIL]
+  shared_dims: [DM_DATE_DIM.Date, Region]
+  note: marketing spend attributed to sales via shared date+region
+```
+
+Same structure handles fulfillment, marketing attribution, and any other
+chasm-bridging analysis without needing separate concepts.
+
+### When `chasm_attribution` is the wrong rule
+
+The rule says *"these facts can be queried together; here's how the
+attribution works."* It is **not** a license to combine facts that share
+*nothing* — that's still a join error. Detection logic should require **at
+least one shared dimension**; pairs with zero shared dims are not chasm
+attributions and should not be declared.
 
 ---
 
@@ -265,6 +373,10 @@ model_instructions:
     - assumption: shared_conformed_date_dim
       dim: DM_DATE_DIM.Date
       note: cross-fact joins should anchor here, not on raw fact dates
+    - assumption: chasm_attribution
+      facts: [DM_INVENTORY, DM_ORDER_DETAIL]
+      shared_dims: [Product, DM_DATE_DIM.Date]
+      note: Inventory has no Customer/Region link; values repeat per customer for fulfillment queries
 ```
 
 ---
@@ -294,9 +406,10 @@ their respective scope:
 
 Before TML import, validate:
 
-- Every `applies_to:`, `column:`, `dim:`, and refs in `columns:`/`tables:` resolve to real Model columns/tables
+- Every `applies_to:`, `column:`, `dim:`, and refs in `columns:`/`tables:`/`facts:`/`shared_dims:` resolve to real Model columns/tables
 - Every `default_agg:`, `default_grain:`, `apply_to_unit:`, `assumption:` value is from its closed enum
 - `exclude_when:` predicates reference physical columns that exist on the same table as `applies_to`
+- `chasm_attribution` rules require **≥ 2 distinct fact tables in `facts:` and ≥ 1 shared dim in `shared_dims:`** — pairs with zero shared dims are not chasm attributions
 - `note:` and `reason:` fields are ≤ 80 chars
 - Top-level keys are from the allowed-key list
 
@@ -344,7 +457,8 @@ required Model-level (not per-column) reinforcement:
 | Failure cluster | What `model_instructions` adds |
 |---|---|
 | Phantom dim tables (`DM_CATEGORY`, `DM_EMPLOYEE`) | `schema_assumptions.denormalized_attributes` — meta-level reinforcement of per-column `column_id` |
-| Cross-fact chasm fanout | `schema_assumptions.shared_conformed_date_dim` — explicit anchor for join behavior |
+| Cross-fact chasm fanout (wrong-direction join on raw dates) | `schema_assumptions.shared_conformed_date_dim` — explicit anchor for join behavior |
+| Cross-fact attribution (intentional repeat per non-shared dim) | `schema_assumptions.chasm_attribution` — declares that two facts can be queried together via shared dims, with intentional value repetition |
 | Default time interpretation drift | `time_defaults` — global default period and grain |
 | Inconsistent currency / percentage formatting | `output_formatting` — keyed by `ai_context.unit` |
 

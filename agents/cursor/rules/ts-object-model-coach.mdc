@@ -320,12 +320,14 @@ model_instructions:
     - apply_to_unit: currency | count | ratio | percentage | duration
       format: <≤80 chars>
 
-  # 5. Meta — schema assumptions (incl. phantom-table reinforcement)
+  # 5. Meta — schema assumptions (phantom-table + chasm-attribution reinforcement)
   schema_assumptions:
-    - assumption: denormalized_attributes | shared_conformed_date_dim | surrogate_keys_only
+    - assumption: denormalized_attributes | shared_conformed_date_dim | surrogate_keys_only | chasm_attribution
       columns: [<col_ref>, ...]      # for column-targeted assumptions
       dim: <col_ref>                 # for date-dim assumptions
       tables: [<table_ref>, ...]     # for table-targeted assumptions
+      facts: [<table_ref>, ...]      # for chasm_attribution (≥ 2 fact tables)
+      shared_dims: [<col_ref>, ...]  # for chasm_attribution (≥ 1 shared dim)
       note: <≤80 chars>
 ```
 
@@ -333,6 +335,13 @@ model_instructions:
 of phantom-table prevention** — list every dimension column whose `column_id`
 lives on a parent table (no separate dim table). Reinforces the per-column
 `column_id` resolution.
+
+`schema_assumptions.chasm_attribution` declares two fact tables that share
+*some* dims but not all — TS handles cross-fact queries correctly via shared
+dims with intentional value repetition across non-shared dims (fulfillment
+queries, marketing-spend attribution). Detect from `joins_with` graph: for
+each fact pair, if `shared ≥ 1` AND (`A-only ≥ 1` OR `B-only ≥ 1`), emit
+proposal. Default `KEEP` when shared ≥ 2; flag `NEEDS_REVIEW` when shared = 1.
 
 Output: write structured form to `{run_dir}/model_instructions.yaml` AND prose
 `{run_dir}/instructions.md` for manual paste until TML location verified
@@ -482,5 +491,5 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.0 | 2026-04-29 | Mirror of Claude v2.1.0 schema overhaul: `ai_context` is structured-only (closed enums + refs), 8 keys (`additivity`/`non_additive_dimension`/`time_basis`/`source`/`grain_keys`/`unit`/`null_semantics`/`role`); `formula` and `additive_dimensions` removed; `role` added for dimensions; `source` is conditional override. New 4-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers, do not infer phantom tables; `ai_context` is authoritative). Step 6.5 Model Instructions is now a structured 5-category schema (`exclusion_rules`/`aggregation_defaults`/`time_defaults`/`output_formatting`/`schema_assumptions`) with `schema_assumptions.denormalized_attributes` as Model-level phantom-table reinforcement. Prose lives in `column.description` and `model.description`. Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
+| 1.1.0 | 2026-04-29 | Mirror of Claude v2.1.0 schema overhaul: `ai_context` is structured-only (closed enums + refs), 8 keys (`additivity`/`non_additive_dimension`/`time_basis`/`source`/`grain_keys`/`unit`/`null_semantics`/`role`); `formula` and `additive_dimensions` removed; `role` added for dimensions; `source` is conditional override. New 4-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers, do not infer phantom tables; `ai_context` is authoritative). Step 6.5 Model Instructions is now a structured 5-category schema (`exclusion_rules`/`aggregation_defaults`/`time_defaults`/`output_formatting`/`schema_assumptions`). `schema_assumptions` enum: `denormalized_attributes` (phantom-table reinforcement), `shared_conformed_date_dim`, `surrogate_keys_only`, `chasm_attribution` (declares fact-pair attribution patterns — ThoughtSpot's chasm-trap capability for fulfillment and marketing-attribution queries; auto-detected from `joins_with` graph). Prose lives in `column.description` and `model.description`. Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
 | 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-object-model-coach/SKILL.md` (Claude v2.0.0). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |
