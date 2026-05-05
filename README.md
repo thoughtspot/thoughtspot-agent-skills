@@ -35,7 +35,7 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-convert-to-snowflake-sv` | `/ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View; auto-detects multi-fact domains and offers to split into one view per domain |
-| `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model; supports merging multiple Semantic Views into one model |
+| `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model; supports merging multiple Semantic Views into one model |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
@@ -66,7 +66,7 @@ install required — runs entirely within Snowflake.
 | `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-setup-sv` | Install or upgrade stored procedures required by the other skills |
 | `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-convert-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model |
 
 See **[agents/coco/SETUP.md](agents/coco/SETUP.md)** for stage setup and Workspace deployment.
 
@@ -82,7 +82,7 @@ in the Cursor AI chat — no slash commands required.
 | `ts-profile-thoughtspot` | "Set up my ThoughtSpot profile" | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | "Set up my Snowflake profile" | Add, update, test, or delete Snowflake profiles |
 | `ts-convert-to-snowflake-sv` | "Convert my ThoughtSpot model to a Snowflake Semantic View" | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-convert-from-snowflake-sv` | "Convert my Snowflake Semantic View to a ThoughtSpot model" | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-convert-from-snowflake-sv` | "Convert my Snowflake Semantic View to a ThoughtSpot model" | Convert a Snowflake Semantic View into a ThoughtSpot Model |
 | `ts-object-answer-promote` | "Promote formulas from this Answer to the Model" | Promote formulas and parameters from a saved Answer into a Model |
 
 See **[agents/cursor/SETUP.md](agents/cursor/SETUP.md)** for installation and credential setup.

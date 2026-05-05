@@ -30,8 +30,8 @@ Trigger by asking: "Convert my ThoughtSpot model to a Snowflake Semantic View".
 
 ### `ts-convert-from-snowflake-sv`
 
-Reverse-engineers a Snowflake Semantic View into a ThoughtSpot Model. Reads the view
-DDL, maps tables and joins, translates SQL expressions to ThoughtSpot formulas, and
+Converts a Snowflake Semantic View into a ThoughtSpot Model. Reads the view DDL,
+maps tables and joins, translates SQL expressions to ThoughtSpot formulas, and
 imports the result.
 
 Trigger by asking: "Convert my Snowflake Semantic View to a ThoughtSpot model".

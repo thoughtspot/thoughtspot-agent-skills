@@ -1,14 +1,14 @@
 ---
-description: Convert a Snowflake Semantic View into a ThoughtSpot Model. Invoked when the user asks to reverse-engineer a Semantic View, import a Snowflake Semantic View into ThoughtSpot, or create a ThoughtSpot Model from a Semantic View DDL.
+description: Convert a Snowflake Semantic View into a ThoughtSpot Model. Invoked when the user asks to convert or import a Snowflake Semantic View into ThoughtSpot, or create a ThoughtSpot Model from a Semantic View DDL.
 alwaysApply: false
 ---
 
 # Snowflake Semantic View → ThoughtSpot Model
 
-Reverse-engineers a Snowflake Semantic View into a ThoughtSpot Model. Reads the
-semantic view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics
-back to ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and
-imports the result via `ts tml import`.
+Converts a Snowflake Semantic View into a ThoughtSpot Model. Reads the semantic
+view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics to
+ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and imports
+the result via `ts tml import`.
 
 Two scenarios are supported:
 - **Scenario A (existing tables):** ThoughtSpot Table objects already exist for the

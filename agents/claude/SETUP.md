@@ -37,10 +37,10 @@ Run with `/ts-convert-to-snowflake-sv`.
 
 ### [`ts-convert-from-snowflake-sv`](ts-convert-from-snowflake-sv/)
 
-Reverse-engineers a Snowflake Semantic View into a ThoughtSpot Model. Reads the
-semantic view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics
-back to ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and
-imports the model via the ThoughtSpot REST API.
+Converts a Snowflake Semantic View into a ThoughtSpot Model. Reads the semantic
+view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics to
+ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and imports
+the model via the ThoughtSpot REST API.
 
 Supports two scenarios: building on the underlying physical tables (reusing existing
 ThoughtSpot Table objects and joins) or building on the semantic view's base tables
@@ -247,7 +247,7 @@ what you want in natural language and Claude will invoke the right skill.
 | Skill | Command | What it does |
 |---|---|---|
 | `ts-convert-to-snowflake-sv` | `/ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Reverse-engineer a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
