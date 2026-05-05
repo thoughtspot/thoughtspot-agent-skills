@@ -11,7 +11,14 @@ Verifies the full path:
   6. Create the Semantic View
   7. Confirm it appears in SHOW SEMANTIC VIEWS
   8. DESCRIBE SEMANTIC VIEW — confirm structure is well-formed
-  9. Cleanup (unless --no-cleanup)
+  9. [--mode-c] Fetch DDL via GET_DDL and run CREATE OR REPLACE with it
+ 10. Cleanup (unless --no-cleanup)
+
+Mode C (--mode-c) specifically tests that CREATE OR REPLACE SEMANTIC VIEW works
+correctly on an existing view. After the normal CREATE step, it:
+  - Fetches the SV's DDL via GET_DDL (same path Mode C uses to read the existing SV)
+  - Runs the DDL directly (GET_DDL output is a ready-to-run CREATE OR REPLACE statement)
+  - Verifies the view still appears in SHOW SEMANTIC VIEWS after the replace
 
 This script is intentionally NOT a pytest test — it has side effects (creates and
 drops a Snowflake Semantic View) and requires live credentials.
@@ -158,6 +165,14 @@ def main() -> int:
     parser.add_argument(
         "--no-cleanup", action="store_true",
         help="Keep the created Semantic View after the test (for manual inspection).",
+    )
+    parser.add_argument(
+        "--mode-c", action="store_true",
+        help=(
+            "Also test the Mode C (update existing) path: after creating the SV, "
+            "fetch its DDL via GET_DDL and run CREATE OR REPLACE with that DDL. "
+            "Verifies that SHOW SEMANTIC VIEWS still returns the view after the replace."
+        ),
     )
     args = parser.parse_args()
 
@@ -354,6 +369,64 @@ def main() -> int:
     # DESCRIBE SEMANTIC VIEW are the correct confirmations that the view was created
     # and is well-formed. To test Cortex Analyst end-to-end, upload the YAML to a
     # Snowflake stage and call the Cortex Analyst REST API directly.
+
+    # ── Mode C: GET_DDL → CREATE OR REPLACE round-trip ────────────────────────
+    if args.mode_c and ok:
+        print()
+        print("  -- Mode C: CREATE OR REPLACE on existing SV --")
+
+        sv_fqn = f"{args.sf_target_db}.{args.sf_target_schema}.{view_name}"
+
+        def _get_existing_ddl():
+            rows = snow_json(
+                snow_cmd, cli_conn,
+                f"SELECT GET_DDL('SEMANTIC_VIEW', '{sv_fqn}') AS ddl;"
+            )
+            if not rows:
+                raise RuntimeError(f"GET_DDL returned no rows for '{sv_fqn}'")
+            ddl = rows[0].get("DDL") or rows[0].get("ddl") or list(rows[0].values())[0]
+            if not ddl:
+                raise RuntimeError(f"GET_DDL returned empty DDL for '{sv_fqn}'")
+            return str(ddl)
+
+        ok_c, existing_ddl = r.step(
+            f"Mode C: Fetch existing DDL via GET_DDL('{sv_fqn}')",
+            _get_existing_ddl,
+        )
+        if ok_c:
+            r.info(f"DDL length: {len(existing_ddl)} chars")
+
+            def _create_or_replace():
+                # GET_DDL output is a ready-to-run CREATE OR REPLACE SEMANTIC VIEW statement
+                snow_json_file(snow_cmd, cli_conn, existing_ddl)
+
+            ok_c, _ = r.step(
+                "Mode C: CREATE OR REPLACE SEMANTIC VIEW (round-trip DDL)",
+                _create_or_replace,
+            )
+
+            if ok_c:
+                def _show_after_replace():
+                    rows = snow_json_file(
+                        snow_cmd, cli_conn,
+                        f"SHOW SEMANTIC VIEWS LIKE '{view_name}' "
+                        f"IN SCHEMA {args.sf_target_db}.{args.sf_target_schema};"
+                    )
+                    found = [
+                        row for row in rows
+                        if str(row.get("name", "")).upper() == view_name.upper()
+                    ]
+                    if not found:
+                        raise RuntimeError(
+                            f"SHOW SEMANTIC VIEWS returned no row for '{view_name}' "
+                            "after CREATE OR REPLACE — the replace may have dropped the view."
+                        )
+                    return found[0]
+
+                r.step(
+                    f"Mode C: SHOW SEMANTIC VIEWS confirms '{view_name}' exists after replace",
+                    _show_after_replace,
+                )
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
     if args.no_cleanup:

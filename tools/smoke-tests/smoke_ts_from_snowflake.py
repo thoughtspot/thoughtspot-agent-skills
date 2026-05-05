@@ -13,13 +13,22 @@ Verifies the full path:
   8. Import the model TML to ThoughtSpot
   9. Verify the model appears in metadata search
  10. Count columns vs expected
- 11. Cleanup: delete imported model (unless --no-cleanup)
+ 11. [--mode-c] Export TML and re-import with --no-create-new; verify GUID unchanged
+ 12. Cleanup: delete imported model (unless --no-cleanup)
+
+Mode C (--mode-c) specifically tests that `ts tml import --no-create-new` updates
+an existing model in-place rather than creating a new one. It exports the just-created
+model's TML, adds `guid:` at the document root, and re-imports with --no-create-new.
+After the import it verifies:
+  - exactly one model with the smoke-test name exists (no duplicate created)
+  - the model's GUID is unchanged (not a new object)
 
 Usage:
     python tools/smoke-tests/smoke_ts_from_snowflake.py \\
         --ts-profile production \\
         --sf-profile production \\
         --sv-fqn "BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV" \\
+        [--mode-c] \\
         [--no-cleanup]
 
 Notes:
@@ -152,6 +161,29 @@ def _delete_ts_object(ts_profile: str, guid: str) -> None:
     run_ts(["metadata", "delete", guid], ts_profile)
 
 
+def _import_model_tml_update(ts_profile: str, tml_dict: dict, model_guid: str) -> list | dict:
+    """
+    Import a model TML update in-place using --no-create-new.
+
+    Per TML invariants: guid: must be at the document root, not nested inside model:.
+    --no-create-new fails if the GUID is not found, preventing silent duplicate creation.
+    """
+    tml_with_guid = {**tml_dict, "guid": model_guid}
+    tml_str = yaml.dump(tml_with_guid, default_flow_style=False, allow_unicode=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False, prefix="smoke_update_"
+    ) as f:
+        f.write(tml_str)
+        tmp_path = f.name
+    try:
+        return run_ts(
+            ["tml", "import", "--file", tmp_path, "--no-create-new"],
+            ts_profile,
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -175,6 +207,14 @@ def main() -> int:
     parser.add_argument(
         "--no-cleanup", action="store_true",
         help="Keep the imported ThoughtSpot model after the test.",
+    )
+    parser.add_argument(
+        "--mode-c", action="store_true",
+        help=(
+            "Also test the Mode C (update existing) path: export the created model's TML, "
+            "re-import with --no-create-new, and verify the GUID is unchanged "
+            "(no duplicate model created)."
+        ),
     )
     args = parser.parse_args()
 
@@ -335,6 +375,78 @@ def main() -> int:
         if ok and model_meta:
             base_url = run_ts(["auth", "whoami"], args.ts_profile).get("base_url", "")
             r.info(f"Model URL: {base_url}/#/model/{imported_guid}")
+
+    # ── Mode C: --no-create-new in-place update ───────────────────────────────
+    if args.mode_c and imported_guid:
+        print()
+        print("  -- Mode C: in-place update (--no-create-new) --")
+
+        def _export_for_update():
+            result = run_ts(["tml", "export", imported_guid, "--fqn"], args.ts_profile)
+            if isinstance(result, list):
+                model_obj = next(
+                    (obj for obj in result if isinstance(obj, dict) and "model" in obj),
+                    None,
+                )
+            elif isinstance(result, dict) and "model" in result:
+                model_obj = result
+            else:
+                model_obj = None
+            if model_obj is None:
+                raise RuntimeError(
+                    f"No model TML found in export result for GUID {imported_guid}. "
+                    f"Export returned {type(result).__name__} with "
+                    f"{len(result) if isinstance(result, list) else 1} item(s)."
+                )
+            return model_obj
+
+        ok, original_model_tml = r.step(
+            f"Mode C: Export '{smoke_model_name}' TML for update", _export_for_update
+        )
+
+        if ok and original_model_tml is not None:
+            def _update_in_place():
+                return _import_model_tml_update(
+                    args.ts_profile, original_model_tml, imported_guid
+                )
+
+            ok, _ = r.step(
+                f"Mode C: Re-import with --no-create-new (guid: {imported_guid})",
+                _update_in_place,
+            )
+
+            if ok:
+                def _verify_no_duplicate():
+                    results = run_ts(
+                        ["metadata", "search", "--subtype", "WORKSHEET",
+                         "--name", f"%{smoke_model_name}%"],
+                        args.ts_profile,
+                    )
+                    exact = [
+                        r_ for r_ in results
+                        if r_.get("metadata_name") == smoke_model_name
+                    ]
+                    if len(exact) > 1:
+                        raise RuntimeError(
+                            f"--no-create-new created a duplicate: found {len(exact)} models "
+                            f"named '{smoke_model_name}'. The flag may have been silently ignored."
+                        )
+                    if len(exact) == 0:
+                        raise RuntimeError(
+                            f"No model named '{smoke_model_name}' found after update — "
+                            "the --no-create-new import may have deleted the model."
+                        )
+                    found_guid = exact[0].get("metadata_id") or exact[0].get("id")
+                    if found_guid != imported_guid:
+                        raise RuntimeError(
+                            f"GUID changed after --no-create-new: expected {imported_guid}, "
+                            f"got {found_guid}. A new model was created instead of updating in-place."
+                        )
+
+                r.step(
+                    "Mode C: Verify GUID unchanged — no duplicate created",
+                    _verify_no_duplicate,
+                )
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
     if imported_guid:
