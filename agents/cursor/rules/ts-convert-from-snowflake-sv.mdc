@@ -10,11 +10,14 @@ view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics to
 ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and imports
 the result via `ts tml import`.
 
-Two scenarios are supported:
-- **Scenario A (existing tables):** ThoughtSpot Table objects already exist for the
-  Snowflake objects the semantic view references. Reuses those existing Table objects.
-- **Scenario B (new tables):** No ThoughtSpot Table objects exist yet. Creates new
-  Table objects pointing to the Snowflake objects.
+Three modes are supported:
+- **Mode A (new model, single SV):** Convert one Semantic View into a new ThoughtSpot Model.
+- **Mode B (new model, merge multiple SVs):** Merge multiple Semantic Views into one Model.
+- **Mode C (update existing):** Apply changes from an updated Semantic View to an existing Model.
+
+Within Modes A and B, two table scenarios apply:
+- **Scenario A (existing tables):** ThoughtSpot Table objects already exist. Reuse them.
+- **Scenario B (new tables):** No ThoughtSpot Table objects exist yet. Create them first.
 
 ---
 
@@ -49,6 +52,21 @@ Ask one question at a time. Wait for each answer before proceeding.
 ## Step 1 — Identify the Semantic View
 
 Ask for the Snowflake Semantic View to convert (database, schema, view name).
+
+---
+
+## Step 1.5 — Choose conversion mode
+
+```
+  A — Convert ONE Semantic View → new ThoughtSpot Model    (default)
+  B — Merge MULTIPLE Semantic Views → new ThoughtSpot Model
+  C — Update an EXISTING ThoughtSpot Model from a changed Semantic View
+```
+
+**Mode A / B** — continue through Steps 2–7. For Mode B, repeat Steps 1–5 for each
+additional SV, then merge all column sets before Step 6 import.
+
+**Mode C** — skip Steps 2–7 and jump to the **Mode C** section below.
 
 ---
 
@@ -155,10 +173,92 @@ Show:
 
 ---
 
+---
+
+## Mode C — Update existing ThoughtSpot Model
+
+### C1 — Identify both objects
+
+Ask for:
+- The Snowflake Semantic View (source — the updated version): `database.schema.view_name`
+- The ThoughtSpot Model to update (target): GUID or search by name
+
+The skill does not auto-match by name — always ask for both explicitly.
+
+### C2 — Fetch both in parallel
+
+```sql
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{sv_name}') AS ddl;
+```
+
+```bash
+ts tml export {model_guid} --profile {profile} --fqn --associated
+```
+
+### C3 — Compute change set
+
+Compare the SV column set against the existing model columns:
+
+- **New columns** (in SV, not in model) — add fully with generated synonyms + descriptions
+- **Removed columns** (in model, not in SV) — flag only; never auto-delete
+- **Modified descriptions** — show current vs new; default action: KEEP
+- **Modified synonyms** — show current vs new; default action: MERGE (additive union)
+- **Modified expressions** — show old vs new side-by-side; default action: SKIP
+
+Normalise expressions before comparing: collapse whitespace, lowercase keywords,
+preserve `[bracket]` / `{brace}` column refs verbatim.
+
+### C4 — Present diff and collect decisions
+
+Show a change summary, then per-section review tables. Require user to type `done`.
+
+**Removed columns** — list with warning, no action column:
+> ⚠ These columns exist in the Model but are no longer in the SV. They are NOT
+> removed automatically. To remove safely: run `/ts-dependency-manager` first.
+
+**Descriptions** — UPDATE / **KEEP** per row (default KEEP).
+
+**Synonyms** — **MERGE** / UPDATE / KEEP per row (MERGE = additive union of existing
+and SV synonyms; preserves coaching synonyms absent from the SV).
+
+**Expressions** — YES / **SKIP** per column; show old and new formula side-by-side.
+
+### C5 — Build and import updated TML
+
+Deep-copy the existing Model TML. Apply only confirmed changes.
+
+- `guid:` must be at the document root (not nested inside `model:`)
+- **Never** touch `ai_context` or Data Model Instructions
+- **Never** auto-delete removed columns
+
+```bash
+ts tml import --file {path} --no-create-new
+```
+
+The import will fail if the GUID is not found — surface the error and stop.
+
+### C6 — Post-import coaching handoff
+
+Always surface after a successful import:
+
+```
+✓ Model "{model_name}" updated.
+
+⚠ May need review:
+  Column AI Context   — {N} new columns added (no ai_context yet); {M} columns changed
+                        → /ts-object-model-coach → surface 1
+  Data Model Instructions — schema changes may affect Spotter defaults
+                        → /ts-object-model-coach → surface 5
+  Removed columns flagged — run /ts-dependency-manager before manual removal
+```
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C (update existing model) workflow. |
 | 1.2.0 | 2026-04-28 | Add Spotter-enablement confirmation step (default Y). |
 | 1.1.0 | 2026-04-28 | Add SV synonyms/descriptions/table-comments mapping. Document `non additive by ... desc` → `first_value`. Note that `count_distinct(...)` and `+` for strings are invalid TS formula syntax. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

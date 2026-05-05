@@ -9,6 +9,11 @@ Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Searche
 ThoughtSpot for available models, exports the TML definition, maps it to the Snowflake
 Semantic View DDL format, and creates it via `CREATE OR REPLACE SEMANTIC VIEW`.
 
+Three modes are supported:
+- **Mode A (new SV, single model):** Convert one ThoughtSpot Model into a new Semantic View.
+- **Mode B (split):** Split a multi-fact Model into one Semantic View per domain.
+- **Mode C (update existing):** Apply changes from an updated Model to an existing Semantic View.
+
 ---
 
 ## References
@@ -53,6 +58,24 @@ ts metadata search --profile {ts_profile} --subtype WORKSHEET --name "%{keyword}
 Show results as a numbered list. Ask the user to select one.
 
 Store `{guid}` and `{model_name}`.
+
+---
+
+## Step 1.5 — Choose conversion mode
+
+```
+  A — Convert ThoughtSpot Model → new Snowflake Semantic View    (default)
+  B — Split ThoughtSpot Model → MULTIPLE Snowflake Semantic Views
+  C — Update an EXISTING Snowflake Semantic View from a changed Model
+```
+
+**Mode A** — continue through Steps 2–8. Produce one SV regardless of domain count.
+
+**Mode B** — continue through Steps 2–8. At Step 4, detect multi-fact domains and
+produce one SV per domain.
+
+**Mode C** — continue through Steps 2–3 (TML export + target selection), then jump to
+the **Mode C** section below instead of Steps 4–8.
 
 ---
 
@@ -155,9 +178,69 @@ same ThoughtSpot and Snowflake profiles across the batch.
 
 ---
 
+## Mode C — Update existing Snowflake Semantic View
+
+### C1 — Identify the existing SV
+
+After Step 3 (target selection), also ask:
+- Existing Snowflake Semantic View to update: `database.schema.view_name`
+
+Store as `{existing_sv_name}`.
+
+### C2 — Fetch existing SV DDL (parallel with TML export)
+
+```sql
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{existing_sv_name}') AS ddl;
+```
+
+Run simultaneously with the TML export from Step 2. Generate the full new SV DDL
+using the same Steps 4–5 logic as Mode A (dry run only — do not execute yet).
+
+### C3 — Compute change set
+
+Compare the generated DDL columns against the existing SV DDL columns:
+
+- **New columns** — will be added
+- **Removed columns** — require per-column confirmation (default: KEEP in the new SV)
+- **Modified expressions** — show old vs new; require YES / SKIP per column
+- **Modified descriptions** — applied automatically (no confirmation needed)
+
+Normalise expressions before comparing: collapse whitespace, lowercase keywords,
+preserve quoted SQL identifiers verbatim.
+
+### C4 — Present diff and collect decisions
+
+```
+=== Change set for "{existing_sv_name}" ===
+
+  ✚ New columns:           {N}   (will be added)
+  ✖ Removed columns:       {M}   (confirm each — default: keep)
+  ~ Modified expressions:  {R}   (YES / SKIP per column)
+  ✏ Modified descriptions: {P}   (auto-applied)
+  = Unchanged:             {T}
+```
+
+**Removed columns** — pre-filled KEEP; unchecked columns are re-added verbatim from
+the existing SV DDL so no dependent Cortex Analyst queries break silently.
+
+**Modified expressions** — show old and new DDL expression side-by-side; require
+explicit YES before applying.
+
+### C5 — Build final DDL and execute
+
+Assemble from: new columns + unchanged columns + confirmed-removed omitted +
+kept-removed carried forward verbatim + confirmed expression changes.
+
+```sql
+CREATE OR REPLACE SEMANTIC VIEW {database}.{schema}.{existing_sv_name} ...;
+```
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C (update existing SV) workflow. Mode B (split) is now explicitly first-class. |
 | 1.1.0 | 2026-04-28 | Document `properties.synonyms` (vs top-level), table comments, and `first_value` → `desc nulls last` mapping. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

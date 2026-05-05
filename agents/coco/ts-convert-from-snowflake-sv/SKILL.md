@@ -158,6 +158,24 @@ Store `secret_value` for use in subsequent API calls via stored procedures. Neve
 
 ---
 
+### Step 1.5: Choose conversion mode
+
+Present this menu to the user and wait for a response:
+
+```
+Choose a conversion mode:
+  A — Convert ONE Semantic View → new ThoughtSpot Model    (default)
+  B — Merge MULTIPLE Semantic Views → new ThoughtSpot Model
+  C — Update an EXISTING ThoughtSpot Model from a changed Semantic View
+```
+
+**Mode A / B** — continue with Step 2 and the standard workflow.
+For Mode B, repeat Steps 1–6 for each additional SV, then merge all column sets before importing.
+
+**Mode C** — skip Steps 2–9 and jump to the **Mode C workflow** section below.
+
+---
+
 ### Step 2: Parse the DDL
 
 Parse the DDL string returned in Step 1. The DDL is a SQL `CREATE OR REPLACE
@@ -855,6 +873,104 @@ if you reimport to fix any errors.
 
 ---
 
+---
+
+## Mode C workflow — Update existing ThoughtSpot Model
+
+### Step C1: Identify both objects
+
+Ask for:
+- The Snowflake Semantic View (source — the updated version): `database.schema.view_name`
+- The ThoughtSpot Model to update (target): GUID or search by name
+
+The skill does not auto-match by name — always collect both explicitly.
+
+### Step C2: Fetch both in parallel
+
+**Fetch SV DDL:**
+
+```sql
+CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.SV_DDL_C AS
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{sv_name}') AS ddl_text;
+
+SELECT ddl_text FROM SKILLS.TEMP.SV_DDL_C;
+```
+
+**Export model TML:**
+
+```sql
+CALL SKILLS.PUBLIC.TS_EXPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{model_guid}'));
+```
+
+Parse the DDL using the standard Step 2 rules. Extract from the model TML:
+- `model.columns` — keyed by column name, with `description`, `synonyms` (from `properties.synonyms`), `formula_id`, and `column_id`
+- `model.formulas` — keyed by formula `id`, storing `expr`
+
+### Step C3: Compute change set
+
+Compare the SV column set against the existing model columns:
+
+- **New columns** — in SV, not in model → add fully with generated descriptions + synonyms
+- **Removed columns** — in model, not in SV → flag only, never auto-delete
+- **Modified descriptions** — SV `comment` ≠ model `description` → review per column (default: KEEP)
+- **Modified synonyms** — SV `with synonyms` ≠ model `properties.synonyms` → review per column (default: MERGE — additive union)
+- **Modified expressions** — formula expression changed → review per column (default: SKIP)
+
+Normalise expressions before comparing: collapse whitespace, lowercase SQL keywords,
+preserve `[bracket]` and `{brace}` column refs verbatim.
+
+### Step C4: Present diff and collect decisions
+
+Show a change-set summary, then per-section review tables. Require user to type `done`.
+
+**Removed columns** — informational list only, no action column:
+> ⚠ These columns exist in the Model but are no longer in the SV. They are NOT
+> removed automatically. To remove safely, run `/ts-dependency-manager` first.
+
+**Modified descriptions** — table with UPDATE / **KEEP** per row.
+
+**Modified synonyms** — table with **MERGE** / UPDATE / KEEP per row.
+- MERGE = union of existing and SV synonym sets (preserves coaching synonyms absent from the SV)
+- UPDATE = replace with SV set entirely
+- KEEP = ignore SV change
+
+**Modified expressions** — side-by-side old / new formula; YES / **SKIP** per column.
+
+### Step C5: Build and import updated TML
+
+Deep-copy the existing model TML. Apply only confirmed changes.
+
+**Rules:**
+- `guid:` must be at the document root — NOT nested inside `model:`
+- **Never** touch `ai_context` fields on any column
+- **Never** touch Data Model Instructions
+- **Never** auto-delete removed columns
+
+```sql
+-- Write updated TML to stage, then import
+CALL SKILLS.PUBLIC.TS_IMPORT_TML('{profile_name}', ARRAY_CONSTRUCT('{updated_tml_json}'), 'VALIDATE_AND_APPLY', FALSE, TRUE);
+```
+
+The `no_create_new` parameter (last argument) must be `TRUE` to update in place.
+The import will fail if the GUID is not found — surface the error and stop.
+
+### Step C6: Post-import coaching handoff
+
+Always surface after a successful import:
+
+```
+✓ Model "{model_name}" updated.
+
+⚠ May need review:
+  Column AI Context   — {N} new columns added (no ai_context yet); {M} columns changed
+                        → /ts-object-model-coach → surface 1
+  Data Model Instructions — schema changes may affect Spotter defaults
+                        → /ts-object-model-coach → surface 5
+  Removed columns     — run /ts-dependency-manager before manual removal
+```
+
+---
+
 ## Multiple semantic view conversion
 
 After completing one conversion, offer to convert additional views.
@@ -873,6 +989,7 @@ After completing one conversion, offer to convert additional views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C workflow (update existing ThoughtSpot Model from changed SV) using TS_EXPORT_TML / TS_IMPORT_TML stored procedures. |
 | 1.2.0 | 2026-04-28 | Add Spotter-enablement confirmation step (default Y) before the review checkpoint. |
 | 1.1.0 | 2026-04-28 | Map SV synonyms/descriptions/table-comments to TS Model + Table TMLs. Add `non additive by ... desc` → `first_value` mapping. Note `count_distinct(...)` and `+` string-concat are invalid TS formula syntax. |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

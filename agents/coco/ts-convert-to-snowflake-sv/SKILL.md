@@ -220,6 +220,28 @@ Store the exact `NAME` value as `{profile_name}` for all subsequent
 
 ---
 
+### Step 1.5: Choose conversion mode
+
+Present this menu to the user and wait for a response:
+
+```
+Choose a conversion mode:
+  A — Convert ThoughtSpot Model → new Snowflake Semantic View    (default)
+  B — Split ThoughtSpot Model → MULTIPLE Snowflake Semantic Views
+  C — Update an EXISTING Snowflake Semantic View from a changed Model
+```
+
+**Mode A** — continue with Step 2 and the standard workflow. Produce one SV regardless
+of domain count.
+
+**Mode B** — continue with Step 2 and the standard workflow. At Step 8 (DDL generation),
+detect multi-fact domains and produce one SV per domain.
+
+**Mode C** — continue through Step 3 (TML export) to get the model data, then jump to
+the **Mode C workflow** section. Store the existing SV name alongside the target.
+
+---
+
 ### Step 2: Find and Select a Model or Worksheet
 
 **Present the following options to the user:**
@@ -1372,9 +1394,80 @@ rm -f /tmp/ts_token.txt
 
 ---
 
+## Mode C workflow — Update existing Snowflake Semantic View
+
+### Step C1: Identify the existing SV
+
+After Step 1.5, ask:
+- Existing Snowflake Semantic View to update: `database.schema.view_name`
+
+Store as `{existing_sv_name}`. The user selects this explicitly — the skill does not auto-match by name.
+
+### Step C2: Fetch existing SV DDL (parallel with TML export in Step 3)
+
+```sql
+CREATE OR REPLACE TEMPORARY TABLE SKILLS.TEMP.EXISTING_SV_DDL AS
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{existing_sv_name}') AS ddl_text;
+
+SELECT ddl_text FROM SKILLS.TEMP.EXISTING_SV_DDL;
+```
+
+Run simultaneously with the TML export. Generate the full new SV DDL using the same
+Steps 4–11 logic as Mode A (dry run — do not execute yet). Parse the existing SV DDL
+to extract its current column set.
+
+### Step C3: Compute change set
+
+Compare the generated DDL column set against the existing SV DDL column set:
+
+- **New columns** — in generated DDL, not in existing SV → will be added
+- **Removed columns** — in existing SV, not in generated DDL → require per-column confirm (default: KEEP)
+- **Modified expressions** — expression changed for an existing column → require YES / SKIP per column
+- **Modified descriptions** — `comment=` changed → auto-applied, no confirmation needed
+
+Normalise expressions before comparing: collapse whitespace, lowercase SQL keywords,
+preserve quoted SQL identifiers (`"identifier"`) verbatim.
+
+### Step C4: Present diff and collect decisions
+
+```
+=== Change set for "{existing_sv_name}" ===
+
+  ✚ New columns:           {N}   (will be added)
+  ✖ Removed columns:       {M}   (confirm each — default: keep)
+  ~ Modified expressions:  {R}   (YES / SKIP per column)
+  ✏ Modified descriptions: {P}   (auto-applied)
+  = Unchanged:             {T}
+```
+
+**Removed columns** — pre-filled unchecked (KEEP). Unchecked columns are re-added
+verbatim from the existing SV DDL so no dependent Cortex Analyst queries break silently.
+
+**Modified expressions** — show old and new DDL expression side-by-side; require
+explicit YES before applying. Do not bulk-apply expression changes.
+
+### Step C5: Build final DDL and execute
+
+Assemble the final DDL from:
+- All new columns (from generated DDL)
+- All unchanged columns (from generated DDL)
+- Confirmed-removed columns: omit
+- KEEP (unchecked) removed columns: carry forward verbatim from existing SV DDL
+- Confirmed modified expressions: use generated DDL value
+- All modified descriptions: use generated DDL value
+
+```sql
+CREATE OR REPLACE SEMANTIC VIEW {database}.{schema}.{existing_sv_name} ...;
+```
+
+Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged.
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C workflow (update existing Snowflake Semantic View from changed Model) using GET_DDL + CREATE OR REPLACE. |
 | 1.1.0 | 2026-04-28 | Document `first_value` ↔ `desc nulls last` mapping and `properties.synonyms` placement (vs top-level which TS drops). |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

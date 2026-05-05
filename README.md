@@ -34,8 +34,8 @@ Skills invoked via slash commands in Claude Code. Requires Claude Code and Pytho
 
 | Skill | Command | What it does |
 |---|---|---|
-| `ts-convert-to-snowflake-sv` | `/ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View; auto-detects multi-fact domains and offers to split into one view per domain |
-| `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model; supports merging multiple Semantic Views into one model |
+| `ts-convert-to-snowflake-sv` | `/ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a new Snowflake Semantic View, split one model into multiple views per domain, or update an existing Semantic View from a changed model |
+| `ts-convert-from-snowflake-sv` | `/ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a new ThoughtSpot Model, merge multiple Semantic Views into one model, or update an existing model from a changed Semantic View |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
