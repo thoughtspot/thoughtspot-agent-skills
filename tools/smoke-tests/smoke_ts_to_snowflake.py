@@ -61,7 +61,7 @@ from check_sv_yaml import validate_sv_yaml  # noqa: E402
 from _common import (  # noqa: E402
     SmokeTestResult, SkipStep,
     ts_auth_check, run_ts,
-    load_sf_profile, get_snow_cmd, snow_json_file, snow_exec,
+    load_sf_profile, get_snow_cmd, snow_json, snow_json_file, snow_exec,
 )
 
 
@@ -397,8 +397,14 @@ def main() -> int:
             r.info(f"DDL length: {len(existing_ddl)} chars")
 
             def _create_or_replace():
-                # GET_DDL output is a ready-to-run CREATE OR REPLACE SEMANTIC VIEW statement
-                snow_json_file(snow_cmd, cli_conn, existing_ddl)
+                # GET_DDL returns a CREATE OR REPLACE statement using the short view name,
+                # so we must set the database/schema context before running it.
+                ddl_with_context = (
+                    f"USE DATABASE {args.sf_target_db};\n"
+                    f"USE SCHEMA {args.sf_target_schema};\n"
+                    f"{existing_ddl}"
+                )
+                snow_json_file(snow_cmd, cli_conn, ddl_with_context)
 
             ok_c, _ = r.step(
                 "Mode C: CREATE OR REPLACE SEMANTIC VIEW (round-trip DDL)",
