@@ -95,7 +95,7 @@ On skill invocation, display this plan before doing any work:
 
 Steps:
   1.   Authenticate (ThoughtSpot + Snowflake) ............. auto
-  1.5. Choose session mode (single view / merge mode) ..... you choose
+  1.5. Choose session mode (A: single / B: merge / C: update) . you choose
   2.   Identify the semantic view ......................... you choose
   3.   Get the semantic view DDL .......................... auto
   4.   Parse the DDL (incl. synonyms, descriptions) ....... auto
@@ -112,7 +112,7 @@ Steps:
 
 File-only mode: at Step 10, choose FILE to write TML files for manual import.
 
-Confirmation required: Steps 1.5, 5, 9.5, 10
+Confirmation required: Steps 1.5, 5, 9.5, 10 (Modes A/B); Steps 1.5, C4 (Mode C)
 Auto-executed: all others
 
 Ready to start? [Y / N]
@@ -146,15 +146,263 @@ Do not begin Step 1 until the user confirms.
 
 ```
 Choose a conversion mode:
-  A — Convert ONE Semantic View → one ThoughtSpot Model  (default)
-  B — Merge MULTIPLE Semantic Views → one ThoughtSpot Model
+  A — Convert ONE Semantic View → new ThoughtSpot Model   (default)
+  B — Merge MULTIPLE Semantic Views → new ThoughtSpot Model
+  C — Update an EXISTING ThoughtSpot Model from a changed Semantic View
 ```
 
-If the user selects **A** (or presses Enter): set `merge_mode = False`. Continue with
-the workflow unchanged — Steps 2 through 13 run exactly as documented.
+If the user selects **A** (or presses Enter): set `session_mode = "single"`. Continue
+with the workflow unchanged — Steps 2 through 13 run exactly as documented.
 
-If the user selects **B**: set `merge_mode = True`. The modified Steps 2, 3, and new
-Step 3.5 below apply; Steps 4–13 then run on the merged result exactly once.
+If the user selects **B**: set `session_mode = "merge"`. The modified Steps 2, 3, and
+new Step 3.5 below apply; Steps 4–13 then run on the merged result exactly once.
+
+If the user selects **C**: set `session_mode = "update"`. Skip Steps 2–13 entirely.
+Run the **Mode C workflow** documented in the section below, then stop.
+
+---
+
+---
+
+## Mode C: Update an Existing ThoughtSpot Model
+
+**Run these steps when `session_mode = "update"` (Mode C selected at Step 1.5).
+Skip Steps 2–13 entirely. When Step C6 completes, the session ends.**
+
+---
+
+### Step C1: Identify both objects
+
+```
+Semantic View (source — the updated version):
+  Enter database.schema.view_name or press Enter to browse: _______
+
+ThoughtSpot Model (target — the existing model to update):
+  G — I have a GUID
+  S — Search by name
+
+Enter G / S:
+```
+
+Store `{sv_name}` and `{model_guid}`. Always require both to be explicitly selected —
+do not attempt to auto-match by name.
+
+---
+
+### Step C2: Fetch both in parallel
+
+Run simultaneously:
+
+```sql
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{sv_name}');
+```
+
+```bash
+ts tml export {model_guid} --profile {profile} --fqn --associated --parse
+```
+
+Parse the SV DDL using the existing Step 4 logic. Extract from the Model bundle:
+
+```python
+model_tml   = next(i["tml"]["model"] for i in bundle if i["type"] == "model")
+existing = {}
+for col in model_tml.get("columns", []):
+    existing[col["name"]] = {
+        "description":  col.get("description", ""),
+        "synonyms":     col.get("properties", {}).get("synonyms", []),
+        "ai_context":   col.get("properties", {}).get("ai_context"),   # read-only
+        "formula_id":   col.get("formula_id"),
+        "column_id":    col.get("column_id"),
+    }
+existing_formulas = {
+    f["id"]: f.get("expr", "")
+    for f in model_tml.get("formulas", [])
+}
+```
+
+---
+
+### Step C3: Compute the change set
+
+```python
+import re
+
+def _normalise_expr(expr: str) -> str:
+    """Normalise for comparison only — never use the output as actual SQL."""
+    refs, i = {}, 0
+    def _stash(m):
+        nonlocal i
+        key = f"__REF{i}__"; refs[key] = m.group(0); i += 1; return key
+    # Stash bracket/brace refs so they survive lowercasing
+    out = re.sub(r'\[[^\]]+\]|\{[^}]+\}', _stash, expr)
+    out = re.sub(r'\s+', ' ', out.strip()).lower()
+    for key, val in refs.items():
+        out = out.replace(key, val)
+    return out
+
+def _exprs_differ(a: str, b: str) -> bool:
+    return _normalise_expr(a) != _normalise_expr(b)
+
+sv_cols    = set(sv_parse["columns"].keys())   # keyed by column display name
+model_cols = set(existing.keys())
+
+change_set = {
+    "new_columns":           list(sv_cols - model_cols),
+    "removed_columns":       list(model_cols - sv_cols),   # flag only
+    "modified_descriptions": [],
+    "modified_synonyms":     [],
+    "modified_expressions":  [],
+    "join_changes":          [],
+}
+
+for col_name in sv_cols & model_cols:
+    sv_col = sv_parse["columns"][col_name]
+    ts_col = existing[col_name]
+
+    if sv_col.get("description") and sv_col["description"] != ts_col["description"]:
+        change_set["modified_descriptions"].append({
+            "column": col_name,
+            "current": ts_col["description"],
+            "new":     sv_col["description"],
+        })
+
+    sv_syns = set(sv_col.get("synonyms", []))
+    ts_syns = set(ts_col["synonyms"])
+    if sv_syns != ts_syns:
+        change_set["modified_synonyms"].append({
+            "column":   col_name,
+            "current":  sorted(ts_syns),
+            "new":      sorted(sv_syns),
+            "added":    sorted(sv_syns - ts_syns),
+            "removed":  sorted(ts_syns - sv_syns),
+        })
+
+    if col_name in sv_formulas and ts_col["formula_id"]:
+        sv_expr = sv_formulas[col_name]
+        ts_expr = existing_formulas.get(ts_col["formula_id"], "")
+        if _exprs_differ(sv_expr, ts_expr):
+            change_set["modified_expressions"].append({
+                "column":  col_name,
+                "current": ts_expr,
+                "new":     sv_expr,
+            })
+
+# Join changes: compare sv_parse["relationships"] vs model join graph
+# Flag any relationship not present in the existing model (name or endpoint differs)
+```
+
+---
+
+### Step C4: Present the diff and collect decisions
+
+Display the summary, then per-section review tables. Wait for the user to edit and
+type `done` before proceeding.
+
+**Summary**
+
+```
+=== Change set for "{model_name}" ===
+
+  ✚ New columns:              {N}   (will be added with generated synonyms + descriptions)
+  ✖ Removed columns:          {M}   (flagged only — see note below)
+  ✏ Modified descriptions:    {P}   (UPDATE / KEEP per column — default: KEEP)
+  ✏ Modified synonyms:        {Q}   (MERGE / UPDATE / KEEP per column — default: MERGE)
+  ~ Modified expressions:     {R}   (YES / SKIP per column — confirm before re-translating)
+  ~ Join changes:             {S}   (flagged for review)
+  = Unchanged columns:        {T}   (no action)
+```
+
+**Modified descriptions** — per-column table, default `KEEP`:
+
+| Column | Current (TS Model) | New (from SV) | Action |
+|---|---|---|---|
+| Amount | Total sales amount in USD | Total revenue in local currency | KEEP |
+
+**Modified synonyms** — per-column table, default `MERGE`:
+
+| Column | Current synonyms | Added by SV | Removed by SV | Action |
+|---|---|---|---|---|
+| Product Category | category, product group | dept | product group | MERGE |
+
+Options:
+- `MERGE` *(default)* — add new SV synonyms, keep existing; never remove coached synonyms
+- `UPDATE` — replace existing synonyms entirely with the SV set
+- `KEEP` — ignore the SV change; leave existing synonyms untouched
+
+**Modified expressions** — show old and new formula side-by-side. Require `YES / SKIP`
+per column — never bulk-apply expression changes.
+
+**Removed columns** — informational list only, no action column:
+
+```
+⚠ The following columns exist in the ThoughtSpot Model but are no longer in the SV.
+  They are NOT removed automatically — removal may break dependent Answers and Liveboards.
+  To remove them safely: run /ts-dependency-manager first, then edit the Model TML manually.
+```
+
+Require the user to type `done` after reviewing before proceeding.
+
+---
+
+### Step C5: Build the updated Model TML and import
+
+Deep-copy the existing Model TML. Apply only the confirmed changes:
+
+| Change type | Action |
+|---|---|
+| New column | Generate using Step 8 + Step 9 logic — same as create mode |
+| Modified description, `UPDATE` | Write to `column.description` |
+| Modified description, `KEEP` | Leave untouched |
+| Modified synonyms, `MERGE` | Union: add new SV synonyms, keep all existing ones |
+| Modified synonyms, `UPDATE` | Replace `properties.synonyms[]` with SV set |
+| Modified synonyms, `KEEP` | Leave untouched |
+| Modified expression, `YES` | Re-translate using Step 9 logic; update `formulas[].expr` |
+| Modified expression, `SKIP` | Leave untouched |
+| `ai_context` on any column | **Never touch** |
+| Data Model Instructions | **Never touch** |
+| Removed columns | **Never touch** |
+
+Place `guid` at the document root (not nested under `model:`) and import with
+`--no-create-new` to update the existing model in place. The import will fail if
+the GUID is not found — surface the error clearly and stop.
+
+```python
+top_level = {"guid": model_guid, "model": model_dict}
+model_tml_str = yaml.dump(top_level, default_flow_style=False, allow_unicode=True)
+
+result = subprocess.run(
+    ["ts", "tml", "import", "--policy", "ALL_OR_NONE",
+     "--no-create-new", "--profile", profile_name],
+    input=json.dumps([model_tml_str]),
+    capture_output=True, text=True,
+)
+```
+
+---
+
+### Step C6: Post-import coaching handoff
+
+After a successful import, always surface:
+
+```
+✓ Model "{model_name}" updated.
+
+⚠ Coaching surfaces that may need review:
+
+  Column AI Context
+    {N_new} new columns added — no ai_context yet
+    {M_updated} existing columns had descriptions or synonyms changed
+    → Run /ts-object-model-coach → surface 1 to review and update ai_context
+
+  Data Model Instructions
+    Schema changes (new columns, expression changes, join changes) may affect
+    Spotter's default behaviours — particularly time_defaults and aggregation_defaults.
+    → Run /ts-object-model-coach → surface 5 to review Instructions
+
+  Removed columns flagged above
+    If you intend to remove any of the flagged columns, run /ts-dependency-manager
+    first to assess downstream impact before editing the Model TML manually.
+```
 
 ---
 
@@ -998,6 +1246,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.0 | 2026-05-05 | Add Mode C (update existing): Steps C1–C6. Identifies a changed SV and an existing TS Model, diffs columns/descriptions/synonyms/expressions, applies per-column reviewed changes with `--no-create-new`, and surfaces /ts-object-model-coach handoff. `ai_context` and Instructions are never touched. Step 1.5 menu updated to A/B/C. |
 | 1.3.0 | 2026-04-28 | Add Step 9.5 — confirm Spotter (AI search) enablement before import. Default Y; preserves existing setting on in-place updates. |
 | 1.2.0 | 2026-04-28 | Map SV synonyms/descriptions to TS Model + Table TMLs. Add Step 6D for table-description updates. Document `non additive by ... desc` → `first_value`. Fix synonyms placement (`properties.synonyms` not column root). |
 | 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |

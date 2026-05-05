@@ -146,20 +146,22 @@ On skill invocation, display this plan before doing any work:
 **ts-convert-to-snowflake-sv** — export a ThoughtSpot Worksheet or Model and create a matching Snowflake Semantic View.
 
 Steps:
-  1.   Authenticate (ThoughtSpot) ......................... auto
-  2.   Find and select the model / worksheet .............. you choose
-  3.   Export and parse the TML ........................... auto
-  4–9. Map columns, joins, and formulas → DDL ............. auto
- 10.   Validate the generated DDL ......................... auto
- 11.   Checkpoint — review DDL before Snowflake execution .. you confirm
- 12.   CREATE OR REPLACE SEMANTIC VIEW in Snowflake ........ auto
- 12b.  Verify creation .................................... auto
- 13.   Generate example test questions ..................... auto
+  1.    Authenticate (ThoughtSpot) ......................... auto
+  1.5.  Choose session mode (A: single / B: split / C: update) . you choose
+  2.    Find and select the model / worksheet .............. you choose
+  3.    Export and parse the TML ........................... auto
+  4–9.  Map columns, joins, and formulas → DDL ............. auto
+  9.5C. (Mode C only) Diff against existing SV + confirm changes . you confirm
+ 10.    Checkpoint — review DDL before Snowflake execution .. you confirm
+ 11.    Validate the generated DDL ......................... auto
+ 12.    CREATE OR REPLACE SEMANTIC VIEW in Snowflake ........ auto
+ 12b.   Verify creation .................................... auto
+ 13.    Generate example test questions ..................... auto
 
-File-only mode: at Step 11, choose FILE instead of executing — generates a .sql file
+File-only mode: at Step 10, choose FILE instead of executing — generates a .sql file
 for manual import in Snowsight.
 
-Confirmation required: Step 11 (DDL review)
+Confirmation required: Step 10 (DDL review); Step 9.5C for Mode C
 Auto-executed: all others
 
 Ready to start? [Y / N]
@@ -219,6 +221,34 @@ Then clear the stale cache and retry:
 ts auth logout --profile {profile_name}
 source ~/.zshenv && ts auth whoami --profile {profile_name}
 ```
+
+---
+
+### Step 1.5: Session Mode
+
+```
+Choose a conversion mode:
+  A — Convert ThoughtSpot Model → new Snowflake Semantic View    (default)
+  B — Split ThoughtSpot Model → MULTIPLE Snowflake Semantic Views
+  C — Update an EXISTING Snowflake Semantic View from a changed Model
+```
+
+**Mode A** (or press Enter): set `session_mode = "single"`. Step 7.5 is skipped —
+the skill produces one SV regardless of how many domains are detected.
+
+**Mode B**: set `session_mode = "split"`. Step 7.5 runs automatically in SPLIT mode —
+the SPLIT/SINGLE/CUSTOM choice prompt is suppressed since the user already chose here.
+
+**Mode C**: set `session_mode = "update"`. After confirming the model in Step 2, also
+ask for the existing SV to update:
+
+```
+Existing Snowflake Semantic View to update:
+  Enter database.schema.view_name or press Enter to browse: _______
+```
+
+Store `{existing_sv_name}`. The skill runs Steps 2–9 as a DDL dry run, then
+diverges at Step 9.5C (diff + review) before executing.
 
 ---
 
@@ -299,6 +329,15 @@ Store `metadata_id` as `{selected_model_id}` and `metadata_name` as
 ---
 
 ### Step 3: Export the TML
+
+**Mode C only:** run the following in parallel with the TML export to fetch the
+existing SV DDL:
+
+```sql
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{existing_sv_name}');
+```
+
+Store the result as `{existing_sv_ddl}` — used in Step 9.5C.
 
 ```bash
 source ~/.zshenv && ts tml export {selected_model_id} --profile {profile_name} --fqn --associated
@@ -684,8 +723,15 @@ For join type and cardinality mappings, see
 
 ### Step 7.5: Multi-Domain Analysis
 
-**Trigger:** Run this step whenever `model_tables[]` contains ≥2 tables and Step 7 produced
-at least one join. Skip (proceed to Step 8) if the model has 0 or 1 fact tables.
+**Mode gate:**
+- **Mode A** (`session_mode = "single"`) — skip this step entirely. Proceed to Step 8.
+- **Mode C** (`session_mode = "update"`) — skip this step entirely. Proceed to Step 8.
+- **Mode B** (`session_mode = "split"`) — run this step and enter SPLIT mode automatically.
+  Set `split_mode = True` immediately; suppress the SPLIT/SINGLE/CUSTOM choice prompt
+  since the user already chose Mode B at Step 1.5.
+
+**Trigger (Mode B only):** Run whenever `model_tables[]` contains ≥2 tables and Step 7
+produced at least one join. Skip (proceed to Step 8) if the model has 0 or 1 fact tables.
 
 **Algorithm:**
 
@@ -947,9 +993,124 @@ Confirmed untranslatable patterns (after checking the reference):
 
 ---
 
+### Step 9.5C: Diff Against Existing SV — Mode C Only
+
+**Skip this step for Modes A and B.** Run only when `session_mode = "update"`.
+
+Parse the existing SV DDL (fetched in Step 3C) using the same logic as
+[~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md)
+to extract its current column set, expressions, and descriptions.
+
+#### Compute the change set
+
+```python
+import re
+
+def _normalise_expr(expr: str) -> str:
+    """Normalise for comparison only — never use the output as actual DDL."""
+    refs, i = {}, 0
+    def _stash(m):
+        nonlocal i
+        key = f"__REF{i}__"; refs[key] = m.group(0); i += 1; return key
+    # Stash quoted identifiers so they survive lowercasing
+    out = re.sub(r'"[^"]*"', _stash, expr)
+    out = re.sub(r'\s+', ' ', out.strip()).lower()
+    for key, val in refs.items():
+        out = out.replace(key, val)
+    return out
+
+def _exprs_differ(a: str, b: str) -> bool:
+    return _normalise_expr(a) != _normalise_expr(b)
+
+new_cols      = set(generated_sv["columns"])
+existing_cols = set(existing_sv_parse["columns"])
+
+change_set = {
+    "new_columns":           list(new_cols - existing_cols),
+    "removed_columns":       list(existing_cols - new_cols),   # user confirms each
+    "modified_expressions":  [],
+    "modified_descriptions": [],
+}
+
+for col in new_cols & existing_cols:
+    if _exprs_differ(generated_sv["columns"][col]["expr"],
+                     existing_sv_parse["columns"][col]["expr"]):
+        change_set["modified_expressions"].append({
+            "column":  col,
+            "current": existing_sv_parse["columns"][col]["expr"],
+            "new":     generated_sv["columns"][col]["expr"],
+        })
+    new_desc = generated_sv["columns"][col].get("description", "")
+    old_desc = existing_sv_parse["columns"][col].get("description", "")
+    if new_desc != old_desc:
+        change_set["modified_descriptions"].append({
+            "column": col, "current": old_desc, "new": new_desc,
+        })
+```
+
+#### Present the diff and collect decisions
+
+```
+=== Change set for "{existing_sv_name}" ===
+
+  ✚ New columns:              {N}   (will be added)
+  ✖ Removed columns:          {M}   (confirm each — unchecked = keep in new SV)
+  ~ Modified expressions:     {R}   (will be updated — review before confirming)
+  ✏ Modified descriptions:    {P}   (will be updated automatically)
+  = Unchanged columns:        {T}   (no change)
+```
+
+**Removed columns** — require per-column confirmation. Pre-fill all as unchecked (keep):
+
+```
+These columns are in the current SV but not in the updated Model.
+Confirm removal from the SV? (unchecked = keep in the new SV DDL)
+
+  [ ] {col_name}  — currently: {existing_expr}
+  ...
+```
+
+Unchecked columns are re-added verbatim from the existing SV DDL — they are preserved
+even if the Model no longer includes them.
+
+**Modified expressions** — show old and new side-by-side. Require `YES / SKIP` per
+column; do not bulk-apply.
+
+Descriptions are applied automatically — no per-column confirmation needed.
+
+Require the user to type `done` after reviewing before proceeding.
+
+#### Build the final DDL
+
+Assemble from the reviewed changes:
+- All new columns (from generated DDL)
+- All unchanged columns (from generated DDL)
+- Confirmed-removed columns: omit
+- Unchecked (kept) removed columns: carry forward from existing SV DDL verbatim
+- Modified expressions confirmed `YES`: use generated DDL value
+- Modified descriptions: use generated DDL value
+
+Replace the `generated_sv_ddl` variable with this assembled DDL before Step 10.
+
+---
+
 ### ⚑ Step 10: CHECKPOINT — Review with User
 
 **Do not proceed without explicit user confirmation.**
+
+**Mode C:** show the assembled (diff-reviewed) DDL and a diff summary instead of the
+full conversion summary. The prompt becomes:
+
+```
+Shall I apply these changes to {existing_sv_name} in Snowflake?
+  ✚ {N} columns added, ✖ {M} removed, ~ {R} expressions updated, ✏ {P} descriptions updated
+
+  YES  — proceed (CREATE OR REPLACE)
+  NO   — cancel
+  FILE — write the final DDL to a file without executing
+```
+
+---
 
 **Single mode (`split_mode = False`):** present the following three sections.
 
@@ -1331,5 +1492,6 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5): A=single new SV, B=split (now first-class), C=update existing SV; add Step 9.5C diff workflow for Mode C |
 | 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.0.0 | 2026-04-24 | Initial versioned release |
