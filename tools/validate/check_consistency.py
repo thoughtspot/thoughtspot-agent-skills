@@ -3,9 +3,9 @@
 check_consistency.py — verify cross-file consistency (skills tables, symlink steps, stage copy list).
 
 Checks:
-  1. README.md skills tables — every skill in agents/claude/ and agents/coco/ is listed
+  1. README.md skills tables — every skill in agents/claude/ and agents/coco-snowsight/ is listed
   2. agents/claude/SETUP.md symlink steps — every claude skill has an ln -s step
-  3. agents/coco/SETUP.md stage copy list — every coco SKILL.md and agents/shared/ file is listed
+  3. agents/coco-snowsight/SETUP.md stage copy list — every coco SKILL.md and agents/shared/ file is listed
   4. README.md structure section — scripts/ and every subdirectory of tools/ is mentioned
   5. agents/cursor/SETUP.md rule entries — every .mdc in agents/cursor/rules/ is listed
   6. README.md cursor coverage — every .mdc rule in agents/cursor/rules/ is mentioned in README
@@ -59,7 +59,7 @@ def _staged_touches_agents_or_setup(staged: list[str]) -> bool:
 
 def check_readme_skills(repo_root: Path) -> list[str]:
     """
-    Every directory under agents/claude/ and agents/coco/ that contains a tracked SKILL.md
+    Every directory under agents/claude/ and agents/coco-snowsight/ that contains a tracked SKILL.md
     must appear in the README.md skills tables.
     Gitignored/untracked skill directories are skipped.
     """
@@ -67,7 +67,7 @@ def check_readme_skills(repo_root: Path) -> list[str]:
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     tracked = _get_tracked_paths(repo_root)
 
-    for runtime in ("claude", "coco"):
+    for runtime in ("claude", "cli", "coco-snowsight"):
         agent_dir = repo_root / "agents" / runtime
         if not agent_dir.is_dir():
             continue
@@ -119,31 +119,31 @@ def check_claude_setup_symlinks(repo_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 3: agents/coco/SETUP.md stage copy list
+# Check 3: agents/coco-snowsight/SETUP.md stage copy list
 # ---------------------------------------------------------------------------
 
 def check_coco_setup_stage_copy(repo_root: Path) -> list[str]:
     """
-    Every SKILL.md under agents/coco/ and every non-CLAUDE.md file under
-    agents/shared/ must appear in a 'snow stage copy' command in agents/coco/SETUP.md.
+    Every SKILL.md under agents/coco-snowsight/ and every non-CLAUDE.md file under
+    agents/shared/ must appear in a 'snow stage copy' command in agents/coco-snowsight/SETUP.md.
     """
     failures = []
-    setup_path = repo_root / "agents" / "coco" / "SETUP.md"
+    setup_path = repo_root / "agents" / "coco-snowsight" / "SETUP.md"
     if not setup_path.exists():
-        return ["agents/coco/SETUP.md not found"]
+        return ["agents/coco-snowsight/SETUP.md not found"]
 
     setup_text = setup_path.read_text(encoding="utf-8")
 
-    # Check coco SKILL.md files
-    coco_dir = repo_root / "agents" / "coco"
+    # Check coco-snowsight SKILL.md files
+    coco_dir = repo_root / "agents" / "coco-snowsight"
     for skill_dir in sorted(coco_dir.iterdir()):
         if not (skill_dir / "SKILL.md").exists():
             continue
         # The stage copy path uses the relative path from repo root
-        rel_path = f"agents/coco/{skill_dir.name}/SKILL.md"
+        rel_path = f"agents/coco-snowsight/{skill_dir.name}/SKILL.md"
         if rel_path not in setup_text:
             failures.append(
-                f"agents/coco/SETUP.md: no 'snow stage copy' found for '{rel_path}'"
+                f"agents/coco-snowsight/SETUP.md: no 'snow stage copy' found for '{rel_path}'"
             )
 
     # Check agents/shared/ files (exclude CLAUDE.md — internal docs, not staged to Snowflake)
@@ -158,7 +158,7 @@ def check_coco_setup_stage_copy(repo_root: Path) -> list[str]:
             continue
         if rel_path not in setup_text:
             failures.append(
-                f"agents/coco/SETUP.md: no 'snow stage copy' found for '{rel_path}'"
+                f"agents/coco-snowsight/SETUP.md: no 'snow stage copy' found for '{rel_path}'"
             )
 
     return failures

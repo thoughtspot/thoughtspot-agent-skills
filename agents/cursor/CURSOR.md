@@ -67,7 +67,7 @@ Rules are per-project in Cursor. The install scripts create symlinks from
 ```bash
 # macOS / Linux
 cd /path/to/your/project
-~/Dev/thoughtspot-agent-skills/agents/cursor/scripts/install.sh
+~/thoughtspot-agent-skills/agents/cursor/scripts/install.sh
 
 # Windows (PowerShell, run as Administrator if needed for symlinks)
 cd C:\path\to\your\project

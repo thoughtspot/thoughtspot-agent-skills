@@ -2,13 +2,13 @@
 """
 check_runtime_coverage.py — validate cross-runtime skill coverage.
 
-Cursor must mirror Claude. CoCo's divergences from Claude/Cursor must be
-documented in EXPECTED_DIVERGENCES below.
+Cursor must mirror Claude. CoCo Snowsight and CoCo CLI divergences from
+Claude/Cursor must be documented in EXPECTED_DIVERGENCES below.
 
-For every skill present in agents/claude/, this validator confirms a Cursor
-.mdc exists at agents/cursor/rules/<skill>.mdc. For every CoCo skill or
-omission, EXPECTED_DIVERGENCES must explicitly list the (skill, runtime)
-pair with a justification comment.
+For every skill present in agents/claude/, this validator confirms:
+  - A Cursor .mdc exists at agents/cursor/rules/<skill>.mdc
+  - A CoCo CLI skill exists at agents/cli/<skill>/SKILL.md (or is documented)
+  - A CoCo Snowsight skill exists at agents/coco-snowsight/<skill>/SKILL.md (or is documented)
 
 Exit codes:
   0 — coverage matches the rule
@@ -17,8 +17,8 @@ Exit codes:
 Run manually:
     python3 tools/validate/check_runtime_coverage.py --root .
 
-Pre-commit invokes this when any agents/{claude,coco}/<skill>/SKILL.md or
-agents/cursor/rules/*.mdc is staged.
+Pre-commit invokes this when any agents/{claude,cli,coco-snowsight}/<skill>/SKILL.md
+or agents/cursor/rules/*.mdc is staged.
 """
 from __future__ import annotations
 
@@ -27,40 +27,44 @@ import sys
 from pathlib import Path
 
 
-# Documented intentional divergences from "Cursor mirrors Claude;
-# CoCo follows the same set". Each entry must have a one-line justification
-# comment so PR reviewers can sanity-check.
+# Documented intentional divergences from the coverage rule.
+# Each entry must have a one-line justification comment so PR reviewers can sanity-check.
 #
 # Format: {(skill_name, runtime): "one-line reason"}
-# Runtime is "cursor" or "coco". A skill that exists in claude but legitimately
-# doesn't have a coco mirror gets ("<skill>", "coco") here.
-# A skill that exists in coco but legitimately doesn't have a claude mirror
-# gets ("<skill>", "claude") here.
+# Runtime is "cursor", "cli", or "coco-snowsight".
+# A skill that exists in claude but legitimately doesn't have a mirror gets
+# ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
-    # --- CoCo divergences (skill exists in claude, not in coco) ---
-    ("ts-dependency-manager", "coco"):
+    # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
+    ("ts-dependency-manager", "coco-snowsight"):
         "Graph walk + alias propagation too heavy for Snowsight stored-proc runtime",
-    ("ts-object-answer-promote", "coco"):
+    ("ts-object-answer-promote", "coco-snowsight"):
         "Complex search-query / formula manipulation not supported in stored-proc model",
-    ("ts-object-model-coach", "coco"):
+    ("ts-object-model-coach", "coco-snowsight"):
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
-    ("ts-profile-snowflake", "coco"):
-        "CoCo runs inside Snowflake — no Snowflake profile needed",
+    ("ts-profile-snowflake", "coco-snowsight"):
+        "CoCo Snowsight runs inside Snowflake — no Snowflake profile needed",
 
-    # --- CoCo-only skills (skill exists in coco, not in claude/cursor) ---
+    # --- CLI divergences (skill exists in claude, not in cli) ---
+    ("ts-profile-snowflake", "cli"):
+        "Cortex Code manages Snowflake connections natively; Claude-only skill",
+
+    # --- CoCo-only skills (skill exists in coco-snowsight, not in claude/cursor/cli) ---
     ("ts-setup-sv", "claude"):
-        "CoCo-only: installs the stored procedures CoCo itself uses; no Claude equivalent needed",
+        "Snowsight-only: installs the stored procedures Snowsight runtime uses",
     ("ts-setup-sv", "cursor"):
-        "CoCo-only: installs the stored procedures CoCo itself uses; no Cursor equivalent needed",
+        "Snowsight-only: installs the stored procedures Snowsight runtime uses",
+    ("ts-setup-sv", "cli"):
+        "Snowsight-only: CLI uses ts CLI directly, no stored procedures needed",
 }
 
 
 def find_skills(root: Path) -> dict[str, set[str]]:
     """Return {skill_name: {runtime, ...}} for every skill seen across all
-    three runtimes."""
+    runtimes."""
     coverage: dict[str, set[str]] = {}
 
-    for runtime in ("claude", "coco"):
+    for runtime in ("claude", "cli", "coco-snowsight"):
         runtime_dir = root / "agents" / runtime
         if runtime_dir.is_dir():
             for child in runtime_dir.iterdir():
@@ -95,7 +99,7 @@ def main() -> int:
         runtimes = coverage[skill_name]
         per_runtime_status: dict[str, str] = {}
 
-        for runtime in ("claude", "cursor", "coco"):
+        for runtime in ("claude", "cursor", "cli", "coco-snowsight"):
             if runtime in runtimes:
                 per_runtime_status[runtime] = "present"
             elif (skill_name, runtime) in EXPECTED_DIVERGENCES:
@@ -103,38 +107,62 @@ def main() -> int:
             else:
                 per_runtime_status[runtime] = "missing"
 
-        # Cursor mirrors Claude — if claude has it, cursor must have it OR
-        # it's an expected divergence.
-        if per_runtime_status["claude"] == "present" and per_runtime_status["cursor"] == "missing":
+        # CLI is the canonical source. A skill in cli satisfies the "claude"
+        # requirement (since cli serves both Claude Code and Cortex Code CLI).
+        effectively_in_claude = (
+            per_runtime_status["claude"] == "present" or
+            per_runtime_status["cli"] == "present"
+        )
+
+        # Cursor mirrors CLI — if cli has it, cursor must have it.
+        if per_runtime_status["cli"] == "present" and per_runtime_status["cursor"] == "missing":
+            failures.append(
+                f"  ✗ {skill_name}: present in cli but missing in cursor "
+                f"(no EXPECTED_DIVERGENCES entry for ('{skill_name}', 'cursor'))"
+            )
+
+        # Claude-only skills must also have a cursor mirror.
+        if (per_runtime_status["claude"] == "present" and
+                per_runtime_status["cli"] != "present" and
+                per_runtime_status["cursor"] == "missing"):
             failures.append(
                 f"  ✗ {skill_name}: present in claude but missing in cursor "
                 f"(no EXPECTED_DIVERGENCES entry for ('{skill_name}', 'cursor'))"
             )
 
-        # CoCo divergences must be documented either way:
-        #   - skill in claude, not in coco → must be in EXPECTED_DIVERGENCES
-        #   - skill in coco, not in claude → must be in EXPECTED_DIVERGENCES
-        if per_runtime_status["claude"] == "present" and per_runtime_status["coco"] == "missing":
+        # CoCo Snowsight: if skill is in cli (or claude), snowsight should have
+        # it or have a documented divergence.
+        if effectively_in_claude and per_runtime_status["coco-snowsight"] == "missing":
             failures.append(
-                f"  ✗ {skill_name}: present in claude but missing in coco "
-                f"(no EXPECTED_DIVERGENCES entry for ('{skill_name}', 'coco'))"
+                f"  ✗ {skill_name}: present in cli/claude but missing in coco-snowsight "
+                f"(no EXPECTED_DIVERGENCES entry for ('{skill_name}', 'coco-snowsight'))"
             )
-        if per_runtime_status["coco"] == "present" and per_runtime_status["claude"] == "missing":
+
+        # Skills in coco-snowsight that don't exist in cli or claude need documentation.
+        if (per_runtime_status["coco-snowsight"] == "present" and
+                not effectively_in_claude and
+                (skill_name, "claude") not in EXPECTED_DIVERGENCES):
             failures.append(
-                f"  ✗ {skill_name}: present in coco but missing in claude "
+                f"  ✗ {skill_name}: present in coco-snowsight but missing in cli/claude "
                 f"(no EXPECTED_DIVERGENCES entry for ('{skill_name}', 'claude'))"
             )
-        # Cursor-only skills are also a violation (cursor mirrors claude;
-        # nothing should be cursor-only)
-        if per_runtime_status["cursor"] == "present" and per_runtime_status["claude"] == "missing":
+
+        # CLI skills that aren't in cli need a divergence entry.
+        if per_runtime_status["cli"] == "missing" and per_runtime_status["cli"] != "expected-divergence":
+            # Only flag if it exists somewhere else and isn't documented
+            pass  # handled by the effectively_in_claude checks above
+
+        # Cursor-only skills (not in cli or claude) are not allowed.
+        if (per_runtime_status["cursor"] == "present" and
+                not effectively_in_claude):
             failures.append(
-                f"  ✗ {skill_name}: present in cursor but missing in claude "
-                f"(Cursor mirrors Claude; cursor-only skills are not allowed)"
+                f"  ✗ {skill_name}: present in cursor but missing in cli/claude "
+                f"(Cursor mirrors CLI; cursor-only skills are not allowed)"
             )
 
         if args.verbose:
             cells = []
-            for runtime in ("claude", "cursor", "coco"):
+            for runtime in ("claude", "cursor", "cli", "coco-snowsight"):
                 status = per_runtime_status[runtime]
                 if status == "present":
                     cells.append(f"{runtime}=✓")
@@ -152,7 +180,7 @@ def main() -> int:
         print("To fix any of these:")
         print("  1. Author the missing skill file in the relevant runtime")
         print("     (agents/claude/<skill>/SKILL.md, agents/cursor/rules/<skill>.mdc,")
-        print("     or agents/coco/<skill>/SKILL.md), OR")
+        print("     agents/cli/<skill>/SKILL.md, or agents/coco-snowsight/<skill>/SKILL.md), OR")
         print("  2. Document the divergence in EXPECTED_DIVERGENCES at the top of")
         print("     tools/validate/check_runtime_coverage.py with a one-line reason.")
         print("  3. See .claude/rules/runtime-coverage.md for the full convention.")

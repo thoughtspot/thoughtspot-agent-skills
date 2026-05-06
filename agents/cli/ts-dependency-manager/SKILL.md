@@ -42,15 +42,15 @@ Ask one question at a time. Wait for each answer before proceeding.
 |---|---|
 | [references/dependency-types.md](references/dependency-types.md) | Status of every dependency type (Implementable / Partial / Manual / GUID-stable / Informational), the dependency hierarchy the skill walks in Step 4, and a worked sample of the Step 5 impact report — read before adding new dep handling or changing how Step 4 walks the graph |
 | [references/open-items.md](references/open-items.md) | Dependency API, search_query and join constraints, Alert scan, RLS/security/aliasing open items — read before implementing Steps 4 and 9 |
-| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
-| [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure — column and formula placement rules, self-validation checklist |
-| [~/.claude/shared/schemas/thoughtspot-answer-tml.md](~/.claude/shared/schemas/thoughtspot-answer-tml.md) | Answer TML structure — answer_columns, cohorts (sets), chart, table, search_query layout |
-| [~/.claude/shared/schemas/thoughtspot-sets-tml.md](~/.claude/shared/schemas/thoughtspot-sets-tml.md) | Set (cohort) TML structure — reusable vs answer-level, anchor_column_id, bin/group/query types |
-| [~/.claude/shared/schemas/thoughtspot-liveboard-tml.md](~/.claude/shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — visualizations, filters, layout |
-| [~/.claude/shared/schemas/thoughtspot-view-tml.md](~/.claude/shared/schemas/thoughtspot-view-tml.md) | View TML structure — view_columns, joins, table_paths, search_query |
-| [~/.claude/shared/schemas/thoughtspot-alert-tml.md](~/.claude/shared/schemas/thoughtspot-alert-tml.md) | Alert TML structure — metric_id references, personalised_view_info filters |
-| [~/.claude/shared/schemas/thoughtspot-feedback-tml.md](~/.claude/shared/schemas/thoughtspot-feedback-tml.md) | Feedback/coaching TML structure — search_tokens and formula_info column references |
-| [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Connection table TML structure — column definitions |
+| [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
+| [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure — column and formula placement rules, self-validation checklist |
+| [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer TML structure — answer_columns, cohorts (sets), chart, table, search_query layout |
+| [../../shared/schemas/thoughtspot-sets-tml.md](../../shared/schemas/thoughtspot-sets-tml.md) | Set (cohort) TML structure — reusable vs answer-level, anchor_column_id, bin/group/query types |
+| [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — visualizations, filters, layout |
+| [../../shared/schemas/thoughtspot-view-tml.md](../../shared/schemas/thoughtspot-view-tml.md) | View TML structure — view_columns, joins, table_paths, search_query |
+| [../../shared/schemas/thoughtspot-alert-tml.md](../../shared/schemas/thoughtspot-alert-tml.md) | Alert TML structure — metric_id references, personalised_view_info filters |
+| [../../shared/schemas/thoughtspot-feedback-tml.md](../../shared/schemas/thoughtspot-feedback-tml.md) | Feedback/coaching TML structure — search_tokens and formula_info column references |
+| [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Connection table TML structure — column definitions |
 
 ---
 
@@ -183,7 +183,7 @@ source ~/.zshenv && ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
-[ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) for the
+[../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) for the
 token refresh procedure.
 
 Save `{base_url}` (strip trailing slash) and `{profile_name}` for all subsequent steps.
@@ -2671,7 +2671,7 @@ for dep in [d for d in objects_to_fix if d["type"] == "ANSWER"]:
 
 Liveboards embed full answer definitions in `visualizations[].answer`. Apply the same
 helper functions to each visualization's answer section that references `{source_guid}`.
-Check against `[~/.claude/shared/schemas/thoughtspot-liveboard-tml.md]` for the exact
+Check against `[../../shared/schemas/thoughtspot-liveboard-tml.md]` for the exact
 field layout before modifying.
 
 ```python
@@ -2745,7 +2745,7 @@ for dep in [d for d in objects_to_fix if d["type"] == "LIVEBOARD"]:
 
 Views have `view_columns[]`, `formulas[]`, `joins[]`, and `search_query` — all need
 updating when a referenced column is removed or renamed. See
-[~/.claude/shared/schemas/thoughtspot-view-tml.md](~/.claude/shared/schemas/thoughtspot-view-tml.md)
+[../../shared/schemas/thoughtspot-view-tml.md](../../shared/schemas/thoughtspot-view-tml.md)
 for the full field layout.
 
 ```python

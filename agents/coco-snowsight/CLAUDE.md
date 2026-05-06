@@ -1,7 +1,7 @@
-# CoCo Skills — Conventions
+# CoCo Snowsight Skills — Conventions
 
-Loaded when working in agents/coco/. Covers Snowsight constraints, stage
-deployment, and CoCo-specific conventions.
+Loaded when working in agents/coco-snowsight/. Covers Snowsight Workspace
+constraints, stage deployment, and Snowsight-specific conventions.
 
 ## Runtime constraints
 
@@ -15,16 +15,19 @@ All ThoughtSpot API access is via stored procedures:
 
 Do not add steps that require shell commands or direct HTTP calls.
 
+Do NOT use the `ts` CLI — it is not available in Snowsight. The `ts` CLI is for
+the CLI runtime only (see `agents/cli/`).
+
 ## Deploy is not automatic
 
-Unlike Claude Code skills (which update via symlinks), every change to `agents/coco/`
-or `agents/shared/` requires a manual stage push:
+Every change to `agents/coco-snowsight/` or `agents/shared/` requires a manual
+stage push:
 
 ```bash
 ./scripts/stage-sync.sh
 ```
 
-Or run the individual `snow stage copy` commands from `agents/coco/SETUP.md`.
+Or run the individual `snow stage copy` commands from `agents/coco-snowsight/SETUP.md`.
 
 Always run after `git commit + git push`. Forgetting to stage means CoCo runs stale skill files.
 
@@ -33,15 +36,15 @@ Always run after `git commit + git push`. Forgetting to stage means CoCo runs st
 The default stage is `@SKILLS.PUBLIC.SHARED`; override with `SNOW_STAGE` env var (see SETUP.md).
 
 ```
-agents/coco/                 → $SNOW_STAGE/skills/
+agents/coco-snowsight/       → $SNOW_STAGE/skills/
 agents/shared/               → $SNOW_STAGE/shared/
 ```
 
 In the Workspace, skills land at `.snowflake/cortex/skills/<skill-name>/SKILL.md`.
 
-## Reference paths (CoCo convention)
+## Reference paths (CoCo Snowsight convention)
 
-CoCo skills reference shared files via relative paths from the skill directory:
+CoCo Snowsight skills reference shared files via relative paths from the skill directory:
 
 ```
 ../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md
@@ -50,11 +53,14 @@ CoCo skills reference shared files via relative paths from the skill directory:
 
 Do NOT use `~/.claude/shared/...` — that is the Claude Code convention and does not resolve in Snowsight.
 
-## Parity with Claude Code skills
+## Parity with other agents
 
-Substantive skill changes (new steps, bug fixes, rule corrections) must also be made in the
-corresponding `agents/claude/<skill>/SKILL.md` unless the change is CoCo-specific (e.g.
-stored procedure usage, Snowsight UI instructions).
+Substantive skill changes (new steps, bug fixes, rule corrections) must also be made in:
+- `agents/claude/<skill>/SKILL.md` — Claude Code version
+- `agents/cli/<skill>/SKILL.md` — Cortex Code CLI version
+
+Unless the change is Snowsight-specific (e.g. stored procedure usage, Snowsight UI
+instructions). See `agents/PARITY.md` for the full cross-agent mapping.
 
 ## Stored procedures
 

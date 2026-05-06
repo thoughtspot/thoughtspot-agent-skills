@@ -22,13 +22,13 @@ Ask one question at a time. Wait for each answer before proceeding.
 | File | Purpose |
 |---|---|
 | [references/open-items.md](references/open-items.md) | Verified and unverified API behaviors — read before implementing each step |
-| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
-| [~/.claude/shared/schemas/thoughtspot-answer-tml.md](~/.claude/shared/schemas/thoughtspot-answer-tml.md) | Answer TML structure — verified field reference for formulas, parameters, sets, data source lookup |
-| [~/.claude/shared/schemas/thoughtspot-liveboard-tml.md](~/.claude/shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — needed for Liveboard fallback path in Step 2 |
-| [~/.claude/shared/schemas/thoughtspot-sets-tml.md](~/.claude/shared/schemas/thoughtspot-sets-tml.md) | Set TML structure — bin sets, group sets, query sets; answer-level vs reusable |
-| [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure — formula and column placement rules, self-validation checklist |
-| [~/.claude/shared/schemas/thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md) | Formula syntax, column reference syntax, YAML encoding rules |
-| [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) | TML parsing: non-printable char cleanup, PyYAML field name quirks |
+| [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
+| [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer TML structure — verified field reference for formulas, parameters, sets, data source lookup |
+| [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — needed for Liveboard fallback path in Step 2 |
+| [../../shared/schemas/thoughtspot-sets-tml.md](../../shared/schemas/thoughtspot-sets-tml.md) | Set TML structure — bin sets, group sets, query sets; answer-level vs reusable |
+| [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure — formula and column placement rules, self-validation checklist |
+| [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | Formula syntax, column reference syntax, YAML encoding rules |
+| [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) | TML parsing: non-printable char cleanup, PyYAML field name quirks |
 
 ---
 
@@ -98,7 +98,7 @@ source ~/.zshenv && ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
-[ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) for the token
+[../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) for the token
 refresh procedure.
 
 Save `{base_url}` (strip trailing slash) and `{profile_name}` for all subsequent steps.
@@ -183,7 +183,7 @@ tml = export_json[0]["tml"]   # fully parsed dict — no further parsing needed
 ```
 
 Extract formulas, sets, parameters, and the data source GUID. The structure is verified —
-see [thoughtspot-answer-tml.md](~/.claude/shared/schemas/thoughtspot-answer-tml.md).
+see [thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md).
 
 ```python
 answer = tml.get("answer", {})
@@ -664,7 +664,7 @@ Apply all rewrites to produce `{rewritten_expr}` for each formula.
 ## Step 10 — Build Updated Model TML
 
 **Generate formula IDs** following the convention from
-[thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md):
+[thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md):
 `"formula_"` + name (spaces preserved).
 
 ```python
@@ -764,7 +764,7 @@ if params_to_promote:
 ```
 
 **Run the self-validation checklist** from
-[thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) — all 12
+[thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) — all 12
 checks, silently, before showing the user. The checks most critical for formula promotion:
 
 - **#7** — No `aggregation:` in any `formulas[]` entry

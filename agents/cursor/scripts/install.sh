@@ -3,10 +3,10 @@
 #
 # Usage:
 #   # Install into the current directory
-#   ~/Dev/thoughtspot-agent-skills/agents/cursor/scripts/install.sh
+#   ~/thoughtspot-agent-skills/agents/cursor/scripts/install.sh
 #
 #   # Install into a specific directory
-#   ~/Dev/thoughtspot-agent-skills/agents/cursor/scripts/install.sh /path/to/project
+#   ~/thoughtspot-agent-skills/agents/cursor/scripts/install.sh /path/to/project
 #
 # What it does:
 #   1. Creates .cursor/rules/ in the target project (if it doesn't exist)

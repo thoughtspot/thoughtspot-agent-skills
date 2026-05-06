@@ -1,7 +1,8 @@
 # ThoughtSpot CLI (`ts`)
 
 A lightweight Python CLI wrapping the ThoughtSpot REST API. Used at runtime by
-Claude Code skills to authenticate, search metadata, and export/import TML.
+Claude Code and Cortex Code CLI skills to authenticate, search metadata, and
+export/import TML.
 
 ---
 
@@ -23,8 +24,10 @@ The CLI resolves which profile to use in this order:
 2. `TS_PROFILE` environment variable
 3. First profile in `~/.claude/thoughtspot-profiles.json`
 
-Profiles are created and managed by the `ts-profile-thoughtspot` Claude Code skill.
-Credentials are stored in the macOS Keychain — never in the profile file itself.
+Profiles are created and managed by the `ts-profile-thoughtspot` skill (available
+in both Claude Code and Cortex Code CLI). Credentials are stored in the OS
+credential store (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+— never in the profile file itself.
 
 Tokens are cached in `/tmp/ts_token_<slug>.txt` (permissions: `0600`) and reused
 until they expire or `ts auth logout` is called.

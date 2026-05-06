@@ -75,7 +75,7 @@ across ThoughtSpot".
 
 ```bash
 # macOS / Linux
-git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/Dev/thoughtspot-agent-skills
+git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/thoughtspot-agent-skills
 
 # Windows (PowerShell)
 git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git "$env:USERPROFILE\Dev\thoughtspot-agent-skills"
@@ -98,7 +98,7 @@ pip install secretstorage
 
 ```bash
 # macOS / Linux
-pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli
+pip install -e ~/thoughtspot-agent-skills/tools/ts-cli
 
 # Windows (PowerShell)
 pip install -e "$env:USERPROFILE\Dev\thoughtspot-agent-skills\tools\ts-cli"
@@ -111,7 +111,7 @@ This makes schemas, mappings, and worked examples available to Cursor rules.
 ```bash
 # macOS / Linux
 mkdir -p ~/.cursor
-ln -s ~/Dev/thoughtspot-agent-skills/agents/shared ~/.cursor/shared
+ln -s ~/thoughtspot-agent-skills/agents/shared ~/.cursor/shared
 
 # Windows (PowerShell — run as Administrator if symlinks require elevated permissions)
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.cursor" | Out-Null
@@ -127,7 +127,7 @@ Run the install script from your project directory:
 ```bash
 # macOS / Linux
 cd /path/to/your/project
-~/Dev/thoughtspot-agent-skills/agents/cursor/scripts/install.sh
+~/thoughtspot-agent-skills/agents/cursor/scripts/install.sh
 
 # Windows (PowerShell)
 cd C:\path\to\your\project

@@ -1,18 +1,19 @@
 # thoughtspot-agent-skills
 
 A collection of skills and tools for creating semantic models in ThoughtSpot and Snowflake,
-packaged for two runtimes: **Claude Code** (via `~/.claude/` symlinks) and **Snowflake Cortex /
-CoCo** (via Snowflake internal stage). Both runtimes consume the same shared reference library.
+packaged for multiple runtimes: **CLI** (Claude Code + Cortex Code CLI, via symlinks) and
+**Snowsight** (via Snowflake internal stage). All runtimes consume the same shared reference library.
 
 ## Directory map
 
 ```
-agents/claude/    — Claude Code skills; symlinked into ~/.claude/skills/
-agents/coco/      — Snowflake Cortex skills; deployed via snow stage copy to @SKILLS.PUBLIC.SHARED
-agents/cursor/    — Cursor AI rules; installed via agents/cursor/scripts/install.sh into .cursor/rules/
-agents/shared/    — Reference files consumed by ALL runtimes (schemas, mappings, worked examples)
-tools/ts-cli/     — Python CLI used by Claude and Cursor skills at runtime for ThoughtSpot API calls
-scripts/          — Deployment helpers (deploy.sh, stage-sync.sh)
+agents/cli/            — Canonical CLI skills (Claude Code + Cortex Code CLI); symlinked into both ~/.claude/skills/ and ~/.snowflake/cortex/skills/
+agents/claude/         — Claude Code-only skills (ts-profile-snowflake); symlinked into ~/.claude/skills/
+agents/coco-snowsight/ — Snowflake Cortex skills (Snowsight); deployed via snow stage copy
+agents/cursor/         — Cursor AI rules; installed via agents/cursor/scripts/install.sh
+agents/shared/         — Reference files consumed by ALL runtimes (schemas, mappings, worked examples)
+tools/ts-cli/          — Python CLI used by CLI skills at runtime for ThoughtSpot API calls
+scripts/               — Deployment helpers (deploy.sh, stage-sync.sh)
 ```
 
 ## Symlink contract
@@ -25,17 +26,18 @@ or patch files there directly.
 
 | Changed area | Also update |
 |---|---|
-| Any SKILL.md (new command or step) | README.md skills table; agents/claude/SETUP.md if install/symlink step changed; corresponding agents/cursor/rules/*.mdc; bump version in SKILL.md ## Changelog |
-| agents/shared/* | snow stage copy for that file (see agents/coco/SETUP.md); worked example if output changes |
+| Any SKILL.md (new command or step) | README.md skills table; agents/cli/SETUP.md if install/symlink step changed; corresponding agents/cursor/rules/*.mdc; bump version in SKILL.md ## Changelog |
+| agents/shared/* | snow stage copy for that file (see agents/coco-snowsight/SETUP.md); worked example if output changes |
 | tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md and .mdc that uses that command; CHANGELOG.md entry if version bumped |
-| agents/claude/ skill logic | Corresponding agents/coco/ skill AND agents/cursor/rules/*.mdc if logic applies |
-| agents/coco/ skill logic | Corresponding agents/claude/ skill if logic applies to both runtimes |
+| agents/claude/ skill logic | Corresponding agents/cli/ and agents/coco-snowsight/ skill AND agents/cursor/rules/*.mdc if logic applies |
+| agents/cli/ skill logic | Corresponding agents/claude/ skill and agents/coco-snowsight/ skill if logic applies |
+| agents/coco-snowsight/ skill logic | Corresponding agents/claude/ and agents/cli/ skill if logic applies to those runtimes |
 | agents/cursor/rules/*.mdc | Corresponding agents/claude/ SKILL.md (keep in sync) |
 | Credential storage steps | agents/claude/ts-profile-{thoughtspot,snowflake}/SKILL.md; agents/cursor/rules/ts-profile-{thoughtspot,snowflake}.mdc; .claude/rules/security.md |
-| Add a new skill | README.md; agents/claude/SETUP.md (symlink step); agents/coco/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file); **tools/smoke-tests/smoke_<skill>.py** (or add to ALLOWLIST in tools/validate/check_smoke_tests.py with justification); add ## Changelog starting at 1.0.0; CHANGELOG.md entry; **skill name must match a family in `.claude/rules/skill-naming.md`** (or extend the rule with a new family in the same PR); **runtime coverage**: Cursor `.mdc` mirror is mandatory (Cursor mirrors Claude); CoCo divergence requires an entry in `EXPECTED_DIVERGENCES` in `tools/validate/check_runtime_coverage.py` with a one-line justification |
-| Add a new shared schema/mapping | agents/coco/SETUP.md stage copy list; all SKILL.md and .mdc files that reference it |
+| Add a new skill | README.md; agents/cli/SETUP.md (symlink step); agents/coco-snowsight/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file); **tools/smoke-tests/smoke_<skill>.py** (or add to ALLOWLIST in tools/validate/check_smoke_tests.py with justification); add ## Changelog starting at 1.0.0; CHANGELOG.md entry; **skill name must match a family in `.claude/rules/skill-naming.md`** (or extend the rule with a new family in the same PR); **runtime coverage**: Cursor `.mdc` mirror is mandatory; CoCo Snowsight divergence requires an entry in `EXPECTED_DIVERGENCES` in `tools/validate/check_runtime_coverage.py` with a one-line justification |
+| Add a new shared schema/mapping | agents/coco-snowsight/SETUP.md stage copy list; all SKILL.md and .mdc files that reference it |
 | `.mcp.json` (MCP server wiring) or `.claude/rules/api-research.md` | Update the other if precedence/usage rules change; check that `agents/claude/CLAUDE.md` "open-items.md pattern" and `.claude/rules/ts-cli.md` (v1 migration trigger, "When a skill needs an API call") still reference the rule correctly |
-| ts-dependency-manager: changes to Step 4 walking, Step 5 impact-report, or any open-items.md status | Also update agents/claude/ts-dependency-manager/references/dependency-types.md (status table, hierarchy, or sample output as relevant) — these must stay in sync; pre-commit prompts soft when one changes without the other |
+| ts-dependency-manager: changes to Step 4 walking, Step 5 impact-report, or any open-items.md status | Also update agents/cli/ts-dependency-manager/references/dependency-types.md (status table, hierarchy, or sample output as relevant) — these must stay in sync; pre-commit prompts soft when one changes without the other |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.
 
@@ -49,7 +51,7 @@ Workflow for every change:
 1. Work on a feature or wip branch (`feat/<slug>` or `wip/<skill>`)
 2. `git push -u origin <branch>` and open a PR against `main`
 3. After the PR merges:
-   - For any changed `agents/coco/` or `agents/shared/` file: `./scripts/stage-sync.sh`
+   - For any changed `agents/coco-snowsight/` or `agents/shared/` file: `./scripts/stage-sync.sh`
    - For `tools/ts-cli/` changes: `pip install -e tools/ts-cli` in the affected environment
 
 Claude Code changes (via symlinks) take effect immediately — no step needed for `agents/claude/` only.
@@ -74,7 +76,7 @@ These branches are pushed to remote for backup but never merged to main until ve
 **Starting a new wip skill:**
 1. `git checkout -b wip/<skill-name>` from current main
 2. Remove the skill's `.gitignore` entry on that branch only
-3. Update README.md, SETUP.md, and coco/SETUP.md to include the skill (consistency checker enforces this)
+3. Update README.md, SETUP.md, and coco-snowsight/SETUP.md to include the skill (consistency checker enforces this)
 4. `git push -u origin wip/<skill-name>`
 
 **Session-start protocol:** see `.claude/rules/branching.md` — check your branch before making any edits.
