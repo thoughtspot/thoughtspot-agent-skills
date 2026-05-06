@@ -14,7 +14,7 @@ for managing local Snowflake connection profiles. Cortex Code CLI users don't ne
 After completing the main setup from `agents/cli/SETUP.md`, additionally symlink this skill:
 
 ```bash
-ln -s ~/Dev/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \
+ln -s ~/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \
       ~/.claude/skills/ts-profile-snowflake
 ```
 

@@ -38,10 +38,10 @@ Then run `claude` to launch.
 
 ```bash
 # 1. Clone
-git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/Dev/thoughtspot-agent-skills
+git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/thoughtspot-agent-skills
 
 # 2. Install the ts CLI
-pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli
+pip install -e ~/thoughtspot-agent-skills/tools/ts-cli
 
 # 3. Symlink skills (choose your runtime)
 ```
@@ -49,20 +49,20 @@ pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli
 **Cortex Code CLI:**
 ```bash
 mkdir -p ~/.snowflake/cortex/skills
-ln -s ~/Dev/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.snowflake/cortex/skills/ts-profile-thoughtspot
-ln -s ~/Dev/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv ~/.snowflake/cortex/skills/ts-convert-to-snowflake-sv
-ln -s ~/Dev/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv ~/.snowflake/cortex/skills/ts-convert-from-snowflake-sv
-ln -s ~/Dev/thoughtspot-agent-skills/agents/shared ~/.snowflake/cortex/shared
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.snowflake/cortex/skills/ts-profile-thoughtspot
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv ~/.snowflake/cortex/skills/ts-convert-to-snowflake-sv
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv ~/.snowflake/cortex/skills/ts-convert-from-snowflake-sv
+ln -s ~/thoughtspot-agent-skills/agents/shared ~/.snowflake/cortex/shared
 ```
 
 **Claude Code:**
 ```bash
 mkdir -p ~/.claude/skills
-ln -s ~/Dev/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.claude/skills/ts-profile-thoughtspot
-ln -s ~/Dev/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv ~/.claude/skills/ts-convert-to-snowflake-sv
-ln -s ~/Dev/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv ~/.claude/skills/ts-convert-from-snowflake-sv
-ln -s ~/Dev/thoughtspot-agent-skills/agents/shared ~/.claude/shared
-ln -s ~/Dev/thoughtspot-agent-skills/agents/shared/mappings ~/.claude/mappings
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.claude/skills/ts-profile-thoughtspot
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv ~/.claude/skills/ts-convert-to-snowflake-sv
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv ~/.claude/skills/ts-convert-from-snowflake-sv
+ln -s ~/thoughtspot-agent-skills/agents/shared ~/.claude/shared
+ln -s ~/thoughtspot-agent-skills/agents/shared/mappings ~/.claude/mappings
 ```
 
 See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for the full setup (all skills,
