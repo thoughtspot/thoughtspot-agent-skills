@@ -46,14 +46,14 @@ Ask one question at a time. Wait for each answer before proceeding.
 | [references/review-explainers.md](references/review-explainers.md) | 3-section explainer blocks (purpose / signals checked / outcome rules) prepended to every Step 7 review file |
 | [references/cross-model-consistency.md](references/cross-model-consistency.md) | Cross-Model column collision detection — purpose, signals, decision tree, output format (powers Step 4.5) |
 | [references/feedback-tml-verified-patterns.md](references/feedback-tml-verified-patterns.md) | Verified `nls_feedback` syntax patterns (search_tokens shapes, chart_type/display_mode values, axis_config notation) mined from real coached Models — authoritative reference for Step 6 + Step 8c generation |
-| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
-| [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake auth (optional) |
-| [~/.claude/shared/schemas/thoughtspot-feedback-tml.md](~/.claude/shared/schemas/thoughtspot-feedback-tml.md) | Coaching TML structure (output for surfaces 3 + 4) |
-| [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure — `ai_context`, `synonyms`, `description` field locations (output for surfaces 1 + 2) |
-| [~/.claude/shared/schemas/thoughtspot-answer-tml.md](~/.claude/shared/schemas/thoughtspot-answer-tml.md) | Answer TML — `name`, `description`, `search_query` mining input |
-| [~/.claude/shared/schemas/thoughtspot-liveboard-tml.md](~/.claude/shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML — visualization names + tile descriptions for prose mining |
-| [~/.claude/shared/schemas/thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md) | Formula syntax for answer-level formula generation |
-| [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → TS formula translation (mandatory read for SQL-derived candidates) |
+| [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
+| Cortex Code connection (configured via `cortex connections set`) | Snowflake auth (optional) |
+| [../../shared/schemas/thoughtspot-feedback-tml.md](../../shared/schemas/thoughtspot-feedback-tml.md) | Coaching TML structure (output for surfaces 3 + 4) |
+| [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure — `ai_context`, `synonyms`, `description` field locations (output for surfaces 1 + 2) |
+| [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer TML — `name`, `description`, `search_query` mining input |
+| [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML — visualization names + tile descriptions for prose mining |
+| [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | Formula syntax for answer-level formula generation |
+| [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → TS formula translation (mandatory read for SQL-derived candidates) |
 
 ---
 
@@ -116,7 +116,7 @@ source ~/.zshenv && ts metadata search \
 
 Mark each result `[MODEL]` or `[WORKSHEET]` using `metadata_header.contentUpgradeId` /
 `worksheetVersion` (same logic as
-[ts-object-answer-promote Step 5](~/.claude/skills/ts-object-answer-promote/SKILL.md)).
+[ts-object-answer-promote Step 5](../ts-object-answer-promote/SKILL.md)).
 This skill targets **Models only** — recommend `/ts-object-model-builder` to upgrade
 legacy Worksheets and stop.
 
@@ -1127,7 +1127,7 @@ if description_delta and description_delta["action"] in ("EXPAND","REWRITE"):
 ```
 
 Run the Model TML self-validation checklist from
-[~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md)
+[../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md)
 before serialising.
 
 ### 8c. Build the merged feedback TML (surfaces 3, 4)

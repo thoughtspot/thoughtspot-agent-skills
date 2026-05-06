@@ -15,16 +15,16 @@ Semantic View DDL format, and creates it via `CREATE OR REPLACE SEMANTIC VIEW`.
 
 | File | Purpose |
 |---|---|
-| [~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
-| [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
-| [~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
-| [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) | Snowflake Semantic View DDL syntax, validation rules, and known limitations |
-| [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
-| [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Table TML field reference — column types, data types, joins_with structure |
-| [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML field reference — model_tables, columns, formulas, join scenarios |
-| [~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View DDL |
-| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
-| [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
+| [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md) | Column classification, aggregation, join type, data type, and name generation lookup tables |
+| [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | ThoughtSpot formula ↔ SQL translation rules (bidirectional) and untranslatable pattern handling |
+| [../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md) | Full property coverage matrix, limitations, and Unmapped Report format |
+| [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md) | Snowflake Semantic View DDL syntax, validation rules, and known limitations |
+| [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) | TML export parsing — non-printable chars, PyYAML pitfalls, object type identification |
+| [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML field reference — column types, data types, joins_with structure |
+| [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML field reference — model_tables, columns, formulas, join scenarios |
+| [../../shared/worked-examples/snowflake/ts-to-snowflake.md](../../shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View DDL |
+| [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| Cortex Code connection (configured via `cortex connections set`) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 
 ---
@@ -106,7 +106,7 @@ CREATE OR REPLACE SEMANTIC VIEW {sv_name}
 ```
 
 For the full coverage matrix including unmapped properties, see
-[~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md).
+[../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md).
 
 ---
 
@@ -181,7 +181,7 @@ and reuse it.
 
 **Profile selection (first model only):**
 
-1. Read `~/.claude/thoughtspot-profiles.json`.
+1. Run `ts profiles list` to show configured profiles.
 2. If multiple profiles: display a numbered list and ask the user to select one.
 3. If exactly one profile: display it and confirm before proceeding.
 
@@ -406,7 +406,7 @@ table:
 ```
 
 **PyYAML field name:** The schema field is `"schema"` in Python dicts after parsing —
-never `"schema_"`. See [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md) for details.
+never `"schema_"`. See [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) for details.
 
 **Schema is reliably exported:** With `export_fqn: true` and `export_associated: true`,
 the schema value is present in Table TML whenever it is set in ThoughtSpot. If it
@@ -423,7 +423,7 @@ Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag 
 
 **SQL view resolution:** For every `sql_view` object referenced in `model_tables[]`
 (or `table_paths[]` for Worksheet format), classify its `sql_query` using the logic
-in [~/.claude/shared/schemas/thoughtspot-tml.md](~/.claude/shared/schemas/thoughtspot-tml.md):
+in [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md):
 
 *Simple* — `SELECT * FROM single_table [AS alias]`:
 - Extract the physical FQN from the FROM clause
@@ -624,10 +624,10 @@ subprocess.run([snow_cmd, 'sql', '-c', cli_connection, '-f', '/tmp/sv_wrappers.s
 import os; os.remove("/tmp/sv_wrappers.sql")
 ```
 
-See [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) for the
+See Cortex Code connection (configured via `cortex connections set`) for the
 connection factory pattern and CLI file-based execution details.
 
-See [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
+See [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md) — Known Snowflake Semantic View Limitations for full details.
 
 ---
 
@@ -717,7 +717,7 @@ used_rel_names.add(base_name)
 Initialise `used_rel_names = set()` before the relationship loop.
 
 For join type and cardinality mappings, see
-[~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md).
+[../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md).
 
 ---
 
@@ -920,12 +920,12 @@ same table.
    column and log it; do not include placeholder `expr` values
 2. If `column_id` set → resolve physical column name as above
 3. Classify as dimension / time_dimension / metric using the decision tree in
-   [~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md)
+   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
 4. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
 5. Record unmapped properties (format_pattern, default_date_bucket, custom_order,
    data_panel_column_groups, geo_config) for the Unmapped Properties Report
 6. Build the Snowflake field entry using the templates in
-   [~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-to-snowflake-rules.md)
+   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
 7. Append the field to the field list for its owning table
 
 ---
@@ -945,7 +945,7 @@ rm -f /tmp/ts_tml_*.json
 ### Step 9: Translate Formulas
 
 > **MANDATORY — read the reference before assessing any formula:**
-> Open [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+> Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 > and use its **Decision Flowchart** to classify every formula. Do **not** classify
 > a formula as untranslatable based on function name recognition alone. Patterns
 > that appear ThoughtSpot-specific have documented Snowflake equivalents — for example:
@@ -998,7 +998,7 @@ Confirmed untranslatable patterns (after checking the reference):
 **Skip this step for Modes A and B.** Run only when `session_mode = "update"`.
 
 Parse the existing SV DDL (fetched in Step 3C) using the same logic as
-[~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md)
+[../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md)
 to extract its current column set, expressions, and descriptions.
 
 #### Compute the change set
@@ -1139,7 +1139,7 @@ If shared dimensions were duplicated, note: `Shared dimensions duplicated into e
 {list} — updates to these must be applied to all {N} views.`
 
 **3. Unmapped Properties Report** — use the format defined in
-[~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md](~/.claude/mappings/ts-snowflake/ts-snowflake-properties.md).
+[../../shared/mappings/ts-snowflake/ts-snowflake-properties.md](../../shared/mappings/ts-snowflake/ts-snowflake-properties.md).
 Include only sections that have entries. Common sections:
 - Parameters not migrated
 - Column groups not migrated
@@ -1178,7 +1178,7 @@ If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-ddl-fi
 
 ### Step 11: Validate
 
-Run all checks from [~/.claude/shared/schemas/snowflake-schema.md](~/.claude/shared/schemas/snowflake-schema.md).
+Run all checks from [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
 - [ ] Every table referenced in `relationships()`, `dimensions()`, or `metrics()` appears in `tables()`
@@ -1263,92 +1263,26 @@ Select (or press Enter for #1):
 
 If the user selects E, ask for `target_database` and `target_schema` explicitly.
 
-**Snowflake profile selection** (skip if already connected in Step 5):
-1. Read `~/.claude/snowflake-profiles.json`
-2. If multiple profiles: display a numbered list including each profile's `method`
-   (`cli` / `python`) so the user can distinguish them; ask user to select
-3. If one profile: show it (including method) and confirm
-4. If no file: ask for connection details; offer to save profile for future use
-5. If `method: python` and `private_key_passphrase_env` is set, read passphrase from that env var
+**Snowflake connection** (skip if already connected in Step 5):
+Uses the active Cortex Code connection (configured via `cortex connections set`).
+Execute SQL via `sql_execute` tool directly.
 
-**Role:** Use `default_role` from the profile if set; otherwise ask the user.
+**Role:** Use the role from the active connection; ask the user if they need a different one.
 
-**Warehouse:** If not specified in the profile:
-- Python: `SHOW WAREHOUSES` via `cur.execute()` — pick first non-suspended
-- CLI: `snow sql -c {cli_connection} --format json -q "SHOW WAREHOUSES"` — pick first non-suspended
+**Warehouse:** Use the warehouse from the active connection.
 
-Use the connection method and patterns from
-[~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md).
+**Execute the CREATE via sql_execute:**
 
-**Execute the CREATE — branch on `profile.method`:**
+Execute the DDL directly using the `sql_execute` tool with the active Cortex Code
+connection. Set the appropriate database and schema context first:
 
-**`method: python`** — re-establish the connector (the Step 5 connection is closed by
-this point) and execute the DDL:
-
-```python
-import snowflake.connector
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key, Encoding, PrivateFormat, NoEncryption)
-from cryptography.hazmat.backends import default_backend
-import os
-
-# Rebuild connection from profile (same auth as Step 5)
-pk_path = os.path.expanduser(profile["private_key_path"])
-with open(pk_path, "rb") as f:
-    pk_data = f.read()
-passphrase = None
-if profile.get("private_key_passphrase_env"):
-    passphrase = os.environ.get(profile["private_key_passphrase_env"], "").encode() or None
-private_key = load_pem_private_key(pk_data, password=passphrase, backend=default_backend())
-pk_der = private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
-
-conn = snowflake.connector.connect(
-    account=profile["account"],
-    user=profile["username"],
-    private_key=pk_der,
-    warehouse=warehouse,
-    role=role,
-    database=target_database,
-    schema=target_schema
-)
-cur = conn.cursor()
-try:
-    cur.execute(sv_ddl)  # CREATE OR REPLACE SEMANTIC VIEW ... (USE statements not needed — set in connect())
-    result = cur.fetchone()
-    print(result[0] if result else "Created successfully")
-except Exception as e:
-    print(f"ERROR: {e}")
-    raise
-finally:
-    cur.close()
-    conn.close()
+```sql
+USE ROLE {role};
+USE DATABASE {target_database};
+USE SCHEMA {target_schema};
 ```
 
-**`method: cli`** — write the DDL to a temp file and execute with `snow sql -f`:
-
-```python
-import subprocess, os
-
-sql_script = (
-    f"USE ROLE {role};\n"
-    f"USE DATABASE {target_database};\n"
-    f"USE SCHEMA {target_schema};\n"
-    f"{sv_ddl};"
-)
-with open("/tmp/sv_create.sql", "w") as f:
-    f.write(sql_script)
-
-result = subprocess.run(
-    [snow_cmd, "sql", "-c", cli_connection, "-f", "/tmp/sv_create.sql"],
-    capture_output=True, text=True
-)
-os.remove("/tmp/sv_create.sql")
-
-if result.returncode != 0:
-    print(f"ERROR: {result.stderr or result.stdout}")
-    raise RuntimeError(result.stderr)
-print(result.stdout or "Created successfully")
-```
+Then execute the `CREATE OR REPLACE SEMANTIC VIEW` DDL statement.
 
 **Notes:**
 - `CREATE OR REPLACE SEMANTIC VIEW` is idempotent — no need to `DROP` first

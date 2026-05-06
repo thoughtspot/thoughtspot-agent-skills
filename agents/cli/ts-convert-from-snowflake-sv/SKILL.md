@@ -22,16 +22,16 @@ Two scenarios are supported:
 
 | File | Purpose |
 |---|---|
-| [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Snowflake Semantic View DDL parsing, type mapping, formula translation, column classification |
-| [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
-| [~/.claude/shared/schemas/thoughtspot-table-tml.md](~/.claude/shared/schemas/thoughtspot-table-tml.md) | Table TML structure, connection reference, data types, import patterns, common errors |
-| [~/.claude/shared/schemas/thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) | Model TML structure, join scenarios, formula visibility, self-validation checklist |
-| [~/.claude/shared/schemas/thoughtspot-formula-patterns.md](~/.claude/shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula syntax, all function categories, LOD/window/semi-additive patterns, YAML encoding rules |
-| [~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md](~/.claude/shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
-| [~/.claude/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md](~/.claude/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md) | End-to-end example: DUNDER_MIFFLIN_SALES_INVENTORY → TS Model. Exercises multi-value synonyms, per-column descriptions, table comments, semi-additive metrics (closing/opening), `unique count` formula, and `concat()` for strings. |
-| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md) | Snowflake Semantic View DDL parsing, type mapping, formula translation, column classification |
+| [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) | SQL → ThoughtSpot formula translation rules (bidirectional reference) |
+| [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML structure, connection reference, data types, import patterns, common errors |
+| [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure, join scenarios, formula visibility, self-validation checklist |
+| [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula syntax, all function categories, LOD/window/semi-additive patterns, YAML encoding rules |
+| [../../shared/worked-examples/snowflake/ts-from-snowflake.md](../../shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
+| [../../shared/worked-examples/snowflake/ts-from-snowflake-dunder.md](../../shared/worked-examples/snowflake/ts-from-snowflake-dunder.md) | End-to-end example: DUNDER_MIFFLIN_SALES_INVENTORY → TS Model. Exercises multi-value synonyms, per-column descriptions, table comments, semi-additive metrics (closing/opening), `unique count` formula, and `concat()` for strings. |
+| [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
-| [~/.claude/skills/ts-profile-snowflake/SKILL.md](~/.claude/skills/ts-profile-snowflake/SKILL.md) | Snowflake connection code, SQL execution patterns |
+| Cortex Code connection (configured via `cortex connections set`) | Snowflake connection code, SQL execution patterns |
 
 ---
 
@@ -135,10 +135,9 @@ Do not begin Step 1 until the user confirms.
 3. If exactly one profile: display it and confirm before proceeding.
 4. Verify: `ts auth whoami --profile {name}` — print display_name and base URL.
 
-**Snowflake profile:**
-1. Read `~/.claude/snowflake-profiles.json` to list profiles.
-2. If multiple: list and ask; if one: confirm.
-3. Verify with a `SELECT CURRENT_USER(), CURRENT_ROLE()` query.
+**Snowflake connection:**
+Uses the active Cortex Code connection (configured via `cortex connections set`).
+Verify with a `SELECT CURRENT_USER(), CURRENT_ROLE()` query.
 
 ---
 
@@ -531,7 +530,7 @@ After confirmation, continue with Step 4 using the merged result.
 ### Step 4: Parse the DDL
 
 Read and parse the DDL returned in Step 3. The DDL is a SQL `CREATE OR REPLACE
-SEMANTIC VIEW` statement. See [~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md)
+SEMANTIC VIEW` statement. See [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md)
 for the full format — it is NOT the hypothetical nested format; the real format has flat
 `dimensions` and `metrics` sections at the view level.
 
@@ -683,7 +682,7 @@ WHERE table_schema = '{SCHEMA}'
 ORDER BY table_name, ordinal_position;
 ```
 
-Map Snowflake types to ThoughtSpot types using `~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md`.
+Map Snowflake types to ThoughtSpot types using `../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md`.
 
 Find the ThoughtSpot connection for those tables:
 ```bash
@@ -761,7 +760,7 @@ If no matching join is found:
 ### Step 8: Build the model TML
 
 Construct the model TML as a YAML string. Use the templates in
-[~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md](~/.claude/mappings/ts-snowflake/ts-from-snowflake-rules.md).
+[../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md).
 
 **Model name:** `TEST_SV_{view_name_title_case}` — prefix indicates this is a
 test/converted model. Ask the user if they want a different name.
@@ -896,7 +895,7 @@ where it causes an import error).
 ### Step 9: Translate SQL expressions → ThoughtSpot formulas
 
 > **MANDATORY — read the reference before assessing any expression:**
-> Open [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+> Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 > and use its **Reverse translation** sections for each SQL pattern. Do **not** classify
 > an expression as untranslatable based on SQL syntax recognition alone. Patterns that
 > appear Snowflake-specific have documented ThoughtSpot equivalents — for example:
@@ -914,7 +913,7 @@ where it causes an import error).
 For each metric whose `EXPR` is not a simple `AGG(table.col)`:
 
 1. Apply the SQL → ThoughtSpot formula translation rules in
-   [~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md](~/.claude/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+   [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
    (bidirectional reference — use the **Snowflake → ThoughtSpot** direction).
 2. Replace column references: `table.COLUMN` → `[TABLE_ALIAS::COLUMN]`
 3. If the expression translates successfully → add a `formulas[]` entry.

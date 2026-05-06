@@ -3,7 +3,7 @@ name: ts-profile-thoughtspot
 description: Manage ThoughtSpot connection profiles — add, list, update, delete, and test profiles. Stores credentials securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Run with no arguments to add your first profile or manage existing ones.
 ---
 
-# ThoughtSpot Setup
+# ThoughtSpot Profile Setup
 
 Manage ThoughtSpot connection profiles stored in `~/.claude/thoughtspot-profiles.json`.
 
@@ -17,7 +17,7 @@ Manage ThoughtSpot connection profiles — add, list, update, delete, or test a 
 
 Read `~/.claude/thoughtspot-profiles.json`.
 
-**If no profiles file or empty profiles array:** go directly to [Add](#add).
+**If no profiles file or empty profiles array:** go directly to [Add](#a--add).
 
 **If profiles exist:** show the menu.
 
@@ -69,6 +69,13 @@ Collect connection details one at a time:
 ThoughtSpot URL (e.g. https://myorg.thoughtspot.cloud):
 ```
 Strip trailing slash. Store as `{base_url}`.
+
+**Private IP validation:** If the URL contains a private IP (e.g. `172.x.x.x`,
+`10.x.x.x`, `192.168.x.x`), warn the user:
+> "Private IP addresses require network connectivity between your machine and the
+> ThoughtSpot cluster (e.g. VPN, direct connect). Do you want to continue?"
+
+If the user confirms, proceed. Otherwise ask for a public hostname.
 
 ```
 Username (email):
@@ -145,7 +152,7 @@ print(platform.system())  # Darwin = macOS, Windows, Linux
 ```
 
 Ask the user to run this command **in their own terminal** (not here — credentials
-must not enter the Claude Code conversation or its history file):
+must not enter the conversation or its history):
 
 **macOS** (`Darwin`):
 ```
@@ -236,7 +243,7 @@ Let me know when done, then restart your terminal for the change to take effect.
 ```
 Note: on Windows the env var step is **optional** — the `ts` CLI reads credentials
 directly from Windows Credential Manager at runtime. Skip this step if the user only
-needs `ts` commands; advise it only if they need `{env_var}` available in other tools.
+needs `ts` commands.
 
 ### Save profile
 
@@ -255,9 +262,11 @@ Profile entry:
 }
 ```
 
+Add `"verify_ssl": false` only if the user confirmed a private/self-signed cluster.
+
 ### Test and confirm
 
-Run the [Test](#test-a-profile) flow for this profile.
+Run the [Test](#t--test) flow for this profile.
 
 On success:
 ```
@@ -384,9 +393,14 @@ Credential updated. Run this in your terminal to apply:
 
 **Windows:** Tell the user: `Credential updated in Windows Credential Manager. Restart your terminal for the change to take effect (or it will be read directly from the credential store at next use).`
 
+Also clear the stale token cache:
+```bash
+ts auth logout --profile {profile_name}
+```
+
 ### U4 — Change Auth Method
 
-Run the full credential setup section of [Add](#add) for this profile (auth method selection → credential prompt → Keychain store → ~/.zshenv update → profile JSON update).
+Run the full credential setup section of [Add](#a--add) for this profile (auth method selection → credential prompt → Keychain store → ~/.zshenv update → profile JSON update).
 
 The old Keychain entry and env var are cleaned up as part of the new setup:
 - Delete old Keychain entry.
@@ -405,7 +419,7 @@ Which profile would you like to delete? (enter number):
 Confirm:
 ```
 Delete profile '{name}'?
-This will remove it from the profile file, the macOS Keychain, and ~/.zshenv.
+This will remove it from the profile file, the OS credential store, and ~/.zshenv.
 
 Y / N:
 ```
@@ -452,18 +466,13 @@ Run this in your terminal to apply the ~/.zshenv change:
 
 Show numbered profile list (if more than one) and ask which to test. If only one, confirm and test it directly.
 
-**macOS / Linux:**
-```bash
-source ~/.zshenv && ts auth whoami --profile {profile_name}
-```
-
-**Windows:**
 ```bash
 ts auth whoami --profile {profile_name}
 ```
-(No source step needed — credentials are read from Windows Credential Manager directly.)
 
 On success: `Profile '{name}' — connection verified.` Return to menu.
+
+On failure (401/403): `Token expired or credential invalid. Run U → Refresh credential.`
 
 ---
 
@@ -472,7 +481,7 @@ On success: `Profile '{name}' — connection verified.` Return to menu.
 | Symptom | Action |
 |---|---|
 | Credential write fails | macOS: check the login keychain is unlocked. Windows: ensure `keyring` is installed (`pip install keyring`). Linux: ensure a Secret Service backend is running (`pip install keyring secretstorage`). |
-| Env var empty after source | macOS/Linux: remind user to run `source ~/.zshenv` in a real terminal (not with `!`). Windows: the env var is optional — `ts` reads from Credential Manager directly. |
+| Env var empty after source | macOS/Linux: remind user to run `source ~/.zshenv` in a real terminal. Windows: the env var is optional — `ts` reads from Credential Manager directly. |
 | 401 / 403 on `ts auth whoami` | Wrong or expired credential. Token: get a fresh one (U → Refresh credential). Run `ts auth logout --profile {name}` to clear the stale cache first. |
 | DNS / connection refused | URL is wrong or instance unreachable. Check with U → Update URL. |
 | `SSLCertVerificationError: certificate verify failed: self signed certificate` | Internal/dev cluster with a self-signed cert. Manually add `"verify_ssl": false` to the profile entry in `~/.claude/thoughtspot-profiles.json`. The CLI will skip certificate verification for that profile. Do not use on production instances. |
@@ -490,10 +499,6 @@ temp files, or `source ~/.zshenv` wrangling needed in skill logic.
 Verify a profile is working:
 
 ```bash
-# macOS / Linux
-source ~/.zshenv && ts auth whoami --profile {profile_name}
-
-# Windows (no source step — credentials read from Credential Manager directly)
 ts auth whoami --profile {profile_name}
 ```
 
@@ -532,5 +537,4 @@ need to manage this file.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.1 | 2026-04-24 | Add one-line context before menu |
-| 1.0.0 | 2026-04-24 | Initial versioned release |
+| 1.0.0 | 2026-05-06 | Initial CoCo CLI version (adapted from Claude Code skill) |
