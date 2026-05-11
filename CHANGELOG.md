@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-05-11
+- chore: bump ts-cli to v0.5.0 — adds `--type` flag to `ts tml export` for FEEDBACK TML export
+- fix: migrate all direct urllib API calls in `ts-object-model-coach` to ts CLI (`ts tml export --type FEEDBACK`, `ts metadata dependents --raw`, `ts metadata dependents`); Cursor mirror updated to match (v1.2.0)
+
 ## 2026-05-05
 - feat: add Mode C (update existing) to `ts-convert-from-snowflake-sv` (v1.4.0) and `ts-convert-to-snowflake-sv` (v1.2.0) — diff-and-confirm workflow for applying a changed SV/Model to an existing counterpart; per-column KEEP/UPDATE/MERGE decisions; `ai_context` and Data Model Instructions never touched; coaching handoff to `/ts-object-model-coach` after import. Mirrored in Cursor `.mdc` (v1.3.0 / v1.2.0) and CoCo runtimes (v1.3.0 / v1.2.0).
 - feat: Mode B (split/merge) is now first-class in both conversion skill mode menus — previously a sub-flow triggered by domain detection, now an explicit choice at session start.

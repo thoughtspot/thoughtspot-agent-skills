@@ -206,50 +206,26 @@ Pull two categories of existing assets:
    `columns[].properties.synonyms[]`) — read directly from the bundle parsed in 2a.
 2. **Existing feedback entries** — NOT in the bundle. `ts tml export --associated`
    does not surface `nls_feedback` (verified, see
-   [open-items.md](references/open-items.md) #2). Enumerate via the metadata
-   dependents API:
+   [open-items.md](references/open-items.md) #2). Fetch full content via
+   `tml/export` with `type=FEEDBACK` (verified retrievable 2026-04-27):
 
 ```python
-import urllib.request
-req = urllib.request.Request(
-    f"{base_url}/api/rest/2.0/metadata/search", method="POST",
-    headers={"Authorization": f"Bearer {token}", "X-Requested-By": "ThoughtSpot",
-             "Content-Type": "application/json"},
-    data=json.dumps({
-        "metadata": [{"identifier": model_guid, "type": "LOGICAL_TABLE"}],
-        "include_dependent_objects": True,
-        "dependent_object_version":  "V2",
-    }).encode(),
+import json, subprocess
+
+result = subprocess.run(
+    ["bash", "-c",
+     f"source ~/.zshenv && ts tml export {model_guid} --type FEEDBACK --parse --profile '{profile_name}'"],
+    capture_output=True, text=True,
 )
-body = json.loads(urllib.request.urlopen(req, timeout=60).read())
-fb_entries = body[0]["dependent_objects"]["dependents"][model_guid].get("FEEDBACK", []) or []
+body = json.loads(result.stdout) if result.stdout.strip() else []
+fb_payload = body[0]["tml"] if body else {"nls_feedback": {"feedback": []}}
+all_fb_entries = fb_payload.get("nls_feedback", {}).get("feedback", []) or []
 
-# Each entry has: id, name (= feedback_phrase), description (= type:
-# REFERENCE_QUESTION / BUSINESS_TERM), authorName, authorDisplayName, modified.
-# The full feedback content (search_tokens, formula_info, access level, chart_type,
-# display_mode) is NOT exposed by this endpoint and is currently NOT retrievable on
-# Cloud — see [open-items.md](references/open-items.md) #2 "Feedback content
-# retrieval" sub-section, cross-referenced with ts-dependency-manager #18.
+# Full content available: search_tokens, formula_info, access, chart_type,
+# display_mode, parent_question, rating, axis_config, etc.
+fb_global = [e for e in all_fb_entries if e.get("access") == "GLOBAL"]
+fb_user   = [e for e in all_fb_entries if e.get("access") != "GLOBAL"]
 ```
-
-**Header-only fallback.** Since search_tokens and access level are unavailable, the
-skill cannot:
-- Split existing feedback into GLOBAL vs USER (Step 5 USER opt-in collapses to a
-  no-op; treat as if no USER entries exist for signal purposes)
-- Use existing `feedback_phrase` strings as paraphrase variants in Step 6.3 (no
-  matching `search_tokens` to anchor them to)
-- Critique stale references in Step 4 §4b (no tokens to validate against the
-  current schema)
-
-What the skill CAN still do header-only:
-- Deduplicate by exact `feedback_phrase` match in Step 6 (case-insensitive)
-- Show counts and a phrase preview in the Step 5 critique summary
-- Surface entries whose `name`/phrase references columns no longer in the Model as
-  a soft warning ("phrase mentions a column not on the Model — review manually")
-
-When feedback content retrieval is restored (open-item #2 follow-up), this section
-should re-enable the GLOBAL/USER split, paraphrase variant generation, and full
-stale-reference critique.
 
 ```python
 existing = {
@@ -260,16 +236,10 @@ existing = {
     "columns_with_synonyms":   [(c["name"], c.get("properties",{}).get("synonyms", []),
                                  c.get("properties",{}).get("synonym_type", ""))
                                  for c in columns if c.get("properties",{}).get("synonyms")],
-    "existing_feedback_headers": [
-        {"id": e["id"], "phrase": e["name"], "type": e.get("description","UNKNOWN"),
-         "author": e.get("authorName"), "modified": e.get("modified")}
-        for e in fb_entries
-    ],
-    "feedback_content_retrievable": False,  # see open-items.md #2 follow-up
-    # Reserved for when content retrieval is restored:
-    "existing_feedback_global": [],
-    "existing_feedback_user":   [],
+    "existing_feedback_global": fb_global,
+    "existing_feedback_user":   fb_user,
 }
+existing_entries = fb_global + fb_user   # flat list — used by Steps 8a, 8c, 9c
 ```
 
 Persist both to `{run_dir}/schema.json` and `{run_dir}/existing_assets.json`.
@@ -289,26 +259,14 @@ ts-dependency-manager skill on the `wip/ts-dependency-manager` branch) — fast 
 VERIFIED on Cloud:
 
 ```python
-import urllib.request, json, os
-profs = json.load(open(os.path.expanduser("~/.claude/thoughtspot-profiles.json")))
-profs = profs.get("profiles", profs) if isinstance(profs, dict) else profs
-prof = next(p for p in profs if p["name"] == profile_name)
-token = os.environ[prof["token_env"]]
+import json, subprocess
 
-req = urllib.request.Request(
-    f"{base_url}/api/rest/2.0/metadata/search",
-    method="POST",
-    headers={"Authorization": f"Bearer {token}", "X-Requested-By": "ThoughtSpot",
-             "Content-Type": "application/json"},
-    data=json.dumps({
-        "metadata": [{"identifier": model_guid, "type": "LOGICAL_TABLE"}],
-        "include_dependent_objects": True,
-        "dependent_object_version": "V2",
-    }).encode(),
+result = subprocess.run(
+    ["bash", "-c",
+     f"source ~/.zshenv && ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
+    capture_output=True, text=True,
 )
-with urllib.request.urlopen(req, timeout=60) as r:
-    body = json.loads(r.read())
-
+body = json.loads(result.stdout)
 deps_node  = body[0].get("dependent_objects",{}).get("dependents",{}).get(model_guid, {})
 answers    = deps_node.get("QUESTION_ANSWER_BOOK", []) or []
 liveboards = deps_node.get("PINBOARD_ANSWER_BOOK", []) or []
@@ -418,9 +376,8 @@ Summary:
 | `model.description` | Length < 100 chars; missing key entities/measures present in mined prose | `KEEP` / `EXPAND` / `REWRITE` |
 | `column.ai_context` | Empty; shorter than 30 chars; doesn't mention column purpose; contradicts mined prose | `ADD` / `REFINE` / `KEEP` |
 | `column.synonyms` | Empty; missing high-frequency phrases from mined prose; redundant with display name | `ADD_PHRASES` / `REMOVE_REDUNDANT` / `KEEP` |
-| `nls_feedback` GLOBAL entries | Stale references; downvoted entries; matches new candidate | `KEEP` / `FLAG_FOR_HUMAN` |
+| `nls_feedback` GLOBAL entries | Stale references (tokens reference columns/formulas no longer on Model); downvoted entries; matches new candidate | `KEEP` / `FLAG_FOR_HUMAN` |
 | `nls_feedback` USER entries | Out of scope by default; surface count only | `KEEP_OUT_OF_SCOPE` (default) |
-| `nls_feedback` (header-only mode) | Phrase mentions a column not on the Model | `FLAG_FOR_HUMAN` (soft warning only — token-level critique unavailable; see [open-items.md](references/open-items.md) #2 sub) |
 
 Per [ai-asset-review-rules.md §4](references/ai-asset-review-rules.md):
 - **GLOBAL feedback** is treated as authoritative — preserved, used as input signal
@@ -1035,10 +992,10 @@ import yaml, copy
 backup_path = run_dir / "before" / "model.tml"
 backup_path.parent.mkdir(parents=True, exist_ok=True)
 backup_path.write_text(yaml.dump(model_tml, sort_keys=False))
-if existing_feedback_entries:
+if existing_entries:
     (run_dir / "before" / "feedback.tml").write_text(
         yaml.dump({"guid": model_guid,
-                   "nls_feedback": {"feedback": existing_feedback_entries}}, sort_keys=False)
+                   "nls_feedback": {"feedback": existing_entries}}, sort_keys=False)
     )
 ```
 
@@ -1139,29 +1096,16 @@ before serialising.
 > merge-with-preservation by fetching existing entries first, then including
 > them in the import payload alongside the new ones.
 
-#### Step 1 — Fetch existing feedback content (full, not headers)
+#### Step 1 — Use feedback fetched in Step 2b
 
-Per [open-items.md #2 sub](references/open-items.md) (verified retrievable
-2026-04-27), use `tml/export` with `type=FEEDBACK` against the Model GUID:
+The full feedback content was already retrieved in Step 2b (`all_fb_entries`).
+Reconstruct the flat list for round-trip preservation:
 
 ```python
-import urllib.request, json, yaml
-req = urllib.request.Request(
-    f"{base_url}/api/rest/2.0/metadata/tml/export", method="POST",
-    headers={"Authorization": f"Bearer {token}", "X-Requested-By": "ThoughtSpot",
-             "Content-Type": "application/json"},
-    data=json.dumps({
-        "metadata": [{"identifier": model_guid, "type": "FEEDBACK"}],
-        "edoc_format": "YAML",
-    }).encode(),
-)
-body = json.loads(urllib.request.urlopen(req, timeout=30).read())
-edoc = body[0].get("edoc") if body else ""
-existing_payload = yaml.safe_load(edoc) if edoc else {"nls_feedback": {"feedback": []}}
-existing_entries = existing_payload.get("nls_feedback", {}).get("feedback", []) or []
+existing_entries = existing["existing_feedback_global"] + existing["existing_feedback_user"]
 ```
 
-`existing_entries` now contains the full content (`search_tokens`,
+`existing_entries` contains the full content (`search_tokens`,
 `formula_info`, `chart_type`, `display_mode`, `parent_question`, `access`,
 `rating`, `axis_config`, etc.) — ready to round-trip back into the import.
 
@@ -1278,25 +1222,21 @@ Parse the response and confirm column-by-column:
   `properties.synonyms`, NOT at column-level — see open-items.md #3)
 - `model.description` matches if updated
 
-**For feedback entries (surfaces 3, 4) — use `metadata/search` with `include_dependent_objects`:**
+**For feedback entries (surfaces 3, 4) — use `ts metadata dependents`:**
 
 ```python
-import urllib.request, json
-req = urllib.request.Request(
-    f"{base_url}/api/rest/2.0/metadata/search", method="POST",
-    headers={"Authorization": f"Bearer {token}", "X-Requested-By": "ThoughtSpot",
-             "Content-Type": "application/json"},
-    data=json.dumps({
-        "metadata": [{"identifier": model_guid, "type": "LOGICAL_TABLE"}],
-        "include_dependent_objects": True,
-        "dependent_object_version": "V2",
-    }).encode(),
-)
-body = json.loads(urllib.request.urlopen(req).read())
-feedback = body[0]["dependent_objects"]["dependents"][model_guid].get("FEEDBACK", [])
+import json, subprocess
 
-# Each entry: {id, name (= feedback_phrase), description (= type), author, created, ...}
-expected_count = len(existing_feedback_entries) + ref_qs_added + bt_added
+result = subprocess.run(
+    ["bash", "-c",
+     f"source ~/.zshenv && ts metadata dependents {model_guid} --profile '{profile_name}'"],
+    capture_output=True, text=True,
+)
+deps = json.loads(result.stdout)
+feedback = [d for d in deps if d["type"] == "FEEDBACK"]
+
+# Each entry: {source_guid, guid, name (= feedback_phrase), type, raw_bucket, ...}
+expected_count = len(existing_entries) + ref_qs_added + bt_added
 assert len(feedback) == expected_count, f"Expected {expected_count}, found {len(feedback)}"
 ```
 
@@ -1370,6 +1310,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.2.0 | 2026-05-11 | Migrate all direct urllib API calls to ts CLI: Step 2b feedback fetch now uses `ts tml export --type FEEDBACK --parse` (requires ts-cli v0.5.0); Step 3a dependents now use `ts metadata dependents --raw`; Step 9c smoke-test count now uses `ts metadata dependents` (flat output). Introduce `existing_entries` variable in Step 2b for consistent use in Steps 8a, 8c, 9c (replaces `existing_feedback_entries`). |
 | 2.1.1 | 2026-04-29 | Document the **3000-char hard limit** on the Settings → Coach Spotter → Instructions field (verified during a Dunder Mifflin coaching run on se-thoughtspot). `references/model-instructions-schema.md` Safeguard #3 adds the validation rule plus the budget-trim order (drop `output_formatting` first, then trim `note:` / `reason:` text, then collapse `aggregation_defaults`; never drop the mandatory tier of `schema_assumptions` / `exclusion_rules` / `time_defaults`). Step 6.5 Validation block points at the safeguard; Step 8e gate now displays `{N_instr_bytes}/3000 chars` so the user sees their headroom before pasting. Cursor mirror v1.1.1 syncs the same. |
 | 2.1.0 | 2026-04-29 | **`ai_context` overhaul.** Structured-only — closed enums and refs; free-form prose moves to `column.description`. Allowed keys: `additivity`, `non_additive_dimension`, `time_basis`, `source` (conditional override), `grain_keys`, `unit`, `null_semantics`, `role`. Removed: `formula` axis (caused TS DSL transliteration failures in `agent-expressibility-eval` Test 4), `additive_dimensions` (redundant with `non_additive_dimension`). Added: `role` axis for dimensions (closed enum `label`/`id`/`code`/`key`) — addresses the Test 3 Q-010 id-vs-label confusion. `source` is now a conditional override — omit when `column_id: TABLE::COL` resolves cleanly via the table's `fqn`. New `references/ai-context-schema.md` is the authoritative spec; `references/ai-context-examples.md` collects 8 worked examples per failure cluster. Step 6.1 generates both `ai_context` (structured) and `column.description` (prose) in parallel and embeds a four-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers — don't infer phantom tables like `DM_CATEGORY` from column names; `ai_context` is authoritative). Step 8b adds deploy-time validation: closed-key check, enum check (incl. `role`), ref resolution, ≤ 400 chars, no prose values. Mandatory measure tier (`additivity`, `time_basis`, `grain_keys`) is never dropped under budget pressure. **`model_instructions` introduced.** Step 6.5 now generates a structured 5-category schema (`exclusion_rules`, `aggregation_defaults`, `time_defaults`, `output_formatting`, `schema_assumptions`) — same declarative-only discipline as `ai_context`, applied at Model scope. `schema_assumptions.denormalized_attributes` provides Model-level reinforcement of phantom-table prevention (lists denormalized columns once per Model rather than per-column). `schema_assumptions.chasm_attribution` declares fact-table pairs that share some dims but not all — encodes ThoughtSpot's chasm-trap attribution capability so external SQL agents handle fulfillment and marketing-attribution queries correctly (each fact aggregated at its own grain, attributed via shared dims with intentional value repetition across non-shared dims). Step 6.5 includes auto-detection from the `joins_with` graph; pairs with one shared dim are flagged `NEEDS_REVIEW`, pairs with ≥ 2 shared dims default to `KEEP`. Boundary: only untriggered global rules belong here; phrase-triggered rules (term aliases, default-by-phrase) are deferred to `nls_feedback` until a feedback-bundling decision lands. New `references/model-instructions-schema.md` is the authoritative spec. Cursor mirror bumped to v1.1.0 to match. |
 | 2.0.0 | 2026-04-28 | **BREAKING:** skill renamed `ts-coach-model` → `ts-object-model-coach` to align with the `ts-object-{type}-{verb}` family pattern (see `.claude/rules/skill-naming.md`). Slash command, directory, smoke-test filename, and cache directory (`~/.cache/ts-object-model-coach/`) all change. Anyone with scripts or aliases pointing at the old name must update. Also formalises the cross-Model consistency scan (Step 4.5), per-surface explainer-block pattern, parallel TML export with progress + cache + pre-scan gate, and verified-pattern library mined from real coached Models — all of which landed in PR #9. |

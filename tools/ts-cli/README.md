@@ -295,6 +295,9 @@ ts tml export e61c7c4c-68a4-4174-b393-a0104ae3bd00 --fqn --associated
 
 # Export multiple objects
 ts tml export abc-123 def-456 --format JSON
+
+# Export coaching feedback TML (nls_feedback) for a Model
+ts tml export abc-123 --type FEEDBACK --parse
 ```
 
 **Options:**
@@ -306,6 +309,7 @@ ts tml export abc-123 def-456 --format JSON
 | `--associated` | false | Export associated objects (e.g. tables for a model) |
 | `--format`, `-f` | `YAML` | Output format: `YAML` or `JSON` |
 | `--parse` | false | Parse each `edoc` string into a structured JSON object (see below) |
+| `--type` | (none) | Metadata type for each export entry. Use `FEEDBACK` to export a Model's coaching feedback TML (nls_feedback). |
 
 **Output (default):** JSON array from `POST /api/rest/2.0/metadata/tml/export`. Each element
 contains `info` (metadata) and `edoc` (the raw TML string).

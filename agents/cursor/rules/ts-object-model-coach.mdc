@@ -97,25 +97,22 @@ Parse and extract:
 2. **Existing AI assets** — `model.description`, `columns[].properties.ai_context`,
    `columns[].properties.synonyms`.
 3. **Existing feedback** — fetched separately via:
-   ```http
-   POST /api/rest/2.0/metadata/tml/export
-   {"metadata": [{"identifier": "{model_guid}", "type": "FEEDBACK"}],
-    "edoc_format": "YAML"}
+   ```bash
+   ts tml export {model_guid} --type FEEDBACK --parse --profile {ts_profile}
    ```
-   The response's `edoc` is the full feedback YAML with `search_tokens`,
-   `formula_info`, `axis_config`, `parent_question`, `access`, `rating` etc.
+   The response's `tml` is the parsed feedback object with `nls_feedback.feedback[]`
+   containing full `search_tokens`, `formula_info`, `axis_config`, `parent_question`,
+   `access`, `rating` etc. Split into `fb_global` (access == GLOBAL) and `fb_user`.
+   Set `existing_entries = fb_global + fb_user` for use in Steps 8a, 8c, 9.
 
 ---
 
 ## Step 3 — Mine candidate sources
 
-### 3a. Dependent Answers / Liveboards (verified v2 API)
+### 3a. Dependent Answers / Liveboards
 
-```http
-POST /api/rest/2.0/metadata/search
-{"metadata": [{"identifier": "{model_guid}", "type": "LOGICAL_TABLE"}],
- "include_dependent_objects": true,
- "dependent_object_version": "V2"}
+```bash
+ts metadata dependents {model_guid} --raw --profile {ts_profile}
 ```
 
 Walks `dependent_objects.dependents.{model_guid}.QUESTION_ANSWER_BOOK[]` and
@@ -415,7 +412,7 @@ Deep-copy the original; apply per-column `description` and
 > this) and including them in the import payload.
 
 ```python
-merged = list(existing_feedback_entries)  # full content from Step 2 fetch
+merged = list(existing_entries)  # full content from Step 2 fetch
 used_ids = {str(e.get("id","")) for e in merged}
 def next_id():
     n = 1
@@ -456,13 +453,12 @@ Verify Model changes via re-export:
 ts tml export {model_guid} --profile {ts_profile} --fqn --associated --parse
 ```
 
-Verify feedback via:
-```http
-POST /api/rest/2.0/metadata/search
-{"metadata": [{"identifier": "{model_guid}", "type": "LOGICAL_TABLE"}],
- "include_dependent_objects": true,
- "dependent_object_version": "V2"}
+Verify feedback count via:
+```bash
+ts metadata dependents {model_guid} --profile {ts_profile}
 ```
+Filter results where `type == "FEEDBACK"` and assert count equals
+`len(existing_entries) + ref_qs_added + bt_added`.
 
 Final report shows counts applied, run dir for rollback (`ts tml import` of
 `before/model.tml` and `before/feedback.tml`), and the `instructions.md` path
@@ -499,6 +495,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-05-11 | Mirror of Claude v2.2.0: migrate all direct API calls to ts CLI — feedback fetch uses `ts tml export --type FEEDBACK --parse`; dependents use `ts metadata dependents --raw`; smoke-test feedback count uses `ts metadata dependents` (flat). Rename `existing_feedback_entries` → `existing_entries` for consistency. |
 | 1.1.1 | 2026-04-29 | Mirror of Claude v2.1.1: documents the **3000-char hard limit** on the Settings → Coach Spotter → Instructions field. Step 6.5 now lists the budget-trim order (drop `output_formatting` first → trim `note:` / `reason:` → collapse `aggregation_defaults`; never drop mandatory tier of `schema_assumptions` / `exclusion_rules` / `time_defaults`) and the Step 8e gate display (`{N_instr_bytes}/3000 chars`). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
 | 1.1.0 | 2026-04-29 | Mirror of Claude v2.1.0 schema overhaul: `ai_context` is structured-only (closed enums + refs), 8 keys (`additivity`/`non_additive_dimension`/`time_basis`/`source`/`grain_keys`/`unit`/`null_semantics`/`role`); `formula` and `additive_dimensions` removed; `role` added for dimensions; `source` is conditional override. New 4-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers, do not infer phantom tables; `ai_context` is authoritative). Step 6.5 Model Instructions is now a structured 5-category schema (`exclusion_rules`/`aggregation_defaults`/`time_defaults`/`output_formatting`/`schema_assumptions`). `schema_assumptions` enum: `denormalized_attributes` (phantom-table reinforcement), `shared_conformed_date_dim`, `surrogate_keys_only`, `chasm_attribution` (declares fact-pair attribution patterns — ThoughtSpot's chasm-trap capability for fulfillment and marketing-attribution queries; auto-detected from `joins_with` graph). Prose lives in `column.description` and `model.description`. Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
 | 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-object-model-coach/SKILL.md` (Claude v2.0.0). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |

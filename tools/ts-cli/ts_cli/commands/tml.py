@@ -85,6 +85,10 @@ def export_tml(
                                    "[{type: '...', guid: '...', tml: {...}, info: {...}}]. "
                                    "Handles non-printable character stripping automatically."
                                )),
+    type: Optional[str] = typer.Option(None, "--type",
+                                       help="Metadata type to include in each export entry. "
+                                            "Omit for standard TML export. "
+                                            "Use FEEDBACK to export a Model's coaching feedback TML."),
 ) -> None:
     """Export TML for one or more objects.
 
@@ -96,6 +100,9 @@ def export_tml(
     object. Non-printable characters are stripped automatically. This
     eliminates the boilerplate parse loop that every skill otherwise needs.
 
+    With --type FEEDBACK, exports the coaching feedback TML (nls_feedback) for
+    the given Model GUID rather than the Model's structural TML.
+
     Examples:
 
     \b
@@ -103,12 +110,20 @@ def export_tml(
       ts tml export abc-123 --fqn --associated
       ts tml export abc-123 --fqn --associated --parse
       ts tml export abc-123 def-456 --format JSON
+      ts tml export abc-123 --type FEEDBACK --parse
     """
     client = ThoughtSpotClient(resolve_profile(profile))
+
+    def _entry(g: str) -> dict:
+        entry: dict = {"identifier": g}
+        if type:
+            entry["type"] = type
+        return entry
+
     resp = client.post(
         "/api/rest/2.0/metadata/tml/export",
         json={
-            "metadata": [{"identifier": g} for g in guids],
+            "metadata": [_entry(g) for g in guids],
             "export_fqn": fqn,
             "export_associated": associated,
             "formattype": format,
