@@ -6,6 +6,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-05-11
+- chore: bump ts-cli to v0.6.0
+- fix: `ts tml import` default changed from `--create-new` to `--no-create-new` — prevents silent duplicate creation when importing TML with an existing GUID; updated help text and docstring with explicit warning about the `--create-new` + existing-GUID pitfall
+- fix: `ts tml export --type FEEDBACK` now exits immediately with a clear error explaining that feedback TML must be exported via the feedback object's own GUID (the API returns HTTP 400 for model GUID + type=FEEDBACK); directs user to `ts metadata dependents` to locate feedback GUIDs
+- feat: `ts profiles list --snowflake` — lists Snowflake profiles from `~/.claude/snowflake-profiles.json` (name, method, account, warehouse); previously there was no CLI path to list Snowflake profiles
+- fix: `ts-object-model-coach` Step 2b — replaced broken `--type FEEDBACK` export with the correct two-step approach: find feedback object GUIDs via `ts metadata dependents`, then export each GUID directly; handles zero-feedback models gracefully (proceeds with empty list)
 - chore: bump ts-cli to v0.5.0 — adds `--type` flag to `ts tml export` for FEEDBACK TML export
 - fix: migrate all direct urllib API calls in `ts-object-model-coach` to ts CLI (`ts tml export --type FEEDBACK`, `ts metadata dependents --raw`, `ts metadata dependents`); Cursor mirror updated to match (v1.2.0)
 

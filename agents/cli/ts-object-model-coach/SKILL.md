@@ -205,27 +205,51 @@ Pull two categories of existing assets:
 1. **Model TML assets** (`model.description`, `columns[].properties.ai_context`,
    `columns[].properties.synonyms[]`) — read directly from the bundle parsed in 2a.
 2. **Existing feedback entries** — NOT in the bundle. `ts tml export --associated`
-   does not surface `nls_feedback` (verified, see
-   [open-items.md](references/open-items.md) #2). Fetch full content via
-   `tml/export` with `type=FEEDBACK` (verified retrievable 2026-04-27):
+   does not surface `nls_feedback` (verified). `ts tml export --type FEEDBACK` is
+   also not supported — the API returns HTTP 400 when a model GUID is passed with
+   `type=FEEDBACK` (verified 2026-05-11). The correct approach is to locate the
+   feedback object's own GUID via `ts metadata dependents`, then export it directly:
 
 ```python
 import json, subprocess
 
-result = subprocess.run(
+# Step 1: find the feedback object GUID via dependents
+dep_result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml export {model_guid} --type FEEDBACK --parse --profile '{profile_name}'"],
+     f"source ~/.zshenv && ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
-body = json.loads(result.stdout) if result.stdout.strip() else []
-fb_payload = body[0]["tml"] if body else {"nls_feedback": {"feedback": []}}
-all_fb_entries = fb_payload.get("nls_feedback", {}).get("feedback", []) or []
+dep_body = json.loads(dep_result.stdout) if dep_result.stdout.strip() else []
+deps_node = (dep_body[0].get("dependent_objects", {})
+                        .get("dependents", {})
+                        .get(model_guid, {})) if dep_body else {}
+feedback_deps = deps_node.get("FEEDBACK", []) or []
+feedback_guids = [d.get("id") or d.get("metadata_id") for d in feedback_deps
+                  if d.get("id") or d.get("metadata_id")]
+
+# Step 2: export each feedback GUID (no --type flag needed)
+all_fb_entries = []
+for fb_guid in feedback_guids:
+    fb_result = subprocess.run(
+        ["bash", "-c",
+         f"source ~/.zshenv && ts tml export {fb_guid} --parse --profile '{profile_name}'"],
+        capture_output=True, text=True,
+    )
+    fb_body = json.loads(fb_result.stdout) if fb_result.stdout.strip() else []
+    if fb_body:
+        fb_payload = fb_body[0].get("tml", {})
+        entries = fb_payload.get("nls_feedback", {}).get("feedback", []) or []
+        all_fb_entries.extend(entries)
 
 # Full content available: search_tokens, formula_info, access, chart_type,
 # display_mode, parent_question, rating, axis_config, etc.
 fb_global = [e for e in all_fb_entries if e.get("access") == "GLOBAL"]
 fb_user   = [e for e in all_fb_entries if e.get("access") != "GLOBAL"]
 ```
+
+If no FEEDBACK dependents are found, `all_fb_entries` will be empty — proceed
+normally with zero feedback entries (the Step 5 critique will note this and
+suggest generating new content).
 
 ```python
 existing = {
@@ -759,6 +783,57 @@ For each column, compile a candidate synonym list from:
 Reject phrases that are exact substrings/supersets of the display name (e.g. don't add
 `"inventory"` as a synonym of `Inventory Balance`).
 
+**Before writing proposals, run two cross-column validation checks across ALL columns
+(existing synonyms + proposed additions combined):**
+
+1. **No synonym matches another column's display name.** A synonym equal to another
+   column's name causes Spotter to resolve the phrase to two different things depending
+   on context. Flag every such entry as `REMOVE` in the review file with the note
+   `"synonym conflicts with column name [{other_col}]"`. This applies to existing
+   synonyms too — surface them for removal even if they weren't proposed in this run.
+
+2. **No synonym appears on more than one column.** Duplicate synonyms cause
+   non-deterministic resolution. Flag every duplicate as `REMOVE` on the lower-priority
+   column (keep it on the column whose display name is closest in meaning).
+
+```python
+all_col_names_lower = {c["name"].lower(): c["name"] for c in m.get("columns", [])}
+
+# Build merged map: synonym_lower → [col_name, ...] across existing + proposed
+syn_to_cols = {}
+for col in m.get("columns", []):
+    all_syns = list(col.get("properties", {}).get("synonyms", []))
+    proposed = synonym_deltas.get(col["name"], {}).get("proposed_additions", [])
+    for syn in all_syns + proposed:
+        syn_to_cols.setdefault(syn.lower(), []).append(col["name"])
+
+synonym_errors = []
+for col in m.get("columns", []):
+    all_syns = list(col.get("properties", {}).get("synonyms", []))
+    proposed = synonym_deltas.get(col["name"], {}).get("proposed_additions", [])
+    for syn in all_syns + proposed:
+        # Rule 1: synonym matches another column's display name
+        match = all_col_names_lower.get(syn.lower())
+        if match and match != col["name"]:
+            synonym_errors.append(
+                f"[{col['name']}] synonym '{syn}' conflicts with column name [{match}] — flag REMOVE"
+            )
+        # Rule 2: synonym appears on multiple columns
+        owners = syn_to_cols.get(syn.lower(), [])
+        if len(owners) > 1 and owners[0] != col["name"]:
+            synonym_errors.append(
+                f"[{col['name']}] synonym '{syn}' duplicated on {owners} — flag REMOVE on lower-priority column"
+            )
+
+if synonym_errors:
+    print("Synonym validation issues (flag in review file):")
+    for e in synonym_errors:
+        print(f"  {e}")
+```
+
+Surface all violations in `synonyms.md` as `REMOVE` rows at the top of the file,
+clearly separated from new proposals, so the user sees them before approving anything.
+
 ### 6.3 — Reference Questions
 
 Apply the taxonomy in [question-taxonomy.md](references/question-taxonomy.md): generate
@@ -1070,13 +1145,47 @@ if errors:
     raise SystemExit("ai_context validation failed:\n  " + "\n  ".join(errors))
 
 # Surface 2 — column synonyms
+# Re-run cross-column validation before writing (catches anything added during Step 7 review)
+all_col_names_lower = {c["name"].lower(): c["name"] for c in m.get("columns", [])}
+syn_to_cols_final = {}
 for col in m.get("columns", []):
     delta = synonym_deltas.get(col["name"])
-    if delta and delta["action"] in ("ADD_PHRASES",):
-        existing = set(col.get("synonyms", []))
-        new = list(existing.union(delta["proposed_additions"]))
-        col["synonyms"] = sorted(new)
-        col.setdefault("properties", {})["synonym_type"] = "USER_DEFINED"
+    merged = set(col.get("properties", {}).get("synonyms", []))
+    if delta and delta["action"] == "ADD_PHRASES":
+        merged |= set(delta["proposed_additions"])
+    if delta and delta["action"] == "REMOVE":
+        merged -= set(delta.get("remove_phrases", []))
+    for syn in merged:
+        syn_to_cols_final.setdefault(syn.lower(), []).append(col["name"])
+
+build_errors = []
+for col in m.get("columns", []):
+    delta = synonym_deltas.get(col["name"])
+    merged = set(col.get("properties", {}).get("synonyms", []))
+    if delta and delta["action"] == "ADD_PHRASES":
+        merged |= set(delta["proposed_additions"])
+    if delta and delta["action"] == "REMOVE":
+        merged -= set(delta.get("remove_phrases", []))
+    validated = set()
+    for syn in merged:
+        # Rule 1: must not match another column's display name
+        match = all_col_names_lower.get(syn.lower())
+        if match and match != col["name"]:
+            build_errors.append(f"[{col['name']}] synonym '{syn}' = column name [{match}] — skipped")
+            continue
+        # Rule 2: must not be on more than one column
+        owners = syn_to_cols_final.get(syn.lower(), [])
+        if len(owners) > 1 and owners[0] != col["name"]:
+            build_errors.append(f"[{col['name']}] synonym '{syn}' duplicated across {owners} — skipped on this column")
+            continue
+        validated.add(syn)
+    col["synonyms"] = sorted(validated)
+    col.setdefault("properties", {})["synonym_type"] = "USER_DEFINED"
+
+if build_errors:
+    print("Synonym build warnings (entries skipped to prevent conflicts):")
+    for e in build_errors:
+        print(f"  {e}")
 
 # Surface 6 — model description
 if description_delta and description_delta["action"] in ("EXPAND","REWRITE"):
@@ -1187,17 +1296,22 @@ If N, exit gracefully — leave the run dir in place so the user can re-run or h
 ### 9a. Import patched Model TML (if any of surfaces 1, 2, 6 are non-empty)
 
 ```bash
-source ~/.zshenv && ts tml import \
-  --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new \
-  < {run_dir}/after/model.tml
+python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{run_dir}/after/model.tml').read_text()]))" \
+  | source ~/.zshenv && ts tml import \
+  --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
+
+> **CLI format:** `ts tml import` reads a **JSON array of TML strings** from stdin —
+> not a raw YAML file. The `python3 -c` wrapper handles the encoding. Passing the raw
+> `.tml` file directly causes `Invalid JSON on stdin` and silently creates a duplicate
+> (if `--create-new` is used) or errors out.
 
 ### 9b. Import feedback TML (if any of surfaces 3, 4 are non-empty)
 
 ```bash
-source ~/.zshenv && ts tml import \
-  --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new \
-  < {run_dir}/after/feedback.tml
+python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{run_dir}/after/feedback.tml').read_text()]))" \
+  | source ~/.zshenv && ts tml import \
+  --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
 > **Open item:** standalone `nls_feedback` import vs bundled-with-model — see
@@ -1269,7 +1383,8 @@ Coaching import complete for "{model_name}":
     → paste these rules into the Spotter UI under Settings → Coach Spotter → Instructions
 
   Run directory: {run_dir}
-  Rollback:      ts tml import --profile {profile_name} < {run_dir}/before/model.tml
+  Rollback:      python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{run_dir}/before/model.tml').read_text()]))" \
+                 | ts tml import --profile {profile_name} --policy ALL_OR_NONE --no-create-new
                  (and feedback.tml if applicable)
 
 Spotter will use the applied coaching on the next index refresh.

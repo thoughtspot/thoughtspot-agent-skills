@@ -87,8 +87,7 @@ def export_tml(
                                )),
     type: Optional[str] = typer.Option(None, "--type",
                                        help="Metadata type to include in each export entry. "
-                                            "Omit for standard TML export. "
-                                            "Use FEEDBACK to export a Model's coaching feedback TML."),
+                                            "Omit for standard TML export."),
 ) -> None:
     """Export TML for one or more objects.
 
@@ -100,8 +99,10 @@ def export_tml(
     object. Non-printable characters are stripped automatically. This
     eliminates the boilerplate parse loop that every skill otherwise needs.
 
-    With --type FEEDBACK, exports the coaching feedback TML (nls_feedback) for
-    the given Model GUID rather than the Model's structural TML.
+    Note: --type FEEDBACK is not supported. Feedback (nls_feedback) TML must
+    be exported via the feedback object's own GUID, not the parent model's
+    GUID. To locate feedback GUIDs: use `ts metadata dependents <model-guid>`
+    and look for FEEDBACK type objects in the response.
 
     Examples:
 
@@ -110,8 +111,20 @@ def export_tml(
       ts tml export abc-123 --fqn --associated
       ts tml export abc-123 --fqn --associated --parse
       ts tml export abc-123 def-456 --format JSON
-      ts tml export abc-123 --type FEEDBACK --parse
     """
+    if type and type.upper() == "FEEDBACK":
+        raise SystemExit(
+            "Error: --type FEEDBACK is not supported.\n"
+            "\n"
+            "Feedback TML must be exported via the feedback object's own GUID,\n"
+            "not the parent model's GUID. The ThoughtSpot API returns 400 when\n"
+            "a model GUID is passed with type=FEEDBACK.\n"
+            "\n"
+            "To find feedback objects for a model:\n"
+            "  ts metadata dependents <model-guid> --profile <profile>\n"
+            "Look for 'FEEDBACK' type entries, then export their GUIDs directly."
+        )
+
     client = ThoughtSpotClient(resolve_profile(profile))
 
     def _entry(g: str) -> dict:
@@ -164,8 +177,13 @@ def import_tml(
         help="Import policy: PARTIAL (best-effort) or ALL_OR_NONE (atomic).",
     ),
     create_new: bool = typer.Option(
-        True, "--create-new/--no-create-new",
-        help="Create new objects if they don't exist.",
+        False, "--create-new/--no-create-new",
+        help=(
+            "Allow creating new objects. Default: --no-create-new (update existing only). "
+            "Use --create-new only when importing a brand-new object with no existing GUID. "
+            "Warning: --create-new with a TML that contains an existing GUID will silently "
+            "create a duplicate with a new GUID instead of updating the original."
+        ),
     ),
 ) -> None:
     """Import TML objects. Reads a JSON array of TML strings from stdin.
@@ -174,17 +192,22 @@ def import_tml(
     Use PARTIAL policy for tables (tolerates partial failures) and
     ALL_OR_NONE for models (either the whole model works or nothing is created).
 
+    Default is --no-create-new (update existing objects only). Use --create-new
+    only when importing brand-new TML that has no existing GUID — passing
+    --create-new with a TML containing an existing GUID creates a duplicate.
+
     Output: JSON from POST /api/rest/2.0/metadata/tml/import containing
     per-object status and GUIDs of created/updated objects.
 
     Examples:
 
     \b
-      # Import tables (partial — some may succeed even if others fail)
-      echo '["table:\\n  name: ..."]' | ts tml import --policy PARTIAL
+      # Update an existing model (default behaviour)
+      python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('model.tml').read_text()]))" \\
+        | ts tml import --policy ALL_OR_NONE
 
-      # Import a model (atomic — all or nothing)
-      echo '["model:\\n  name: ..."]' | ts tml import --policy ALL_OR_NONE
+      # Create a brand-new object from TML with no GUID
+      echo '["model:\\n  name: ..."]' | ts tml import --policy ALL_OR_NONE --create-new
     """
     try:
         payload = json.load(sys.stdin)
