@@ -35,7 +35,6 @@ ALLOWLIST = {
     "ts-profile-thoughtspot",   # interactive credential setup — no API mutation flow to test
     "ts-profile-snowflake",     # interactive credential setup
     "ts-object-answer-promote", # legacy gap; backfill in a follow-up PR
-    "ts-variable-timezone",     # new skill; smoke test to be added in a follow-up PR
 }
 
 # Skills whose smoke test uses an abbreviated filename rather than the default convention.
