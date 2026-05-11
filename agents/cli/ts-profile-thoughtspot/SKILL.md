@@ -1,6 +1,6 @@
 ---
 name: ts-profile-thoughtspot
-description: Manage ThoughtSpot connection profiles — add, list, update, delete, and test profiles. Stores credentials securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Run with no arguments to add your first profile or manage existing ones.
+description: Set up and manage ThoughtSpot connection profiles. Use when configuring a new ThoughtSpot instance, updating credentials, or testing whether an existing profile is working. Credentials are stored securely in the OS keychain.
 ---
 
 # ThoughtSpot Profile Setup

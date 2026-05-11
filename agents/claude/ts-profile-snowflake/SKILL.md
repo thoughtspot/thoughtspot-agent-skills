@@ -1,6 +1,6 @@
 ---
 name: ts-profile-snowflake
-description: Manage Snowflake connection profiles — add, list, update, delete, and test profiles. Supports Python connector (key pair or password) and Snowflake CLI. Passwords stored securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Run with no arguments to add your first profile or manage existing ones.
+description: Set up and manage Snowflake connection profiles. Use when configuring a new Snowflake connection, updating credentials, or testing whether an existing profile is working. Supports Python connector (key pair or password) and Snowflake CLI. Credentials are stored securely in the OS keychain.
 ---
 
 # Snowflake Setup

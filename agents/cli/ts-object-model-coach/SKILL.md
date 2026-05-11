@@ -1,6 +1,6 @@
 ---
 name: ts-object-model-coach
-description: Comprehensively prepare a ThoughtSpot Model for Spotter — review existing AI context, synonyms, and description for quality; mine dependent Liveboards/Answers and (optionally) Snowflake history for real business language; then generate the user's chosen mix of column AI Context, column Synonyms, Reference Questions, Business Terms, and a Data Model Instructions draft.
+description: Prepare a ThoughtSpot Model to work well with Spotter. Use when you want to improve how a Model responds to natural language queries — reviewing and writing AI context, synonyms, reference questions, business terms, and data model instructions. Mines real language from existing Liveboards, Answers, and optionally Snowflake query history to ground the coaching in how users actually talk about the data.
 ---
 
 # ThoughtSpot: Coach a Model (Comprehensive Spotter Preparation)
