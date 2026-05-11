@@ -111,6 +111,10 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 | `ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
 | `ts-object-model-coach` | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
 | `ts-dependency-manager` | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards |
+<<<<<<< HEAD
+=======
+| `ts-variable-timezone` | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
+>>>>>>> 23572a9 (fix: rebase ts-variable-timezone onto current main structure)
 
 **Setup** — manage connection profiles
 
@@ -121,6 +125,19 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 
 See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for installation and setup.
 
+<<<<<<< HEAD
+=======
+### ts-variable-timezone version requirements
+
+> ⚠️ **Beta in ThoughtSpot 26.5, Early Access in 26.6 — requires `tscli` flags to enable.**
+
+| ThoughtSpot version | Status | Notes |
+|---|---|---|
+| 26.5 | Beta | Must be enabled by your ThoughtSpot admin via `tscli` |
+| 26.6 | Early Access | Must be enabled by your ThoughtSpot admin via `tscli` |
+| Post-GA | Generally Available | Enabled by default |
+
+>>>>>>> 23572a9 (fix: rebase ts-variable-timezone onto current main structure)
 ---
 
 ## Snowsight Workspace Skills

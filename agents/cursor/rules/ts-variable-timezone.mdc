@@ -1,0 +1,125 @@
+---
+description: Manage the ts_user_timezone variable in ThoughtSpot — search current values, or set/remove timezone values at org or user level. Use when the user wants to view, set, or clear timezone assignments for the ts_user_timezone template variable. ⚠️ Beta in ThoughtSpot 26.5, EA in 26.6.
+alwaysApply: false
+---
+
+> **Cursor mirror of `agents/cli/ts-variable-timezone/SKILL.md` (v1.0.0).** The Claude
+> SKILL.md is the authoritative source. This condensed version covers the same
+> 8-step flow but omits verbose error tables — refer to the SKILL.md for full
+> error handling details.
+
+# ThoughtSpot: Manage Timezone Variable
+
+Manage values for the `ts_user_timezone` template variable, which controls the timezone
+applied to date/time calculations per org or per user.
+
+Ask one question at a time. Wait for each answer before proceeding.
+
+## Prerequisites
+
+- ThoughtSpot profile configured (`~/.claude/thoughtspot-profiles.json`)
+- `ts` CLI installed: `pip install -e tools/ts-cli`
+- `ts_user_timezone` variable must exist on the cluster
+
+## Step 1 — Authenticate
+
+Read `~/.claude/thoughtspot-profiles.json`. Prompt for profile if multiple exist; confirm if one.
+
+```bash
+source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+```
+
+Save `{base_url}`, `{profile_name}`, `{verify_ssl}` (default `true`).
+
+## Step 2 — Select Operation
+
+```
+What would you like to do with ts_user_timezone?
+
+  1  Search — view current timezone values
+  2  Set    — set (or overwrite) a timezone value for an org or user
+  3  Remove — remove the timezone value for an org or user
+```
+
+- 1 → `{operation}` = `"search"` → go to **Search Flow**
+- 2 → `{operation}` = `"set"`
+- 3 → `{operation}` = `"remove"`
+
+## Search Flow
+
+```bash
+source ~/.zshenv && curl -sk -X POST \
+  "{base_url}/api/rest/2.0/template/variables/search" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(ts auth token --profile {profile_name})" \
+  --data-raw '{
+    "record_offset": 0,
+    "record_size": 10,
+    "response_content": "METADATA_AND_VALUES",
+    "variable_details": [{ "identifier": "ts_user_timezone" }]
+  }'
+```
+
+Display results as a table: Org | Level | Principal | Timezone. Stop after showing results.
+
+## Step 3 — Collect Timezone (Set only)
+
+Skip if `{operation}` = `"remove"`. Ask for IANA format timezone (e.g. `Asia/Kolkata`,
+`America/New_York`). Warn if format doesn't match `Region/City` pattern but allow override.
+
+## Step 4 — Collect Org
+
+Ask for org name (e.g. `Primary`). Save as `{org_identifier}`.
+
+## Step 5 — Collect User (optional)
+
+Ask for username or Enter to apply at org level. Set `{level}` = `"user"` or `"org"` accordingly.
+
+## Step 6 — Confirm
+
+Show summary (operation, timezone if set, org, level/user, cluster URL) and ask `Proceed? (Y/N)`.
+
+## Step 7 — Call the API
+
+Build body and POST to the update-values endpoint:
+
+```python
+import json, subprocess
+
+assignment = {
+    "org_identifier": "{org_identifier}",
+    "principal_type": "USER",
+    "assigned_values": ["{timezone_value}"] if "{operation}" == "set" else [],
+}
+if "{level}" == "user":
+    assignment["principal_identifier"] = "{principal_identifier}"
+
+body = json.dumps({"variable_assignment": [assignment]})
+
+verify_flag = "" if {verify_ssl} else "-k"
+result = subprocess.run(
+    ["bash", "-c",
+     f"source ~/.zshenv && curl -s {verify_flag} -X POST "
+     f"'{base_url}/api/rest/2.0/template/variables/ts_user_timezone/update-values' "
+     f"-H 'Content-Type: application/json' "
+     f"-H 'Authorization: Bearer $(ts auth token --profile {profile_name})' "
+     f"--data-raw '{body}'"],
+    capture_output=True, text=True
+)
+```
+
+Empty response body = HTTP 204 success. JSON with `error` key = failure.
+
+## Step 8 — Report Result
+
+On success: confirm operation, timezone (if set), org, level, cluster URL.
+On error: show error message and common causes (invalid IANA spelling, unknown username,
+wrong org name, variable not enabled on cluster).
+
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-05-11 | Initial release — Cursor mirror of ts-variable-timezone v1.0.0 |

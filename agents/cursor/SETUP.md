@@ -67,6 +67,18 @@ across ThoughtSpot".
 > Untested in Cursor — best-effort condensation of the Claude version. See the rule
 > file's header for details.
 
+### `ts-variable-timezone`
+
+Manages the `ts_user_timezone` template variable — search current assignments, set a
+timezone for an org or user (IANA format), or remove a previously set value.
+
+⚠️ Beta in ThoughtSpot 26.5, EA in 26.6 — requires `tscli` flags to enable.
+
+Trigger by asking: "Show timezone assignments" or "Set timezone for this user".
+
+> Untested in Cursor — best-effort condensation of the Claude version. See the rule
+> file's header for details.
+
 ---
 
 ## Installation

@@ -84,6 +84,12 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.snowflake/cortex/skills/ts-object-model-coach
 
+<<<<<<< HEAD
+=======
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
+      ~/.snowflake/cortex/skills/ts-variable-timezone
+
+>>>>>>> 23572a9 (fix: rebase ts-variable-timezone onto current main structure)
 # Symlink shared reference files
 ln -s ~/thoughtspot-agent-skills/agents/shared \
       ~/.snowflake/cortex/shared
@@ -113,6 +119,12 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.claude/skills/ts-object-model-coach
 
+<<<<<<< HEAD
+=======
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
+      ~/.claude/skills/ts-variable-timezone
+
+>>>>>>> 23572a9 (fix: rebase ts-variable-timezone onto current main structure)
 # Claude-only: Snowflake profile management
 ln -s ~/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \
       ~/.claude/skills/ts-profile-snowflake
