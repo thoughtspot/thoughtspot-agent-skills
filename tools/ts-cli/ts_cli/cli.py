@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import auth, connections, metadata, profiles, tables, tml
+from ts_cli.commands import auth, connections, metadata, orgs, profiles, tables, tml, users, variables
 
 app = typer.Typer(
     name="ts",
@@ -14,9 +14,12 @@ app = typer.Typer(
 app.add_typer(auth.app, name="auth")
 app.add_typer(connections.app, name="connections")
 app.add_typer(metadata.app, name="metadata")
+app.add_typer(orgs.app, name="orgs")
 app.add_typer(tables.app, name="tables")
 app.add_typer(tml.app, name="tml")
 app.add_typer(profiles.app, name="profiles")
+app.add_typer(users.app, name="users")
+app.add_typer(variables.app, name="variables")
 
 
 def main() -> None:

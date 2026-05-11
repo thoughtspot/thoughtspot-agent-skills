@@ -56,8 +56,9 @@ If the command fails, refer to
 [ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) for
 the token refresh procedure.
 
-Save `{base_url}` (strip trailing slash), `{profile_name}`, and `{verify_ssl}` (from
-the profile JSON, default `true`) for all subsequent steps.
+Save `{base_url}` (strip trailing slash) and `{profile_name}` for display in confirmation
+and result summaries. The `ts` CLI handles auth and SSL internally — no need to track
+`{verify_ssl}` or manage bearer tokens.
 
 ---
 
@@ -87,22 +88,8 @@ Otherwise continue with Step 3.
 
 ## Search Flow
 
-Call the variables search API and display all current assignments for `ts_user_timezone`:
-
 ```bash
-source ~/.zshenv && curl -sk -X POST \
-  "{base_url}/api/rest/2.0/template/variables/search" \
-  -H "Accept: application/json" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(ts auth token --profile {profile_name})" \
-  --data-raw '{
-    "record_offset": 0,
-    "record_size": 10,
-    "response_content": "METADATA_AND_VALUES",
-    "variable_details": [
-      { "identifier": "ts_user_timezone" }
-    ]
-  }'
+source ~/.zshenv && ts variables search ts_user_timezone --profile "{profile_name}"
 ```
 
 Parse the JSON response. The response is an array; the first element's `values` array
@@ -169,15 +156,11 @@ Save `{timezone_value}`.
 Fetch all active orgs:
 
 ```bash
-source ~/.zshenv && curl -sk -X POST \
-  "{base_url}/api/rest/2.0/orgs/search" \
-  -H "Accept: application/json" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(ts auth token --profile {profile_name})" \
-  --data-raw '{"status": "ACTIVE"}'
+source ~/.zshenv && ts orgs search --status ACTIVE --profile "{profile_name}"
 ```
 
-Save the fetched org names as `{available_orgs}`.
+Parse the JSON array. Each element has an `orgName` field. Save all names as
+`{available_orgs}`.
 
 **If 20 or fewer orgs** — show a numbered checklist:
 
@@ -230,16 +213,11 @@ If 1: set `{level}` to `"org"`, leave `{principal_identifiers}` empty.
 Ask: `Search for user (name or email pattern):` Save as `{user_search_term}`.
 
 ```bash
-source ~/.zshenv && curl -sk -X POST \
-  "{base_url}/api/rest/2.0/users/search" \
-  -H "Accept: application/json" -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(ts auth token --profile {profile_name})" \
-  --data-raw '{
-    "name_pattern": "{user_search_term}",
-    "org_identifiers": {org_identifiers},
-    "account_status": "ACTIVE",
-    "record_size": 20
-  }'
+source ~/.zshenv && ts users search \
+  --name "{user_search_term}" \
+  $(printf -- '--org "%s" ' {org_identifiers}) \
+  --account-status ACTIVE \
+  --profile "{profile_name}"
 ```
 
 Display results as a numbered list: `# | Display Name | Username (email)`.
@@ -253,16 +231,11 @@ Display results as a numbered list: `# | Display Name | Username (email)`.
 Ask: `Search for group (name pattern):` Save as `{group_search_term}`.
 
 ```bash
-source ~/.zshenv && curl -sk -X POST \
-  "{base_url}/api/rest/2.0/groups/search" \
-  -H "Accept: application/json" -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(ts auth token --profile {profile_name})" \
-  --data-raw '{
-    "name_pattern": "{group_search_term}",
-    "org_identifiers": {org_identifiers},
-    "include_users": true,
-    "record_size": 20
-  }'
+source ~/.zshenv && ts users groups \
+  --name "{group_search_term}" \
+  $(printf -- '--org "%s" ' {org_identifiers}) \
+  --include-users \
+  --profile "{profile_name}"
 ```
 
 Show matching groups as a numbered list: `# | Group Name | User count`. User picks one group.
@@ -306,34 +279,31 @@ If N, ask what to change and return to the relevant step.
 
 ## Step 7 — Call the API
 
-Use the global update-values endpoint: `POST /api/rest/2.0/template/variables/update-values`.
+### For Set
 
-The body has two top-level keys:
-- `variable_assignment` — what to update and how (variable name + values + operation)
-- `variable_value_scope` — who/where to apply it (org + optional user)
+Build the `ts variables set` command with one `--org` flag per org, and one `--user` flag
+per user (if user-level). The CLI builds the cross-product internally:
+
+```bash
+source ~/.zshenv && ts variables set ts_user_timezone "{timezone_value}" \
+  --org "{org1}" [--org "{org2}" ...] \
+  [--user "{user1}" [--user "{user2}" ...]] \
+  --profile "{profile_name}"
+```
 
 ### For Remove: look up current value first
-
-Search for the current value across all selected orgs before calling REMOVE:
 
 ```python
 import subprocess, json
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && curl -sk -X POST "
-     f"'{base_url}/api/rest/2.0/template/variables/search' "
-     f"-H 'Accept: application/json' -H 'Content-Type: application/json' "
-     f"-H 'Authorization: Bearer $(ts auth token --profile {profile_name})' "
-     f"--data-raw '{{\"record_offset\":0,\"record_size\":10,"
-     f"\"response_content\":\"METADATA_AND_VALUES\","
-     f"\"variable_details\":[{{\"identifier\":\"ts_user_timezone\"}}]}}'"],
-    capture_output=True, text=True
+     f"source ~/.zshenv && ts variables search ts_user_timezone --profile '{profile_name}'"],
+    capture_output=True, text=True,
 )
 data = json.loads(result.stdout)
 all_values = data[0].get("values", []) if data else []
 
-# Find the current value — pick first match across orgs/users (values are same per variable)
 current_value = None
 for v in all_values:
     if "{level}" == "user":
@@ -348,68 +318,25 @@ for v in all_values:
 
 If `current_value` is `None`, report that no assignment exists for any selected org and stop.
 
-### Build the request body
+Then remove:
 
-One scope entry per selected org; a single `variable_assignment` entry covers all of them:
-
-```python
-import json
-
-api_operation = "REPLACE" if "{operation}" == "set" else "REMOVE"
-variable_values = ["{timezone_value}"] if "{operation}" == "set" else [current_value]
-
-scopes = []
-for org in {org_identifiers}:
-    if "{level}" == "user":
-        for user in {principal_identifiers}:
-            scopes.append({
-                "org_identifier": org,
-                "principal_type": "USER",
-                "principal_identifier": user,
-            })
-    else:
-        scopes.append({"org_identifier": org})
-
-body = json.dumps({
-    "variable_assignment": [{
-        "variable_identifier": "ts_user_timezone",
-        "variable_values": variable_values,
-        "operation": api_operation,
-    }],
-    "variable_value_scope": scopes,
-})
+```bash
+source ~/.zshenv && ts variables remove ts_user_timezone "{current_value}" \
+  --org "{org1}" [--org "{org2}" ...] \
+  [--user "{user1}" [--user "{user2}" ...]] \
+  --profile "{profile_name}"
 ```
 
-### Make the API call
+### Interpreting the response
 
-```python
-import subprocess
-
-verify_flag = "" if {verify_ssl} else "-k"
-
-result = subprocess.run(
-    ["bash", "-c",
-     f"source ~/.zshenv && curl -s {verify_flag} -X POST "
-     f"'{base_url}/api/rest/2.0/template/variables/update-values' "
-     f"-H 'Content-Type: application/json' "
-     f"-H 'Authorization: Bearer $(ts auth token --profile {profile_name})' "
-     f"--data-raw '{body}'"],
-    capture_output=True, text=True
-)
-
-raw = result.stdout.strip()
-```
-
-Parse the response:
-- Empty response body → success (HTTP 204 returns no body)
+- No output → success (HTTP 204)
 - JSON with `error` key → extract and display the error message
-- Any other response → show raw output
 
 ---
 
 ## Step 8 — Report Result
 
-**On success (empty body):**
+**On success (no output):**
 
 ```
 ts_user_timezone updated.
@@ -454,6 +381,7 @@ Common causes:
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.0 | 2026-05-11 | Refactor to use `ts` CLI commands: `ts variables search/set/remove`, `ts orgs search`, `ts users search`, `ts users groups` — removes all curl boilerplate |
 | 1.5.0 | 2026-05-11 | Step 5: user search (by name/email) and group-based user selection; multi-user scope support |
 | 1.4.0 | 2026-05-11 | Step 4: adaptive UX — numbered checklist for ≤20 orgs, name entry with validation for >20 |
 | 1.3.0 | 2026-05-11 | Step 4: fetch org list from API and present numbered checklist; support multiple orgs in one call |
