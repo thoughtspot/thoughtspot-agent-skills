@@ -1004,7 +1004,7 @@ source ~/.zshenv && ts tml export {known_set_guid} --profile '{profile_name}' --
   needs to be replaced.
 - Sets appear in v2 dependents responses under their own **`COHORT` bucket** alongside
   `LOGICAL_TABLE` etc. (when querying the source table that contains the set's anchor column).
-- The `ts metadata delete` CLI command is **broken** — see open-item #17.
+- The `ts metadata delete` CLI command required a `--type` flag (fixed — see open-item #17).
 
 ---
 
@@ -1225,42 +1225,24 @@ retry workaround applied successfully.
 
 ---
 
-## #17 — `ts metadata delete` CLI command is broken — VERIFIED 2026-04-26
+## #17 — `ts metadata delete` CLI command is broken — VERIFIED FIXED 2026-05-11
 
-**Issue:** `ts metadata delete <guid> --profile <name>` returns exit 0 with response
-`{"deleted": [<guid>]}` but **the object is not actually deleted**. Querying the object
-afterward returns it with `isDeleted: False`.
+**Original issue (2026-04-26):** `ts metadata delete <guid>` returned exit 0 but did not
+actually delete the object — the CLI was omitting the required `type` field from the v2
+`/api/rest/2.0/metadata/delete` request body, which the API silently ignored.
 
-**Root cause:** The CLI sends a v2 `POST /api/rest/2.0/metadata/delete` request without
-the required `type` field in the body. The API silently accepts the malformed request
-and returns 200 OK with a fake "deleted" payload, but does nothing.
+**Fix applied to ts-cli:** `tools/ts-cli/ts_cli/commands/metadata.py` `delete` command
+now accepts `--type` and passes `{"identifier": guid, "type": type}` in the request body.
 
-**Workaround (verified):** Call the v2 endpoint directly with `{type, identifier}`:
+**Verified 2026-05-11 against se-thoughtspot:** `ts metadata delete <guid> --type LIVEBOARD`
+returns `{"deleted": [...]}` with exit 0 and a subsequent `ts metadata get` returns
+"No LIVEBOARD object found" — confirming genuine deletion (not `isDeleted: True` soft-delete).
 
-```python
-import requests
-r = requests.post(
-    f"{base_url}/api/rest/2.0/metadata/delete",
-    headers={"Authorization": f"Bearer {token}", "X-Requested-By": "ThoughtSpot",
-             "Content-Type": "application/json", "Accept": "application/json"},
-    json={"metadata": [{"identifier": guid, "type": v2_type}]},
-    timeout=60, verify=verify_ssl,
-)
-# 204 No Content = success
-```
+The v2 type values: `ANSWER`, `LIVEBOARD`, `LOGICAL_TABLE` (Models/Views/Tables),
+`LOGICAL_COLUMN` (Sets/Cohorts).
 
-The v2 type values: `ANSWER`, `LIVEBOARD`, `LOGICAL_TABLE` (for Models/Views/Tables),
-`LOGICAL_COLUMN` (for Sets/Cohorts).
-
-**Resolution:**
-1. **Skill (already applied)**: Step 9a uses the direct v2 call, not `ts metadata delete`
-2. **ts-cli fix needed**: `tools/ts-cli/ts_cli/commands/metadata.py` `delete` command must
-   include `type` in the request body. Resolve the type either via a required CLI flag
-   (`--type ANSWER`) or by looking it up via `metadata/search` first.
-3. **Add a verification step in the CLI**: after calling delete, re-query and confirm
-   the object is gone. If not, error with the actual cause.
-
-**Status:** SKILL.md updated to bypass the CLI. Separate ts-cli bug ticket needed.
+**Status:** VERIFIED FIXED — `ts metadata delete --type` works. Step 9a updated to use
+`ts metadata delete --type {v2_type} {guid} --profile {name}` via subprocess.
 
 ---
 

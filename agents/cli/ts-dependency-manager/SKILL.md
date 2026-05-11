@@ -2171,16 +2171,12 @@ the skill on the affected dependents.
 
 Skip this section entirely if `objects_to_delete` is empty.
 
-**Important — verified 2026-04-26 on champ-staging:** the `ts metadata delete <guid>` CLI
-command is **broken**. It returns success (`{"deleted": [guid]}`) but the object is not
-actually deleted; querying it afterward still returns the object with `isDeleted: False`.
-The root cause is that the CLI doesn't pass an explicit `type` field in the v2
-`/api/rest/2.0/metadata/delete` body, which the API silently ignores. Until the CLI is
-fixed, call the v2 endpoint directly with `type` populated per object.
+**Verified 2026-05-11 on se-thoughtspot:** `ts metadata delete <guid> --type <type>`
+genuinely deletes objects. The CLI passes `type` in the v2 request body and the API
+performs the deletion (confirmed by post-delete `ts metadata get` returning "No … object
+found"). See open-items.md #17 for the history of the earlier CLI bug (now fixed).
 
 ```python
-import requests
-
 results = {"succeeded": [], "failed": [], "deleted": [], "skipped": []}
 
 # Delete order: terminal types first, then non-terminal (Sets, Models/Views, source last)
@@ -2196,7 +2192,7 @@ delete_order = {
 }
 sorted_deletes = sorted(objects_to_delete, key=lambda d: delete_order.get(d["type"].upper(), 9))
 
-# v2 expects an explicit type per object. Map skill types to the v2 enum.
+# v2 type values expected by --type flag
 v2_type_map = {
     "ANSWER":    "ANSWER",
     "LIVEBOARD": "LIVEBOARD",
@@ -2223,39 +2219,33 @@ for dep in sorted_deletes:
                                    results, phase="delete", name=dep["name"]):
         continue
 
-    # IMPLEMENTATION NOTE: The `ts metadata delete` CLI command is broken (open-items.md
-    # #17) — it doesn't pass the required `type` field to v2 /metadata/delete. Until the
-    # CLI is fixed, the implementation must call the v2 endpoint directly with explicit
-    # type. The exact call shape is documented in open-items.md #17 (verified 2026-04-26
-    # against champ-staging). Once the CLI is fixed, replace this whole block with a
-    # subprocess call to `ts metadata delete --type {v2_type} {guid}`.
-
     print(f"  Deleting {dep['type']}: {dep['name']} ({dep['guid']})...")
-    status, body = ts_metadata_delete(dep["guid"], v2_type, profile_name)  # see open-items.md #17
+    r = subprocess.run(
+        ["bash", "-c",
+         f"source ~/.zshenv && ts metadata delete {dep['guid']} --type {v2_type} "
+         f"--profile '{profile_name}'"],
+        capture_output=True, text=True,
+    )
 
-    # 204 No Content = success. 200 with body is the broken path; treat as inconclusive
-    # and verify by re-querying the object's metadata.
-    if status == 204:
+    if r.returncode == 0:
         print(f"  ✓ Deleted: {dep['name']}")
         results["deleted"].append(dep)
     else:
-        # Verify by re-querying — the API sometimes returns 200 with a deleted-list payload
-        # even when the object remains. Trust only the post-state.
-        gone = ts_metadata_object_is_gone(dep["guid"], v2_type, profile_name)  # search returns empty
-        if gone:
+        # Verify by re-querying — if the object is gone, treat as success
+        check = subprocess.run(
+            ["bash", "-c",
+             f"source ~/.zshenv && ts metadata get {dep['guid']} --type {v2_type} "
+             f"--profile '{profile_name}'"],
+            capture_output=True, text=True,
+        )
+        if check.returncode != 0 or not check.stdout.strip():
             print(f"  ✓ Deleted: {dep['name']}  (verified by post-query)")
             results["deleted"].append(dep)
         else:
-            err = f"status={status} body={body[:200]}; post-query still returns object"
+            err = f"CLI exit {r.returncode}: {r.stderr[:200]}"
             print(f"  ✗ Delete failed: {dep['name']} — {err}")
             results["failed"].append({**dep, "error": err, "phase": "delete"})
 ```
-
-The `ts_metadata_dependents`, `ts_metadata_delete`, and `ts_metadata_object_is_gone`
-helpers are temporary stubs that wrap the verified v2 calls documented in
-[references/open-items.md](references/open-items.md) #1 and #17. They live in a
-small `_v2_helpers.py` shim alongside the skill, and will be deleted once `ts metadata
-dependents` and `ts metadata delete --type` ship in ts-cli.
 
 If a delete fails (permissions, dependent of an inaccessible object, etc.), continue with the
 remaining deletes — the user will see the failures in the Change Report and can decide whether
@@ -2633,6 +2623,41 @@ def repoint_answer(answer_dict, source_guid, target_guid, target_name, column_ga
         a = remove_columns_from_answer(a, column_gap)
 
     return a
+```
+
+```python
+def repoint_view(view_dict, source_guid, target_guid, target_name, column_gap):
+    """Update a View TML body to point at target_guid instead of source_guid.
+
+    Updates tables[].fqn and name, then cascades the name change through
+    table_paths[].table and joins[] source/destination references.
+    Removes column_gap columns via remove_columns_from_view.
+    """
+    v = view_dict
+    old_name = None
+
+    for tbl in v.get("tables", []):
+        if tbl.get("fqn") == source_guid:
+            old_name = tbl.get("name")
+            if tbl.get("id") == old_name:  # id mirrors name when not a custom alias
+                tbl["id"] = target_name
+            tbl["fqn"]  = target_guid
+            tbl["name"] = target_name
+
+    if old_name and old_name != target_name:
+        for tp in v.get("table_paths", []):
+            if tp.get("table") == old_name:
+                tp["table"] = target_name
+        for j in v.get("joins", []):
+            if j.get("source") == old_name:
+                j["source"] = target_name
+            if j.get("destination") == old_name:
+                j["destination"] = target_name
+
+    if column_gap:
+        v = remove_columns_from_view(v, column_gap)
+
+    return v
 ```
 
 **Apply to Answers:**

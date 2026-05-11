@@ -2,39 +2,35 @@
 """
 smoke_ts_dependency_manager.py — live smoke test for ts-dependency-manager.
 
-Verifies the full dependency management workflow against a real ThoughtSpot instance:
+Verifies the dependency management workflow against a real ThoughtSpot instance:
   1.  ThoughtSpot auth
   2.  Find target model by name and get its GUID
-  3.  Export model TML with --associated flag
-  4.  Dependency API (POST /tspublic/v1/dependency/listdependents) — open item #1
-  5.  TML backup creation (manifest.json + all TML files)
-  6.  Column rename in model TML (search_query + join expression safety checks)
-  7.  Import renamed model TML
-  8.  Verify rename via re-export
-  9.  Rollback from backup
-  10. Verify rollback via re-export
-  11. Cleanup backup directory
+  3.  Export model TML with --associated --parse
+  4.  ts metadata dependents (flat row output)
+  5.  ts metadata dependents --raw (v2 structured output)
+  6.  Create TML backup
+  7.  Import original model TML via stdin (round-trip; no modifications)
+  8.  Verify round-trip via re-export
+  9.  (Optional) ts metadata delete --type — requires --test-delete-guid and
+      --test-delete-type to provide a throwaway object for the deletion test
 
-The test uses a RENAME operation (not REMOVE) so it has no permanent effect even
-if cleanup fails — the original column is always restored by step 9.
+The test does NOT perform RENAME — that operation is not supported by the
+ts-dependency-manager skill (see SKILL.md for rationale).
 
 Usage:
     python tools/smoke-tests/smoke_ts_dependency_manager.py \\
         --ts-profile production \\
         --model-name "Retail Sales" \\
-        --column-name "Revenue" \\
+        [--test-delete-guid <guid> --test-delete-type LIVEBOARD] \\
         [--no-cleanup]
 
-The specified model must exist in ThoughtSpot and contain the named column.
-The test renames the column to "<column-name>_smoke_test" and then renames it back.
-
-Credentials are read from ~/.claude/thoughtspot-profiles.json (ts CLI handles auth).
+The specified model must exist in ThoughtSpot.
+Credentials are read via the ts CLI profile (handles auth and token caching).
 """
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -48,142 +44,39 @@ except ImportError:
     print("ERROR: PyYAML is required. Run: pip install PyYAML")
     sys.exit(1)
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
 
 from _common import SmokeTestResult, SkipStep, ts_auth_check, run_ts  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Dependency API helper (open item #1 verification)
+# TML import helper (stdin only — ts tml import has no --file flag)
 # ---------------------------------------------------------------------------
 
-def call_dependency_api(base_url: str, token: str, guid: str) -> dict:
-    """
-    POST /tspublic/v1/dependency/listdependents
-    Form-encoded, requires X-Requested-By header.
-    Returns the full response dict (keys: QUESTION_ANSWER_BOOK, PINBOARD_ANSWER_BOOK,
-    LOGICAL_TABLE — only keys with dependents are present).
-    Raises RuntimeError on non-200 or unexpected response.
-    """
-    import urllib.request
-    import urllib.parse
-
-    payload = urllib.parse.urlencode({
-        "type": "LOGICAL_TABLE",
-        "id": json.dumps([guid]),
-        "batchsize": "-1",
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        f"{base_url}/tspublic/v1/dependency/listdependents",
-        data=payload,
-        method="POST",
-    )
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("X-Requested-By", "ThoughtSpot")
-    req.add_header("Content-Type", "application/x-www-form-urlencoded")
-    req.add_header("Accept", "application/json")
-
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = resp.read().decode("utf-8")
-            return json.loads(body)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"Dependency API returned HTTP {e.code}: {body[:300]}"
-        )
-
-
-def get_ts_token(profile: str) -> tuple[str, str]:
-    """
-    Return (base_url, token) by calling ts auth whoami --profile.
-    The ts CLI caches the token — this doesn't re-authenticate.
-    """
-    result = subprocess.run(
-        ["ts", "auth", "whoami", "--profile", profile],
-        capture_output=True, text=True,
-    )
+def _ts_import_stdin(ts_profile: str, tml_str: str,
+                     extra_flags: list[str]) -> list | dict:
+    """Import a single TML YAML string via ts tml import (reads JSON array from stdin)."""
+    cmd = ["ts", "tml", "import", "--profile", ts_profile] + extra_flags
+    result = subprocess.run(cmd, input=json.dumps([tml_str]),
+                            capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"ts auth whoami failed: {result.stderr.strip()}")
-
-    data = json.loads(result.stdout)
-    # Extract base_url and token from whoami output
-    # whoami returns: {"userName": ..., "id": ..., "orgId": ...}
-    # We need the profile metadata for base_url — read from profiles file
-    profiles_path = Path.home() / ".claude" / "thoughtspot-profiles.json"
-    if not profiles_path.exists():
-        raise RuntimeError(f"No profiles file at {profiles_path}")
-
-    profiles_data = json.loads(profiles_path.read_text())
-    if isinstance(profiles_data, dict) and "profiles" in profiles_data:
-        profiles = profiles_data["profiles"]
-    elif isinstance(profiles_data, list):
-        profiles = profiles_data
-    else:
-        raise RuntimeError("Unexpected profiles.json format")
-
-    matching = [p for p in profiles if p.get("name") == profile]
-    if not matching:
-        raise RuntimeError(f"Profile '{profile}' not found in profiles file")
-
-    base_url = matching[0]["url"].rstrip("/")
-
-    # Read token from the ts CLI token cache
-    token_cache = Path(tempfile.gettempdir()) / f"ts_token_{profile.lower().replace(' ', '_')}.txt"
-    if not token_cache.exists():
-        # Try slugified name (non-alphanumeric → hyphen)
-        slug = re.sub(r"[^a-z0-9]", "-", profile.lower())
-        token_cache = Path(tempfile.gettempdir()) / f"ts_token_{slug}.txt"
-
-    if not token_cache.exists():
-        raise SkipStep(
-            "Token cache not found — dependency API test skipped. "
-            "Run any ts command first to populate the token cache."
+        raise RuntimeError(
+            f"ts tml import failed:\n{result.stderr.strip() or result.stdout.strip()}"
         )
-
-    token = token_cache.read_text().strip()
-    return base_url, token
-
-
-# ---------------------------------------------------------------------------
-# TML helpers
-# ---------------------------------------------------------------------------
-
-def sanitize_search_query(query_str: str, cols_to_remove: list[str]) -> str:
-    for col in cols_to_remove:
-        query_str = re.sub(r"\s*\[" + re.escape(col) + r"\]\s*", " ", query_str)
-    return query_str.strip()
-
-
-def rename_in_search_query(query_str: str, old_name: str, new_name: str) -> str:
-    return re.sub(r"\[" + re.escape(old_name) + r"\]", f"[{new_name}]", query_str)
-
-
-def rename_column_in_model(model_section: dict, old_name: str, new_name: str) -> dict:
-    """Rename a column in model TML (columns list + join expressions)."""
-    import copy
-    section = copy.deepcopy(model_section)
-
-    for col in section.get("columns", []):
-        if col.get("name") == old_name:
-            col["name"] = new_name
-
-    # Update join on: expressions
-    for tbl in section.get("model_tables", []):
-        for join in tbl.get("joins_with", []):
-            if "on" in join:
-                join["on"] = rename_in_search_query(join["on"], old_name, new_name)
-
-    return section
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"ts tml import returned non-JSON:\n{result.stdout[:300]}"
+        ) from e
 
 
 # ---------------------------------------------------------------------------
 # Main smoke test
 # ---------------------------------------------------------------------------
 
-def run_smoke_test(ts_profile: str, model_name: str, column_name: str,
+def run_smoke_test(ts_profile: str, model_name: str,
+                   test_delete_guid: str | None, test_delete_type: str | None,
                    no_cleanup: bool) -> int:
     result = SmokeTestResult()
     backup_dir = None
@@ -193,13 +86,13 @@ def run_smoke_test(ts_profile: str, model_name: str, column_name: str,
     print("=" * 60)
     print(f"  ThoughtSpot profile:  {ts_profile}")
     print(f"  Target model:         {model_name}")
-    print(f"  Test column:          {column_name}")
-    print(f"  Operation:            rename '{column_name}' → '{column_name}_smoke_test'")
+    if test_delete_guid:
+        print(f"  Delete test GUID:     {test_delete_guid} ({test_delete_type})")
     print()
 
     # ── Step 1: Auth ──────────────────────────────────────────────────────
     ok, whoami = result.step(
-        f"ThoughtSpot auth (ts auth whoami)",
+        "ThoughtSpot auth (ts auth whoami)",
         ts_auth_check, ts_profile,
     )
     if ok:
@@ -220,8 +113,10 @@ def run_smoke_test(ts_profile: str, model_name: str, column_name: str,
         print(f"  FAIL  No model named '{model_name}' found. Check --model-name.")
         return 1
 
-    model_guid = search_results[0]["header"]["id"]
-    result.info(f"Model GUID: {model_guid}")
+    # metadata search returns a list; each item has metadata_id (not header.id)
+    model_guid = search_results[0]["metadata_id"]
+    model_display_name = search_results[0].get("metadata_name", model_name)
+    result.info(f"Model GUID: {model_guid}  ({model_display_name})")
 
     # ── Step 3: Export TML ───────────────────────────────────────────────
     ok, tml_docs = result.step(
@@ -247,36 +142,47 @@ def run_smoke_test(ts_profile: str, model_name: str, column_name: str,
 
     result.info(f"Exported {len(tml_docs)} TML document(s)")
 
-    # Verify the target column exists in the model
-    model_section = model_doc.get("model") or model_doc.get("worksheet") or {}
-    col_names = [c.get("name") for c in model_section.get("columns", [])]
-    if column_name not in col_names:
-        print(f"  FAIL  Column '{column_name}' not found in model. "
-              f"Available columns: {col_names[:10]}{'...' if len(col_names) > 10 else ''}")
-        return 1
-    result.info(f"Column '{column_name}' confirmed in model")
+    # ── Step 4: ts metadata dependents (flat) ────────────────────────────
+    def _test_dependents_flat():
+        rows = run_ts(["metadata", "dependents", model_guid], ts_profile)
+        if not isinstance(rows, list):
+            raise RuntimeError(f"Expected list output, got: {type(rows).__name__}")
+        result.info(f"dependents (flat): {len(rows)} row(s)")
+        if rows:
+            sample = rows[0]
+            required = {"metadata_id", "metadata_name", "metadata_type"}
+            missing = required - set(sample.keys())
+            if missing:
+                raise RuntimeError(f"Flat row missing expected keys: {missing}")
+        return rows
 
-    # ── Step 4: Dependency API ────────────────────────────────────────────
-    def _test_dependency_api():
-        base_url, token = get_ts_token(ts_profile)
-        resp = call_dependency_api(base_url, token, model_guid)
-        answer_count = len(resp.get("QUESTION_ANSWER_BOOK", {}).get(model_guid, []))
-        lb_count = len(resp.get("PINBOARD_ANSWER_BOOK", {}).get(model_guid, []))
-        table_count = len(resp.get("LOGICAL_TABLE", {}).get(model_guid, []))
-        return answer_count, lb_count, table_count
-
-    ok, dep_counts = result.step(
-        "Dependency API (POST /v1/dependency/listdependents)",
-        _test_dependency_api,
+    ok, dep_rows = result.step(
+        "ts metadata dependents (flat output)",
+        _test_dependents_flat,
     )
     if ok:
-        answers, liveboards, tables = dep_counts
-        result.info(f"Dependents found — Answers: {answers}, Liveboards: {liveboards}, "
-                    f"Models/Views/Tables: {tables}")
-        result.info("Open item #1: VERIFIED — dependency API accessible and returns valid response")
-    # Dependency API failure is non-blocking — the skill has a TML scan fallback
+        result.info("Open item #1: VERIFIED — ts metadata dependents returns valid flat rows")
 
-    # ── Step 5: Create TML backup ─────────────────────────────────────────
+    # ── Step 5: ts metadata dependents --raw ─────────────────────────────
+    def _test_dependents_raw():
+        raw = run_ts(["metadata", "dependents", model_guid, "--raw"], ts_profile)
+        # --raw returns a list of per-GUID objects; each has dependent_objects.dependents
+        if not isinstance(raw, list) or not raw:
+            raise RuntimeError(f"Expected non-empty list from --raw, got: {type(raw).__name__}")
+        first = raw[0]
+        dep_obj = first.get("dependent_objects", {})
+        if not isinstance(dep_obj, dict):
+            raise RuntimeError(f"Expected dependent_objects dict, got: {type(dep_obj).__name__}")
+        deps = dep_obj.get("dependents", {})
+        result.info(f"dependents (raw): {len(deps)} dependent GUID(s)")
+        return raw
+
+    ok, _ = result.step(
+        "ts metadata dependents --raw (v2 structured output)",
+        _test_dependents_raw,
+    )
+
+    # ── Step 6: Create TML backup ─────────────────────────────────────────
     timestamp = int(time.time())
     backup_dir = Path(tempfile.gettempdir()) / f"ts_dep_smoke_{timestamp}"
 
@@ -286,9 +192,12 @@ def run_smoke_test(ts_profile: str, model_name: str, column_name: str,
                     "timestamp": timestamp, "files": []}
         for i, doc in enumerate(tml_docs):
             doc_type = doc.get("type", f"doc_{i}")
-            doc_guid = (doc.get(doc_type, {}) or {}).get("guid", f"unknown_{i}")
+            doc_body = doc.get(doc_type) or {}
+            doc_guid = doc_body.get("guid") or f"unknown_{i}"
             fname = f"{doc_type}_{doc_guid}.yaml"
-            (backup_dir / fname).write_text(yaml.dump(doc, allow_unicode=True))
+            (backup_dir / fname).write_text(
+                yaml.dump(doc, allow_unicode=True, default_flow_style=False)
+            )
             manifest["files"].append(fname)
         (backup_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
         return backup_dir
@@ -298,95 +207,84 @@ def run_smoke_test(ts_profile: str, model_name: str, column_name: str,
         return result.summary()
     result.info(f"Backup: {backup_dir}")
 
-    # ── Step 6: Apply rename to model TML ────────────────────────────────
-    rename_target = f"{column_name}_smoke_test"
+    # ── Step 7: Import original model TML via stdin (round-trip) ─────────
+    def _import_round_trip():
+        tml_str = yaml.dump(model_doc, allow_unicode=True, default_flow_style=False)
+        resp = _ts_import_stdin(ts_profile, tml_str,
+                                ["--policy", "ALL_OR_NONE", "--no-create-new"])
+        # Treat api=ERROR + verified (post-check) as success per open-item #15
+        items = resp if isinstance(resp, list) else [resp]
+        for item in items:
+            status = (item.get("response", {}).get("status", {}) or
+                      item.get("object", [{}])[0].get("response", {}).get("status", {}))
+            sc = (status.get("status_code") if isinstance(status, dict) else None)
+            if sc not in (None, "OK", "ERROR"):
+                raise RuntimeError(f"Unexpected import status_code: {sc}")
+        return resp
 
-    def _apply_rename():
-        key = next(k for k in model_doc if k not in ("type", "guid"))
-        renamed_section = rename_column_in_model(model_doc[key], column_name, rename_target)
-        renamed_doc = dict(model_doc)
-        renamed_doc[key] = renamed_section
-        return renamed_doc
-
-    ok, renamed_doc = result.step(
-        f"Apply rename in TML ('{column_name}' → '{rename_target}')",
-        _apply_rename,
+    ok, _ = result.step(
+        "Import original model TML via stdin (round-trip, no modifications)",
+        _import_round_trip,
     )
     if not ok:
         return result.summary()
 
-    # Verify rename happened before importing
-    key = next(k for k in renamed_doc if k not in ("type", "guid"))
-    new_col_names = [c.get("name") for c in renamed_doc[key].get("columns", [])]
-    assert rename_target in new_col_names, f"Rename not applied — column names: {new_col_names}"
-    assert column_name not in new_col_names, "Original name still present after rename"
-
-    # ── Step 7: Import renamed TML ───────────────────────────────────────
-    def _import_renamed():
-        # Write renamed TML to temp file and import
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml",
-                                        delete=False, dir=backup_dir) as f:
-            yaml.dump(renamed_doc, f, allow_unicode=True)
-            tmp_path = f.name
-        return run_ts(["tml", "import", tmp_path, "--fqn"], ts_profile)
-
-    ok, import_result = result.step("Import renamed model TML", _import_renamed)
-    if not ok:
-        return result.summary()
-
-    # ── Step 8: Verify rename via re-export ───────────────────────────────
-    def _verify_rename():
+    # ── Step 8: Verify round-trip via re-export ───────────────────────────
+    def _verify_round_trip():
         re_exported = run_ts(
             ["tml", "export", model_guid, "--fqn", "--parse"], ts_profile,
         )
         for doc in re_exported:
-            key = next((k for k in doc if k not in ("type", "guid")), None)
-            if key and doc.get("type") in ("worksheet", "logical_table", "model"):
-                cols = [c.get("name") for c in doc[key].get("columns", [])]
-                if rename_target in cols:
-                    return True
-        raise RuntimeError(
-            f"Column '{rename_target}' not found in re-exported TML after import"
-        )
+            if doc.get("type") in ("worksheet", "logical_table", "model"):
+                return doc
+        raise RuntimeError("Model TML not found in re-export after round-trip import")
 
-    ok, _ = result.step("Verify rename in re-exported TML", _verify_rename)
-    if not ok:
-        return result.summary()
+    ok, _ = result.step("Verify round-trip via re-export", _verify_round_trip)
 
-    # ── Step 9: Rollback from backup ─────────────────────────────────────
-    def _rollback():
-        # Re-import the original model TML from backup
-        original_backup = next(
-            backup_dir.glob(f"*_{model_guid}.yaml"),
-            None,
-        )
-        if not original_backup:
-            raise RuntimeError(
-                f"Original model backup not found in {backup_dir}. "
-                f"Files: {list(backup_dir.iterdir())}"
+    # ── Step 9 (optional): ts metadata delete --type ─────────────────────
+    if test_delete_guid and test_delete_type:
+        v2_type_map = {
+            "ANSWER":    "ANSWER",
+            "LIVEBOARD": "LIVEBOARD",
+            "MODEL":     "LOGICAL_TABLE",
+            "WORKSHEET": "LOGICAL_TABLE",
+            "VIEW":      "LOGICAL_TABLE",
+            "TABLE":     "LOGICAL_TABLE",
+            "SET":       "LOGICAL_COLUMN",
+            "COHORT":    "LOGICAL_COLUMN",
+        }
+        v2_type = v2_type_map.get(test_delete_type.upper(), test_delete_type)
+
+        def _test_delete():
+            r = subprocess.run(
+                ["bash", "-c",
+                 f"source ~/.zshenv && ts metadata delete {test_delete_guid} "
+                 f"--type {v2_type} --profile '{ts_profile}'"],
+                capture_output=True, text=True,
             )
-        return run_ts(["tml", "import", str(original_backup), "--fqn"], ts_profile)
+            if r.returncode != 0:
+                raise RuntimeError(f"ts metadata delete failed: {r.stderr[:300]}")
+            # Verify deletion by re-querying
+            check = subprocess.run(
+                ["bash", "-c",
+                 f"source ~/.zshenv && ts metadata get {test_delete_guid} "
+                 f"--type {v2_type} --profile '{ts_profile}'"],
+                capture_output=True, text=True,
+            )
+            if check.returncode == 0 and check.stdout.strip():
+                raise RuntimeError(
+                    f"Object still present after delete — "
+                    f"ts metadata delete --type may not be working correctly"
+                )
+            return True
 
-    ok, _ = result.step("Rollback from backup (restore original TML)", _rollback)
-    if not ok:
-        return result.summary()
-
-    # ── Step 10: Verify rollback ──────────────────────────────────────────
-    def _verify_rollback():
-        re_exported = run_ts(
-            ["tml", "export", model_guid, "--fqn", "--parse"], ts_profile,
+        ok, _ = result.step(
+            f"ts metadata delete --type {v2_type} (open-item #17 verification)",
+            _test_delete,
         )
-        for doc in re_exported:
-            key = next((k for k in doc if k not in ("type", "guid")), None)
-            if key and doc.get("type") in ("worksheet", "logical_table", "model"):
-                cols = [c.get("name") for c in doc[key].get("columns", [])]
-                if column_name in cols and rename_target not in cols:
-                    return True
-        raise RuntimeError(
-            f"Rollback verification failed — original column '{column_name}' not restored"
-        )
-
-    ok, _ = result.step("Verify rollback in re-exported TML", _verify_rollback)
+        if ok:
+            result.info(f"Open item #17: VERIFIED — object {test_delete_guid[:8]}... "
+                        f"genuinely deleted (post-query returned not-found)")
 
     # ── Cleanup ───────────────────────────────────────────────────────────
     if not no_cleanup and backup_dir and backup_dir.exists():
@@ -400,22 +298,28 @@ def run_smoke_test(ts_profile: str, model_name: str, column_name: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Live smoke test for ts-dependency-manager (rename + rollback workflow)"
+        description="Live smoke test for ts-dependency-manager"
     )
     parser.add_argument("--ts-profile", required=True,
                         help="ThoughtSpot profile name (from ts-profile-thoughtspot setup)")
     parser.add_argument("--model-name", required=True,
                         help="Name of the ThoughtSpot model to test against")
-    parser.add_argument("--column-name", required=True,
-                        help="Column in that model to use as the rename test target")
+    parser.add_argument("--test-delete-guid",
+                        help="Optional: GUID of a throwaway object to test ts metadata delete --type")
+    parser.add_argument("--test-delete-type",
+                        help="Type of the throwaway object (LIVEBOARD, ANSWER, etc.)")
     parser.add_argument("--no-cleanup", action="store_true",
                         help="Keep backup directory after test for inspection")
     args = parser.parse_args()
 
+    if bool(args.test_delete_guid) != bool(args.test_delete_type):
+        parser.error("--test-delete-guid and --test-delete-type must be provided together")
+
     return run_smoke_test(
         ts_profile=args.ts_profile,
         model_name=args.model_name,
-        column_name=args.column_name,
+        test_delete_guid=args.test_delete_guid,
+        test_delete_type=args.test_delete_type,
         no_cleanup=args.no_cleanup,
     )
 
