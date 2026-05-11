@@ -416,6 +416,37 @@ def step_verify_feedback_landed(profile: str, model_guid: str, probe_phrase: str
     return match["guid"]
 
 
+def step_verify_feedback_export_guard(model_guid: str, profile: str) -> None:
+    """Verify that ts tml export --type FEEDBACK exits with a clear error, not HTTP 400.
+
+    This was a regression: the ThoughtSpot API returns HTTP 400 when a model GUID is
+    passed with type=FEEDBACK. The CLI previously propagated this as an unhandled
+    HTTPError. The fix adds an early exit with a user-readable message.
+
+    Pass condition: exit code != 0 AND output mentions 'dependents' (directs user to
+    the correct lookup path).
+    """
+    cmd = ["bash", "-c",
+           f"source ~/.zshenv && ts tml export {model_guid} --type FEEDBACK --profile '{profile}' 2>&1; echo EXIT_CODE:$?"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    combined = result.stdout + result.stderr
+
+    exit_code_line = next((l for l in combined.splitlines() if l.startswith("EXIT_CODE:")), "")
+    exit_code = int(exit_code_line.split(":")[1]) if exit_code_line else -1
+
+    if exit_code == 0:
+        raise RuntimeError(
+            "ts tml export --type FEEDBACK should have exited non-zero "
+            f"(the API rejects model-GUID + type=FEEDBACK). Exit code was 0. "
+            f"Output: {combined[:300]}"
+        )
+    if "dependents" not in combined.lower():
+        raise RuntimeError(
+            "ts tml export --type FEEDBACK exit message must mention 'dependents' "
+            f"so users know how to find the correct GUID. Output: {combined[:300]}"
+        )
+
+
 def step_cleanup_restore_model(original_tml: dict, profile: str) -> None:
     """Restore the Model from the original (pre-patch) TML.
 
@@ -468,6 +499,9 @@ def main() -> int:
                        step_check_dependents_api, args.ts_profile, model_guid)
     if ok:
         r.info(f"Dependents categories: {sorted(deps.keys())}")
+
+    r.step("ts tml export --type FEEDBACK: must exit with clear error, not HTTP 400",
+           step_verify_feedback_export_guard, model_guid, args.ts_profile)
 
     # ---- Step 4.5 — cross-Model consistency scan ----
     ok, all_models = r.step("Step 4.5 — enumerate readable Models",
