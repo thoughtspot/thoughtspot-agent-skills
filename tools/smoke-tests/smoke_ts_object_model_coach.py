@@ -48,8 +48,6 @@ import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 try:
@@ -67,7 +65,14 @@ from _common import SmokeTestResult, ts_auth_check, run_ts  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _load_token(profile_name: str) -> tuple[str, str]:
-    """Return (base_url, token) for the named TS profile."""
+    """Return (base_url, token) for the named TS profile.
+
+    Tries three sources in order:
+      1. token_env from profile JSON (token-auth profiles)
+      2. CLI token cache file written by ts auth whoami (password/secret-key profiles)
+      3. keyring fallback via the ts CLI client slug convention
+    """
+    import tempfile, re
     profs_path = Path.home() / ".claude" / "thoughtspot-profiles.json"
     profs = json.loads(profs_path.read_text())
     profs_list = profs.get("profiles", profs) if isinstance(profs, dict) else profs
@@ -75,29 +80,26 @@ def _load_token(profile_name: str) -> tuple[str, str]:
     if not prof:
         raise RuntimeError(f"Profile {profile_name!r} not found in {profs_path}")
     base_url = prof["base_url"].rstrip("/")
-    token_env = prof.get("token_env", f"THOUGHTSPOT_TOKEN_{profile_name.upper().replace('-', '_')}")
-    token = os.environ.get(token_env)
-    if not token:
-        raise RuntimeError(f"Token env var {token_env} not set; run /ts-profile-thoughtspot")
-    return base_url, token
 
+    # 1. token_env (token-auth profiles)
+    if prof.get("token_env"):
+        token = os.environ.get(prof["token_env"])
+        if token:
+            return base_url, token
 
-def _v2_post(base_url: str, token: str, path: str, body: dict, timeout: int = 30) -> dict | list:
-    req = urllib.request.Request(
-        f"{base_url}{path}",
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-Requested-By": "ThoughtSpot",
-            "Content-Type": "application/json",
-        },
-        data=json.dumps(body).encode(),
+    # 2. CLI token cache (password / secret-key profiles — populated by ts auth whoami)
+    slug = re.sub(r"[^a-z0-9]+", "-", profile_name.lower()).strip("-")
+    cache_path = Path(tempfile.gettempdir()) / f"ts_token_{slug}.txt"
+    if cache_path.exists():
+        token = cache_path.read_text().strip()
+        if token:
+            return base_url, token
+
+    raise RuntimeError(
+        f"No token found for profile {profile_name!r}. "
+        f"Run: ts auth whoami --profile '{profile_name}'"
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"HTTP {e.code} on {path}: {e.read().decode()[:300]}") from e
+
 
 
 def _ts_tml_export(guids: list[str], profile: str, associated: bool = False) -> list[dict]:
@@ -149,23 +151,26 @@ def step_export_and_parse(model_guid: str, profile: str) -> tuple[dict, list[dic
     return model["tml"], [t["tml"] for t in tables]
 
 
-def step_check_dependents_api(base_url: str, token: str, model_guid: str) -> dict:
-    """Verify the metadata/search dependents API works and returns a FEEDBACK key."""
-    body = _v2_post(base_url, token, "/api/rest/2.0/metadata/search", {
-        "metadata": [{"identifier": model_guid, "type": "LOGICAL_TABLE"}],
-        "include_dependent_objects": True,
-        "dependent_object_version": "V2",
-    })
-    deps_node = body[0].get("dependent_objects", {}).get("dependents", {}).get(model_guid, {})
-    # A model with no feedback yet still returns the dependents node — just empty.
+def step_check_dependents_api(profile: str, model_guid: str) -> dict:
+    """Verify ts metadata dependents works and returns expected dependent types."""
+    rows = run_ts(["metadata", "dependents", model_guid], profile)
+    # Normalize flat rows into a bucket dict keyed by raw_bucket for callers.
+    deps_node: dict = {}
+    for row in rows:
+        deps_node.setdefault(row["raw_bucket"], []).append(row)
     return deps_node
 
 
 def _is_model_not_worksheet(metadata_header: dict) -> bool:
-    """Filter a metadata search hit down to MODELs only (not legacy Worksheets)."""
+    """Return True if the metadata hit is a Model (not a legacy Worksheet).
+
+    WORKSHEET_TO_MODEL_UPGRADE means the object started as a Worksheet and was
+    upgraded to a Model — it IS a Model. MODEL_UPGRADE and worksheetVersion==V2
+    are the other Model markers.
+    """
     cu = metadata_header.get("contentUpgradeId") or ""
     wv = metadata_header.get("worksheetVersion") or ""
-    return cu != "WORKSHEET_TO_MODEL_UPGRADE" and wv != "V1"
+    return cu in ("WORKSHEET_TO_MODEL_UPGRADE", "MODEL_UPGRADE") or wv == "V2"
 
 
 def step_enumerate_readable_models(profile: str) -> list[dict]:
@@ -398,22 +403,17 @@ def step_import_feedback_probe(model_guid: str, profile: str, probe_phrase: str,
         raise RuntimeError(f"Feedback import status: {resp['status']}")
 
 
-def step_verify_feedback_landed(base_url: str, token: str, model_guid: str,
-                                 probe_phrase: str) -> str:
-    """Verify the probe entry exists. Returns the feedback entry's GUID."""
-    body = _v2_post(base_url, token, "/api/rest/2.0/metadata/search", {
-        "metadata": [{"identifier": model_guid, "type": "LOGICAL_TABLE"}],
-        "include_dependent_objects": True,
-        "dependent_object_version": "V2",
-    })
-    fb = body[0]["dependent_objects"]["dependents"][model_guid].get("FEEDBACK", [])
+def step_verify_feedback_landed(profile: str, model_guid: str, probe_phrase: str) -> str:
+    """Verify the probe entry exists via ts metadata dependents. Returns the entry GUID."""
+    rows = run_ts(["metadata", "dependents", model_guid], profile)
+    fb = [r for r in rows if r["type"] == "FEEDBACK"]
     match = next((f for f in fb if f.get("name") == probe_phrase), None)
     if not match:
         raise RuntimeError(
             f"Probe entry {probe_phrase!r} not found in {len(fb)} FEEDBACK dependents. "
             f"This is the verification path — open-items.md #2."
         )
-    return match["id"]
+    return match["guid"]
 
 
 def step_cleanup_restore_model(original_tml: dict, profile: str) -> None:
@@ -446,11 +446,7 @@ def main() -> int:
 
     r = SmokeTestResult()
 
-    base_url, token = "", ""
     ok, _ = r.step("auth", ts_auth_check, args.ts_profile)
-    if not ok:
-        return r.summary()
-    ok, (base_url, token) = r.step("load profile token", _load_token, args.ts_profile)
     if not ok:
         return r.summary()
 
@@ -468,8 +464,8 @@ def main() -> int:
     r.info(f"Model has {len(original_tml['model'].get('columns', []))} columns; "
             f"{len(table_tmls)} tables in bundle")
 
-    ok, deps = r.step("dependents API (verified path from open-items.md #1)",
-                       step_check_dependents_api, base_url, token, model_guid)
+    ok, deps = r.step("ts metadata dependents (verified path from open-items.md #1)",
+                       step_check_dependents_api, args.ts_profile, model_guid)
     if ok:
         r.info(f"Dependents categories: {sorted(deps.keys())}")
 
@@ -533,8 +529,8 @@ def main() -> int:
             pass
         return r.summary()
 
-    ok, fb_guid = r.step("verify feedback probe lands via metadata/search dependents.FEEDBACK",
-                          step_verify_feedback_landed, base_url, token,
+    ok, fb_guid = r.step("verify feedback probe lands via ts metadata dependents.FEEDBACK",
+                          step_verify_feedback_landed, args.ts_profile,
                           model_guid, probe_phrase)
     if ok:
         r.info(f"Probe feedback GUID: {fb_guid} — remove manually via Coach Spotter UI")
