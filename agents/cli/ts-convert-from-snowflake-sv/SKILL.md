@@ -197,7 +197,7 @@ SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{sv_name}');
 ```
 
 ```bash
-ts tml export {model_guid} --profile {profile} --fqn --associated --parse
+source ~/.zshenv && ts tml export {model_guid} --profile {profile} --fqn --associated --parse
 ```
 
 Parse the SV DDL using the existing Step 4 logic. Extract from the Model bundle:
@@ -370,8 +370,9 @@ top_level = {"guid": model_guid, "model": model_dict}
 model_tml_str = yaml.dump(top_level, default_flow_style=False, allow_unicode=True)
 
 result = subprocess.run(
-    ["ts", "tml", "import", "--policy", "ALL_OR_NONE",
-     "--no-create-new", "--profile", profile_name],
+    ["bash", "-c",
+     f"source ~/.zshenv && ts tml import --policy ALL_OR_NONE "
+     f"--no-create-new --profile '{profile_name}'"],
     input=json.dumps([model_tml_str]),
     capture_output=True, text=True,
 )
@@ -602,7 +603,7 @@ Skip this step if the user answered **N** in Step 5 — go directly to Step 6B.
 **Search ThoughtSpot for all table objects:**
 
 ```bash
-ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile {profile}
+source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile {profile}
 ```
 
 Filter the JSON to match each semantic view base table by database + schema + table name
@@ -612,7 +613,7 @@ Build a map: `physical_table_name → {metadata_id, metadata_name}`.
 **Export TMLs for all found tables in one call to verify columns:**
 
 ```bash
-ts tml export {guid1} {guid2} ... --profile {profile} --parse
+source ~/.zshenv && ts tml export {guid1} {guid2} ... --profile {profile} --parse
 ```
 
 `--parse` returns structured JSON — access columns via `item["tml"]["table"]["columns"]`
@@ -686,14 +687,14 @@ Map Snowflake types to ThoughtSpot types using `../../shared/mappings/ts-snowfla
 
 Find the ThoughtSpot connection for those tables:
 ```bash
-ts connections list --profile {profile}
+source ~/.zshenv && ts connections list --profile {profile}
 ```
 **Note:** `ts connections list` auto-paginates and returns all connections.
 
 Add the missing columns to the connection, then re-import the updated Table TML
 for each affected table (batch all imports in one call):
 ```bash
-ts tml import --policy ALL_OR_NONE --profile {profile}
+source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile {profile}
 ```
 
 After import, re-export the updated TMLs to refresh the column map before Step 8.
@@ -1113,10 +1114,10 @@ model_tml = yaml.dump(top_level, default_flow_style=False, allow_unicode=True)
 payload = json.dumps([model_tml])
 
 result = subprocess.run(
-    ["ts", "tml", "import", "--policy", "ALL_OR_NONE", "--profile", profile_name],
+    ["bash", "-c",
+     f"source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile '{profile_name}'"],
     input=payload,
-    capture_output=True,
-    text=True,
+    capture_output=True, text=True,
 )
 print(result.stdout)
 if result.returncode != 0:
@@ -1151,7 +1152,7 @@ shape — not just that the API returned 200.
 **1. Search for the model by GUID:**
 
 ```bash
-ts metadata search --subtype WORKSHEET --name "%TEST_SV_{view_name}%" --profile {profile}
+source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%TEST_SV_{view_name}%" --profile {profile}
 ```
 
 The GUID returned by the import response must appear in the results. If it is absent,
@@ -1161,7 +1162,7 @@ retry once.
 **2. Export the imported model and count columns:**
 
 ```bash
-ts tml export {created_guid} --fqn --profile {profile}
+source ~/.zshenv && ts tml export {created_guid} --fqn --profile {profile}
 ```
 
 Parse the returned TML and count `model.columns[]` entries. This count must be ≥ the
@@ -1245,6 +1246,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.1 | 2026-05-11 | Add `source ~/.zshenv &&` prefix to all bash blocks and convert subprocess.run calls from `["ts", ...]` to `["bash", "-c", "source ~/.zshenv && ts ..."]` for consistent env var loading |
 | 1.4.0 | 2026-05-05 | Add Mode C (update existing): Steps C1–C6. Identifies a changed SV and an existing TS Model, diffs columns/descriptions/synonyms/expressions, applies per-column reviewed changes with `--no-create-new`, and surfaces /ts-object-model-coach handoff. `ai_context` and Instructions are never touched. Step 1.5 menu updated to A/B/C. |
 | 1.3.0 | 2026-04-28 | Add Step 9.5 — confirm Spotter (AI search) enablement before import. Default Y; preserves existing setting on in-place updates. |
 | 1.2.0 | 2026-04-28 | Map SV synonyms/descriptions to TS Model + Table TMLs. Add Step 6D for table-description updates. Document `non additive by ... desc` → `first_value`. Fix synonyms placement (`properties.synonyms` not column root). |

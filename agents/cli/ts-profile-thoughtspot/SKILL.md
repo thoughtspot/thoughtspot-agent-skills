@@ -11,6 +11,24 @@ Ask one question at a time. Wait for each answer before moving on.
 
 ---
 
+## Step 0 — Overview
+
+On skill invocation, display this introduction before reading the profiles file:
+
+---
+**ts-profile-thoughtspot** — manage your ThoughtSpot connection profiles.
+
+Profiles store your ThoughtSpot URL, username, and auth method. Credentials are kept securely in your OS keychain (macOS Keychain, Windows Credential Manager, or Linux Secret Service) — never in the profile file or this conversation.
+
+**Actions:**  L List   A Add   U Update   D Delete   T Test
+
+*Reading profiles…*
+---
+
+Then proceed to [Entry Point](#entry-point).
+
+---
+
 ## Entry Point
 
 Manage ThoughtSpot connection profiles — add, list, update, delete, or test a profile.
@@ -395,7 +413,7 @@ Credential updated. Run this in your terminal to apply:
 
 Also clear the stale token cache:
 ```bash
-ts auth logout --profile {profile_name}
+source ~/.zshenv && ts auth logout --profile {profile_name}
 ```
 
 ### U4 — Change Auth Method
@@ -467,7 +485,7 @@ Run this in your terminal to apply the ~/.zshenv change:
 Show numbered profile list (if more than one) and ask which to test. If only one, confirm and test it directly.
 
 ```bash
-ts auth whoami --profile {profile_name}
+source ~/.zshenv && ts auth whoami --profile {profile_name}
 ```
 
 On success: `Profile '{name}' — connection verified.` Return to menu.
@@ -537,4 +555,5 @@ need to manage this file.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-05-11 | Add Step 0 orientation paragraph shown before the mode-selection menu |
 | 1.0.0 | 2026-05-06 | Initial CoCo CLI version (adapted from Claude Code skill) |

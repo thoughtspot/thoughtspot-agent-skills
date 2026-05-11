@@ -11,6 +11,24 @@ Ask one question at a time. Wait for each answer before moving on.
 
 ---
 
+## Step 0 — Overview
+
+On skill invocation, display this introduction before reading the profiles file:
+
+---
+**ts-profile-thoughtspot** — manage your ThoughtSpot connection profiles.
+
+Profiles store your ThoughtSpot URL, username, and auth method. Credentials are kept securely in your OS keychain (macOS Keychain, Windows Credential Manager, or Linux Secret Service) — never in the profile file or this conversation.
+
+**Actions:**  L List   A Add   U Update   D Delete   T Test
+
+*Reading profiles…*
+---
+
+Then proceed to [Entry Point](#entry-point).
+
+---
+
 ## Entry Point
 
 Read `~/.claude/thoughtspot-profiles.json`.
@@ -479,4 +497,5 @@ Skills do not manage this file — use `ts auth logout --profile {name}` to inva
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-05-11 | Add Step 0 orientation paragraph shown before the mode-selection menu |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

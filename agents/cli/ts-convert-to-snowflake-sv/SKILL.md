@@ -218,7 +218,7 @@ Your ThoughtSpot token has expired. To refresh:
 Then clear the stale cache and retry:
 
 ```bash
-ts auth logout --profile {profile_name}
+source ~/.zshenv && ts auth logout --profile {profile_name}
 source ~/.zshenv && ts auth whoami --profile {profile_name}
 ```
 
@@ -1426,6 +1426,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.1 | 2026-05-11 | Add `source ~/.zshenv &&` prefix to bare `ts auth logout` in the error-recovery bash block |
 | 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5): A=single new SV, B=split (now first-class), C=update existing SV; add Step 9.5C diff workflow for Mode C |
 | 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.0.0 | 2026-04-24 | Initial versioned release |
