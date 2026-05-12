@@ -40,6 +40,13 @@
         "--sf-profile", "YOUR_SF_PROFILE",
         "--sv-fqn",     "YOUR_DATABASE.YOUR_SCHEMA.YOUR_VIEW"
       ]
+    },
+    "ts-setup-snowflake-udfs-business-days": {
+      "extra_args": [
+        "--sf-profile",       "YOUR_SF_PROFILE",
+        "--sf-target-db",     "YOUR_DATABASE",
+        "--sf-target-schema", "YOUR_SCHEMA"
+      ]
     }
   }
 }
