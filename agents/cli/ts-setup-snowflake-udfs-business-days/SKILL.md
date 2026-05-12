@@ -337,10 +337,33 @@ Would you like help adding one of these formulas to a specific ThoughtSpot Model
 If Y:
 1. Check `~/.claude/thoughtspot-profiles.json` — if missing, ask user to run `/ts-profile-thoughtspot` first
 2. Verify: `source ~/.zshenv && ts auth whoami --profile "{ts_profile_name}"`
-3. Ask which model, which formula name, which UDF + which date columns to use
+3. Ask: which model, what to name the formula (e.g. `Business Days Open`), which UDF to use, and which date column(s) to pass as arguments
 4. Export TML: `ts tml export {model_guid} --profile {ts_profile_name} --fqn --parse`
-5. Add the formula to the `formulas` section and a corresponding `columns` entry, following `~/.claude/shared/schemas/thoughtspot-model-tml.md`
+5. Add **both** of the following to the TML — a formula alone is not enough; without the `columns[]` entry the formula is hidden from users:
+
+   **In `formulas[]`** — the expression:
+   ```yaml
+   - id: "formula_{formula_name}"          # e.g. formula_Business Days Open
+     name: "{formula_name}"
+     expr: >-
+       sql_int_op ("{target_db}.{target_schema}.get_business_days_clamped({0},{1}, FALSE)", [{date_column}], today())
+     properties:
+       column_type: MEASURE
+   ```
+   For `get_business_duration_str` (returns a string), use `column_type: ATTRIBUTE` and wrap with `sql_string_op`.
+
+   **In `columns[]`** — the visible column entry that references the formula:
+   ```yaml
+   - name: "{formula_name}"
+     formula_id: "formula_{formula_name}"  # must match the id above exactly
+     properties:
+       column_type: MEASURE                # ATTRIBUTE for string UDF
+       aggregation: SUM                    # omit for ATTRIBUTE
+       index_type: DONT_INDEX
+   ```
+
 6. Import: `ts tml import --profile {ts_profile_name} --policy ALL_OR_NONE`
+7. Verify the formula appears in the Model — search for the formula name or run `ts metadata search --profile {ts_profile_name} --name "{formula_name}"` to confirm it is indexed.
 
 If N → done.
 
@@ -363,4 +386,5 @@ If N → done.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-05-12 | Step 5: explicit formulas[] + columns[] TML pattern; formula alone is hidden without the columns[] entry |
 | 1.0.0 | 2026-05-12 | Initial release — deploy three Snowflake business-day UDFs and show ThoughtSpot formula syntax |

@@ -199,9 +199,39 @@ Weekday elapsed time as HH:MM string:
 Weekday-only minutes elapsed:
   sql_int_op ("{target_db}.{target_schema}.get_business_minutes_clamped({0},{1})", [start date], [end date])
 
-To add a formula in ThoughtSpot: open the Model → Edit → + Add formula → paste
-the expression with your column names substituted.
+To add a formula in ThoughtSpot:
+  1. Open the Model → Edit → + Add formula
+  2. Paste the expression with your column names substituted and give it a name
+     (e.g. "Business Days Open")
+  3. Save the formula — this creates the formula definition, but the column
+     entry is also required for the formula to be visible to users.
+  4. If adding via TML: you must add BOTH a formulas[] entry AND a matching
+     columns[] entry with formula_id. Without the columns[] entry the formula
+     is hidden. See the TML pattern note below.
 ```
+
+> **TML pattern — both entries are required:**
+>
+> ```yaml
+> formulas:
+> - id: "formula_Business Days Open"
+>   name: "Business Days Open"
+>   expr: >-
+>     sql_int_op ("{target_db}.{target_schema}.get_business_days_clamped({0},{1}, FALSE)", [{date_column}], today())
+>   properties:
+>     column_type: MEASURE
+>
+> columns:
+> # ... existing columns ...
+> - name: "Business Days Open"
+>   formula_id: "formula_Business Days Open"   # must match id above exactly
+>   properties:
+>     column_type: MEASURE
+>     aggregation: SUM
+>     index_type: DONT_INDEX
+> ```
+>
+> For `get_business_duration_str` (returns a string): use `sql_string_op`, `column_type: ATTRIBUTE`, and omit `aggregation`.
 
 ---
 
@@ -219,4 +249,5 @@ the expression with your column names substituted.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-05-12 | Step 4: explicit formulas[] + columns[] TML pattern; formula alone is hidden without the columns[] entry |
 | 1.0.0 | 2026-05-12 | Initial release |

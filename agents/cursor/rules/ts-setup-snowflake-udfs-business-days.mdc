@@ -168,11 +168,36 @@ Weekday-only minutes:
   sql_int_op ("{target_db}.{target_schema}.get_business_minutes_clamped({0},{1})", [start], [end])
 ```
 
-To add a formula in ThoughtSpot: open the Model → Edit → + Add formula → paste the expression with your column names substituted.
+To add a formula in ThoughtSpot via the UI:
+1. Open the Model → Edit → + Add formula
+2. Paste the expression with your column names and give it a name
+3. Save — this creates the formula definition and the visible column entry together
 
-> Note: adding formulas directly to a ThoughtSpot Model via TML requires the `ts` CLI
-> (Claude Code only). In Cursor, use the ThoughtSpot UI or run `/ts-object-answer-promote`
-> in a Claude Code session.
+> **If adding via TML:** both a `formulas[]` entry AND a matching `columns[]` entry
+> with `formula_id` are required. Without the `columns[]` entry the formula is hidden.
+>
+> ```yaml
+> formulas:
+> - id: "formula_Business Days Open"
+>   name: "Business Days Open"
+>   expr: >-
+>     sql_int_op ("{target_db}.{target_schema}.get_business_days_clamped({0},{1}, FALSE)", [{date_column}], today())
+>   properties:
+>     column_type: MEASURE
+>
+> columns:
+> - name: "Business Days Open"
+>   formula_id: "formula_Business Days Open"   # must match id above exactly
+>   properties:
+>     column_type: MEASURE
+>     aggregation: SUM
+>     index_type: DONT_INDEX
+> ```
+>
+> For `get_business_duration_str`: use `sql_string_op`, `column_type: ATTRIBUTE`, omit `aggregation`.
+
+> Note: editing TML directly requires the `ts` CLI (Claude Code only). In Cursor,
+> use the ThoughtSpot UI or run `/ts-object-answer-promote` in a Claude Code session.
 
 ---
 
@@ -191,4 +216,5 @@ To add a formula in ThoughtSpot: open the Model → Edit → + Add formula → p
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-05-12 | Step 5: explicit formulas[] + columns[] TML pattern; formula alone is hidden without the columns[] entry |
 | 1.0.0 | 2026-05-12 | Initial release |
