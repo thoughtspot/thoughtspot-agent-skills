@@ -485,13 +485,14 @@ def main() -> int:
                           help="GUID of the ThoughtSpot Model (preferred — stable, unambiguous)")
     id_group.add_argument("--model-name",
                           help="Model display name — resolved to GUID at runtime (exact match)")
-    parser.add_argument("--column-name", required=True, help="Column on the Model to patch")
+    parser.add_argument("--column-name", default=None,
+                        help="Column on the Model to patch (auto-selects first MEASURE if omitted)")
     parser.add_argument("--no-cleanup", action="store_true",
                         help="Skip Model rollback (useful for debugging)")
     args = parser.parse_args()
 
     label = args.model_guid or args.model_name
-    print(f"smoke_ts_object_model_coach — target: {label!r}, column: {args.column_name!r}")
+    print(f"smoke_ts_object_model_coach — target: {label!r}, column: {args.column_name or '(auto)'!r}")
     print()
 
     r = SmokeTestResult()
@@ -545,6 +546,24 @@ def main() -> int:
                 r.step("Step 4.5 — proposed RouteAction defaults to NEEDS_REVIEW (open-items #15)",
                         step_verify_proposed_action_default, collisions)
 
+    # Auto-select column if not specified: first MEASURE, else first non-date ATTRIBUTE
+    column_name = args.column_name
+    if not column_name:
+        cols = original_tml["model"].get("columns", [])
+        measures = [c["name"] for c in cols
+                    if c.get("properties", {}).get("column_type") == "MEASURE"]
+        if measures:
+            column_name = measures[0]
+        else:
+            attrs = [c["name"] for c in cols
+                     if c.get("properties", {}).get("column_type") == "ATTRIBUTE"]
+            column_name = attrs[0] if attrs else (cols[0]["name"] if cols else None)
+        if column_name:
+            r.info(f"Auto-selected column: {column_name!r}")
+        else:
+            r.info("No columns found on Model — cannot patch")
+            return r.summary()
+
     timestamp = int(time.time())
     test_ai_context = f"smoke test ai_context probe (run {timestamp})"
     test_synonyms = [f"smoke_test_syn_{timestamp}_a", f"smoke_test_syn_{timestamp}_b"]
@@ -552,7 +571,7 @@ def main() -> int:
 
     ok, patched = r.step("patch Model with ai_context + synonyms",
                           step_patch_model_with_ai_assets, original_tml,
-                          args.column_name, test_ai_context, test_synonyms)
+                          column_name, test_ai_context, test_synonyms)
     if not ok:
         return r.summary()
 
@@ -563,7 +582,7 @@ def main() -> int:
 
     ok, _ = r.step("verify ai_context + synonyms round-tripped",
                     step_verify_round_trip, model_guid, args.ts_profile,
-                    args.column_name, test_ai_context, test_synonyms)
+                    column_name, test_ai_context, test_synonyms)
     if not ok and not args.no_cleanup:
         r.info("Attempting rollback...")
         try:
@@ -572,7 +591,7 @@ def main() -> int:
             r.info(f"Rollback failed: {e}")
         return r.summary()
 
-    target_token = f"[{args.column_name}]"
+    target_token = f"[{column_name}]"
     ok, _ = r.step("import REFERENCE_QUESTION feedback probe",
                     step_import_feedback_probe, model_guid, args.ts_profile,
                     probe_phrase, target_token)
