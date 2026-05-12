@@ -29,7 +29,7 @@ Then run `claude` to launch.
 
 ### 2. Other requirements
 
-- Python 3.9+
+- Python 3.9–3.13 (Python 3.14 has a macOS `libexpat` incompatibility — see [Troubleshooting](#troubleshooting))
 - Git (to clone or update the repo)
 
 ---
@@ -47,6 +47,10 @@ git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/thoughts
 ```bash
 pip install -e ~/thoughtspot-agent-skills/tools/ts-cli
 ```
+
+> **Python version:** use Python 3.9–3.13. If `pip` defaults to Python 3.14, specify
+> the version explicitly: `pip3.12 install -e ~/thoughtspot-agent-skills/tools/ts-cli`
+> (install Python 3.12 first with `brew install python@3.12` if needed).
 
 Verify:
 
@@ -213,3 +217,47 @@ cp tools/smoke-tests/smoke-config.local.json.example \
 
 Skills with all required args configured will run automatically on push.
 Skills missing config are skipped with a warning (they don't block the push).
+
+---
+
+## Troubleshooting
+
+### `ts` CLI install fails on Python 3.14 (macOS)
+
+**Symptom:** `pip install` or `pipx install` fails with:
+```
+ImportError: Symbol not found: _XML_SetAllocTrackerActivationThreshold
+```
+
+**Cause:** Python 3.14 from Homebrew is compiled against a newer `libexpat` than the
+one shipped with macOS, causing a dynamic library mismatch. The `ts` CLI requires
+Python 3.9–3.13.
+
+**Fix:** Install and use Python 3.12 or 3.13:
+```bash
+brew install python@3.12
+pip3.12 install -e ~/thoughtspot-agent-skills/tools/ts-cli
+```
+
+If `pipx` is your default install path, point it at a supported Python:
+```bash
+pipx install --python python3.12 -e ~/thoughtspot-agent-skills/tools/ts-cli
+```
+
+> Use `pip install -e` (not `pipx install -e`) — `pipx` is designed for standalone
+> PyPI packages, not editable local installs.
+
+### `ts: command not found` after install
+
+The install succeeded but the `ts` command is not on your PATH. Check where pip
+installed the script:
+
+```bash
+pip show -f thoughtspot-cli | grep "^Location"
+```
+
+Then verify the corresponding `bin/` directory is in your PATH, or use:
+
+```bash
+python -m ts_cli.cli --help
+```
