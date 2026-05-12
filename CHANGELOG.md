@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-05-12
+- feat: add `ts-setup-snowflake-udfs-business-days` (v1.0.0) — deploys three Snowflake scalar UDFs for weekday-only date arithmetic (`get_business_days_clamped`, `get_business_minutes_clamped`, `get_business_duration_str`) and shows ThoughtSpot `sql_int_op` / `sql_string_op` formula syntax; available in CLI, Cortex Code CLI, Snowsight Workspaces, and Cursor
+
 ## 2026-05-11
 - chore: bump ts-cli to v0.6.0
 - fix: `ts tml import` default changed from `--create-new` to `--no-create-new` — prevents silent duplicate creation when importing TML with an existing GUID; updated help text and docstring with explicit warning about the `--create-new` + existing-GUID pitfall

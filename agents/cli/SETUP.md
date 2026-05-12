@@ -91,6 +91,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.snowflake/cortex/skills/ts-variable-timezone
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-setup-snowflake-udfs-business-days \
+      ~/.snowflake/cortex/skills/ts-setup-snowflake-udfs-business-days
+
 # Symlink shared reference files
 ln -s ~/thoughtspot-agent-skills/agents/shared \
       ~/.snowflake/cortex/shared
@@ -122,6 +125,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.claude/skills/ts-variable-timezone
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-setup-snowflake-udfs-business-days \
+      ~/.claude/skills/ts-setup-snowflake-udfs-business-days
 
 # Claude-only: Snowflake profile management
 ln -s ~/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \

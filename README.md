@@ -113,12 +113,13 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 | `ts-dependency-manager` | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards |
 | `ts-variable-timezone` | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
 
-**Setup** — manage connection profiles
+**Setup** — deploy infrastructure and manage connection profiles
 
 | Skill | What it does |
 |---|---|
 | `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles (**Claude Code only** — Cortex Code manages Snowflake connections natively) |
+| `ts-setup-snowflake-udfs-business-days` | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
 
 See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for installation and setup.
 
@@ -143,6 +144,7 @@ install required — runs entirely within Snowflake using stored procedures.
 |---|---|
 | `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles (uses Snowflake Secrets) |
 | `ts-setup-sv` | Install or upgrade stored procedures required by the other skills |
+| `ts-setup-snowflake-udfs-business-days` | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic |
 | `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model |
 
@@ -166,6 +168,7 @@ language in the Cursor AI chat.
 | `ts-object-model-coach` | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements ⚠️ Untested in Cursor |
 | `ts-dependency-manager` | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards ⚠️ Untested in Cursor |
 | `ts-variable-timezone` | Search, set, or remove timezone values for the `ts_user_timezone` variable ⚠️ Beta in 26.5, EA in 26.6, Untested in Cursor |
+| `ts-setup-snowflake-udfs-business-days` | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
 
 See **[agents/cursor/SETUP.md](agents/cursor/SETUP.md)** for installation.
 
