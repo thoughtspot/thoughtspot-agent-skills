@@ -20,14 +20,6 @@
     "ts-object-model-coach": {
       "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE", "--column-name", "YOUR_COLUMN_NAME"]
     },
-    "ts-object-model-builder": {
-      "extra_args": [
-        "--connection-name", "YOUR_CONNECTION_NAME",
-        "--db",             "YOUR_DATABASE",
-        "--schema",         "YOUR_SCHEMA",
-        "--table",          "YOUR_TABLE"
-      ]
-    },
     "ts-convert-to-snowflake-sv": {
       "ts_profile": "YOUR_OTHER_PROFILE",
       "extra_args": [
