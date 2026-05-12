@@ -27,9 +27,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         [ -z "$remote_sha" ] && continue
     fi
 
-    # Collect skill directories touched in this push
+    # Collect skill directories touched in this push.
+    # Match only paths with at least one more component after the skill dir
+    # (e.g. agents/cli/ts-variable-timezone/SKILL.md) — not files directly
+    # in agents/cli/ like agents/cli/SETUP.md.
     BATCH=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null \
-        | grep -oE '^agents/cli/[^/]+|^agents/claude/[^/]+' \
+        | grep -E '^agents/(cli|claude)/[^/]+/' \
+        | grep -oE '^agents/(cli|claude)/[^/]+' \
         | sed 's|^agents/cli/||;s|^agents/claude/||' \
         | sort -u || true)
 
