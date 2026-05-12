@@ -53,6 +53,9 @@ build/
 # Deployment state (local only — tracks last Snowflake stage sync)
 .snowflake-deploy-sha
 
+# Per-machine smoke test configuration (model names, connection details, etc.)
+tools/smoke-tests/smoke-config.local.json
+
 # Skills pending testing — not yet published to remote
 agents/claude/ts-profile-databricks/
 agents/claude/ts-convert-to-databricks-mv/

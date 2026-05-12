@@ -1,0 +1,36 @@
+{
+  "_comment": "Copy this file to smoke-config.local.json and fill in your values. smoke-config.local.json is gitignored.",
+
+  "default_ts_profile": "champ-staging",
+  "default_org": "Primary",
+
+  "skills": {
+    "ts-dependency-manager": {
+      "extra_args": ["--model-name", "YOUR_MODEL_NAME"]
+    },
+    "ts-object-model-coach": {
+      "extra_args": ["--model-name", "YOUR_MODEL_NAME", "--column-name", "YOUR_COLUMN_NAME"]
+    },
+    "ts-object-model-builder": {
+      "extra_args": [
+        "--connection-name", "YOUR_CONNECTION_NAME",
+        "--db",             "YOUR_DATABASE",
+        "--schema",         "YOUR_SCHEMA",
+        "--table",          "YOUR_TABLE"
+      ]
+    },
+    "ts-convert-to-snowflake-sv": {
+      "extra_args": [
+        "--sf-profile",       "YOUR_SF_PROFILE",
+        "--sf-target-db",     "YOUR_DATABASE",
+        "--sf-target-schema", "YOUR_SCHEMA"
+      ]
+    },
+    "ts-convert-from-snowflake-sv": {
+      "extra_args": [
+        "--sf-profile", "YOUR_SF_PROFILE",
+        "--sv-fqn",     "YOUR_DATABASE.YOUR_SCHEMA.YOUR_VIEW"
+      ]
+    }
+  }
+}

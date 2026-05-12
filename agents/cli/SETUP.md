@@ -84,12 +84,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.snowflake/cortex/skills/ts-object-model-coach
 
-<<<<<<< HEAD
-=======
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.snowflake/cortex/skills/ts-variable-timezone
 
->>>>>>> 23572a9 (fix: rebase ts-variable-timezone onto current main structure)
 # Symlink shared reference files
 ln -s ~/thoughtspot-agent-skills/agents/shared \
       ~/.snowflake/cortex/shared
@@ -119,12 +116,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.claude/skills/ts-object-model-coach
 
-<<<<<<< HEAD
-=======
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.claude/skills/ts-variable-timezone
 
->>>>>>> 23572a9 (fix: rebase ts-variable-timezone onto current main structure)
 # Claude-only: Snowflake profile management
 ln -s ~/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \
       ~/.claude/skills/ts-profile-snowflake
@@ -185,3 +179,37 @@ Snowflake connections natively via `cortex connections set`.
 
 CLI skills call the ThoughtSpot API directly. You do NOT need `/ts-setup-sv`
 or any stored procedures unless you also use Snowsight Workspaces.
+
+---
+
+## For contributors
+
+### Install git hooks
+
+The repo ships two git hooks. Install both after cloning:
+
+```bash
+cd ~/thoughtspot-agent-skills
+
+# Blocks commits that fail static validation (secrets, references, versions, etc.)
+ln -s ../../scripts/pre-commit.sh .git/hooks/pre-commit
+
+# Blocks pushes where smoke tests fail against a live ThoughtSpot instance
+ln -s ../../scripts/pre-push.sh .git/hooks/pre-push
+
+chmod +x scripts/pre-commit.sh scripts/pre-push.sh
+```
+
+### Configure smoke test arguments
+
+Some smoke tests require model names, connection names, or Snowflake profile details
+that vary per machine. Copy the example config and fill in your values:
+
+```bash
+cp tools/smoke-tests/smoke-config.local.json.example \
+   tools/smoke-tests/smoke-config.local.json
+# Edit smoke-config.local.json with your values — it is gitignored
+```
+
+Skills with all required args configured will run automatically on push.
+Skills missing config are skipped with a warning (they don't block the push).
