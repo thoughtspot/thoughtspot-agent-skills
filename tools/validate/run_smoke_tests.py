@@ -47,10 +47,11 @@ NAME_ALIASES: dict[str, str] = {
 }
 
 # Skills that need extra required args beyond --ts-profile.
-# If not present in smoke-config.local.json, these are skipped with a warning.
+# These must come from smoke-config.local.json; skills are skipped with a warning if absent.
+# Use --model-guid (not --model-name) for stable, unambiguous model identification.
 REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
-    "ts-dependency-manager":        ["--model-name"],
-    "ts-object-model-coach":        ["--model-name", "--column-name"],
+    "ts-dependency-manager":        ["--model-guid"],
+    "ts-object-model-coach":        ["--model-guid", "--column-name"],
     "ts-object-model-builder":      ["--connection-name", "--db", "--schema", "--table"],
     "ts-convert-to-snowflake-sv":   ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-convert-from-snowflake-sv": ["--sf-profile", "--sv-fqn"],

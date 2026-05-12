@@ -6,10 +6,10 @@
 
   "skills": {
     "ts-dependency-manager": {
-      "extra_args": ["--model-name", "YOUR_MODEL_NAME"]
+      "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
     },
     "ts-object-model-coach": {
-      "extra_args": ["--model-name", "YOUR_MODEL_NAME", "--column-name", "YOUR_COLUMN_NAME"]
+      "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE", "--column-name", "YOUR_COLUMN_NAME"]
     },
     "ts-object-model-builder": {
       "extra_args": [

@@ -20,10 +20,12 @@ ts-dependency-manager skill (see SKILL.md for rationale).
 Usage:
     python tools/smoke-tests/smoke_ts_dependency_manager.py \\
         --ts-profile production \\
-        --model-name "Retail Sales" \\
+        --model-guid  abc123...   \\           # preferred — stable, unambiguous
+        [--model-name "Retail Sales"]          # alternative — resolved to GUID at runtime
         [--test-delete-guid <guid> --test-delete-type LIVEBOARD] \\
         [--no-cleanup]
 
+Provide exactly one of --model-guid or --model-name.
 The specified model must exist in ThoughtSpot.
 Credentials are read via the ts CLI profile (handles auth and token caching).
 """
@@ -75,7 +77,7 @@ def _ts_import_stdin(ts_profile: str, tml_str: str,
 # Main smoke test
 # ---------------------------------------------------------------------------
 
-def run_smoke_test(ts_profile: str, model_name: str,
+def run_smoke_test(ts_profile: str, model_name: str | None, model_guid: str | None,
                    test_delete_guid: str | None, test_delete_type: str | None,
                    no_cleanup: bool) -> int:
     result = SmokeTestResult()
@@ -85,7 +87,10 @@ def run_smoke_test(ts_profile: str, model_name: str,
     print("Smoke test: ts-dependency-manager")
     print("=" * 60)
     print(f"  ThoughtSpot profile:  {ts_profile}")
-    print(f"  Target model:         {model_name}")
+    if model_guid:
+        print(f"  Target model GUID:    {model_guid}")
+    else:
+        print(f"  Target model name:    {model_name}")
     if test_delete_guid:
         print(f"  Delete test GUID:     {test_delete_guid} ({test_delete_type})")
     print()
@@ -100,22 +105,34 @@ def run_smoke_test(ts_profile: str, model_name: str,
     if not ok:
         return result.summary()
 
-    # ── Step 2: Find model ────────────────────────────────────────────────
-    ok, search_results = result.step(
-        f"Locate model '{model_name}'",
-        run_ts, ["metadata", "search", "--subtype", "WORKSHEET",
-                 "--name", model_name], ts_profile,
-    )
-    if not ok:
-        return result.summary()
+    # ── Step 2: Resolve model GUID ────────────────────────────────────────
+    if model_guid:
+        # GUID provided directly — verify it exists and get the display name
+        ok, search_results = result.step(
+            f"Verify model GUID {model_guid[:8]}...",
+            run_ts, ["metadata", "search", "--subtype", "WORKSHEET",
+                     "--guid", model_guid], ts_profile,
+        )
+        if not ok:
+            return result.summary()
+        if not search_results:
+            print(f"  FAIL  No model found with GUID '{model_guid}'. Check --model-guid.")
+            return 1
+        model_display_name = search_results[0].get("metadata_name", model_guid)
+    else:
+        ok, search_results = result.step(
+            f"Locate model '{model_name}'",
+            run_ts, ["metadata", "search", "--subtype", "WORKSHEET",
+                     "--name", model_name], ts_profile,
+        )
+        if not ok:
+            return result.summary()
+        if not search_results:
+            print(f"  FAIL  No model named '{model_name}' found. Check --model-name.")
+            return 1
+        model_guid = search_results[0]["metadata_id"]
+        model_display_name = search_results[0].get("metadata_name", model_name)
 
-    if not search_results:
-        print(f"  FAIL  No model named '{model_name}' found. Check --model-name.")
-        return 1
-
-    # metadata search returns a list; each item has metadata_id (not header.id)
-    model_guid = search_results[0]["metadata_id"]
-    model_display_name = search_results[0].get("metadata_name", model_name)
     result.info(f"Model GUID: {model_guid}  ({model_display_name})")
 
     # ── Step 3: Export TML ───────────────────────────────────────────────
@@ -302,8 +319,11 @@ def main() -> int:
     )
     parser.add_argument("--ts-profile", required=True,
                         help="ThoughtSpot profile name (from ts-profile-thoughtspot setup)")
-    parser.add_argument("--model-name", required=True,
-                        help="Name of the ThoughtSpot model to test against")
+    id_group = parser.add_mutually_exclusive_group(required=True)
+    id_group.add_argument("--model-guid",
+                          help="GUID of the ThoughtSpot model (preferred — stable, unambiguous)")
+    id_group.add_argument("--model-name",
+                          help="Display name of the ThoughtSpot model (resolved to GUID at runtime)")
     parser.add_argument("--test-delete-guid",
                         help="Optional: GUID of a throwaway object to test ts metadata delete --type")
     parser.add_argument("--test-delete-type",
@@ -318,6 +338,7 @@ def main() -> int:
     return run_smoke_test(
         ts_profile=args.ts_profile,
         model_name=args.model_name,
+        model_guid=args.model_guid,
         test_delete_guid=args.test_delete_guid,
         test_delete_type=args.test_delete_type,
         no_cleanup=args.no_cleanup,
