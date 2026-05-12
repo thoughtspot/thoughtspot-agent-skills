@@ -96,7 +96,7 @@ Platform policy: `.claude/rules/security.md`.
 
 ## Critical TML invariants
 
-Read `agents/shared/schemas/thoughtspot-table-tml.md` and `thoughtspot-model-tml.md` before generating any TML.
+Read `agents/shared/schemas/thoughtspot-table-tml.md` and `agents/shared/schemas/thoughtspot-model-tml.md` before generating any TML.
 These rules come from real import failures — violating them causes silent errors or rejected imports:
 
 - `db_column_name`: always include on every table column, even when it equals `name`
