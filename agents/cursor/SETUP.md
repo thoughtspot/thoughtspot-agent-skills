@@ -190,7 +190,7 @@ All rules support multiple named profiles, so you can switch between environment
 - Snowflake account with Cortex Analyst / Semantic Views enabled
 
 **Local:**
-- Python 3.9+
+- Python 3.9–3.13 (Python 3.14 has a macOS `libexpat` incompatibility — see [ts-cli install troubleshooting](../cli/SETUP.md#troubleshooting))
 - Cursor 0.40+
 - macOS, Windows 10+, or Linux (with Secret Service / KWallet for keyring)
 

@@ -29,7 +29,7 @@ Then run `cortex` to launch and connect to your Snowflake account.
 Then run `claude` to launch.
 
 **Also required:**
-- Python 3.9+
+- Python 3.9–3.13 (Python 3.14 has a macOS `libexpat` incompatibility — see [Troubleshooting](#troubleshooting))
 - Git
 
 ---
@@ -124,12 +124,12 @@ See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for installation and setup.
 
 ### ts-variable-timezone version requirements
 
-> ⚠️ **Beta in ThoughtSpot 26.5, Early Access in 26.6 — requires `tscli` flags to enable.**
+> ⚠️ **Beta in ThoughtSpot 26.5, Early Access in 26.6 — requires a support ticket to enable.**
 
 | ThoughtSpot version | Status | Notes |
 |---|---|---|
-| 26.5 | Beta | Must be enabled by your ThoughtSpot admin via `tscli` |
-| 26.6 | Early Access | Must be enabled by your ThoughtSpot admin via `tscli` |
+| 26.5 | Beta | Must be enabled by your ThoughtSpot admin via a support ticket |
+| 26.6 | Early Access | Must be enabled by your ThoughtSpot admin via a support ticket |
 | Post-GA | Generally Available | Enabled by default |
 
 ---
@@ -184,3 +184,32 @@ ts --help
 
 Commands: `ts auth`, `ts metadata search`, `ts tml export/import`,
 `ts connections list/get/add-tables`, `ts tables create`, `ts profiles list`.
+
+---
+
+## Troubleshooting
+
+### `ts` CLI install fails on Python 3.14 (macOS)
+
+**Symptom:** `pip install` or `pipx install` fails with:
+```
+ImportError: Symbol not found: _XML_SetAllocTrackerActivationThreshold
+```
+
+**Cause:** Python 3.14 from Homebrew is compiled against a newer `libexpat` than the
+one shipped with macOS, causing a dynamic library mismatch. The `ts` CLI requires
+Python 3.9–3.13.
+
+**Fix:** Install and use Python 3.12 or 3.13:
+```bash
+brew install python@3.12
+pip3.12 install -e ~/thoughtspot-agent-skills/tools/ts-cli
+```
+
+If you installed via `pipx`, point it at a supported Python:
+```bash
+pipx install --python python3.12 -e ~/thoughtspot-agent-skills/tools/ts-cli
+```
+
+> Note: also use `pip install -e` (not `pipx install -e`) — `pipx` is designed for
+> standalone PyPI packages, not editable local installs.
