@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -136,9 +137,10 @@ def run(skills: list[str]) -> int:
             skipped.append(skill)
             continue
 
+        quoted_args = " ".join(shlex.quote(a) for a in extra_args)
         cmd = ["bash", "-c",
                f"source ~/.zshenv && python3 {smoke_path} "
-               f"--ts-profile {skill_profile} {' '.join(extra_args)}"]
+               f"--ts-profile {shlex.quote(skill_profile)} {quoted_args}"]
 
         print(f"{label:<{col}} ", end="", flush=True)
         result = subprocess.run(cmd, capture_output=True, text=True)

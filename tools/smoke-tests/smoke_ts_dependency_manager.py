@@ -167,7 +167,7 @@ def run_smoke_test(ts_profile: str, model_name: str | None, model_guid: str | No
         result.info(f"dependents (flat): {len(rows)} row(s)")
         if rows:
             sample = rows[0]
-            required = {"metadata_id", "metadata_name", "metadata_type"}
+            required = {"guid", "name", "type"}
             missing = required - set(sample.keys())
             if missing:
                 raise RuntimeError(f"Flat row missing expected keys: {missing}")

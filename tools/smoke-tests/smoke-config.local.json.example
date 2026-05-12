@@ -7,7 +7,12 @@
     "  ts_profile  — optional; overrides default_ts_profile for this skill only.",
     "                Any skill can have its own profile.",
     "  extra_args  — required args beyond --ts-profile (model GUIDs, connection names, etc.).",
-    "                Skills with unconfigured required args are skipped, not failed."
+    "                Skills with unconfigured required args are skipped, not failed.",
+    "",
+    "Snowflake profile requirement:",
+    "  --sf-profile must be a CLI method profile (method: cli) in ~/.claude/snowflake-profiles.json.",
+    "  Key-pair / python method profiles are not supported by the smoke tests.",
+    "  Run 'SHOW SEMANTIC VIEWS IN DATABASE <db>;' in Snowflake to find valid --sv-fqn values."
   ],
 
   "default_ts_profile": "champ-staging",
@@ -18,6 +23,7 @@
       "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
     },
     "ts-object-model-coach": {
+      "ts_profile": "YOUR_PROFILE_IF_DIFFERENT",
       "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
     },
     "ts-convert-to-snowflake-sv": {
