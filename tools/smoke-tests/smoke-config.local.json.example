@@ -1,5 +1,14 @@
 {
-  "_comment": "Copy this file to smoke-config.local.json and fill in your values. smoke-config.local.json is gitignored.",
+  "_comment": [
+    "Copy this file to smoke-config.local.json and fill in your values.",
+    "smoke-config.local.json is gitignored — never commit it.",
+    "",
+    "Keys per skill entry:",
+    "  ts_profile  — optional; overrides default_ts_profile for this skill only.",
+    "                Any skill can have its own profile.",
+    "  extra_args  — required args beyond --ts-profile (model GUIDs, connection names, etc.).",
+    "                Skills with unconfigured required args are skipped, not failed."
+  ],
 
   "default_ts_profile": "champ-staging",
   "default_org": "Primary",
