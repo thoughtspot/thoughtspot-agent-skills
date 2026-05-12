@@ -125,6 +125,9 @@ def run(skills: list[str]) -> int:
         skill_cfg = skill_configs.get(skill, {})
         extra_args = skill_cfg.get("extra_args", [])
 
+        # Per-skill profile overrides the default
+        skill_profile = skill_cfg.get("ts_profile", profile)
+
         # Check all required extras are covered
         missing = [a for a in extra_required if a not in extra_args]
         if missing:
@@ -135,7 +138,7 @@ def run(skills: list[str]) -> int:
 
         cmd = ["bash", "-c",
                f"source ~/.zshenv && python3 {smoke_path} "
-               f"--ts-profile {profile} {' '.join(extra_args)}"]
+               f"--ts-profile {skill_profile} {' '.join(extra_args)}"]
 
         print(f"{label:<{col}} ", end="", flush=True)
         result = subprocess.run(cmd, capture_output=True, text=True)

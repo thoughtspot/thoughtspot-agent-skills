@@ -20,6 +20,7 @@
       ]
     },
     "ts-convert-to-snowflake-sv": {
+      "ts_profile": "YOUR_OTHER_PROFILE",
       "extra_args": [
         "--sf-profile",       "YOUR_SF_PROFILE",
         "--sf-target-db",     "YOUR_DATABASE",
@@ -27,6 +28,7 @@
       ]
     },
     "ts-convert-from-snowflake-sv": {
+      "ts_profile": "YOUR_OTHER_PROFILE",
       "extra_args": [
         "--sf-profile", "YOUR_SF_PROFILE",
         "--sv-fqn",     "YOUR_DATABASE.YOUR_SCHEMA.YOUR_VIEW"
