@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-05-13
+- feat: add `ts-recipe-formula-hms-display-snowflake` (v1.0.0) — deploys four Snowflake scalar UDFs (`format_seconds_to_hms`, `format_seconds_to_dhms`, `format_minutes_to_hm`, `format_minutes_to_dhm`) for formatting integer durations as `HH:MM:SS` / `DD:HH:MM:SS` / `HH:MM` / `DD:HH:MM` strings; shows ThoughtSpot `sql_string_op` formula syntax and TML pattern; available in CLI, Cortex Code CLI, Snowsight Workspaces, and Cursor
 - refactor: introduce `ts-recipe-*` naming family for analytical capability skills — rename `ts-setup-snowflake-udfs-business-days` → `ts-recipe-formula-business-days-snowflake` (v2.0.0 MAJOR); update validator, skill-naming doc, smoke tests, README, and all SETUP.md files
 - feat: split README "Setup" section into "Connection Profiles" (`ts-profile-*`) and "Recipes" (`ts-recipe-*`) for clearer category separation
 

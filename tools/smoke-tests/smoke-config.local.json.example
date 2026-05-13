@@ -47,6 +47,13 @@
         "--sf-target-db",     "YOUR_DATABASE",
         "--sf-target-schema", "YOUR_SCHEMA"
       ]
+    },
+    "ts-recipe-formula-hms-display-snowflake": {
+      "extra_args": [
+        "--sf-profile",       "YOUR_SF_PROFILE",
+        "--sf-target-db",     "YOUR_DATABASE",
+        "--sf-target-schema", "YOUR_SCHEMA"
+      ]
     }
   }
 }

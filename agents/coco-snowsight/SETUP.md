@@ -42,6 +42,7 @@ snow stage copy agents/coco-snowsight/ts-profile-thoughtspot/SKILL.md @SKILLS.PU
 snow stage copy agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-convert-to-snowflake-sv/ --overwrite
 snow stage copy agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-convert-from-snowflake-sv/ --overwrite
 snow stage copy agents/coco-snowsight/ts-recipe-formula-business-days-snowflake/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-recipe-formula-business-days-snowflake/ --overwrite
+snow stage copy agents/coco-snowsight/ts-recipe-formula-hms-display-snowflake/SKILL.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/skills/ts-recipe-formula-hms-display-snowflake/ --overwrite
 
 # Shared reference files (only needed when these change)
 snow stage copy agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/ts-snowflake/ --overwrite

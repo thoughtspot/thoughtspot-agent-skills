@@ -94,6 +94,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-business-days-snowflake \
       ~/.snowflake/cortex/skills/ts-recipe-formula-business-days-snowflake
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-hms-display-snowflake \
+      ~/.snowflake/cortex/skills/ts-recipe-formula-hms-display-snowflake
+
 # Symlink shared reference files
 ln -s ~/thoughtspot-agent-skills/agents/shared \
       ~/.snowflake/cortex/shared
@@ -128,6 +131,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-business-days-snowflake \
       ~/.claude/skills/ts-recipe-formula-business-days-snowflake
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-hms-display-snowflake \
+      ~/.claude/skills/ts-recipe-formula-hms-display-snowflake
 
 # Claude-only: Snowflake profile management
 ln -s ~/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \

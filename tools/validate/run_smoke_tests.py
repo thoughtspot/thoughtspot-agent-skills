@@ -57,6 +57,7 @@ REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-convert-to-snowflake-sv":               ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-convert-from-snowflake-sv":             ["--sf-profile", "--sv-fqn"],
     "ts-recipe-formula-business-days-snowflake": ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
+    "ts-recipe-formula-hms-display-snowflake":   ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
 }
 
 PASS = "\033[32mPASS\033[0m"
