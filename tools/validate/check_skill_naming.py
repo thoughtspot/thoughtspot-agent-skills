@@ -50,8 +50,12 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         "variable management: ts-variable-{specifier}",
     ),
     "ts-setup-*": (
-        re.compile(r"ts-setup-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
+        re.compile(r"ts-setup-[a-z][a-z0-9]*"),
         "toolset / proc installation: ts-setup-{specifier}",
+    ),
+    "ts-recipe-*": (
+        re.compile(r"ts-recipe-(formula|answer|liveboard|model)-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
+        "analytical recipe: ts-recipe-{ts-artifact-type}-{concept}[-{platform}]",
     ),
 }
 

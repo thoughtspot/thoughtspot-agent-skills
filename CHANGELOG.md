@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-05-13
+- refactor: introduce `ts-recipe-*` naming family for analytical capability skills — rename `ts-setup-snowflake-udfs-business-days` → `ts-recipe-formula-business-days-snowflake` (v2.0.0 MAJOR); update validator, skill-naming doc, smoke tests, README, and all SETUP.md files
+- feat: split README "Setup" section into "Connection Profiles" (`ts-profile-*`) and "Recipes" (`ts-recipe-*`) for clearer category separation
+
 ## 2026-05-12
 - feat: add `ts-setup-snowflake-udfs-business-days` (v1.0.0) — deploys three Snowflake scalar UDFs for weekday-only date arithmetic (`get_business_days_clamped`, `get_business_minutes_clamped`, `get_business_duration_str`) and shows ThoughtSpot `sql_int_op` / `sql_string_op` formula syntax; available in CLI, Cortex Code CLI, Snowsight Workspaces, and Cursor
 

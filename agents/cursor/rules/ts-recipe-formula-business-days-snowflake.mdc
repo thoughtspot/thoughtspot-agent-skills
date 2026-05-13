@@ -216,5 +216,6 @@ To add a formula in ThoughtSpot via the UI:
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.0 | 2026-05-13 | Renamed from ts-setup-snowflake-udfs-business-days to ts-recipe-formula-business-days-snowflake; new ts-recipe-* family introduced |
 | 1.0.1 | 2026-05-12 | Step 5: explicit formulas[] + columns[] TML pattern; formula alone is hidden without the columns[] entry |
 | 1.0.0 | 2026-05-12 | Initial release |

@@ -30,6 +30,7 @@ extend the rule with a new one.
 | 4 | `ts-dependency-*` | `ts-dependency-{verb}` | Cross-object dependency-graph operation (audit, walk, rewrite, cleanup). | `ts-dependency-manager` |
 | 5 | `ts-variable-*` | `ts-variable-{specifier}` | Manage a specific platform variable across all its operations (search, set, remove). Second token is the variable's short name. | `ts-variable-timezone` *(planned)* |
 | 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure used by other skills. | `ts-setup-sv` |
+| 7 | `ts-recipe-*` | `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]` | Build a specific analytical capability in ThoughtSpot. Second token is the primary ThoughtSpot artifact produced (`formula`, `answer`, `liveboard`, `model`). Third+ tokens describe the concept (`business-days`, `hms-display`, `abc-analysis`). Optional platform suffix (`-snowflake`, `-databricks`) present only when the recipe deploys to an external platform; omitted for pure-ThoughtSpot recipes. | `ts-recipe-formula-business-days-snowflake` |
 
 ---
 
@@ -87,9 +88,24 @@ that hasn't been written yet.
 Specifier identifies what's being installed (`sv` = the semantic-view
 toolset, `databricks` = the Databricks toolset, etc.). This is distinct
 from `ts-profile-*` — profile is about credentials, setup is about
-deploying executable code or shared schema files.
+deploying executable code or shared schema files that **other skills use**.
+If the deployment serves end-users directly (not other skills), prefer
+`ts-recipe-*`.
 
-### 7. None of the above match
+### 7. Does the skill build a specific analytical capability — a formula, answer, or liveboard pattern?
+
+→ **`ts-recipe-*`**. Pattern: `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]`.
+
+The second token is the primary ThoughtSpot artifact the user receives
+(`formula`, `answer`, `liveboard`, `model`). The concept follows in
+kebab-case (`business-days`, `hms-display`, `abc-analysis`). The platform
+suffix (`-snowflake`, `-databricks`) is only included when the recipe
+deploys something to that external platform — omit it for pure-ThoughtSpot
+recipes. This family is distinct from `ts-setup-*` (which deploys
+infrastructure for other skills) and `ts-object-*` (which operates on an
+existing object the user already has).
+
+### 8. None of the above match
 
 → **Extend the rule**. See "Adding a new family" below. The validator
 will fail until either (a) a new family is added or (b) the skill is

@@ -56,7 +56,7 @@ REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-object-model-coach":                    ["--model-guid"],
     "ts-convert-to-snowflake-sv":               ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-convert-from-snowflake-sv":             ["--sf-profile", "--sv-fqn"],
-    "ts-setup-snowflake-udfs-business-days":    ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
+    "ts-recipe-formula-business-days-snowflake": ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
 }
 
 PASS = "\033[32mPASS\033[0m"

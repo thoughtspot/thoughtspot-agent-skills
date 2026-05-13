@@ -41,7 +41,7 @@
         "--sv-fqn",     "YOUR_DATABASE.YOUR_SCHEMA.YOUR_VIEW"
       ]
     },
-    "ts-setup-snowflake-udfs-business-days": {
+    "ts-recipe-formula-business-days-snowflake": {
       "extra_args": [
         "--sf-profile",       "YOUR_SF_PROFILE",
         "--sf-target-db",     "YOUR_DATABASE",
