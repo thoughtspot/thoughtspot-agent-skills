@@ -336,6 +336,69 @@ RULES FOR THE OUTCOMES YOU CAN PICK
 
 ---
 
+## Block 9 — `column_metadata.md` (Column Metadata + Hierarchies)
+
+```
+─── column_metadata.md ─────────────────────────────────────────────────────────
+WHAT THIS IS FOR
+  Column metadata helps agents pick the RIGHT column when a query could match
+  multiple candidates. It declares:
+    • Cardinality — how many distinct values a column has (low / medium /
+      high / unique). Agents use this to decide whether to GROUP BY or filter.
+    • Sample values — representative values for low/medium cardinality
+      columns. Agents use these to resolve filter terms ("Scranton" → Ship
+      City, not Ship Region).
+    • Usage hint — whether the column is typically a filter target, a
+      GROUP BY target, or both.
+    • Value format — the shape of values (e.g. "2-letter code" vs "full
+      name"), so agents write correct WHERE predicates.
+
+  Hierarchies declare ordered drill-down paths — which columns nest inside
+  each other for coarse → fine analysis (e.g. Country > Region > City).
+  Agents use these for "break down by X then Y" queries.
+
+WHAT WE CHECKED
+  - Queried Snowflake APPROX_COUNT_DISTINCT for every ATTRIBUTE column
+  - Classified into cardinality tiers: low (<20), medium (20–1000),
+    high (1000–100K), unique (≈ row count)
+  - PII-flagged columns matching sensitive patterns (NAME, EMAIL,
+    ADDRESS, PHONE, SSN, DOB, etc.) — excluded from sample values
+  - For low/medium non-PII columns: queried top 5 distinct values
+  - Inferred usage from mined query history (WHERE clause → filter,
+    GROUP BY → group_by) or from cardinality heuristic as fallback
+  - For hierarchies: grouped columns by shared name prefix + table,
+    ordered by cardinality, validated functional dependencies via
+    Snowflake (each child value maps to exactly one parent)
+  - Date dim hierarchies auto-detected from temporal column names
+
+RULES FOR THE OUTCOMES YOU CAN PICK
+
+  Column metadata rows:
+  | RouteAction | Use when | Effect |
+  |---|---|---|
+  | KEEP | Proposed cardinality, samples, usage, and format are right | Included in model_instructions |
+  | DROP | Don't include metadata for this column | Column omitted from column_metadata |
+  | EDIT | You changed any field (cardinality, samples, usage, format) | Your values become authoritative |
+
+  Hierarchy rows:
+  | RouteAction | Use when | Effect |
+  |---|---|---|
+  | KEEP | The drill-down path and level ordering are correct | Included in model_instructions |
+  | DROP | This isn't a real hierarchy in your business context | Hierarchy omitted |
+  | EDIT | You changed the level ordering or added/removed levels | Your levels become authoritative |
+  | NEEDS_REVIEW | Can't verify right now — come back later | Surfaced again on next run |
+
+  Notes:
+  - Columns flagged as PII will show "— (PII-flagged)" in the Samples column.
+    You can override this by changing the RouteAction to EDIT and adding
+    samples manually (if the column is NOT actually sensitive).
+  - Hierarchies with confidence "medium" (inferred from naming only, not
+    validated via functional dependency) are defaulted to NEEDS_REVIEW.
+────────────────────────────────────────────────────────────────────────────────
+```
+
+---
+
 ## Per-surface block lookup
 
 When generating a review file in Step 6, prepend the matching block:
@@ -350,5 +413,6 @@ When generating a review file in Step 6, prepend the matching block:
 | 6.7 Cross-Model Consistency *(new)* | `cross_model_consistency.md` | Block 6 |
 | 6.6 Improved Model Description | `description.md` | Block 7 |
 | 6.5 Data Model Instructions | `instructions.md` | Block 8 |
+| 6.5 Column Metadata + Hierarchies | `column_metadata.md` | Block 9 |
 
 The lookup is stable; if the SKILL.md step numbers change, only this table updates.
