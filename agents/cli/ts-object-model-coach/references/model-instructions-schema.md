@@ -63,9 +63,11 @@ aggregation_defaults
 time_defaults
 output_formatting
 schema_assumptions
+column_metadata
+hierarchies
 ```
 
-Five categories. All untriggered. Within each category, every rule has a known
+Seven categories. All untriggered. Within each category, every rule has a known
 shape with typed fields (refs, enums, predicates).
 
 ---
@@ -204,6 +206,131 @@ schema_assumptions:
     facts: [DM_INVENTORY, DM_ORDER_DETAIL]
     shared_dims: [Product, DM_DATE_DIM.Date]
     note: Inventory has no Customer/Region link; values repeat per customer for fulfillment queries
+```
+
+### 6. `column_metadata` — cardinality, sample values, and usage hints
+
+Structured per-column profiling data that helps agents disambiguate columns and
+choose the right one for filters, GROUP BY, and value matching. Only dimension
+columns (ATTRIBUTE type) are profiled — measures don't benefit from samples.
+
+```yaml
+column_metadata:
+  - column: <col_ref>              # required — dimension column ref
+    cardinality: <enum>            # required — closed: low/medium/high/unique
+    samples: [<value>, ...]        # optional — 3-5 representative values
+    usage: <enum>                  # optional — closed: filter/group_by/both
+    value_format: <text ≤ 40ch>    # optional — shape of values, not free prose
+```
+
+**Closed enum for `cardinality`:**
+
+| Value | Meaning | Distinct count |
+|---|---|---|
+| `low` | Few values — natural GROUP BY candidate | < 20 |
+| `medium` | Moderate values — GROUP BY is reasonable | 20–1000 |
+| `high` | Many values — typically a filter target | 1000–100K |
+| `unique` | Near or at row count — primary key / identifier | ≈ row count |
+
+**Closed enum for `usage`:**
+
+| Value | Meaning |
+|---|---|
+| `filter` | Column is typically used in WHERE clauses |
+| `group_by` | Column is typically used in GROUP BY |
+| `both` | Column is commonly used in both contexts |
+
+**Rules for `samples`:**
+
+- Include only when `cardinality` is `low` or `medium` (and column is not PII)
+- 3–5 representative values, chosen from the most frequent distinct values
+- Omit when: column is PII-flagged, cardinality is `high` or `unique`, or no
+  Snowflake profile was available during generation
+- Values are **case-sensitive as stored** — the agent should match accordingly
+
+**Rules for `value_format`:**
+
+- Short structured description (≤ 40 chars) of value shape, not free prose
+- Examples: `"2-letter country code"`, `"full company name"`, `"US state abbrev"`,
+  `"YYYY-MM-DD"`, `"integer product ID"`
+- Helps agents write correct filter predicates (e.g., knowing a country column
+  uses codes vs full names)
+
+**PII exclusion:** Columns whose names match sensitive patterns (`*NAME*`,
+`*EMAIL*`, `*ADDRESS*`, `*PHONE*`, `*SSN*`, `*DOB*`, `*BIRTH*`, `*PASSWORD*`,
+`*TOKEN*`, `*CREDIT_CARD*`, `*ACCOUNT_NUM*`) are auto-flagged during generation.
+Confirmed PII columns receive `cardinality` only — no `samples`.
+
+**Example:**
+
+```yaml
+column_metadata:
+  - column: Ship Country
+    cardinality: low
+    samples: [USA, Germany, Brazil, UK, France]
+    usage: filter
+    value_format: full country name
+  - column: Ship Region
+    cardinality: low
+    samples: [Western Europe, North America, South America]
+    usage: group_by
+    value_format: geographic region name
+  - column: Ship City
+    cardinality: medium
+    usage: group_by
+  - column: Customer Name
+    cardinality: high
+    usage: filter
+  - column: Order ID
+    cardinality: unique
+    usage: filter
+    value_format: integer order ID
+```
+
+### 7. `hierarchies` — drill-path declarations
+
+Declares ordered column relationships for drill-down queries. Helps agents
+understand which columns represent coarser vs finer grain within the same
+dimension, preventing incorrect GROUP BY choices (e.g., aggregating at postal
+code when the user asked "by region").
+
+```yaml
+hierarchies:
+  - name: <identifier>             # required — short label, ≤ 20 chars, no spaces
+    levels: [<col_ref>, ...]       # required — ordered coarse → fine, ≥ 2 levels
+```
+
+**Rules:**
+
+- Ordered from **coarsest to finest** grain (first level = broadest, last = most granular)
+- All refs must resolve to Model columns (validation in Step 8b)
+- Minimum 2 levels per hierarchy
+- `name` is a simple identifier (letters, digits, underscores; ≤ 20 chars) — not a display name
+- Each column may appear in at most one hierarchy (no overlapping drill paths)
+- Hierarchies are informational — they tell the agent which columns nest inside
+  each other, enabling correct drill-down, roll-up, and "by X then by Y" queries
+
+**Detection heuristics (Step 6.5):**
+
+1. **Name-prefix grouping** — columns sharing a prefix on the same table
+   (e.g., `Ship Country`, `Ship Region`, `Ship City`) are candidates
+2. **Cardinality ordering** — within a group, lower cardinality = coarser level
+3. **Functional dependency validation** — each child value must map to exactly
+   one parent value (verified via Snowflake query). If violated, it's not a
+   true hierarchy
+4. **Date dim detection** — date dimension tables with Year/Quarter/Month/Week/Date
+   columns are auto-detected as a time hierarchy
+
+**Example:**
+
+```yaml
+hierarchies:
+  - name: geography
+    levels: [Ship Country, Ship Region, Ship City]
+  - name: product
+    levels: [Product Category, Product Name]
+  - name: time
+    levels: [Year, Quarter, Month, Date]
 ```
 
 ---
@@ -376,7 +503,48 @@ model_instructions:
     - assumption: chasm_attribution
       facts: [DM_INVENTORY, DM_ORDER_DETAIL]
       shared_dims: [Product, DM_DATE_DIM.Date]
-      note: Inventory has no Customer/Region link; values repeat per customer for fulfillment queries
+      note: Inventory has no Customer/Region link; values repeat per customer
+
+  column_metadata:
+    - column: Ship Country
+      cardinality: low
+      samples: [USA, Germany, Brazil, UK, France]
+      usage: filter
+      value_format: full country name
+    - column: Ship Region
+      cardinality: low
+      samples: [Western Europe, North America, South America]
+      usage: group_by
+      value_format: geographic region name
+    - column: Ship City
+      cardinality: medium
+      usage: group_by
+    - column: Product Category
+      cardinality: low
+      samples: [Beverages, Condiments, Confections, Seafood]
+      usage: group_by
+    - column: Product Name
+      cardinality: medium
+      usage: group_by
+    - column: Customer Name
+      cardinality: high
+      usage: filter
+    - column: Employee Name
+      cardinality: low
+      samples: [Michael Scott, Dwight Schrute, Jim Halpert]
+      usage: filter
+    - column: Order ID
+      cardinality: unique
+      usage: filter
+      value_format: integer order ID
+
+  hierarchies:
+    - name: geography
+      levels: [Ship Country, Ship Region, Ship City]
+    - name: product
+      levels: [Product Category, Product Name]
+    - name: time
+      levels: [Year, Quarter, Month, Date]
 ```
 
 ---
@@ -401,24 +569,36 @@ their respective scope:
 - `time_defaults` apply when the user's question omits a time qualifier
 - `output_formatting` applies when the result column matches the `apply_to_unit`
 - `schema_assumptions` are read at orientation time, before per-column resolution
+- `column_metadata` is used for column disambiguation — prefer `low` cardinality columns for GROUP BY, `high`/`unique` for filters; use `samples` to resolve filter values to the correct column; use `value_format` to write correct WHERE predicates
+- `hierarchies` declare drill-down paths — when the user asks to "break down by X then Y", verify that X is a coarser level than Y in a declared hierarchy
 
 ### 3. Deploy-time validation
 
 Before TML import, validate:
 
-- Every `applies_to:`, `column:`, `dim:`, and refs in `columns:`/`tables:`/`facts:`/`shared_dims:` resolve to real Model columns/tables
-- Every `default_agg:`, `default_grain:`, `apply_to_unit:`, `assumption:` value is from its closed enum
+- Every `applies_to:`, `column:`, `dim:`, and refs in `columns:`/`tables:`/`facts:`/`shared_dims:`/`levels:` resolve to real Model columns/tables
+- Every `default_agg:`, `default_grain:`, `apply_to_unit:`, `assumption:`, `cardinality:`, `usage:` value is from its closed enum
 - `exclude_when:` predicates reference physical columns that exist on the same table as `applies_to`
 - `chasm_attribution` rules require **≥ 2 distinct fact tables in `facts:` and ≥ 1 shared dim in `shared_dims:`** — pairs with zero shared dims are not chasm attributions
+- `column_metadata[].column` must resolve to a Model column with `column_type: ATTRIBUTE`
+- `column_metadata[].cardinality` must be from `{low, medium, high, unique}`
+- `column_metadata[].usage` must be from `{filter, group_by, both}`
+- `column_metadata[].value_format` ≤ 40 chars
+- `column_metadata[].samples` only present when `cardinality` is `low` or `medium`
+- `hierarchies[].name` must be a simple identifier (letters, digits, underscores; ≤ 20 chars)
+- `hierarchies[].levels` must have ≥ 2 entries, all resolving to Model columns
+- Each column appears in at most one hierarchy (no overlapping drill paths)
 - `note:` and `reason:` fields are ≤ 80 chars
 - Top-level keys are from the allowed-key list
 - **Total `model_instructions` payload ≤ 3000 chars** — verified hard limit on
   the Spotter UI Settings → Coach Spotter → Instructions field. Generators must
-  budget; if the structured form exceeds 3000 chars, drop `output_formatting`
-  rules first (they're the lowest-impact category), then trim `note:` /
-  `reason:` text, then collapse multiple `aggregation_defaults` to the
+  budget; if the structured form exceeds 3000 chars, apply the trim order:
+  drop `output_formatting` first, then `column_metadata[].samples` (keep
+  `cardinality` and `usage`), then `column_metadata[].value_format`, then trim
+  `note:` / `reason:` text, then collapse multiple `aggregation_defaults` to the
   highest-frequency entities. Mandatory tier (`schema_assumptions`,
-  `exclusion_rules`, `time_defaults`) is never dropped under budget pressure.
+  `exclusion_rules`, `time_defaults`, `hierarchies`) is never dropped under
+  budget pressure.
 
 Validation failures block import; the user is shown the offending rule and the
 specific failure.
@@ -468,6 +648,8 @@ required Model-level (not per-column) reinforcement:
 | Cross-fact attribution (intentional repeat per non-shared dim) | `schema_assumptions.chasm_attribution` — declares that two facts can be queried together via shared dims, with intentional value repetition |
 | Default time interpretation drift | `time_defaults` — global default period and grain |
 | Inconsistent currency / percentage formatting | `output_formatting` — keyed by `ai_context.unit` |
+| Wrong column selected for filter / GROUP BY | `column_metadata` — cardinality + samples + usage hints disambiguate similar-named columns |
+| Incorrect drill-down ordering | `hierarchies` — declares coarse-to-fine relationships so agents don't aggregate at the wrong grain |
 
 Phrase-triggered patterns (term aliases, default measures by phrase) are
 deferred to feedback when bundling for external agents is decided. This schema

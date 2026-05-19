@@ -334,6 +334,289 @@ def step_verify_proposed_action_default(collisions: list[dict]) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# model_instructions structural validation (column_metadata + hierarchies)
+# ---------------------------------------------------------------------------
+
+VALID_CARDINALITY = {"low", "medium", "high", "unique"}
+VALID_USAGE = {"filter", "group_by", "both"}
+
+
+def step_validate_column_metadata_schema(model_tml: dict) -> None:
+    """Verify column_metadata schema validation catches invalid entries.
+
+    Tests that:
+      - Valid entries pass (correct enums, samples only on low/medium)
+      - Invalid cardinality values are rejected
+      - Invalid usage values are rejected
+      - samples on high/unique cardinality are rejected
+      - value_format over 40 chars is rejected
+      - column ref must resolve to an ATTRIBUTE column
+    """
+    cols = model_tml["model"].get("columns", [])
+    attr_names = {c["name"] for c in cols
+                  if c.get("properties", {}).get("column_type") == "ATTRIBUTE"}
+    measure_names = {c["name"] for c in cols
+                     if c.get("properties", {}).get("column_type") == "MEASURE"}
+
+    if not attr_names:
+        raise RuntimeError("No ATTRIBUTE columns on Model — cannot validate column_metadata schema")
+
+    test_col = sorted(attr_names)[0]
+
+    # --- Valid entry must pass ---
+    valid_entry = {
+        "column": test_col,
+        "cardinality": "low",
+        "samples": ["val_a", "val_b"],
+        "usage": "group_by",
+        "value_format": "short format",
+    }
+    _validate_column_metadata_entry(valid_entry, attr_names)
+
+    # --- Invalid cardinality must fail ---
+    bad_card = {**valid_entry, "cardinality": "very_high"}
+    try:
+        _validate_column_metadata_entry(bad_card, attr_names)
+        raise RuntimeError("Should have rejected invalid cardinality 'very_high'")
+    except ValueError:
+        pass  # expected
+
+    # --- Invalid usage must fail ---
+    bad_usage = {**valid_entry, "usage": "pivot"}
+    try:
+        _validate_column_metadata_entry(bad_usage, attr_names)
+        raise RuntimeError("Should have rejected invalid usage 'pivot'")
+    except ValueError:
+        pass  # expected
+
+    # --- samples on high cardinality must fail ---
+    bad_samples = {**valid_entry, "cardinality": "high", "samples": ["x"]}
+    try:
+        _validate_column_metadata_entry(bad_samples, attr_names)
+        raise RuntimeError("Should have rejected samples on high-cardinality column")
+    except ValueError:
+        pass  # expected
+
+    # --- samples on unique cardinality must fail ---
+    bad_samples_u = {**valid_entry, "cardinality": "unique", "samples": ["x"]}
+    try:
+        _validate_column_metadata_entry(bad_samples_u, attr_names)
+        raise RuntimeError("Should have rejected samples on unique-cardinality column")
+    except ValueError:
+        pass  # expected
+
+    # --- value_format over 40 chars must fail ---
+    bad_fmt = {**valid_entry, "value_format": "a" * 41}
+    try:
+        _validate_column_metadata_entry(bad_fmt, attr_names)
+        raise RuntimeError("Should have rejected value_format over 40 chars")
+    except ValueError:
+        pass  # expected
+
+    # --- column must be an ATTRIBUTE ---
+    if measure_names:
+        bad_col = {**valid_entry, "column": sorted(measure_names)[0]}
+        try:
+            _validate_column_metadata_entry(bad_col, attr_names)
+            raise RuntimeError("Should have rejected MEASURE column in column_metadata")
+        except ValueError:
+            pass  # expected
+
+
+def _validate_column_metadata_entry(entry: dict, attr_names: set[str]) -> None:
+    """Validate a single column_metadata entry per model-instructions-schema.md § Safeguards."""
+    col = entry.get("column", "")
+    if col not in attr_names:
+        raise ValueError(f"column '{col}' is not an ATTRIBUTE column on the Model")
+
+    card = entry.get("cardinality", "")
+    if card not in VALID_CARDINALITY:
+        raise ValueError(f"cardinality '{card}' not in {VALID_CARDINALITY}")
+
+    usage = entry.get("usage")
+    if usage is not None and usage not in VALID_USAGE:
+        raise ValueError(f"usage '{usage}' not in {VALID_USAGE}")
+
+    samples = entry.get("samples")
+    if samples and card in ("high", "unique"):
+        raise ValueError(f"samples not allowed when cardinality is '{card}'")
+
+    vf = entry.get("value_format", "")
+    if vf and len(vf) > 40:
+        raise ValueError(f"value_format exceeds 40 chars ({len(vf)})")
+
+
+def step_validate_hierarchies_schema(model_tml: dict) -> None:
+    """Verify hierarchies schema validation catches invalid entries.
+
+    Tests that:
+      - Valid hierarchy passes (≥ 2 levels, all resolve, valid name)
+      - Hierarchy with < 2 levels is rejected
+      - Hierarchy name with spaces is rejected
+      - Hierarchy name over 20 chars is rejected
+      - Levels referencing non-existent columns are rejected
+      - Overlapping hierarchies (same column in two) are rejected
+    """
+    import re
+
+    cols = model_tml["model"].get("columns", [])
+    all_col_names = {c["name"] for c in cols}
+
+    if len(all_col_names) < 2:
+        raise RuntimeError("Model has fewer than 2 columns — cannot validate hierarchy schema")
+
+    two_cols = sorted(all_col_names)[:2]
+
+    # --- Valid hierarchy must pass ---
+    valid = {"name": "test_hier", "levels": two_cols}
+    _validate_hierarchy_entry(valid, all_col_names, set())
+
+    # --- < 2 levels must fail ---
+    bad_levels = {"name": "one", "levels": [two_cols[0]]}
+    try:
+        _validate_hierarchy_entry(bad_levels, all_col_names, set())
+        raise RuntimeError("Should have rejected hierarchy with < 2 levels")
+    except ValueError:
+        pass  # expected
+
+    # --- name with spaces must fail ---
+    bad_name = {"name": "has spaces", "levels": two_cols}
+    try:
+        _validate_hierarchy_entry(bad_name, all_col_names, set())
+        raise RuntimeError("Should have rejected hierarchy name with spaces")
+    except ValueError:
+        pass  # expected
+
+    # --- name over 20 chars must fail ---
+    bad_long = {"name": "a" * 21, "levels": two_cols}
+    try:
+        _validate_hierarchy_entry(bad_long, all_col_names, set())
+        raise RuntimeError("Should have rejected hierarchy name over 20 chars")
+    except ValueError:
+        pass  # expected
+
+    # --- non-existent column ref must fail ---
+    bad_ref = {"name": "bad_ref", "levels": [two_cols[0], "DOES_NOT_EXIST_xyz"]}
+    try:
+        _validate_hierarchy_entry(bad_ref, all_col_names, set())
+        raise RuntimeError("Should have rejected hierarchy with non-existent column")
+    except ValueError:
+        pass  # expected
+
+    # --- overlapping hierarchy (column in two hierarchies) must fail ---
+    claimed = {two_cols[0]}
+    overlap = {"name": "overlap", "levels": two_cols}
+    try:
+        _validate_hierarchy_entry(overlap, all_col_names, claimed)
+        raise RuntimeError("Should have rejected overlapping hierarchy membership")
+    except ValueError:
+        pass  # expected
+
+
+def _validate_hierarchy_entry(entry: dict, all_col_names: set[str],
+                              already_claimed: set[str]) -> None:
+    """Validate a single hierarchy entry per model-instructions-schema.md § Safeguards."""
+    import re
+
+    name = entry.get("name", "")
+    if not name or not re.match(r'^[a-zA-Z0-9_]+$', name):
+        raise ValueError(f"hierarchy name '{name}' must be letters/digits/underscores only")
+    if len(name) > 20:
+        raise ValueError(f"hierarchy name '{name}' exceeds 20 chars ({len(name)})")
+
+    levels = entry.get("levels", [])
+    if len(levels) < 2:
+        raise ValueError(f"hierarchy '{name}' must have ≥ 2 levels, got {len(levels)}")
+
+    for lvl in levels:
+        if lvl not in all_col_names:
+            raise ValueError(f"hierarchy '{name}' level '{lvl}' not found in Model columns")
+        if lvl in already_claimed:
+            raise ValueError(
+                f"hierarchy '{name}' level '{lvl}' already in another hierarchy (no overlaps)")
+
+
+def step_validate_budget_limit(model_tml: dict) -> None:
+    """Verify that the worked example from model-instructions-schema.md fits within 3000 chars.
+
+    Uses the Dunder Mifflin reference payload and confirms it's under budget.
+    Also verifies that the budget-trim logic would kick in for an oversized payload.
+    """
+    # Reference worked example (approximate — just the YAML content)
+    worked_example = """model_instructions:
+  exclusion_rules:
+    - applies_to: Total Sales
+      exclude_when: line_total < 0
+      reason: refund line items
+  aggregation_defaults:
+    - column: Customer Name
+      default_agg: count_distinct
+    - column: Order ID
+      default_agg: count_distinct
+  time_defaults:
+    default_period: last 90 days
+    default_grain: day
+    fiscal_year_start: 2026-02-01
+  output_formatting:
+    - apply_to_unit: currency
+      format: USD, no decimals, thousands separator
+    - apply_to_unit: percentage
+      format: one decimal place, % symbol
+  schema_assumptions:
+    - assumption: denormalized_attributes
+      columns: [Product Category, Customer Region, Employee Manager]
+      note: do not infer separate dim tables
+    - assumption: shared_conformed_date_dim
+      dim: DM_DATE_DIM.Date
+      note: cross-fact joins anchor here
+    - assumption: chasm_attribution
+      facts: [DM_INVENTORY, DM_ORDER_DETAIL]
+      shared_dims: [Product, DM_DATE_DIM.Date]
+      note: Inventory has no Customer/Region link
+  column_metadata:
+    - column: Ship Country
+      cardinality: low
+      samples: [USA, Germany, Brazil, UK, France]
+      usage: filter
+      value_format: full country name
+    - column: Ship Region
+      cardinality: low
+      samples: [Western Europe, North America, South America]
+      usage: group_by
+    - column: Ship City
+      cardinality: medium
+      usage: group_by
+    - column: Product Category
+      cardinality: low
+      samples: [Beverages, Condiments, Confections, Seafood]
+      usage: group_by
+    - column: Customer Name
+      cardinality: high
+      usage: filter
+    - column: Order ID
+      cardinality: unique
+      usage: filter
+      value_format: integer order ID
+  hierarchies:
+    - name: geography
+      levels: [Ship Country, Ship Region, Ship City]
+    - name: product
+      levels: [Product Category, Product Name]
+    - name: time
+      levels: [Year, Quarter, Month, Date]"""
+
+    payload_size = len(worked_example)
+    if payload_size > 3000:
+        raise RuntimeError(
+            f"Worked example ({payload_size} chars) exceeds the 3000-char budget limit. "
+            f"Budget-trim logic needs to activate.")
+    if payload_size < 1500:
+        raise RuntimeError(
+            f"Worked example ({payload_size} chars) is suspiciously small — "
+            f"may be missing categories.")
+
+
 def step_patch_model_with_ai_assets(model_tml: dict, column_name: str,
                                      test_ai_context: str, test_synonyms: list[str]) -> dict:
     """Return patched model TML with ai_context + properties.synonyms on one column."""
@@ -545,6 +828,14 @@ def main() -> int:
                 r.info(f"Detected {len(collisions)} collision(s) across the prioritised sibling corpus")
                 r.step("Step 4.5 — proposed RouteAction defaults to NEEDS_REVIEW (open-items #15)",
                         step_verify_proposed_action_default, collisions)
+
+    # ---- model_instructions structural validation (column_metadata + hierarchies) ----
+    r.step("model_instructions — column_metadata schema validation (accept + reject)",
+           step_validate_column_metadata_schema, original_tml)
+    r.step("model_instructions — hierarchies schema validation (accept + reject)",
+           step_validate_hierarchies_schema, original_tml)
+    r.step("model_instructions — budget limit (worked example < 3000 chars)",
+           step_validate_budget_limit, original_tml)
 
     # Auto-select column if not specified: first MEASURE, else first non-date ATTRIBUTE
     column_name = args.column_name

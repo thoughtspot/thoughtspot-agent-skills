@@ -631,6 +631,8 @@ What would you like to generate or improve? (tick all that apply)
   [ ] 6. Improve Model description   — only shown when Step 4 critique is REWRITE/EXPAND
   [ ] 7. Cross-Model consistency     — review same-named-column collisions in other Models
                                         (only shown when Step 4.5 found ≥ 1 collision)
+  [ ] 8. Column metadata + hierarchies — cardinality, sample values, drill paths
+                                          (requires Snowflake profile for samples)
 
 Enter numbers (e.g. "1,3,5"), "all", or "0" to skip generation but still review #7:
 ```
@@ -894,7 +896,7 @@ behavior ("when users say X, do Y") goes to `nls_feedback` (Surfaces 3 and 4),
 not here. See
 [model-instructions-schema.md § Boundary](references/model-instructions-schema.md#boundary--what-does-not-belong-here).
 
-#### Bootstrapping the 5 categories
+#### Bootstrapping the 7 categories
 
 | Category | Bootstrap source |
 |---|---|
@@ -903,6 +905,8 @@ not here. See
 | `time_defaults` | Mined query window heuristics (the modal time range across mined queries); fiscal year metadata if present in connection settings |
 | `output_formatting` | One rule per `ai_context.unit` value present in the Model — bootstrap conservative defaults (currency: no decimals, percentage: one decimal) |
 | `schema_assumptions` | **`denormalized_attributes`**: every dimension column whose `column_id` lives on a parent table (rather than a dedicated dim table) is added — this is the meta-level reinforcement of the per-column phantom-table prevention. **`shared_conformed_date_dim`**: detect from `joins_with` graph — if multiple facts join through one date dim, it's the conformed anchor. **`surrogate_keys_only`**: tables whose PK columns have `column_id` like `*_KEY` and no business meaning. **`chasm_attribution`**: detect from `joins_with` graph — for each pair of fact tables (tables with MEASURE columns), compute shared dims (dims both join to) and unique dims; if `shared ≥ 1` AND (`A-only ≥ 1` OR `B-only ≥ 1`) emit a proposal. Default RouteAction `KEEP`; flag pairs with only one shared dim as `NEEDS_REVIEW` (single-shared-dim chasms have higher false-positive risk — analyst should confirm intent). See [model-instructions-schema.md § How `chasm_attribution` enables (and clarifies) cross-fact queries](references/model-instructions-schema.md#how-chasm_attribution-enables-and-clarifies-cross-fact-queries). |
+| `column_metadata` | Requires Snowflake profile. For each ATTRIBUTE column: query `APPROX_COUNT_DISTINCT` → classify cardinality tier; PII-gate flagged columns; for `low`/`medium` non-PII columns query `SELECT DISTINCT ... LIMIT 5` for samples; infer `usage` from mined query history (WHERE = `filter`, GROUP BY = `group_by`) or from cardinality heuristic; infer `value_format` from sample value patterns. See § Column metadata generation below. |
+| `hierarchies` | Detect from name-prefix grouping + cardinality ordering + functional dependency validation via Snowflake. See § Hierarchy detection below. |
 
 #### Output
 
@@ -923,10 +927,11 @@ for the budget-trim order when a generated payload exceeds 3000 chars.
 
 #### Worked example
 
-For Dunder Mifflin, a fully populated `model_instructions` is ~30 lines and
-covers the Model-scope failure clusters from Test 4 plus the `chasm_attribution`
+For Dunder Mifflin, a fully populated `model_instructions` is ~70 lines and
+covers the Model-scope failure clusters from Test 4, the `chasm_attribution`
 rule for the Inventory ↔ Order Detail pair (which has shared Product + Date but
-no shared Customer/Region) — see
+no shared Customer/Region), column metadata for 8 dimensions, and 3 drill-path
+hierarchies — see
 [model-instructions-schema.md § Worked example](references/model-instructions-schema.md#worked-example--full-model_instructions-for-dunder-mifflin).
 
 #### Chasm-attribution detection algorithm (sketch)
@@ -962,6 +967,178 @@ Pairs with **0 shared dims** are NOT chasm attributions (they have no bridging
 dim) — never emit a proposal. Pairs with **1 shared dim** are flagged
 `NEEDS_REVIEW` because single-shared-dim attributions have higher false-positive
 risk (the analyst should confirm the cross-fact attribution is intended).
+
+#### Column metadata generation (requires Snowflake profile)
+
+Generates the `column_metadata` category. Skipped entirely if no Snowflake
+profile is available (can't query the data for cardinality or samples).
+
+```python
+import re, subprocess, json
+
+# PII detection patterns
+PII_PATTERNS = re.compile(
+    r'\b(name|email|address|phone|ssn|social_sec|dob|birth|password|token|'
+    r'credit_card|account_num)\b', re.I)
+
+# Step 1: Identify ATTRIBUTE columns and flag PII candidates
+attr_columns = [c for c in columns if c.get("properties", {}).get("column_type") == "ATTRIBUTE"]
+pii_flagged = [c for c in attr_columns if PII_PATTERNS.search(c["name"])]
+non_pii_attrs = [c for c in attr_columns if c not in pii_flagged]
+```
+
+Present the PII-flagged list for user confirmation:
+
+```
+The following columns were flagged as potentially containing PII:
+  {list of pii_flagged column names}
+
+Confirm exclusion from sample values? (Y to confirm / N to include all):
+```
+
+If confirmed, those columns get `cardinality` only — no `samples`.
+
+```python
+# Step 2: Query Snowflake for cardinality (all ATTRIBUTE columns)
+# Build a single query with APPROX_COUNT_DISTINCT per column
+# (resolve physical table + column from column_id + table fqn)
+
+cardinality_sql = f"""
+SELECT
+  {", ".join([
+    f"APPROX_COUNT_DISTINCT({resolve_physical_col(c)}) AS {sanitize(c['name'])}"
+    for c in attr_columns
+  ])}
+FROM {physical_table_fqn}
+"""
+
+# Step 3: Classify cardinality tiers
+row_count = ...  # from Step 2 schema extraction
+for c in attr_columns:
+    distinct = cardinality_results[c["name"]]
+    if distinct < 20:
+        c["_cardinality"] = "low"
+    elif distinct < 1000:
+        c["_cardinality"] = "medium"
+    elif distinct > row_count * 0.9:
+        c["_cardinality"] = "unique"
+    else:
+        c["_cardinality"] = "high"
+
+# Step 4: Query sample values for low/medium non-PII columns
+sample_columns = [c for c in non_pii_attrs if c["_cardinality"] in ("low", "medium")]
+for c in sample_columns:
+    sample_sql = f"""
+    SELECT DISTINCT {resolve_physical_col(c)} AS val
+    FROM {physical_table_fqn}
+    WHERE {resolve_physical_col(c)} IS NOT NULL
+    ORDER BY val
+    LIMIT 5
+    """
+    c["_samples"] = [row["val"] for row in execute(sample_sql)]
+
+# Step 5: Infer usage from mined query history (if available)
+# Falls back to cardinality heuristic if no query history
+for c in attr_columns:
+    if c["name"] in where_clause_columns:
+        c["_usage"] = "filter"
+    elif c["name"] in group_by_columns:
+        c["_usage"] = "group_by"
+    elif c["name"] in both_columns:
+        c["_usage"] = "both"
+    else:
+        # Heuristic fallback
+        if c["_cardinality"] in ("high", "unique"):
+            c["_usage"] = "filter"
+        else:
+            c["_usage"] = "group_by"
+
+# Step 6: Infer value_format from sample patterns
+VALUE_FORMAT_PATTERNS = [
+    (re.compile(r'^[A-Z]{2}$'), "2-letter code"),
+    (re.compile(r'^[A-Z]{3}$'), "3-letter code"),
+    (re.compile(r'^\d{4}-\d{2}-\d{2}$'), "YYYY-MM-DD"),
+    (re.compile(r'^\d+$'), "integer"),
+]
+for c in sample_columns:
+    if c.get("_samples"):
+        for pattern, fmt in VALUE_FORMAT_PATTERNS:
+            if all(pattern.match(str(s)) for s in c["_samples"]):
+                c["_value_format"] = fmt
+                break
+```
+
+#### Hierarchy detection
+
+Detects drill-path hierarchies from schema structure and validates via Snowflake.
+
+```python
+import re
+from collections import defaultdict
+
+# Step 1: Group dimensions by table + name prefix
+# e.g., "Ship Country", "Ship Region", "Ship City" → prefix "Ship"
+prefix_groups = defaultdict(list)
+for c in attr_columns:
+    parts = c["name"].split()
+    if len(parts) >= 2:
+        prefix = parts[0]
+        prefix_groups[(c.get("_source_table", ""), prefix)].append(c)
+
+# Step 2: Order within each group by cardinality (lowest = coarsest)
+hierarchy_candidates = []
+for (table, prefix), cols in prefix_groups.items():
+    if len(cols) < 2:
+        continue
+    ordered = sorted(cols, key=lambda c: {"low": 0, "medium": 1, "high": 2, "unique": 3}.get(c["_cardinality"], 99))
+    hierarchy_candidates.append({
+        "name": prefix.lower(),
+        "levels": [c["name"] for c in ordered],
+        "_confidence": "medium",
+    })
+
+# Step 3: Detect date dim hierarchies
+# Look for date dimension tables with known temporal columns
+date_dim_cols = [c for c in attr_columns
+                 if c.get("_source_table", "").upper() in ("DM_DATE_DIM", "DM_DATE", "DATE_DIM")]
+TEMPORAL_ORDER = {"year": 0, "quarter": 1, "month": 2, "week": 3, "day": 4, "date": 5}
+temporal_cols = [(c, TEMPORAL_ORDER[k]) for c in date_dim_cols
+                 for k in TEMPORAL_ORDER if k in c["name"].lower()]
+if len(temporal_cols) >= 2:
+    temporal_cols.sort(key=lambda x: x[1])
+    hierarchy_candidates.append({
+        "name": "time",
+        "levels": [c["name"] for c, _ in temporal_cols],
+        "_confidence": "high",
+    })
+
+# Step 4: Validate functional dependencies via Snowflake
+# For each candidate hierarchy, check that child → parent is many-to-one
+for h in hierarchy_candidates:
+    for i in range(len(h["levels"]) - 1):
+        parent_col = resolve_physical_col_by_name(h["levels"][i])
+        child_col = resolve_physical_col_by_name(h["levels"][i + 1])
+        validation_sql = f"""
+        SELECT {child_col}, COUNT(DISTINCT {parent_col}) AS parent_count
+        FROM {physical_table_fqn}
+        WHERE {child_col} IS NOT NULL AND {parent_col} IS NOT NULL
+        GROUP BY {child_col}
+        HAVING parent_count > 1
+        LIMIT 1
+        """
+        result = execute(validation_sql)
+        if result:
+            h["_confidence"] = "invalid"  # Not a true hierarchy
+            break
+
+# Remove invalid hierarchies
+hierarchy_candidates = [h for h in hierarchy_candidates if h["_confidence"] != "invalid"]
+```
+
+Hierarchy candidates with `_confidence: "medium"` (name-prefix + cardinality
+only, no date-dim detection) are flagged as `NEEDS_REVIEW` in the review file.
+High-confidence candidates (date dim, validated functional dependency) default
+to `KEEP`.
 
 ### 6.6 — Improved Model Description
 
@@ -1020,10 +1197,11 @@ Per-surface format:
 | Cross-Model Consistency | `cross_model_consistency.md` | Block 6 | Always shown when Step 4.5 found ≥ 1 collision |
 | Description | `description.md` | Block 7 | Before/after diff |
 | Data Model Instructions | `instructions.md` | Block 8 | Free-form draft + manual-paste guidance |
+| Column Metadata + Hierarchies | `column_metadata.md` | Block 9 | Table: column, cardinality, samples, usage, format, action + hierarchies section |
 
 Each row has a `RouteAction` column with surface-specific allowed values. The
 *per-surface* allowed values, defaults, and what each one does are in the
-explainer block at the top of the file (Block 1–8 in
+explainer block at the top of the file (Block 1–9 in
 [review-explainers.md](references/review-explainers.md)). The shared / common
 shape:
 
@@ -1280,6 +1458,8 @@ Ready to apply coaching to "{model_name}":
   Data Model Instructions:      {N_instr} draft rule(s), {N_instr_bytes}/3000
                                   chars — for manual paste (verified hard
                                   limit on Settings → Coach Spotter field)
+                                  Includes: {N_col_meta} column_metadata entries,
+                                  {N_hierarchies} hierarchy declarations
 
   Backup saved to:   {run_dir}/before/
   Patched files at:  {run_dir}/after/
@@ -1425,6 +1605,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.3.0 | 2026-05-19 | **`column_metadata` + `hierarchies` categories added to `model_instructions`.** Two new structured categories for agent disambiguation: `column_metadata` (cardinality tier, sample values, usage hint, value format per dimension column — requires Snowflake profile) and `hierarchies` (ordered drill-path declarations from coarse to fine grain). Allowed-key list updated (5 → 7 categories). Budget-trim order updated: `output_formatting` → `samples` → `value_format` → `note:/reason:` → `aggregation_defaults`; mandatory tier now includes `hierarchies`. Step 5 adds scope menu option 8; Step 6.5 adds generation algorithms (PII-gated cardinality queries, functional dependency validation for hierarchies, date-dim auto-detection); Step 7 adds `column_metadata.md` review file (Block 9 in review-explainers); Step 8b adds deploy-time validation for new enums/refs. Smoke test updated with structural validation steps for both categories. |
 | 2.2.0 | 2026-05-11 | Migrate all direct urllib API calls to ts CLI: Step 2b feedback fetch now uses `ts tml export --type FEEDBACK --parse` (requires ts-cli v0.5.0); Step 3a dependents now use `ts metadata dependents --raw`; Step 9c smoke-test count now uses `ts metadata dependents` (flat output). Introduce `existing_entries` variable in Step 2b for consistent use in Steps 8a, 8c, 9c (replaces `existing_feedback_entries`). |
 | 2.1.1 | 2026-04-29 | Document the **3000-char hard limit** on the Settings → Coach Spotter → Instructions field (verified during a Dunder Mifflin coaching run on se-thoughtspot). `references/model-instructions-schema.md` Safeguard #3 adds the validation rule plus the budget-trim order (drop `output_formatting` first, then trim `note:` / `reason:` text, then collapse `aggregation_defaults`; never drop the mandatory tier of `schema_assumptions` / `exclusion_rules` / `time_defaults`). Step 6.5 Validation block points at the safeguard; Step 8e gate now displays `{N_instr_bytes}/3000 chars` so the user sees their headroom before pasting. Cursor mirror v1.1.1 syncs the same. |
 | 2.1.0 | 2026-04-29 | **`ai_context` overhaul.** Structured-only — closed enums and refs; free-form prose moves to `column.description`. Allowed keys: `additivity`, `non_additive_dimension`, `time_basis`, `source` (conditional override), `grain_keys`, `unit`, `null_semantics`, `role`. Removed: `formula` axis (caused TS DSL transliteration failures in `agent-expressibility-eval` Test 4), `additive_dimensions` (redundant with `non_additive_dimension`). Added: `role` axis for dimensions (closed enum `label`/`id`/`code`/`key`) — addresses the Test 3 Q-010 id-vs-label confusion. `source` is now a conditional override — omit when `column_id: TABLE::COL` resolves cleanly via the table's `fqn`. New `references/ai-context-schema.md` is the authoritative spec; `references/ai-context-examples.md` collects 8 worked examples per failure cluster. Step 6.1 generates both `ai_context` (structured) and `column.description` (prose) in parallel and embeds a four-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers — don't infer phantom tables like `DM_CATEGORY` from column names; `ai_context` is authoritative). Step 8b adds deploy-time validation: closed-key check, enum check (incl. `role`), ref resolution, ≤ 400 chars, no prose values. Mandatory measure tier (`additivity`, `time_basis`, `grain_keys`) is never dropped under budget pressure. **`model_instructions` introduced.** Step 6.5 now generates a structured 5-category schema (`exclusion_rules`, `aggregation_defaults`, `time_defaults`, `output_formatting`, `schema_assumptions`) — same declarative-only discipline as `ai_context`, applied at Model scope. `schema_assumptions.denormalized_attributes` provides Model-level reinforcement of phantom-table prevention (lists denormalized columns once per Model rather than per-column). `schema_assumptions.chasm_attribution` declares fact-table pairs that share some dims but not all — encodes ThoughtSpot's chasm-trap attribution capability so external SQL agents handle fulfillment and marketing-attribution queries correctly (each fact aggregated at its own grain, attributed via shared dims with intentional value repetition across non-shared dims). Step 6.5 includes auto-detection from the `joins_with` graph; pairs with one shared dim are flagged `NEEDS_REVIEW`, pairs with ≥ 2 shared dims default to `KEEP`. Boundary: only untriggered global rules belong here; phrase-triggered rules (term aliases, default-by-phrase) are deferred to `nls_feedback` until a feedback-bundling decision lands. New `references/model-instructions-schema.md` is the authoritative spec. Cursor mirror bumped to v1.1.0 to match. |
