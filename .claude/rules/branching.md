@@ -51,4 +51,4 @@ git push origin --delete wip/<branch>
 | Branch | Contents | Status |
 |---|---|---|
 | `wip/model-builder` | `ts-object-model-builder` — TS-native split/merge modes | In progress |
-| `wip/databricks` | Databricks profile + conversion skills | In progress |
+| `wip/databricks` | Databricks profile + conversion skills (restarted 2026-05-20) | In progress |

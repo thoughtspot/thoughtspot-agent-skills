@@ -97,6 +97,15 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-business-days-snow
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-hms-display-snowflake \
       ~/.snowflake/cortex/skills/ts-recipe-formula-hms-display-snowflake
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-databricks \
+      ~/.snowflake/cortex/skills/ts-profile-databricks
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-databricks-mv \
+      ~/.snowflake/cortex/skills/ts-convert-to-databricks-mv
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
+      ~/.snowflake/cortex/skills/ts-convert-from-databricks-mv
+
 # Symlink shared reference files
 ln -s ~/thoughtspot-agent-skills/agents/shared \
       ~/.snowflake/cortex/shared
@@ -134,6 +143,15 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-business-days-snow
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-hms-display-snowflake \
       ~/.claude/skills/ts-recipe-formula-hms-display-snowflake
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-databricks \
+      ~/.claude/skills/ts-profile-databricks
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-databricks-mv \
+      ~/.claude/skills/ts-convert-to-databricks-mv
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-databricks-mv \
+      ~/.claude/skills/ts-convert-from-databricks-mv
 
 # Claude-only: Snowflake profile management
 ln -s ~/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \

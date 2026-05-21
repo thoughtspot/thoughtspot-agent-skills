@@ -92,15 +92,18 @@ In a single PR:
 
 ## Validator output
 
-Today's coverage (verified 2026-04-28):
+Today's coverage (verified 2026-05-22):
 
 | Skill | Claude | Cursor | CoCo | Notes |
 |---|:-:|:-:|:-:|---|
+| `ts-convert-from-databricks-mv` | ✓ | ✓ | — | CoCo: Databricks CLI not available in Snowsight runtime |
 | `ts-convert-from-snowflake-sv` | ✓ | ✓ | ✓ | Full mirror across all runtimes |
+| `ts-convert-to-databricks-mv` | ✓ | ✓ | — | CoCo: Databricks CLI not available in Snowsight runtime |
 | `ts-convert-to-snowflake-sv` | ✓ | ✓ | ✓ | |
 | `ts-dependency-manager` | ✓ | ✓ | — | CoCo: graph walk too heavy for Snowsight runtime |
 | `ts-object-answer-promote` | ✓ | ✓ | — | CoCo: complex search-query manipulation not supported |
 | `ts-object-model-coach` | ✓ | ✓ | — | CoCo: interactive coaching workflow doesn't fit stored-proc model |
+| `ts-profile-databricks` | ✓ | ✓ | — | CoCo: Snowsight runs inside Snowflake, no Databricks profile needed |
 | `ts-profile-thoughtspot` | ✓ | ✓ | ✓ | All runtimes need to credentialise to ThoughtSpot |
 | `ts-profile-snowflake` | ✓ | ✓ | — | CoCo: lives inside Snowflake, no Snowflake profile needed |
 | `ts-setup-sv` | — | — | ✓ | CoCo-only: installs stored procedures CoCo uses |

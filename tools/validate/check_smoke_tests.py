@@ -34,15 +34,18 @@ from pathlib import Path
 ALLOWLIST = {
     "ts-profile-thoughtspot",   # interactive credential setup — no API mutation flow to test
     "ts-profile-snowflake",     # interactive credential setup
+    "ts-profile-databricks",    # interactive credential setup
     "ts-object-answer-promote", # legacy gap; backfill in a follow-up PR
 }
 
 # Skills whose smoke test uses an abbreviated filename rather than the default convention.
 # Add an entry here when the smoke test name is shortened from the skill name.
 NAME_ALIASES = {
-    "ts-convert-to-snowflake-sv":   "tools/smoke-tests/smoke_ts_to_snowflake.py",
-    "ts-convert-from-snowflake-sv": "tools/smoke-tests/smoke_ts_from_snowflake.py",
-    "ts-object-model-builder":      "tools/smoke-tests/smoke_ts_model_builder.py",
+    "ts-convert-to-snowflake-sv":    "tools/smoke-tests/smoke_ts_to_snowflake.py",
+    "ts-convert-from-snowflake-sv":  "tools/smoke-tests/smoke_ts_from_snowflake.py",
+    "ts-convert-to-databricks-mv":   "tools/smoke-tests/smoke_ts_to_databricks.py",
+    "ts-convert-from-databricks-mv": "tools/smoke-tests/smoke_ts_from_databricks.py",
+    "ts-object-model-builder":       "tools/smoke-tests/smoke_ts_model_builder.py",
 }
 
 

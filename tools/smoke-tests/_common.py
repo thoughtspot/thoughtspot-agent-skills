@@ -286,3 +286,106 @@ def sf_connect_python(profile: dict) -> Any:
 
     kwargs = {k: v for k, v in kwargs.items() if v is not None}
     return snowflake.connector.connect(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Databricks connection helpers
+# ---------------------------------------------------------------------------
+
+_DBX_PROFILES_PATH = Path.home() / ".claude" / "databricks-profiles.json"
+
+
+def load_dbx_profile(profile_name: str) -> dict:
+    """Load a Databricks profile from ~/.claude/databricks-profiles.json."""
+    if not _DBX_PROFILES_PATH.exists():
+        raise RuntimeError(
+            f"No Databricks profiles file found at {_DBX_PROFILES_PATH}. "
+            "Run /ts-profile-databricks to create a profile."
+        )
+
+    profiles = json.loads(_DBX_PROFILES_PATH.read_text(encoding="utf-8"))
+    if isinstance(profiles, dict) and "profiles" in profiles:
+        profiles = profiles["profiles"]
+
+    for p in profiles:
+        if p.get("name") == profile_name:
+            return p
+
+    available = [p.get("name") for p in profiles]
+    raise RuntimeError(
+        f"Databricks profile '{profile_name}' not found. "
+        f"Available profiles: {available}"
+    )
+
+
+def get_dbx_warehouse_id(profile: dict) -> str:
+    """Extract the warehouse ID from a Databricks profile's sql_warehouse_http_path."""
+    path = profile.get("sql_warehouse_http_path", "")
+    if not path:
+        raise RuntimeError("Profile has no sql_warehouse_http_path configured")
+    return path.rstrip("/").split("/")[-1]
+
+
+def databricks_sql(dbx_profile_name: str, statement: str) -> dict:
+    """
+    Execute a SQL statement via the Databricks SQL Statement Execution API.
+    Returns the full response dict. Raises RuntimeError on CLI failure.
+    Polls for completion if the initial response is PENDING.
+    """
+    profile = load_dbx_profile(dbx_profile_name)
+    wh_id = get_dbx_warehouse_id(profile)
+    cli_profile = profile["dbx_profile"]
+
+    payload = json.dumps({
+        "warehouse_id": wh_id,
+        "statement": statement,
+        "wait_timeout": "50s",
+    })
+
+    result = subprocess.run(
+        ["databricks", "api", "post", "/api/2.0/sql/statements",
+         "--profile", cli_profile, "--json", payload],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"databricks api post failed:\n{result.stderr.strip() or result.stdout.strip()}"
+        )
+
+    data = json.loads(result.stdout)
+    status = data.get("status", {})
+
+    if status.get("state") == "FAILED":
+        err = status.get("error", {}).get("message", "unknown error")
+        raise RuntimeError(f"SQL statement failed: {err}")
+
+    if status.get("state") == "PENDING":
+        import time
+        stmt_id = data.get("statement_id")
+        for _ in range(12):
+            time.sleep(5)
+            poll = subprocess.run(
+                ["databricks", "api", "get",
+                 f"/api/2.0/sql/statements/{stmt_id}",
+                 "--profile", cli_profile],
+                capture_output=True, text=True,
+            )
+            if poll.returncode != 0:
+                raise RuntimeError(f"Poll failed:\n{poll.stderr.strip()}")
+            data = json.loads(poll.stdout)
+            state = data.get("status", {}).get("state")
+            if state == "SUCCEEDED":
+                break
+            if state == "FAILED":
+                err = data["status"].get("error", {}).get("message", "unknown")
+                raise RuntimeError(f"SQL statement failed: {err}")
+        else:
+            raise RuntimeError("SQL statement timed out after 60s")
+
+    return data
+
+
+def dbx_sql_rows(dbx_profile_name: str, statement: str) -> list[list]:
+    """Execute SQL and return just the data_array rows."""
+    data = databricks_sql(dbx_profile_name, statement)
+    return data.get("result", {}).get("data_array", [])

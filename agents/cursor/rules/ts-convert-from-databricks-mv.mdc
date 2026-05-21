@@ -1,0 +1,229 @@
+---
+description: Convert a Databricks Metric View into a ThoughtSpot Model. Invoked when the user asks to convert or import a Databricks Metric View into ThoughtSpot, or create a ThoughtSpot Model from a Metric View. Untested in Cursor — see agents/cli/ts-convert-from-databricks-mv/SKILL.md as the authoritative source.
+alwaysApply: false
+---
+
+# Databricks Metric View → ThoughtSpot Model
+
+Converts a Databricks Unity Catalog Metric View into a ThoughtSpot Model. Reads
+the Metric View YAML definition via `DESCRIBE TABLE EXTENDED`, maps dimensions and
+measures to ThoughtSpot TML, translates Databricks SQL expressions to ThoughtSpot
+formulas, and imports the result via `ts tml import`.
+
+Mode A only (single conversion). The source Metric View uses a single source table
+(v0.1). Two table scenarios:
+- **Scenario A (existing tables):** ThoughtSpot Table objects already exist. Reuse them.
+- **Scenario B (new tables):** No ThoughtSpot Table objects exist yet. Create them first.
+
+---
+
+## References
+
+Read these files before starting. Do not guess YAML parsing rules, type mappings,
+or TML structure from memory.
+
+| File | Purpose |
+|---|---|
+| `~/.cursor/shared/mappings/ts-databricks/ts-from-databricks-rules.md` | MV YAML parsing, type mapping, formula translation, column classification |
+| `~/.cursor/shared/mappings/ts-databricks/ts-databricks-formula-translation.md` | Databricks SQL → ThoughtSpot formula translation (bidirectional reference) |
+| `~/.cursor/shared/mappings/ts-databricks/ts-databricks-properties.md` | Full property coverage matrix and Unmapped Report format |
+| `~/.cursor/shared/schemas/databricks-metric-view.md` | Metric View YAML schema, DDL syntax, discovery queries |
+| `~/.cursor/shared/schemas/thoughtspot-table-tml.md` | Table TML structure, connection reference, data types, import patterns |
+| `~/.cursor/shared/schemas/thoughtspot-model-tml.md` | Model TML structure, join scenarios, formula visibility |
+| `~/.cursor/shared/schemas/thoughtspot-formula-patterns.md` | ThoughtSpot formula syntax, all function categories |
+| `~/.cursor/rules/ts-profile-databricks.mdc` | Databricks auth, profile config, CLI usage |
+| `~/.cursor/rules/ts-profile-thoughtspot.mdc` | ThoughtSpot auth methods, CLI usage |
+
+---
+
+## Prerequisites
+
+1. ThoughtSpot profile configured — run "set up my ThoughtSpot profile" if needed.
+2. Databricks profile configured — run "set up my Databricks profile" if needed.
+3. `ts` CLI installed: `pip install -e ~/Dev/thoughtspot-agent-skills/tools/ts-cli`
+4. SQL warehouse must be on **Preview channel** (Metric Views are a Preview feature).
+
+Ask one question at a time. Wait for each answer before proceeding.
+
+---
+
+## Step 1 — Authenticate
+
+**ThoughtSpot:**
+```bash
+ts auth whoami --profile {ts_profile}
+```
+
+**Databricks:**
+```bash
+source ~/.zshenv && databricks auth describe --profile {dbx_profile}
+```
+
+Load the Databricks profile to get `warehouse_id`:
+```python
+import json, os
+with open(os.path.expanduser("~/.claude/databricks-profiles.json")) as f:
+    profiles = json.load(f)
+profile = next(p for p in profiles if p["name"] == "{name}")
+warehouse_id = profile["sql_warehouse_http_path"].rstrip("/").split("/")[-1]
+```
+
+---
+
+## Step 2 — List Metric Views
+
+Ask which catalog to search (default: profile's `default_catalog`).
+
+```sql
+SELECT table_catalog, table_schema, table_name
+FROM system.information_schema.tables
+WHERE table_type = 'METRIC_VIEW'
+  AND table_catalog = '{catalog}'
+ORDER BY table_schema, table_name
+```
+
+Execute via:
+```bash
+source ~/.zshenv && databricks api post /api/2.0/sql/statements \
+  --profile {dbx_profile} \
+  --json '{"warehouse_id": "{wh_id}", "statement": "{sql}", "wait_timeout": "50s"}'
+```
+
+Show results as a numbered list. Ask the user to select one.
+
+---
+
+## Step 3 — Fetch Metric View Definition
+
+```sql
+DESCRIBE TABLE EXTENDED {catalog}.{schema}.{view_name}
+```
+
+Parse the result: find the row where `col_name = 'View Text'`. The `data_type`
+column contains the full YAML definition.
+
+Parse the YAML to extract: `version`, `source`, `dimensions`, `measures`, `filter`.
+
+---
+
+## Step 4 — Identify Source Table
+
+For v0.1: `source` field gives the fully qualified table name.
+Split into `catalog`, `schema`, `table_name`.
+
+Fetch the table's columns for reference:
+```sql
+DESCRIBE TABLE {source_fqn}
+```
+
+---
+
+## Step 5 — Map Columns
+
+**Dimensions → ATTRIBUTE columns:**
+- Direct column reference (`expr: col_name`) → ATTRIBUTE column with `column_id` = physical column
+- Computed expression (`expr: date_trunc(...)`) → formula ATTRIBUTE (translate to TS formula)
+
+**Measures → MEASURE columns or formulas:**
+- Simple aggregate (`expr: SUM(col)`) → MEASURE column, extract aggregation type
+- Complex expression → formula MEASURE (translate full expression)
+
+Use `ts-databricks-formula-translation.md` for all expression translation.
+
+---
+
+## Step 6 — Check for Existing ThoughtSpot Tables
+
+Search ThoughtSpot for tables pointing to the source:
+```bash
+ts metadata search --profile {ts_profile} --subtype TABLE --name "%{table_name}%"
+```
+
+- **Scenario A:** Table found → reuse, export its TML for column name verification
+- **Scenario B:** No table → create Table TML pointing to the Databricks source table
+
+---
+
+## Step 7 — Build TML
+
+**Table TML** (Scenario B only):
+```yaml
+table:
+  name: "{table_name}"
+  db: "{catalog}"
+  schema: "{schema}"
+  db_table: "{table_name}"
+  connection:
+    name: "{databricks_connection_name}"
+  columns:
+  - name: "{col_name}"
+    db_column_name: "{physical_col}"
+    data_type: "{TS_TYPE}"
+    column_type: "{ATTRIBUTE|MEASURE}"
+```
+
+**Model TML:**
+```yaml
+model:
+  name: "{metric_view_name}"
+  description: "Imported from Databricks Metric View {fqn}"
+  tables:
+  - name: "{table_name}"
+  model_tables:
+  - name: "{table_name}"
+    columns:
+    - name: "{dimension_or_measure_name}"
+      column_id: "{table}::{physical_col}"
+      properties:
+        column_type: "{ATTRIBUTE|MEASURE}"
+        aggregation: "{SUM|COUNT|...}"
+    formulas:
+    - name: "{formula_name}"
+      expr: "{translated_expression}"
+      id: "{formula_id}"
+```
+
+Include `db_column_name` on every Table TML column.
+
+---
+
+## Step 8 — Review Checkpoint
+
+Display:
+1. Summary: source MV, target model name, column counts
+2. Full Table TML (if creating)
+3. Full Model TML
+4. Unmapped Properties Report (formulas that couldn't translate, synonyms, etc.)
+
+Options:
+- **EXECUTE** — import via `ts tml import`
+- **FILE** — write TML files for manual import
+- **EDIT** — make changes before proceeding
+
+---
+
+## Step 9 — Import
+
+```bash
+ts tml import --profile {ts_profile} < table.tml.yaml
+ts tml import --profile {ts_profile} < model.tml.yaml
+```
+
+---
+
+## Step 10 — Verify and Report
+
+Search for the imported model:
+```bash
+ts metadata search --profile {ts_profile} --subtype WORKSHEET --name "%{model_name}%"
+```
+
+Generate 3-5 natural language test questions based on the dimensions and measures.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-05-22 | Initial release — single conversion mode (Mode A) |

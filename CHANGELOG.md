@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-05-22
+- feat: add `ts-convert-to-databricks-mv` and `ts-convert-from-databricks-mv` skills — convert between ThoughtSpot Models and Databricks Metric Views (v0.1 single-source and v1.1 multi-source); available in CLI, Cortex Code CLI, and Cursor
+- feat: add `ts-profile-databricks` skill — manage Databricks connection profiles with Service Principal (OAuth M2M), PAT, or existing CLI profile auth; available in CLI, Cortex Code CLI, and Cursor
+- docs: add Databricks Metric View shared reference library — MV YAML schema (`databricks-metric-view.md`), bidirectional mapping rules, formula translation reference, and property coverage matrix in `agents/shared/mappings/ts-databricks/`
+
 ## 2026-05-13
 - feat: add `ts-recipe-formula-hms-display-snowflake` (v1.0.0) — deploys four Snowflake scalar UDFs (`format_seconds_to_hms`, `format_seconds_to_dhms`, `format_minutes_to_hm`, `format_minutes_to_dhm`) for formatting integer durations as `HH:MM:SS` / `DD:HH:MM:SS` / `HH:MM` / `DD:HH:MM` strings; shows ThoughtSpot `sql_string_op` formula syntax and TML pattern; available in CLI, Cortex Code CLI, Snowsight Workspaces, and Cursor
 - refactor: introduce `ts-recipe-*` naming family for analytical capability skills — rename `ts-setup-snowflake-udfs-business-days` → `ts-recipe-formula-business-days-snowflake` (v2.0.0 MAJOR); update validator, skill-naming doc, smoke tests, README, and all SETUP.md files

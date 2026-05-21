@@ -57,12 +57,9 @@ build/
 tools/smoke-tests/smoke-config.local.json
 
 # Skills pending testing — not yet published to remote
-agents/claude/ts-profile-databricks/
 agents/claude/ts-convert-to-databricks-mv/
 agents/claude/ts-object-model-builder/
 tools/smoke-tests/smoke_ts_model_builder.py
 
 # Databricks shared content — not yet published to remote
-agents/shared/mappings/ts-databricks/
-agents/shared/schemas/databricks-schema.md
 agents/shared/worked-examples/unity-catalog/

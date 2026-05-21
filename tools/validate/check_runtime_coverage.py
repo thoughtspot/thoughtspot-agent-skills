@@ -46,6 +46,12 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
     ("ts-profile-snowflake", "coco-snowsight"):
         "CoCo Snowsight runs inside Snowflake — no Snowflake profile needed",
+    ("ts-profile-databricks", "coco-snowsight"):
+        "CoCo Snowsight runs inside Snowflake — no Databricks profile needed",
+    ("ts-convert-from-databricks-mv", "coco-snowsight"):
+        "Databricks MV skills use Databricks CLI — not available in Snowsight runtime",
+    ("ts-convert-to-databricks-mv", "coco-snowsight"):
+        "Databricks MV skills use Databricks CLI — not available in Snowsight runtime",
 
     # --- CLI divergences (skill exists in claude, not in cli) ---
     ("ts-profile-snowflake", "cli"):

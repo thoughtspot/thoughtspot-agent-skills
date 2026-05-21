@@ -20,6 +20,12 @@ mappings/ts-snowflake/
   ts-snowflake-formula-translation.md — authoritative formula mapping (41 KB)
   ts-snowflake-properties.md          — column/join property mapping rules
 
+mappings/ts-databricks/
+  ts-from-databricks-rules.md         — rules for MV → TS direction
+  ts-to-databricks-rules.md           — rules for TS → MV direction
+  ts-databricks-formula-translation.md — ThoughtSpot ↔ Databricks SQL formula mapping
+  ts-databricks-properties.md         — column/property coverage matrix for MV ↔ TS
+
 schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference
@@ -33,6 +39,7 @@ schemas/
   thoughtspot-formula-patterns.md     — ThoughtSpot formula syntax reference
   thoughtspot-connection.md           — connection object structure
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
+  databricks-metric-view.md           — Databricks Metric View YAML schema (v0.1/v1.1)
 
 worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)
