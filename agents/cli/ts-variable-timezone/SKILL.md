@@ -16,7 +16,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 | File | Purpose |
 |---|---|
-| [~/.claude/skills/ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
+| [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
 
 ---
 
@@ -53,7 +53,7 @@ source ~/.zshenv && ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, refer to
-[ts-profile-thoughtspot/SKILL.md](~/.claude/skills/ts-profile-thoughtspot/SKILL.md) for
+[ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) for
 the token refresh procedure.
 
 Save `{base_url}` (strip trailing slash) and `{profile_name}` for display in confirmation

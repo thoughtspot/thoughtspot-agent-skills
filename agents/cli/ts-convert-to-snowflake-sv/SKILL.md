@@ -25,7 +25,7 @@ Semantic View DDL format, and creates it via `CREATE OR REPLACE SEMANTIC VIEW`.
 | [../../shared/worked-examples/snowflake/ts-to-snowflake.md](../../shared/worked-examples/snowflake/ts-to-snowflake.md) | End-to-end mapping example: Worksheet TML → Semantic View DDL |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | Cortex Code connection (configured via `cortex connections set`) | Snowflake connection code, SQL execution patterns, SHOW commands for case-sensitivity |
-| [../references/direct-api-auth.md](../references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
+| [../../claude/references/direct-api-auth.md](../../claude/references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 
 ---
 
