@@ -69,6 +69,10 @@ snow stage copy agents/shared/schemas/databricks-metric-view.md @SKILLS.PUBLIC.S
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
+snow stage copy agents/shared/schemas/thoughtspot-sql-view-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/worked-examples/databricks/ts-to-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
+snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
+snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 ```
 
 Or use the sync script (only uploads changed files):

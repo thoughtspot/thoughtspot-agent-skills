@@ -53,8 +53,8 @@ Formula contains...
 ├── rank( or rank_percentile(   → Window: Rank Functions
 ├── group_* or group_aggregate  → Level of Detail (LOD) Functions
 ├── last_value( or first_value( → Semi-Additive Functions
-├── last_value_in_period(       → Semi-Additive (untranslatable)
-├── first_value_in_period(      → Semi-Additive (untranslatable)
+├── last_value_in_period(       → Semi-Additive (same as last_value)
+├── first_value_in_period(      → Semi-Additive (same as first_value)
 ├── [TABLE::COL] references     → Resolve via Column Reference Syntax
 ├── [other_formula_name]        → Resolve via Nested Column References
 └── standard function(args)     → Scalar Functions
@@ -860,8 +860,8 @@ Identify the date column from the `dimension` field in `non_additive_dimensions`
 | `agg(last_value(...))` e.g. `max(last_value(...))` | Cannot nest/re-aggregate a `NON ADDITIVE BY` metric |
 | `agg(first_value(...))` e.g. `max(first_value(...))` | Cannot nest/re-aggregate a `NON ADDITIVE BY` metric |
 | `last_value(...)` with non-`query_groups()` grouping | Same grouping limitations as `group_aggregate` |
-| `last_value_in_period(...)` | Period-scoped: returns the last snapshot value only if the partition's last date matches the overall period's last date; returns NULL otherwise. This date-completeness check has no semantic view equivalent. |
-| `first_value_in_period(...)` | Period-scoped: same completeness check but for the first date in the period. No semantic view equivalent. |
+| `last_value_in_period(...)` | Treat same as `last_value(...)` — map to `non_additive_dimensions` with `sort_direction: ascending` |
+| `first_value_in_period(...)` | Treat same as `first_value(...)` — map to `non_additive_dimensions` with `sort_direction: descending` |
 
 Log entry for untranslatable patterns:
 ```

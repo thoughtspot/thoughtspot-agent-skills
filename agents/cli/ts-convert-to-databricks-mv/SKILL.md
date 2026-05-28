@@ -25,56 +25,120 @@ Metric View YAML format, and creates it via `CREATE OR REPLACE VIEW ... WITH MET
 | [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | Common ThoughtSpot formula patterns and their classification |
 | [../ts-profile-databricks/SKILL.md](../ts-profile-databricks/SKILL.md) | Databricks auth methods, profile config, CLI usage |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [../../shared/worked-examples/databricks/ts-to-databricks.md](../../shared/worked-examples/databricks/ts-to-databricks.md) | End-to-end Dunder Mifflin conversion: multi-fact split, flattened views, LOD, semi-additive, cross-measure ratios |
 
 ---
 
 ## Concept Mapping
 
-| ThoughtSpot | Databricks Metric View |
+| ThoughtSpot | Databricks Metric View (v1.1) |
 |---|---|
 | Worksheet / Model | Metric View (VIEW ... WITH METRICS) |
-| `ATTRIBUTE` column (non-date) | `dimensions[]` — `name: display_name`, `expr: column_name` |
+| Model `description` | Top-level `comment:` |
+| `ATTRIBUTE` column (non-date) | `dimensions[]` — `name:`, `expr:`, `display_name:`, `comment:`, `synonyms:` |
 | `ATTRIBUTE` column (date/timestamp) | `dimensions[]` — same as non-date (no separate time_dimensions in MV) |
-| `MEASURE` column with `aggregation` | `measures[]` — `name: display_name`, `expr: AGG(column_name)` |
+| `MEASURE` column with `aggregation` | `measures[]` — `expr: AGG(column_name)`, with `display_name:`, `comment:`, `synonyms:` |
 | `MEASURE` COUNT_DISTINCT column | `measures[]` — `expr: COUNT(DISTINCT column_name)` |
 | Formula column — translatable MEASURE | `measures[]` — expression translated to Databricks SQL aggregation |
 | Formula column — translatable ATTRIBUTE | `dimensions[]` — expression translated to Databricks SQL |
+| Formula column — LOD (`group_aggregate`) | `dimensions[]` — `expr: AGG() OVER (PARTITION BY ...)` |
+| Semi-additive (`last_value(sum(m), query_groups(), {d})`) | `measures[]` with `window: [{order: raw_date_dim, semiadditive: last, range: current}]` — snapshot metrics |
+| Period filter — current month (`sum_if(diff_months(...)=0,[m])`) | `measures[]` with `window: [{order: month_dim, semiadditive: last, range: current}]` — flow metrics |
+| Period filter — prior month (`sum_if(diff_months(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 month}]` |
+| Period filter — same month last year (`sum_if(diff_months(...)=-12,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 year}]` |
+| Period filter — current quarter (`sum_if(diff_quarters(...)=0,[m])`) | `measures[]` with `window: [{order: quarter_dim, semiadditive: last, range: current}]` |
+| Period filter — prior quarter (`sum_if(diff_quarters(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -3 month}]` |
+| Period filter — current year (`sum_if(diff_years(...)=0,[m])`) | `measures[]` with `window: [{order: year_dim, semiadditive: last, range: current}]` |
+| Period filter — prior year (`sum_if(diff_years(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 year}]` |
+| Rolling window (`moving_sum(m, 7, 0, d)`) | `measures[]` with `window: [{order: date_dim, range: trailing 7 day, semiadditive: last}]` |
+| Cumulative (`cumulative_sum(m, d)`) | `measures[]` with `window: [{..., range: cumulative}]` |
+| Conditional aggregate (`sum_if(cond, x)`) | `measures[]` — `expr: SUM(x) FILTER (WHERE cond)` |
+| Conditional aggregate (`unique_count_if(cond, x)`) | `measures[]` — `expr: COUNT(DISTINCT x) FILTER (WHERE cond)` |
+| Conditional aggregate (all `*_if` variants) | `measures[]` — `expr: AGG(x) FILTER (WHERE cond)` |
+| `safe_divide(a, b)` | `COALESCE(a / NULLIF(b, 0), 0)` |
+| Cross-formula ref to measure | `MEASURE(measure_name)` in measure `expr` |
+| Cross-formula ref to LOD dimension | `ANY_VALUE(dimension_name)` in measure `expr` |
 | Formula column — untranslatable | **Omitted** — logged in Unmapped Report |
-| `synonyms[]` | **NOT MAPPED** — MV has no synonyms support; logged in Unmapped Report |
-| Column / formula `description` | **NOT MAPPED** in v0.1 — logged in Unmapped Report |
-| `ai_context` / model `description` | **NOT MAPPED** in v0.1 — logged in Unmapped Report |
-| `joins[]` / `referencing_join` | NOT MAPPED — single-source MV only in v0.1; multi-table uses v1.1 `filter` |
+| Column `name` (display name) | `display_name:` |
+| Column `description` | `comment:` |
+| `properties.synonyms[]` | `synonyms:` list (read from `properties.synonyms`, NOT column root) |
+| `ai_context` | **NOT MAPPED** — no equivalent; include in view-level `comment` if relevant |
+| `joins[]` / `referencing_join` | **Primary:** nested `joins:` in v1.1 star schema. **Fallback:** flattened SQL VIEWs (user-confirmed) |
+| `properties.currency_type` | `format: { type: currency, currency_code: ... }` |
 
 ## DDL Format Reference
 
 The output is a `CREATE OR REPLACE VIEW ... WITH METRICS` statement wrapping a YAML
-body. Full structure:
+body. **Always use v1.1** for rich column metadata. Full structure:
+
+**Single-source (no joins):**
 
 ```sql
 CREATE OR REPLACE VIEW {catalog}.{schema}.{view_name}
 WITH METRICS LANGUAGE YAML AS $$
-version: 0.1
+version: 1.1
+comment: >-
+  Description of what this Metric View covers.
 source: {catalog}.{schema}.{source_table}
 dimensions:
-  - name: {display_name}
+  - name: {identifier}
     expr: {column_or_expression}
-  - name: {display_name}
-    expr: {column_or_expression}
+    display_name: '{Human Label}'
+    comment: '{Column description.}'
+    synonyms: ['{alias1}', '{alias2}']
 measures:
-  - name: {display_name}
+  - name: {identifier}
     expr: {AGG(column_or_expression)}
-  - name: {display_name}
-    expr: {AGG(column_or_expression)}
+    display_name: '{Human Label}'
+    comment: '{Measure description.}'
+    synonyms: ['{alias1}']
+$$
+```
+
+**Multi-table with joins (primary approach for star schemas):**
+
+```sql
+CREATE OR REPLACE VIEW {catalog}.{schema}.{view_name}
+WITH METRICS LANGUAGE YAML AS $$
+version: 1.1
+comment: >-
+  Description.
+source: {catalog}.{schema}.{fact_table}
+joins:
+  - name: {dim_alias}
+    source: {catalog}.{schema}.{dim_table}
+    "on": source.{fk} = {dim_alias}.{pk}
+    rely: { at_most_one_match: true }
+    joins:
+      - name: {sub_dim_alias}
+        source: {catalog}.{schema}.{sub_dim_table}
+        "on": {dim_alias}.{fk2} = {sub_dim_alias}.{pk2}
+        rely: { at_most_one_match: true }
+dimensions:
+  - name: {identifier}
+    expr: {dim_alias}.{column}
+    display_name: '{Human Label}'
+measures:
+  - name: {identifier}
+    expr: SUM(source.{column})
+    display_name: '{Human Label}'
+    format: { type: currency, currency_code: USD, decimal_places: { type: exact, places: 2 } }
 $$
 ```
 
 **DDL rules:**
+- **Always use `LANGUAGE YAML`** in the DDL — `WITH METRICS AS $$` without it fails with `MISSING_CLAUSES_FOR_OPERATION`.
+- **Always use v1.1** — even for single-source MVs. v1.1 supports `source:` (same as v0.1) but adds `display_name`, `comment`, `synonyms`.
 - All non-metric columns (including dates) go in `dimensions[]`. There is no separate `time_dimensions` in the Metric View schema.
 - Aggregation is embedded in each measure's `expr` — e.g. `expr: SUM(revenue)`, `expr: COUNT(DISTINCT customer_id)`.
-- Column references in `expr` use physical column names directly (no table alias prefix in v0.1 single-source mode).
-- For multi-table models (v1.1), `source` references the primary fact table; dimension tables are referenced via `filter` expressions or SQL JOINs in the underlying view.
+- LOD calculations go in `dimensions[]` with `AGG() OVER (PARTITION BY ...)` — NOT in measures.
+- Cross-measure references use `MEASURE(name)` and `ANY_VALUE(dim_name)`.
+- Semi-additive measures use `window: [{order: dim, range: current, semiadditive: last}]` — `semiadditive` is REQUIRED.
+- **Single-source:** column references in `expr` use physical column names directly (no prefix).
+- **Multi-table (primary):** use nested `joins:` with `rely: { at_most_one_match: true }`. Column refs use dot-path: `orders.customers.COMPANY_NAME`.
+- **Multi-table (fallback):** flattened SQL VIEWs as sources — only when joins are too complex. User must confirm this approach.
+- **Multi-fact models** must be split into independent MVs (one per fact table).
 - The YAML body is delimited by `$$` — do not use `$$` inside any expression or string value.
-- `version: 0.1` for single-table source; `version: 1.1` when multi-table patterns are needed.
 
 For the full schema reference, see
 [../../shared/schemas/databricks-metric-view.md](../../shared/schemas/databricks-metric-view.md).
@@ -446,17 +510,24 @@ Use `TODO_CATALOG` / `TODO_SCHEMA` placeholders for unresolved tables and flag t
   - **S (Skip):** Omit all model columns whose `column_id` references this sql_view.
     Log each omitted column in the Unmapped Properties Report under "SQL Views skipped".
 
-**Single-source determination:**
+**Multi-table handling:**
 
-For v0.1 (single-table) Metric Views, the source must be a single table or view. If the
-model references multiple physical tables:
+If the model references multiple physical tables:
 
-1. Identify the primary fact table (the table with the most measure columns)
-2. Check if all dimension columns can be resolved from the primary table alone
-3. If yes: use v0.1 with the primary table as `source`
-4. If no: use v1.1 multi-table mode, or create a flattened view in Databricks first
+1. **Single fact + dimension joins (primary):** Use v1.1 with nested `joins:` to express the
+   star schema directly. The fact table is `source:`, dimension tables are nested `joins:`.
+   Column references use dot-path: `dim_alias.COL`, `dim_alias.sub_dim.COL`.
+2. **Multiple fact tables:** Split into independent MVs — one per fact table as `source:`,
+   each with its own dimension joins via nested `joins:`.
+3. **Flattened SQL VIEW (fallback only):** Only when the join structure cannot be expressed
+   as nested joins (e.g., many-to-many, cross-fact joins). The user must confirm this
+   approach at the Step 10 checkpoint.
 
-Present this decision to the user at the Step 10 checkpoint.
+See [../../shared/mappings/ts-databricks/ts-to-databricks-rules.md](../../shared/mappings/ts-databricks/ts-to-databricks-rules.md)
+for the multi-table mapping rules and YAML templates.
+
+See the [Dunder Mifflin worked example](../../shared/worked-examples/databricks/ts-to-databricks.md)
+for a complete multi-fact split.
 
 ---
 
@@ -465,15 +536,20 @@ Present this decision to the user at the Step 10 checkpoint.
 For each model column classified as ATTRIBUTE (including date/timestamp columns):
 
 1. Resolve `column_id` → physical column name via Table TML (see Step 4)
-2. Build the dimension entry:
+2. Build the dimension entry with v1.1 metadata:
    ```yaml
-   - name: {display_name}
+   - name: {snake_case_identifier}
      expr: {physical_column_name}
+     display_name: '{ThoughtSpot display name}'
+     comment: '{column description}'
+     synonyms: ['{synonym1}', '{synonym2}']
    ```
 3. If the column has a formula (`formula_id` is set), defer to Step 7 for translation
+4. If the formula is an LOD pattern (`group_aggregate`), defer to Step 7 — it maps
+   to a dimension with `AGG() OVER (PARTITION BY ...)`, not a measure
 
-**Name generation:** Use the model column's `name` as the dimension `name`. Clean it
-for YAML safety — replace characters that would break YAML parsing.
+**Name generation:** Use a snake_case version of the display name for the `name:` field
+(machine identifier). Use the ThoughtSpot display name as `display_name:`.
 
 **All ATTRIBUTE types go in dimensions** — there is no separate `time_dimensions`
 section in the Metric View schema. Date columns, timestamp columns, and regular
@@ -503,13 +579,18 @@ For each model column classified as MEASURE with an `aggregation` value:
    | `VARIANCE` | `VARIANCE({column})` |
    | (none — no aggregation) | Treat as ATTRIBUTE → `dimensions[]` |
 
-3. Build the measure entry:
+3. Build the measure entry with v1.1 metadata:
    ```yaml
-   - name: {display_name}
+   - name: {snake_case_identifier}
      expr: {AGG}({physical_column_name})
+     display_name: '{ThoughtSpot display name}'
+     comment: '{column description}'
+     synonyms: ['{synonym1}']
    ```
 
 4. If the column has a formula (`formula_id` is set), defer to Step 7 for translation
+5. For period-filter measures (`sum_if(diff_months/quarters/years(...))`) and
+   cumulative measures (`cumulative_sum`), add `window:` — see Step 7
 
 **Aggregation is embedded in expr:** Unlike some formats that separate the aggregation
 type from the column reference, Metric View measures embed the full aggregate call in
@@ -553,11 +634,146 @@ Instead:
   | {display_name} | OMITTED | {reason} | {original_expr} |
   ```
 
+**LOD formulas → dimension window functions:**
+
+ThoughtSpot `group_aggregate(sum(x), {dim}, query_filters())` maps to a **dimension** (not a measure):
+```yaml
+dimensions:
+  - name: category_quantity
+    expr: SUM(QUANTITY) OVER (PARTITION BY PRODUCT_CATEGORY)
+    display_name: 'Category Quantity'
+    comment: 'Total units at category grain.'
+```
+
+Do NOT use `AGGREGATE OVER` — it causes `PARSE_SYNTAX_ERROR`.
+Do NOT use `window:` for LOD — `window` requires `semiadditive`.
+
+**Window formulas — classify by `order:` dimension type:**
+
+Two ThoughtSpot patterns map to MV `window: [{range: current}]`. The `order:`
+dimension determines which:
+
+```
+Is the formula last_value() or first_value()?
+  YES → Semi-additive (snapshot metric)
+        order: raw date dimension
+  NO  → Is it sum_if(diff_months/quarters/years(...))?
+          YES → Period filter (flow/additive metric)
+                order: truncated period dimension
+```
+
+**Semi-additive (snapshot metrics) → `order:` raw date:**
+
+```yaml
+# last_value(sum([FILLED_INVENTORY]), query_groups(), {[balance_date]})
+measures:
+  - name: inventory_balance
+    expr: SUM(FILLED_INVENTORY)
+    display_name: 'Inventory Balance'
+    window:
+      - order: balance_date
+        semiadditive: last
+        range: current
+```
+
+**Period filter (flow metrics) → `order:` truncated period:**
+
+```yaml
+# sum_if(diff_months([date], today()) = 0, [m]) → current month
+measures:
+  - name: monthly_revenue
+    expr: SUM(LINE_TOTAL)
+    display_name: 'Monthly Revenue'
+    window:
+      - order: order_month
+        semiadditive: last
+        range: current
+
+# sum_if(diff_months([date], today()) = -1, [m]) → previous month
+  - name: prior_month_revenue
+    expr: SUM(LINE_TOTAL)
+    display_name: 'Prior Month Revenue'
+    window:
+      - order: order_month
+        semiadditive: last
+        range: current
+        offset: -1 month
+
+# sum_if(diff_months([date], today()) = -12, [m]) → same month last year
+  - name: prior_year_revenue
+    expr: SUM(LINE_TOTAL)
+    display_name: 'Prior Year Revenue'
+    window:
+      - order: order_month
+        semiadditive: last
+        range: current
+        offset: -1 year
+```
+
+Quarter grain uses `diff_quarters` → `offset: -3 month`; year grain uses
+`diff_years` → `offset: -1 year` / `-2 year`.
+
+**Growth % formulas** inline `sum_if` for both periods directly, so no cross-formula
+references are needed in the MV — express as a ratio of two `MEASURE()` references.
+
+**Cumulative formulas → window with range cumulative:**
+
+ThoughtSpot `cumulative_sum(m, d)` maps to:
+```yaml
+measures:
+  - name: cumulative_revenue
+    expr: SUM(LINE_TOTAL)
+    display_name: 'Cumulative Revenue'
+    window:
+      - order: order_date
+        semiadditive: last
+        range: cumulative
+```
+
+**Cross-measure references:**
+
+When a formula references other measures or LOD dimensions:
+- Reference another measure: `MEASURE(measure_name)`
+- Reference an LOD dimension from a measure: `ANY_VALUE(dimension_name)`
+
+```yaml
+measures:
+  - name: category_contribution_ratio
+    expr: MEASURE(quantity) / ANY_VALUE(category_quantity)
+    display_name: 'Product to Category Contribution Ratio'
+```
+
+**safe_divide → COALESCE/NULLIF:**
+```yaml
+measures:
+  - name: answer_formula
+    expr: COALESCE(SUM(LINE_TOTAL) / NULLIF(SUM(QUANTITY), 0), 0)
+```
+
+**Boolean filter formulas → MV `filter:` field:**
+
+Detect formula columns that are boolean ATTRIBUTE filters (e.g., named "MV Filter",
+"Is Active", or containing only boolean comparison logic). If found:
+
+1. Check if the expression is translatable to SQL (see filter translation table below)
+2. If translatable → add as `filter:` field in the MV YAML, remove from dimensions list
+3. If untranslatable (parameters, LOD-based) → log in Unmapped Report
+
+| ThoughtSpot formula | MV `filter:` |
+|---|---|
+| `[TABLE::col] = 'val'` | `col = 'val'` |
+| `[TABLE::col] = false` | `NOT col` |
+| `[TABLE::col] = 'a' or [TABLE::col] = 'b'` | `col IN ('a', 'b')` |
+| `[TABLE::col] >= N and [TABLE::col] <= M` | `col BETWEEN N AND M` |
+
+Not every boolean ATTRIBUTE is a filter — only convert when the formula's purpose
+is clearly row-level filtering (named "Filter", "MV Filter", or confirmed by user).
+If uncertain, present the formula at the Step 10 checkpoint and ask.
+
 Confirmed untranslatable patterns (after checking the reference):
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
-- `ts_first_day_of_week(...)`, `last_n_days(...)`, `last_value_in_period(...)`, `first_value_in_period(...)` — period-scoped time intelligence with no Databricks equivalent
-- `group_aggregate(...)` with any filter argument other than `query_filters()` — hardcoded/selective filters unsupported
-- `group_aggregate(...)` with `query_groups() + {attr}` or `query_groups(attr1, attr2)` grouping
+- `ts_first_day_of_week(...)`, `last_n_days(...)` — period-scoped time intelligence with no Databricks equivalent
+- `group_aggregate(...)` with `query_groups()` modifier — hardcoded/selective filters unsupported
 - Hyperlink markup: `concat("{caption}", ..., "{/caption}", ...)` — ThoughtSpot display hint
 - Any reference to a formula that is itself confirmed untranslatable (transitive)
 
@@ -566,35 +782,32 @@ Confirmed untranslatable patterns (after checking the reference):
 ### Step 8: Generate Metric View YAML
 
 Assemble the YAML body from the dimensions and measures collected in Steps 5–7.
+**Always use v1.1** for rich column metadata.
 
-**Single-table (v0.1):**
-```yaml
-version: 0.1
-source: "catalog.schema.source_table"
-dimensions:
-  - name: "display_name"
-    expr: "column_or_expression"
-measures:
-  - name: "display_name"
-    expr: "AGG(column_or_expression)"
-```
-
-**Multi-table (v1.1):**
-When the model includes joins and columns from multiple tables, and v0.1 cannot
-represent the full model:
 ```yaml
 version: 1.1
-source: "catalog.schema.primary_fact_table"
+comment: >-
+  Description of the Metric View.
+source: catalog.schema.source_table_or_view
+
 dimensions:
-  - name: "display_name"
-    expr: "column_or_expression"
+  - name: identifier
+    expr: PHYSICAL_COLUMN
+    display_name: 'Human Label'
+    comment: 'Description.'
+    synonyms: ['alias1', 'alias2']
+
 measures:
-  - name: "display_name"
-    expr: "AGG(column_or_expression)"
+  - name: identifier
+    expr: AGG(PHYSICAL_COLUMN)
+    display_name: 'Human Label'
+    comment: 'Description.'
+    synonyms: ['alias1']
 ```
 
 **YAML formatting rules:**
 - Indent with 2 spaces (YAML standard)
+- Quote `display_name`, `comment`, and `synonyms` values in single quotes
 - Quote `name` values that contain special YAML characters (`:`, `#`, `{`, `}`, `[`, `]`)
 - Do not include trailing whitespace
 - Ensure the YAML is valid — test-parse it before embedding in the DDL
@@ -664,8 +877,7 @@ code block.
 **3. Unmapped Properties Report** — use the format defined in
 [../../shared/mappings/ts-databricks/ts-databricks-properties.md](../../shared/mappings/ts-databricks/ts-databricks-properties.md).
 Include only sections that have entries. Common sections:
-- Synonyms not migrated (MV has no synonyms support)
-- Descriptions not migrated (MV v0.1 has no description/comment support)
+- AI Context not migrated (no MV equivalent)
 - Parameters not migrated
 - Column groups not migrated
 - AI Context not migrated
@@ -696,12 +908,16 @@ If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-ddl-fi
 Run all checks before execution. Report all failures together before retrying.
 Key checks:
 
-- [ ] `version` is `0.1` or `1.1`
+- [ ] `version` is `1.1` (always — v0.1 lacks rich metadata)
 - [ ] `source` is a fully-qualified Unity Catalog reference (`catalog.schema.table`)
+- [ ] DDL uses `WITH METRICS LANGUAGE YAML AS $$` (not `WITH METRICS AS $$`)
 - [ ] Every `dimensions[]` entry has both `name` and `expr`
 - [ ] Every `measures[]` entry has both `name` and `expr`
 - [ ] Dimension and measure `name` values are unique across the entire view
-- [ ] Measure `expr` values contain an aggregate function (SUM, AVG, MIN, MAX, COUNT, etc.)
+- [ ] Measure `expr` values contain an aggregate function (SUM, AVG, MIN, MAX, COUNT, etc.) — except cross-measure refs using `MEASURE()`
+- [ ] LOD dimensions use `AGG() OVER (PARTITION BY ...)` — NOT `AGGREGATE OVER`
+- [ ] Semi-additive measures with `window:` include `semiadditive:` property
+- [ ] Cross-measure refs use `MEASURE(name)` and `ANY_VALUE(dim)` — not direct column names
 - [ ] No untranslatable formula placeholders anywhere in the YAML (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL AS`)
 - [ ] YAML is valid — parse it to confirm no syntax errors
 - [ ] `$$` delimiter does not appear inside any `expr` value

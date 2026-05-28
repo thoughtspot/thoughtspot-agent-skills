@@ -156,8 +156,11 @@ Run the self-validation checklist from `thoughtspot-model-tml.md` before importi
 ## Step 6 — Import
 
 ```bash
-ts tml import --profile {ts_profile} --policy ALL_OR_NONE
+ts tml import --profile {ts_profile} --policy PARTIAL
 ```
+
+Use `PARTIAL` for multi-model batches — `ALL_OR_NONE` silently rolls back successful
+models when any model in the batch fails (returns success GUIDs but objects don't persist).
 
 On success, show the ThoughtSpot Model GUID and a summary of imported objects.
 

@@ -10,8 +10,8 @@ the Metric View YAML definition via `DESCRIBE TABLE EXTENDED`, maps dimensions a
 measures to ThoughtSpot TML, translates Databricks SQL expressions to ThoughtSpot
 formulas, and imports the result via `ts tml import`.
 
-Mode A only (single conversion). The source Metric View uses a single source table
-(v0.1). Two table scenarios:
+Mode A only (single conversion). Handles both v0.1 (single-source) and v1.1
+(multi-source with joins). Two table scenarios:
 - **Scenario A (existing tables):** ThoughtSpot Table objects already exist. Reuse them.
 - **Scenario B (new tables):** No ThoughtSpot Table objects exist yet. Create them first.
 
@@ -30,6 +30,7 @@ or TML structure from memory.
 | `~/.cursor/shared/schemas/databricks-metric-view.md` | Metric View YAML schema, DDL syntax, discovery queries |
 | `~/.cursor/shared/schemas/thoughtspot-table-tml.md` | Table TML structure, connection reference, data types, import patterns |
 | `~/.cursor/shared/schemas/thoughtspot-model-tml.md` | Model TML structure, join scenarios, formula visibility |
+| `~/.cursor/shared/schemas/thoughtspot-sql-view-tml.md` | SQL View TML — `sql_view:` type for subquery sources |
 | `~/.cursor/shared/schemas/thoughtspot-formula-patterns.md` | ThoughtSpot formula syntax, all function categories |
 | `~/.cursor/rules/ts-profile-databricks.mdc` | Databricks auth, profile config, CLI usage |
 | `~/.cursor/rules/ts-profile-thoughtspot.mdc` | ThoughtSpot auth methods, CLI usage |
@@ -106,12 +107,28 @@ Parse the YAML to extract: `version`, `source`, `dimensions`, `measures`, `filte
 
 ---
 
-## Step 4 — Identify Source Table
+## Step 4 — Identify Source Tables
 
-For v0.1: `source` field gives the fully qualified table name.
+**Subquery detection:** If `source` starts with `SELECT` or `WITH` (case-insensitive),
+it is a subquery — not a table FQN. Prompt the user:
+- **(D)** Create Databricks VIEW from the SQL, then use that view as source
+- **(T)** Create a ThoughtSpot SQL View (`sql_view:` TML) with the SQL baked in
+- **(M)** Map to an existing ThoughtSpot object (user provides the name)
+- **(S)** Skip this MV
+
+For **(T)**: build a `sql_view:` TML with `connection.name`, `sql_query` (include filter
+as WHERE clause), and `sql_view_columns`. Import, then build the Model on the SQL View.
+See `~/.cursor/shared/schemas/thoughtspot-sql-view-tml.md`.
+
+**v0.1 / v1.1 single source:** `source` field gives the fully qualified table name.
 Split into `catalog`, `schema`, `table_name`.
 
-Fetch the table's columns for reference:
+**v1.1 with joins:** Walk the `joins:` hierarchy to collect all dimension tables.
+Each join has `name` (alias), `source` (FQN), `on` (join condition), and optionally
+nested `joins:` for multi-hop relationships. Column refs use dot-path: `alias.COL`,
+`alias.sub_alias.COL`.
+
+Fetch each table's columns:
 ```sql
 DESCRIBE TABLE {source_fqn}
 ```
@@ -123,10 +140,43 @@ DESCRIBE TABLE {source_fqn}
 **Dimensions → ATTRIBUTE columns:**
 - Direct column reference (`expr: col_name`) → ATTRIBUTE column with `column_id` = physical column
 - Computed expression (`expr: date_trunc(...)`) → formula ATTRIBUTE (translate to TS formula)
+- Window function (`expr: SUM(x) OVER (PARTITION BY dim)`) → LOD formula: `group_aggregate(sum([x]), {[dim]}, query_filters())`
 
 **Measures → MEASURE columns or formulas:**
+
+**Check for `window:` FIRST.** If a measure has a `window:` section, classify by window
+type before looking at the `expr`. The expr and window translate together into one formula.
+Flag all window measures with `⚠ WINDOW` in the review checkpoint.
+
+For `moving_sum`/`moving_average`: strip the outer AGG wrapper from `expr` and translate
+the inner expression. `SUM(a * b)` + `trailing 7 day` → `moving_sum([a] * [b], 7, 0, [d])`.
+
+If no `window:`, classify by `expr`:
 - Simple aggregate (`expr: SUM(col)`) → MEASURE column, extract aggregation type
+- `COUNT(*)` → formula: `count ( 1 )`
+- `AGG(x) FILTER (WHERE cond)` → formula MEASURE: use native `*_if` function (e.g., `sum_if(cond, [x])`, `unique_count_if(cond, [x])`)
 - Complex expression → formula MEASURE (translate full expression)
+- `MEASURE(name)` → cross-measure reference `[name]` (inline full expression if import fails)
+- `ANY_VALUE(dim)` → dimension reference `[dim]` from a measure
+- Subquery in `expr` (`(SELECT ...)`) → **untranslatable**, log in Unmapped Report
+
+**Window measures — classify by `order:` dimension type:**
+- `order:` is a **raw date** (snapshot metric) → `last_value(sum([m]), query_groups(), {[d]})` (semi-additive)
+- `order:` is a **truncated period** (flow metric) → `sum_if` patterns:
+  - `window: [{range: current}]`, month dim → `sum_if(diff_months([d], today()) = 0, [m])`
+  - `window: [{range: current, offset: -1 month}]` → `sum_if(diff_months([d], today()) = -1, [m])`
+  - `window: [{range: current, offset: -1 year}]` (month grain) → `sum_if(diff_months([d], today()) = -12, [m])`
+  - `window: [{range: current, offset: -3 month}]` (quarter grain) → `sum_if(diff_quarters([d], today()) = -1, [m])`
+  - `window: [{range: current, offset: -1 year}]` (year grain) → `sum_if(diff_years([d], today()) = -1, [m])`
+- `window: [{range: trailing N day}]` → `moving_sum([m], N, 0, [d])` (rolling window)
+- `window: [{range: cumulative}]` → `cumulative_sum([m], [d])`
+- Growth % formulas: inline `sum_if` for both periods — no cross-formula refs needed
+- Strip SQL comments (`--`, `/* */`) from `expr` before translating
+
+**v1.1 metadata → TML properties:**
+- `display_name` → column `name`
+- `comment` → column `description`
+- `synonyms` → `properties.synonyms[]` + `properties.synonym_type: USER_DEFINED`
 
 Use `ts-databricks-formula-translation.md` for all expression translation.
 
@@ -172,16 +222,25 @@ model:
   model_tables:
   - name: "{table_name}"
     columns:
-    - name: "{dimension_or_measure_name}"
+    - name: "{display_name}"
+      description: "{comment}"
       column_id: "{table}::{physical_col}"
       properties:
         column_type: "{ATTRIBUTE|MEASURE}"
         aggregation: "{SUM|COUNT|...}"
+        synonyms:
+        - "{synonym1}"
+        synonym_type: USER_DEFINED
     formulas:
     - name: "{formula_name}"
       expr: "{translated_expression}"
       id: "{formula_id}"
+      properties:
+        column_type: MEASURE
 ```
+
+**Synonym placement:** synonyms MUST be inside `properties:` with `synonym_type: USER_DEFINED`.
+Top-level `synonyms:` at column root is silently dropped on import.
 
 Include `db_column_name` on every Table TML column.
 

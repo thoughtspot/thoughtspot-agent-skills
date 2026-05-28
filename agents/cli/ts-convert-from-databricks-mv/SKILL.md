@@ -29,22 +29,49 @@ Two scenarios are supported:
 | [../../shared/schemas/thoughtspot-tml.md](../../shared/schemas/thoughtspot-tml.md) | TML export parsing (PyYAML pitfalls, type detection) |
 | [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML structure, connection reference, data types, import patterns, common errors |
 | [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure, join scenarios, formula visibility, self-validation checklist |
+| [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md) | SQL View TML structure — `sql_view:` type for subquery sources |
 | [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula syntax, all function categories, LOD/window patterns, YAML encoding rules |
 | [../ts-profile-databricks/SKILL.md](../ts-profile-databricks/SKILL.md) | Databricks auth methods, profile config, CLI usage |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
+| [../../shared/worked-examples/databricks/ts-to-databricks.md](../../shared/worked-examples/databricks/ts-to-databricks.md) | End-to-end Dunder Mifflin conversion: LOD dimensions, semi-additive, cross-measure ratios, multi-fact split |
+| [../../shared/worked-examples/databricks/ts-from-databricks.md](../../shared/worked-examples/databricks/ts-from-databricks.md) | End-to-end MV → Model conversion: direct + computed dimensions, simple + ratio + window + conditional measures |
+| [../../shared/worked-examples/databricks/ts-from-databricks-sql-view.md](../../shared/worked-examples/databricks/ts-from-databricks-sql-view.md) | Subquery source path: SQL View TML + Model on top |
 
 ---
 
 ## Concept Mapping
 
-| Databricks Metric View (v0.1 YAML) | ThoughtSpot Model |
+| Databricks Metric View YAML | ThoughtSpot Model |
 |---|---|
 | `source:` (fully qualified table name) | Single Table TML — `db_table`, `db`, `schema` decomposed from the FQN |
+| Top-level `comment:` (v1.1) | Model `description` |
 | `dimensions[].expr` (direct column reference) | `columns[]` with `column_type: ATTRIBUTE` |
 | `dimensions[].expr` (computed expression) | `formulas[]` entry with translated expression + `columns[]` with `formula_id` reference |
-| `measures[].expr` (simple `AGG(col)`) | `columns[]` with `column_type: MEASURE` + extracted `aggregation` |
+| `dimensions[].expr` (window function — LOD) | LOD `formulas[]` entry: `group_aggregate(agg([col]), {[dim]}, query_filters())` — 3 args required |
+| `dimensions[].display_name` (v1.1) | Column `name` (display name) |
+| `dimensions[].comment` (v1.1) | Column `description` |
+| `dimensions[].synonyms` (v1.1) | `properties.synonyms[]` + `properties.synonym_type: USER_DEFINED` |
+| `measures[].expr` (simple `AGG(col)` — SUM, AVG, MIN, MAX, COUNT) | `columns[]` with `column_type: MEASURE` + extracted `aggregation` |
+| `measures[].expr` (`COUNT(DISTINCT col)`) | `formulas[]` entry: `unique count ( [TABLE::col] )` — NOT `aggregation: COUNT_DISTINCT` on a `column_id` (TS silently overrides to ATTRIBUTE) |
 | `measures[].expr` (complex — ratios, nested aggregates) | `formulas[]` entry with translated expression + `columns[]` with `formula_id` reference |
-| `filter:` (global WHERE clause) | Noted in model `description` — not enforced as a ThoughtSpot filter |
+| `measures[].expr` with `MEASURE()`/`ANY_VALUE()` | Cross-measure formula — **inline** the referenced expressions (cross-refs fail during TML import) |
+| `measures[].window`, `order:` raw date (semi-additive) | `last_value ( sum ( [m] ) , query_groups ( ) , { [date] } )` — snapshot metrics (inventory, balance) |
+| `measures[].window`, `order:` truncated month (period filter) | `sum_if ( diff_months ( [date] , today ( ) ) = 0 , [m] )` — flow metrics (revenue, qty) |
+| `measures[].window` + `offset: -1 month` | `sum_if ( diff_months ( [date] , today ( ) ) = -1 , [m] )` |
+| `measures[].window` + `offset: -1 year` (month grain) | `sum_if ( diff_months ( [date] , today ( ) ) = -12 , [m] )` |
+| `measures[].window`, `order:` truncated quarter | `sum_if ( diff_quarters ( [date] , today ( ) ) = 0 , [m] )` |
+| `measures[].window` + `offset: -3 month` (quarter) | `sum_if ( diff_quarters ( [date] , today ( ) ) = -1 , [m] )` |
+| `measures[].window`, `order:` truncated year | `sum_if ( diff_years ( [date] , today ( ) ) = 0 , [m] )` |
+| `measures[].window` + `offset: -1 year` (year grain) | `sum_if ( diff_years ( [date] , today ( ) ) = -1 , [m] )` |
+| `measures[].window` with `range: trailing N day` | `moving_sum([m], N, 0, [date])` — rolling window |
+| `measures[].window` with `range: cumulative` | `cumulative_sum([m], [date])` |
+| `measures[].expr` with `FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` conditional aggregate (e.g., `sum_if`, `unique_count_if`) |
+| `COUNT(*)` | Formula: `count ( 1 )` |
+| Growth % (MoM, QoQ, YoY) | Inline `sum_if` expressions for both periods — cross-formula refs not supported during TML import |
+| `joins:` (nested hierarchy) | One Table TML per source; model `joins[]` from parent→child hierarchy |
+| `filter:` (any) | Boolean formula column `[MV Filter]` — users apply `[MV Filter] = true`. Always create, never description-only. |
+| Subquery in `expr` | **Untranslatable** — log in Unmapped Report |
+| `source:` as SELECT subquery | Prompt user: (D) create Databricks VIEW, (T) create ThoughtSpot SQL View, (M) map to existing, (S) skip |
 | `version:` | Drives parsing path (v0.1 vs v1.1) — not stored in ThoughtSpot |
 
 **Key structural rules:**
@@ -54,8 +81,18 @@ Two scenarios are supported:
   Complex expressions → `formulas[]` entry.
 - In Scenario A, the Table TML already exists — reuse its GUID and column names.
 - In Scenario B, create a new Table TML from the Databricks schema introspection.
-- MV v0.1 has no synonyms, descriptions, or join definitions — these features are
-  only available in v1.1 (not yet observed in production environments).
+- v1.1 MVs provide `display_name`, `comment`, and `synonyms` — map `display_name` to
+  column `name`, `comment` to `description`, and `synonyms` to `properties.synonyms`
+  (with `properties.synonym_type: USER_DEFINED`). Synonyms at the column root level
+  are silently dropped on import. v0.1 MVs only have `name` and `expr`.
+- LOD dimensions (with `AGG() OVER (PARTITION BY ...)`) map to ThoughtSpot
+  `group_aggregate()` formulas — always 3 arguments: `group_aggregate(expr, {query}, query_filters())`.
+- Cross-measure references (`MEASURE(name)`, `ANY_VALUE(dim)`) must be **inlined** as
+  full expressions during TML import — `[name]` cross-references fail during import
+  (open-items #4). After import, users can simplify formulas in the ThoughtSpot UI.
+- **Duplicate column_id:** when the same physical column appears as both an ATTRIBUTE
+  dimension and a MEASURE (e.g., `COUNT(col)`), convert the measure to a formula to
+  avoid the "unique column_id" import error (open-items #2).
 
 ---
 
@@ -259,16 +296,85 @@ import yaml
 mv_yaml = yaml.safe_load(yaml_string)
 
 version = mv_yaml.get("version", "0.1")
-source_fqn = mv_yaml.get("source", "")          # v0.1: "catalog.schema.table"
-entities = mv_yaml.get("entities", [])            # v1.1: list of entity defs
+source_fqn = mv_yaml.get("source", "")          # fact table FQN
+joins = mv_yaml.get("joins", [])                  # v1.1: nested dimension joins
 dimensions = mv_yaml.get("dimensions", [])
 measures = mv_yaml.get("measures", [])
 mv_filter = mv_yaml.get("filter", "")
 ```
 
+**Subquery source detection (before version routing):**
+
+Check if `source` is a SELECT subquery rather than a table FQN:
+
+```python
+is_subquery = source_fqn.strip().lower().startswith(("select ", "with "))
+```
+
+If `is_subquery` is true, the MV source cannot be mapped directly to a ThoughtSpot
+Table object. Present these options to the user:
+
+| Option | Action |
+|---|---|
+| **(D)** Create Databricks VIEW | Execute `CREATE VIEW catalog.schema.view_name AS {source}` in Databricks, then use the new view as a regular table FQN. Re-enter Step 5 with the new FQN. |
+| **(T)** Create ThoughtSpot SQL View | Build a `sql_view:` TML that runs the source SQL against the Databricks connection, import it, then build a Model on top. See **Step 5T** below. |
+| **(M)** Map to existing | User provides an existing ThoughtSpot Table/View name — skip table creation, proceed to Model. |
+| **(S)** Skip | Log the MV to the Unmapped Report and continue to the next MV. |
+
+If the user selects **(T)**, proceed to **Step 5T**. Otherwise continue with the
+selected option. For **(D)**, **(M)**, and **(S)**, the rest of Step 5 proceeds as normal
+(or skips).
+
+**Step 5T — Build a ThoughtSpot SQL View from a subquery source:**
+
+See [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md)
+for the full TML reference.
+
+1. Construct the SQL query by combining `source` and `filter`:
+   ```python
+   sql_query = source_fqn  # the SELECT statement
+   if mv_filter:
+       sql_query = f"SELECT * FROM ({source_fqn}) _mv WHERE {mv_filter}"
+   ```
+
+2. Introspect the query columns. Execute the query with `LIMIT 0` via the Statement
+   Execution API to retrieve the column schema without returning data:
+   ```sql
+   SELECT * FROM ({sql_query}) _cols LIMIT 0
+   ```
+   Parse `manifest.schema.columns` from the response — each entry has `name` and
+   `type_name`.
+
+3. Build the `sql_view:` TML:
+   ```yaml
+   sql_view:
+     name: "{model_name}"
+     description: "SQL View for Databricks MV {mv_fqn}. Source: {source_fqn}"
+     connection:
+       name: "{databricks_connection_name}"
+     sql_query: "{sql_query}"
+     sql_view_columns:
+     - name: "{col_name}"
+       sql_output_column: "{col_name}"
+       properties:
+         column_type: ATTRIBUTE   # or MEASURE for numeric columns used in aggregation
+   ```
+
+4. Import via `ts tml import --profile {profile} --policy PARTIAL --create-new`.
+   Record the returned GUID.
+
+5. Continue to Step 6 (mapping) — treat the SQL View as the source table. Column
+   references in the Model TML use `[SQL_VIEW_NAME::column]` syntax. The Model's
+   `model_tables` entry references the SQL View name and GUID.
+
+See [../../shared/worked-examples/databricks/ts-from-databricks-sql-view.md](../../shared/worked-examples/databricks/ts-from-databricks-sql-view.md)
+for a complete worked example.
+
+---
+
 **Version routing:**
-- `version: 0.1` → single-source parsing path (all observed production MVs)
-- `version: 1.1` → multi-source parsing path (from documentation, not yet observed live)
+- `version: 0.1` → single-source parsing path (basic column metadata only)
+- `version: 1.1` → rich metadata + optional multi-source with joins (verified 2026-05-26)
 
 **v0.1 — single source:**
 
@@ -298,12 +404,49 @@ Build an internal map:
 - `measures_parsed`: list of `{name, expr, is_simple, agg_function, physical_col_or_formula}`
 - `filter_expr`: the global filter string (or empty)
 
-**v1.1 — multi-source (when encountered):**
+**v1.1 — multi-source with joins (when encountered):**
 
-Follow the entity-based parsing documented in
-[../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md)
-(v1.1 Parsing section). Map entities to Table TMLs, extract primary/foreign key
-relationships for join definitions.
+Parse the `joins:` hierarchy to identify all source tables and their relationships:
+
+```python
+joins = mv_yaml.get("joins", [])
+
+def walk_joins(join_list, parent_alias="source"):
+    tables = []
+    for j in join_list:
+        alias = j["name"]
+        source_fqn = j["source"]
+        on_clause = j["on"]
+        rely = j.get("rely", {})
+        tables.append({
+            "alias": alias,
+            "source": source_fqn,
+            "on": on_clause,
+            "parent": parent_alias,
+            "many_to_one": rely.get("at_most_one_match", False),
+        })
+        # Recurse into nested sub-joins
+        sub_joins = j.get("joins", [])
+        tables.extend(walk_joins(sub_joins, parent_alias=alias))
+    return tables
+
+all_dim_tables = walk_joins(joins)
+```
+
+This produces one entry per dimension table. Each entry records the alias, source FQN,
+join condition, parent alias, and cardinality hint. Map each entry to a ThoughtSpot
+Table TML and build model joins from the parent→child relationships.
+
+Column references in `expr` use dot-path notation through the join hierarchy:
+- `source.COL` → fact table column
+- `alias.COL` → first-level dimension column
+- `alias.sub_alias.COL` → nested dimension column
+
+Parse dot-paths to determine which Table TML each column belongs to. The last segment
+is the column name; preceding segments trace the join path.
+
+Follow [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md)
+(v1.1 Multi-Source Parsing section) for the full mapping reference.
 
 ---
 
@@ -329,9 +472,45 @@ For each measure:
 | Measure type | ThoughtSpot mapping |
 |---|---|
 | Simple `SUM(col)` | `columns[]` entry: `column_id: {table}::{col}`, `column_type: MEASURE`, `aggregation: SUM` |
-| Simple `COUNT(DISTINCT col)` | `columns[]` entry: `column_id: {table}::{col}`, `column_type: MEASURE`, `aggregation: COUNT_DISTINCT` |
 | Simple `AVG(col)` | `columns[]` entry: `column_id: {table}::{col}`, `column_type: MEASURE`, `aggregation: AVERAGE` |
+| Simple `COUNT(DISTINCT col)` | `formulas[]` entry: `unique count ( [TABLE::col] )` + `columns[]` with `formula_id`, `column_type: MEASURE` |
 | Complex expression | `formulas[]` entry with translated expression + `columns[]` with `formula_id` |
+| Any measure with `window:` | See **Window measures** below — translated to `moving_sum`/`moving_average`/`cumulative_sum`/`sum_if`/`last_value` depending on window type. Always flagged for review. |
+
+**Window measures — `window:` handling:**
+
+When a measure has a `window:` section, the `expr` and `window` are translated **together**
+into a single ThoughtSpot formula. The `expr` alone is not sufficient — the `window:`
+changes the semantic meaning of the measure. Follow the decision tree in
+[../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md)
+(Window Function Translation section).
+
+| MV window pattern | ThoughtSpot formula |
+|---|---|
+| `range: trailing N day`, `order: date_dim` | `moving_sum ( expr , N , 0 , [TABLE::date_col] )` or `moving_average` if `AVG` |
+| `range: cumulative`, `order: date_dim` | `cumulative_sum ( expr , [TABLE::date_col] )` |
+| `range: current`, `order:` raw date, `semiadditive: last` | `last_value ( sum ( [m] ) , query_groups ( ) , { [TABLE::date_col] } )` |
+| `range: current`, `order:` truncated period | `sum_if ( diff_months/quarters/years ( [TABLE::date_col] , today ( ) ) = N , [m] )` |
+
+For `moving_sum` / `moving_average`, the inner `expr` is translated **without** the outer
+aggregate wrapper — `SUM(a * b)` with `range: trailing 7 day` becomes
+`moving_sum ( [TABLE::a] * [TABLE::b] , 7 , 0 , [TABLE::date_col] )`, not
+`moving_sum ( sum ( [TABLE::a] * [TABLE::b] ) , 7 , 0 , [TABLE::date_col] )`.
+
+**The sort/date argument must be a physical column reference** (`[TABLE::transaction_date]`),
+not a formula dimension name. Look up the `order:` dimension's `expr` to resolve the
+underlying physical column. Formula references in `moving_sum`'s sort position fail with
+"Search did not find" errors.
+
+**All measures with `window:` definitions must be flagged in the Step 10 review checkpoint**
+with a `⚠ WINDOW` marker so the user can verify the translation is correct. Window
+semantics (daily grain assumption, offset direction, period boundaries) vary between
+platforms and are the most likely source of subtle data mismatches.
+
+**Why COUNT_DISTINCT is a formula, not a simple aggregate:** Using `aggregation: COUNT_DISTINCT`
+on a direct `column_id` causes ThoughtSpot to silently override `column_type: MEASURE` to
+`ATTRIBUTE` on the physical column reference. Always create a `formulas[]` entry with
+`unique count ( [TABLE::col] )` instead.
 
 **Aggregate extraction mapping:**
 
@@ -339,7 +518,6 @@ For each measure:
 |---|---|
 | `SUM` | `SUM` |
 | `COUNT` | `COUNT` |
-| `COUNT(DISTINCT ...)` | `COUNT_DISTINCT` |
 | `AVG` | `AVERAGE` |
 | `MIN` | `MIN` |
 | `MAX` | `MAX` |
@@ -355,7 +533,7 @@ For each measure:
 |---|---|
 | `date_trunc('day', transaction_date)` | `date ( [TABLE::transaction_date] )` |
 | `date_trunc('month', col)` | `start_of_month ( [TABLE::col] )` |
-| `CASE WHEN x > 10 THEN 'High' ELSE 'Low' END` | `if ( [TABLE::x] > 10 , 'High' , 'Low' )` |
+| `CASE WHEN x > 10 THEN 'High' ELSE 'Low' END` | `if ( [TABLE::x] > 10 ) then 'High' else 'Low'` |
 | `SUM(price * quantity * (1 - discount))` | `sum ( [TABLE::price] * [TABLE::quantity] * ( 1 - [TABLE::discount] ) )` |
 | `SUM(x) / COUNT(DISTINCT y)` | `sum ( [TABLE::x] ) / unique count ( [TABLE::y] )` |
 
@@ -368,17 +546,23 @@ Example:
 - MV EXPR: `SUM(product_price * quantity * (1 - discount_percent))`
 - ThoughtSpot formula: `sum ( [ECOMMERCE_TRANSACTIONS::product_price] * [ECOMMERCE_TRANSACTIONS::quantity] * ( 1 - [ECOMMERCE_TRANSACTIONS::discount_percent] ) )`
 
-**`last_value` / curly brace formulas — YAML block scalar required:**
+**Curly brace formulas — YAML block scalar required:**
 
-When the translated formula contains `{ [col] }` (curly braces), use a `>-` block scalar
-for the `expr` field. Inline YAML string assignment fails because `{` is a flow mapping
-start character:
+When the translated formula contains `{ [col] }` (curly braces — e.g. in
+`group_aggregate` LOD formulas or `last_value` semi-additive formulas), use a `>-`
+block scalar for the `expr` field. Inline YAML string assignment fails because `{`
+is a flow mapping start character:
 
 ```yaml
 formulas:
-- name: "Running Balance"
+- name: "Category Total Revenue"
   expr: >-
-    last_value ( sum ( [TABLE::balance] ) , query_groups ( ) , { [TABLE::date_col] } )
+    group_aggregate ( sum ( [TABLE::LINE_TOTAL] ) , { [TABLE::CATEGORY_NAME] } , query_filters ( ) )
+  properties:
+    column_type: MEASURE
+- name: "Inventory Balance"
+  expr: >-
+    last_value ( sum ( [TABLE::FILLED_INVENTORY] ) , query_groups ( ) , { [TABLE::BALANCE_DATE] } )
   properties:
     column_type: MEASURE
 ```
@@ -417,9 +601,10 @@ Is this table already registered in ThoughtSpot?
 Enter Y / N / ?:
 ```
 
-**v1.1 (multi-source):**
+**v1.1 (multi-source with joins):**
 
-List all entities and ask the same question.
+List all source tables (fact table from `source:` + all dimension tables from `joins:`)
+and ask the same question for each.
 
 - **Y** → skip search, go to Step 8A (column verification only)
 - **N** → skip search, go to Step 8B (create)
@@ -493,11 +678,11 @@ Ask the user to confirm which ThoughtSpot connection to use (or auto-select if o
 one Databricks connection exists):
 
 ```bash
-source ~/.zshenv && ts connections list --profile {profile}
+source ~/.zshenv && ts connections list --type DATABRICKS --profile {profile}
 ```
 
-`ts connections list` auto-paginates and returns all connections. Filter for Databricks
-connections. Display matching connections and ask the user to confirm. Once confirmed,
+`ts connections list` auto-paginates and returns all connections of the specified type.
+Display matching connections and ask the user to confirm. Once confirmed,
 use the exact `name` value from the API response.
 
 Create the ThoughtSpot Table object:
@@ -528,7 +713,7 @@ types using [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](..
 
 Find the ThoughtSpot connection for the table:
 ```bash
-source ~/.zshenv && ts connections list --profile {profile}
+source ~/.zshenv && ts connections list --type DATABRICKS --profile {profile}
 ```
 
 Add the missing columns to the connection, then re-import the updated Table TML
@@ -549,13 +734,74 @@ Construct the model TML as a YAML string. Use the templates in
 **Model name:** `TEST_MV_{view_name_title_case}` — prefix indicates this is a
 test/converted model. Ask the user if they want a different name.
 
-**Model description:** Include the MV filter (if present) and source metadata:
+**Model description:** Include source metadata only — filters are enforced via the
+model-level `filters:` section, not documented in the description:
 
 ```python
-desc_parts = [f"Imported from Databricks Metric View: {catalog}.{schema}.{view_name}"]
-if mv_filter:
-    desc_parts.append(f"Filter: {mv_filter}")
-model_description = " | ".join(desc_parts)
+model_description = f"Imported from Databricks Metric View: {catalog}.{schema}.{view_name}"
+```
+
+**Filter handling:** If the MV has a `filter:` field, **always create a boolean formula
+column** — never rely on description-only documentation. Users won't remember to apply
+column filters manually; a formula makes the filter discoverable and pinnable.
+
+```
+If the MV has a filter:
+  1. Translate the SQL filter to a ThoughtSpot boolean formula
+  2. Create a formula column:
+       name: "MV Filter"
+       id: "formula_MV Filter"
+       expr: <translated SQL filter → ThoughtSpot formula>
+       column_type: ATTRIBUTE
+  3. Add a columns[] entry with formula_id: "formula_MV Filter"
+  4. Add a model-level filters: section to apply the filter automatically:
+       filters:
+       - column:
+         - MV Filter
+         oper: in
+         values:
+         - 'true'
+  5. Note in description: "MV Filter applied automatically via model filter."
+```
+
+The `filters:` section is a model-level filter — it applies to ALL queries against
+the model without users needing to do anything. This is the correct way to enforce
+the MV's global filter in ThoughtSpot. Without it, the formula column exists but
+is never applied unless users manually pin it.
+
+**SQL → ThoughtSpot filter translation:**
+
+| SQL pattern | ThoughtSpot formula |
+|---|---|
+| `col = 'val'` | `[TABLE::col] = 'val'` |
+| `NOT col` (boolean) | `[TABLE::col] = false` |
+| `col IN ('a', 'b')` | `[TABLE::col] = 'a' or [TABLE::col] = 'b'` |
+| `col BETWEEN a AND b` | `[TABLE::col] >= a and [TABLE::col] <= b` |
+| `col >= 'date'` | `[TABLE::col] >= 'date'` |
+
+**Example — complex filter formula:**
+```yaml
+formulas:
+- id: "formula_MV Filter"
+  name: "MV Filter"
+  expr: >-
+    [TABLE::is_return] = false and ( [TABLE::transaction_status] = 'Completed' or [TABLE::transaction_status] = 'Shipped' )
+  properties:
+    column_type: ATTRIBUTE
+
+columns:
+# ... other columns ...
+- name: "MV Filter"
+  formula_id: "formula_MV Filter"
+  properties:
+    column_type: ATTRIBUTE
+
+filters:
+- column:
+  - MV Filter
+  oper: in
+  values:
+  - 'true'
 ```
 
 **Critical `id` rules (applies to all scenarios):**
@@ -579,14 +825,22 @@ model:
     fqn: "{table_guid}"       # GUID from Step 8A
   columns:
   - name: "{dimension_display_name}"
+    description: "{comment}"             # from MV comment field (v1.1)
     column_id: SOURCE_TABLE::{physical_col}
     properties:
       column_type: ATTRIBUTE
+      synonyms:                          # from MV synonyms field (v1.1)
+      - "{synonym_1}"
+      synonym_type: USER_DEFINED
   - name: "{measure_display_name}"
+    description: "{comment}"
     column_id: SOURCE_TABLE::{physical_col}
     properties:
       column_type: MEASURE
       aggregation: SUM
+      synonyms:
+      - "{synonym_1}"
+      synonym_type: USER_DEFINED
   formulas:
   - id: "formula_{formula_name}"
     name: "{formula_name}"
@@ -594,6 +848,10 @@ model:
     properties:
       column_type: MEASURE
 ```
+
+**Synonym placement:** synonyms MUST be inside `properties:` alongside `column_type`,
+with `synonym_type: USER_DEFINED`. Top-level `synonyms:` at the column root is silently
+dropped on import — see open-items #5.
 
 **Model TML skeleton (v1.1 — multi-source, inline joins):**
 
@@ -693,6 +951,16 @@ Columns ({n} total):
 Formula translations:
   ✓ {name}: {dbx_expr} → {ts_formula}
   ⚠ {name}: OMITTED — {reason}
+
+Window measures (review required):
+  ⚠ WINDOW {name}: {window_type} → {ts_formula}
+    Assumption: {grain assumption, e.g. "daily grain — one row per day"}
+
+If any window measures exist, display this warning:
+
+  ⚠ Window measures assume daily grain (one row per day for trailing/rolling).
+    Verify that the source data matches this assumption — if the table has
+    multiple rows per day, moving_sum/moving_average will over-count.
 
 Spotter (AI search): enabled / disabled
 
@@ -799,7 +1067,7 @@ payload = json.dumps([model_tml])
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile '{profile_name}'"],
+     f"source ~/.zshenv && ts tml import --policy PARTIAL --profile '{profile_name}'"],
     input=payload,
     capture_output=True, text=True,
 )
@@ -807,6 +1075,12 @@ print(result.stdout)
 if result.returncode != 0:
     print(result.stderr)
 ```
+
+**Import policy:** Use `--policy PARTIAL` when importing multiple models in a batch.
+`ALL_OR_NONE` rolls back the **entire** batch if any single TML fails — including
+models that parsed and imported successfully. The response still returns success GUIDs
+for the rolled-back models, making the failure silent. Use `ALL_OR_NONE` only for
+atomic pairs (one table + one model that references it).
 
 On success, parse the response JSON to extract the created model's GUID. **Save it** —
 required for any future reimports to update the model without creating a duplicate.

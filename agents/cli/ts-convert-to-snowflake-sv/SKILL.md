@@ -983,7 +983,7 @@ Instead:
 
 Confirmed untranslatable patterns (after checking the reference):
 - `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
-- `ts_first_day_of_week(...)`, `last_n_days(...)`, `last_value_in_period(...)`, `first_value_in_period(...)` — period-scoped time intelligence with no Snowflake equivalent
+- `ts_first_day_of_week(...)`, `last_n_days(...)` — period-scoped time intelligence with no Snowflake equivalent
 - `agg(last_value(...))` and `agg(first_value(...))` — cannot re-aggregate a `NON ADDITIVE BY` metric
 - `group_aggregate(...)` with any filter argument other than `query_filters()` — hardcoded/selective filters unsupported
 - `group_aggregate(...)` with `query_groups() + {attr}` or `query_groups(attr1, attr2)` grouping

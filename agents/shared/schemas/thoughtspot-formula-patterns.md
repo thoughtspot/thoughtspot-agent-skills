@@ -77,15 +77,26 @@ the start of an inline map. Always use `>-` when curly braces appear in the expr
 
 ### Conditional Aggregates
 
+All standard aggregates have a `*_if` variant that filters rows by a condition.
+Signature: `agg_if ( condition , measure_expression )`
+
 | Function | Syntax | Notes |
 |---|---|---|
-| `sum_if` | `sum_if ( [condition] , [TABLE::col] )` | Sum where condition is true |
-| `unique_count_if` | `unique_count_if ( [condition] , [TABLE::col] )` | Distinct count where condition is true |
+| `sum_if` | `sum_if ( condition , [TABLE::col] )` | Sum where condition is true |
+| `count_if` | `count_if ( condition , [TABLE::col] )` | Count where condition is true |
+| `unique_count_if` | `unique_count_if ( condition , [TABLE::col] )` | Distinct count where condition is true |
+| `average_if` | `average_if ( condition , [TABLE::col] )` | Average where condition is true |
+| `min_if` | `min_if ( condition , [TABLE::col] )` | Min where condition is true |
+| `max_if` | `max_if ( condition , [TABLE::col] )` | Max where condition is true |
+| `stddev_if` | `stddev_if ( condition , [TABLE::col] )` | Std deviation where condition is true |
+| `variance_if` | `variance_if ( condition , [TABLE::col] )` | Variance where condition is true |
 
 ```
-# Example
+# Examples
 sum_if ( [formula_Opportunity Qualified Flag] , [SFDC_OPP::ACV] )
 unique_count_if ( not ( isnull ( [SFDC_OPP::M0 Date] ) ) , [SFDC_OPP::Opportunity ID] )
+average_if ( [TABLE::city] = 'San Francisco' , [TABLE::revenue] )
+count_if ( [TABLE::region] = 'west' , [TABLE::region] )
 ```
 
 ---
@@ -186,7 +197,7 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 | `year` (fiscal) | `year ( [date] , fiscal )` | Fiscal year — ThoughtSpot-specific, not translatable to static SQL |
 | `quarter_number` | `quarter_number ( [date] )` | Calendar quarter (1–4) |
 | `quarter_number` (fiscal) | `quarter_number ( [date] , fiscal )` | Fiscal quarter — not translatable |
-| `month` | `month ( [date] )` | Month number (1–12) |
+| `month_number` | `month_number ( [date] )` | Month number (1–12). **Not** `month()` — that is rejected by the formula parser. Verified 2026-05-27. |
 | `day` | `day ( [date] )` | Day of month |
 | `hour` | `hour ( [date] )` | Hour of day |
 | `start_of_month` | `start_of_month ( [date] )` | First day of the month |
@@ -201,6 +212,11 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 
 **Argument order note:** `diff_*` functions take `(end, start)` — end date first. This is
 the opposite of most SQL `DATEDIFF` functions which take `(unit, start, end)`.
+
+**Date literal warning:** A bare `'2024-05-01'` is parsed as subtraction
+(`'2024' - 05 - 01`). Wrap in `to_date ( '2024-05-01' , 'yyyy-MM-dd' )` —
+hyphens are fine inside `to_date()` since the parser treats the argument as
+a string. No reformatting needed; just provide a matching format pattern.
 
 ---
 
@@ -242,6 +258,9 @@ cumulative_sum ( [FACT::AMOUNT] , [DATE_DIM::ORDER_DATE] )
 ```
 moving_sum ( [FACT::AMOUNT] , 2 , 0 , [DATE_DIM::ORDER_DATE] )   # 2-period trailing sum
 ```
+
+Sort column (4th arg) must be a physical `[TABLE::column]` reference. Formula column
+names fail with "Search did not find" errors. Verified 2026-05-28.
 
 ### Rank Functions
 
@@ -335,8 +354,8 @@ expr: >-
 |---|---|---|
 | `last_value(..., query_groups(), {date})` | Last snapshot value, query-grain partition | Yes — via `non_additive_dimensions` in Snowflake SV |
 | `first_value(..., query_groups(), {date})` | First snapshot value | No — `NON ADDITIVE BY` only supports last-value semantics |
-| `last_value_in_period(...)` | Last value only if the period's last date is complete | No — completeness check has no SQL equivalent |
-| `first_value_in_period(...)` | First value only if the period's first date is complete | No |
+| `last_value_in_period(...)` | Last value only if the period's last date is complete | Yes — treat same as `last_value(...)` |
+| `first_value_in_period(...)` | First value only if the period's first date is complete | Yes — treat same as `first_value(...)` |
 | `agg(last_value(...))` e.g. `max(last_value(...))` | Re-aggregation of a snapshot metric | No |
 
 ---

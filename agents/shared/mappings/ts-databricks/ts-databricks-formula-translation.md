@@ -16,14 +16,21 @@ ThoughtSpot models.
 ## Translation Decision Flowchart
 
 ```
-Formula contains...
+Formula / Expression contains...
 ├── [word] with no ::           → Parameter References (untranslatable)
+├── (SELECT ... FROM ...)       → Subquery (untranslatable — log in Unmapped Report)
+├── -- or /* ... */             → SQL Comments (strip before translating)
+├── *_if(cond, x)               → Conditional Aggregates (native *_if functions)
+├── AGG(...) FILTER (WHERE ...) → Conditional Aggregates (FILTER WHERE clause)
 ├── sql_*_op(...)               → SQL Pass-Through Functions
 ├── cumulative_*                → Window: Cumulative Functions
-├── moving_*                    → Window: Moving Functions
+├── moving_*                    → Window: Moving / Rolling Functions
 ├── rank( or rank_percentile(   → Window: Rank Functions
 ├── group_* or group_aggregate  → Level of Detail (LOD) Functions
-├── last_value( or first_value( → Semi-Additive Functions (limited support)
+├── last_value( or first_value(  → Semi-Additive: True Semi-Additive (snapshot metrics — order: raw date)
+├── sum_if(diff_months/...      → Semi-Additive: Period Filter (flow metrics — order: truncated period)
+├── cumulative_sum(             → Semi-Additive: Cumulative (range: cumulative)
+├── COUNT(*)                    → count(1) — no direct COUNT(*) in TS
 ├── [TABLE::COL] references     → Resolve via Column Reference Syntax
 ├── [other_formula_name]        → Resolve via Nested Column References
 └── standard function(args)     → Scalar Functions
@@ -97,7 +104,7 @@ Resolution:
 | `now()` | `CURRENT_TIMESTAMP()` | |
 | `date(ts)` | `DATE(ts)` or `date_trunc('day', ts)` | |
 | `year(d)` | `YEAR(d)` | |
-| `month(d)` | `MONTH(d)` | |
+| `month_number(d)` | `MONTH(d)` | **Not** `month()` — rejected by TS formula parser. Use `month_number()`. |
 | `day_of_month(d)` | `DAY(d)` | |
 | `day_of_week(d)` | `DAYOFWEEK(d)` | TS: 1=Mon; Databricks: 1=Sun — adjust |
 | `day_of_year(d)` | `DAYOFYEAR(d)` | |
@@ -111,7 +118,13 @@ Resolution:
 | `start_of_year(d)` | `date_trunc('year', d)` | |
 | `start_of_week(d)` | `date_trunc('week', d)` | Week start day may differ |
 | `diff_days(start, end)` | `DATEDIFF(end, start)` | Arg order reversed; Databricks `DATEDIFF` returns days only |
+| `diff_days(start, end)` | `DATEDIFF(DAY, start, end)` | 3-arg form: unit first; reverse args for TS |
+| `diff_months(start, end)` | `DATEDIFF(MONTH, start, end)` | 3-arg form: unit first; reverse args for TS |
 | `diff_months(start, end)` | `MONTHS_BETWEEN(end, start)` | Returns fractional months |
+| `year(d)` | `EXTRACT(YEAR FROM d)` | `EXTRACT` form — same as `YEAR(d)` |
+| `month_number(d)` | `EXTRACT(MONTH FROM d)` | `EXTRACT` form — same as `MONTH(d)` |
+| `day_of_month(d)` | `EXTRACT(DAY FROM d)` | `EXTRACT` form — same as `DAY(d)` |
+| `hour(ts)` | `EXTRACT(HOUR FROM ts)` | `EXTRACT` form — same as `HOUR(ts)` |
 | `add_days(d, n)` | `DATE_ADD(d, n)` | |
 | `add_months(d, n)` | `ADD_MONTHS(d, n)` | |
 | `date_format(d, fmt)` | `DATE_FORMAT(d, fmt)` | Format strings may differ slightly |
@@ -120,7 +133,7 @@ Resolution:
 
 | ThoughtSpot | Databricks SQL | Notes |
 |---|---|---|
-| `if(cond, then, else)` | `CASE WHEN cond THEN then ELSE else END` | Or `IF(cond, then, else)` |
+| `if (cond) then val else val` | `CASE WHEN cond THEN val ELSE val END` | Or `IF(cond, val, val)` |
 | `ifnull(x, default)` | `COALESCE(x, default)` | |
 | `isnull(x)` | `x IS NULL` | |
 | `not(x)` | `NOT x` | |
@@ -138,11 +151,77 @@ Resolution:
 | `sum(x)` | `SUM(x)` | |
 | `average(x)` | `AVG(x)` | |
 | `count(x)` | `COUNT(x)` | |
+| `count(1)` | `COUNT(*)` | TS has no `COUNT(*)` — use `count(1)` |
 | `unique count(x)` | `COUNT(DISTINCT x)` | |
 | `min(x)` | `MIN(x)` | |
 | `max(x)` | `MAX(x)` | |
 | `stddev(x)` | `STDDEV(x)` | |
 | `variance(x)` | `VARIANCE(x)` | |
+| `sum_if(cond, x)` | `SUM(x) FILTER (WHERE cond)` | Conditional aggregate |
+| `count_if(cond, x)` | `COUNT(x) FILTER (WHERE cond)` | Conditional aggregate |
+| `unique_count_if(cond, x)` | `COUNT(DISTINCT x) FILTER (WHERE cond)` | Conditional aggregate |
+| `average_if(cond, x)` | `AVG(x) FILTER (WHERE cond)` | Conditional aggregate |
+| `min_if(cond, x)` | `MIN(x) FILTER (WHERE cond)` | Conditional aggregate |
+| `max_if(cond, x)` | `MAX(x) FILTER (WHERE cond)` | Conditional aggregate |
+| `stddev_if(cond, x)` | `STDDEV(x) FILTER (WHERE cond)` | Conditional aggregate |
+| `variance_if(cond, x)` | `VARIANCE(x) FILTER (WHERE cond)` | Conditional aggregate |
+
+### Conditional Aggregates — `FILTER (WHERE ...)` Clause
+
+Databricks SQL supports the `FILTER (WHERE ...)` clause on aggregate functions.
+ThoughtSpot has native `*_if` conditional aggregate functions — use these as the
+**primary** translation. Fall back to `agg(if (cond) then x else null)` only when no
+native `*_if` function exists for the aggregate type.
+
+#### Databricks → TS (primary: native `*_if` functions)
+
+| Databricks SQL | ThoughtSpot formula | Notes |
+|---|---|---|
+| `SUM(x) FILTER (WHERE cond)` | `sum_if ( cond , [x] )` | Native |
+| `COUNT(x) FILTER (WHERE cond)` | `count_if ( cond , [x] )` | Native |
+| `COUNT(DISTINCT x) FILTER (WHERE cond)` | `unique_count_if ( cond , [x] )` | Native |
+| `AVG(x) FILTER (WHERE cond)` | `average_if ( cond , [x] )` | Native |
+| `MIN(x) FILTER (WHERE cond)` | `min_if ( cond , [x] )` | Native |
+| `MAX(x) FILTER (WHERE cond)` | `max_if ( cond , [x] )` | Native |
+| `STDDEV(x) FILTER (WHERE cond)` | `stddev_if ( cond , [x] )` | Native |
+| `VARIANCE(x) FILTER (WHERE cond)` | `variance_if ( cond , [x] )` | Native |
+
+**`*_if` function signature:** `agg_if ( condition , measure_expression )`
+- First argument is the boolean condition
+- Second argument is the measure column or expression
+
+**Fallback pattern** (if a `*_if` function doesn't exist for the aggregate type):
+Wrap the column in `if()` inside the aggregate:
+- `agg ( if ( cond , [x] , null ) )` — for COUNT, AVG, MIN, MAX (skip nulls)
+- `agg ( if ( cond , [x] , 0 ) )` — for SUM only (`0` is additive-neutral)
+
+Translate the `cond` expression using the standard SQL → TS rules from this file.
+
+**Example:**
+```sql
+-- Databricks MV
+COUNT(DISTINCT customer_id) FILTER (WHERE NOT is_return AND transaction_status = 'Completed')
+```
+```
+-- ThoughtSpot formula (primary)
+unique_count_if ( [TABLE::is_return] = false and [TABLE::transaction_status] = 'Completed' , [TABLE::customer_id] )
+```
+
+#### TS → Databricks
+
+| ThoughtSpot formula | Databricks SQL |
+|---|---|
+| `sum_if ( cond , [x] )` | `SUM(x) FILTER (WHERE cond)` |
+| `count_if ( cond , [x] )` | `COUNT(x) FILTER (WHERE cond)` |
+| `unique_count_if ( cond , [x] )` | `COUNT(DISTINCT x) FILTER (WHERE cond)` |
+| `average_if ( cond , [x] )` | `AVG(x) FILTER (WHERE cond)` |
+| `min_if ( cond , [x] )` | `MIN(x) FILTER (WHERE cond)` |
+| `max_if ( cond , [x] )` | `MAX(x) FILTER (WHERE cond)` |
+| `stddev_if ( cond , [x] )` | `STDDEV(x) FILTER (WHERE cond)` |
+| `variance_if ( cond , [x] )` | `VARIANCE(x) FILTER (WHERE cond)` |
+
+Also detect the fallback pattern: an aggregate wrapping `if()` where the else
+branch is `null` (or `0` for SUM) → extract the condition into `FILTER (WHERE ...)`.
 
 ---
 
@@ -183,6 +262,34 @@ Databricks SQL equivalents.
 | `moving_max(measure, window)` | `MAX(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {window-1} PRECEDING AND CURRENT ROW)` | |
 | `moving_min(measure, window)` | `MIN(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {window-1} PRECEDING AND CURRENT ROW)` | |
 
+### Rolling Window Functions
+
+Databricks MV `window: [{range: trailing N day}]` is a date-based rolling window.
+ThoughtSpot's `moving_sum`/`moving_average` operate on row counts, not calendar days,
+so the mapping assumes one row per day (daily grain). If the source data has multiple
+rows per day or gaps, the results may differ.
+
+#### Databricks → TS
+
+| Databricks MV YAML | ThoughtSpot formula | Notes |
+|---|---|---|
+| `window: [{order: date_dim, range: trailing 7 day, semiadditive: last}]` | `moving_sum ( [m] , 7 , 0 , [date] )` | 7-day rolling sum |
+| `window: [{order: date_dim, range: trailing 30 day, semiadditive: last}]` | `moving_sum ( [m] , 30 , 0 , [date] )` | 30-day rolling sum |
+| `window: [{order: date_dim, range: trailing N day, semiadditive: last}]` | `moving_sum ( [m] , N , 0 , [date] )` | General pattern |
+| `window: [{order: date_dim, range: trailing 7 day, semiadditive: last}]` (avg) | `moving_average ( [m] , 7 , 0 , [date] )` | Rolling average variant |
+
+`moving_sum(measure, window_size, look_ahead, sort_column)`:
+- `window_size` = N (the trailing day count)
+- `look_ahead` = 0 (no forward-looking rows)
+- `sort_column` = the date dimension
+
+#### TS → Databricks
+
+| ThoughtSpot | Databricks MV YAML |
+|---|---|
+| `moving_sum([m], 7, 0, [d])` | `expr: SUM(m)` + `window: [{order: date_dim, range: trailing 7 day, semiadditive: last}]` |
+| `moving_average([m], 30, 0, [d])` | `expr: AVG(m)` + `window: [{order: date_dim, range: trailing 30 day, semiadditive: last}]` |
+
 ### Rank Functions
 
 | ThoughtSpot | Databricks SQL | Notes |
@@ -193,34 +300,164 @@ Databricks SQL equivalents.
 
 ---
 
-## Level of Detail (LOD) Functions
+## Level of Detail (LOD) Functions (verified 2026-05-25)
 
-LOD functions have limited support in Metric View `expr` fields because MVs
-pre-aggregate at query time. Simple LOD patterns can sometimes be expressed
-as nested aggregates or subqueries.
+LOD functions map to **dimension window functions** in Metric Views. The LOD
+column becomes a `dimensions[]` entry (not a measure), using
+`AGG() OVER (PARTITION BY ...)` in the `expr`.
 
-| ThoughtSpot | Databricks SQL | Translatable? |
+### TS → Databricks (to-direction)
+
+| ThoughtSpot | Databricks MV YAML | Column type |
 |---|---|---|
-| `group_sum(measure, group_by)` | Subquery or nested aggregate | Limited |
-| `group_count(measure, group_by)` | Subquery or nested aggregate | Limited |
-| `group_average(measure, group_by)` | Subquery or nested aggregate | Limited |
-| `group_aggregate(...)` | Complex subquery | **Usually untranslatable** |
+| `group_aggregate(sum(x), {dim}, query_filters())` | `expr: SUM(x) OVER (PARTITION BY dim)` | **dimension** |
+| `group_aggregate(count(x), {dim}, query_filters())` | `expr: COUNT(x) OVER (PARTITION BY dim)` | **dimension** |
+| `group_aggregate(average(x), {d1, d2}, query_filters())` | `expr: AVG(x) OVER (PARTITION BY d1, d2)` | **dimension** |
+| `group_sum(x, dim)` | `expr: SUM(x) OVER (PARTITION BY dim)` | **dimension** |
+| `group_count(x, dim)` | `expr: COUNT(x) OVER (PARTITION BY dim)` | **dimension** |
+| `group_average(x, dim)` | `expr: AVG(x) OVER (PARTITION BY dim)` | **dimension** |
 
-When untranslatable, omit the formula and log in the Unmapped Report.
+**Key rules:**
+- LOD results are **dimensions**, not measures
+- Do NOT use `AGGREGATE OVER` — it causes `PARSE_SYNTAX_ERROR`
+- Do NOT use `window:` for LOD — `window` requires `semiadditive`
+- Complex `group_aggregate` with `query_groups()` or multiple aggregation levels
+  may still be untranslatable — log in Unmapped Report
+
+### Databricks → TS (from-direction)
+
+| Databricks MV (dimension) | ThoughtSpot formula |
+|---|---|
+| `expr: SUM(x) OVER (PARTITION BY dim)` | `group_aggregate(sum([x]), {[dim]}, query_filters())` |
+| `expr: COUNT(x) OVER (PARTITION BY dim)` | `group_aggregate(count([x]), {[dim]}, query_filters())` |
+| `expr: AVG(x) OVER (PARTITION BY d1, d2)` | `group_aggregate(average([x]), {[d1], [d2]}, query_filters())` |
 
 ---
 
-## Semi-Additive Functions
+## Cross-Measure References (verified 2026-05-25)
 
-| ThoughtSpot | Databricks SQL | Translatable? |
+Metric Views support referencing other measures and dimensions from within measure
+expressions using `MEASURE()` and `ANY_VALUE()`.
+
+### TS → Databricks (to-direction)
+
+| ThoughtSpot pattern | Databricks MV `expr` |
+|---|---|
+| `[measure_name]` (ref to another measure) | `MEASURE(measure_name)` |
+| `[lod_dimension]` (ref to LOD dim from a measure) | `ANY_VALUE(lod_dimension)` |
+| `safe_divide([quantity], [category_quantity])` | `MEASURE(quantity) / ANY_VALUE(category_quantity)` |
+
+### Databricks → TS (from-direction)
+
+| Databricks MV `expr` | ThoughtSpot formula |
+|---|---|
+| `MEASURE(measure_name)` | `[measure_name]` |
+| `ANY_VALUE(dimension_name)` | `[dimension_name]` |
+| `MEASURE(a) / ANY_VALUE(b)` | `[a] / [b]` |
+
+---
+
+## Semi-Additive / Period-Filter Functions (verified 2026-05-26)
+
+Databricks MV measures with a `window` field use the `semiadditive` property.
+The ThoughtSpot translation depends on the `order:` dimension type:
+
+- **`order:` is a raw date** (snapshot metric — inventory, account balance) →
+  **`last_value`/`first_value`** — takes the last/first observation in each period.
+- **`order:` is a truncated period dimension** (flow metric — revenue, quantity) →
+  **`sum_if` filter pattern** — filters to a specific period using `diff_months`,
+  `diff_quarters`, or `diff_years`. This is a conditional aggregate, not a window function.
+- **`range: cumulative`** → **`cumulative_sum`** — a true window function.
+
+**How to classify:** Look up the `order:` dimension's `expr` in the MV YAML.
+If the expr is a direct column reference or `date_trunc('day', ...)`, it's a raw
+date → `last_value`. If it uses `date_trunc('month'/'quarter'/'year', ...)`, it's
+a truncated period → `sum_if`.
+
+### True Semi-Additive (snapshot metrics)
+
+#### TS → Databricks
+
+| ThoughtSpot | Databricks MV YAML | Notes |
 |---|---|---|
-| `last_value(sum(m), query_groups(), {date})` | Complex window function | **Limited** |
-| `first_value(sum(m), query_groups(), {date})` | Complex window function | **Limited** |
-| `last_value_in_period(...)` | No equivalent | **Untranslatable** |
-| `first_value_in_period(...)` | No equivalent | **Untranslatable** |
+| `last_value(sum(m), query_groups(), {date})` | `expr: SUM(m)` + `window: [{order: raw_date_dim, semiadditive: last, range: current}]` | End-of-period snapshot |
+| `first_value(sum(m), query_groups(), {date})` | `expr: SUM(m)` + `window: [{order: raw_date_dim, semiadditive: first, range: current}]` | Start-of-period snapshot |
 
-Semi-additive patterns are difficult to express in MV `expr` fields. Log in
-the Unmapped Report when encountered.
+#### Databricks → TS
+
+| Databricks MV YAML | ThoughtSpot formula | Notes |
+|---|---|---|
+| `window: [{order: raw_date, semiadditive: last, range: current}]` | `last_value(sum([m]), query_groups(), {[date]})` | `order:` is a raw date dimension |
+| `window: [{order: raw_date, semiadditive: first, range: current}]` | `first_value(sum([m]), query_groups(), {[date]})` | `order:` is a raw date dimension |
+
+### Period Filter (flow/additive metrics)
+
+#### TS → Databricks
+
+| ThoughtSpot | Databricks MV YAML | Notes |
+|---|---|---|
+| `sum_if(diff_months([date], today()) = 0, [m])` | `expr: SUM(m)` + `window: [{order: month_dim, range: current, semiadditive: last}]` | Current month |
+| `sum_if(diff_quarters([date], today()) = 0, [m])` | `expr: SUM(m)` + `window: [{order: quarter_dim, range: current, semiadditive: last}]` | Current quarter |
+| `sum_if(diff_months([date], today()) = -1, [m])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 month}]` | Previous month |
+| `sum_if(diff_quarters([date], today()) = -1, [m])` | `expr: SUM(m)` + `window: [{order: quarter_dim, semiadditive: last, range: current, offset: -3 month}]` | Previous quarter |
+| `sum_if(diff_months([date], today()) = -12, [m])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 year}]` | Same month last year |
+| `sum_if(diff_years([date], today()) = -1, [m])` | `expr: SUM(m)` + `window: [{order: year_dim, semiadditive: last, range: current, offset: -1 year}]` | Previous year |
+
+**Growth % formulas (MoM, YoY)** inline the `sum_if` expressions directly — no
+cross-formula references needed:
+
+```
+// MoM growth %
+safe_divide(
+  sum_if(diff_months([date], today()) = 0, [m]) - sum_if(diff_months([date], today()) = -1, [m]),
+  sum_if(diff_months([date], today()) = -1, [m])
+) * 100
+
+// YoY growth % (month grain)
+safe_divide(
+  sum_if(diff_months([date], today()) = 0, [m]) - sum_if(diff_months([date], today()) = -12, [m]),
+  sum_if(diff_months([date], today()) = -12, [m])
+) * 100
+```
+
+#### Databricks → TS
+
+| Databricks MV YAML | ThoughtSpot formula | Notes |
+|---|---|---|
+| `window: [{range: current}]`, `order:` is truncated month | `sum_if(diff_months([date], today()) = 0, [m])` | Current period filter |
+| `window: [{range: current}]`, `order:` is truncated quarter | `sum_if(diff_quarters([date], today()) = 0, [m])` | Current quarter filter |
+| `window: [{range: current, offset: -1 month}]` | `sum_if(diff_months([date], today()) = -1, [m])` | Previous month |
+| `window: [{range: current, offset: -3 month}]`, quarter grain | `sum_if(diff_quarters([date], today()) = -1, [m])` | Previous quarter |
+| `window: [{range: current, offset: -1 year}]`, month grain | `sum_if(diff_months([date], today()) = -12, [m])` | Same month last year |
+
+### Cumulative
+
+| Direction | From | To |
+|---|---|---|
+| TS → Databricks | `cumulative_sum(m, d)` | `expr: SUM(m)` + `window: [{order: d, semiadditive: last, range: cumulative}]` |
+| Databricks → TS | `window: [{range: cumulative}]` | `cumulative_sum([m], [d])` |
+
+### Key rules
+
+- `semiadditive` is REQUIRED when `window` is present. Using `window`
+  without `semiadditive` fails with `Missing required creator property 'semiadditive'`.
+- **Classify by `order:` dimension type**: raw date → `last_value`; truncated period →
+  `sum_if`. The `order:` dimension's `expr` in the MV YAML tells you which.
+- The `offset` shifts the period anchor: `-1 month` = previous month,
+  `-1 year` at month grain = -12 months (use `diff_months(...) = -12`).
+- `range: cumulative` remains a true window function (`cumulative_sum`).
+
+---
+
+## safe_divide Pattern (verified 2026-05-25)
+
+ThoughtSpot `safe_divide` has no direct Databricks equivalent. Use `COALESCE/NULLIF`:
+
+| Direction | From | To |
+|---|---|---|
+| TS → Databricks | `safe_divide(sum(a), sum(b))` | `COALESCE(SUM(a) / NULLIF(SUM(b), 0), 0)` |
+| Databricks → TS | `COALESCE(x / NULLIF(y, 0), 0)` | `safe_divide(x, y)` |
+| Databricks → TS | `x / NULLIF(y, 0)` | `safe_divide(x, y)` |
 
 ---
 
@@ -231,15 +468,32 @@ These ThoughtSpot formula patterns cannot be translated to Databricks MV express
 | Pattern | Reason |
 |---|---|
 | Parameter references: `[Param]` (no `::`) | Runtime parameters don't exist in MVs |
-| `last_value_in_period(...)` | No MV equivalent |
-| `first_value_in_period(...)` | No MV equivalent |
-| Complex `group_aggregate(...)` with custom `query_groups` | Cannot express in MV expr |
+| `last_value(...)` / `first_value(...)` — when NOT a semi-additive pattern | Only translatable when the formula matches the semi-additive pattern `last_value(sum([m]), query_groups(), {[d]})` → `window: [{semiadditive: last}]`. Other uses are untranslatable. |
+| Complex `group_aggregate(...)` with `query_groups()` modifier | Cannot express the query-group-aware variant |
+| `AGGREGATE OVER` in YAML `expr` | Causes `PARSE_SYNTAX_ERROR` — use dimension window function instead |
 | Nested formula references beyond 3 levels | Complexity limit |
 | Circular formula references | Cannot resolve |
 
-When encountering untranslatable formulas:
-1. Omit the column from the MV YAML
+These Databricks MV expression patterns cannot be translated to ThoughtSpot formulas:
+
+| Pattern | Reason |
+|---|---|
+| Subquery in `expr`: `(SELECT ... FROM ...)` | ThoughtSpot formulas cannot contain SQL subqueries |
+| `source:` as SELECT statement: `source: (SELECT ... FROM ...)` | Not a table reference — requires creating a Databricks VIEW first |
+| Correlated window with non-standard frame | No direct TS equivalent for arbitrary window frames |
+
+When encountering untranslatable patterns:
+1. Omit the column from the output (MV YAML or TS Model TML)
 2. Log in the Unmapped Report with the original expression and reason
+
+### SQL Comment Stripping
+
+Databricks MV `expr` fields may contain SQL comments:
+- `-- line comment` at end of expression
+- `/* block comment */` inline
+
+Strip all SQL comments before translating. They are not meaningful to ThoughtSpot
+formulas and will cause parse errors if included.
 
 ---
 
@@ -254,13 +508,19 @@ formula equivalents:
 | `date_trunc('month', col)` | `start_of_month(col)` |
 | `date_trunc('quarter', col)` | `start_of_quarter(col)` |
 | `date_trunc('year', col)` | `start_of_year(col)` |
-| `CASE WHEN x THEN y WHEN z THEN w ELSE v END` | Nested `if(x, y, if(z, w, v))` |
-| `COALESCE(a, b)` | `if(a != null, a, b)` |
+| `CASE WHEN x THEN y WHEN z THEN w ELSE v END` | `if (x) then y else if (z) then w else v` |
+| `COALESCE(a, b)` | `if (a != null) then a else b` |
 | `CONCAT(a, ' ', b)` | `concat(a, ' ', b)` |
 | `DATEDIFF(end, start)` | `diff_days(start, end)` — arg order reversed |
+| `DATEDIFF(MONTH, start, end)` | `diff_months(start, end)` — 3-arg form; swap start/end for TS |
+| `DATEDIFF(DAY, start, end)` | `diff_days(start, end)` — 3-arg form; swap start/end for TS |
 | `MONTHS_BETWEEN(end, start)` | `diff_months(start, end)` — arg order reversed |
+| `EXTRACT(YEAR FROM d)` | `year(d)` |
+| `EXTRACT(MONTH FROM d)` | `month_number(d)` |
+| `EXTRACT(DAY FROM d)` | `day_of_month(d)` |
+| `EXTRACT(HOUR FROM ts)` | `hour(ts)` |
 | `YEAR(d)` | `year(d)` |
-| `MONTH(d)` | `month(d)` |
+| `MONTH(d)` | `month_number(d)` |
 | `DAYOFWEEK(d)` | `day_of_week(d)` — adjust: Databricks 1=Sun, TS 1=Mon |
 | `ROUND(x, n)` | `round(x, n)` |
 | `CAST(x AS type)` | Depends on target type; often implicit in TS |
@@ -269,3 +529,31 @@ formula equivalents:
 | `x IS NULL` | `isnull(x)` |
 | `NOT expr` | `not(expr)` |
 | `x IN (a, b, c)` | `in(x, a, b, c)` |
+| `COUNT(*)` | `count ( 1 )` — TS has no `COUNT(*)` syntax |
+| `AGG(x) FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` function; see Conditional Aggregates section |
+| `SUM(x) OVER (PARTITION BY dim)` | `group_aggregate(sum([x]), {[dim]}, query_filters())` — LOD dimension |
+| `MEASURE(name)` | `[name]` — cross-measure reference |
+| `ANY_VALUE(name)` | `[name]` — dimension reference from measure |
+| `MEASURE(a) / ANY_VALUE(b)` | `[a] / [b]` — cross-measure ratio |
+| `(SELECT ... FROM ...)` | **Untranslatable** — subquery; log in Unmapped Report |
+
+### Implementation Notes
+
+**Date literals with hyphens:** A bare `'2024-05-01'` in a ThoughtSpot formula is parsed
+as `'2024' - 05 - 01` (subtraction). Wrap in `to_date('2024-05-01', 'yyyy-MM-dd')` —
+hyphens are fine inside `to_date()` because the parser treats the first argument as a
+string, not arithmetic. No reformatting needed — keep the original date string as-is
+and provide a matching format pattern.
+
+**Operator regex ordering:** When tokenising SQL operators for translation, match multi-character
+operators before single-character ones: `<=|>=|!=|<>|<|>|=`. If `<` is matched before `<=`,
+the `=` is left orphaned and the formula breaks.
+
+**`moving_sum` / `moving_average` — no nested aggregates:** ThoughtSpot window functions
+(`moving_sum`, `moving_average`, `cumulative_sum`) already aggregate internally. Do NOT
+wrap `sum()` or `average()` inside them. Strip the outer aggregate and pass the raw
+column expression: `moving_sum([col], N, 0, [date])`, not `moving_sum(sum([col]), N, 0, [date])`.
+
+**`count(distinct col)` — use `unique count`:** ThoughtSpot does not support `count(distinct ...)`.
+Use `unique count ( [col] )` (with a space, not underscore). In MEASURE columns, set
+`aggregation: COUNT_DISTINCT`. In formulas, write `unique count ( [col] )`.
