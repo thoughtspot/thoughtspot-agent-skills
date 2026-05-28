@@ -19,6 +19,8 @@
 
 **Conventions to follow:** [.claude/rules/ts-cli.md](../../../.claude/rules/ts-cli.md), [.claude/rules/api-research.md](../../../.claude/rules/api-research.md), [.claude/rules/branching.md](../../../.claude/rules/branching.md), [tools/ts-cli/CLAUDE.md](../../../tools/ts-cli/CLAUDE.md). MCP-first for any API question.
 
+**API version:** All calls are **v2** (`/api/rest/2.0/...`). The v1 dependents endpoint returns 404 on Cloud anyway (open-item #1). The repo's only remaining v1 usage is `ts connections get / add-tables` which is *not* called by `ts metadata report` — its v2 migration is tracked separately in `.claude/rules/ts-cli.md`.
+
 ---
 
 ## File map
