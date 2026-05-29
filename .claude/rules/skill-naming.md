@@ -20,7 +20,7 @@ extend the rule with a new one.
 
 ---
 
-## The six families
+## The nine families
 
 | # | Family | Pattern | Semantic | Members |
 |---|---|---|---|---|
@@ -31,6 +31,8 @@ extend the rule with a new one.
 | 5 | `ts-variable-*` | `ts-variable-{specifier}` | Manage a specific platform variable across all its operations (search, set, remove). Second token is the variable's short name. | `ts-variable-timezone` *(planned)* |
 | 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure used by other skills. | `ts-setup-sv` |
 | 7 | `ts-recipe-*` | `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]` | Build a specific analytical capability in ThoughtSpot. Second token is the primary ThoughtSpot artifact produced (`formula`, `answer`, `liveboard`, `model`). Third+ tokens describe the concept (`business-days`, `hms-display`, `abc-analysis`). Optional platform suffix (`-snowflake`, `-databricks`) present only when the recipe deploys to an external platform; omitted for pure-ThoughtSpot recipes. | `ts-recipe-formula-business-days-snowflake` |
+| 8 | `ts-model-from-*` | `ts-model-from-{platform}` | Migrate a data model **from** an external BI platform into ThoughtSpot — parses a workbook file and generates table + model TMLs. Distinct from `ts-convert-*` because the input is a full workbook (not a ThoughtSpot object). | `ts-model-from-tableau` |
+| 9 | `ts-liveboard-from-*` | `ts-liveboard-from-{platform}` | Migrate dashboards **from** an external BI platform into ThoughtSpot liveboards. Companion to `ts-model-from-*` for the visualization layer. | `ts-liveboard-from-tableau` |
 
 ---
 

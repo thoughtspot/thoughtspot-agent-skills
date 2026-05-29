@@ -64,6 +64,16 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "Snowsight-only: installs the stored procedures Snowsight runtime uses",
     ("ts-setup-sv", "cli"):
         "Snowsight-only: CLI uses ts CLI directly, no stored procedures needed",
+
+    # --- Tableau migration skills (Claude-only; LLM reasoning required for TWB parsing) ---
+    ("ts-model-from-tableau", "coco-snowsight"):
+        "TWB XML parsing and TML generation require Claude's native reasoning; not supported in stored-proc runtime",
+    ("ts-model-from-tableau", "cli"):
+        "Claude-only skill: requires LLM reasoning for XML parsing and TML authoring",
+    ("ts-liveboard-from-tableau", "coco-snowsight"):
+        "Dashboard coordinate mapping and layout generation require Claude's native reasoning",
+    ("ts-liveboard-from-tableau", "cli"):
+        "Claude-only skill: requires LLM reasoning for dashboard parsing and TML authoring",
 }
 
 
