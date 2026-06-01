@@ -94,3 +94,26 @@ def _next_hop_type(row: dict) -> Optional[str]:
     if t == "LIVEBOARD":
         return "LIVEBOARD"
     return "LOGICAL_TABLE"
+
+
+def row_to_entry(row: dict) -> DependentEntry:
+    """Convert a normalized dependents row into a DependentEntry.
+
+    Owner is set from author_* fields when present.
+    Modified-at is left as None here; tml_probes can fill it later.
+    Risk is set to a placeholder LOW tag; the classifier replaces it.
+    """
+    author_id = row.get("author_id")
+    author_name = row.get("author_display_name")
+    owner = Owner(id=author_id, display_name=author_name) if author_id else None
+    return DependentEntry(
+        guid=row["guid"],
+        name=row["name"],
+        type=row["type"],
+        subtype=None,
+        via="v2_dependents",
+        hops=row.get("hops", 1),
+        owner=owner,
+        modified_at=None,
+        risk=RiskTag(tag="LOW", reason="placeholder — classifier overrides"),
+    )

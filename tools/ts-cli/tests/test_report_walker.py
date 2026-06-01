@@ -92,3 +92,35 @@ class TestWalkDependentsRecursive:
         assert len(out) == 1
         assert out[0]["guid"] == "mdl"
         assert client.post.call_count == 1
+
+
+from ts_cli.report.walker import row_to_entry
+from ts_cli.report.schema import DependentEntry, RiskTag
+
+
+class TestRowToEntry:
+    def test_minimal_row(self):
+        row = {
+            "source_guid": "src", "guid": "g", "name": "n",
+            "type": "LOGICAL_TABLE", "raw_bucket": "LOGICAL_TABLE",
+            "author_id": "u", "author_display_name": "U",
+            "hops": 1,
+        }
+        entry = row_to_entry(row)
+        assert isinstance(entry, DependentEntry)
+        assert entry.guid == "g"
+        assert entry.owner is not None
+        assert entry.owner.id == "u"
+        assert entry.hops == 1
+        assert entry.via == "v2_dependents"
+        assert entry.risk.tag == "LOW"   # placeholder
+
+    def test_no_author(self):
+        row = {
+            "source_guid": "src", "guid": "g", "name": "n",
+            "type": "LOGICAL_TABLE", "raw_bucket": "LOGICAL_TABLE",
+            "author_id": None, "author_display_name": None,
+            "hops": 1,
+        }
+        entry = row_to_entry(row)
+        assert entry.owner is None
