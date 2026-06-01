@@ -65,4 +65,10 @@ def test_build_report_with_deep_calls_alias_export(MockClient):
         _resp([{"info": {"type": "model"}, "edoc": "column_alias:\n  columns: []\n"}]),
     ]
     out = build_report(uuid, profile="test", with_deep=True)
+    # Verify the alias export call was actually made (3rd call: resolve + walk + alias probe).
+    assert client.post.call_count == 3
+    third_call = client.post.call_args_list[2]
+    assert "/api/rest/2.0/metadata/tml/export" in third_call.args[0]
+    assert third_call.kwargs["json"]["export_options"]["export_with_column_aliases"] is True
+    # Coverage should include Column alias TML row.
     assert any("alias" in c["type"].lower() for c in out["coverage"])

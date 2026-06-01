@@ -42,6 +42,11 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
     ai_hits: list = []
     alias_supported = True
 
+    # Deep probes filter by column name; for table/model sources there is no
+    # single target column, so all probe functions return zero hits.  Track
+    # whether deep probes were truly active so coverage rows can be honest.
+    deep_active = with_deep and source.type == "LOGICAL_COLUMN"
+
     if with_deep:
         from . import tml_probes
         import yaml
@@ -105,17 +110,26 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
                       found=sum(1 for d in dependents if d.type == "SET")),
         CoverageEntry(type="Spotter feedback", checked=True,
                       found=sum(1 for d in dependents if d.type == "FEEDBACK")),
-        CoverageEntry(type="RLS rules", checked=with_deep, found=len(rls_hits)),
-        CoverageEntry(type="Monitor alerts", checked=with_deep, found=len(alert_hits)),
+        CoverageEntry(type="RLS rules", checked=deep_active, found=len(rls_hits),
+                      reason=(None if deep_active
+                              else "deep probes only populate for column sources in v1")),
+        CoverageEntry(type="Monitor alerts", checked=deep_active, found=len(alert_hits),
+                      reason=(None if deep_active
+                              else "deep probes only populate for column sources in v1")),
         CoverageEntry(
             type="Column alias TML",
-            checked=with_deep and alias_supported,
+            checked=deep_active and alias_supported,
             found=len(alias_hits),
-            reason=(None if (with_deep and alias_supported)
-                    else "requires --with-deep + cluster build 10.13.0+"),
+            reason=(None if (deep_active and alias_supported)
+                    else ("requires --with-deep + cluster build 10.13.0+" if deep_active
+                          else "deep probes only populate for column sources in v1")),
         ),
-        CoverageEntry(type="Joins", checked=with_deep, found=len(join_hits)),
-        CoverageEntry(type="Spotter AI surface area", checked=with_deep, found=len(ai_hits)),
+        CoverageEntry(type="Joins", checked=deep_active, found=len(join_hits),
+                      reason=(None if deep_active
+                              else "deep probes only populate for column sources in v1")),
+        CoverageEntry(type="Spotter AI surface area", checked=deep_active, found=len(ai_hits),
+                      reason=(None if deep_active
+                              else "deep probes only populate for column sources in v1")),
         CoverageEntry(type="Column-level sharing (ACLs)", checked=False, found=0,
                       informational=True, reason="not implemented in v1"),
         CoverageEntry(type="CSR (column_security_rules)", checked=False, found=0,
