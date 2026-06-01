@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-01
+- feat: add `ts metadata report` command — dependency walk + TML probes + risk classifier + formatters
+- feat: rewrite ts-dependency-manager Steps 4/5 to delegate to `ts metadata report` CLI
+
 ## 2026-05-22
 - feat: add `ts-convert-to-databricks-mv` and `ts-convert-from-databricks-mv` skills — convert between ThoughtSpot Models and Databricks Metric Views (v0.1 single-source and v1.1 multi-source); available in CLI, Cortex Code CLI, and Cursor
 - feat: add `ts-profile-databricks` skill — manage Databricks connection profiles with Service Principal (OAuth M2M), PAT, or existing CLI profile auth; available in CLI, Cortex Code CLI, and Cursor
