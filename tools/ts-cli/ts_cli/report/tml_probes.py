@@ -92,3 +92,51 @@ def find_alias_column_uses(alias_tml: dict, target_columns: Iterable[str]) -> Li
                 "locales": [loc.get("name") for loc in (c.get("locales") or [])],
             })
     return hits
+
+
+def find_join_column_uses(model_tml: dict, target_columns: Iterable[str]) -> List[dict]:
+    """Return join hits where any join.on expression references a target column.
+
+    Per open-items.md #4: ThoughtSpot rejects model imports if joins[].on
+    references a missing column.
+    """
+    targets = set(target_columns)
+    hits = []
+    for tbl in (model_tml.get("model") or {}).get("model_tables", []):
+        for join in tbl.get("joins_with", []):
+            on_expr = join.get("on", "")
+            for col in targets:
+                if col in on_expr:
+                    hits.append({
+                        "table": tbl.get("name", "?"),
+                        "join": join.get("name", "unnamed"),
+                        "on": on_expr,
+                        "column": col,
+                    })
+                    break
+    return hits
+
+
+def find_ai_surface_uses(model_tml: dict, target_columns: Iterable[str]) -> List[dict]:
+    """Return hits where a target column appears in a Spotter-AI surface area:
+    Data Model Instructions, synonyms, or business-term column references.
+    """
+    targets = set(target_columns)
+    hits = []
+    model = model_tml.get("model") or {}
+
+    # Data Model Instructions — free text; tokens look like [Column Name].
+    dmi = ((model.get("model_instructions") or {}).get("data_model_instructions")) or ""
+    for col in targets:
+        if f"[{col}]" in dmi or col in dmi:
+            hits.append({"surface": "data_model_instructions", "column": col})
+
+    # Synonyms — per-column array.
+    for c in model.get("columns", []) or []:
+        name = c.get("name")
+        if name in targets:
+            syns = (c.get("properties") or {}).get("synonyms") or []
+            if syns:
+                hits.append({"surface": "synonyms", "column": name, "values": syns})
+
+    return hits

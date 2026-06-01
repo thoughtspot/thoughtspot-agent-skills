@@ -112,3 +112,58 @@ class TestFindAliasColumnUses:
     def test_empty_alias_tml(self):
         hits = find_alias_column_uses({}, {"X"})
         assert hits == []
+
+
+from ts_cli.report.tml_probes import (
+    find_join_column_uses,
+    find_ai_surface_uses,
+)
+
+
+class TestFindJoinColumnUses:
+    def test_finds_column_in_join_on(self):
+        model_tml = {
+            "model": {
+                "model_tables": [{
+                    "name": "ORDERS",
+                    "joins_with": [
+                        {"name": "j1", "on": "[ORDERS::CUSTOMER_ID] = [CUSTOMERS::ID]"},
+                    ],
+                }],
+            }
+        }
+        hits = find_join_column_uses(model_tml, {"CUSTOMER_ID"})
+        assert len(hits) == 1
+        assert hits[0]["table"] == "ORDERS"
+        assert hits[0]["join"] == "j1"
+
+    def test_no_match(self):
+        model_tml = {"model": {"model_tables": [{"name": "X", "joins_with": []}]}}
+        assert find_join_column_uses(model_tml, {"Y"}) == []
+
+
+class TestFindAiSurfaceUses:
+    def test_finds_column_in_data_model_instructions(self):
+        model_tml = {
+            "model": {
+                "model_instructions": {
+                    "data_model_instructions": "Always filter by [Customer Zipcode] when computing regional totals.",
+                },
+                "columns": [],
+            }
+        }
+        hits = find_ai_surface_uses(model_tml, {"Customer Zipcode"})
+        assert any(h["surface"] == "data_model_instructions" for h in hits)
+
+    def test_finds_column_in_synonyms(self):
+        model_tml = {
+            "model": {
+                "columns": [{"name": "Customer Zipcode", "properties": {"synonyms": ["zip"]}}],
+            }
+        }
+        hits = find_ai_surface_uses(model_tml, {"Customer Zipcode"})
+        assert any(h["surface"] == "synonyms" for h in hits)
+
+    def test_no_ai_uses(self):
+        model_tml = {"model": {"columns": []}}
+        assert find_ai_surface_uses(model_tml, {"X"}) == []
