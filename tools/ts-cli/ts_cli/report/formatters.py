@@ -68,5 +68,56 @@ def render_text(report: Report) -> str:
 
 
 def render_md(report: Report) -> str:
-    """Stub — implemented in F3."""
-    raise NotImplementedError
+    """Markdown — heading, dependents table, coverage table, recommendation block."""
+    lines: List[str] = []
+    src = report.source
+    lines.append(f"# Dependency report — `{src.name}`")
+    lines.append("")
+    lines.append(f"- **GUID:** `{src.guid}`")
+    lines.append(f"- **Type:** {src.type}")
+    if src.parent:
+        lines.append(f"- **Parent:** {src.parent.get('name')} (`{src.parent.get('guid')}`)")
+    lines.append(f"- **Walked at:** {report.walked_at} — profile `{report.profile}`")
+    lines.append("")
+
+    lines.append("## Dependents")
+    if not report.dependents:
+        lines.append("_(none)_")
+    else:
+        lines.append("")
+        lines.append("| Risk | Type | Name | GUID | Owner | Reason |")
+        lines.append("|---|---|---|---|---|---|")
+        for d in report.dependents:
+            owner = d.owner.display_name if d.owner else "—"
+            lines.append(f"| {d.risk.tag} | {d.type} | {d.name} | `{d.guid}` | {owner} | {d.risk.reason} |")
+    lines.append("")
+
+    lines.append("## Coverage")
+    lines.append("")
+    lines.append("| Type | Checked | Found | Notes |")
+    lines.append("|---|:-:|---:|---|")
+    for c in report.coverage:
+        check = "✓" if c.checked else "—"
+        notes = []
+        if c.informational:
+            notes.append("informational")
+        if not c.checked and c.reason:
+            notes.append(c.reason)
+        lines.append(f"| {c.type} | {check} | {c.found} | {' / '.join(notes)} |")
+    lines.append("")
+
+    agg = report.classification.aggregate
+    rec = report.classification.recommendation or "—"
+    lines.append("## Aggregate")
+    lines.append("")
+    lines.append(f"- **Risk:** `{agg.tag}`")
+    lines.append(f"- **Recommendation:** `{rec}`")
+    lines.append(f"- **Reason:** {agg.reason}")
+
+    if report.warnings:
+        lines.append("")
+        lines.append("## Warnings")
+        for w in report.warnings:
+            lines.append(f"- ⚠ {w}")
+
+    return "\n".join(lines)

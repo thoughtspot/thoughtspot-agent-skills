@@ -54,3 +54,17 @@ class TestRenderText:
     def test_contains_recommendation(self):
         out = render_text(_mk_report())
         assert "SAFE_TO_DROP" in out
+
+
+class TestRenderMd:
+    def test_has_markdown_heading(self):
+        out = render_md(_mk_report())
+        assert out.startswith("# ") or "\n# " in out
+
+    def test_has_table_syntax(self):
+        out = render_md(_mk_report())
+        assert "| Coverage" in out or "| Type " in out
+
+    def test_includes_aggregate(self):
+        out = render_md(_mk_report())
+        assert "SAFE_TO_DROP" in out
