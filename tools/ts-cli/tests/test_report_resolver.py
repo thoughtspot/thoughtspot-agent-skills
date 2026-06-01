@@ -136,3 +136,46 @@ class TestResolveSourceTwoPart:
         assert desc.guid == "g-1"
         call_body = client.post.call_args[1]["json"]
         assert "name_pattern" in str(call_body)
+
+
+class TestResolveFourPartColumn:
+    def test_resolves_column_on_table(self, monkeypatch):
+        """DB.SCH.TBL.COL → resolve table first, then look up column on it."""
+        table_hit = _mk_hit("tbl-1", "DB.SCH.TBL")
+        column = {"header": {"id": "col-1", "name": "COL"}}
+        detail_resp = [{
+            "metadata_id": "tbl-1",
+            "metadata_name": "DB.SCH.TBL",
+            "metadata_type": "LOGICAL_TABLE",
+            "metadata_detail": {"columns": [column]},
+            "metadata_header": {"id": "tbl-1", "name": "DB.SCH.TBL"},
+        }]
+
+        client = MagicMock()
+        resp1, resp2 = MagicMock(), MagicMock()
+        resp1.json.return_value = [table_hit]
+        resp2.json.return_value = detail_resp
+        client.post.side_effect = [resp1, resp2]
+
+        desc = resolve_source("DB.SCH.TBL.COL", client)
+        assert desc.type == "LOGICAL_COLUMN"
+        assert desc.guid == "col-1"
+        assert desc.name == "COL"
+        assert desc.parent == {"guid": "tbl-1", "name": "DB.SCH.TBL", "type": "LOGICAL_TABLE"}
+
+    def test_column_not_found_raises(self, monkeypatch):
+        table_hit = _mk_hit("tbl-1", "DB.SCH.TBL")
+        detail_resp = [{
+            "metadata_id": "tbl-1",
+            "metadata_name": "DB.SCH.TBL",
+            "metadata_detail": {"columns": []},
+            "metadata_header": {"id": "tbl-1", "name": "DB.SCH.TBL"},
+        }]
+        client = MagicMock()
+        resp1, resp2 = MagicMock(), MagicMock()
+        resp1.json.return_value = [table_hit]
+        resp2.json.return_value = detail_resp
+        client.post.side_effect = [resp1, resp2]
+
+        with pytest.raises(SourceUnresolvedError):
+            resolve_source("DB.SCH.TBL.MISSING", client)

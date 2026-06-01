@@ -76,14 +76,24 @@ def _to_descriptor(input_str: str, hit: dict, parent: Optional[dict] = None) -> 
     )
 
 
-def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescriptor:
-    """Resolve a user-provided source string to a SourceDescriptor.
+def _fetch_table_columns(client: ThoughtSpotClient, table_guid: str) -> list:
+    """Return the columns[] list from metadata/search with include_details=true."""
+    resp = client.post("/api/rest/2.0/metadata/search", json={
+        "metadata": [{"identifier": table_guid, "type": "LOGICAL_TABLE"}],
+        "include_details": True,
+        "include_headers": True,
+    })
+    data = resp.json()
+    if not data:
+        return []
+    return (data[0].get("metadata_detail") or {}).get("columns") or []
 
-    Raises SourceUnresolvedError / SourceAmbiguousError on failure cases.
-    """
+
+def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescriptor:
+    """Resolve a user-provided source string to a SourceDescriptor."""
     kind = classify_input(input_str)
+
     if kind == InputKind.GUID:
-        # For GUIDs, look up by identifier.
         hits = _search(client, {
             "metadata": [{"identifier": input_str}],
             "record_size": 1,
@@ -93,13 +103,30 @@ def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescripto
             raise SourceUnresolvedError(input_str)
         return _to_descriptor(input_str, hits[0])
 
-    # Name lookup: use exact name match (no SQL-LIKE wildcards).
+    if kind == InputKind.FOUR_PART_NAME:
+        # DB.SCH.TBL.COL — resolve the table first, then find the column.
+        table_name = input_str.rsplit(".", 1)[0]
+        col_name = input_str.rsplit(".", 1)[1]
+        table_desc = resolve_source(table_name, client)
+        cols = _fetch_table_columns(client, table_desc.guid)
+        for c in cols:
+            h = c.get("header") or {}
+            if h.get("name") == col_name:
+                return SourceDescriptor(
+                    input=input_str,
+                    guid=h.get("id"),
+                    type="LOGICAL_COLUMN",
+                    name=col_name,
+                    parent={"guid": table_desc.guid, "name": table_desc.name, "type": "LOGICAL_TABLE"},
+                )
+        raise SourceUnresolvedError(input_str)
+
+    # 1-, 2-, 3-part name lookup (exact-name match).
     hits = _search(client, {
         "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": input_str}],
         "record_size": 10,
         "include_headers": True,
     })
-    # Filter to exact-name matches only.
     hits = [h for h in hits if (h.get("metadata_name") or "") == input_str]
     if not hits:
         raise SourceUnresolvedError(input_str)
