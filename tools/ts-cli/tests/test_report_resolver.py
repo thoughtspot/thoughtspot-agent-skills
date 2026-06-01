@@ -75,12 +75,13 @@ def _mk_hit(guid, name, type_="LOGICAL_TABLE", subtype="ONE_TO_ONE_LOGICAL"):
 
 class TestResolveSourceGuid:
     def test_resolve_guid_returns_descriptor(self):
-        client = _mk_client([_mk_hit("g-1", "DB.SCH.T")])
-        desc = resolve_source("g-1", client)
+        guid = "baa451a6-02a0-42d1-8347-8cd4af13b505"
+        client = _mk_client([_mk_hit(guid, "DB.SCH.T")])
+        desc = resolve_source(guid, client)
         assert isinstance(desc, SourceDescriptor)
-        assert desc.guid == "g-1"
+        assert desc.guid == guid
         assert desc.type == "LOGICAL_TABLE"
-        assert desc.input == "g-1"
+        assert desc.input == guid
 
 
 class TestResolveSourceThreePartName:
@@ -103,3 +104,35 @@ class TestResolveSourceThreePartName:
         with pytest.raises(SourceAmbiguousError) as excinfo:
             resolve_source("DB.SCH.T", client)
         assert len(excinfo.value.candidates) == 2
+
+
+class TestResolveSourceOnePart:
+    def test_one_part_name_uses_name_pattern(self):
+        """Bare name like 'MyModel' must use name_pattern search, not identifier."""
+        client = MagicMock()
+        resp = MagicMock()
+        resp.json.return_value = [_mk_hit("g-1", "MyModel")]
+        client.post.return_value = resp
+        desc = resolve_source("MyModel", client)
+        assert desc.guid == "g-1"
+        # Verify name_pattern was used (not identifier)
+        call_body = client.post.call_args[1]["json"]
+        assert "name_pattern" in str(call_body)
+        assert "identifier" not in str(call_body)
+
+    def test_one_part_no_match_raises_unresolved(self):
+        client = _mk_client([])
+        with pytest.raises(SourceUnresolvedError):
+            resolve_source("MissingModel", client)
+
+
+class TestResolveSourceTwoPart:
+    def test_two_part_name_uses_name_pattern(self):
+        client = MagicMock()
+        resp = MagicMock()
+        resp.json.return_value = [_mk_hit("g-1", "Schema.Model")]
+        client.post.return_value = resp
+        desc = resolve_source("Schema.Model", client)
+        assert desc.guid == "g-1"
+        call_body = client.post.call_args[1]["json"]
+        assert "name_pattern" in str(call_body)

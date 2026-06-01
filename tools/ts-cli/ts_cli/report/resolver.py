@@ -82,8 +82,8 @@ def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescripto
     Raises SourceUnresolvedError / SourceAmbiguousError on failure cases.
     """
     kind = classify_input(input_str)
-    if kind in (InputKind.GUID, InputKind.ONE_PART_NAME):
-        # For GUIDs and bare single-part identifiers, look up by identifier.
+    if kind == InputKind.GUID:
+        # For GUIDs, look up by identifier.
         hits = _search(client, {
             "metadata": [{"identifier": input_str}],
             "record_size": 1,
