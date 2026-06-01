@@ -33,10 +33,66 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
     raw_rows = walk_dependents_recursive(source, client, max_depth=max_depth)
     dependents = [row_to_entry(r) for r in raw_rows]
 
-    # TML probes (RLS, alerts, aliases, joins, AI surface) — added in Task G2.
-    # For now, with_deep=True is identical to with_deep=False until G2 lands.
+    # TML probes (RLS, alerts, aliases, joins, AI surface).
     rls_hits: list = []
     csr_hits: list = []
+    alias_hits: list = []
+    alert_hits: list = []
+    join_hits: list = []
+    ai_hits: list = []
+    alias_supported = True
+
+    if with_deep:
+        from . import tml_probes
+        import yaml
+
+        # Determine target columns for probe filtering.
+        target_cols = {source.name} if source.type == "LOGICAL_COLUMN" else set()
+
+        # Export source TML with the column-alias beta flag (10.13.0+).
+        # The response contains model, table, and column_alias docs in one call.
+        # RLS, joins, and AI-surface uses are parsed from those same docs.
+        try:
+            resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+                "metadata": [{"identifier": source.guid, "type": source.type}],
+                "export_associated": True,
+                "export_fqn": True,
+                "edoc_format": "YAML",
+                "export_options": {"export_with_column_aliases": True},
+            })
+            for doc in (resp.json() or []):
+                edoc_str = doc.get("edoc") or ""
+                if not edoc_str:
+                    continue
+                parsed = yaml.safe_load(edoc_str) or {}
+                info_type = ((doc.get("info") or {}).get("type") or "").upper()
+                filename = ((doc.get("info") or {}).get("filename") or "").lower()
+                if "COLUMN_ALIAS" in info_type or "alias" in filename:
+                    alias_hits.extend(tml_probes.find_alias_column_uses(parsed, target_cols))
+                if info_type in ("TABLE", "LOGICAL_TABLE"):
+                    rls_hits.extend(tml_probes.find_rls_column_uses(parsed, target_cols))
+                if info_type in ("MODEL", "LOGICAL_MODEL", "WORKSHEET"):
+                    join_hits.extend(tml_probes.find_join_column_uses(parsed, target_cols))
+                    ai_hits.extend(tml_probes.find_ai_surface_uses(parsed, target_cols))
+        except Exception:
+            alias_supported = False
+
+        # Monitor alerts: export TML for each Liveboard dependent.
+        for dep in dependents:
+            if dep.type != "LIVEBOARD":
+                continue
+            try:
+                a_resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+                    "metadata": [{"identifier": dep.guid, "type": "LIVEBOARD"}],
+                    "export_associated": True,
+                    "edoc_format": "YAML",
+                })
+                for doc in (a_resp.json() or []):
+                    parsed = yaml.safe_load((doc.get("edoc") or "")) or {}
+                    if "monitor_alert" in parsed:
+                        alert_hits.extend(tml_probes.find_alert_column_uses(parsed, target_cols))
+            except Exception:
+                pass
 
     coverage = [
         CoverageEntry(type="Models / Views / Tables", checked=True,
@@ -49,6 +105,21 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
                       found=sum(1 for d in dependents if d.type == "SET")),
         CoverageEntry(type="Spotter feedback", checked=True,
                       found=sum(1 for d in dependents if d.type == "FEEDBACK")),
+        CoverageEntry(type="RLS rules", checked=with_deep, found=len(rls_hits)),
+        CoverageEntry(type="Monitor alerts", checked=with_deep, found=len(alert_hits)),
+        CoverageEntry(
+            type="Column alias TML",
+            checked=with_deep and alias_supported,
+            found=len(alias_hits),
+            reason=(None if (with_deep and alias_supported)
+                    else "requires --with-deep + cluster build 10.13.0+"),
+        ),
+        CoverageEntry(type="Joins", checked=with_deep, found=len(join_hits)),
+        CoverageEntry(type="Spotter AI surface area", checked=with_deep, found=len(ai_hits)),
+        CoverageEntry(type="Column-level sharing (ACLs)", checked=False, found=0,
+                      informational=True, reason="not implemented in v1"),
+        CoverageEntry(type="CSR (column_security_rules)", checked=False, found=0,
+                      reason="deferred — cluster feature gate (open-item #9)"),
     ]
 
     agg = aggregate_classification(AggregateInputs(
