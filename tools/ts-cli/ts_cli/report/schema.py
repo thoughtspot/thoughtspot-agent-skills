@@ -34,6 +34,10 @@ class RiskTag:
     tag: str  # one of RISK_TAGS
     reason: str
 
+    def __post_init__(self):
+        if self.tag not in RISK_TAGS:
+            raise ValueError(f"Invalid RiskTag.tag {self.tag!r}; must be one of {RISK_TAGS}")
+
     def to_dict(self):
         return asdict(self)
 
@@ -98,6 +102,10 @@ class Classification:
     per_dependent: List[DependentEntry]
     aggregate: RiskTag
     recommendation: str = ""  # one of RECOMMENDATIONS — set by classifier
+
+    def __post_init__(self):
+        if self.recommendation and self.recommendation not in RECOMMENDATIONS:
+            raise ValueError(f"Invalid recommendation {self.recommendation!r}; must be one of {RECOMMENDATIONS}")
 
     def to_dict(self):
         return {
