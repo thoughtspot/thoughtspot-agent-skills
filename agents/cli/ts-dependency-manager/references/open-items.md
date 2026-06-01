@@ -279,8 +279,8 @@ so the input data (per-column dep counts and patterns) is already populated.
 
 ---
 
-## #22 — Smoke test for ts metadata report — OPEN
+## #22 — Smoke test for ts metadata report — VERIFIED 2026-06-01
 
-**Status:** OPEN until `tools/smoke-tests/smoke_ts-metadata-report.py` passes against
-SpotterAccuracy. See plan Task I1. Live run currently blocked by `TLSV1_ALERT_PROTOCOL_VERSION`
-on `champ-clone-spotql.thoughtspotdev.cloud`.
+**Status:** VERIFIED 2026-06-01. `tools/smoke-tests/smoke_ts-metadata-report.py` passes
+against SpotterAccuracy (`champ-clone-spotql.thoughtspotdev.cloud`). Fixture:
+`EDUCATION_BUSINESS.EDUCATION_BUSINESS.UNIVERSITY_FACULTY` (GUID `baa451a6-02a0-42d1-8347-8cd4af13b505`).
