@@ -40,3 +40,17 @@ class TestRenderJson:
         parsed = json.loads(out)
         assert parsed["schema_version"] == "1.0"
         assert len(parsed["reports"]) == 2
+
+
+class TestRenderText:
+    def test_contains_source_name(self):
+        out = render_text(_mk_report())
+        assert "X" in out
+
+    def test_contains_coverage_section(self):
+        out = render_text(_mk_report())
+        assert "Coverage" in out or "CHECKED" in out
+
+    def test_contains_recommendation(self):
+        out = render_text(_mk_report())
+        assert "SAFE_TO_DROP" in out
