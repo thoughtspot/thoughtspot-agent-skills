@@ -111,72 +111,38 @@ target) and propose mappings before proceeding.
 
 ---
 
-## Step 4 — Walk dependencies (alias-aware, v2 API)
+## Step 4 — Walk dependents
 
-### Direct dependents (one v2 call)
+Run `ts metadata report` to walk dependents and generate the risk-rated report:
 
-```http
-POST /api/rest/2.0/metadata/search
-{"metadata": [{"identifier": "{source_guid}", "type": "LOGICAL_TABLE"}],
- "include_dependent_objects": true,
- "dependent_object_version": "V2"}
+```bash
+ts metadata report <source-guid> --profile {ts_profile} --format json --depth 3 > /tmp/{slug}_report.json
 ```
 
-Returns `dependent_objects.dependents.{source_guid}` with keys:
-- `LOGICAL_TABLE[]` — Models / Views derived from the source
-- `QUESTION_ANSWER_BOOK[]` — Answers
-- `PINBOARD_ANSWER_BOOK[]` — Liveboards
-- `LOGICAL_COLUMN[]` — column dependents
-- `FEEDBACK[]` — coaching entries
-- `INSIGHT[]` — Sets / cohorts (if surfaced)
+Parse the JSON for:
+- `dependents[]` — flat list (guid / name / type / hops / risk{tag,reason})
+- `coverage[]` — what was checked and found
+- `classification.aggregate` — aggregate risk tag and recommendation
 
-### Alias propagation (critical)
-
-Direct dependents only show level-1. Models that derive from this Model can
-RENAME columns at the join boundary — those aliases need to be propagated
-when walking dependents of the derived Model. For each derived Model in the
-dependent list:
-1. Export its TML
-2. Build the alias map: source-column-name → derived-column-display-name
-3. Re-walk that Model's dependents using the aliased names
-
-This catches Answers/Liveboards on derived Models that reference the original
-column under its aliased name. Skipping this step misses ~30% of real-world
-deps (per the alias-propagation memory).
-
-### Capture timestamps for drift detection
-
-Snapshot `metadata_header.modified` for every dependent at scan time. Before
-each Step 9 import, re-query the timestamp and abort the per-object change if
-it has moved (someone else edited the object between scan and apply).
-
-### Inaccessible-dependents signal
-
-Aggregate the count of dependents that returned partial info (cross-org,
-RLS-restricted, sharing not granted to the calling user). Surface this in
-Step 5 STOP CONDITIONS.
+Apply scope filtering over `dependents[]` if the audit scope is column-specific.
 
 ---
 
 ## Step 5 — Impact report
 
-Generate a markdown report with:
+Render the report in markdown:
 
-- **Per-dependent classification** — Implementable / Partial / Manual / GUID-stable
-  / Informational (see `dependency-types.md` for the full matrix)
-- **Risk rating** per object (low / medium / high based on type + change scope)
-- **Hyperlinks** to the ThoughtSpot UI for manual review
-- **Dependency tree** in indented markdown
-- **Dependency DAG** as a mermaid diagram
-- **Scan coverage** — what was reachable, what was not, and why
-- **STOP CONDITIONS** — list any reasons the user should not proceed
-  (inaccessible deps, alias gaps, RLS exclusions)
+```bash
+ts metadata report <source-guid> --profile {ts_profile} --format md --out /tmp/{slug}_impact_report.md
+```
 
-Write the report to `/tmp/ts_dep_report_<ts>.md`. Show the first ~200 chars
-inline; tell the user where the full report is. Ask `Proceed / re-scan /
-exit?`
+Present the markdown to the user. For Audit mode, exit after this step.
 
-For Audit mode: stop here. Print the report path and exit.
+If `classification.aggregate.tag == "STOP"`, surface the stop condition:
+
+> ⛔ STOP CONDITION — `{recommendation}`
+>
+> Resolve via the ThoughtSpot UI before proceeding.
 
 ---
 
