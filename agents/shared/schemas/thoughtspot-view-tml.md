@@ -1,8 +1,12 @@
-# ThoughtSpot View TML — Structure Reference
+# ThoughtSpot View TML — Structure Reference (AGGR_WORKSHEET)
 
-How a ThoughtSpot View (also called an "Aggregated Worksheet" or "SQL View") is
-represented in TML. Views are query-based logical tables — they can be a data source
-for Answers and Liveboards in the same way a Model can.
+How a ThoughtSpot View (Aggregated Worksheet) is represented in TML. Views are
+search-query-based logical tables — they can be a data source for Answers and
+Liveboards in the same way a Model can.
+
+**This is NOT a SQL View.** For the `sql_view:` TML type (query-backed views that
+run raw SQL against a database connection), see
+[thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md).
 
 For dependency tracking: Views reference physical Tables. Answers and Liveboards can
 reference Views. If a column is removed from a Table, Views built on that Table are

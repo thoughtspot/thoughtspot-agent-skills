@@ -20,6 +20,12 @@ mappings/ts-snowflake/
   ts-snowflake-formula-translation.md — authoritative formula mapping (41 KB)
   ts-snowflake-properties.md          — column/join property mapping rules
 
+mappings/ts-databricks/
+  ts-from-databricks-rules.md         — rules for MV → TS direction
+  ts-to-databricks-rules.md           — rules for TS → MV direction
+  ts-databricks-formula-translation.md — ThoughtSpot ↔ Databricks SQL formula mapping
+  ts-databricks-properties.md         — column/property coverage matrix for MV ↔ TS
+
 schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference
@@ -30,14 +36,21 @@ schemas/
   thoughtspot-alert-tml.md            — Monitor Alert TML structure — metric_id references, personalised_view_info
   thoughtspot-feedback-tml.md         — NLS Feedback/Coaching TML structure — search_tokens, formula_info column references
   thoughtspot-sets-tml.md             — Set TML structure (bins, groups, query sets; answer-level vs reusable)
+  thoughtspot-sql-view-tml.md         — SQL View TML structure (sql_view: type — query-backed, distinct from view:/AGGR_WORKSHEET)
   thoughtspot-formula-patterns.md     — ThoughtSpot formula syntax reference
   thoughtspot-connection.md           — connection object structure
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
+  databricks-metric-view.md           — Databricks Metric View YAML schema (v0.1/v1.1)
 
 worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)
   ts-from-snowflake.md                — end-to-end SV → TS conversion — BIRD_SUPERHEROS_SV (verified against live instance)
   ts-from-snowflake-dunder.md         — end-to-end SV → TS conversion — DUNDER_MIFFLIN_SALES_INVENTORY (multi-value synonyms, descriptions, semi-additive, unique count, concat; verified against live instance)
+
+worked-examples/databricks/
+  ts-to-databricks.md                 — end-to-end TS → MV conversion — DUNDER_MIFFLIN (multi-fact split, flattened views, LOD dimensions, semi-additive, MEASURE()/ANY_VALUE() cross-refs; verified against live instance 2026-05-25)
+  ts-from-databricks.md               — end-to-end MV → TS conversion — e-commerce transactions (direct + computed dims, ratio + window + conditional measures; verified against live instance 2026-05-28)
+  ts-from-databricks-sql-view.md      — end-to-end MV → TS conversion — SELECT subquery source → SQL View + Model (CASE formula, COUNT DISTINCT ratio, filter baked into sql_query; verified against live instance 2026-05-28)
 ```
 
 ## Worked examples are ground truth

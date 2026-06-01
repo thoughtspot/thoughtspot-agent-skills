@@ -21,6 +21,17 @@ and Snowflake CLI. Tests the connection and saves the profile for use by other r
 
 Trigger by asking: "Set up my Snowflake profile" or "Add a Snowflake connection".
 
+### `ts-profile-databricks`
+
+Manages Databricks connection profiles. Supports Service Principal (OAuth M2M), Personal
+Access Token, and existing Databricks CLI profiles. Stores credentials securely in the OS
+credential store and configures `~/.databrickscfg` for CLI access.
+
+Trigger by asking: "Set up my Databricks profile" or "Add a Databricks connection".
+
+> Untested in Cursor — best-effort condensation of the Claude version. See the rule
+> file's header for details.
+
 ### `ts-convert-to-snowflake-sv`
 
 Converts a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Exports the
@@ -35,6 +46,28 @@ maps tables and joins, translates SQL expressions to ThoughtSpot formulas, and
 imports the result.
 
 Trigger by asking: "Convert my Snowflake Semantic View to a ThoughtSpot model".
+
+### `ts-convert-to-databricks-mv`
+
+Converts a ThoughtSpot Model into a Databricks Metric View. Exports the TML definition,
+maps attributes to dimensions and measures to measure expressions (with embedded aggregation),
+translates formulas to Databricks SQL, and creates the view using `CREATE OR REPLACE VIEW ... WITH METRICS LANGUAGE YAML`.
+
+Trigger by asking: "Convert my ThoughtSpot model to a Databricks Metric View".
+
+> Untested in Cursor — best-effort condensation of the Claude version. See the rule
+> file's header for details.
+
+### `ts-convert-from-databricks-mv`
+
+Converts a Databricks Metric View into a ThoughtSpot Model. Fetches the MV YAML via
+`DESCRIBE TABLE EXTENDED`, maps dimensions to attributes and measures to measures/formulas,
+translates Databricks SQL expressions to ThoughtSpot formulas, and imports the result.
+
+Trigger by asking: "Convert my Databricks Metric View to a ThoughtSpot model".
+
+> Untested in Cursor — best-effort condensation of the Claude version. See the rule
+> file's header for details.
 
 ### `ts-object-answer-promote`
 

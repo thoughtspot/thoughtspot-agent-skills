@@ -1115,7 +1115,7 @@ payload = json.dumps([model_tml])
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile '{profile_name}'"],
+     f"source ~/.zshenv && ts tml import --policy PARTIAL --profile '{profile_name}'"],
     input=payload,
     capture_output=True, text=True,
 )
@@ -1123,6 +1123,12 @@ print(result.stdout)
 if result.returncode != 0:
     print(result.stderr)
 ```
+
+**Import policy:** Use `--policy PARTIAL` when importing multiple models in a batch.
+`ALL_OR_NONE` rolls back the **entire** batch if any single TML fails — including
+models that parsed and imported successfully. The response still returns success GUIDs
+for the rolled-back models, making the failure silent. Use `ALL_OR_NONE` only for
+atomic pairs (one table + one model that references it).
 
 On success, parse the response JSON to extract the created model's GUID. **Save it** —
 required for any future reimports to update the model without creating a duplicate.

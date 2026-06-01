@@ -118,7 +118,7 @@ model:
 | `formula_id` | Formula reference | Must match a `formulas[].id` exactly (case-sensitive, spaces included) |
 | `name` | Yes (always) | Display name shown in ThoughtSpot search bar |
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
-| `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Valid on both `column_id` and `formula_id` entries. |
+| `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). Omit for full indexing (default). |
 | `properties.is_hidden` | No | `true` hides the column from the search bar. Use for FK columns and RLS key columns. |
 | `properties.is_additive` | No | `true` marks a column as additive — used on semi-additive models to explicitly allow summation across time. |
@@ -509,6 +509,32 @@ ts metadata search --subtype WORKSHEET --name '%{model_name}%' --profile {profil
 ts metadata delete {wrong_guid} --profile {profile}
 ```
 
+### Import policy: `PARTIAL` for multi-model batches
+
+When importing multiple models in a single call, use `--policy PARTIAL` instead of
+`--policy ALL_OR_NONE`. With `ALL_OR_NONE`, if **any** TML in the batch fails, the
+entire batch is rolled back — including models that parsed and imported successfully.
+The import response still returns `status_code: OK` with GUIDs for those models, but
+the objects are not persisted. This is a silent data loss: the caller sees success
+GUIDs but the objects don't exist.
+
+`PARTIAL` allows each TML to succeed or fail independently. Failed models are reported
+in the response; successful models are persisted.
+
+Use `ALL_OR_NONE` only when the batch is a single atomic unit (e.g., one table + one
+model that references it) where partial success would leave broken references.
+
+```bash
+# Multi-model batch — use PARTIAL
+echo '["{model1_tml}", "{model2_tml}"]' | ts tml import --policy PARTIAL --profile {profile}
+
+# Single model or atomic table+model pair — ALL_OR_NONE is safe
+echo '["{table_tml}", "{model_tml}"]' | ts tml import --policy ALL_OR_NONE --profile {profile}
+```
+
+Verified 2026-05-28: 12-model batch with 6 failures silently rolled back all 12
+despite 6 returning success GUIDs.
+
 ---
 
 ## Join Scenarios
@@ -628,6 +654,7 @@ Run before every import. Fix all issues silently before showing the user.
 | Error | Cause | Fix |
 |---|---|---|
 | `duplicate column_id` | Same `column_id` in two `columns[]` entries | Convert the COUNT_DISTINCT duplicate to a formula: `unique count ( [TABLE::col] )` |
+| MEASURE silently becomes ATTRIBUTE | `aggregation: COUNT_DISTINCT` on a `column_id` (physical column) | TS overrides `column_type` to ATTRIBUTE on physical refs. Use a formula: `unique count ( [TABLE::col] )` |
 | `referencing_join not found` | Join name wrong or join doesn't exist at the Table object level | Re-export the Table TML and verify the join name |
 | `column_id not found` | Wrong column name suffix | Export Table TML and use the exact `name` from `table.columns[]` |
 | `destination is missing` | `joins:` placed at model top level instead of inside a `model_tables[]` entry | Move joins inside the FROM table's entry |

@@ -97,12 +97,14 @@ thoughtspot-agent-skills/
 These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 `ts` CLI for ThoughtSpot API calls and store credentials in the OS credential store.
 
-**Conversion** — move semantic models between ThoughtSpot and Snowflake
+**Conversion** — move semantic models between ThoughtSpot and external platforms
 
 | Skill | What it does |
 |---|---|
 | `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) |
 | `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) |
+| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) |
+| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
@@ -119,6 +121,7 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 |---|---|
 | `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles (**Claude Code only** — Cortex Code manages Snowflake connections natively) |
+| `ts-profile-databricks` | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile |
 
 **Recipes** — pre-built analytical capabilities for ThoughtSpot
 
@@ -169,8 +172,11 @@ language in the Cursor AI chat.
 |---|---|
 | `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles |
+| `ts-profile-databricks` | Add, update, test, or delete Databricks profiles |
 | `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
 | `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model |
+| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View |
+| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model |
 | `ts-object-answer-promote` | Promote formulas from a saved Answer into a Model |
 | `ts-object-model-coach` | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements ⚠️ Untested in Cursor |
 | `ts-dependency-manager` | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards ⚠️ Untested in Cursor |
