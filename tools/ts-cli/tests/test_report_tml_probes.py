@@ -78,3 +78,37 @@ class TestFindAlertColumnUses:
     def test_empty_alert_tml(self):
         hits = find_alert_column_uses({}, {"X"}, source_model_name=None)
         assert hits == []
+
+
+from ts_cli.report.tml_probes import find_alias_column_uses
+
+
+class TestFindAliasColumnUses:
+    def test_finds_alias_for_target_column(self):
+        alias_tml = {
+            "column_alias": {
+                "model": {"name": "M", "fqn": "m-guid"},
+                "columns": [
+                    {"name": "Customer Zipcode", "locales": [{"name": "de-DE"}, {"name": "en-AU"}]},
+                    {"name": "Order ID", "locales": [{"name": "en-AU"}]},
+                ],
+            }
+        }
+        hits = find_alias_column_uses(alias_tml, {"Customer Zipcode"})
+        assert len(hits) == 1
+        assert hits[0]["name"] == "Customer Zipcode"
+        assert hits[0]["locale_count"] == 2
+
+    def test_no_aliases_for_column(self):
+        alias_tml = {
+            "column_alias": {
+                "model": {"name": "M"},
+                "columns": [{"name": "Order ID", "locales": []}],
+            }
+        }
+        hits = find_alias_column_uses(alias_tml, {"Customer Zipcode"})
+        assert hits == []
+
+    def test_empty_alias_tml(self):
+        hits = find_alias_column_uses({}, {"X"})
+        assert hits == []

@@ -67,3 +67,28 @@ def find_alert_column_uses(
                     "table": tbl,
                 })
     return hits
+
+
+def find_alias_column_uses(alias_tml: dict, target_columns: Iterable[str]) -> List[dict]:
+    """Return alias entries for any column in target_columns.
+
+    Per open-items.md #10 (resolved 2026-05-28): alias TML structure is
+        column_alias:
+          model: {name: ..., fqn: ...}
+          columns:
+            - name: <model alias name>
+              locales:
+                - name: <locale code>
+                  orgs: [...]
+    """
+    targets = set(target_columns)
+    cols = (alias_tml.get("column_alias") or {}).get("columns") or []
+    hits = []
+    for c in cols:
+        if c.get("name") in targets:
+            hits.append({
+                "name": c["name"],
+                "locale_count": len(c.get("locales") or []),
+                "locales": [loc.get("name") for loc in (c.get("locales") or [])],
+            })
+    return hits
