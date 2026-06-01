@@ -1,6 +1,6 @@
 ---
 name: ts-dependency-manager
-description: Safely remove or rename columns and repoint objects across a ThoughtSpot environment — generates a risk-rated impact report, backs up TML before any change, and supports full rollback.
+description: Safely audit, remove, or repoint columns and objects across a ThoughtSpot environment — generates a risk-rated impact report, backs up TML before any change, and supports full rollback.
 ---
 
 # ThoughtSpot: Dependency Manager
@@ -31,6 +31,7 @@ exactly what to change, takes TML backups, and provides rollback capability.
 - A column has been renamed in the data warehouse and ThoughtSpot objects need updating
 - Answers or Liveboards need to be moved to a new or restructured Model
 - You want to audit what would be affected before making a structural change
+- You want a dependency report on a column/table/Model **without** committing to a change — Audit mode, or run `ts metadata report` directly for a non-interactive shell version.
 
 Ask one question at a time. Wait for each answer before proceeding.
 
@@ -68,7 +69,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 On skill invocation, display this plan before doing any work:
 
 ---
-**ts-dependency-manager** — safely remove, rename, or repoint columns across a ThoughtSpot environment, with a full impact report and TML backup before any change is made.
+**ts-dependency-manager** — safely audit, remove, or repoint columns and objects across a ThoughtSpot environment, with a full impact report and TML backup before any change is made.
 
 ### A. Steps
 
@@ -220,6 +221,8 @@ Step 3 sub-section.
 the same report files as R/N/P (impact_plan.json, impact_report.csv, dependency_tree.txt,
 dependency.mmd) and exits cleanly after Step 5. The user can re-run with R/N/P later
 once they've planned their change.
+
+> For a quick non-interactive audit, you can also run `ts metadata report <source>` directly — same coverage, no skill conversation. The CLI emits the same impact report data in JSON, text, or markdown.
 
 ---
 
