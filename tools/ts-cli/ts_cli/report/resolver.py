@@ -39,3 +39,70 @@ def classify_input(s: str) -> InputKind:
     if n == 4:
         return InputKind.FOUR_PART_NAME
     raise ValueError(f"Cannot classify input: {s!r}")
+
+
+from .schema import SourceDescriptor
+
+
+class SourceUnresolvedError(Exception):
+    """No metadata object matched the input."""
+    def __init__(self, input_: str):
+        super().__init__(f"No metadata object matched: {input_!r}")
+        self.input = input_
+
+
+class SourceAmbiguousError(Exception):
+    """More than one metadata object matched the input."""
+    def __init__(self, input_: str, candidates: list):
+        super().__init__(f"Input {input_!r} matched {len(candidates)} objects; specify GUID")
+        self.input = input_
+        self.candidates = candidates
+
+
+def _search(client: ThoughtSpotClient, body: dict) -> list:
+    """Call metadata/search and return the list of results."""
+    resp = client.post("/api/rest/2.0/metadata/search", json=body)
+    data = resp.json()
+    return data if isinstance(data, list) else data.get("metadata", [])
+
+
+def _to_descriptor(input_str: str, hit: dict, parent: Optional[dict] = None) -> SourceDescriptor:
+    return SourceDescriptor(
+        input=input_str,
+        guid=hit.get("metadata_id") or hit.get("metadata_header", {}).get("id"),
+        type=hit.get("metadata_type") or "LOGICAL_TABLE",
+        name=hit.get("metadata_name") or hit.get("metadata_header", {}).get("name", ""),
+        parent=parent,
+    )
+
+
+def resolve_source(input_str: str, client: ThoughtSpotClient) -> SourceDescriptor:
+    """Resolve a user-provided source string to a SourceDescriptor.
+
+    Raises SourceUnresolvedError / SourceAmbiguousError on failure cases.
+    """
+    kind = classify_input(input_str)
+    if kind in (InputKind.GUID, InputKind.ONE_PART_NAME):
+        # For GUIDs and bare single-part identifiers, look up by identifier.
+        hits = _search(client, {
+            "metadata": [{"identifier": input_str}],
+            "record_size": 1,
+            "include_headers": True,
+        })
+        if not hits:
+            raise SourceUnresolvedError(input_str)
+        return _to_descriptor(input_str, hits[0])
+
+    # Name lookup: use exact name match (no SQL-LIKE wildcards).
+    hits = _search(client, {
+        "metadata": [{"type": "LOGICAL_TABLE", "name_pattern": input_str}],
+        "record_size": 10,
+        "include_headers": True,
+    })
+    # Filter to exact-name matches only.
+    hits = [h for h in hits if (h.get("metadata_name") or "") == input_str]
+    if not hits:
+        raise SourceUnresolvedError(input_str)
+    if len(hits) > 1:
+        raise SourceAmbiguousError(input_str, hits)
+    return _to_descriptor(input_str, hits[0])
