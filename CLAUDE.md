@@ -64,8 +64,6 @@ These branches are pushed to remote for backup but never merged to main until ve
 | Branch | Contents |
 |---|---|
 | `main` | Clean, published — what users clone |
-| `wip/databricks` | Databricks profile + conversion skills; Databricks shared content |
-| `wip/model-builder` | `ts-object-model-builder` (pending Snowflake + ThoughtSpot live testing) |
 
 **Working on a wip branch:**
 - Pre-commit hook runs on every commit (same as main)
