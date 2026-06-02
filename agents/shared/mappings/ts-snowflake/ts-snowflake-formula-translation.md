@@ -641,9 +641,9 @@ preserve the grain; dynamic grouping (`query_groups()`) simplifies to a plain me
 
 | ThoughtSpot | Semantic view | Note |
 |---|---|---|
-| `group_aggregate(sum(m), {attr}, query_filters())` | `SUM(m) OVER (PARTITION BY attr)` | Fixed grain — preserve as window function |
-| `group_sum(m, attr)` standalone | `SUM(m) OVER (PARTITION BY attr)` | Shorthand for `{attr}` grouping — same rule |
-| `sum(group_aggregate(sum(m), {attr}, query_filters()))` | `SUM(m) OVER (PARTITION BY attr)` | Outer `sum()` does not change fixed-grain semantics |
+| `group_aggregate(sum(m), {attr}, query_filters())` | `SUM(base_metric) OVER (PARTITION BY attr)` | Fixed grain — preserve as window function |
+| `group_sum(m, attr)` standalone | `SUM(base_metric) OVER (PARTITION BY attr)` | Shorthand for `{attr}` grouping — same rule |
+| `sum(group_aggregate(sum(m), {attr}, query_filters()))` | `SUM(base_metric) OVER (PARTITION BY attr)` | Outer `sum()` does not change fixed-grain semantics |
 | `group_aggregate(sum(m), query_groups(), query_filters())` | `SUM(m)` | Dynamic grain — simplifies to plain metric |
 | `sum(group_aggregate(sum(m), query_groups(), query_filters()))` | `SUM(m)` | `query_groups()` is dynamic grain — same simplification |
 
@@ -660,11 +660,29 @@ Analyst applies query filters automatically, so `query_filters()` is always redu
 
 ```yaml
 metrics:
+  # base metric the window aggregates over — MUST be defined first
+  - name: quantity
+    expr: SUM(dm_order_detail.QUANTITY)
   - name: category_quantity
-    expr: "SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.product_category)"
+    expr: "SUM(dm_order_detail.quantity) OVER (PARTITION BY dm_category.product_category)"
     synonyms:
     - Category Quantity
 ```
+
+> **⚠ The windowed aggregate must reference a defined metric alias, not a raw physical
+> column.** Above, `SUM(dm_order_detail.quantity)` references the `quantity` *metric*
+> defined immediately above it — not the `QUANTITY` column. Windowing directly over a
+> raw column — `SUM(dm_order_detail.QUANTITY) OVER (...)` when no metric named
+> `quantity` exists — is rejected by Snowflake (error **010256**: *"Window functions in
+> a metric must operate over other metrics on the same entity…"*) in **both** the
+> `CREATE SEMANTIC VIEW` DDL path and the `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` path.
+> Always emit the base aggregate metric first, then window over its alias. If the base
+> metric is named differently from the column (e.g. `total_quantity` to avoid a
+> name-collision with the column), the window must use that alias:
+> `SUM(dm_order_detail.total_quantity) OVER (...)`.
+> The `PARTITION BY` may reference a dimension on a joined (coarser) entity such as
+> `dm_category.product_category` — no denormalization onto the fact table is needed.
+> Verified on a live instance 2026-06-02.
 
 **Transitive dependencies:** If a second formula referenced this one as untranslatable,
 it can now also be translated. When you resolve a previously-untranslatable formula,
