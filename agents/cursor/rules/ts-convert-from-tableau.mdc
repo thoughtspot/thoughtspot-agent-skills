@@ -114,12 +114,15 @@ model:
 ```
 - `obj_id` is optional on fresh import — omit it
 - Resolve Tableau internal IDs (`[Calculation_\d+]`) to display names before translating
+- **Parameters:** extract from `Parameters` datasource → `model.parameters[]`. Static
+  list params get `list_config.list_choice[]`; SQL-lookup params query the warehouse.
+  Rewrite formula refs: `[Parameters].[Name]` → `[Name]`
 - LOD expressions → `group_aggregate()`, RUNNING_* → `cumulative_*()`, RANK → `rank()`
 - WINDOW_SUM/AVG/MAX/MIN → `moving_sum/average/max/min()` (requires sort attribute from
   shelf context; fall back to pass-through if sort dimension unknown)
 - Pass-through fallback for partitioned RANK, DENSE_RANK: use `sql_*_aggregate_op()` —
   last resort, requires SQL Passthrough Functions enabled
-- Truly untranslatable formulas (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE): omit from
+- Truly untranslatable formulas (LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE): omit from
   `formulas[]` and `columns[]` entirely, log in `MIGRATION_LIMITATIONS.md`
 - Formulas in topological dependency order (Level 0 first)
 

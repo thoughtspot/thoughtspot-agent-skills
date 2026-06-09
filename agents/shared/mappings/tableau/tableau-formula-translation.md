@@ -296,7 +296,7 @@ model import. A missing formula produces a functional model with reduced coverag
 | `SIZE()`, `FIRST()`, `LAST()` | Table calculations — partition-aware row addressing; no SQL equivalent |
 | `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent |
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
-| References to Tableau Parameters (`[Parameters].[Name]`) | ThoughtSpot has its own parameter system; formula syntax (IF/CASE) is translatable but parameter values need manual mapping — see Parameter References section |
+| References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
 
 **Formerly untranslatable, now mapped:**
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
@@ -324,20 +324,53 @@ user-selected value at runtime.
 | Threshold filter | `IF [Metric] > [Parameters].[Threshold] THEN 'Above' ELSE 'Below' END` | User sets a numeric cutoff |
 | Date granularity | `CASE [Parameters].[Date Grain] WHEN 'day' THEN DATEPART('day', [Date]) WHEN 'month' THEN DATEPART('month', [Date]) END` | User picks date roll-up |
 
-**Migration approach:** These formulas use translatable syntax (IF/CASE/WHEN) but
-depend on Tableau parameter values with no automatic ThoughtSpot equivalent. During
-audit, classify as **Parameter ref** (separate from Untranslatable). During migration,
-omit and log with specific guidance:
+### Auto-migratable parameters (static list or range)
 
-1. Identify the parameter's purpose (dimension selector, threshold, toggle)
-2. In ThoughtSpot, replace with a runtime filter, a formula with a hardcoded value,
-   or a ThoughtSpot parameter (if the ThoughtSpot build supports it)
-3. Re-add the formula manually after import
+ThoughtSpot supports `model.parameters[]` with `list_config` (fixed choice list) and
+`range_config` (numeric range). Tableau parameters with static `<member>` values or
+`<range>` bounds map directly:
+
+| Tableau | ThoughtSpot TML |
+|---|---|
+| `param-domain-type="list"` + `<member>` values | `list_config.list_choice[]` |
+| `param-domain-type="range"` + `<range min max>` | `range_config` (numeric types only) |
+| `param-domain-type="any"` | Free-form (no config) |
+
+**Formula translation:** `[Parameters].[Currency]` → `[Currency]` (strip prefix).
+ThoughtSpot parameter references use bare `[Name]` syntax with no table qualifier.
+
+**Value cleanup:**
+- Strip wrapping double quotes from member values: `'"USD"'` → `USD`
+- Strip `#` delimiters from date defaults: `#2026-05-10#` → format as `MM/DD/YYYY`
+- `default_value` is always a string in ThoughtSpot TML regardless of `data_type`
+
+### SQL-lookup parameters (query at migration time)
+
+Tableau parameters whose list values come from a database query (no static `<member>`
+elements in the TWB) can still be auto-migrated — query the warehouse at migration
+time to populate `list_config.list_choice[]` with a snapshot of the current values.
+
+**Migration-time approach:**
+1. Extract the SQL query or column reference that populates the parameter in Tableau
+2. Execute the query against the connected warehouse (Snowflake/Databricks) via the
+   connection established in Step 4
+3. Use the distinct values from the result set as `list_choice[]` values
+4. Document in `MIGRATION_LIMITATIONS.md` that these values are a point-in-time snapshot
+   — if the underlying data changes, the parameter list goes stale
+
+**Ongoing sync:** ThoughtSpot's `list_config` is static — it has no live-query
+capability. A future `/ts-recipe-parameter-sync` skill could periodically re-query the
+warehouse and update the parameter's `list_choice[]` values via TML export/modify/import.
+This is not part of the migration skill but is a natural follow-up.
+
+**Audit mode note:** In audit mode (no auth, no connection), SQL-lookup parameters
+are classified as **Parameter ref (query)** — auto-migratable at migration time but
+requires a live connection. The audit report flags them separately from static params.
 
 **Scale note:** In production workbooks, parameter references can account for 10–50%
-of all calculated fields (observed up to 131 in a single datasource). The audit report
-separates these from truly untranslatable formulas so the user sees accurate function
-coverage.
+of all calculated fields (observed up to 131 in a single datasource). With auto-migration
+of both static and query-based parameters, all parameter-referencing formulas are
+translatable during migration.
 
 ---
 

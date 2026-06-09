@@ -123,7 +123,8 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context, TOTAL() |
 | **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE |
-| **Parameter ref** | References a Tableau parameter — requires manual mapping | `[Parameters].[Parameter Name]` |
+| **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
+| **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
 ### Classifier implementation notes
 
@@ -141,8 +142,15 @@ TOTAL\s*\(
 
 **Parameter references.** Detect `[Parameters].[...]` pattern — this is Tableau's
 cross-datasource parameter reference syntax. These formulas use translatable syntax
-(IF/CASE/WHEN) but depend on Tableau parameter values that have no automatic
-ThoughtSpot equivalent. Classify as **Parameter ref**, not Untranslatable.
+(IF/CASE/WHEN). Cross-reference the parameter name against the parameter definitions
+extracted in Step A2/3:
+- If the parameter has static `<member>` list values or a `<range>` → **Parameter ref
+  (auto)** — the parameter will be auto-created in the model TML, formula translates
+  with a simple `[Parameters].[Name]` → `[Name]` prefix strip
+- If the parameter has no static values (SQL-lookup populated) → **Parameter ref
+  (query)** — auto-migratable at migration time (requires warehouse connection to
+  populate list values), but flagged separately in audit mode since no connection
+  is available
 
 **LOD first.** Check `{FIXED|INCLUDE|EXCLUDE}` before other tiers — LOD expressions
 may also contain functions like SUM that would match Native.
@@ -175,34 +183,35 @@ Audit: {workbook_name}
   Joins:                {N}
 
   Calculated fields:    {N} total
-  ┌─────────────────────────────────────────────────┐
-  │ Tier                Count    %     Examples     │
-  ├─────────────────────────────────────────────────┤
-  │ Native              {N}     {%}   IF, DATEDIFF │
-  │ LOD → group_agg     {N}     {%}   {FIXED ...}  │
-  │ Cumulative          {N}     {%}   RUNNING_SUM  │
-  │ Moving              {N}     {%}   WINDOW_SUM   │
-  │ Pass-through        {N}     {%}   DENSE_RANK   │
-  │ Untranslatable      {N}     {%}   LOOKUP       │
-  │ Parameter ref       {N}     {%}                │
-  └─────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────┐
+  │ Tier                    Count    %     Examples      │
+  ├──────────────────────────────────────────────────────┤
+  │ Native                  {N}     {%}   IF, DATEDIFF  │
+  │ LOD → group_agg         {N}     {%}   {FIXED ...}   │
+  │ Cumulative              {N}     {%}   RUNNING_SUM   │
+  │ Moving                  {N}     {%}   WINDOW_SUM    │
+  │ Pass-through            {N}     {%}   DENSE_RANK    │
+  │ Parameter ref (auto)    {N}     {%}   static list   │
+  │ Parameter ref (query)   {N}     {%}   SQL lookup    │
+  │ Untranslatable          {N}     {%}   LOOKUP        │
+  └──────────────────────────────────────────────────────┘
 
-  Parameters:           {N} (require manual recreation in ThoughtSpot)
+  Parameters:           {N} total ({N} static, {N} SQL-lookup — query at migration)
   Dashboards:           {N} (optional liveboard migration)
 
   ──────────────────────────────────────────────────
-  Function coverage:    {(native+lod+cum+mov+pt+rank) / total}%
-                        (formula syntax is auto-translatable)
-  Fully automatic:      {(native+lod+cum+mov+pt+rank) / total}%
-                        (excludes parameter refs that need manual mapping)
+  Migration coverage:   {(all except untranslatable) / total}%
+                         (all parameters auto-created — static or queried)
+  Untranslatable:       {N} formula(s) — will be omitted
+  SQL-lookup params:    {N} — need warehouse connection at migration time
   Pass-through formulas require SQL Passthrough Functions enabled.
   ──────────────────────────────────────────────────
 ```
 
-**Function coverage** counts everything except Untranslatable — including parameter
-refs, whose IF/CASE/WHEN syntax IS translatable even though the parameter value
-needs manual mapping. **Fully automatic** excludes both Untranslatable AND Parameter
-ref formulas.
+**Migration coverage** includes everything except Untranslatable. All parameter types
+are auto-migratable: static params are created directly in the model TML; SQL-lookup
+params are populated by querying the warehouse at migration time. The formula reference
+`[Parameters].[Name]` is rewritten to `[Name]` in both cases.
 
 If any formulas are classified as Untranslatable, list them:
 
@@ -212,18 +221,14 @@ If any formulas are classified as Untranslatable, list them:
     - ...
 ```
 
-If any formulas are classified as Parameter ref, list them with guidance:
+If any SQL-lookup parameters exist, note them:
 
 ```
-  Parameter-referencing formulas ({count}):
-    - {formula_name}: references [Parameters].[{param_name}]
+  SQL-lookup parameters ({count} — populated from warehouse at migration time):
+    - {param_name}: query/column reference from TWB
     - ...
-
-  These formulas use translatable syntax (IF/CASE/WHEN) but depend on
-  Tableau parameter values. To migrate:
-  1. Identify the parameter's purpose (dimension selector, threshold, toggle)
-  2. Replace with a ThoughtSpot runtime filter, or hardcode the value
-  3. Re-add the formula manually after import
+  Values are a point-in-time snapshot. Consider /ts-recipe-parameter-sync for
+  ongoing refresh.
 ```
 
 If any formulas are classified as Pass-through, list them with the generated expression:
@@ -362,9 +367,18 @@ For each datasource, extract:
   not by display name — resolve these references before translating formulas.
 
 **Parameters** — `<datasource name="Parameters">` children:
-- `name`, `caption`, `datatype`, default value
-- Log parameters for the limitations report — ThoughtSpot has its own parameter system
-  and Tableau parameters cannot be auto-migrated
+- For each `<column>` with `param-domain-type` attribute:
+  - `caption` = display name (used as ThoughtSpot parameter name)
+  - `datatype` = `string` | `integer` | `real` | `date` | `boolean`
+  - `param-domain-type` = `list` | `range` | `any`
+  - `value` attribute or `calculation.formula` = default value
+  - `<member value="...">` children = list values (when `param-domain-type="list"`)
+  - `<range min="..." max="...">` child = range bounds (when `param-domain-type="range"`)
+- Save parameter definitions — these generate `model.parameters[]` in Step 5b
+- **SQL-lookup parameters** (where the list values come from a database query rather
+  than static `<member>` elements): save the query/column reference — at migration
+  time (Step 5b), query the warehouse to populate `list_config.list_choice[]` with
+  current values. In audit mode (no connection), flag as "requires connection"
 
 Save the parsed structure internally. Announce a summary:
 > Parsed `{workbook_name}`: {N} datasource(s), {N} physical table(s),
@@ -494,6 +508,15 @@ model:
       type: LEFT_OUTER          # INNER | LEFT_OUTER | RIGHT_OUTER | OUTER
       cardinality: ONE_TO_MANY
   - name: OTHER_TABLE
+  parameters:                   # omit if no Tableau parameters to migrate
+  - name: Currency
+    data_type: VARCHAR
+    default_value: "USD"
+    list_config:
+      list_choice:
+      - value: USD
+      - value: CAD
+      - value: GBP
   formulas:                     # omit section entirely if no translatable calculated fields
   - id: formula_Formula Name
     name: Formula Name
@@ -504,6 +527,56 @@ model:
     properties:
       column_type: ATTRIBUTE    # or MEASURE
 ```
+
+### Parameter migration (Tableau → ThoughtSpot `parameters[]`)
+
+When the TWB has a `Parameters` datasource (Step 3), generate `parameters[]` entries
+in the model TML. Omit `id` — ThoughtSpot assigns it on import.
+
+**Type mapping:**
+
+| Tableau `param-domain-type` | Tableau `datatype` | ThoughtSpot `data_type` | Config |
+|---|---|---|---|
+| `list` | `string` | `VARCHAR` | `list_config` with `list_choice[]` from `<member>` values |
+| `list` | `date` | `DATE` | `list_config` with date values (strip `#` delimiters) |
+| `list` | `integer` | `INT64` | `list_config` |
+| `list` | `real` | `DOUBLE` | `list_config` |
+| `range` | `integer` | `INT64` | `range_config` with `range_min`, `range_max` |
+| `range` | `real` | `DOUBLE` | `range_config` |
+| `range` | `date` | `DATE` | Free-form (no `range_config` — ThoughtSpot range is numeric only) |
+| `any` | any | mapped type | Free-form (no config) |
+| `list` | `boolean` | `BOOL` | `list_config` with `'true'`/`'false'` values |
+
+**Value cleanup:**
+- Tableau wraps string member values in double quotes: `'"USD"'` → strip to `USD`
+- Tableau date defaults use `#` delimiters: `#2026-05-10#` → strip to `2026-05-10`
+  then format as `MM/DD/YYYY` (ThoughtSpot's date parameter format)
+
+**SQL-lookup parameters:** If a parameter's list values come from a database query
+(no static `<member>` elements in the TWB), query the warehouse at migration time to
+populate `list_config.list_choice[]`:
+1. Extract the SQL query or column reference from the Tableau parameter definition
+2. Execute against the warehouse connection from Step 4
+3. Use the distinct result values as `list_choice[]` entries
+4. Log in `MIGRATION_LIMITATIONS.md` that these values are a point-in-time snapshot
+
+If no warehouse connection is available (Step 4 was skipped), omit the parameter and
+log the omission with the original SQL query for manual recreation.
+
+### Formula reference translation
+
+In Tableau, calculated fields reference parameters as `[Parameters].[Parameter Name]`.
+In ThoughtSpot, parameters are referenced as `[Parameter Name]` (no prefix, no table
+qualifier). Apply this transformation:
+
+```
+Tableau:     [Parameters].[Currency]
+ThoughtSpot: [Currency]
+```
+
+This is a simple prefix strip: `[Parameters].[X]` → `[X]`. Apply AFTER resolving
+Tableau internal cross-references (`[Calculation_\d+]`) and BEFORE translating function
+syntax.
 
 Formula translation rules: use `tableau-formula-translation.md`.
 - Convert Tableau join types: `full` → `OUTER`, `left` → `LEFT_OUTER`,

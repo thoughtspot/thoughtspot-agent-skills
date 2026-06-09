@@ -117,6 +117,29 @@ formulas:
 
 - Physical columns: `[table_name::column_name]`
 - Other formulas: `[formula_<display_name>]` (by their `id`)
+- Parameters: `[Parameter Name]` (no table prefix, no `::` separator)
+
+### Parameter migration (Tableau `Parameters` datasource → `model.parameters[]`)
+
+Tableau parameters from the `Parameters` datasource are created as ThoughtSpot model
+parameters. Omit `id` on first import — ThoughtSpot assigns it.
+
+```yaml
+parameters:
+- name: Currency
+  data_type: VARCHAR
+  default_value: "USD"
+  list_config:
+    list_choice:
+    - value: USD
+    - value: CAD
+    - value: GBP
+```
+
+**Formula references:** Tableau `[Parameters].[Currency]` → ThoughtSpot `[Currency]`.
+
+See `tableau-formula-translation.md` "Parameter References" for the full type mapping
+and value cleanup rules (quote stripping, date format conversion).
 
 ### Formula fallback — omit and log untranslatable formulas
 
