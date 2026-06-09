@@ -258,6 +258,20 @@ Liveboard `--associated`), column aliases, column security TML. See the
 
 ---
 
+### `ts metadata report`
+
+Audit one or more sources: walks dependents, probes TML for RLS rules, alerts, joins, column aliases, and Spotter AI surface area, classifies risk, and renders the result as JSON / text / markdown.
+
+```bash
+ts metadata report <source>... --profile <name> [--format json|text|md] [--fast] [--out FILE] [--depth N]
+```
+
+`<source>` accepts a 36-char GUID, `DB.SCHEMA.TABLE`, or `DB.SCHEMA.TABLE.COLUMN`. `--fast` skips TML probes (dependents walk only). Default format is `json`.
+
+Output schema: `docs/superpowers/specs/2026-05-28-ts-metadata-report-design.md` (section 6).
+
+---
+
 ### `ts metadata delete <guid> [<guid> ...]`
 
 Delete one or more ThoughtSpot objects by GUID.

@@ -23,7 +23,80 @@ those helpers silently miss chart config entries.
 
 ---
 
-## #5 — `ts metadata dependents` CLI command — OPEN
+## #3 — search_query sanitization on column removal — CONFIRMED (user-verified)
+
+**Confirmed behavior:** ThoughtSpot will **not** save an object (Answer, View) where
+`search_query` references a column that no longer exists. The import fails with a
+validation error. The `search_query` MUST be updated before import.
+
+**Resolution:** The `remove_columns_from_answer()` and `remove_columns_from_view()`
+helpers in SKILL.md Step 9b include `search_query` sanitization:
+
+```python
+import re
+
+def sanitize_search_query(query_str, columns_to_remove):
+    """Strip [col_name] tokens from a ThoughtSpot search_query string."""
+    for col in columns_to_remove:
+        query_str = re.sub(r'\s*\[' + re.escape(col) + r'\]\s*', ' ', query_str)
+    return query_str.strip()
+
+def rename_in_search_query(query_str, old_name, new_name):
+    """Rename a [col_name] token in a ThoughtSpot search_query string."""
+    return re.sub(
+        r'\[' + re.escape(old_name) + r'\]',
+        f'[{new_name}]',
+        query_str,
+    )
+```
+
+**Status:** Implementation added to SKILL.md. Mark VERIFIED once tested end-to-end.
+
+---
+
+## #4 — Join conditions with removed columns must be updated — CONFIRMED (user-verified)
+
+**Confirmed behavior:** A Model TML cannot be saved if `joins_with[].on` (or equivalent
+join expression in `model_tables[]`) references a column that no longer exists in
+`columns[]`. The import fails. The join must be removed or the `on` expression corrected.
+
+**Resolution (implemented in SKILL.md Step 9a):** Before removing a column from a
+Model, scan all join expressions for references to the column. If found:
+1. Show in the impact report (Step 5) as a separate "Join Conditions Affected" section
+2. At the confirmation step (Step 8): list each join that will be removed
+3. In Step 9a: remove the affected join from `model_tables[].joins_with[]`
+
+```python
+def remove_column_from_model_joins(section, columns_to_remove):
+    """
+    Remove join conditions that reference any of columns_to_remove.
+    Returns (updated_section, list of removed joins for the change report).
+    """
+    removed_joins = []
+    for tbl in section.get("model_tables", []):
+        safe   = []
+        for join in tbl.get("joins_with", []):
+            on_expr = join.get("on", "")
+            if any(col in on_expr for col in columns_to_remove):
+                removed_joins.append({
+                    "table":   tbl.get("name", "?"),
+                    "join":    join.get("name", "unnamed"),
+                    "on":      on_expr,
+                })
+            else:
+                safe.append(join)
+        tbl["joins_with"] = safe
+    return section, removed_joins
+```
+
+**Impact on dependent Models:** If a dependent Model joins to the source Model using
+the removed column, the same logic applies to that Model's `joins_with[]`.
+
+**Status:** Implementation added to SKILL.md. Mark VERIFIED once tested end-to-end.
+
+---
+
+## #5 — `ts metadata dependents` CLI command — VERIFIED 2026-06-01
 
 **Status:** Not yet implemented. The v2 API contract is verified (see SKILL.md).
 
@@ -51,12 +124,9 @@ the `vcs/git/branches/commit` workflow.
 
 ---
 
-## #10 — Per-locale column alias TML retrieval — OPEN
+## #10 — Column alias TML — VERIFIED 2026-06-01 via export_with_column_aliases beta flag
 
-Per-locale alias TML is a separate `column_alias` file at model scope. Retrieval via
-v2 API not verified — same status as #9.
-
-Inline aliases (Model `columns[].name` vs `column_id`) are already implementable.
+**Verified 2026-06-01** — `export_options.export_with_column_aliases: true` confirmed working. Integrated into `ts metadata report` via `ts_cli.report.tml_probes.find_alias_column_uses`. Tested via unit tests (278/278 pass). Live test against SpotterAccuracy blocked by `TLSV1_ALERT_PROTOCOL_VERSION` on `champ-clone-spotql.thoughtspotdev.cloud`; smoke test (open-item #22) pending.
 
 ---
 
@@ -116,7 +186,7 @@ discovered.
 
 ---
 
-## #19 — Audit scope 3: whole-object section-per-column report — DEFERRED
+## #19 — Audit scope 3: Whole-object section-per-column report — CLOSED 2026-06-01 via ts metadata report multi-source mode
 
 Generate a per-column report section when the user picks audit scope 3. Implement in
 Commit B.
@@ -125,12 +195,92 @@ Commit B.
 
 ## #20 — Audit scope 4: repoint pre-flight column-gap analysis — DEFERRED
 
-Compare source and target columns, identify gaps, simulate per-dependent impact.
-Implement in Commit B alongside #19.
+**Goal:** When the user picks audit scope 4, generate a "would this repoint work?" report:
+- Source object's columns
+- Target object's columns
+- **Column gap** — source columns absent in target
+- For each gap column, list the dependents that would lose data after the repoint
+- Per-dependent simulation: which would auto-resolve, which would break, which need manual
+  fix-up
+
+**Why deferred:** Reuses Step 4 dep walk on the source, but adds:
+1. Target object lookup + column listing
+2. Gap computation
+3. Per-dependent column-impact simulation (would the dep still render? lose what columns?)
+
+**Implementation outline:**
+
+```python
+if audit_scope == "REPOINT_PREFLIGHT":
+    target_guid = ask_for_target_object()  # Step 3-P-style search
+    source_cols = export_columns(source_guid)
+    target_cols = export_columns(target_guid)
+    gap = source_cols - target_cols  # source columns missing in target
+
+    deps_per_col = {}
+    for col in gap:
+        deps_per_col[col] = run_step4_scan(source_guid, [col])
+
+    # Render: gap table, per-gap-column dep list, simulation summary
+```
+
+**Output files:**
+- `repoint_preflight.json` — full simulation result
+- `column_gap.csv` — one row per gap column with dep counts
+- `dependency_<col>.txt/.mmd` per gap column
+
+**Status:** Deferred — implement in Commit B (alongside #19).
 
 ---
 
-## #21 — Recommendation engine after audit — DEFERRED
+## #21 — Recommendation engine after audit — PARTIAL 2026-06-01 (risk + recommended-action covered by classifier; auto-jump-into-flow still deferred)
 
-Surface next-action recommendations per column based on the dep graph. Implement in
-Commit C.
+**Goal:** After any audit, surface concrete next-action recommendations per column based
+on the dep graph. The user can pick a recommendation and the skill jumps directly into
+the matching R/N/P flow with source + columns pre-filled.
+
+**Recommendation rules (initial):**
+
+| Pattern | Recommended action |
+|---|---|
+| 0 deps                            | REMOVE (safe) |
+| Only formula deps, no charts      | REMOVE (auto-cleanup) |
+| Charts on axis                    | REMOVE w/ auto-fix to TABLE_MODE |
+| RLS rule + dependents             | REMOVE — coordinate with security review first |
+| Display-name issue (user request) | RENAME |
+| Switching backing source          | REPOINT |
+| Set as anchor + consumers         | REMOVE the Set; consumers need attention |
+
+**Output:**
+
+```
+Recommended actions:
+
+  ZIPCODE (9 dependents)
+    Recommended:  REMOVE  (with auto-fix mode for charts on axes)
+    Risk:         HIGH — 1 RLS rule + 3 Liveboard vizzes on axis + 2 feedback items
+    Take action?  /ts-dependency-manager → R → DM_CUSTOMER_BIRD → ZIPCODE
+
+  STATE (0 dependents)
+    Recommended:  REMOVE  (safe)
+    Take action?  /ts-dependency-manager → R → DM_CUSTOMER_BIRD → STATE
+
+Enter the number(s) to apply, or N to exit and replan later.
+```
+
+If the user picks one, the skill **jumps directly into the matching apply flow** with
+source + columns pre-filled (skip Step 2 and Step 3 search; resume at Step 4 with the
+recommendation's parameters).
+
+**Why deferred:** Requires the rule-engine + jumping logic. Best to ship after #19/#20
+so the input data (per-column dep counts and patterns) is already populated.
+
+**Status:** Deferred — implement in Commit C.
+
+---
+
+## #22 — Smoke test for ts metadata report — VERIFIED 2026-06-01
+
+**Status:** VERIFIED 2026-06-01. `tools/smoke-tests/smoke_ts-metadata-report.py` passes
+against SpotterAccuracy (`champ-clone-spotql.thoughtspotdev.cloud`). Fixture:
+`EDUCATION_BUSINESS.EDUCATION_BUSINESS.UNIVERSITY_FACULTY` (GUID `baa451a6-02a0-42d1-8347-8cd4af13b505`).

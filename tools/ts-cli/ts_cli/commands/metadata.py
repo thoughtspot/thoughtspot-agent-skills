@@ -288,3 +288,114 @@ def dependents(
         print(json.dumps(data))
         return
     print(json.dumps(_normalize_dependents_response(data)))
+
+
+# ---------------------------------------------------------------------------
+# `ts metadata report` — full audit (dep walk + TML probes + classification + format)
+# ---------------------------------------------------------------------------
+
+@app.command("report")
+def report(
+    sources: List[str] = typer.Argument(..., help="One or more sources (GUID or N-part name)"),
+    profile: Optional[str] = _profile_option,
+    format: str = typer.Option("json", "--format", "-f",
+                               help="Output format: json (default) | text | md"),
+    fast: bool = typer.Option(False, "--fast",
+                              help="Skip TML probes (v2 dependents API only)"),
+    out: Optional[str] = typer.Option(None, "--out",
+                                      help="Write to file instead of stdout"),
+    depth: int = typer.Option(3, "--depth", help="Max dep-walk hops (default: 3)"),
+) -> None:
+    """Audit dependents of one or more sources.
+
+    Examples:
+
+    \b
+      ts metadata report DB.SCH.TBL --profile P --format text
+      ts metadata report DB.SCH.TBL.COL --profile P --format md --out report.md
+      ts metadata report <guid> --profile P --format json --fast
+    """
+    from ts_cli.report import build_report, build_reports
+    from ts_cli.report.formatters import render_json, render_text, render_md
+    from ts_cli.report.resolver import SourceUnresolvedError, SourceAmbiguousError
+
+    profile_name = resolve_profile(profile)
+
+    try:
+        if len(sources) == 1:
+            payload = build_report(sources[0], profile=profile_name, with_deep=not fast, max_depth=depth)
+        else:
+            payload = build_reports(sources, profile=profile_name, with_deep=not fast, max_depth=depth)
+    except SourceUnresolvedError as e:
+        typer.echo(json.dumps({"error": "unresolved", "input": e.input}), err=True)
+        raise typer.Exit(code=2)
+    except SourceAmbiguousError as e:
+        typer.echo(json.dumps({"error": "ambiguous", "input": e.input,
+                               "candidates": [{"guid": c.get("metadata_id"), "name": c.get("metadata_name")}
+                                              for c in e.candidates]}), err=True)
+        raise typer.Exit(code=2)
+
+    if format == "json":
+        text = json.dumps(payload, indent=2)
+    elif format == "text":
+        if "reports" in payload:
+            blocks = []
+            for r in payload["reports"]:
+                if "error" in r:
+                    blocks.append(f"[{r['source'].get('input')}] ERROR: {r['error']}")
+                else:
+                    blocks.append(render_text(_dict_to_report(r)))
+            text = "\n\n---\n\n".join(blocks)
+        else:
+            text = render_text(_dict_to_report(payload))
+    elif format == "md":
+        if "reports" in payload:
+            blocks = [render_md(_dict_to_report(r)) for r in payload["reports"] if "error" not in r]
+            text = "\n\n---\n\n".join(blocks)
+        else:
+            text = render_md(_dict_to_report(payload))
+    else:
+        typer.echo(f"unknown format: {format}", err=True)
+        raise typer.Exit(code=1)
+
+    if out:
+        from pathlib import Path
+        Path(out).write_text(text + "\n")
+    else:
+        print(text)
+
+
+def _dict_to_report(d: dict):
+    """Reconstruct a Report from its dict form (formatters expect dataclass instances)."""
+    from ts_cli.report.schema import (
+        Report, SourceDescriptor, DependentEntry, Owner, RiskTag,
+        CoverageEntry, Classification,
+    )
+    src_d = d["source"]
+    src = SourceDescriptor(
+        input=src_d["input"], guid=src_d["guid"], type=src_d["type"],
+        name=src_d["name"], parent=src_d.get("parent"),
+    )
+    deps = []
+    for de in d.get("dependents", []):
+        owner = None
+        if de.get("owner"):
+            owner = Owner(id=de["owner"]["id"], display_name=de["owner"]["display_name"])
+        deps.append(DependentEntry(
+            guid=de["guid"], name=de["name"], type=de["type"],
+            subtype=de.get("subtype"), via=de.get("via", "v2_dependents"),
+            hops=de.get("hops", 1), owner=owner, modified_at=de.get("modified_at"),
+            risk=RiskTag(tag=de["risk"]["tag"], reason=de["risk"]["reason"]),
+        ))
+    coverage = [CoverageEntry(**c) for c in d.get("coverage", [])]
+    cls = d["classification"]
+    classification = Classification(
+        per_dependent=deps,
+        aggregate=RiskTag(tag=cls["aggregate"]["tag"], reason=cls["aggregate"]["reason"]),
+        recommendation=cls.get("recommendation", ""),
+    )
+    return Report(
+        source=src, walked_at=d["walked_at"], profile=d["profile"],
+        dependents=deps, coverage=coverage,
+        classification=classification, warnings=d.get("warnings", []),
+    )
