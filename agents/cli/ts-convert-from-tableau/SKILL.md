@@ -22,6 +22,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 | [../../shared/mappings/tableau/tableau-tml-rules.md](../../shared/mappings/tableau/tableau-tml-rules.md) | TML generation rules — critical invariants for valid import |
 | [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML structure reference |
 | [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure reference |
+| [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md) | SQL View TML structure — for custom SQL datasources |
 | [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure reference |
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
@@ -51,8 +52,8 @@ with optional dashboard-to-liveboard migration.
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields .................................. auto
-  4.  Fetch ThoughtSpot connection schema (optional) ...... you provide Connection ID (or skip)
-  5.  Generate TML files (table + model) .................. auto
+  4.  Select ThoughtSpot connection ....................... you choose (or skip)
+  5.  Generate TML files (table + sql_view + model) ...... auto
   6.  Validate against ThoughtSpot (up to 10 fix cycles) .. auto
   7.  Import to ThoughtSpot ................................ you confirm
   8.  Migrate dashboards to liveboards? .................... you choose (skip → Step 12)
@@ -113,13 +114,43 @@ Take from the filename (strip `.twb`). Save as `{workbook_name}`.
 
 ### 3b. For each `<datasource>` element (skip those named `Parameters`)
 
+Each datasource is processed independently — **never merge datasources**. Even when
+datasources share tables or point at the same database, each has its own join topology,
+calculated fields, and column aliases. See `tableau-tml-rules.md` "One model per
+Tableau datasource" for the full rule.
+
+**Datasource type detection:**
+- If the datasource contains `<connection class="sqlproxy">`, it is a **Published
+  Datasource** (hosted on Tableau Server). The table name resolves to
+  `connection.get('dbname')`, not the literal `[sqlproxy]`.
+- If the datasource contains `<extract>`, it is an **Extract** — skip it (extracts
+  are Tableau-local snapshots, not live connections to the warehouse).
+- Otherwise, it is a **Live** datasource — proceed with extraction.
+
+**Relation wrapper handling:** TWB XML wraps `<relation>` elements in one of three
+structures. Check in order:
+1. `_.fcp.ObjectModelEncapsulateLegacy.false...relation` tag
+2. `_.fcp.ObjectModelEncapsulateLegacy.true...relation` tag
+3. `<relation>` directly under `<connection class='federated'>` (fallback)
+
+All three contain the same child elements — the wrapper determines where to look.
+
 For each datasource, extract:
 
-**Physical tables** — `<relation>` elements of `type="table"` or `type="text"`:
+**Physical tables** — `<relation>` elements of `type="table"`:
 - `name` attribute = table alias used in joins
-- `table` attribute = physical table name (use this for `db_table`)
-- If `type="custom-sql"`: extract the physical table name from the SQL string
-  (the table after `FROM`)
+- `table` attribute = fully-qualified physical table name — may be `[DB].[SCHEMA].[TABLE]`
+  format; strip brackets and split on `.` to extract db, schema, and table components
+- For Published Datasources (sqlproxy): if table name is `[sqlproxy]`, use
+  `connection.get('dbname')` instead
+
+**Custom SQL relations** — `<relation>` elements of `type="text"`:
+- These contain raw SQL in the element text content — do NOT try to extract a table name
+- Flag the relation as `source_type: "custom-sql"` and save the full SQL text
+- Refactor the SQL: replace `<<` with `<`, `>>` with `>`, `==` with `=` (XML encoding
+  artifacts from the TWB)
+- These will generate a `sql_view:` TML instead of a `table:` TML (see Step 5c)
+- Extract column names from the SQL `SELECT` clause aliases for column mapping
 
 **Joins** — `<relation>` elements of `type="join"`:
 - `join` attribute = join type (`inner` | `left` | `right` | `full`)
@@ -127,19 +158,28 @@ For each datasource, extract:
   `&amp;`→`&`, `&lt;`→`<`, `&gt;`→`>`)
 - Extract left and right table references from the clause
 
-**Physical columns** — `<column>` elements WITHOUT a `<calculation>` child:
-- `name` attribute = `[ColumnName]` — strip brackets
-- `datatype` attribute = Tableau data type
-- `role` attribute = `dimension` or `measure`
-- `caption` attribute = display name
+**Physical columns** — from `<metadata-records>` → `<metadata-record class="column">`:
+- `local-name` = column identifier
+- `remote-name` = physical column name in the database (use for `db_column_name`)
+- `local-type` = Tableau data type
+- `parent-name` = which table this column belongs to
+- Also extract from `<column>` elements WITHOUT a `<calculation>` child:
+  `name` (strip brackets), `datatype`, `role` (dimension/measure), `caption` (display name)
 
 **Calculated fields** — `<column>` elements WITH a `<calculation class="tableau">` child:
+- Skip columns where `param-domain-type` is `list` or `range` — these are Tableau
+  parameters, not calculated fields
 - `caption` or `name` = display name
 - `calculation formula` attribute = Tableau expression (decode HTML entities)
 - `datatype` attribute
+- Build a cross-reference map: Tableau internal names (`[Calculation_1234567890]`) →
+  display names. Calculated fields reference each other by internal ID in the TWB XML,
+  not by display name — resolve these references before translating formulas.
 
 **Parameters** — `<datasource name="Parameters">` children:
 - `name`, `caption`, `datatype`, default value
+- Log parameters for the limitations report — ThoughtSpot has its own parameter system
+  and Tableau parameters cannot be auto-migrated
 
 Save the parsed structure internally. Announce a summary:
 > Parsed `{workbook_name}`: {N} datasource(s), {N} physical table(s),
@@ -151,6 +191,9 @@ Some calculated fields reference other calculated fields. Sort them so that fiel
 with no formula-dependencies come first (Level 0), then Level 1, etc. This determines
 the order they must appear in the model TML `formulas` section.
 
+Resolve all internal Tableau cross-references (`[Calculation_\d+]` → display name)
+before sorting. The topological sort must use display names, not internal IDs.
+
 ### 3d. Dashboard metadata (for Step 8 decision)
 
 Count `<dashboard>` elements in the TWB. Save the count and names — this is shown
@@ -158,27 +201,47 @@ in Step 8 when asking whether to migrate dashboards.
 
 ---
 
-## Step 4 — Fetch Connection Schema (Optional)
+## Step 4 — Select ThoughtSpot Connection
 
-Ask: "Do you have a ThoughtSpot Connection ID to map physical tables to the warehouse?
-(Enter the GUID or type 'skip')"
-
-If skipped, use `YOUR_DATABASE` and `YOUR_SCHEMA` as placeholders in table TMLs —
-these produce a warning on validation, not an error.
-
-If a Connection ID is provided (`{connection_id}`):
+List available connections and let the user select:
 
 ```bash
-ts connections get {connection_id} --profile {profile_name}
+source ~/.zshenv && ts connections list --profile {profile_name}
+```
+
+`ts connections list` auto-paginates and returns all connections. Display the results
+as a numbered list showing connection name, type, and database. If only one connection
+exists, auto-select it and confirm with the user.
+
+```
+Available ThoughtSpot connections:
+
+  1. SNOWFLAKE_PROD    (RDBMS_SNOWFLAKE)   — PROD_DB
+  2. ANALYTICS_DW      (RDBMS_SNOWFLAKE)   — ANALYTICS_DB
+
+Which connection should the generated tables use? (Enter number, or 'skip'):
+```
+
+Save the selected connection's exact `name` value as `{connection_name}`. This name is
+used in SQL View TMLs (where `connection.name` is required) and for schema resolution.
+
+If the user selects a connection, fetch the schema to resolve db/schema/table names:
+
+```bash
+source ~/.zshenv && ts connections get {connection_id} --profile {profile_name}
 ```
 
 Parse the response to extract available databases, schemas, and table names. For each
 physical table from Step 3, find the best match (case-insensitive) in the connection
 schema. Save the resolved `{db}`, `{schema}`, and `{db_table}` for each table.
 
-If the connection response has no tables (empty `externalDatabases`), ask:
-"The connection returned no tables. Please enter the database name to search
-(e.g., FRANCOIS):"
+If the connection response has no tables (empty `externalDatabases`), ask the user for
+the database and schema names directly.
+
+If the user types **skip**: use `YOUR_DATABASE` and `YOUR_SCHEMA` as placeholders in
+table TMLs — these produce a warning on validation, not an error. **Custom SQL relations
+(Step 5c) still require a connection name** — if skipped, prompt for the connection name
+string before generating SQL View TMLs.
 
 ---
 
@@ -190,18 +253,20 @@ Create output directory:
 mkdir -p /tmp/ts_tableau_mig/output/{workbook_name}
 ```
 
-### 5a. Table TML — one per physical table
+### 5a. Table TML — one per physical table (skip custom SQL relations)
 
-For each physical table identified in Step 3, generate a `.table.tml` file. Follow
-all rules in `tableau-tml-rules.md`.
+For each physical table identified in Step 3 with `type="table"`, generate a
+`.table.tml` file. **Skip custom SQL relations** — those are handled in Step 5c.
+
+Follow all rules in `tableau-tml-rules.md`.
 
 **Template:**
 
 ```yaml
 table:
   name: TABLE_NAME
-  db: YOUR_DATABASE
-  schema: YOUR_SCHEMA
+  db: RESOLVED_DATABASE
+  schema: RESOLVED_SCHEMA
   db_table: physical_table_name
   columns:
   - name: COLUMN_NAME
@@ -215,15 +280,21 @@ table:
 ```
 
 Key rules:
+- Use `db`, `schema` values resolved from Step 4 — fall back to `YOUR_DATABASE` /
+  `YOUR_SCHEMA` only when the connection was skipped
 - Use `INT64` for Tableau `integer` — **never `INT`**
 - `db_column_properties` is **required** on every column
 - No `guid`, `fqn`, or `connection` sections
 
 Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{TABLE_NAME}.table.tml`.
 
-### 5b. Model TML — one per datasource
+### 5b. Model TML — one per datasource (strict separation)
 
-For each datasource, generate a `.model.tml` file.
+For each datasource, generate exactly one `.model.tml` file. **Never merge multiple
+datasources into a single model** — see `tableau-tml-rules.md` for the rationale.
+
+The `model_tables[]` section references both regular tables (from Step 5a) and SQL
+Views (from Step 5c) — both are referenced by `name` in the same way.
 
 **Template:**
 
@@ -232,15 +303,13 @@ model:
   name: "Datasource Display Name"
   model_tables:
   - name: TABLE_NAME
-    obj_id: TABLE_NAME
     joins:                      # only if this table has joins to others
     - with: OTHER_TABLE
       on: "[TABLE_NAME::JOIN_COL] = [OTHER_TABLE::JOIN_COL]"
       type: LEFT_OUTER          # INNER | LEFT_OUTER | RIGHT_OUTER | OUTER
       cardinality: ONE_TO_MANY
   - name: OTHER_TABLE
-    obj_id: OTHER_TABLE
-  formulas:                     # omit section entirely if no calculated fields
+  formulas:                     # omit section entirely if no translatable calculated fields
   - id: formula_Formula Name
     name: Formula Name
     expr: "ThoughtSpot expression"
@@ -255,10 +324,72 @@ Formula translation rules: use `tableau-formula-translation.md`.
 - Convert Tableau join types: `full` → `OUTER`, `left` → `LEFT_OUTER`,
   `right` → `RIGHT_OUTER`, `inner` → `INNER`
 - Write formulas in topological dependency order (Level 0 first)
+- Resolve Tableau internal IDs (`[Calculation_\d+]`) to display names before translating
+- **LOD expressions** (`{FIXED}`, `{INCLUDE}`, `{EXCLUDE}`) → `group_aggregate()` — see
+  the LOD section in `tableau-formula-translation.md`
+- **Running calculations** (`RUNNING_SUM`, etc.) → `cumulative_sum()`, etc.
+- **Rank functions** → `rank()`
+- **Window functions** (WINDOW_SUM, WINDOW_AVG, etc.) → `moving_sum()`, `moving_average()`,
+  etc. — requires identifying the sort dimension from the worksheet shelf. See "Window /
+  Moving Functions" in `tableau-formula-translation.md`.
+- **Pass-through fallback** for formulas with valid Snowflake SQL but no native ThoughtSpot
+  function (partitioned RANK, DENSE_RANK, WINDOW_* when sort dimension is unknown): use
+  `sql_*_aggregate_op()` pass-through functions — see "Pass-Through Fallback" in
+  `tableau-formula-translation.md`. Always prefer native functions first.
+- **Truly untranslatable formulas** (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE, etc.): omit
+  from `formulas[]` entirely, omit the corresponding `columns[]` entry, and log the
+  omission for the Step 12 limitations report. Never generate a placeholder — incorrect
+  syntax fails the entire model import.
 - Every join MUST have a non-empty `on` field
 - No `fqn` in `model_tables`
+- `obj_id` is optional on fresh import — omit it unless repointing an existing model
 
 Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{DatasourceName}.model.tml`.
+
+### 5c. SQL View TML — one per custom SQL relation
+
+For each custom SQL relation identified in Step 3b (those with `source_type: "custom-sql"`),
+generate a `.sql_view.tml` file. Follow the rules in `tableau-tml-rules.md` "SQL View
+TML Rules" and the full schema in `thoughtspot-sql-view-tml.md`.
+
+**Template:**
+
+```yaml
+sql_view:
+  name: "Datasource Custom SQL"
+  connection:
+    name: "Connection Display Name"
+  sql_query: |
+    SELECT col1, col2, col3
+    FROM catalog.schema.table_name
+    WHERE condition = 'value'
+  sql_view_columns:
+  - name: COL1
+    sql_output_column: col1
+    data_type: VARCHAR
+    properties:
+      column_type: ATTRIBUTE
+  - name: COL2
+    sql_output_column: col2
+    data_type: DOUBLE
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+```
+
+Key rules:
+- `connection.name` is **required** — use `{connection_name}` from Step 4
+- `sql_query` contains the full SQL text from the Tableau `<relation>` element (decode
+  HTML entities)
+- `sql_output_column` must match a column name or alias from the SQL query output
+- Map Tableau column datatypes to ThoughtSpot types using the same mapping as table TMLs
+- No `db`, `schema`, `db_table`, or `db_column_properties` fields
+- File extension: `*.sql_view.tml`
+
+Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{Name}.sql_view.tml`.
+
+The model TML (Step 5b) references these SQL Views by name in `model_tables[]`, just
+like regular tables.
 
 ---
 
@@ -300,6 +431,7 @@ Display a summary:
 ```
 Ready to import {N} TML files to {base_url}:
   - {N} table TMLs
+  - {N} SQL view TMLs (if any custom SQL relations)
   - {N} model TMLs
 ```
 
@@ -526,14 +658,17 @@ Display the final summary:
 Migration complete: {workbook_name}
 
   Tables imported:     {N}
+  SQL Views imported:  {N} (or "none" if no custom SQL relations)
   Models imported:     {N}
   Liveboards imported: {N} (or "skipped")
 
   TML files: /tmp/ts_tableau_mig/output/{workbook_name}/
 ```
 
-If any calculated fields were untranslatable (WINDOW_*, LOD expressions, table
-calculations, etc.), write a limitations file and display it:
+If any calculated fields were untranslatable (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE, etc.),
+any formulas used pass-through functions, or any formulas were omitted during Step 5b,
+write a limitations file and display it. Include pass-through formulas in the report
+(they work but require SQL Passthrough Functions to be enabled in ThoughtSpot admin):
 
 `/tmp/ts_tableau_mig/output/{workbook_name}/MIGRATION_LIMITATIONS.md`
 
@@ -553,4 +688,5 @@ calculations, etc.), write a limitations file and display it:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-06-09 | Custom SQL → sql_view TML, connection listing, formula fallback, obj_id fix, datasource separation |
 | 1.0.0 | 2026-06-09 | Initial release — merged from ts-model-from-tableau + ts-liveboard-from-tableau |

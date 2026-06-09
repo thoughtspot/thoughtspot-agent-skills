@@ -36,12 +36,14 @@ Status: DEFERRED to v1.1.0
 
 ---
 
-## #4 — Custom SQL relations — PARTIAL
+## #4 — Custom SQL relations — RESOLVED
 
-When a Tableau relation uses custom SQL, the skill extracts the physical table name from
-the SQL string (table after `FROM`). Complex multi-table SQL or subqueries are not handled.
+Custom SQL relations now generate `sql_view:` TMLs instead of extracting table names
+from the SQL string. The full SQL text is preserved in `sql_query:`, columns are mapped
+via `sql_output_column`, and the SQL View is referenced by name in the model's
+`model_tables[]`. See Step 5c in SKILL.md and `tableau-tml-rules.md` "SQL View TML Rules".
 
-Status: PARTIAL — simple `FROM table` pattern only
+Status: RESOLVED in v1.1.0
 
 ---
 

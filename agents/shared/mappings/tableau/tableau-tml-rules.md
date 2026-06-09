@@ -53,7 +53,12 @@ table:
 
 ## Model TML Rules
 
-### One model per Tableau datasource
+### One model per Tableau datasource — strict separation
+
+Each Tableau `<datasource>` element produces exactly one model TML. **Never collapse
+multiple datasources into a single model**, even when they share tables or point at the
+same database. Each datasource has its own join topology, calculated fields, and column
+aliases — merging them produces wrong joins and broken formula references.
 
 Exception: COLLECTION datasources get one model per underlying table.
 
@@ -62,11 +67,12 @@ Exception: COLLECTION datasources get one model per underlying table.
 ```yaml
 model_tables:
 - name: TABLE_A          # must match the table TML's `name` field exactly
-  obj_id: TABLE_A        # MUST be present and match `name`
 ```
 
+- `obj_id` is **optional** on fresh import — ThoughtSpot resolves tables by `name`. Include
+  `obj_id` only when repointing an existing model to a different table (see
+  `thoughtspot-model-tml.md` lines 98-99 for the authoritative rule).
 - **No `fqn` in `model_tables` entries** — causes import failures.
-- `obj_id` must match the table's own `obj_id`.
 
 ### Joins — inline syntax only
 
@@ -111,6 +117,80 @@ formulas:
 
 - Physical columns: `[table_name::column_name]`
 - Other formulas: `[formula_<display_name>]` (by their `id`)
+
+### Formula fallback — omit and log untranslatable formulas
+
+When a Tableau calculated field cannot be translated to a native ThoughtSpot function
+or a pass-through fallback (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE, or any pattern listed
+in `tableau-formula-translation.md` "Untranslatable Patterns"):
+
+1. **Omit the formula** from the model TML `formulas[]` section entirely
+2. **Omit the corresponding `columns[]` entry** that would reference the formula via `formula_id`
+3. **Log the omission** — add a row to the `MIGRATION_LIMITATIONS.md` report with the
+   formula name, datasource, reason, and Tableau expression excerpt
+
+Never generate a placeholder or stub formula — a formula with incorrect syntax causes
+the entire model import to fail. A missing formula produces a functional model with
+reduced coverage, which the user can then address manually.
+
+---
+
+## SQL View TML Rules (Custom SQL Datasources)
+
+When a Tableau `<relation>` has `type="custom-sql"`, the SQL text is the datasource's
+query — it does NOT map to a physical table. Generate a `sql_view:` TML instead of a
+`table:` TML.
+
+### When to generate a SQL View
+
+- The `<relation>` element has `type="text"` (custom SQL indicator in TWB XML)
+- The element contains a raw SQL query in its text content
+
+### Required structure
+
+```yaml
+sql_view:
+  name: "Datasource Custom SQL"
+  connection:
+    name: "Connection Display Name"      # exact name from ts connections list — case-sensitive
+  sql_query: |
+    SELECT col1, col2, col3
+    FROM catalog.schema.table_name
+    WHERE condition = 'value'
+  sql_view_columns:
+  - name: COL1
+    sql_output_column: col1              # must match a column/alias in the SQL output
+    data_type: VARCHAR
+    properties:
+      column_type: ATTRIBUTE
+  - name: COL2
+    sql_output_column: col2
+    data_type: DOUBLE
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+```
+
+### Key differences from table TML
+
+- **No `db`, `schema`, or `db_table`** — the SQL query defines the data source
+- **`connection.name` is required** — SQL Views must reference a named connection
+- **`sql_output_column`** replaces `db_column_name` — must match a column/alias in the SQL
+- **`db_column_properties` is NOT used** — `data_type` goes at the column level
+- **File extension**: `*.sql_view.tml` (not `*.table.tml`)
+
+See `thoughtspot-sql-view-tml.md` for the full schema reference.
+
+### Model references to SQL Views
+
+A SQL View is referenced in `model_tables[]` by name, just like a regular table:
+
+```yaml
+model_tables:
+- name: "Datasource Custom SQL"
+```
+
+Column references use the same `[sql_view_name::column]` syntax.
 
 ---
 
