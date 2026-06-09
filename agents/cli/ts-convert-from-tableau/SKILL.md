@@ -46,7 +46,17 @@ On skill invocation, display this plan before doing any work:
 **ts-convert-from-tableau** — convert a Tableau workbook into ThoughtSpot TML objects,
 with optional dashboard-to-liveboard migration.
 
-### Steps
+### Modes
+
+  **A  Audit** — analyse a TWB file (or multiple files) and report migration coverage.
+     No ThoughtSpot auth required. No TMLs generated. Use this to assess feasibility
+     before committing to a migration.
+
+  **M  Migrate** — full conversion: parse, generate TMLs, validate, and import.
+
+Enter A / M:
+
+### Steps (Migrate mode)
 
   1.  Authenticate to ThoughtSpot .......................... auto
   2.  Locate and extract the TWB file ...................... you provide path
@@ -65,9 +75,140 @@ with optional dashboard-to-liveboard migration.
 Confirmation required: Steps 7, 8, 11
 Auto-executed: Steps 1, 3, 5, 6, 9, 10, 12
 
+### Steps (Audit mode)
+
+  A1.  Locate and extract TWB file(s) ...................... you provide path(s)
+  A2.  Parse TWB XML — same extraction as Step 3 .......... auto
+  A3.  Classify formulas into translation tiers ............ auto
+  A4.  Migration coverage report ........................... auto
+
+No auth, no TML generation, no import. Supports multiple files in one run.
+
 ---
 
-Ask: "Ready to start? Please provide the path to your `.twb` or `.twbx` file."
+If Audit mode, proceed to Step A1. If Migrate mode, proceed to Step 1.
+
+---
+
+## Step A1 — Locate TWB File(s) (Audit Mode)
+
+Ask: "Provide the path to a `.twb` or `.twbx` file, or a directory containing multiple
+workbooks."
+
+If a directory is provided, find all `.twb` and `.twbx` files recursively. For each
+`.twbx`, extract to a temp directory to access the inner `.twb`.
+
+Save the list of TWB paths. Process each file through Steps A2–A4 independently.
+
+---
+
+## Step A2 — Parse TWB XML (Audit Mode)
+
+Run the same extraction as Step 3 (3a through 3d) on each TWB file. Do NOT skip any
+datasource type — include Extract datasources in the audit count (marked as "Extract —
+skipped in migration").
+
+---
+
+## Step A3 — Classify Formulas (Audit Mode)
+
+For each calculated field extracted in Step A2, classify it into one of these tiers
+based on the patterns in `tableau-formula-translation.md`:
+
+| Tier | Description | Examples |
+|---|---|---|
+| **Native** | Direct ThoughtSpot function mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF |
+| **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}` |
+| **Cumulative** | Running calculation → `cumulative_*()` | RUNNING_SUM, RUNNING_AVG |
+| **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
+| **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE, PREVIOUS_VALUE |
+| **Parameter ref** | References a Tableau parameter — requires manual recreation | `[Parameter.Name]` |
+
+For each formula, also check:
+- Does it reference other calculated fields? (cross-reference depth)
+- Does it use functions from the untranslatable list?
+- Does it mix translatable and untranslatable patterns?
+
+---
+
+## Step A4 — Migration Coverage Report (Audit Mode)
+
+For each TWB file, produce a coverage report. If multiple files were audited, also
+produce a combined summary at the end.
+
+**Per-file report:**
+
+```
+Audit: {workbook_name}
+══════════════════════════════════════════════════════
+
+  Datasources:          {N} total
+    Live:               {N}
+    Extract:            {N} (skipped in migration)
+    Published (sqlproxy): {N}
+
+  Physical tables:      {N}
+  Custom SQL relations: {N} → will generate sql_view TMLs
+  Joins:                {N}
+
+  Calculated fields:    {N} total
+  ┌─────────────────────────────────────────────────┐
+  │ Tier                Count    %     Examples     │
+  ├─────────────────────────────────────────────────┤
+  │ Native              {N}     {%}   IF, DATEDIFF │
+  │ LOD → group_agg     {N}     {%}   {FIXED ...}  │
+  │ Cumulative          {N}     {%}   RUNNING_SUM  │
+  │ Moving              {N}     {%}   WINDOW_SUM   │
+  │ Pass-through        {N}     {%}   DENSE_RANK   │
+  │ Untranslatable      {N}     {%}   LOOKUP       │
+  │ Parameter ref       {N}     {%}                │
+  └─────────────────────────────────────────────────┘
+
+  Parameters:           {N} (require manual recreation in ThoughtSpot)
+  Dashboards:           {N} (optional liveboard migration)
+
+  ──────────────────────────────────────────────────
+  Estimated migration coverage: {translatable / total}%
+  Pass-through formulas require SQL Passthrough Functions enabled.
+  ──────────────────────────────────────────────────
+```
+
+If any formulas are classified as Untranslatable, list them:
+
+```
+  Untranslatable formulas:
+    - {formula_name}: {reason} — {expression excerpt}
+    - ...
+```
+
+If any formulas are classified as Pass-through, list them with the generated expression:
+
+```
+  Pass-through formulas (require SQL Passthrough Functions enabled):
+    - {formula_name}: sql_{type}_aggregate_op("...", ...)
+    - ...
+```
+
+Write the report to `/tmp/ts_tableau_mig/audit/{workbook_name}_audit.md` and display
+it inline.
+
+**Combined summary (multiple files):**
+
+```
+Audit Summary: {N} workbook(s)
+══════════════════════════════════════════════════════
+
+  Workbook                          Tables  Calcs  Coverage
+  ─────────────────────────────────────────────────────────
+  {workbook_1}                      {N}     {N}    {%}%
+  {workbook_2}                      {N}     {N}    {%}%
+  ...
+  ─────────────────────────────────────────────────────────
+  Total                             {N}     {N}    {%}%
+```
+
+After the audit, exit cleanly. Do NOT proceed to Migrate mode steps.
 
 ---
 

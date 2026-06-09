@@ -15,7 +15,16 @@ to liveboards with approximate layout mapping.
 - `ts` CLI installed: `pip install -e tools/ts-cli`
 - `.twb` or `.twbx` file accessible on disk
 
-## Workflow
+## Modes
+
+**A  Audit** — analyse TWB file(s) and report migration coverage. No auth, no TMLs.
+Runs Steps A1–A4: parse XML, classify formulas into tiers (Native / LOD / Cumulative /
+Moving / Pass-through / Untranslatable / Parameter ref), produce coverage report.
+Supports multiple files. Output: `/tmp/ts_tableau_mig/audit/{workbook}_audit.md`.
+
+**M  Migrate** — full conversion (Steps 1–12 below).
+
+## Workflow (Migrate mode)
 
 **Step 1 — Authenticate**
 ```bash
