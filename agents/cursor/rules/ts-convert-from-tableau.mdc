@@ -21,6 +21,8 @@ to liveboards with approximate layout mapping.
 Runs Steps A1–A4: parse XML, classify formulas into tiers (Native / LOD / Cumulative /
 Moving / Pass-through / Untranslatable / Parameter ref), produce coverage report.
 Supports multiple files. Output: `/tmp/ts_tableau_mig/audit/{workbook}_audit.md`.
+Classifier must match function calls with `FUNCTION(` pattern (not bare words) to avoid
+false positives — e.g. `SIZE(` not `\bSIZE\b`. Parameter refs: detect `[Parameters].[...]`.
 
 **M  Migrate** — full conversion (Steps 1–12 below).
 

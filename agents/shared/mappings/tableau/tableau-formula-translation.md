@@ -296,7 +296,7 @@ model import. A missing formula produces a functional model with reduced coverag
 | `SIZE()`, `FIRST()`, `LAST()` | Table calculations — partition-aware row addressing; no SQL equivalent |
 | `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent |
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
-| References to Tableau Parameters | ThoughtSpot has its own parameter system; requires manual recreation |
+| References to Tableau Parameters (`[Parameters].[Name]`) | ThoughtSpot has its own parameter system; formula syntax (IF/CASE) is translatable but parameter values need manual mapping — see Parameter References section |
 
 **Formerly untranslatable, now mapped:**
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
@@ -305,6 +305,39 @@ model import. A missing formula produces a functional model with reduced coverag
 - `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined
 - `RANK_MODIFIED`, `RANK_DENSE` → `sql_int_aggregate_op()` pass-through
 - Partitioned `RANK` → `sql_int_aggregate_op()` with `partition by`
+
+---
+
+## Parameter References
+
+Tableau formulas can reference parameters via `[Parameters].[Parameter Name]`. This is
+Tableau's cross-datasource parameter reference syntax — the formula evaluates to a
+user-selected value at runtime.
+
+**Detection pattern:** `[Parameters].[` in the formula text.
+
+**Common patterns in production workbooks:**
+
+| Pattern | Tableau | Purpose |
+|---|---|---|
+| Dimension selector | `CASE [Parameters].[Dimension Picker] WHEN 'Revenue' THEN [Revenue] WHEN 'Units' THEN [Units] END` | User picks which metric to display |
+| Threshold filter | `IF [Metric] > [Parameters].[Threshold] THEN 'Above' ELSE 'Below' END` | User sets a numeric cutoff |
+| Date granularity | `CASE [Parameters].[Date Grain] WHEN 'day' THEN DATEPART('day', [Date]) WHEN 'month' THEN DATEPART('month', [Date]) END` | User picks date roll-up |
+
+**Migration approach:** These formulas use translatable syntax (IF/CASE/WHEN) but
+depend on Tableau parameter values with no automatic ThoughtSpot equivalent. During
+audit, classify as **Parameter ref** (separate from Untranslatable). During migration,
+omit and log with specific guidance:
+
+1. Identify the parameter's purpose (dimension selector, threshold, toggle)
+2. In ThoughtSpot, replace with a runtime filter, a formula with a hardcoded value,
+   or a ThoughtSpot parameter (if the ThoughtSpot build supports it)
+3. Re-add the formula manually after import
+
+**Scale note:** In production workbooks, parameter references can account for 10–50%
+of all calculated fields (observed up to 131 in a single datasource). The audit report
+separates these from truly untranslatable formulas so the user sees accurate function
+coverage.
 
 ---
 

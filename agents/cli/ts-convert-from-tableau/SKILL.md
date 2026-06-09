@@ -121,9 +121,31 @@ based on the patterns in `tableau-formula-translation.md`:
 | **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}` |
 | **Cumulative** | Running calculation → `cumulative_*()` | RUNNING_SUM, RUNNING_AVG |
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
-| **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
-| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE, PREVIOUS_VALUE |
-| **Parameter ref** | References a Tableau parameter — requires manual recreation | `[Parameter.Name]` |
+| **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context, TOTAL() |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE |
+| **Parameter ref** | References a Tableau parameter — requires manual mapping | `[Parameters].[Parameter Name]` |
+
+### Classifier implementation notes
+
+**Function detection — require parentheses.** Match `FUNCTION_NAME(` (with optional
+whitespace before the paren), not bare word boundaries. Bare `\bSIZE\b` false-positives
+on dimension values like `'Size'` or column names like `[Size]`. Correct patterns:
+
+```
+LOOKUP\s*\(   INDEX\s*\(   SIZE\s*\(   PREVIOUS_VALUE\s*\(   RAWSQL_
+RUNNING_(SUM|AVG|MAX|MIN|COUNT)\s*\(
+WINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(
+RANK(_UNIQUE|_MODIFIED|_DENSE|_PERCENTILE)?\s*\(
+TOTAL\s*\(
+```
+
+**Parameter references.** Detect `[Parameters].[...]` pattern — this is Tableau's
+cross-datasource parameter reference syntax. These formulas use translatable syntax
+(IF/CASE/WHEN) but depend on Tableau parameter values that have no automatic
+ThoughtSpot equivalent. Classify as **Parameter ref**, not Untranslatable.
+
+**LOD first.** Check `{FIXED|INCLUDE|EXCLUDE}` before other tiers — LOD expressions
+may also contain functions like SUM that would match Native.
 
 For each formula, also check:
 - Does it reference other calculated fields? (cross-reference depth)
@@ -169,17 +191,39 @@ Audit: {workbook_name}
   Dashboards:           {N} (optional liveboard migration)
 
   ──────────────────────────────────────────────────
-  Estimated migration coverage: {translatable / total}%
+  Function coverage:    {(native+lod+cum+mov+pt+rank) / total}%
+                        (formula syntax is auto-translatable)
+  Fully automatic:      {(native+lod+cum+mov+pt+rank) / total}%
+                        (excludes parameter refs that need manual mapping)
   Pass-through formulas require SQL Passthrough Functions enabled.
   ──────────────────────────────────────────────────
 ```
 
+**Function coverage** counts everything except Untranslatable — including parameter
+refs, whose IF/CASE/WHEN syntax IS translatable even though the parameter value
+needs manual mapping. **Fully automatic** excludes both Untranslatable AND Parameter
+ref formulas.
+
 If any formulas are classified as Untranslatable, list them:
 
 ```
-  Untranslatable formulas:
+  Untranslatable formulas (will be omitted):
     - {formula_name}: {reason} — {expression excerpt}
     - ...
+```
+
+If any formulas are classified as Parameter ref, list them with guidance:
+
+```
+  Parameter-referencing formulas ({count}):
+    - {formula_name}: references [Parameters].[{param_name}]
+    - ...
+
+  These formulas use translatable syntax (IF/CASE/WHEN) but depend on
+  Tableau parameter values. To migrate:
+  1. Identify the parameter's purpose (dimension selector, threshold, toggle)
+  2. Replace with a ThoughtSpot runtime filter, or hardcode the value
+  3. Re-add the formula manually after import
 ```
 
 If any formulas are classified as Pass-through, list them with the generated expression:
