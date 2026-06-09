@@ -26,6 +26,10 @@ mappings/ts-databricks/
   ts-databricks-formula-translation.md — ThoughtSpot ↔ Databricks SQL formula mapping
   ts-databricks-properties.md         — column/property coverage matrix for MV ↔ TS
 
+mappings/tableau/
+  tableau-formula-translation.md      — Tableau → ThoughtSpot formula and function mapping
+  tableau-tml-rules.md                — TML generation rules for Tableau workbook conversion
+
 schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference

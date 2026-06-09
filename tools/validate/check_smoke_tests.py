@@ -36,6 +36,7 @@ ALLOWLIST = {
     "ts-profile-snowflake",     # interactive credential setup
     "ts-profile-databricks",    # interactive credential setup
     "ts-object-answer-promote", # legacy gap; backfill in a follow-up PR
+    "ts-convert-from-tableau",  # requires .twb fixture file; smoke test deferred until a sample workbook is available
 }
 
 # Skills whose smoke test uses an abbreviated filename rather than the default convention.

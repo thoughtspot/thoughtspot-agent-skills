@@ -1,0 +1,161 @@
+---
+description: Convert or import a Tableau workbook (.twb or .twbx) into ThoughtSpot — parses TWB XML, generates table + model TMLs, validates and imports. Optionally migrates dashboards to liveboards. Direction is always Tableau → ThoughtSpot.
+---
+
+> **Untested in Cursor** — authoritative source is `agents/cli/ts-convert-from-tableau/SKILL.md`.
+> This `.mdc` mirrors the same workflow for Cursor users.
+
+# Tableau Workbook → ThoughtSpot
+
+Convert a Tableau workbook into ThoughtSpot TML objects. Optionally migrate dashboards
+to liveboards with approximate layout mapping.
+
+## Prerequisites
+- ThoughtSpot profile configured (`/ts-profile-thoughtspot`)
+- `ts` CLI installed: `pip install -e tools/ts-cli`
+- `.twb` or `.twbx` file accessible on disk
+
+## Workflow
+
+**Step 1 — Authenticate**
+```bash
+source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+```
+
+**Step 2 — Extract TWB**
+If `.twbx`, unzip first: `unzip -o "{file}.twbx" -d /tmp/ts_tableau_mig/`
+Read the `.twb` XML file in full.
+
+**Step 3 — Parse TWB XML**
+Extract for each `<datasource>` (skip `Parameters`):
+- Physical tables: `<relation type="table">` → `name` (alias), `table` (physical name)
+- Columns: `<column>` without `<calculation>` child → name, datatype, role
+- Calculated fields: `<column>` with `<calculation class="tableau">` → caption, formula
+  (decode HTML entities)
+- Joins: `<relation type="join">` → join type + `<clause>` condition
+- Dashboard count and names from `<dashboard>` elements
+Topologically sort calculated fields (dependencies first).
+
+**Step 4 — Fetch connection schema (optional)**
+`ts connections get {connection_id} --profile {profile_name}` — map physical tables to
+db/schema. If skipped, use `YOUR_DATABASE` / `YOUR_SCHEMA` placeholders.
+
+**Step 5 — Generate TML files**
+See `~/.cursor/shared/mappings/tableau/tableau-tml-rules.md` for all required fields.
+See `~/.cursor/shared/mappings/tableau/tableau-formula-translation.md` for formula mapping.
+
+Table TML (one per physical table):
+```yaml
+table:
+  name: {TABLE}
+  db: {db}
+  schema: {schema}
+  db_table: {physical_name}
+  columns:
+  - name: {COL}
+    db_column_name: {COL}
+    data_type: {VARCHAR|INT64|DOUBLE|BOOL|DATE|DATETIME}
+    properties:
+      column_type: {ATTRIBUTE|MEASURE}
+      aggregation: SUM   # MEASURE only
+    db_column_properties:
+      data_type: {same as data_type}
+```
+
+Model TML (one per datasource):
+```yaml
+model:
+  name: {Datasource Name}
+  model_tables:
+  - name: {TABLE}
+    obj_id: {TABLE}
+    joins:
+    - with: {OTHER_TABLE}
+      on: "[{TABLE}::{COL}] = [{OTHER_TABLE}::{COL}]"
+      type: LEFT_OUTER
+      cardinality: ONE_TO_MANY
+  formulas:
+  - id: formula_{Name}
+    name: {Name}
+    expr: "{ThoughtSpot expression}"
+  columns:
+  - name: {display_name}
+    column_id: {TABLE}::{COL}
+    properties:
+      column_type: ATTRIBUTE
+```
+
+**Step 6 — Validate (up to 10 fix cycles)**
+```bash
+cd /tmp/ts_tableau_mig/output/{workbook} && zip -r /tmp/ts_tableau_mig/{workbook}.zip *.tml
+ts tml import --policy VALIDATE_ONLY --profile {profile_name} < /tmp/ts_tableau_mig/{workbook}.zip
+```
+Fix errors per `tableau-tml-rules.md` error table. Ignore "Table with id null" warnings.
+
+**Step 7 — Import**
+```bash
+ts tml import --policy ALL_OR_NONE --profile {profile_name} < /tmp/ts_tableau_mig/{workbook}.zip
+```
+
+**Step 8 — Migrate dashboards? (optional)**
+If the workbook has dashboards, ask the user. If yes, continue; if no, skip to Step 12.
+
+**Step 9 — Parse dashboard layout + map to grid**
+Walk `<zones>` → `<zone>` elements recursively per dashboard:
+- `viz` zones (worksheet_name) → chart tiles
+- `text` / `title` zones → note tiles
+- Extract x, y, w, h (Tableau 0–100,000 coordinate space)
+Map to ThoughtSpot 12-column grid:
+- Group zones into y-bands (within 2,000 units = same row)
+- Assign col positions proportionally (sum = 12)
+- Height = h / (dashboard_height / 20), minimum 4
+
+**Step 10 — Generate liveboard TML**
+For each viz zone: resolve chart type (bar→BAR, line→LINE, circle→SCATTER, text→TABLE,
+pie→PIE, area→AREA), build search query from shelf columns + aggregations, resolve
+calculated fields via formula_column_map.
+
+```yaml
+liveboard:
+  name: {dashboard_name}
+  visualizations:
+  - id: Viz_{zone_id}
+    answer:
+      name: {worksheet_name}
+      tables:
+      - id: {DatasourceName}
+        fqn: {model_guid}
+      search_query: "{nl_query}"
+      chart:
+        type: {CHART_TYPE}
+  - id: Note_{zone_id}
+    viz_type: NOTE_TILE
+    note_tile:
+      content: "{text_content}"
+  layout:
+    tiles:
+    - visualization_id: Viz_{zone_id}
+      x: {col}
+      y: {y}
+      height: {row_span}
+      width: {col_span}
+```
+
+Beautify: sort tiles by y then x, pack rows from y=0, fill 12 columns, enforce min height 4.
+
+**Step 11 — Import liveboard**
+```bash
+zip -r /tmp/ts_tableau_mig/{workbook}_LB.zip *.liveboard.tml
+ts tml import --policy PARTIAL --profile {profile_name} < /tmp/ts_tableau_mig/{workbook}_LB.zip
+```
+
+**Step 12 — Summary**
+Display imported counts, TML file locations, liveboard URLs
+(`{base_url}/#/pinboard/{guid}`), and `MIGRATION_LIMITATIONS.md` for any untranslatable
+formulas (WINDOW_*, LOD, table calculations).
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-06-09 | Initial release (untested in Cursor) |
