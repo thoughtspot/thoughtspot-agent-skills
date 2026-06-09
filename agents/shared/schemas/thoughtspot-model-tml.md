@@ -95,8 +95,8 @@ model:
 |---|---|---|
 | `name` | Yes | Exact ThoughtSpot table object name — case-sensitive, copy verbatim |
 | `alias` | No | When the same physical table appears more than once (e.g. self-join or two roles for one dim), assign a unique alias per entry. `column_id` then uses the alias as the table prefix: `LOT_DRUGS_1::MOLECULE`. |
-| `fqn` | Yes on first import | GUID of the ThoughtSpot table object. After ThoughtSpot processes the TML, it replaces `fqn` with `obj_id`. |
-| `obj_id` | After round-trip | ThoughtSpot-assigned content ID (e.g. `DM_ORDER-924f10e2`) — appears after export; use `fqn` on import |
+| `fqn` | Yes on first import | GUID of the ThoughtSpot table object. For repoint operations, prefer `obj_id` over `fqn` when supported (avoids VERSION_CONFLICT 14009). Use one or the other on each entry, not both. |
+| `obj_id` | No | ThoughtSpot-assigned content ID (format: `{NAME}-{first_8_chars_of_guid}`, e.g. `DM_ORDER-924f10e2`). Only present when exported with `export_options.include_obj_id_ref: true`. Preferred over `fqn` for repoint operations — avoids VERSION_CONFLICT (error 14009) on some builds. When importing with `obj_id`, omit `fqn` on the same entry (and vice versa). |
 | `id` | No | When present, must equal `name` exactly (same case). ThoughtSpot uses `name` as the join reference target when `id` is absent. Omitting `id` is simpler. |
 | `joins` | No | Inline joins FROM this table. Lives on the source (FK) table entry only. |
 | `referencing_join` | No | Scenario A only — name of a pre-defined join in the ThoughtSpot Table TML. System-inferred joins have auto-generated names like `SYS_CONSTRAINT_<uuid>`. |

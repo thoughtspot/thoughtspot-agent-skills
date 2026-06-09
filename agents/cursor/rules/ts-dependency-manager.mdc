@@ -176,11 +176,16 @@ the chart in TABLE_MODE.
 
 ## Step 7 — TML backup
 
-**Announce backup location BEFORE running** (so the user knows where to find
-the rollback files if something fails):
+**Ask the user where to save backups** before running:
 
 ```
-Backing up source + N dependents to /tmp/ts_dep_backup_<ts>/
+Where should I save the TML backups?
+
+  1  Current directory  — ./ts_dep_backup_<ts>/
+  2  /tmp               — /tmp/ts_dep_backup_<ts>/
+  3  Custom path        — you provide
+
+Enter 1 / 2 / 3:
 ```
 
 For each selected object, export TML to that dir. Include a manifest
@@ -198,7 +203,7 @@ Source object: {name}                 — change: {operation}
 Dependents to FIX:    {N}
 Dependents to DELETE: {M} (typed confirmation required)
 Dependents to SKIP:   {K}
-Backup at: /tmp/ts_dep_backup_<ts>/
+Backup at: {backup_dir}
 Drift detection: ENABLED (any dep modified since scan will abort that step)
 Proceed? (Y / N)
 ```
@@ -208,6 +213,21 @@ If any deletes are queued, also require: `Type DELETE to confirm:`.
 ---
 
 ## Step 9 — Apply changes
+
+### 9b. obj_id detection (Repoint mode only)
+
+Before applying repoints, detect whether the instance supports `obj_id` references:
+
+```bash
+ts tml export {source_guid} --profile {ts_profile} --include-obj-id --include-obj-id-ref --no-guid --parse
+```
+
+If the exported TML contains `obj_id` fields on `model_tables[]`, use obj_id-based
+references for the repoint (avoids VERSION_CONFLICT error 14009 on some builds).
+Derive `target_obj_id` as `{target_name}-{target_guid[:8]}`. Fall back to fqn if
+obj_id is not present.
+
+### Apply order
 
 Order matters:
 
@@ -258,11 +278,11 @@ If any Step 9 substep fails:
 
 ## Cleanup
 
-The backup dir at `/tmp/ts_dep_backup_<ts>/` is preserved deliberately —
-needed for rollback verification. Auto-clean older runs:
+The backup dir is preserved deliberately — needed for rollback verification.
+Remove when you are confident the changes are correct:
 
 ```bash
-find /tmp -maxdepth 1 -name "ts_dep_backup_*" -mtime +7 -type d -exec rm -rf {} \;
+rm -rf {backup_dir}
 ```
 
 ---
@@ -271,4 +291,5 @@ find /tmp -maxdepth 1 -name "ts_dep_backup_*" -mtime +7 -type d -exec rm -rf {} 
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-06-09 | Mirror Claude v1.1.0: obj_id-based repoint with fqn fallback (Step 9b), backup location prompt (Step 7). Requires ts-cli v0.8.0. |
 | 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-dependency-manager/SKILL.md` (Claude v0.1.3). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |

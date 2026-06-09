@@ -34,21 +34,22 @@ def strip_nonprintable(text: str) -> str:
 
 
 def detect_tml_type(parsed: dict) -> str:
-    """Return the TML object type from the top-level key (excluding 'guid').
+    """Return the TML object type from the top-level key (excluding 'guid'/'obj_id').
 
     ThoughtSpot TML has exactly one top-level key that names the object type
-    (e.g. 'model', 'table', 'answer'). The optional 'guid' key at document
-    root is excluded from the search.
+    (e.g. 'model', 'table', 'answer'). The optional 'guid' and 'obj_id' keys
+    at document root are excluded from the search.
 
     Returns 'unknown' if no recognised type key is found.
     """
+    _skip = {"guid", "obj_id"}
     # Prefer known type keys first for determinism
     for key in _TML_TYPE_KEYS:
         if key in parsed:
             return key
-    # Fallback: first non-guid key
+    # Fallback: first non-metadata key
     for key in parsed:
-        if key != "guid":
+        if key not in _skip:
             return key
     return "unknown"
 
@@ -88,6 +89,14 @@ def export_tml(
     type: Optional[str] = typer.Option(None, "--type",
                                        help="Metadata type to include in each export entry. "
                                             "Omit for standard TML export."),
+    include_obj_id: bool = typer.Option(False, "--include-obj-id",
+                                        help="Include obj_id on the exported object itself."),
+    include_obj_id_ref: bool = typer.Option(False, "--include-obj-id-ref",
+                                            help="Include obj_id on referenced objects "
+                                                 "(e.g. model_tables entries)."),
+    include_guid: bool = typer.Option(True, "--include-guid/--no-guid",
+                                      help="Include guid at document root. "
+                                           "Default: true. Use --no-guid to omit."),
 ) -> None:
     """Export TML for one or more objects.
 
@@ -111,6 +120,7 @@ def export_tml(
       ts tml export abc-123 --fqn --associated
       ts tml export abc-123 --fqn --associated --parse
       ts tml export abc-123 def-456 --format JSON
+      ts tml export abc-123 --include-obj-id --include-obj-id-ref --no-guid --parse
     """
     if type and type.upper() == "FEEDBACK":
         raise SystemExit(
@@ -133,15 +143,23 @@ def export_tml(
             entry["type"] = type
         return entry
 
-    resp = client.post(
-        "/api/rest/2.0/metadata/tml/export",
-        json={
-            "metadata": [_entry(g) for g in guids],
-            "export_fqn": fqn,
-            "export_associated": associated,
-            "formattype": format,
-        },
-    )
+    body: dict = {
+        "metadata": [_entry(g) for g in guids],
+        "export_fqn": fqn,
+        "export_associated": associated,
+        "formattype": format,
+    }
+    export_opts: dict = {}
+    if include_obj_id:
+        export_opts["include_obj_id"] = True
+    if include_obj_id_ref:
+        export_opts["include_obj_id_ref"] = True
+    if not include_guid:
+        export_opts["include_guid"] = False
+    if export_opts:
+        body["export_options"] = export_opts
+
+    resp = client.post("/api/rest/2.0/metadata/tml/export", json=body)
     data = resp.json()
 
     if not parse:

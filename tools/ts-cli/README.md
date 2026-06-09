@@ -312,6 +312,9 @@ ts tml export abc-123 def-456 --format JSON
 
 # Export coaching feedback TML (nls_feedback) for a Model
 ts tml export abc-123 --type FEEDBACK --parse
+
+# Export with obj_id references (for repoint operations)
+ts tml export abc-123 --include-obj-id --include-obj-id-ref --no-guid --parse
 ```
 
 **Options:**
@@ -324,6 +327,9 @@ ts tml export abc-123 --type FEEDBACK --parse
 | `--format`, `-f` | `YAML` | Output format: `YAML` or `JSON` |
 | `--parse` | false | Parse each `edoc` string into a structured JSON object (see below) |
 | `--type` | (none) | Metadata type for each export entry. Use `FEEDBACK` to export a Model's coaching feedback TML (nls_feedback). |
+| `--include-obj-id` | false | Include `obj_id` on the exported object itself. |
+| `--include-obj-id-ref` | false | Include `obj_id` on referenced objects (e.g. `model_tables` entries). |
+| `--include-guid` / `--no-guid` | true | Include `guid` at document root. Use `--no-guid` to omit. |
 
 **Output (default):** JSON array from `POST /api/rest/2.0/metadata/tml/export`. Each element
 contains `info` (metadata) and `edoc` (the raw TML string).

@@ -284,3 +284,53 @@ so the input data (per-column dep counts and patterns) is already populated.
 **Status:** VERIFIED 2026-06-01. `tools/smoke-tests/smoke_ts-metadata-report.py` passes
 against SpotterAccuracy (`champ-clone-spotql.thoughtspotdev.cloud`). Fixture:
 `EDUCATION_BUSINESS.EDUCATION_BUSINESS.UNIVERSITY_FACULTY` (GUID `baa451a6-02a0-42d1-8347-8cd4af13b505`).
+
+---
+
+## #23 — VERSION_CONFLICT (14009) on fqn-based model repoint — CONFIRMED 2026-06-09
+
+**Context:** When repointing a model's `model_tables[].fqn` from one table to another,
+some ThoughtSpot builds return VERSION_CONFLICT (error 14009) on import — even when the
+TML is otherwise valid and the only change is the fqn value.
+
+**Finding:** Using `obj_id`-based references instead of `fqn` avoids the error. The
+`export_options` API flags (`include_obj_id: true`, `include_obj_id_ref: true`,
+`include_guid: false`) produce TML with `obj_id` fields. The repoint then replaces
+`obj_id` (format: `{NAME}-{first8chars_of_guid}`) instead of `fqn`.
+
+**Verified against:**
+- `se-thoughtspot-cloud.thoughtspot.cloud` — 4 models repointed successfully using obj_id
+  approach (2026-06-09). Source table `DM_CATEGORY_SQL` (GUID `dda51113-cc80-47e5-82a1-b1a997ed5e69`),
+  target table `DM_CATEGORY` (GUID `b1c94779-122f-43aa-86f6-f9a7fbcfddce`).
+- `champ-clone-spotql.thoughtspotdev.cloud` (SpotterAccuracy) — ALL TML imports fail with
+  VERSION_CONFLICT on this cluster, including trivial description changes. This is a
+  pre-existing instance condition, not specific to the repoint operation.
+
+**Skill impact:** Step 9 now detects obj_id support and prefers obj_id-based references
+with fqn fallback. See `detect_obj_id_support` block and `repoint_model()` function.
+
+**Status:** CONFIRMED 2026-06-09. Implemented in ts-dependency-manager v1.1.0.
+
+---
+
+## #24 — TML export_options API flags — CONFIRMED 2026-06-09
+
+**Context:** The `exportMetadataTML` v2 endpoint accepts an `export_options` object in
+the request body with three boolean flags:
+
+- `include_obj_id` — includes `obj_id` field at the root of each TML object
+- `include_obj_id_ref` — includes `obj_id` fields on references within the TML
+  (e.g. `model_tables[].obj_id`)
+- `include_guid` — when `false`, omits `guid` from the exported TML (default: `true`)
+
+**Verified via:** SpotterCode MCP `get-rest-api-reference(apiName: "exportMetadataTML")`
+and live testing on `se-thoughtspot-cloud.thoughtspot.cloud` (2026-06-09).
+
+**obj_id format:** `{OBJECT_NAME}-{first_8_chars_of_guid}` (e.g. `DM_CATEGORY_SQL-dda51113`).
+The name portion uses the object's ThoughtSpot display name (spaces replaced with
+underscores in some cases).
+
+**Skill impact:** ts-cli v0.8.0 adds `--include-obj-id`, `--include-obj-id-ref`, and
+`--no-guid` flags to `ts tml export`. Step 9 uses these flags for repoint operations.
+
+**Status:** CONFIRMED 2026-06-09. Implemented in ts-cli v0.8.0.

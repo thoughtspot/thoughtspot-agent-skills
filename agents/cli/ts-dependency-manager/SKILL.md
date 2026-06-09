@@ -109,8 +109,8 @@ What the skill walks during Step 4. Solid arrows = standard dependencies via v2 
            ▼         ▼         ╲- - -→ [<TABLE>_CSR.column_security_rules]
        [MODEL]    [VIEW]                   (#9 — retrieval unverified)
         / │ \      │ │
-       /  │  \     │ │
-      /   │   ╲    │ │
+       /  │  \     │ │  ............→ [<MODEL>.column_alias]
+      /   │   ╲    │ │       (#10 — retrieval unverified)
      /    │    ╲   │ │
     ▼     ▼     ▼  ▼ ▼
  [ANSWER] │  [SET]   ┊
@@ -120,8 +120,6 @@ What the skill walks during Step 4. Solid arrows = standard dependencies via v2 
      │    │
      ▼    ▼
  [LIVEBOARD]
-     │   │  ............→ [<MODEL>.column_alias]
-     │   │       (#10 — retrieval unverified)
      │   │
      │   └ ............→ [nls_feedback]   (#18 partial via --associated)
      │
@@ -728,6 +726,23 @@ Scope of the backup:
 If any backup export fails, abort the run and ask the user how to proceed — never skip,
 never proceed with partial backup.
 
+### Choose backup location
+
+Before generating the backup path, ask the user:
+
+```
+Where should the TML backup be saved?
+
+  1  /tmp/   (default — ephemeral, cleared on reboot)
+  2  Custom path
+
+Enter 1 or a path [default: 1]:
+```
+
+If the user enters a custom path, use it as the base directory. The skill appends
+`ts_dep_backup_<YYYYMMDD_HHMMSS>/` for uniqueness in both cases. If the directory
+doesn't exist, create it with `os.makedirs(path, exist_ok=True)`.
+
 ### Announce backup location BEFORE running
 
 Before exporting anything, tell the user where the backup will be written and what it will
@@ -736,7 +751,7 @@ contain. The path is generated once and reused for the rest of this run.
 ```
 TML BACKUP — about to run
 
-  Location:  /tmp/ts_dep_backup_<YYYYMMDD_HHMMSS>/
+  Location:  {backup_dir}/
   Contents:  manifest.json
              {source_type}_{source_guid}_{source_name}.json   ← source
              {type}_{guid}_{name}.json   × {F + D} dependent(s)
@@ -755,7 +770,8 @@ even if the user selected "None" in Step 6 (the source still changes).
 import os, json, datetime
 
 timestamp   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-backup_dir  = f"/tmp/ts_dep_backup_{timestamp}"
+backup_base = custom_backup_path or "/tmp"
+backup_dir  = os.path.join(backup_base, f"ts_dep_backup_{timestamp}")
 os.makedirs(backup_dir, exist_ok=True)
 
 # Source + everything we touch (fix + delete) — non-negotiable: always back up before Step 9
@@ -974,6 +990,44 @@ def assert_no_drift_or_skip(guid, skill_type, profile_name, snapshot, results,
     return True
 ```
 
+**Detect obj_id support (REPOINT only).** Before any modifications, probe whether the
+instance supports obj_id references by exporting the source with the obj_id flags.
+When obj_id is available, the repoint helpers use it instead of fqn — avoiding
+VERSION_CONFLICT (error 14009) on builds that track content versions via obj_id.
+
+```python
+source_obj_id = None
+target_obj_id = None
+
+if operation == "REPOINT":
+    probe = subprocess.run(
+        ["bash", "-c",
+         f"source ~/.zshenv && ts tml export {source_guid} "
+         f"--profile '{profile_name}' --include-obj-id --include-obj-id-ref "
+         f"--no-guid --parse"],
+        capture_output=True, text=True,
+    )
+    if probe.returncode == 0:
+        probe_items = json.loads(probe.stdout)
+        probe_tml = probe_items[0]["tml"] if probe_items else {}
+        probe_section = probe_tml.get("model") or probe_tml.get("worksheet") or probe_tml.get("table", {})
+        for tbl in probe_section.get("model_tables", probe_section.get("tables", [])):
+            if tbl.get("obj_id"):
+                source_obj_id = tbl.get("obj_id")
+                break
+        if not source_obj_id and probe_tml.get("obj_id"):
+            source_obj_id = probe_tml["obj_id"]
+
+    if source_obj_id:
+        # Derive target obj_id: {target_name}-{first 8 chars of target_guid}
+        target_obj_id = f"{target_name}-{target_guid[:8]}"
+        print(f"  obj_id detected — using obj_id-based repoint (avoids VERSION_CONFLICT)")
+        print(f"    source: {source_obj_id}")
+        print(f"    target: {target_obj_id}")
+    else:
+        print(f"  obj_id not available — using fqn-based repoint")
+```
+
 **Source drift is a hard stop.** If the source object has drifted between Step 4 and
 Step 9, abort the entire run before touching any dependent — the Step 6 plan was
 computed against the old source, and applying it could remove columns that were
@@ -1138,7 +1192,8 @@ def import_status(resp):
 
 def verify_change_applied(guid, skill_type, profile_name, *,
                           operation, columns_to_remove=None,
-                          target_guid=None, column_gap=None):
+                          target_guid=None, column_gap=None,
+                          target_obj_id=None):
     """Re-export the object's TML and confirm the expected change was applied.
 
     Returns (verified_applied: bool, detail: str). The skill calls this AFTER
@@ -1159,11 +1214,12 @@ def verify_change_applied(guid, skill_type, profile_name, *,
 
     Per-operation verification:
       REMOVE  — none of the columns_to_remove may appear in the exported TML
-      REPOINT — every reference to source_guid in tables[].fqn must now point
-                at target_guid; columns in column_gap (if any) must be absent
+      REPOINT — target_guid or target_obj_id must appear in the exported TML;
+                columns in column_gap (if any) must be absent
     """
     cmd = (f"source ~/.zshenv && ts tml export {guid} "
-           f"--profile '{profile_name}' --fqn --parse")
+           f"--profile '{profile_name}' --fqn "
+           f"--include-obj-id --include-obj-id-ref --parse")
     r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip():
         return False, f"verification re-export failed: {r.stderr[:200]}"
@@ -1187,9 +1243,15 @@ def verify_change_applied(guid, skill_type, profile_name, *,
         return True, f"REMOVE verified — none of {cols} appear in TML"
 
     if operation == "REPOINT":
-        # Source GUID must no longer appear in tables[].fqn references
-        if target_guid and target_guid not in body:
-            return False, f"REPOINT not applied — target {target_guid[:8]} not in TML"
+        # Verify target is referenced — check both fqn and obj_id
+        target_found = False
+        if target_guid and target_guid in body:
+            target_found = True
+        if target_obj_id and target_obj_id in body:
+            target_found = True
+        if not target_found and (target_guid or target_obj_id):
+            ref = target_obj_id or target_guid[:8]
+            return False, f"REPOINT not applied — target {ref} not in TML"
         if column_gap:
             still_present = [c for c in column_gap if (f"[{c}]" in body) or (f"::{c}" in body)]
             if still_present:
@@ -1202,7 +1264,8 @@ def verify_change_applied(guid, skill_type, profile_name, *,
 
 def import_and_verify(tml_dict, guid, skill_type, profile_name,
                       operation, results, phase, name=None,
-                      columns_to_remove=None, target_guid=None, column_gap=None):
+                      columns_to_remove=None, target_guid=None, column_gap=None,
+                      target_obj_id=None):
     """Single entry point that wraps import_tml + import_status + verify_change_applied
     and writes the right entry to `results`. Use this at every Step 9 call site.
 
@@ -1216,6 +1279,7 @@ def import_and_verify(tml_dict, guid, skill_type, profile_name,
         operation=operation,
         columns_to_remove=columns_to_remove,
         target_guid=target_guid, column_gap=column_gap,
+        target_obj_id=target_obj_id,
     )
 
     label = name or guid
@@ -1313,6 +1377,7 @@ outcome = import_and_verify(
     columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
     target_guid=target_guid if operation == "REPOINT" else None,
     column_gap=column_gap if operation == "REPOINT" else None,
+    target_obj_id=target_obj_id if operation == "REPOINT" else None,
 )
 if outcome in ("FAIL_VERIFIED", "FAIL_SILENT"):
     print(f"  ✗ Source update failed ({outcome}). "
@@ -1438,15 +1503,33 @@ def remove_columns_from_answer(answer_dict, cols_to_remove):
 
 **For REPOINT — change the data source reference and remove gap columns:**
 
+The repoint helpers use **obj_id-first matching with fqn fallback**. When the TML was
+exported with `--include-obj-id --include-obj-id-ref`, obj_id fields are present and the
+helpers match on those. This avoids VERSION_CONFLICT (error 14009) on builds that track
+content versions via obj_id. When obj_id is absent (older builds), the helpers fall back
+to fqn matching.
+
 ```python
-def repoint_answer(answer_dict, source_guid, target_guid, target_name, column_gap):
+def repoint_answer(answer_dict, source_guid, target_guid, target_name, column_gap,
+                   *, source_obj_id=None, target_obj_id=None):
     a = answer_dict
 
     for tbl in a.get("tables", []):
-        if tbl.get("fqn") == source_guid:
-            tbl["fqn"]  = target_guid
+        matched = False
+        if source_obj_id and tbl.get("obj_id") == source_obj_id:
+            matched = True
+        elif tbl.get("fqn") == source_guid:
+            matched = True
+
+        if matched:
+            if target_obj_id:
+                tbl["obj_id"] = target_obj_id
+                tbl.pop("fqn", None)
+            else:
+                tbl["fqn"] = target_guid
+                tbl.pop("obj_id", None)
             tbl["name"] = target_name
-            tbl["id"]   = target_name  # id mirrors name in answer tables
+            tbl["id"]   = target_name
 
     if column_gap:
         a = remove_columns_from_answer(a, column_gap)
@@ -1455,22 +1538,33 @@ def repoint_answer(answer_dict, source_guid, target_guid, target_name, column_ga
 ```
 
 ```python
-def repoint_view(view_dict, source_guid, target_guid, target_name, column_gap):
+def repoint_view(view_dict, source_guid, target_guid, target_name, column_gap,
+                 *, source_obj_id=None, target_obj_id=None):
     """Update a View TML body to point at target_guid instead of source_guid.
 
-    Updates tables[].fqn and name, then cascades the name change through
-    table_paths[].table and joins[] source/destination references.
-    Removes column_gap columns via remove_columns_from_view.
+    Prefers obj_id matching when available (avoids VERSION_CONFLICT / error 14009).
+    Falls back to fqn when obj_id is absent.
     """
     v = view_dict
     old_name = None
 
     for tbl in v.get("tables", []):
-        if tbl.get("fqn") == source_guid:
+        matched = False
+        if source_obj_id and tbl.get("obj_id") == source_obj_id:
+            matched = True
+        elif tbl.get("fqn") == source_guid:
+            matched = True
+
+        if matched:
             old_name = tbl.get("name")
-            if tbl.get("id") == old_name:  # id mirrors name when not a custom alias
+            if tbl.get("id") == old_name:
                 tbl["id"] = target_name
-            tbl["fqn"]  = target_guid
+            if target_obj_id:
+                tbl["obj_id"] = target_obj_id
+                tbl.pop("fqn", None)
+            else:
+                tbl["fqn"] = target_guid
+                tbl.pop("obj_id", None)
             tbl["name"] = target_name
 
     if old_name and old_name != target_name:
@@ -1487,6 +1581,67 @@ def repoint_view(view_dict, source_guid, target_guid, target_name, column_gap):
         v = remove_columns_from_view(v, column_gap)
 
     return v
+```
+
+```python
+def repoint_model(model_dict, source_name, target_name, column_gap,
+                  *, source_obj_id=None, target_obj_id=None,
+                  source_guid=None, target_guid=None):
+    """Repoint a Model's model_tables entry from source to target.
+
+    Updates model_tables obj_id/fqn/name, joins with/on clauses,
+    column_id prefixes, formula expressions, and description.
+    Prefers obj_id when available; falls back to fqn.
+    """
+    m = model_dict
+
+    for tbl in m.get("model_tables", []):
+        matched = False
+        if source_obj_id and tbl.get("obj_id") == source_obj_id:
+            matched = True
+        elif source_guid and tbl.get("fqn") == source_guid:
+            matched = True
+        elif tbl.get("name") == source_name:
+            matched = True
+
+        if matched:
+            tbl["name"] = target_name
+            if target_obj_id:
+                tbl["obj_id"] = target_obj_id
+                tbl.pop("fqn", None)
+            elif target_guid:
+                tbl["fqn"] = target_guid
+                tbl.pop("obj_id", None)
+
+        for join_key in ("joins", "joins_with"):
+            for j in tbl.get(join_key, []):
+                if j.get("with") == source_name:
+                    j["with"] = target_name
+                on_clause = j.get("on", "")
+                if f"[{source_name}::" in on_clause:
+                    j["on"] = on_clause.replace(
+                        f"[{source_name}::", f"[{target_name}::")
+
+    for col in m.get("columns", []):
+        cid = col.get("column_id", "")
+        if cid.startswith(f"{source_name}::"):
+            col["column_id"] = cid.replace(
+                f"{source_name}::", f"{target_name}::", 1)
+
+    for formula in m.get("formulas", []):
+        expr = formula.get("expr", "")
+        if f"[{source_name}::" in expr:
+            formula["expr"] = expr.replace(
+                f"[{source_name}::", f"[{target_name}::")
+
+    desc = m.get("description", "")
+    if source_name in desc:
+        m["description"] = desc.replace(source_name, target_name)
+
+    if column_gap:
+        m = fix_model(m, column_gap)
+
+    return m
 ```
 
 **Apply to Answers:**
@@ -1509,7 +1664,8 @@ for dep in [d for d in objects_to_fix if d["type"] == "ANSWER"]:
             answer = convert_answer_to_table(answer)
         answer = remove_columns_from_answer(answer, columns_to_remove)
     elif operation == "REPOINT":
-        answer = repoint_answer(answer, source_guid, target_guid, target_name, column_gap)
+        answer = repoint_answer(answer, source_guid, target_guid, target_name, column_gap,
+                                source_obj_id=source_obj_id, target_obj_id=target_obj_id)
 
     updated["answer"] = answer
     import_and_verify(
@@ -1518,6 +1674,7 @@ for dep in [d for d in objects_to_fix if d["type"] == "ANSWER"]:
         columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
         target_guid=target_guid if operation == "REPOINT" else None,
         column_gap=column_gap if operation == "REPOINT" else None,
+        target_obj_id=target_obj_id if operation == "REPOINT" else None,
     )
 ```
 
@@ -1592,6 +1749,7 @@ for dep in [d for d in objects_to_fix if d["type"] == "LIVEBOARD"]:
         columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
         target_guid=target_guid if operation == "REPOINT" else None,
         column_gap=column_gap if operation == "REPOINT" else None,
+        target_obj_id=target_obj_id if operation == "REPOINT" else None,
     )
 ```
 
@@ -1650,7 +1808,8 @@ for dep in [d for d in objects_to_fix if d["type"] == "VIEW"]:
     view    = updated.get("view", {})
 
     if   operation == "REMOVE":  view = remove_columns_from_view(view, columns_to_remove)
-    elif operation == "REPOINT": view = repoint_view(view, source_guid, target_guid, target_name, column_gap)
+    elif operation == "REPOINT": view = repoint_view(view, source_guid, target_guid, target_name, column_gap,
+                                                       source_obj_id=source_obj_id, target_obj_id=target_obj_id)
 
     updated["view"] = view
     import_and_verify(
@@ -1659,6 +1818,7 @@ for dep in [d for d in objects_to_fix if d["type"] == "VIEW"]:
         columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
         target_guid=target_guid if operation == "REPOINT" else None,
         column_gap=column_gap if operation == "REPOINT" else None,
+        target_obj_id=target_obj_id if operation == "REPOINT" else None,
     )
 ```
 
@@ -2006,4 +2166,5 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-06-09 | **Repoint: obj_id-based references with fqn fallback.** Step 9 now detects `obj_id` support via `export_options` flags and prefers obj_id-based model_table references over fqn to avoid VERSION_CONFLICT (error 14009) on some TS builds (open-item #23). New `repoint_model()` function handles model_tables obj_id/name/joins/column_id/formula swaps. `repoint_answer()` and `repoint_view()` also support obj_id-first matching. **Backup location prompt** — Step 7 now asks the user where to save backups (current directory, /tmp, or custom path) instead of hardcoding /tmp. Requires ts-cli v0.8.0 (`--include-obj-id`, `--include-obj-id-ref`, `--no-guid` flags). |
 | 1.0.0 | 2026-04-27 | Initial release. Three modes: **Audit** (read-only blast-radius report), **Remove** (drop one or more columns and clean up dependents), **Repoint** (redirect Answers/Liveboards to a different Model/View/Table with column-gap detection). Step 4 dep walk uses the v2 metadata/search dependents API (`ts metadata dependents`) with **alias propagation** — per-Model/View aliases for the target column are extracted at scan time so Answers/Liveboards/Sets that reference renamed columns (e.g. `ZIPCODE` → `Customer Zipcode`) are caught. **STOP-condition** handling for inaccessible dependents (v2 `hasInaccessibleDependents` flag), source-table RLS rules, model-level join conditions referencing the column (open-items.md #4), model-level filters (#12), and chart-axis conflicts. Step 5 impact report drives the Scan Coverage block from the canonical `references/dependency-types.md` status table via `references/build_coverage.py`. Steps 7 / 8 require typed "DELETE" / "ACCEPT INCOMPLETE IMPACT" confirmations and take a TML backup before any change is applied. Step 9 wraps every import with **post-import verification** (`import_and_verify`) — re-exports the TML and confirms the change actually applied, since TS sometimes returns status_code=ERROR while applying the change anyway (open-item #15). **Object-version drift detection** captures `metadata_header.modified` at scan time and aborts the per-object change (or the entire run, if the source drifted) when the timestamp moves between scan and apply. Step 11 supports rollback for both updates and deletes. RENAME mode is intentionally not supported on this build — see the rationale at the top of SKILL.md. |

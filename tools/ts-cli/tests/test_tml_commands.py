@@ -33,6 +33,105 @@ runner = CliRunner(mix_stderr=False)
 # unhandled HTTPError with a confusing traceback.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# ts tml export --include-obj-id / --include-obj-id-ref / --no-guid
+#
+# Why: repoint operations need obj_id references to avoid VERSION_CONFLICT
+# (error 14009) on some TS builds. The flags must reach the API request body
+# as export_options, and must be absent when not set (older builds may reject
+# unknown keys).
+# ---------------------------------------------------------------------------
+
+class TestExportObjIdFlags:
+    def _get_export_params(self):
+        import inspect
+        from ts_cli.commands.tml import export_tml
+        return inspect.signature(export_tml).parameters
+
+    def test_include_obj_id_param_exists(self):
+        assert "include_obj_id" in self._get_export_params()
+
+    def test_include_obj_id_ref_param_exists(self):
+        assert "include_obj_id_ref" in self._get_export_params()
+
+    def test_include_guid_param_exists(self):
+        assert "include_guid" in self._get_export_params()
+
+    def test_include_guid_defaults_true(self):
+        p = self._get_export_params()["include_guid"]
+        default = p.default
+        if hasattr(default, "default"):
+            default = default.default
+        assert default is True
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_no_flags_omits_export_options(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            {"edoc": "", "info": {"name": "x"}}
+        ]
+        mock_client_cls.return_value = mock_client
+        runner.invoke(app, ["tml", "export", "abc-123"])
+        call_kwargs = mock_client.post.call_args
+        body = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json", {})
+        assert "export_options" not in body
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_include_obj_id_sets_export_option(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            {"edoc": "", "info": {"name": "x"}}
+        ]
+        mock_client_cls.return_value = mock_client
+        runner.invoke(app, ["tml", "export", "abc-123", "--include-obj-id"])
+        body = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1]["json"]
+        assert body["export_options"]["include_obj_id"] is True
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_include_obj_id_ref_sets_export_option(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            {"edoc": "", "info": {"name": "x"}}
+        ]
+        mock_client_cls.return_value = mock_client
+        runner.invoke(app, ["tml", "export", "abc-123", "--include-obj-id-ref"])
+        body = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1]["json"]
+        assert body["export_options"]["include_obj_id_ref"] is True
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_no_guid_sets_export_option(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            {"edoc": "", "info": {"name": "x"}}
+        ]
+        mock_client_cls.return_value = mock_client
+        runner.invoke(app, ["tml", "export", "abc-123", "--no-guid"])
+        body = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1]["json"]
+        assert body["export_options"]["include_guid"] is False
+
+    @patch("ts_cli.commands.tml.ThoughtSpotClient")
+    @patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+    def test_multiple_flags_combine(self, mock_resolve, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client.post.return_value.json.return_value = [
+            {"edoc": "", "info": {"name": "x"}}
+        ]
+        mock_client_cls.return_value = mock_client
+        runner.invoke(app, [
+            "tml", "export", "abc-123",
+            "--include-obj-id", "--include-obj-id-ref", "--no-guid",
+        ])
+        body = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1]["json"]
+        opts = body["export_options"]
+        assert opts["include_obj_id"] is True
+        assert opts["include_obj_id_ref"] is True
+        assert opts["include_guid"] is False
+
+
 class TestExportTypeFeedbackGuard:
     def test_feedback_exits_with_nonzero(self):
         result = runner.invoke(app, ["tml", "export", "some-guid", "--type", "FEEDBACK"])

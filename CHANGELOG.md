@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-09
+- chore: bump ts-cli to v0.8.0 — adds `--include-obj-id`, `--include-obj-id-ref`, `--no-guid` flags to `ts tml export` for export_options support
+
 ## 2026-06-01
 - feat: add `ts metadata report` command — dependency walk + TML probes + risk classifier + formatters
 - feat: rewrite ts-dependency-manager Steps 4/5 to delegate to `ts metadata report` CLI
