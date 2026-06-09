@@ -112,6 +112,18 @@ Trigger by asking: "Show timezone assignments" or "Set timezone for this user".
 > Untested in Cursor — best-effort condensation of the Claude version. See the rule
 > file's header for details.
 
+### `ts-convert-from-tableau`
+
+Converts a Tableau workbook (.twb or .twbx) into ThoughtSpot table + model TMLs,
+with optional dashboard-to-liveboard migration. Parses the TWB XML, generates TML,
+validates, and imports.
+
+Trigger by asking: "Convert my Tableau workbook to ThoughtSpot" or "Migrate a Tableau
+dashboard to ThoughtSpot".
+
+> Untested in Cursor — best-effort condensation of the Claude version. See the rule
+> file's header for details.
+
 ### `ts-recipe-formula-business-days-snowflake`
 
 Deploys three Snowflake scalar UDFs for weekday-only date arithmetic

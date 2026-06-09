@@ -76,7 +76,7 @@ credential configuration, and verification steps).
 thoughtspot-agent-skills/
 ├── agents/
 │   ├── cli/        — Canonical CLI skills (Claude Code + Cortex Code CLI)
-│   ├── claude/     — Claude Code-only skills (ts-profile-snowflake, Tableau migration)
+│   ├── claude/     — Claude Code-only skills (ts-profile-snowflake)
 │   ├── coco-snowsight/ — Snowsight Workspace skills (stored procedures)
 │   ├── cursor/     — Cursor AI rules (.mdc format)
 │   └── shared/     — Shared reference files used by all runtimes
@@ -106,6 +106,7 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 | `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) |
 | `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) |
 | `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) |
+| `ts-convert-from-tableau` | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
@@ -123,13 +124,6 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 | `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
 | `ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles (**Claude Code only** — Cortex Code manages Snowflake connections natively) |
 | `ts-profile-databricks` | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile |
-
-**Tableau Migration** — migrate Tableau workbooks to ThoughtSpot (**Claude Code only**)
-
-| Skill | What it does |
-|---|---|
-| `ts-model-from-tableau` | Stage 1 — parse a `.twb`/`.twbx` file, generate table + model TMLs, validate and import. Writes `migration_manifest.json` for Stage 2 |
-| `ts-liveboard-from-tableau` | Stage 2 — read the manifest, convert dashboard layout to a 12-column grid, generate Answer + liveboard TMLs, import |
 
 **Recipes** — pre-built analytical capabilities for ThoughtSpot
 
@@ -191,8 +185,7 @@ language in the Cursor AI chat.
 | `ts-variable-timezone` | Search, set, or remove timezone values for the `ts_user_timezone` variable ⚠️ Beta in 26.5, EA in 26.6, Untested in Cursor |
 | `ts-recipe-formula-business-days-snowflake` | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
 | `ts-recipe-formula-hms-display-snowflake` | Deploy four Snowflake scalar UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` |
-| `ts-model-from-tableau` | Migrate a Tableau workbook's data model to ThoughtSpot TML ⚠️ Untested in Cursor |
-| `ts-liveboard-from-tableau` | Migrate Tableau dashboards to ThoughtSpot liveboards ⚠️ Untested in Cursor |
+| `ts-convert-from-tableau` | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot, with optional liveboard migration ⚠️ Untested in Cursor |
 
 See **[agents/cursor/SETUP.md](agents/cursor/SETUP.md)** for installation.
 

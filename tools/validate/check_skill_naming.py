@@ -57,14 +57,6 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         re.compile(r"ts-recipe-(formula|answer|liveboard|model)-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
         "analytical recipe: ts-recipe-{ts-artifact-type}-{concept}[-{platform}]",
     ),
-    "ts-model-from-*": (
-        re.compile(r"ts-model-from-[a-z][a-z0-9]*"),
-        "import/migrate a data model from an external platform: ts-model-from-{platform}",
-    ),
-    "ts-liveboard-from-*": (
-        re.compile(r"ts-liveboard-from-[a-z][a-z0-9]*"),
-        "import/migrate liveboards from an external platform: ts-liveboard-from-{platform}",
-    ),
 }
 
 # Skills that legitimately don't match any family. Each entry must include a

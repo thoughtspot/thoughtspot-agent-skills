@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-09
+- feat: add `ts-convert-from-tableau` skill — convert Tableau workbooks (.twb/.twbx) into ThoughtSpot table + model TMLs with optional dashboard-to-liveboard migration; available in CLI, Cortex Code CLI, and Cursor
+- docs: add Tableau shared reference library — formula translation (`tableau-formula-translation.md`) and TML generation rules (`tableau-tml-rules.md`) in `agents/shared/mappings/tableau/`
 - chore: bump ts-cli to v0.8.0 — adds `--include-obj-id`, `--include-obj-id-ref`, `--no-guid` flags to `ts tml export` for export_options support
 
 ## 2026-06-01
