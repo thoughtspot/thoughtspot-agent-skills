@@ -50,4 +50,4 @@ git push origin --delete wip/<branch>
 
 | Branch | Contents | Status |
 |---|---|---|
-| `wip/model-builder` | `ts-object-model-builder` — TS-native split/merge modes | In progress |
+| _none_ | — | No active wip branches |

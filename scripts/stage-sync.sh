@@ -28,21 +28,21 @@ done
 # ── Determine which files changed since last sync ─────────────────────────────
 if $FORCE_ALL; then
   echo "Full sync requested — uploading all CoCo and shared files."
-  CHANGED_FILES=$(git ls-files agents/coco/ agents/shared/)
+  CHANGED_FILES=$(git ls-files agents/coco-snowsight/ agents/shared/)
 elif [ -f "$SHA_FILE" ]; then
   LAST_SHA=$(cat "$SHA_FILE")
   echo "Last stage sync: $LAST_SHA"
   # Include locally modified but uncommitted files too
-  COMMITTED=$(git diff --name-only "$LAST_SHA" HEAD 2>/dev/null || git ls-files agents/coco/ agents/shared/)
-  UNCOMMITTED=$(git diff --name-only agents/coco/ agents/shared/; git diff --cached --name-only agents/coco/ agents/shared/)
+  COMMITTED=$(git diff --name-only "$LAST_SHA" HEAD 2>/dev/null || git ls-files agents/coco-snowsight/ agents/shared/)
+  UNCOMMITTED=$(git diff --name-only agents/coco-snowsight/ agents/shared/; git diff --cached --name-only agents/coco-snowsight/ agents/shared/)
   CHANGED_FILES=$(printf '%s\n%s\n' "$COMMITTED" "$UNCOMMITTED" | sort -u)
 else
   echo "No previous sync found — uploading all CoCo and shared files."
-  CHANGED_FILES=$(git ls-files agents/coco/ agents/shared/)
+  CHANGED_FILES=$(git ls-files agents/coco-snowsight/ agents/shared/)
 fi
 
-# Filter to only coco/ and shared/ paths
-COCO_CHANGED=$(echo "$CHANGED_FILES" | grep -E "^agents/(coco|shared)/" || true)
+# Filter to only coco-snowsight/ and shared/ paths
+COCO_CHANGED=$(echo "$CHANGED_FILES" | grep -E "^agents/(coco-snowsight|shared)/" || true)
 
 if [ -z "$COCO_CHANGED" ]; then
   echo "No CoCo or shared files changed since last sync. Nothing to upload."
@@ -61,8 +61,8 @@ while IFS= read -r file; do
   [ -z "$file" ] && continue
   [ ! -f "$file" ] && { echo "  (skipping deleted) $file"; continue; }
 
-  if [[ "$file" == agents/coco/* ]]; then
-    rel="${file#agents/coco/}"
+  if [[ "$file" == agents/coco-snowsight/* ]]; then
+    rel="${file#agents/coco-snowsight/}"
     rel_dir="$(dirname "$rel")"
     dest_dir="$STAGE/skills/$( [ "$rel_dir" = "." ] && echo "" || echo "$rel_dir/" )"
 

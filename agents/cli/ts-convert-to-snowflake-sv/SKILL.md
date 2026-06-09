@@ -1187,6 +1187,7 @@ Report all failures together before retrying. Key checks:
 - [ ] Dimension aliases are globally unique across the entire view (no two tables share an alias name)
 - [ ] Metric expressions reference **metric aliases** for derived/ratio metrics — not nested `SUM()` calls: `DIV0(tbl.amount, tbl.quantity)` not `DIV0(SUM(tbl.LINE_TOTAL), SUM(tbl.QUANTITY))`
 - [ ] Metrics that reference other metric aliases appear **after** those aliases in the `metrics()` clause
+- [ ] LOD/window metrics (`group_sum` → `SUM(...) OVER (PARTITION BY ...)`): the windowed aggregate references a **defined base metric alias**, not a raw column — `SUM(tbl.total_quantity) OVER (...)` not `SUM(tbl.QUANTITY) OVER (...)` (the raw-column form is rejected with error 010256). PARTITION BY may use a dimension on a joined coarser entity; no denormalization needed
 - [ ] `non additive by` metrics: modifier is `{TABLE}.{COL} {asc|desc} nulls last`, expression is `SUM(...)`, the TABLE is a joined date dimension
 - [ ] Formula dimension expressions use `table_lower.ALIAS` references, not physical column names if those differ
 - [ ] Reserved SQL words used as column names are double-quoted in expressions: `table."date"`, `table."schema"`
@@ -1426,6 +1427,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.2 | 2026-06-02 | Add Step 11 checklist rule: LOD/window metrics must window over a defined base metric alias (not a raw column — rejected with error 010256); PARTITION BY may use a joined coarser dimension, no denormalization |
 | 1.2.1 | 2026-05-11 | Add `source ~/.zshenv &&` prefix to bare `ts auth logout` in the error-recovery bash block |
 | 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5): A=single new SV, B=split (now first-class), C=update existing SV; add Step 9.5C diff workflow for Mode C |
 | 1.1.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
