@@ -102,7 +102,7 @@ These rules come from real import failures — violating them causes silent erro
 - `guid:` goes at the document root — NOT nested inside `table:` or `model:`; omit on first import
 - All formula columns (ATTRIBUTE and MEASURE) need a `columns[]` entry with `formula_id:` that matches the `formulas[]` `id:`
 - `aggregation:` belongs in `columns[]` entries only — never in a `formulas[]` entry
-- Model `id:` is optional; when absent, `name:` is the join reference target in `joins_with`
+- Model `id:` is optional; when absent, `name:` is the join reference target in `model_tables[].joins[].with`
 
 ## Formula classification
 

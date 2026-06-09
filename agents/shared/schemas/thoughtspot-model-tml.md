@@ -98,10 +98,20 @@ model:
 | `fqn` | Yes on first import | GUID of the ThoughtSpot table object. For repoint operations, prefer `obj_id` over `fqn` when supported (avoids VERSION_CONFLICT 14009). Use one or the other on each entry, not both. |
 | `obj_id` | No | ThoughtSpot-assigned content ID (format: `{NAME}-{first_8_chars_of_guid}`, e.g. `DM_ORDER-924f10e2`). Only present when exported with `export_options.include_obj_id_ref: true`. Preferred over `fqn` for repoint operations — avoids VERSION_CONFLICT (error 14009) on some builds. When importing with `obj_id`, omit `fqn` on the same entry (and vice versa). |
 | `id` | No | When present, must equal `name` exactly (same case). ThoughtSpot uses `name` as the join reference target when `id` is absent. Omitting `id` is simpler. |
-| `joins` | No | Inline joins FROM this table. Lives on the source (FK) table entry only. |
-| `referencing_join` | No | Scenario A only — name of a pre-defined join in the ThoughtSpot Table TML. System-inferred joins have auto-generated names like `SYS_CONSTRAINT_<uuid>`. |
+| `joins` | No | Joins FROM this table — lives on the source (FK) table entry only. Each entry is either a **referencing join** (Scenario A: `with` + `referencing_join`) or an **inline join** (Scenario B: `with` + `on` + `type` + `cardinality`). See Join Scenarios below. |
 
-### `joins[]` fields (inline joins on `model_tables` entry)
+### `joins[]` fields (on `model_tables` FK entry)
+
+Each `joins[]` entry has `with` (always required) plus **one of two forms**:
+
+**Scenario A — referencing a pre-defined Table TML join:**
+
+| Field | Required | Notes |
+|---|---|---|
+| `with` | Yes | Must equal the `name:` of the target `model_tables[]` entry exactly (case-sensitive) |
+| `referencing_join` | Yes | Name of a `joins_with[]` entry in the source Table TML. System-inferred joins have auto-generated names like `SYS_CONSTRAINT_<uuid>`. |
+
+**Scenario B — inline join (no pre-defined Table TML join):**
 
 | Field | Required | Notes |
 |---|---|---|
@@ -542,15 +552,18 @@ despite 6 returning success GUIDs.
 ### Scenario A — Pre-defined joins (Table TML has `joins_with`)
 
 Use when the ThoughtSpot Table objects already have `joins_with` entries defined.
-The model references these joins by name via `referencing_join`:
+The model references these joins by name via `referencing_join` inside a `joins:`
+array on the **FK (FROM) table entry** — not as a standalone field on the dim entry:
 
 ```yaml
 model_tables:
-- name: FACT_TABLE
+- name: FACT_TABLE        # FK side — joins array goes here
   fqn: "{fact_guid}"
-- name: DIM_TABLE
+  joins:
+  - with: DIM_TABLE       # target table's name:
+    referencing_join: "FACT_TABLE_to_DIM_TABLE"  # name from Table TML's joins_with[]
+- name: DIM_TABLE         # PK side — no joins array
   fqn: "{dim_guid}"
-  referencing_join: "FACT_TABLE_to_DIM_TABLE"  # name from Table TML's joins_with[]
 ```
 
 To find the join name: export the FROM table's TML → find `joins_with[]` → match entry

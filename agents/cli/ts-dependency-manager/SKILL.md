@@ -1338,9 +1338,11 @@ section["formulas"] = [
 
 # Remove join conditions that reference the removed column(s)
 # (must be done — cannot save a model with an orphaned join condition)
+# model_tables uses `joins` (Scenario A referencing + Scenario B inline);
+# `joins_with` only exists at the table/view level, never on model_tables.
 for tbl in section.get("model_tables", []):
-    tbl["joins_with"] = [
-        j for j in tbl.get("joins_with", [])
+    tbl["joins"] = [
+        j for j in tbl.get("joins", [])
         if not any(col in j.get("on", "") for col in columns_to_remove)
     ]
 
@@ -1874,9 +1876,11 @@ def fix_model(m, cols_to_remove):
     m["formulas"] = [f for f in m.get("formulas", []) if f.get("id") not in formula_ids_to_remove]
 
     # Strip join conditions referencing the column (open-items.md #4)
+    # model_tables uses `joins` (Scenario A referencing + Scenario B inline);
+    # `joins_with` only exists at the table/view level, never on model_tables.
     for tbl in m.get("model_tables", []):
-        tbl["joins_with"] = [
-            j for j in tbl.get("joins_with", [])
+        tbl["joins"] = [
+            j for j in tbl.get("joins", [])
             if not any(c in j.get("on", "") for c in cols_to_remove)
         ]
 

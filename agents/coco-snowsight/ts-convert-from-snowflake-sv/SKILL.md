@@ -529,7 +529,7 @@ POST {base_url}/api/rest/2.0/metadata/tml/export
 }
 ```
 
-Parse each returned `edoc` YAML string. Find in the `joins` section the entry whose
+Parse each returned `edoc` YAML string. Find in the `joins_with` section the entry whose
 `destination` matches the TO table name. Record the join `name`.
 
 ---
@@ -693,8 +693,8 @@ Model ready to import: TEST_SV_{view_name}
 Self-validation: all checks passed
 
 Tables ({n}):
-  ✓ {FACT_TABLE}    — fact table
-  ✓ {DIM_TABLE}     — referencing_join: {join_name}
+  ✓ {FACT_TABLE}    — fact table, joins: [{DIM_TABLE} via {join_name}]
+  ✓ {DIM_TABLE}     — dimension
   ...
 
 Columns: {n} ATTRIBUTE, {n} MEASURE, {n} formulas

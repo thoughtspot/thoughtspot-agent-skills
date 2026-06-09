@@ -512,11 +512,13 @@ This matches the semantic view relationship direction:
 `REL_NAME as FROM_TABLE(FK) references TO_TABLE(PK)`.
 
 For Scenario A:
-- `referencing_join` on a dim table entry names the join defined in the FROM table's
-  ThoughtSpot Table TML (`joins_with[].name` where `destination.name` = TO table name).
+- `referencing_join` is a field inside a `joins[]` entry on the FROM/FK table's
+  `model_tables` entry. It names the join defined in the FROM table's ThoughtSpot
+  Table TML (`joins_with[].name` where `destination.name` = TO table name).
 
 For Scenario B / inline joins:
 - The `joins[]` array lives on the FROM table's `model_tables` entry.
+- Each entry has `with`, `on`, `type`, `cardinality` (no `referencing_join`).
 - `with` points to the TO table's `id`.
 
 ---

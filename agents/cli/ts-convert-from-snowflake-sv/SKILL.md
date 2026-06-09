@@ -788,12 +788,14 @@ model:
   name: "TEST_SV_{view_name}"
   model_tables:
   - id: FACT_TABLE          # MUST equal name exactly (copy verbatim — often uppercase)
-    name: FACT_TABLE        # exact ThoughtSpot table object name
+    name: FACT_TABLE        # exact ThoughtSpot table object name — FK side, joins go here
     fqn: "{fact_guid}"      # GUID from Step 6A
-  - id: DIM_TABLE           # MUST equal name exactly
+    joins:
+    - with: DIM_TABLE       # must equal the target entry's name exactly
+      referencing_join: "{join_name}"   # from Step 7
+  - id: DIM_TABLE           # MUST equal name exactly — PK side, no joins
     name: DIM_TABLE         # exact ThoughtSpot table object name
     fqn: "{dim_guid}"       # GUID from Step 6A
-    referencing_join: "{join_name}"   # from Step 7
   columns:
   - name: "{display_name}"
     column_id: fact_table::{col_name}  # col_name from ThoughtSpot Table TML
