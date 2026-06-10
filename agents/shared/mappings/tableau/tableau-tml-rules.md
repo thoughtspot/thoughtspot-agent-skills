@@ -33,21 +33,55 @@ Critical invariants for producing valid ThoughtSpot TML from a Tableau TWB. Ever
     data_type: DOUBLE
 ```
 
-### Forbidden fields
+### Required `connection` section
 
-- **No `guid`, `fqn`, or `connection` sections** — ThoughtSpot assigns these on import.
-
-### Placeholder db/schema
-
-When the connection is not yet known, use placeholders — they produce a warning, not an error:
+- **`connection.name` is required** — a ThoughtSpot logical table sits on a connection that
+  already exposes the physical table and its columns. Use the exact ThoughtSpot connection
+  **name** (case-sensitive), never a GUID; the v2 API cannot search connections by name, so
+  the name string is both necessary and sufficient.
 
 ```yaml
 table:
   name: ORDERS
-  db: YOUR_DATABASE
-  schema: YOUR_SCHEMA
+  db: AGENT_SKILLS
+  schema: SALES
   db_table: ORDERS
+  connection:
+    name: "APJ_TAB"        # exact connection name as it appears in ts connections list
 ```
+
+If import returns `connection not found`, the name/case is wrong; if it returns
+`column not found in connection`, the connection doesn't expose the `db_table`/column
+named — both fail loudly at validation rather than silently producing an empty table.
+
+### Forbidden fields
+
+- **No `guid` or `fqn` sections on a *fresh* import** — ThoughtSpot assigns the `guid` on first
+  import (use `--create-new`). (For a *re-import in place*, you DO pin `guid` — see below.)
+- **No placeholder `db`/`schema`** (e.g. `YOUR_DATABASE`) — a ThoughtSpot table is a logical
+  object over a live connection. The physical table must exist in the database and the
+  connection must exist, or the table cannot be created. Always emit the real `db`, `schema`,
+  `db_table`, and `connection.name`; if they aren't known, stop rather than emit a stub.
+
+### Updating an existing object in place (re-import)
+
+To update an object you already imported (a styling/formula/coverage pass) instead of forking a
+duplicate, pin its identity and import with **`--no-create-new`**. **The `guid` and `obj_id` must
+be TOP-LEVEL keys of the TML document — siblings of `table:`/`model:`/`liveboard:`, never nested
+inside that object:**
+
+```json
+{ "guid": "<existing>", "obj_id": "<existing>", "liveboard": { "name": ..., "visualizations": ... } }
+```
+
+- Nesting them *inside* the object (e.g. `liveboard.guid`) means the import never matches the
+  existing object and **silently forks a new guid — every time, regardless of `--policy`**.
+  (Tables/models often "just work" because their `guid` is naturally written at the top level;
+  liveboards forked repeatedly until the guid was moved out of the `liveboard` block.)
+- `--create-new` with a TML that already has a `guid` also forks a duplicate — use it only for
+  brand-new objects.
+- Read the existing `obj_id` from a search (`metadata_obj_id`) or a prior export. **After import,
+  verify the returned `id_guid` is unchanged** — a new guid means you forked; delete the stale copy.
 
 ---
 
@@ -55,12 +89,24 @@ table:
 
 ### One model per Tableau datasource — strict separation
 
-Each Tableau `<datasource>` element produces exactly one model TML. **Never collapse
-multiple datasources into a single model**, even when they share tables or point at the
-same database. Each datasource has its own join topology, calculated fields, and column
-aliases — merging them produces wrong joins and broken formula references.
+Each Tableau `<datasource>` element produces exactly one model TML. **Never *blindly*
+collapse multiple datasources into a single model** just because they share tables or point
+at the same database — each has its own join topology, calculated fields, and column aliases,
+and merging them indiscriminately produces wrong joins and broken formula references.
 
-Exception: COLLECTION datasources get one model per underlying table.
+**Two deliberate exceptions:**
+- **COLLECTION datasources** → one model per underlying table.
+- **A genuine cross-datasource blend** (a calculated field that references *another*
+  datasource, e.g. `SUM([Sales]) - SUM([Targets].[Target])`) is *meant* to combine the two.
+  Realize it as **one model** by co-locating the blend's link keys into a single relation
+  (a SQL view spanning the needed tables) and joining the other datasource in — see
+  "Join keys must be physical" / "Cross-datasource formulas" in `tableau-formula-translation.md`.
+  This is an intentional, key-aligned merge, not the accidental collapse the rule guards against.
+
+**Build only the models the workbook actually uses.** Map models to what the worksheets and
+dashboards reference — don't materialize a model for every datasource speculatively. A
+datasource with no worksheet of its own (e.g. a targets source that exists only to feed a
+blend) folds into the model that uses it rather than becoming a standalone, unused model.
 
 ### model_tables entries
 
@@ -309,6 +355,7 @@ Column references use the same `[sql_view_name::column]` syntax.
 | `Data type INT is not valid for column` | Used `INT` instead of `INT64` | Change to `data_type: INT64` |
 | `Compulsory Field table->columns->db_column_properties is not populated` | Missing `db_column_properties` | Add `db_column_properties: { data_type: <type> }` to every column |
 | `Tables do not exist` | Table TMLs failed to import | Fix table TML errors first |
-| `Table with id null not found` | Placeholder db/schema | Expected warning — not a blocker |
+| `connection not found` | Wrong `connection.name` or wrong case | Run `ts connections list` and copy the exact name |
+| `column not found in connection` | `db_table`/`db_column_name` doesn't match what the connection exposes | Check the warehouse schema for the real names |
 | `referencing_join` errors | Used `referencing_join` syntax | Switch to inline `on`/`type`/`cardinality` |
 | `Invalid value FULL_OUTER` | Used `FULL_OUTER` join type | Change to `OUTER` |

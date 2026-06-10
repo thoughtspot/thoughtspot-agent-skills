@@ -23,6 +23,10 @@ liveboard:
       name: "Viz Title"
       description: ""
       display_mode: TABLE_MODE | CHART_MODE
+      # TABLE_MODE → render as a table: OMIT the `chart` block entirely (there is no
+      # `chart.type: TABLE` — that value is rejected). CHART_MODE → include a `chart` block
+      # with a verified type (BAR / LINE / PIE / KPI / AREA / SCATTER). Good for "coverage"
+      # tiles that just surface one formula as a simple table.
       tables:
       - id: "Model Name"
         name: "Model Name"
@@ -121,10 +125,16 @@ liveboard:
       value: CURVED | SQUARE
     - name: lb_brand_color
       value: LBC_A | LBC_B | ...
-    - name: hide_group_title
+    - name: hide_group_title          # section header title
       value: 'false'
-    - name: hide_tile_description
+    - name: hide_group_description     # section header description
+      value: 'true'
+    - name: hide_group_tile_description
       value: 'false'
+    - name: hide_tile_description      # per-viz tile description
+      value: 'false'
+    - name: kpi_hero_font_size         # KPI headline size: S | M | L | XL
+      value: M
 ```
 
 ---
@@ -174,15 +184,129 @@ not shared between vizzes on the same Liveboard.
 
 ### `layout` fields
 
-Two layouts are mutually exclusive:
+There are three layout styles (mutually exclusive at the top level):
 
 | Layout style | Structure | Notes |
 |---|---|---|
 | Flat (no tabs) | `layout.tiles[]` | Each tile: `visualization_id`, `x`, `y`, `height`, `width` OR `size` |
 | Tabbed | `layout.tabs[]` | Each tab: `name`, `description`, `tiles[]` (same tile structure) |
+| Sections (groups) | `layout.tiles[]` + `layout.group_layouts[]` | A group is placed in `layout.tiles[]` as `visualization_id: Group_N`; its members are arranged in `layout.group_layouts[]`. Requires a top-level `groups[]`. See "Sections (groups)" below. |
 
 Predefined `size` values: `EXTRA_SMALL`, `SMALL`, `MEDIUM`, `LARGE`, `LARGE_SMALL`,
 `MEDIUM_SMALL`, `EXTRA_LARGE`. Use `size` OR `height`/`width`, not both.
+
+---
+
+## Visualization data-source binding — use `obj_id`, not `fqn`
+
+Inside a viz, the `answer.tables[]` entry binds the viz to its Model. **Use `obj_id`,
+not a bare `fqn` GUID** — a viz-level `fqn` is dropped on import, leaving the viz with no
+data source, which renders as an error (the chart shows but has nothing to query).
+
+```yaml
+tables:
+- id: "Model Name"
+  name: "Model Name"
+  obj_id: ModelNameNoSpaces-{guid8}   # e.g. AmazonSalesdata-fdea93b4
+```
+
+`obj_id` format = the model's display name with spaces removed, `-`, then the first
+segment of its GUID (`fdea93b4` from `fdea93b4-a80f-...`). The liveboard document itself
+also carries a root `obj_id` (`{LiveboardNameNoSpaces}-{guid8}`) alongside the root
+`guid`.
+
+## Chart block must be complete
+
+A partial `chart:` block (just `type`) is **not** auto-completed on import — the viz
+renders broken. Either omit `chart:` entirely (ThoughtSpot generates a full default,
+usually a table/KPI) **or** supply a complete block: `type`, `chart_columns[]`, and
+`axis_configs[]` (`x`/`y`). All column references must use the **resolved** answer-column
+names, not the raw model column names:
+
+- An aggregated measure gains its aggregation word: `SUM([Total Revenue])` resolves to
+  `Total Total Revenue`; a non-default agg follows the same pattern.
+- A bucketed date resolves to `{Bucket}(col)` — `[Ship Date].yearly` → `Year(Ship Date)`,
+  `[Order Date].monthly` → `Month(Order Date)`.
+- Attributes keep their name.
+- Date bucketing in `search_query` uses the **dotted** form (`[Order Date].monthly`); a
+  bare `monthly` token is rejected with `Invalid value token: monthly`.
+
+ThoughtSpot re-resolves `answer_columns` from `search_query` on import, but it does **not**
+fix `chart_columns`/`axis_configs`/`table_columns` — those must already use the resolved
+names or the chart fails. The reliable workflow: import once, export, copy the resolved
+names into `chart_columns`/`axis_configs`, re-import.
+
+---
+
+## Note tiles (text tiles)
+
+A note tile is a `visualizations[]` entry with a `note_tile` block and **no `answer`**.
+It holds rich text (migrate a Tableau dashboard text/title zone here). It is placed in
+`layout.tiles[]` like any other tile.
+
+```yaml
+- id: Viz_6
+  viz_guid: "{viz_guid}"          # omit on first import
+  note_tile:
+    html_parsed_string: |-
+      <p><strong>Sales Performance Overview</strong></p>
+      <p><em>Your complete view of Amazon sales health.</em></p>
+      <p>Narrative text, with <strong>bold</strong> and <em>italic</em> HTML.</p>
+```
+
+## Sections (groups)
+
+Groups (a.k.a. sections) bundle vizzes into a labelled container with its own inner grid.
+
+```yaml
+liveboard:
+  groups:
+  - id: Group_1
+    name: "Sales Channel Performance"
+    description: "Revenue and profit breakdown by sales channel"
+    group_guid: "{group_guid}"     # omit on first import
+    visualizations:                # member viz IDs
+    - Viz_2
+    - Viz_3
+  layout:
+    tiles:                         # the GROUP is positioned here, as a tile
+    - visualization_id: Group_1
+      x: 0
+      y: 6
+      height: 6
+      width: 6
+    group_layouts:                 # members are arranged INSIDE the group (fresh 12-col grid)
+    - id: Group_1
+      tiles:
+      - visualization_id: Viz_2
+        x: 0
+        y: 0
+        height: 6
+        width: 6
+      - visualization_id: Viz_3
+        x: 6
+        y: 0
+        height: 6
+        width: 6
+```
+
+| Field | Notes |
+|---|---|
+| `groups[].id` | Local group ID (`Group_1`); referenced from `layout.tiles[]` and `layout.group_layouts[]` |
+| `groups[].name` / `description` | Section header text |
+| `groups[].visualizations[]` | Member viz IDs |
+| `groups[].group_guid` | TS-assigned; omit on first import |
+| `layout.group_layouts[]` | Per-group inner layout — one entry per group, each with its own `tiles[]` |
+
+## `client_state` / `client_state_v2`
+
+Both `answer.table` and `answer.chart` carry `client_state` (legacy, usually `''`) and
+`client_state_v2` — an opaque JSON blob holding frontend presentation state. It is **not**
+required to render a viz; ThoughtSpot applies sensible defaults when it is empty. See the
+`client_state_v2` section in [thoughtspot-answer-tml.md](thoughtspot-answer-tml.md) for the
+observed structure (series colors, axis properties incl. dual-axis `isOpposite`, per-column
+KPI display options, responsive layout). Do not hand-author it for migrations — supply the
+structural chart block and leave styling to defaults.
 
 ### `parameter_overrides[]` fields
 
@@ -192,6 +316,92 @@ Predefined `size` values: `EXTRA_SMALL`, `SMALL`, `MEDIUM`, `LARGE`, `LARGE_SMAL
 | `value.name` | `"ModelName::ParameterName"` — scope-qualified parameter name |
 | `value.id` | Same UUID as `key` |
 | `value.override_value` | Present only if the default was changed. String regardless of data type. |
+
+---
+
+## Liveboard styling — `style_properties`, `overrides`, color tokens
+
+Liveboard styling lives **in the TML** under `liveboard.style` and uses semantic **color
+tokens**, not hex codes. (This is distinct from embed-time theming via the Visual Embed
+SDK `customizations.style` / `--ts-var-*` CSS variables, which is a runtime layer and does
+**not** appear in TML.)
+
+```yaml
+style:
+  style_properties:            # global — whole liveboard
+  - name: lb_brand_color
+    value: LBC_A
+  - name: lb_border_type
+    value: CURVED              # CURVED | SHARP
+  - name: hide_group_title
+    value: 'false'
+  - name: hide_group_description
+    value: 'true'
+  - name: kpi_hero_font_size
+    value: M                   # S | M | L
+  overrides:                   # per-object — keyed by group or viz id
+  - object_id: Group_2
+    style_properties:
+    - name: group_brand_color
+      value: GBC_C
+  - object_id: Viz_7
+    style_properties:
+    - name: tile_brand_color
+      value: TBC_I             # dark — KPI tiles only
+```
+
+### Property scopes
+
+| Scope | Property | Values |
+|---|---|---|
+| Liveboard | `lb_brand_color` | `LBC_A`…`LBC_H` |
+| Liveboard | `lb_border_type` | `CURVED` / `SHARP` |
+| Group | `group_brand_color` | `GBC_A`…`GBC_H` |
+| Group | `hide_group_title` / `hide_group_description` / `hide_group_tile_description` | `'true'`/`'false'` |
+| Tile | `tile_brand_color` | `TBC_A`…`TBC_H` (light, any viz); `TBC_I`…`TBC_P` (dark, **KPI only**) |
+| Tile | `hide_tile_title` / `hide_tile_description` | `'true'`/`'false'` |
+| KPI | `is_highlighted` | emphasis styling |
+| KPI | `tile_kpi_color` | `TKS_A`…`TKS_P` (KPI number color) |
+| KPI | `kpi_hero_font_size` | `S` / `M` / `L` / `XL` |
+
+`overrides[].object_id` accepts a group id (`Group_N`) or viz id (`Viz_N`). Per-object
+`style_properties` override the global ones for that object only.
+
+### Background color tokens (hex reference)
+
+`LBC_*` = liveboard background, `GBC_*` = group background (lighter), `TBC_A`–`TBC_H` =
+light tile backgrounds. Suffix → hue:
+
+| Suffix | Hue | `LBC_*` hex |
+|---|---|---|
+| A | light gray | `#F6F8FA` |
+| B | light purple | `#E3D9FC` |
+| C | light blue | `#CEDCF5` |
+| D | light cyan | `#C9F0F5` |
+| E | light green | `#C7F2E3` |
+| F | light yellow | `#FCF1D1` |
+| G | light orange | `#FFDDCC` |
+| H | light pink | `#FCD4D7` |
+
+`TBC_I`–`TBC_P` are dark tile backgrounds valid **only on KPI tiles** (pair with light
+`tile_kpi_color`). `TKS_A`–`TKS_P` set the KPI hero-number color.
+
+### Curated themes
+
+A pick-one set that maps cleanly onto the tokens (used by the skill's style step). The
+**base brand colors** are below; border type, per-tile colors, KPI emphasis
+(`tile_kpi_color`/`is_highlighted`), and matching `chart.viz_style` palettes vary per theme
+— the verified, complete recipes live in the tableau skill's
+`references/liveboard-style-themes.md`.
+
+| Theme | `lb_brand_color` | `group_brand_color` | `tile_brand_color` | `lb_border_type` |
+|---|---|---|---|---|
+| Clean & Minimal | `LBC_A` | `GBC_A` | `TBC_A` | `SHARP` |
+| Warm Tones | `LBC_G` | `GBC_G` | `TBC_G` | `CURVED` |
+| Cool Professional | `LBC_C` | `GBC_C` | `TBC_C` | `CURVED` |
+| Fresh & Modern | `LBC_D` | `GBC_D` | `TBC_D` | `CURVED` |
+| Soft Lavender | `LBC_B` | `GBC_B` | `TBC_B` | `CURVED` |
+| High Contrast KPIs | `LBC_A` | — | KPI tiles `TBC_I`–`TBC_P` (dark) | `CURVED` |
 
 ---
 

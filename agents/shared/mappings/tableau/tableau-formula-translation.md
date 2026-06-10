@@ -40,6 +40,7 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `INT(x)` | `round ( x )` | No direct INT cast in ThoughtSpot |
 | `FLOAT(x)` | `x * 1.0` | |
 | `STR(x)` | `to_string ( x )` | |
+| `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot uses `concat()` for strings — the `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 2 ) ) , '%' )`. |
 | `ABS(x)` | `abs ( x )` | |
 | `ROUND(x, n)` | `round ( x , n )` | |
 | `CEILING(x)` | `ceil ( x )` | |
@@ -64,6 +65,26 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `DATEPART('quarter', d)` | `quarter_number ( d )` | |
 | `DATEPART('week', d)` | `week_number_of_year ( d )` | |
 
+### Year-over-year / period comparisons — make them dynamic, don't copy hardcoded years
+
+Tableau workbooks routinely **hardcode** the comparison years because the author froze them to
+the data they had — e.g. `IF YEAR([Order Date]) = 2019 THEN [Sales] END` ("previous year") and
+`= 2020` ("current year"). A literal translation bakes in 2019/2020 forever. Prefer the
+**dynamic, relative-to-today** form so the calc keeps working as data rolls forward:
+
+| Intent | Hardcoded (as authored) | Dynamic ThoughtSpot |
+|---|---|---|
+| Current-year measure | `if ( year([d]) = 2020 ) then [m] else 0` | `sum ( if ( year ( [t::d] ) = year ( today ( ) ) ) then [t::m] else 0 )` |
+| Prior-year measure | `if ( year([d]) = 2019 ) then [m] else 0` | `sum ( if ( year ( [t::d] ) = year ( add_years ( today ( ) , -1 ) ) ) then [t::m] else 0 )` |
+
+**Surface the data-fidelity tradeoff (don't switch silently).** Dynamic-to-`today()` is correct
+for a live/refreshing source, but returns **0 / N/A on a frozen demo dataset** whose latest year
+is in the past (e.g. 2019–2020 data when `today()` is 2026). When the workbook's data doesn't
+reach the current year, tell the user and offer: (a) keep dynamic (correct for production, empty
+on this demo), or (b) anchor to the dataset's actual latest year so it demos now. Note that
+`max([date])` is **not** allowed inside a formula filter, so "latest year in data" can't be
+expressed as `year(max([d]))` in the conditional — anchoring means a literal year.
+
 ---
 
 ## ThoughtSpot Formula Syntax Rules
@@ -75,6 +96,24 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 5. **Boolean operators** — `and`, `or`, `not` (lowercase)
 6. **No semicolons or statement terminators**
 7. **`to_date()` requires exactly 2 arguments** — `to_date ( '2019-07-31' , 'yyyy-MM-dd' )`
+
+### Don't create redundant pass-through formulas
+
+A Tableau workbook often has calculated fields that **just restate a physical column** —
+`Total sales = SUM([Sales])`, `Monthly sales = [Sales]` (or a tautological `IF` that reduces to
+`[Sales]`). In ThoughtSpot the physical `Sales` column is already a measure that aggregates as
+`sum` by default, so these formulas add a duplicate that means the same thing. **Detect and
+drop them:**
+- A formula whose expression is exactly `SUM([col])` / `AVG([col])` / `[col]` of an existing
+  physical column (no other transformation) → **don't create it; use the physical column**
+  (e.g. reference `[Sales]` directly). Repoint anything that referenced the formula at the
+  physical column.
+- Two formulas that reduce to the **same expression** → keep **one**, drop the rest.
+- **Note each collapse in the migration report** (status ⊘ "redundant — use physical `[col]`")
+  so the reviewer sees the field wasn't lost, just deduplicated.
+
+Keep the formula only when it adds something the physical column can't express (a different
+aggregation surfaced as its own column, a rename the rest of the model depends on, etc.).
 
 ---
 
@@ -92,6 +131,13 @@ Functions" for the full `group_aggregate` reference.
 | `{INCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () + { dim } , query_filters () )` | Adds dimension to whatever the query already groups by |
 | `{EXCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () - { dim } , query_filters () )` | Removes dimension from the query's grouping |
 | `{SUM([col])}` (no LOD keyword) | `group_aggregate ( sum ( [table::col] ) , {} , {} )` | Grand total — no partitioning |
+| `TOTAL(SUM([col]))` | `group_aggregate ( sum ( [table::col] ) , {} , query_filters () )` | Table-calc grand total that **respects filters** — `{}` grouping (whole table) + `query_filters()`. Use this as the denominator for percent-of-total. |
+| `SUM([x]) / TOTAL(SUM([x]))` (percent of total) | `sum ( [table::x] ) / group_aggregate ( sum ( [table::x] ) , {} , query_filters () )` | Common idiom: row/group value ÷ filtered grand total |
+
+`TOTAL(agg)` is a Tableau table calculation, but the common `TOTAL(SUM(...))` / percent-of-total
+case has a clean LOD translation (above) — same `group_aggregate` family Snowflake/Databricks
+use. Other `TOTAL()` partitionings (e.g. along a specific pane direction) may still need
+pass-through.
 
 **Syntax rules for `group_aggregate`:**
 - Dimensions use curly braces: `{ dim1 , dim2 }`
@@ -101,11 +147,213 @@ Functions" for the full `group_aggregate` reference.
 
 ---
 
+## Tableau Bins → bucketing formula
+
+A Tableau **bin** field (a `<column>` whose `<calculation class='bin'>` discretizes a
+continuous field) is translatable — it floors the source field to multiples of the bin
+size, anchored at `peg`. The `<calculation>` attributes give everything needed:
+
+```
+<calculation class='bin' formula='[Age]' size-parameter='[Parameters].[Age (bin) Parameter]' peg='0' .../>
+```
+
+| Attribute | Meaning |
+|---|---|
+| `formula` | the source field being binned (`[Age]`) |
+| `size-parameter` | the bin width — a Tableau **parameter** (migrate it per the Parameters section); resolve to its ThoughtSpot parameter **caption** |
+| `peg` | the bin anchor/offset (usually `0`) |
+
+Translation (peg = 0):
+
+```
+floor ( [table::field] / [Bin Size Param] ) * [Bin Size Param]
+```
+
+General form (peg ≠ 0):
+
+```
+floor ( ( [table::field] - peg ) / [Bin Size Param] ) * [Bin Size Param] + peg
+```
+
+**Row-level by default.** A bare column reference inside a formula (`[BALANCE]`) is
+**scalar / row-level** — the column's default aggregation does **not** apply unless you write
+it explicitly (`sum([BALANCE])`). So `floor([BALANCE]/size)*size` bins each row correctly
+**even when the source column is modelled as a `SUM` measure** — no need to add a separate
+"scalar" attribute. (Aggregation in formulas is always explicit: `sum()`, `average()`, etc.)
+
+The result is an **attribute** (it groups rows into buckets). Examples (dynamic, parameter-driven size):
+
+| Tableau bin | ThoughtSpot formula |
+|---|---|
+| `Age (bin)` size = param `Age Groups`, peg 0 | `floor ( [Age] / [Age Groups] ) * [Age Groups]` |
+| `Balance (bin)` size = param `Balance (bin) Parameter`, peg 0 | `floor ( [Balance] / [Balance (bin) Parameter] ) * [Balance (bin) Parameter]` |
+
+### Two ways to translate a bin — pick by whether the size is dynamic
+
+| Bin size | Approach | Why |
+|---|---|---|
+| **Dynamic** (driven by a Tableau parameter) | `floor()` **formula** referencing the parameter (above) | The bucket width must change when the user changes the parameter — only a formula can do that. |
+| **Fixed** (a literal bin size, no parameter) | a **cohort (column set) TML object** — `cohort_grouping_type: BIN_BASED` | Native ThoughtSpot binning; cleaner than a formula, and shows as a proper set on the column. |
+
+A fixed-size bin becomes a separate **`cohort:` TML object** bound to the model (worksheet)
+by `obj_id`. See [../../schemas/thoughtspot-sets-tml.md](../../schemas/thoughtspot-sets-tml.md)
+for the full schema. Shape:
+
+```yaml
+cohort:
+  name: Age Bins
+  worksheet:
+    id: P1-UK-Bank-Customers
+    name: P1-UK-Bank-Customers
+    obj_id: P1-UK-Bank-Customers-5235898b   # the model's obj_id ({NameNoSpaces}-{guid8})
+  config:
+    cohort_type: SIMPLE
+    anchor_column_id: Age                    # the model column being binned
+    cohort_grouping_type: BIN_BASED
+    bins:
+      minimum_value: 0.0
+      maximum_value: 90.0
+      bin_size: 10.0
+```
+
+**Prompt the user** for `minimum_value`, `maximum_value`, and `bin_size` (suggest the Tableau
+bin parameter's default as the `bin_size`). If the user can't supply the range, **a warehouse
+lookup is an acceptable fallback** (e.g. `SELECT MIN(col), MAX(col) …` — with the user's
+authorization, since it's a live read). Prefer prompting; fall back to the DB lookup. Import
+the cohort **after** the model.
+
+**The model must have a set `obj_id` for the cohort to bind.** A freshly created model has
+**no** `obj_id` (export shows `obj_id: None`), and a cohort that references it by `fqn`
+(GUID) alone fails with *"Worksheet not found"*. Fix: set the model's `obj_id` explicitly
+(root `obj_id: {ModelNameNoSpaces-or-hyphenated}-{guid8}`, e.g. `P1-UK-Bank-Customers-5235898b`),
+re-import the model in place (root `guid` + `--no-create-new`), then have the cohort's
+`worksheet.obj_id` point at that same value. (This is also the `obj_id` a liveboard viz uses
+to bind to the model — set it once, reuse everywhere.)
+
+### `Number of Records` / row counts → `count([column])`
+
+Tableau's auto-generated **`Number of Records`** field (`formula = 1`) is a row count. Don't
+translate it to `sum ( 1 )` — that's opaque. Translate it to a real **`count()` of a chosen
+column**, and **prompt the user for which column** (default to the table's primary key / a
+non-null id):
+
+```
+Number of Records → count ( [TABLE::CUSTOMER_ID] )      # user picks the column
+SUM([Number of Records]) → count ( [TABLE::CUSTOMER_ID] )
+```
+
+Carry the same choice into any formula that builds on it (e.g. percent-of-total):
+
+```
+Calculation1 → count ( [TABLE::CUSTOMER_ID] )
+             / group_aggregate ( count ( [TABLE::CUSTOMER_ID] ) , {} , query_filters () )
+```
+
+If the user has no preference, count the primary-key column (counts every row, non-null).
+
+### Manual groups → `GROUP_BASED` cohort (classify by `class`, NOT the field name)
+
+A `<calculation class='categorical-bin'>` is a **manual group** — it assigns explicit source
+values to named groups (e.g. specific `[Date Joined]` dates → "Cluster 1/2/3", with a
+`default` label for the rest). **Despite a field name like "… (clusters)", this is NOT
+statistical clustering — it is translatable** to a `GROUP_BASED` cohort:
+
+```yaml
+cohort:
+  name: Date Joined (clusters)
+  worksheet: { id: ..., name: ..., obj_id: P1-UK-Bank-Customers-5235898b }   # model obj_id, set it first
+  config:
+    cohort_type: SIMPLE
+    anchor_column_id: Date Joined
+    cohort_grouping_type: GROUP_BASED
+    null_output_value: "Not Clustered"        # the categorical-bin `default`
+    combine_non_group_values: true            # bucket everything else under null_output_value
+    groups:
+    - name: Cluster 1
+      combine_type: ALL
+      conditions:
+      - operator: EQ
+        column_name: Date Joined
+        filter_value_type: STRING             # REQUIRED on each condition (STRING/DOUBLE/…)
+        value: ["2015-04-01", "2015-08-01", ...]   # stored values, NOT Tableau's display format
+    - name: Cluster 2
+      combine_type: ALL
+      conditions:
+      - { operator: EQ, column_name: Date Joined, filter_value_type: STRING, value: [ ... ] }
+```
+
+Map: `categorical-bin` `<bin value='Cluster 1'>` → a `groups[]` entry; its `<value>` list →
+the condition `value[]`; the calc's `default` → `null_output_value` (+ `combine_non_group_values: true`).
+
+**Two things that bite (both confirmed against a working set):**
+- Each condition needs **`filter_value_type`** matching the **anchor column's type**, and a
+  `combine_type` (use **`ANY`** for set membership — `ALL` ANDs the conditions and matches
+  nothing). The condition shape depends on the type:
+  - **String/number column** → `filter_value_type: STRING` (or `DOUBLE`/…), `operator: EQ`,
+    `value: [...]` (a multi-value list = "in this set").
+  - **DATE column** → `filter_value_type: DATE_FILTER`, one condition per value with
+    `date_filter_values: [{ type: EXACT_DATE, date: MM/DD/YYYY, oper: "=" }]`, combined with
+    `combine_type: ANY`. Dates use **`MM/DD/YYYY`**. (So if you retype the anchor column
+    VARCHAR→DATE, the cohort conditions must switch from `STRING`/`value[]` to
+    `DATE_FILTER`/`date_filter_values`.)
+- **Convert the values to the column's STORED format, not Tableau's display format.** A
+  `categorical-bin`'s `<value>` strings are Tableau *display* values (`01.Apr.15`); the
+  warehouse column holds something else (`2015-04-01`). Transform every value to match
+  what's stored, or the groups match nothing. **If the stored format is unknown, ask the user;
+  if they don't know, look it up** (`SELECT <col> … LIMIT 5`, with authorization). (Date
+  display `DD.Mon.YY` → ISO `YYYY-MM-DD`.)
+- **The group values are a snapshot of the TWB's data and may not exist in the target.** A
+  `categorical-bin` enumerates the exact values present when the workbook was authored. If the
+  warehouse now holds *different* data (regenerated, refreshed, or a different load), those
+  values won't match and every row falls to `null_output_value` — a silently empty grouping.
+  Don't just assume — **confirm membership**: prompt the user ("do these values still exist in
+  the data?"), or, failing that, do a quick warehouse lookup (with authorization) before
+  shipping the cohort. If they genuinely don't match, flag it as a **data-fidelity** limitation
+  (not a translation error) and note the cohort is only meaningful once the data contains those
+  values. (Also: if the anchor
+  column is later retyped — e.g. VARCHAR→DATE — the condition `filter_value_type` and values
+  must change to match the new type.)
+
+**Cohort vs. `if/then` formula — decide by group shape.** A manual group can also be an
+`if … then … else if … then … else …` formula (ThoughtSpot has **no `CASE`** — always use
+the if/then/else-if chain). When each group is a **contiguous, non-overlapping range** of the
+source value, that's the *cleanest* translation:
+
+```
+if      [x] >= a1 and [x] <= b1 then "Group 1"
+else if [x] >= a2 and [x] <= b2 then "Group 2"
+else "Other"
+```
+
+But this only works for ranges. Check the membership first: parse the `<value>` lists and
+see whether each group is a contiguous block. If the groups are **arbitrary / interleaved
+value sets** (e.g. dates from a clustering-by-volume that span the whole range), a range
+formula misclassifies almost everything — use the **`GROUP_BASED` cohort** (or, if a formula
+is required, an explicit membership chain `if [x] = v1 or [x] = v2 or … then "Group 1" …`,
+which is faithful but verbose). For a range test on a date stored as a **string**, parse it
+first (`to_date(...)`).
+
+**Genuinely untranslatable:** true **statistical clustering** (Tableau's k-means "Clusters",
+a different calculation produced by the analytics engine, not `categorical-bin`) — no
+ThoughtSpot equivalent; omit + log. **Always classify by the calculation `class`, not the
+field's display name.**
+
+---
+
 ## Running / Cumulative Functions
 
 Tableau running table calculations map to ThoughtSpot cumulative functions. Chain:
 Tableau `RUNNING_*` → Snowflake `SUM/AVG/etc OVER (... ROWS BETWEEN UNBOUNDED PRECEDING
 AND CURRENT ROW)` → ThoughtSpot `cumulative_*()`.
+
+> ⚠️ **`cumulative_*` (and `moving_*`) are query-time functions — they CANNOT be stored as
+> model/worksheet formula columns.** Adding one to `model.formulas[]` fails validation with
+> *"Search did not find …"* (in any form — `cumulative_sum(sum([col]))`, `cumulative_sum([formula_measure])`,
+> etc.). They are only valid **inside an answer's `search_query`** (the live query context that
+> supplies the sort order). So: do **not** emit a model formula for a `RUNNING_*`/`WINDOW_*`
+> field — instead realize it on the **viz that uses it** (Step 10b) via the search keyword
+> (`cumulative …`, `moving average of …`) or an answer-level formula. Log it in the Migration
+> Summary as "realized at the answer level, not the model."
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
@@ -127,6 +375,23 @@ Tableau's `WINDOW_*` functions map to ThoughtSpot's `moving_*` functions. Chain:
 Tableau `WINDOW_SUM` → Snowflake `SUM() OVER (... ROWS BETWEEN ...)` → ThoughtSpot
 `moving_sum()`. See `ts-snowflake-formula-translation.md` "Moving / Sliding Window
 Functions" for the full reference.
+
+> ⚠️ Like `cumulative_*`, **`moving_*` are query-time only — not valid in model formulas**
+> (same *"Search did not find …"* failure). Realize them on the viz (answer `search_query`),
+> not in `model.formulas[]`. A composite like `EXP(WINDOW_AVG(LOG([m]), -2, 0))` (a geometric
+> moving average) therefore can't be a model column at all — build it as an answer-level
+> formula on the one viz that needs it, or flag it as a placeholder if the answer-formula
+> nesting (`exp`/`log10` around `moving_average`) is also rejected.
+
+> 🔑 **Pass the worksheet's shelf attribute(s) as the trailing sort args — and reference the
+> MEASURE COLUMN by name, not `sum()`.** A running/moving total is meaningless without an order.
+> Take the dimension(s) the Tableau worksheet lays the calc *along* (its Rows/Columns shelf —
+> e.g. `Month of order date`, `Order Date`) and append them as sort args. The first argument is
+> the **measure column by display name** (`[Sales]`), **not** `sum([t::Sales])`: `cumulative_*`/
+> `moving_*` reject an already-aggregated arg (*"expects 1st argument to be not aggregated"*) and
+> can't resolve a `[t::col]` ref in answer context. So:
+> `RUNNING_SUM(SUM([Sales]))` along `[Month]` → `cumulative_sum ( [Sales] , [Month of order date] )`;
+> `EXP(WINDOW_AVG(LOG([Sales]),-2,0))` along `[Order Date]` → `exp ( moving_average ( log10 ( [Sales] ) , 2 , 0 , [Order Date] ) )`.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
@@ -179,9 +444,9 @@ function with `PARTITION BY` in the SQL string instead.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `RANK(SUM([col]))` | `rank ( sum ( [table::col] ) )` | Descending by default |
+| `RANK(SUM([col]))` | `rank ( sum ( [table::col] ) , 'desc' )` | **Direction arg is required** — `rank(measure)` with one arg fails validation (*"Function rank expects 2 arguments, found 1"*). Pass `'desc'` explicitly for Tableau's default. |
 | `RANK(SUM([col]), 'asc')` | `rank ( sum ( [table::col] ) , 'asc' )` | |
-| `RANK_UNIQUE(SUM([col]))` | `rank ( sum ( [table::col] ) )` | ThoughtSpot `rank` is always dense; no RANK_UNIQUE equivalent |
+| `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` is always dense; no RANK_UNIQUE equivalent — document the tie-handling difference. |
 
 **Partitioned rank** — ThoughtSpot's native `rank()` has no partition support. For
 partitioned rank, use a pass-through function (see "Pass-Through Fallback" below):
@@ -296,10 +561,14 @@ model import. A missing formula produces a functional model with reduced coverag
 | `SIZE()`, `FIRST()`, `LAST()` | Table calculations — partition-aware row addressing; no SQL equivalent |
 | `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent |
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
+| True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
 | References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
 
 **Formerly untranslatable, now mapped:**
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
+- `TOTAL(SUM(...))` / percent-of-total → `group_aggregate(..., {}, query_filters())` (see LOD section)
+- Tableau **bins** (`class='bin'`) → `floor([x]/size)*size` bucketing formula (see Tableau Bins section)
+- `Number of Records` (`= 1`) → `sum(1)`
 - `RUNNING_SUM`, `RUNNING_AVG`, etc. → `cumulative_sum()`, `cumulative_average()`, etc. (see Running/Cumulative section)
 - `RANK()` → `rank()` (see Rank section)
 - `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined

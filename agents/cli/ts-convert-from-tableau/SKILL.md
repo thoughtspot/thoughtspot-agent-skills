@@ -27,6 +27,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
 | [references/open-items.md](references/open-items.md) | Known validation quirks and workarounds |
+| [references/liveboard-style-themes.md](references/liveboard-style-themes.md) | Step 10.5 curated themes — brand tokens + per-chart `viz_style` color palettes |
 
 ---
 
@@ -35,6 +36,49 @@ Ask one question at a time. Wait for each answer before proceeding.
 - ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
 - `ts` CLI installed: `pip install -e tools/ts-cli`
 - Tableau workbook file (`.twb` or `.twbx`) accessible on disk
+- **The source tables and their data already exist in a warehouse, and a ThoughtSpot
+  connection exposes them.** This skill creates ThoughtSpot *logical* objects (Table, Model,
+  cohorts, Liveboard) **over existing physical tables** — it does **not** create warehouse
+  tables or load/populate data. A ThoughtSpot table binds to a live connection that already
+  surfaces the physical table and its columns (see Step 4 / `thoughtspot-table-tml.md`); if no
+  such connection/table exists, set that up first (the data pipeline is out of scope). The
+  skill *may read* the warehouse for confirmation (value formats, ranges, membership) — with
+  your authorization — but never loads or modifies data.
+
+---
+
+## Working principle — surface, recommend, resolve
+
+Whenever the parse or generation hits a situation that has no clean 1:1 automatic
+translation or needs a judgement call — e.g. a **cross-datasource blend**, a **join key that
+doesn't exist / spans two tables**, a **date stored as VARCHAR**, **bins** (formula vs cohort),
+an **ambiguous count column**, a **manual group** (cohort vs `if/then`), an **untranslatable
+formula**, or a **value-vs-data mismatch** — do **not** silently drop it, guess, or merely
+flag it. Instead:
+
+1. **Surface it** — tell the user plainly what was found and why it's not a straight
+   translation.
+2. **Recommend** — if there's a sound solution (or a small set of options), say which and why,
+   with the trade-offs.
+3. **Resolve** — with the user's go-ahead, **do it** (build the SQL view, prompt for the
+   value, retype the column, create the cohort, etc.). Only fall back to omit-and-flag when no
+   solution exists or the user declines.
+
+Default to *enabling* the migration, not abandoning the hard parts. The per-step prompts and
+checkpoints below are how this principle is applied in practice.
+
+**Read the actual calculation — never infer from the name.** A worksheet called "Highest
+Growth in past 5 years" tells you the *intent*, not the *logic*. Always inspect the real
+Tableau definition — the table-calc type (`pcdf`, `pctd`, `running_*`), the **filters**
+(Top-N, recent-N-years), the **compute-using/partition**, and the **sort** — and translate
+*that*. (Example: that title is really "top 5 sectors by FDI % change over a 6-year window" —
+a period comparison, not a raw `growth of` line.)
+
+**Placeholder charts when a full translation isn't possible.** If a viz can't be fully
+reproduced, don't silently omit it — build a **placeholder**: a `TABLE` with the columns you
+*can* produce, and write a note in **both** the viz's `answer.description` and the Migration
+Summary tab that the chart is partial and **needs review**. A visible, labelled stub the user
+can finish beats a missing tile.
 
 ---
 
@@ -62,17 +106,25 @@ Enter A / M:
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields .................................. auto
-  4.  Select ThoughtSpot connection ....................... you choose (or skip)
+  4.  Select ThoughtSpot connection (required) ............ you choose
+  4.5 Confirm source tables (reuse vs. create; search) .... you choose
   5.  Generate TML files (table + sql_view + model) ...... auto
+  5.5 Confirm Spotter (AI search) enablement (default Y) .. you choose
   6.  Validate against ThoughtSpot (up to 10 fix cycles) .. auto
-  7.  Import to ThoughtSpot ................................ you confirm
-  8.  Migrate dashboards to liveboards? .................... you choose (skip → Step 12)
+  7.  Review checkpoint (formula map + omissions) + import  you confirm
+  7.5 Confirm the model is correct (test in Search/Spotter)  you confirm
+  8.  Migrate dashboards? + separate vs single-tabbed (2+) . you choose (skip → Step 12)
   9.  Parse dashboard layout and map to grid ............... auto
+  9d. Orphan worksheets (not on a dashboard) — add as tiles? you choose
  10.  Generate liveboard TML ............................... auto
+ 10f. Add referenced parameters to the header? (default Y) . you choose
+ 10g. Add a "Migration Summary" tab (migrated/decisions/omitted) auto
+ 10.5 Pick a liveboard style (curated theme; default) ..... you choose
  11.  Import liveboard ..................................... you confirm
- 12.  Summary + limitations report ......................... auto
+ 11.5 Formula coverage answers (every formula testable) ... auto
+ 12.  Migration report (outcomes + links + formula map) ... auto
 
-Confirmation required: Steps 7, 8, 11
+Confirmation required: Steps 4.5, 5.5, 7, 7.5, 8, 9d, 11
 Auto-executed: Steps 1, 3, 5, 6, 9, 10, 12
 
 ### Steps (Audit mode)
@@ -105,8 +157,9 @@ Save the list of TWB paths. Process each file through Steps A2–A4 independentl
 ## Step A2 — Parse TWB XML (Audit Mode)
 
 Run the same extraction as Step 3 (3a through 3d) on each TWB file. Do NOT skip any
-datasource type — include Extract datasources in the audit count (marked as "Extract —
-skipped in migration").
+datasource type. For extracts, resolve the underlying source (Step 3b) and report it as
+migratable via that source; mark as "Extract — no underlying source" only when none
+resolves.
 
 ---
 
@@ -117,12 +170,12 @@ based on the patterns in `tableau-formula-translation.md`:
 
 | Tier | Description | Examples |
 |---|---|---|
-| **Native** | Direct ThoughtSpot function mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF |
-| **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}` |
+| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key) |
+| **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}`; **`TOTAL(SUM(x))`** / percent-of-total → `group_aggregate(..., {}, query_filters())` |
 | **Cumulative** | Running calculation → `cumulative_*()` | RUNNING_SUM, RUNNING_AVG |
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
-| **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context, TOTAL() |
-| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE |
+| **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE; true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
@@ -313,8 +366,19 @@ Tableau datasource" for the full rule.
 - If the datasource contains `<connection class="sqlproxy">`, it is a **Published
   Datasource** (hosted on Tableau Server). The table name resolves to
   `connection.get('dbname')`, not the literal `[sqlproxy]`.
-- If the datasource contains `<extract>`, it is an **Extract** — skip it (extracts
-  are Tableau-local snapshots, not live connections to the warehouse).
+- If the datasource contains `<extract>`, **do not blindly skip it.** An extract is a
+  local snapshot, but it almost always wraps an *underlying* connection that names a real
+  table — a file source (`textscan`/CSV, `excel-direct`), a database, etc. What matters
+  for migration is that underlying source, because that's what gets queried in the
+  warehouse. Look past the `<extract>`/`hyper` connection to the real one:
+  - The relation has two parents in `<metadata-records>` — the live source (e.g.
+    `[Amazon Sales data.csv]`) and `[Extract]`. **Use the live-source relation; ignore the
+    `[Extract]` relation.** The physical table name comes from the live source (mapped to
+    its warehouse table per Step 4).
+  - Only treat a datasource as truly skippable when there is **no** resolvable underlying
+    connection (a pure Tableau-authored extract with no source) — and say so in the report.
+  - File-based sources (CSV/Excel) imply the data was loaded into the warehouse out of
+    band; bind the table to the connection that now exposes it (Step 4/4.5).
 - Otherwise, it is a **Live** datasource — proceed with extraction.
 
 **Relation wrapper handling:** TWB XML wraps `<relation>` elements in one of three
@@ -418,7 +482,7 @@ Available ThoughtSpot connections:
   1. SNOWFLAKE_PROD    (RDBMS_SNOWFLAKE)   — PROD_DB
   2. ANALYTICS_DW      (RDBMS_SNOWFLAKE)   — ANALYTICS_DB
 
-Which connection should the generated tables use? (Enter number, or 'skip'):
+Which connection should the generated tables use? (Enter number):
 ```
 
 Save the selected connection's exact `name` value as `{connection_name}`. This name is
@@ -437,10 +501,88 @@ schema. Save the resolved `{db}`, `{schema}`, and `{db_table}` for each table.
 If the connection response has no tables (empty `externalDatabases`), ask the user for
 the database and schema names directly.
 
-If the user types **skip**: use `YOUR_DATABASE` and `YOUR_SCHEMA` as placeholders in
-table TMLs — these produce a warning on validation, not an error. **Custom SQL relations
-(Step 5c) still require a connection name** — if skipped, prompt for the connection name
-string before generating SQL View TMLs.
+A connection is **required** — there is no skip path. ThoughtSpot tables are logical
+objects over a **live** connection: the physical table must already exist in the database
+and the connection must already exist for the table to be created at all. You cannot
+generate a usable table without one, so do not offer placeholders or a dry-run mode —
+they only produce objects that can never bind to data. If the user has no suitable
+connection, stop and tell them a connection exposing the source tables must be created
+first (the data pipeline / connection setup is out of this skill's scope).
+
+Use the selected connection's exact **name** in every table TML and SQL View TML — never
+a GUID. The v2 API cannot search connections by name, so the name string is both
+necessary and sufficient; do not try to resolve it to an ID. See
+`../../shared/schemas/thoughtspot-table-tml.md` "Connection Reference".
+
+---
+
+## Step 4.5 — Confirm Source Tables & Search Decision
+
+Step 4 resolved a `{db}`/`{schema}`/`{db_table}` for each physical table — but resolving
+a *name* is not the same as confirming the table is actually there. A model TML that
+points at a table the connection can't see will still *import* cleanly, yet every search
+and liveboard built on it comes back empty. That failure is silent and easy to miss, so
+confirm the source situation before generating anything. This step only **searches and
+confirms** — it never loads or modifies warehouse data (that is the data pipeline's job,
+not this skill's). It mirrors `ts-convert-from-databricks-mv` Step 8.
+
+### 4.5a — Present the table list and ask (do NOT search yet)
+
+Show the user the full inventory of physical tables from Step 3, then ask whether those
+tables already exist as ThoughtSpot Table objects. **Ask before searching.** Searching
+ThoughtSpot for every table on every run is wasteful when the user already knows the
+answer — so the search is gated behind the user's response, not run up front.
+
+```
+Source tables referenced by {workbook_name} ({N} total):
+
+  1. AGENT_SKILLS.AMAZON_SALES_DATA.AMAZON_SALES_DATA
+  2. AGENT_SKILLS.DUAL_AXIS_EXAMPLE.LISTOFORDERS
+  …
+
+Do these already exist as ThoughtSpot Table objects?
+  E  Exist      — reuse them (I'll look up their GUIDs)
+  N  Don't exist — create new Table TMLs            (default)
+  ?  Unsure     — search ThoughtSpot to find out
+
+Enter E / N / ? :
+```
+
+If the tables differ in status (some exist, some don't), the user can say so — accept a
+per-table answer or let them point out the exceptions.
+
+### 4.5b — Act on the answer
+
+- **N (don't exist)** → create a new Table TML for each in Step 5a (the default path).
+  No search.
+- **E (exist)** or **? (unsure)** → *now* search ThoughtSpot to locate/confirm:
+
+  ```bash
+  source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile {profile_name}
+  ```
+
+  Match on database + schema + table name (`metadata_header.database_stripes`,
+  `metadata_header.schema_stripes`, `metadata_name`). For each table found, reuse its
+  name/GUID in the model's `model_tables[]` and **skip generating a Table TML** for it in
+  Step 5a. For **?**, report what was/wasn't found and treat the not-found ones as create.
+  For **E**, if a table the user expected is not found, say so and confirm before falling
+  back to create.
+
+### 4.5c — Confirm any missing sources before proceeding
+
+If any table the plan intends to **create** is *not found* in the connection, surface it
+and require confirmation — this is the silent-failure case:
+
+```
+⚠ The following table(s) are not visible to connection "{connection_name}":
+    - {db}.{schema}.{db_table}
+  Their models will import, but searches return no data until the data is loaded
+  and visible to the connection. This skill does not load data.
+
+  Proceed anyway (generate the TMLs as-is)?   (yes / no):
+```
+
+Do not proceed past this warning without the user's confirmation.
 
 ---
 
@@ -467,6 +609,8 @@ table:
   db: RESOLVED_DATABASE
   schema: RESOLVED_SCHEMA
   db_table: physical_table_name
+  connection:
+    name: "{connection_name}"       # exact ThoughtSpot connection name, case-sensitive — NOT a GUID
   columns:
   - name: COLUMN_NAME
     db_column_name: COLUMN_NAME
@@ -479,18 +623,46 @@ table:
 ```
 
 Key rules:
-- Use `db`, `schema` values resolved from Step 4 — fall back to `YOUR_DATABASE` /
-  `YOUR_SCHEMA` only when the connection was skipped
+- `connection.name` is **required** — a ThoughtSpot logical table must sit on a connection
+  that already exposes the physical table and its columns. Use the connection **name**
+  directly (case-sensitive); never look up a GUID — the v2 API cannot search connections
+  by name, and the name is what the TML needs. See `../../shared/schemas/thoughtspot-table-tml.md`
+  "Connection Reference".
+- Use the `db`, `schema` values resolved from Step 4 (the connection is required, so these
+  are always real).
+- **`db_column_name` must match the physical column the connection exposes — not the
+  Tableau name.** When a file source (CSV/Excel) was loaded into the warehouse, the loader
+  usually normalizes names (`Item Type` → `ITEM_TYPE`: spaces→`_`, upper-cased). Use the
+  warehouse column name for `db_column_name` (and the friendly Tableau caption for the
+  model column's display `name`). If unsure, the connection schema from Step 4
+  (`externalDatabases`) lists the real column names; validation reports
+  `column not found in connection` when they don't match.
+- **Date stored as VARCHAR — flag it.** If the Tableau column is typed `date`/`datetime`
+  but the warehouse column is **VARCHAR** (common when a CSV date loaded as text), binding
+  it as VARCHAR loses all date capability (no buckets/trends/relative-date filters; Spotter
+  won't read it as time). The TS column `data_type` must match the physical column, so you
+  can't just declare `DATE`. Surface it and offer: **(a)** retype at the source (warehouse
+  `ALTER`/reload to a real `DATE` — outside this skill; needs the user) then bind as `DATE`,
+  or **(b)** keep VARCHAR and add a `to_date([col])` **derived formula column** for
+  date analytics. Don't silently bind a date as a string.
 - Use `INT64` for Tableau `integer` — **never `INT`**
 - `db_column_properties` is **required** on every column
-- No `guid`, `fqn`, or `connection` sections
+- No `guid` or `fqn` sections
+- If validation (Step 6) returns `connection not found`, the name/case is wrong; if it
+  returns `column not found in connection`, the physical table/column the connection sees
+  doesn't match `db_table`/`db_column_name` — both are surfaced there, so a wrong binding
+  fails loudly rather than silently.
 
 Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{TABLE_NAME}.table.tml`.
 
 ### 5b. Model TML — one per datasource (strict separation)
 
-For each datasource, generate exactly one `.model.tml` file. **Never merge multiple
-datasources into a single model** — see `tableau-tml-rules.md` for the rationale.
+Generate one `.model.tml` per datasource the workbook **actually uses** — don't blindly
+merge independent datasources, but also don't materialize an unused model for every
+datasource. **Exception:** a genuine **cross-datasource blend** (a formula referencing
+another datasource) is realized as **one** model by co-locating the link keys in a SQL view
+and joining the other datasource in (see the join/blend rules in 5b and
+`tableau-tml-rules.md` "One model per Tableau datasource").
 
 The `model_tables[]` section references both regular tables (from Step 5a) and SQL
 Views (from Step 5c) — both are referenced by `name` in the same way.
@@ -500,6 +672,9 @@ Views (from Step 5c) — both are referenced by `name` in the same way.
 ```yaml
 model:
   name: "Datasource Display Name"
+  properties:
+    spotter_config:
+      is_spotter_enabled: true  # set by Step 5.5 — Spotter is on by default
   model_tables:
   - name: TABLE_NAME
     joins:                      # only if this table has joins to others
@@ -560,7 +735,7 @@ populate `list_config.list_choice[]`:
 3. Use the distinct result values as `list_choice[]` entries
 4. Log in `MIGRATION_LIMITATIONS.md` that these values are a point-in-time snapshot
 
-If no warehouse connection is available (Step 4 was skipped), omit the parameter and
+If the selected connection cannot be queried for the values, omit the parameter and
 log the omission with the original SQL query for manual recreation.
 
 ### Formula reference translation
@@ -585,6 +760,65 @@ Formula translation rules: use `tableau-formula-translation.md`.
 - Resolve Tableau internal IDs (`[Calculation_\d+]`) to display names before translating
 - **LOD expressions** (`{FIXED}`, `{INCLUDE}`, `{EXCLUDE}`) → `group_aggregate()` — see
   the LOD section in `tableau-formula-translation.md`
+- **`TOTAL(SUM(x))` / percent-of-total** → `group_aggregate(..., {}, query_filters())`
+- **Tableau bins** (`class='bin'`): **prompt the user** for how to create each one — there
+  are two valid representations and the choice is theirs:
+
+  ```
+  This workbook has {N} bin field(s):
+    - Age (bin):     binned on [Age],     size = parameter "Age Groups" (dynamic)
+    - Balance (bin): binned on [Balance], size = parameter "Balance (bin) Parameter" (dynamic)
+
+  How should each bin be created?
+    F  floor() formula        — keeps it dynamic when the size is parameter-driven
+    C  cohort / column set     — native BIN_BASED set, fixed bin size
+    B  both
+  (default: F for parameter-driven bins, C for fixed-size bins)
+  ```
+
+  - **F — `floor()` formula**: `floor([x]/size)*size` referencing the migrated parameter
+    (resolve its internal name to the parameter caption) or a literal for fixed size. Stays
+    dynamic if parameter-driven.
+  - **C — cohort**: a separate **`cohort:` TML object** (`cohort_grouping_type: BIN_BASED`,
+    `anchor_column_id`, `bins.{minimum_value,maximum_value,bin_size}`) bound to the model by
+    `obj_id`. A cohort needs a fixed range — **prompt the user for `minimum_value`,
+    `maximum_value`, and `bin_size`**, offering the Tableau parameter's default as the
+    suggested `bin_size`. If the user can't supply the range, **fall back to a warehouse
+    lookup** (`SELECT MIN/MAX`, with their authorization) — prompt first, DB lookup second.
+    See the Bins section in `tableau-formula-translation.md` and
+    `../../shared/schemas/thoughtspot-sets-tml.md`. Generate as `*.cohort.tml` and import
+    **after** the model.
+  - **B — both**: emit the formula *and* the cohort.
+
+  Offer the smart default per bin (F for dynamic, C for fixed) so the user can just accept.
+- **Manual groups** (`class='categorical-bin'`) → a **`GROUP_BASED` cohort** (`*.cohort.tml`):
+  one `groups[]` entry per `<bin>`, its `<value>` list → the condition `value[]`, the calc's
+  `default` → `null_output_value`. **Classify by the calculation `class`, not the field name** —
+  a field called "… (clusters)" is usually a `categorical-bin` (translatable), not k-means.
+  Only true statistical clustering is untranslatable. Bind by the model `obj_id`; import after
+  the model. Watch the value-format caveat (stored values must match the group's values).
+  - **Cohort vs. `if/then` formula:** if each group is a **contiguous, non-overlapping range**,
+    an `if … then … else if … then … else …` formula is cleaner (ThoughtSpot has **no `CASE`** —
+    use the if/then/else-if chain); if groups are **arbitrary/interleaved value sets**, use the
+    cohort (a range formula would misclassify). Check membership before choosing — see the
+    categorical-bin section in `tableau-formula-translation.md`.
+- **`Number of Records` / row-count fields** → `count([column])`. **Prompt the user for which
+  column to count** (default the table's primary key); carry the same choice into dependent
+  formulas (e.g. percent-of-total). Don't emit `sum(1)`.
+- **Referencing one formula from another:** use the **formula id** `[formula_<id>]`, **not**
+  its display name `[<Name>]` — the name form errors *"Search did not find …"*. E.g.
+  `[formula_Attrition Count] / sum([T::EMPLOYEECOUNT])`. (Column refs still use `[T::COL]`.)
+- **Model-level vs answer-level formulas.** A calculated field used across many worksheets
+  belongs in the **model** `formulas[]` (reusable). One used by **only a single worksheet**
+  can instead be an **answer-level formula** on that liveboard viz (`answer.formulas[]`,
+  with a matching `answer_columns[]` entry) — keeping the model lean. Decide by reuse: shared
+  → model; viz-specific → answer-level.
+- **Growth / decline (Tableau `pcdf` / percent-difference / running-percent table calcs).**
+  Prefer the **`growth of`** search keyword when the breakdown is over a **date**:
+  `growth of [Measure] by [Date]` (this is a viz `search_query`, not a model formula). If
+  there is **no date** (e.g. growth across a *sector* attribute), build explicit
+  this-period vs last-period formulas and a percentage — but when a date exists, `growth of`
+  is the right tool.
 - **Running calculations** (`RUNNING_SUM`, etc.) → `cumulative_sum()`, etc.
 - **Rank functions** → `rank()`
 - **Window functions** (WINDOW_SUM, WINDOW_AVG, etc.) → `moving_sum()`, `moving_average()`,
@@ -598,7 +832,37 @@ Formula translation rules: use `tableau-formula-translation.md`.
   from `formulas[]` entirely, omit the corresponding `columns[]` entry, and log the
   omission for the Step 12 limitations report. Never generate a placeholder — incorrect
   syntax fails the entire model import.
-- Every join MUST have a non-empty `on` field
+- Every join MUST have a non-empty `on` field. Multi-column joins are fine —
+  `on: "[A::k1] = [B::k1] AND [A::k2] = [B::k2]"`.
+- **Join keys must be physical columns — you cannot join on a model formula.** And a
+  ThoughtSpot relationship is **binary**: a join's `on` cannot span more than two tables, so
+  **multi-table join keys must be co-located into ONE relation first** (e.g. targets keyed by
+  `(month, category)` where `month` derives from one table and `category` lives on another →
+  build a **single SQL view spanning both** so both keys sit on one relation). If a needed
+  key simply **doesn't exist** (e.g. month-of-order-date when orders only have a full
+  `ORDER_DATE`), **stop and advise the user**; don't skip it or fake a formula key. Present
+  the **two ways to make the column(s) physically exist**, and let the user choose:
+  1. **ThoughtSpot SQL View** (a `sql_view` TML — Step 5c): write the derived/pre-aggregated
+     columns into a `SELECT` over the connection (`DATE_TRUNC('month', ORDER_DATE) AS …`,
+     `GROUP BY …`). Its `sql_output_columns` are physical → valid multi-column join keys. Fast,
+     stays entirely in TML, no warehouse change. Use this as the foundation table for the model.
+  2. **Database table/view** the user creates in the warehouse, then **adds to the connection**
+     so ThoughtSpot can see it — then bind a normal Table TML to it. More setup (DB work +
+     connection refresh) but governed/reusable outside this model.
+  State exactly what the object needs to expose (which derived/aggregated columns, at what
+  grain) so the user can act. A ThoughtSpot join can be multi-column; the keys just have to be
+  real columns the relation exposes.
+- **Cross-datasource formulas (Tableau data blends).** A formula that references another
+  datasource (`SUM([Sales]) - SUM([OtherDS].[Target])`) is a **blend**, not a single-model
+  formula — models are per-datasource. To realize it, bring the other side into one relation
+  via a **join** (which usually needs the materialization above). **Do NOT pre-aggregate the
+  view to dodge fan-out** — ThoughtSpot's query generation **handles fan/chasm traps** (it
+  aggregates each fact independently), so a per-group dimension table (e.g. targets by
+  category/month) joined to per-line facts computes `sum(measure)` correctly without
+  double-counting. Keep the view **line-level**; the view exists only to materialize/co-locate
+  the join key, not to aggregate. The result is usually **one model**, not one-per-datasource.
+  If the user doesn't want the extra object, omit the blend and flag it; never reference a
+  second datasource from a model formula.
 - No `fqn` in `model_tables`
 - `obj_id` is optional on fresh import — omit it unless repointing an existing model
 
@@ -651,29 +915,64 @@ like regular tables.
 
 ---
 
-## Step 6 — Validate Against ThoughtSpot
+## Step 5.5 — Spotter Enablement
 
-Create a zip of all generated TML files:
+Before validating, confirm whether Spotter (AI search) should be enabled for each model
+— the same step `ts-convert-from-snowflake-sv` and `ts-convert-from-databricks-mv` run.
+Spotter is the primary natural-language interface for a Model, and a migrated workbook
+almost always exists to be queried this way, so the default is **yes**.
 
-```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name} && \
-  zip -r /tmp/ts_tableau_mig/{workbook_name}_TMLs.zip *.tml
+```
+Enable Spotter (AI search) for this model? [Y / n] (default: Y)
 ```
 
-Validate (up to 10 fix cycles):
+Write the answer into the model TML `properties` block (see the Step 5b template):
+
+```yaml
+model:
+  properties:
+    spotter_config:
+      is_spotter_enabled: true   # or false if the user declines
+```
+
+On an in-place update of an existing model, preserve its current setting unless the user
+asks to change it. Default new models to enabled.
+
+`ts tml import` reads a **JSON array of TML strings** from stdin — not a zip and not a
+single document. Build that array with tables first, then SQL views, then models (so a
+model's tables are validated alongside it):
 
 ```bash
-ts tml import --policy VALIDATE_ONLY --profile {profile_name} \
-  < /tmp/ts_tableau_mig/{workbook_name}_TMLs.zip
+cd /tmp/ts_tableau_mig/output/{workbook_name}
+python3 - > /tmp/ts_tableau_mig/{workbook_name}_payload.json <<'PY'
+import json, glob
+order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + sorted(glob.glob("*.model.tml")) + sorted(glob.glob("*.cohort.tml"))
+print(json.dumps([open(f).read() for f in order]))
+PY
+```
+
+Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisting:
+
+```bash
+cat /tmp/ts_tableau_mig/{workbook_name}_payload.json \
+  | ts tml import --policy VALIDATE_ONLY --profile {profile_name}
 ```
 
 For each cycle:
 
-1. Parse the validation response.
-2. **Ignore** warnings about `Table with id null not found` (placeholder db/schema — expected).
-3. For any **errors**, identify the affected TML file and the specific issue. Apply
+1. Parse the validation response. Each element has a `status.status_code` of `OK`,
+   `WARNING`, or `ERROR`. Only `ERROR` blocks; `WARNING` does not.
+2. **Expected WARNING (ignore):** `Table with id null not found. Matching with
+   db/schema/dbTable` with `status_code: WARNING`. A freshly generated table TML has no
+   GUID, so ThoughtSpot matches it by db/schema/dbTable instead — this is normal for a
+   new table and is not a problem. (Note: a *clean* binding still shows this warning; it
+   does not mean the connection failed.)
+3. **Real ERRORs to fix:** `connection not found` (wrong `connection.name`/case) and
+   `column not found in connection` (the connection doesn't expose that `db_table`/column)
+   are genuine `ERROR`s — the table won't bind. Fix the name or the column mapping.
+4. For any other **errors**, identify the affected TML file and the specific issue. Apply
    the fix from the error table in `tableau-tml-rules.md`.
-4. Rewrite the affected TML file and rebuild the zip.
+4. Rewrite the affected TML file and rebuild the JSON payload.
 5. Re-validate.
 
 After 10 cycles with remaining errors, stop and report to the user:
@@ -683,27 +982,76 @@ After 10 cycles with remaining errors, stop and report to the user:
 
 ---
 
-## Step 7 — Import to ThoughtSpot
+## Step 7 — Review Checkpoint & Import
 
-Display a summary:
+Before importing, show the user a review summary — the same convention the
+`ts-convert-from-snowflake-sv` and `ts-convert-from-databricks-mv` skills use. The user
+should see exactly how every calculated field was translated, and what (if anything)
+will **not** migrate, *before* committing — not discover omissions only in the Step 12
+report afterward. Reuse the formula tier classification from Step A3/Step 5b.
+
 ```
-Ready to import {N} TML files to {base_url}:
-  - {N} table TMLs
-  - {N} SQL view TMLs (if any custom SQL relations)
-  - {N} model TMLs
+Ready to import to {base_url}:
+
+Tables:
+  ✓ {TABLE_NAME}   → create new on connection "{connection_name}"
+  ↺ {TABLE_NAME}   → reuse existing object (GUID {guid})        # if Step 4.5 reuse
+  …
+
+Model: {datasource_name}
+  Columns: {n} total — {a} attribute(s), {m} measure(s), {f} formula(s)
+  Parameters: {p}  ({names or "none"})
+  Spotter (AI search): enabled / disabled   # from Step 5.5
+
+Formula translations ({F} total):
+  ✓ {name}  [{tier}]:        {tableau_expr}  →  {ts_expr}
+  ⚙ {name}  [pass-through]:   {tableau_expr}  →  {sql_*_op expr}
+       (works only with SQL Passthrough Functions enabled in ThoughtSpot admin)
+  ⚠ {name}  [untranslatable]: OMITTED — {reason}
+
+Will NOT migrate ({K}):
+  - {name}: {reason}
+  # if none: "Nothing omitted — full coverage."
+
+Dashboards: {N}  (liveboard migration offered after import)
+
+Proceed?
+  yes   — import the table + model TMLs
+  no    — cancel
+  file  — write the TMLs to /tmp/ts_tableau_mig/output/{workbook_name}/ without importing
 ```
 
-Ask: "Import now? (yes/no)"
+Tiers are the Step A3 set: Native, LOD, Cumulative, Moving, Pass-through, Parameter ref,
+Untranslatable. Show `⚠ … OMITTED` for every untranslatable formula (and its dropped
+`columns[]` entry) and `⚙ … pass-through` for every formula needing SQL Passthrough — so
+the un-migratable and caveated items are flagged here, up front, for the user to weigh.
 
-On confirmation:
+Wait for confirmation. **no** cancels. **file** writes the TMLs and skips to Step 12
+(report only, no import). **yes** imports:
+
+On confirmation, reuse the JSON payload from Step 6 (rebuild it if any TML changed). Pass
+`--create-new` because these are brand-new objects with no GUID — without it, the default
+`--no-create-new` only updates existing objects. (Do **not** pass `--create-new` if you
+are re-importing TML that already carries a GUID — that silently creates a duplicate.)
 
 ```bash
-ts tml import --policy ALL_OR_NONE --profile {profile_name} \
-  < /tmp/ts_tableau_mig/{workbook_name}_TMLs.zip
+cat /tmp/ts_tableau_mig/{workbook_name}_payload.json \
+  | ts tml import --policy ALL_OR_NONE --create-new --profile {profile_name}
 ```
 
 Parse the response. Extract the GUID for each imported object. On failure, show the
 error and stop.
+
+> **Updating something that already exists.** If Step 4.5 found an existing object, or a
+> first import already created one and you need to re-import (e.g. to set Spotter, fix a
+> column type), do **not** re-run with `--create-new`. **Pin the object's `guid` at the TML
+> root and import with `--no-create-new`** — this is true for **tables, models, AND
+> liveboards alike**. Re-importing *without* the root `guid` does **not** reliably update in
+> place: it can create a **duplicate** with a new GUID (observed on tables — a re-import
+> without `guid` churned the table's identity and left an orphan), even though the object
+> "matches" by name/db/schema. **Always** capture the `id_guid` from the first import, write
+> it back into the TML root, and re-import with `--no-create-new`. Verify the returned
+> `id_guid` matches; a new GUID means you just made a duplicate — delete the orphan.
 
 Save the imported GUIDs internally as `{datasource_guids}` and `{table_guids}` — these
 are used by Step 10 if the user proceeds with dashboard migration. Also save
@@ -712,9 +1060,50 @@ and `{parameter_map}` from the TWB parse.
 
 ---
 
+## Step 7.5 — Confirm the Model (before any liveboards)
+
+Pause and have the user verify the model is correct **before** building liveboards on it.
+Every liveboard viz references this model's columns and formulas, so a wrong model means
+re-doing every tile — far cheaper to catch it here. (Do this even when there are no
+dashboards — a verified model is the deliverable either way.)
+
+Present a confirmation summary and wait:
+
+```
+Model imported: {model_name}
+  {base_url}/#/data/tables/{model_guid}
+
+  Tables:     {table list}
+  Columns:    {N} — {a} attribute, {m} measure, {f} formula
+  Parameters: {names + type}            (or "none")
+  Spotter:    enabled / disabled
+
+  Translated formulas — please sanity-check:
+    {name}: {ts_expr}
+    ...
+  Omitted (untranslatable): {names}     (or "none")
+
+  Try these in Search/Spotter to confirm it behaves:
+    - "{suggested NL question 1}"
+    - "{suggested NL question 2}"
+    - "{suggested NL question 3}"
+
+Does the model look correct? (yes → continue / describe changes)
+```
+
+Suggest 3–5 natural-language test questions grounded in the model's actual columns and
+formulas (mirrors the snowflake/databricks skills). If the user asks for changes, edit the
+model TML and **re-import in place** — include the model's `guid` at the document root and
+import with `--no-create-new` (a model has no natural key, so omitting the root `guid`
+creates a duplicate; see Step 7). Re-confirm, then proceed. Do not start Step 8 until the
+user confirms the model.
+
+---
+
 ## Step 8 — Migrate Dashboards?
 
-If Step 3d found zero `<dashboard>` elements, skip to Step 12.
+If Step 3d found zero `<dashboard>` elements, skip to **Step 11.5** (a model-only workbook
+still benefits from coverage answers), then Step 12.
 
 Otherwise, present the decision:
 
@@ -735,6 +1124,20 @@ Enter Y / N:
 
 If **N**, skip to Step 12.
 
+**When there are 2+ dashboards, also ask how to package them:**
+
+```
+This workbook has {N} dashboards. Create:
+  S  Separate liveboards — one per dashboard
+  T  A single liveboard with one tab per dashboard   (+ the Migration Summary tab)
+
+Enter S / T:
+```
+
+ThoughtSpot liveboards support `layout.tabs[]`, so **T** puts each dashboard on its own tab
+in one liveboard (often tidier for a related set), while **S** keeps them independent. Either
+way, add the Step 10g Migration Summary as a final tab.
+
 ---
 
 ## Step 9 — Parse Dashboard Layout and Map to Grid
@@ -753,10 +1156,22 @@ recursively. For each leaf zone, extract:
 | `text_content` | `<formatted-text>` child text (for `text` / `title` zones) |
 
 Classify each zone:
-- **Chart zones**: `type="viz"` with a worksheet name → becomes a visualization tile
-- **Text/title zones**: `type="text"` or `type="title"` → becomes a note tile
-- **Skip**: `type="bitmap"` (images), `type="web"`, `type="extension"`,
-  `type="metric"` (not supported in v1)
+- **Chart zones**: a worksheet viz — a leaf zone carrying a `name` (worksheet name) and no
+  more specific sub-type. These become visualization tiles.
+- **Text/title zones**: `type="text"` or `type="title"` → becomes a note tile (Step 10c).
+- **Skip**: `type="bitmap"` (images), `type="web"`, `type="extension"`, `type="metric"`,
+  `type="filter"` (quick filters — handled via liveboard `filters[]`, not as tiles),
+  `type="paramctrl"` (parameter controls — the migrated model `parameters[]` cover these),
+  `type="color"`/`type="legend"` (legend zones — ThoughtSpot draws its own),
+  `type="flipboard"`/`type="flipboard-nav"` (Tableau Story-style flipboards — no ThoughtSpot
+  liveboard equivalent). **Before skipping a flipboard/story dashboard, salvage its content:**
+  a flipboard usually re-presents worksheets already migrated from another dashboard (check —
+  it may reference **no unique worksheets**), but it often carries **narrative captions**
+  (analyst commentary). Migrate any unique worksheets as vizzes and preserve the narrative
+  text as **note tiles** rather than losing it; only the flip *interaction* itself is dropped.
+  A single
+  worksheet often emits several zones (the viz plus its color/filter companions); keep the
+  viz zone, drop the companions, and de-duplicate by worksheet name.
 
 ### 9b. Worksheet shelf data
 
@@ -790,36 +1205,131 @@ Use a band-based approach:
 Save the grid layout as a list of tiles with `zone_id`, `zone_type`, `worksheet_name`,
 `col`, `col_span`, `row_span`, `y`.
 
+### 9d. Orphan worksheets — surface and prompt to include
+
+A workbook often contains worksheets that aren't placed on **any** dashboard being migrated.
+By default they produce no tile — but the author built them for a reason, and the model fully
+supports them, so the user should **decide**, not have them silently dropped (surface →
+recommend → resolve).
+
+1. **Detect.** Compute the set of worksheets referenced by the dashboard(s) being migrated
+   (the `name` on each chart zone). Any `<worksheet>` in the TWB not in that set is an orphan.
+2. **Describe each.** Read the orphan's shelves (as in 9b) and state, in one line, **what it
+   shows** and its **ThoughtSpot equivalent** — not just the name. E.g.
+   *"`Attrition Yes/No Count` — pie of headcount split by Attrition (Yes/No) → PIE
+   `[Attrition] [Total Employee Count]`."* A bare name leaves the user unable to choose.
+3. **Recommend.** Say whether each looks worth adding (a meaningful, distinct view) or is
+   likely a draft/superseded by a tile already on the dashboard.
+4. **Prompt** (per the references — ask, don't assume). Offer: add **all**, add a **subset**
+   (name which), or **none**. For any the user picks, build them as additional tiles in Step 10
+   (same chart-type resolution, theming, and grid placement as dashboarded vizzes) and append
+   them after the dashboard's own tiles.
+5. **Record the outcome** in the Migration Summary (Step 10g): which orphans existed, which
+   were added, which were left off (and that the model still supports them via Spotter).
+
+Don't skip this prompt just because the dashboard already looks complete — orphans frequently
+include an overall-rate or breakdown view the author drafted but forgot to place.
+
 ---
 
 ## Step 10 — Generate Liveboard TML
 
 ### 10a. Resolve chart types
 
-| Tableau mark class | ThoughtSpot chart type |
+| Tableau mark class / zone | ThoughtSpot `chart.type` |
 |---|---|
 | `bar` | `BAR` |
 | `line` | `LINE` |
 | `circle` / `point` | `SCATTER` |
 | `square` | `BAR` |
-| `text` | `TABLE` |
 | `pie` | `PIE` |
 | `area` | `AREA` |
+| `text` (crosstab) | `TABLE` (display_mode `TABLE_MODE`) |
+| Map (lat/long generated + geo role) | `GEO_BUBBLE` (or `GEO_AREA` for a filled/choropleth map) |
+| "Measure Names / Measure Values" KPI block | `KPI` — **one tile per measure** (see KPI rule below) |
+
+**KPI rule.** A Tableau scorecard/KPI worksheet (Measure Names + Measure Values, no
+dimension) maps poorly to a single tile. Emit **one KPI viz per measure** — that's the
+idiomatic ThoughtSpot KPI (headline + sparkline + period-over-period). **ALWAYS include a date
+when the model has one** — this applies to *every* KPI tile (not just measure blocks), and is
+easy to forget. Date selection: **0 date fields → static KPI (measure only); exactly 1 →
+include it automatically; 2+ → ask the user which.** Use the data's grain (`[Date].yearly`
+for annual data, `[Date].monthly` otherwise) — the default is monthly, so set `.yearly`
+explicitly for annual sources. So a "count of sectors" KPI in a workbook with a `Fiscal Year`
+column is `[Total Sectors] [Fiscal Year].yearly`, **not** a bare `[Total Sectors]`.
+
+For the trend/sparkline to actually render, the date must be in **both** `chart_columns`
+and on axis **`x`**, with the measure on `y` — a KPI with only `y:[measure]` shows a flat
+number, no trend:
+
+```yaml
+chart:
+  type: KPI
+  chart_columns:
+  - column_id: Month(Order Date)
+  - column_id: Total Total Revenue
+  axis_configs:
+  - x: [Month(Order Date)]
+    y: [Total Total Revenue]
+```
 
 ### 10b. Build search queries
 
-For each chart zone, construct a search query from the worksheet's shelves:
+`search_query` is a ThoughtSpot search string of **bracketed column display names**, not
+a "sum sales" phrase. Build it from the worksheet shelves:
 
-- Rows/Columns shelf columns → include as dimensions or measures
-- Apply aggregation prefix from the shelf caption (`SUM(Sales)` → `sum sales`)
-- If a date column is on a shelf, add a time bucket (`monthly`, `yearly`) based on the
-  `datetrunc` or `datepart` in the TWB
-- Resolve calculated field names: use `{formula_column_map}` to translate Tableau
-  caption → ThoughtSpot formula name
+- Reference each measure by its model column name: `[Total Revenue]` — the column's own
+  default aggregation applies; do **not** prepend `sum`.
+- Reference each dimension/attribute by name: `[Sales Channel]`.
+- Date on a shelf → **dotted** bucket from the TWB `datetrunc`/`datepart`:
+  `[Ship Date].yearly`, `[Order Date].monthly`. A bare `monthly` token is rejected.
+- Top-N (Tableau Top filter) → append `top N`, e.g. `[Item Type] [Total Revenue] top 5`.
+- **Percentage format for ratio measures.** A contribution / percent-of-total / growth-rate
+  measure should display as a percent, not `0.07`. Set `format` on its `answer_columns[]` entry
+  (`category: PERCENTAGE`, `percentageFormatConfig.decimals`) — see
+  `../../shared/schemas/thoughtspot-answer-tml.md` "answer_columns[] fields". Detect from the
+  formula (`/ TOTAL(...)`, `/ {FIXED ...}`, `growth of`) or the Tableau column's own % format.
+- **Cumulative / moving measures** → reference the **measure column** by name with the
+  worksheet's shelf attribute as the trailing sort arg: `cumulative_sum ( [Sales] , [Month] )`,
+  `moving_average ( [Sales] , 2 , 0 , [Order Date] )` — these are **answer-level** formulas (not
+  model columns). See `tableau-formula-translation.md` Running/Moving sections.
+- **Growth / decline.** Two cases — read the worksheet's actual filters/table-calc to choose:
+  - **A trend of growth over time** (`pcdf` with no Top-N, every period shown) → the
+    `growth of` keyword: supply the bare date *and* its bucket, `growth of [Measure] by [Date]
+    [Date].yearly [dim]` (default is **monthly**, so set `.yearly` for annual; dotted-only
+    `by [Date].yearly` fails to tokenize). Resolved columns: `Growth of Total {Measure}` +
+    `{Bucket}(Date)` — bind chart columns to those (export-patch).
+  - **"Top/bottom N by growth over a window"** (`pcdf` **plus a Top-N filter + a recent-N-years
+    filter** — e.g. "highest growth in past 5 years") → a **period-comparison**, best built as
+    **answer-level formulas** on that one viz (it's viz-specific):
+    ```yaml
+    formulas:
+    - id: formula_Val Start   # FDI in the start year
+      expr: "group_aggregate ( sum ( [Measure] ) , query_groups () , query_filters () + { year_name ( [Date] ) = '2012' } )"
+    - id: formula_Val End     # FDI in the end year
+      expr: "group_aggregate ( sum ( [Measure] ) , query_groups () , query_filters () + { year_name ( [Date] ) = '2016' } )"
+    - id: formula_Growth
+      expr: "( [formula_Val End] - [formula_Val Start] ) / [formula_Val Start]"
+    # search_query: "[Sector] [formula_Growth] top 5 by [formula_Growth]"   (bottom 5 = decline)
+    ```
+    Anchor years: **dynamic vs the actual data range matters.** `max([Date])` is **not allowed
+    inside a formula filter** (`"Search did not find max("`), so you can't compute the data's
+    latest year in-formula. Options: (a) **dynamic** via `currentdate()` —
+    `year ([Date]) = year ( currentdate () )` and `… - 5` — correct for **live/refreshing**
+    data, but returns **nothing** if the data is historical (e.g. ends 2016 while "today" is
+    2026); (b) **anchor to the data's real bounds** (latest year and latest−5) when the
+    dataset is static — functional, matches the "past 5 years" intent. Choose by whether the
+    source refreshes; if unsure, **ask the user**. Format `Growth` as a percentage. This is the
+    faithful translation of the `pcdf` + Top-N + window pattern — not a raw `growth of` line.
+- A formula used by only this one viz can be an **answer-level formula** (`answer.formulas[]`
+  + an `answer_columns[]` entry) rather than a model formula — see Step 5b.
+- Calculated fields: translate the Tableau caption to the ThoughtSpot formula name via
+  `{formula_column_map}`.
 
 ### 10c. Build liveboard TML
 
-For each dashboard, generate a `.liveboard.tml`:
+Follow `../../shared/schemas/thoughtspot-liveboard-tml.md` exactly — the structure below
+is what actually imports and renders (an earlier `fqn`-based, minimal-chart form did not).
 
 ```yaml
 liveboard:
@@ -830,16 +1340,27 @@ liveboard:
     answer:
       name: Worksheet Name
       tables:
-      - id: DatasourceName
-        fqn: "model-guid-here"
-      search_query: "sum sales category"
-      chart:
-        type: BAR
-  - id: Note_2                   # for text/title zones
-    viz_type: NOTE_TILE
+      - id: "Model Name"
+        name: "Model Name"
+        obj_id: ModelNameNoSpaces-{guid8}   # NOT fqn — a viz-level fqn is dropped on import
+      search_query: "[Sales Channel] [Total Revenue]"
+      answer_columns:                         # RESOLVED names (see below)
+      - name: Sales Channel
+      - name: Total Total Revenue
+      chart:                                  # complete block, or omit entirely
+        type: PIE
+        chart_columns:
+        - column_id: Sales Channel
+        - column_id: Total Total Revenue
+        axis_configs:
+        - x: [Sales Channel]
+          y: [Total Total Revenue]
+      display_mode: CHART_MODE
+  - id: Note_1                                # Tableau text / title zone → note tile
     note_tile:
-      content: "Note text here"
-      background_color: "#FFFFFF"
+      html_parsed_string: |-
+        <p><strong>Title text</strong></p>
+        <p>Body text from the Tableau text zone.</p>
   layout:
     tiles:
     - visualization_id: Viz_1
@@ -847,12 +1368,28 @@ liveboard:
       y: 0
       height: 6
       width: 8
-    - visualization_id: Note_2
+    - visualization_id: Note_1
       x: 8
       y: 0
       height: 6
       width: 4
 ```
+
+**Critical naming rule (this is what breaks vizzes).** `chart_columns`, `axis_configs`,
+and `table.table_columns` must reference the **resolved** answer-column names, not raw
+model names:
+- aggregated measure → `Total {Measure}` (`SUM([Total Revenue])` → `Total Total Revenue`)
+- bucketed date → `{Bucket}(col)` (`[Ship Date].yearly` → `Year(Ship Date)`)
+- attribute → unchanged
+
+ThoughtSpot re-resolves `answer_columns` from `search_query` on import but does **not** fix
+`chart_columns`/`axis_configs`. Reliable loop: build with your best-guess resolved names,
+import, **export the liveboard**, copy the exact resolved names back into
+`chart_columns`/`axis_configs`, and re-import. Use `obj_id` (never bare `fqn`) for the
+table ref, and don't hand-author `client_state_v2` — leave styling to defaults.
+
+Note tiles use `note_tile.html_parsed_string` (HTML) and have **no `answer`** — not the
+old `viz_type: NOTE_TILE`/`content` form.
 
 ### 10d. Beautify layout
 
@@ -867,8 +1404,180 @@ Apply layout optimization to each liveboard TML:
 
 Rewrite the `layout.tiles` section with corrected coordinates.
 
+### 10e. Group related tiles into sections, and label everything clearly
+
+A flat grid of tiles reads as a dump; a grouped, well-labelled liveboard reads as a
+designed product. Two cheap, high-value steps:
+
+**Group related vizzes into sections** (`groups[]` + `layout.group_layouts[]` — see
+`../../shared/schemas/thoughtspot-liveboard-tml.md` "Sections (groups)"). Infer groupings
+from what the vizzes have in common rather than leaving everything loose:
+- All the per-measure **KPI tiles** → one "Key Metrics" section.
+- Vizzes that share a **breakdown dimension** (e.g. two charts both by *Sales Channel*) →
+  a section named for that dimension ("Channel Performance").
+- Vizzes that share a **subject** (e.g. top-products + a geographic map) → e.g.
+  "Product & Geographic Analysis".
+- Give each group a short `name` and a one-line `description`.
+A Tableau dashboard has no native sections, so this is an inference — keep it light
+(2–4 groups), and don't force a viz into a group it doesn't fit; ungrouped tiles are fine.
+
+**Write meaningful names and descriptions on every viz.** Don't ship raw worksheet names
+like `Sheet 1` or terse labels. Set `answer.name` to a clear title and add a one-line
+`answer.description` stating what the tile shows (these surface as the tile title and its
+info tooltip):
+
+```yaml
+answer:
+  name: "Revenue by Country"
+  description: "Total revenue distribution across countries; bubble size = revenue volume."
+```
+
+Prefer the Tableau worksheet caption when it's descriptive; otherwise synthesize a title
+from the columns on the shelves (`{measure} by {dimension}`, `Monthly {measure} Trend`,
+`Top {N} {dimension} by {measure}`). Keep descriptions to one factual sentence.
+
+### 10f. Surface referenced parameters in the liveboard header
+
+If any viz on the liveboard **references a model parameter** (directly, or via a formula/bin
+it uses — e.g. an `Age (bin)` driven by an `Age Groups` parameter), the parameter can be
+shown as a **header chip** so users can change it live. For each referenced parameter,
+**ask the user — default yes:**
+
+```
+Add parameter "{name}" to the liveboard header so users can adjust it? [Y/n]  (default Y)
+```
+
+On **yes**, add it to the liveboard header via `ordered_chips[]` and `parameter_overrides[]`
+(see `../../shared/schemas/thoughtspot-liveboard-tml.md`):
+
+```yaml
+liveboard:
+  parameter_overrides:
+  - key: "{parameter_uuid}"
+    value:
+      name: "{Model Name}::{Parameter Name}"
+      id: "{parameter_uuid}"
+      # override_value: "..."   # only to change the default
+  ordered_chips:
+  - name: "{Model Name}::{Parameter Name}"
+    type: PARAMETER
+```
+
+The `{parameter_uuid}` is assigned when the model imports — resolve it by exporting the
+model (`ts tml export {model_guid} --parse`) and reading its `parameters[].id`. Chip names
+are scope-qualified: `Model Name::Parameter Name`.
+
+### 10g. Add a "Migration Summary" tab
+
+Add a final **"Migration Summary"** tab to each liveboard — a single note tile that records
+what the migration did, so it's reviewable **in-product** (not just in a side file). The user
+can edit or delete it. Use the **tabs** layout (`layout.tabs[]`): the migrated content is the
+first tab, the summary is the last. The note tile's `html_parsed_string` has three sections:
+
+```
+1. Items migrated      — each viz/tile and how (chart type, search), formulas, cohorts, params
+2. Decisions made      — non-obvious choices (unpivot via SQL view, bins=cohort vs formula,
+                          count column, growth via `growth of`, theme, top/bottom approximations…)
+3. Partial / placeholder — vizzes that couldn't be fully reproduced but were built as
+                          placeholders (forecast → historical trend; cluster → underlying inputs);
+                          flag each "needs review" + what's missing
+4. Items NOT migrated  — only things with genuinely nothing to show, untranslatable formulas,
+                          the flipboard interaction, orphan worksheets, data-fidelity gaps — reason each
+```
+
+Per the placeholder principle, **forecast/cluster vizzes are placeholders, not omissions** —
+show the reproducible part (a forecast's historical trend; a cluster's input columns) and
+flag for review; reserve "not migrated" for things with literally nothing to render.
+
+This is the same content as `MIGRATION_LIMITATIONS.md` (Step 12) plus the positive items —
+keep them consistent. If a workbook has multiple liveboards, give each its own summary
+covering that liveboard, and note model-level decisions on the first.
+
+**Record the orphan-worksheet outcome.** Orphans are surfaced and decided in **Step 9d** (not
+here). In the Migration Summary, list which orphans existed, which were added as tiles, and
+which were left off — noting that any calc fields/cohorts they introduced are still on the
+model (usable via Spotter/search). (Example: the FDI `Groups` cohort exists on the model, but
+its `Groups` worksheet wasn't dashboarded — so nothing referenced it until added deliberately.)
+
 Write each liveboard to
 `/tmp/ts_tableau_mig/output/{workbook_name}/{dashboard_name}.liveboard.tml`.
+
+---
+
+## Step 10.5 — Liveboard Style
+
+A migrated liveboard looks intentional when it carries a coherent style rather than the
+bare default. Offer the user a **curated theme** (one pick), then write it into the
+liveboard. A complete theme is **three layers** — board/group/tile brand tokens
+(`style.style_properties`), per-object assignments (`style.overrides[]`), **and** a matching
+per-chart color palette (`chart.viz_style`). The full token reference is in
+`../../shared/schemas/thoughtspot-liveboard-tml.md` ("Liveboard styling"); the
+ready-to-apply per-theme recipes (tokens + `viz_style` palettes) are in
+[references/liveboard-style-themes.md](references/liveboard-style-themes.md) — read it and
+apply the chosen theme's three layers verbatim.
+
+```
+Pick a style for the liveboard(s):
+  1  Clean & Minimal     — light gray, sharp borders (data-first, default)
+  2  Cool Professional   — blue, corporate/executive
+  3  Fresh & Modern      — mint/teal, contemporary
+  4  Soft Lavender       — purple, elegant/calm
+  5  Warm Tones          — peach/orange, friendly/customer-facing
+  6  High Contrast KPIs  — dark KPI tiles for maximum headline impact
+  0  None                — leave ThoughtSpot defaults
+
+Enter 1–6 or 0:
+```
+
+**Apply the theme to EVERY chart tile — don't skip any.** When a theme defines a chart
+palette (`viz_style`), set it on *all* chart vizzes uniformly, including formula-/growth-based
+tiles and ones added late. A common miss is theming the straightforward bars/pies but leaving
+a growth or computed tile on the default color — verify every chart tile got both its
+`tile_brand_color` override **and** its `viz_style`.
+
+**Confirm the theme on every workbook — never apply it silently.** In a multi-workbook run,
+remember the previous pick and offer it as the **default** ("Style for this liveboard?
+[default: High Contrast KPIs]"), so the user can press through to stay consistent or change
+it per workbook. Always surface the choice; do not assume the last theme carries over without
+showing it. Apply the theme by
+writing `style.style_properties` and, where the theme colors groups/tiles, per-object
+`style.overrides[]`:
+
+```yaml
+style:
+  style_properties:
+  - name: lb_brand_color
+    value: LBC_C            # theme's liveboard color
+  - name: lb_border_type
+    value: CURVED           # SHARP for Clean & Minimal
+  - name: kpi_hero_font_size
+    value: M
+  overrides:                # set each group/tile to the theme's GBC_/TBC_ token
+  - object_id: Group_1
+    style_properties:
+    - name: group_brand_color
+      value: GBC_C
+```
+
+Theme → token map:
+
+The base brand colors per theme (quick glance — **the verified, complete recipe incl.
+border type, per-tile colors, KPI emphasis, and `viz_style` palette is in
+[references/liveboard-style-themes.md](references/liveboard-style-themes.md), which is
+authoritative**):
+
+| Theme | `lb_brand_color` | `group_brand_color` | non-KPI `tile_brand_color` |
+|---|---|---|---|
+| Clean & Minimal | `LBC_A` | `GBC_A` | `TBC_A` |
+| Cool Professional | `LBC_C` | `GBC_C` | `TBC_C` |
+| Fresh & Modern | `LBC_D` | `GBC_D` | `TBC_D` |
+| Soft Lavender | `LBC_B` | `GBC_B` | `TBC_B` |
+| Warm Tones | `LBC_G` | `GBC_G` | `TBC_G` |
+| High Contrast KPIs | `LBC_A` | — | KPI tiles `TBC_I`–`TBC_P` (dark) |
+
+Border type and KPI-tile treatment **vary per theme** — read the reference file, don't
+assume. `TBC_I`–`TBC_P` are valid **only on KPI tiles** — never apply a dark tile color to
+a chart/table tile.
 
 ---
 
@@ -884,21 +1593,39 @@ Ready to import {N} liveboard(s) to {base_url}:
 
 Ask: "Import now? (yes/no)"
 
-On confirmation, zip all liveboard TMLs:
+On confirmation, build the JSON array of liveboard TML strings and import. Use
+`--policy PARTIAL` so successfully imported liveboards are kept even if some fail, and
+`--create-new` since these are new objects:
 
 ```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name} && \
-  zip -r /tmp/ts_tableau_mig/{workbook_name}_LB_TMLs.zip *.liveboard.tml
+cd /tmp/ts_tableau_mig/output/{workbook_name}
+python3 - > /tmp/ts_tableau_mig/{workbook_name}_lb_payload.json <<'PY'
+import json, glob
+print(json.dumps([open(f).read() for f in sorted(glob.glob("*.liveboard.tml"))]))
+PY
+cat /tmp/ts_tableau_mig/{workbook_name}_lb_payload.json \
+  | ts tml import --policy PARTIAL --create-new --profile {profile_name}
 ```
-
-```bash
-ts tml import --policy PARTIAL --profile {profile_name} \
-  < /tmp/ts_tableau_mig/{workbook_name}_LB_TMLs.zip
-```
-
-Use `--policy PARTIAL` so successfully imported liveboards are kept even if some fail.
 
 Parse the response for import errors. Show any failures with detail.
+
+**Re-importing a liveboard in place** (a styling/param-chip/coverage pass after the first
+import): set `guid` **and** `obj_id` to the existing object's values and import with
+`--no-create-new`. **The single thing that matters: `guid`/`obj_id` must be TOP-LEVEL keys of
+the TML document — siblings of `liveboard:`, NOT nested inside it.**
+
+```json
+{ "guid": "<existing>", "obj_id": "<existing>", "liveboard": { "name": ..., "visualizations": ... } }
+```
+
+Nesting them as `liveboard.guid` (a natural mistake when you build the dict as `{"liveboard": {...}}`
+and set `d["liveboard"]["guid"]`) means the import never matches the existing object and **forks a
+duplicate with a new guid — every time, regardless of `--policy`**. (This is the same top-level
+placement tables/models use, which is why those updated in place while liveboards kept forking.)
+`--policy` is irrelevant to the match; either `ALL_OR_NONE` or `PARTIAL` works once the guid is
+top-level. Read the existing `obj_id` from the search result (`metadata_obj_id`) or a prior
+export, and **verify the returned `id_guid` is unchanged** afterward; if it changed, the guid was
+mis-placed — fix it and delete the stale duplicate.
 
 For each successfully imported liveboard, display the URL:
 
@@ -908,37 +1635,112 @@ For each successfully imported liveboard, display the URL:
 
 ---
 
-## Step 12 — Summary
+## Step 11.5 — Formula Coverage Answers
 
-Display the final summary:
+A workbook often defines **more formulas than its dashboards actually visualize** — and a
+model-only workbook (no dashboards) visualizes none. Those formulas are valid on the model but
+have no quick way to be *seen and tested*. So make every formula reachable:
 
-```
-Migration complete: {workbook_name}
+1. **Find uncovered formulas.** From the model's formula columns (plus any answer-level formulas
+   built in Step 10), subtract those already referenced by a liveboard tile. The remainder are
+   uncovered. (For a model-only workbook, **all** formulas are uncovered.)
+2. **Build one simple answer per uncovered formula** — a minimal, testable viz:
+   - A measure → a KPI (`[Formula]`) or a small BAR by a natural dimension (`[Region] [Formula]`).
+   - A string/label formula → a `TABLE_MODE` tile (`[Region] [Formula]`).
+   - Apply the same conventions as Step 10b (resolved names, `%` format for ratios, sort attrs
+     for cumulative/moving).
+   - **Put the original Tableau formula in the answer's `description`** (e.g.
+     `description: "Coverage tile for Rank of profit  ·  Tableau: RANK_UNIQUE(SUM([Profit]),'desc')"`)
+     so a reviewer can compare the source expression to the migrated one without leaving the tile.
+3. **Where they live:**
+   - **Liveboard exists** → add a **"Formula coverage"** tab to it (one tile per uncovered
+     formula). Keeps everything testable in one place. Re-import in place (see the
+     `ALL_OR_NONE` rule above).
+   - **No liveboard** (model-only) → create **standalone saved answers** (one per formula) bound
+     to the model, so each is independently openable.
+4. **Note it** in the Step 12 report (a formula's coverage tile/answer counts as ✅ reachable).
 
-  Tables imported:     {N}
-  SQL Views imported:  {N} (or "none" if no custom SQL relations)
-  Models imported:     {N}
-  Liveboards imported: {N} (or "skipped")
+For table-mode coverage tiles, **omit the `chart` block** and set `display_mode: TABLE_MODE`
+(`chart.type: TABLE` is invalid; stick to verified chart types — `BAR/LINE/PIE/KPI/AREA` — for
+the charted tiles, and let table tiles render via `display_mode` with no chart block).
 
-  TML files: /tmp/ts_tableau_mig/output/{workbook_name}/
-```
+This is the safety net that makes a migration verifiable: no formula is migrated "blind."
 
-If any calculated fields were untranslatable (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE, etc.),
-any formulas used pass-through functions, or any formulas were omitted during Step 5b,
-write a limitations file and display it. Include pass-through formulas in the report
-(they work but require SQL Passthrough Functions to be enabled in ThoughtSpot admin):
+---
 
-`/tmp/ts_tableau_mig/output/{workbook_name}/MIGRATION_LIMITATIONS.md`
+## Step 12 — Migration Report
+
+Produce a **written migration report** — not just a console line. Write it to
+`/tmp/ts_tableau_mig/output/MIGRATION_REPORT.md` and display it inline. The report is the
+artifact the user reviews to understand what happened and to click straight through to each
+created object, so **every object reference is a hyperlink** and **every formula is accounted
+for**.
+
+**One report, accumulating across files.** When the skill is run repeatedly in a loop (one
+workbook at a time), **append** each workbook's section to the same `MIGRATION_REPORT.md` and
+refresh the overview table — don't scatter one report per workbook. (A per-workbook
+`MIGRATION_LIMITATIONS.md` may still be written for the untranslatable/pass-through detail.)
+
+### Hyperlinks
+
+Build links from `{base_url}` (Step 1) and the GUID returned at import:
+- Model / table: `{base_url}/#/data/tables/{guid}`
+- Liveboard: `{base_url}/#/pinboard/{guid}`
+- Answer (standalone): `{base_url}/#/saved-answer/{guid}`
+
+### Report structure
 
 ```markdown
-# Migration Limitations: {workbook_name}
+# Tableau → ThoughtSpot Migration Report
+_Generated {date} · ThoughtSpot: {base_url} · Connection: {connection_name}_
 
-## Untranslatable Formulas
+## Overview
 
-| Formula Name | Datasource | Reason | Tableau Expression (excerpt) |
+| # | Source workbook (.twb) | Outcome | Model | Liveboard |
+|---|---|---|---|---|
+| 1 | Amazon Sales.twb | ✅ Model + Liveboard | [Amazon Sales]({link}) | [Amazon Dashboard]({link}) |
+| 2 | arms_viz.twb | ◑ Model only (no dashboards) | [arms]({link}) | — |
+| 3 | legacy.twb | ⊘ No action | — | — |
+
+Outcome legend: **✅ Model + Liveboard** · **◑ Model only** · **⊘ No action** (why).
+
+---
+
+## {workbook_name}
+
+**Source:** `{twb path}` · **Outcome:** {outcome} · **Connection:** {connection_name}
+
+**Objects created**
+| Type | Name | Link |
+|---|---|---|
+| Table | {name} | [{guid8}]({link}) |
+| Model | {name} | [{guid8}]({link}) |
+| Liveboard | {name} | [{guid8}]({link}) |
+
+**What was done** — datasources, tables/SQL views, joins, model, Spotter, # tiles, theme.
+
+**Decisions made** — the non-obvious calls (blend → one SQL view, bins = formula vs cohort,
+dynamic vs anchored YoY, orphan worksheets added/left off, separate vs tabbed liveboards…).
+
+**Formula mapping** — every calculated field, with status:
+| Tableau field | Tableau expression | ThoughtSpot expression | Status |
 |---|---|---|---|
-| {name} | {datasource} | {reason} | `{expression snippet}` |
+| Total sales | `SUM([Sales])` | `sum([ORDERS::SALES])` | ✅ Migrated (model) |
+| Cumulative sales | `RUNNING_SUM(SUM([Monthly sales]))` | `cumulative_sum([Sales])` | ✅ Migrated (answer-level) |
+| Sales growth rate | `(SUM(curr)-SUM(prev))/SUM(prev)` | `([formula_Current…]-…)/…` | ◑ Partial — N/A on this data (dynamic, data ends 2024) |
+| Relative difference | `LOOKUP([Total sales],-1)…` | `growth of [Total sales] by [Order Date]` | ◑ Partial — realized as a growth viz, not a column |
+| Profit forecast | `MODEL_QUANTILE(…)` | — | ⊘ Not migrated — no ThoughtSpot equivalent (placeholder tile built) |
+
+Status values: **✅ Migrated** (model or answer-level — say which), **◑ Partial** (built but
+with a caveat — approximation, N/A on current data, placeholder), **⊘ Not migrated** (omitted;
+give the reason). Every calculated field from Step 3 must appear in exactly one row.
+
+**Partial / not migrated** — repeat the ◑/⊘ rows with the reason and what the user can do.
 ```
+
+A console one-liner (`Tables: N · Models: N · Liveboards: N`) is fine as a closing line, but
+the markdown report above is the deliverable. Keep it consistent with each liveboard's
+in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.md`.
 
 ---
 
@@ -946,5 +1748,55 @@ write a limitations file and display it. Include pass-through formulas in the re
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.37 | 2026-06-10 | **Corrects the liveboard in-place rule (1.5.32/1.5.36 were wrong about *why*):** the only thing that matters is that `guid`/`obj_id` are **top-level keys of the TML doc — siblings of `liveboard:`, not nested inside it**. Nesting `liveboard.guid` makes every re-import fork a duplicate regardless of `--policy` (the `PARTIAL`-forks claim was a red herring — it was the nesting all along; models worked only because their guid was already top-level). Plus two review fixes: **(a)** detect & drop **redundant pass-through formulas** (`SUM([col])`/`[col]` of an existing physical column — e.g. `Total sales`, `Monthly sales` vs physical `Sales`); use the physical column, note the collapse. **(b)** put the **original Tableau formula in each coverage answer's `description`** for side-by-side review. |
+| 1.5.36 | 2026-06-10 | Three fixes from the Multiple Calculated Fields review: **(1)** new **Step 11.5 — Formula coverage answers**: every formula not on a dashboard tile (or *all* of them, for a model-only workbook) gets a simple testable answer — a "Formula coverage" tab on the liveboard, or standalone saved answers when there's no liveboard. **(2)** `cumulative_*`/`moving_*` must take the **worksheet's shelf attribute as the trailing sort arg** and reference the **measure column** by name (`cumulative_sum([Sales],[Month])`), not `sum()`. **(3)** apply **`PERCENTAGE` format** (`answer_columns[].format`) to contribution/percent-of-total/growth measures. Also: **in-place liveboard re-import must use `ALL_OR_NONE`** — `PARTIAL` forks a duplicate even with `guid`+`obj_id` pinned; and `chart.type: TABLE` is invalid (omit the chart block for `TABLE_MODE` tiles). |
+| 1.5.35 | 2026-06-10 | Rewrite **Step 12** into a written **MIGRATION_REPORT.md**: an overview table of every source `.twb` → outcome (✅ Model + Liveboard / ◑ Model only / ⊘ No action) with **hyperlinks** to each created object, a per-workbook section (what done / decisions / partial / not migrated), and a **full formula-mapping table** (Tableau expr → ThoughtSpot expr → status ✅/◑/⊘) covering *every* calc field. One accumulating report across a multi-file loop. (Requested while migrating Multiple Calculated Fields.) |
+| 1.5.34 | 2026-06-10 | Four formula-translation fixes from the Multiple Calculated Fields stress test (all in `tableau-formula-translation.md`): **(1)** `rank()` needs the **direction arg** — `rank(m,'desc')`, 1-arg fails; **(2)** `cumulative_*`/`moving_*` are **query-time only — invalid in model formulas** (*"Search did not find"*), realize them on the viz's `search_query` (so a `RUNNING_SUM`/`WINDOW_*` field → answer-level, not a model column; a nested `EXP(WINDOW_AVG(LOG()))` can't be a model column at all); **(3)** string concat uses **`concat(a,b)`**, not `+` (Tableau overloads `+`); **(4)** year-comparison calcs should be **dynamic** (`year(today())` / `year(add_years(today(),-1))`) not the workbook's hardcoded years — but surface the data-fidelity tradeoff when the data is frozen in the past. |
+| 1.5.33 | 2026-06-10 | Promote orphan-worksheet handling from a Step-10 footnote to a real **Step 9d** that **prompts** the user (add all / subset / none) — describing *what each orphan shows* + its TS equivalent and a recommendation, not just naming it; picked orphans become extra tiles. Don't silently drop them. (Raised on HR: `Attrition Yes/No Count`, `department`.) |
+| 1.5.32 | 2026-06-10 | **Liveboard in-place update needs both `guid` AND `obj_id` pinned** — `--no-create-new` + `guid` alone still forked a duplicate (new `obj_id`). Same rule as tables/models: set `liveboard.guid` + `liveboard.obj_id` to the existing object's values before re-import. (Caught re-importing HR liveboard for the KPI-emphasis/param-chip pass.) |
+| 1.5.31 | 2026-06-10 | Cross-formula references use the **formula id** `[formula_<id>]`, not the display name `[<Name>]` (name form errors "Search did not find"); column refs stay `[T::COL]`. (Caught on HR `Attrition Percentage` referencing `Attrition Count`.) |
+| 1.5.30 | 2026-06-10 | Apply the placeholder principle to **forecast/cluster vizzes** — build them as placeholders (forecast → historical trend; cluster → input columns as a table) and flag "needs review", rather than omitting. Migration Summary now has a "Partial / placeholder" section distinct from "Not migrated". (Caught: FDI had Cluster/Trend Forecast omitted instead of placeholdered.) |
+| 1.5.29 | 2026-06-10 | Flag **orphan worksheets** (in the workbook but on no dashboard → no tile) in the Migration Summary; note their calc fields/cohorts are still on the model (Spotter-usable) and offer to add them as tiles. Caught: FDI `Groups` cohort on the model but its worksheet wasn't dashboarded, so nothing used it. |
+| 1.5.28 | 2026-06-10 | Theme application must cover **every chart tile** — set the theme's `viz_style` palette on all chart vizzes (incl. formula/growth tiles), not just the straightforward ones (caught: FDI growth bars left on default color). |
+| 1.5.27 | 2026-06-10 | Dynamic-period growth limitation: **`max([date])` is not allowed in a formula filter** (can't compute the data's latest year in-formula). For *live* data use `currentdate()`-relative anchors; for *historical/static* data (e.g. ends 2016) `currentdate()` returns empty, so anchor to the data's real bounds. Choose by whether the source refreshes — ask if unsure. |
+| 1.5.26 | 2026-06-10 | Three principles (from FDI growth tiles): **(1) read the actual calculation, not the worksheet title** (inspect table-calc type, filters, Top-N, sort) to pick the translation. **(2) "Top/bottom N by growth over a window"** (`pcdf` + Top-N + recent-years filter) → a **period-comparison** built from **answer-level** `group_aggregate(..., query_filters() + { year_name([Date]) = 'YYYY' })` formulas + `Growth = (end-start)/start` + `top/bottom N` (anchor years hardcoded or dynamic). **(3) Placeholder charts**: when a viz can't be fully translated, build a `TABLE` of the columns you can produce and flag it for review in the viz description + Migration Summary — don't silently omit. |
+| 1.5.25 | 2026-06-10 | Strengthen the KPI rule: **ALWAYS include a date on every KPI tile when the model has one** (not just measure blocks) — easy to miss; use the data's grain (`.yearly` for annual). E.g. a Total Sectors KPI in a workbook with Fiscal Year is `[Total Sectors] [Fiscal Year].yearly`, not a static `[Total Sectors]`. |
+| 1.5.24 | 2026-06-10 | Correct the `growth of` date-period syntax: set the grain with `by [Date] [Date].yearly` (bare date + bucket); **default is monthly**, so apply `.yearly` for annual data (dotted-only `by [Date].yearly` fails to tokenize). Resolved cols `Growth of Total {Measure}` + `{Bucket}(Date)`. Also add **Step 8 prompt: separate liveboards vs one tabbed liveboard** when a workbook has 2+ dashboards. |
+| 1.5.23 | 2026-06-10 | `growth of` syntax quirk (from FDI): no dotted bucket in the `by` clause (`by [Date].yearly` fails to tokenize) — ThoughtSpot auto-buckets; resolved columns are `Growth of Total {Measure}` + `{Bucket}(Date)`; bind chart columns to those (export-patch). |
+| 1.5.22 | 2026-06-10 | Add **Step 10g — "Migration Summary" tab**: a note-tile tab on each liveboard listing (1) items migrated, (2) decisions made, (3) items not migrated + reasons — reviewable in-product, editable/deletable by the user. Mirrors `MIGRATION_LIMITATIONS.md` plus the positive items. Uses the `layout.tabs[]` form. |
+| 1.5.21 | 2026-06-10 | Two formula principles (from FDI): **single-viz formulas can be answer-level** (`answer.formulas[]`) rather than model-level — keep the model lean; reuse decides. **Growth/decline** (`pcdf`/percent-difference table calc) → `growth of [measure] by [date]` when a date is present (else this/last-period formulas). |
+| 1.5.20 | 2026-06-10 | Add a top-level **working principle — surface, recommend, resolve**: when a non-1:1 situation is hit (blend, missing/multi-table join key, VARCHAR date, bins, count column, manual group, value-vs-data mismatch, untranslatable formula), inform the user, recommend a solution, and attempt to resolve it with their go-ahead — don't silently drop/guess/flag. Default to enabling the migration. |
+| 1.5.19 | 2026-06-10 | Reconcile the "**never merge datasources**" rule with the blend reality: it guards against *blind* collapse, but a deliberate **cross-datasource blend** is realized as **one** model (co-locate keys in a SQL view + join). Add: **build only the models the workbook actually uses** — a datasource that exists only to feed a blend folds into the model that uses it, not a standalone unused model. |
+| 1.5.18 | 2026-06-10 | Refine join/blend handling from the Dual Axis workbook: ThoughtSpot relationships are **binary** — a join key spanning two tables must be **co-located into one SQL view**; and **don't pre-aggregate to dodge fan-out** — ThoughtSpot **handles fan/chasm traps**, so a line-level view joined to a per-group table computes `sum()` correctly. Net result: a blend usually becomes **one model** on a single line-level view, not multiple. |
+| 1.5.17 | 2026-06-10 | Joins: **keys must be physical columns — you cannot join on a model formula.** When a join/blend needs a column that doesn't exist (e.g. month-of-order-date), **advise the user of two remediation paths**: (1) a ThoughtSpot **SQL View** (`sql_view` TML, derived/pre-aggregated columns → physical join keys) used as the model foundation, or (2) a **DB table/view** the user creates and adds to the connection, then bind to it. State exactly what columns/grain are needed; multi-column joins OK; mind fan-out. Cross-datasource formulas are blends → realize via such a join or omit+flag. |
+| 1.5.16 | 2026-06-10 | Add **Step 10f**: when a liveboard viz references a model parameter (directly or via a bin/formula), **ask (default yes) to add it to the header** as a chip — writes `ordered_chips[]` + `parameter_overrides[]` (resolve the parameter UUID from the exported model). |
+| 1.5.15 | 2026-06-10 | Step 10.5: **confirm the theme on every workbook, defaulting to the previous selection** — never apply silently. Surface the choice (default = last pick) so the user can keep or override per liveboard. |
+| 1.5.14 | 2026-06-10 | Refine flipboard/story handling: before skipping such a dashboard, **salvage its content** — migrate any unique worksheets and preserve narrative captions as **note tiles**; only the flip *interaction* is dropped (not visualizations or commentary). |
+| 1.5.13 | 2026-06-10 | Add explicit **prerequisite**: the source tables + data already exist in a warehouse and a ThoughtSpot connection exposes them. The skill creates logical TS objects over existing physical tables; it does not create/load warehouse data (data pipeline is out of scope). |
+| 1.5.12 | 2026-06-09 | Correct the "never read the warehouse" framing: for data-dependent info (bin ranges, stored value format, group-membership existence) the skill should **prompt the user first**, and **fall back to a warehouse lookup (with authorization)** if they can't supply it — reading data for confirmation is allowed (only data *loading/modifying* stays out of scope). |
+| 1.5.11 | 2026-06-09 | Correctness fix: ThoughtSpot has **no `CASE`** — the manual-group / range translations now say `if … then … else if … then … else …` (and membership via `or`-chained `if`), not "CASE". |
+| 1.5.10 | 2026-06-09 | Promote the VARCHAR-date handling from a note to actual **Step 5a guidance**: detect a Tableau date column bound to a VARCHAR warehouse column, flag it, and offer (a) retype at source → bind as DATE, or (b) a `to_date()` derived column. |
+| 1.5.9 | 2026-06-09 | GROUP_BASED cohort on a **DATE** anchor column: conditions use `filter_value_type: DATE_FILTER` + `date_filter_values: [{type: EXACT_DATE, date: MM/DD/YYYY, oper: "="}]` (not `STRING`/`value[]`), `combine_type: ANY` for set membership. Retyping the anchor (VARCHAR→DATE) requires switching the condition shape accordingly. |
+| 1.5.8 | 2026-06-09 | Correct the in-place-update rule: **tables also need their root `guid` pinned** to re-import in place — re-importing a table TML without a `guid` can create a duplicate (new GUID) and orphan the original, not update it (observed on Bank). Pin `guid` for tables/models/liveboards alike; verify the returned `id_guid`. |
+| 1.5.7 | 2026-06-09 | Two data-fidelity notes (from Bank): (1) a date-like column stored as **VARCHAR** should be flagged + offered a fix (retype at source, or `to_date()` derived column) so date buckets/Spotter work. (2) A `categorical-bin`'s values are a **snapshot of the TWB's data** — if the warehouse holds different data, the cohort matches nothing (silently empty); flag as a data-fidelity limitation, not a translation error. |
+| 1.5.6 | 2026-06-09 | GROUP_BASED cohort specifics (from a working column set): each condition needs **`filter_value_type`** (STRING/DOUBLE/…) + `combine_type`; config `combine_non_group_values: true` + `null_output_value`; `operator: EQ` with a multi-value list = "in set". **Convert group values to the column's STORED format, not Tableau's display** (`01.Apr.15` → `2015-04-01`) or they match nothing. |
+| 1.5.5 | 2026-06-09 | Add the **cohort-vs-formula decision for manual groups**: contiguous non-overlapping ranges → an `if/then/else if` formula (cleanest; ThoughtSpot has no `CASE`); arbitrary/interleaved value sets → `GROUP_BASED` cohort (a range formula would misclassify). Decide by checking group membership/contiguity first; parse string dates with `to_date` for range tests. |
+| 1.5.4 | 2026-06-09 | Fix misclassification: Tableau **`categorical-bin`** (manual value groups — even when the field is named "… clusters") is **translatable** → `GROUP_BASED` cohort (`groups[]`/`conditions[]`, `default` → `null_output_value`). **Classify by calculation `class`, not field name.** Only true k-means clustering stays untranslatable. Updated formula mapping, Step A3 tiers, Step 5b. (Found via Bank's "Date Joined (clusters)".) |
+| 1.5.3 | 2026-06-09 | Cohort binding fix: a model needs a **set `obj_id`** for a cohort to reference it — a fresh model has none, and `fqn`-only refs fail with "Worksheet not found". Set the model's root `obj_id` explicitly, re-import in place, then point `cohort.worksheet.obj_id` at it (same `obj_id` a liveboard viz uses). Documented in the Bins/cohort section. |
+| 1.5.2 | 2026-06-09 | When bins are detected, **prompt the user** for how to create each (F `floor()` formula / C cohort set / B both) with a smart default (F for parameter-driven, C for fixed) — rather than auto-deciding. For the cohort path, **prompt for `minimum_value`/`maximum_value`/`bin_size`** (prompt first; a warehouse lookup is an acceptable fallback). |
+| 1.5.1 | 2026-06-09 | Add the **cohort (column set) alternative for fixed-size bins**: dynamic (parameter-driven) bins stay `floor()` formulas, but a **fixed** bin size → a `cohort:` TML object (`BIN_BASED`, `anchor_column_id`, `bins.min/max/bin_size`) bound to the model by `obj_id`, generated as `*.cohort.tml` and imported after the model. Documented in the formula mapping (Bins section) + Step 5b; payload order includes cohorts. |
+| 1.5.0 | 2026-06-09 | `Number of Records`/row-count fields → **`count([column])` with a user prompt** for which column (default primary key), not `sum(1)` — carried into dependent formulas (percent-of-total). Updated the formula mapping + Step 5b rules. |
+| 1.4.9 | 2026-06-09 | Add **Step 7.5 — confirm the model before liveboards** (present columns/formulas/parameters/Spotter + suggested Search/Spotter test questions; re-import in place on changes). Add `paramctrl` and `flipboard`/`flipboard-nav` to the Step 9a skip list (parameter controls covered by model parameters; Story flipboards have no liveboard equivalent — skip + flag). |
+| 1.4.8 | 2026-06-09 | Formula coverage (from Bank workbook): map **Tableau bins** (`class='bin'`) → `floor([x]/size)*size` using the migrated size-parameter; **`TOTAL(SUM(x))`/percent-of-total** → `group_aggregate(..., {}, query_filters())` (same family as Snowflake/Databricks); **`Number of Records`** → `sum(1)`. Reclassify in Step A3 (bins=Native, TOTAL=LOD), add **clustering** to Untranslatable. Updated `tableau-formula-translation.md` with a Bins section + TOTAL rows. |
+| 1.4.7 | 2026-06-09 | Record **High Contrast KPIs** theme (user-confirmed), completing all **6/6** curated themes in `references/liveboard-style-themes.md`: neutral `LBC_A`/`GBC_A`/`TBC_A` base, darkest KPI tiles `TBC_I` + `is_highlighted`, **`kpi_hero_font_size: XL`** (extends S/M/L — schema updated), **and vivid warm chart palette (`#FF8C66`/`#FFB399`) with purple KPI sparklines** — the contrast is charts *and* KPI tiles, confirmed intentional (not the neutral charts I'd first assumed). Lesson: a theme's `viz_style` chart palette is an independent design choice — confirm, don't assume neutral or brand-hue. |
+| 1.4.6 | 2026-06-09 | Record **Warm Tones** theme (verified TML): `LBC_G`/`CURVED`, KPI tiles `TBC_O`, peach/orange series palette (`#FF8C66`/`#FFB399`). Noted the per-theme dark KPI token varies (K/L/J/O) and to match KPI sparkline `viz_style` to the theme. |
+| 1.4.5 | 2026-06-09 | Record **Soft Lavender** theme (verified TML): `LBC_B`/`CURVED`, KPI tiles `TBC_J`, purple series palette (`#6B4E9C`/`#B8A3DC`) — and it also themes the KPI sparklines via per-KPI `viz_style`, a detail the slate themes omit. |
+| 1.4.4 | 2026-06-09 | Record **Fresh & Modern** theme (verified TML): `LBC_D`/`CURVED`, KPI tiles emphasized via `TBC_L`, and — unlike the slate themes — a genuine **teal/mint chart series palette** (`#22636B`/`#4ECDC4`). Confirms chart `viz_style` palette varies per theme. |
+| 1.4.3 | 2026-06-09 | Record **Cool Professional** theme recipe in `references/liveboard-style-themes.md` (verified TML): `LBC_C`/`SHARP`, KPI tiles emphasized via `TBC_K` + `tile_kpi_color: TKS_A` + `is_highlighted`, neutral-slate chart palette. Document the KPI-emphasis pattern and that border type varies per theme; make the reference file authoritative over the quick-glance token table. |
+| 1.4.2 | 2026-06-09 | Document **`chart.viz_style`** (per-series/legend color palette — the third styling layer) in the answer schema; add `references/liveboard-style-themes.md` recording each Step 10.5 theme as brand tokens + `viz_style` palettes (Clean & Minimal recorded from a verified export; others pending reference TML). Step 10.5 now applies all three style layers. |
+| 1.4.1 | 2026-06-09 | Add **Step 10e** — group related vizzes into labelled sections (KPIs → "Key Metrics"; shared-dimension charts → a named section) and require clear `answer.name` + one-line `answer.description` on every viz (no raw `Sheet 1` titles). Clarify KPI trend needs the date in `chart_columns` **and** axis `x`. |
+| 1.4.0 | 2026-06-09 | Add **Step 10.5 — Liveboard style**: offer 6 curated themes (Clean & Minimal, Cool Professional, Fresh & Modern, Soft Lavender, Warm Tones, High Contrast KPIs) that write `style.style_properties` + per-object `style.overrides[]` using the `LBC_/GBC_/TBC_/TKS_` color-token system; ask once and reuse across a batch. Document the full styling layer (tokens, scopes, hex reference, overrides, themes) in the liveboard schema; clarify it is TML-level styling, distinct from embed-time `--ts-var-*` CSS theming. |
+| 1.3.0 | 2026-06-09 | Add **Step 5.5 — Spotter enablement** (default Y; `model.properties.spotter_config.is_spotter_enabled`) + Spotter line in the Step 7 review, mirroring snowflake/databricks. Rewrite liveboard generation (Step 9/10) from verified behaviour: bind vizzes by **`obj_id`** not `fqn`; emit a **complete chart block** (`chart_columns`+`axis_configs`) using **resolved** column names (`Total {Measure}`, `{Bucket}(date)`); dotted date buckets (`[Order Date].monthly`); note tiles use `note_tile.html_parsed_string` (not `viz_type: NOTE_TILE`); KPI blocks → one KPI tile per measure with a date (0→static / 1→auto / 2+→prompt); export-then-patch loop for resolved names; skip filter/legend zones. **Extracts no longer blanket-skipped** — resolve the underlying source (CSV/Excel/db) and migrate that. `db_column_name` must match the warehouse's (possibly normalized) column name. Document the in-place-update trap: models/liveboards need a root `guid` or `--no-create-new` duplicates them. Companion doc updates: liveboard schema (note tiles, groups/sections + `group_layouts`, viz `obj_id`, expanded `style_properties`) and answer schema (`client_state_v2` structure). |
+| 1.2.0 | 2026-06-09 | Add Step 4.5 — present the Step 3 table inventory and ASK whether tables exist / don't exist / unsure; search ThoughtSpot only when the user says exist or unsure (never auto-search up front). Fix table-TML contract: `connection.name` is **required** (was wrongly "no connection section") — a table must bind to a connection that exposes the physical table. **Removed placeholder db/schema and the connection `skip` path entirely** (no dry-run mode) — a TS table is a live object over an existing connection, so emitting stubs only yields unusable objects; if no connection exists, stop. Aligns table TMLs with the shared schema and the snowflake/databricks skills. Fix import I/O: `ts tml import` reads a **JSON array of TML strings** on stdin (not a zip); build payload tables→sql_views→models; add `--create-new` for fresh objects; clarify that `Table with id null not found` is a benign new-table WARNING (no GUID → matches by db/schema/dbTable), distinct from `connection not found`/`column not found` ERRORs. Add a Step 7 **review checkpoint** (mirrors snowflake/databricks): present per-formula translations `source → ts_expr` with tiers, flag pass-through and untranslatable/OMITTED items, and offer yes/no/file — so caveats and un-migratable items surface before import, not only in the Step 12 report. Search/confirm only, never loads data |
 | 1.1.0 | 2026-06-09 | Custom SQL → sql_view TML, connection listing, formula fallback, obj_id fix, datasource separation |
 | 1.0.0 | 2026-06-09 | Initial release — merged from ts-model-from-tableau + ts-liveboard-from-tableau |
