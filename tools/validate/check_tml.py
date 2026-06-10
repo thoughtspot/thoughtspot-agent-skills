@@ -359,31 +359,51 @@ def validate_model_tml(data: dict) -> list[str]:
 _TEMPLATE_RE = re.compile(r'\{[A-Za-z_][A-Za-z0-9_]*\}')
 
 
+# Literal placeholder identifiers used in doc/worked-example templates. Real TML always
+# uses actual object names (ORDERS, SALES, AGENT_SKILLS…), never these generic tokens, so
+# their presence reliably marks a documentation template rather than importable TML.
+_PLACEHOLDER_TOKENS = (
+    "TABLE_NAME", "OTHER_TABLE", "TABLE_A", "TABLE_B",
+    "COLUMN_NAME", "OTHER_COLUMN", "JOIN_COL",
+    "RESOLVED_DATABASE", "RESOLVED_SCHEMA", "physical_table_name",
+    "Datasource Display Name", "Formula Name", "ThoughtSpot expression",
+)
+
+
 def _is_template_block(data: dict) -> bool:
     """
     Return True if this YAML block looks like a schema-reference template or a
     documentation snippet rather than a real TML object. Checks:
     - Any template placeholder {identifier} anywhere in the dict
+    - Any literal placeholder token (TABLE_NAME, COLUMN_NAME, "Formula Name", …)
     - Inner dict has a 'name' field that is itself a dict (schema ref pattern)
-    - Table TML snippet: has 'table:' but missing both 'connection' and 'columns'
-      (documentation excerpts showing only selected fields — not complete TML)
+    - Model TML snippet: has 'model:' but missing BOTH 'name' and 'model_tables'
+      (a doc excerpt showing only one section, e.g. just `properties:`)
+    - Table TML snippet: has 'table:' but no 'columns' (a real Table TML always
+      lists columns; a block without them is a documentation excerpt)
     """
     raw = str(data)
-    # Any template placeholder = skip (schema refs and worked-example templates use these)
+    # Any {curly} template placeholder = skip (schema refs and worked-example templates)
     if _TEMPLATE_RE.search(raw):
+        return True
+    # Literal placeholder tokens = skip (templates use generic names, real TML never does)
+    if any(tok in raw for tok in _PLACEHOLDER_TOKENS):
         return True
     # Inner object name is a dict (YAML schema reference pattern: name: {type: string})
     inner = data.get("table") or data.get("model") or {}
     if isinstance(inner, dict) and isinstance(inner.get("name"), dict):
         return True
-    # Partial table TML snippet: real Table TML always has connection: and columns:
-    # If both are absent the block is a documentation excerpt, not importable TML
+    # Partial model TML snippet: real Model TML always has name AND model_tables.
+    # A block missing both is a documentation excerpt (e.g. showing only properties:).
+    if "model" in data and isinstance(data["model"], dict):
+        mdl = data["model"]
+        if "name" not in mdl and "model_tables" not in mdl:
+            return True
+    # Partial table TML snippet: real Table TML always lists columns. A block without
+    # them (or with an empty `columns:`) is a documentation excerpt, not importable TML.
     if "table" in data and isinstance(data["table"], dict):
         tbl = data["table"]
-        if "connection" not in tbl and "columns" not in tbl:
-            return True
-        # Documentation pattern: columns: with no value (YAML null) = "columns go here" comment
-        if "columns" in tbl and tbl.get("columns") is None:
+        if "columns" not in tbl or tbl.get("columns") is None:
             return True
     return False
 

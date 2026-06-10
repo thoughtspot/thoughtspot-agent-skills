@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-10
+- chore: harden pre-commit validation — `check_tml.py` now skips documentation template/fragment YAML blocks (placeholder tokens like `TABLE_NAME`/`COLUMN_NAME`, partial `model:` snippets with no name/model_tables, `table:` snippets with no columns) instead of false-failing on them; `suggest_repo_changelog.py` gains a `--check` gating mode — wired into `scripts/pre-commit.sh` — that blocks a commit (in non-TTY/CI too) when a significant change (new skill, new shared file, ts-cli bump, or MAJOR/MINOR skill version bump) has no same-day CHANGELOG.md entry
+
 ## 2026-06-09
 - feat: add `ts-convert-from-tableau` skill — convert Tableau workbooks (.twb/.twbx) into ThoughtSpot table + model TMLs with optional dashboard-to-liveboard migration; available in CLI, Cortex Code CLI, and Cursor
 - docs: add Tableau shared reference library — formula translation (`tableau-formula-translation.md`) and TML generation rules (`tableau-tml-rules.md`) in `agents/shared/mappings/tableau/`

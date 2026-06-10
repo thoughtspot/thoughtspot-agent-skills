@@ -104,9 +104,13 @@ if echo "$STAGED" | grep -qE '^agents/claude/ts-dependency-manager/(SKILL\.md|re
   python3 tools/validate/suggest_dependency_types.py --root $REPO_ROOT
 fi
 
-# Repo changelog — suggests a CHANGELOG.md entry for significant staged changes:
-# new skills, ts-cli version bumps, new shared reference files (TTY only)
+# Repo changelog — for significant staged changes (new skills, ts-cli bumps, new shared
+# files, MAJOR/MINOR skill version bumps):
+#   1. interactively suggest + auto-insert an entry (TTY only)
+#   2. GATE — fail the commit if no same-day CHANGELOG.md entry exists. Runs in non-TTY too
+#      (CI / agent-driven commits), so the entry can't be silently skipped.
 python3 tools/validate/suggest_repo_changelog.py --root $REPO_ROOT
+run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root $REPO_ROOT --check"
 
 # Only run unit tests if Python source files are staged
 if echo "$STAGED" | grep -q '\.py$'; then
