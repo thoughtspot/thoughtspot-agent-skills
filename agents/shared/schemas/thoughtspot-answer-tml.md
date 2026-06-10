@@ -257,6 +257,89 @@ formula columns, and set columns (cohorts). No column_type or aggregation metada
 
 The only additional field is `format:` for display formatting (PERCENTAGE, NUMBER, etc.).
 
+**Apply `PERCENTAGE` format to ratio/contribution/growth measures.** A Tableau field that is a
+proportion — percent-of-total (`SUM(x)/TOTAL(SUM(x))`), an LOD contribution, a growth rate, or
+anything the author displayed with a `%` — should render as a percent in ThoughtSpot, not a raw
+`0.0734`. Set it on the column in `answer_columns[]` (and `growth of` columns):
+
+```yaml
+answer_columns:
+- name: Profit contribution
+  format:
+    category: PERCENTAGE
+    percentageFormatConfig:
+      decimals: 2.0
+      removeTrailingZeroes: false
+    isCategoryEditable: true
+```
+
+Detect these from the formula (a `/ TOTAL(...)` or `/ {FIXED ...}` denominator, `growth`/`pcdf`
+table calcs) or from the Tableau column's own number-format being a percentage. A separate
+*string* field like `Formatted profit contribution` (`STR(ROUND(x*100,2))+'%'`) is already text —
+don't double-format it; prefer the numeric measure + `PERCENTAGE` format so it stays sortable.
+
+---
+
+## `client_state_v2` — chart/table presentation blob
+
+`client_state` (legacy, usually `''`) and `client_state_v2` appear on both `answer.table`
+and `answer.chart`. `client_state_v2` is a JSON **string** holding frontend presentation
+state. It is **opaque and optional** — a viz renders without it (ThoughtSpot applies
+defaults). It does **not** affect *which* data shows or *whether* the viz works; only how
+it looks. Do not hand-author it for migrations — emit the structural chart
+(`type`/`chart_columns`/`axis_configs`) and let styling default; flag exact styling as
+"set in UI". Decoded structure observed on a live chart:
+
+```jsonc
+{
+  "version": "V4DOT2",
+  "chartProperties": {
+    "gridLines": {},
+    "responsiveLayoutPreference": "USER_PREFERRED_ON",   // or AUTO_ON
+    "chartSpecific": { "dataFieldArea": "column" }
+  },
+  "columnProperties": [
+    { "columnId": "Total Total Revenue", "columnProperty": { "dataLabels": true } },
+    // KPI tiles carry kpiColumnProperties: showSparkline, showComparisonDate,
+    // showCurrentDateLabel, showPreviousDateLabel, showPreviousValue
+  ],
+  "axisProperties": [
+    { "id": "{uuid}", "properties": { "axisType": "Y",
+        "linkedColumns": ["Total Total Revenue"], "isOpposite": false } },
+    { "id": "{uuid}", "properties": { "axisType": "Y",
+        "linkedColumns": ["Total Total Profit"], "isOpposite": true } },   // dual-axis
+    { "id": "{uuid}", "properties": { "axisType": "X",
+        "linkedColumns": ["Year(Ship Date)"] } }
+  ],
+  "systemSeriesColors": [
+    { "serieName": "Total Total Revenue", "color": "#2E75F0" }
+  ]
+}
+```
+
+The one structurally meaningful setting here is **dual-axis** (`axisProperties` with two
+`Y` entries, one `isOpposite: true`). Everything else (colors, data labels, sparklines,
+grid lines, responsive layout) is cosmetic. The `table` variant is simpler:
+`{"tableVizPropVersion": "V1", "columnProperties": [...]}`.
+
+### `chart.viz_style` — chart colors
+
+Separate from `client_state_v2`, `chart.viz_style` is a JSON **string** that overrides chart
+**colors**:
+
+```jsonc
+{ "overrides": {
+    "column_properties": [ { "column_id": "Total Total Revenue", "properties": { "color": "#64748B" } } ],
+    "legend_properties": { "color_palette": { "colors": ["#b8c1d0", "#9daab8", "#64748B"] } }
+} }
+```
+
+- `column_properties[].properties.color` — per-series hex (LINE, BAR, KPI; one per measure).
+- `legend_properties.color_palette.colors[]` — categorical palette (PIE, color-by-dimension).
+
+Optional — omit for ThoughtSpot's default palette. This is the layer migration uses to apply
+a theme's chart colors (see the tableau skill's `references/liveboard-style-themes.md`).
+
 ---
 
 ## Key Differences from Model TML
