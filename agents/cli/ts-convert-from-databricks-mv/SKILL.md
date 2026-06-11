@@ -927,7 +927,10 @@ model:
       is_spotter_enabled: true   # or false based on answer
 ```
 
-If the user answers `n` or `no`, set `is_spotter_enabled: false`.
+If the user answers `n` or `no`, set `is_spotter_enabled: false`. Pre-existing
+models being updated in place (Step 11): if the user does not explicitly answer,
+preserve the existing setting from the previously-exported model TML rather than
+overwriting it with a default.
 
 ---
 
