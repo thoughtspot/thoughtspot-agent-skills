@@ -667,6 +667,28 @@ and joining the other datasource in (see the join/blend rules in 5b and
 The `model_tables[]` section references both regular tables (from Step 5a) and SQL
 Views (from Step 5c) — both are referenced by `name` in the same way.
 
+**Model TML hard rules** — these apply to every model this step generates.
+Violations cause silent data loss or import rejections with no clear error.
+See `../../shared/schemas/ts-model-conversion-invariants.md` for full detail.
+
+> **I1 — Every `formulas[]` entry must have a paired `columns[]` entry** with `formula_id:`
+> matching the formula's `id`. An unpaired formula is silently dropped on import.
+>
+> **I2 — Never add `aggregation:` to a `formulas[]` entry.** It belongs only on `columns[]`
+> entries. Adding it to `formulas[]` causes `FORMULA is not a valid aggregation type`.
+>
+> **I3 — Add `index_type: DONT_INDEX`** on every `columns[]` entry that has a `formula_id`
+> and `column_type: MEASURE`.
+>
+> **I4 — `with:` must exactly match the target table's `name:`.** (In ThoughtSpot, `with:`
+> resolves against `name`, not an `id`. If you add an `id:` field to a `model_tables` entry,
+> it must equal `name:` exactly — same case, same characters — or joins break with
+> `"{table} does not exist in schema"` at query time.)
+>
+> **I5 — `COUNTD(x)` → `unique count ( [T::x] )` formula entry, never `aggregation: COUNT_DISTINCT`.**
+> Using `aggregation: COUNT_DISTINCT` silently flips `column_type` from MEASURE to ATTRIBUTE.
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I1–I5).
+
 **Template:**
 
 ```yaml
@@ -678,7 +700,7 @@ model:
   model_tables:
   - name: TABLE_NAME
     joins:                      # only if this table has joins to others
-    - with: OTHER_TABLE
+    - with: OTHER_TABLE         # must match OTHER_TABLE's name exactly (same case)
       on: "[TABLE_NAME::JOIN_COL] = [OTHER_TABLE::JOIN_COL]"
       type: LEFT_OUTER          # INNER | LEFT_OUTER | RIGHT_OUTER | OUTER
       cardinality: ONE_TO_MANY
@@ -693,14 +715,33 @@ model:
       - value: CAD
       - value: GBP
   formulas:                     # omit section entirely if no translatable calculated fields
-  - id: formula_Formula Name
+  - id: formula_Formula Name    # id: "formula_" + display name
     name: Formula Name
     expr: "ThoughtSpot expression"
+    properties:
+      column_type: MEASURE      # or ATTRIBUTE — NO aggregation: here (I2)
+  - id: formula_Unique Customers   # COUNTD(x) → unique count formula, NOT aggregation: COUNT_DISTINCT (I5)
+    name: Unique Customers
+    expr: "unique count ( [TABLE_NAME::customer_id] )"
+    properties:
+      column_type: MEASURE
   columns:
   - name: display_name
     column_id: TABLE_NAME::COLUMN_NAME
     properties:
       column_type: ATTRIBUTE    # or MEASURE
+  - name: Formula Name          # paired columns[] entry for every formulas[] entry (I1)
+    formula_id: formula_Formula Name   # must match the formula's id exactly
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX    # always on computed MEASURE formula columns (I3)
+  - name: Unique Customers      # paired entry for the COUNTD formula (I1 + I5)
+    formula_id: formula_Unique Customers
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
 ```
 
 ### Parameter migration (Tableau → ThoughtSpot `parameters[]`)
