@@ -32,6 +32,7 @@ Two scenarios are supported:
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
 | [../../claude/references/direct-api-auth.md](../../claude/references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 | Cortex Code connection (configured via `cortex connections set`) | Snowflake connection code, SQL execution patterns |
+| [references/open-items.md](references/open-items.md) | Known gaps and deferred capabilities for this skill |
 
 ---
 
