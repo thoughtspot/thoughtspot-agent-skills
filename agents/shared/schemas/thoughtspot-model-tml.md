@@ -7,6 +7,8 @@ Redshift, standalone model creation, etc.).
 For Table TML construction, see [thoughtspot-table-tml.md](thoughtspot-table-tml.md).
 For parsing exported TML, see [thoughtspot-tml.md](thoughtspot-tml.md).
 
+> Hard rules every Model-producing conversion skill must obey: see [ts-model-conversion-invariants.md](./ts-model-conversion-invariants.md).
+
 ---
 
 ## Full Model TML Structure

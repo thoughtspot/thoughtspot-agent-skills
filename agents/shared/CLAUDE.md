@@ -34,6 +34,7 @@ schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference
   thoughtspot-model-tml.md            — model TML construction reference
+  ts-model-conversion-invariants.md  — canonical hard rules every Model-producing conversion skill must obey
   thoughtspot-answer-tml.md           — Answer TML structure (formulas, parameters, sets, data source lookup) — verified
   thoughtspot-liveboard-tml.md        — Liveboard TML structure (visualizations, filters, layout, tabs) — verified
   thoughtspot-view-tml.md             — View (AGGR_WORKSHEET) TML structure — view_columns, joins, table_paths, search_query

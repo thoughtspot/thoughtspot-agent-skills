@@ -1,0 +1,279 @@
+# ThoughtSpot Model Conversion Invariants
+
+Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
+Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
+satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
+skills against this file; keep the IDs (I1–I7, EXC1) stable so the auditor can cite
+them without ambiguity.
+
+> Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7)
+> and `ts-convert-from-databricks-mv` (I1–I7). They are proven against live ThoughtSpot
+> imports; violations produce the failure modes listed below.
+
+---
+
+## Invariants
+
+### I1 — Every formula has a paired `columns[]` entry
+
+**Rule:** For every entry in `formulas[]`, there must be a corresponding entry in
+`columns[]` that references it via `formula_id:`. An unpaired formula is **silently
+dropped** by ThoughtSpot on import — no error, no warning, no column in the model.
+
+**Failure mode:** Formula disappears from the model after import. User sees a model with
+fewer columns than expected, with no TML import error to diagnose.
+
+**Applies to:** All source dialects (Tableau, Snowflake SV, Databricks MV, …).
+
+**Correct pattern:**
+```yaml
+formulas:
+- id: formula_Total Sales           # id: "formula_" + name
+  name: "Total Sales"
+  expr: "sum ( [ORDERS::price] * [ORDERS::qty] )"
+  properties:
+    column_type: MEASURE
+
+columns:
+# ... physical columns first ...
+- name: "Total Sales"
+  formula_id: formula_Total Sales   # must match the formula's id exactly
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+    index_type: DONT_INDEX          # see I3
+```
+
+---
+
+### I2 — No `aggregation:` inside `formulas[]` entries
+
+**Rule:** Never add an `aggregation:` field to a `formulas[]` entry. Formulas are
+self-contained via their `expr`; `aggregation:` belongs only on `columns[]` entries.
+
+**Failure mode:** ThoughtSpot rejects the TML import with:
+`FORMULA is not a valid aggregation type`
+
+**Applies to:** All source dialects.
+
+**Correct (formula — no aggregation:):**
+```yaml
+formulas:
+- id: formula_Total Sales
+  name: "Total Sales"
+  expr: "sum ( [ORDERS::price] * [ORDERS::qty] )"
+  properties:
+    column_type: MEASURE
+    # NO aggregation: here
+```
+
+**Wrong (do NOT do this) — `aggregation:` on a formulas entry:**
+```yaml
+# Single formula entry — aggregation: on it triggers "FORMULA is not a valid aggregation type"
+- id: formula_Total Sales
+  name: "Total Sales"
+  expr: "sum ( [ORDERS::price] * [ORDERS::qty] )"
+  properties:
+    column_type: MEASURE
+    aggregation: SUM    # WRONG — remove this; keep aggregation: only on the columns[] entry
+```
+
+`aggregation:` on a `columns[]` formula entry *is* allowed (it defines how the column
+aggregates when rolled up). Only the `formulas[]` entry must not carry it.
+
+---
+
+### I3 — `index_type: DONT_INDEX` on computed numeric measures
+
+**Rule:** Every `columns[]` entry that references a formula (i.e., has a `formula_id`)
+and is typed as a MEASURE should carry `index_type: DONT_INDEX`.
+
+**Failure mode:** ThoughtSpot may attempt to index the computed column, which is
+unnecessary for numeric measures and can produce unexpected search behaviour.
+
+**Applies to:** All source dialects.
+
+**Correct pattern:**
+```yaml
+columns:
+- name: "Total Sales"
+  formula_id: formula_Total Sales
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+    index_type: DONT_INDEX   # always on computed measures
+```
+
+---
+
+### I4 — Join `id` must equal `name` (exact case)
+
+**Rule:** In every `model_tables[]` entry, the `id` field must be character-for-character
+identical to the `name` field. ThoughtSpot resolves `with:` and `on:` join references
+against the table's `name` — if `id` differs in case, joins silently fail.
+
+**Failure mode:** TML imports without error, but joins are broken at query time:
+`"{table_name} does not exist in schema"`
+
+**Applies to:** All source dialects.
+
+**Correct pattern:**
+```yaml
+model_tables:
+- id: FACT_ORDERS          # MUST equal name exactly — often uppercase
+  name: FACT_ORDERS        # exact ThoughtSpot table object name
+  fqn: "{guid}"
+  joins:
+  - with: DIM_CUSTOMERS    # must match the target entry's name exactly
+    referencing_join: "{join_name}"
+- id: DIM_CUSTOMERS        # MUST equal name exactly
+  name: DIM_CUSTOMERS
+  fqn: "{guid}"
+```
+
+**Wrong (do NOT do this):**
+```yaml
+model_tables:
+- id: fact_orders          # WRONG — lowercase id, uppercase name
+  name: FACT_ORDERS
+```
+
+---
+
+### I5 — COUNT-distinct as `unique count(...)` formula, never `COUNT_DISTINCT` aggregation
+
+**Rule:** Any distinct-count measure must be expressed as a `formulas[]` entry with
+`unique count ( [TABLE::col] )`. Never use `aggregation: COUNT_DISTINCT` on a `columns[]`
+entry that references a physical column.
+
+**Failure mode:** Using `aggregation: COUNT_DISTINCT` causes ThoughtSpot to silently
+override `column_type: MEASURE` → `ATTRIBUTE` on that column, making it unsearchable as
+a measure. No import error is raised.
+
+**Applies to:** All source dialects.
+- Tableau: `COUNTD(field)` → `unique count ( [TABLE::col] )` formula
+- Snowflake SV: `COUNT(DISTINCT col)` metrics → `unique count ( [TABLE::col] )` formula
+- Databricks MV: `COUNT(DISTINCT col)` → `unique count ( [TABLE::col] )` formula
+
+**Correct pattern:**
+```yaml
+formulas:
+- id: formula_Unique Customers
+  name: "Unique Customers"
+  expr: "unique count ( [ORDERS::customer_id] )"
+  properties:
+    column_type: MEASURE
+
+columns:
+- name: "Unique Customers"
+  formula_id: formula_Unique Customers
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+    index_type: DONT_INDEX
+```
+
+**Wrong (do NOT do this):**
+```yaml
+columns:
+- name: "Unique Customers"
+  column_id: ORDERS::customer_id
+  properties:
+    column_type: MEASURE
+    aggregation: COUNT_DISTINCT   # WRONG — silently flips to ATTRIBUTE
+```
+
+---
+
+### I6 — Connections referenced by name, not GUID
+
+**Rule:** In all TML generated by conversion skills, the connection inside a `table:` or
+`sql_view:` block must use the `name:` field — never a GUID.
+
+**Failure mode:** GUIDs are environment-specific. A TML exported from one ThoughtSpot
+instance and imported into another will fail with an unresolvable GUID.
+
+**Applies to:** All source dialects.
+
+**Correct pattern:**
+```yaml
+table:
+  connection:
+    name: "Snowflake Production"   # display name from ts connections list
+```
+
+**Wrong (do NOT do this) — GUID in the connection block:**
+```yaml
+# connection block — fqn: here causes import failure on any other ThoughtSpot instance
+    name: "..."
+    fqn: "a1b2c3d4-..."   # WRONG — remove fqn:; use only name:
+```
+
+---
+
+### I7 — Consult the formula reference before declaring "untranslatable"
+
+**Rule:** Before classifying any expression as untranslatable, the skill must explicitly
+instruct the model to open the formula-translation reference for that source dialect and
+check both the forward and reverse tables. Do not decide from syntax alone.
+
+**Failure mode:** Expressions that appear Snowflake-specific or Databricks-specific have
+documented ThoughtSpot equivalents. Skipping the reference causes valid columns to be
+omitted from the converted model.
+
+**Applies to:** All source dialects. Each skill must cite its own mapping file:
+- Tableau: `../../shared/mappings/tableau/tableau-formula-translation.md`
+- Snowflake SV: `../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`
+- Databricks MV: `../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md`
+
+**Required gate (appears before the untranslatable classification step in every skill):**
+> MANDATORY: before classifying any expression as untranslatable, open the formula
+> reference for this source dialect and check the reverse table. Do not decide from
+> SQL syntax recognition alone.
+
+---
+
+## Naming
+
+### N1 — Model name: bare source name, no prefix
+
+**Rule:** The converted model's `name:` must use the bare source object name (view name,
+workbook + datasource name, etc.). Do not prepend environment markers such as `TEST_`,
+`TEST_SV_`, `TEST_MV_`, or similar prefixes.
+
+**Rationale:** Production migrations must not carry test markers. If the user needs a
+prefix for local testing, they can override the name interactively — every skill should
+ask the user if they want a different name before importing.
+
+**Applies to:** All source dialects. Supersedes any prior per-skill default that used
+`TEST_SV_*` or `TEST_MV_*` prefixes.
+
+**Correct:**
+```yaml
+model:
+  name: "DUNDER_MIFFLIN_SALES"     # bare view/datasource name
+```
+
+**Wrong (do NOT do this):**
+```yaml
+model:
+  name: "TEST_SV_DUNDER_MIFFLIN_SALES"   # WRONG — environment marker in production TML
+```
+
+---
+
+## Intentional differences (do NOT harmonize)
+
+### EXC1 — Cumulative/moving: model formula vs query-time only
+
+**This difference is correct and deliberate. The auditor must NOT flag it.**
+
+| Source | Treatment | Reason |
+|---|---|---|
+| Snowflake SV window functions (`OVER PARTITION BY …`) | Translate to ThoughtSpot model formulas: `cumulative_sum`, `moving_average`, `group_sum`, etc. | These are true SQL window expressions — valid as model-level formulas that ThoughtSpot evaluates at query time. |
+| Databricks MV window metrics | Same: translate to ThoughtSpot `cumulative_*` / `moving_*` model formulas. | Same rationale as SV. |
+| Tableau table calculations (`RUNNING_SUM`, `WINDOW_AVG`, `INDEX`, `LOOKUP`, `FIRST`, `LAST`, `SIZE`, `PREVIOUS_VALUE`, `RANK`, `PERCENTILE`, etc.) | Do **NOT** emit as model `formulas[]`. Classify as answer-level only, document in the untranslatable log. | Tableau table-calcs are row-level operations that depend on the view's partition/addressing. They have no stable model-level equivalent in ThoughtSpot. Forcing them into `formulas[]` produces incorrect results. |
+
+The asymmetry (SV/MV → model formulas; Tableau table-calcs → answer-level only) is
+the correct behaviour, not a bug. Do not add Tableau table-calcs to `formulas[]` to
+achieve "consistency" with SV/MV.

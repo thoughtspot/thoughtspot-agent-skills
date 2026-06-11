@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-11
+- docs: add `ts-model-conversion-invariants.md` shared reference — canonical hard-rule checklist (I1–I7 + EXC1) for all Model-producing conversion skills; cross-linked from `thoughtspot-model-tml.md`
+
 ## 2026-06-10
 - feat: `ts-convert-from-tableau` v1.2.0 → v1.5.37 — major dashboard→liveboard migration upgrade, hardened against 6 real workbook migrations on a live ThoughtSpot. Adds Step 4.5 (confirm tables exist before searching; connection required, no placeholders), Step 5.5 (Spotter on every model), Step 7/7.5 (formula-review checkpoint + model confirmation), Step 9d (orphan-worksheet prompt), full liveboard generation (obj_id binding, complete chart blocks with resolved names, note tiles, KPI-per-measure, parameter header chips, Migration Summary tab, curated style themes), Step 11.5 (formula-coverage answers — every formula gets a testable answer), and Step 12 (written `MIGRATION_REPORT.md` with outcomes table, hyperlinks, and a full formula-mapping status table)
 - docs: expand Tableau shared reference library — `tableau-formula-translation.md` (rank direction arg; `cumulative_*`/`moving_*` are query-time only and take the shelf attribute as sort arg; `concat()` not `+`; dynamic year-comparison; drop redundant pass-through formulas), `tableau-tml-rules.md` (in-place re-import requires top-level `guid`/`obj_id`), and schema docs (`thoughtspot-answer-tml.md` PERCENTAGE format; `thoughtspot-liveboard-tml.md` TABLE_MODE tiles omit the chart block)
