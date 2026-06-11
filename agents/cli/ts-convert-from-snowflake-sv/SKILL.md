@@ -1262,6 +1262,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-06-11 | Drop `TEST_SV_` prefix — model name now uses the bare SV name (N1); cite canonical conversion invariants doc. Add I5 explicit note: `COUNT(DISTINCT)` → `unique count(...)` formula, never `aggregation: COUNT_DISTINCT`. Add `references/open-items.md` tracking sql_view generation gap. |
 | 1.4.1 | 2026-05-11 | Add `source ~/.zshenv &&` prefix to all bash blocks and convert subprocess.run calls from `["ts", ...]` to `["bash", "-c", "source ~/.zshenv && ts ..."]` for consistent env var loading |
 | 1.4.0 | 2026-05-05 | Add Mode C (update existing): Steps C1–C6. Identifies a changed SV and an existing TS Model, diffs columns/descriptions/synonyms/expressions, applies per-column reviewed changes with `--no-create-new`, and surfaces /ts-object-model-coach handoff. `ai_context` and Instructions are never touched. Step 1.5 menu updated to A/B/C. |
 | 1.3.0 | 2026-04-28 | Add Step 9.5 — confirm Spotter (AI search) enablement before import. Default Y; preserves existing setting on in-place updates. |

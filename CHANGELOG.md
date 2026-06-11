@@ -6,7 +6,12 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-11
-- docs: add `ts-model-conversion-invariants.md` shared reference — canonical hard-rule checklist (I1–I7 + EXC1) for all Model-producing conversion skills; cross-linked from `thoughtspot-model-tml.md`
+- docs: add `ts-model-conversion-invariants.md` shared reference — canonical hard-rule checklist (I1–I7 + EXC1 + N1) for all Model-producing conversion skills; cross-linked from `thoughtspot-model-tml.md`
+- feat: add `conversion-consistency-auditor` subagent — semantic auditor for I1–I7 and N1 across the five conversion skills; run before merging any conversion-skill PR
+- fix(agents): update `consistency-checker` to current `agents/cli/` + `agents/coco-snowsight/` layout
+- feat(from-snowflake-sv): v1.5.0 — drop TEST_SV_ prefix, I5 explicit note, open-items.md
+- feat(from-databricks-mv): v1.1.0 — preserve Spotter setting on in-place update, drop TEST_MV_ prefix
+- fix(from-tableau): v1.5.38 — add I1–I5 hard rules to Step 5b, I7 formula-reference gate
 
 ## 2026-06-10
 - feat: `ts-convert-from-tableau` v1.2.0 → v1.5.37 — major dashboard→liveboard migration upgrade, hardened against 6 real workbook migrations on a live ThoughtSpot. Adds Step 4.5 (confirm tables exist before searching; connection required, no placeholders), Step 5.5 (Spotter on every model), Step 7/7.5 (formula-review checkpoint + model confirmation), Step 9d (orphan-worksheet prompt), full liveboard generation (obj_id binding, complete chart blocks with resolved names, note tiles, KPI-per-measure, parameter header chips, Migration Summary tab, curated style themes), Step 11.5 (formula-coverage answers — every formula gets a testable answer), and Step 12 (written `MIGRATION_REPORT.md` with outcomes table, hyperlinks, and a full formula-mapping status table)

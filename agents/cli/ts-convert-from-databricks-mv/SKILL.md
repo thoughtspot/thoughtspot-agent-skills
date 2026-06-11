@@ -1216,4 +1216,5 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-06-11 | Preserve existing Spotter setting on in-place model updates (don't reset to default). Drop `TEST_MV_` prefix — model name uses the bare MV name (N1); cite canonical conversion invariants doc. |
 | 1.0.0 | 2026-05-22 | Initial release — single conversion mode (Mode A) |
