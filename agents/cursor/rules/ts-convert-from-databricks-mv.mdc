@@ -244,6 +244,11 @@ Top-level `synonyms:` at column root is silently dropped on import.
 
 Include `db_column_name` on every Table TML column.
 
+**Spotter enablement:** Before finalizing the model TML, ask whether Spotter (AI search)
+should be enabled (default: yes). Apply to `model.properties.spotter_config.is_spotter_enabled`.
+When updating an existing model in place, preserve the existing setting rather than
+overwriting with the default.
+
 ---
 
 ## Step 8 — Review Checkpoint

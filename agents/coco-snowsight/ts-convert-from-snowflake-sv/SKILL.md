@@ -641,7 +641,8 @@ For each metric in the semantic view:
 - Complex expression → **read [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) first**, then translate SQL to ThoughtSpot formula using the Snowflake → ThoughtSpot reverse-translation sections; add to `formulas[]`. Do not classify as untranslatable based on SQL syntax recognition alone — patterns like `NON ADDITIVE BY`, `OVER (PARTITION BY ...)`, and `PARTITION BY EXCLUDING` all have documented ThoughtSpot equivalents.
 - Untranslatable (confirmed after consulting reference) → omit and log in report
 
-**Model name:** `TEST_SV_{semantic_view_name}` (or user-specified).
+**Model name:** `{semantic_view_name}` (or user-specified). Do not add a `TEST_SV_` or
+other prefix — see `../../shared/schemas/ts-model-conversion-invariants.md` (N1).
 
 **CRITICAL — Never normalise names from API responses.** Names that came from
 `TS_EXPORT_TML` (join names, column names, table names) or from import response GUIDs
@@ -688,7 +689,7 @@ preserve the existing value rather than overwriting with a default.
 After all checks pass, show the user:
 
 ```
-Model ready to import: TEST_SV_{view_name}
+Model ready to import: {view_name}
 
 Self-validation: all checks passed
 
@@ -785,7 +786,7 @@ line, BEFORE the `model:` key:
 ```yaml
 guid: "{existing_model_guid}"   # MUST be at document root — NOT inside model:
 model:
-  name: "TEST_SV_{view_name}"
+  name: "{view_name}"
   model_tables:
   # ...
 ```
@@ -850,7 +851,7 @@ if you reimport to fix any errors.
 ```
 ## Model Import Complete
 
-**Model:** TEST_SV_{view_name}
+**Model:** {view_name}
 **GUID:** {guid}
 **ThoughtSpot URL:** {base_url}/#/model/{guid}
 

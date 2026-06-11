@@ -92,25 +92,50 @@ table:
 ```
 
 **5b. Model TML** (one per datasource — strict separation, never merge):
+
+> **Model TML hard rules (I1–I5):** see `~/.cursor/shared/schemas/ts-model-conversion-invariants.md`.
+> I1: every formula needs a paired `columns[]` entry with `formula_id:`. I2: no `aggregation:` in `formulas[]`.
+> I3: `index_type: DONT_INDEX` on formula MEASURE columns. I4: `with:` must match the target's `name:` exactly.
+> I5: `COUNTD(x)` → `unique count([T::x])` formula, never `aggregation: COUNT_DISTINCT`.
+
 ```yaml
 model:
-  name: Datasource Name
+  name: Datasource Name   # bare source name, no TEST_ prefix (N1)
   model_tables:
   - name: TABLE_NAME
     joins:
-    - with: OTHER_TABLE
+    - with: OTHER_TABLE   # must match OTHER_TABLE's name exactly (I4)
       on: "[TABLE_NAME::COL] = [OTHER_TABLE::COL]"
       type: LEFT_OUTER
       cardinality: ONE_TO_MANY
   formulas:
   - id: formula_Name
     name: Name
-    expr: "ThoughtSpot expression"
+    expr: "ThoughtSpot expression"  # NO aggregation: here (I2)
+    properties:
+      column_type: MEASURE
+  - id: formula_Unique Customers    # COUNTD → unique count formula (I5)
+    name: Unique Customers
+    expr: "unique count ( [TABLE_NAME::customer_id] )"
+    properties:
+      column_type: MEASURE
   columns:
   - name: display_name
     column_id: TABLE_NAME::COL
     properties:
       column_type: ATTRIBUTE
+  - name: Name                          # paired columns[] for every formula (I1)
+    formula_id: formula_Name            # must match formula id exactly
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX            # always on MEASURE formula columns (I3)
+  - name: Unique Customers
+    formula_id: formula_Unique Customers
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
 ```
 - `obj_id` is optional on fresh import — omit it
 - Resolve Tableau internal IDs (`[Calculation_\d+]`) to display names before translating
@@ -122,6 +147,9 @@ model:
   shelf context; fall back to pass-through if sort dimension unknown)
 - Pass-through fallback for partitioned RANK, DENSE_RANK: use `sql_*_aggregate_op()` —
   last resort, requires SQL Passthrough Functions enabled
+- **MANDATORY (I7):** before classifying any formula as untranslatable, open
+  `~/.cursor/shared/mappings/tableau/tableau-formula-translation.md` and check the full
+  function table and pass-through section. Do not decide from syntax alone.
 - Truly untranslatable formulas (LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE): omit from
   `formulas[]` and `columns[]` entirely, log in `MIGRATION_LIMITATIONS.md`
 - Formulas in topological dependency order (Level 0 first)
