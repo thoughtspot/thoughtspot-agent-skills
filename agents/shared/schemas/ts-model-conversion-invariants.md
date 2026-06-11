@@ -106,11 +106,13 @@ columns:
 
 ---
 
-### I4 — Join `id` must equal `name` (exact case)
+### I4 — Join `id` (when present) must equal `name` (exact case)
 
-**Rule:** In every `model_tables[]` entry, the `id` field must be character-for-character
-identical to the `name` field. ThoughtSpot resolves `with:` and `on:` join references
-against the table's `name` — if `id` differs in case, joins silently fail.
+**Rule:** `id` on a `model_tables[]` entry is optional. When present, it must be
+character-for-character identical to the `name` field. Omitting `id:` and referencing tables
+by `name:` alone (as the Tableau skill does) is simpler and equally correct. ThoughtSpot
+resolves `with:` and `on:` join references against the table's `name` — so if `id` is present
+but differs in case, joins silently fail.
 
 **Failure mode:** TML imports without error, but joins are broken at query time:
 `"{table_name} does not exist in schema"`

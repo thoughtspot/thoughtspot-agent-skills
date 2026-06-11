@@ -27,6 +27,10 @@ are deliberate.
 - `agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md`
 - `agents/shared/schemas/thoughtspot-model-tml.md`
 
+**Mirrors (must carry the same invariant guidance — see "Mirror parity" below):**
+- `agents/cursor/rules/ts-convert-from-{tableau,snowflake-sv,databricks-mv}.mdc`
+- `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md`
+
 ## Checks (per from-skill)
 
 For each invariant I1–I7 and N1: confirm the skill states the rule (or cites the
@@ -48,7 +52,9 @@ YAML block is a FAIL — unless the line is clearly labelled as a "WRONG" counte
 ### I3 — Computed numeric measures carry `index_type: DONT_INDEX`
 
 For every `columns[]` entry that has a `formula_id:` AND `column_type: MEASURE`, confirm
-`index_type: DONT_INDEX` is present in the same entry. Absence is a FAIL.
+`index_type: DONT_INDEX` is present in the same entry. This invariant is **advisory** — the
+canonical doc and the skills phrase it as *should* / *recommended* (it affects search
+behaviour, not import success). Report absence as a `[WARN]`, not a FAIL.
 
 ### I4 — Join examples use id == name (exact case) or with: matches name exactly
 
@@ -81,6 +87,30 @@ classification step, report FAIL with the first "untranslatable" mention.
 Scan the model name instruction in the skill. If `TEST_SV_`, `TEST_MV_`, or any
 `TEST_` prefix appears in a recommended/default model name (not in a "do not do this"
 warning), report FAIL.
+
+## Mirror parity — cursor `.mdc` and coco-snowsight `SKILL.md`
+
+Each from-skill is mirrored into other runtimes, and those mirrors must carry the same
+invariant guidance. Condensed is fine — a cursor `.mdc` may use a one-line-per-invariant
+callout instead of full TML templates — but the rule must be present and must cite the
+invariants doc.
+
+| CLI skill | Cursor mirror | CoCo mirror |
+|---|---|---|
+| `ts-convert-from-tableau` | `agents/cursor/rules/ts-convert-from-tableau.mdc` | — (no CoCo mirror — Tableau parsing needs a local shell) |
+| `ts-convert-from-snowflake-sv` | `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` | `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` |
+| `ts-convert-from-databricks-mv` | `agents/cursor/rules/ts-convert-from-databricks-mv.mdc` | — (no CoCo mirror — Databricks CLI not available in Snowsight) |
+
+For each mirror that exists, confirm:
+- **N1** — no `TEST_*` prefix in the recommended/default model name.
+- **I1–I6** — the mirror states each rule, or carries a callout citing
+  `ts-model-conversion-invariants.md` (cursor path: `~/.cursor/shared/schemas/...`;
+  coco path: `../../shared/schemas/...`). I3 stays advisory here too (`[WARN]`).
+- **I7** — a `MANDATORY` formula-reference gate precedes the untranslatable classification.
+
+Report a mirror that is missing any invariant its CLI primary enforces as `[FAIL]`, citing the
+mirror's `file:line` and the missing invariant ID. A mirror that is simply terser (rule present
+but condensed) is a PASS.
 
 ## Formula-parity check
 

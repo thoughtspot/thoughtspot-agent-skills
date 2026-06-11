@@ -121,11 +121,22 @@ For each physical Snowflake table referenced by the semantic view:
 Read `~/.cursor/shared/schemas/thoughtspot-model-tml.md` and
 `~/.cursor/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` in full.
 
+> **Model TML hard rules (I1–I6 + N1):** see `~/.cursor/shared/schemas/ts-model-conversion-invariants.md`.
+> I1: every formula needs a paired `columns[]` entry with `formula_id:`. I2: no `aggregation:` in `formulas[]`.
+> I3: `index_type: DONT_INDEX` on formula MEASURE columns. I4: `id:` (if present) and join `with`/`on` references
+> must match the target table's `name:` exactly. I5: `COUNT(DISTINCT col)` → `unique count([T::col])` formula,
+> never `aggregation: COUNT_DISTINCT`. I6: connection referenced by name, never GUID.
+> N1: model name uses the bare semantic-view name — no `TEST_SV_` prefix (ask the user before importing).
+
 Map the Semantic View DDL to ThoughtSpot Model TML:
 - Dimensions → ATTRIBUTE columns
 - Metrics → MEASURE columns with formula expressions
 - Relationships → `joins_with` entries
 - SQL expressions → ThoughtSpot formulas (use the formula translation reference)
+- **MANDATORY (I7):** before classifying any expression as untranslatable, open
+  `~/.cursor/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` and check the
+  reverse-translation tables — `NON ADDITIVE BY`, `OVER (PARTITION BY ...)`, and
+  `PARTITION BY EXCLUDING` all have documented ThoughtSpot equivalents. Do not decide from SQL syntax alone.
 
 **Metadata mapping (synonyms / descriptions / table comments):**
 - `with synonyms=('First','Alt 1','Alt 2',...)` → first → column `name`; rest → `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`). Synonyms MUST live under `properties:`; top-level `synonyms:` is silently dropped.
@@ -261,6 +272,7 @@ Always surface after a successful import:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.1 | 2026-06-11 | Add Model TML hard-rules callout (I1–I6 + N1) and mandatory formula-reference gate (I7) to Step 5, citing `ts-model-conversion-invariants.md` — mirrors the CLI skill v1.5.0. |
 | 1.3.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C (update existing model) workflow. |
 | 1.2.0 | 2026-04-28 | Add Spotter-enablement confirmation step (default Y). |
 | 1.1.0 | 2026-04-28 | Add SV synonyms/descriptions/table-comments mapping. Document `non additive by ... desc` → `first_value`. Note that `count_distinct(...)` and `+` for strings are invalid TS formula syntax. |

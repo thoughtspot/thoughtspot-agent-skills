@@ -16,9 +16,9 @@ Report pass/fail for each check. On failure, give the exact file and line to fix
 
 ### 1. Broken file references in SKILL.md files
 
-Scan every `SKILL.md` in `agents/cli/` and `agents/coco-snowsight/` for markdown links `[text](path)`.
+Scan every `SKILL.md` in `agents/cli/`, `agents/claude/`, and `agents/coco-snowsight/` for markdown links `[text](path)`.
 
-- For Claude skills (`agents/cli/`): resolve `~/.claude/shared/` → `agents/shared/`, `~/.claude/mappings/` → `agents/shared/mappings/`, `~/.claude/skills/` → `agents/cli/`
+- For CLI skills (`agents/cli/`) and Claude-only skills (`agents/claude/`): resolve `~/.claude/shared/` → `agents/shared/`, `~/.claude/mappings/` → `agents/shared/mappings/`, `~/.claude/skills/` → the directory that contains the skill (`agents/cli/` or `agents/claude/`)
 - For CoCo skills (`agents/coco-snowsight/`): resolve relative `../../shared/` → `agents/shared/`
 - Check each resolved path exists in the repo
 - Report: file, line number, broken path
@@ -37,16 +37,18 @@ Read `README.md`. Extract skill names from the Claude Code and CoCo skills table
 
 Compare against:
 - Every directory in `agents/cli/` that contains a `SKILL.md`
+- Every directory in `agents/claude/` that contains a `SKILL.md`
 - Every directory in `agents/coco-snowsight/` that contains a `SKILL.md`
 
 Report: any skill directory not in README, or any README row with no matching directory.
 
 ### 4. Symlink steps in SETUP.md
 
-Read `agents/cli/SETUP.md`. Extract skill names from the `ln -s` symlink commands in the
-Developer Install section.
+Read `agents/cli/SETUP.md` and `agents/claude/SETUP.md`. Extract skill names from the
+`ln -s` symlink commands in each Developer Install section.
 
-Compare against every directory in `agents/cli/` that contains a `SKILL.md`.
+Compare against every directory in `agents/cli/` and `agents/claude/` that contains a
+`SKILL.md` (each SETUP.md covers the skills in its own directory).
 Report: any skill missing a symlink step.
 
 ### 5. Anti-pattern detection
