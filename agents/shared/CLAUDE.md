@@ -47,6 +47,9 @@ schemas/
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
   databricks-metric-view.md           — Databricks Metric View YAML schema (v0.1/v1.1)
 
+worked-examples/tableau/
+  liveboard-kpi-sparkline.md          — KPI viz with sparkline: client_state_v2 requirement, before/after, verified template (2026-06-11)
+
 worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)
   ts-from-snowflake.md                — end-to-end SV → TS conversion — BIRD_SUPERHEROS_SV (verified against live instance)
