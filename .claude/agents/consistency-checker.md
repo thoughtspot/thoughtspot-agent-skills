@@ -5,6 +5,10 @@ description: Verify cross-file consistency after edits — checks broken referen
 
 # Consistency Checker
 
+> For **semantic** conversion-logic consistency (TML invariants, formula parity across skills),
+> use the `conversion-consistency-auditor` subagent instead. This checker covers structural
+> consistency only (broken references, stage copy list, README table, symlink steps, anti-patterns).
+
 Run after any batch of edits to catch integration problems that individual file edits can miss.
 Report pass/fail for each check. On failure, give the exact file and line to fix.
 
@@ -12,19 +16,19 @@ Report pass/fail for each check. On failure, give the exact file and line to fix
 
 ### 1. Broken file references in SKILL.md files
 
-Scan every `SKILL.md` in `agents/claude/` and `agents/coco/` for markdown links `[text](path)`.
+Scan every `SKILL.md` in `agents/cli/` and `agents/coco-snowsight/` for markdown links `[text](path)`.
 
-- For Claude skills (`agents/claude/`): resolve `~/.claude/shared/` → `agents/shared/`, `~/.claude/mappings/` → `agents/shared/mappings/`, `~/.claude/skills/` → `agents/claude/`
-- For CoCo skills (`agents/coco/`): resolve relative `../../shared/` → `agents/shared/`
+- For Claude skills (`agents/cli/`): resolve `~/.claude/shared/` → `agents/shared/`, `~/.claude/mappings/` → `agents/shared/mappings/`, `~/.claude/skills/` → `agents/cli/`
+- For CoCo skills (`agents/coco-snowsight/`): resolve relative `../../shared/` → `agents/shared/`
 - Check each resolved path exists in the repo
 - Report: file, line number, broken path
 
 ### 2. Stage copy list completeness
 
-Read `agents/coco/SETUP.md`. Extract every filename mentioned in `snow stage copy` commands.
+Read `agents/coco-snowsight/SETUP.md`. Extract every filename mentioned in `snow stage copy` commands.
 For each, verify the source file exists in the repo at the stated path.
 
-Also check: every `SKILL.md` in `agents/coco/` is listed in a `snow stage copy` command.
+Also check: every `SKILL.md` in `agents/coco-snowsight/` is listed in a `snow stage copy` command.
 Every file in `agents/shared/` is listed (or note any that are missing and should be added).
 
 ### 3. Skills table in README.md
@@ -32,17 +36,17 @@ Every file in `agents/shared/` is listed (or note any that are missing and shoul
 Read `README.md`. Extract skill names from the Claude Code and CoCo skills tables.
 
 Compare against:
-- Every directory in `agents/claude/` that contains a `SKILL.md`
-- Every directory in `agents/coco/` that contains a `SKILL.md`
+- Every directory in `agents/cli/` that contains a `SKILL.md`
+- Every directory in `agents/coco-snowsight/` that contains a `SKILL.md`
 
 Report: any skill directory not in README, or any README row with no matching directory.
 
 ### 4. Symlink steps in SETUP.md
 
-Read `agents/claude/SETUP.md`. Extract skill names from the `ln -s` symlink commands in the
+Read `agents/cli/SETUP.md`. Extract skill names from the `ln -s` symlink commands in the
 Developer Install section.
 
-Compare against every directory in `agents/claude/` that contains a `SKILL.md`.
+Compare against every directory in `agents/cli/` that contains a `SKILL.md`.
 Report: any skill missing a symlink step.
 
 ### 5. Anti-pattern detection
@@ -72,7 +76,7 @@ consistency-checker results
 ===========================
 
 [PASS] Broken references: all paths resolved
-[FAIL] Stage copy completeness: agents/coco/ts-setup-sv/SKILL.md not listed in SETUP.md (line 24)
+[FAIL] Stage copy completeness: agents/coco-snowsight/ts-setup-sv/SKILL.md not listed in SETUP.md (line 24)
 [PASS] README skills table: all skills present
 [PASS] SETUP.md symlink steps: all skills covered
 [FAIL] Anti-patterns: tools/ts-cli/ts_cli/commands/metadata.py:44 — "%%" in help string
