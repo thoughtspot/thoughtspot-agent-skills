@@ -165,6 +165,10 @@ resolves.
 
 ## Step A3 — Classify Formulas (Audit Mode)
 
+> **MANDATORY (I7) — before classifying any calculated field as untranslatable, open
+> [`../../shared/mappings/tableau/tableau-formula-translation.md`](../../shared/mappings/tableau/tableau-formula-translation.md)
+> and check its full function table and pass-through section. Do not decide from syntax alone.**
+
 For each calculated field extracted in Step A2, classify it into one of these tiers
 based on the patterns in `tableau-formula-translation.md`:
 
@@ -793,6 +797,11 @@ ThoughtSpot: [Currency]
 This is a simple prefix strip: `[Parameters].[X]` → `[X]`. Apply AFTER resolving
 Tableau internal cross-references (`[Calculation_\d+]`) and BEFORE translating function
 syntax.
+
+> **MANDATORY (I7) — before classifying any calculated field as untranslatable, open
+> [`../../shared/mappings/tableau/tableau-formula-translation.md`](../../shared/mappings/tableau/tableau-formula-translation.md)
+> and check its full function table and pass-through section. Do not decide from syntax alone.**
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
 
 Formula translation rules: use `tableau-formula-translation.md`.
 - Convert Tableau join types: `full` → `OUTER`, `left` → `LEFT_OUTER`,
