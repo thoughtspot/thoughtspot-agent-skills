@@ -863,6 +863,12 @@ For each simple metric (`AGG(view_alias.metric_name)`):
 - `properties.column_type: MEASURE`
 - `aggregation`: mapped from the SQL aggregate function (see ts-from-snowflake-rules.md)
 
+**`COUNT(DISTINCT col)` metrics — use a formula, not `aggregation: COUNT_DISTINCT` (I5):**
+`COUNT(DISTINCT col)` must be expressed as a `formulas[]` entry with `unique count ( [TABLE::col] )`.
+Never use `aggregation: COUNT_DISTINCT` on a `column_id` entry — ThoughtSpot silently overrides
+`column_type: MEASURE` → `ATTRIBUTE` when `COUNT_DISTINCT` is used this way.
+See `../../shared/schemas/ts-model-conversion-invariants.md` (I5).
+
 For each complex metric (formula expression):
 - See Step 9 for translation. Results go into `formulas[]`.
 - **Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained
