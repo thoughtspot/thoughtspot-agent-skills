@@ -671,6 +671,10 @@ and joining the other datasource in (see the join/blend rules in 5b and
 The `model_tables[]` section references both regular tables (from Step 5a) and SQL
 Views (from Step 5c) — both are referenced by `name` in the same way.
 
+**Model name:** use the Tableau datasource display name — no prefix (no `TEST_` or environment
+markers). Ask the user if they want a different name before importing. See
+`../../shared/schemas/ts-model-conversion-invariants.md` (N1).
+
 **Model TML hard rules** — these apply to every model this step generates.
 Violations cause silent data loss or import rejections with no clear error.
 See `../../shared/schemas/ts-model-conversion-invariants.md` for full detail.

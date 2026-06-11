@@ -764,8 +764,9 @@ If no matching join is found:
 Construct the model TML as a YAML string. Use the templates in
 [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md).
 
-**Model name:** `TEST_SV_{view_name_title_case}` — prefix indicates this is a
-test/converted model. Ask the user if they want a different name.
+**Model name:** `{view_name_title_case}` — derived from the Snowflake Semantic View name.
+Ask the user if they want a different name. Do not add a `TEST_SV_` or other prefix —
+see `../../shared/schemas/ts-model-conversion-invariants.md` (N1).
 
 **Identify the fact table** (the table that is never on the "TO" side of any relationship)
 — it gets no `referencing_join` and no `joins[]`.
@@ -786,7 +787,7 @@ test/converted model. Ask the user if they want a different name.
 
 ```yaml
 model:
-  name: "TEST_SV_{view_name}"
+  name: "{view_name}"
   model_tables:
   - id: FACT_TABLE          # MUST equal name exactly (copy verbatim — often uppercase)
     name: FACT_TABLE        # exact ThoughtSpot table object name — FK side, joins go here
@@ -821,7 +822,7 @@ new Table objects for views. Inline joins live on the **source (FROM) table** en
 
 ```yaml
 model:
-  name: "TEST_SV_{view_name}"
+  name: "{view_name}"
   model_tables:
   - id: FROM_TABLE          # MUST equal name exactly (copy verbatim from import response)
     name: FROM_TABLE        # exact ThoughtSpot table object name — never lowercase or transform
@@ -985,7 +986,7 @@ Apply the answer to the model TML's properties block:
 
 ```yaml
 model:
-  name: TEST_SV_{view_name}
+  name: {view_name}
   # ... model_tables, columns, formulas, etc.
   properties:
     spotter_config:
@@ -1004,7 +1005,7 @@ overwriting it with a default.
 Before importing, show the user a summary:
 
 ```
-Model to import: TEST_SV_{view_name}
+Model to import: {view_name}
 Tables:
   ✓ {FACT_TABLE} (GUID: {guid}) — fact table
   ✓ {DIM_TABLE}  (GUID: {guid}) — referencing_join: {join_name}
@@ -1167,7 +1168,7 @@ shape — not just that the API returned 200.
 **1. Search for the model by GUID:**
 
 ```bash
-source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%TEST_SV_{view_name}%" --profile {profile}
+source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{view_name}%" --profile {profile}
 ```
 
 The GUID returned by the import response must appear in the results. If it is absent,
@@ -1192,7 +1193,7 @@ sent in Step 11 to identify which columns ThoughtSpot silently dropped, and inve
 ```
 Model imported successfully.
 
-  Name:    TEST_SV_{view_name}
+  Name:    {view_name}
   GUID:    {created_guid}
   URL:     {base_url}/#/model/{created_guid}
 
@@ -1208,7 +1209,7 @@ After a successful import, output:
 ```
 ## Model Import Complete
 
-**Model:** TEST_SV_{view_name}
+**Model:** {view_name}
 **GUID:** {created_guid}
 **ThoughtSpot URL:** {base_url}/#/model/{created_guid}
 
