@@ -32,11 +32,11 @@ or patch files there directly.
 | agents/claude/ skill logic | Corresponding agents/cli/ and agents/coco-snowsight/ skill AND agents/cursor/rules/*.mdc if logic applies |
 | agents/cli/ skill logic | Corresponding agents/claude/ skill and agents/coco-snowsight/ skill if logic applies |
 | agents/coco-snowsight/ skill logic | Corresponding agents/claude/ and agents/cli/ skill if logic applies to those runtimes |
-| agents/cursor/rules/*.mdc | Corresponding agents/claude/ SKILL.md (keep in sync) |
-| Credential storage steps | agents/claude/ts-profile-{thoughtspot,snowflake}/SKILL.md; agents/cursor/rules/ts-profile-{thoughtspot,snowflake}.mdc; .claude/rules/security.md |
+| agents/cursor/rules/*.mdc | Corresponding agents/cli/ SKILL.md (keep in sync) |
+| Credential storage steps | agents/cli/ts-profile-thoughtspot/SKILL.md; agents/claude/ts-profile-snowflake/SKILL.md; agents/cursor/rules/ts-profile-{thoughtspot,snowflake}.mdc; .claude/rules/security.md |
 | Add a new skill | README.md; agents/cli/SETUP.md (symlink step); agents/coco-snowsight/SETUP.md (stage copy list); agents/cursor/rules/ (.mdc file); **tools/smoke-tests/smoke_<skill>.py** (or add to ALLOWLIST in tools/validate/check_smoke_tests.py with justification); add ## Changelog starting at 1.0.0; CHANGELOG.md entry; **skill name must match a family in `.claude/rules/skill-naming.md`** (or extend the rule with a new family in the same PR); **runtime coverage**: Cursor `.mdc` mirror is mandatory; CoCo Snowsight divergence requires an entry in `EXPECTED_DIVERGENCES` in `tools/validate/check_runtime_coverage.py` with a one-line justification |
 | Add a new shared schema/mapping | agents/coco-snowsight/SETUP.md stage copy list; all SKILL.md and .mdc files that reference it |
-| `.mcp.json` (MCP server wiring) or `.claude/rules/api-research.md` | Update the other if precedence/usage rules change; check that `agents/claude/CLAUDE.md` "open-items.md pattern" and `.claude/rules/ts-cli.md` (v1 migration trigger, "When a skill needs an API call") still reference the rule correctly |
+| `.mcp.json` (MCP server wiring) or `.claude/rules/api-research.md` | Update the other if precedence/usage rules change; check that `CLAUDE.md` "open-items.md pattern" and `.claude/rules/ts-cli.md` (v1 migration trigger, "When a skill needs an API call") still reference the rule correctly |
 | ts-dependency-manager: changes to Step 4 walking, Step 5 impact-report, or any open-items.md status | Also update agents/cli/ts-dependency-manager/references/dependency-types.md (status table, hierarchy, or sample output as relevant) — these must stay in sync; pre-commit prompts soft when one changes without the other |
 
 If this map is getting outdated, update the table — do not prompt the author to check manually.
@@ -89,7 +89,7 @@ Credentials are never stored in files, env files, or git. Pattern used throughou
 - Env var → `~/.zshenv` export line (macOS/Linux) or permanent user env var (Windows — optional)
 - Profile JSON → `~/.claude/thoughtspot-profiles.json` (not in repo) stores `{token_env: "THOUGHTSPOT_TOKEN_{SLUG}"}`
 
-Canonical source for full auth flow: `agents/claude/ts-profile-thoughtspot/SKILL.md` (Technical Reference section).
+Canonical source for full auth flow: `agents/cli/ts-profile-thoughtspot/SKILL.md` (Technical Reference section).
 Platform policy: `.claude/rules/security.md`.
 
 ## Critical TML invariants

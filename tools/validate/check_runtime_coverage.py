@@ -5,7 +5,8 @@ check_runtime_coverage.py — validate cross-runtime skill coverage.
 Cursor must mirror Claude. CoCo Snowsight and CoCo CLI divergences from
 Claude/Cursor must be documented in EXPECTED_DIVERGENCES below.
 
-For every skill present in agents/claude/, this validator confirms:
+For every skill present in agents/cli/ (the canonical CLI skill location;
+agents/claude/ is the Claude-only annex), this validator confirms:
   - A Cursor .mdc exists at agents/cursor/rules/<skill>.mdc
   - A CoCo CLI skill exists at agents/cli/<skill>/SKILL.md (or is documented)
   - A CoCo Snowsight skill exists at agents/coco-snowsight/<skill>/SKILL.md (or is documented)
@@ -191,8 +192,8 @@ def main() -> int:
         print()
         print("To fix any of these:")
         print("  1. Author the missing skill file in the relevant runtime")
-        print("     (agents/claude/<skill>/SKILL.md, agents/cursor/rules/<skill>.mdc,")
-        print("     agents/cli/<skill>/SKILL.md, or agents/coco-snowsight/<skill>/SKILL.md), OR")
+        print("     (agents/cli/<skill>/SKILL.md, agents/cursor/rules/<skill>.mdc,")
+        print("     agents/claude/<skill>/SKILL.md, or agents/coco-snowsight/<skill>/SKILL.md), OR")
         print("  2. Document the divergence in EXPECTED_DIVERGENCES at the top of")
         print("     tools/validate/check_runtime_coverage.py with a one-line reason.")
         print("  3. See .claude/rules/runtime-coverage.md for the full convention.")

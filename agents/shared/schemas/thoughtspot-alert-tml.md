@@ -152,7 +152,7 @@ them in the impact report but does not modify their TML:
 
 **Finding Alerts that reference an Answer:**
 There is no direct metadata search for `monitor_alert` type via the current `ts` CLI.
-See [open-items.md](../../../agents/claude/ts-dependency-manager/references/open-items.md) #6
+See [open-items.md](../../../agents/cli/ts-dependency-manager/references/open-items.md) #6
 for the test script to find Alerts via TML scan or API.
 
 **`personalised_view_info.filters[].column` format:** `<table_name>::<column_name>` —

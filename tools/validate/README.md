@@ -15,7 +15,7 @@ Resolves runtime-specific path prefixes back to repo paths before checking:
 
 - `~/.claude/shared/` → `agents/shared/`
 - `~/.claude/mappings/` → `agents/shared/mappings/`
-- `~/.claude/skills/` → `agents/claude/`
+- `~/.claude/skills/` → `agents/cli/` (Claude-only skills like ts-profile-snowflake remain under `agents/claude/`)
 - `../../shared/` (CoCo) → `agents/shared/`
 
 ```bash

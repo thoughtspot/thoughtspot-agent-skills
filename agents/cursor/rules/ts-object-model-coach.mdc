@@ -4,7 +4,7 @@ alwaysApply: false
 ---
 
 > **Untested in Cursor.** This file was authored as a best-effort mirror of
-> `agents/claude/ts-object-model-coach/SKILL.md` by someone without a Cursor
+> `agents/cli/ts-object-model-coach/SKILL.md` by someone without a Cursor
 > install. The condensation below may have lost necessary detail. Cursor users
 > should validate against a real Cursor session and file a follow-up PR if
 > anything is wrong. The Claude SKILL.md remains the authoritative source.
@@ -41,7 +41,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 For verified `nls_feedback` syntax patterns (working `search_tokens` shapes,
 `chart_type` whitelist, `axis_config` notation), refer to the Claude version's
-`agents/claude/ts-object-model-coach/references/feedback-tml-verified-patterns.md`
+`agents/cli/ts-object-model-coach/references/feedback-tml-verified-patterns.md`
 in the repo.
 
 ---
@@ -498,4 +498,4 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 | 1.2.0 | 2026-05-11 | Mirror of Claude v2.2.0: migrate all direct API calls to ts CLI — feedback fetch uses `ts tml export --type FEEDBACK --parse`; dependents use `ts metadata dependents --raw`; smoke-test feedback count uses `ts metadata dependents` (flat). Rename `existing_feedback_entries` → `existing_entries` for consistency. |
 | 1.1.1 | 2026-04-29 | Mirror of Claude v2.1.1: documents the **3000-char hard limit** on the Settings → Coach Spotter → Instructions field. Step 6.5 now lists the budget-trim order (drop `output_formatting` first → trim `note:` / `reason:` → collapse `aggregation_defaults`; never drop mandatory tier of `schema_assumptions` / `exclusion_rules` / `time_defaults`) and the Step 8e gate display (`{N_instr_bytes}/3000 chars`). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
 | 1.1.0 | 2026-04-29 | Mirror of Claude v2.1.0 schema overhaul: `ai_context` is structured-only (closed enums + refs), 8 keys (`additivity`/`non_additive_dimension`/`time_basis`/`source`/`grain_keys`/`unit`/`null_semantics`/`role`); `formula` and `additive_dimensions` removed; `role` added for dimensions; `source` is conditional override. New 4-clause system-prompt rule (TS DSL is not SQL; bracket/curly refs resolve via column_id; display names are not SQL identifiers, do not infer phantom tables; `ai_context` is authoritative). Step 6.5 Model Instructions is now a structured 5-category schema (`exclusion_rules`/`aggregation_defaults`/`time_defaults`/`output_formatting`/`schema_assumptions`). `schema_assumptions` enum: `denormalized_attributes` (phantom-table reinforcement), `shared_conformed_date_dim`, `surrogate_keys_only`, `chasm_attribution` (declares fact-pair attribution patterns — ThoughtSpot's chasm-trap capability for fulfillment and marketing-attribution queries; auto-detected from `joins_with` graph). Prose lives in `column.description` and `model.description`. Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative. |
-| 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/claude/ts-object-model-coach/SKILL.md` (Claude v2.0.0). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |
+| 1.0.0 | 2026-04-28 | Initial Cursor mirror of `agents/cli/ts-object-model-coach/SKILL.md` (Claude v2.0.0). Untested in Cursor — best-effort condensation; Claude SKILL.md remains authoritative for any disagreement. |

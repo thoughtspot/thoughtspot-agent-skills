@@ -32,7 +32,7 @@ Python one-liners for Windows and Linux users. Both work with `client.py`'s fall
 **Never accept a credential in the Claude Code conversation.** Instructions to the user to
 enter a token, password, or key must always direct them to run the command in their own
 terminal. The credential must not appear in any message the user sends or Claude echoes.
-See `agents/claude/ts-profile-thoughtspot/SKILL.md` (Add section) for the exact pattern.
+See `agents/cli/ts-profile-thoughtspot/SKILL.md` (Add section) for the exact pattern.
 
 **Never write credentials to files inside the repo.** Even to the OS temp directory — tokens
 cached there must be cleaned up at skill end and must not be inside the working directory.
@@ -69,7 +69,7 @@ THOUGHTSPOT_SECRET_KEY_{SLUG}  ← secret key auth
 
 Example: profile name `"My Staging"` → slug `my-staging` → env var `THOUGHTSPOT_TOKEN_MY_STAGING`.
 
-Full pattern: `agents/claude/ts-profile-thoughtspot/SKILL.md` (Derive names section).
+Full pattern: `agents/cli/ts-profile-thoughtspot/SKILL.md` (Derive names section).
 
 ## Token cache
 

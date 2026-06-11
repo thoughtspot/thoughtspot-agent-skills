@@ -159,7 +159,8 @@ def main() -> int:
         md_files_for_tml = all_md_files
         py_files = all_py_files
         skill_md_files = [f for f in all_md_files
-                          if "agents/claude" in str(f) and f.name == "SKILL.md"]
+                          if ("agents/cli" in str(f) or "agents/claude" in str(f))
+                          and f.name == "SKILL.md"]
     else:
         md_files_for_tml = sorted(
             f for f in repo_root.glob("**/*.md")
@@ -172,10 +173,13 @@ def main() -> int:
         # Only check SKILL.md files that are tracked by git (skip gitignored pending skills)
         import subprocess as _sp
         _tracked = set(
-            _sp.run(["git", "ls-files", "agents/claude"],
+            _sp.run(["git", "ls-files", "agents/cli", "agents/claude"],
                     capture_output=True, text=True, cwd=repo_root).stdout.splitlines()
         )
         skill_md_files = sorted(
+            (f for f in repo_root.glob("agents/cli/*/SKILL.md")
+             if str(f.relative_to(repo_root)) in _tracked),
+        ) + sorted(
             f for f in repo_root.glob("agents/claude/*/SKILL.md")
             if str(f.relative_to(repo_root)) in _tracked
         )
@@ -246,7 +250,7 @@ def main() -> int:
                 total_hits += 1
 
     # Check 5: direct requests calls in Claude SKILL.md files (should use ts CLI instead)
-    # Legitimate exceptions: references/ subdirs (open-items test scripts) and agents/coco/ (no CLI available)
+    # Legitimate exceptions: references/ subdirs (open-items test scripts) and agents/coco-snowsight/ (no CLI available)
     # In --staged mode: only flag lines that are NEW in this commit (not pre-existing violations)
     requests_re = re.compile(r'\brequests\.(get|post|put|delete|patch|Session)\b')
     for md_file in skill_md_files:

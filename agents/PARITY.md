@@ -7,8 +7,8 @@ kept in sync when making changes.
 
 | Directory | Runtime | API Access | Credential Storage | Deployment |
 |---|---|---|---|---|
-| `agents/claude/` | Claude Code (local terminal) | `ts` CLI | OS Keychain + `~/.claude/` profiles | Symlinks from `~/.claude/skills/` |
-| `agents/cli/` | Cortex Code CLI (local terminal) | `ts` CLI | OS Keychain + `~/.claude/` profiles | Symlinks from `~/.snowflake/cortex/skills/` |
+| `agents/cli/` | Claude Code + Cortex Code CLI (local terminal) | `ts` CLI | OS Keychain + `~/.claude/` profiles | Symlinks from `~/.claude/skills/` and `~/.snowflake/cortex/skills/` |
+| `agents/claude/` | Claude Code only (annex — `ts-profile-snowflake`) | `ts` CLI | OS Keychain + `~/.claude/` profiles | Symlinks from `~/.claude/skills/` |
 | `agents/coco-snowsight/` | Snowsight Workspace (no shell) | Stored procedures | Snowflake Secrets | Stage → Workspace copy |
 
 ## Skill Matrix

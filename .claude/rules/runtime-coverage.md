@@ -4,13 +4,15 @@ Skills in this repo are served across three runtimes:
 
 | Runtime | Layout | What it serves |
 |---|---|---|
-| `agents/claude/` | `<skill>/SKILL.md` | Claude Code skills (interactive, full reference library) |
+| `agents/cli/` | `<skill>/SKILL.md` | Canonical CLI skills (Claude Code + Cortex Code CLI; interactive, full reference library). `agents/claude/` is a Claude-only annex holding `ts-profile-snowflake`. |
 | `agents/cursor/` | `rules/<skill>.mdc` (flat) | Cursor AI rules (condensed procedural guides) |
-| `agents/coco/` | `<skill>/SKILL.md` | Snowflake Cortex / CoCo skills (Snowsight stored-procedure path) |
+| `agents/coco-snowsight/` | `<skill>/SKILL.md` | Snowflake Cortex / CoCo skills (Snowsight stored-procedure path) |
 
 Not every skill belongs in every runtime. The rule below documents which
 skills should mirror across runtimes and which legitimately diverge — and is
-enforced by `tools/validate/check_runtime_coverage.py`.
+enforced by `tools/validate/check_runtime_coverage.py`, which scans
+`agents/cli/`, `agents/claude/`, and `agents/coco-snowsight/` and merges skills by
+name.
 
 ---
 
@@ -28,7 +30,7 @@ skills fit CoCo's environment, others don't.
 
 ## What must mirror
 
-For every skill present in `agents/claude/`, there must be a Cursor `.mdc`
+For every skill present in `agents/cli/`, there must be a Cursor `.mdc`
 file at `agents/cursor/rules/<skill>.mdc`. The Cursor version is allowed to be
 condensed — it doesn't need to replicate every reference file or every step's
 inline detail — but it must:
@@ -79,11 +81,11 @@ omissions. Adding to it requires a one-line justification in the comment.
 In a single PR:
 
 1. **Pick a family** per [skill-naming.md](skill-naming.md)
-2. **Author the Claude SKILL.md** under `agents/claude/<skill>/`
+2. **Author the CLI SKILL.md** under `agents/cli/<skill>/`
 3. **Author the Cursor `.mdc`** under `agents/cursor/rules/<skill>.mdc`
    (mark "Untested in Cursor" if you don't have Cursor)
 4. **For CoCo:** if the skill fits the Snowsight / stored-procedure model,
-   author `agents/coco/<skill>/SKILL.md` too. If it doesn't fit, add an entry
+   author `agents/coco-snowsight/<skill>/SKILL.md` too. If it doesn't fit, add an entry
    to `EXPECTED_DIVERGENCES` in `tools/validate/check_runtime_coverage.py`
    explaining why
 5. The validator runs in pre-commit and fails if any of the above are missing
@@ -112,10 +114,10 @@ Today's coverage (verified 2026-05-22):
 
 ## What this rule does NOT cover
 
-- **Skill content sync** — when a Claude SKILL.md is updated, the Cursor
+- **Skill content sync** — when a CLI SKILL.md is updated, the Cursor
   `.mdc` may drift. Keeping content in sync is the change-impact map's job
-  in `CLAUDE.md` ("agents/cursor/rules/*.mdc | Corresponding agents/claude/
+  in `CLAUDE.md` ("agents/cursor/rules/*.mdc | Corresponding agents/cli/
   SKILL.md (keep in sync)"). The runtime-coverage validator only checks
   *existence*, not content currency.
-- **Shared file deployment** — `agents/coco/SETUP.md` stage-copy list is
+- **Shared file deployment** — `agents/coco-snowsight/SETUP.md` stage-copy list is
   validated by `check_consistency.py`, not here.

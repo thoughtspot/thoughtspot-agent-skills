@@ -176,7 +176,7 @@ def _format_scan_coverage(rows: list[dict], oi_statuses: dict[int, str]) -> str:
     out = []
     out.append("─── SCAN COVERAGE ──────────────────────────────────────────────")
     out.append("")
-    out.append("  Source of truth: agents/claude/ts-dependency-manager/references/dependency-types.md")
+    out.append("  Source of truth: agents/cli/ts-dependency-manager/references/dependency-types.md")
     out.append("  When a status changes, update that file — this block regenerates from it.")
     out.append("")
     out.append("  CHECKED                         FOUND")

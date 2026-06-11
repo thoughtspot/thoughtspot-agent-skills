@@ -3,9 +3,9 @@
 check_skill_naming.py — validate skill directory names against the family
 patterns documented in .claude/rules/skill-naming.md.
 
-Walks agents/claude/<skill>/ and agents/coco/<skill>/ for any directory that
-contains a SKILL.md, then checks the directory name matches one of the
-documented family regexes (or is on the explicit ALLOWLIST).
+Walks agents/cli/<skill>/, agents/claude/<skill>/, and agents/coco-snowsight/<skill>/
+for any directory that contains a SKILL.md, then checks the directory name matches
+one of the documented family regexes (or is on the explicit ALLOWLIST).
 
 Exit codes:
   0 — every skill matches a family or is allowlisted
@@ -14,8 +14,8 @@ Exit codes:
 Run manually:
     python3 tools/validate/check_skill_naming.py --root .
 
-The pre-commit hook invokes this when `agents/{claude,coco}/**/SKILL.md` is
-staged.
+The pre-commit hook invokes this when `agents/{cli,claude,coco-snowsight}/**/SKILL.md`
+is staged.
 """
 from __future__ import annotations
 
@@ -71,9 +71,10 @@ def find_skills(root: Path) -> list[tuple[str, str, Path]]:
     Each entry is a tuple of (runtime_label, skill_name, path_for_error).
 
     Runtimes covered:
-      - agents/claude/<skill>/SKILL.md  (directory layout)
-      - agents/coco/<skill>/SKILL.md    (directory layout)
-      - agents/cursor/rules/<skill>.mdc (flat .mdc layout — name = stem)
+      - agents/cli/<skill>/SKILL.md            (directory layout)
+      - agents/claude/<skill>/SKILL.md         (directory layout)
+      - agents/coco-snowsight/<skill>/SKILL.md (directory layout)
+      - agents/cursor/rules/<skill>.mdc        (flat .mdc layout — name = stem)
 
     The cursor layout is checked too because nothing prevents a contributor
     from adding `agents/cursor/rules/ts-bad-name.mdc`. The skill-name rules
@@ -81,8 +82,8 @@ def find_skills(root: Path) -> list[tuple[str, str, Path]]:
     """
     found: list[tuple[str, str, Path]] = []
 
-    # Claude + CoCo: <skill>/SKILL.md
-    for runtime in ("claude", "coco"):
+    # CLI + Claude + CoCo: <skill>/SKILL.md
+    for runtime in ("cli", "claude", "coco-snowsight"):
         runtime_dir = root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue
@@ -118,7 +119,7 @@ def main() -> int:
     root = Path(args.root).resolve()
     skills = find_skills(root)
     if not skills:
-        print(f"No skills found under {root}/agents/{{claude,coco,cursor}}/. Nothing to check.")
+        print(f"No skills found under {root}/agents/{{cli,claude,coco-snowsight,cursor}}/. Nothing to check.")
         return 0
 
     failures: list[tuple[str, Path]] = []

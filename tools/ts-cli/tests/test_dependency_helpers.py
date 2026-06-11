@@ -1,7 +1,7 @@
 """
 test_dependency_helpers.py — unit tests for ts-dependency-manager helper functions.
 
-These functions are defined inline in agents/claude/ts-dependency-manager/SKILL.md
+These functions are defined inline in agents/cli/ts-dependency-manager/SKILL.md
 and executed by Claude at runtime. The implementations are duplicated here so they
 can be tested without a live ThoughtSpot instance.
 

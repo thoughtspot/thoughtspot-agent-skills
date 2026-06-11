@@ -110,7 +110,7 @@ on a newer build.
 
 | Rule file | Relevant section | What it does |
 |---|---|---|
-| `agents/claude/CLAUDE.md` — "open-items.md pattern" | Add MCP-first step before filing an open-item |
+| root `CLAUDE.md` — "open-items.md pattern" | Add MCP-first step before filing an open-item |
 | `.claude/rules/ts-cli.md` — "v1 API migration trigger" | Replace "REST Playground" with `get-rest-api-reference` |
 | `.claude/rules/ts-cli.md` — "When a skill needs an API call ts-cli doesn't have yet" | Add: query MCP for the spec before writing the open-items.md test script |
 

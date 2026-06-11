@@ -269,7 +269,7 @@ def dependents(
 
     For Sets / Cohorts, query with `--type LOGICAL_COLUMN`. RLS rules, alerts, column
     aliases, and column security TML are NOT covered by v2 dependents — see
-    `agents/claude/ts-dependency-manager/references/open-items.md` for those.
+    `agents/cli/ts-dependency-manager/references/open-items.md` for those.
 
     Examples:
 

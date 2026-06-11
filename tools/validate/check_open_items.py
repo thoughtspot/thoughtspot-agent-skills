@@ -66,7 +66,11 @@ def main() -> int:
     repo_root = Path(args.root).resolve()
 
     open_items_files = sorted(
+        repo_root.glob("agents/cli/*/references/open-items.md")
+    ) + sorted(
         repo_root.glob("agents/claude/*/references/open-items.md")
+    ) + sorted(
+        repo_root.glob("agents/coco-snowsight/*/references/open-items.md")
     )
 
     if not open_items_files:

@@ -2,9 +2,9 @@
 """
 check_smoke_tests.py — verify every Claude skill has a smoke test.
 
-Rule: every directory under agents/claude/ that contains a tracked SKILL.md must
-have a corresponding tools/smoke-tests/smoke_<skill_name>.py file (also tracked),
-unless the skill is on the allowlist.
+Rule: every directory under agents/cli/ or agents/claude/ that contains a tracked
+SKILL.md must have a corresponding tools/smoke-tests/smoke_<skill_name>.py file
+(also tracked), unless the skill is on the allowlist.
 
 The skill name is normalised: hyphens → underscores, plus an optional `ts_object_`
 → `ts_` shortening (e.g. `ts-object-model-builder` → `smoke_ts_model_builder.py`).
@@ -70,7 +70,8 @@ def _get_staged_names(repo_root: Path) -> list[str]:
 def _staged_touches_skills_or_smoke(staged: list[str]) -> bool:
     """Return True if staged files include anything that would change a skill or smoke test."""
     for f in staged:
-        if f.startswith("agents/claude/") or f.startswith("tools/smoke-tests/"):
+        if (f.startswith("agents/cli/") or f.startswith("agents/claude/")
+                or f.startswith("tools/smoke-tests/")):
             return True
     return False
 
@@ -101,31 +102,33 @@ def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[s
 
     tracked = _get_tracked_paths(repo_root)
 
-    claude_dir = repo_root / "agents" / "claude"
-    if not claude_dir.is_dir():
-        return failures, info
-
-    for skill_dir in sorted(claude_dir.iterdir()):
-        if not skill_dir.is_dir():
-            continue
-        skill_name = skill_dir.name
-        skill_md_rel = f"agents/claude/{skill_name}/SKILL.md"
-        if skill_md_rel not in tracked:
-            continue  # untracked / wip skill; not yet enforced
-
-        if skill_name in ALLOWLIST:
-            info.append(f"  SKIP  {skill_name}  (on allowlist)")
+    # Canonical CLI skills live in agents/cli/; agents/claude/ holds Claude-only skills.
+    for runtime in ("cli", "claude"):
+        runtime_dir = repo_root / "agents" / runtime
+        if not runtime_dir.is_dir():
             continue
 
-        candidates = _candidate_smoke_paths(skill_name)
-        if any(c in tracked for c in candidates):
-            matched = next(c for c in candidates if c in tracked)
-            info.append(f"  PASS  {skill_name}  →  {matched}")
-        else:
-            failures.append(
-                f"FAIL  {skill_name}  →  no smoke test found.  "
-                f"Expected one of: {', '.join(candidates)}"
-            )
+        for skill_dir in sorted(runtime_dir.iterdir()):
+            if not skill_dir.is_dir():
+                continue
+            skill_name = skill_dir.name
+            skill_md_rel = f"agents/{runtime}/{skill_name}/SKILL.md"
+            if skill_md_rel not in tracked:
+                continue  # untracked / wip skill; not yet enforced
+
+            if skill_name in ALLOWLIST:
+                info.append(f"  SKIP  {skill_name}  (on allowlist)")
+                continue
+
+            candidates = _candidate_smoke_paths(skill_name)
+            if any(c in tracked for c in candidates):
+                matched = next(c for c in candidates if c in tracked)
+                info.append(f"  PASS  {skill_name}  →  {matched}")
+            else:
+                failures.append(
+                    f"FAIL  {skill_name}  →  no smoke test found.  "
+                    f"Expected one of: {', '.join(candidates)}"
+                )
 
     return failures, info
 

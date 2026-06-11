@@ -94,9 +94,11 @@ def main() -> int:
         md_files = sorted(
             repo_root.glob("agents/shared/**/*.md")
         ) + sorted(
+            repo_root.glob("agents/cli/**/*.md")
+        ) + sorted(
             repo_root.glob("agents/claude/**/*.md")
         ) + sorted(
-            repo_root.glob("agents/coco/**/*.md")
+            repo_root.glob("agents/coco-snowsight/**/*.md")
         )
         md_files = [f for f in md_files if not any(p in f.parts for p in skip_dirs)]
 

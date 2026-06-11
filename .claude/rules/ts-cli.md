@@ -7,7 +7,7 @@ are legitimate exceptions. Applies to both skill authoring and CLI development.
 
 ## The core rule: Claude skills use `ts`, never `requests`
 
-Claude Code skills (`agents/claude/`) must use `ts` CLI commands for all ThoughtSpot
+Claude Code skills (`agents/cli/`) must use `ts` CLI commands for all ThoughtSpot
 API calls. Direct `import requests` / `requests.post()` calls in a SKILL.md are an
 anti-pattern — they duplicate auth handling, bypass token caching, and break if the
 CLI's auth model changes.
@@ -23,7 +23,7 @@ requests.post(f"{base_url}/api/rest/2.0/metadata/tml/export", headers=..., json=
 **Exceptions — direct API calls are legitimate in:**
 - `references/open-items.md` — self-contained test scripts to verify unverified API behaviour
   before a CLI command is written. These are temporary scaffolding, not skill logic.
-- `agents/coco/` — CoCo runs inside Snowsight and cannot install or invoke the `ts` CLI.
+- `agents/coco-snowsight/` — CoCo runs inside Snowsight and cannot install or invoke the `ts` CLI.
   CoCo skills use stored procedures (`TS_EXPORT_TML`, `TS_IMPORT_TML`, etc.) instead.
 
 ---

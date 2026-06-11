@@ -4,9 +4,10 @@ check_skill_versions.py — verify every skill file across all runtimes has a
 ## Changelog section with at least one valid semver entry.
 
 Covers:
-  agents/claude/*/SKILL.md   — Claude Code skills
-  agents/coco/*/SKILL.md     — Snowflake Cortex (CoCo) skills
-  agents/cursor/rules/*.mdc  — Cursor AI rules
+  agents/cli/*/SKILL.md             — Canonical CLI skills (Claude Code + Cortex Code CLI)
+  agents/claude/*/SKILL.md          — Claude Code-only skills
+  agents/coco-snowsight/*/SKILL.md  — Snowflake Cortex (CoCo) skills
+  agents/cursor/rules/*.mdc         — Cursor AI rules
 
 Every file must have:
   ## Changelog
@@ -61,17 +62,24 @@ def collect_skill_files(repo_root: Path) -> list[Path]:
     """Return all tracked skill files across all runtimes."""
     files: list[Path] = []
 
-    # Claude Code skills: agents/claude/*/SKILL.md
+    # Canonical CLI skills: agents/cli/*/SKILL.md
+    tracked_cli = get_tracked_files(repo_root, "agents/cli")
+    files += sorted(
+        f for f in (repo_root / "agents" / "cli").glob("*/SKILL.md")
+        if str(f.relative_to(repo_root)) in tracked_cli
+    )
+
+    # Claude Code-only skills: agents/claude/*/SKILL.md
     tracked_claude = get_tracked_files(repo_root, "agents/claude")
     files += sorted(
         f for f in (repo_root / "agents" / "claude").glob("*/SKILL.md")
         if str(f.relative_to(repo_root)) in tracked_claude
     )
 
-    # CoCo skills: agents/coco/*/SKILL.md
-    tracked_coco = get_tracked_files(repo_root, "agents/coco")
+    # CoCo skills: agents/coco-snowsight/*/SKILL.md
+    tracked_coco = get_tracked_files(repo_root, "agents/coco-snowsight")
     files += sorted(
-        f for f in (repo_root / "agents" / "coco").glob("*/SKILL.md")
+        f for f in (repo_root / "agents" / "coco-snowsight").glob("*/SKILL.md")
         if str(f.relative_to(repo_root)) in tracked_coco
     )
 

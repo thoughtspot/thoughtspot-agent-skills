@@ -3,11 +3,11 @@
 suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill.
 
 If a contributor stages changes to:
-  - agents/claude/ts-dependency-manager/SKILL.md, OR
-  - agents/claude/ts-dependency-manager/references/open-items.md
+  - agents/cli/ts-dependency-manager/SKILL.md, OR
+  - agents/cli/ts-dependency-manager/references/open-items.md
 
 without also staging:
-  - agents/claude/ts-dependency-manager/references/dependency-types.md
+  - agents/cli/ts-dependency-manager/references/dependency-types.md
 
 we prompt them to confirm whether dependency-types.md needs an update too. The status
 table, hierarchy diagram, and sample output in dependency-types.md are the canonical
@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 
-SKILL_DIR_REL = "agents/claude/ts-dependency-manager"
+SKILL_DIR_REL = "agents/cli/ts-dependency-manager"
 TRIGGER_PATHS = (
     f"{SKILL_DIR_REL}/SKILL.md",
     f"{SKILL_DIR_REL}/references/open-items.md",

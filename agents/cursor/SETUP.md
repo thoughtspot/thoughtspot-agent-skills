@@ -275,7 +275,7 @@ rules/
 
 Rules share the same reference content as Claude Code skills (`agents/shared/`).
 When adding or modifying logic, keep the `.mdc` file in sync with the corresponding
-`agents/claude/<skill>/SKILL.md`.
+`agents/cli/<skill>/SKILL.md`.
 
 ### Credential and secret handling
 

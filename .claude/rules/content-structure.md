@@ -14,7 +14,7 @@ Work through these questions in order. Stop at the first match.
 
 Examples: formula translation tables, TML schema references, property mapping rules,
 worked examples. Both runtimes read these files; putting the content in either
-`agents/claude/` or `agents/coco/` means the other runtime gets a stale copy.
+`agents/cli/` or `agents/coco-snowsight/` means the other runtime gets a stale copy.
 
 ### 2. Is it a lookup table, schema reference, or worked example used by 2+ skills?
 **→ agents/shared/**
@@ -24,7 +24,7 @@ content belongs in shared/ so there is one source of truth. Duplicating content 
 SKILL.md files means rule changes require touching multiple files — and they will drift.
 
 ### 3. Is it procedural step logic specific to one skill, but too large for SKILL.md?
-**→ agents/claude/<skill>/references/ or agents/coco/<skill>/references/**
+**→ agents/cli/<skill>/references/ or agents/coco-snowsight/<skill>/references/**
 
 Skill-local reference files: lookup tables, test scripts, open-items tracking. Used only
 by one skill, not shared across skills or runtimes. SKILL.md references them with a link.
@@ -71,7 +71,7 @@ Never add inline formula logic to SKILL.md — the skill reads the reference fil
 
 If the formula is a worked example showing how a specific model was translated:
 → **agents/shared/worked-examples/snowflake/** if verified against a live instance,
-or **agents/claude/<skill>/references/** if it is a skill-local test case.
+or **agents/cli/<skill>/references/** if it is a skill-local test case.
 
 ### "Should this go in the CoCo SKILL.md or the Claude SKILL.md or both?"
 
@@ -100,5 +100,5 @@ connection object). One file per object type, per platform.
 New platforms get a new subdirectory (e.g., mappings/ts-databricks/), not new files
 in the Snowflake mapping directory.
 
-When you add to either: update agents/coco/SETUP.md stage copy list and run
+When you add to either: update agents/coco-snowsight/SETUP.md stage copy list and run
 `./scripts/stage-sync.sh` — shared/ files must be deployed to the stage to reach CoCo.

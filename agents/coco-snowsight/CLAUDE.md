@@ -56,8 +56,7 @@ Do NOT use `~/.claude/shared/...` — that is the Claude Code convention and doe
 ## Parity with other agents
 
 Substantive skill changes (new steps, bug fixes, rule corrections) must also be made in:
-- `agents/claude/<skill>/SKILL.md` — Claude Code version
-- `agents/cli/<skill>/SKILL.md` — Cortex Code CLI version
+- `agents/cli/<skill>/SKILL.md` — canonical CLI version (Claude Code + Cortex Code CLI)
 
 Unless the change is Snowsight-specific (e.g. stored procedure usage, Snowsight UI
 instructions). See `agents/PARITY.md` for the full cross-agent mapping.

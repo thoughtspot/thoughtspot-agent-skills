@@ -43,10 +43,10 @@ Confirm push succeeded before proceeding to stage sync.
 
 ### Step 4: Sync to Snowflake stage (conditional)
 
-Check which committed files are in `agents/coco/` or `agents/shared/`:
+Check which committed files are in `agents/coco-snowsight/` or `agents/shared/`:
 
 ```bash
-git diff HEAD~1 --name-only | grep -E "^agents/(coco|shared)/"
+git diff HEAD~1 --name-only | grep -E "^agents/(coco-snowsight|shared)/"
 ```
 
 If any match:

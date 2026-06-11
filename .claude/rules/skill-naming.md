@@ -1,6 +1,6 @@
 # Skill Naming Convention
 
-Every skill directory under `agents/claude/` and `agents/coco/` must match one
+Every skill directory under `agents/cli/` and `agents/coco-snowsight/` must match one
 of the documented family patterns below. The pattern is enforced by
 `tools/validate/check_skill_naming.py` and runs in the pre-commit hook on every
 commit that adds or renames a skill directory.
@@ -122,7 +122,7 @@ A new family needs THREE updates in the same PR:
 2. **Add the family to `tools/validate/check_skill_naming.py`** in the
    `FAMILY_PATTERNS` dict, with a regex that matches valid names and a
    one-line description.
-3. **Update `agents/claude/CLAUDE.md`** change-impact map row "Adding a new
+3. **Update the root `CLAUDE.md`** change-impact map row "Adding a new
    skill" to mention the new family.
 
 The PR description must explain **why** the new family is needed and
@@ -147,13 +147,13 @@ The same family rule applies to **every runtime** the repo serves:
 
 | Runtime | Layout | Validator check |
 |---|---|---|
-| `agents/claude/` | `<skill>/SKILL.md` | Directory name |
-| `agents/coco/` | `<skill>/SKILL.md` | Directory name |
+| `agents/cli/` | `<skill>/SKILL.md` | Directory name |
+| `agents/coco-snowsight/` | `<skill>/SKILL.md` | Directory name |
 | `agents/cursor/` | `rules/<skill>.mdc` (flat) | File stem (`.mdc` removed) |
 
 Where a skill exists in multiple runtimes, all copies must share the same
-name — `agents/claude/ts-convert-to-snowflake-sv`,
-`agents/coco/ts-convert-to-snowflake-sv`, and
+name — `agents/cli/ts-convert-to-snowflake-sv`,
+`agents/coco-snowsight/ts-convert-to-snowflake-sv`, and
 `agents/cursor/rules/ts-convert-to-snowflake-sv.mdc` are all the same skill.
 The validator catches new skills added to ANY of these locations.
 

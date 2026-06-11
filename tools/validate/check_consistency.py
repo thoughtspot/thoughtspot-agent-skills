@@ -3,8 +3,8 @@
 check_consistency.py — verify cross-file consistency (skills tables, symlink steps, stage copy list).
 
 Checks:
-  1. README.md skills tables — every skill in agents/claude/ and agents/coco-snowsight/ is listed
-  2. agents/claude/SETUP.md symlink steps — every claude skill has an ln -s step
+  1. README.md skills tables — every skill in agents/cli/, agents/claude/, and agents/coco-snowsight/ is listed
+  2. SETUP.md symlink steps — every agents/cli/ and agents/claude/ skill has an ln -s step in its runtime's SETUP.md
   3. agents/coco-snowsight/SETUP.md stage copy list — every coco SKILL.md and agents/shared/ file is listed
   4. README.md structure section — scripts/ and every subdirectory of tools/ is mentioned
   5. agents/cursor/SETUP.md rule entries — every .mdc in agents/cursor/rules/ is listed
@@ -86,34 +86,41 @@ def check_readme_skills(repo_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 2: agents/claude/SETUP.md symlink steps
+# Check 2: SETUP.md symlink steps (agents/cli/ + agents/claude/)
 # ---------------------------------------------------------------------------
 
 def check_claude_setup_symlinks(repo_root: Path) -> list[str]:
     """
-    Every directory under agents/claude/ that contains a tracked SKILL.md must have
-    a corresponding ln -s step in agents/claude/SETUP.md.
+    Every directory under agents/cli/ or agents/claude/ that contains a tracked
+    SKILL.md must have a corresponding ln -s step in that runtime's SETUP.md
+    (agents/cli/SETUP.md or agents/claude/SETUP.md respectively).
     Gitignored/untracked skill directories are skipped.
     """
     failures = []
-    setup_path = repo_root / "agents" / "claude" / "SETUP.md"
-    if not setup_path.exists():
-        return ["agents/claude/SETUP.md not found"]
-
-    setup_text = setup_path.read_text(encoding="utf-8")
-    agent_dir = repo_root / "agents" / "claude"
     tracked = _get_tracked_paths(repo_root)
 
-    for skill_dir in sorted(agent_dir.iterdir()):
-        skill_md_rel = f"agents/claude/{skill_dir.name}/SKILL.md"
-        if skill_md_rel not in tracked:
+    for runtime in ("cli", "claude"):
+        agent_dir = repo_root / "agents" / runtime
+        if not agent_dir.is_dir():
             continue
-        skill_name = skill_dir.name
-        # Look for ln -s line containing the skill directory name
-        if f"ln -s" not in setup_text or skill_name not in setup_text:
-            failures.append(
-                f"agents/claude/SETUP.md: no 'ln -s' step found for skill '{skill_name}'"
-            )
+        setup_path = agent_dir / "SETUP.md"
+        if not setup_path.exists():
+            failures.append(f"agents/{runtime}/SETUP.md not found")
+            continue
+        setup_text = setup_path.read_text(encoding="utf-8")
+
+        for skill_dir in sorted(agent_dir.iterdir()):
+            if not skill_dir.is_dir():
+                continue
+            skill_md_rel = f"agents/{runtime}/{skill_dir.name}/SKILL.md"
+            if skill_md_rel not in tracked:
+                continue
+            skill_name = skill_dir.name
+            # Look for ln -s line containing the skill directory name
+            if "ln -s" not in setup_text or skill_name not in setup_text:
+                failures.append(
+                    f"agents/{runtime}/SETUP.md: no 'ln -s' step found for skill '{skill_name}'"
+                )
 
     return failures
 

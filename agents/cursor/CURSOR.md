@@ -53,9 +53,9 @@ setting up for the first time.
 
 | Changed area | Also update |
 |---|---|
-| `agents/claude/<skill>/SKILL.md` logic | `agents/cursor/rules/<skill>.mdc` (keep in sync) |
+| `agents/cli/<skill>/SKILL.md` logic | `agents/cursor/rules/<skill>.mdc` (keep in sync) |
 | Credential storage or verification steps | Both SKILL.md files, both .mdc files, and `.claude/rules/security.md` |
-| `agents/shared/*` | `agents/coco/` stage copy AND `agents/cursor/` (shared via `~/.cursor/shared/` symlink — no copy needed if symlink is in place) |
+| `agents/shared/*` | `agents/coco-snowsight/` stage copy AND `agents/cursor/` (shared via `~/.cursor/shared/` symlink — no copy needed if symlink is in place) |
 | Add a new Claude skill | Add matching `agents/cursor/rules/<skill>.mdc` |
 | Path convention changes | Update `agents/cursor/SETUP.md` install steps |
 

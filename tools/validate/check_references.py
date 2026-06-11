@@ -2,15 +2,15 @@
 """
 check_references.py — verify all file paths referenced in SKILL.md and .mdc files exist.
 
-Scans every SKILL.md in agents/claude/ and agents/coco/, and every .mdc in
-agents/cursor/rules/, for markdown links [text](path) and maps runtime-specific
-path prefixes back to repo paths before checking existence.
+Scans every SKILL.md in agents/cli/, agents/claude/, and agents/coco-snowsight/,
+and every .mdc in agents/cursor/rules/, for markdown links [text](path) and maps
+runtime-specific path prefixes back to repo paths before checking existence.
 
 Path mappings:
-  Claude skills  (~/.claude/...):
+  Claude / CLI skills  (~/.claude/...):
     ~/.claude/shared/         → agents/shared/
     ~/.claude/mappings/       → agents/shared/mappings/
-    ~/.claude/skills/         → agents/claude/
+    ~/.claude/skills/         → agents/cli/ (or agents/claude/ for Claude-only skills)
 
   CoCo skills (relative ../../shared/...):
     ../../shared/             → agents/shared/   (from skill dir two levels deep)
@@ -37,7 +37,7 @@ LINK_PATTERN = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
 CLAUDE_PREFIX_MAP = {
     "~/.claude/shared/": "agents/shared/",
     "~/.claude/mappings/": "agents/shared/mappings/",
-    "~/.claude/skills/": "agents/claude/",
+    "~/.claude/skills/": "agents/cli/",
 }
 
 COCO_PREFIX_MAP = {
@@ -69,6 +69,12 @@ def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | 
     # Strip fragment from path
     path_part = link_target.split("#")[0]
     if not path_part:
+        return None
+
+    # Skip template placeholders — link targets that contain {var} tokens are
+    # emitted-output examples (e.g. MIGRATION_REPORT.md rows: [name]({link})),
+    # not real repo paths.
+    if "{" in path_part or "}" in path_part:
         return None
 
     prefix_map = _prefix_map_for(skill_file)
@@ -110,8 +116,9 @@ def main() -> int:
 
     repo_root = Path(args.root).resolve()
     skill_files = (
+        list(repo_root.glob("agents/cli/*/SKILL.md")) +
         list(repo_root.glob("agents/claude/*/SKILL.md")) +
-        list(repo_root.glob("agents/coco/*/SKILL.md")) +
+        list(repo_root.glob("agents/coco-snowsight/*/SKILL.md")) +
         list(repo_root.glob("agents/cursor/rules/*.mdc"))
     )
 

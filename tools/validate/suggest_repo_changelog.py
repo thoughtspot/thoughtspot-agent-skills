@@ -85,7 +85,9 @@ def detect_significant_changes(staged_lines: list[str], repo_root: Path) -> list
         status, path = parts[0].strip(), parts[1].strip()
 
         # New SKILL.md added
-        if status == "A" and path.endswith("/SKILL.md") and path.startswith("agents/claude/"):
+        if status == "A" and path.endswith("/SKILL.md") and path.startswith(
+            ("agents/cli/", "agents/claude/", "agents/coco-snowsight/")
+        ):
             skill_name = path.split("/")[2]
             changes.append(("new-skill", f"feat: add {skill_name} skill"))
 
