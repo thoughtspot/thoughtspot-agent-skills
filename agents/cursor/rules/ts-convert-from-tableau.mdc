@@ -93,10 +93,11 @@ table:
 
 **5b. Model TML** (one per datasource — strict separation, never merge):
 
-> **Model TML hard rules (I1–I5):** see `~/.cursor/shared/schemas/ts-model-conversion-invariants.md`.
+> **Model TML hard rules (I1–I6):** see `~/.cursor/shared/schemas/ts-model-conversion-invariants.md`.
 > I1: every formula needs a paired `columns[]` entry with `formula_id:`. I2: no `aggregation:` in `formulas[]`.
 > I3: `index_type: DONT_INDEX` on formula MEASURE columns. I4: `with:` must match the target's `name:` exactly.
 > I5: `COUNTD(x)` → `unique count([T::x])` formula, never `aggregation: COUNT_DISTINCT`.
+> I6: connection referenced by name, never GUID — use the display name from Step 4.
 
 ```yaml
 model:
@@ -248,5 +249,6 @@ any omitted untranslatable formulas (WINDOW_*, LOD, table calculations).
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-06-11 | Add I6 to Model TML hard rules callout (connection by name, never GUID) |
 | 1.1.0 | 2026-06-09 | Custom SQL → sql_view TML, connection listing, formula fallback, obj_id fix, datasource separation |
 | 1.0.0 | 2026-06-09 | Initial release (untested in Cursor) |

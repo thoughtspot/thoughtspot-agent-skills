@@ -695,7 +695,11 @@ See `../../shared/schemas/ts-model-conversion-invariants.md` for full detail.
 >
 > **I5 — `COUNTD(x)` → `unique count ( [T::x] )` formula entry, never `aggregation: COUNT_DISTINCT`.**
 > Using `aggregation: COUNT_DISTINCT` silently flips `column_type` from MEASURE to ATTRIBUTE.
-> See `../../shared/schemas/ts-model-conversion-invariants.md` (I1–I5).
+>
+> **I6 — Connection referenced by name, never GUID.** In every table and sql_view TML block,
+> use `connection: name: "{name}"` — the display name from Step 4. GUIDs are environment-specific
+> and will fail on any ThoughtSpot instance other than the one they were exported from.
+> See `../../shared/schemas/ts-model-conversion-invariants.md` (I1–I6).
 
 **Template:**
 
@@ -1802,6 +1806,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.39 | 2026-06-11 | Add I6 (connection by name, never GUID) to Step 5b callout; callout now covers I1–I6. |
 | 1.5.38 | 2026-06-11 | Add Model TML hard rules (I1–I5) callout to Step 5b with paired `formula_id`/`DONT_INDEX` template and COUNTD → `unique count` example. Add mandatory formula-reference gate (I7) to Step 5b and Step A3. Add model name N1 citation (bare datasource name, no prefix). |
 | 1.5.37 | 2026-06-10 | **Corrects the liveboard in-place rule (1.5.32/1.5.36 were wrong about *why*):** the only thing that matters is that `guid`/`obj_id` are **top-level keys of the TML doc — siblings of `liveboard:`, not nested inside it**. Nesting `liveboard.guid` makes every re-import fork a duplicate regardless of `--policy` (the `PARTIAL`-forks claim was a red herring — it was the nesting all along; models worked only because their guid was already top-level). Plus two review fixes: **(a)** detect & drop **redundant pass-through formulas** (`SUM([col])`/`[col]` of an existing physical column — e.g. `Total sales`, `Monthly sales` vs physical `Sales`); use the physical column, note the collapse. **(b)** put the **original Tableau formula in each coverage answer's `description`** for side-by-side review. |
 | 1.5.36 | 2026-06-10 | Three fixes from the Multiple Calculated Fields review: **(1)** new **Step 11.5 — Formula coverage answers**: every formula not on a dashboard tile (or *all* of them, for a model-only workbook) gets a simple testable answer — a "Formula coverage" tab on the liveboard, or standalone saved answers when there's no liveboard. **(2)** `cumulative_*`/`moving_*` must take the **worksheet's shelf attribute as the trailing sort arg** and reference the **measure column** by name (`cumulative_sum([Sales],[Month])`), not `sum()`. **(3)** apply **`PERCENTAGE` format** (`answer_columns[].format`) to contribution/percent-of-total/growth measures. Also: **in-place liveboard re-import must use `ALL_OR_NONE`** — `PARTIAL` forks a duplicate even with `guid`+`obj_id` pinned; and `chart.type: TABLE` is invalid (omit the chart block for `TABLE_MODE` tiles). |
