@@ -261,79 +261,59 @@ model_tables:
 
 Column references use the same `[sql_view_name::column]` syntax.
 
-### Formula fallback — omit and log untranslatable formulas
-
-When a Tableau calculated field cannot be translated to a native ThoughtSpot function
-or a pass-through fallback (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE, or any pattern listed
-in `tableau-formula-translation.md` "Untranslatable Patterns"):
-
-1. **Omit the formula** from the model TML `formulas[]` section entirely
-2. **Omit the corresponding `columns[]` entry** that would reference the formula via `formula_id`
-3. **Log the omission** — add a row to the `MIGRATION_LIMITATIONS.md` report with the
-   formula name, datasource, reason, and Tableau expression excerpt
-
-Never generate a placeholder or stub formula — a formula with incorrect syntax causes
-the entire model import to fail. A missing formula produces a functional model with
-reduced coverage, which the user can then address manually.
-
 ---
 
-## SQL View TML Rules (Custom SQL Datasources)
+## Date Column Rules — full date required
 
-When a Tableau `<relation>` has `type="custom-sql"`, the SQL text is the datasource's
-query — it does NOT map to a physical table. Generate a `sql_view:` TML instead of a
-`table:` TML.
+Any column intended as a DATE in ThoughtSpot must resolve to a full `YYYY-MM-DD` date,
+never a bare year or partial string. ThoughtSpot requires a complete date for:
 
-### When to generate a SQL View
+- **Date bucketing** — `.yearly`, `.monthly`, `.quarterly` in search queries
+- **KPI sparklines** — period-over-period comparison needs actual date arithmetic
+- **Filters** — date-range filters expect a real date type
 
-- The `<relation>` element has `type="text"` (custom SQL indicator in TWB XML)
-- The element contains a raw SQL query in its text content
+### The rule
 
-### Required structure
+When converting a string that represents a year (e.g. `_2016_17`, `FY2016`, `2016`) to
+a date column, always produce a full date by appending a month and day:
 
-```yaml
-sql_view:
-  name: "Datasource Custom SQL"
-  connection:
-    name: "Connection Display Name"      # exact name from ts connections list — case-sensitive
-  sql_query: |
-    SELECT col1, col2, col3
-    FROM catalog.schema.table_name
-    WHERE condition = 'value'
-  sql_view_columns:
-  - name: COL1
-    sql_output_column: col1              # must match a column/alias in the SQL output
-    data_type: VARCHAR
-    properties:
-      column_type: ATTRIBUTE
-  - name: COL2
-    sql_output_column: col2
-    data_type: DOUBLE
-    properties:
-      column_type: MEASURE
-      aggregation: SUM
+```sql
+-- Correct: full date — ThoughtSpot can bucket, compare, and sparkline
+TO_DATE(SUBSTRING(YEAR_PERIOD, 2, 4) || '-01-01', 'YYYY-MM-DD')
+
+-- Wrong: bare year — renders as a number, not a date; sparklines fail
+TO_DATE(SUBSTRING(YEAR_PERIOD, 2, 4), 'YYYY')
 ```
 
-### Key differences from table TML
+The same applies in ThoughtSpot formulas:
 
-- **No `db`, `schema`, or `db_table`** — the SQL query defines the data source
-- **`connection.name` is required** — SQL Views must reference a named connection
-- **`sql_output_column`** replaces `db_column_name` — must match a column/alias in the SQL
-- **`db_column_properties` is NOT used** — `data_type` goes at the column level
-- **File extension**: `*.sql_view.tml` (not `*.table.tml`)
+```
+// Correct
+to_date(substr([YEAR_PERIOD], 2, 4) + '-01-01', 'yyyy-MM-dd')
 
-See `thoughtspot-sql-view-tml.md` for the full schema reference.
-
-### Model references to SQL Views
-
-A SQL View is referenced in `model_tables[]` by name, just like a regular table:
-
-```yaml
-model_tables:
-- name: "Datasource Custom SQL"
+// Wrong — produces an ambiguous value ThoughtSpot can't reliably bucket
+to_date(substr([YEAR_PERIOD], 2, 4), 'yyyy')
 ```
 
-Column references use the same `[sql_view_name::column]` syntax.
+### Where to apply the conversion
+
+**If the datasource already uses a SQL View** (custom SQL or UNPIVOT), apply the
+conversion in the SQL query itself — this produces a native DATE column at the source.
+The model then references it directly via `column_id` instead of needing a formula.
+
+**If the datasource uses a regular table**, apply the conversion as a model formula —
+a formula like `to_date(substr([col], 2, 4) + '-01-01', 'yyyy-MM-dd')` works correctly
+and keeps the date logic visible in the model. Either approach is fine as long as the
+result is a full `YYYY-MM-DD` date.
+
+### Common patterns
+
+| Source pattern | SQL (in SQL View) | ThoughtSpot formula (in model) | Result |
+|---|---|---|---|
+| `_2016_17` (UNPIVOT) | `TO_DATE(SUBSTRING(col, 2, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date(substr([col], 2, 4) + '-01-01', 'yyyy-MM-dd')` | `2016-01-01` |
+| `FY2016` | `TO_DATE(SUBSTRING(col, 3, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date(substr([col], 3, 4) + '-01-01', 'yyyy-MM-dd')` | `2016-01-01` |
+| `2016` (bare year) | `TO_DATE(col \|\| '-01-01', 'YYYY-MM-DD')` | `to_date([col] + '-01-01', 'yyyy-MM-dd')` | `2016-01-01` |
+| `2016-03` (year-month) | `TO_DATE(col \|\| '-01', 'YYYY-MM-DD')` | `to_date([col] + '-01', 'yyyy-MM-dd')` | `2016-03-01` |
 
 ---
 

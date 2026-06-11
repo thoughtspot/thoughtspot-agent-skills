@@ -301,12 +301,85 @@ liveboard:
 ## `client_state` / `client_state_v2`
 
 Both `answer.table` and `answer.chart` carry `client_state` (legacy, usually `''`) and
-`client_state_v2` — an opaque JSON blob holding frontend presentation state. It is **not**
-required to render a viz; ThoughtSpot applies sensible defaults when it is empty. See the
+`client_state_v2` — an opaque JSON blob holding frontend presentation state. For most chart
+types it is **not** required — ThoughtSpot applies sensible defaults when it is empty. See the
 `client_state_v2` section in [thoughtspot-answer-tml.md](thoughtspot-answer-tml.md) for the
 observed structure (series colors, axis properties incl. dual-axis `isOpposite`, per-column
-KPI display options, responsive layout). Do not hand-author it for migrations — supply the
-structural chart block and leave styling to defaults.
+KPI display options, responsive layout).
+
+**Exception — KPI sparklines.** A KPI viz imported without `client_state_v2` renders as a
+plain number — no sparkline, no comparison, no change indicator. The sparkline requires
+`kpiColumnProperties.showSparkline: true` on the date column inside `client_state_v2`. See
+"KPI sparkline `client_state_v2`" below for the verified template.
+
+For all other chart types, do not hand-author `client_state_v2` — supply the structural chart
+block and leave styling to defaults.
+
+### KPI sparkline `client_state_v2`
+
+A KPI viz with a date dimension (e.g. `[Ship Date].yearly`) needs this `client_state_v2` on
+the `chart:` block to render the sparkline trend line. Verified against a live instance
+(2026-06-11).
+
+```jsonc
+{
+  "version": "V4DOT2",
+  "chartProperties": {
+    "gridLines": {},
+    "responsiveLayoutPreference": "USER_PREFERRED_ON",
+    "chartSpecific": { "dataFieldArea": "column" },
+    "kpiDisplayProperties": {
+      "showChange": true,              // show % change vs prior period
+      "showChangeAs": "PERCENT",       // PERCENT | ABSOLUTE
+      "changeInterpretation": "UPWARD_IS_GOOD",
+      "linkChangeColorsWithAnomaly": true
+    }
+  },
+  "columnProperties": [
+    {
+      "columnId": "{DateColumn}",      // e.g. "Year(Ship Date)"
+      "columnProperty": {
+        "kpiColumnProperties": {
+          "showAbbreviatedPreviousDate": false,
+          "showSparkline": true,       // ← THIS enables the sparkline
+          "showComparisonDate": true,
+          "showCurrentDateLabel": true,
+          "showPreviousDateLabel": true,
+          "showPreviousValue": true
+        }
+      }
+    },
+    {
+      "columnId": "{MeasureColumn}",   // e.g. "Total Units Sold"
+      "columnProperty": {
+        "kpiColumnProperties": {
+          "showAbbreviatedPreviousDate": false,
+          "showSparkline": true,
+          "showComparisonDate": true,
+          "showCurrentDateLabel": true,
+          "showPreviousDateLabel": true,
+          "showPreviousValue": true
+        }
+      }
+    }
+  ],
+  "axisProperties": [
+    { "id": "{uuid}", "properties": { "axisType": "Y", "linkedColumns": ["{MeasureColumn}"], "isOpposite": false } },
+    { "id": "{uuid}", "properties": { "axisType": "X", "linkedColumns": ["{DateColumn}"] } }
+  ],
+  "seriesColors": [
+    { "serieName": "{MeasureColumn}", "color": "{hex}" }  // optional — matches viz_style
+  ]
+}
+```
+
+The `table:` block also needs a corresponding `client_state_v2` (simpler — just
+`tableVizPropVersion` and column stubs) and `table_columns` with `headline_aggregation`.
+Both `table:` and `chart:` blocks are required for the KPI to render correctly with
+sparkline.
+
+Generate fresh UUIDs for `axisProperties[].id` — these are opaque identifiers, not
+references to other objects.
 
 ### `parameter_overrides[]` fields
 

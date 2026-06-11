@@ -116,7 +116,7 @@ Enter A / M:
   8.  Migrate dashboards? + separate vs single-tabbed (2+) . you choose (skip → Step 12)
   9.  Parse dashboard layout and map to grid ............... auto
   9d. Orphan worksheets (not on a dashboard) — add as tiles? you choose
- 10.  Generate liveboard TML ............................... auto
+ 10.  Generate liveboard TML (export model for params first) auto
  10f. Add referenced parameters to the header? (default Y) . you choose
  10g. Add a "Migration Summary" tab (migrated/decisions/omitted) auto
  10.5 Pick a liveboard style (curated theme; default) ..... you choose
@@ -649,6 +649,16 @@ Key rules:
   `ALTER`/reload to a real `DATE` — outside this skill; needs the user) then bind as `DATE`,
   or **(b)** keep VARCHAR and add a `to_date([col])` **derived formula column** for
   date analytics. Don't silently bind a date as a string.
+- **Partial date strings must produce a full `YYYY-MM-DD` date.** When a source column
+  contains a year-only value (e.g. `_2016_17`, `FY2016`, `2016`) and needs to become a
+  DATE, always append `-01-01` (or `-01` for year-month) to produce a complete date.
+  A bare-year conversion like `to_date('2016', 'yyyy')` produces an ambiguous value that
+  ThoughtSpot cannot bucket (`.yearly`, `.monthly`), use for KPI sparklines, or filter as
+  a date range. If the datasource already uses a **SQL View**, apply the conversion in the
+  SQL query (`TO_DATE(SUBSTRING(col, 2, 4) || '-01-01', 'YYYY-MM-DD')`). If it uses a
+  **regular table**, apply it as a model formula
+  (`to_date(substr([col], 2, 4) + '-01-01', 'yyyy-MM-dd')`). See `tableau-tml-rules.md`
+  "Date Column Rules" for the full pattern table.
 - Use `INT64` for Tableau `integer` — **never `INT`**
 - `db_column_properties` is **required** on every column
 - No `guid` or `fqn` sections
@@ -790,6 +800,22 @@ populate `list_config.list_choice[]`:
 
 If the selected connection cannot be queried for the values, omit the parameter and
 log the omission with the original SQL query for manual recreation.
+
+**Critical parameter invariants (from live-instance testing):**
+- `range_config` values (`range_min`, `range_max`, `default_value`) **must be strings**
+  in the TML — `range_min: "1"`, not `range_min: 1`. Bare integers cause
+  `"Invalid YAML/JSON syntax in file"` on import. This applies even when the parameter's
+  `data_type` is `INT64` or `DOUBLE`.
+- When a formula references another formula inside `sum()` — e.g.
+  `sum([Attrition Count])` where `Attrition Count` is `if(x='Yes') then 1 else 0` —
+  ThoughtSpot rejects it with *"Function sum expects 1st argument to be Numeric"*. The
+  fix is to **inline the referenced formula's expression**: write
+  `sum ( if ( [x] = 'Yes' ) then 1 else 0 )` directly, not `sum ( [Attrition Count] )`.
+  Apply this when any MEASURE formula references another formula column inside an
+  aggregation function.
+- After importing a model with parameters, **export the model** and read the
+  `parameters[].id` field — ThoughtSpot assigns the UUID on import. You need this UUID
+  for Step 10f (liveboard parameter chips).
 
 ### Formula reference translation
 
@@ -1285,14 +1311,41 @@ recommend → resolve).
 5. **Record the outcome** in the Migration Summary (Step 10g): which orphans existed, which
    were added, which were left off (and that the model still supports them via Spotter).
 
-Don't skip this prompt just because the dashboard already looks complete — orphans frequently
-include an overall-rate or breakdown view the author drafted but forgot to place.
+**This is a MUST-ASK step — never skip the prompt or decide on the user's behalf.** Orphans
+frequently include an overall-rate or breakdown view the author drafted but forgot to place.
+Even when the dashboard looks complete, the user may want the extra coverage. When
+recommending, default to **"add as tiles"** for orphans that represent a distinct, useful
+view (a different aggregation, a different dimension breakdown) — the user can always decline.
 
 ---
 
 ## Step 10 — Generate Liveboard TML
 
+### 10-pre. Export model and check for parameters (BEFORE generating TML)
+
+**Do this first, before writing any liveboard YAML.** Export each model referenced by the
+liveboard to discover parameters and their UUIDs:
+
+```bash
+source ~/.zshenv && ts tml export {model_guid} --profile {profile_name}
+```
+
+Parse the exported model for `parameters[]` entries. If any exist, record:
+- `name` — the parameter display name
+- `id` — the UUID assigned by ThoughtSpot (needed for `parameter_overrides[].key`)
+
+These will be used in Step 10f to add `parameter_overrides` and `ordered_chips` to the
+liveboard TML. **If you skip this step, Step 10f cannot be completed** — the UUIDs are
+not available from the TWB or from the import response.
+
 ### 10a. Resolve chart types
+
+**Default to CHART_MODE with the closest chart type — TABLE_MODE is a last resort.**
+Only use `TABLE_MODE` for explicit crosstabs (Tableau `text` mark class) or when there
+is genuinely no chart type that can render the data. For untranslatable visualizations
+(k-means cluster, forecast), build a **CHART_MODE placeholder** with the most representative
+type (SCATTER for cluster inputs, LINE for forecast historical trend) and flag for review
+in the description — never fall back to TABLE_MODE as a lazy alternative.
 
 | Tableau mark class / zone | ThoughtSpot `chart.type` |
 |---|---|
@@ -1316,19 +1369,70 @@ for annual data, `[Date].monthly` otherwise) — the default is monthly, so set 
 explicitly for annual sources. So a "count of sectors" KPI in a workbook with a `Fiscal Year`
 column is `[Total Sectors] [Fiscal Year].yearly`, **not** a bare `[Total Sectors]`.
 
-For the trend/sparkline to actually render, the date must be in **both** `chart_columns`
-and on axis **`x`**, with the measure on `y` — a KPI with only `y:[measure]` shows a flat
-number, no trend:
+For the trend/sparkline to actually render, three things are required:
+
+1. The date must be in **both** `chart_columns` and on axis **`x`**, with the measure on `y`
+2. A `table:` block with `table_columns` and `ordered_column_ids`
+3. **`client_state_v2` on the `chart:` block** with `showSparkline: true` in the
+   `kpiColumnProperties` — without this, the KPI renders as a plain number with no trend line
+
+See `thoughtspot-liveboard-tml.md` "KPI sparkline `client_state_v2`" for the verified
+template. The template requires:
+- `kpiDisplayProperties` at the chart level (`showChange`, `showChangeAs: "PERCENT"`)
+- Per-column `kpiColumnProperties` with `showSparkline: true` on **both** the date and
+  measure columns
+- `axisProperties` with fresh UUIDs (use `python3 -c "import uuid; print(uuid.uuid4())"`)
+- Optional `seriesColors` to match the chosen theme palette
+
+Full KPI viz template (substitute column names, UUIDs, and colors):
 
 ```yaml
 chart:
   type: KPI
   chart_columns:
-  - column_id: Month(Order Date)
-  - column_id: Total Total Revenue
+  - column_id: "{ResolvedMeasure}"
+  - column_id: "{ResolvedDate}"
   axis_configs:
-  - x: [Month(Order Date)]
-    y: [Total Total Revenue]
+  - x:
+    - "{ResolvedDate}"
+    y:
+    - "{ResolvedMeasure}"
+  client_state: ""
+  client_state_v2: >-
+    {"version": "V4DOT2",
+     "chartProperties": {"gridLines": {}, "responsiveLayoutPreference": "USER_PREFERRED_ON",
+       "chartSpecific": {"dataFieldArea": "column"},
+       "kpiDisplayProperties": {"showChange": true, "showChangeAs": "PERCENT",
+         "changeInterpretation": "UPWARD_IS_GOOD", "linkChangeColorsWithAnomaly": true}},
+     "columnProperties": [
+       {"columnId": "{ResolvedDate}", "columnProperty": {"kpiColumnProperties":
+         {"showAbbreviatedPreviousDate": false, "showSparkline": true,
+          "showComparisonDate": true, "showCurrentDateLabel": true,
+          "showPreviousDateLabel": true, "showPreviousValue": true}}},
+       {"columnId": "{ResolvedMeasure}", "columnProperty": {"kpiColumnProperties":
+         {"showAbbreviatedPreviousDate": false, "showSparkline": true,
+          "showComparisonDate": true, "showCurrentDateLabel": true,
+          "showPreviousDateLabel": true, "showPreviousValue": true}}}],
+     "axisProperties": [
+       {"id": "{uuid1}", "properties": {"axisType": "Y", "linkedColumns": ["{ResolvedMeasure}"], "isOpposite": false}},
+       {"id": "{uuid2}", "properties": {"axisType": "X", "linkedColumns": ["{ResolvedDate}"]}}],
+     "seriesColors": [{"serieName": "{ResolvedMeasure}", "color": "{hex}"}]}
+  viz_style: '{"overrides": {"column_properties": [{"column_id": "{ResolvedMeasure}", "properties": {"color": "{hex}"}}]}}'
+table:
+  table_columns:
+  - column_id: "{ResolvedMeasure}"
+    headline_aggregation: SUM
+  - column_id: "{ResolvedDate}"
+    headline_aggregation: MIN-MAX
+  ordered_column_ids:
+  - "{ResolvedDate}"
+  - "{ResolvedMeasure}"
+  client_state: ""
+  client_state_v2: >-
+    {"tableVizPropVersion": "V1",
+     "columnProperties": [
+       {"columnId": "{ResolvedDate}", "columnProperty": {}},
+       {"columnId": "{ResolvedMeasure}", "columnProperty": {}}]}
 ```
 
 ### 10b. Build search queries
@@ -1449,6 +1553,12 @@ table ref, and don't hand-author `client_state_v2` — leave styling to defaults
 Note tiles use `note_tile.html_parsed_string` (HTML) and have **no `answer`** — not the
 old `viz_type: NOTE_TILE`/`content` form.
 
+**Do NOT create a note tile just for the dashboard title.** ThoughtSpot liveboards have
+native `name` and `description` fields — use them instead. Set `liveboard.name` to the
+dashboard title and `liveboard.description` to any subtitle or context text. Only create
+a note tile for a Tableau text zone that carries **content beyond the title** — instructions,
+annotations, embedded links, or multi-paragraph context that belongs inside the board.
+
 ### 10d. Beautify layout
 
 Apply layout optimization to each liveboard TML:
@@ -1494,7 +1604,25 @@ Prefer the Tableau worksheet caption when it's descriptive; otherwise synthesize
 from the columns on the shelves (`{measure} by {dimension}`, `Monthly {measure} Trend`,
 `Top {N} {dimension} by {measure}`). Keep descriptions to one factual sentence.
 
+**Every viz MUST have an `answer.description` — no exceptions.** This includes fully
+translated charts, not just placeholders. The description should state what the chart shows
+and name the Tableau source worksheet. Example:
+
+```yaml
+answer:
+  name: "Top 5 Item Types by Revenue"
+  description: "Horizontal bar of top 5 item types ranked by total revenue. Source: Tableau worksheet 'Top 5 Item Type Revenue wise'."
+```
+
+For placeholder/partial vizzes, also note what's missing and that it needs review.
+
 ### 10f. Surface referenced parameters in the liveboard header
+
+**This step is MANDATORY when the model has parameters — do not skip it.** If parameter
+creation failed in Step 5b, fix the parameter first (check `range_config` string values,
+cross-formula inlining) before proceeding. A Tableau dashboard with a parameter control
+zone expects the parameter to be surfaced on the liveboard; omitting it silently loses
+interactivity.
 
 If any viz on the liveboard **references a model parameter** (directly, or via a formula/bin
 it uses — e.g. an `Age (bin)` driven by an `Age Groups` parameter), the parameter can be
@@ -1574,6 +1702,9 @@ ready-to-apply per-theme recipes (tokens + `viz_style` palettes) are in
 [references/liveboard-style-themes.md](references/liveboard-style-themes.md) — read it and
 apply the chosen theme's three layers verbatim.
 
+**MUST present ALL 6 themes plus option 0 — do not truncate the list.** Presenting a
+subset removes the user's choice. Use the exact prompt below:
+
 ```
 Pick a style for the liveboard(s):
   1  Clean & Minimal     — light gray, sharp borders (data-first, default)
@@ -1636,6 +1767,13 @@ authoritative**):
 Border type and KPI-tile treatment **vary per theme** — read the reference file, don't
 assume. `TBC_I`–`TBC_P` are valid **only on KPI tiles** — never apply a dark tile color to
 a chart/table tile.
+
+**Post-apply verification.** After importing a themed liveboard, export it and verify:
+1. Every chart viz has a `chart.viz_style` entry with the theme's color palette
+2. Every viz has a `style.overrides[]` entry with the correct `tile_brand_color`
+3. KPI tiles have `tile_kpi_color` and `is_highlighted` if the theme specifies them
+4. No viz is missing from the overrides list (common miss: late-added or computed tiles)
+If any are missing, add them and re-import.
 
 ---
 
@@ -1806,6 +1944,10 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.43 | 2026-06-11 | Add **partial-date-to-full-date rule** to Step 5a: year-only strings (e.g. `_2016_17`, `FY2016`) must produce a full `YYYY-MM-DD` date (append `-01-01`). Bare-year conversions break ThoughtSpot date bucketing, KPI sparklines, and date filters. Apply in SQL View query when one exists, otherwise as a model formula. Companion rule added to `tableau-tml-rules.md` "Date Column Rules". Also fixed duplicate SQL View TML Rules section in that file. |
+| 1.5.42 | 2026-06-11 | Add **Step 10-pre** — export model and check for parameters BEFORE generating any liveboard TML. Fixes repeated Step 10f misses: the parameter UUID lookup was positioned after TML generation, making it easy to skip. Now the UUID is collected upfront so `parameter_overrides`/`ordered_chips` are part of the initial TML, not an afterthought. |
+| 1.5.41 | 2026-06-11 | KPI sparkline fix: `client_state_v2` with `showSparkline: true` is **required** on KPI chart blocks — without it, only a plain number renders (no trend line, no comparison). Added full KPI viz template to Step 10a with `chart:` + `table:` blocks, `kpiDisplayProperties`, per-column `kpiColumnProperties`, and axis UUIDs. Updated `thoughtspot-liveboard-tml.md` schema to document the exception and provide verified template. |
+| 1.5.40 | 2026-06-11 | Eight learnings from the 3-workbook demo migration (Amazon/FDI/HR): **(1)** Title note tiles are unnecessary — use `liveboard.name`/`description` instead; only create note tiles for substantive text zones. **(2)** Parameter `range_config` values must be strings; `sum([formula_ref])` needs inlining; export model post-import to capture parameter UUIDs. **(3)** Step 10f (parameter on liveboard) is now mandatory — do not skip; fix failed params first. **(4)** Step 9d (orphan worksheets) reinforced as must-ask with "add" as default recommendation. **(5)** CHART_MODE is the default — TABLE_MODE only for explicit crosstabs; untranslatable vizzes get CHART_MODE placeholders (SCATTER for clusters, LINE for forecasts). **(6)** Theme picker must show all 6 options; post-apply verification step added. **(7)** `answer.description` required on every viz (not just placeholders), naming the Tableau source worksheet. **(8)** Updated Step 10c template accordingly. |
 | 1.5.39 | 2026-06-11 | Add I6 (connection by name, never GUID) to Step 5b callout; callout now covers I1–I6. |
 | 1.5.38 | 2026-06-11 | Add Model TML hard rules (I1–I5) callout to Step 5b with paired `formula_id`/`DONT_INDEX` template and COUNTD → `unique count` example. Add mandatory formula-reference gate (I7) to Step 5b and Step A3. Add model name N1 citation (bare datasource name, no prefix). |
 | 1.5.37 | 2026-06-10 | **Corrects the liveboard in-place rule (1.5.32/1.5.36 were wrong about *why*):** the only thing that matters is that `guid`/`obj_id` are **top-level keys of the TML doc — siblings of `liveboard:`, not nested inside it**. Nesting `liveboard.guid` makes every re-import fork a duplicate regardless of `--policy` (the `PARTIAL`-forks claim was a red herring — it was the nesting all along; models worked only because their guid was already top-level). Plus two review fixes: **(a)** detect & drop **redundant pass-through formulas** (`SUM([col])`/`[col]` of an existing physical column — e.g. `Total sales`, `Monthly sales` vs physical `Sales`); use the physical column, note the collapse. **(b)** put the **original Tableau formula in each coverage answer's `description`** for side-by-side review. |

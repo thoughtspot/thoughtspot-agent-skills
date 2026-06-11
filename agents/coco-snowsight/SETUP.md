@@ -73,6 +73,7 @@ snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SK
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-sql-view-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/worked-examples/tableau/liveboard-kpi-sparkline.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-to-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
@@ -135,10 +136,13 @@ without CLI access.
 │   │   ├── thoughtspot-model-tml.md
 │   │   ├── thoughtspot-feedback-tml.md
 │   │   └── thoughtspot-formula-patterns.md
-│   └── worked-examples/snowflake/
-│       ├── ts-from-snowflake.md
-│       ├── ts-from-snowflake-dunder.md
-│       └── ts-to-snowflake.md
+│   └── worked-examples/
+│       ├── snowflake/
+│       │   ├── ts-from-snowflake.md
+│       │   ├── ts-from-snowflake-dunder.md
+│       │   └── ts-to-snowflake.md
+│       └── tableau/
+│           └── liveboard-kpi-sparkline.md
 └── skills/
     ├── ts-setup-sv/
     │   └── SKILL.md
