@@ -1,7 +1,7 @@
 # Worked Example — Snowflake Semantic View → ThoughtSpot Model
 
 End-to-end conversion of `BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV` to a ThoughtSpot
-Model named `TEST_SV_BIRD Superhero`.
+Model named `BIRD Superhero`.
 
 The semantic view references Snowflake objects in the `BIRD.SUPERHERO_SV` schema —
 in this case those objects are views, but a semantic view can equally reference
@@ -137,7 +137,7 @@ Exporting ThoughtSpot table TMLs confirms that none of the tables have pre-defin
 
 ```yaml
 model:
-  name: "TEST_SV_BIRD Superhero"
+  name: "BIRD Superhero"
   # guid: "{model_guid}"   # Omit on first import. Add on ALL subsequent reimports to
   #                        # update in-place — without it ThoughtSpot creates a new model.
   properties:

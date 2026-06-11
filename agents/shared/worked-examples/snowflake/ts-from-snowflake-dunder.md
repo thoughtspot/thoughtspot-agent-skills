@@ -1,7 +1,7 @@
 # Worked Example — Dunder Mifflin Sales & Inventory SV → ThoughtSpot Model
 
 End-to-end conversion of `DUNDERMIFFLIN.PUBLIC.DUNDER_MIFFLIN_SALES_INVENTORY` to a
-ThoughtSpot Model named `TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY`.
+ThoughtSpot Model named `DUNDER_MIFFLIN_SALES_INVENTORY`.
 
 This example complements [ts-from-snowflake.md](ts-from-snowflake.md) (BIRD example)
 by exercising features that example does NOT cover:
@@ -245,7 +245,7 @@ For this conversion the user accepted the default, producing (excerpt):
 
 ```
 model:
-  name: TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY
+  name: DUNDER_MIFFLIN_SALES_INVENTORY
   # ... tables, columns, formulas elided ...
   properties:
     spotter_config:
@@ -260,7 +260,7 @@ re-run.
 
 ## Final Result
 
-- **Model:** `TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY`
+- **Model:** `DUNDER_MIFFLIN_SALES_INVENTORY`
 - **GUID:** `aee6593d-abf0-4c11-b380-d265181fa9b0`
 - **Tables:** 8 (all reused from APJ_BIRD connection)
 - **Columns:** 31 (23 ATTRIBUTE + 7 MEASURE + 1 attribute formula + 6 measure formulas)
