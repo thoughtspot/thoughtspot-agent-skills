@@ -178,6 +178,10 @@ If no `window:`, classify by `expr`:
 - `comment` → column `description`
 - `synonyms` → `properties.synonyms[]` + `properties.synonym_type: USER_DEFINED`
 
+**MANDATORY (I7):** before classifying any measure expression as untranslatable, open
+`~/.cursor/shared/mappings/ts-databricks/ts-databricks-formula-translation.md` and check the
+full function table and pass-through section. Do not decide from SQL syntax alone.
+
 Use `ts-databricks-formula-translation.md` for all expression translation.
 
 ---
@@ -211,6 +215,16 @@ table:
     data_type: "{TS_TYPE}"
     column_type: "{ATTRIBUTE|MEASURE}"
 ```
+
+> **Model TML hard rules (I1–I7 + N1):** see `~/.cursor/shared/schemas/ts-model-conversion-invariants.md`.
+> I1: every formula needs a paired `columns[]` entry with `formula_id:`. I2: no `aggregation:` in `formulas[]`.
+> I3: `index_type: DONT_INDEX` on formula MEASURE columns.
+> I4: `id:` (when present) must equal `name:` exactly (case-sensitive) — a mismatch makes joins silently fail
+> ("{table} does not exist in schema"). Omit `id:` or set it identical to `name:`.
+> I5: `COUNT(DISTINCT col)` → `unique count([T::col])` formula, never `aggregation: COUNT_DISTINCT`.
+> I6: connection referenced by name, never GUID.
+> I7: see MANDATORY gate in Step 5 — consult the formula-translation reference before any untranslatable call.
+> N1: model name uses the bare MV name — no `TEST_MV_` prefix.
 
 **Model TML:**
 ```yaml
@@ -290,4 +304,5 @@ Generate 3-5 natural language test questions based on the dimensions and measure
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-06-12 | Mirror conversion invariants (I1–I7, N1) + I7 gate from CLI skill (BL-012). |
 | 1.0.0 | 2026-05-22 | Initial release — single conversion mode (Mode A) |

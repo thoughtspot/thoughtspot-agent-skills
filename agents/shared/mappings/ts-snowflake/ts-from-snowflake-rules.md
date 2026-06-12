@@ -465,7 +465,7 @@ The `data_type` field in ThoughtSpot TML `db_column_properties` uses these value
 | `TEXT`, `VARCHAR`, `CHAR`, `STRING` | `VARCHAR` |
 | `NUMBER`, `DECIMAL`, `INT`, `INTEGER`, `BIGINT` (scale=0) | `INT64` |
 | `FLOAT`, `DOUBLE`, `REAL`, `NUMBER` (scale>0) | `DOUBLE` |
-| `BOOLEAN` | `BOOLEAN` |
+| `BOOLEAN` | `BOOL`  *(Snowflake connections — `ts tables create` rejects `BOOLEAN`)* |
 | `DATE` | `DATE` |
 | `DATETIME`, `TIMESTAMP_NTZ`, `TIMESTAMP_LTZ`, `TIMESTAMP_TZ` | `DATE_TIME` |
 | `VARIANT`, `OBJECT`, `ARRAY` | `VARCHAR` *(flag for review)* |
@@ -474,6 +474,11 @@ The `data_type` field in ThoughtSpot TML `db_column_properties` uses these value
 `DataType BIGINT does not match CDW DataType` if you use SQL type names.
 When in doubt about NUMBER scale, use `INT64`; ThoughtSpot validates against
 the actual CDW column type and will report a mismatch if wrong.
+
+> **Snowflake connection note:** `ts tables create` validates `data_type` against the
+> live CDW column type. For Snowflake `BOOLEAN` columns, use `BOOL` — not `BOOLEAN`,
+> `INT64`, or `VARCHAR`. Any other value returns:
+> `Data type BOOLEAN is not valid for column having name {col} and db_column_name {col}.`
 
 ---
 

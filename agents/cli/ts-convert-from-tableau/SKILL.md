@@ -1035,6 +1035,28 @@ print(json.dumps([open(f).read() for f in order]))
 PY
 ```
 
+#### Pre-import validation gate (I1 / I2 / I4 / I5)
+
+Before running `ts tml import`, validate the generated **Model** TML against the hard
+invariants in [`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md).
+`--policy VALIDATE_ONLY` does **not** catch these — ThoughtSpot accepts the TML and then
+behaves wrong. Do not import until all four pass:
+
+- **I1** — every `formulas[]` entry has a `columns[]` entry whose `formula_id:` matches its `id:` exactly. *(Unpaired formula is silently dropped.)*
+- **I2** — no `aggregation:` key appears inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
+- **I4** — every `model_tables[]` `id:` (when present) equals its `name:` with identical case. *(Mismatch makes joins silently fail: "{table} does not exist in schema".)*
+- **I5** — no physical-column `columns[]` entry uses `aggregation: COUNT_DISTINCT`; distinct counts are `unique count ( [TABLE::col] )` formulas. *(COUNT_DISTINCT silently flips MEASURE → ATTRIBUTE.)*
+
+Quick mechanical check on the generated file (replace `<file>`):
+
+```bash
+grep -nE '^\s*aggregation:\s*COUNT_DISTINCT' <file>   # I5 — expect NO matches
+grep -nE '^\s*aggregation:' <file>                    # confirm none sit under a formulas[] entry (I2)
+```
+
+Inspect `formulas[]`/`columns[]` for I1 pairing and `model_tables[]` for I4 id==name.
+If any check fails, fix the TML and re-validate before importing.
+
 Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisting:
 
 ```bash
@@ -1944,6 +1966,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |
 | 1.5.43 | 2026-06-11 | Add **partial-date-to-full-date rule** to Step 5a: year-only strings (e.g. `_2016_17`, `FY2016`) must produce a full `YYYY-MM-DD` date (append `-01-01`). Bare-year conversions break ThoughtSpot date bucketing, KPI sparklines, and date filters. Apply in SQL View query when one exists, otherwise as a model formula. Companion rule added to `tableau-tml-rules.md` "Date Column Rules". Also fixed duplicate SQL View TML Rules section in that file. |
 | 1.5.42 | 2026-06-11 | Add **Step 10-pre** — export model and check for parameters BEFORE generating any liveboard TML. Fixes repeated Step 10f misses: the parameter UUID lookup was positioned after TML generation, making it easy to skip. Now the UUID is collected upfront so `parameter_overrides`/`ordered_chips` are part of the initial TML, not an afterthought. |
 | 1.5.41 | 2026-06-11 | KPI sparkline fix: `client_state_v2` with `showSparkline: true` is **required** on KPI chart blocks — without it, only a plain number renders (no trend line, no comparison). Added full KPI viz template to Step 10a with `chart:` + `table:` blocks, `kpiDisplayProperties`, per-column `kpiColumnProperties`, and axis UUIDs. Updated `thoughtspot-liveboard-tml.md` schema to document the exception and provide verified template. |
