@@ -11,6 +11,17 @@ For how sets appear inside Answer TML (as `cohorts[]`), see
 
 ---
 
+## Column set vs query set (official ThoughtSpot terms)
+
+- **Column set** — scalar, single-column categorization. TML: `cohort.config.cohort_type: SIMPLE`
+  with `cohort_grouping_type: BIN_BASED` or `GROUP_BASED`. No aggregation/ranking.
+- **Query set** — aggregation/ranking across columns. TML: `cohort_type: ADVANCED` with an embedded
+  `cohort.answer{}` (search_query + answer_columns + table) and `groups` over aggregated columns.
+
+Docs: cloud/latest/column-sets, query-sets, tml-sets.
+
+---
+
 ## Two Set Scopes
 
 | Scope | Where defined | Who can use it |
@@ -25,6 +36,10 @@ GUID). Reusable sets have their own GUID and can be exported, imported, and shar
 
 ## Reusable Set TML
 
+The examples below cover all three `cohort_grouping_type` values. `BIN_BASED` and
+`GROUP_BASED` are **column sets** (`cohort_type: SIMPLE`). `COLUMN_BASED` is a
+**query set** (`cohort_type: ADVANCED`).
+
 ```yaml
 guid: "{set_guid}"              # document root — omit on first import
 cohort:
@@ -32,28 +47,24 @@ cohort:
   description: "Optional description"
   owner: "analyst@company.com"
 
-  model:                        # single-model set
-    id: "Model Display Name"
-    name: "Model Display Name"
-  # OR for multi-model sets:
-  models:
-  - id: "Model A"
-    name: "Model A"
-  - id: "Model B"
-    name: "Model B"
+  worksheet:                    # data-source binding — use `worksheet:`, NOT `model:`
+    id: "Model Display Name"    # (live-verified 26.6.0: `model:` fails import with
+    name: "Model Display Name"  #  "Invalid save request, Table cant be empty")
+    obj_id: "MODEL_OBJ_ID-<guidprefix>"   # stable object id from the model's exported TML header
+  # Multi-model sets: repeat under `worksheets:` (list of {id, name, obj_id}).
 
   config:
     anchor_column_id: Revenue   # column the set operates on
     cohort_type: SIMPLE | ADVANCED
     cohort_grouping_type: BIN_BASED | GROUP_BASED | COLUMN_BASED
 
-    # --- BIN_BASED (column set, continuous ranges) ---
+    # --- BIN_BASED (column set — cohort_type: SIMPLE, continuous ranges) ---
     bins:
       minimum_value: 0.0
       maximum_value: 100.0
       bin_size: 10.0
 
-    # --- GROUP_BASED (column set, named value groups) ---
+    # --- GROUP_BASED (column set — cohort_type: SIMPLE, named value groups) ---
     groups:
     - name: "High Value"
       conditions:
@@ -68,7 +79,7 @@ cohort:
     combine_non_group_values: true       # group remaining rows into "Other"
     group_excluded_query_values: "Other" # label for the combined remainder group
 
-    # --- COLUMN_BASED (query set — results of an embedded search) ---
+    # --- COLUMN_BASED (query set — cohort_type: ADVANCED, results of an embedded search) ---
     hide_excluded_query_values: false    # show/hide rows not in the set
     pass_thru_filter:                    # how outer query filters apply to the embedded search
       accept_all: true                   # accept all outer filters
@@ -103,8 +114,10 @@ cohort:
 ## Answer-Level Set (inline in Answer TML)
 
 When a set is answer-level (not reusable), it appears in `answer.cohorts[]` without a
-GUID. The structure is the same as the `cohort:` body above, minus the `model:` /
-`models:` field (the model is inherited from the Answer's `tables[]`).
+GUID. The structure is the same as the `cohort:` body above, minus the `worksheet:`
+binding (the model is inherited from the Answer's `tables[]`).
+
+The example below is a **column set** (`cohort_type: SIMPLE`, `cohort_grouping_type: BIN_BASED`).
 
 ```yaml
 # Inside answer.cohorts[]

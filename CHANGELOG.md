@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-12
+- feat(from-tableau): v1.8.0 — static sets → column sets (BL-009 Phase 2a); detect+log Top-N/set-ops/set-actions as deferred; refresh thoughtspot-sets-tml.md with column-set/query-set vocabulary
 - fix(mappings): trig unit bug — SIN/COS/TAN now convert radians→degrees (Tableau trig is radians, ThoughtSpot is degrees); UPPER/LOWER fixed to sql_string_op pass-through (no native in TS 26.6.0); REGEXP_MATCH fixed to sql_bool_op (returns boolean, not 1/0)
 - feat(convert-from): PT1 cross-skill pass-through policy — scalar pass-throughs reliable; aggregate pass-throughs (sql_*_aggregate_op) must be flagged for review; policy in ts-model-conversion-invariants.md, applied across Tableau/SV/Databricks formula-translation files
 - feat(from-tableau): v1.7.0 — Phase-1 Tableau function mappings: DATEPARSE, EXP, trig, STARTSWITH/ENDSWITH, PI/RADIANS/DEGREES composites, PROPER/ASCII/CHAR/REGEXP/FINDNTH pass-through, WINDOW_*/RUNNING_COUNT table-calc notes (BL-009 Phase 1)

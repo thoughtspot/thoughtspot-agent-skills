@@ -103,13 +103,19 @@ Status: DEFERRED to v1.1.0
 
 ---
 
-## #10 — Dynamic Sets — DEFERRED (Phase 2)
+## #10 — Dynamic Sets — Phase 2a DONE; 2b/2c deferred
 
-Tableau Dynamic Sets (calculated set conditions) have no direct ThoughtSpot equivalent.
-See parent plan `docs/superpowers/plans/2026-06-12-tableau-mapping-gaps-phase1-functions.md`
-Phase 2 (future round).
+Phase 2a DONE: static sets (top-level `<group>` with `function='union'`+`function='member'`
+groupfilter trees) → ThoughtSpot `GROUP_BASED` column sets (`cohort_type: SIMPLE`). Detected
+by `function='union'`+`function='member'` presence and absence of `function='end'`/`'except'`/`'intersect'`.
 
-Status: DEFERRED
+Deferred (logged, never mis-translated):
+- **Phase 2b** — Top-N sets (`function='end'` in groupfilter) → query sets; no ThoughtSpot
+  equivalent yet.
+- **Phase 2c** — Set operations (`function='except'`/`'intersect'`) → no ThoughtSpot equivalent yet.
+- **No equivalent** — Worksheet set actions (`<action>` on a set) — logged and omitted.
+
+Status: Phase 2a DONE (2026-06-12); 2b/2c DEFERRED
 
 ---
 

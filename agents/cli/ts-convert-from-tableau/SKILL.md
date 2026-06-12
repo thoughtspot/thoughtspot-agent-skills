@@ -174,11 +174,12 @@ based on the patterns in `tableau-formula-translation.md`:
 
 | Tier | Description | Examples |
 |---|---|---|
-| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key) |
+| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key); **static sets** (`<group>` with `union`/`member`) → `GROUP_BASED` column-set cohort — incl. ones anchored on a **formula column**, with a **`%null%`** member (via `EQ {Null}`), or an **`except` member-list** (via `NE`) (Phase 2a) |
 | **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}`; **`TOTAL(SUM(x))`** / percent-of-total → `group_aggregate(..., {}, query_filters())` |
 | **Cumulative** | Running calculation → `cumulative_*()` | RUNNING_SUM, RUNNING_AVG |
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
+| **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **Top-N sets** (`function='end'`) → query set, Phase 2b deferred; **`intersect`** / `except` of a *computed* sub-tree → Phase 2c deferred; **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
 | **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE; true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
@@ -253,6 +254,14 @@ Audit: {workbook_name}
   │ Untranslatable          {N}     {%}   LOOKUP        │
   └──────────────────────────────────────────────────────┘
 
+  Tableau Sets (top-level <group> elements — separate from calculated fields):
+  ┌──────────────────────────────────────────────────────┐
+  │ Set tier                Count    Notes               │
+  ├──────────────────────────────────────────────────────┤
+  │ Native / column set     {N}      static → GROUP_BASED cohort (Phase 2a) │
+  │ Partial / deferred      {N}      Top-N (2b) + set-ops (2c) + actions    │
+  └──────────────────────────────────────────────────────┘
+
   Parameters:           {N} total ({N} static, {N} SQL-lookup — query at migration)
   Dashboards:           {N} (optional liveboard migration)
 
@@ -260,6 +269,7 @@ Audit: {workbook_name}
   Migration coverage:   {(all except untranslatable) / total}%
                          (all parameters auto-created — static or queried)
   Untranslatable:       {N} formula(s) — will be omitted
+  Deferred sets:        {N} (Top-N/set-ops/actions — flagged for manual creation)
   SQL-lookup params:    {N} — need warehouse connection at migration time
   Pass-through formulas require SQL Passthrough Functions enabled.
   ──────────────────────────────────────────────────
@@ -950,6 +960,170 @@ Formula translation rules: use `tableau-formula-translation.md`.
 - No `fqn` in `model_tables`
 - `obj_id` is optional on fresh import — omit it unless repointing an existing model
 
+### Tableau Sets → ThoughtSpot column sets (Phase 2a)
+
+> **Construct distinction:** A Tableau **set** is a top-level `<group ...>` element (a named
+> in/out partition on a dimension column). It is **entirely different** from a **manual group**
+> (`<column><calculation class='categorical-bin'>`) — which is already handled above as a
+> `GROUP_BASED` cohort. Do NOT confuse the two. Sets are identified by the `<group>` XML
+> element; manual groups by the calculation `class`.
+
+**Detection — scan for top-level `<group>` elements in the datasource XML.**
+
+For each `<group>` element, inspect its `<groupfilter>` tree and classify:
+
+- **Static set (Phase 2a — translate):** the groupfilter tree contains **only**
+  `function='union'` and `function='member'` nodes (optionally `function='level-members'`).
+  There is **no** `function='end'` and **no** `function='except'`/`'intersect'`.
+
+  Extract:
+  - `caption` attribute → set name
+  - The `level='[Dimension]'` attribute on the groupfilter → anchor column → its ThoughtSpot
+    column **display name** (map via the model's column mapping). **If `level` is a calculated
+    field** (`[Calculation_NNN]`, i.e. a set anchored on a derived dimension like
+    `YEAR([Order Date])`): **resolve the internal ID to the calc's display name** via the calc
+    cross-reference map (Step 3), and **ensure that calc is emitted as a model formula column**
+    (an ATTRIBUTE formula, e.g. `year ( [Order Date] )`) so the set has a column to anchor on.
+    Column sets **can** anchor on a formula column by its display name (live-verified 2026-06-12 —
+    a set anchored on the `Sales Rep` formula column imported cleanly). Never emit the raw
+    `Calculation_NNN` id as `anchor_column_id`.
+  - Each child `<groupfilter function='member' member='...'/>` → a member value:
+    - **HTML-decode** the value (`&quot;` → `"`, `&amp;` → `&`, `&lt;` → `<`, `&gt;` → `>`)
+    - Strip Tableau's surrounding double-quotes from string values (e.g. `'"Aaron Bergman"'` → `Aaron Bergman`)
+    - **Match `filter_value_type` to the anchor's type** — text → `STRING`; a numeric calc anchor
+      (e.g. `year()` → integer, member `2018`) → `DOUBLE`; a date anchor → `DATE_FILTER` (per 1.5.9).
+    - **`%null%` member → use the literal `{Null}` grouping value.** NULL **is** selectable in a column
+      set (live-verified 2026-06-12 — the UI emits the token `{Null}` for a null selection). Emit a
+      condition `operator: EQ, value: ["{Null}"], filter_value_type: STRING`.
+      - **`%null%` *included*** (a `union`/member set putting NULL **in** the set) → add the `EQ {Null}`
+        condition alongside the member-list condition with `combine_type: ANY` (in the list **or** null).
+      - **`%null%` *excluded*** (an `except` removing NULL) → no condition needed: nulls already fall to
+        the catch-all "out" bucket via `combine_non_group_values`. (Or be explicit with `NE`/no-`{Null}`.)
+      No formula alternative is required for null — column sets handle it directly via `{Null}`.
+
+- **Top-N set (Phase 2b — defer):** groupfilter tree contains `function='end'` (with `count`
+  and/or `order` attributes). Do NOT translate. Log:
+  `"Set '<name>' is a Top-N/computed set → needs a ThoughtSpot query set (not yet supported, Phase 2b) — omitted, flag for manual creation."`
+
+- **`except` of a member-list (TRANSLATABLE) — column set with `NE`:** an `except` whose excluded
+  side is a `union`/`member` list (e.g. *all categories except {Furniture, %null%}*) maps to a column
+  set: one group with an `operator: NE` condition per excluded member, `combine_type: ALL` ("not A AND
+  not B"). `operator: NE` is a valid cohort operator (live-verified 2026-06-12). Any `%null%` in the
+  excluded side needs no condition — it's already excluded by `combine_non_group_values` (catch-all).
+  Anchor + member rules are the same as a static set.
+- **`intersect`, or `except` of a non-member sub-tree (Phase 2c — defer):** groupfilter tree contains
+  `function='intersect'`, or an `except` whose excluded side is itself a computed set (Top-N, another
+  set-op) rather than a flat member list. Do NOT translate. Log:
+  `"Set '<name>' uses an intersect / computed set operation → no ThoughtSpot equivalent yet (Phase 2c) — omitted, flag for manual creation."`
+
+- **Set control / dynamic set (no static members) → an interactive filter; drop the scaffolding.** A set
+  whose groupfilter tree is **`level-members` only** (`ui-enumeration="all"`, `ui-builder="filter-group"`)
+  has no fixed membership — it's a Tableau **Set Control** the user toggles live, usually feeding
+  `IF [Set] THEN measure ELSE NULL` calcs. **That set + IF-calc machinery is Tableau scaffolding to fake
+  interactive filtering — ThoughtSpot does it natively.** Translate the *intent*, not the scaffolding:
+  1. **Migrate the anchor as a model formula column** if it's a calc (e.g. `01. Month` =
+     `DATE(DATETRUNC('month',[Order Date]))` → `start_of_month ( [Order Date] )`) — a useful filterable
+     dimension. (Same calc-anchor rule as a static set.)
+  2. **Map the control to an interactive filter** on that column (Step 10). The filter *is* the selection.
+  3. **Drop the `IF [Set] THEN measure ELSE NULL` referencing calcs** — do NOT migrate them as formulas.
+     The measure + filter replaces them (`sum(sales)` filtered to the chosen months). Treat them like the
+     "redundant pass-through formula" case: recognize the intent and collapse to the native pattern.
+  4. **Do not emit a cohort.** The only case needing more than a filter is a genuine side-by-side
+     **in-set vs out-set comparison** viz — handle that with a grouping attribute (a real static column set)
+     or two answers; flag it specifically rather than generalising a "capability gap" onto every control.
+  Log: `"Set '<name>' is a dynamic Set Control → mapped to a filter on <anchor> (anchor calc migrated as a column); its IF-[Set] scaffolding calcs were collapsed into measure+filter, not migrated."`
+- **Worksheet set action (no equivalent — defer):** a `<action>` element that adds/removes
+  members from a set based on viz selection. No ThoughtSpot equivalent. Log:
+  `"Set action on '<set name>' has no ThoughtSpot equivalent — omitted."`
+
+**Emit one `*.cohort.tml` per static set** — see "Column-set TML emission" below. Import
+cohorts after the model (the payload order in Step 5.5 already includes `*.cohort.tml`).
+
+> **⚠ MANDATORY — flag every set conversion for the user to review.** Set conversions are
+> *semantic reinterpretations*, not literal 1:1 translations — a column set, a filter, dropped
+> scaffolding, or a deferral may not behave exactly like the Tableau set. For **each** set, surface
+> its outcome and ask the user to confirm it matches intent, in **both** the Step 7 review checkpoint
+> and the Migration Summary (Step 10g) / Step 12 report. Show a per-set line with its kind and how it
+> was handled, e.g.:
+> ```
+> Sets ({N}) — review each result matches intent:
+>   ✓ State Set            → column set (GROUP_BASED, 3 members)         [verify membership]
+>   ✓ Category Set         → column set via NE (except {Furniture})      [verify exclusion + nulls]
+>   ✓ Year Set             → column set on formula column "Order Year"   [verify the calc + values]
+>   ⚠ Customer Group 1     → column set (231 members)                    [large list — spot-check]
+>   ⚙ 01. Month Set        → interactive filter on "Order Month"; IF-[Set] calcs collapsed to
+>                            measure+filter, NOT migrated                [confirm filter ≈ the control]
+>   ⊘ Top-N State Set      → DEFERRED (query set, Phase 2b) — flagged for manual creation
+> ```
+> The reinterpreted ones (`except`→`NE`, `%null%`→`{Null}`, formula-anchor, set-control→filter,
+> collapsed `IF [Set]` calcs) especially need a human eye — call them out explicitly, don't bury them.
+
+**Set references in filters:** when a translated static set is used as an in/out filter on a
+worksheet, the migrated column set becomes a filterable/groupable column on the model. In the
+liveboard/answer step (Step 10), translate the filter by referencing the cohort column where
+the dashboard→liveboard filter step constructs filters. If the reference cannot be resolved
+(e.g. a worksheet filter on a set that couldn't be translated), log it and leave the filter as
+best-effort; this phase does not guarantee full filter-reference migration beyond the set
+object itself. See `../../shared/schemas/thoughtspot-sets-tml.md` (column set) and the
+live-verified worked example `../../shared/worked-examples/tableau/static-set-to-column-set.md`.
+
+#### Column-set TML emission (static set → `GROUP_BASED` cohort)
+
+For each static set detected above, generate a `.cohort.tml` file with the following shape:
+
+```yaml
+# guid omitted on first import
+cohort:
+  name: "<group caption>"            # from group caption attribute
+  config:
+    cohort_type: SIMPLE
+    cohort_grouping_type: GROUP_BASED
+    anchor_column_id: "<dimension display name>"  # ThoughtSpot column DISPLAY name (live-verified), from groupfilter level=
+    combine_non_group_values: true          # DEFAULT CATCH-ALL: every value not matched by a group — incl. NULL — combined into one group
+    null_output_value: "Not in set"         # display label for that default catch-all group
+    groups:
+    - name: "<group caption>"        # same as cohort name
+      combine_type: ANY              # ANY = membership in the value list ("in set")
+      conditions:
+      - operator: EQ                 # PROVEN pattern (changelog 1.5.6, from a working column set):
+        column_name: "<dim name>"    #   operator: EQ with a MULTI-VALUE list = "in set".
+        value: ["Aaron Bergman", "Aaron Hawkins", ...]  # NOT operator: IN.
+        filter_value_type: STRING    # STRING for text anchors; for a DATE anchor use DATE_FILTER
+                                     # + date_filter_values instead (changelog 1.5.9).
+  worksheet:                         # BINDING FIELD IS `worksheet:` NOT `model:` (live-verified — `model:` → "Table cant be empty")
+    id: "<model display name>"
+    name: "<model display name>"
+    obj_id: "<model obj_id>"         # stable object id, e.g. TEST_SV_..._AI_CONTEXT-889a704f (from the model's exported TML header)
+```
+
+Key rules:
+- `anchor_column_id` and `column_name` = the dimension's ThoughtSpot **display name** (live-verified —
+  works even for a multi-table model). Map from `level='[Dimension]'` via the same column mapping as Step 5b.
+- `combine_non_group_values: true` is the **default catch-all**: every value not matched by a group
+  condition — including NULL — is combined into one group, labelled by `null_output_value`. This
+  mirrors Tableau's in/out semantics: unmatched + NULL rows land in the catch-all ("out") bucket.
+- Member values must be **HTML-decoded** and have Tableau's surrounding double-quotes stripped,
+  AND converted to the column's **stored** format, not Tableau's display format (changelog 1.5.6:
+  e.g. `01.Apr.15` → `2015-04-01`) — display-format values match nothing.
+- Membership uses `operator: EQ` with the full value list + `combine_type: ANY` (proven in 1.5.6) —
+  do **not** use `operator: IN`. For a **DATE** anchor, switch each condition to
+  `filter_value_type: DATE_FILTER` + `date_filter_values` (changelog 1.5.9), not `STRING`/`value[]`.
+- **`%null%` is selectable as a grouping value** — column sets DO support NULL membership (live-verified
+  2026-06-12). To **include** null in the set, add a condition `operator: EQ, value: ["{Null}"],
+  filter_value_type: STRING` to the group (with `combine_type: ANY` so it's "in the list OR null"). To
+  **exclude** null, omit it (the catch-all already excludes it). The literal token is `{Null}`. No
+  IF/THEN/ELSE formula alternative is needed for null.
+- **`except` / not-in** → `operator: NE` (live-verified 2026-06-12): one `NE` condition per excluded
+  value, `combine_type: ALL`. (`except {Furniture, %null%}` → `NE Furniture`; null auto-excluded.)
+- Bind the set to its model via the **`worksheet:`** block (`id`/`name` = the model display name;
+  `obj_id` = the model's stable object id, from the model's exported TML header) — **not** `model:`.
+  Using `model:` fails import with `"Invalid save request, Table cant be empty"` (live-verified
+  2026-06-12: set "Focus Categories" created on model `TEST_SV_DMSI_AI_CONTEXT` only after switching
+  `model:` → `worksheet:`).
+- No top-level `guid` on first import.
+- File extension: `<SetName>.cohort.tml`; write to
+  `/tmp/ts_tableau_mig/output/{workbook_name}/`
+
 Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{DatasourceName}.model.tml`.
 
 ### 5c. SQL View TML — one per custom SQL relation
@@ -1115,6 +1289,11 @@ Formula translations ({F} total):
        (works only with SQL Passthrough Functions enabled in ThoughtSpot admin)
   ⚠ {name}  [untranslatable]: OMITTED — {reason}
 
+Sets ({S}) — semantic reinterpretations, REVIEW each matches intent:   # omit section if no sets
+  ✓ {name} → column set ({GROUP_BASED, N members | NE except | {Null} | formula-col anchor})  [what to verify]
+  ⚙ {name} → interactive filter on {anchor} (set control; IF-[Set] calcs collapsed to measure+filter)
+  ⊘ {name} → DEFERRED ({Top-N → query set 2b | intersect/computed except 2c | set action}) — manual
+
 Will NOT migrate ({K}):
   - {name}: {reason}
   # if none: "Nothing omitted — full coverage."
@@ -1131,6 +1310,9 @@ Tiers are the Step A3 set: Native, LOD, Cumulative, Moving, Pass-through, Parame
 Untranslatable. Show `⚠ … OMITTED` for every untranslatable formula (and its dropped
 `columns[]` entry) and `⚙ … pass-through` for every formula needing SQL Passthrough — so
 the un-migratable and caveated items are flagged here, up front, for the user to weigh.
+**Always include the Sets section when the workbook has sets** (per the MANDATORY set-review
+rule in Step 5b) — set conversions are semantic reinterpretations, so the user must confirm
+each matches intent before import.
 
 Wait for confirmation. **no** cancels. **file** writes the TMLs and skips to Step 12
 (report only, no import). **yes** imports:
@@ -1953,6 +2135,16 @@ Status values: **✅ Migrated** (model or answer-level — say which), **◑ Par
 with a caveat — approximation, N/A on current data, placeholder), **⊘ Not migrated** (omitted;
 give the reason). Every calculated field from Step 3 must appear in exactly one row.
 
+**Sets** — every Tableau set, how it was handled, and what to verify (per the MANDATORY set-review
+rule). Set conversions are semantic reinterpretations — list each so the user can confirm intent:
+| Tableau set | Kind | ThoughtSpot result | Review |
+|---|---|---|---|
+| State Set | static | column set (GROUP_BASED, 3 members) | verify membership |
+| Category Set | `except` | column set via `NE` (except Furniture; nulls excluded) | verify exclusion |
+| Year Set | static, calc-anchored | column set on formula column `Order Year` | verify calc + values |
+| 01. Month Set | set control | filter on `Order Month`; IF-[Set] calcs collapsed to measure+filter | confirm filter ≈ control |
+| Top-N State | Top-N | ⊘ DEFERRED (query set, Phase 2b) | manual creation |
+
 **Partial / not migrated** — repeat the ◑/⊘ rows with the reason and what the user can do.
 ```
 
@@ -1966,6 +2158,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.8.0 | 2026-06-12 | Translate Tableau static sets → ThoughtSpot column sets (`cohort_type: SIMPLE`, `cohort_grouping_type: GROUP_BASED`); detect and log Top-N sets (`function='end'`) as Phase-2b deferred, set operations (`except`/`intersect`) as Phase-2c deferred, and set actions as no-equivalent — none mis-translated (BL-009 Phase 2a). Live-verified on se-thoughtspot: bind via `worksheet:` (id/name/obj_id) NOT `model:`; anchor/column_name use display names; `operator: EQ` + value list. Added worked example `worked-examples/tableau/static-set-to-column-set.md`. UI-verified set capabilities: `%null%` members ARE representable via the `{Null}` grouping value (`EQ ["{Null}"]`); `except` member-lists → `operator: NE`; sets can anchor on a **formula column** (resolve calc id → display name, emit the backing formula); set controls (`level-members` only) → no set object, surface as a liveboard filter. Top-N (→ query set) + `intersect`/computed `except` remain deferred. |
 | 1.7.0 | 2026-06-12 | Add Phase-1 Tableau function mappings (DATEPARSE, EXP, trig, STARTSWITH/ENDSWITH, PI/RADIANS/DEGREES composites, PROPER/ASCII/CHAR/REGEXP/FINDNTH pass-through, WINDOW_*/RUNNING_COUNT table-calc notes) (BL-009 Phase 1). Fix trig unit bug (Tableau radians→ThoughtSpot degrees conversion). Fix UPPER/LOWER (no native — use sql_string_op pass-through). Fix REGEXP_MATCH (sql_bool_op, returns boolean). Drop ⚠ confirm markers on docs-confirmed functions. Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). Document NULL-in-IF/ELSE behavior — matches Tableau via SQL CASE, faithful, no auto-guard (BL-002). |
 | 1.6.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |
 | 1.5.43 | 2026-06-11 | Add **partial-date-to-full-date rule** to Step 5a: year-only strings (e.g. `_2016_17`, `FY2016`) must produce a full `YYYY-MM-DD` date (append `-01-01`). Bare-year conversions break ThoughtSpot date bucketing, KPI sparklines, and date filters. Apply in SQL View query when one exists, otherwise as a model formula. Companion rule added to `tableau-tml-rules.md` "Date Column Rules". Also fixed duplicate SQL View TML Rules section in that file. |

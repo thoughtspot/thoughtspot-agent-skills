@@ -474,8 +474,16 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 
 **Source:** Audit of 127 workbooks in `tableau-migration-testing/twb/inactive/` (2026-06-10)
 **Affects:** ts-convert-from-tableau, `agents/shared/mappings/tableau/tableau-formula-translation.md`
-**Status:** Not started
+**Status:** In progress — **Phase 1 DONE (2026-06-12, PR #48)**; Phases 2–4 open
 **Full plan:** [`superpowers/plans/2026-06-11-tableau-mapping-gaps.md`](superpowers/plans/2026-06-11-tableau-mapping-gaps.md)
+
+> **Phase 1 (function table) — DONE (PR #48):** added DATEPARSE, EXP, trig (radians→degrees fix),
+> STARTSWITH/ENDSWITH, PI/RADIANS/DEGREES composites, PROPER/ASCII/CHAR/REGEXP_*/FINDNTH
+> scalar pass-through, WINDOW_*/RUNNING_COUNT/DATETIME notes; fixed the UPPER/LOWER bug; all
+> grounded against the 26.6.0 formula reference + live-validated. Introduced the PT1 pass-through
+> policy. Open-items #12/#13/#14 closed.
+> **Remaining:** Phase 2 (Dynamic Sets — largest gap, 86 files), Phase 3 (geospatial MAKEPOINT/
+> MAKELINE), Phase 4 (source coverage + INDEX note). See the full plan.
 
 ### Problem
 
