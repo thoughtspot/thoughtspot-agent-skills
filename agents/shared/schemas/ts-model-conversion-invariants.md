@@ -264,6 +264,23 @@ model:
 
 ---
 
+## Pass-through translation policy
+
+### PT1 — Scalar pass-through is reliable; aggregate pass-through must be flagged for review
+When a source function has no native ThoughtSpot equivalent but the underlying warehouse
+provides an equivalent SQL function, translate it via a ThoughtSpot pass-through op
+(`sql_*_op`) rather than dropping it.
+
+- **Scalar pass-throughs** (`sql_string_op`, `sql_int_op`, `sql_double_op`, `sql_bool_op`,
+  `sql_date_op`, `sql_time_op`, `sql_date_time_op`) are row-level and reliable — use freely.
+- **Aggregate pass-throughs** (`sql_*_aggregate_op`) DO work but interact with ThoughtSpot's
+  query-time aggregation/grouping context, so correctness is not guaranteed. ALWAYS mark any
+  aggregate pass-through with a "⚑ flag for review" note and surface it in the conversion output.
+
+**Applies to:** all convert-from skills (Tableau, Snowflake SV, Databricks MV).
+
+---
+
 ## Intentional differences (do NOT harmonize)
 
 ### EXC1 — Cumulative/moving: model formula vs query-time only

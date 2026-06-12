@@ -1240,6 +1240,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-06-12 | Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). |
 | 1.2.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |
 | 1.1.0 | 2026-06-11 | Preserve existing Spotter setting on in-place model updates (don't reset to default). Drop `TEST_MV_` prefix — model name uses the bare MV name (N1); cite canonical conversion invariants doc. |
 | 1.0.0 | 2026-05-22 | Initial release — single conversion mode (Mode A) |

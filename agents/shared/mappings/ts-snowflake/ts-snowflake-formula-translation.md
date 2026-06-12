@@ -234,6 +234,8 @@ ThoughtSpot uses `(date, n)`, Snowflake uses `(part, n, date)`.
 
 ## SQL Pass-Through Functions
 
+Pass-through policy: scalar reliable, aggregate flag for review — see PT1 in ../../schemas/ts-model-conversion-invariants.md
+
 ThoughtSpot's `sql_*` pass-through functions embed raw SQL templates with positional
 `{0}`, `{1}` placeholders for column references. Since the templates contain valid
 Snowflake SQL, they can be translated directly by substituting column references.
@@ -261,7 +263,7 @@ Snowflake SQL, they can be translated directly by substituting column references
 5. Aggregate variants (`sql_*_aggregate_op`) → metric
 6. If the template contains `OVER (...)` → window function metric
 
-**Example — `sql_string_aggregate_op("listagg({0}, ' - ') within group (order by {0} desc)", Product Name)`:**
+**Example — `sql_string_aggregate_op("listagg({0}, ' - ') within group (order by {0} desc)", Product Name)` ⚑ flag for review (PT1):**
 
 ```yaml
 metrics:
@@ -269,7 +271,7 @@ metrics:
     expr: "LISTAGG(products.PRODUCT_NAME, ' - ') WITHIN GROUP (ORDER BY products.PRODUCT_NAME DESC)"
 ```
 
-**Example — `sql_int_aggregate_op("rank() over (partition by {0} order by sum({1}) desc)", Category Name, Quantity)`:**
+**Example — `sql_int_aggregate_op("rank() over (partition by {0} order by sum({1}) desc)", Category Name, Quantity)` ⚑ flag for review (PT1):**
 
 ```yaml
 metrics:
@@ -940,6 +942,6 @@ For every formula processed, include a row in the Unmapped Properties Report:
 |---|---|---|---|
 | Days to Ship | `diff_days([SHIPPED_DATE], [ORDER_DATE])` | Translated | `DATEDIFF('day', DM_ORDER.ORDER_DATE, DM_ORDER.SHIPPED_DATE)` |
 | Employee Name | `concat([FIRST_NAME], ' ', [LAST_NAME])` | Translated | `CONCAT(DM_EMPLOYEE.FIRST_NAME, ' ', DM_EMPLOYEE.LAST_NAME)` |
-| Product List | `sql_string_aggregate_op("listagg({0},...)", [PRODUCT_NAME])` | Translated | `LISTAGG(products.PRODUCT_NAME, ...)` |
+| Product List | `sql_string_aggregate_op("listagg({0},...)", [PRODUCT_NAME])` | Translated ⚑ flag for review (PT1) | `LISTAGG(products.PRODUCT_NAME, ...)` |
 | Language | `[locale]` | ⚠ Parameter reference | OMITTED |
 | Master Date | `if ([Date] = 'order date') then ...` | ⚠ Parameter reference | OMITTED |

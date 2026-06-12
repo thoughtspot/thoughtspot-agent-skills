@@ -6,6 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-12
+- fix(mappings): trig unit bug — SIN/COS/TAN now convert radians→degrees (Tableau trig is radians, ThoughtSpot is degrees); UPPER/LOWER fixed to sql_string_op pass-through (no native in TS 26.6.0); REGEXP_MATCH fixed to sql_bool_op (returns boolean, not 1/0)
+- feat(convert-from): PT1 cross-skill pass-through policy — scalar pass-throughs reliable; aggregate pass-throughs (sql_*_aggregate_op) must be flagged for review; policy in ts-model-conversion-invariants.md, applied across Tableau/SV/Databricks formula-translation files
+- feat(from-tableau): v1.7.0 — Phase-1 Tableau function mappings: DATEPARSE, EXP, trig, STARTSWITH/ENDSWITH, PI/RADIANS/DEGREES composites, PROPER/ASCII/CHAR/REGEXP/FINDNTH pass-through, WINDOW_*/RUNNING_COUNT table-calc notes (BL-009 Phase 1)
 - feat(validate): `check_tml.py` now enforces I4 (join id==name exact case) and I5 (no `aggregation: COUNT_DISTINCT` on physical columns); added `tools/validate/tests/test_check_tml.py` (BL-001)
 - feat(convert-from): add an inline pre-import validation gate (I1/I2/I4/I5) to ts-convert-from-tableau, -snowflake-sv, and -databricks-mv before model TML import (BL-001)
 - fix(mappings): Snowflake `BOOLEAN` maps to `BOOL` for ThoughtSpot — `ts tables create` rejects `BOOLEAN` on Snowflake connections (BL-006)

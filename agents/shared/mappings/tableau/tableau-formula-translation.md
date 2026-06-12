@@ -21,8 +21,8 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `LEN(s)` | `strlen ( s )` | |
 | `FIND(s, sub)` | `strpos ( s , sub )` | |
 | `REPLACE(s, old, new)` | `replace ( s , old , new )` | |
-| `UPPER(s)` | `upper ( s )` | |
-| `LOWER(s)` | `lower ( s )` | |
+| `UPPER(s)` | `sql_string_op ( "UPPER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
+| `LOWER(s)` | `sql_string_op ( "LOWER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
 | `TRIM(s)` | `trim ( s )` | |
 | `SPLIT(s, delim, n)` | Use `substr`/`strpos` combination | No direct equivalent; chain: Tableau `SPLIT` → Snowflake `SPLIT_PART` → ThoughtSpot `substr`/`strpos` |
 | `DATEDIFF('day', a, b)` | `diff_days ( a , b )` | Unit-specific: also `diff_months` |
@@ -64,6 +64,14 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `DATEPART('hour', d)` | `hour_of_day ( d )` | |
 | `DATEPART('quarter', d)` | `quarter_number ( d )` | |
 | `DATEPART('week', d)` | `week_number_of_year ( d )` | |
+| `EXP(n)` | `exp ( n )` | |
+| `SIN(n)` / `COS(n)` / `TAN(n)` | `sin ( n * 180 / 3.14159265358979 )` / `cos ( n * 180 / 3.14159265358979 )` / `tan ( n * 180 / 3.14159265358979 )` | Tableau trig is in radians; ThoughtSpot trig is in degrees — convert. (Inverse trig `acos/asin/atan` also return degrees in ThoughtSpot vs radians in Tableau.) |
+| `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
+| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`; `strpos` is 1-based |
+| `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with`; mirrors the `RIGHT(s, n)` idiom above |
+| `PI()` | `3.14159265358979` | No native `pi()` — use the literal (dialect-free). (alternatively `sql_double_op ( "pi()" )` — documented pass-through) |
+| `RADIANS(n)` | `n * 3.14159265358979 / 180` | No native `radians()` — use the literal composite. (alternatively `sql_double_op ( "radians({0})" , n )` — documented pass-through) |
+| `DEGREES(n)` | `n * 180 / 3.14159265358979` | No native `degrees()` — use the literal composite. (alternatively `sql_double_op ( "degrees({0})" , n )` — documented pass-through) |
 
 ### Year-over-year / period comparisons — make them dynamic, don't copy hardcoded years
 
@@ -84,6 +92,24 @@ reach the current year, tell the user and offer: (a) keep dynamic (correct for p
 on this demo), or (b) anchor to the dataset's actual latest year so it demos now. Note that
 `max([date])` is **not** allowed inside a formula filter, so "latest year in data" can't be
 expressed as `year(max([d]))` in the conditional — anchoring means a literal year.
+
+### NULL in IF/THEN/ELSE conditions — matches Tableau, don't auto-guard
+
+ThoughtSpot compiles `if ( cond ) then a else b` to a SQL `CASE WHEN cond THEN a ELSE b END`
+pushed down to the warehouse. When the condition references a NULL (e.g. `[x] >= 5000` where
+`[x]` is NULL), the comparison is unknown — not TRUE — so the row falls into the **ELSE**
+branch. This is standard SQL `CASE` semantics, consistent across warehouses (Snowflake,
+BigQuery, Databricks, Redshift). *(Confirmed live 2026-06-12: the generated SQL is
+`CASE WHEN NULL >= 5E3 THEN 'High' ELSE 'Low' END` → returns the ELSE value.)*
+
+**Tableau behaves identically** — `IF [x] >= 5000 THEN a ELSE b END` also routes NULL rows to
+ELSE. So a **literal translation is faithful** and preserves the workbook's original behavior.
+**Do not auto-insert a NULL guard** — adding `if ( isnull([x]) ) then ... else ...` would
+*change* the result relative to the source workbook.
+
+Treat NULL-guarding as an **opt-in correction**: only add it when the user explicitly wants to
+fix latent NULL mis-classification in the original (e.g. keep NULLs as NULL rather than 'Bronze').
+This is warehouse-`CASE` behavior, so the same reasoning applies to the SV/MV converters.
 
 ---
 
@@ -366,6 +392,7 @@ AND CURRENT ROW)` → ThoughtSpot `cumulative_*()`.
 - ThoughtSpot cumulative functions use the query's natural sort order — there is no
   explicit `ORDER BY` parameter like Snowflake window functions
 - Partition dimensions are optional trailing arguments, not a separate `PARTITION BY`
+- `RUNNING_COUNT(expr)` — no `cumulative_count`. Approximate with `cumulative_sum ( 1 , [sort_attr] )` at answer level (table calc, EXC1), or omit + log if the sort attribute can't be determined.
 
 ---
 
@@ -438,6 +465,9 @@ partition arguments — partitioning is determined dynamically by which attribut
 appear in the search query. If explicit partitioning is required, use a pass-through
 function with `PARTITION BY` in the SQL string instead.
 
+**Extended windowed variants with no model-formula equivalent:**
+- `WINDOW_STDEV`, `WINDOW_PERCENTILE`, `WINDOW_COUNT`, `WINDOW_MEDIAN` — no windowed model-formula equivalent (table calculations, answer-level per EXC1). If the viz uses them as a plain aggregate over the whole partition (not a sliding window), use `stddev()`, `percentile(measure, p)`, `count()`, `median()` respectively. Otherwise realize answer-level or omit + log.
+
 ---
 
 ## Rank Functions
@@ -453,6 +483,7 @@ partitioned rank, use a pass-through function (see "Pass-Through Fallback" below
 ```
 sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::region] , [table::revenue] )
 ```
+⚑ flag for review — aggregate pass-through (PT1)
 
 **Limitations:**
 - `RANK_MODIFIED`, `RANK_DENSE` have no exact native equivalents; use `rank()` as an approximation and document the difference
@@ -480,6 +511,8 @@ if ( [table::source_table] = 'terminations' ) then [table::employee_id] else ''
 When a Tableau formula has a valid Snowflake SQL equivalent but no native ThoughtSpot
 function, use a **pass-through function** to embed the raw SQL. Pass-through functions
 are a last resort — always prefer native ThoughtSpot functions first.
+
+Pass-through policy: scalar reliable, aggregate flag for review — see PT1 in ../../schemas/ts-model-conversion-invariants.md
 
 See `ts-snowflake-formula-translation.md` "Pass-Through Functions" for the full
 reference. Summary below.
@@ -511,8 +544,20 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
 
 | Tableau | Pass-through ThoughtSpot formula | Notes |
 |---|---|---|
-| `RANK(SUM([col]))` partitioned | `sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] )` | Native `rank()` has no partition support |
-| `DENSE_RANK(SUM([col]))` | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [table::col] )` | |
+| `RANK(SUM([col]))` partitioned | `sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] )` | Native `rank()` has no partition support. ⚑ flag for review (PT1) |
+| `DENSE_RANK(SUM([col]))` | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [table::col] )` | ⚑ flag for review (PT1) |
+
+### Functions with no native ThoughtSpot equivalent — pass-through
+
+| Tableau | Pass-through ThoughtSpot formula | Notes |
+|---|---|---|
+| `PROPER(s)` | `sql_string_op ( "INITCAP({0})" , s )` | No native title-case. Dialect: Snowflake/most use `INITCAP`. |
+| `ASCII(s)` | `sql_int_op ( "ASCII({0})" , s )` | No native `ascii()`. Dialect-specific. |
+| `CHAR(n)` | `sql_string_op ( "CHR({0})" , n )` | Snowflake uses `CHR`; SQL Server uses `CHAR`. |
+| `REGEXP_EXTRACT(s, pat)` | `sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , s , pat )` | No native regex. Snowflake `REGEXP_SUBSTR`. |
+| `REGEXP_MATCH(s, pat)` | `sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , s , pat )` | No native regex; returns boolean. |
+| `REGEXP_REPLACE(s, pat, r)` | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , s , pat , r )` | No native regex. |
+| `FINDNTH(s, sub, n)` | `sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , s , sub , n )` | No native nth-occurrence; else omit + log. |
 
 ### Rules
 
@@ -525,6 +570,7 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
    ```
    group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] ) , query_groups () + { dim } , query_filters () )
    ```
+   ⚑ flag for review — aggregate pass-through (PT1)
 4. **No validation** — ThoughtSpot does not validate the SQL string; errors surface at
    query time from the warehouse
 5. **Pass-through must be enabled** — admins can disable via Admin > Search & SpotIQ >
@@ -563,6 +609,7 @@ model import. A missing formula produces a functional model with reduced coverag
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
 | True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
 | References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
+| `DATETIME(expr)` | No `to_datetime` cast. If the column is already a datetime type, reference it directly; if it's a string, only `to_date` (date-only) exists — omit + log the time component. |
 
 **Formerly untranslatable, now mapped:**
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
@@ -571,9 +618,9 @@ model import. A missing formula produces a functional model with reduced coverag
 - `Number of Records` (`= 1`) → `sum(1)`
 - `RUNNING_SUM`, `RUNNING_AVG`, etc. → `cumulative_sum()`, `cumulative_average()`, etc. (see Running/Cumulative section)
 - `RANK()` → `rank()` (see Rank section)
-- `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined
-- `RANK_MODIFIED`, `RANK_DENSE` → `sql_int_aggregate_op()` pass-through
-- Partitioned `RANK` → `sql_int_aggregate_op()` with `partition by`
+- `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined (⚑ flag for review if using `sql_*_aggregate_op` — PT1)
+- `RANK_MODIFIED`, `RANK_DENSE` → `sql_int_aggregate_op()` pass-through ⚑ flag for review (PT1)
+- Partitioned `RANK` → `sql_int_aggregate_op()` with `partition by` ⚑ flag for review (PT1)
 
 ---
 

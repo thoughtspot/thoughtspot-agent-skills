@@ -42,34 +42,24 @@ step that writes TML. Fail loudly before attempting import.
 ## BL-002 — NULL fall-through in Tableau IF/ELSE formula translation
 
 **Source:** Analysis of twells89/sigma-migration-skills (2026-06-11)
-**Affects:** ts-convert-from-tableau (primarily); may affect other conversion skills
-**Status:** Not started
+**Affects:** ts-convert-from-tableau (primarily); applies to all converters
+**Status:** Done (2026-06-12) — resolved as "no auto-guard"
+> Live test on se-thoughtspot: `if ([x] >= 5000) then 'High' else 'Low'` returns **'Low'**
+> for NULL rows. ThoughtSpot compiles if/then/else → SQL `CASE WHEN ... THEN ... ELSE ... END`
+> (captured: `CASE WHEN NULL >= 5E3 THEN 'High' ELSE 'Low' END`), so NULL→ELSE is standard
+> warehouse `CASE` semantics — **identical to Tableau's own behavior**. A literal translation is
+> therefore **faithful**; auto-adding an `isnull()` guard would *change* the source behavior.
+> Resolution: documented in `tableau-formula-translation.md` ("NULL in IF/THEN/ELSE") as
+> matching-Tableau + opt-in correction only. No mandatory rule added.
 
-### Problem
+### Problem (original framing — now disproven)
 
-In Tableau, `IF [x] >= 5000 THEN "Platinum" ELSE "Bronze" END` sends NULL rows to
-the ELSE branch — `NULL >= 5000` evaluates as NULL (not false), so it falls through.
-If ThoughtSpot behaves the same way, translated formulas silently produce wrong
-results for NULL values (NULLs classified as "Bronze" instead of remaining NULL).
-
-The Sigma migration repo identified this as a real bug and wraps with
-`Coalesce([x], -1)` before comparisons.
-
-### Next step
-
-Test on a live ThoughtSpot instance:
-```
-if ( [nullable_col] >= 5000 ) then 'Platinum' else 'Bronze'
-```
-where some rows have NULL in `nullable_col`. Check whether NULLs land in ELSE or
-produce NULL output.
-
-### If confirmed
-
-Add a translation rule to `tableau-formula-translation.md`: when an IF condition
-compares a nullable column, wrap with a sentinel value or add an explicit NULL check
-(`if ( [col] is null ) then ...`). Update the Tableau skill's formula migration step
-to apply this pattern.
+The concern was that ThoughtSpot might *differ* from Tableau on `IF [x] >= 5000 THEN 'Platinum'
+ELSE 'Bronze'` when `[x]` is NULL, silently mis-classifying NULLs. The live test showed
+ThoughtSpot behaves **the same as Tableau** (NULL → ELSE), so there is no divergence to fix and
+a faithful migration must NOT guard by default. The Sigma repo's `Coalesce` wrap is an
+intentional *correction*, not a fidelity requirement — offered as opt-in, not applied
+automatically.
 
 ---
 
@@ -714,3 +704,33 @@ Add an **Audit mode** to both converters, mirroring the Tableau pattern:
 - `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — Audit mode steps + coverage report
 - `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — Audit mode steps + coverage report
 - `agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` + `ts-databricks/ts-databricks-properties.md` — tier definitions feeding the classifier
+
+---
+
+## BL-016 — Conversion mapping-file naming/structure consistency
+
+**Source:** Observed during BL-009 Phase 1 (2026-06-12)
+**Affects:** agents/shared/mappings/tableau/, ts-snowflake/, ts-databricks/
+**Status:** Not started
+
+### Problem
+
+The three convert-from skills name their shared mapping files inconsistently:
+
+| Role | Tableau | Snowflake | Databricks |
+|---|---|---|---|
+| Formula translation | `tableau-formula-translation.md` | `ts-snowflake-formula-translation.md` | `ts-databricks-formula-translation.md` |
+| TML-generation rules | **`tableau-tml-rules.md`** | `ts-from-snowflake-rules.md` | `ts-from-databricks-rules.md` |
+| Properties | *(none — folded into tml-rules)* | `ts-snowflake-properties.md` | `ts-databricks-properties.md` |
+
+`tableau-tml-rules.md` is the functional equivalent of the SV/MV `*-from-rules.md` files
+(Table/Model/SQL-View TML rules, date rules, join + type mapping, validation reference) — just
+named differently. Tableau correctly has no `*-to-rules.md` (it is convert-*from* only, one-directional).
+
+### Proposed approach
+
+Low-priority cosmetic alignment (no capability gap): consider renaming
+`tableau-tml-rules.md` → `tableau-from-rules.md` (update all SKILL.md + cursor/coco mirror
+references), and optionally splitting Tableau property/type content into a
+`tableau-properties.md` to mirror SV/MV. Fits the BL-012 cross-skill-consistency theme; the
+conversion-consistency-auditor could then assert the naming convention.

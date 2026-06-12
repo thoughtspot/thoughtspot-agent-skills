@@ -126,6 +126,10 @@ ThoughtSpot syntax. Specifically:
 Report divergences as `[WARN]` (not `[FAIL]`) with both mappings shown. Do NOT flag
 cumulative/moving differences between Tableau and SV/MV — that is EXC1 (deliberate).
 
+## PT1 — Pass-through policy check
+
+**PT1:** aggregate pass-throughs (`sql_*_aggregate_op`) carry a "⚑ flag for review" marker; scalar pass-throughs do not require it. Flag any `sql_*_aggregate_op` usage in the mapping files or skill TML examples that lacks a "⚑ flag for review" (or equivalent note) as `[WARN]`.
+
 ## EXC1 — Do NOT flag
 
 The following asymmetries are intentional. Never report them as failures or warnings:

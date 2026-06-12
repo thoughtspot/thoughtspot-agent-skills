@@ -100,3 +100,45 @@ multi-tab liveboard is a better migration output but requires the liveboard tabs
 structure.
 
 Status: DEFERRED to v1.1.0
+
+---
+
+## #10 — Dynamic Sets — DEFERRED (Phase 2)
+
+Tableau Dynamic Sets (calculated set conditions) have no direct ThoughtSpot equivalent.
+See parent plan `docs/superpowers/plans/2026-06-12-tableau-mapping-gaps-phase1-functions.md`
+Phase 2 (future round).
+
+Status: DEFERRED
+
+---
+
+## #11 — Geospatial functions — DEFERRED (Phase 3)
+
+Tableau geospatial functions (MAKELINE, MAKEPOINT, DISTANCE, etc.) have no ThoughtSpot
+formula equivalent. See parent plan for Phase 3 (future round).
+
+Status: DEFERRED
+
+---
+
+## #12 — Missing function-table entries — DONE (Phase 1, 2026-06-12)
+DATEPARSE/DATETIME/EXP/PI/trig/PROPER/ASCII/CHAR/STARTSWITH/ENDSWITH added to
+tableau-formula-translation.md, all grounded against the 26.6.0 formula reference.
+PI/RADIANS/DEGREES use literal composites (no native); PROPER/ASCII/CHAR map to
+scalar sql_*_op pass-through (no native equivalent — PT1). Trig converts radians→degrees.
+Status: DONE.
+
+---
+
+## #13 — REGEXP family + FINDNTH — PASS-THROUGH ONLY
+REGEXP_EXTRACT/MATCH/REPLACE, FINDNTH have no native TS equivalent — mapped to
+sql_*_op pass-through (warehouse-dialect-specific) or omit+log.
+Status: DONE pending confirmation.
+
+---
+
+## #14 — Extended WINDOW_*/RUNNING_* — DOCUMENTED AS TABLE CALCS
+WINDOW_STDEV/PERCENTILE/COUNT/MEDIAN and RUNNING_COUNT documented as answer-level
+table calcs (EXC1) with aggregate fallbacks; no model-formula form.
+Status: DONE.

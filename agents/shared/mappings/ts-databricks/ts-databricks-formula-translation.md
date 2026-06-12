@@ -227,6 +227,8 @@ branch is `null` (or `0` for SUM) → extract the condition into `FILTER (WHERE 
 
 ## SQL Pass-Through Functions
 
+Pass-through policy: scalar reliable, aggregate flag for review — see PT1 in ../../schemas/ts-model-conversion-invariants.md
+
 | ThoughtSpot | Databricks SQL | Notes |
 |---|---|---|
 | `sql_int_op(expr)` | `expr` | Unwrap — emit the inner SQL directly |
