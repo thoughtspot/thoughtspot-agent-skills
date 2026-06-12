@@ -1031,8 +1031,9 @@ For each `<group>` element, inspect its `<groupfilter>` tree and classify:
   `function='end'` (with `count` and/or `order` child/attributes). Translate to a
   `cohort_type: ADVANCED` / `COLUMN_BASED` query set in **one of two forms, chosen by `count`:**
   - **Literal `count='N'` (static N)** → the simplest form: the embedded answer's `search_query`
-    is a plain **`top N [measure] [dimension]`** (or **`bottom N …`**) keyword search — **no
-    formulas, no parameter**. (The `top N` keyword search_query IS correct for a fixed N.)
+    is a plain **`top N [dimension] [measure]`** (or **`bottom N …`**) keyword search (anchor
+    dimension first, then measure) — **no formulas, no parameter**. (The `top N` keyword
+    search_query IS correct for a fixed N.)
   - **`count='[Parameters].[X]'` (dynamic, parameter-driven N)** → a **rank formula +
     parameter-filter formula**, with N read from the migrated model parameter. This is the only
     form that stays in sync with the parameter as the user changes it. (B2VBWeek11 uses this.)
@@ -1323,7 +1324,7 @@ cohort:
     - id: "<model display name>"
       name: "<model display name>"
       obj_id: "<model obj_id>"
-    search_query: "top 10 [<measure>] [<dimension>]"   # "bottom 10 …" for Bottom-N; N is the literal count
+    search_query: "top 10 [<dimension>] [<measure>]"   # anchor dimension FIRST, then measure; "bottom 10 …" for Bottom-N; N is the literal count
     answer_columns:
     - name: <dimension display name>
     - name: "<aggregated measure display name>"         # e.g. "Total gallons"
@@ -1347,15 +1348,17 @@ cohort:
     anchor_column_id: <dimension display name>
     return_column_id: <dimension display name>
     cohort_grouping_type: COLUMN_BASED
-    hide_excluded_query_values: true
-    group_excluded_query_values: "Excluded values"
+    hide_excluded_query_values: false       # false = show a remainder bucket (label below); true = hide non-members
+    group_excluded_query_values: "Others"   # label for the non-member remainder bucket
     pass_thru_filter:
       accept_all: false
 ```
-> The `top N`/`bottom N` keyword `search_query` is the correct representation for a **fixed-N**
-> query set (no parameter). The surrounding answer block mirrors the verified dynamic export's
-> shape (minus the rank machinery); a static-form export hasn't been separately captured — flag
-> for review on first use.
+> Live-verified 2026-06-12 against se-thoughtspot (set "Static Top 10" on model
+> `TEST_SV_DMSI_AI_CONTEXT`). The `top N [dimension] [measure]` keyword `search_query` (**anchor
+> dimension first, then measure**) is the correct representation for a fixed-N query set — no
+> formulas, no parameter. `hide_excluded_query_values` is a display choice: `false` keeps a
+> remainder bucket (labelled by `group_excluded_query_values`, e.g. "Others"); `true` hides
+> non-members.
 
 ### 5c. SQL View TML — one per custom SQL relation
 
@@ -2410,6 +2413,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.9.1 | 2026-06-12 | **Fix static query-set `search_query` token order** (v1.9.0 follow-up, now live-verified). A static (fixed-N) Top-N query set's search is **`top N [dimension] [measure]`** — anchor dimension FIRST, then measure — not `[measure] [dimension]`. Verified against an exported set "Static Top 10" on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). Also corrected the static-form `config` defaults to the verified values: `hide_excluded_query_values: false` (shows an "Others" remainder bucket) + `group_excluded_query_values: "Others"`, with a note that hide/show is a display choice. Dropped the "static-form export not yet captured" caveat — it's now ground-truthed. Added the verified static export to `thoughtspot-sets-tml.md`. (Dynamic form unchanged.) |
 | 1.9.0 | 2026-06-12 | **Top-N/Bottom-N sets → ThoughtSpot query sets (BL-009 Phase 2b).** Replace Phase-2b deferral with a verified translation: Tableau `<group>` whose `<groupfilter>` tree contains `function='end'` → `cohort_type: ADVANCED`, `cohort_grouping_type: COLUMN_BASED` cohort, in **one of two forms by `count`**: (a) **dynamic** (parameter-driven N, `count='[Parameters].[X]'`) — embedded answer with a rank formula (`rank(sum(measure),'desc'/'asc')` for top/bottom) + a parameter-filter formula (`[formula_rank] <= [<alias>::<param>]`), N read from the migrated model parameter (live-verified ground truth); (b) **static** (fixed N, literal `count='N'`) — a plain `search_query: "top N [measure] [dimension]"` / `"bottom N …"` keyword search, no formulas (the `top N` keyword form is correct for fixed N — not wrong). Detection rules: `end='top'` → `top N`/`'desc'`; `end='bottom'` → `bottom N`/`'asc'`. Both emission templates added (Section 5b). **Stepped range → `list_config`:** a Tableau `<range granularity='N' .../>` parameter enumerates min→max by step → `list_config` (NOT `range_config` which loses the step); a count parameter for a Top-N set must use `list_config`. Import order: model (with param) → cohort. Tier table + audit coverage table updated (Top-N moved from "Partial/deferred" → "Native/Set"). Dropped nuances (null-pad, conditional measure) flagged for review. All live-verified 2026-06-12 on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). New worked example `worked-examples/tableau/topn-set-to-query-set.md`. Schema `thoughtspot-sets-tml.md` updated with verified COLUMN_BASED pattern. |
 | 1.8.1 | 2026-06-12 | Add `FIRST()`/`LAST()` to the untranslatable table-calc detection (tier table + Audit classifier regex + translation step) — missing from the skill's own classifier though the mapping reference listed them; precedence note: untranslatable only standalone, not as `WINDOW_*`/`RUNNING_*` offset args. **AND recognise the comma-separated-list / string-concatenation technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE building one delimited string) → translate the *intent* to **`LISTAGG` string aggregation** (`sql_string_aggregate_op`, answer-level, ⚑ flag for review) or a table, instead of omitting; the feeder/`Last` scaffolding collapses into the one formula. Live-verified the LISTAGG answer-level formula on se-thoughtspot. New "String aggregation" section in `tableau-formula-translation.md`. **Plus set IN/OUT consumption (all live/UI-verified):** column sets ARE formula-referenceable — `IF [Set] THEN x END` → `sum ( if ( [Set] = 'in' ) then x else null )` or `sum_if ( [Set] = 'in' , x )` (or dimension-direct `sum_if ( [dim] in {…} , x )`); compare in-vs-out → group a measure by the cohort (`[Amount] [Set]`); filter on it for in/out. Pitfall: cohort **name must differ from its `in`/`out` labels** (a name==label collision fails "Search did not find"); emit distinct lowercase `in`/`out` labels; formula label must match exactly (case-sensitive). Added verified consumption answer TML (measures + group-by breakdown) to the worked example. (Found via TableauSetControlUseCases.) |
 | 1.8.0 | 2026-06-12 | Translate Tableau static sets → ThoughtSpot column sets (`cohort_type: SIMPLE`, `cohort_grouping_type: GROUP_BASED`); detect and log Top-N sets (`function='end'`) as Phase-2b deferred, set operations (`except`/`intersect`) as Phase-2c deferred, and set actions as no-equivalent — none mis-translated (BL-009 Phase 2a). Live-verified on se-thoughtspot: bind via `worksheet:` (id/name/obj_id) NOT `model:`; anchor/column_name use display names; `operator: EQ` + value list. Added worked example `worked-examples/tableau/static-set-to-column-set.md`. UI-verified set capabilities: `%null%` members ARE representable via the `{Null}` grouping value (`EQ ["{Null}"]`); `except` member-lists → `operator: NE`; sets can anchor on a **formula column** (resolve calc id → display name, emit the backing formula); set controls (`level-members` only) → no set object, surface as a liveboard filter. Top-N (→ query set) + `intersect`/computed `except` remain deferred. |

@@ -82,7 +82,8 @@ cohort:
     # --- COLUMN_BASED (query set — cohort_type: ADVANCED, results of an embedded search) ---
     # Two forms, by whether N is fixed or parameter-driven:
     #  • STATIC N (fixed): the embedded answer's search_query is a plain "top N …" / "bottom N …"
-    #    keyword search — no formulas, no parameter (e.g. search_query: "top 10 [Amount] [Customer State]").
+    #    keyword search — no formulas, no parameter. Anchor dimension FIRST, then measure
+    #    (e.g. search_query: "top 10 [Customer State] [Amount]"). Live-verified 2026-06-12.
     #  • DYNAMIC N (parameter-driven): a rank formula + parameter-filter formula, with N read from a
     #    model parameter. Live-verified 2026-06-12 (se-thoughtspot, model TEST_SV_DMSI_AI_CONTEXT). Shown below.
     # (use cohort_type: ADVANCED, cohort_grouping_type: COLUMN_BASED for this config)
@@ -212,11 +213,57 @@ The example below is a **column set** (`cohort_type: SIMPLE`, `cohort_grouping_t
 ### `answer` section (query sets only — COLUMN_BASED)
 
 Contains a full embedded Answer whose results define the set members. Two forms:
-- **Static N (fixed):** `search_query: "top N [measure] [dimension]"` (or `"bottom N …"`) — a
-  plain keyword search, no formulas, no parameter. Correct for a fixed N.
+- **Static N (fixed):** `search_query: "top N [dimension] [measure]"` (or `"bottom N …"`) — a
+  plain keyword search, anchor dimension first then measure, no formulas, no parameter. Correct
+  for a fixed N (live-verified 2026-06-12, set "Static Top 10").
 - **Dynamic N (parameter-driven):** a rank formula + parameter-filter formula, with N read from
   a model parameter (live-verified 2026-06-12 on se-thoughtspot). This is the form shown above;
   it stays in sync as the user changes the parameter.
+
+**Static query set — verified export** (set "Static Top 10", se-thoughtspot, model
+`TEST_SV_DMSI_AI_CONTEXT`, 2026-06-12). Note the `search_query` order: **anchor dimension first,
+then measure**.
+
+```yaml
+# guid/obj_id omitted on first import
+cohort:
+  name: Static Top 10
+  answer:
+    tables:
+    - id: TEST_SV_DMSI_AI_CONTEXT
+      name: TEST_SV_DMSI_AI_CONTEXT
+      obj_id: TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY_AI_CONTEXT-889a704f
+    search_query: "top 10 [Customer State] [Amount]"
+    answer_columns:
+    - name: Customer State
+    - name: Total Amount
+    table:
+      table_columns:
+      - column_id: Customer State
+        show_headline: false
+      - column_id: Total Amount
+        show_headline: false
+      ordered_column_ids:
+      - Customer State
+      - Total Amount
+      client_state: ""
+    display_mode: TABLE_MODE
+  worksheet:
+    id: TEST_SV_DMSI_AI_CONTEXT
+    name: TEST_SV_DMSI_AI_CONTEXT
+    obj_id: TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY_AI_CONTEXT-889a704f
+  config:
+    cohort_type: ADVANCED
+    anchor_column_id: Customer State
+    return_column_id: Customer State
+    cohort_grouping_type: COLUMN_BASED
+    hide_excluded_query_values: false        # false → show "Others" remainder bucket; true → hide non-members
+    group_excluded_query_values: Others
+    pass_thru_filter:
+      accept_all: false
+```
+
+### Field reference (dynamic form)
 
 | Field | Notes |
 |---|---|

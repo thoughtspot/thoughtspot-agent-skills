@@ -48,7 +48,8 @@ Detection: `function='end'`, `end='top'` → Top-N → `rank(..., 'desc')`.
 - `count='[Parameters].[パラメーター 1]'` → **parameter-driven N → dynamic form** (rank +
   parameter-filter formula, N from the migrated model param `topN`). This example uses the
   dynamic form throughout. (A set with a *literal* `count`, e.g. `count='10'`, would instead use
-  the simpler **static form** — `search_query: "top 10 [gallons] [State]"`, no formulas.)
+  the simpler **static form** — `search_query: "top 10 [State] [gallons]"` (anchor dimension
+  first, then measure), no formulas.)
 - `direction='DESC'` + `SUM([gallons-null-padded])` → ordering measure is SUM of `gallons`
   (the `gallons-null-padded` is a null-padding wrapper — use the plain `gallons` column and
   **flag** the dropped nuance).
