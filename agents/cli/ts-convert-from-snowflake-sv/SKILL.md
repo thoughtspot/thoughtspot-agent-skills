@@ -1092,6 +1092,30 @@ and column summary so the user has the full picture before importing.
 
 ---
 
+#### Pre-import validation gate (I1 / I2 / I4 / I5)
+
+Before running `ts tml import`, validate the generated **Model** TML against the hard
+invariants in [`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md).
+`--policy VALIDATE_ONLY` does **not** catch these — ThoughtSpot accepts the TML and then
+behaves wrong. Do not import until all four pass:
+
+- **I1** — every `formulas[]` entry has a `columns[]` entry whose `formula_id:` matches its `id:` exactly. *(Unpaired formula is silently dropped.)*
+- **I2** — no `aggregation:` key appears inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
+- **I4** — every `model_tables[]` `id:` (when present) equals its `name:` with identical case. *(Mismatch makes joins silently fail: "{table} does not exist in schema".)*
+- **I5** — no physical-column `columns[]` entry uses `aggregation: COUNT_DISTINCT`; distinct counts are `unique count ( [TABLE::col] )` formulas. *(COUNT_DISTINCT silently flips MEASURE → ATTRIBUTE.)*
+
+Quick mechanical check on the generated file (replace `<file>`):
+
+```bash
+grep -nE '^\s*aggregation:\s*COUNT_DISTINCT' <file>   # I5 — expect NO matches
+grep -nE '^\s*aggregation:' <file>                    # confirm none sit under a formulas[] entry (I2)
+```
+
+Inspect `formulas[]`/`columns[]` for I1 pairing and `model_tables[]` for I4 id==name.
+If any check fails, fix the TML and re-validate before importing.
+
+---
+
 ### Step 11: Import the model
 
 **IMPORTANT — Updating vs creating:** Without a `guid` field in the TML, ThoughtSpot
@@ -1262,6 +1286,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |
 | 1.5.0 | 2026-06-11 | Drop `TEST_SV_` prefix — model name now uses the bare SV name (N1); cite canonical conversion invariants doc. Add I5 explicit note: `COUNT(DISTINCT)` → `unique count(...)` formula, never `aggregation: COUNT_DISTINCT`. Add `references/open-items.md` tracking sql_view generation gap. |
 | 1.4.1 | 2026-05-11 | Add `source ~/.zshenv &&` prefix to all bash blocks and convert subprocess.run calls from `["ts", ...]` to `["bash", "-c", "source ~/.zshenv && ts ..."]` for consistent env var loading |
 | 1.4.0 | 2026-05-05 | Add Mode C (update existing): Steps C1–C6. Identifies a changed SV and an existing TS Model, diffs columns/descriptions/synonyms/expressions, applies per-column reviewed changes with `--no-create-new`, and surfaces /ts-object-model-coach handoff. `ai_context` and Instructions are never touched. Step 1.5 menu updated to A/B/C. |

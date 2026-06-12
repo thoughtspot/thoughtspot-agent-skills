@@ -144,155 +144,143 @@ model:
     is_bypass_rls: false
     join_progressive: true
   model_tables:
-  - id: hero_attribute          # lowercase id — used in column_id and join on clauses
-    name: HERO_ATTRIBUTE        # exact ThoughtSpot table object name
+  - name: HERO_ATTRIBUTE        # exact ThoughtSpot table object name (I4: omit id or set id == name)
     fqn: "0d52f26c-9bcf-4c1f-8461-b1b9c5174f8b"
     joins:
     - name: ha_to_superhero
-      with: superhero           # matches id of target entry
-      on: "[hero_attribute::HA_HERO_ID] = [superhero::SUPERHERO_ID]"
+      with: SUPERHERO           # must match the target entry's name exactly (I4)
+      on: "[HERO_ATTRIBUTE::HA_HERO_ID] = [SUPERHERO::SUPERHERO_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: ha_to_attribute
-      with: attribute
-      on: "[hero_attribute::HA_ATTRIBUTE_ID] = [attribute::ATTRIBUTE_ID]"
+      with: ATTRIBUTE
+      on: "[HERO_ATTRIBUTE::HA_ATTRIBUTE_ID] = [ATTRIBUTE::ATTRIBUTE_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
-  - id: hero_power
-    name: HERO_POWER
+  - name: HERO_POWER
     fqn: "aae49ef1-8b13-4891-b9fc-eeac65e0116a"
     joins:
     - name: hp_to_superhero
-      with: superhero
-      on: "[hero_power::HP_HERO_ID] = [superhero::SUPERHERO_ID]"
+      with: SUPERHERO
+      on: "[HERO_POWER::HP_HERO_ID] = [SUPERHERO::SUPERHERO_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: hp_to_superpower
-      with: superpower
-      on: "[hero_power::HP_POWER_ID] = [superpower::SUPERPOWER_ID]"
+      with: SUPERPOWER
+      on: "[HERO_POWER::HP_POWER_ID] = [SUPERPOWER::SUPERPOWER_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
-  - id: superhero
-    name: SUPERHERO
+  - name: SUPERHERO
     fqn: "4c089346-7892-4cbb-925c-395f5c90302b"
     joins:
     - name: sh_to_alignment
-      with: alignment
-      on: "[superhero::SH_ALIGNMENT_ID] = [alignment::ALIGNMENT_ID]"
+      with: ALIGNMENT
+      on: "[SUPERHERO::SH_ALIGNMENT_ID] = [ALIGNMENT::ALIGNMENT_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_eye_colour
-      with: eye_colour
-      on: "[superhero::SH_EYE_COLOUR_ID] = [eye_colour::EYE_COLOUR_PK_ID]"
+      with: EYE_COLOUR
+      on: "[SUPERHERO::SH_EYE_COLOUR_ID] = [EYE_COLOUR::EYE_COLOUR_PK_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_hair_colour
-      with: hair_colour
-      on: "[superhero::SH_HAIR_COLOUR_ID] = [hair_colour::HAIR_COLOUR_PK_ID]"
+      with: HAIR_COLOUR
+      on: "[SUPERHERO::SH_HAIR_COLOUR_ID] = [HAIR_COLOUR::HAIR_COLOUR_PK_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_skin_colour
-      with: skin_colour
-      on: "[superhero::SH_SKIN_COLOUR_ID] = [skin_colour::SKIN_COLOUR_PK_ID]"
+      with: SKIN_COLOUR
+      on: "[SUPERHERO::SH_SKIN_COLOUR_ID] = [SKIN_COLOUR::SKIN_COLOUR_PK_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_gender
-      with: gender
-      on: "[superhero::SH_GENDER_ID] = [gender::GENDER_ID]"
+      with: GENDER
+      on: "[SUPERHERO::SH_GENDER_ID] = [GENDER::GENDER_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_publisher
-      with: publisher
-      on: "[superhero::SH_PUBLISHER_ID] = [publisher::PUBLISHER_ID]"
+      with: PUBLISHER
+      on: "[SUPERHERO::SH_PUBLISHER_ID] = [PUBLISHER::PUBLISHER_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
     - name: sh_to_race
-      with: race
-      on: "[superhero::SH_RACE_ID] = [race::RACE_ID]"
+      with: RACE
+      on: "[SUPERHERO::SH_RACE_ID] = [RACE::RACE_ID]"
       type: INNER
       cardinality: MANY_TO_ONE
-  - id: alignment
-    name: ALIGNMENT
+  - name: ALIGNMENT
     fqn: "e0115940-7faa-4821-a840-68f0e6bf1b87"
-  - id: attribute
-    name: ATTRIBUTE
+  - name: ATTRIBUTE
     fqn: "7d539ecb-0888-425d-b84c-f85d2acc6416"
-  - id: eye_colour
-    name: EYE_COLOUR
+  - name: EYE_COLOUR
     fqn: "e21ffc4d-51f7-4141-b05e-0e314722cc2a"
-  - id: hair_colour
-    name: HAIR_COLOUR
+  - name: HAIR_COLOUR
     fqn: "02c48153-f640-4a81-bf55-11d58dfd2913"
-  - id: skin_colour
-    name: SKIN_COLOUR
+  - name: SKIN_COLOUR
     fqn: "1dc0334f-a5df-443a-8bef-dd81174b6c39"
-  - id: gender
-    name: GENDER
+  - name: GENDER
     fqn: "bfd7596e-431f-4f6a-99f4-20cec611c16c"
-  - id: publisher
-    name: PUBLISHER
+  - name: PUBLISHER
     fqn: "1e7dec84-6e8c-413c-b284-e1c285bd72a3"
-  - id: race
-    name: RACE
+  - name: RACE
     fqn: "f2d74e25-e11c-44e6-bf0a-a7bfa39ccacd"
-  - id: superpower
-    name: SUPERPOWER
+  - name: SUPERPOWER
     fqn: "fbd2de8f-dc23-4aaa-a14b-08e54cf3ccfc"
   columns:
   - name: "the name of the superhero"          # from comment='...'
-    column_id: superhero::SUPERHERO_NAME
+    column_id: SUPERHERO::SUPERHERO_NAME
     properties:
       column_type: ATTRIBUTE
   - name: "the full name of the superhero"
-    column_id: superhero::FULL_NAME
+    column_id: SUPERHERO::FULL_NAME
     properties:
       column_type: ATTRIBUTE
   - name: "the height of the superhero in centimeters"
-    column_id: superhero::HEIGHT_CM
+    column_id: SUPERHERO::HEIGHT_CM
     properties:
       column_type: ATTRIBUTE
   - name: "the weight of the superhero in kilograms"
-    column_id: superhero::WEIGHT_KG
+    column_id: SUPERHERO::WEIGHT_KG
     properties:
       column_type: ATTRIBUTE
   - name: "the alignment of the superhero (Good, Neutral, or Bad)"
-    column_id: alignment::ALIGNMENT
+    column_id: ALIGNMENT::ALIGNMENT
     properties:
       column_type: ATTRIBUTE
   - name: "the attribute that defines who they are and what they are capable of"
-    column_id: attribute::ATTRIBUTE_NAME
+    column_id: ATTRIBUTE::ATTRIBUTE_NAME
     properties:
       column_type: ATTRIBUTE
   - name: "the attribute value"
-    column_id: hero_attribute::ATTRIBUTE_VALUE
+    column_id: HERO_ATTRIBUTE::ATTRIBUTE_VALUE
     properties:
       column_type: ATTRIBUTE
   - name: "the color of the superhero's eye"
-    column_id: eye_colour::COLOUR         # ThoughtSpot column name, not semantic view alias
+    column_id: EYE_COLOUR::COLOUR         # ThoughtSpot column name, not semantic view alias
     properties:
       column_type: ATTRIBUTE
   - name: "the color of the superhero's hair"
-    column_id: hair_colour::COLOUR
+    column_id: HAIR_COLOUR::COLOUR
     properties:
       column_type: ATTRIBUTE
   - name: "the color of the superhero's skin"
-    column_id: skin_colour::COLOUR
+    column_id: SKIN_COLOUR::COLOUR
     properties:
       column_type: ATTRIBUTE
   - name: "the gender of the superhero"
-    column_id: gender::GENDER
+    column_id: GENDER::GENDER
     properties:
       column_type: ATTRIBUTE
   - name: "the name of the publisher"
-    column_id: publisher::PUBLISHER_NAME
+    column_id: PUBLISHER::PUBLISHER_NAME
     properties:
       column_type: ATTRIBUTE
   - name: "the race of the superhero"
-    column_id: race::RACE
+    column_id: RACE::RACE
     properties:
       column_type: ATTRIBUTE
   - name: "the superpower name"
-    column_id: superpower::POWER_NAME
+    column_id: SUPERPOWER::POWER_NAME
     properties:
       column_type: ATTRIBUTE
 ```
@@ -320,8 +308,9 @@ model:
    case-mismatch errors.
 
 5. **`with` and `on` consistency.** Both must reference the same identifier (either the `id`
-   if present, or the `name` if `id` is omitted). In the superhero example, `id` is set to
-   lowercase and both use it: `with: alignment` and `on: "[superhero::SH_ALIGNMENT_ID] = [alignment::ALIGNMENT_ID]"`.
+   if present, or the `name` if `id` is omitted). The superhero example omits `id`, so both
+   reference the `name` directly: `with: ALIGNMENT` and
+   `on: "[SUPERHERO::SH_ALIGNMENT_ID] = [ALIGNMENT::ALIGNMENT_ID]"`.
 
 6. **Display names from `comment=`.** The `comment='...'` value on each dimension becomes the
    ThoughtSpot column display name. Where no comment exists, title-case the DIM_NAME.

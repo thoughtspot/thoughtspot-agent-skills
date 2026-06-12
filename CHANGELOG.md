@@ -5,6 +5,12 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-12
+- feat(validate): `check_tml.py` now enforces I4 (join id==name exact case) and I5 (no `aggregation: COUNT_DISTINCT` on physical columns); added `tools/validate/tests/test_check_tml.py` (BL-001)
+- feat(convert-from): add an inline pre-import validation gate (I1/I2/I4/I5) to ts-convert-from-tableau, -snowflake-sv, and -databricks-mv before model TML import (BL-001)
+- fix(mappings): Snowflake `BOOLEAN` maps to `BOOL` for ThoughtSpot — `ts tables create` rejects `BOOLEAN` on Snowflake connections (BL-006)
+- chore(mirrors): mirror conversion invariants into the tableau + databricks-mv cursor rules, completing BL-012 parity
+
 ## 2026-06-11
 - docs: add `ts-model-conversion-invariants.md` shared reference — canonical hard-rule checklist (I1–I7 + EXC1 + N1) for all Model-producing conversion skills; cross-linked from `thoughtspot-model-tml.md`
 - feat: add `conversion-consistency-auditor` subagent — semantic auditor for I1–I7 and N1 across the five conversion skills plus their cursor + coco-snowsight mirrors (Mirror parity section); I3 is advisory (WARN); run before merging any conversion-skill PR

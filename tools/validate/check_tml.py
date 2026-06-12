@@ -238,6 +238,16 @@ def validate_model_tml(data: dict) -> list[str]:
         if entry_id:
             table_aliases.add(entry_id)
 
+        # I4: when id is present it must equal name exactly (case-sensitive).
+        # Joins resolve against name, so a case-mismatched id silently breaks joins.
+        if entry_id and t_name and entry_id != t_name:
+            errors.append(
+                f"model_tables entry id='{entry_id}' does not equal name='{t_name}' "
+                "(exact case) — ThoughtSpot resolves joins against 'name', so a "
+                "mismatched 'id' makes joins silently fail at query time "
+                "(\"{table} does not exist in schema\"). Omit 'id' or set it identical to 'name'."
+            )
+
         # Validate inline joins[].type — FULL_OUTER is invalid in model TML
         for j, join in enumerate(entry.get("joins") or []):
             if not isinstance(join, dict):
@@ -319,6 +329,20 @@ def validate_model_tml(data: dict) -> list[str]:
                         f"table prefix '{tbl_prefix}' does not match any "
                         "model_tables name or alias"
                     )
+
+        # I5: COUNT_DISTINCT as an aggregation on a physical column silently flips
+        # the column MEASURE -> ATTRIBUTE. Distinct counts must be `unique count(...)` formulas.
+        if (
+            isinstance(props, dict)
+            and props.get("aggregation") == "COUNT_DISTINCT"
+            and col.get("column_id")
+            and not col.get("formula_id")
+        ):
+            errors.append(
+                f"Column '{col_display}' uses aggregation: COUNT_DISTINCT on a physical "
+                "column — ThoughtSpot silently overrides column_type MEASURE -> ATTRIBUTE. "
+                "Express distinct counts as a 'unique count ( [TABLE::col] )' formula instead (I5)."
+            )
 
         # formula_id: must match a formulas[] id
         formula_id = col.get("formula_id")
