@@ -1791,7 +1791,13 @@ liveboard:
 and `table.table_columns` must reference the **resolved** answer-column names, not raw
 model names:
 - aggregated measure → `Total {Measure}` (`SUM([Total Revenue])` → `Total Total Revenue`)
+- **model formula with embedded aggregation** (e.g. `sum([A] * [B])`) → resolves to the
+  **formula name as-is**, no "Total" prefix. Example: formula "Commission Earned" with
+  `sum(...)` expression → `Commission Earned`, NOT `Total Commission Earned`.
 - bucketed date → `{Bucket}(col)` (`[Ship Date].yearly` → `Year(Ship Date)`)
+- **KPI date auto-bucketing:** a bare date in a KPI `search_query` (e.g. `[Date]`) is
+  auto-bucketed to **monthly** — resolved name becomes `Month(Date)` and the search_query
+  gains `.monthly`. Specify `[Date].daily` explicitly if you want `Day(Date)` instead.
 - attribute → unchanged
 
 ThoughtSpot re-resolves `answer_columns` from `search_query` on import but does **not** fix
@@ -1827,9 +1833,10 @@ Rewrite the `layout.tiles` section with corrected coordinates.
 A flat grid of tiles reads as a dump; a grouped, well-labelled liveboard reads as a
 designed product. Two cheap, high-value steps:
 
-**Group related vizzes into sections** (`groups[]` + `layout.group_layouts[]` — see
-`../../shared/schemas/thoughtspot-liveboard-tml.md` "Sections (groups)"). Infer groupings
-from what the vizzes have in common rather than leaving everything loose:
+**Group related vizzes into sections** (`groups[]` + `group_layouts[]` — see
+`../../shared/schemas/thoughtspot-liveboard-tml.md` "Sections (groups)" and "Tabbed +
+Groups"). Infer groupings from what the vizzes have in common rather than leaving
+everything loose:
 - All the per-measure **KPI tiles** → one "Key Metrics" section.
 - Vizzes that share a **breakdown dimension** (e.g. two charts both by *Sales Channel*) →
   a section named for that dimension ("Channel Performance").
@@ -1838,6 +1845,18 @@ from what the vizzes have in common rather than leaving everything loose:
 - Give each group a short `name` and a one-line `description`.
 A Tableau dashboard has no native sections, so this is an inference — keep it light
 (2–4 groups), and don't force a viz into a group it doesn't fit; ungrouped tiles are fine.
+
+**Groups work with tabs — but the nesting is specific.** When using `layout.tabs[]`:
+1. Define `groups[]` at the liveboard level with `visualizations:` listing member viz IDs
+2. In each tab's `tiles[]`, place **group IDs** as tiles (`visualization_id: Group_1`) —
+   NOT individual viz IDs
+3. Nest `group_layouts[]` **inside each tab** (not at the top-level `layout`)
+4. Individual vizzes only appear inside `group_layouts[].tiles[]`
+5. Ungrouped vizzes (e.g. note tiles) go directly in `tabs[].tiles[]`
+
+**Common mistake:** putting individual viz IDs in `tabs[].tiles[]` alongside groups, or
+putting `group_layouts` at the layout root instead of inside each tab — both cause
+"Group was dropped because it has no valid visualizations" on import.
 
 **Write meaningful names and descriptions on every viz.** Don't ship raw worksheet names
 like `Sheet 1` or terse labels. Set `answer.name` to a clear title and add a one-line

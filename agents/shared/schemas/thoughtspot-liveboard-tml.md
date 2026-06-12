@@ -184,13 +184,14 @@ not shared between vizzes on the same Liveboard.
 
 ### `layout` fields
 
-There are three layout styles (mutually exclusive at the top level):
+There are four layout styles:
 
 | Layout style | Structure | Notes |
 |---|---|---|
 | Flat (no tabs) | `layout.tiles[]` | Each tile: `visualization_id`, `x`, `y`, `height`, `width` OR `size` |
 | Tabbed | `layout.tabs[]` | Each tab: `name`, `description`, `tiles[]` (same tile structure) |
-| Sections (groups) | `layout.tiles[]` + `layout.group_layouts[]` | A group is placed in `layout.tiles[]` as `visualization_id: Group_N`; its members are arranged in `layout.group_layouts[]`. Requires a top-level `groups[]`. See "Sections (groups)" below. |
+| Flat + Groups | `layout.tiles[]` + `layout.group_layouts[]` | Groups in a flat (non-tabbed) layout. See "Sections (groups)" below. |
+| **Tabbed + Groups** | `layout.tabs[]` with `group_layouts[]` **inside each tab** | Tabs and groups coexist. Tab `tiles[]` reference **group IDs** (not individual viz IDs); `group_layouts[]` nests inside each tab entry. See "Tabbed + Groups" below. |
 
 Predefined `size` values: `EXTRA_SMALL`, `SMALL`, `MEDIUM`, `LARGE`, `LARGE_SMALL`,
 `MEDIUM_SMALL`, `EXTRA_LARGE`. Use `size` OR `height`/`width`, not both.
@@ -225,8 +226,16 @@ names, not the raw model column names:
 
 - An aggregated measure gains its aggregation word: `SUM([Total Revenue])` resolves to
   `Total Total Revenue`; a non-default agg follows the same pattern.
+- **Model formula columns** with embedded aggregation (e.g. `sum([A] * [B])`) resolve to
+  their **formula name as-is** — no "Total" prefix. Example: a formula named
+  "Commission Earned" with `sum(...)` in its expression resolves to `Commission Earned`,
+  NOT `Total Commission Earned`.
 - A bucketed date resolves to `{Bucket}(col)` — `[Ship Date].yearly` → `Year(Ship Date)`,
   `[Order Date].monthly` → `Month(Order Date)`.
+- **KPI date auto-bucketing:** a bare date column in a KPI `search_query`
+  (e.g. `[Date]`) is auto-bucketed to **monthly** by ThoughtSpot. The resolved column
+  name becomes `Month(Date)` and the search_query gains `.monthly`. To get a different
+  bucket, specify it explicitly (e.g. `[Date].daily` → `Day(Date)`).
 - Attributes keep their name.
 - Date bucketing in `search_query` uses the **dotted** form (`[Order Date].monthly`); a
   bare `monthly` token is rejected with `Invalid value token: monthly`.
@@ -297,6 +306,82 @@ liveboard:
 | `groups[].visualizations[]` | Member viz IDs |
 | `groups[].group_guid` | TS-assigned; omit on first import |
 | `layout.group_layouts[]` | Per-group inner layout — one entry per group, each with its own `tiles[]` |
+
+## Tabbed + Groups
+
+Groups work inside tabs. The key difference from flat+groups: `group_layouts[]` nests
+inside each **tab** entry, and the tab's `tiles[]` reference **group IDs** — individual
+vizzes only appear inside `group_layouts[].tiles[]`. Verified against a live instance
+(`se-thoughtspot`) on 2026-06-12.
+
+```yaml
+liveboard:
+  groups:
+  - id: Group_1
+    name: "Key Metrics"
+    description: "High-level KPIs"
+    visualizations:              # member viz IDs
+    - Viz_1
+    - Viz_2
+  - id: Group_2
+    name: "Sales Analysis"
+    description: "Breakdown charts"
+    visualizations:
+    - Viz_3
+    - Viz_4
+  layout:
+    tabs:
+    - name: "Overview"
+      tiles:                     # tab tiles reference GROUPS, not individual vizzes
+      - visualization_id: Group_1
+        x: 0
+        y: 0
+        height: 4
+        width: 12
+      - visualization_id: Group_2
+        x: 0
+        y: 4
+        height: 6
+        width: 12
+      group_layouts:             # nested INSIDE the tab — not at layout root
+      - id: Group_1              # matches groups[].id — NOT "group_id"
+        tiles:
+        - visualization_id: Viz_1
+          x: 0
+          y: 0
+          height: 4
+          width: 6
+        - visualization_id: Viz_2
+          x: 6
+          y: 0
+          height: 4
+          width: 6
+      - id: Group_2
+        tiles:
+        - visualization_id: Viz_3
+          x: 0
+          y: 0
+          height: 6
+          width: 6
+        - visualization_id: Viz_4
+          x: 6
+          y: 0
+          height: 6
+          width: 6
+    - name: "Notes"
+      tiles:                     # ungrouped vizzes go directly in tabs[].tiles[]
+      - visualization_id: Viz_5
+        x: 0
+        y: 0
+        height: 14
+        width: 12
+```
+
+**Common mistakes that cause "Group was dropped because it has no valid visualizations":**
+- Putting individual viz IDs in `tabs[].tiles[]` instead of group IDs
+- Putting `group_layouts` at the top-level `layout` instead of inside each tab
+- Using `group_id` instead of `id` in `group_layouts[]` entries
+- Using `visualization_ids` instead of `visualizations` in `groups[]`
 
 ## `client_state` / `client_state_v2`
 
