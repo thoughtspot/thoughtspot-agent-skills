@@ -604,8 +604,8 @@ model import. A missing formula produces a functional model with reduced coverag
 | `LOOKUP()` | Table calculation — references rows by offset; no SQL equivalent |
 | `INDEX()` | Table calculation — row numbering without aggregation context |
 | `ISMEMBEROF()` | User-specific function — no equivalent |
-| `SIZE()`, `FIRST()`, `LAST()` | Table calculations — partition-aware row addressing; no SQL equivalent |
-| `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent |
+| `SIZE()`, `FIRST()`, `LAST()` | Table calculations — partition-aware row addressing; no SQL equivalent. **Exception — recognise the *intent*:** when `FIRST()`/`LAST()`/`LOOKUP()`/`PREVIOUS_VALUE()` together implement the **comma-separated-list-of-values technique** (concatenate a column's values into one string, e.g. Jonathan Drummey's CSV technique), don't omit — translate the *intent* to string aggregation (see below). |
+| `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent (but see the string-aggregation note above). |
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
 | True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
 | References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
@@ -621,6 +621,31 @@ model import. A missing formula produces a functional model with reduced coverag
 - `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined (⚑ flag for review if using `sql_*_aggregate_op` — PT1)
 - `RANK_MODIFIED`, `RANK_DENSE` → `sql_int_aggregate_op()` pass-through ⚑ flag for review (PT1)
 - Partitioned `RANK` → `sql_int_aggregate_op()` with `partition by` ⚑ flag for review (PT1)
+- **Comma-separated list of values** (Tableau's `FIRST`/`LAST`/`LOOKUP`/`PREVIOUS_VALUE` CSV technique) →
+  string aggregation, see below
+
+---
+
+## String aggregation — comma-separated list of values
+
+Tableau workbooks concatenate a column's values into one string via a row-walking **table-calc
+technique** (`FIRST()`/`LAST()`/`LOOKUP()`/`PREVIOUS_VALUE()` building up a string — e.g. Jonathan
+Drummey's "comma-separated list" / set-member-list dashboards). The *implementation* is untranslatable,
+but the *intent* (one delimited string of the values) maps to **`LISTAGG` via a string-aggregate
+pass-through** (live-verified 2026-06-12 as an answer-level formula):
+
+```
+sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [Category] )
+```
+
+- It is an **aggregate pass-through** → **⚑ flag for review** (PT1).
+- Make it an **answer-level** formula (`answer.formulas[]`) on the viz that needs it (it's viz-specific,
+  not a reusable model column), rendered `display_mode: TABLE_MODE`. The Tableau feeder/`Last`
+  scaffolding calcs collapse into this single formula — do **not** migrate them individually.
+- **Scope to a set's in/out members** by applying the migrated column set / a filter on the answer
+  (LISTAGG over the in-set rows = the "in list"; over the out-set rows = the "out list").
+- **Often a plain table of the values is the better ThoughtSpot UX** than a pre-concatenated string —
+  offer both.
 
 ---
 

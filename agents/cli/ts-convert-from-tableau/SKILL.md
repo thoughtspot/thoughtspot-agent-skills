@@ -180,7 +180,7 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
 | **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **Top-N sets** (`function='end'`) → query set, Phase 2b deferred; **`intersect`** / `except` of a *computed* sub-tree → Phase 2c deferred; **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
-| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), PREVIOUS_VALUE; true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`) |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), **FIRST()**, **LAST()**, PREVIOUS_VALUE (standalone partition-position table calcs — e.g. the comma-separated-list-of-set-members technique; **not** FIRST()/LAST() as `WINDOW_*`/`RUNNING_*` offset args, which map to moving/cumulative); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
@@ -191,12 +191,20 @@ whitespace before the paren), not bare word boundaries. Bare `\bSIZE\b` false-po
 on dimension values like `'Size'` or column names like `[Size]`. Correct patterns:
 
 ```
-LOOKUP\s*\(   INDEX\s*\(   SIZE\s*\(   PREVIOUS_VALUE\s*\(   RAWSQL_
+LOOKUP\s*\(   INDEX\s*\(   SIZE\s*\(   FIRST\s*\(   LAST\s*\(   PREVIOUS_VALUE\s*\(   RAWSQL_
 RUNNING_(SUM|AVG|MAX|MIN|COUNT)\s*\(
 WINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(
 RANK(_UNIQUE|_MODIFIED|_DENSE|_PERCENTILE)?\s*\(
 TOTAL\s*\(
 ```
+
+**`FIRST()`/`LAST()` precedence.** These are untranslatable **standalone** (partition-position
+calcs like `LAST()=0`, or the comma-separated-list-of-members technique using
+`FIRST()`/`LAST()`/`LOOKUP()`/`PREVIOUS_VALUE()`). BUT `FIRST()`/`0` also appear as the **offset
+arguments** of a `WINDOW_*`/`RUNNING_*` window (e.g. `WINDOW_SUM(SUM([x]), FIRST(), 0)`) — there they
+belong to the moving/cumulative mapping, not the untranslatable tier. So **match `RUNNING_*`/`WINDOW_*`
+first**; only classify `FIRST()`/`LAST()` as untranslatable when they are **not** inside a window
+function's argument list.
 
 **Parameter references.** Detect `[Parameters].[...]` pattern — this is Tableau's
 cross-datasource parameter reference syntax. These formulas use translatable syntax
@@ -922,7 +930,14 @@ Formula translation rules: use `tableau-formula-translation.md`.
   function (partitioned RANK, DENSE_RANK, WINDOW_* when sort dimension is unknown): use
   `sql_*_aggregate_op()` pass-through functions — see "Pass-Through Fallback" in
   `tableau-formula-translation.md`. Always prefer native functions first.
-- **Truly untranslatable formulas** (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE, etc.): omit
+- **Comma-separated-list / string-concatenation technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE used
+  together to build one delimited string of a column's values — e.g. Jonathan Drummey's CSV-list /
+  set-member-list dashboards): do **NOT** omit — translate the *intent* to **`LISTAGG` string
+  aggregation** (`sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [col] )`,
+  answer-level, ⚑ flag for review per PT1) or a plain table of the values. The feeder/`Last` scaffolding
+  calcs collapse into the one LISTAGG formula. See `tableau-formula-translation.md` "String aggregation".
+- **Truly untranslatable formulas** (LOOKUP, INDEX, SIZE, FIRST, LAST, PREVIOUS_VALUE — standalone
+  partition-position table calcs that are NOT part of the string-aggregation technique above): omit
   from `formulas[]` entirely, omit the corresponding `columns[]` entry, and log the
   omission for the Step 12 limitations report. Never generate a placeholder — incorrect
   syntax fails the entire model import.
@@ -1058,14 +1073,43 @@ cohorts after the model (the payload order in Step 5.5 already includes `*.cohor
 > The reinterpreted ones (`except`→`NE`, `%null%`→`{Null}`, formula-anchor, set-control→filter,
 > collapsed `IF [Set]` calcs) especially need a human eye — call them out explicitly, don't bury them.
 
-**Set references in filters:** when a translated static set is used as an in/out filter on a
-worksheet, the migrated column set becomes a filterable/groupable column on the model. In the
-liveboard/answer step (Step 10), translate the filter by referencing the cohort column where
-the dashboard→liveboard filter step constructs filters. If the reference cannot be resolved
-(e.g. a worksheet filter on a set that couldn't be translated), log it and leave the filter as
-best-effort; this phase does not guarantee full filter-reference migration beyond the set
-object itself. See `../../shared/schemas/thoughtspot-sets-tml.md` (column set) and the
-live-verified worked example `../../shared/worked-examples/tableau/static-set-to-column-set.md`.
+#### Set IN/OUT semantics — the column set IS the In/Out classification
+
+A Tableau set returns a **boolean per row** — every dimension value is either a **member (IN)** or
+not (**OUT**). The migrated `GROUP_BASED` column set already encodes exactly that: its group label is
+the **In** value and the `combine_non_group_values` catch-all (`null_output_value`) is the **Out**
+value. So the three ways Tableau uses In/Out all map cleanly — translate the *intent*, don't migrate
+the `IF [Set]` scaffolding calcs:
+
+- **Compare In vs Out** (e.g. "Compare In vs Out" / "Part to Whole" dashboards) → **group a measure by
+  the cohort column** (`[measure] [Set]` → two groups, In vs Out). Native — this is the comparison; it
+  is **not** a capability gap for a static set.
+- **In/Out measure** (`IF [Set] THEN [Sales] END` / `Set Sales` / `Group 1 Sales`) → a **conditional
+  aggregate**. Three equivalent forms (all live-verified 2026-06-12) — a column set **is**
+  formula-referenceable as `[<cohort name>] = '<in/out label>'`:
+  - **Literal translation** (mirrors Tableau's `IF [Set] THEN x END` exactly):
+    `sum ( if ( [Product Category set] = 'in' ) then [Sales] else null )`.
+  - **`sum_if` shorthand** (preferred, esp. for large member lists — no inlining):
+    `sum_if ( [Product Category set] = 'in' , [Sales] )` (and `… = 'out'` for OUT). Family:
+    `sum_if`/`average_if`/`count_if`/`unique_count_if`/`max_if`/`min_if`.
+  - **Dimension + member list** (no cohort dependency; fine for small lists):
+    `sum_if ( [Category] in { 'Furniture','Technology' } , [Sales] )` /
+    `sum_if ( not ( [Category] in { 'Furniture','Technology' } ) , [Sales] )`.
+  - ⚠️ **Pitfall (cohort-ref forms):** the cohort **name must differ from its group labels** — a
+    name==label collision (e.g. cohort `Focus Categories` with group also `Focus Categories`) makes the
+    formula fail with *"Search did not find …"*. Emit distinct labels (group `in`, out `out`); see the
+    emission template.
+- **Filter to In / Out** → filter on the cohort column = the In label (or the Out label).
+- **`IF [Set] THEN [dimension]` label calcs** (`In`, `Out`, `Set Label`) → the cohort column itself
+  (its two labels), or the dimension filtered to In/Out.
+
+Pick `sum_if(...)` when In and Out are wanted as **separate measure columns** (KPIs, side-by-side, an
+In/Out ratio) — reference the cohort for large lists, the dimension for small; pick **grouping by the
+cohort** for an in-vs-out **breakdown** viz. Either way the pile of `IF [Set] THEN …` calcs collapses onto the one
+column set / a couple of `sum_if`s — don't emit them as per-row formulas.
+
+See `../../shared/schemas/thoughtspot-sets-tml.md` (column set) and the live-verified worked example
+`../../shared/worked-examples/tableau/static-set-to-column-set.md`.
 
 #### Column-set TML emission (static set → `GROUP_BASED` cohort)
 
@@ -1074,15 +1118,17 @@ For each static set detected above, generate a `.cohort.tml` file with the follo
 ```yaml
 # guid omitted on first import
 cohort:
-  name: "<group caption>"            # from group caption attribute
+  name: "<set caption>"              # from the Tableau set's group caption attribute
   config:
     cohort_type: SIMPLE
     cohort_grouping_type: GROUP_BASED
     anchor_column_id: "<dimension display name>"  # ThoughtSpot column DISPLAY name (live-verified), from groupfilter level=
     combine_non_group_values: true          # DEFAULT CATCH-ALL: every value not matched by a group — incl. NULL — combined into one group
-    null_output_value: "Not in set"         # display label for that default catch-all group
+    null_output_value: "out"                # OUT label for the catch-all — keep DISTINCT from the cohort name (see below)
     groups:
-    - name: "<group caption>"        # same as cohort name
+    - name: "in"                     # IN label — MUST differ from the cohort `name` above, or formula refs
+                                     # (`sum_if([<cohort>] = 'in', …)`) fail with "Search did not find" (live-verified).
+                                     # Formula refs must match this label EXACTLY (case-sensitive).
       combine_type: ANY              # ANY = membership in the value list ("in set")
       conditions:
       - operator: EQ                 # PROVEN pattern (changelog 1.5.6, from a working column set):
@@ -2158,6 +2204,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.8.1 | 2026-06-12 | Add `FIRST()`/`LAST()` to the untranslatable table-calc detection (tier table + Audit classifier regex + translation step) — missing from the skill's own classifier though the mapping reference listed them; precedence note: untranslatable only standalone, not as `WINDOW_*`/`RUNNING_*` offset args. **AND recognise the comma-separated-list / string-concatenation technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE building one delimited string) → translate the *intent* to **`LISTAGG` string aggregation** (`sql_string_aggregate_op`, answer-level, ⚑ flag for review) or a table, instead of omitting; the feeder/`Last` scaffolding collapses into the one formula. Live-verified the LISTAGG answer-level formula on se-thoughtspot. New "String aggregation" section in `tableau-formula-translation.md`. **Plus set IN/OUT consumption (all live/UI-verified):** column sets ARE formula-referenceable — `IF [Set] THEN x END` → `sum ( if ( [Set] = 'in' ) then x else null )` or `sum_if ( [Set] = 'in' , x )` (or dimension-direct `sum_if ( [dim] in {…} , x )`); compare in-vs-out → group a measure by the cohort (`[Amount] [Set]`); filter on it for in/out. Pitfall: cohort **name must differ from its `in`/`out` labels** (a name==label collision fails "Search did not find"); emit distinct lowercase `in`/`out` labels; formula label must match exactly (case-sensitive). Added verified consumption answer TML (measures + group-by breakdown) to the worked example. (Found via TableauSetControlUseCases.) |
 | 1.8.0 | 2026-06-12 | Translate Tableau static sets → ThoughtSpot column sets (`cohort_type: SIMPLE`, `cohort_grouping_type: GROUP_BASED`); detect and log Top-N sets (`function='end'`) as Phase-2b deferred, set operations (`except`/`intersect`) as Phase-2c deferred, and set actions as no-equivalent — none mis-translated (BL-009 Phase 2a). Live-verified on se-thoughtspot: bind via `worksheet:` (id/name/obj_id) NOT `model:`; anchor/column_name use display names; `operator: EQ` + value list. Added worked example `worked-examples/tableau/static-set-to-column-set.md`. UI-verified set capabilities: `%null%` members ARE representable via the `{Null}` grouping value (`EQ ["{Null}"]`); `except` member-lists → `operator: NE`; sets can anchor on a **formula column** (resolve calc id → display name, emit the backing formula); set controls (`level-members` only) → no set object, surface as a liveboard filter. Top-N (→ query set) + `intersect`/computed `except` remain deferred. |
 | 1.7.0 | 2026-06-12 | Add Phase-1 Tableau function mappings (DATEPARSE, EXP, trig, STARTSWITH/ENDSWITH, PI/RADIANS/DEGREES composites, PROPER/ASCII/CHAR/REGEXP/FINDNTH pass-through, WINDOW_*/RUNNING_COUNT table-calc notes) (BL-009 Phase 1). Fix trig unit bug (Tableau radians→ThoughtSpot degrees conversion). Fix UPPER/LOWER (no native — use sql_string_op pass-through). Fix REGEXP_MATCH (sql_bool_op, returns boolean). Drop ⚠ confirm markers on docs-confirmed functions. Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). Document NULL-in-IF/ELSE behavior — matches Tableau via SQL CASE, faithful, no auto-guard (BL-002). |
 | 1.6.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |
