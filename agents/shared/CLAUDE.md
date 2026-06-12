@@ -50,6 +50,7 @@ schemas/
 worked-examples/tableau/
   liveboard-kpi-sparkline.md          — KPI viz with sparkline: client_state_v2 requirement, before/after, verified template (2026-06-11)
   static-set-to-column-set.md         — Tableau static set → ThoughtSpot column set: worksheet binding, EQ-list, {Null}, NE/except, formula-col anchor, live-verified (2026-06-12)
+  topn-set-to-query-set.md            — Tableau Top-N/Bottom-N set → ThoughtSpot query set (ADVANCED/COLUMN_BASED): dynamic (rank + parameter-filter formula, model param) vs static (top N keyword) forms, live-verified (2026-06-12)
 
 worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)

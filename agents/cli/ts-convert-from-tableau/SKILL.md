@@ -174,12 +174,12 @@ based on the patterns in `tableau-formula-translation.md`:
 
 | Tier | Description | Examples |
 |---|---|---|
-| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key); **static sets** (`<group>` with `union`/`member`) → `GROUP_BASED` column-set cohort — incl. ones anchored on a **formula column**, with a **`%null%`** member (via `EQ {Null}`), or an **`except` member-list** (via `NE`) (Phase 2a) |
+| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key); **static sets** (`<group>` with `union`/`member`) → `GROUP_BASED` column-set cohort — incl. ones anchored on a **formula column**, with a **`%null%`** member (via `EQ {Null}`), or an **`except` member-list** (via `NE`) (Phase 2a); **Top-N/Bottom-N sets** (`function='end'`) → query set (`cohort_type: ADVANCED`, `COLUMN_BASED`) via a rank formula + parameter-filter formula (Phase 2b) |
 | **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}`; **`TOTAL(SUM(x))`** / percent-of-total → `group_aggregate(..., {}, query_filters())` |
 | **Cumulative** | Running calculation → `cumulative_*()` | RUNNING_SUM, RUNNING_AVG |
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
-| **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **Top-N sets** (`function='end'`) → query set, Phase 2b deferred; **`intersect`** / `except` of a *computed* sub-tree → Phase 2c deferred; **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
+| **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **`intersect`** / `except` of a *computed* sub-tree → Phase 2c deferred; **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
 | **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), **FIRST()**, **LAST()**, PREVIOUS_VALUE (standalone partition-position table calcs — e.g. the comma-separated-list-of-set-members technique; **not** FIRST()/LAST() as `WINDOW_*`/`RUNNING_*` offset args, which map to moving/cumulative); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
@@ -267,7 +267,8 @@ Audit: {workbook_name}
   │ Set tier                Count    Notes               │
   ├──────────────────────────────────────────────────────┤
   │ Native / column set     {N}      static → GROUP_BASED cohort (Phase 2a) │
-  │ Partial / deferred      {N}      Top-N (2b) + set-ops (2c) + actions    │
+  │ Query set {N}           {N}      Top-N/Bottom-N → ADVANCED cohort (Phase 2b) │
+  │ Partial / deferred      {N}      set-ops (2c) + actions                 │
   └──────────────────────────────────────────────────────┘
 
   Parameters:           {N} total ({N} static, {N} SQL-lookup — query at migration)
@@ -277,7 +278,7 @@ Audit: {workbook_name}
   Migration coverage:   {(all except untranslatable) / total}%
                          (all parameters auto-created — static or queried)
   Untranslatable:       {N} formula(s) — will be omitted
-  Deferred sets:        {N} (Top-N/set-ops/actions — flagged for manual creation)
+  Deferred sets:        {N} (set-ops/actions — flagged for manual creation)
   SQL-lookup params:    {N} — need warehouse connection at migration time
   Pass-through formulas require SQL Passthrough Functions enabled.
   ──────────────────────────────────────────────────
@@ -797,8 +798,8 @@ in the model TML. Omit `id` — ThoughtSpot assigns it on import.
 | `list` | `date` | `DATE` | `list_config` with date values (strip `#` delimiters) |
 | `list` | `integer` | `INT64` | `list_config` |
 | `list` | `real` | `DOUBLE` | `list_config` |
-| `range` | `integer` | `INT64` | `range_config` with `range_min`, `range_max` |
-| `range` | `real` | `DOUBLE` | `range_config` |
+| `range` | `integer` | `INT64` | `range_config` with `range_min`, `range_max` — **unless the `<range>` has a `granularity` attribute (step size); then use `list_config`** (see note below) |
+| `range` | `real` | `DOUBLE` | `range_config` — same granularity rule applies |
 | `range` | `date` | `DATE` | Free-form (no `range_config` — ThoughtSpot range is numeric only) |
 | `any` | any | mapped type | Free-form (no config) |
 | `list` | `boolean` | `BOOL` | `list_config` with `'true'`/`'false'` values |
@@ -807,6 +808,16 @@ in the model TML. Omit `id` — ThoughtSpot assigns it on import.
 - Tableau wraps string member values in double quotes: `'"USD"'` → strip to `USD`
 - Tableau date defaults use `#` delimiters: `#2026-05-10#` → strip to `2026-05-10`
   then format as `MM/DD/YYYY` (ThoughtSpot's date parameter format)
+
+**Stepped range → `list_config` (not `range_config`):** A Tableau `<range>` parameter
+that has a `granularity` attribute (step size) enumerates to a **small discrete choice
+list** → use `list_config` (enumerate min→max by step), NOT `range_config` (which cannot
+express the step). Plain ranges (no `granularity`) keep `range_config`.
+
+> **Note:** A parameter that drives a Top-N/Bottom-N set's `count` should be `list_config`
+> (discrete choices — live-verified ground truth used `list_config`; `range_config` loses
+> the step). Example: `<range granularity='5' min='5' max='25'/>` → `list_choice: [5, 10,
+> 15, 20, 25]`, `data_type: INT64`.
 
 **SQL-lookup parameters:** If a parameter's list values come from a database query
 (no static `<member>` elements in the TWB), query the warehouse at migration time to
@@ -1016,9 +1027,39 @@ For each `<group>` element, inspect its `<groupfilter>` tree and classify:
         the catch-all "out" bucket via `combine_non_group_values`. (Or be explicit with `NE`/no-`{Null}`.)
       No formula alternative is required for null — column sets handle it directly via `{Null}`.
 
-- **Top-N set (Phase 2b — defer):** groupfilter tree contains `function='end'` (with `count`
-  and/or `order` attributes). Do NOT translate. Log:
-  `"Set '<name>' is a Top-N/computed set → needs a ThoughtSpot query set (not yet supported, Phase 2b) — omitted, flag for manual creation."`
+- **Top-N / Bottom-N set (Phase 2b — TRANSLATE to a query set):** groupfilter tree contains
+  `function='end'` (with `count` and/or `order` child/attributes). Translate to a
+  `cohort_type: ADVANCED` / `COLUMN_BASED` query set in **one of two forms, chosen by `count`:**
+  - **Literal `count='N'` (static N)** → the simplest form: the embedded answer's `search_query`
+    is a plain **`top N [measure] [dimension]`** (or **`bottom N …`**) keyword search — **no
+    formulas, no parameter**. (The `top N` keyword search_query IS correct for a fixed N.)
+  - **`count='[Parameters].[X]'` (dynamic, parameter-driven N)** → a **rank formula +
+    parameter-filter formula**, with N read from the migrated model parameter. This is the only
+    form that stays in sync with the parameter as the user changes it. (B2VBWeek11 uses this.)
+
+  Detection (applies to both forms):
+  - `end='top'` → `top N` keyword / `rank(..., 'desc')`; `end='bottom'` → `bottom N` keyword /
+    `rank(..., 'asc')`.
+  - The `order` child's `expression` (e.g. `SUM([measure])`) → the ranking measure (and, in the
+    dynamic form, the rank's aggregation). If the ordering measure is a *derived/conditional*
+    field (null-pad, IF-exclude), use the plain underlying measure and **flag** the dropped nuance.
+  - `count` type selects the form: `[Parameters].[X]` → dynamic (filter references the migrated
+    model param `[<alias>::<param>]`); a literal `N` → static (`top N`/`bottom N` keyword).
+  - The innermost `level='[Dim]'` → anchor/return column display name.
+
+  Extract:
+  - Set `caption` → cohort name.
+  - Ordering measure column display name (via the model's column mapping).
+  - Parameter name (if `count` is a parameter reference) — must already exist on the model
+    (migrated via the Parameters datasource → `model.parameters[]`).
+
+  Emit one `*.cohort.tml` per Top-N/Bottom-N set — see **Query-set TML emission** below.
+  Log: `"Set '<name>' is a Top-N/Bottom-N set → translated to a ThoughtSpot query set (rank
+  formula + parameter-filter, Phase 2b) — flag for review."`
+
+  Flag dropped nuances: if the ordering measure is conditional/null-padded, note the
+  simplification: `"Dropped null-padding / conditional ranking — using plain <measure>; verify
+  ranking matches the Tableau set."`
 
 - **`except` of a member-list (TRANSLATABLE) — column set with `NE`:** an `except` whose excluded
   side is a `union`/`member` list (e.g. *all categories except {Furniture, %null%}*) maps to a column
@@ -1051,8 +1092,11 @@ For each `<group>` element, inspect its `<groupfilter>` tree and classify:
   members from a set based on viz selection. No ThoughtSpot equivalent. Log:
   `"Set action on '<set name>' has no ThoughtSpot equivalent — omitted."`
 
-**Emit one `*.cohort.tml` per static set** — see "Column-set TML emission" below. Import
+**Emit one `*.cohort.tml` per static set** — see "Column-set TML emission" below. **Emit one
+`*.cohort.tml` per Top-N/Bottom-N set** — see "Query-set TML emission" below. Import
 cohorts after the model (the payload order in Step 5.5 already includes `*.cohort.tml`).
+**Import order for query sets: model (with parameter) → cohort** — the set's formula
+references the parameter, which must exist on the model first.
 
 > **⚠ MANDATORY — flag every set conversion for the user to review.** Set conversions are
 > *semantic reinterpretations*, not literal 1:1 translations — a column set, a filter, dropped
@@ -1068,10 +1112,14 @@ cohorts after the model (the payload order in Step 5.5 already includes `*.cohor
 >   ⚠ Customer Group 1     → column set (231 members)                    [large list — spot-check]
 >   ⚙ 01. Month Set        → interactive filter on "Order Month"; IF-[Set] calcs collapsed to
 >                            measure+filter, NOT migrated                [confirm filter ≈ the control]
->   ⊘ Top-N State Set      → DEFERRED (query set, Phase 2b) — flagged for manual creation
+>   ✓ State_TopN           → query set (rank desc by SUM gallons, N=topN param)   [verify ranking + N]
+>   ✓ State_BottomN        → query set (rank asc by SUM gallons, N=topN param)    [verify ranking + N]
+>   ⊘ <set-op set>         → DEFERRED (intersect/computed except, Phase 2c) — flagged for manual creation
 > ```
 > The reinterpreted ones (`except`→`NE`, `%null%`→`{Null}`, formula-anchor, set-control→filter,
-> collapsed `IF [Set]` calcs) especially need a human eye — call them out explicitly, don't bury them.
+> collapsed `IF [Set]` calcs, **Top-N/Bottom-N → query set**) especially need a human eye — call them
+> out explicitly, don't bury them. For Top-N/Bottom-N sets, explicitly call out any dropped ranking
+> nuances (null-padding, conditional measure) so the user can verify the ranking matches intent.
 
 #### Set IN/OUT semantics — the column set IS the In/Out classification
 
@@ -1108,8 +1156,9 @@ In/Out ratio) — reference the cohort for large lists, the dimension for small;
 cohort** for an in-vs-out **breakdown** viz. Either way the pile of `IF [Set] THEN …` calcs collapses onto the one
 column set / a couple of `sum_if`s — don't emit them as per-row formulas.
 
-See `../../shared/schemas/thoughtspot-sets-tml.md` (column set) and the live-verified worked example
-`../../shared/worked-examples/tableau/static-set-to-column-set.md`.
+See `../../shared/schemas/thoughtspot-sets-tml.md` (column set + query set) and the live-verified
+worked examples `../../shared/worked-examples/tableau/static-set-to-column-set.md` (column set) and
+`../../shared/worked-examples/tableau/topn-set-to-query-set.md` (Top-N/Bottom-N query set).
 
 #### Column-set TML emission (static set → `GROUP_BASED` cohort)
 
@@ -1171,6 +1220,142 @@ Key rules:
   `/tmp/ts_tableau_mig/output/{workbook_name}/`
 
 Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{DatasourceName}.model.tml`.
+
+#### Query-set TML emission (Top-N/Bottom-N → ADVANCED cohort)
+
+For each Top-N/Bottom-N set detected above, generate a `.cohort.tml` file. There are **two
+forms** (see classification above): the **dynamic** form (parameter-driven N — a rank formula +
+parameter-filter formula, live-verified 2026-06-12 against se-thoughtspot, model
+`TEST_SV_DMSI_AI_CONTEXT`), and the simpler **static** form (fixed N — a `top N`/`bottom N`
+keyword search, no formulas) shown after it. Cross-refs:
+`../../shared/schemas/thoughtspot-sets-tml.md` (query set section) +
+`../../shared/worked-examples/tableau/topn-set-to-query-set.md`.
+
+**Dynamic form (parameter-driven N — `count='[Parameters].[X]'`):**
+
+```yaml
+# guid omitted on first import
+cohort:
+  name: "<set caption>"
+  answer:
+    tables:
+    - id: "<model display name>"
+      name: "<model display name>"
+      obj_id: "<model obj_id>"
+    table_paths:
+    - id: "<model display name>_1"          # self-path alias used by the formulas
+      table: "<model display name>"
+    formulas:
+    - id: formula_filter
+      name: filter
+      expr: "[formula_rank] <= [<model display name>_1::<paramName>] "
+      was_auto_generated: false
+    - id: formula_rank
+      name: rank
+      expr: "rank ( sum ( [<model display name>_1::<measure col>] ) , 'desc' )"   # 'asc' for Bottom-N
+      properties:
+        column_type: ATTRIBUTE
+      was_auto_generated: false
+    search_query: "[<measure>] [<dimension>] [formula_rank] [formula_filter] = true"
+    answer_columns:
+    - name: <dimension display name>
+    - name: "<aggregated measure display name>"   # e.g. "Total gallons" for a SUM measure
+    - name: rank
+    table:
+      table_columns:
+      - column_id: <dimension display name>
+        show_headline: false
+      - column_id: "<aggregated measure display name>"
+        show_headline: false
+      - column_id: rank
+        show_headline: false
+      ordered_column_ids:
+      - <dimension display name>
+      - rank
+      - "<aggregated measure display name>"
+      client_state: ""
+    display_mode: TABLE_MODE
+  worksheet:
+    id: "<model display name>"
+    name: "<model display name>"
+    obj_id: "<model obj_id>"
+  config:
+    cohort_type: ADVANCED
+    anchor_column_id: <dimension display name>
+    return_column_id: <dimension display name>
+    cohort_grouping_type: COLUMN_BASED
+    hide_excluded_query_values: true
+    group_excluded_query_values: "Excluded values"
+    pass_thru_filter:
+      accept_all: false
+```
+
+Key rules:
+- **Parameter prerequisite (dynamic form)** — the `count` parameter MUST be on the model first
+  (already migrated via the Parameters datasource → `model.parameters[]`). The set's
+  `formula_filter` references it as `[<model display name>_1::<paramName>]`. **Import order:
+  model (with param) → cohort.** (The static form below has no parameter dependency.)
+- **Top vs Bottom** — `end='top'` → `rank(sum(measure), 'desc')`; `end='bottom'` →
+  `rank(sum(measure), 'asc')` (user-confirmed 2026-06-12).
+- Rank aggregation = the set's `order` expression aggregation (SUM here). Translate the
+  ordering measure to its TS column; if it's a derived/conditional field, use the plain
+  measure + **flag** the dropped nuance for review.
+- `table_paths` alias = `<model display name>_1`; all `formulas[].expr` column refs use
+  `[<alias>::<col>]`. `answer_columns`, `config`, and `table.*` use **display names** (no alias).
+- `answer_columns` measure entry uses the **aggregated display name** ThoughtSpot generates
+  (`Total <measure>` for a SUM measure, e.g. `Total gallons`).
+- A **stepped range parameter** (Tableau `<range granularity='5' min='5' max='25'/>`) maps
+  to `list_config` (enumerate min→max by step: `[5,10,15,20,25]`), NOT `range_config`. See
+  the Parameter migration section for this rule.
+- Bind via `worksheet:` (id/name/obj_id) — NOT `model:` (same rule as column sets).
+- No top-level `guid` on first import.
+- File: `<SetName>.cohort.tml` → `/tmp/ts_tableau_mig/output/{workbook_name}/`.
+
+**Static form (fixed N — literal `count`):** no formulas, no parameter; the `top N`/`bottom N`
+keyword `search_query` defines membership. Use this when the Tableau set's `count` is a literal.
+
+```yaml
+# guid omitted on first import
+cohort:
+  name: "<set caption>"
+  answer:
+    tables:
+    - id: "<model display name>"
+      name: "<model display name>"
+      obj_id: "<model obj_id>"
+    search_query: "top 10 [<measure>] [<dimension>]"   # "bottom 10 …" for Bottom-N; N is the literal count
+    answer_columns:
+    - name: <dimension display name>
+    - name: "<aggregated measure display name>"         # e.g. "Total gallons"
+    table:
+      table_columns:
+      - column_id: <dimension display name>
+        show_headline: false
+      - column_id: "<aggregated measure display name>"
+        show_headline: false
+      ordered_column_ids:
+      - <dimension display name>
+      - "<aggregated measure display name>"
+      client_state: ""
+    display_mode: TABLE_MODE
+  worksheet:
+    id: "<model display name>"
+    name: "<model display name>"
+    obj_id: "<model obj_id>"
+  config:
+    cohort_type: ADVANCED
+    anchor_column_id: <dimension display name>
+    return_column_id: <dimension display name>
+    cohort_grouping_type: COLUMN_BASED
+    hide_excluded_query_values: true
+    group_excluded_query_values: "Excluded values"
+    pass_thru_filter:
+      accept_all: false
+```
+> The `top N`/`bottom N` keyword `search_query` is the correct representation for a **fixed-N**
+> query set (no parameter). The surrounding answer block mirrors the verified dynamic export's
+> shape (minus the rank machinery); a static-form export hasn't been separately captured — flag
+> for review on first use.
 
 ### 5c. SQL View TML — one per custom SQL relation
 
@@ -1337,8 +1522,9 @@ Formula translations ({F} total):
 
 Sets ({S}) — semantic reinterpretations, REVIEW each matches intent:   # omit section if no sets
   ✓ {name} → column set ({GROUP_BASED, N members | NE except | {Null} | formula-col anchor})  [what to verify]
+  ✓ {name} → query set (rank {desc|asc} by SUM {measure}, N={param|literal})   [verify ranking + N]
   ⚙ {name} → interactive filter on {anchor} (set control; IF-[Set] calcs collapsed to measure+filter)
-  ⊘ {name} → DEFERRED ({Top-N → query set 2b | intersect/computed except 2c | set action}) — manual
+  ⊘ {name} → DEFERRED ({intersect/computed except 2c | set action}) — manual
 
 Will NOT migrate ({K}):
   - {name}: {reason}
@@ -2208,7 +2394,8 @@ rule). Set conversions are semantic reinterpretations — list each so the user 
 | Category Set | `except` | column set via `NE` (except Furniture; nulls excluded) | verify exclusion |
 | Year Set | static, calc-anchored | column set on formula column `Order Year` | verify calc + values |
 | 01. Month Set | set control | filter on `Order Month`; IF-[Set] calcs collapsed to measure+filter | confirm filter ≈ control |
-| Top-N State | Top-N | ⊘ DEFERRED (query set, Phase 2b) | manual creation |
+| State_TopN | Top-N | ✓ query set (rank desc by SUM, N=topN param) | verify ranking + N |
+| State_BottomN | Bottom-N | ✓ query set (rank asc by SUM, N=topN param) | verify ranking + N |
 
 **Partial / not migrated** — repeat the ◑/⊘ rows with the reason and what the user can do.
 ```
@@ -2223,6 +2410,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.9.0 | 2026-06-12 | **Top-N/Bottom-N sets → ThoughtSpot query sets (BL-009 Phase 2b).** Replace Phase-2b deferral with a verified translation: Tableau `<group>` whose `<groupfilter>` tree contains `function='end'` → `cohort_type: ADVANCED`, `cohort_grouping_type: COLUMN_BASED` cohort, in **one of two forms by `count`**: (a) **dynamic** (parameter-driven N, `count='[Parameters].[X]'`) — embedded answer with a rank formula (`rank(sum(measure),'desc'/'asc')` for top/bottom) + a parameter-filter formula (`[formula_rank] <= [<alias>::<param>]`), N read from the migrated model parameter (live-verified ground truth); (b) **static** (fixed N, literal `count='N'`) — a plain `search_query: "top N [measure] [dimension]"` / `"bottom N …"` keyword search, no formulas (the `top N` keyword form is correct for fixed N — not wrong). Detection rules: `end='top'` → `top N`/`'desc'`; `end='bottom'` → `bottom N`/`'asc'`. Both emission templates added (Section 5b). **Stepped range → `list_config`:** a Tableau `<range granularity='N' .../>` parameter enumerates min→max by step → `list_config` (NOT `range_config` which loses the step); a count parameter for a Top-N set must use `list_config`. Import order: model (with param) → cohort. Tier table + audit coverage table updated (Top-N moved from "Partial/deferred" → "Native/Set"). Dropped nuances (null-pad, conditional measure) flagged for review. All live-verified 2026-06-12 on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). New worked example `worked-examples/tableau/topn-set-to-query-set.md`. Schema `thoughtspot-sets-tml.md` updated with verified COLUMN_BASED pattern. |
 | 1.8.1 | 2026-06-12 | Add `FIRST()`/`LAST()` to the untranslatable table-calc detection (tier table + Audit classifier regex + translation step) — missing from the skill's own classifier though the mapping reference listed them; precedence note: untranslatable only standalone, not as `WINDOW_*`/`RUNNING_*` offset args. **AND recognise the comma-separated-list / string-concatenation technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE building one delimited string) → translate the *intent* to **`LISTAGG` string aggregation** (`sql_string_aggregate_op`, answer-level, ⚑ flag for review) or a table, instead of omitting; the feeder/`Last` scaffolding collapses into the one formula. Live-verified the LISTAGG answer-level formula on se-thoughtspot. New "String aggregation" section in `tableau-formula-translation.md`. **Plus set IN/OUT consumption (all live/UI-verified):** column sets ARE formula-referenceable — `IF [Set] THEN x END` → `sum ( if ( [Set] = 'in' ) then x else null )` or `sum_if ( [Set] = 'in' , x )` (or dimension-direct `sum_if ( [dim] in {…} , x )`); compare in-vs-out → group a measure by the cohort (`[Amount] [Set]`); filter on it for in/out. Pitfall: cohort **name must differ from its `in`/`out` labels** (a name==label collision fails "Search did not find"); emit distinct lowercase `in`/`out` labels; formula label must match exactly (case-sensitive). Added verified consumption answer TML (measures + group-by breakdown) to the worked example. (Found via TableauSetControlUseCases.) |
 | 1.8.0 | 2026-06-12 | Translate Tableau static sets → ThoughtSpot column sets (`cohort_type: SIMPLE`, `cohort_grouping_type: GROUP_BASED`); detect and log Top-N sets (`function='end'`) as Phase-2b deferred, set operations (`except`/`intersect`) as Phase-2c deferred, and set actions as no-equivalent — none mis-translated (BL-009 Phase 2a). Live-verified on se-thoughtspot: bind via `worksheet:` (id/name/obj_id) NOT `model:`; anchor/column_name use display names; `operator: EQ` + value list. Added worked example `worked-examples/tableau/static-set-to-column-set.md`. UI-verified set capabilities: `%null%` members ARE representable via the `{Null}` grouping value (`EQ ["{Null}"]`); `except` member-lists → `operator: NE`; sets can anchor on a **formula column** (resolve calc id → display name, emit the backing formula); set controls (`level-members` only) → no set object, surface as a liveboard filter. Top-N (→ query set) + `intersect`/computed `except` remain deferred. |
 | 1.7.0 | 2026-06-12 | Add Phase-1 Tableau function mappings (DATEPARSE, EXP, trig, STARTSWITH/ENDSWITH, PI/RADIANS/DEGREES composites, PROPER/ASCII/CHAR/REGEXP/FINDNTH pass-through, WINDOW_*/RUNNING_COUNT table-calc notes) (BL-009 Phase 1). Fix trig unit bug (Tableau radians→ThoughtSpot degrees conversion). Fix UPPER/LOWER (no native — use sql_string_op pass-through). Fix REGEXP_MATCH (sql_bool_op, returns boolean). Drop ⚠ confirm markers on docs-confirmed functions. Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). Document NULL-in-IF/ELSE behavior — matches Tableau via SQL CASE, faithful, no auto-guard (BL-002). |

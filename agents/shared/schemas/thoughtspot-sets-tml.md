@@ -80,33 +80,59 @@ cohort:
     group_excluded_query_values: "Other" # label for the combined remainder group
 
     # --- COLUMN_BASED (query set — cohort_type: ADVANCED, results of an embedded search) ---
-    hide_excluded_query_values: false    # show/hide rows not in the set
-    pass_thru_filter:                    # how outer query filters apply to the embedded search
-      accept_all: true                   # accept all outer filters
+    # Two forms, by whether N is fixed or parameter-driven:
+    #  • STATIC N (fixed): the embedded answer's search_query is a plain "top N …" / "bottom N …"
+    #    keyword search — no formulas, no parameter (e.g. search_query: "top 10 [Amount] [Customer State]").
+    #  • DYNAMIC N (parameter-driven): a rank formula + parameter-filter formula, with N read from a
+    #    model parameter. Live-verified 2026-06-12 (se-thoughtspot, model TEST_SV_DMSI_AI_CONTEXT). Shown below.
+    # (use cohort_type: ADVANCED, cohort_grouping_type: COLUMN_BASED for this config)
+    return_column_id: Customer State   # the column whose values define set membership
+    hide_excluded_query_values: true
+    group_excluded_query_values: "Excluded values"
+    pass_thru_filter:
+      accept_all: false
       # OR selectively:
-      include_column_ids: [col_id_1]
-      exclude_column_ids: [col_id_2]
-    return_column_id: "Product ID"       # the column whose values define set membership
+      # include_column_ids: [col_id_1]
+      # exclude_column_ids: [col_id_2]
 
   answer:                               # COLUMN_BASED (query set) only
-    name: "Untitled"
     tables:
     - id: "Model Display Name"
       name: "Model Display Name"
-      fqn: "{model_guid}"
-    search_query: "top 10 [Amount] [Product ID]"
+      obj_id: "MODEL_OBJ_ID-<guidprefix>"
+    table_paths:
+    - id: "Model Display Name_1"        # self-path alias — used by ALL formula refs
+      table: "Model Display Name"
+    formulas:
+    - id: formula_filter
+      name: filter
+      expr: "[formula_rank] <= [Model Display Name_1::topN] "   # or "<= N" for a literal count
+      was_auto_generated: false
+    - id: formula_rank
+      name: rank
+      expr: "rank ( sum ( [Model Display Name_1::Amount] ) , 'desc' )"   # 'asc' for Bottom-N
+      properties:
+        column_type: ATTRIBUTE
+      was_auto_generated: false
+    search_query: "[Amount] [Customer State] [formula_rank] [formula_filter] = true"
     answer_columns:
-    - name: Product ID
+    - name: Customer State
     - name: Total Amount
+    - name: rank
     display_mode: TABLE_MODE
     table:
-      client_state: ''
-      ordered_column_ids: [Product ID, Total Amount]
+      client_state: ""
+      ordered_column_ids:
+      - Customer State
+      - rank
+      - Total Amount
       table_columns:
-      - column_id: Product ID
-        headline_aggregation: COUNT_DISTINCT
+      - column_id: Customer State
+        show_headline: false
       - column_id: Total Amount
-        headline_aggregation: SUM
+        show_headline: false
+      - column_id: rank
+        show_headline: false
 ```
 
 ---
@@ -175,17 +201,46 @@ The example below is a **column set** (`cohort_type: SIMPLE`, `cohort_grouping_t
 
 | Field | Notes |
 |---|---|
-| `hide_excluded_query_values` | `true` hides rows not in the set from the Answer |
-| `pass_thru_filter.accept_all` | If `true`, all outer query filters apply to the embedded search |
+| `anchor_column_id` | The dimension whose values define set membership |
+| `return_column_id` | Same as `anchor_column_id` for a standard Top-N/Bottom-N set |
+| `hide_excluded_query_values` | `true` hides rows not in the set from the Answer (use `true` for Top-N) |
+| `group_excluded_query_values` | Label for the excluded/remainder group (e.g. `"Excluded values"`) |
+| `pass_thru_filter.accept_all` | If `true`, all outer query filters apply to the embedded search; use `false` for Top-N |
 | `pass_thru_filter.include_column_ids` | Only these columns' filters are passed through |
 | `pass_thru_filter.exclude_column_ids` | These columns' filters are blocked |
-| `return_column_id` | The column whose values define set membership (the "anchor") |
 
-### `answer` section (query sets only)
+### `answer` section (query sets only — COLUMN_BASED)
 
-Contains a full embedded Answer — the search whose results define the set members. Uses
-the same structure as `answer.cohorts[n].answer` in Answer TML. See
-[thoughtspot-answer-tml.md](thoughtspot-answer-tml.md) for the full field reference.
+Contains a full embedded Answer whose results define the set members. Two forms:
+- **Static N (fixed):** `search_query: "top N [measure] [dimension]"` (or `"bottom N …"`) — a
+  plain keyword search, no formulas, no parameter. Correct for a fixed N.
+- **Dynamic N (parameter-driven):** a rank formula + parameter-filter formula, with N read from
+  a model parameter (live-verified 2026-06-12 on se-thoughtspot). This is the form shown above;
+  it stays in sync as the user changes the parameter.
+
+| Field | Notes |
+|---|---|
+| `answer.tables[]` | Reference to the bound model (`id`, `name`, `obj_id`) |
+| `answer.table_paths[]` | Self-path alias — `id` = `"<model display name>_1"`, `table` = `"<model display name>"`. All formula refs use this alias: `[<alias>::<col>]` |
+| `answer.formulas[].id: formula_rank` | Rank formula: `rank ( sum ( [<alias>::<measure>] ) , 'desc' )` for Top-N; `'asc'` for Bottom-N. Must set `properties.column_type: ATTRIBUTE` |
+| `answer.formulas[].id: formula_filter` | Filter formula: `[formula_rank] <= [<alias>::<paramName>]` (or `<= N` for a literal count). References the model parameter |
+| `answer.search_query` | `"[<measure>] [<dimension>] [formula_rank] [formula_filter] = true"` |
+| `answer.answer_columns[]` | Dimension, aggregated measure (e.g. `Total <measure>`), and `rank` entries |
+| `answer.table.table_columns[].show_headline` | Set `false` on all columns (live-verified) |
+| `answer.display_mode` | `TABLE_MODE` |
+
+**Model parameter prerequisite:** the parameter referenced by `formula_filter` must exist
+on the model **before** the cohort is imported. Parameters are migrated via the Tableau
+`Parameters` datasource → `model.parameters[]`. A Tableau stepped range parameter
+(`<range granularity='5' min='5' max='25'/>`) → `list_config` (enumerate min→max by step:
+`[5, 10, 15, 20, 25]`), NOT `range_config`.
+
+**Top vs Bottom:** `end='top'` in Tableau → `rank(..., 'desc')`; `end='bottom'` →
+`rank(..., 'asc')` (user-confirmed 2026-06-12).
+
+See [thoughtspot-answer-tml.md](thoughtspot-answer-tml.md) for the full Answer field
+reference. See `../../shared/worked-examples/tableau/topn-set-to-query-set.md` for a
+complete worked example (B2VBWeek11 `US_WINE_PRODUCTION`).
 
 ---
 

@@ -137,12 +137,14 @@ answer:
   display_mode: CHART_MODE
 ```
 
-## Deferred (not Phase 2a — detect + log, never mis-translate)
+## Other set kinds
 
 - **Top-N / Bottom-N** (`function='end'` + `order` + `count`) → ThoughtSpot **query set**
-  (`cohort_type: ADVANCED`, embedded `answer`) — Phase 2b.
-- **Set operations** (`function='except'`/`'intersect'`) → Phase 2c.
-- **Set actions** (interactive) → no equivalent.
+  (`cohort_type: ADVANCED`, `COLUMN_BASED`) — now **translated** (Phase 2b, 2026-06-12). See the
+  sibling worked example `topn-set-to-query-set.md`.
+- **Set operations** (`function='except'`/`'intersect'` of a computed sub-tree) → Phase 2c
+  (still deferred — detect + log, never mis-translate).
+- **Set actions** (interactive) → no equivalent (logged + omitted).
 
 ## `%null%` members — use the `{Null}` grouping value (resolved 2026-06-12, UI-verified)
 

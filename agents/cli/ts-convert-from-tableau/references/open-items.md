@@ -103,19 +103,25 @@ Status: DEFERRED to v1.1.0
 
 ---
 
-## #10 — Dynamic Sets — Phase 2a DONE; 2b/2c deferred
+## #10 — Dynamic Sets — Phase 2a + 2b DONE; 2c deferred
 
 Phase 2a DONE: static sets (top-level `<group>` with `function='union'`+`function='member'`
 groupfilter trees) → ThoughtSpot `GROUP_BASED` column sets (`cohort_type: SIMPLE`). Detected
 by `function='union'`+`function='member'` presence and absence of `function='end'`/`'except'`/`'intersect'`.
 
+Phase 2b DONE (2026-06-12): Top-N/Bottom-N sets (`function='end'` in groupfilter) →
+ThoughtSpot `ADVANCED` query sets (`cohort_type: ADVANCED`, `cohort_grouping_type:
+COLUMN_BASED`) with embedded answer holding a rank formula + parameter-filter formula.
+Live-verified on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). See SKILL.md
+Step 5b "Query-set TML emission" and worked example
+`agents/shared/worked-examples/tableau/topn-set-to-query-set.md`.
+
 Deferred (logged, never mis-translated):
-- **Phase 2b** — Top-N sets (`function='end'` in groupfilter) → query sets; no ThoughtSpot
-  equivalent yet.
-- **Phase 2c** — Set operations (`function='except'`/`'intersect'`) → no ThoughtSpot equivalent yet.
+- **Phase 2c** — Set operations (`function='intersect'`, or `function='except'` of a
+  computed/non-member sub-tree) → no ThoughtSpot equivalent yet.
 - **No equivalent** — Worksheet set actions (`<action>` on a set) — logged and omitted.
 
-Status: Phase 2a DONE (2026-06-12); 2b/2c DEFERRED
+Status: Phase 2a DONE (2026-06-12); Phase 2b DONE (2026-06-12); Phase 2c DEFERRED
 
 ---
 

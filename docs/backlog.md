@@ -474,7 +474,7 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 
 **Source:** Audit of 127 workbooks in `tableau-migration-testing/twb/inactive/` (2026-06-10)
 **Affects:** ts-convert-from-tableau, `agents/shared/mappings/tableau/tableau-formula-translation.md`
-**Status:** In progress — **Phase 1 DONE (PR #48)**, **Phase 2a DONE (PR #49)**; Phase 2b/2c + 3 + 4 open
+**Status:** In progress — **Phase 1 DONE (PR #48)**, **Phase 2a DONE (PR #49)**, **Phase 2b DONE (2026-06-12)**; Phase 2c + 3 + 4 open
 **Full plan:** [`superpowers/plans/2026-06-11-tableau-mapping-gaps.md`](superpowers/plans/2026-06-11-tableau-mapping-gaps.md)
 
 > **Phase 1 (function table) — DONE (PR #48):** added DATEPARSE, EXP, trig (radians→degrees fix),
@@ -487,9 +487,15 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 > via `operator: NE`; formula-column anchors (resolve calc id → display name + emit formula column);
 > set controls → interactive filter + migrate anchor calc + drop IF-[Set] scaffolding; EVERY set
 > conversion flagged for user review (Step 7 + Step 12). Worked example added.
-> **Remaining:** Phase 2b (**Top-N → query set** — `cohort_type: ADVANCED` + embedded answer),
-> Phase 2c (`intersect`/computed `except`), Phase 3 (geospatial MAKEPOINT/MAKELINE), Phase 4
-> (source coverage + INDEX note). See the full plan.
+> **Phase 2b (Top-N/Bottom-N sets → query sets) — DONE (2026-06-12, live-verified on se-thoughtspot):**
+> `cohort_type: ADVANCED`, `cohort_grouping_type: COLUMN_BASED`, embedded answer with rank formula
+> (`rank(sum(measure),'desc'/'asc')`) + parameter-filter formula (`[formula_rank] <= [alias::param]`).
+> Stepped range params → `list_config`. Detection: `function='end'`, `end='top'/'bottom'`, `count`
+> param/literal, ordering measure. Full emission template + worked example
+> (`topn-set-to-query-set.md`) added. The Dynamic-Sets gap (previously noted at line ~500) is now
+> addressed for Top-N/Bottom-N. Open-items #10 Phase 2b closed.
+> **Remaining:** Phase 2c (`intersect`/computed `except`), Phase 3 (geospatial MAKEPOINT/MAKELINE),
+> Phase 4 (source coverage + INDEX note). See the full plan.
 
 ### Problem
 
