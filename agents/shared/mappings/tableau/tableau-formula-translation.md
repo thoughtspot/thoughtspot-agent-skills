@@ -19,7 +19,7 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `RIGHT(s, n)` | `substr ( s , strlen ( s ) - n , n )` | |
 | `MID(s, start, len)` | `substr ( s , start - 1 , len )` | Adjust for 0-based indexing |
 | `LEN(s)` | `strlen ( s )` | |
-| `FIND(s, sub)` | `strpos ( s , sub )` | |
+| `FIND(s, sub)` | `strpos ( s , sub )` | 1-based, returns 0 when absent — identical contract to Tableau FIND, so `FIND(...) > 0` idioms translate unchanged (live-verified 2026-06-13, se-thoughtspot: strpos('needle_haystack','needle')=1, not-found=0). NOTE: official TS docs describe strpos as 0-based/−1 — live behavior differs; trust this entry. |
 | `REPLACE(s, old, new)` | `replace ( s , old , new )` | |
 | `UPPER(s)` | `sql_string_op ( "UPPER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
 | `LOWER(s)` | `sql_string_op ( "LOWER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
@@ -67,7 +67,7 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `EXP(n)` | `exp ( n )` | |
 | `SIN(n)` / `COS(n)` / `TAN(n)` | `sin ( n * 180 / 3.14159265358979 )` / `cos ( n * 180 / 3.14159265358979 )` / `tan ( n * 180 / 3.14159265358979 )` | Tableau trig is in radians; ThoughtSpot trig is in degrees — convert. (Inverse trig `acos/asin/atan` also return degrees in ThoughtSpot vs radians in Tableau.) |
 | `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
-| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`; `strpos` is 1-based |
+| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, se-thoughtspot). |
 | `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with`; mirrors the `RIGHT(s, n)` idiom above |
 | `PI()` | `3.14159265358979` | No native `pi()` — use the literal (dialect-free). (alternatively `sql_double_op ( "pi()" )` — documented pass-through) |
 | `RADIANS(n)` | `n * 3.14159265358979 / 180` | No native `radians()` — use the literal composite. (alternatively `sql_double_op ( "radians({0})" , n )` — documented pass-through) |
@@ -490,7 +490,7 @@ sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" ,
 
 ---
 
-#### Conditional aggregates (Tableau `AGG(IF cond THEN x END)`)
+## Conditional aggregates (Tableau `AGG(IF cond THEN x END)`)
 
 ThoughtSpot model formulas MAY be aggregate (see invariants I5 and ts-model-conversion-invariants.md:33). Do NOT convert to row-level with `else ''` — empty string becomes a countable distinct value (COUNTD off by one) and changes SUM/AVG denominators. Use the `*_if` family; the bare `IF` with no ELSE is NULL in Tableau, which aggregates ignore — `else null` preserves that exactly.
 

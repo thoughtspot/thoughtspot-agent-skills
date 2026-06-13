@@ -153,7 +153,7 @@ else 0
 | `left` | `left ( [x] , [n] )` | First N characters |
 | `right` | `right ( [x] , [n] )` | Last N characters |
 | `strlen` | `strlen ( [x] )` | String length |
-| `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence (1-indexed) |
+| `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence — 1-indexed, returns 0 when not found (live-verified 2026-06-13, se-thoughtspot; official docs claim 0-based/−1 — live behavior wins). |
 | `upper` | `upper ( [x] )` | Uppercase |
 | `lower` | `lower ( [x] )` | Lowercase |
 | `trim` | `trim ( [x] )` | Strip leading/trailing whitespace |
