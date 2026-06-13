@@ -10,7 +10,6 @@ effects and require live credentials.
 |---|---|
 | `smoke_ts_to_snowflake.py` | SV YAML validation → dry-run → create → SHOW → SELECT → cleanup |
 | `smoke_ts_from_snowflake.py` | GET_DDL → parse DDL → find TS tables → import model → verify → cleanup |
-| `smoke_ts_model_builder.py` | connections list/get → build TML → validate → tables create → verify → cleanup |
 | `smoke_ts_dependency_manager.py` | auth → find model → export TML → dependency API → backup → rename → import → verify → rollback → verify → cleanup |
 
 ## Prerequisites
@@ -82,17 +81,6 @@ python tools/smoke-tests/smoke_ts_dependency_manager.py \
 The test renames the column to `<column-name>_smoke_test` and then rolls back automatically.
 Step 4 (dependency API) is non-blocking — if the v1 API is unavailable it is marked SKIP,
 not FAIL. A PASS on step 4 marks open item #1 as VERIFIED.
-
-### ts-object-model-builder (create a ThoughtSpot table object)
-
-```bash
-python tools/smoke-tests/smoke_ts_model_builder.py \
-    --ts-profile production \
-    --connection-name "My Snowflake Connection" \
-    --db ANALYTICS \
-    --schema PUBLIC \
-    --table FACT_SALES
-```
 
 ## Output
 

@@ -6,8 +6,8 @@ Rule: every directory under agents/cli/ or agents/claude/ that contains a tracke
 SKILL.md must have a corresponding tools/smoke-tests/smoke_<skill_name>.py file
 (also tracked), unless the skill is on the allowlist.
 
-The skill name is normalised: hyphens → underscores, plus an optional `ts_object_`
-→ `ts_` shortening (e.g. `ts-object-model-builder` → `smoke_ts_model_builder.py`).
+The skill name is normalised: hyphens → underscores. A few skills use an abbreviated
+smoke filename — those are listed explicitly in NAME_ALIASES below.
 
 Skills on the allowlist (interactive / setup / out-of-scope for live testing)
 are skipped:
@@ -46,7 +46,6 @@ NAME_ALIASES = {
     "ts-convert-from-snowflake-sv":  "tools/smoke-tests/smoke_ts_from_snowflake.py",
     "ts-convert-to-databricks-mv":   "tools/smoke-tests/smoke_ts_to_databricks.py",
     "ts-convert-from-databricks-mv": "tools/smoke-tests/smoke_ts_from_databricks.py",
-    "ts-object-model-builder":       "tools/smoke-tests/smoke_ts_model_builder.py",
 }
 
 

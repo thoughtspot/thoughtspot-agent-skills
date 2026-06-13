@@ -33,19 +33,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 
-# Skills exempt from smoke tests (mirrors check_smoke_tests.py ALLOWLIST)
-ALLOWLIST = {
-    "ts-profile-thoughtspot",
-    "ts-profile-snowflake",
-    "ts-object-answer-promote",
-}
-
-# Skills whose smoke test file uses a non-default name
-NAME_ALIASES: dict[str, str] = {
-    "ts-convert-to-snowflake-sv":   "tools/smoke-tests/smoke_ts_to_snowflake.py",
-    "ts-convert-from-snowflake-sv": "tools/smoke-tests/smoke_ts_from_snowflake.py",
-    "ts-object-model-builder":      "tools/smoke-tests/smoke_ts_model_builder.py",
-}
+# The exemption allowlist and the smoke-file name aliases are the SINGLE SOURCE OF TRUTH
+# in check_smoke_tests.py. Import them (don't re-declare) so the runner and checker can
+# never drift — a divergence here once meant Databricks smoke tests silently never ran
+# (audit F5). test_smoke_alias_sync.py asserts the `is` identity below.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_smoke_tests import ALLOWLIST, NAME_ALIASES  # noqa: E402
 
 # Skills that need extra required args beyond --ts-profile.
 # These must come from smoke-config.local.json; skills are skipped with a warning if absent.
@@ -96,6 +89,12 @@ def _smoke_test_path(skill: str) -> Path | None:
 
 def run(skills: list[str]) -> int:
     config = _load_config()
+    config_path = REPO_ROOT / "tools" / "smoke-tests" / "smoke-config.local.json"
+    if not config_path.exists():
+        # No machine-specific config: every test will SKIP for lack of a profile/args.
+        # Make that loud so a "green" run isn't mistaken for actual coverage.
+        print("WARN: smoke suite is a no-op on this machine (no smoke-config.local.json)")
+
     profile = _resolve_profile(config)
     skill_configs = config.get("skills", {})
 
@@ -113,8 +112,12 @@ def run(skills: list[str]) -> int:
 
         smoke_path = _smoke_test_path(skill)
         if smoke_path is None:
-            print(f"{label:<{col}} {SKIP}  (no smoke test found)")
-            skipped.append(skill)
+            # Not allowlisted but no smoke file resolves — this is a FAIL, not a SKIP.
+            # A silent SKIP here is exactly how the Databricks smoke tests went dark
+            # for a month (audit F5).
+            print(f"{label:<{col}} {FAIL}  (no smoke test found — not on allowlist; "
+                  "add the smoke file or allowlist the skill in check_smoke_tests.py)")
+            failures.append(skill)
             continue
 
         if not profile:
