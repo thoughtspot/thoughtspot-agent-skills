@@ -915,6 +915,21 @@ See `../../shared/schemas/ts-model-conversion-invariants.md` (I5).
 
 For each complex metric (formula expression):
 - See Step 9 for translation. Results go into `formulas[]`.
+
+For each **public fact** in the `facts` map:
+- Create a `formulas[]` entry with the translated expression (apply the same SQL →
+  ThoughtSpot formula rules as metrics). Use `column_type: MEASURE` for numeric
+  expressions and `column_type: ATTRIBUTE` for string/date expressions.
+- Create a paired `columns[]` entry with `formula_id` matching the formula's `id`.
+- For **private facts** referenced by at least one metric: create the formula with
+  `index_type: DONT_INDEX` on the `columns[]` entry. For private facts not referenced
+  by any metric: skip entirely.
+- Fact formulas are emitted **before** metric formulas so that metric formula
+  references (`[Fact Name]`) resolve correctly.
+
+See `../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` "Facts Block →
+ThoughtSpot" for the full mapping pattern and examples.
+
 - **Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained
   via their `expr`. ThoughtSpot rejects TML with `FORMULA is not a valid aggregation type`.
 
