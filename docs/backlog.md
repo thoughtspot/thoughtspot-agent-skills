@@ -1176,3 +1176,75 @@ category and skip all others).
 - `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — Mode D workflow steps (first update mode for DBX)
 - `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` — delta sync rules
 - `agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md` — delta sync rules
+
+---
+
+## BL-022 — Unjoined table suggestion pattern (cross-converter)
+
+**Source:** BL-018 live testing — EMPLOYEE_SUMMARY_VW had no declared relationship in the SV (2026-06-13)
+**Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, ts-convert-from-tableau
+**Status:** Open
+**Priority:** Medium — prevents orphan tables silently entering models without joins
+
+### Problem
+
+When a source (SV, MV, or Tableau datasource) includes a table with no declared
+foreign-key or relationship to other tables, the current converters silently add
+it to `model_tables[]` with no `joins[]`. The resulting model has an unjoined island
+that ThoughtSpot accepts but cannot query across — the user gets "no path between
+tables" errors at search time with no clue why.
+
+### Proposed approach
+
+When a table has no declared relationship in the source, the converter should:
+
+1. **Scan column name overlap** — compare the unjoined table's columns against all
+   other tables in the model. Columns with identical names (exact match, case-insensitive)
+   are candidate join keys.
+
+2. **Check composite key uniqueness** — for each candidate set of join columns on the
+   unjoined table, verify uniqueness:
+   ```sql
+   SELECT COUNT(*) AS total,
+          COUNT(DISTINCT (col1, col2, ...)) AS distinct_keys
+   FROM schema.table;
+   ```
+   If `total == distinct_keys`, the column set is a valid key.
+
+3. **Validate cardinality** — run a live query to confirm the relationship direction
+   (MANY_TO_ONE, ONE_TO_ONE, or MANY_TO_MANY):
+   ```sql
+   SELECT MAX(cnt) FROM (
+     SELECT col1, col2, COUNT(*) AS cnt
+     FROM left_table GROUP BY col1, col2
+   );
+   ```
+   `max(cnt) == 1` → ONE_TO_ONE; `max(cnt) > 1` → MANY_TO_ONE from the left table.
+
+4. **Present to user with evidence** — show the suggested join, the overlapping
+   columns, the uniqueness result, and the cardinality. Require explicit confirmation
+   before adding the join to the model.
+
+5. **User actions:**
+   - **Accept** — add the join as suggested
+   - **Modify** — user corrects columns, cardinality, or join type
+   - **Skip** — exclude the table from the model entirely (with a warning)
+   - **Add anyway (no join)** — include the table as an unjoined island (explicit choice)
+
+### Cross-converter applicability
+
+| Converter | Table source | Join source | Suggestion triggers when |
+|---|---|---|---|
+| from-snowflake-sv | `tables(...)` block | `relationships(...)` block | Table listed in `tables()` but absent from `relationships()` |
+| from-databricks-mv | `tables:` section | `primary_keys:` / `foreign_keys:` | Table has no foreign key declared in MV YAML |
+| from-tableau | Data source tables | Tableau join clauses | Table in datasource with no join to other tables |
+
+### Files affected
+
+- `agents/shared/schemas/ts-model-conversion-invariants.md` — document as a recommended pattern (not a hard invariant)
+- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — add unjoined-table check after Step 6
+- `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — add unjoined-table check after table discovery
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — add unjoined-table check after datasource parsing
+- `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror
+- `agents/cursor/rules/ts-convert-from-databricks-mv.mdc` — mirror
+- `agents/cursor/rules/ts-convert-from-tableau.mdc` — mirror
