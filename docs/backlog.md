@@ -84,9 +84,9 @@ View constructs are not parsed or translated to ThoughtSpot. The full gap analys
 | BL-003c | Metric-references-fact resolution | HIGH | BL-003b | **Done** (2026-06-13) |
 | BL-003 | Double aggregation (metric-referencing-metric) | HIGH | BL-003b | **Done** (2026-06-13) |
 | BL-004 | Semantic views with no joins | MEDIUM | None | **Done** (2026-06-13) |
-| GAP-04 | Derived metrics (cross-table, view-level) | MEDIUM | BL-003 | |
-| GAP-08 | Range joins / ASOF joins | MEDIUM | None | |
-| GAP-10 | Filters on logical tables | MEDIUM | None | |
+| GAP-04 | Derived metrics (cross-table, view-level) | MEDIUM | BL-003 | → BL-018 sub-item 3 (SQL View path) |
+| GAP-08 | Range joins / ASOF joins | MEDIUM | None | → BL-018 sub-item 1 (TS supports range joins) |
+| GAP-10 | Filters on logical tables | MEDIUM | None | → BL-018 sub-item 2 (model filters) |
 | GAP-13 | Window metrics referencing other metrics | MEDIUM | BL-003 | **Done** (2026-06-13) |
 | GAP-05 | Verified queries → Spotter instructions | LOW | None |
 | GAP-06 | Custom instructions → `data_model_instructions` | LOW | None |
@@ -801,3 +801,91 @@ through a workflow that no longer matches the canonical skill).
 `agents/SYNC-DEBT.md` tracks all gaps. `check_mirror_sync.py` fails on any
 unacknowledged gap. Closing a SYNC-DEBT row = syncing the mirror and bumping
 its `synced-from` marker.
+
+---
+
+## BL-018 — Close remaining SV→TS mapping gaps (range joins, model filters, SQL View for subquery SVs)
+
+**Source:** Post-identifier-resolution review of unmapped SV features (2026-06-13)
+**Affects:** ts-convert-from-snowflake-sv, sv-to-ts-gap-analysis.md
+**Status:** Not started
+**Corrects:** GAP-08 (range joins), GAP-10 (table filters), GAP-04 (derived/subquery SVs)
+
+### Problem
+
+Three SV DDL constructs were classified as "no ThoughtSpot equivalent" in the gap
+analysis, but ThoughtSpot **does** have the necessary mechanisms:
+
+1. **Range joins (GAP-08):** The gap analysis says "ThoughtSpot only supports equi-joins."
+   This is wrong — ThoughtSpot Model TML `joins[].on` accepts arbitrary expressions
+   including `<`, `>`, `AND`, range predicates. Verified via live TML export showing:
+   ```yaml
+   - name: range join
+     destination:
+       name: SCD Invoice
+     'on': "((([FACT_RETAIL_VIEW::invoice date] < [SCD Invoice::date]) AND
+             ([FACT_RETAIL_VIEW::invoice_id] = [SCD Invoice::invoice_id])) AND
+             ([FACT_RETAIL_VIEW::due date] > [SCD Invoice::date]))"
+     type: INNER
+   ```
+   Snowflake `DISTINCT_RANGE(start_col, end_col)` constraints and constant-value joins
+   can be translated to this `on` expression format.
+
+2. **Table filters (GAP-10):** The gap analysis says "No table-level filter in model TML."
+   While there's no *table*-level filter, `model.filters[]` provides model-level pre-filters
+   with operators (`=`, `!=`, `>`, `>=`, `<`, `<=`, `between`, `in`, `not_in`),
+   `is_mandatory` for non-removable filters, and `apply_on_tables` to scope a filter to
+   specific tables in a multi-fact model. This covers the SV "filters on logical tables"
+   use case.
+
+3. **Subquery-backed SVs (GAP-04):** When an SV's source is a SQL subquery rather than a
+   physical table, the skill currently has no path. ThoughtSpot's SQL View TML
+   (`sql_view:` with `sql_query:`) is the direct equivalent — create a SQL View TML
+   containing the subquery, import it, then reference it in the Model as a `model_tables[]`
+   entry. The SQL View TML schema is already documented in
+   `agents/shared/schemas/thoughtspot-sql-view-tml.md`.
+
+### Proposed approach
+
+#### Sub-item 1: Range joins (corrects GAP-08)
+
+1. **Detection** — In Step 4, parse `CONSTRAINT ... DISTINCT_RANGE(start_col, end_col)`
+   from the SV DDL relationships block.
+2. **Translation** — Convert to a Model TML join `on` expression:
+   ```
+   [FROM_TABLE::key] = [TO_TABLE::key] AND [FROM_TABLE::start_col] <= [TO_TABLE::date] AND [FROM_TABLE::end_col] > [TO_TABLE::date]
+   ```
+   The exact expression depends on whether it's an inclusive or exclusive range.
+3. **ASOF joins** — Research whether these can also be expressed as range predicates
+   in the `on` clause, or whether they require a different approach.
+4. **Update** `sv-to-ts-gap-analysis.md` GAP-08 to reflect that TS supports range joins.
+
+#### Sub-item 2: Model filters (corrects GAP-10)
+
+1. **Detection** — Parse the SV's table filter definitions from DDL.
+2. **Translation** — Map to `model.filters[]` entries:
+   - SV filter column → `column:` (display name)
+   - SV filter condition → `oper:` + `values:`
+   - SV table scope → `apply_on_tables:` (if the filter applies to only one table)
+   - Default `is_mandatory: true` (SV filters are permanent; user can override at review)
+3. **Update** `sv-to-ts-gap-analysis.md` GAP-10 to reflect model filters as the mapping.
+
+#### Sub-item 3: SQL View for subquery SVs (implements GAP-04)
+
+1. **Detection** — In Step 4, identify when an SV's `tables` block references a subquery
+   or inline SQL rather than a physical `DB.SCHEMA.TABLE`.
+2. **Generation** — Create a SQL View TML with:
+   - `sql_query:` ← the subquery text
+   - `connection:` ← the ThoughtSpot connection name
+   - `sql_view_columns:` ← columns inferred from the subquery's SELECT list
+3. **Import** — Import the SQL View first, capture its GUID, then reference it in the
+   Model TML as a `model_tables[]` entry (same as a regular table).
+4. **Worked example** — Add a worked example showing a subquery SV → SQL View + Model.
+
+### Files affected
+
+- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — Step 4 (parse), Step 7 (joins), new filter step, Step 6 (SQL View generation for subquery SVs)
+- `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` — range join rules, filter mapping rules
+- `docs/sv-to-ts-gap-analysis.md` — correct GAP-08 and GAP-10 assessments
+- `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` — mirror changes
+- `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror changes
