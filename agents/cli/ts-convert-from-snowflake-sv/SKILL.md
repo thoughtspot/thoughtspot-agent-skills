@@ -1155,6 +1155,8 @@ Columns ({n} total):
 
 Formula translations:
   ✓ {name}: {sql_expr} → {ts_formula}
+  🔄 {name}: DOUBLE AGGREGATION — {outer_agg}(group_{inner_agg}(...))
+  📐 {name}: FACT REFERENCE — uses [Fact Name] formula
   ⚠ {name}: OMITTED — {reason}
 
 Spotter (AI search): enabled / disabled
@@ -1386,10 +1388,23 @@ After a successful import, output:
 | Column | Original SQL | Status | ThoughtSpot Formula |
 |---|---|---|---|
 | {name} | `{sql}` | ✓ Translated | `{ts_formula}` |
+| {name} | `{sql}` | 🔄 Double aggregation | `{ts_formula}` |
+| {name} | `{sql}` | 📐 Fact formula | `{ts_formula}` |
 | {name} | `{sql}` | ⚠ Omitted | {reason} |
 
 ### Not Mapped
 - Extension JSON (Cortex Analyst context): not translated to ThoughtSpot
+
+### Facts Mapped ({n})
+| Fact Name | Source Table | Expression | ThoughtSpot Formula |
+|---|---|---|---|
+| {name} | {table} | `{sql_expr}` | `{ts_formula}` |
+
+### Identifier Resolution Summary
+- Physical columns resolved: {n}
+- Fact references resolved: {n}
+- Double aggregation patterns: {n}
+- Unresolvable references: {n} (see OMITTED above)
 ```
 
 ---
