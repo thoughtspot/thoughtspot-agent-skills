@@ -107,6 +107,12 @@ if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKI
   run_check "parity matrix"      "tools/validate/generate_parity.py --check"
 fi
 
+# Mirror sync — check synced-from markers against CLI source versions
+# Runs when any mirror file or SYNC-DEBT.md changes
+if echo "$STAGED" | grep -qE '(agents/(coco-snowsight|cursor)/|agents/SYNC-DEBT\.md)'; then
+  run_check "mirror sync"         "tools/validate/check_mirror_sync.py"
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
