@@ -26,8 +26,13 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
     )
     -- FACTS: row-level named expressions referenced by metrics (not all SVs have this)
     facts (
-        TABLE.COL as view_alias.FACT_NAME,
-        EXPR as view_alias.FACT_NAME,   -- expression-based fact
+        -- Format 1: Physical column reference (aliases a table column)
+        TABLE.COL as view_alias.FACT_NAME [comment='...'] [with synonyms=(...)],
+        -- Format 2: Expression-based fact (computed from table columns)
+        EXPR as view_alias.FACT_NAME [comment='...'] [with synonyms=(...)],
+        -- Format 3: Private fact (hidden from Cortex Analyst, may be referenced by metrics)
+        PRIVATE TABLE.COL as view_alias.FACT_NAME,
+        PRIVATE EXPR as view_alias.FACT_NAME,
         ...
     )
     dimensions (
@@ -427,6 +432,184 @@ This file does not maintain a separate untranslatable list. Under PT1
 |---|---|---|
 | CTEs / subqueries | `(SELECT ... FROM ...)` | Cannot be embedded in a ThoughtSpot formula |
 | Self-referential metrics | Metric A → Metric B → Metric A | Circular dependency; no formula representation |
+
+---
+
+## Facts Block → ThoughtSpot
+
+Facts are **row-level computed expressions** — NOT aggregates. They define named
+calculations at the grain of the underlying table, which metrics then aggregate.
+A fact never contains `SUM`, `COUNT`, `AVG`, or any aggregate function; if it did,
+the semantic view DDL would reject it.
+
+**Parsing format:** identical to dimensions —
+```
+TABLE.FACT_NAME as EXPR [comment='...'] [with synonyms=(...)]
+```
+
+Where `EXPR` is either a physical column reference (`view_alias.COL`) or a SQL
+expression over one or more columns (`DATEDIFF(month, view_alias.COL_A, CURRENT_DATE())`).
+
+**ThoughtSpot mapping:** each public (non-PRIVATE) fact translates to a `formulas[]`
+entry with a paired `columns[]` entry, following the same pattern as computed
+dimensions:
+
+- Numeric expressions (arithmetic, date-diff, cast-to-number) → `column_type: MEASURE`
+- String expressions (concat, substr, upper) → `column_type: ATTRIBUTE`
+- Date expressions (dateadd, date_trunc) → `column_type: ATTRIBUTE`
+
+**Worked example:**
+
+Semantic view fact:
+```sql
+PAYROLL_COMPANIES.COMPANY_AGE_MONTHS as DATEDIFF(month, payroll.PAYROLL_COMPANY_CREATED_AT, CURRENT_DATE())
+```
+
+ThoughtSpot TML:
+```yaml
+formulas:
+- id: formula_Company Age Months
+  name: "Company Age Months"
+  expr: "diff_months ( today () , [PAYROLL_COMPANIES::PAYROLL_COMPANY_CREATED_AT] )"
+  properties:
+    column_type: MEASURE
+
+columns:
+- name: "Company Age Months"
+  formula_id: formula_Company Age Months
+  properties:
+    column_type: MEASURE
+```
+
+**Private facts:** a `PRIVATE` fact is hidden from Cortex Analyst but may be
+referenced by a metric expression. Apply this rule:
+- If the private fact is referenced by any metric → create with `index_type: DONT_INDEX`
+- If the private fact is unreferenced by any metric → skip entirely (do not emit)
+
+**Synonyms and description:** map identically to dimensions — first synonym becomes
+the display `name`, remaining synonyms → `properties.synonyms`, and `comment='...'` →
+`description`. See "Display Name, Synonyms, and Description Resolution" below.
+
+---
+
+## Identifier Resolution Algorithm
+
+When translating metric expressions from Snowflake SQL to ThoughtSpot formulas,
+every `table_alias.name` reference in the expression must be resolved to the
+correct ThoughtSpot construct. This decision tree defines the resolution order.
+
+**Resolution inputs:**
+
+| Input | Source |
+|---|---|
+| Table columns | Physical columns from the ThoughtSpot Table TML exports |
+| Facts map | `{FACT_NAME: {expr, table_alias, visibility}}` parsed from the `facts()` block |
+| Metrics map | `{METRIC_NAME: {expr, agg, table_alias}}` parsed from the `metrics()` block |
+| Relationships | `{REL_NAME: {from_table, from_col, to_table, to_col}}` parsed from `relationships()` |
+
+**Decision tree — resolve `table_alias.name` in this order:**
+
+```
+1. Is `name` a physical column on the table identified by `table_alias`?
+   YES → emit [TABLE_ID::col_name]  (standard column reference)
+   NO  → step 2
+
+2. Is `name` a FACT_NAME in the facts map where the fact's table_alias matches?
+   YES → emit [Fact Display Name]  (formula reference — no TABLE:: prefix)
+         The fact's own formula must already be in formulas[].
+   NO  → step 3
+
+3. Is `name` a METRIC_NAME in the metrics map?
+   YES → Double aggregation — see "Double Aggregation (Metric-on-Metric)" below.
+         The referenced metric becomes an inner formula; the current metric wraps it.
+   NO  → step 4
+
+4. FAIL — the identifier cannot be resolved. Log it as an unresolved reference
+   in the Formula Translation Log and emit a placeholder comment in the formula:
+   /* UNRESOLVED: table_alias.name */
+```
+
+**Cross-table resolution:** when `table_alias` in the metric expression differs
+from the metric's own table, the reference crosses a relationship. The column
+reference still uses the standard `[TABLE_ID::col_name]` format — ThoughtSpot
+resolves cross-table references through the model's join graph. No special syntax
+is needed, but the join between the two tables must exist in `model_tables[].joins[]`.
+
+---
+
+## Double Aggregation (Metric-on-Metric)
+
+When a metric's expression references another metric (resolved at step 3 of the
+Identifier Resolution Algorithm), the outer metric aggregates an already-aggregated
+value. ThoughtSpot requires the inner metric to be wrapped in `group_aggregate`
+(or a `group_*` shorthand) to produce a per-group value that the outer metric
+can then aggregate.
+
+**Step 1 — Find the relationship:** identify the relationship connecting the inner
+metric's table to the outer metric's table. The grouping key is the primary key
+column on the parent (TO) side of that relationship.
+
+**Step 2 — Build the formula:** use a `group_*` shorthand function when one exists
+for the inner metric's aggregation:
+
+| Inner metric aggregation | Shorthand function |
+|---|---|
+| `COUNT(col)` | `group_count` |
+| `SUM(col)` | `group_sum` |
+| `AVG(col)` | `group_average` |
+| `COUNT(DISTINCT col)` | `group_unique_count` |
+| `MIN(col)` | `group_min` |
+| `MAX(col)` | `group_max` |
+
+Shorthand syntax: `group_<agg>([inner_table::measure_col], [outer_table::group_key])`
+
+When no shorthand exists (complex inner expression), use the full form:
+```
+group_aggregate(<inner_agg_formula>, {[outer_table::group_key]}, query_filters())
+```
+
+The filter argument is always `query_filters()` — this ensures user-applied runtime
+filters propagate into the inner aggregation. Do NOT use `{}` (empty filter).
+
+**Worked example:**
+
+Semantic view metrics:
+```sql
+-- Inner: count of locations per company
+PAYROLL_LOCATIONS.PAYROLL_LOCATION_ID as COUNT(payroll.NUMBER_OF_LOCATIONS)
+-- Outer: average locations across companies (references inner metric)
+PAYROLL_LOCATIONS.NUMBER_OF_LOCATIONS USING LOCATIONS_TO_COMPANIES as AVG(payroll.AVERAGE_LOCATIONS_PER_COMPANY)
+```
+
+Relationship: `LOCATIONS_TO_COMPANIES as PAYROLL_LOCATIONS(PAYROLL_COMPANY_ID) references PAYROLL_COMPANIES(PAYROLL_COMPANY_ID)`
+
+Resolution:
+- Outer metric `AVERAGE_LOCATIONS_PER_COMPANY` references `NUMBER_OF_LOCATIONS`
+- `NUMBER_OF_LOCATIONS` resolves to a metric (step 3) → double aggregation
+- Inner aggregation is `COUNT` → use `group_count` shorthand
+- Grouping key = `PAYROLL_COMPANIES.PAYROLL_COMPANY_ID` (PK on the TO side)
+
+ThoughtSpot formula:
+```yaml
+formulas:
+- id: formula_Average Locations Per Company
+  name: "Average Locations Per Company"
+  expr: "average ( group_count ( [PAYROLL_LOCATIONS::PAYROLL_LOCATION_ID] , [PAYROLL_COMPANIES::PAYROLL_COMPANY_ID] ) )"
+  properties:
+    column_type: MEASURE
+```
+
+**Window metrics referencing metrics (GAP-13):** when a cumulative or moving-window
+metric references another metric, the same resolution applies — resolve the inner
+metric reference, wrap it in the appropriate `group_*` function, then apply the
+window function (`cumulative_sum`, `moving_average`, etc.) on top. The inner
+`group_*` call is inlined as the argument to the window function rather than
+being split into a separate formula.
+
+**Report line requirement:** every double-aggregation formula must appear in the
+Formula Translation Log with a 🔄 marker prefix to flag it for review. Double
+aggregations are semantically fragile — the grouping key and relationship
+direction must be verified against the semantic view's intent.
 
 ---
 
