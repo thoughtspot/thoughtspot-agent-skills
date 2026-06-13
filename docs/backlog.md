@@ -754,3 +754,46 @@ Low-priority cosmetic alignment (no capability gap): consider renaming
 references), and optionally splitting Tableau property/type content into a
 `tableau-properties.md` to mirror SV/MV. Fits the BL-012 cross-skill-consistency theme; the
 conversion-consistency-auditor could then assert the naming convention.
+
+---
+
+## BL-017 — Cursor mirror sync: close version gaps or retire runtime
+
+**Source:** 2026-06-13 mirror parity audit (Plan 3)
+**Affects:** All 7 behind-version Cursor `.mdc` mirrors (see `agents/SYNC-DEBT.md`)
+**Status:** Open
+
+### Problem
+
+The Cursor runtime received zero updates through four CLI release cycles. Seven
+mirrors are behind — the worst (`ts-object-model-coach.mdc`) is at v1.2.0 vs
+CLI v2.3.0 (a full major version behind, meaning the Cursor mirror guides users
+through a workflow that no longer matches the canonical skill).
+
+### Version gap table
+
+| Mirror | Cursor at | CLI at | Gap size |
+|---|---|---|---|
+| ts-convert-from-tableau | v1.1.2 | v1.9.1 | 8 minor versions |
+| ts-object-model-coach | v1.2.0 | v2.3.0 | 1 major + 1 minor |
+| ts-convert-from-snowflake-sv | v1.3.1 | v1.7.1 | 4 minor versions |
+| ts-convert-from-databricks-mv | v1.0.1 | v1.3.0 | 2 minor versions |
+| ts-convert-to-snowflake-sv | v1.2.0 | v1.2.2 | 2 patch versions |
+| ts-object-answer-promote | v1.1.0 | v1.2.0 | 1 minor version |
+| ts-profile-snowflake | v1.0.0 | v1.0.1 | 1 patch version |
+
+### Decision needed
+
+1. **Sync**: update all 7 mirrors to current CLI versions. Estimated effort: medium
+   (the `.mdc` format is condensed — a full content sync requires reading each CLI
+   skill diff since the marker version and condensing the new content).
+2. **Retire**: remove the Cursor runtime entirely and update `EXPECTED_DIVERGENCES`
+   + PARITY.md. This is legitimate if no one uses Cursor with these skills.
+3. **Selective sync**: sync the most-used mirrors (convert-from-*, profile-*), retire
+   or freeze the rest.
+
+### Tracking
+
+`agents/SYNC-DEBT.md` tracks all gaps. `check_mirror_sync.py` fails on any
+unacknowledged gap. Closing a SYNC-DEBT row = syncing the mirror and bumping
+its `synced-from` marker.
