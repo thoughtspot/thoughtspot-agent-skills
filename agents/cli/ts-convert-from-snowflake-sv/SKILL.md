@@ -766,6 +766,17 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
 
 ### Step 7: Find join names (Scenario A only)
 
+**Joinless semantic views (GAP-03):** if the relationships block is empty or absent
+(no relationships were parsed in Step 4), skip this step entirely. The model will have
+`model_tables` entries with no `joins[]` or `referencing_join`. This is a valid model
+configuration — ThoughtSpot models can contain multiple unjoined tables (though queries
+will be limited to columns from one table at a time).
+
+If there is only ONE table in the semantic view, there are no joins by definition.
+Skip this step and proceed to Step 8 with a single `model_tables` entry.
+
+---
+
 For each relationship in the semantic view, find the name of the pre-defined join
 in the ThoughtSpot Table objects.
 
@@ -804,6 +815,24 @@ doubt, copy the string character-for-character from the API response.
 
 **Identify the fact table** (the table that is never on the "TO" side of any relationship)
 — it gets no `referencing_join` and no `joins[]`.
+
+**Joinless models:** if no relationships exist, there is no fact table distinction.
+All tables are peers — list each as a `model_tables` entry with no `joins[]`, no
+`referencing_join`. Omit the `joins:` key entirely from each entry:
+
+```yaml
+model:
+  name: "{view_name}"
+  model_tables:
+  - id: TABLE_A
+    name: TABLE_A
+    fqn: "{guid_a}"
+  - id: TABLE_B
+    name: TABLE_B
+    fqn: "{guid_b}"
+  columns:
+  # columns from both tables, using column_id: TABLE_A::col or TABLE_B::col
+```
 
 **Critical `id` rules (applies to all scenarios):**
 - **`id` must equal `name` exactly** (same case, same characters). ThoughtSpot resolves
