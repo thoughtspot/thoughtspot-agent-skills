@@ -52,8 +52,11 @@ if echo "$STAGED" | grep -qE '(snowflake-schema|ts-to-snowflake|\.yaml$|\.yml$)'
   run_check "SV YAML structure"  "tools/validate/check_sv_yaml.py --root $REPO_ROOT --staged"
 fi
 
-# ThoughtSpot TML structural validator — runs when TML schema or worked-example .md files are staged
-if echo "$STAGED" | grep -qE '(thoughtspot-(table|model)-tml|ts-from-snowflake)'; then
+# ThoughtSpot TML structural validator — fire on ANY staged .md file.
+# check_tml self-filters: it only validates real Table/Model TML blocks and skips
+# templates, partial snippets, worksheets, and non-TML YAML. Narrow filename triggers
+# previously meant TML edits in other docs went unchecked.
+if echo "$STAGED" | grep -qE '\.md$'; then
   run_check "TML structure"      "tools/validate/check_tml.py --root $REPO_ROOT --staged"
 fi
 
@@ -78,7 +81,7 @@ fi
 
 # Smoke tests — every Claude skill (not on the allowlist) must have a smoke test
 # Runs when a SKILL.md or smoke test is touched
-if echo "$STAGED" | grep -qE '(agents/claude/.*/SKILL\.md|tools/smoke-tests/)'; then
+if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/)'; then
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
 fi
 
@@ -86,7 +89,7 @@ fi
 # match a documented family pattern (see .claude/rules/skill-naming.md).
 # Runs when a SKILL.md, a Cursor .mdc rule, the rule itself, or the validator
 # is added/renamed.
-if echo "$STAGED" | grep -qE '(agents/(claude|coco)/.*/SKILL\.md|agents/cursor/rules/.*\.mdc|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKILL\.md|.*\.mdc)|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
   run_check "skill naming"       "tools/validate/check_skill_naming.py --root $REPO_ROOT"
 fi
 
@@ -94,13 +97,13 @@ fi
 # in EXPECTED_DIVERGENCES (see .claude/rules/runtime-coverage.md).
 # Runs whenever a skill file is added or renamed in any runtime, or when the
 # rule/validator itself changes.
-if echo "$STAGED" | grep -qE '(agents/(claude|coco)/.*/SKILL\.md|agents/cursor/rules/.*\.mdc|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)'; then
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKILL\.md|.*\.mdc)|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)'; then
   run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root $REPO_ROOT"
 fi
 
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
-if echo "$STAGED" | grep -qE '^agents/claude/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
+if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
   python3 tools/validate/suggest_dependency_types.py --root $REPO_ROOT
 fi
 
@@ -133,27 +136,31 @@ if [ "$FAILED" -gt 0 ]; then
 fi
 
 # ── Main branch skill audit ───────────────────────────────────────────────────
-# On any commit to main that touches agents/claude/, show the full skill inventory
-# and require explicit confirmation that every skill belongs in this repo.
+# On any commit to main that touches a skill in ANY runtime, show the full skill
+# inventory and require explicit confirmation that every skill belongs in this repo.
 # This prevents accidentally committing skills that live in other projects.
+# (The agents/claude -> agents/cli rename meant this only watched agents/claude/ —
+#  CLI/CoCo/Cursor skill additions slipped through unaudited. Now spans all runtimes.)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-if [ "$CURRENT_BRANCH" = "main" ] && echo "$STAGED" | grep -qE '^agents/claude/'; then
-  # What skill-level changes are in this commit?
+if [ "$CURRENT_BRANCH" = "main" ] && echo "$STAGED" | grep -qE '^agents/(cli|claude|coco-snowsight|cursor)/'; then
+  # What skill-level changes are in this commit? Names keep the runtime prefix
+  # (e.g. cli/ts-dependency-manager) so the same skill name across runtimes is unambiguous.
   ADDING=$(git diff --cached --name-only --diff-filter=A \
-    | grep -E '^agents/claude/[^/]+/SKILL\.md$' \
-    | sed 's|agents/claude/||;s|/SKILL\.md||' | sort)
+    | grep -E '^agents/(cli|claude|coco-snowsight|cursor)/[^/]+/SKILL\.md$' \
+    | sed 's|agents/||;s|/SKILL\.md||' | sort)
   REMOVING=$(git diff --cached --name-only --diff-filter=D \
-    | grep -E '^agents/claude/[^/]+/SKILL\.md$' \
-    | sed 's|agents/claude/||;s|/SKILL\.md||' | sort)
+    | grep -E '^agents/(cli|claude|coco-snowsight|cursor)/[^/]+/SKILL\.md$' \
+    | sed 's|agents/||;s|/SKILL\.md||' | sort)
   UPDATING=$(git diff --cached --name-only \
-    | grep -E '^agents/claude/[^/]+/' \
-    | sed 's|agents/claude/||;s|/.*||' | sort -u \
+    | grep -E '^agents/(cli|claude|coco-snowsight|cursor)/[^/]+/' \
+    | sed -E 's|^agents/([^/]+)/([^/]+)/.*|\1/\2|' | sort -u \
     | grep -vxF "$ADDING" | grep -vxF "$REMOVING")
 
   # Skills on disk after staging (find reflects the post-staged filesystem state)
-  ALL_SKILLS=$(find agents/claude -maxdepth 2 -name 'SKILL.md' 2>/dev/null \
-    | sed 's|^agents/claude/||;s|/SKILL\.md$||' | sort)
+  ALL_SKILLS=$(find agents/cli agents/claude agents/coco-snowsight agents/cursor \
+      -maxdepth 2 -name 'SKILL.md' 2>/dev/null \
+    | sed 's|^agents/||;s|/SKILL\.md$||' | sort)
 
   echo "  ── Main branch skill audit ──────────────────────────────────────"
   echo ""
