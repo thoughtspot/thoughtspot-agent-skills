@@ -384,27 +384,25 @@ Tableau running table calculations map to ThoughtSpot cumulative functions. Chai
 Tableau `RUNNING_*` → Snowflake `SUM/AVG/etc OVER (... ROWS BETWEEN UNBOUNDED PRECEDING
 AND CURRENT ROW)` → ThoughtSpot `cumulative_*()`.
 
-> ⚠️ **`cumulative_*` (and `moving_*`) are query-time functions — they CANNOT be stored as
-> model/worksheet formula columns.** Adding one to `model.formulas[]` fails validation with
-> *"Search did not find …"* (in any form — `cumulative_sum(sum([col]))`, `cumulative_sum([formula_measure])`,
-> etc.). They are only valid **inside an answer's `search_query`** (the live query context that
-> supplies the sort order). So: do **not** emit a model formula for a `RUNNING_*`/`WINDOW_*`
-> field — instead realize it on the **viz that uses it** (Step 10b) via the search keyword
-> (`cumulative …`, `moving average of …`) or an answer-level formula. Log it in the Migration
-> Summary as "realized at the answer level, not the model."
+> ⚠️ **`cumulative_*` (and `moving_*`) ARE valid as model formulas when the first arg is an
+> unaggregated `[table::col]` reference** — verified 2026-06-13 on se-thoughtspot (see EXC1 in
+> `ts-model-conversion-invariants.md`). They fail ONLY when the first arg is already aggregated
+> (`sum([col])`) or a display-name ref (`[Sales]`). For Tableau conversion: strip the Tableau
+> `SUM()`/`AVG()` wrapper and use the raw column ref → valid model formula. Fall back to
+> answer-level only when the sort dimension cannot be determined from the workbook.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( [Measure] , [sort attr] )` | Answer-level only. First arg = measure **display name, NOT `sum([t::col])`** — `cumulative_*` rejects an aggregated arg ("expects 1st argument to be not aggregated"). See 🔑 note below. |
-| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( [Measure] , [sort attr] )` | Same constraint. |
-| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( [Measure] , [sort attr] )` | Same constraint. |
-| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( [Measure] , [sort attr] )` | Same constraint. |
+| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( [table::col] , [sort attr] )` | **Model formula valid** with unaggregated `[table::col]` ref (verified 2026-06-13, EXC1). Strip Tableau's `SUM()` wrapper. Fall back to answer-level (`[Measure]` display name) only when sort dimension is undetermined. |
+| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( [table::col] , [sort attr] )` | Same — strip `AVG()` wrapper, use unaggregated ref. |
+| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( [table::col] , [sort attr] )` | Same — strip `MAX()` wrapper. |
+| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( [table::col] , [sort attr] )` | Same — strip `MIN()` wrapper. |
 
 **Limitations:**
 - ThoughtSpot cumulative functions use the query's natural sort order — there is no
   explicit `ORDER BY` parameter like Snowflake window functions
 - Partition dimensions are optional trailing arguments, not a separate `PARTITION BY`
-- `RUNNING_COUNT(expr)` — no `cumulative_count`. Approximate with `cumulative_sum ( 1 , [sort_attr] )` at answer level (table calc, EXC1), or omit + log if the sort attribute can't be determined.
+- `RUNNING_COUNT(expr)` — no `cumulative_count`. Approximate with `cumulative_sum ( 1 , [sort_attr] )` at answer level, or omit + log if the sort attribute can't be determined.
 
 ---
 
@@ -415,29 +413,29 @@ Tableau `WINDOW_SUM` → Snowflake `SUM() OVER (... ROWS BETWEEN ...)` → Thoug
 `moving_sum()`. See `ts-snowflake-formula-translation.md` "Moving / Sliding Window
 Functions" for the full reference.
 
-> ⚠️ Like `cumulative_*`, **`moving_*` are query-time only — not valid in model formulas**
-> (same *"Search did not find …"* failure). Realize them on the viz (answer `search_query`),
-> not in `model.formulas[]`. A composite like `EXP(WINDOW_AVG(LOG([m]), -2, 0))` (a geometric
-> moving average) therefore can't be a model column at all — build it as an answer-level
-> formula on the one viz that needs it, or flag it as a placeholder if the answer-formula
-> nesting (`exp`/`log10` around `moving_average`) is also rejected.
+> ⚠️ Like `cumulative_*`, `moving_*` **are valid as model formulas when the first arg is an
+> unaggregated `[table::col]` reference** (see EXC1 in `ts-model-conversion-invariants.md`).
+> Strip the Tableau `SUM()`/`AVG()` wrapper and use the raw column ref. A composite like
+> `EXP(WINDOW_AVG(LOG([m]), -2, 0))` (a geometric moving average) should be built as an
+> answer-level formula if the nesting (`exp`/`log10` around `moving_average`) is rejected
+> at model level.
 
-> 🔑 **Pass the worksheet's shelf attribute(s) as the trailing sort args — and reference the
-> MEASURE COLUMN by name, not `sum()`.** A running/moving total is meaningless without an order.
-> Take the dimension(s) the Tableau worksheet lays the calc *along* (its Rows/Columns shelf —
-> e.g. `Month of order date`, `Order Date`) and append them as sort args. The first argument is
-> the **measure column by display name** (`[Sales]`), **not** `sum([t::Sales])`: `cumulative_*`/
-> `moving_*` reject an already-aggregated arg (*"expects 1st argument to be not aggregated"*) and
-> can't resolve a `[t::col]` ref in answer context. So:
-> `RUNNING_SUM(SUM([Sales]))` along `[Month]` → `cumulative_sum ( [Sales] , [Month of order date] )`;
-> `EXP(WINDOW_AVG(LOG([Sales]),-2,0))` along `[Order Date]` → `exp ( moving_average ( log10 ( [Sales] ) , 2 , 0 , [Order Date] ) )`.
+> 🔑 **First arg must be unaggregated. For model formulas use `[table::col]`; for answer-level
+> use the measure display name `[Sales]`.** Strip Tableau's outer `SUM()`/`AVG()` wrapper — 
+> `cumulative_*`/`moving_*` reject an already-aggregated arg (*"expects 1st argument to be not
+> aggregated"*). Pass the worksheet's shelf attribute(s) as trailing sort args. Verified
+> 2026-06-13: `cumulative_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_ORDER::ORDER_DATE] )` imports
+> as a model formula (GUID `889a704f`, model `TEST_SV_DMSI_AI_CONTEXT`). So:
+> `RUNNING_SUM(SUM([Sales]))` along `[Month]` → model: `cumulative_sum ( [t::Sales] , [t::Month] )`;
+> answer: `cumulative_sum ( [Sales] , [Month of order date] )`.
+> `EXP(WINDOW_AVG(LOG([Sales]),-2,0))` along `[Order Date]` → `exp ( moving_average ( log10 ( [t::Sales] ) , 2 , 0 , [t::Order Date] ) )`.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( [Measure] , 3 , 0 , [sort attr] )` | 3-row lookback. First arg = measure **display name, NOT `sum([t::col])`** — `moving_*` rejects an aggregated arg ("expects 1st argument to be not aggregated"). See 🔑 note above. |
-| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( [Measure] , 3 , 0 , [sort attr] )` | Same constraint. |
-| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( [Measure] , 3 , 0 , [sort attr] )` | Same constraint. |
-| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( [Measure] , 3 , 0 , [sort attr] )` | Same constraint. |
+| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( [table::col] , 3 , 0 , [sort attr] )` | 3-row lookback. **Model formula valid** with unaggregated `[table::col]` ref (verified 2026-06-13, EXC1). Strip Tableau's `SUM()` wrapper. |
+| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper, use unaggregated ref. |
+| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper. |
+| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper. |
 
 ### Syntax
 
