@@ -1058,3 +1058,121 @@ parallel assessment for equivalent concepts in Tableau workbooks.
 - `agents/shared/mappings/tableau/tableau-tml-rules.md` — filter mapping, custom SQL→SQL View docs
 - `agents/cli/ts-convert-from-tableau/SKILL.md` — data source filter translation step
 - `agents/cli/ts-convert-from-tableau/references/open-items.md` — new items for filter + custom SQL gaps
+
+---
+
+## BL-021 — Delta sync mode for SV and MV converters (selective, additive, TS-side-preserving)
+
+**Source:** Feature request (2026-06-14)
+**Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv
+**Status:** Not started
+**Supersedes:** BL-013 (metadata-only sync is a subset of this)
+
+### Problem
+
+Mode C (SV) performs a full structural diff — every column, formula, join, and metadata
+field is compared and the user decides per-item. This is appropriate for a wholesale
+refresh, but too heavy for the common case: the source SV/MV changed incrementally and
+the user wants to **selectively pull in specific changes** while **preserving everything
+they've added on the ThoughtSpot side**.
+
+Typical delta scenarios:
+
+| What changed in SV/MV | What user wants | What must be preserved in TS |
+|---|---|---|
+| New columns added | Pull in new columns only | All existing columns, formulas, ai_context, instructions |
+| Column descriptions/synonyms updated | Sync metadata selectively | User-authored ai_context, coached synonyms |
+| Metric expression changed | Update specific formulas | Unrelated formulas, column settings |
+| New relationship added | Add the join | Existing joins, column order |
+| Nothing — user added formulas in TS | No source sync | Everything — this is a TS-only edit |
+
+Today's options don't cover this well:
+
+- **Mode A** (create new) — overwrites everything; user loses all TS-side additions
+- **Mode C** (full diff) — presents every difference, even unchanged items; user must
+  review the full change set even when only one column changed
+- **BL-013** (metadata-only) — limited to names/comments/synonyms; can't pull in new
+  columns or updated expressions
+
+### Proposed approach
+
+A **delta sync** mode (Mode D or an enhancement to Mode C) with these principles:
+
+#### 1. Selective change categories
+
+Present changes grouped by category, let the user opt in/out per category:
+
+```
+Delta sync — changes detected:
+
+  ✚ New columns (3)          [APPLY / SKIP]    ← default: APPLY
+  ✏ Modified metadata (5)    [REVIEW / SKIP]   ← default: REVIEW (per-column MERGE/UPDATE/KEEP)
+  ~ Modified expressions (2) [REVIEW / SKIP]   ← default: REVIEW (per-formula YES/SKIP)
+  ✚ New joins (1)            [APPLY / SKIP]    ← default: APPLY
+  ✖ Removed in source (2)   [FLAG ONLY]        ← never auto-removed
+
+  = Unchanged (42)           — no action
+```
+
+User can APPLY an entire category without per-item review, or REVIEW to get the
+Mode C per-column table for that category only.
+
+#### 2. TS-side preservation rules
+
+These fields are **never overwritten** by a delta sync, regardless of category:
+
+| TS-side field | Why preserved |
+|---|---|
+| `ai_context` | User-authored coaching — no source equivalent |
+| `data_model_instructions` | User-authored Spotter guidance |
+| User-added formulas (no source match) | Custom TS-side analytics |
+| User-added joins (no source match) | Manual relationship additions |
+| `index_type` overrides | User tuning for Spotter |
+| Column order | User curation |
+
+#### 3. Conflict resolution for metadata
+
+When both source and TS have changed the same field (e.g. source updated a synonym
+AND the user added a coached synonym):
+
+- **Synonyms** — default MERGE (union of both sets; never remove user-added synonyms)
+- **Descriptions** — default KEEP TS (user's description is likely more refined)
+- **Expressions** — always REVIEW (show side-by-side, require explicit YES)
+
+#### 4. New-column enrichment
+
+New columns pulled from the source get:
+- Display name, description, synonyms from the source (as in Mode A)
+- No `ai_context` (flagged for coaching handoff)
+- Automatic `column_type` classification per existing rules
+
+Post-sync handoff to `/ts-object-model-coach` for the new columns.
+
+#### 5. Dry-run option
+
+```
+Run as:  DRY RUN (show what would change, don't import)  /  APPLY
+```
+
+Dry run produces the categorised change report without importing — useful for
+assessing scope before committing.
+
+### Relationship to existing modes
+
+| Mode | When to use |
+|---|---|
+| A — Create new | First conversion; no existing model |
+| B — Merge | Combine multiple SVs/MVs into one model |
+| C — Full diff | Wholesale refresh; review everything |
+| D — Delta sync (this item) | Incremental sync; preserve TS-side work |
+| BL-013 — Metadata only | Subset of D: only names/comments/synonyms |
+
+BL-013 becomes a convenience shortcut within Mode D (select only the "Modified metadata"
+category and skip all others).
+
+### Files affected
+
+- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — Mode D workflow steps
+- `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — Mode D workflow steps (first update mode for DBX)
+- `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` — delta sync rules
+- `agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md` — delta sync rules
