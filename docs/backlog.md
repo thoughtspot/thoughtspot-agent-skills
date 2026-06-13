@@ -67,7 +67,7 @@ automatically.
 
 **Source:** Full gap analysis against production SV `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (all steps)
-**Status:** Not started
+**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); remaining gaps tracked below
 **Full spec:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md)
 
 ### Summary
@@ -80,14 +80,14 @@ View constructs are not parsed or translated to ThoughtSpot. The full gap analys
 
 | Item | Gap | Priority | Dependency |
 |---|---|---|---|
-| BL-003b | Parse `facts (...)` section from DDL | HIGH | None |
-| BL-003c | Metric-references-fact resolution | HIGH | BL-003b |
-| BL-003 | Double aggregation (metric-referencing-metric) | HIGH | BL-003b |
-| BL-004 | Semantic views with no joins | MEDIUM | None |
-| GAP-04 | Derived metrics (cross-table, view-level) | MEDIUM | BL-003 |
-| GAP-08 | Range joins / ASOF joins | MEDIUM | None |
-| GAP-10 | Filters on logical tables | MEDIUM | None |
-| GAP-13 | Window metrics referencing other metrics | MEDIUM | BL-003 |
+| BL-003b | Parse `facts (...)` section from DDL | HIGH | None | **Done** (2026-06-13) |
+| BL-003c | Metric-references-fact resolution | HIGH | BL-003b | **Done** (2026-06-13) |
+| BL-003 | Double aggregation (metric-referencing-metric) | HIGH | BL-003b | **Done** (2026-06-13) |
+| BL-004 | Semantic views with no joins | MEDIUM | None | **Done** (2026-06-13) |
+| GAP-04 | Derived metrics (cross-table, view-level) | MEDIUM | BL-003 | |
+| GAP-08 | Range joins / ASOF joins | MEDIUM | None | |
+| GAP-10 | Filters on logical tables | MEDIUM | None | |
+| GAP-13 | Window metrics referencing other metrics | MEDIUM | BL-003 | **Done** (2026-06-13) |
 | GAP-05 | Verified queries → Spotter instructions | LOW | None |
 | GAP-06 | Custom instructions → `data_model_instructions` | LOW | None |
 | GAP-07 | Table synonyms | LOW | None |
@@ -121,7 +121,8 @@ metric patterns (all metrics on a single table).
 
 **Source:** Analysis of Snowflake Semantic View `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (Step 9 — formula translation)
-**Status:** Not started
+**Status:** Done (2026-06-13) — identifier resolution engine adds group_aggregate wrapping with group_* shorthand
+> Implemented in CLI SKILL.md Step 9a (identifier resolution pre-pass), shared rules (ts-from-snowflake-rules.md), and formula translation (ts-snowflake-formula-translation.md). Option B (group_aggregate, no schema changes) chosen as default. Mirrored to CoCo and Cursor.
 
 ### Problem
 
@@ -175,7 +176,8 @@ The engine computes: `AVG( COUNT(locations) per company )`.
 
 **Source:** Gap analysis of `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (Step 4 parser + Step 9 translation)
-**Status:** Not started
+**Status:** Done (2026-06-13) — Step 4 extracts facts block; facts become standalone formulas in Step 8
+> Facts parsed as `{table_alias, fact_name, expression, comment, synonyms, access_modifier}`. Public facts emitted as `formulas[]` entries with `column_type: ATTRIBUTE`. Private facts emitted but noted in report. Mirrored to CoCo and Cursor.
 **Full analysis:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md) — GAP-01
 
 ### Problem
@@ -213,7 +215,8 @@ prerequisite for correct metric-on-fact translation.
 
 **Source:** Gap analysis of `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (Step 9)
-**Status:** Not started
+**Status:** Done (2026-06-13) — identifier resolution pre-pass resolves fact references to formula names
+> Three-step resolution in Step 9a: physical column → `[TABLE::col]`; fact → `[Fact Display Name]` formula reference; metric → double aggregation. Mirrored to CoCo and Cursor.
 **Full analysis:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md) — GAP-12
 
 ### Problem
@@ -238,7 +241,8 @@ Add a resolution step before formula translation:
 
 **Source:** Field observations (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv
-**Status:** Not started
+**Status:** Done (2026-06-13) — joinless SV guard skips Step 7 and produces model with no joins
+> If no `relationships` block exists, Steps 7 (join mapping) and related sections are skipped. Model TML produced with `model_tables[]` entries and no `joins_with` entries. Mirrored to CoCo and Cursor.
 
 ### Problem
 

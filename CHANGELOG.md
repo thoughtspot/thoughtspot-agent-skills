@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-13
+- feat(from-snowflake-sv): v1.9.0 — identifier resolution engine: facts parsing (BL-003b), metric→fact resolution (BL-003c), double aggregation via group_aggregate (BL-003), window metrics referencing metrics (GAP-13), joinless SV handling (GAP-03/BL-004)
 - fix(coco): mirror parity — port PT1 pass-through policy and error-010256 rule to CoCo skills; reverse-port name-normalisation rule to CLI; fix count_distinct example (audit C8/F2/F11)
 - fix(snowflake-sv): Phase 1 audit — fail-loud SV DDL parsing (C5), LEFT_OUTER join default (F5), authority fix (F4), discovery SQL fix (F8), Mode C comparison fix (F7), INFORMATION_SCHEMA case fix (F12)
 

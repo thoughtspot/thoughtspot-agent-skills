@@ -1051,6 +1051,7 @@ After completing one conversion, offer to convert additional views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-06-13 | Identifier resolution engine: facts parsing (BL-003b), metric→fact resolution (BL-003c), double aggregation via group_aggregate (BL-003), window metrics referencing metrics (GAP-13), joinless SV handling (GAP-03/BL-004). Mirrors CLI v1.9.0. |
 | 1.4.0 | 2026-06-13 | Add PT1 pass-through policy; fix `count_distinct` example → `unique count` (I5); sync to CLI v1.7.0. |
 | 1.3.1 | 2026-06-11 | Drop `TEST_SV_` model-name prefix (N1) and add the mandatory formula-reference gate (I7), citing `ts-model-conversion-invariants.md` — mirrors the CLI skill v1.5.0. |
 | 1.3.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C workflow (update existing ThoughtSpot Model from changed SV) using TS_EXPORT_TML / TS_IMPORT_TML stored procedures. |

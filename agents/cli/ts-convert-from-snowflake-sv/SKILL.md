@@ -1438,6 +1438,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.9.0 | 2026-06-13 | Identifier resolution engine: facts parsing (BL-003b), metric→fact resolution (BL-003c), double aggregation via group_aggregate (BL-003), window metrics referencing metrics (GAP-13), joinless SV handling (GAP-03/BL-004). |
 | 1.8.0 | 2026-06-13 | Fail-loud parsing (C5): Step 4x scans for facts, AI clauses, cortex search, private, unknown grammar. LEFT_OUTER join default (F5). Fix SV discovery SQL (F8). Fix Mode C comparison to translate before diff (F7). |
 | 1.7.1 | 2026-06-13 | Add "never normalise API response names" rule (reverse-port from CoCo). |
 | 1.7.0 | 2026-06-12 | Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). |
