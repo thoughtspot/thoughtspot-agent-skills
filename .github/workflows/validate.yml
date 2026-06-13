@@ -1,0 +1,44 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so checkers that diff against HEAD/refs behave correctly.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test/runtime deps
+        run: pip install pytest pyyaml
+
+      - name: Run validators (full-repo mode)
+        run: |
+          set -e
+          # Smoke tests are intentionally excluded — they need live ThoughtSpot /
+          # Snowflake credentials and run via scripts/pre-push.sh, not in CI.
+          python3 tools/validate/check_secrets.py --root . --all
+          python3 tools/validate/check_references.py --root .
+          python3 tools/validate/check_patterns.py --root .
+          python3 tools/validate/check_version_sync.py --root .
+          python3 tools/validate/check_yaml.py --root .
+          python3 tools/validate/check_sv_yaml.py --root .
+          python3 tools/validate/check_tml.py --root .
+          python3 tools/validate/check_consistency.py --root .
+          python3 tools/validate/check_skill_versions.py --root .
+          python3 tools/validate/check_smoke_tests.py --root .
+          python3 tools/validate/check_skill_naming.py --root .
+          python3 tools/validate/check_runtime_coverage.py --root .
+          python3 tools/validate/check_open_items.py --root . --warn
+
+      - name: Run unit + validator tests
+        run: pytest tools/ts-cli/tests/ tools/validate/tests/ -q
