@@ -16,22 +16,47 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         DB.SCHEMA.TABLE_NAME [primary key (COL)],
         -- Explicit alias (reserved words, name conflicts)
         ALIAS as DB.SCHEMA."TABLE_NAME" [primary key (COL)],
+        -- Table-level comment + synonyms
+        DB.SCHEMA.TABLE comment='...' with synonyms=('Alt Name','...'),
         ...
     )
     relationships (
         REL_NAME as FROM_TABLE(FROM_COL) references TO_TABLE(TO_COL),
         ...
     )
-    dimensions (
-        -- All dimensions at view level (NOT nested per-table)
-        TABLE_REF.VIEW_COL as view_alias.DIM_NAME [comment='...'],
+    -- FACTS: row-level named expressions referenced by metrics (not all SVs have this)
+    facts (
+        TABLE.COL as view_alias.FACT_NAME,
+        EXPR as view_alias.FACT_NAME,   -- expression-based fact
         ...
     )
+    dimensions (
+        -- All dimensions at view level (NOT nested per-table)
+        TABLE_REF.VIEW_COL as view_alias.DIM_NAME [comment='...'] [with synonyms=(...)],
+        -- Visibility modifier: PRIVATE dims are hidden from Cortex Analyst
+        PRIVATE TABLE_REF.VIEW_COL as view_alias.DIM_NAME,
+        -- Cortex Search Service on a dimension
+        TABLE_REF.VIEW_COL as view_alias.DIM_NAME with cortex search service SVC_NAME,
+        ...
+    )
+    -- Uniqueness constraints (optional; inform cardinality)
+    unique (TABLE.COL_A, TABLE.COL_B) distinct TABLE.COL_C range between X and Y,
     metrics (
         -- Simple: TABLE_REF.VIEW_COL as AGG(view_alias.METRIC_NAME)
         TABLE_REF.VIEW_COL as SUM(view_alias.METRIC_NAME) [comment='...'],
+        -- Semi-additive: non additive by (DATE_TABLE.COL asc|desc nulls last)
+        TABLE_REF.VIEW_COL non additive by (DATE.COL desc nulls last) as SUM(view_alias.NAME),
+        -- Metric referencing another metric alias (USING <relationship>)
+        TABLE_REF.metric_alias USING REL_NAME as AGG(view_alias.NAME),
         -- Complex expressions appear as the right-hand side
         ...
+    )
+    comment='top-level view description'
+    -- Cortex Analyst clauses (optional; may appear after comment)
+    ai_sql_generation = 'ON'|'OFF'
+    ai_question_categorization = 'ON'|'OFF'
+    ai_verified_queries (
+        'query text' verified_by = 'username' ...
     )
     with extension (CA='{...cortex_analyst_context_json...}');
 ```

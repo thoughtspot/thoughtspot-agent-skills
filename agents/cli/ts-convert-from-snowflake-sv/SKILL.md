@@ -497,8 +497,9 @@ will treat as if it came from one Semantic View.
   which definition wins or rename one before the merge can proceed. Do not silently
   prefer either definition.
 
-**4. Dimensions / time_dimensions / facts** — union across all tables, deduplicated
-by (table_name, column_name).
+**4. Dimensions / time_dimensions / metrics / facts (if present)** — union across all
+views, deduplicated by (table_name, column_name). DDL `facts ()` entries (row-level named
+expressions) are also merged and available for identifier resolution in Step 9.
 
 **5. Fact table identification in merged context** — re-run the fact-table detection
 algorithm (tables with no incoming relationships in the merged relationship set = fact
@@ -570,6 +571,24 @@ Build an internal map:
 - `columns` (flat): all dimensions and metrics, keyed by (table_alias, view_col), with
   display name, synonyms[], and description fields populated.
 - `model_description`: from the top-level `comment='...'` clause
+
+**4x. Unrecognized-construct scan (MANDATORY — do not skip).** After extracting the known
+blocks, scan the remaining DDL text for these tokens (case-insensitive). Each hit is a
+construct this skill cannot yet convert. NEVER silently drop one:
+
+| Token | Construct | Action |
+|---|---|---|
+| `facts (` | FACTS block (row-level expressions metrics may reference) | Extract names+exprs; treat each fact as a candidate formula source in Step 9 resolution; if a metric references an unresolvable fact → FAIL that column loudly with the fact name |
+| `ai_sql_generation` / `ai_question_categorization` | CA custom instructions | Add Unmapped Report row: "Custom instructions present — review for ThoughtSpot data_model_instructions equivalent (GAP-06)" |
+| `ai_verified_queries` | CA verified queries | Unmapped Report row (GAP-05); note count |
+| `with cortex search service` | dimension search service | Unmapped Report row naming the dimension |
+| `private` (as visibility modifier) | private dims/metrics | Convert but set `index_type: DONT_INDEX` + report |
+| `unique (` / `range between` | uniqueness constraints | Record for join cardinality inference (see Task 1.4) |
+| anything else unparsed (non-whitespace remains after extraction) | unknown grammar | STOP and show the user the unconsumed text — the SV spec evolves; do not guess |
+
+**Top-level COMMENT extraction fix:** the `comment '...'` clause is no longer guaranteed to
+be the last clause — `AI_*` clauses may follow it. Anchor on the `comment '...'` token
+pattern, not on position relative to the end of the DDL.
 
 ---
 

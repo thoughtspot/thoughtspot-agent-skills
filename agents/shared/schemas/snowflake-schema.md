@@ -64,9 +64,28 @@ relationships:                    # Optional. Defined at the top level (not unde
     right_column: string          # Physical column name on right_table.
 ```
 
-### What is NOT supported
+### DDL-only constructs (not in YAML schema)
 
-The following fields are **not** part of the schema. Including them causes a parse error:
+The DDL format (`CREATE SEMANTIC VIEW` / `GET_DDL`) supports additional constructs
+that have no YAML equivalent in `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
+
+| Construct | DDL syntax | Notes |
+|---|---|---|
+| `facts` | `facts ( TABLE.COL as alias.NAME, ... )` | Row-level named expressions referenced by metrics |
+| `private` / `public` | Visibility modifier on dims/metrics | Controls Cortex Analyst visibility |
+| `unique` / `range between` | `unique (TABLE.COL) distinct ... range between X and Y` | Uniqueness/range constraints |
+| `with cortex search service` | On dimensions | Links a dimension to a Cortex Search service |
+| `ai_sql_generation` | `ai_sql_generation = 'ON'\|'OFF'` | Cortex Analyst SQL generation toggle |
+| `ai_question_categorization` | `ai_question_categorization = 'ON'\|'OFF'` | Cortex Analyst question categorization toggle |
+| `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | Cortex Analyst verified query examples |
+| `using <relationship>` | On metrics | Specifies which relationship path to use for cross-table metrics |
+
+The from-snowflake-sv skill parses DDL via `GET_DDL` and must handle all of these.
+The to-snowflake-sv skill emits DDL via `CREATE SEMANTIC VIEW` and may emit these where supported.
+
+### What is NOT supported in YAML
+
+The following fields are **not** part of the YAML schema. Including them causes a parse error:
 
 | Field | Notes |
 |---|---|
