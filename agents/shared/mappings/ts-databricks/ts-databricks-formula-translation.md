@@ -86,7 +86,7 @@ Resolution:
 | `floor(x)` | `FLOOR(x)` | |
 | `round(x, n)` | `ROUND(x, n)` | |
 | `mod(x, y)` | `MOD(x, y)` | |
-| `power(x, y)` | `POWER(x, y)` | |
+| `pow(x, y)` | `POWER(x, y)` | TS function is `pow`, not `power` (verified 2026-06-13) |
 | `sqrt(x)` | `SQRT(x)` | |
 | `ln(x)` | `LN(x)` | |
 | `log2(x)` | `LOG2(x)` | |

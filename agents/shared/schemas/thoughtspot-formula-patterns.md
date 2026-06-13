@@ -135,7 +135,7 @@ else 0
 | `floor` | `floor ( [x] )` |
 | `ceil` | `ceil ( [x] )` |
 | `abs` | `abs ( [x] )` |
-| `power` | `power ( [x] , [n] )` |
+| `pow` | `pow ( [x] , [n] )` | Verified 2026-06-13. **Not** `power` — that name is rejected. |
 | `mod` | `mod ( [x] , [n] )` |
 | `sqrt` | `sqrt ( [x] )` |
 | `ln` | `ln ( [x] )` |
@@ -154,8 +154,8 @@ else 0
 | `right` | `right ( [x] , [n] )` | Last N characters |
 | `strlen` | `strlen ( [x] )` | String length |
 | `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence — 1-indexed, returns 0 when not found (live-verified 2026-06-13, se-thoughtspot; official docs claim 0-based/−1 — live behavior wins). |
-| `upper` | `upper ( [x] )` | Uppercase |
-| `lower` | `lower ( [x] )` | Lowercase |
+| ~~`upper`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "UPPER({0})" , [x] )` pass-through. |
+| ~~`lower`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "LOWER({0})" , [x] )` pass-through. |
 | `trim` | `trim ( [x] )` | Strip leading/trailing whitespace |
 | `replace` | `replace ( [x] , [old] , [new] )` | Replace all occurrences |
 | `contains` | `contains ( [x] , 'val' )` | Returns boolean |
@@ -208,7 +208,7 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 | `add_days` | `add_days ( [date] , [n] )` | Add N days |
 | `add_weeks` | `add_weeks ( [date] , [n] )` | Add N weeks |
 | `add_months` | `add_months ( [date] , [n] )` | Add N months |
-| `date_trunc` | `date_trunc ( 'month' , [date] )` | Truncate to period — `'day'`, `'week'`, `'month'`, `'quarter'`, `'year'` |
+| ~~`date_trunc`~~ | — | **Does not exist** as a formula function (verified 2026-06-13). ThoughtSpot uses search keywords (`Weekly`, `Monthly`, `Quarterly`, `Yearly`) for time bucketing, which generate the appropriate SQL. Use `start_of_month()` etc. if those exist, or pass-through. |
 
 **Argument order note:** `diff_*` functions take `(end, start)` — end date first. This is
 the opposite of most SQL `DATEDIFF` functions which take `(unit, start, end)`.

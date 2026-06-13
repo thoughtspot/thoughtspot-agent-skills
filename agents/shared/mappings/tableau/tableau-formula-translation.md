@@ -29,14 +29,14 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `DATETRUNC('month', d)` | `start_of_month ( d )` | Also `start_of_quarter`, `start_of_week`, `start_of_year` |
 | `DATETRUNC('week', TODAY()) + 1` | `add_days ( start_of_week ( today () ) , 1 )` | Do NOT use + operator on dates |
 | `DATEADD('day', n, d)` | `add_days ( d , n )` | Also `add_months`, `add_years` |
-| `DATEPART('month', d)` | `month_number ( d )` | Also `day_number_of_month`, `year`, `quarter_number` |
+| `DATEPART('month', d)` | `month_number ( d )` | Also `day()` (day of month), `year`, `quarter_number`, `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` |
 | `DATENAME('month', d)` | `month_number ( d )` | ThoughtSpot has no month-name function; use number |
 | `TODAY()` | `today ()` | |
 | `NOW()` | `now ()` | |
 | `DATE(d)` | `date ( d )` | Does not accept string literals |
 | `YEAR(d)` | `year ( d )` | |
 | `MONTH(d)` | `month_number ( d )` | |
-| `DAY(d)` | `day_number_of_month ( d )` | |
+| `DAY(d)` | `day ( d )` | **`day_number_of_month` does not exist** (verified 2026-06-13). `day()` extracts day-of-month. Related: `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` do exist. |
 | `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. ⚠ floor/ceil names pending live verification (P11/P12) — flag on first use. |
 | `FLOAT(x)` | `to_double ( x )` | See formula-patterns.md (to_double). `x * 1.0` breaks for string inputs Tableau accepts. |
 | `STR(x)` | `to_string ( x )` | |
@@ -495,7 +495,7 @@ function with `PARTITION BY` in the SQL string instead.
 |---|---|---|
 | `RANK(SUM([col]))` | `rank ( sum ( [table::col] ) , 'desc' )` | **Direction arg is required** — `rank(measure)` with one arg fails validation (*"Function rank expects 2 arguments, found 1"*). Pass `'desc'` explicitly for Tableau's default. |
 | `RANK(SUM([col]), 'asc')` | `rank ( sum ( [table::col] ) , 'asc' )` | |
-| `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` is always dense; no RANK_UNIQUE equivalent — document the tie-handling difference. |
+| `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` uses **competition ranking** (ties share a rank, next rank is skipped: 1,1,3 — verified 2026-06-13, generates `RANK() OVER (ORDER BY ...)`). No RANK_UNIQUE equivalent — document the tie-handling difference. |
 
 **Partitioned rank** — ThoughtSpot's native `rank()` has no partition support. For
 partitioned rank, use a pass-through function (see "Pass-Through Fallback" below):
@@ -505,7 +505,7 @@ sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" ,
 ⚑ flag for review — aggregate pass-through (PT1)
 
 **Limitations:**
-- `RANK_MODIFIED`, `RANK_DENSE` have no exact native equivalents; use `rank()` as an approximation and document the difference
+- `RANK_MODIFIED` has no native equivalent; `RANK_DENSE` → use `sql_int_aggregate_op ( "dense_rank() over (...)" )` pass-through (native `rank()` is competition, not dense — verified 2026-06-13)
 
 ---
 
