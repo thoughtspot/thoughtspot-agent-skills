@@ -978,7 +978,58 @@ where it causes an import error).
 >
 > Consult the reference. Never reason from first principles about SQL window functions.
 
-For each metric whose `EXPR` is not a simple `AGG(table.col)`:
+**9a. Identifier resolution (MANDATORY pre-pass).**
+
+Before translating any metric expression, resolve every `table_alias.name` reference
+in the expression. Use the Identifier Resolution Algorithm in
+[../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md):
+
+1. **Physical column?** Check the ThoughtSpot Table TML columns for `table_alias`.
+   If `name` matches a column → use `[TABLE::col]` reference. No further resolution needed.
+
+2. **Fact?** Check the `facts` map for `(table_alias, name)`.
+   If found → use formula reference `[Fact Display Name]` (the display name from the
+   fact's `formulas[]` entry, which was created in Step 8). The formula reference has
+   no `TABLE::` prefix — ThoughtSpot resolves it by substituting the fact formula's
+   `expr` inline.
+
+3. **Metric?** Check the `metrics` map for `(table_alias, name)`.
+   If found → this is **double aggregation**. Apply the Double Aggregation rules from
+   [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md):
+
+   a. Find the relationship connecting the inner metric's table to the outer metric's
+      table. If the DDL uses `USING REL_NAME`, use that relationship. Otherwise, find
+      the relationship where one endpoint is the inner metric's table alias and the
+      other is the outer metric's table alias.
+
+   b. Identify the inner metric's aggregation function and column:
+      `INNER_AGG(inner_col)`.
+
+   c. Build the ThoughtSpot formula:
+      ```
+      outer_agg ( group_inner_agg ( [CHILD_TABLE::inner_col] , [PARENT_TABLE::pk_col] ) )
+      ```
+      Use `group_*` shorthand when one exists for the inner aggregation (`group_count`,
+      `group_sum`, `group_average`, `group_unique_count`, `group_min`, `group_max`).
+      Fall back to full `group_aggregate(inner_agg(...), {[PARENT::pk]}, query_filters())`
+      for other aggregation types.
+
+   d. If the inner metric itself references another metric (triple aggregation),
+      FAIL with: "Triple aggregation detected — `{outer}` → `{middle}` → `{inner}`.
+      This skill supports one level of metric-on-metric nesting."
+
+4. **None of the above?** FAIL the column loudly: "Metric references
+   `{table_alias}.{name}` which is not a physical column, fact, or metric."
+
+**Window metrics referencing metrics (GAP-13):** when a window function metric
+(e.g. `SUM(...) OVER (ORDER BY ... ROWS BETWEEN ...)`) references another metric
+in its base expression, resolve the inner metric first:
+- If the inner metric is a simple `AGG(col)`: inline the aggregation directly:
+  `cumulative_sum(count([TABLE::col]), [TABLE::order_col])`
+- Do NOT wrap in `group_aggregate` — cumulative/moving functions already handle
+  the aggregation grain internally.
+
+For each metric whose `EXPR` is not a simple `AGG(table.col)` (after applying identifier resolution above — references have been resolved or the metric has been translated via double aggregation):
 
 1. Apply the SQL → ThoughtSpot formula translation rules in
    [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
