@@ -1,6 +1,7 @@
 ---
 description: Convert or import a Tableau workbook (.twb or .twbx) into ThoughtSpot — parses TWB XML, generates table + sql_view + model TMLs, validates and imports. Optionally migrates dashboards to liveboards. Direction is always Tableau → ThoughtSpot.
 ---
+<!-- synced-from: agents/cli/ts-convert-from-tableau/SKILL.md @ v1.1.2 on 2026-06-13 -->
 
 > **Untested in Cursor** — authoritative source is `agents/cli/ts-convert-from-tableau/SKILL.md`.
 > This `.mdc` mirrors the same workflow for Cursor users.

@@ -4,6 +4,7 @@ description: Creates four Snowflake scalar UDFs that format integer durations (s
 ---
 
 # ThoughtSpot + Snowflake: Duration Display UDFs
+<!-- synced-from: agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md @ v1.0.0 on 2026-06-13 -->
 
 ThoughtSpot stores durations as integer columns (seconds or minutes) but cannot natively format them as `HH:MM:SS`. This skill deploys four Snowflake scalar UDFs that convert integer durations to formatted strings, then shows how to call them from ThoughtSpot formulas using `sql_string_op`.
 

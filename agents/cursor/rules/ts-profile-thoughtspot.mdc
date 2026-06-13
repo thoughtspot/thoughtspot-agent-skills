@@ -2,6 +2,7 @@
 description: Manage ThoughtSpot connection profiles — add, list, update, delete, and test profiles. Stores credentials securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Invoked when the user asks to set up ThoughtSpot credentials, add or update a ThoughtSpot profile, or test a ThoughtSpot connection.
 alwaysApply: false
 ---
+<!-- synced-from: agents/cli/ts-profile-thoughtspot/SKILL.md @ v1.1.0 on 2026-06-13 -->
 
 # ThoughtSpot Setup
 

@@ -2,6 +2,7 @@
 description: Manage Databricks connection profiles — add, list, update, delete, and test profiles. Supports Service Principal (OAuth M2M), Personal Access Token, and existing CLI profiles. Credentials are stored securely in the OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Invoked when the user asks to set up Databricks credentials, add or update a Databricks profile, or test a Databricks connection. Untested in Cursor — see agents/cli/ts-profile-databricks/SKILL.md as the authoritative source.
 alwaysApply: false
 ---
+<!-- synced-from: agents/cli/ts-profile-databricks/SKILL.md @ v1.0.0 on 2026-06-13 -->
 
 # Databricks Profile Setup
 

@@ -2,6 +2,7 @@
 description: Creates four Snowflake scalar UDFs that format integer durations (seconds or minutes) as human-readable time strings (HH:MM:SS, DD:HH:MM:SS, HH:MM, DD:HH:MM), then shows the ThoughtSpot formula syntax to use them. Invoked when the user asks about displaying durations, formatting elapsed time, converting seconds or minutes to a readable format, call duration, handle time, SLA elapsed time, or any scenario where an integer count should appear as a formatted time string in ThoughtSpot.
 alwaysApply: false
 ---
+<!-- synced-from: agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md @ v1.0.0 on 2026-06-13 -->
 
 # ThoughtSpot + Snowflake: Duration Display UDFs
 

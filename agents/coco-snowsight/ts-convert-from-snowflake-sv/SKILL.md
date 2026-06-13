@@ -4,6 +4,7 @@ description: Convert a Snowflake Semantic View into a ThoughtSpot Model by readi
 ---
 
 # Snowflake Semantic View → ThoughtSpot Model
+<!-- synced-from: agents/cli/ts-convert-from-snowflake-sv/SKILL.md @ v1.7.1 on 2026-06-13 -->
 
 Converts a Snowflake Semantic View into a ThoughtSpot Model. Reads the semantic
 view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics to

@@ -4,6 +4,7 @@ description: Manage ThoughtSpot connection profiles for Snowflake workspaces —
 ---
 
 # ThoughtSpot Profile Setup
+<!-- synced-from: agents/cli/ts-profile-thoughtspot/SKILL.md @ v1.1.0 on 2026-06-13 -->
 
 Manage ThoughtSpot connection profiles stored in a Snowflake table, credentials
 stored as Snowflake Secrets, and API access via External Access Integration.

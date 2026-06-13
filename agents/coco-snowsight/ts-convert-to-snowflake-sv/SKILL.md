@@ -4,6 +4,7 @@ description: Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic 
 ---
 
 # ThoughtSpot → Snowflake Semantic View
+<!-- synced-from: agents/cli/ts-convert-to-snowflake-sv/SKILL.md @ v1.2.2 on 2026-06-13 -->
 
 Convert a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Searches
 ThoughtSpot for available models, exports the TML definition, maps it to the Snowflake

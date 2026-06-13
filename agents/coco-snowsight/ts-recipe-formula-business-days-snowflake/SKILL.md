@@ -4,6 +4,7 @@ description: Creates three Snowflake scalar UDFs for calculating business-day (w
 ---
 
 # ThoughtSpot + Snowflake: Business Day UDFs
+<!-- synced-from: agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md @ v2.0.0 on 2026-06-13 -->
 
 ThoughtSpot's built-in `diff_days` / `diff_hours` / `diff_minutes` count calendar days. This skill deploys three Snowflake scalar UDFs that exclude weekends and shows how to call them from ThoughtSpot formulas using `sql_int_op` / `sql_string_op`.
 
