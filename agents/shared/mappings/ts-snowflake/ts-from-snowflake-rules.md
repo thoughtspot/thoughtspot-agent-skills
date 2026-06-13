@@ -408,22 +408,25 @@ Do not confuse the two contexts.
 
 ---
 
-## Untranslatable SQL Patterns
+## Untranslatable vs pass-through (PT1)
 
-**Omit and log — do not include these as formula columns.**
+**AUTHORITY:** `ts-snowflake-formula-translation.md` is the single mapping authority.
+This file does not maintain a separate untranslatable list. Under PT1
+(`ts-model-conversion-invariants.md`):
+
+- Scalar SQL with no native TS mapping → `sql_*_op` pass-through (reliable)
+- Aggregate/window SQL with no native mapping → `sql_*_aggregate_op` pass-through, ALWAYS flagged for review
+- `TRY_CAST` has a native mapping (see formula translation reference)
+- `RANK() OVER` has a native mapping via `rank()` (see formula translation reference)
+- Omit-and-log is reserved for constructs PT1 explicitly excludes: CTEs/subqueries and
+  genuinely un-representable structures (not just unfamiliar functions)
+
+**Truly untranslatable (omit and log):**
 
 | Pattern | Example | Reason |
 |---|---|---|
-| Complex window functions | `RANK() OVER (...)`, `ROW_NUMBER() OVER (...)`, `LAG(x, n)`, `LEAD(x, n)` | No ThoughtSpot equivalent |
-| Running/moving window | `SUM(x) OVER (... ROWS BETWEEN ...)` | Use `cumulative_*` / `moving_*` only if exact match — otherwise omit |
-| CTEs / subqueries | `(SELECT ... FROM ...)` | Cannot be embedded in a formula |
-| JSON/variant access | `col:key::type`, `GET_PATH(col, 'k')` | Snowflake-specific |
-| `TRY_CAST`, `PARSE_JSON` | — | Snowflake-specific |
-| `LISTAGG`, `ARRAY_AGG` | — | No ThoughtSpot equivalent |
-| Unknown functions | `HAVERSINE(...)` | Not in ThoughtSpot |
-
-**Note:** `SUM/COUNT/AVG(x) OVER (PARTITION BY dims)` is NOT in this table — it IS
-translatable. See the "Translatable Window Function Patterns" section above.
+| CTEs / subqueries | `(SELECT ... FROM ...)` | Cannot be embedded in a ThoughtSpot formula |
+| Self-referential metrics | Metric A → Metric B → Metric A | Circular dependency; no formula representation |
 
 ---
 
