@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-13
+- fix(coco): mirror parity — port PT1 pass-through policy and error-010256 rule to CoCo skills; reverse-port name-normalisation rule to CLI; fix count_distinct example (audit C8/F2/F11)
+
 ## 2026-06-12
 - feat(from-tableau): v1.8.0 — static sets → column sets (BL-009 Phase 2a); detect+log Top-N/set-ops/set-actions as deferred; refresh thoughtspot-sets-tml.md with column-set/query-set vocabulary
 - fix(mappings): trig unit bug — SIN/COS/TAN now convert radians→degrees (Tableau trig is radians, ThoughtSpot is degrees); UPPER/LOWER fixed to sql_string_op pass-through (no native in TS 26.6.0); REGEXP_MATCH fixed to sql_bool_op (returns boolean, not 1/0)

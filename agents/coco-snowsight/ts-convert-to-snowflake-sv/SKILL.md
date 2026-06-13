@@ -1135,6 +1135,7 @@ Report all failures together before retrying. Key checks:
 - [ ] Valid `data_type` values on dimensions/time_dimensions: `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700.
 - [ ] Every join key column (FK and PK) is exposed as a named dimension in its table, with name = `snake_case(physical_column)`
 - [ ] No two tables in a relationship share a join column name — if they do, rename FK columns in wrapper views with a table-specific prefix
+- [ ] LOD/window metrics (`group_sum` → `SUM(...) OVER (PARTITION BY ...)`): the windowed aggregate references a **defined base metric alias**, not a raw column — `SUM(tbl.total_quantity) OVER (...)` not `SUM(tbl.QUANTITY) OVER (...)` (the raw-column form is rejected with error 010256). PARTITION BY may use a dimension on a joined coarser entity; no denormalization needed
 
 ---
 
@@ -1468,6 +1469,7 @@ Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.1 | 2026-06-13 | Add LOD/window metric alias rule (error 010256) to Step 11 checklist; sync to CLI v1.2.2. |
 | 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C workflow (update existing Snowflake Semantic View from changed Model) using GET_DDL + CREATE OR REPLACE. |
 | 1.1.0 | 2026-04-28 | Document `first_value` ↔ `desc nulls last` mapping and `properties.synonyms` placement (vs top-level which TS drops). |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

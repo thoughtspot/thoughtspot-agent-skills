@@ -768,6 +768,13 @@ Construct the model TML as a YAML string. Use the templates in
 Ask the user if they want a different name. Do not add a `TEST_SV_` or other prefix —
 see `../../shared/schemas/ts-model-conversion-invariants.md` (N1).
 
+**CRITICAL — Never normalise names from API responses.** Names that came from
+`ts tml export` (join names, column names, table names) or from import response GUIDs
+must be used **exactly as returned** — no `.lower()`, no `.upper()`, no title-casing,
+no whitespace trimming. Any silent transformation will cause a lookup failure in the
+model TML (wrong `referencing_join`, wrong `table.name`, wrong `column_id`). When in
+doubt, copy the string character-for-character from the API response.
+
 **Identify the fact table** (the table that is never on the "TO" side of any relationship)
 — it gets no `referencing_join` and no `joins[]`.
 
@@ -1286,6 +1293,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.7.1 | 2026-06-13 | Add "never normalise API response names" rule (reverse-port from CoCo). |
 | 1.7.0 | 2026-06-12 | Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). |
 | 1.6.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |
 | 1.5.0 | 2026-06-11 | Drop `TEST_SV_` prefix — model name now uses the bare SV name (N1); cite canonical conversion invariants doc. Add I5 explicit note: `COUNT(DISTINCT)` → `unique count(...)` formula, never `aggregation: COUNT_DISTINCT`. Add `references/open-items.md` tracking sql_view generation gap. |
