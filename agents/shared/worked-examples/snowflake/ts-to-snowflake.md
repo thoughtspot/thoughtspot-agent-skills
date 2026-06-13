@@ -543,14 +543,14 @@ CREATE SCHEMA IF NOT EXISTS DUNDERMIFFLIN.PUBLIC_SV;
 CREATE OR REPLACE VIEW DUNDERMIFFLIN.PUBLIC_SV.DM_ORDER AS
 SELECT ORDER_ID, CUSTOMER_ID AS DM_ORDER_CUSTOMER_ID,
        EMPLOYEE_ID AS DM_ORDER_EMPLOYEE_ID,
-       ORDER_DATE AS DM_ORDER_ORDER_DATE,
+       ORDER_DATE,
        REQUIRED_DATE, SHIPPED_DATE, SHIPPER_ID, FREIGHT,
        SHIP_NAME, SHIP_ADDRESS, SHIP_CITY, SHIP_REGION,
        SHIP_POSTAL_CODE, SHIP_COUNTRY
 FROM DUNDERMIFFLIN.PUBLIC.DM_ORDER;
 
 CREATE OR REPLACE VIEW DUNDERMIFFLIN.PUBLIC_SV.DM_ORDER_DETAIL AS
-SELECT RRDER_ID AS DM_ORDER_DETAIL_ORDER_ID,
+SELECT RRDER_ID,
        PRODUCT_ID AS DM_ORDER_DETAIL_PRODUCT_ID,
        UNIT_PRICE, QUANTITY, DISCOUNT, LINE_TOTAL
 FROM DUNDERMIFFLIN.PUBLIC.DM_ORDER_DETAIL;
@@ -587,7 +587,7 @@ FROM DUNDERMIFFLIN.PUBLIC.DM_INVENTORY;
 **Key decisions:**
 - FK columns renamed with table prefix: `CUSTOMER_ID` → `DM_ORDER_CUSTOMER_ID`
 - `DM_DATE_DIM` kept as a single shared view — column `DATE` is a reserved word (quoted in `expr`)
-- Typo `RRDER_ID` renamed to `DM_ORDER_DETAIL_ORDER_ID`
+- Typo `RRDER_ID` passed through as-is (no PK collision — `DM_ORDER` PK is `ORDER_ID`)
 
 ---
 
@@ -716,7 +716,7 @@ relationships:
   left_table: dm_order_detail
   right_table: dm_order
   relationship_columns:
-  - left_column: DM_ORDER_DETAIL_ORDER_ID    # renamed from RRDER_ID
+  - left_column: RRDER_ID                     # typo in source table — not renamed
     right_column: ORDER_ID
 - name: dm_order_detail_to_dm_product
   left_table: dm_order_detail
@@ -734,7 +734,7 @@ relationships:
   left_table: dm_order
   right_table: dm_date_dim                   # single shared date dim
   relationship_columns:
-  - left_column: DM_ORDER_ORDER_DATE         # renamed from ORDER_DATE
+  - left_column: ORDER_DATE                   # not renamed — no collision with PK
     right_column: DATE                       # reserved word — bare in relationship_columns
 - name: dm_order_to_dm_employee
   left_table: dm_order
@@ -816,8 +816,8 @@ tables:
     expr: dm_order.SHIP_COUNTRY
     data_type: TEXT
   time_dimensions:
-  - name: dm_order_order_date
-    expr: dm_order.DM_ORDER_ORDER_DATE
+  - name: order_date
+    expr: dm_order.ORDER_DATE
     data_type: DATE
   - name: required_date
     expr: dm_order.REQUIRED_DATE
@@ -838,8 +838,8 @@ tables:
     schema: PUBLIC_SV
     table: DM_ORDER_DETAIL
   dimensions:
-  - name: dm_order_detail_order_id
-    expr: dm_order_detail.DM_ORDER_DETAIL_ORDER_ID
+  - name: rrder_id
+    expr: dm_order_detail.RRDER_ID
     data_type: NUMBER
   - name: dm_order_detail_product_id
     expr: dm_order_detail.DM_ORDER_DETAIL_PRODUCT_ID
@@ -1005,7 +1005,7 @@ relationships:
   left_table: dm_order_detail
   right_table: dm_order
   relationship_columns:
-  - left_column: DM_ORDER_DETAIL_ORDER_ID
+  - left_column: RRDER_ID
     right_column: ORDER_ID
 - name: dm_order_detail_to_dm_product
   left_table: dm_order_detail
@@ -1023,7 +1023,7 @@ relationships:
   left_table: dm_order
   right_table: dm_date_dim
   relationship_columns:
-  - left_column: DM_ORDER_ORDER_DATE
+  - left_column: ORDER_DATE
     right_column: DATE
 - name: dm_order_to_dm_employee
   left_table: dm_order
@@ -1098,9 +1098,9 @@ relationships:
 9. **Percentage contribution uses `DIV0`.** When translating ratio formulas that divide
    by a `group_aggregate` result, use `DIV0` to handle division-by-zero safely.
 
-10. **Physical column typos are handled in wrapper views.** `RRDER_ID` (typo for
-    `ORDER_ID`) is renamed to `DM_ORDER_DETAIL_ORDER_ID` in the wrapper view, making
-    the semantic view clean regardless of the underlying data issue.
+10. **Physical column typos pass through when no PK collision exists.** `RRDER_ID` (typo
+    for `ORDER_ID`) does not collide with `DM_ORDER.ORDER_ID` since the names differ,
+    so no FK rename is needed. Rename only when FK and PK share the same column name.
 
 11. **Batch all wrapper view DDL into one SQL call.** Creating N views requires N+1 UI
     confirmations if done separately. Combine `CREATE SCHEMA` and all `CREATE VIEW`
