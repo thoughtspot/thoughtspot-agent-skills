@@ -732,6 +732,59 @@ situation, the named reference must be re-expanded as a window function, not inl
 
 ---
 
+### Double Aggregation (Metric-on-Metric) — Snowflake → TS
+
+Snowflake Semantic Views support **double aggregation**: a metric whose expression
+references another metric by `table_alias.metric_name`. The engine resolves the inner
+metric first (grouped by the join key), then applies the outer aggregate.
+
+**Direction:** Snowflake → ThoughtSpot only. ThoughtSpot does not emit this pattern
+when converting in the TS → Snowflake direction (the reverse skill emits two separate
+metrics instead).
+
+**Translation pattern:**
+
+| Snowflake SV | ThoughtSpot formula |
+|---|---|
+| `PARENT.OUTER_METRIC as OUTER_AGG(child_alias.inner_metric_name)` where inner metric = `INNER_AGG(col)` | `outer_agg ( group_inner_agg ( [CHILD_TABLE::col] , [PARENT_TABLE::pk_col] ) )` |
+
+The grouping key is the PK column on the parent table (from the relationship that
+connects child → parent). Use `group_*` shorthand when a shorthand exists for the
+inner aggregation (see LOD Functions above).
+
+**Examples:**
+
+```
+-- SV: AVG(child.COUNT(col))
+AVG(payroll_locations.number_of_locations)
+  where number_of_locations = COUNT(PAYROLL_LOCATION_ID)
+  relationship: PAYROLL_LOCATIONS(PAYROLL_COMPANY_ID) references PAYROLL_COMPANIES(PAYROLL_COMPANY_ID)
+
+-- TS formula:
+average ( group_count ( [PAYROLL_LOCATIONS::PAYROLL_LOCATION_ID] , [PAYROLL_COMPANIES::PAYROLL_COMPANY_ID] ) )
+```
+
+```
+-- SV: MAX(child.SUM(col))
+MAX(order_items.total_revenue)
+  where total_revenue = SUM(LINE_TOTAL)
+  relationship: ORDER_ITEMS(ORDER_ID) references ORDERS(ORDER_ID)
+
+-- TS formula:
+max ( group_sum ( [ORDER_ITEMS::LINE_TOTAL] , [ORDERS::ORDER_ID] ) )
+```
+
+**Filter argument:** the `group_*` shorthands use `query_filters()` implicitly,
+ensuring user-applied filters flow through to the inner aggregation. If using the
+full `group_aggregate` form, always pass `query_filters()` as the third argument.
+
+**Fact references are NOT double aggregation:** when a metric references a fact
+(row-level expression, not an aggregate), only one aggregation step occurs. Use a
+formula reference `[Fact Name]` instead of `group_aggregate`. See the Identifier
+Resolution Algorithm in `ts-from-snowflake-rules.md`.
+
+---
+
 ### Untranslatable LOD Patterns
 
 | Pattern | Reason |
