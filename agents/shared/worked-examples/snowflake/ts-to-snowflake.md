@@ -508,8 +508,8 @@ Key differences from Worksheet format:
 
 Query `INFORMATION_SCHEMA.COLUMNS` for all 8 tables. Key findings:
 
-1. **Case-sensitive column:** `DM_DATE_DIM.date` — lowercase in Snowflake → requires
-   quoting or wrapper view
+1. **Reserved-word column:** `DM_DATE_DIM.DATE` — SQL reserved word, requires quoting
+   in `expr` but bare in PK/FK
 2. **Physical column typo:** `DM_ORDER_DETAIL.RRDER_ID` — the TML references `ORDER_ID`
    but the actual Snowflake column is `RRDER_ID`
 3. **FK/PK name conflicts:** Multiple tables share the same join column names:
@@ -527,13 +527,13 @@ Query `INFORMATION_SCHEMA.COLUMNS` for all 8 tables. Key findings:
 
 ## Step 4 — Create Wrapper Views
 
-All three issues above require wrapper views in a new schema `DUNDERMIFFLIN.PUBLIC_SV`.
+All issues above require wrapper views in a new schema `DUNDERMIFFLIN.PUBLIC_SV`.
 
 **Why wrapper views are needed:**
-- Case-sensitive `date` column cannot be used bare in `primary_key.columns` or
-  `relationship_columns` (Cortex Analyst error 392700)
+- `DATE` is a SQL reserved word — requires quoting in `expr` fields
+- Physical column typo (`RRDER_ID`) needs renaming
 - FK columns sharing names with PK columns must be renamed to be globally unique
-- `DM_DATE_DIM` needs a single wrapper view with the case-sensitive column uppercased
+- `DM_DATE_DIM` needs a single shared wrapper view for cross-domain queries
 
 **Wrapper view DDL** (all batched in a single SQL call):
 
