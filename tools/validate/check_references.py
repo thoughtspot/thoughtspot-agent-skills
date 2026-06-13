@@ -28,10 +28,17 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 LINK_PATTERN = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
+
+# Links whose targets exist locally but are deliberately untracked / gitignored at
+# HEAD — dead links for cloners. Tracked as acknowledged debt so the checker lands
+# green; remove in Plan 6 (verification-auditability) once these docs are committed
+# or the links are dropped.
+KNOWN_UNTRACKED_DEBT: set[str] = set()  # remove in Plan 6 (verification-auditability)
 
 # Maps path prefixes used at runtime to repo-relative paths
 CLAUDE_PREFIX_MAP = {
@@ -94,9 +101,27 @@ def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | 
     return None
 
 
-def check_skill_file(skill_file: Path, repo_root: Path) -> list[tuple[int, str, str]]:
-    """Return list of (line_num, link_target, resolved_path) for broken references."""
+def _git_tracked(repo_root: Path) -> set[str]:
+    """Repo-relative paths currently tracked by git."""
+    result = subprocess.run(
+        ["git", "ls-files"], capture_output=True, text=True, cwd=repo_root,
+    )
+    return set(result.stdout.splitlines())
+
+
+def check_skill_file(
+    skill_file: Path, repo_root: Path, tracked: set[str] | None = None
+) -> list[tuple[int, str, str]]:
+    """Return list of (line_num, link_target, resolved_path) for broken references.
+
+    Two failure modes:
+      - target does not exist on disk (classic broken link)
+      - target exists but is untracked/gitignored while the source file IS tracked —
+        a dead link for anyone who clones the repo (audit 4.1)
+    """
     broken = []
+    src_rel = str(skill_file.relative_to(repo_root)) if skill_file.is_absolute() else str(skill_file)
+    src_tracked = tracked is not None and src_rel in tracked
     content = skill_file.read_text(encoding="utf-8")
     for line_num, line in enumerate(content.splitlines(), 1):
         for _text, target in LINK_PATTERN.findall(line):
@@ -106,6 +131,16 @@ def check_skill_file(skill_file: Path, repo_root: Path) -> list[tuple[int, str, 
             if not resolved.exists():
                 rel_resolved = resolved.relative_to(repo_root) if resolved.is_absolute() else resolved
                 broken.append((line_num, target, str(rel_resolved)))
+                continue
+            # Exists on disk — but is it tracked? Only enforce when the source is tracked
+            # (untracked source files are WIP and not yet cloners' concern).
+            if tracked is not None and src_tracked and resolved.is_absolute():
+                try:
+                    rel_resolved = str(resolved.relative_to(repo_root))
+                except ValueError:
+                    continue  # outside repo — not our concern
+                if rel_resolved not in tracked and rel_resolved not in KNOWN_UNTRACKED_DEBT:
+                    broken.append((line_num, target, rel_resolved + "  [untracked]"))
     return broken
 
 
@@ -126,13 +161,21 @@ def main() -> int:
         print("No SKILL.md or .mdc files found.")
         return 1
 
+    tracked = _git_tracked(repo_root)
+
     total_broken = 0
     for skill_file in sorted(skill_files):
         rel = skill_file.relative_to(repo_root)
-        broken = check_skill_file(skill_file, repo_root)
+        broken = check_skill_file(skill_file, repo_root, tracked)
         if broken:
             for line_num, target, resolved in broken:
-                print(f"FAIL  {rel}:{line_num}  →  {target}  (resolved: {resolved})")
+                if resolved.endswith("[untracked]"):
+                    clean = resolved.removesuffix("  [untracked]")
+                    print(f"FAIL  {rel}:{line_num}  →  {target}  "
+                          f"(resolved: {clean})  link target exists locally but is "
+                          "untracked/gitignored — dead link for cloners")
+                else:
+                    print(f"FAIL  {rel}:{line_num}  →  {target}  (resolved: {resolved})")
                 total_broken += 1
         else:
             print(f"PASS  {rel}")
