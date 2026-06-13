@@ -278,9 +278,12 @@ for col_name in sv_cols & model_cols:
         })
 
     if col_name in sv_formulas and ts_col["formula_id"]:
-        sv_expr = sv_formulas[col_name]
+        # IMPORTANT: translate the SV expression through the formula translation
+        # reference FIRST (Step 9 resolution), THEN compare TS-formula-to-TS-formula.
+        # Comparing raw SQL to TS formula text flags every column as modified.
+        sv_expr_translated = translate_sv_to_ts(sv_formulas[col_name])  # Step 9
         ts_expr = existing_formulas.get(ts_col["formula_id"], "")
-        if _exprs_differ(sv_expr, ts_expr):
+        if _exprs_differ(sv_expr_translated, ts_expr):
             change_set["modified_expressions"].append({
                 "column":  col_name,
                 "current": ts_expr,
@@ -459,13 +462,12 @@ Store the returned DDL string in full — it will be parsed in the next step.
 If the call fails with "object does not exist", verify the fully-qualified name and
 the user's role has `USAGE` on the schema.
 
-**Converting multiple views from the same schema?** Get all DDLs in one query:
+**Converting multiple views from the same schema?** List then fetch each DDL:
 ```sql
-SELECT view_name,
-       GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.' || view_name) AS ddl
-FROM {database}.information_schema.views
-WHERE table_schema = '{schema}'
-  AND table_type = 'SEMANTIC VIEW';   -- Snowflake filter for semantic views only
+SHOW SEMANTIC VIEWS IN SCHEMA {database}.{schema};
+SELECT "name" FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
+-- then per name:
+SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}."' || name || '"') AS ddl;
 ```
 Parse each DDL in Step 4 before switching Snowflake queries.
 
@@ -1320,6 +1322,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.8.0 | 2026-06-13 | Fail-loud parsing (C5): Step 4x scans for facts, AI clauses, cortex search, private, unknown grammar. LEFT_OUTER join default (F5). Fix SV discovery SQL (F8). Fix Mode C comparison to translate before diff (F7). |
 | 1.7.1 | 2026-06-13 | Add "never normalise API response names" rule (reverse-port from CoCo). |
 | 1.7.0 | 2026-06-12 | Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). |
 | 1.6.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |

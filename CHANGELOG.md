@@ -7,6 +7,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-06-13
 - fix(coco): mirror parity — port PT1 pass-through policy and error-010256 rule to CoCo skills; reverse-port name-normalisation rule to CLI; fix count_distinct example (audit C8/F2/F11)
+- fix(snowflake-sv): Phase 1 audit — fail-loud SV DDL parsing (C5), LEFT_OUTER join default (F5), authority fix (F4), discovery SQL fix (F8), Mode C comparison fix (F7), INFORMATION_SCHEMA case fix (F12)
 
 ## 2026-06-12
 - feat(from-tableau): v1.8.0 — static sets → column sets (BL-009 Phase 2a); detect+log Top-N/set-ops/set-actions as deferred; refresh thoughtspot-sets-tml.md with column-set/query-set vocabulary

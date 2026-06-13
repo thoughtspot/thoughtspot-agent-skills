@@ -544,11 +544,10 @@ for r in rows:
     col_types[(tbl_name, col_name)] = r['DATA_TYPE']
 ```
 
-**Note:** `INFORMATION_SCHEMA` stores schema names in uppercase for case-insensitive
-schemas and lowercase for case-sensitive ones — use `schema.upper()` in the WHERE
-clause when querying a case-insensitive schema; use the literal value when case-sensitive.
-In practice, the `schema.upper()` form works for both because Snowflake normalises the
-comparison.
+**Note:** `INFORMATION_SCHEMA` predicates are literal string comparisons — they do NOT
+normalise case. Query with the exact stored case. If the first probe returns zero rows,
+retry with `UPPER(table_schema) = UPPER('{schema}')` to handle case-insensitive schemas
+(stored uppercase) vs case-sensitive schemas (stored in original case).
 
 **Rule:** lowercase column name in `INFORMATION_SCHEMA.COLUMNS` → the column is
 case-sensitive (created with a quoted identifier).
@@ -1427,6 +1426,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.3 | 2026-06-13 | Fix INFORMATION_SCHEMA case comparison (F12); add join-type drop reporting table to T-RULES. |
 | 1.2.2 | 2026-06-02 | Add Step 11 checklist rule: LOD/window metrics must window over a defined base metric alias (not a raw column — rejected with error 010256); PARTITION BY may use a joined coarser dimension, no denormalization |
 | 1.2.1 | 2026-05-11 | Add `source ~/.zshenv &&` prefix to bare `ts auth logout` in the error-recovery bash block |
 | 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5): A=single new SV, B=split (now first-class), C=update existing SV; add Step 9.5C diff workflow for Mode C |
