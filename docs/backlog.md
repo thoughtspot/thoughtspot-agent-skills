@@ -860,15 +860,31 @@ analysis, but ThoughtSpot **does** have the necessary mechanisms:
    in the `on` clause, or whether they require a different approach.
 4. **Update** `sv-to-ts-gap-analysis.md` GAP-08 to reflect that TS supports range joins.
 
-#### Sub-item 2: Model filters (corrects GAP-10)
+#### Sub-item 2: SV filter labels → model filters or boolean formula columns (corrects GAP-10)
 
-1. **Detection** — Parse the SV's table filter definitions from DDL.
-2. **Translation** — Map to `model.filters[]` entries:
-   - SV filter column → `column:` (display name)
-   - SV filter condition → `oper:` + `values:`
-   - SV table scope → `apply_on_tables:` (if the filter applies to only one table)
-   - Default `is_mandatory: true` (SV filters are permanent; user can override at review)
-3. **Update** `sv-to-ts-gap-analysis.md` GAP-10 to reflect model filters as the mapping.
+Snowflake SV filters are dimensions or facts with `LABELS = (FILTER)` — boolean
+expressions that Cortex Analyst *can* use as WHERE clauses. They are not
+permanently auto-applied; they're available for optional use in queries.
+
+ThoughtSpot `model.filters[]` scoping:
+- Without `apply_on_tables` → filter is always applied (mandatory on every search)
+- With `apply_on_tables` → filter only applies when one of those tables is in the search
+
+**Translation depends on intent:**
+
+| SV filter intent | TS mapping |
+|---|---|
+| Always-applied business rule (e.g. `is_active = TRUE`) | `model.filters[]` without `apply_on_tables` |
+| Table-scoped rule (e.g. only for orders table) | `model.filters[]` with `apply_on_tables: [table_name]` |
+| Available for ad-hoc filtering (the default SV LABELS=FILTER meaning) | Boolean formula column — no model filter; users apply it in the search bar |
+
+1. **Detection** — Parse dimensions/facts with `LABELS = (FILTER)` from DDL.
+   These are boolean expressions.
+2. **Translation** — Create the boolean expression as a formula column. At the
+   Step 10 review checkpoint, ask the user whether each filter should be:
+   - A model-level filter (always applied or table-scoped via `apply_on_tables`)
+   - A boolean column available for ad-hoc filtering (default — matches SV semantics)
+3. **Update** `sv-to-ts-gap-analysis.md` GAP-10 to reflect the corrected mapping.
 
 #### Sub-item 3: SQL View for subquery SVs (implements GAP-04)
 

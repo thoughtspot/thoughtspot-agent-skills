@@ -267,9 +267,8 @@ Model-level pre-filters applied before any query. Column references use display 
 | `oper` | No | Comparison operator — see values below |
 | `values` | No | Filter values as strings. Date values use `MM/DD/YYYY` format. |
 | `display_name` | No | Human-readable label for the filter. Pass through on round-trips. |
-| `is_mandatory` | No | `true` prevents users from removing this filter. Default false. |
 | `is_single_value` | No | `true` restricts the filter to a single value. Default false. |
-| `apply_on_tables` | No | List of table aliases (from `model_tables[]`) this filter applies to. If absent, the filter applies to all tables. Use on multi-fact models to scope a filter to one fact table. |
+| `apply_on_tables` | No | List of table aliases (from `model_tables[]`) this filter applies to. **Absent → filter is always applied (mandatory).** Present → filter only applies when one of the listed tables is included in the search. |
 
 Valid `oper` values: `=`, `!=`, `>`, `>=`, `<`, `<=`, `between`, `in`, `not_in`
 
@@ -311,15 +310,15 @@ filters:
   values:
   - "true"
 
-# Table-scoped filter (multi-fact model — only applies to the sales table)
+# Table-scoped filter — only applies when Lineorder or Supplier is in the search
 - column:
   - Region
   oper: in
   values:
   - APAC
   apply_on_tables:
-  - sales
-  is_mandatory: true
+  - Lineorder
+  - Supplier
 ```
 
 ### `column_groups[]`
