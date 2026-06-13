@@ -2,7 +2,7 @@
 description: Convert a Snowflake Semantic View into a ThoughtSpot Model. Invoked when the user asks to convert or import a Snowflake Semantic View into ThoughtSpot, or create a ThoughtSpot Model from a Semantic View DDL.
 alwaysApply: false
 ---
-<!-- synced-from: agents/cli/ts-convert-from-snowflake-sv/SKILL.md @ v1.3.1 on 2026-06-13 -->
+<!-- synced-from: agents/cli/ts-convert-from-snowflake-sv/SKILL.md @ v1.4.0 on 2026-06-13 -->
 
 # Snowflake Semantic View → ThoughtSpot Model
 
@@ -82,6 +82,10 @@ SELECT GET_DDL('semantic_view', '{db}.{schema}.{sv_name}', TRUE);
 Parse the DDL. Before processing, read `~/.cursor/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md`
 for the authoritative parsing and mapping rules.
 
+Extract three column categories: **dimensions**, **metrics**, and **facts**. Facts are row-level
+expressions (not aggregates) declared as `TABLE.FACT_NAME as EXPR` that metrics reference as
+building blocks.
+
 ---
 
 ## Step 3 — Choose Scenario
@@ -131,9 +135,21 @@ Read `~/.cursor/shared/schemas/thoughtspot-model-tml.md` and
 
 Map the Semantic View DDL to ThoughtSpot Model TML:
 - Dimensions → ATTRIBUTE columns
+- Facts → ATTRIBUTE formula columns (row-level expressions metrics build on)
 - Metrics → MEASURE columns with formula expressions
-- Relationships → `joins_with` entries
+- Relationships → `joins_with` entries; if the SV has no relationships, skip join
+  resolution and produce `model_tables` with no `joins_with` entries
 - SQL expressions → ThoughtSpot formulas (use the formula translation reference)
+
+**Identifier resolution (before formula translation):** resolve every identifier in a
+metric/fact expression before translating SQL syntax. Lookup order:
+1. Physical column → `[TABLE::col]`
+2. Fact name → `[Fact Display Name]` (formula reference to the fact's own formula)
+3. Metric name → double aggregation via `group_aggregate` / `group_*` shorthand
+
+Double aggregation example: `AVG(metric_that_is_COUNT(...))` →
+`average(group_count([TABLE::col], [DIM_TABLE::dim_col]))`.
+See `~/.cursor/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` for full resolution rules.
 - **MANDATORY (I7):** before classifying any expression as untranslatable, open
   `~/.cursor/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` and check the
   reverse-translation tables — `NON ADDITIVE BY`, `OVER (PARTITION BY ...)`, and
@@ -185,6 +201,7 @@ Show:
 - Tables: {n} reused / {n} created
 - Dimensions: {n}, Metrics: {n}, Formulas: {n}
 - Any formula translation notes (untranslatable expressions left as SQL passthrough)
+- Double aggregation formulas marked with 🔄 for user review
 
 ---
 
@@ -273,6 +290,7 @@ Always surface after a successful import:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.0 | 2026-06-13 | Add facts parsing, identifier resolution engine (physical/fact/metric lookup with double aggregation), joinless SV handling, and double-aggregation report marker — mirrors CLI skill v1.6.0. |
 | 1.3.1 | 2026-06-11 | Add Model TML hard-rules callout (I1–I6 + N1) and mandatory formula-reference gate (I7) to Step 5, citing `ts-model-conversion-invariants.md` — mirrors the CLI skill v1.5.0. |
 | 1.3.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C (update existing model) workflow. |
 | 1.2.0 | 2026-04-28 | Add Spotter-enablement confirmation step (default Y). |
