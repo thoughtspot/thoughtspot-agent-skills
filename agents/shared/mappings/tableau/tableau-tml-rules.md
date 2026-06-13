@@ -289,10 +289,10 @@ The same applies in ThoughtSpot formulas:
 
 ```
 // Correct
-to_date(substr([YEAR_PERIOD], 2, 4) + '-01-01', 'yyyy-MM-dd')
+to_date ( concat ( substr ( [YEAR_PERIOD] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )
 
 // Wrong — produces an ambiguous value ThoughtSpot can't reliably bucket
-to_date(substr([YEAR_PERIOD], 2, 4), 'yyyy')
+to_date ( substr ( [YEAR_PERIOD] , 1 , 4 ) , 'yyyy' )
 ```
 
 ### Where to apply the conversion
@@ -302,7 +302,7 @@ conversion in the SQL query itself — this produces a native DATE column at the
 The model then references it directly via `column_id` instead of needing a formula.
 
 **If the datasource uses a regular table**, apply the conversion as a model formula —
-a formula like `to_date(substr([col], 2, 4) + '-01-01', 'yyyy-MM-dd')` works correctly
+a formula like `to_date ( concat ( substr ( [col] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )` works correctly
 and keeps the date logic visible in the model. Either approach is fine as long as the
 result is a full `YYYY-MM-DD` date.
 
@@ -310,10 +310,10 @@ result is a full `YYYY-MM-DD` date.
 
 | Source pattern | SQL (in SQL View) | ThoughtSpot formula (in model) | Result |
 |---|---|---|---|
-| `_2016_17` (UNPIVOT) | `TO_DATE(SUBSTRING(col, 2, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date(substr([col], 2, 4) + '-01-01', 'yyyy-MM-dd')` | `2016-01-01` |
-| `FY2016` | `TO_DATE(SUBSTRING(col, 3, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date(substr([col], 3, 4) + '-01-01', 'yyyy-MM-dd')` | `2016-01-01` |
-| `2016` (bare year) | `TO_DATE(col \|\| '-01-01', 'YYYY-MM-DD')` | `to_date([col] + '-01-01', 'yyyy-MM-dd')` | `2016-01-01` |
-| `2016-03` (year-month) | `TO_DATE(col \|\| '-01', 'YYYY-MM-DD')` | `to_date([col] + '-01', 'yyyy-MM-dd')` | `2016-03-01` |
+| `_2016_17` (UNPIVOT) | `TO_DATE(SUBSTRING(col, 2, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date ( concat ( substr ( [col] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )` | `2016-01-01` |
+| `FY2016` | `TO_DATE(SUBSTRING(col, 3, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date ( concat ( substr ( [col] , 2 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )` | `2016-01-01` |
+| `2016` (bare year) | `TO_DATE(col \|\| '-01-01', 'YYYY-MM-DD')` | `to_date ( concat ( [col] , '-01-01' ) , 'yyyy-MM-dd' )` | `2016-01-01` |
+| `2016-03` (year-month) | `TO_DATE(col \|\| '-01', 'YYYY-MM-DD')` | `to_date ( concat ( [col] , '-01' ) , 'yyyy-MM-dd' )` | `2016-03-01` |
 
 ---
 

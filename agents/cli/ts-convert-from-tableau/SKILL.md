@@ -676,7 +676,7 @@ Key rules:
   a date range. If the datasource already uses a **SQL View**, apply the conversion in the
   SQL query (`TO_DATE(SUBSTRING(col, 2, 4) || '-01-01', 'YYYY-MM-DD')`). If it uses a
   **regular table**, apply it as a model formula
-  (`to_date(substr([col], 2, 4) + '-01-01', 'yyyy-MM-dd')`). See `tableau-tml-rules.md`
+  (`to_date ( concat ( substr ( [col] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )`). See `tableau-tml-rules.md`
   "Date Column Rules" for the full pattern table.
 - Use `INT64` for Tableau `integer` — **never `INT`**
 - `db_column_properties` is **required** on every column
