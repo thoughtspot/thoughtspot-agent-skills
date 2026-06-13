@@ -664,7 +664,8 @@ Use the Identifier Resolution Algorithm in
 [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md):
 
 1. **Physical column?** → use `[TABLE::col]` reference
-2. **Fact?** → use formula reference `[Fact Display Name]` (no `TABLE::` prefix)
+2. **Fact?** → use `[formula_<id>]` reference (the fact's formula `id`, NOT display name —
+   `[Tenure Months]` fails; `[formula_Tenure Months]` works)
 3. **Metric?** → **double aggregation**: wrap inner metric in `group_aggregate`:
    `outer_agg(group_inner_agg([CHILD_TABLE::col], [PARENT_TABLE::pk_col]))`.
    Use `group_*` shorthand when available (`group_count`, `group_sum`, etc.).

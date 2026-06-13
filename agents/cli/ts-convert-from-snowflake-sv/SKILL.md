@@ -953,8 +953,9 @@ For each **public fact** in the `facts` map:
 - For **private facts** referenced by at least one metric: create the formula with
   `index_type: DONT_INDEX` on the `columns[]` entry. For private facts not referenced
   by any metric: skip entirely.
-- Fact formulas are emitted **before** metric formulas so that metric formula
-  references (`[Fact Name]`) resolve correctly.
+- Fact formulas are emitted **before** metric formulas in the `formulas[]` array
+  so that `[formula_<id>]` references resolve correctly. Metric formulas reference
+  facts by their formula `id` (e.g. `[formula_Tenure Months]`), NOT display name.
 
 See `../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` "Facts Block →
 ThoughtSpot" for the full mapping pattern and examples.
@@ -1017,10 +1018,10 @@ in the expression. Use the Identifier Resolution Algorithm in
    If `name` matches a column → use `[TABLE::col]` reference. No further resolution needed.
 
 2. **Fact?** Check the `facts` map for `(table_alias, name)`.
-   If found → use formula reference `[Fact Display Name]` (the display name from the
-   fact's `formulas[]` entry, which was created in Step 8). The formula reference has
-   no `TABLE::` prefix — ThoughtSpot resolves it by substituting the fact formula's
-   `expr` inline.
+   If found → use formula reference `[formula_<id>]` where `<id>` is the fact's
+   `id` value from its `formulas[]` entry (e.g. `formula_Tenure Months`). The
+   reference must use the formula `id`, NOT the display name — `[Tenure Months]`
+   fails during TML import; `[formula_Tenure Months]` succeeds. No `TABLE::` prefix.
 
 3. **Metric?** Check the `metrics` map for `(table_alias, name)`.
    If found → this is **double aggregation**. Apply the Double Aggregation rules from
@@ -1156,7 +1157,7 @@ Columns ({n} total):
 Formula translations:
   ✓ {name}: {sql_expr} → {ts_formula}
   🔄 {name}: DOUBLE AGGREGATION — {outer_agg}(group_{inner_agg}(...))
-  📐 {name}: FACT REFERENCE — uses [Fact Name] formula
+  📐 {name}: FACT REFERENCE — inlines fact expression (from {fact_name})
   ⚠ {name}: OMITTED — {reason}
 
 Spotter (AI search): enabled / disabled

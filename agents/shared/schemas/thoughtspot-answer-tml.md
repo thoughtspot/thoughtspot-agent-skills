@@ -349,7 +349,7 @@ a theme's chart colors (see the tableau skill's `references/liveboard-style-them
 | Formula `column_type` | Absent — must infer when promoting | In `columns[].properties` |
 | Formula `aggregation` | Absent — must infer when promoting | In `columns[].properties` (never in `formulas[]`) |
 | Column references | Bare display name `[Revenue]` or formula ID `[formula_X]` | `[TABLE_NAME::col_name]` |
-| Formula inter-refs | `[formula_formula_id]` using the id field | `[formula_name]` using the display name |
+| Formula inter-refs | `[formula_<id>]` using the id field | `[formula_<id>]` using the id field (NOT display name — verified 2026-06-13) |
 | Parameters | Answer-level, scoped to Answer | Model-level, reusable |
 | Sets | `cohorts[]` — answer-level only | Not in Model TML (sets reference Models) |
 | `was_auto_generated` | Present on formulas — `true` = AI-created, `false` = user-created | Rare — only present when ThoughtSpot auto-generated the formula; absent on all user-created model formulas |

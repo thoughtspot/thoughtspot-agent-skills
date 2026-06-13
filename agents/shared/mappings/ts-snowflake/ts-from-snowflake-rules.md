@@ -309,7 +309,7 @@ ThoughtSpot:    [TABLE_ID::col_name]
 | `a - b` | `[a] - [b]` |
 | `(a) / NULLIF(b, 0)` | `safe_divide ( [a] , [b] )` |
 | `a / b` | `[a] / [b]` *(warn: no null guard)* |
-| `CASE WHEN c THEN a ELSE b END` | `if [c] then [a] else [b]` |
+| `CASE WHEN c THEN a ELSE b END` | `if ( [c] ) then [a] else [b]` |
 | `x IS NULL` | `isnull ( [x] )` |
 | `x IS NOT NULL` | `isnotnull ( [x] )` |
 
@@ -515,8 +515,14 @@ correct ThoughtSpot construct. This decision tree defines the resolution order.
    NO  → step 2
 
 2. Is `name` a FACT_NAME in the facts map where the fact's table_alias matches?
-   YES → emit [Fact Display Name]  (formula reference — no TABLE:: prefix)
-         The fact's own formula must already be in formulas[].
+   YES → emit [formula_<id>]  (formula reference using the fact's `id` field)
+         The reference uses the formula's `id` value (e.g. `formula_Tenure Months`),
+         NOT the display name. `[Tenure Months]` fails during TML import;
+         `[formula_Tenure Months]` succeeds. The `formula_` prefix + name is the
+         `id:` value from the fact's `formulas[]` entry. No TABLE:: prefix.
+         Example: fact id `formula_Tenure Months`
+                  metric `AVG(employees.tenure_months)`
+                  → `average ( [formula_Tenure Months] )`
    NO  → step 3
 
 3. Is `name` a METRIC_NAME in the metrics map?

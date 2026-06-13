@@ -144,7 +144,8 @@ Map the Semantic View DDL to ThoughtSpot Model TML:
 **Identifier resolution (before formula translation):** resolve every identifier in a
 metric/fact expression before translating SQL syntax. Lookup order:
 1. Physical column → `[TABLE::col]`
-2. Fact name → `[Fact Display Name]` (formula reference to the fact's own formula)
+2. Fact name → `[formula_<id>]` reference (use the fact's formula `id`, NOT display name —
+   `[Tenure Months]` fails; `[formula_Tenure Months]` works)
 3. Metric name → double aggregation via `group_aggregate` / `group_*` shorthand
 
 Double aggregation example: `AVG(metric_that_is_COUNT(...))` →

@@ -56,6 +56,7 @@ worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)
   ts-from-snowflake.md                — end-to-end SV → TS conversion — BIRD_SUPERHEROS_SV (verified against live instance)
   ts-from-snowflake-dunder.md         — end-to-end SV → TS conversion — DUNDER_MIFFLIN_SALES_INVENTORY (multi-value synonyms, descriptions, semi-additive, unique count, concat; verified against live instance)
+  ts-from-snowflake-identifier-resolution.md — end-to-end SV → TS conversion — COMPANY_WORKFORCE_SV (facts, metric-on-fact inlining, double aggregation via group_count/group_sum, duplicate column_id fix; verified against live instance 2026-06-13)
 
 worked-examples/databricks/
   ts-to-databricks.md                 — end-to-end TS → MV conversion — DUNDER_MIFFLIN (multi-fact split, flattened views, LOD dimensions, semi-additive, MEASURE()/ANY_VALUE() cross-refs; verified against live instance 2026-05-25)

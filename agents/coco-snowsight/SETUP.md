@@ -72,6 +72,7 @@ snow stage copy agents/shared/mappings/tableau/tableau-tml-rules.md @SKILLS.PUBL
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
+snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake-identifier-resolution.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/schemas/thoughtspot-sql-view-tml.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
 snow stage copy agents/shared/worked-examples/tableau/liveboard-kpi-sparkline.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/tableau/static-set-to-column-set.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite

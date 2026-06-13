@@ -125,8 +125,8 @@ These functions translate 1:1 in both directions.
 
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
-| `if [cond] then [a] else [b]` → `CASE WHEN cond THEN a ELSE b END` | `CASE WHEN cond THEN a ELSE b END` → `if [cond] then [a] else [b]` |
-| `if [c1] then [a] else if [c2] then [b] else [c]` → `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` | `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` → `if [c1] then [a] else if [c2] then [b] else [c]` |
+| `if ( [cond] ) then [a] else [b]` → `CASE WHEN cond THEN a ELSE b END` | `CASE WHEN cond THEN a ELSE b END` → `if ( [cond] ) then [a] else [b]` |
+| `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` → `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` | `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` → `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` |
 | `isnull ( [x] )` → `x IS NULL` | `x IS NULL` → `isnull ( [x] )` |
 | `isnotnull ( [x] )` → `x IS NOT NULL` | `x IS NOT NULL` → `isnotnull ( [x] )` |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `ifnull ( [x] , [default] )` |
