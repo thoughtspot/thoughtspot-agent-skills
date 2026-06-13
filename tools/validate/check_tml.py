@@ -167,12 +167,20 @@ def validate_table_tml(data: dict) -> list[str]:
             )
         elif isinstance(db_props, dict):
             dt = db_props.get("data_type")
-            if dt and isinstance(dt, str) and dt.upper() in SQL_ONLY_TYPES:
-                errors.append(
-                    f"Column '{col_name}' db_column_properties.data_type='{dt}' "
-                    "is a SQL type. Use the ThoughtSpot type instead "
-                    "(e.g. INT64 not INTEGER, VARCHAR not TEXT, BOOL not TINYINT)."
-                )
+            if dt and isinstance(dt, str):
+                dt_up = dt.upper()
+                if dt_up in SQL_ONLY_TYPES:
+                    errors.append(
+                        f"Column '{col_name}' db_column_properties.data_type='{dt}' "
+                        "is a SQL type. Use the ThoughtSpot type instead "
+                        "(e.g. INT64 not INTEGER, VARCHAR not TEXT, BOOL not TINYINT)."
+                    )
+                elif dt_up not in TS_DATA_TYPES:
+                    errors.append(
+                        f"Column '{col_name}' db_column_properties.data_type='{dt}' "
+                        f"is not a valid ThoughtSpot data type — must be one of "
+                        f"{sorted(TS_DATA_TYPES)}."
+                    )
 
     # joins_with: empty list is an error
     joins_with = inner.get("joins_with")
@@ -329,6 +337,22 @@ def validate_model_tml(data: dict) -> list[str]:
                         f"table prefix '{tbl_prefix}' does not match any "
                         "model_tables name or alias"
                     )
+
+        # Aggregation value must be a known ThoughtSpot enum (VALID_AGGREGATIONS).
+        # Common mistake: AVG instead of AVERAGE. COUNT_DISTINCT is a valid enum here —
+        # its placement on a physical column is a separate check (I5, below).
+        if isinstance(props, dict):
+            agg = props.get("aggregation")
+            if (
+                agg
+                and isinstance(agg, str)
+                and agg.upper() not in VALID_AGGREGATIONS
+            ):
+                errors.append(
+                    f"Column '{col_display}' has invalid aggregation='{agg}' — "
+                    f"must be one of {sorted(VALID_AGGREGATIONS)} "
+                    "(ThoughtSpot uses AVERAGE, not AVG)"
+                )
 
         # I5: COUNT_DISTINCT as an aggregation on a physical column silently flips
         # the column MEASURE -> ATTRIBUTE. Distinct counts must be `unique count(...)` formulas.
