@@ -3,26 +3,38 @@
 This document tracks which skills exist in which agent runtime and what must be
 kept in sync when making changes.
 
+**This matrix is generated.** Run `python3 tools/validate/generate_parity.py` to
+regenerate. Run with `--check` to validate the committed version matches the
+filesystem.
+
 ## Agent Runtimes
 
-| Directory | Runtime | API Access | Credential Storage | Deployment |
-|---|---|---|---|---|
-| `agents/cli/` | Claude Code + Cortex Code CLI (local terminal) | `ts` CLI | OS Keychain + `~/.claude/` profiles | Symlinks from `~/.claude/skills/` and `~/.snowflake/cortex/skills/` |
-| `agents/claude/` | Claude Code only (annex — `ts-profile-snowflake`) | `ts` CLI | OS Keychain + `~/.claude/` profiles | Symlinks from `~/.claude/skills/` |
-| `agents/coco-snowsight/` | Snowsight Workspace (no shell) | Stored procedures | Snowflake Secrets | Stage → Workspace copy |
+| Directory | Runtime | API Access | Credential Storage | Shared path convention | Deployment |
+|---|---|---|---|---|---|
+| `agents/cli/` | Claude Code + Cortex Code CLI (local terminal) | `ts` CLI | OS Keychain + `~/.claude/` profiles | `../../shared/mappings/...`, `../../shared/schemas/...` | Symlinks from `~/.claude/skills/` and `~/.snowflake/cortex/skills/` |
+| `agents/claude/` | Claude Code only (annex — `ts-profile-snowflake`) | `ts` CLI | OS Keychain + `~/.claude/` profiles | `../../shared/mappings/...`, `../../shared/schemas/...` | Symlinks from `~/.claude/skills/` |
+| `agents/coco-snowsight/` | Snowsight Workspace (no shell) | Stored procedures | Snowflake Secrets | `../../shared/mappings/...`, `../../shared/schemas/...` | Stage → Workspace copy (`stage-sync.sh`) |
+| `agents/cursor/` | Cursor AI (IDE rules) | `ts` CLI | OS Keychain + `~/.cursor/` profiles | `~/.cursor/shared/mappings/...`, `~/.cursor/shared/schemas/...` | Symlinks from `~/.cursor/rules/` |
 
 ## Skill Matrix
 
-| Skill | claude | cli | coco-snowsight | Notes |
+| Skill | cli | claude | coco-snowsight | cursor |
 |---|---|---|---|---|
-| ts-profile-thoughtspot | Y | Y | Y | CLI versions use OS keychain; Snowsight uses Snowflake Secrets |
-| ts-convert-to-snowflake-sv | Y | Y | Y | Core mapping logic identical; API call mechanism differs |
-| ts-convert-from-snowflake-sv | Y | Y | Y | Core mapping logic identical; API call mechanism differs |
-| ts-dependency-manager | Y | Y | — | CLI versions use ts CLI; Snowsight can't support graph walks |
-| ts-object-answer-promote | Y | Y | — | CLI versions use ts CLI; Snowsight can't support complex manipulation |
-| ts-object-model-coach | Y | Y | — | CLI versions use ts CLI; Snowsight can't support interactive coaching |
-| ts-setup-sv | — | — | Y | Snowsight-only: installs stored procedures |
-| ts-profile-snowflake | Y | — | — | Claude Code only: Cortex Code manages connections natively |
+| ts-convert-from-databricks-mv | Y | — | — | Y |
+| ts-convert-from-snowflake-sv | Y | — | Y | Y |
+| ts-convert-from-tableau | Y | — | — | Y |
+| ts-convert-to-databricks-mv | Y | — | — | Y |
+| ts-convert-to-snowflake-sv | Y | — | Y | Y |
+| ts-dependency-manager | Y | — | — | Y |
+| ts-object-answer-promote | Y | — | — | Y |
+| ts-object-model-coach | Y | — | — | Y |
+| ts-profile-databricks | Y | — | — | Y |
+| ts-profile-snowflake | — | Y | — | Y |
+| ts-profile-thoughtspot | Y | — | Y | Y |
+| ts-recipe-formula-business-days-snowflake | Y | — | Y | Y |
+| ts-recipe-formula-hms-display-snowflake | Y | — | Y | Y |
+| ts-setup-sv | — | — | Y | — |
+| ts-variable-timezone | Y | — | — | Y |
 
 ## What to Sync
 
@@ -32,7 +44,7 @@ Changes to these areas must be propagated to ALL agent versions of the skill:
 
 - Mapping rules (column classification, formula translation, DDL generation)
 - TML schema interpretations
-- Concept mappings (ThoughtSpot ↔ Snowflake)
+- Concept mappings (ThoughtSpot ↔ Snowflake/Databricks/Tableau)
 - Validation logic
 - Error messages and user-facing text
 - New steps or removed steps
@@ -44,20 +56,9 @@ These are inherently different per runtime:
 
 - API call mechanism (stored procedure vs `ts` CLI)
 - Authentication flow (Snowflake Secrets vs OS Keychain)
-- File paths (relative shared refs vs `~/.claude/` vs Cortex Code connections)
-- SQL execution method (`sql_execute` tool vs `snow sql` vs Python connector)
+- File paths (relative shared refs vs `~/.claude/` vs `~/.cursor/`)
+- SQL execution method (`snowflake_sql_execute` vs `snow sql` vs Python connector)
 - Deployment instructions
-
-## Shared References
-
-All agents reference the same `agents/shared/` directory for mapping rules,
-schemas, and worked examples. Path convention differs by agent:
-
-| Agent | Shared path convention |
-|---|---|
-| `claude` | `~/.claude/mappings/...`, `~/.claude/shared/schemas/...` |
-| `cli` | `../../shared/mappings/...`, `../../shared/schemas/...` |
-| `coco-snowsight` | `../../shared/mappings/...`, `../../shared/schemas/...` |
 
 ## Publishing Checklist
 
@@ -67,6 +68,7 @@ When making a change to a skill:
 2. Make the core logic change in all applicable agents
 3. Adapt runtime-specific sections for each agent
 4. Update changelogs in each SKILL.md
-5. For coco-snowsight: run `./scripts/stage-sync.sh` after push
-6. For cli: symlinks update automatically on `git pull`
-7. For claude: symlinks update automatically on `git pull`
+5. Update `synced-from` markers on mirrors to reflect the new CLI version
+6. For coco-snowsight: run `./scripts/stage-sync.sh` after push
+7. For cli/claude: symlinks update automatically on `git pull`
+8. For cursor: symlinks update automatically on `git pull`

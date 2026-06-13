@@ -101,6 +101,12 @@ if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKI
   run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root $REPO_ROOT"
 fi
 
+# Parity matrix — generated from the filesystem, must match committed PARITY.md
+# Runs when any skill file is added/renamed or PARITY.md itself changes
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKILL\.md|.*\.mdc)|agents/PARITY\.md)'; then
+  run_check "parity matrix"      "tools/validate/generate_parity.py --check"
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
