@@ -118,11 +118,11 @@ run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root 
 # Only run unit tests if Python source files are staged
 if echo "$STAGED" | grep -q '\.py$'; then
   printf "  %-30s " "unit tests"
-  if python3 -m pytest tools/ts-cli/tests/ -q --tb=short 2>&1 | tail -1 | grep -q "passed"; then
+  if python3 -m pytest tools/ts-cli/tests/ tools/validate/tests/ -q --tb=short 2>&1 | tail -1 | grep -q "passed"; then
     echo "PASS"
   else
     echo "FAIL"
-    python3 -m pytest tools/ts-cli/tests/ -q --tb=short 2>&1 | sed 's/^/    /'
+    python3 -m pytest tools/ts-cli/tests/ tools/validate/tests/ -q --tb=short 2>&1 | sed 's/^/    /'
     FAILED=$((FAILED + 1))
   fi
 fi
