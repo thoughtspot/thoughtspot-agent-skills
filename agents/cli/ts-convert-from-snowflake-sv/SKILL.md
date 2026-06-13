@@ -564,7 +564,12 @@ Extract the following:
    - **Window function**: `... OVER (PARTITION BY ...)` — translates to `group_sum`,
      `safe_divide(..., group_sum(...))` for contribution ratios, etc.
    - **Synonyms** + **description** mapping: same rule as dimensions.
-6. **Extension JSON** (`with extension (CA='...')`): parse for column type confirmation
+6. **Facts block** (if present): for each entry (`TABLE.FACT_NAME as EXPR [comment='...'] [with synonyms=(...)]`), record:
+   - Source: TABLE alias + fact name
+   - Expression (SQL): the right-hand side
+   - **Synonyms** + **description**: same mapping as dimensions
+   - **Visibility**: `PRIVATE` modifier if present
+7. **Extension JSON** (`with extension (CA='...')`): parse for column type confirmation
    (dimensions / time_dimensions / metrics per table). Do not map to ThoughtSpot.
 
 Build an internal map:
@@ -572,6 +577,7 @@ Build an internal map:
 - `relationships`: list of (name, from_alias, from_col, to_alias, to_col)
 - `columns` (flat): all dimensions and metrics, keyed by (table_alias, view_col), with
   display name, synonyms[], and description fields populated.
+- `facts`: keyed by (table_alias, fact_name) → {expression, comment, synonyms[], visibility}
 - `model_description`: from the top-level `comment='...'` clause
 
 **4x. Unrecognized-construct scan (MANDATORY — do not skip).** After extracting the known
@@ -580,7 +586,7 @@ construct this skill cannot yet convert. NEVER silently drop one:
 
 | Token | Construct | Action |
 |---|---|---|
-| `facts (` | FACTS block (row-level expressions metrics may reference) | Extract names+exprs; treat each fact as a candidate formula source in Step 9 resolution; if a metric references an unresolvable fact → FAIL that column loudly with the fact name |
+| `facts (` | FACTS block (row-level expressions metrics may reference) | Extract into the `facts` map (see item 6 above). Each fact becomes a `formulas[]` entry in Step 8 (see ts-from-snowflake-rules.md "Facts Block → ThoughtSpot"). Step 9's identifier resolution uses this map to resolve metric references to facts. If a metric references a fact name that was not successfully parsed → FAIL that column loudly with the fact name. |
 | `ai_sql_generation` / `ai_question_categorization` | CA custom instructions | Add Unmapped Report row: "Custom instructions present — review for ThoughtSpot data_model_instructions equivalent (GAP-06)" |
 | `ai_verified_queries` | CA verified queries | Unmapped Report row (GAP-05); note count |
 | `with cortex search service` | dimension search service | Unmapped Report row naming the dimension |
