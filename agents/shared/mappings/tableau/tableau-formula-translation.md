@@ -37,8 +37,8 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `YEAR(d)` | `year ( d )` | |
 | `MONTH(d)` | `month_number ( d )` | |
 | `DAY(d)` | `day_number_of_month ( d )` | |
-| `INT(x)` | `round ( x )` | No direct INT cast in ThoughtSpot |
-| `FLOAT(x)` | `x * 1.0` | |
+| `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. ⚠ floor/ceil names pending live verification (P11/P12) — flag on first use. |
+| `FLOAT(x)` | `to_double ( x )` | See formula-patterns.md (to_double). `x * 1.0` breaks for string inputs Tableau accepts. |
 | `STR(x)` | `to_string ( x )` | |
 | `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot uses `concat()` for strings — the `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 2 ) ) , '%' )`. |
 | `ABS(x)` | `abs ( x )` | |
