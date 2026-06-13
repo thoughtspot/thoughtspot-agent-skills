@@ -841,6 +841,14 @@ model:
       column_type: MEASURE
 ```
 
+**Join type and cardinality defaults:**
+
+SV relationships carry no join type — they define foreign key paths only. Use these defaults:
+- **`type: LEFT_OUTER`** — preserves fact rows with NULL FKs, matching SV query semantics
+  where unmatched facts still aggregate. State the assumption in the conversion report.
+- **`cardinality: MANY_TO_ONE`** — default for FK→PK relationships. If the target table's
+  key carries a `UNIQUE` constraint (detected in Step 4x scan), use `ONE_TO_ONE` instead.
+
 **Model TML skeleton (Scenario B / Hybrid — inline joins, or no pre-defined table joins):**
 
 Use this when ThoughtSpot Table objects have no `joins_with` entries, or when creating
@@ -857,8 +865,8 @@ model:
     - name: "{join_name}"
       with: TO_TABLE        # REQUIRED — must equal `id` (= `name`) of the target entry exactly
       on: "[FROM_TABLE::{fk_col}] = [TO_TABLE::{pk_col}]"  # uses id values (= name values)
-      type: INNER
-      cardinality: MANY_TO_ONE
+      type: LEFT_OUTER
+      cardinality: MANY_TO_ONE   # or ONE_TO_ONE if target key has UNIQUE constraint
   - id: TO_TABLE            # matches `with` value above — same case
     name: TO_TABLE
     fqn: "{to_guid}"

@@ -231,6 +231,21 @@ prior relationship (two join paths between the same pair), use
 **Do not include** `relationship_type` or `join_type` — these fields are not supported
 and will cause a parse error.
 
+**Join type and cardinality mapping (TS → SV):**
+
+| ThoughtSpot join type | SV relationship | Unmapped Report |
+|---|---|---|
+| `LEFT_OUTER` | relationship (type dropped) | "Join semantics dropped: {join_name} was LEFT_OUTER" |
+| `RIGHT_OUTER` | relationship (type dropped) | "Join semantics dropped: {join_name} was RIGHT_OUTER" |
+| `FULL_OUTER` | relationship (type dropped) | "Join semantics dropped: {join_name} was FULL_OUTER" |
+| `INNER` | relationship (type dropped) | "Join semantics dropped: {join_name} was INNER" |
+| `MANY_TO_MANY` | **FAIL** — do not emit | "MANY_TO_MANY join {join_name} cannot be represented in SV (primary_key constraint would be false)" |
+
+SV relationships are FK→PK path declarations with no join-type semantics. Every non-MANY_TO_MANY
+join maps to a plain relationship, but the type information is lost. The Unmapped Report must
+list every join and its dropped type so the user knows the SV will use Snowflake's default
+join behaviour (which may differ from the ThoughtSpot model's intent).
+
 **`relationship_columns` must always use bare unquoted identifiers.** Cortex Analyst
 rejects the `'"col"'` format with a 400 error. Even for case-sensitive lowercase
 columns, emit the plain name without any quoting:
