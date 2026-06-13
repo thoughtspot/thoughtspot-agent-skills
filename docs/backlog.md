@@ -67,7 +67,7 @@ automatically.
 
 **Source:** Full gap analysis against production SV `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (all steps)
-**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); remaining gaps tracked below
+**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); GAP-04/05/08/10 mapped in BL-018 (2026-06-13, documentation complete, SKILL.md parsing pending); remaining LOW gaps tracked below
 **Full spec:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md)
 
 ### Summary
@@ -808,8 +808,8 @@ its `synced-from` marker.
 
 **Source:** Post-identifier-resolution review of unmapped SV features (2026-06-13)
 **Affects:** ts-convert-from-snowflake-sv, sv-to-ts-gap-analysis.md
-**Status:** Not started
-**Corrects:** GAP-08 (range joins), GAP-10 (table filters), GAP-04 (derived/subquery SVs)
+**Status:** In progress — documentation and mapping rules complete (2026-06-13); SKILL.md parsing logic pending
+**Corrects:** GAP-08 (range joins), GAP-10 (filter labels), GAP-04 (view-backed sources), GAP-05 (verified queries)
 
 ### Problem
 
@@ -958,3 +958,293 @@ Schema reference: `agents/shared/schemas/thoughtspot-feedback-tml.md`
 - `docs/sv-to-ts-gap-analysis.md` — correct GAP-05, GAP-08, and GAP-10 assessments
 - `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` — mirror changes
 - `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror changes
+
+---
+
+## BL-019 — Databricks MV: audit mapping gaps equivalent to BL-018 (SV parity)
+
+**Source:** BL-018 parity review (2026-06-13)
+**Affects:** ts-convert-from-databricks-mv, ts-from-databricks-rules.md
+**Status:** Not started
+**Related:** BL-014 (general DBX MV coverage review), BL-018 (SV equivalent)
+
+### Problem
+
+BL-018 identified and mapped four SV constructs to ThoughtSpot (range joins, filter
+labels, view-backed sources, verified queries). The Databricks MV converter needs a
+parallel assessment: which of these concepts exist in Databricks Metric Views, and
+does the converter handle them?
+
+### Feature parity matrix
+
+| SV Feature (BL-018) | Databricks MV Equivalent | Current Mapping Status |
+|---|---|---|
+| Range joins (BETWEEN, ASOF) | **None** — MV YAML `joins` are equi-only (`primary_key`/`foreign_key`) | N/A — no equivalent construct |
+| Filter labels (`LABELS=(FILTER)`) | MV `filter:` on dimensions/measures — boolean expressions for conditional availability | **Not mapped** — `ts-from-databricks-rules.md` does not document filter handling |
+| View-backed sources | MV `source.table` accepts views and subqueries (`source.sql_select`) | **Partially mapped** — `sql_select` sources → SQL View TML exists in worked example |
+| Verified queries | **None** — Databricks uses Genie Spaces with separate instruction files, not inline verified queries | N/A — no equivalent construct |
+
+### Proposed approach
+
+1. **MV filters** — Audit the `filter:` property on MV dimensions and measures.
+   Determine whether these are row-level boolean expressions (like SV filter labels)
+   or pre-applied aggregation filters. Map to boolean formula columns or model filters
+   per the same decision logic as BL-018 sub-item 2.
+
+2. **View/subquery sources** — Verify the existing `sql_select` → SQL View TML path
+   is documented in `ts-from-databricks-rules.md` and the SKILL.md. Confirm the
+   worked example (`ts-from-databricks-sql-view.md`) is still current.
+
+3. **No-action items** — Document in `ts-from-databricks-rules.md` that range/non-equi
+   joins and verified queries have no Databricks MV equivalent (so the converter
+   correctly has no mapping for these).
+
+### Files affected
+
+- `agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md` — filter mapping, view/subquery docs, no-equivalent notes
+- `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — filter parsing if applicable
+- `docs/mv-to-ts-gap-analysis.md` (new, also tracked in BL-014)
+
+---
+
+## BL-020 — Tableau: audit mapping gaps equivalent to BL-018 (SV parity)
+
+**Source:** BL-018 parity review (2026-06-13)
+**Affects:** ts-convert-from-tableau, tableau-tml-rules.md
+**Status:** Not started
+**Related:** BL-009 (general Tableau mapping gaps), BL-018 (SV equivalent)
+
+### Problem
+
+BL-018 mapped four SV constructs to ThoughtSpot. The Tableau converter needs a
+parallel assessment for equivalent concepts in Tableau workbooks.
+
+### Feature parity matrix
+
+| SV Feature (BL-018) | Tableau Equivalent | Current Mapping Status |
+|---|---|---|
+| Range joins (BETWEEN, ASOF) | Custom SQL data sources with range predicates in JOIN ON clauses | **Not mapped** — Tableau custom SQL is extracted but JOIN clauses within it are passed through, not parsed for range predicates |
+| Filter labels | Data source filters, context filters, fixed dimension filters — boolean conditions on data sources | **Partially mapped** — data source filters are logged but not translated to model filters or boolean formulas |
+| View-backed sources | Custom SQL data sources (arbitrary SELECT statements) | **Partially mapped** — custom SQL logged in report (BL-009 Phase 4), not yet translated to SQL View TML |
+| Verified queries | **None** — Tableau has "Ask Data" lenses but these are not exported in .twb/.twbx files | N/A — no equivalent construct |
+
+### Proposed approach
+
+1. **Custom SQL range predicates** — When Tableau's custom SQL contains JOIN ... ON
+   with range predicates (`<`, `>`, `BETWEEN`), the converter currently passes the
+   entire custom SQL through as a SQL View. Consider parsing the JOIN structure to
+   produce Model TML joins with range expressions (same as BL-018 sub-item 1). This
+   is complex and may not be worth the effort vs. the SQL View pass-through.
+
+2. **Data source filters** — Tableau data source filters are boolean conditions
+   applied at the data source level. Map to model filters (`model.filters[]`) with
+   appropriate `apply_on_tables` scoping. This is a direct equivalent of the SV
+   filter label → model filter mapping.
+
+3. **Custom SQL → SQL View TML** — This is already identified as BL-009 Phase 4.
+   Confirm alignment with the SQL View TML generation path used by BL-018 sub-item 3
+   and the Databricks `sql_select` path.
+
+4. **No-action items** — Document that verified queries have no Tableau equivalent.
+
+### Dependencies
+
+- **BL-009 Phase 4** (source coverage) overlaps with custom SQL handling — coordinate.
+- Tableau data source filter mapping should use the same model filter generation
+  logic as BL-018 sub-item 2 (shared pattern).
+
+### Files affected
+
+- `agents/shared/mappings/tableau/tableau-tml-rules.md` — filter mapping, custom SQL→SQL View docs
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — data source filter translation step
+- `agents/cli/ts-convert-from-tableau/references/open-items.md` — new items for filter + custom SQL gaps
+
+---
+
+## BL-021 — Delta sync mode for SV and MV converters (selective, additive, TS-side-preserving)
+
+**Source:** Feature request (2026-06-14)
+**Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv
+**Status:** Not started
+**Supersedes:** BL-013 (metadata-only sync is a subset of this)
+
+### Problem
+
+Mode C (SV) performs a full structural diff — every column, formula, join, and metadata
+field is compared and the user decides per-item. This is appropriate for a wholesale
+refresh, but too heavy for the common case: the source SV/MV changed incrementally and
+the user wants to **selectively pull in specific changes** while **preserving everything
+they've added on the ThoughtSpot side**.
+
+Typical delta scenarios:
+
+| What changed in SV/MV | What user wants | What must be preserved in TS |
+|---|---|---|
+| New columns added | Pull in new columns only | All existing columns, formulas, ai_context, instructions |
+| Column descriptions/synonyms updated | Sync metadata selectively | User-authored ai_context, coached synonyms |
+| Metric expression changed | Update specific formulas | Unrelated formulas, column settings |
+| New relationship added | Add the join | Existing joins, column order |
+| Nothing — user added formulas in TS | No source sync | Everything — this is a TS-only edit |
+
+Today's options don't cover this well:
+
+- **Mode A** (create new) — overwrites everything; user loses all TS-side additions
+- **Mode C** (full diff) — presents every difference, even unchanged items; user must
+  review the full change set even when only one column changed
+- **BL-013** (metadata-only) — limited to names/comments/synonyms; can't pull in new
+  columns or updated expressions
+
+### Proposed approach
+
+A **delta sync** mode (Mode D or an enhancement to Mode C) with these principles:
+
+#### 1. Selective change categories
+
+Present changes grouped by category, let the user opt in/out per category:
+
+```
+Delta sync — changes detected:
+
+  ✚ New columns (3)          [APPLY / SKIP]    ← default: APPLY
+  ✏ Modified metadata (5)    [REVIEW / SKIP]   ← default: REVIEW (per-column MERGE/UPDATE/KEEP)
+  ~ Modified expressions (2) [REVIEW / SKIP]   ← default: REVIEW (per-formula YES/SKIP)
+  ✚ New joins (1)            [APPLY / SKIP]    ← default: APPLY
+  ✖ Removed in source (2)   [FLAG ONLY]        ← never auto-removed
+
+  = Unchanged (42)           — no action
+```
+
+User can APPLY an entire category without per-item review, or REVIEW to get the
+Mode C per-column table for that category only.
+
+#### 2. TS-side preservation rules
+
+These fields are **never overwritten** by a delta sync, regardless of category:
+
+| TS-side field | Why preserved |
+|---|---|
+| `ai_context` | User-authored coaching — no source equivalent |
+| `data_model_instructions` | User-authored Spotter guidance |
+| User-added formulas (no source match) | Custom TS-side analytics |
+| User-added joins (no source match) | Manual relationship additions |
+| `index_type` overrides | User tuning for Spotter |
+| Column order | User curation |
+
+#### 3. Conflict resolution for metadata
+
+When both source and TS have changed the same field (e.g. source updated a synonym
+AND the user added a coached synonym):
+
+- **Synonyms** — default MERGE (union of both sets; never remove user-added synonyms)
+- **Descriptions** — default KEEP TS (user's description is likely more refined)
+- **Expressions** — always REVIEW (show side-by-side, require explicit YES)
+
+#### 4. New-column enrichment
+
+New columns pulled from the source get:
+- Display name, description, synonyms from the source (as in Mode A)
+- No `ai_context` (flagged for coaching handoff)
+- Automatic `column_type` classification per existing rules
+
+Post-sync handoff to `/ts-object-model-coach` for the new columns.
+
+#### 5. Dry-run option
+
+```
+Run as:  DRY RUN (show what would change, don't import)  /  APPLY
+```
+
+Dry run produces the categorised change report without importing — useful for
+assessing scope before committing.
+
+### Relationship to existing modes
+
+| Mode | When to use |
+|---|---|
+| A — Create new | First conversion; no existing model |
+| B — Merge | Combine multiple SVs/MVs into one model |
+| C — Full diff | Wholesale refresh; review everything |
+| D — Delta sync (this item) | Incremental sync; preserve TS-side work |
+| BL-013 — Metadata only | Subset of D: only names/comments/synonyms |
+
+BL-013 becomes a convenience shortcut within Mode D (select only the "Modified metadata"
+category and skip all others).
+
+### Files affected
+
+- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — Mode D workflow steps
+- `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — Mode D workflow steps (first update mode for DBX)
+- `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` — delta sync rules
+- `agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md` — delta sync rules
+
+---
+
+## BL-022 — Unjoined table suggestion pattern (cross-converter)
+
+**Source:** BL-018 live testing — EMPLOYEE_SUMMARY_VW had no declared relationship in the SV (2026-06-13)
+**Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, ts-convert-from-tableau
+**Status:** Open
+**Priority:** Medium — prevents orphan tables silently entering models without joins
+
+### Problem
+
+When a source (SV, MV, or Tableau datasource) includes a table with no declared
+foreign-key or relationship to other tables, the current converters silently add
+it to `model_tables[]` with no `joins[]`. The resulting model has an unjoined island
+that ThoughtSpot accepts but cannot query across — the user gets "no path between
+tables" errors at search time with no clue why.
+
+### Proposed approach
+
+When a table has no declared relationship in the source, the converter should:
+
+1. **Scan column name overlap** — compare the unjoined table's columns against all
+   other tables in the model. Columns with identical names (exact match, case-insensitive)
+   are candidate join keys.
+
+2. **Check composite key uniqueness** — for each candidate set of join columns on the
+   unjoined table, verify uniqueness:
+   ```sql
+   SELECT COUNT(*) AS total,
+          COUNT(DISTINCT (col1, col2, ...)) AS distinct_keys
+   FROM schema.table;
+   ```
+   If `total == distinct_keys`, the column set is a valid key.
+
+3. **Validate cardinality** — run a live query to confirm the relationship direction
+   (MANY_TO_ONE, ONE_TO_ONE, or MANY_TO_MANY):
+   ```sql
+   SELECT MAX(cnt) FROM (
+     SELECT col1, col2, COUNT(*) AS cnt
+     FROM left_table GROUP BY col1, col2
+   );
+   ```
+   `max(cnt) == 1` → ONE_TO_ONE; `max(cnt) > 1` → MANY_TO_ONE from the left table.
+
+4. **Present to user with evidence** — show the suggested join, the overlapping
+   columns, the uniqueness result, and the cardinality. Require explicit confirmation
+   before adding the join to the model.
+
+5. **User actions:**
+   - **Accept** — add the join as suggested
+   - **Modify** — user corrects columns, cardinality, or join type
+   - **Skip** — exclude the table from the model entirely (with a warning)
+   - **Add anyway (no join)** — include the table as an unjoined island (explicit choice)
+
+### Cross-converter applicability
+
+| Converter | Table source | Join source | Suggestion triggers when |
+|---|---|---|---|
+| from-snowflake-sv | `tables(...)` block | `relationships(...)` block | Table listed in `tables()` but absent from `relationships()` |
+| from-databricks-mv | `tables:` section | `primary_keys:` / `foreign_keys:` | Table has no foreign key declared in MV YAML |
+| from-tableau | Data source tables | Tableau join clauses | Table in datasource with no join to other tables |
+
+### Files affected
+
+- `agents/shared/schemas/ts-model-conversion-invariants.md` — document as a recommended pattern (not a hard invariant)
+- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — add unjoined-table check after Step 6
+- `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — add unjoined-table check after table discovery
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — add unjoined-table check after datasource parsing
+- `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror
+- `agents/cursor/rules/ts-convert-from-databricks-mv.mdc` — mirror
+- `agents/cursor/rules/ts-convert-from-tableau.mdc` — mirror

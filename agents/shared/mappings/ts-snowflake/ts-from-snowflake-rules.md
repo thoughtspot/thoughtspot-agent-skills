@@ -18,10 +18,20 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         ALIAS as DB.SCHEMA."TABLE_NAME" [primary key (COL)],
         -- Table-level comment + synonyms
         DB.SCHEMA.TABLE comment='...' with synonyms=('Alt Name','...'),
+        -- View-backed source (no primary key — Snowflake view, not physical table)
+        DB.SCHEMA.VIEW_NAME,
+        -- Range constraint (for range/temporal joins — half-open interval)
+        DB.SCHEMA.TABLE primary key (COL) unique (START_COL, END_COL)
+            constraint CONSTRAINT_NAME distinct range between START_COL and END_COL exclusive,
         ...
     )
     relationships (
+        -- Standard equi-join
         REL_NAME as FROM_TABLE(FROM_COL) references TO_TABLE(TO_COL),
+        -- Range join: BETWEEN references the constraint columns (half-open: >= start, < end)
+        REL_NAME as FROM_TABLE(COL) references TO_TABLE(between START_COL and END_COL exclusive),
+        -- ASOF join: temporal pattern-matching (FROM.COL2 >= TO.ASOF_COL)
+        REL_NAME as FROM_TABLE(COL1, COL2) references TO_TABLE(COL1, ASOF COL2),
         ...
     )
     -- FACTS: row-level named expressions referenced by metrics (not all SVs have this)
@@ -33,6 +43,8 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         -- Format 3: Private fact (hidden from Cortex Analyst, may be referenced by metrics)
         PRIVATE TABLE.COL as view_alias.FACT_NAME,
         PRIVATE EXPR as view_alias.FACT_NAME,
+        -- Format 4: Filter-labeled fact (boolean expr, available as WHERE clause)
+        TABLE.FACT_NAME labels = (filter) as BOOLEAN_EXPR [comment='...'],
         ...
     )
     dimensions (
@@ -42,10 +54,11 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         PRIVATE TABLE_REF.VIEW_COL as view_alias.DIM_NAME,
         -- Cortex Search Service on a dimension
         TABLE_REF.VIEW_COL as view_alias.DIM_NAME with cortex search service SVC_NAME,
+        -- Filter-labeled dimension (boolean expr, available as WHERE clause)
+        TABLE_REF.DIM_NAME labels = (filter) as BOOLEAN_EXPR [comment='...'],
         ...
     )
-    -- Uniqueness constraints (optional; inform cardinality)
-    unique (TABLE.COL_A, TABLE.COL_B) distinct TABLE.COL_C range between X and Y,
+    -- Uniqueness constraints (inline on tables; range constraints defined in tables() block)
     metrics (
         -- Simple: TABLE_REF.VIEW_COL as AGG(view_alias.METRIC_NAME)
         TABLE_REF.VIEW_COL as SUM(view_alias.METRIC_NAME) [comment='...'],
@@ -61,7 +74,14 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
     ai_sql_generation = 'ON'|'OFF'
     ai_question_categorization = 'ON'|'OFF'
     ai_verified_queries (
-        'query text' verified_by = 'username' ...
+        QUERY_NAME AS (
+            QUESTION 'natural language question'
+            [VERIFIED_AT unix_epoch_seconds]
+            [ONBOARDING_QUESTION TRUE|FALSE]
+            [VERIFIED_BY '(PURPOSE = contact)']
+            SQL 'SELECT ... using semantic view logical table/column names'
+        ),
+        ...
     )
     with extension (CA='{...cortex_analyst_context_json...}');
 ```
@@ -742,6 +762,167 @@ For Scenario B / inline joins:
 - The `joins[]` array lives on the FROM table's `model_tables` entry.
 - Each entry has `with`, `on`, `type`, `cardinality` (no `referencing_join`).
 - `with` points to the TO table's `id`.
+
+---
+
+## Range Joins → ThoughtSpot
+
+### Detection
+
+In Step 4, detect range joins by two tokens in the DDL:
+
+1. **Table constraint:** `constraint <NAME> distinct range between <START> and <END> exclusive`
+   on a table entry in `tables()`, after `unique()`. Extract: constraint name, start column, end column.
+
+2. **Relationship BETWEEN reference:** `references TABLE(between <START> and <END> exclusive)`
+   instead of the normal `references TABLE(COL)`. The BETWEEN clause references the
+   constraint columns on the target table.
+
+### Translation
+
+Map to a ThoughtSpot Model inline join with a range predicate in the `on` expression.
+The `exclusive` keyword means half-open interval: `>=` on start, `<` on end.
+
+| SV DDL | TS Model TML |
+|---|---|
+| `REL as FROM(COL) references TO(between START and END exclusive)` | `joins: [{with: TO, 'on': '[FROM::COL] >= [TO::START] and [FROM::COL] < [TO::END]', type: LEFT_OUTER, cardinality: MANY_TO_ONE}]` |
+
+### ASOF Joins
+
+ASOF joins use `ASOF COL` instead of `between ... exclusive`:
+
+| SV DDL | TS Model TML |
+|---|---|
+| `REL as FROM(COL1, COL2) references TO(COL1, ASOF COL2)` | `joins: [{with: TO, 'on': '[FROM::COL1] = [TO::COL1] and [FROM::COL2] >= [TO::COL2]', type: LEFT_OUTER, cardinality: MANY_TO_ONE}]` |
+
+The ASOF keyword means "the most recent value where FROM.COL2 >= TO.COL2".
+
+---
+
+## Filter Labels → ThoughtSpot
+
+### Detection
+
+In Step 4, detect filter labels by the token `labels = (filter)` on a fact or dimension
+entry. The token appears BEFORE the `as` keyword:
+
+```sql
+TABLE.NAME labels = (filter) as BOOLEAN_EXPR [comment='...']
+```
+
+### Extraction
+
+Parse the fact/dimension as normal (name, expression, comment, synonyms) but additionally
+store `is_filter: true` in the parsed output.
+
+### Translation
+
+Filter-labeled facts/dimensions are BOOLEAN expressions. Default: create as a boolean
+formula column (matches SV semantics — available for ad-hoc use, not auto-applied).
+
+```yaml
+formulas:
+- id: formula_Is Senior
+  name: Is Senior
+  expr: "if ( [EMPLOYEES::SALARY] >= 90000 ) then true else false"
+
+columns:
+- name: Is Senior
+  formula_id: formula_Is Senior
+  properties:
+    column_type: ATTRIBUTE
+    description: "Boolean filter: true when salary at or above senior threshold"
+```
+
+At the Step 10 review checkpoint, offer the user the option to also add as a model filter:
+
+- **Column only (default)** — matches SV semantics (available for filtering, not auto-applied)
+- **Model filter** — auto-applied; without `apply_on_tables` = always applied,
+  with `apply_on_tables` = only when listed tables are in the search
+
+---
+
+## Verified Queries → NLS Feedback TML
+
+### Detection
+
+In Step 4, detect the `ai_verified_queries (...)` block after the `comment=` clause.
+Each verified query has this format in GET_DDL output:
+
+```sql
+QUERY_NAME AS (
+    QUESTION 'natural language question'
+    [VERIFIED_AT unix_epoch_seconds]
+    [ONBOARDING_QUESTION TRUE|FALSE]
+    [VERIFIED_BY '(PURPOSE = contact)']
+    SQL 'SELECT ... using semantic view logical table/column names'
+)
+```
+
+### Extraction
+
+Parse each verified query into:
+- `name`: the QUERY_NAME identifier
+- `question`: the QUESTION string
+- `sql`: the SQL string (uses SV logical names, not physical)
+- `verified_at`: optional Unix timestamp
+- `onboarding`: optional boolean
+
+### SQL-to-Search-Token Translation
+
+The SQL in verified queries uses SV logical names. Map each element to ThoughtSpot
+search tokens using the column name mapping from Steps 8/9:
+
+```sql
+-- SV SQL:
+SELECT COMPANIES.COMPANY_NAME, COUNT(EMPLOYEES.EMPLOYEE_ID) AS HEADCOUNT
+FROM EMPLOYEES JOIN COMPANIES ON ... GROUP BY COMPANIES.COMPANY_NAME
+
+-- TS search_tokens:
+"count [Employee Id] [Company Name]"
+```
+
+Rules:
+1. `COUNT(col)` → `count [Col Display Name]`; `SUM(col)` → `sum [Col]`; `AVG(col)` → `avg [Col]`
+2. Non-aggregate SELECT columns → dimension tokens: `[Col Display Name]`
+3. `WHERE col = 'val'` → `[Col] = 'val'`
+4. Column names use the TS Model display names (from column mapping in Steps 8/9)
+
+### Emission
+
+After successful Model import (Step 12), generate NLS Feedback TML:
+
+```yaml
+guid: "{model_guid}"
+nls_feedback:
+  feedback:
+  - id: "1"
+    type: REFERENCE_QUESTION
+    access: GLOBAL
+    feedback_phrase: "How many employees does each company have?"
+    search_tokens: "count [Employee Id] [Company Name]"
+    rating: UPVOTE
+    display_mode: UNDEFINED
+    chart_type: KPI
+```
+
+Import with: `ts tml import --policy ALL_OR_NONE --profile {profile}`
+
+### Limitations
+
+- Complex SQL (subqueries, CTEs, CASE, window functions) cannot be faithfully converted
+  to search tokens. Log these as "manual review needed" in the report.
+- Column name resolution depends on the Model import succeeding first.
+
+---
+
+## View-Backed Sources
+
+Snowflake views referenced in the `tables()` block (entries with no `primary key`
+declaration) are handled identically to physical tables. ThoughtSpot Table objects can
+point to views — the connection's table browser shows both. No special handling needed.
+
+Flag in the report: "Source: Snowflake view (no primary key declared)".
 
 ---
 

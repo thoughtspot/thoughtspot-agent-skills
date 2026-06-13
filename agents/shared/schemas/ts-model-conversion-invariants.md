@@ -3,7 +3,7 @@
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I7, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I8, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7)
@@ -232,6 +232,63 @@ omitted from the converted model.
 > MANDATORY: before classifying any expression as untranslatable, open the formula
 > reference for this source dialect and check the reverse table. Do not decide from
 > SQL syntax recognition alone.
+
+---
+
+### I8 — No duplicate `column_id` values; second metric on same column must be a formula
+
+**Rule:** Every `column_id` value in `columns[]` must be unique. When a source defines
+multiple metrics on the same physical column with different aggregations (e.g.
+`SUM(SALARY)` and `AVG(SALARY)`), only ONE may use a `column_id`-based entry. All
+others must be expressed as `formulas[]` entries.
+
+**Failure mode:** ThoughtSpot rejects the TML import with:
+`"columns should have unique column_id values — duplicate {TABLE::COL}"`
+
+**Applies to:** All source dialects. Common in Snowflake SVs and Databricks MVs where
+multiple aggregations on the same column are a standard pattern.
+
+**Correct pattern — first metric as column, second as formula:**
+```yaml
+columns:
+- name: "Total Salary"
+  column_id: EMPLOYEES::SALARY
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+
+formulas:
+- id: formula_Avg Salary
+  name: "Avg Salary"
+  expr: "average ( [EMPLOYEES::SALARY] )"
+  properties:
+    column_type: MEASURE
+
+columns:
+- name: "Avg Salary"
+  formula_id: formula_Avg Salary
+  properties:
+    column_type: MEASURE
+```
+
+**Wrong (do NOT do this) — same column_id twice:**
+```yaml
+columns:
+- name: "Total Salary"
+  column_id: EMPLOYEES::SALARY       # first use — OK
+  properties:
+    column_type: MEASURE
+    aggregation: SUM
+- name: "Avg Salary"
+  column_id: EMPLOYEES::SALARY       # WRONG — duplicate column_id
+  properties:
+    column_type: MEASURE
+    aggregation: AVERAGE
+```
+
+**Which metric keeps the `column_id`?** Prefer keeping the SUM metric as the
+`column_id`-based entry (SUM is the most common default aggregation). Express AVG,
+MIN, MAX, COUNT, and other aggregations as formulas.
 
 ---
 
