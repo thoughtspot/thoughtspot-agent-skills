@@ -113,6 +113,18 @@ This is warehouse-`CASE` behavior, so the same reasoning applies to the SV/MV co
 
 ---
 
+## Division-by-zero (MANDATORY for every translated ratio)
+
+Tableau returns NULL on division by zero; raw `/` pushed to the warehouse errors the whole
+answer (Snowflake: "Division by zero"). Every translated division gets one of:
+
+| Fidelity | Form | Caveat |
+|---|---|---|
+| Closest to Tableau | `if ( [b] = 0 ) then null else [a] / [b]` | Exact NULL semantics |
+| Shorter | `safe_divide ( [a] , [b] )` | Function live-verified 2026-06-13 (se-thoughtspot). Returns **0**, not NULL, on zero divisor (formula-patterns.md) — flag if downstream logic distinguishes 0 from NULL. |
+
+---
+
 ## ThoughtSpot Formula Syntax Rules
 
 1. **Spaces around operators and parentheses** — `if ( a = b ) then c else d` (not `if(a=b)`)

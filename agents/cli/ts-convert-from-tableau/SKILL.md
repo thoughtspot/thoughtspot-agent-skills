@@ -1549,6 +1549,9 @@ the un-migratable and caveated items are flagged here, up front, for the user to
 rule in Step 5b) — set conversions are semantic reinterpretations, so the user must confirm
 each matches intent before import.
 
+Reviewer checks before import:
+- Every translated division has a div-by-zero guard (FT "Division-by-zero" section)
+
 Wait for confirmation. **no** cancels. **file** writes the TMLs and skips to Step 12
 (report only, no import). **yes** imports:
 
