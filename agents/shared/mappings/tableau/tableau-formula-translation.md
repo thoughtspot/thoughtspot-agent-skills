@@ -383,10 +383,10 @@ AND CURRENT ROW)` → ThoughtSpot `cumulative_*()`.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( sum ( [table::col] ) )` | Optional partition/sort args: `cumulative_sum ( measure , attr1 , attr2 )` |
-| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( average ( [table::col] ) )` | |
-| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( max ( [table::col] ) )` | |
-| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( min ( [table::col] ) )` | |
+| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( [Measure] , [sort attr] )` | Answer-level only. First arg = measure **display name, NOT `sum([t::col])`** — `cumulative_*` rejects an aggregated arg ("expects 1st argument to be not aggregated"). See 🔑 note below. |
+| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( [Measure] , [sort attr] )` | Same constraint. |
+| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( [Measure] , [sort attr] )` | Same constraint. |
+| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( [Measure] , [sort attr] )` | Same constraint. |
 
 **Limitations:**
 - ThoughtSpot cumulative functions use the query's natural sort order — there is no
@@ -422,10 +422,10 @@ Functions" for the full reference.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | 3-row lookback |
-| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
-| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
-| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
+| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( [Measure] , 3 , 0 , [sort attr] )` | 3-row lookback. First arg = measure **display name, NOT `sum([t::col])`** — `moving_*` rejects an aggregated arg ("expects 1st argument to be not aggregated"). See 🔑 note above. |
+| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( [Measure] , 3 , 0 , [sort attr] )` | Same constraint. |
+| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( [Measure] , 3 , 0 , [sort attr] )` | Same constraint. |
+| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( [Measure] , 3 , 0 , [sort attr] )` | Same constraint. |
 
 ### Syntax
 
