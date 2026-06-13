@@ -490,19 +490,17 @@ sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" ,
 
 ---
 
-## Aggregate Formulas: Row-Level Conversion
+#### Conditional aggregates (Tableau `AGG(IF cond THEN x END)`)
 
-Tableau calculated fields that use aggregation functions (`COUNTD`, `SUM`, `COUNT`) are aggregate formulas. ThoughtSpot **model formulas must be row-level**. Convert them to row-level expressions; the aggregation is applied at the search/answer level.
+ThoughtSpot model formulas MAY be aggregate (see invariants I5 and ts-model-conversion-invariants.md:33). Do NOT convert to row-level with `else ''` — empty string becomes a countable distinct value (COUNTD off by one) and changes SUM/AVG denominators. Use the `*_if` family; the bare `IF` with no ELSE is NULL in Tableau, which aggregates ignore — `else null` preserves that exactly.
 
-**Tableau (aggregate):**
-```
-COUNTD(if [source_table] = 'terminations' then [employee_id] end)
-```
-
-**ThoughtSpot model formula (row-level):**
-```
-if ( [table::source_table] = 'terminations' ) then [table::employee_id] else ''
-```
+| Tableau | ThoughtSpot |
+|---|---|
+| `COUNTD(IF c THEN x END)` | `unique_count_if ( c , [x] )` |
+| `SUM(IF c THEN x END)` | `sum_if ( c , [x] )` |
+| `COUNT(IF c THEN x END)` | `count_if ( c , [x] )` |
+| `AVG(IF c THEN x END)` | `average_if ( c , [x] )` |
+| other agg / complex | `agg ( if ( c ) then [x] else null )` — `else null` is live-verified (static-set-to-column-set.md:107) |
 
 ---
 
