@@ -67,7 +67,7 @@ automatically.
 
 **Source:** Full gap analysis against production SV `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (all steps)
-**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); remaining gaps tracked below
+**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); GAP-04/05/08/10 mapped in BL-018 (2026-06-13, documentation complete, SKILL.md parsing pending); remaining LOW gaps tracked below
 **Full spec:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md)
 
 ### Summary
@@ -808,8 +808,8 @@ its `synced-from` marker.
 
 **Source:** Post-identifier-resolution review of unmapped SV features (2026-06-13)
 **Affects:** ts-convert-from-snowflake-sv, sv-to-ts-gap-analysis.md
-**Status:** Not started
-**Corrects:** GAP-08 (range joins), GAP-10 (table filters), GAP-04 (derived/subquery SVs)
+**Status:** In progress — documentation and mapping rules complete (2026-06-13); SKILL.md parsing logic pending
+**Corrects:** GAP-08 (range joins), GAP-10 (filter labels), GAP-04 (view-backed sources), GAP-05 (verified queries)
 
 ### Problem
 
@@ -958,3 +958,103 @@ Schema reference: `agents/shared/schemas/thoughtspot-feedback-tml.md`
 - `docs/sv-to-ts-gap-analysis.md` — correct GAP-05, GAP-08, and GAP-10 assessments
 - `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` — mirror changes
 - `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror changes
+
+---
+
+## BL-019 — Databricks MV: audit mapping gaps equivalent to BL-018 (SV parity)
+
+**Source:** BL-018 parity review (2026-06-13)
+**Affects:** ts-convert-from-databricks-mv, ts-from-databricks-rules.md
+**Status:** Not started
+**Related:** BL-014 (general DBX MV coverage review), BL-018 (SV equivalent)
+
+### Problem
+
+BL-018 identified and mapped four SV constructs to ThoughtSpot (range joins, filter
+labels, view-backed sources, verified queries). The Databricks MV converter needs a
+parallel assessment: which of these concepts exist in Databricks Metric Views, and
+does the converter handle them?
+
+### Feature parity matrix
+
+| SV Feature (BL-018) | Databricks MV Equivalent | Current Mapping Status |
+|---|---|---|
+| Range joins (BETWEEN, ASOF) | **None** — MV YAML `joins` are equi-only (`primary_key`/`foreign_key`) | N/A — no equivalent construct |
+| Filter labels (`LABELS=(FILTER)`) | MV `filter:` on dimensions/measures — boolean expressions for conditional availability | **Not mapped** — `ts-from-databricks-rules.md` does not document filter handling |
+| View-backed sources | MV `source.table` accepts views and subqueries (`source.sql_select`) | **Partially mapped** — `sql_select` sources → SQL View TML exists in worked example |
+| Verified queries | **None** — Databricks uses Genie Spaces with separate instruction files, not inline verified queries | N/A — no equivalent construct |
+
+### Proposed approach
+
+1. **MV filters** — Audit the `filter:` property on MV dimensions and measures.
+   Determine whether these are row-level boolean expressions (like SV filter labels)
+   or pre-applied aggregation filters. Map to boolean formula columns or model filters
+   per the same decision logic as BL-018 sub-item 2.
+
+2. **View/subquery sources** — Verify the existing `sql_select` → SQL View TML path
+   is documented in `ts-from-databricks-rules.md` and the SKILL.md. Confirm the
+   worked example (`ts-from-databricks-sql-view.md`) is still current.
+
+3. **No-action items** — Document in `ts-from-databricks-rules.md` that range/non-equi
+   joins and verified queries have no Databricks MV equivalent (so the converter
+   correctly has no mapping for these).
+
+### Files affected
+
+- `agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md` — filter mapping, view/subquery docs, no-equivalent notes
+- `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — filter parsing if applicable
+- `docs/mv-to-ts-gap-analysis.md` (new, also tracked in BL-014)
+
+---
+
+## BL-020 — Tableau: audit mapping gaps equivalent to BL-018 (SV parity)
+
+**Source:** BL-018 parity review (2026-06-13)
+**Affects:** ts-convert-from-tableau, tableau-tml-rules.md
+**Status:** Not started
+**Related:** BL-009 (general Tableau mapping gaps), BL-018 (SV equivalent)
+
+### Problem
+
+BL-018 mapped four SV constructs to ThoughtSpot. The Tableau converter needs a
+parallel assessment for equivalent concepts in Tableau workbooks.
+
+### Feature parity matrix
+
+| SV Feature (BL-018) | Tableau Equivalent | Current Mapping Status |
+|---|---|---|
+| Range joins (BETWEEN, ASOF) | Custom SQL data sources with range predicates in JOIN ON clauses | **Not mapped** — Tableau custom SQL is extracted but JOIN clauses within it are passed through, not parsed for range predicates |
+| Filter labels | Data source filters, context filters, fixed dimension filters — boolean conditions on data sources | **Partially mapped** — data source filters are logged but not translated to model filters or boolean formulas |
+| View-backed sources | Custom SQL data sources (arbitrary SELECT statements) | **Partially mapped** — custom SQL logged in report (BL-009 Phase 4), not yet translated to SQL View TML |
+| Verified queries | **None** — Tableau has "Ask Data" lenses but these are not exported in .twb/.twbx files | N/A — no equivalent construct |
+
+### Proposed approach
+
+1. **Custom SQL range predicates** — When Tableau's custom SQL contains JOIN ... ON
+   with range predicates (`<`, `>`, `BETWEEN`), the converter currently passes the
+   entire custom SQL through as a SQL View. Consider parsing the JOIN structure to
+   produce Model TML joins with range expressions (same as BL-018 sub-item 1). This
+   is complex and may not be worth the effort vs. the SQL View pass-through.
+
+2. **Data source filters** — Tableau data source filters are boolean conditions
+   applied at the data source level. Map to model filters (`model.filters[]`) with
+   appropriate `apply_on_tables` scoping. This is a direct equivalent of the SV
+   filter label → model filter mapping.
+
+3. **Custom SQL → SQL View TML** — This is already identified as BL-009 Phase 4.
+   Confirm alignment with the SQL View TML generation path used by BL-018 sub-item 3
+   and the Databricks `sql_select` path.
+
+4. **No-action items** — Document that verified queries have no Tableau equivalent.
+
+### Dependencies
+
+- **BL-009 Phase 4** (source coverage) overlaps with custom SQL handling — coordinate.
+- Tableau data source filter mapping should use the same model filter generation
+  logic as BL-018 sub-item 2 (shared pattern).
+
+### Files affected
+
+- `agents/shared/mappings/tableau/tableau-tml-rules.md` — filter mapping, custom SQL→SQL View docs
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — data source filter translation step
+- `agents/cli/ts-convert-from-tableau/references/open-items.md` — new items for filter + custom SQL gaps

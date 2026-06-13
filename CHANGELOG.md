@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-13
+- docs(BL-018): map four previously-unmapped SV features to ThoughtSpot — range joins (GAP-08), filter labels (GAP-10), view-backed sources (GAP-04), verified queries → NLS Feedback TML (GAP-05); update `ts-from-snowflake-rules.md` DDL format + mapping sections, `sv-to-ts-gap-analysis.md`, `thoughtspot-model-tml.md` (remove `is_mandatory`, correct `apply_on_tables` semantics), and `backlog.md` (BL-019/BL-020 for Databricks/Tableau parity)
 - feat(from-snowflake-sv): v1.9.0 — identifier resolution engine: facts parsing (BL-003b), metric→fact resolution (BL-003c), double aggregation via group_aggregate (BL-003), window metrics referencing metrics (GAP-13), joinless SV handling (GAP-03/BL-004)
 - fix(from-snowflake-sv): fact references use `[formula_<id>]` syntax, not display name — live-verified; add `if()` parenthesization fix; add identifier resolution worked example
 - docs: add `ts-from-snowflake-identifier-resolution.md` worked example — facts, metric-on-fact, double aggregation, verified end-to-end
