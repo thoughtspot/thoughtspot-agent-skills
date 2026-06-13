@@ -573,8 +573,9 @@ CREATE OR REPLACE VIEW DUNDERMIFFLIN.PUBLIC_SV.DM_CATEGORY AS
 SELECT * FROM DUNDERMIFFLIN.PUBLIC.DM_CATEGORY;
 
 -- Single shared date dim (joined from both DM_ORDER and DM_INVENTORY)
+-- Physical column is DATE (reserved word — requires quoting in expr but not in PK/FK)
 CREATE OR REPLACE VIEW DUNDERMIFFLIN.PUBLIC_SV.DM_DATE_DIM AS
-SELECT "date" AS DATE_VALUE FROM DUNDERMIFFLIN.PUBLIC.DM_DATE_DIM;
+SELECT "DATE" FROM DUNDERMIFFLIN.PUBLIC.DM_DATE_DIM;
 
 CREATE OR REPLACE VIEW DUNDERMIFFLIN.PUBLIC_SV.DM_INVENTORY AS
 SELECT BALANCE_DATE AS DM_INVENTORY_BALANCE_DATE,
@@ -585,7 +586,7 @@ FROM DUNDERMIFFLIN.PUBLIC.DM_INVENTORY;
 
 **Key decisions:**
 - FK columns renamed with table prefix: `CUSTOMER_ID` → `DM_ORDER_CUSTOMER_ID`
-- `DM_DATE_DIM` kept as a single shared view — case-sensitive `"date"` uppercased to `DATE_VALUE`
+- `DM_DATE_DIM` kept as a single shared view — column `DATE` is a reserved word (quoted in `expr`)
 - Typo `RRDER_ID` renamed to `DM_ORDER_DETAIL_ORDER_ID`
 
 ---
@@ -636,7 +637,7 @@ Translation:
 - The `{date_col}` (`DM_DATE_DIM::date`) identifies the non-additive dimension — this
   is the **joined** date dimension table, not the local FK column
 - Result: metric with `non_additive_dimensions` referencing the joined date dim's
-  time dimension (`dm_date_dim.date_value`)
+  time dimension (`dm_date_dim.date`)
 
 ✓ Translatable — use `non_additive_dimensions` referencing the joined date table.
 No `facts` section is needed as long as the metric name does not collide with the
@@ -648,13 +649,13 @@ metrics:
   expr: SUM(dm_inventory.FILLED_INVENTORY)
   non_additive_dimensions:
   - table: dm_date_dim
-    dimension: date_value
+    dimension: date
     sort_direction: ascending
     nulls_position: last
 ```
 
 **Important:** The `non_additive_dimensions` should reference the **joined date
-dimension table** (e.g. `dm_date_dim.date_value`), not a local FK column on the
+dimension table** (e.g. `dm_date_dim.date`), not a local FK column on the
 fact table. Use a **single shared date dimension** when multiple fact tables
 (e.g. orders and inventory) join to the same date table — this allows Cortex Analyst
 to answer cross-domain questions like "sales and inventory balance last quarter"
@@ -734,7 +735,7 @@ relationships:
   right_table: dm_date_dim                   # single shared date dim
   relationship_columns:
   - left_column: DM_ORDER_ORDER_DATE         # renamed from ORDER_DATE
-    right_column: DATE_VALUE                 # renamed from "date"
+    right_column: DATE                       # reserved word — bare in relationship_columns
 - name: dm_order_to_dm_employee
   left_table: dm_order
   right_table: dm_employee
@@ -752,7 +753,7 @@ relationships:
   right_table: dm_date_dim                   # same shared date dim
   relationship_columns:
   - left_column: DM_INVENTORY_BALANCE_DATE   # renamed from BALANCE_DATE
-    right_column: DATE_VALUE
+    right_column: DATE                       # reserved word — bare in relationship_columns
 - name: dm_inventory_to_dm_product
   left_table: dm_inventory
   right_table: dm_product
@@ -767,7 +768,7 @@ Tables that appear as `right_table` need `primary_key`:
 - `dm_customer` → `CUSTOMER_ID`
 - `dm_employee` → `EMPLOYEE_ID`
 - `dm_category` → `CATEGORY_ID`
-- `dm_date_dim` → `DATE_VALUE`
+- `dm_date_dim` → `DATE`
 
 ---
 
@@ -967,11 +968,11 @@ tables:
     table: DM_DATE_DIM
   primary_key:
     columns:
-    - DATE_VALUE
+    - DATE
   time_dimensions:
-  - name: date_value
+  - name: date
     synonyms: ["Transaction Date", "Order Date", "Balance Date", "Inventory Date"]
-    expr: dm_date_dim.DATE_VALUE
+    expr: dm_date_dim."DATE"
     data_type: DATE
 
 - name: dm_inventory
@@ -995,7 +996,7 @@ tables:
     expr: SUM(dm_inventory.FILLED_INVENTORY)
     non_additive_dimensions:
     - table: dm_date_dim
-      dimension: date_value
+      dimension: date
       sort_direction: ascending
       nulls_position: last
 
@@ -1023,7 +1024,7 @@ relationships:
   right_table: dm_date_dim
   relationship_columns:
   - left_column: DM_ORDER_ORDER_DATE
-    right_column: DATE_VALUE
+    right_column: DATE
 - name: dm_order_to_dm_employee
   left_table: dm_order
   right_table: dm_employee
@@ -1041,7 +1042,7 @@ relationships:
   right_table: dm_date_dim
   relationship_columns:
   - left_column: DM_INVENTORY_BALANCE_DATE
-    right_column: DATE_VALUE
+    right_column: DATE
 - name: dm_inventory_to_dm_product
   left_table: dm_inventory
   right_table: dm_product
@@ -1062,9 +1063,9 @@ relationships:
    not in the model (e.g. `DM_SUPPLIER`). Skip any join where either side is not in
    `model_tables`.
 
-3. **Case-sensitive columns require wrapper views.** `DM_DATE_DIM.date` (lowercase)
-   cannot be used bare in `primary_key.columns` or `relationship_columns`. Create a
-   wrapper view that renames it to uppercase (`DATE_VALUE`).
+3. **Reserved-word columns require quoting in `expr`.** `DM_DATE_DIM.DATE` is a SQL
+   reserved word — use `dm_date_dim."DATE"` in `expr` fields but bare `DATE` in
+   `primary_key.columns` and `relationship_columns`.
 
 4. **FK/PK name conflicts require FK renaming.** When `PRODUCT_ID` appears in both
    `DM_ORDER_DETAIL` (FK) and `DM_PRODUCT` (PK), rename the FK in the wrapper view
@@ -1081,7 +1082,7 @@ relationships:
    pattern translates to a metric with `non_additive_dimensions`. The metric can
    reference the physical column directly — no `facts` section needed. The non-additive
    dimension should reference the **joined date dimension table** (e.g.
-   `dm_date_dim.date_value`), not a local FK column on the fact table.
+   `dm_date_dim.date`), not a local FK column on the fact table.
    Include `nulls_position: last` to match ThoughtSpot's `last_value` behaviour.
 
 7. **Metric naming must avoid cycles.** Snowflake's cycle detection is
