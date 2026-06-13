@@ -8,10 +8,12 @@ Triggered by the pre-commit hook when any of these are staged:
   - A ts-cli version bump (pyproject.toml or __init__.py)
   - A new file in agents/shared/
 
-If CHANGELOG.md already has today's date as the latest entry, exits silently —
-assumes the developer already updated it for this commit.
+If CHANGELOG.md is itself staged in this commit, exits silently — the developer
+already wrote the entry for this change. (The gate is per-commit, not per-day:
+a pre-existing same-day section from an earlier commit does NOT satisfy it.)
 
-Skips silently in non-TTY environments (CI, GUI git clients).
+Skips silently in non-TTY environments (CI, GUI git clients) in suggestion mode;
+--check mode runs everywhere and blocks the commit.
 
 Usage:
     python tools/validate/suggest_repo_changelog.py --root /path/to/repo
@@ -122,16 +124,6 @@ def detect_significant_changes(staged_lines: list[str], repo_root: Path) -> list
 
 # ── changelog helpers ─────────────────────────────────────────────────────────
 
-def changelog_has_today(changelog_path: Path) -> bool:
-    """Return True if CHANGELOG.md already has today's date as the most recent entry."""
-    if not changelog_path.exists():
-        return False
-    text = changelog_path.read_text(encoding="utf-8")
-    # Find the first ## date line
-    m = re.search(r"^## (\d{4}-\d{2}-\d{2})", text, re.MULTILINE)
-    return bool(m and m.group(1) == TODAY)
-
-
 def changelog_already_staged(staged_lines: list[str]) -> bool:
     """Return True if CHANGELOG.md is already in the staged changes."""
     return any(
@@ -208,8 +200,11 @@ def main() -> int:
     changelog_path = repo_root / CHANGELOG
     staged_lines = get_staged_files(repo_root)
 
-    # Already handled in this commit — nothing to enforce or suggest
-    if changelog_already_staged(staged_lines) or changelog_has_today(changelog_path):
+    # The gate is PER-COMMIT, not per-day: a significant change must carry its own
+    # staged CHANGELOG.md hunk. A pre-existing "## <today>" section from an earlier
+    # commit no longer satisfies it (audit F2 — that per-day escape let later commits
+    # ship significant changes with no changelog line of their own).
+    if changelog_already_staged(staged_lines):
         return 0
 
     changes = detect_significant_changes(staged_lines, repo_root)
