@@ -4,7 +4,7 @@ description: Convert a Snowflake Semantic View into a ThoughtSpot Model by readi
 ---
 
 # Snowflake Semantic View → ThoughtSpot Model
-<!-- synced-from: agents/cli/ts-convert-from-snowflake-sv/SKILL.md @ v1.7.1 on 2026-06-13 -->
+<!-- synced-from: agents/cli/ts-convert-from-snowflake-sv/SKILL.md @ v1.9.0 on 2026-06-13 -->
 
 Converts a Snowflake Semantic View into a ThoughtSpot Model. Reads the semantic
 view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics to
@@ -200,12 +200,18 @@ Extract:
    - Source: table alias + column name
    - Aggregation (from `AGG(...)`) or full expression
    - Display name: from `comment='...'` or title-cased NAME
-5. **Extension JSON** (`with extension (CA='...')`): log but do not map to ThoughtSpot
+5. **Facts block** (if present): for each entry (`TABLE.FACT_NAME as EXPR [comment='...'] [with synonyms=(...)]`), record:
+   - Source: TABLE alias + fact name
+   - Expression (SQL): the right-hand side
+   - Synonyms + description: same mapping as dimensions
+   - Visibility: `PRIVATE` modifier if present
+6. **Extension JSON** (`with extension (CA='...')`): log but do not map to ThoughtSpot
 
 Build an internal map:
 - `tables`: list of `{alias, fqn, primary_key}`
 - `relationships`: list of `{name, from_alias, from_col, to_alias, to_col}`
 - `columns`: all dimensions and metrics keyed by `(table_alias, col_name)`
+- `facts`: keyed by `(table_alias, fact_name)` → `{expression, comment, synonyms[], visibility}`
 
 Identify the **fact table**: the table that never appears on the `TO` side of any relationship.
 
@@ -512,6 +518,12 @@ Snowflake → ThoughtSpot type mapping:
 
 ### Step 5: Find join names (Scenario A only)
 
+**Joinless semantic views (GAP-03):** if the relationships block is empty or absent
+(no relationships were parsed in Step 2), skip this step entirely. Proceed to Step 6
+with `model_tables` entries that have no `joins[]` or `referencing_join`.
+
+---
+
 **Scenario B — skip this step entirely.** Join names were defined by you in the
 Table TMLs built in Step 4B. Use those same names as `referencing_join` values
 in Step 6. No search or export is needed. Go directly to Step 6.
@@ -633,6 +645,35 @@ the model TML dict. Serialise to a YAML string.
 > [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 > and check the reverse-translation tables. Do not decide from SQL syntax alone.**
 > See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
+
+**Facts → formulas (emit before metric formulas):**
+
+For each **public fact** in the `facts` map:
+- Create a `formulas[]` entry with the translated expression. Use `column_type: MEASURE`
+  for numeric expressions, `column_type: ATTRIBUTE` for string/date expressions.
+- Create a paired `columns[]` entry with `formula_id` matching the formula's `id`.
+- Private facts referenced by a metric: create with `index_type: DONT_INDEX`. Unreferenced
+  private facts: skip.
+- See `../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` "Facts Block →
+  ThoughtSpot" for the full mapping pattern.
+
+**Identifier resolution (MANDATORY pre-pass before translating metrics):**
+
+Before translating any metric expression, resolve every `table_alias.name` reference.
+Use the Identifier Resolution Algorithm in
+[../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md):
+
+1. **Physical column?** → use `[TABLE::col]` reference
+2. **Fact?** → use formula reference `[Fact Display Name]` (no `TABLE::` prefix)
+3. **Metric?** → **double aggregation**: wrap inner metric in `group_aggregate`:
+   `outer_agg(group_inner_agg([CHILD_TABLE::col], [PARENT_TABLE::pk_col]))`.
+   Use `group_*` shorthand when available (`group_count`, `group_sum`, etc.).
+   See `../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` "Double Aggregation".
+4. **None?** → FAIL loudly with the unresolvable reference name.
+
+**Window metrics referencing metrics (GAP-13):** resolve the inner metric first,
+then apply the window translation. For cumulative functions, inline the inner
+aggregation directly: `cumulative_sum(count([TABLE::col]), [TABLE::order_col])`.
 
 For each metric in the semantic view:
 - Simple `SUM/COUNT/AVG/MIN/MAX(table.col)` → `MEASURE` column in `columns[]`
@@ -873,10 +914,23 @@ if you reimport to fix any errors.
 | Column | Original SQL | Status | ThoughtSpot Formula |
 |---|---|---|---|
 | {name} | `{sql}` | ✓ Translated | `{ts_formula}` |
+| {name} | `{sql}` | 🔄 Double aggregation | `{ts_formula}` |
+| {name} | `{sql}` | 📐 Fact formula | `{ts_formula}` |
 | {name} | `{sql}` | ⚠ Omitted | {reason} |
 
 ### Not Mapped
 - Extension JSON (Cortex Analyst context): not translated to ThoughtSpot
+
+### Facts Mapped ({n})
+| Fact Name | Source Table | Expression | ThoughtSpot Formula |
+|---|---|---|---|
+| {name} | {table} | `{sql_expr}` | `{ts_formula}` |
+
+### Identifier Resolution Summary
+- Physical columns resolved: {n}
+- Fact references resolved: {n}
+- Double aggregation patterns: {n}
+- Unresolvable references: {n} (see OMITTED above)
 ```
 
 ---
