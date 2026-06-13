@@ -298,7 +298,8 @@ The constraint is on the **first argument's aggregation state**, not on the sour
 | First arg form | Model formula? | Why |
 |---|---|---|
 | Unaggregated column ref: `[table::col]` | **YES** — valid in `formulas[]` | ThoughtSpot applies its own aggregation at query time |
-| Aggregated expression: `sum([table::col])` | **NO** — rejected with *"expects 1st argument to be not aggregated"* | Already-aggregated args conflict with the query engine's own aggregation |
+| `group_aggregate()` wrapped: `group_aggregate(max([col]), query_groups(), query_filters())` | **YES** — valid in `formulas[]` | `group_aggregate` encapsulates the aggregation so the outer function sees a single value, not an aggregate expression |
+| Aggregated expression: `sum([table::col])` | **NO** — rejected with *"expects 1st argument to be not aggregated"* | Already-aggregated args conflict with the query engine's own aggregation; use `group_aggregate()` wrapper instead |
 | Measure display name: `[Sales]` | **Answer-level only** — valid in `search_query`, not in model `formulas[]` | Display-name refs resolve in the live query context, not at model definition time |
 
 **Implications per source:**

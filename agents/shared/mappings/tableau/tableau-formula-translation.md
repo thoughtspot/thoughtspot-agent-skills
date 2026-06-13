@@ -398,6 +398,15 @@ AND CURRENT ROW)` → ThoughtSpot `cumulative_*()`.
 | `RUNNING_MAX(MAX([col]))` | `cumulative_max ( [table::col] , [sort attr] )` | Same — strip `MAX()` wrapper. |
 | `RUNNING_MIN(MIN([col]))` | `cumulative_min ( [table::col] , [sort attr] )` | Same — strip `MIN()` wrapper. |
 
+**Aggregate-inside-cumulative pattern:** When the Tableau source nests an aggregate
+that can't simply be stripped (e.g. `RUNNING_SUM(MAX([col]))` where you need the MAX
+semantics, not a raw SUM), wrap it in `group_aggregate()`:
+```
+cumulative_sum ( group_aggregate ( max ( [table::col] ) , query_groups ( ) , query_filters ( ) ) )
+```
+Direct nesting like `cumulative_sum ( max ( [col] ) , [date] )` is rejected — the first
+arg must be unaggregated OR wrapped in `group_aggregate()`.
+
 **Limitations:**
 - ThoughtSpot cumulative functions use the query's natural sort order — there is no
   explicit `ORDER BY` parameter like Snowflake window functions
