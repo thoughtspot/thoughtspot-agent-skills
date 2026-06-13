@@ -135,35 +135,54 @@ without `joins[]`. The model is valid without joins.
 
 ---
 
-### GAP-04: Derived metrics (view-level, cross-table) — MEDIUM
+### GAP-04: Derived metrics / view-backed sources — MEDIUM — CLARIFIED (2026-06-13)
 
-**What it is:** The `DESCRIBE SEMANTIC VIEW` output shows `DERIVED_METRIC` as a
-distinct object kind. These are metrics defined at the view level (not anchored to
-any single table) that can reference metrics from multiple tables.
+**What it is:** Two related patterns:
 
-**Current state:** Unknown whether `GET_DDL` emits these differently from regular
-metrics. Need to test with a live SV that has derived metrics.
+1. **Derived metrics:** `DESCRIBE SEMANTIC VIEW` shows `DERIVED_METRIC` as a distinct
+   object kind. These are metrics defined at the view level that can reference metrics
+   from multiple tables. In GET_DDL output they appear as regular metric entries
+   referencing multiple table aliases.
 
-**Proposed mapping:** If they appear as regular metric entries in the DDL but reference
-multiple table aliases, treat them as cross-table formulas. ThoughtSpot formulas can
-reference columns from multiple tables in the same model.
+2. **View-backed table sources:** Snowflake views referenced in the `tables()` block
+   instead of physical tables. Confirmed: `tables()` accepts fully-qualified view names
+   (verified 2026-06-13 with EMPLOYEE_SUMMARY_VW). Subqueries are NOT supported — the
+   source must be a named database object.
 
-**Action required:** Test `GET_DDL` on a view with derived metrics to confirm DDL format,
-then document the pattern.
+**ThoughtSpot equivalent:**
+- Cross-table derived metrics → formulas referencing columns from multiple `model_tables`
+- View-backed sources → ThoughtSpot Table objects can point to views (connection table
+  browser shows both tables and views)
+
+**Mapping:** View-backed sources are handled identically to physical tables — no special
+logic needed. Flag in report: "Source: Snowflake view (no primary key declared)".
+See `ts-from-snowflake-rules.md` "View-Backed Sources".
 
 ---
 
-### GAP-05: Verified queries / AI verified queries — LOW
+### GAP-05: Verified queries / AI verified queries — MEDIUM — MAPPED (2026-06-13)
 
 **What it is:** SVs can include question + SQL pairs that train Cortex Analyst.
-`DESCRIBE SEMANTIC VIEW` shows these as `AI_VERIFIED_QUERY`.
+`DESCRIBE SEMANTIC VIEW` shows these as `AI_VERIFIED_QUERY`. Full DDL format:
 
-**ThoughtSpot equivalent:** No direct equivalent. Closest options:
-- `data_model_instructions` in the model (Spotter instructions)
-- Manual Liveboard creation from the verified SQL
+```sql
+ai_verified_queries (
+    QUERY_NAME AS (
+        QUESTION 'natural language question'
+        VERIFIED_AT unix_epoch_seconds
+        SQL 'SELECT ... using SV logical names'
+    )
+)
+```
 
-**Proposed mapping:** Log in the conversion report. Optionally extract question text
-as Spotter instruction hints (user decision at review checkpoint).
+**ThoughtSpot equivalent:** NLS Feedback TML (`nls_feedback.feedback[]` entries).
+Each verified query maps to a `REFERENCE_QUESTION` entry with `feedback_phrase` (from
+QUESTION) and `search_tokens` (translated from SQL using the column mapping).
+
+**Mapping:** Parse verified queries in Step 4. After Model import (Step 12), translate
+SQL to search tokens using the column name mapping, generate NLS Feedback TML, and
+import as a separate payload. See `ts-from-snowflake-rules.md` "Verified Queries →
+NLS Feedback TML" and `agents/shared/schemas/thoughtspot-feedback-tml.md`.
 
 ---
 
@@ -198,25 +217,24 @@ block. Example from Snowflake docs: `ORDERS with synonyms=('sales orders')`.
 
 ---
 
-### GAP-08: Range joins / ASOF joins — MEDIUM
+### GAP-08: Range joins / ASOF joins — MEDIUM — MAPPED (2026-06-13)
 
 **What it is:** Snowflake SVs support:
-- `CONSTRAINT` with `DISTINCT_RANGE` (start_column, end_column) for range joins
-- ASOF joins (temporal pattern matching)
+- `constraint ... distinct range between START and END exclusive` on table entries
+- `references TABLE(between START and END exclusive)` in relationships (range join)
+- `references TABLE(COL, ASOF COL)` in relationships (ASOF/temporal join)
 
-These appear in `DESCRIBE` output and are used for complex temporal relationships
-(e.g. matching flights to weather windows).
+**ThoughtSpot equivalent:** Model TML `joins[].on` supports arbitrary expressions
+including `<`, `>`, `>=`, `AND`. Verified via live TML export showing range predicates
+in the `on` field.
 
-**ThoughtSpot equivalent:** None. ThoughtSpot only supports equi-joins.
+**Mapping:**
+- Range join → `'on': '[FROM::COL] >= [TO::START] and [FROM::COL] < [TO::END]'`
+  (half-open interval from `exclusive` keyword)
+- ASOF join → `'on': '[FROM::COL1] = [TO::COL1] and [FROM::COL2] >= [TO::ASOF_COL]'`
+- Both use `type: LEFT_OUTER`, `cardinality: MANY_TO_ONE`
 
-**Proposed mapping:**
-- Flag as unsupported at Step 10 review checkpoint
-- Recommend creating a pre-joined view that materialises the range/ASOF logic
-- Columns dependent on these joins are omitted unless the pre-joined view exists
-
-**Files to update:**
-- SKILL.md Step 4 — detect range/ASOF relationships and flag
-- SKILL.md Step 10 — warn user about unsupported join types
+See `ts-from-snowflake-rules.md` "Range Joins → ThoughtSpot".
 
 ---
 
@@ -235,18 +253,23 @@ Recommend: Skip by default, present as option at review checkpoint if any exist.
 
 ---
 
-### GAP-10: Filters on logical tables — MEDIUM
+### GAP-10: Filter labels on facts/dimensions — MEDIUM — MAPPED (2026-06-13)
 
-**What it is:** SVs support defining permanent filters on logical tables (Snowflake
-docs: "Defining filters for logical tables"). These restrict which rows Cortex Analyst
-considers when querying that table.
+**What it is:** SVs support `LABELS = (FILTER)` on facts and dimensions. These are
+boolean expressions that Cortex Analyst can use as optional WHERE clauses. They are
+NOT permanently auto-applied — they are available for use in queries.
 
-**ThoughtSpot equivalent:** No table-level filter in model TML. Closest:
-- Row-level security (different mechanism)
-- Worksheet-level filters (not available in models)
+DDL syntax: `TABLE.NAME labels = (filter) as BOOLEAN_EXPR`
 
-**Proposed mapping:** Log in report. Flag for manual implementation as a ThoughtSpot
-View (SQL view with WHERE clause) if the filter is business-critical.
+**ThoughtSpot equivalent:** Two options depending on intent:
+- **Boolean formula column (default)** — matches SV semantics (available, not auto-applied)
+- **Model filter** — `model.filters[]` with optional `apply_on_tables` scoping.
+  Without `apply_on_tables` = always applied. With `apply_on_tables` = only when
+  listed tables are in the search.
+
+**Mapping:** Create as boolean formula column by default. Offer model filter as opt-in
+at the Step 10 review checkpoint. See `ts-from-snowflake-rules.md` "Filter Labels →
+ThoughtSpot".
 
 ---
 
@@ -327,9 +350,9 @@ cumulative_sum ( [PAYROLL_COMPANIES::NUMBER_OF_COMPANIES] , [PAYROLL_COMPANIES::
 
 | Priority | Gaps | Impact |
 |---|---|---|
-| **HIGH** | GAP-01, GAP-02, GAP-12 | Cannot convert production SVs like SHIFTS7_PAYROLL1 without these |
-| **MEDIUM** | GAP-03, GAP-04, GAP-08, GAP-10, GAP-13 | Will encounter in real-world SVs; workarounds exist but are manual |
-| **LOW** | GAP-05, GAP-06, GAP-07, GAP-09, GAP-11 | Nice-to-have; no direct TS equivalent for most |
+| **HIGH — DONE** | GAP-01, GAP-02, GAP-12 | Implemented 2026-06-13 (identifier resolution engine) |
+| **MEDIUM — DONE** | GAP-03, GAP-04, GAP-05, GAP-08, GAP-10, GAP-13 | GAP-03/13 done 2026-06-13; GAP-04/05/08/10 mapped 2026-06-13 (BL-018) |
+| **LOW** | GAP-06, GAP-07, GAP-09, GAP-11 | Nice-to-have; no direct TS equivalent for most |
 
 ---
 
