@@ -599,7 +599,7 @@ Parse each returned `edoc` YAML string. Find in the `joins_with` section the ent
    formulas:
    - id: formula_Num Orders
      name: "Num Orders"
-     expr: "count_distinct ( [DM_ORDER::ORDER_ID] )"
+     expr: "unique count ( [DM_ORDER::ORDER_ID] )"
      properties:
        column_type: MEASURE
    ```
