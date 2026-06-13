@@ -135,7 +135,7 @@ else 0
 | `floor` | `floor ( [x] )` |
 | `ceil` | `ceil ( [x] )` |
 | `abs` | `abs ( [x] )` |
-| `power` | `power ( [x] , [n] )` |
+| `pow` | `pow ( [x] , [n] )` | Verified 2026-06-13. **Not** `power` — that name is rejected. |
 | `mod` | `mod ( [x] , [n] )` |
 | `sqrt` | `sqrt ( [x] )` |
 | `ln` | `ln ( [x] )` |
@@ -153,9 +153,9 @@ else 0
 | `left` | `left ( [x] , [n] )` | First N characters |
 | `right` | `right ( [x] , [n] )` | Last N characters |
 | `strlen` | `strlen ( [x] )` | String length |
-| `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence (1-indexed) |
-| `upper` | `upper ( [x] )` | Uppercase |
-| `lower` | `lower ( [x] )` | Lowercase |
+| `strpos` | `strpos ( [x] , 'val' )` | Position of first occurrence — 1-indexed, returns 0 when not found (live-verified 2026-06-13, se-thoughtspot; official docs claim 0-based/−1 — live behavior wins). |
+| ~~`upper`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "UPPER({0})" , [x] )` pass-through. |
+| ~~`lower`~~ | — | **Does not exist** in ThoughtSpot (verified 2026-06-13). Use `sql_string_op ( "LOWER({0})" , [x] )` pass-through. |
 | `trim` | `trim ( [x] )` | Strip leading/trailing whitespace |
 | `replace` | `replace ( [x] , [old] , [new] )` | Replace all occurrences |
 | `contains` | `contains ( [x] , 'val' )` | Returns boolean |
@@ -188,27 +188,53 @@ results. They are ThoughtSpot-only — **not translatable** to any warehouse SQL
 
 ## Date Functions
 
+*Source: ThoughtSpot official formula reference (verified 2026-06-13). Most date-part
+functions accept an optional `fiscal` second parameter for fiscal calendar support.*
+
 | Function | Syntax | Notes |
 |---|---|---|
 | `today` | `today ()` | Current date |
-| `now` | `now ()` | Current timestamp |
-| `date` | `date ( [datetime] )` | Cast datetime to date |
-| `year` | `year ( [date] )` | Calendar year |
-| `year` (fiscal) | `year ( [date] , fiscal )` | Fiscal year — ThoughtSpot-specific, not translatable to static SQL |
-| `quarter_number` | `quarter_number ( [date] )` | Calendar quarter (1–4) |
-| `quarter_number` (fiscal) | `quarter_number ( [date] , fiscal )` | Fiscal quarter — not translatable |
-| `month_number` | `month_number ( [date] )` | Month number (1–12). **Not** `month()` — that is rejected by the formula parser. Verified 2026-05-27. |
-| `day` | `day ( [date] )` | Day of month |
-| `hour` | `hour ( [date] )` | Hour of day |
-| `start_of_month` | `start_of_month ( [date] )` | First day of the month |
+| `now` | `now ()` | Current date and time |
+| `date` | `date ( [datetime] )` | Date portion of a datetime |
+| `time` | `time ( [datetime] )` | Time portion of a datetime |
+| `year` | `year ( [date] )` | Calendar year (integer). Optional `fiscal` param. |
+| `year_name` | `year_name ( [date] )` | Year as string. With fiscal: `"FY_2014"` |
+| `quarter_number` | `quarter_number ( [date] )` | Quarter (1–4). Optional `fiscal` param. |
+| `month` | `month ( [date] )` | Month name (e.g. "January"). Optional `fiscal` param. |
+| `month_number` | `month_number ( [date] )` | Month number (1–12). Optional `fiscal` param. |
+| `month_number_of_quarter` | `month_number_of_quarter ( [date] )` | Month within quarter (1–3). Optional `fiscal` param. |
+| `day` | `day ( [date] )` | Day of month (1–31). Verified 2026-06-13. Optional `fiscal` param. |
+| `day_of_week` | `day_of_week ( [date] )` | Day name (e.g. "Friday"). Optional `fiscal` param. |
+| `day_number_of_week` | `day_number_of_week ( [date] )` | Day number (1=Mon, 7=Sun). Optional `fiscal` param. |
+| `day_number_of_quarter` | `day_number_of_quarter ( [date] )` | Day within quarter. Optional `fiscal` param. |
+| `day_number_of_year` | `day_number_of_year ( [date] )` | Day within year (1–366). Optional `fiscal` param. |
+| `hour_of_day` | `hour_of_day ( [date] )` | Hour of the day |
+| `week_number_of_month` | `week_number_of_month ( [date] )` | Week within month. Optional `fiscal` param. |
+| `week_number_of_quarter` | `week_number_of_quarter ( [date] )` | Week within quarter. Optional `fiscal` param. |
+| `week_number_of_year` | `week_number_of_year ( [date] )` | Week within year. Optional `fiscal` param. |
+| `is_weekend` | `is_weekend ( [date] )` | Returns true for Saturday/Sunday. Optional `fiscal` param. |
+| `start_of_month` | `start_of_month ( [date] )` | First day of the month. Optional `fiscal` param. |
+| `start_of_quarter` | `start_of_quarter ( [date] )` | First day of the quarter. Optional `fiscal` param. |
+| `start_of_week` | `start_of_week ( [date] )` | First day of the week. Optional `fiscal` param. |
+| `start_of_year` | `start_of_year ( [date] )` | First day of the year. Optional `fiscal` param. |
+| `start_of_hour` | `start_of_hour ( [time] )` | Time truncated to the hour |
+| `start_of_min` | `start_of_min ( [time] )` | Time truncated to the minute |
 | `diff_days` | `diff_days ( [end] , [start] )` | Days between — note arg order (end first) |
-| `diff_months` | `diff_months ( [end] , [start] )` | Months between |
-| `diff_years` | `diff_years ( [end] , [start] )` | Years between |
-| `diff_time` | `diff_time ( [end] , [start] )` | Time difference in seconds |
+| `diff_weeks` | `diff_weeks ( [end] , [start] )` | Weeks between. Optional `fiscal` third param. |
+| `diff_months` | `diff_months ( [end] , [start] )` | Months between. Optional `fiscal` third param. |
+| `diff_quarters` | `diff_quarters ( [end] , [start] )` | Quarters between. Optional `fiscal` third param. |
+| `diff_years` | `diff_years ( [end] , [start] )` | Years between. Optional `fiscal` third param. |
+| `diff_time` | `diff_time ( [end] , [start] )` | Difference in seconds |
+| `diff_hours` | `diff_hours ( [end] , [start] )` | Difference in hours |
+| `diff_minutes` | `diff_minutes ( [end] , [start] )` | Difference in minutes |
 | `add_days` | `add_days ( [date] , [n] )` | Add N days |
 | `add_weeks` | `add_weeks ( [date] , [n] )` | Add N weeks |
 | `add_months` | `add_months ( [date] , [n] )` | Add N months |
-| `date_trunc` | `date_trunc ( 'month' , [date] )` | Truncate to period — `'day'`, `'week'`, `'month'`, `'quarter'`, `'year'` |
+| `add_years` | `add_years ( [date] , [n] )` | Add N years |
+| `add_minutes` | `add_minutes ( [datetime] , [n] )` | Add N minutes |
+| `add_seconds` | `add_seconds ( [datetime] , [n] )` | Add N seconds |
+| ~~`date_trunc`~~ | — | **Does not exist** as a formula function (verified 2026-06-13). Use `start_of_month()` / `start_of_quarter()` / `start_of_week()` / `start_of_year()` instead. ThoughtSpot also has search keywords (`Weekly`, `Monthly`, `Quarterly`, `Yearly`) for time bucketing. |
+| ~~`day_number_of_month`~~ | — | **Does not exist** (verified 2026-06-13). Use `day()` instead. |
 
 **Argument order note:** `diff_*` functions take `(end, start)` — end date first. This is
 the opposite of most SQL `DATEDIFF` functions which take `(unit, start, end)`.

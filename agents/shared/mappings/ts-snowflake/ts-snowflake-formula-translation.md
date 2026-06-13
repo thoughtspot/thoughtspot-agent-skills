@@ -153,7 +153,7 @@ These functions translate 1:1 in both directions.
 | `floor ( [x] )` → `FLOOR(x)` | `FLOOR(x)` → `floor ( [x] )` |
 | `ceil ( [x] )` → `CEIL(x)` | `CEIL(x)` → `ceil ( [x] )` |
 | `abs ( [x] )` → `ABS(x)` | `ABS(x)` → `abs ( [x] )` |
-| `power ( [x] , [n] )` → `POWER(x, n)` | `POWER(x, n)` → `power ( [x] , [n] )` |
+| `pow ( [x] , [n] )` → `POWER(x, n)` | `POWER(x, n)` → `pow ( [x] , [n] )` |
 | `mod ( [x] , [n] )` → `MOD(x, n)` | `MOD(x, n)` → `mod ( [x] , [n] )` |
 | `sqrt ( [x] )` → `SQRT(x)` | `SQRT(x)` → `sqrt ( [x] )` |
 | `ln ( [x] )` → `LN(x)` | `LN(x)` → `ln ( [x] )` |

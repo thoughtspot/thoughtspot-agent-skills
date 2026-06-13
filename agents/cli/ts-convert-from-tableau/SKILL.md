@@ -676,7 +676,7 @@ Key rules:
   a date range. If the datasource already uses a **SQL View**, apply the conversion in the
   SQL query (`TO_DATE(SUBSTRING(col, 2, 4) || '-01-01', 'YYYY-MM-DD')`). If it uses a
   **regular table**, apply it as a model formula
-  (`to_date(substr([col], 2, 4) + '-01-01', 'yyyy-MM-dd')`). See `tableau-tml-rules.md`
+  (`to_date ( concat ( substr ( [col] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )`). See `tableau-tml-rules.md`
   "Date Column Rules" for the full pattern table.
 - Use `INT64` for Tableau `integer` — **never `INT`**
 - `db_column_properties` is **required** on every column
@@ -1548,6 +1548,9 @@ the un-migratable and caveated items are flagged here, up front, for the user to
 **Always include the Sets section when the workbook has sets** (per the MANDATORY set-review
 rule in Step 5b) — set conversions are semantic reinterpretations, so the user must confirm
 each matches intent before import.
+
+Reviewer checks before import:
+- Every translated division has a div-by-zero guard (FT "Division-by-zero" section)
 
 Wait for confirmation. **no** cancels. **file** writes the TMLs and skips to Step 12
 (report only, no import). **yes** imports:

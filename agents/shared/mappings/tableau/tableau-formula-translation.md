@@ -19,26 +19,26 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `RIGHT(s, n)` | `substr ( s , strlen ( s ) - n , n )` | |
 | `MID(s, start, len)` | `substr ( s , start - 1 , len )` | Adjust for 0-based indexing |
 | `LEN(s)` | `strlen ( s )` | |
-| `FIND(s, sub)` | `strpos ( s , sub )` | |
+| `FIND(s, sub)` | `strpos ( s , sub )` | 1-based, returns 0 when absent — identical contract to Tableau FIND, so `FIND(...) > 0` idioms translate unchanged (live-verified 2026-06-13, se-thoughtspot: strpos('needle_haystack','needle')=1, not-found=0). NOTE: official TS docs describe strpos as 0-based/−1 — live behavior differs; trust this entry. |
 | `REPLACE(s, old, new)` | `replace ( s , old , new )` | |
 | `UPPER(s)` | `sql_string_op ( "UPPER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
 | `LOWER(s)` | `sql_string_op ( "LOWER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
 | `TRIM(s)` | `trim ( s )` | |
 | `SPLIT(s, delim, n)` | Use `substr`/`strpos` combination | No direct equivalent; chain: Tableau `SPLIT` → Snowflake `SPLIT_PART` → ThoughtSpot `substr`/`strpos` |
-| `DATEDIFF('day', a, b)` | `diff_days ( a , b )` | Unit-specific: also `diff_months` |
+| `DATEDIFF('day', a, b)` | `diff_days ( b , a )` | **Arg order reversed vs Tableau.** TS `diff_*` takes `(end, start)` (see formula-patterns.md "Argument order note"); Tableau `DATEDIFF(unit, start, end)` returns end−start. Same flip for `diff_months`, `diff_years`, `diff_time` (seconds). `'hour'`/`'minute'` → `diff_time ( b , a ) / 3600` / `/ 60`. `'week'` → `diff_days ( b , a ) / 7` ⚠ flag: boundary-crossing + week-start semantics differ from Tableau — verify per workbook. |
 | `DATETRUNC('month', d)` | `start_of_month ( d )` | Also `start_of_quarter`, `start_of_week`, `start_of_year` |
 | `DATETRUNC('week', TODAY()) + 1` | `add_days ( start_of_week ( today () ) , 1 )` | Do NOT use + operator on dates |
 | `DATEADD('day', n, d)` | `add_days ( d , n )` | Also `add_months`, `add_years` |
-| `DATEPART('month', d)` | `month_number ( d )` | Also `day_number_of_month`, `year`, `quarter_number` |
+| `DATEPART('month', d)` | `month_number ( d )` | Also `day()` (day of month), `year`, `quarter_number`, `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` |
 | `DATENAME('month', d)` | `month_number ( d )` | ThoughtSpot has no month-name function; use number |
 | `TODAY()` | `today ()` | |
 | `NOW()` | `now ()` | |
 | `DATE(d)` | `date ( d )` | Does not accept string literals |
 | `YEAR(d)` | `year ( d )` | |
 | `MONTH(d)` | `month_number ( d )` | |
-| `DAY(d)` | `day_number_of_month ( d )` | |
-| `INT(x)` | `round ( x )` | No direct INT cast in ThoughtSpot |
-| `FLOAT(x)` | `x * 1.0` | |
+| `DAY(d)` | `day ( d )` | **`day_number_of_month` does not exist** (verified 2026-06-13). `day()` extracts day-of-month. Related: `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` do exist. |
+| `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. ⚠ floor/ceil names pending live verification (P11/P12) — flag on first use. |
+| `FLOAT(x)` | `to_double ( x )` | See formula-patterns.md (to_double). `x * 1.0` breaks for string inputs Tableau accepts. |
 | `STR(x)` | `to_string ( x )` | |
 | `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot uses `concat()` for strings — the `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 2 ) ) , '%' )`. |
 | `ABS(x)` | `abs ( x )` | |
@@ -67,7 +67,7 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `EXP(n)` | `exp ( n )` | |
 | `SIN(n)` / `COS(n)` / `TAN(n)` | `sin ( n * 180 / 3.14159265358979 )` / `cos ( n * 180 / 3.14159265358979 )` / `tan ( n * 180 / 3.14159265358979 )` | Tableau trig is in radians; ThoughtSpot trig is in degrees — convert. (Inverse trig `acos/asin/atan` also return degrees in ThoughtSpot vs radians in Tableau.) |
 | `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
-| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`; `strpos` is 1-based |
+| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, se-thoughtspot). |
 | `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with`; mirrors the `RIGHT(s, n)` idiom above |
 | `PI()` | `3.14159265358979` | No native `pi()` — use the literal (dialect-free). (alternatively `sql_double_op ( "pi()" )` — documented pass-through) |
 | `RADIANS(n)` | `n * 3.14159265358979 / 180` | No native `radians()` — use the literal composite. (alternatively `sql_double_op ( "radians({0})" , n )` — documented pass-through) |
@@ -110,6 +110,18 @@ ELSE. So a **literal translation is faithful** and preserves the workbook's orig
 Treat NULL-guarding as an **opt-in correction**: only add it when the user explicitly wants to
 fix latent NULL mis-classification in the original (e.g. keep NULLs as NULL rather than 'Bronze').
 This is warehouse-`CASE` behavior, so the same reasoning applies to the SV/MV converters.
+
+---
+
+## Division-by-zero (MANDATORY for every translated ratio)
+
+Tableau returns NULL on division by zero; raw `/` pushed to the warehouse errors the whole
+answer (Snowflake: "Division by zero"). Every translated division gets one of:
+
+| Fidelity | Form | Caveat |
+|---|---|---|
+| Closest to Tableau | `if ( [b] = 0 ) then null else [a] / [b]` | Exact NULL semantics |
+| Shorter | `safe_divide ( [a] , [b] )` | Function live-verified 2026-06-13 (se-thoughtspot). Returns **0**, not NULL, on zero divisor (formula-patterns.md) — flag if downstream logic distinguishes 0 from NULL. |
 
 ---
 
@@ -372,27 +384,34 @@ Tableau running table calculations map to ThoughtSpot cumulative functions. Chai
 Tableau `RUNNING_*` → Snowflake `SUM/AVG/etc OVER (... ROWS BETWEEN UNBOUNDED PRECEDING
 AND CURRENT ROW)` → ThoughtSpot `cumulative_*()`.
 
-> ⚠️ **`cumulative_*` (and `moving_*`) are query-time functions — they CANNOT be stored as
-> model/worksheet formula columns.** Adding one to `model.formulas[]` fails validation with
-> *"Search did not find …"* (in any form — `cumulative_sum(sum([col]))`, `cumulative_sum([formula_measure])`,
-> etc.). They are only valid **inside an answer's `search_query`** (the live query context that
-> supplies the sort order). So: do **not** emit a model formula for a `RUNNING_*`/`WINDOW_*`
-> field — instead realize it on the **viz that uses it** (Step 10b) via the search keyword
-> (`cumulative …`, `moving average of …`) or an answer-level formula. Log it in the Migration
-> Summary as "realized at the answer level, not the model."
+> ⚠️ **`cumulative_*` (and `moving_*`) ARE valid as model formulas when the first arg is an
+> unaggregated `[table::col]` reference** — verified 2026-06-13 on se-thoughtspot (see EXC1 in
+> `ts-model-conversion-invariants.md`). They fail ONLY when the first arg is already aggregated
+> (`sum([col])`) or a display-name ref (`[Sales]`). For Tableau conversion: strip the Tableau
+> `SUM()`/`AVG()` wrapper and use the raw column ref → valid model formula. Fall back to
+> answer-level only when the sort dimension cannot be determined from the workbook.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( sum ( [table::col] ) )` | Optional partition/sort args: `cumulative_sum ( measure , attr1 , attr2 )` |
-| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( average ( [table::col] ) )` | |
-| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( max ( [table::col] ) )` | |
-| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( min ( [table::col] ) )` | |
+| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( [table::col] , [sort attr] )` | **Model formula valid** with unaggregated `[table::col]` ref (verified 2026-06-13, EXC1). Strip Tableau's `SUM()` wrapper. Fall back to answer-level (`[Measure]` display name) only when sort dimension is undetermined. |
+| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( [table::col] , [sort attr] )` | Same — strip `AVG()` wrapper, use unaggregated ref. |
+| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( [table::col] , [sort attr] )` | Same — strip `MAX()` wrapper. |
+| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( [table::col] , [sort attr] )` | Same — strip `MIN()` wrapper. |
+
+**Aggregate-inside-cumulative pattern:** When the Tableau source nests an aggregate
+that can't simply be stripped (e.g. `RUNNING_SUM(MAX([col]))` where you need the MAX
+semantics, not a raw SUM), wrap it in `group_aggregate()`:
+```
+cumulative_sum ( group_aggregate ( max ( [table::col] ) , query_groups ( ) , query_filters ( ) ) )
+```
+Direct nesting like `cumulative_sum ( max ( [col] ) , [date] )` is rejected — the first
+arg must be unaggregated OR wrapped in `group_aggregate()`.
 
 **Limitations:**
 - ThoughtSpot cumulative functions use the query's natural sort order — there is no
   explicit `ORDER BY` parameter like Snowflake window functions
 - Partition dimensions are optional trailing arguments, not a separate `PARTITION BY`
-- `RUNNING_COUNT(expr)` — no `cumulative_count`. Approximate with `cumulative_sum ( 1 , [sort_attr] )` at answer level (table calc, EXC1), or omit + log if the sort attribute can't be determined.
+- `RUNNING_COUNT(expr)` — no `cumulative_count`. Approximate with `cumulative_sum ( 1 , [sort_attr] )` at answer level, or omit + log if the sort attribute can't be determined.
 
 ---
 
@@ -403,29 +422,29 @@ Tableau `WINDOW_SUM` → Snowflake `SUM() OVER (... ROWS BETWEEN ...)` → Thoug
 `moving_sum()`. See `ts-snowflake-formula-translation.md` "Moving / Sliding Window
 Functions" for the full reference.
 
-> ⚠️ Like `cumulative_*`, **`moving_*` are query-time only — not valid in model formulas**
-> (same *"Search did not find …"* failure). Realize them on the viz (answer `search_query`),
-> not in `model.formulas[]`. A composite like `EXP(WINDOW_AVG(LOG([m]), -2, 0))` (a geometric
-> moving average) therefore can't be a model column at all — build it as an answer-level
-> formula on the one viz that needs it, or flag it as a placeholder if the answer-formula
-> nesting (`exp`/`log10` around `moving_average`) is also rejected.
+> ⚠️ Like `cumulative_*`, `moving_*` **are valid as model formulas when the first arg is an
+> unaggregated `[table::col]` reference** (see EXC1 in `ts-model-conversion-invariants.md`).
+> Strip the Tableau `SUM()`/`AVG()` wrapper and use the raw column ref. A composite like
+> `EXP(WINDOW_AVG(LOG([m]), -2, 0))` (a geometric moving average) should be built as an
+> answer-level formula if the nesting (`exp`/`log10` around `moving_average`) is rejected
+> at model level.
 
-> 🔑 **Pass the worksheet's shelf attribute(s) as the trailing sort args — and reference the
-> MEASURE COLUMN by name, not `sum()`.** A running/moving total is meaningless without an order.
-> Take the dimension(s) the Tableau worksheet lays the calc *along* (its Rows/Columns shelf —
-> e.g. `Month of order date`, `Order Date`) and append them as sort args. The first argument is
-> the **measure column by display name** (`[Sales]`), **not** `sum([t::Sales])`: `cumulative_*`/
-> `moving_*` reject an already-aggregated arg (*"expects 1st argument to be not aggregated"*) and
-> can't resolve a `[t::col]` ref in answer context. So:
-> `RUNNING_SUM(SUM([Sales]))` along `[Month]` → `cumulative_sum ( [Sales] , [Month of order date] )`;
-> `EXP(WINDOW_AVG(LOG([Sales]),-2,0))` along `[Order Date]` → `exp ( moving_average ( log10 ( [Sales] ) , 2 , 0 , [Order Date] ) )`.
+> 🔑 **First arg must be unaggregated. For model formulas use `[table::col]`; for answer-level
+> use the measure display name `[Sales]`.** Strip Tableau's outer `SUM()`/`AVG()` wrapper — 
+> `cumulative_*`/`moving_*` reject an already-aggregated arg (*"expects 1st argument to be not
+> aggregated"*). Pass the worksheet's shelf attribute(s) as trailing sort args. Verified
+> 2026-06-13: `cumulative_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_ORDER::ORDER_DATE] )` imports
+> as a model formula (GUID `889a704f`, model `TEST_SV_DMSI_AI_CONTEXT`). So:
+> `RUNNING_SUM(SUM([Sales]))` along `[Month]` → model: `cumulative_sum ( [t::Sales] , [t::Month] )`;
+> answer: `cumulative_sum ( [Sales] , [Month of order date] )`.
+> `EXP(WINDOW_AVG(LOG([Sales]),-2,0))` along `[Order Date]` → `exp ( moving_average ( log10 ( [t::Sales] ) , 2 , 0 , [t::Order Date] ) )`.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | 3-row lookback |
-| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
-| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
-| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
+| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( [table::col] , 3 , 0 , [sort attr] )` | 3-row lookback. **Model formula valid** with unaggregated `[table::col]` ref (verified 2026-06-13, EXC1). Strip Tableau's `SUM()` wrapper. |
+| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper, use unaggregated ref. |
+| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper. |
+| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper. |
 
 ### Syntax
 
@@ -476,7 +495,7 @@ function with `PARTITION BY` in the SQL string instead.
 |---|---|---|
 | `RANK(SUM([col]))` | `rank ( sum ( [table::col] ) , 'desc' )` | **Direction arg is required** — `rank(measure)` with one arg fails validation (*"Function rank expects 2 arguments, found 1"*). Pass `'desc'` explicitly for Tableau's default. |
 | `RANK(SUM([col]), 'asc')` | `rank ( sum ( [table::col] ) , 'asc' )` | |
-| `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` is always dense; no RANK_UNIQUE equivalent — document the tie-handling difference. |
+| `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` uses **competition ranking** (ties share a rank, next rank is skipped: 1,1,3 — verified 2026-06-13, generates `RANK() OVER (ORDER BY ...)`). No RANK_UNIQUE equivalent — document the tie-handling difference. |
 
 **Partitioned rank** — ThoughtSpot's native `rank()` has no partition support. For
 partitioned rank, use a pass-through function (see "Pass-Through Fallback" below):
@@ -486,23 +505,21 @@ sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" ,
 ⚑ flag for review — aggregate pass-through (PT1)
 
 **Limitations:**
-- `RANK_MODIFIED`, `RANK_DENSE` have no exact native equivalents; use `rank()` as an approximation and document the difference
+- `RANK_MODIFIED` has no native equivalent; `RANK_DENSE` → use `sql_int_aggregate_op ( "dense_rank() over (...)" )` pass-through (native `rank()` is competition, not dense — verified 2026-06-13)
 
 ---
 
-## Aggregate Formulas: Row-Level Conversion
+## Conditional aggregates (Tableau `AGG(IF cond THEN x END)`)
 
-Tableau calculated fields that use aggregation functions (`COUNTD`, `SUM`, `COUNT`) are aggregate formulas. ThoughtSpot **model formulas must be row-level**. Convert them to row-level expressions; the aggregation is applied at the search/answer level.
+ThoughtSpot model formulas MAY be aggregate (see invariants I5 and ts-model-conversion-invariants.md:33). Do NOT convert to row-level with `else ''` — empty string becomes a countable distinct value (COUNTD off by one) and changes SUM/AVG denominators. Use the `*_if` family; the bare `IF` with no ELSE is NULL in Tableau, which aggregates ignore — `else null` preserves that exactly.
 
-**Tableau (aggregate):**
-```
-COUNTD(if [source_table] = 'terminations' then [employee_id] end)
-```
-
-**ThoughtSpot model formula (row-level):**
-```
-if ( [table::source_table] = 'terminations' ) then [table::employee_id] else ''
-```
+| Tableau | ThoughtSpot |
+|---|---|
+| `COUNTD(IF c THEN x END)` | `unique_count_if ( c , [x] )` |
+| `SUM(IF c THEN x END)` | `sum_if ( c , [x] )` |
+| `COUNT(IF c THEN x END)` | `count_if ( c , [x] )` |
+| `AVG(IF c THEN x END)` | `average_if ( c , [x] )` |
+| other agg / complex | `agg ( if ( c ) then [x] else null )` — `else null` is live-verified (static-set-to-column-set.md:107) |
 
 ---
 

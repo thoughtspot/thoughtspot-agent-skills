@@ -283,16 +283,30 @@ provides an equivalent SQL function, translate it via a ThoughtSpot pass-through
 
 ## Intentional differences (do NOT harmonize)
 
-### EXC1 — Cumulative/moving: model formula vs query-time only
+### EXC1 — Cumulative/moving: model formula vs answer-level
 
-**This difference is correct and deliberate. The auditor must NOT flag it.**
+`cumulative_*` and `moving_*` functions **are valid as model formulas** when the first
+argument is an **unaggregated column reference** — verified 2026-06-13 on se-thoughtspot
+(GUID `889a704f-2714-4649-9cea-23551cb68d64`, model `TEST_SV_DMSI_AI_CONTEXT`):
+
+```
+cumulative_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_ORDER::ORDER_DATE] )
+```
+
+The constraint is on the **first argument's aggregation state**, not on the source dialect:
+
+| First arg form | Model formula? | Why |
+|---|---|---|
+| Unaggregated column ref: `[table::col]` | **YES** — valid in `formulas[]` | ThoughtSpot applies its own aggregation at query time |
+| `group_aggregate()` wrapped: `group_aggregate(max([col]), query_groups(), query_filters())` | **YES** — valid in `formulas[]` | `group_aggregate` encapsulates the aggregation so the outer function sees a single value, not an aggregate expression |
+| Aggregated expression: `sum([table::col])` | **NO** — rejected with *"expects 1st argument to be not aggregated"* | Already-aggregated args conflict with the query engine's own aggregation; use `group_aggregate()` wrapper instead |
+| Measure display name: `[Sales]` | **Answer-level only** — valid in `search_query`, not in model `formulas[]` | Display-name refs resolve in the live query context, not at model definition time |
+
+**Implications per source:**
 
 | Source | Treatment | Reason |
 |---|---|---|
-| Snowflake SV window functions (`OVER PARTITION BY …`) | Translate to ThoughtSpot model formulas: `cumulative_sum`, `moving_average`, `group_sum`, etc. | These are true SQL window expressions — valid as model-level formulas that ThoughtSpot evaluates at query time. |
-| Databricks MV window metrics | Same: translate to ThoughtSpot `cumulative_*` / `moving_*` model formulas. | Same rationale as SV. |
-| Tableau table calculations (`RUNNING_SUM`, `WINDOW_AVG`, `INDEX`, `LOOKUP`, `FIRST`, `LAST`, `SIZE`, `PREVIOUS_VALUE`, `RANK`, `PERCENTILE`, etc.) | Do **NOT** emit as model `formulas[]`. Classify as answer-level only, document in the untranslatable log. | Tableau table-calcs are row-level operations that depend on the view's partition/addressing. They have no stable model-level equivalent in ThoughtSpot. Forcing them into `formulas[]` produces incorrect results. |
-
-The asymmetry (SV/MV → model formulas; Tableau table-calcs → answer-level only) is
-the correct behaviour, not a bug. Do not add Tableau table-calcs to `formulas[]` to
-achieve "consistency" with SV/MV.
+| Snowflake SV / Databricks MV window functions | Translate to model formulas with unaggregated `[table::col]` refs | Source column refs are unaggregated — maps directly |
+| Tableau `RUNNING_SUM(SUM([col]))` / `WINDOW_AVG(SUM([col]))` | **Model formula is valid** if converted to unaggregated form: `cumulative_sum ( [table::col] , [sort_col] )`. Fall back to answer-level if the sort dimension cannot be determined from the workbook | The Tableau `SUM()` wrapper must be stripped — the unaggregated column ref goes to the model formula |
+| Tableau positional table calcs (`INDEX`, `LOOKUP`, `FIRST`, `LAST`, `SIZE`, `PREVIOUS_VALUE`) | Answer-level only or untranslatable — do **NOT** emit as model formulas | These are row-position-dependent; no ThoughtSpot model-level equivalent |
+| `RANK`, `PERCENTILE` | Answer-level: use `rank()` in `search_query` | See Running / Cumulative Functions section in formula-translation.md |
