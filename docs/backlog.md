@@ -67,7 +67,7 @@ automatically.
 
 **Source:** Full gap analysis against production SV `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (all steps)
-**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); GAP-04/05/08/10 mapped in BL-018 (2026-06-13, documentation complete, SKILL.md parsing pending); remaining LOW gaps tracked below
+**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); GAP-04/05/08/10 mapped + SKILL.md parsing complete (2026-06-14); remaining LOW gaps tracked below
 **Full spec:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md)
 
 ### Summary
@@ -808,7 +808,7 @@ its `synced-from` marker.
 
 **Source:** Post-identifier-resolution review of unmapped SV features (2026-06-13)
 **Affects:** ts-convert-from-snowflake-sv, sv-to-ts-gap-analysis.md
-**Status:** In progress — documentation and mapping rules complete (2026-06-13); SKILL.md parsing logic pending
+**Status:** In progress — documentation and mapping rules complete (2026-06-13); SKILL.md parsing complete (2026-06-14); live verification pending
 **Corrects:** GAP-08 (range joins), GAP-10 (filter labels), GAP-04 (view-backed sources), GAP-05 (verified queries)
 
 ### Problem

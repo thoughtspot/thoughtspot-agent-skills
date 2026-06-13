@@ -351,7 +351,7 @@ cumulative_sum ( [PAYROLL_COMPANIES::NUMBER_OF_COMPANIES] , [PAYROLL_COMPANIES::
 | Priority | Gaps | Impact |
 |---|---|---|
 | **HIGH — DONE** | GAP-01, GAP-02, GAP-12 | Implemented 2026-06-13 (identifier resolution engine) |
-| **MEDIUM — DONE** | GAP-03, GAP-04, GAP-05, GAP-08, GAP-10, GAP-13 | GAP-03/13 done 2026-06-13; GAP-04/05/08/10 mapped 2026-06-13 (BL-018) |
+| **MEDIUM — DONE** | GAP-03, GAP-04, GAP-05, GAP-08, GAP-10, GAP-13 | GAP-03/13 done 2026-06-13; GAP-04/05/08/10 mapped 2026-06-13 + SKILL.md parsing 2026-06-14 (BL-018) |
 | **LOW** | GAP-06, GAP-07, GAP-09, GAP-11 | Nice-to-have; no direct TS equivalent for most |
 
 ---

@@ -86,6 +86,18 @@ Extract three column categories: **dimensions**, **metrics**, and **facts**. Fac
 expressions (not aggregates) declared as `TABLE.FACT_NAME as EXPR` that metrics reference as
 building blocks.
 
+**Range/ASOF join detection:** in the `relationships(...)` block, detect:
+- `references TABLE(between START and END exclusive)` → range join (`>=` start, `<` end)
+- `references TABLE(COL1, ASOF COL2)` → ASOF join (equi on COL1, `>=` on COL2)
+- Composite equi-joins: `FROM(COL1, COL2) references TO(COL1, COL2)` — multiple `=` pairs
+Also parse `constraint ... distinct range between START and END exclusive` on table entries.
+
+**Filter labels:** detect `labels = (filter)` before `as` on dimension/fact entries.
+These are BOOLEAN expressions → create as boolean formula columns (ATTRIBUTE).
+
+**Verified queries:** parse `ai_verified_queries(...)` block → list of {name, question, sql}.
+Emitted as NLS Feedback TML after Model import.
+
 ---
 
 ## Step 3 — Choose Scenario
@@ -126,11 +138,12 @@ For each physical Snowflake table referenced by the semantic view:
 Read `~/.cursor/shared/schemas/thoughtspot-model-tml.md` and
 `~/.cursor/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` in full.
 
-> **Model TML hard rules (I1–I6 + N1):** see `~/.cursor/shared/schemas/ts-model-conversion-invariants.md`.
+> **Model TML hard rules (I1–I8 + N1):** see `~/.cursor/shared/schemas/ts-model-conversion-invariants.md`.
 > I1: every formula needs a paired `columns[]` entry with `formula_id:`. I2: no `aggregation:` in `formulas[]`.
 > I3: `index_type: DONT_INDEX` on formula MEASURE columns. I4: `id:` (if present) and join `with`/`on` references
 > must match the target table's `name:` exactly. I5: `COUNT(DISTINCT col)` → `unique count([T::col])` formula,
 > never `aggregation: COUNT_DISTINCT`. I6: connection referenced by name, never GUID.
+> I8: no duplicate `column_id` values — when two metrics use the same physical column, express the second as a formula.
 > N1: model name uses the bare semantic-view name — no `TEST_SV_` prefix (ask the user before importing).
 
 Map the Semantic View DDL to ThoughtSpot Model TML:
@@ -139,7 +152,12 @@ Map the Semantic View DDL to ThoughtSpot Model TML:
 - Metrics → MEASURE columns with formula expressions
 - Relationships → `joins_with` entries; if the SV has no relationships, skip join
   resolution and produce `model_tables` with no `joins_with` entries
+  - **Range joins:** `on: "[FROM::COL] >= [TO::START] and [FROM::COL] < [TO::END]"` (half-open)
+  - **ASOF joins:** equi columns with `=`, ASOF column with `>=`
+  - **Composite equi-joins:** `"[FROM::COL1] = [TO::COL1] and [FROM::COL2] = [TO::COL2]"`
 - SQL expressions → ThoughtSpot formulas (use the formula translation reference)
+- Filter labels → boolean formula columns (ATTRIBUTE, `column_type: ATTRIBUTE`)
+- Duplicate `column_id` check (I8): scan for duplicate `column_id` values; convert the second to a formula
 
 **Identifier resolution (before formula translation):** resolve every identifier in a
 metric/fact expression before translating SQL syntax. Lookup order:
@@ -203,6 +221,8 @@ Show:
 - Dimensions: {n}, Metrics: {n}, Formulas: {n}
 - Any formula translation notes (untranslatable expressions left as SQL passthrough)
 - Double aggregation formulas marked with 🔄 for user review
+- Filter labels: list boolean formula columns created from `labels = (filter)` entries
+- Verified queries: import as NLS Feedback TML after Model import (translate SV SQL to search tokens using column name mapping; log complex SQL as "manual review needed")
 
 ---
 

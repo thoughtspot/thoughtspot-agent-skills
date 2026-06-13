@@ -191,11 +191,16 @@ Extract:
    - Fully-qualified table reference (`DB.SCHEMA.TABLE`)
    - Table alias (explicit `ALIAS as DB.SCHEMA.TABLE`, or last segment of the name)
    - Primary key column(s) — marks this as a join target
-2. **Relationships block:** for each entry, record:
-   - Relationship name, from table alias, from column, to table alias, to column
+   - **Range constraint** (if present): `constraint <NAME> distinct range between <START> and <END> exclusive`
+2. **Relationships block:** for each entry, record name, from/to aliases and columns, and **join style**:
+   - **Equi-join:** `REL_NAME as FROM(COL) references TO(COL)` → `join_style: "equi"`
+   - **Composite equi-join:** multiple column pairs → `join_style: "equi"` with parallel column lists
+   - **Range join (BETWEEN):** `references TO(between START and END exclusive)` → `join_style: "range"`
+   - **ASOF join:** `references TO(COL1, ASOF COL2)` → `join_style: "asof"`
 3. **Dimensions block** (flat, all tables): for each entry (`TABLE.COL as view_alias.NAME [comment='...']`), record:
    - Source: table alias + column name
    - Display name: value of `comment='...'`, or title-cased NAME if no comment
+   - **Filter label**: `labels = (filter)` before `as` → `is_filter: true` (BOOLEAN expression)
 4. **Metrics block** (flat): for each entry, record:
    - Source: table alias + column name
    - Aggregation (from `AGG(...)`) or full expression
@@ -204,14 +209,18 @@ Extract:
    - Source: TABLE alias + fact name
    - Expression (SQL): the right-hand side
    - Synonyms + description: same mapping as dimensions
+   - **Filter label**: `labels = (filter)` → `is_filter: true`
    - Visibility: `PRIVATE` modifier if present
 6. **Extension JSON** (`with extension (CA='...')`): log but do not map to ThoughtSpot
+7. **Verified queries** (`ai_verified_queries (...)`): if present, parse each query
+   (name, question, sql). Store for NLS Feedback TML emission after Model import.
 
 Build an internal map:
-- `tables`: list of `{alias, fqn, primary_key}`
-- `relationships`: list of `{name, from_alias, from_col, to_alias, to_col}`
-- `columns`: all dimensions and metrics keyed by `(table_alias, col_name)`
-- `facts`: keyed by `(table_alias, fact_name)` → `{expression, comment, synonyms[], visibility}`
+- `tables`: list of `{alias, fqn, primary_key, range_constraint}`
+- `relationships`: list of `{name, from_alias, from_cols[], to_alias, to_cols[], join_style}`
+- `columns`: all dimensions and metrics keyed by `(table_alias, col_name)`, with `is_filter` flag
+- `facts`: keyed by `(table_alias, fact_name)` → `{expression, comment, synonyms[], visibility, is_filter}`
+- `verified_queries`: list of `{name, question, sql}`
 
 Identify the **fact table**: the table that never appears on the `TO` side of any relationship.
 
@@ -682,16 +691,39 @@ For each metric in the semantic view:
   ```
   unique count ( [TABLE_ID::col_name] )
   ```
-  ThoughtSpot rejects models where the same `column_id` appears more than once.
-  A COUNT_DISTINCT MEASURE on a column that is also an ATTRIBUTE dimension will
-  cause a **duplicate column_id** error — even though the `column_type` values differ.
-  Using a formula avoids this entirely since formulas don't carry a `column_id`.
+  ThoughtSpot rejects models where the same `column_id` appears more than once (I8).
+  This applies broadly: when two metrics use the same physical column with different
+  aggregations (e.g. SUM(SALARY) and AVG(SALARY)), only the first keeps `column_id`;
+  express the rest as formulas. See `../../shared/schemas/ts-model-conversion-invariants.md` (I8).
 - Complex expression → **read [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md) first**, then translate SQL to ThoughtSpot formula using the Snowflake → ThoughtSpot reverse-translation sections; add to `formulas[]`. Do not classify as untranslatable based on SQL syntax recognition alone — patterns like `NON ADDITIVE BY`, `OVER (PARTITION BY ...)`, and `PARTITION BY EXCLUDING` all have documented ThoughtSpot equivalents.
 - No native TS equivalent but warehouse has the SQL function → use a ThoughtSpot pass-through (`sql_*_op`). **Scalar** pass-throughs (`sql_string_op`, `sql_int_op`, `sql_double_op`, etc.) are row-level and reliable — use freely. **Aggregate** pass-throughs (`sql_*_aggregate_op`) interact with TS query-time grouping — always flag for review. See `../../shared/schemas/ts-model-conversion-invariants.md` (PT1).
 - Untranslatable (confirmed after consulting reference) → omit and log in report
 
 **Model name:** `{semantic_view_name}` (or user-specified). Do not add a `TEST_SV_` or
 other prefix — see `../../shared/schemas/ts-model-conversion-invariants.md` (N1).
+
+**Range joins** (`join_style: "range"`): generate `on` with `>=` and `<`:
+```yaml
+on: "[FROM::COL] >= [TO::START] and [FROM::COL] < [TO::END]"
+```
+
+**ASOF joins** (`join_style: "asof"`): equi columns use `=`; ASOF column uses `>=`.
+
+**Composite equi-joins**: `"[FROM::COL1] = [TO::COL1] and [FROM::COL2] = [TO::COL2]"`.
+
+**Filter labels** (`is_filter: true`): create as boolean formula columns (ATTRIBUTE):
+```yaml
+formulas:
+- id: "formula_{name}"
+  name: "{name}"
+  expr: "if ( [TABLE::COL] >= 90000 ) then true else false"
+  properties:
+    column_type: ATTRIBUTE
+```
+
+**Verified queries**: after successful Model import, generate NLS Feedback TML from
+the `verified_queries` list. Translate SV SQL to search tokens using the column name
+mapping. Complex SQL (subqueries, CTEs) → log as "manual review needed".
 
 **CRITICAL — Never normalise names from API responses.** Names that came from
 `TS_EXPORT_TML` (join names, column names, table names) or from import response GUIDs
