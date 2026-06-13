@@ -88,7 +88,7 @@ View constructs are not parsed or translated to ThoughtSpot. The full gap analys
 | GAP-08 | Range joins / ASOF joins | MEDIUM | None | → BL-018 sub-item 1 (TS supports range joins) |
 | GAP-10 | Filters on logical tables | MEDIUM | None | → BL-018 sub-item 2 (model filters) |
 | GAP-13 | Window metrics referencing other metrics | MEDIUM | BL-003 | **Done** (2026-06-13) |
-| GAP-05 | Verified queries → Spotter instructions | LOW | None |
+| GAP-05 | Verified queries → NLS Feedback TML | MEDIUM | None | → BL-018 sub-item 4 (direct mapping exists) |
 | GAP-06 | Custom instructions → `data_model_instructions` | LOW | None |
 | GAP-07 | Table synonyms | LOW | None |
 | GAP-09 | Private facts/metrics | LOW | None |
@@ -882,10 +882,63 @@ analysis, but ThoughtSpot **does** have the necessary mechanisms:
    Model TML as a `model_tables[]` entry (same as a regular table).
 4. **Worked example** — Add a worked example showing a subquery SV → SQL View + Model.
 
+#### Sub-item 4: Verified queries → NLS Feedback TML (implements GAP-05)
+
+The gap analysis says "no direct TS equivalent" for `ai_verified_queries`. This is wrong —
+ThoughtSpot's NLS Feedback TML (`nls_feedback:` with `feedback[]` entries) is the direct
+equivalent. Both are question→search mappings that train the AI layer.
+
+**Snowflake `ai_verified_queries`:**
+```sql
+ai_verified_queries (
+  'What is total revenue?' : 'SELECT SUM(amount) FROM sales',
+  'Revenue by region'      : 'SELECT region, SUM(amount) FROM sales GROUP BY region'
+)
+```
+
+**ThoughtSpot NLS Feedback TML equivalent:**
+```yaml
+guid: "{model_guid}"
+nls_feedback:
+  feedback:
+  - id: "1"
+    type: REFERENCE_QUESTION
+    access: GLOBAL
+    feedback_phrase: "What is total revenue?"
+    search_tokens: "sum [Amount]"
+    rating: UPVOTE
+    display_mode: UNDEFINED
+    chart_type: KPI
+  - id: "2"
+    type: REFERENCE_QUESTION
+    access: GLOBAL
+    feedback_phrase: "Revenue by region"
+    search_tokens: "sum [Amount] [Region]"
+    rating: UPVOTE
+    display_mode: CHART_MODE
+    chart_type: COLUMN
+```
+
+**Translation steps:**
+1. Parse each verified query's question text → `feedback_phrase`
+2. Parse the SQL query's SELECT columns and map to ThoughtSpot column names using
+   the column mapping already built during conversion → `search_tokens`
+3. Infer `chart_type` from query shape: single aggregate → `KPI`; aggregate + group by → `COLUMN`/`BAR`;
+   date group by → `LINE`; two measures → `SCATTER`
+4. Emit as `REFERENCE_QUESTION` entries with `rating: UPVOTE`, `access: GLOBAL`
+5. Import as a separate TML payload after the Model import succeeds (feedback entries
+   reference Model columns — columns must exist first)
+
+**Constraint:** Every column in `search_tokens` must exist on the Model at import time
+(verified — silently dropped otherwise). The column mapping from Step 8/9 provides
+the name resolution.
+
+Schema reference: `agents/shared/schemas/thoughtspot-feedback-tml.md`
+
 ### Files affected
 
-- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — Step 4 (parse), Step 7 (joins), new filter step, Step 6 (SQL View generation for subquery SVs)
-- `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` — range join rules, filter mapping rules
-- `docs/sv-to-ts-gap-analysis.md` — correct GAP-08 and GAP-10 assessments
+- `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — Step 4 (parse), Step 7 (joins), new filter step, Step 6 (SQL View generation for subquery SVs), new post-import step for feedback TML
+- `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` — range join rules, filter mapping rules, verified query translation rules
+- `docs/sv-to-ts-gap-analysis.md` — correct GAP-05, GAP-08, and GAP-10 assessments
 - `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` — mirror changes
 - `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror changes
