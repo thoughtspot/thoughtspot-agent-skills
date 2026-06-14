@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-14
-- feat: BL-024 — row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) now translate via tiered decision tree instead of unconditional omit
+- feat: BL-024 — row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) now translate via tiered decision tree instead of unconditional omit; ts-convert-from-tableau bumped to v1.10.0
 - chore: retire Cursor runtime — delete `agents/cursor/` (14 .mdc rules, SETUP.md, install scripts), remove all Cursor references from validators, pre-commit hook, rules, README, backlog, and auditor; closes BL-017
 - docs: add data-blend-to-model shared reference — two-datasource Tableau blend → single ThoughtSpot model with LEFT_OUTER join worked example
 
