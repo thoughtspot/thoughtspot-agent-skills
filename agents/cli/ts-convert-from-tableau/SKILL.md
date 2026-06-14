@@ -181,8 +181,8 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
 | **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
-| **Row-offset (native)** | Table calc with recoverable intent → native TS function | `INDEX() <= N` (Top-N filter intent → `rank()` + query set); `INDEX()` display numbering when sort is `Field` with a date → `rank()` |
-| **Row-offset (pass-through)** | Table calc with recoverable sort → answer-level SQL | `INDEX()` (→ `ROW_NUMBER`), `LOOKUP()` (→ `LAG`/`LEAD`), `FIRST()`/`LAST()` standalone (→ `FIRST_VALUE`/`LAST_VALUE`), `SIZE()` (→ `COUNT(*) OVER`) — **only when `<table-calc>` addressing yields an unambiguous sort/partition** ⚑ flag PT1 |
+| **Row-offset (native)** | Table calc with recoverable intent → native TS function | `INDEX() <= N` (Top-N filter → `rank()` + query set); `INDEX()` display → `rank()`; `LOOKUP(-N)` → `moving_sum(N,N)`; `LOOKUP(+N)` → `moving_sum` subtraction; `FIRST()` → `first_value()`; `LAST()` → `last_value()` — **all use native TS functions, work with all column types** |
+| **Row-offset (pass-through)** | `SIZE()` only → answer-level `sql_int_aggregate_op("COUNT(*) OVER()")` | `SIZE()` — only row-offset that still requires SQL pass-through ⚑ flag PT1 |
 | **Untranslatable** | No ThoughtSpot equivalent — will be omitted | `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` **when addressing is ambiguous** (CellInPane, multi-dim Table, or no shelf sort); `PREVIOUS_VALUE` (true recursion — not the string-aggregation technique); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
@@ -267,8 +267,8 @@ Audit: {workbook_name}
   │ Cumulative              {N}     {%}   RUNNING_SUM   │
   │ Moving                  {N}     {%}   WINDOW_SUM    │
   │ Pass-through            {N}     {%}   DENSE_RANK    │
-  │ Row-offset (native)     {N}     {%}   INDEX≤N→rank  │
-  │ Row-offset (pass-thru)  {N}     {%}   INDEX→ROW_NUM │
+  │ Row-offset (native)     {N}     {%}   LAG→moving_sum│
+  │ Row-offset (pass-thru)  {N}     {%}   SIZE→COUNT(*) │
   │ Parameter ref (auto)    {N}     {%}   static list   │
   │ Parameter ref (query)   {N}     {%}   SQL lookup    │
   │ Geospatial (omit+log)   {N}     {%}   MAKEPOINT     │
@@ -294,7 +294,8 @@ Audit: {workbook_name}
   Geospatial:           {N} formula(s) — spatial funcs omitted; lat/lon cols migrated as attributes
   Deferred sets:        {N} (set controls/actions — flagged for manual creation)
   SQL-lookup params:    {N} — need warehouse connection at migration time
-  Pass-through formulas require SQL Passthrough Functions enabled.
+  Pass-through formulas (DENSE_RANK, SIZE, etc.) require SQL Passthrough Functions enabled.
+  Row-offset native formulas (LAG, LEAD, FIRST, LAST, INDEX) use native TS functions — no pass-through needed.
 
   Data Blending (resolve federated IDs to datasource captions for display):
   ┌──────────────────────────────────────────────────────┐
@@ -1271,16 +1272,17 @@ Formula translation rules: use `tableau-formula-translation.md`.
   2. **Native rank** — `INDEX()` used for display row numbering where `ordering_type` is
      `Field` with a single date/continuous dimension → `rank ( [measure] , 'asc' )`.
 
-  3. **Gated pass-through** — sort/partition is unambiguously recoverable from the
-     `<table-calc>` addressing (Step 3f) + worksheet shelf (Step 9b):
-     - `INDEX()` → answer-level `sql_int_aggregate_op ( "ROW_NUMBER() OVER (ORDER BY {0})" , [sort_col] )`
-     - `LOOKUP(agg, N)` where N > 0 → `sql_*_aggregate_op ( "LEAD({0}, N) OVER (ORDER BY {1})" , [measure] , [sort_col] )`
-     - `LOOKUP(agg, N)` where N < 0 → `sql_*_aggregate_op ( "LAG({0}, abs(N)) OVER (ORDER BY {1})" , [measure] , [sort_col] )`
-     - `FIRST()` standalone → `sql_*_aggregate_op ( "FIRST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )`
-     - `LAST()` standalone → `sql_*_aggregate_op ( "LAST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )`
-     - `SIZE()` → `sql_int_aggregate_op ( "COUNT(*) OVER (PARTITION BY {0})" , [partition_col] )`
-     - All pass-throughs are **answer-level only** (in `answer.formulas[]`, not model `formulas[]`).
-     - ⚑ Always flag for review (PT1): admin-enabled, dialect-specific, unvalidated.
+  3. **Native window functions** — sort is unambiguously recoverable from the
+     `<table-calc>` addressing (Step 3f) + worksheet shelf (Step 9b). Uses native
+     ThoughtSpot functions (no SQL pass-through, works with all column types):
+     - `INDEX()` → `rank ( sum ( [measure] ) , 'asc' )` (ranks by value, not row position — acceptable)
+     - `LOOKUP(agg, N)` where N < 0 (LAG) → `moving_sum ( [measure] , abs(N) , abs(N) , [sort_col] )`
+     - `LOOKUP(agg, 1)` (LEAD 1) → `moving_sum ( [measure] , 0 , 1 , [sort_col] ) - sum ( [measure] )`
+     - `LOOKUP(agg, N)` where N > 1 (LEAD N) → `moving_sum ( [measure] , 0 , N , [sort_col] ) - moving_sum ( [measure] , 0 , N-1 , [sort_col] )`
+     - `FIRST()` standalone → `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
+     - `LAST()` standalone → `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
+     - `SIZE()` → `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` ⚑ flag PT1 (only row-offset needing pass-through)
+     - All are **answer-level only** (in `answer.formulas[]`, not model `formulas[]`).
 
   4. **Omit + log** — addressing is ambiguous (`ordering_type='CellInPane'`, multi-dim
      `Table`, or no deterministic shelf sort). Log: `"[func]() — addressing context is
@@ -2007,9 +2009,10 @@ Proceed?
 Tiers are the Step A3 set: Native, LOD, Cumulative, Moving, Pass-through, Row-offset
 (native), Row-offset (pass-through), Parameter ref, Untranslatable. Show `⚠ … OMITTED`
 for every untranslatable formula (and its dropped `columns[]` entry), `⚙ … pass-through`
-for every formula needing SQL Passthrough (including row-offset pass-throughs), and
-`↻ … row-offset (native)` for row-offset formulas translated to `rank()` — so the
-un-migratable and caveated items are flagged here, up front, for the user to weigh.
+for every formula needing SQL Passthrough (SIZE pass-through only — LAG/LEAD/FIRST/LAST/INDEX
+now use native TS functions), and `↻ … row-offset (native)` for row-offset formulas
+translated to native functions (`moving_sum`, `first_value`, `last_value`, `rank`) — so
+the un-migratable and caveated items are flagged here, up front, for the user to weigh.
 **Always include the Sets section when the workbook has sets** (per the MANDATORY set-review
 rule in Step 5b) — set conversions are semantic reinterpretations, so the user must confirm
 each matches intent before import.
@@ -2893,7 +2896,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.10.0 | 2026-06-14 | Add row-offset table-calc translation (BL-024): tiered decision tree for INDEX/LOOKUP/FIRST/LAST/SIZE — native rank/Top-N, gated pass-through, or omit based on `<table-calc>` addressing recoverability. New Step 3f extracts addressing context from TWB XML. |
+| 1.10.0 | 2026-06-14 | Add row-offset table-calc translation (BL-024): tiered decision tree for INDEX/LOOKUP/FIRST/LAST/SIZE — native rank/Top-N, native window functions (`moving_sum`, `first_value`, `last_value`, `rank`), or omit based on `<table-calc>` addressing recoverability. New Step 3f extracts addressing context from TWB XML. Live-verified 2026-06-15: SQL pass-through `ORDER BY` fails for DATE/numeric columns; replaced with native TS functions that work for all column types. |
 | 1.9.1 | 2026-06-12 | **Fix static query-set `search_query` token order** (v1.9.0 follow-up, now live-verified). A static (fixed-N) Top-N query set's search is **`top N [dimension] [measure]`** — anchor dimension FIRST, then measure — not `[measure] [dimension]`. Verified against an exported set "Static Top 10" on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). Also corrected the static-form `config` defaults to the verified values: `hide_excluded_query_values: false` (shows an "Others" remainder bucket) + `group_excluded_query_values: "Others"`, with a note that hide/show is a display choice. Dropped the "static-form export not yet captured" caveat — it's now ground-truthed. Added the verified static export to `thoughtspot-sets-tml.md`. (Dynamic form unchanged.) |
 | 1.9.0 | 2026-06-12 | **Top-N/Bottom-N sets → ThoughtSpot query sets (BL-009 Phase 2b).** Replace Phase-2b deferral with a verified translation: Tableau `<group>` whose `<groupfilter>` tree contains `function='end'` → `cohort_type: ADVANCED`, `cohort_grouping_type: COLUMN_BASED` cohort, in **one of two forms by `count`**: (a) **dynamic** (parameter-driven N, `count='[Parameters].[X]'`) — embedded answer with a rank formula (`rank(sum(measure),'desc'/'asc')` for top/bottom) + a parameter-filter formula (`[formula_rank] <= [<alias>::<param>]`), N read from the migrated model parameter (live-verified ground truth); (b) **static** (fixed N, literal `count='N'`) — a plain `search_query: "top N [measure] [dimension]"` / `"bottom N …"` keyword search, no formulas (the `top N` keyword form is correct for fixed N — not wrong). Detection rules: `end='top'` → `top N`/`'desc'`; `end='bottom'` → `bottom N`/`'asc'`. Both emission templates added (Section 5b). **Stepped range → `list_config`:** a Tableau `<range granularity='N' .../>` parameter enumerates min→max by step → `list_config` (NOT `range_config` which loses the step); a count parameter for a Top-N set must use `list_config`. Import order: model (with param) → cohort. Tier table + audit coverage table updated (Top-N moved from "Partial/deferred" → "Native/Set"). Dropped nuances (null-pad, conditional measure) flagged for review. All live-verified 2026-06-12 on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). New worked example `worked-examples/tableau/topn-set-to-query-set.md`. Schema `thoughtspot-sets-tml.md` updated with verified COLUMN_BASED pattern. |
 | 1.8.1 | 2026-06-12 | Add `FIRST()`/`LAST()` to the untranslatable table-calc detection (tier table + Audit classifier regex + translation step) — missing from the skill's own classifier though the mapping reference listed them; precedence note: untranslatable only standalone, not as `WINDOW_*`/`RUNNING_*` offset args. **AND recognise the comma-separated-list / string-concatenation technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE building one delimited string) → translate the *intent* to **`LISTAGG` string aggregation** (`sql_string_aggregate_op`, answer-level, ⚑ flag for review) or a table, instead of omitting; the feeder/`Last` scaffolding collapses into the one formula. Live-verified the LISTAGG answer-level formula on se-thoughtspot. New "String aggregation" section in `tableau-formula-translation.md`. **Plus set IN/OUT consumption (all live/UI-verified):** column sets ARE formula-referenceable — `IF [Set] THEN x END` → `sum ( if ( [Set] = 'in' ) then x else null )` or `sum_if ( [Set] = 'in' , x )` (or dimension-direct `sum_if ( [dim] in {…} , x )`); compare in-vs-out → group a measure by the cohort (`[Amount] [Set]`); filter on it for in/out. Pitfall: cohort **name must differ from its `in`/`out` labels** (a name==label collision fails "Search did not find"); emit distinct lowercase `in`/`out` labels; formula label must match exactly (case-sensitive). Added verified consumption answer TML (measures + group-by breakdown) to the worked example. (Found via TableauSetControlUseCases.) |

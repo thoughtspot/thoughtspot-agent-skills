@@ -210,16 +210,33 @@ Status: DONE.
 
 ---
 
-## #18 — Row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) — DONE (2026-06-14)
+## #18 — Row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) — VERIFIED (2026-06-15)
 
 BL-024. Tiered decision tree added: Top-N filter intent → native rank/query set;
-display numbering/offset/window-bound → answer-level `sql_*_aggregate_op` pass-through
-(gated on unambiguous `<table-calc>` addressing from Step 3f); ambiguous addressing →
-omit + log (unchanged). Affects 39 workbooks (INDEX), 21 (LOOKUP), 18 (FIRST/LAST/SIZE)
-in the 140-workbook corpus.
+display numbering/offset/window-bound → native ThoughtSpot window functions; ambiguous
+addressing → omit + log (unchanged). Affects 39 workbooks (INDEX), 21 (LOOKUP),
+18 (FIRST/LAST/SIZE) in the 140-workbook corpus.
 
 New Step 3f extracts `<table-calc>` addressing attributes (`ordering-type`, `ordering-field`,
 `<order>` children) from both column definitions and worksheet-level `<column-instance>`
-overrides. Formula translation reference updated with SQL templates and resolution table.
+overrides. Formula translation reference updated with native function templates.
 
-Status: DONE — NEEDS LIVE VERIFICATION against a workbook with INDEX/LOOKUP table calcs
+**Live verification (se-thoughtspot, 2026-06-15):**
+
+`sql_*_aggregate_op` with `ORDER BY` inside window functions fails for DATE and numeric
+columns due to ThoughtSpot GROUP BY generation mismatch (Snowflake error:
+`"column is not a valid group by expression"`). VARCHAR columns work, but most Tableau
+table calcs sort by date. Replaced SQL pass-through with native TS functions:
+
+| Function | Native TS formula | Verified |
+|---|---|---|
+| LAG(N) | `moving_sum([m], N, N, [sort])` | ✓ DATE, VARCHAR |
+| LEAD(1) | `moving_sum([m], 0, 1, [sort]) - sum([m])` | ✓ DATE, VARCHAR |
+| FIRST | `first_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
+| LAST | `last_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
+| INDEX | `rank(sum([m]), 'asc')` | ✓ DATE |
+| SIZE | `sql_int_aggregate_op("COUNT(*) OVER()")` | ✓ (no ORDER BY) |
+
+Liveboard GUID: `4253d395-bae3-4ea6-9ab7-76d90d7cb86c`, table: SUPERSTORE.
+
+Status: VERIFIED

@@ -523,12 +523,13 @@ Apply in order — stop at the first match:
 | # | Condition | Action | Tier |
 |---|---|---|---|
 | 1 | `INDEX() <= N` or `INDEX() = N` used as a **filter** (inside an IF/CASE that gates row visibility, or a set filter) | Route to existing Top-N / query-set machinery (SKILL.md Step 5b). Use `rank ( [measure] , 'desc' )` + filter `[rank] <= N`. | **Native** |
-| 2 | `INDEX()` used for **display row numbering** (standalone on a shelf, not filtering) AND `ordering_type` is `Rows` or `Field` with a known sort column | Emit answer-level: `sql_int_aggregate_op ( "ROW_NUMBER() OVER (ORDER BY {0})" , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
-| 3 | `LOOKUP(agg, N)` where N > 0 AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "LEAD({0}, N) OVER (ORDER BY {1})" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
-| 4 | `LOOKUP(agg, N)` where N < 0 AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "LAG({0}, abs(N)) OVER (ORDER BY {1})" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
-| 5 | `FIRST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "FIRST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
-| 6 | `LAST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "LAST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
-| 7 | `SIZE()` AND partition dims are known (from `ordering_type='Field'` + `order_fields`) | Emit answer-level: `sql_int_aggregate_op ( "COUNT(*) OVER (PARTITION BY {0})" , [partition_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
+| 2 | `INDEX()` used for **display row numbering** (standalone on a shelf, not filtering) AND `ordering_type` is `Rows` or `Field` with a known sort column | Emit answer-level: `rank ( sum ( [measure] ) , 'asc' )`. Note: ranks by measure value, not row position — acceptable for display numbering. | **Native** |
+| 3 | `LOOKUP(agg, N)` where N > 0 (forward offset = LEAD) AND sort column is known AND N = 1 | Emit answer-level: `moving_sum ( [measure] , 0 , 1 , [sort_col] ) - sum ( [measure] )` | **Native** |
+| 3b | `LOOKUP(agg, N)` where N > 1 (forward offset > 1) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , 0 , N , [sort_col] ) - moving_sum ( [measure] , 0 , N-1 , [sort_col] )` | **Native** |
+| 4 | `LOOKUP(agg, N)` where N < 0 (backward offset = LAG) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , abs(N) , abs(N) , [sort_col] )` | **Native** |
+| 5 | `FIRST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
+| 6 | `LAST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
+| 7 | `SIZE()` (unpartitioned) | Emit answer-level: `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` ⚑ flag PT1 | **Pass-through (SIZE only)** |
 | 8 | Any of the above but sort/partition is **not** recoverable (`ordering_type='CellInPane'`, or `ordering_type='Rows'`/`'Columns'` with no deterministic shelf sort, or `ordering_type='Table'` spanning multiple dims) | **Omit + log** (current behavior). Log message: `"[func]() — addressing context is ambiguous (ordering_type={type}); omit + log."` | **Omit** |
 
 ### Resolving the sort column from `<table-calc>` addressing
@@ -545,45 +546,58 @@ Given the `table_calc_addressing` entry (from Step 3f) and the worksheet shelf d
 | `Table` | Both Rows + Columns shelf dims in sequence. Only unambiguous for simple layouts (one dim on each); for complex multi-dim, Tier 8. |
 | `CellInPane` | Always ambiguous → Tier 8. |
 
-### SQL templates (Snowflake-flavored)
+### Native ThoughtSpot formula templates
 
 These are answer-level formulas. Use display-name column references (`[Sales]`), not
 `[TABLE::col]` model references.
 
 ```
-# INDEX() → ROW_NUMBER
-sql_int_aggregate_op ( "ROW_NUMBER() OVER (ORDER BY {0})" , [Order Date] )
+# INDEX() → rank (ranks by measure value — approximates row numbering)
+rank ( sum ( [Sales] ) , 'asc' )
 
-# LOOKUP(SUM([Sales]), -1) → LAG
-sql_int_aggregate_op ( "LAG({0}, 1) OVER (ORDER BY {1})" , [Sales] , [Order Date] )
+# LOOKUP(SUM([Sales]), -1) → LAG via moving_sum
+moving_sum ( [Sales] , 1 , 1 , [Order Date] )
 
-# LOOKUP(SUM([Sales]), 2) → LEAD
-sql_int_aggregate_op ( "LEAD({0}, 2) OVER (ORDER BY {1})" , [Sales] , [Order Date] )
+# LOOKUP(SUM([Sales]), -3) → LAG(3)
+moving_sum ( [Sales] , 3 , 3 , [Order Date] )
 
-# FIRST() → FIRST_VALUE
-sql_int_aggregate_op ( "FIRST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [Sales] , [Order Date] )
+# LOOKUP(SUM([Sales]), 1) → LEAD(1) via moving_sum minus current
+moving_sum ( [Sales] , 0 , 1 , [Order Date] ) - sum ( [Sales] )
 
-# LAST() → LAST_VALUE
-sql_int_aggregate_op ( "LAST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [Sales] , [Order Date] )
+# LOOKUP(SUM([Sales]), 2) → LEAD(2) via moving_sum difference
+moving_sum ( [Sales] , 0 , 2 , [Order Date] ) - moving_sum ( [Sales] , 0 , 1 , [Order Date] )
 
-# SIZE() → COUNT(*) OVER
-sql_int_aggregate_op ( "COUNT(*) OVER (PARTITION BY {0})" , [Category] )
+# FIRST() → first_value
+first_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
+
+# LAST() → last_value
+last_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
+
+# SIZE() → COUNT(*) OVER (pass-through — only row-offset that still uses sql_*_aggregate_op)
+sql_int_aggregate_op ( "COUNT(*) OVER ()" )
 ```
 
-When partition dimensions are known (from `<order>` children beyond the first), add
-`PARTITION BY` to the template:
-```
-sql_int_aggregate_op ( "ROW_NUMBER() OVER (PARTITION BY {0} ORDER BY {1})" , [Category] , [Order Date] )
-```
+### Why native functions, not SQL pass-through
 
-### Pass-through caveats (always log with the formula)
+Live-verified (se-thoughtspot, 2026-06-15): `sql_*_aggregate_op` with `ORDER BY` inside
+a window function fails for DATE and numeric columns due to a ThoughtSpot GROUP BY
+generation mismatch (Snowflake error: `"column is not a valid group by expression"`).
+VARCHAR columns work, but most Tableau table calcs sort by date.
 
-Every emitted pass-through MUST be accompanied by these standing caveats in the
-migration report:
-1. **Admin-enabled** — `sql_*_op` pass-through requires admin enablement on the ThoughtSpot instance
-2. **Dialect-specific** — the SQL is Snowflake-flavored; other warehouses need different syntax
-3. **Unvalidated** — ThoughtSpot does not validate pass-through SQL at import; verify values post-import
-4. **Answer-level only** — these are viz-scoped formulas, not model formulas; they don't participate in search/Spotter discovery
+Native ThoughtSpot functions (`moving_sum`, `first_value`, `last_value`, `rank`) handle
+all column types correctly — verified with DATE, VARCHAR, and INT64 ORDER BY columns.
+
+### Caveats for native row-offset formulas
+
+1. **`rank()` is not `ROW_NUMBER()`** — ties share a rank and the next rank is skipped
+   (1,1,3 not 1,2,3). Acceptable for display numbering; document the difference.
+2. **`moving_sum` LEAD formula** — the subtraction pattern
+   (`moving_sum(0,N) - moving_sum(0,N-1)`) is semantically correct but produces `null`
+   at the last N rows (no following rows). This matches Tableau's LOOKUP behavior.
+3. **Answer-level only** — these are viz-scoped formulas, not model formulas; they
+   don't participate in search/Spotter discovery.
+4. **SIZE() only** uses `sql_int_aggregate_op` — requires admin enablement for SQL
+   pass-through functions. All other row-offset formulas are fully native.
 
 ---
 
