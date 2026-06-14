@@ -181,7 +181,7 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
 | **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
-| **Row-offset (native)** | Table calc with recoverable intent → native TS function | `INDEX() <= N` (Top-N filter → `rank()` + query set); `INDEX()` display → `rank()`; `LOOKUP(-N)` → `moving_sum(N,N)`; `LOOKUP(+N)` → `moving_sum` subtraction; `FIRST()` → `first_value()`; `LAST()` → `last_value()` — **all use native TS functions, work with all column types** |
+| **Row-offset (native)** | Table calc with recoverable intent → native TS function | `INDEX() <= N` (Top-N filter → `rank()` + query set); `INDEX()` display → `rank()`; `LOOKUP(-N)` → `moving_sum(N,-N)`; `LOOKUP(+N)` → `moving_sum(-N,N)`; `LOOKUP(agg, FIRST())` → `first_value()`; `LOOKUP(agg, LAST())` → `last_value()`; bare `FIRST()`/`LAST()` standalone → omit + log (returns offset, not value) — **all native mappings use native TS functions, work with all column types** |
 | **Row-offset (pass-through)** | `SIZE()` only → answer-level `sql_int_aggregate_op("COUNT(*) OVER()")` | `SIZE()` — only row-offset that still requires SQL pass-through ⚑ flag PT1 |
 | **Untranslatable** | No ThoughtSpot equivalent — will be omitted | `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` **when addressing is ambiguous** (CellInPane, multi-dim Table, or no shelf sort); `PREVIOUS_VALUE` (true recursion — not the string-aggregation technique); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
@@ -212,9 +212,12 @@ recoverability — they are no longer unconditionally untranslatable.
    part of the moving/cumulative mapping (not standalone). Match `RUNNING_*`/`WINDOW_*` first.
 2. **As part of the string-aggregation CSV technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE
    building a delimited string) → translate intent to `LISTAGG` (see String aggregation section).
-3. **Standalone** (e.g. `LAST()=0`, or standalone `FIRST()`) → apply the Row-Offset Table
-   Calculations decision tree: emit `FIRST_VALUE`/`LAST_VALUE` pass-through if sort is
-   recoverable, else omit + log.
+3. **Inside `LOOKUP()`** (e.g. `LOOKUP(SUM([Sales]), FIRST())`) → the composed pattern
+   means "get value at first/last row" → `first_value` / `last_value` (tiers 5a/5b).
+4. **Standalone** (e.g. `LAST()==0`, `FIRST()+1`, or bare `FIRST()` on a shelf) →
+   Tableau `FIRST()`/`LAST()` return row *offsets*, not values. No direct TS equivalent.
+   If used for row numbering (`FIRST()+1`), approximate with `rank()` (tier 6b).
+   Otherwise omit + log (tiers 6a/6c).
 
 **Parameter references.** Detect `[Parameters].[...]` pattern — this is Tableau's
 cross-datasource parameter reference syntax. These formulas use translatable syntax
@@ -295,7 +298,8 @@ Audit: {workbook_name}
   Deferred sets:        {N} (set controls/actions — flagged for manual creation)
   SQL-lookup params:    {N} — need warehouse connection at migration time
   Pass-through formulas (DENSE_RANK, SIZE, etc.) require SQL Passthrough Functions enabled.
-  Row-offset native formulas (LAG, LEAD, FIRST, LAST, INDEX) use native TS functions — no pass-through needed.
+  Row-offset native formulas (LAG, LEAD, LOOKUP(agg,FIRST/LAST), INDEX) use native TS functions — no pass-through needed.
+  Bare FIRST()/LAST() standalone → omitted (returns offset, not value — no TS equivalent).
 
   Data Blending (resolve federated IDs to datasource captions for display):
   ┌──────────────────────────────────────────────────────┐
@@ -1278,8 +1282,11 @@ Formula translation rules: use `tableau-formula-translation.md`.
      - `INDEX()` → `rank ( sum ( [measure] ) , 'asc' )` (ranks by value, not row position — acceptable)
      - `LOOKUP(agg, N)` where N < 0 (LAG) → `moving_sum ( [measure] , abs(N) , -abs(N) , [sort_col] )`
      - `LOOKUP(agg, N)` where N > 0 (LEAD) → `moving_sum ( [measure] , -N , N , [sort_col] )`
-     - `FIRST()` standalone → `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
-     - `LAST()` standalone → `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
+     - `LOOKUP(agg, FIRST())` → `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
+     - `LOOKUP(agg, LAST())` → `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
+     - Bare `FIRST()` / `LAST()` standalone → **omit + log** (these return row *offsets* in
+       Tableau, not data values — `FIRST()` = distance-to-first-row, `LAST()` = distance-to-last-row;
+       no TS equivalent). Exception: `FIRST()+1` for row numbering → `rank()` approximation.
      - `SIZE()` → `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` ⚑ flag PT1 (only row-offset needing pass-through)
      - All are **answer-level only** (in `answer.formulas[]`, not model `formulas[]`).
      - **SQL pass-through alternative:** when exact SQL semantics are needed (e.g.,

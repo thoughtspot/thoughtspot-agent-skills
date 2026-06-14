@@ -526,8 +526,11 @@ Apply in order — stop at the first match:
 | 2 | `INDEX()` used for **display row numbering** (standalone on a shelf, not filtering) AND `ordering_type` is `Rows` or `Field` with a known sort column | Emit answer-level: `rank ( sum ( [measure] ) , 'asc' )`. Note: ranks by measure value, not row position — acceptable for display numbering. | **Native** |
 | 3 | `LOOKUP(agg, N)` where N > 0 (forward offset = LEAD) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , -N , N , [sort_col] )` | **Native** |
 | 4 | `LOOKUP(agg, N)` where N < 0 (backward offset = LAG) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , abs(N) , -abs(N) , [sort_col] )` | **Native** |
-| 5 | `FIRST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
-| 6 | `LAST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
+| 5a | `LOOKUP(agg, FIRST())` — "get value at first row" AND sort column is known | Emit answer-level: `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
+| 5b | `LOOKUP(agg, LAST())` — "get value at last row" AND sort column is known | Emit answer-level: `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
+| 6a | Bare `FIRST()` used as a **filter condition** (e.g. `IF FIRST() == 0 THEN`) — "am I the first row?" | No direct equivalent. Omit + log: `"FIRST() as row-position filter — no TS equivalent; consider rank()-based alternative."` | **Omit** |
+| 6b | Bare `FIRST()` used for **row numbering** or arithmetic (e.g. `FIRST() + 1`) | Route to tier 2 (rank-based numbering). `rank ( sum ( [measure] ) , 'asc' )` approximates position. | **Native (approx)** |
+| 6c | Bare `LAST()` standalone (e.g. `LAST() == 0`, `LAST()` on a shelf) | No direct equivalent. Omit + log: `"LAST() returns offset-to-end — no TS equivalent."` | **Omit** |
 | 7 | `SIZE()` (unpartitioned) | Emit answer-level: `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` ⚑ flag PT1 | **Pass-through (SIZE only)** |
 | 8 | Any of the above but sort/partition is **not** recoverable (`ordering_type='CellInPane'`, or `ordering_type='Rows'`/`'Columns'` with no deterministic shelf sort, or `ordering_type='Table'` spanning multiple dims) | **Omit + log** (current behavior). Log message: `"[func]() — addressing context is ambiguous (ordering_type={type}); omit + log."` | **Omit** |
 
@@ -570,11 +573,21 @@ moving_sum ( [Sales] , -1 , 1 , [Order Date] )
 # LOOKUP(SUM([Sales]), 2) → LEAD(2)
 moving_sum ( [Sales] , -2 , 2 , [Order Date] )
 
-# FIRST() → first_value
+# LOOKUP(SUM([Sales]), FIRST()) → "get value at first row" → first_value
 first_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
 
-# LAST() → last_value
+# LOOKUP(SUM([Sales]), LAST()) → "get value at last row" → last_value
 last_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
+
+# Bare FIRST() / LAST() — these return OFFSETS in Tableau, not values:
+#   FIRST() = rows-back-to-first (0 at row 1, -1 at row 2, -2 at row 3, ...)
+#   LAST()  = rows-forward-to-last (4 at row 1, 3 at row 2, ..., 0 at last row)
+# Common composed patterns:
+#   LOOKUP(agg, FIRST()) → first_value  (tiers 5a)
+#   LOOKUP(agg, LAST())  → last_value   (tier 5b)
+#   IF FIRST() == 0      → omit + log   (tier 6a — row-position filter)
+#   FIRST() + 1           → rank approx  (tier 6b — row numbering)
+#   Bare LAST()           → omit + log   (tier 6c — no TS equivalent)
 
 # SIZE() → COUNT(*) OVER (pass-through — only row-offset that still uses sql_*_aggregate_op)
 sql_int_aggregate_op ( "COUNT(*) OVER ()" )
