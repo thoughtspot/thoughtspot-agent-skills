@@ -267,10 +267,12 @@ Audit: {workbook_name}
   │ Cumulative              {N}     {%}   RUNNING_SUM   │
   │ Moving                  {N}     {%}   WINDOW_SUM    │
   │ Pass-through            {N}     {%}   DENSE_RANK    │
+  │ Row-offset (native)     {N}     {%}   INDEX≤N→rank  │
+  │ Row-offset (pass-thru)  {N}     {%}   INDEX→ROW_NUM │
   │ Parameter ref (auto)    {N}     {%}   static list   │
   │ Parameter ref (query)   {N}     {%}   SQL lookup    │
   │ Geospatial (omit+log)   {N}     {%}   MAKEPOINT     │
-  │ Untranslatable          {N}     {%}   LOOKUP        │
+  │ Untranslatable          {N}     {%}   INDEX(ambig)  │
   └──────────────────────────────────────────────────────┘
 
   Tableau Sets (top-level <group> elements — separate from calculated fields):
@@ -286,7 +288,7 @@ Audit: {workbook_name}
   Dashboards:           {N} (optional liveboard migration)
 
   ──────────────────────────────────────────────────
-  Migration coverage:   {(all except untranslatable) / total}%
+  Migration coverage:   {(all except untranslatable-ambiguous) / total}%
                          (all parameters auto-created — static or queried)
   Untranslatable:       {N} formula(s) — will be omitted
   Geospatial:           {N} formula(s) — spatial funcs omitted; lat/lon cols migrated as attributes
@@ -311,9 +313,13 @@ are auto-migratable: static params are created directly in the model TML; SQL-lo
 params are populated by querying the warehouse at migration time. The formula reference
 `[Parameters].[Name]` is rewritten to `[Name]` in both cases.
 
-If any formulas are classified as Untranslatable, list them:
+If any formulas are classified as Row-offset or Untranslatable, list them:
 
 ```
+  Row-offset formulas (translated via decision tree):
+    - {formula_name}: {tier} — {tableau_expr} → {ts_expr or "omit (ambiguous)"}
+    - ...
+
   Untranslatable formulas (will be omitted):
     - {formula_name}: {reason} — {expression excerpt}
     - ...
@@ -1998,10 +2004,12 @@ Proceed?
   file  — write the TMLs to /tmp/ts_tableau_mig/output/{workbook_name}/ without importing
 ```
 
-Tiers are the Step A3 set: Native, LOD, Cumulative, Moving, Pass-through, Parameter ref,
-Untranslatable. Show `⚠ … OMITTED` for every untranslatable formula (and its dropped
-`columns[]` entry) and `⚙ … pass-through` for every formula needing SQL Passthrough — so
-the un-migratable and caveated items are flagged here, up front, for the user to weigh.
+Tiers are the Step A3 set: Native, LOD, Cumulative, Moving, Pass-through, Row-offset
+(native), Row-offset (pass-through), Parameter ref, Untranslatable. Show `⚠ … OMITTED`
+for every untranslatable formula (and its dropped `columns[]` entry), `⚙ … pass-through`
+for every formula needing SQL Passthrough (including row-offset pass-throughs), and
+`↻ … row-offset (native)` for row-offset formulas translated to `rank()` — so the
+un-migratable and caveated items are flagged here, up front, for the user to weigh.
 **Always include the Sets section when the workbook has sets** (per the MANDATORY set-review
 rule in Step 5b) — set conversions are semantic reinterpretations, so the user must confirm
 each matches intent before import.
