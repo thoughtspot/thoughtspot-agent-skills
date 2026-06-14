@@ -282,11 +282,11 @@ Audit: {workbook_name}
   SQL-lookup params:    {N} — need warehouse connection at migration time
   Pass-through formulas require SQL Passthrough Functions enabled.
 
-  Data Blending:
+  Data Blending (resolve federated IDs to datasource captions for display):
   ┌──────────────────────────────────────────────────────┐
   │ Primary Datasource   Secondary DS(s)   Link Columns  │
   ├──────────────────────────────────────────────────────┤
-  │ {primary_name}       {secondary_name}  {col1}, {col2}│
+  │ {ds_caption}         {ds_caption}      {col1}, {col2}│
   └──────────────────────────────────────────────────────┘
   Blended datasources:  {N} of {total} — will merge into single model(s)
   Blend relationships:  {M} total
@@ -823,66 +823,74 @@ When `blend_graph` is non-empty, datasources connected by blend relationships pr
            component.append(node)
            queue.extend(adjacency.get(node, set()) - visited)
 
-       # Primary = the datasource that appears as `source` in blend_graph (never only as target)
-       primaries = [d for d in component if d in blend_graph]
-       primary = primaries[0] if primaries else component[0]
+       # Primary = a datasource that appears as `source` but NEVER as any `target`
+       all_targets = {t['target_ds'] for edges in blend_graph.values() for t in edges}
+       roots = [d for d in component if d in blend_graph and d not in all_targets]
+       primary = roots[0] if roots else component[0]
        model_groups.append({'primary': primary, 'members': component})
    ```
 
-2. **For each model group**, generate a single model TML that contains:
+2. **Build the datasource → table mapping.** Each Tableau datasource has a primary physical
+   table (the first `<relation>` element or the relation named in the `<datasource>` caption).
+   Map each datasource's federated ID to its ThoughtSpot Table TML `name` from Step 5a. Also
+   map each federated ID to its Tableau `caption` attribute (the display name shown in Tableau).
+
+   ```python
+   ds_id_to_table = {}    # federated.xxx → ThoughtSpot table name (from Step 5a)
+   ds_id_to_caption = {}  # federated.xxx → Tableau datasource display name
+   for ds_id, ds_info in datasources.items():
+       ds_id_to_table[ds_id] = ds_info['primary_table_name']   # TS table name
+       ds_id_to_caption[ds_id] = ds_info['caption']             # Tableau caption
+   ```
+
+   For multi-table datasources (internal joins within one datasource), the blend link
+   column determines which table is the join anchor. Resolve the link column from Step 3e
+   to its owning table via the column-to-table mapping already built in Step 3b.
+
+3. **For each model group**, generate a single model TML that contains:
    - All `model_tables[]` entries from every member datasource (tables + SQL views)
    - All `columns[]` from every member datasource (with `column_id` prefixed by the
      correct table name: `TABLE_NAME::col_name`)
    - All `formulas[]` from every member datasource
    - **Inline joins** derived from `blend_graph` column mappings (see below)
 
-3. **Generate blend joins** for each `datasource-relationship` in the group:
+4. **Generate blend joins** — iterate ALL edges in the connected component, not just
+   the primary's. This handles star topologies (A→B, A→C) and transitive blends (A→B, B→C):
 
    ```python
-   for target_info in blend_graph.get(primary_ds, []):
-       target_ds = target_info['target_ds']
-       col_maps = target_info['column_mappings']
+   for member_ds in model_group['members']:
+       for target_info in blend_graph.get(member_ds, []):
+           target_ds = target_info['target_ds']
+           col_maps = target_info['column_mappings']
 
-       # Find the table names for source and target datasources
-       # (the ThoughtSpot table name from the Table TML, not the Tableau datasource ID)
-       src_table = datasource_to_table_name[primary_ds]   # from Step 5a
-       tgt_table = datasource_to_table_name[target_ds]
+           src_table = ds_id_to_table[member_ds]
+           tgt_table = ds_id_to_table[target_ds]
 
-       # Build the join ON clause — multi-column if multiple mappings
-       on_parts = []
-       for cm in col_maps:
-           on_parts.append(f"[{src_table}::{cm['source_col']}] = [{tgt_table}::{cm['target_col']}]")
-       on_clause = " and ".join(on_parts)
+           on_parts = []
+           for cm in col_maps:
+               on_parts.append(f"[{src_table}::{cm['source_col']}] = [{tgt_table}::{cm['target_col']}]")
+           on_clause = " and ".join(on_parts)
 
-       # Add join to the secondary table's model_tables entry
-       join_entry = {
-           'with': src_table,
-           'on': on_clause,
-           'type': 'LEFT_OUTER',        # Tableau blends are always LEFT JOIN
-           'cardinality': 'MANY_TO_ONE', # default; override to MANY_TO_MANY if both sides are fact tables
-       }
+           # Append join to the TARGET table's model_tables entry (secondary joins to source)
+           target_model_table = model_tables_by_name[tgt_table]
+           target_model_table.setdefault('joins', []).append({
+               'with': src_table,
+               'on': on_clause,
+               'type': 'LEFT_OUTER',
+               'cardinality': 'MANY_TO_ONE',
+           })
    ```
 
    **Cardinality heuristic:** if the secondary datasource has no dimension-only columns
    (all columns are measures or aggregated), it is likely a fact table → use `MANY_TO_MANY`.
-   Otherwise default to `MANY_TO_ONE`. Surface the choice in the review checkpoint (Step 6)
+   Otherwise default to `MANY_TO_ONE`. Surface the choice in the review checkpoint (Step 7)
    so the user can override.
 
-4. **Datasources not in any blend** continue to produce one model per datasource as before.
+5. **Datasources not in any blend** continue to produce one model per datasource as before.
 
-5. **Column name conflicts:** when merging, if two datasources define columns with the same
+6. **Column name conflicts:** when merging, if two datasources define columns with the same
    display name but different semantics, disambiguate by prefixing with the datasource
    display name (e.g. `Orders Revenue` vs `Targets Revenue`). Log every rename.
-
-6. **Star topologies** (one primary → multiple secondaries): when `blend_graph[primary_ds]`
-   has more than one entry, each secondary datasource gets its own `joins[]` entry on the
-   secondary's `model_tables` entry. All joins are `LEFT_OUTER`. The joins are independent —
-   each secondary joins to the primary, not to each other.
-
-7. **Transitive blends** (A blends to B, B blends to C): these are chained, not star. Build a
-   join chain: A → B → C. The `blend_graph` connected-component logic groups them, and each
-   pairwise relationship generates its own join. ThoughtSpot navigates the join path
-   transitively.
 
 The `model_tables[]` section references both regular tables (from Step 5a) and SQL
 Views (from Step 5c) — both are referenced by `name` in the same way.
@@ -1166,12 +1174,17 @@ Formula translation rules: use `tableau-formula-translation.md`.
   `sum ( [ORDERS::Sales] ) - sum ( [TARGETS::Target] )` because both `ORDERS` and `TARGETS`
   are `model_tables[]` entries in the same model.
 
-  **Reference resolution:** Tableau formulas that reference another datasource use the format
-  `[datasource_caption].[column_name]`. During formula translation:
-  1. Strip the datasource caption prefix
-  2. Resolve the column name against the merged model's `columns[]` (it will exist because
+  **Reference resolution:** Tableau formulas reference other datasources in two formats:
+  - **By federated ID:** `[federated.xxx].[column_name]` (the internal XML format)
+  - **By caption:** `[Datasource Caption].[column_name]` (the display format)
+
+  During formula translation:
+  1. Detect the datasource prefix (`[federated.xxx]` or `[Caption]`) using the
+     `ds_id_to_caption` mapping from Step 5b — match against both IDs and captions
+  2. Strip the prefix, leaving just `[column_name]`
+  3. Resolve the column name against the merged model's `columns[]` (it will exist because
      the secondary datasource's columns were included in the merge)
-  3. Prefix with the correct `TABLE_NAME::` for the ThoughtSpot model reference
+  4. Prefix with the correct `TABLE_NAME::` for the ThoughtSpot model reference
 
   **If a cross-datasource formula references a datasource NOT in the blend group** (shouldn't
   happen in well-formed workbooks, but possible in hand-edited TWBs): log a warning and omit

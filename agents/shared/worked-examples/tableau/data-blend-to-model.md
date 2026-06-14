@@ -38,11 +38,6 @@ blend_graph = {
 ```yaml
 model:
   name: Orders
-  tables:
-  - name: ORDERS
-    fqn: ORDERS
-  connection:
-    name: Snowflake_Warehouse
 
   model_tables:
   - name: ORDERS

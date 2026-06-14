@@ -99,8 +99,10 @@ and merging them indiscriminately produces wrong joins and broken formula refere
 - **Blend-connected datasources** → datasources linked by `<datasource-relationships>` in the
   workbook XML produce a single merged model. The primary datasource's tables and columns
   form the base; secondary datasources' tables join in via `LEFT_OUTER` inline joins derived
-  from the blend's `<column-mapping>` link fields. This is the standard blend-to-model
-  mapping; see SKILL.md Step 3e (extraction) and Step 5b (model generation).
+  from the blend's `<column-mapping>` link fields. **Join placement:** the join is declared on
+  the **secondary** table's `model_tables[]` entry, with `with:` pointing to the primary.
+  This is the standard blend-to-model mapping; see SKILL.md Step 3e (extraction) and Step 5b
+  (model generation).
   - A datasource with no worksheet of its own (e.g. a targets source that exists only to feed
     a blend) folds into the model that uses it rather than becoming a standalone, unused model.
 - **A cross-datasource formula** that references another datasource resolves within the
