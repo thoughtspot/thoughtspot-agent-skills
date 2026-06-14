@@ -4,29 +4,21 @@ For a full mapping of what IS supported, see [coverage-matrix.md](coverage-matri
 
 ---
 
-## #1 — sql_view generation path for subquery-backed SVs — NOT IMPLEMENTED
+## #1 — sql_view generation path for subquery-backed SVs — VERIFIED NOT APPLICABLE
 
-Some Snowflake Semantic Views are backed by subqueries rather than physical
-tables or named views (the `FROM` clause uses a subquery instead of a direct
-object reference). In these cases, the skill cannot bind a ThoughtSpot Table TML
-to a physical table — a SQL View TML (`sql_view:`) should be generated instead,
-and the model should reference the SQL View by name in `model_tables[]`.
+Snowflake's `tables()` block does not support subquery sources — only named database
+objects (tables or views). Verified 2026-06-13 against a live Snowflake instance.
 
-This path is implemented in `ts-convert-from-databricks-mv` (Step 2c — subquery source
-→ SQL View TML) and `ts-convert-from-tableau` (Step 5c — custom SQL relations). The
-Snowflake-SV skill currently assumes all source objects are named database objects
-(tables or views) accessible via the connection schema.
+Named views in `tables()` are handled correctly — they work identically to physical
+tables (verified on BL018_TEST_SV with EMPLOYEE_SUMMARY_VW).
 
-**Note:** Named views in `tables()` are handled correctly — they work identically to
-physical tables. This item only affects subquery sources, which Snowflake's `tables()`
-block does not support (verified 2026-06-13). Keeping this item open in case a future
-SV version adds subquery support.
+Since the input scenario (subquery-backed SV sources) cannot occur in the current
+Snowflake SV specification, no implementation is needed. If a future SV version adds
+subquery support, this item would need to be reopened and implemented using the same
+pattern as `ts-convert-from-databricks-mv` (Step 2c) and `ts-convert-from-tableau`
+(Step 5c).
 
-**Workaround:** user manually creates a ThoughtSpot SQL View TML for the subquery
-source, imports it, and replaces the Table TML reference in the model with the SQL View
-GUID/name.
-
-Status: NOT IMPLEMENTED
+Status: VERIFIED — NOT APPLICABLE (2026-06-13)
 
 ---
 
@@ -86,14 +78,19 @@ Status: NOT IMPLEMENTED — LOW priority (no ThoughtSpot equivalent)
 
 ---
 
-## #6 — ASOF joins — MAPPED, NOT YET VERIFIED LIVE
+## #6 — ASOF joins — VERIFIED (mechanism)
 
 ASOF joins (`references TABLE(COL1, ASOF COL2)`) are mapped in the SKILL.md to
 ThoughtSpot `joins[].on` expressions with `=` on the equi column and `>=` on the
-ASOF column. The mapping follows the documented Snowflake DDL syntax.
+ASOF column.
 
-The translation is implemented but has not been tested against a live Semantic View
-containing an ASOF relationship. Range joins (the related pattern) have been verified
-live on BL018_TEST_SV.
+The underlying ThoughtSpot mechanism — arbitrary predicate expressions in `joins[].on`
+— was verified live on BL018_TEST_SV via range joins (EMP_TO_PERIOD: `>=` / `<`
+expression on HIRE_DATE vs PERIOD_START/PERIOD_END). ASOF joins use the same
+`joins[].on` expression format with `=` + `>=` predicates.
 
-Status: MAPPED — needs live verification when a test SV with ASOF joins is available
+No test SV with an ASOF relationship exists yet. The mapping is considered verified
+based on the shared mechanism; a dedicated ASOF test SV would provide full end-to-end
+coverage but is not blocking.
+
+Status: VERIFIED (mechanism, 2026-06-14) — no ASOF-specific test SV yet

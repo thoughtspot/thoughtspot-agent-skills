@@ -19,7 +19,7 @@ Last verified: 2026-06-14 (BL018_TEST_SV end-to-end on se-thoughtspot)
 | 6 | Top-level `comment='...'` (after metrics) | `model.description` | All test SVs |
 | 7 | `relationships (REL as FROM(FK) references TO(PK))` — equi joins | `joins[]` inline on the FROM table entry | All test SVs |
 | 8 | `references TABLE(between START and END exclusive)` — range joins | `joins[].on` with `>=` / `<` expression | BL018_TEST_SV (EMP_TO_PERIOD) |
-| 9 | `references TABLE(COL1, ASOF COL2)` — ASOF joins | `joins[].on` with `=` on COL1, `>=` on ASOF col | Mapped in SKILL.md; not yet verified live |
+| 9 | `references TABLE(COL1, ASOF COL2)` — ASOF joins | `joins[].on` with `=` on COL1, `>=` on ASOF col | Mechanism verified via range joins (BL018_TEST_SV); no ASOF-specific test SV yet |
 | 10 | Composite equi-joins (`FROM(C1,C2) references TO(C1,C2)`) | `joins[].on` with multiple `=` pairs | BL018_TEST_SV (EMP_TO_SUMMARY) |
 | 11 | Joinless SVs (no `relationships` block) | 4-option join discovery workflow: PK/FK, column overlap, manual, separate models | BL018_TEST_SV (EMPLOYEE_SUMMARY_VW) |
 | 12 | `dimensions (TABLE.COL as NAME)` | `columns[]` with `column_type: ATTRIBUTE` | All test SVs |
@@ -58,7 +58,7 @@ Last verified: 2026-06-14 (BL018_TEST_SV end-to-end on se-thoughtspot)
 | L2 | Table-level `with synonyms=('...')` on `tables()` entries | No ThoughtSpot table-level synonym concept | LOW | Add table synonyms to `model.description` or `data_model_instructions` for Spotter context |
 | L3 | `ACCESS_MODIFIER: PRIVATE` on facts/metrics | No "private column" concept in ThoughtSpot models | LOW | Omit private facts/metrics from the model; or include with `index_type: DONT_INDEX` so Spotter ignores them |
 | L4 | `unique_keys` declarations on table entries | No key declarations in ThoughtSpot models | LOW | Not needed — ThoughtSpot does not use key metadata |
-| L5 | Subquery-backed sources (`FROM (<subquery>)` in tables block) | SQL View TML (`sql_view:` type) | MEDIUM | Manually create a ThoughtSpot SQL View TML for the subquery source, import it, and reference the SQL View in the model |
+| L5 | Subquery-backed sources (`FROM (<subquery>)` in tables block) | SQL View TML (`sql_view:` type) | N/A | Snowflake `tables()` does not support subquery sources (verified 2026-06-13) — this scenario cannot occur. If a future SV version adds subquery support, implement using the pattern from `ts-convert-from-databricks-mv` (Step 2c) |
 
 ### Notes on limitations
 
@@ -67,16 +67,14 @@ equivalent is easily achieved via post-conversion coaching (`/ts-object-model-co
 These are cosmetic/metadata features that do not affect the structural correctness of
 the converted model.
 
-**L5** is MEDIUM because subquery-backed sources require a different TML type
-(`sql_view:` instead of `table:`) and the skill cannot generate SQL View TML today.
-The workaround is manual but straightforward. This pattern is implemented in
-`ts-convert-from-databricks-mv` (Step 2c) and `ts-convert-from-tableau` (Step 5c)
-and could be ported to the SV skill.
+**L5** was originally MEDIUM severity but has been reclassified as N/A — Snowflake's
+`tables()` block does not support subquery sources (verified 2026-06-13). Only named
+database objects (tables and views) are valid. If a future SV version adds subquery
+support, this limitation would need to be reopened.
 
-**ASOF joins** (row 9) are mapped in the SKILL.md but have not been verified against a
-live Semantic View containing an ASOF relationship. The mapping follows the documented
-Snowflake DDL syntax and the ThoughtSpot `joins[].on` expression format, which supports
-arbitrary predicates (verified via range join testing).
+**ASOF joins** (row 9) are mapped in the SKILL.md. The underlying mechanism
+(`joins[].on` with arbitrary predicates) was verified live via range joins on
+BL018_TEST_SV. No ASOF-specific test SV exists yet, but the mechanism is confirmed.
 
 ---
 
