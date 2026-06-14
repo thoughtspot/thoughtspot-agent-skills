@@ -19,7 +19,7 @@ Last verified: 2026-06-14 (BL018_TEST_SV end-to-end on se-thoughtspot)
 | 6 | Top-level `comment='...'` (after metrics) | `model.description` | All test SVs |
 | 7 | `relationships (REL as FROM(FK) references TO(PK))` — equi joins | `joins[]` inline on the FROM table entry | All test SVs |
 | 8 | `references TABLE(between START and END exclusive)` — range joins | `joins[].on` with `>=` / `<` expression | BL018_TEST_SV (EMP_TO_PERIOD) |
-| 9 | `references TABLE(COL1, ASOF COL2)` — ASOF joins | `joins[].on` with `=` on COL1, `>=` on ASOF col | Mechanism verified via range joins (BL018_TEST_SV); no ASOF-specific test SV yet |
+| 9 | `references TABLE(COL1, ASOF COL2)` — ASOF joins | `joins[].on` with `=` on COL1, `>=` on ASOF col | BL018_TEST_SV (EMP_TO_RATE: DEPARTMENT + asof EFFECTIVE_DATE) |
 | 10 | Composite equi-joins (`FROM(C1,C2) references TO(C1,C2)`) | `joins[].on` with multiple `=` pairs | BL018_TEST_SV (EMP_TO_SUMMARY) |
 | 11 | Joinless SVs (no `relationships` block) | 4-option join discovery workflow: PK/FK, column overlap, manual, separate models | BL018_TEST_SV (EMPLOYEE_SUMMARY_VW) |
 | 12 | `dimensions (TABLE.COL as NAME)` | `columns[]` with `column_type: ATTRIBUTE` | All test SVs |
@@ -72,9 +72,10 @@ the converted model.
 database objects (tables and views) are valid. If a future SV version adds subquery
 support, this limitation would need to be reopened.
 
-**ASOF joins** (row 9) are mapped in the SKILL.md. The underlying mechanism
-(`joins[].on` with arbitrary predicates) was verified live via range joins on
-BL018_TEST_SV. No ASOF-specific test SV exists yet, but the mechanism is confirmed.
+**ASOF joins** (row 9) verified end-to-end on BL018_TEST_SV (2026-06-14) with the
+`EMP_TO_RATE` relationship: `EMPLOYEES(DEPARTMENT, HIRE_DATE) references
+SALARY_RATES(DEPARTMENT, asof EFFECTIVE_DATE)`. ThoughtSpot model import and
+round-trip confirmed.
 
 ---
 
@@ -85,4 +86,4 @@ BL018_TEST_SV. No ASOF-specific test SV exists yet, but the mechanism is confirm
 | BIRD_SUPERHEROS_SV | DEMO.SEMANTIC_TESTING | Basic tables, equi joins, dimensions, simple + complex metrics, window functions, synonyms |
 | DUNDER_MIFFLIN_SALES_INVENTORY | DEMO.SEMANTIC_TESTING | Multi-value synonyms, per-column descriptions, table comments, semi-additive (closing/opening), `unique count`, `concat()` |
 | COMPANY_WORKFORCE_SV | AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST | Facts, metric-on-fact (`[formula_<id>]`), double aggregation (`group_count`/`group_sum`), duplicate `column_id`, `if()` parenthesization |
-| BL018_TEST_SV | AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST | Range joins, composite equi-joins, filter labels, I8 detection, verified queries → NLS Feedback, view-backed sources, joinless table discovery |
+| BL018_TEST_SV | AGENT_SKILLS.IDENTIFIER_RESOLUTION_TEST | Range joins, ASOF joins, composite equi-joins, filter labels, I8 detection, verified queries → NLS Feedback, view-backed sources, joinless table discovery |

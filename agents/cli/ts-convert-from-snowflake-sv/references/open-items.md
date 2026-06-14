@@ -78,19 +78,16 @@ Status: NOT IMPLEMENTED — LOW priority (no ThoughtSpot equivalent)
 
 ---
 
-## #6 — ASOF joins — VERIFIED (mechanism)
+## #6 — ASOF joins — VERIFIED
 
 ASOF joins (`references TABLE(COL1, ASOF COL2)`) are mapped in the SKILL.md to
 ThoughtSpot `joins[].on` expressions with `=` on the equi column and `>=` on the
 ASOF column.
 
-The underlying ThoughtSpot mechanism — arbitrary predicate expressions in `joins[].on`
-— was verified live on BL018_TEST_SV via range joins (EMP_TO_PERIOD: `>=` / `<`
-expression on HIRE_DATE vs PERIOD_START/PERIOD_END). ASOF joins use the same
-`joins[].on` expression format with `=` + `>=` predicates.
+Verified end-to-end on BL018_TEST_SV (2026-06-14):
+- Added `SALARY_RATES` table with `EFFECTIVE_DATE` column
+- Added ASOF relationship: `EMP_TO_RATE as EMPLOYEES(DEPARTMENT,HIRE_DATE) references SALARY_RATES(DEPARTMENT, asof EFFECTIVE_DATE)`
+- Model imported successfully with join expression: `(([EMPLOYEES::DEPARTMENT] = [SALARY_RATES::DEPARTMENT]) AND ([EMPLOYEES::HIRE_DATE] >= [SALARY_RATES::EFFECTIVE_DATE]))`
+- Round-trip confirmed: exported model preserves the compound predicate
 
-No test SV with an ASOF relationship exists yet. The mapping is considered verified
-based on the shared mechanism; a dedicated ASOF test SV would provide full end-to-end
-coverage but is not blocking.
-
-Status: VERIFIED (mechanism, 2026-06-14) — no ASOF-specific test SV yet
+Status: VERIFIED (2026-06-14)
