@@ -212,31 +212,27 @@ Last verified: 2026-06-15 (BL-024 row-offset table calcs on se-thoughtspot)
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
 | L9 | Set actions (`<action>` on a set) | No interactive set membership changes in TS | Omit + log |
-| ~~L10~~ | ~~`DATETIME(expr)` cast~~ | ~~No native `to_datetime`~~ | Moved to Mapped (#111): `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — verified on se-thoughtspot |
-| L11 | All SQL pass-through functions (RANK partitioned, DENSE_RANK, SIZE, REGEXP, UPPER/LOWER, PROPER, ASCII, CHAR) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review |
-| L12 | `rank()` tie handling | TS `rank()` is competition ranking (1,1,3) — no `ROW_NUMBER()` equivalent for unique ranks | Document the difference |
-| L13 | Geospatial formulas (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) | No spatial data types or constructors | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
-| L14 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |
-| L15 | Liveboard layout coordinate system | Exact ThoughtSpot grid units not fully verified | Open-items #6 |
-| L16 | Inline answer TML in liveboard | Nested `answer:` blocks inside `visualizations[]` not confirmed | Open-items #5 |
-| L17 | NOTE_TILE structure | Exact TML structure not fully verified | Open-items #7 |
-| L18 | Multi-dashboard → tabs | Liveboard tabs TML structure not implemented | Open-items #9 — deferred to v1.1.0; creates separate liveboards |
+| L10 | All SQL pass-through functions (RANK partitioned, DENSE_RANK, SIZE, REGEXP, UPPER/LOWER, PROPER, ASCII, CHAR) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review |
+| L11 | `rank()` tie handling | TS `rank()` is competition ranking (1,1,3) — no `ROW_NUMBER()` equivalent for unique ranks | Document the difference |
+| L12 | Geospatial formulas (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) | No spatial data types or constructors | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
+| L13 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |
+| L14 | Liveboard layout coordinate system | Exact ThoughtSpot grid units not fully verified | Open-items #6 |
+| L15 | Inline answer TML in liveboard | Nested `answer:` blocks inside `visualizations[]` not confirmed | Open-items #5 |
+| L16 | NOTE_TILE structure | Exact TML structure not fully verified | Open-items #7 |
+| L17 | Multi-dashboard → tabs | Liveboard tabs TML structure not implemented | Open-items #9 — deferred to v1.1.0; creates separate liveboards |
 
 ### LOW — Cosmetic or edge-case
 
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
-| L19 | SQL-lookup parameter values | ThoughtSpot `list_config` is static; no live-query capability | Point-in-time snapshot; document staleness |
-| L20 | `RUNNING_COUNT` | No `cumulative_count` function | Approximate with `cumulative_sum(1, [sort_attr])` at answer level |
-| ~~L21~~ | ~~`DATENAME('month', d)`~~ | ~~No month-name function~~ | Moved to Mapped (#107): `month([date])` returns month name natively |
-| L22 | Bitmap/image zones | Images not migratable to liveboard tiles | Skipped |
-| L23 | Web/extension zones | No equivalent | Skipped |
-| L24 | Flipboard/Story interaction | Flip navigation lost | Content salvaged; interaction dropped |
-| L25 | Legend/color zones | TS draws its own legends | Skipped |
-| ~~L26~~ | ~~`WINDOW_STDEV/PERCENTILE/COUNT/MEDIAN`~~ | ~~No windowed model-formula equivalent~~ | Moved to Mapped (#108–109): `moving_*` for sliding windows, `sql_*_aggregate_op` pass-through for others |
-| L27 | `DATEDIFF('week', ...)` boundary semantics | Week-start semantics differ between Tableau and TS | Flag per workbook for manual verification |
-| L28 | Manual group value snapshot | `categorical-bin` values from TWB authoring time may not exist in current data | Flag as data-fidelity limitation |
-| ~~L29~~ | ~~`max([date])` in formula filters~~ | ~~Cannot compute dynamically~~ | Moved to Mapped (#110): `group_aggregate ( max ( [date] ) , {} , {} )` returns global max date; or query set for "rows where date = max" |
+| L18 | SQL-lookup parameter values | ThoughtSpot `list_config` is static; no live-query capability | Point-in-time snapshot; document staleness |
+| L19 | `RUNNING_COUNT` | No `cumulative_count` function | Approximate with `cumulative_sum(1, [sort_attr])` at answer level |
+| L20 | Bitmap/image zones | Images not migratable to liveboard tiles | Skipped |
+| L21 | Web/extension zones | No equivalent | Skipped |
+| L22 | Flipboard/Story interaction | Flip navigation lost | Content salvaged; interaction dropped |
+| L23 | Legend/color zones | TS draws its own legends | Skipped |
+| L24 | `DATEDIFF('week', ...)` boundary semantics | Week-start semantics differ between Tableau and TS | Flag per workbook for manual verification |
+| L25 | Manual group value snapshot | `categorical-bin` values from TWB authoring time may not exist in current data | Flag as data-fidelity limitation |
 
 ### Notes on limitations
 
@@ -249,7 +245,7 @@ The skill detects them, omits them cleanly, and logs them in the audit report.
 **L7–L8** (bare FIRST/LAST) are distinct from LOOKUP(agg, FIRST/LAST) (#64–65) — see
 the decision tree in `tableau-formula-translation.md` tiers 5a–6c.
 
-**L11** (pass-through functions) — SQL Passthrough Functions are **enabled by default** in
+**L10** (pass-through functions) — SQL Passthrough Functions are **enabled by default** in
 ThoughtSpot. This is only a limitation if an admin has explicitly turned it off in
 Admin > Search & SpotIQ. All pass-through formulas are flagged with `PT1` in the audit
 report for visibility. Native alternatives are used wherever possible — SQL pass-through
