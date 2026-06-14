@@ -754,10 +754,90 @@ Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{TABLE_NAME}.tabl
 
 Generate one `.model.tml` per datasource the workbook **actually uses** — don't blindly
 merge independent datasources, but also don't materialize an unused model for every
-datasource. **Exception:** a genuine **cross-datasource blend** (a formula referencing
-another datasource) is realized as **one** model by co-locating the link keys in a SQL view
-and joining the other datasource in (see the join/blend rules in 5b and
-`tableau-tml-rules.md` "One model per Tableau datasource").
+datasource. **Blend-aware model grouping** (requires `blend_graph` from Step 3e):
+
+When `blend_graph` is non-empty, datasources connected by blend relationships produce a
+**single merged model** instead of separate models. The merge procedure:
+
+1. **Build connected components** from `blend_graph`. Each connected component (a primary
+   datasource and all its direct or transitive secondaries) becomes one model. Use the
+   primary datasource's display name as the model name.
+
+   ```python
+   # Build undirected adjacency from blend_graph for connected-component discovery
+   adjacency = {}
+   for src, targets in blend_graph.items():
+       for t in targets:
+           adjacency.setdefault(src, set()).add(t['target_ds'])
+           adjacency.setdefault(t['target_ds'], set()).add(src)
+
+   visited = set()
+   model_groups = []  # each group: {'primary': ds_id, 'members': [ds_id, ...]}
+
+   for ds_id in adjacency:
+       if ds_id in visited:
+           continue
+       # BFS to find connected component
+       component = []
+       queue = [ds_id]
+       while queue:
+           node = queue.pop(0)
+           if node in visited:
+               continue
+           visited.add(node)
+           component.append(node)
+           queue.extend(adjacency.get(node, set()) - visited)
+
+       # Primary = the datasource that appears as `source` in blend_graph (never only as target)
+       primaries = [d for d in component if d in blend_graph]
+       primary = primaries[0] if primaries else component[0]
+       model_groups.append({'primary': primary, 'members': component})
+   ```
+
+2. **For each model group**, generate a single model TML that contains:
+   - All `model_tables[]` entries from every member datasource (tables + SQL views)
+   - All `columns[]` from every member datasource (with `column_id` prefixed by the
+     correct table name: `TABLE_NAME::col_name`)
+   - All `formulas[]` from every member datasource
+   - **Inline joins** derived from `blend_graph` column mappings (see below)
+
+3. **Generate blend joins** for each `datasource-relationship` in the group:
+
+   ```python
+   for target_info in blend_graph.get(primary_ds, []):
+       target_ds = target_info['target_ds']
+       col_maps = target_info['column_mappings']
+
+       # Find the table names for source and target datasources
+       # (the ThoughtSpot table name from the Table TML, not the Tableau datasource ID)
+       src_table = datasource_to_table_name[primary_ds]   # from Step 5a
+       tgt_table = datasource_to_table_name[target_ds]
+
+       # Build the join ON clause — multi-column if multiple mappings
+       on_parts = []
+       for cm in col_maps:
+           on_parts.append(f"[{src_table}::{cm['source_col']}] = [{tgt_table}::{cm['target_col']}]")
+       on_clause = " and ".join(on_parts)
+
+       # Add join to the secondary table's model_tables entry
+       join_entry = {
+           'with': src_table,
+           'on': on_clause,
+           'type': 'LEFT_OUTER',        # Tableau blends are always LEFT JOIN
+           'cardinality': 'MANY_TO_ONE', # default; override to MANY_TO_MANY if both sides are fact tables
+       }
+   ```
+
+   **Cardinality heuristic:** if the secondary datasource has no dimension-only columns
+   (all columns are measures or aggregated), it is likely a fact table → use `MANY_TO_MANY`.
+   Otherwise default to `MANY_TO_ONE`. Surface the choice in the review checkpoint (Step 6)
+   so the user can override.
+
+4. **Datasources not in any blend** continue to produce one model per datasource as before.
+
+5. **Column name conflicts:** when merging, if two datasources define columns with the same
+   display name but different semantics, disambiguate by prefixing with the datasource
+   display name (e.g. `Orders Revenue` vs `Targets Revenue`). Log every rename.
 
 The `model_tables[]` section references both regular tables (from Step 5a) and SQL
 Views (from Step 5c) — both are referenced by `name` in the same way.
