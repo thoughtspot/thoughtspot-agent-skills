@@ -156,7 +156,7 @@ Save the list of TWB paths. Process each file through Steps A2–A4 independentl
 
 ## Step A2 — Parse TWB XML (Audit Mode)
 
-Run the same extraction as Step 3 (3a through 3d) on each TWB file. Do NOT skip any
+Run the same extraction as Step 3 (3a through 3e) on each TWB file. Do NOT skip any
 datasource type. For extracts, resolve the underlying source (Step 3b) and report it as
 migratable via that source; mark as "Extract — no underlying source" only when none
 resolves.
@@ -281,6 +281,16 @@ Audit: {workbook_name}
   Deferred sets:        {N} (set-ops/actions — flagged for manual creation)
   SQL-lookup params:    {N} — need warehouse connection at migration time
   Pass-through formulas require SQL Passthrough Functions enabled.
+
+  Data Blending:
+  ┌──────────────────────────────────────────────────────┐
+  │ Primary Datasource   Secondary DS(s)   Link Columns  │
+  ├──────────────────────────────────────────────────────┤
+  │ {primary_name}       {secondary_name}  {col1}, {col2}│
+  └──────────────────────────────────────────────────────┘
+  Blended datasources:  {N} of {total} — will merge into single model(s)
+  Blend relationships:  {M} total
+  Star topologies:      {S} (1 primary → 2+ secondaries)
   ──────────────────────────────────────────────────
 ```
 
