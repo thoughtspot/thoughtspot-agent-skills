@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-14
+- feat: BL-024 — row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) translate via native TS window functions (`moving_sum`, `first_value`, `last_value`, `rank`) instead of SQL pass-through (which fails for DATE/numeric ORDER BY columns); ts-convert-from-tableau v1.10.0; live-verified 2026-06-15
 - chore: retire Cursor runtime — delete `agents/cursor/` (14 .mdc rules, SETUP.md, install scripts), remove all Cursor references from validators, pre-commit hook, rules, README, backlog, and auditor; closes BL-017
 - docs: add data-blend-to-model shared reference — two-datasource Tableau blend → single ThoughtSpot model with LEFT_OUTER join worked example
 

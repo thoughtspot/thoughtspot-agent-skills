@@ -271,8 +271,13 @@ cumulative_sum ( [FACT::AMOUNT] , [DATE_DIM::ORDER_DATE] )
 
 `moving_{func}(measure, start, end, attr1 [, attr2, ...])`
 
-- `start` / `end`: window frame bounds. Positive = preceding rows, 0 = current row, negative = following rows
+- `start`: positive = N rows preceding (backward), negative = N rows following (forward)
+- `end`: positive = N rows following (forward), negative = N rows preceding (backward)
 - `attr`: ORDER BY columns
+- **Opposite-sign convention:** `start` and `end` use opposite sign conventions.
+  `start=2, end=0` means "from 2 preceding to current." `start=1, end=-1` means
+  "exactly the row 1 position back" (single-row window). This is how ThoughtSpot
+  stores the offsets internally — verified via TML round-trip export (2026-06-15).
 
 | Function |
 |---|
@@ -281,9 +286,33 @@ cumulative_sum ( [FACT::AMOUNT] , [DATE_DIM::ORDER_DATE] )
 | `moving_max` |
 | `moving_min` |
 
+**Common patterns:**
+
 ```
-moving_sum ( [FACT::AMOUNT] , 2 , 0 , [DATE_DIM::ORDER_DATE] )   # 2-period trailing sum
+# Trailing window (2-period trailing sum)
+moving_sum ( [FACT::AMOUNT] , 2 , 0 , [DATE_DIM::ORDER_DATE] )
+
+# LAG(1) — single row 1 position back
+moving_sum ( [FACT::AMOUNT] , 1 , -1 , [DATE_DIM::ORDER_DATE] )
+
+# LAG(3) — single row 3 positions back
+moving_sum ( [FACT::AMOUNT] , 3 , -3 , [DATE_DIM::ORDER_DATE] )
+
+# LEAD(1) — single row 1 position forward
+moving_sum ( [FACT::AMOUNT] , -1 , 1 , [DATE_DIM::ORDER_DATE] )
+
+# LEAD(2) — single row 2 positions forward
+moving_sum ( [FACT::AMOUNT] , -2 , 2 , [DATE_DIM::ORDER_DATE] )
 ```
+
+**Offset summary (verified 2026-06-15, se-thoughtspot):**
+
+| Intent | start | end | Window |
+|---|---|---|---|
+| Trailing N rows + current | N | 0 | N preceding → current |
+| LAG(N) — single row N back | N | -N | exactly row N back |
+| LEAD(N) — single row N forward | -N | N | exactly row N forward |
+| Full window (N back to M forward) | N | M | N preceding → M following |
 
 Sort column (4th arg) must be a physical `[TABLE::column]` reference. Formula column
 names fail with "Search did not find" errors. Verified 2026-05-28.
@@ -398,9 +427,11 @@ Used when ThoughtSpot's native functions don't cover the required expression.
 | `sql_double_op(template, args...)` | DOUBLE | Double dimension |
 | `sql_bool_op(template, args...)` | BOOLEAN | Boolean dimension |
 | `sql_date_op(template, args...)` | DATE | Date dimension |
+| `sql_date_time_op(template, args...)` | DATETIME | Datetime dimension (verified 2026-06-15) |
 | `sql_string_aggregate_op(template, args...)` | VARCHAR | String aggregate/metric |
 | `sql_int_aggregate_op(template, args...)` | INTEGER | Integer aggregate/metric |
 | `sql_number_aggregate_op(template, args...)` | NUMBER | Numeric aggregate/metric |
+| `sql_date_time_aggregate_op(template, args...)` | DATETIME | Datetime aggregate/metric |
 
 ```
 # Initcap with replace
@@ -420,6 +451,81 @@ sql_string_aggregate_op ( "listagg({0}, ' | ') within group (order by {0})" , [P
 ```
 
 **If any argument is a parameter reference (`[Param Name]`), the formula is untranslatable.**
+
+### Window functions inside `sql_*_aggregate_op`
+
+`sql_*_aggregate_op` can embed SQL window functions (`LAG`, `LEAD`, `ROW_NUMBER`,
+`RANK`, `DENSE_RANK`, etc.). Two rules apply when the query is aggregated
+(i.e., the search includes both dimension and measure columns):
+
+1. **ORDER BY expression must match GROUP BY.** ThoughtSpot generates GROUP BY from
+   the search query's columns. The window function's `ORDER BY` must resolve to the
+   same expression. For date columns with bucketing (e.g., `[date].monthly` in the
+   search query), use the matching ThoughtSpot date function in ORDER BY:
+
+   | Search date aggregate | Matching ORDER BY expression |
+   |---|---|
+   | `[date].monthly` | `start_of_month ( [date] )` |
+   | `[date].quarterly` | `start_of_quarter ( [date] )` |
+   | `[date].yearly` | `start_of_year ( [date] )` |
+   | `[date].weekly` | `start_of_week ( [date] )` |
+   | `[date]` (no bucketing) | `[date]` |
+
+   A raw `[date]` in ORDER BY when the search uses `.monthly` produces
+   `"column is not a valid group by expression"` — the raw column doesn't match
+   the `DATE_TRUNC` in GROUP BY.
+
+2. **All search dimensions must appear in PARTITION BY.** Every non-measure column
+   in the `search_query` generates a GROUP BY clause. The window function must
+   include all of them in `PARTITION BY`, or Snowflake rejects the unmatched
+   GROUP BY column.
+
+Verified 2026-06-15 on se-thoughtspot (Snowflake). Example:
+```
+# LEAD with monthly date bucketing and region partition
+sql_int_aggregate_op ( "LEAD(SUM({0}), 1) OVER (PARTITION BY {1} ORDER BY {2})" , [Sales] , [Region] , start_of_month ( [Order Date] ) )
+# search_query must include: [Order Date].monthly [Region] [Sales] [formula]
+```
+
+### `group_aggregate` wrapping for pass-through window functions
+
+Wrapping a `sql_*_aggregate_op` window function in `group_aggregate` resolves
+multiple limitations at once:
+
+1. **Mandatory partition columns** — the PARTITION BY column is guaranteed to be in
+   the GROUP BY via `query_groups() + {col}`, even if the user's search doesn't
+   include it. Without wrapping, the formula breaks when the partition column is
+   absent from the search.
+2. **Aggregate function conflicts** — ThoughtSpot's SQL generator can misplace
+   aggregate expressions inside window functions. `group_aggregate` isolates the
+   aggregation context.
+3. **HAVING clause compatibility** — bare pass-through window functions can conflict
+   with ThoughtSpot-generated HAVING clauses. The wrapper prevents this.
+4. **Drill-down support** — wrapped formulas remain valid when the user drills into
+   additional dimensions, because `query_groups()` dynamically includes them.
+
+**Pattern — partitioned rank:**
+```
+# Without wrapping — breaks if [Account Region] is not in the search
+sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [Account Region] , [Account Revenue] )
+
+# With group_aggregate wrapping — always works
+group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [Account Region] , [Account Revenue] ) , query_groups ( ) + { [Account Region] } , query_filters ( ) )
+```
+
+The `query_groups() + {col}` grouping ensures the partition column is always
+present in the GROUP BY. `query_filters()` passes through all user-applied filters.
+
+**When to wrap:** wrap any `sql_*_aggregate_op` window function that has a
+`PARTITION BY` clause referencing a column that may not be in the user's search.
+Unwrapped formulas are valid only when the partition column is guaranteed to be in
+every search that uses the formula.
+
+**Prefer native functions** (`moving_sum` for LAG/LEAD, `first_value`/`last_value`,
+`rank`) when they cover the use case — they handle all column types without
+GROUP BY matching concerns. Use `sql_*_aggregate_op` window functions (with
+`group_aggregate` wrapping) when native functions can't express the required
+semantics (e.g., `DENSE_RANK`, partitioned rank, `ROW_NUMBER`).
 
 ---
 

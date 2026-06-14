@@ -1316,7 +1316,7 @@ as the SV coverage matrix:
 
 **Source:** Sigma-vs-ThoughtSpot Tableau-migration comparison over a 140-workbook corpus (2026-06-14)
 **Affects:** ts-convert-from-tableau (primarily); pattern applies to any converter that translates table calcs
-**Status:** Not started
+**Status:** Implemented (2026-06-14) — tiered decision tree in SKILL.md + formula translation reference. Needs live verification against workbooks with INDEX/LOOKUP calcs.
 **Related:** BL-009 (Tableau mapping gaps), BL-020/BL-023 (coverage matrix)
 
 ### Problem

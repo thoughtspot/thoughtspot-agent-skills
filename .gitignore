@@ -41,6 +41,9 @@ build/
 /tmp/
 *.tmp
 
+# Tableau Hyper engine logs (created by tableauhyperapi in cwd)
+hyperd.log
+
 # Local test data
 .data/
 

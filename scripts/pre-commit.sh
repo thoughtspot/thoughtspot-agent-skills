@@ -112,6 +112,12 @@ if echo "$STAGED" | grep -qE '(agents/coco-snowsight/|agents/SYNC-DEBT\.md)'; th
   run_check "mirror sync"         "tools/validate/check_mirror_sync.py"
 fi
 
+# Coverage matrix — every ts-convert-* skill must have references/coverage-matrix.md
+# Runs when a converter skill is touched or the validator itself changes
+if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/validate/check_coverage_matrix\.py)'; then
+  run_check "coverage matrix"     "tools/validate/check_coverage_matrix.py --root $REPO_ROOT"
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then

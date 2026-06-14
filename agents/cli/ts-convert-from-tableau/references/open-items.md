@@ -207,3 +207,42 @@ Top-N row numbering. Added a prevalence note to SKILL.md Step 5b: when INDEX() i
 ranking/Top-N intent (e.g. `INDEX() <= 10`), recommend `rank()` or answer-level `top N`
 keyword as a substitute. Log message added.
 Status: DONE.
+
+---
+
+## #18 — Row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) — VERIFIED (2026-06-15)
+
+BL-024. Tiered decision tree added: Top-N filter intent → native rank/query set;
+display numbering/offset/window-bound → native ThoughtSpot window functions; ambiguous
+addressing → omit + log (unchanged). Affects 39 workbooks (INDEX), 21 (LOOKUP),
+18 (FIRST/LAST/SIZE) in the 140-workbook corpus.
+
+New Step 3f extracts `<table-calc>` addressing attributes (`ordering-type`, `ordering-field`,
+`<order>` children) from both column definitions and worksheet-level `<column-instance>`
+overrides. Formula translation reference updated with native function templates.
+
+**Live verification (se-thoughtspot, 2026-06-15):**
+
+Primary approach: native TS functions (no SQL pass-through needed):
+
+| Function | Native TS formula | Verified |
+|---|---|---|
+| LAG(N) | `moving_sum([m], N, -N, [sort])` | ✓ DATE, VARCHAR |
+| LEAD(N) | `moving_sum([m], -N, N, [sort])` | ✓ DATE, VARCHAR |
+| FIRST | `first_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
+| LAST | `last_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
+| INDEX | `rank(sum([m]), 'asc')` | ✓ DATE |
+| SIZE | `sql_int_aggregate_op("COUNT(*) OVER()")` | ✓ (no ORDER BY) |
+
+`moving_sum` offset convention: `(N, -N)` = single row N positions back (LAG),
+`(-N, N)` = single row N positions forward (LEAD).
+
+SQL pass-through with dates also works when: (1) ORDER BY date expression matches
+the search query's date aggregate (e.g., `start_of_month([date])` with `.monthly`),
+and (2) all shelf GROUP BY columns are in PARTITION BY. Example:
+`sql_int_aggregate_op("LEAD(SUM({0}), 1) OVER (PARTITION BY {1} ORDER BY {2})", [Sales], [Region], start_of_month([Order Date]))`
+with search `[Sales] [formula] [Order Date].monthly [Region]`.
+
+Liveboard GUID: `4253d395-bae3-4ea6-9ab7-76d90d7cb86c`, table: SUPERSTORE.
+
+Status: VERIFIED
