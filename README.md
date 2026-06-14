@@ -98,13 +98,13 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 
 **Conversion** — move semantic models between ThoughtSpot and external platforms
 
-| Skill | What it does |
-|---|---|
-| `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) |
-| `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) |
-| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) |
-| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) |
-| `ts-convert-from-tableau` | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration |
+| Skill | What it does | Coverage |
+|---|---|---|
+| `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | — |
+| `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) |
+| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | — |
+| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | — |
+| `ts-convert-from-tableau` | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
