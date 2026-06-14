@@ -94,19 +94,21 @@ collapse multiple datasources into a single model** just because they share tabl
 at the same database — each has its own join topology, calculated fields, and column aliases,
 and merging them indiscriminately produces wrong joins and broken formula references.
 
-**Two deliberate exceptions:**
+**Three deliberate exceptions:**
 - **COLLECTION datasources** → one model per underlying table.
-- **A genuine cross-datasource blend** (a calculated field that references *another*
-  datasource, e.g. `SUM([Sales]) - SUM([Targets].[Target])`) is *meant* to combine the two.
-  Realize it as **one model** by co-locating the blend's link keys into a single relation
-  (a SQL view spanning the needed tables) and joining the other datasource in — see
-  "Join keys must be physical" / "Cross-datasource formulas" in `tableau-formula-translation.md`.
-  This is an intentional, key-aligned merge, not the accidental collapse the rule guards against.
+- **Blend-connected datasources** → datasources linked by `<datasource-relationships>` in the
+  workbook XML produce a single merged model. The primary datasource's tables and columns
+  form the base; secondary datasources' tables join in via `LEFT_OUTER` inline joins derived
+  from the blend's `<column-mapping>` link fields. This is the standard blend-to-model
+  mapping; see SKILL.md Step 3e (extraction) and Step 5b (model generation).
+  - A datasource with no worksheet of its own (e.g. a targets source that exists only to feed
+    a blend) folds into the model that uses it rather than becoming a standalone, unused model.
+- **A cross-datasource formula** that references another datasource resolves within the
+  merged model — no separate SQL view is needed when both datasources are already in the
+  same model via blending.
 
 **Build only the models the workbook actually uses.** Map models to what the worksheets and
-dashboards reference — don't materialize a model for every datasource speculatively. A
-datasource with no worksheet of its own (e.g. a targets source that exists only to feed a
-blend) folds into the model that uses it rather than becoming a standalone, unused model.
+dashboards reference — don't materialize a model for every datasource speculatively.
 
 ### model_tables entries
 

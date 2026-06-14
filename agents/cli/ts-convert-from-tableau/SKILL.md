@@ -380,10 +380,11 @@ Take from the filename (strip `.twb`). Save as `{workbook_name}`.
 
 ### 3b. For each `<datasource>` element (skip those named `Parameters`)
 
-Each datasource is processed independently — **never merge datasources**. Even when
-datasources share tables or point at the same database, each has its own join topology,
-calculated fields, and column aliases. See `tableau-tml-rules.md` "One model per
-Tableau datasource" for the full rule.
+Each datasource is processed independently for extraction (Steps 3b–3d). **Datasources are
+merged into a single model only when they are connected by blend relationships** (detected in
+Step 3e). Even when datasources share tables or point at the same database, they are NOT
+merged unless a `<datasource-relationship>` explicitly links them. See Step 5b
+"Blend-aware model grouping" for the merge procedure.
 
 **Datasource type detection:**
 - If the datasource contains `<connection class="sqlproxy">`, it is a **Published
