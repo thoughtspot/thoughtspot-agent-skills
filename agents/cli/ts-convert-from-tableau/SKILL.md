@@ -1114,17 +1114,23 @@ Formula translation rules: use `tableau-formula-translation.md`.
   State exactly what the object needs to expose (which derived/aggregated columns, at what
   grain) so the user can act. A ThoughtSpot join can be multi-column; the keys just have to be
   real columns the relation exposes.
-- **Cross-datasource formulas (Tableau data blends).** A formula that references another
-  datasource (`SUM([Sales]) - SUM([OtherDS].[Target])`) is a **blend**, not a single-model
-  formula — models are per-datasource. To realize it, bring the other side into one relation
-  via a **join** (which usually needs the materialization above). **Do NOT pre-aggregate the
-  view to dodge fan-out** — ThoughtSpot's query generation **handles fan/chasm traps** (it
-  aggregates each fact independently), so a per-group dimension table (e.g. targets by
-  category/month) joined to per-line facts computes `sum(measure)` correctly without
-  double-counting. Keep the view **line-level**; the view exists only to materialize/co-locate
-  the join key, not to aggregate. The result is usually **one model**, not one-per-datasource.
-  If the user doesn't want the extra object, omit the blend and flag it; never reference a
-  second datasource from a model formula.
+- **Cross-datasource formulas (Tableau data blends).** When datasources are merged into a
+  single model via blend-aware grouping (Step 5b), cross-datasource references resolve
+  naturally — all columns from all blended datasources exist in the same model. A formula
+  like `SUM([Sales]) - SUM([OtherDS].[Target])` becomes
+  `sum ( [ORDERS::Sales] ) - sum ( [TARGETS::Target] )` because both `ORDERS` and `TARGETS`
+  are `model_tables[]` entries in the same model.
+
+  **Reference resolution:** Tableau formulas that reference another datasource use the format
+  `[datasource_caption].[column_name]`. During formula translation:
+  1. Strip the datasource caption prefix
+  2. Resolve the column name against the merged model's `columns[]` (it will exist because
+     the secondary datasource's columns were included in the merge)
+  3. Prefix with the correct `TABLE_NAME::` for the ThoughtSpot model reference
+
+  **If a cross-datasource formula references a datasource NOT in the blend group** (shouldn't
+  happen in well-formed workbooks, but possible in hand-edited TWBs): log a warning and omit
+  the formula with a flag in the audit report.
 - No `fqn` in `model_tables`
 - `obj_id` is optional on fresh import — omit it unless repointing an existing model
 
