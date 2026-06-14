@@ -14,7 +14,7 @@ Use this as the canonical limitations reference.
 | 1 | Physical tables (`<relation type="table">`) | Table TML (one per physical table) | |
 | 2 | Custom SQL relations (`<relation type="text">`) | SQL View TML — full SQL preserved in `sql_query` | |
 | 3 | Joins (`<relation type="join">` — inner/left/right/full) | Model `joins[]` with type mapping (`full`→`OUTER`, `left`→`LEFT_OUTER`, etc.) | |
-| 4 | Data blending (`<datasource-relationships>`) | Merged single model with `LEFT_OUTER` joins from blend column mappings; connected-component grouping | 64% of audited workbooks |
+| 4 | Data blending (`<datasource-relationships>`) | Merged single model with `LEFT_OUTER` joins from blend column mappings; connected-component grouping | Same connection only — blended tables must exist in the same database connection |
 | 5 | Cross-datasource formula references (blend) | Resolved within merged model — federated ID/caption prefix stripped, re-prefixed with `TABLE::` | |
 | 6 | Column data types (string, integer, real, boolean, date, datetime) | VARCHAR, INT64, DOUBLE, BOOL, DATE, DATETIME | |
 | 7 | `db_column_name` from `remote-name` metadata | Physical column name in table TML | |
@@ -38,7 +38,7 @@ Use this as the canonical limitations reference.
 | 20 | `UPPER/LOWER` | `sql_string_op("UPPER/LOWER({0})")` pass-through | |
 | 21 | `STARTSWITH/ENDSWITH` | `strpos(s,sub) = 1` / `substr` idiom | |
 | 22 | `PROPER/ASCII/CHAR` | `sql_string_op("INITCAP/ASCII/CHR({0})")` pass-through | |
-| 23 | `SPLIT(s, delim, n)` | `substr`/`strpos` chain | Documented |
+| 23 | `SPLIT(s, delim, n)` | `substr`/`strpos` chain | Not verified |
 | 24 | `DATEDIFF` (day/month/year/hour/minute/week) | `diff_days/diff_months/diff_years/diff_time` (reversed arg order) | |
 | 25 | `DATETRUNC` | `start_of_month/quarter/week/year` | |
 | 26 | `DATEADD` | `add_days/add_months/add_years` | |
@@ -56,8 +56,8 @@ Use this as the canonical limitations reference.
 | 38 | `SIGN(x)/SQUARE(x)` | Composite `if/then` / `pow(x,2)` | |
 | 39 | `MIN/MAX` (scalar, 2-arg) | `if ( a < b ) then a else b` / vice versa | |
 | 40 | Division by zero | `safe_divide()` or `if ( b = 0 ) then null else a/b` | |
-| 41 | `REGEXP_EXTRACT/MATCH/REPLACE` | `sql_string_op/sql_bool_op` pass-through (Snowflake REGEXP_*) | Documented |
-| 42 | `FINDNTH(s, sub, n)` | `sql_int_op("REGEXP_INSTR({0},{1},1,{2})")` pass-through | Documented |
+| 41 | `REGEXP_EXTRACT/MATCH/REPLACE` | `sql_string_op/sql_bool_op` pass-through (Snowflake REGEXP_*) | Not verified |
+| 42 | `FINDNTH(s, sub, n)` | `sql_int_op("REGEXP_INSTR({0},{1},1,{2})")` pass-through | Not verified |
 | 108 | `ISMEMBEROF("group")` | `ts_groups = 'group'` — TS handles multi-value list membership natively with `=` | |
 
 ### Formula Translation — Aggregates
@@ -87,7 +87,7 @@ Use this as the canonical limitations reference.
 | # | Tableau Function(s) | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
 | 55 | `RUNNING_SUM/AVG/MAX/MIN` | `cumulative_sum/average/max/min ( [t::col] , [sort_attr] )` | |
-| 56 | `RUNNING_COUNT` | `cumulative_sum ( 1 , [sort_attr] )` at answer level (approx) | Documented |
+| 56 | `RUNNING_COUNT` | `cumulative_sum ( 1 , [sort_attr] )` at answer level (approx) | Not verified |
 
 ### Formula Translation — Moving / Window
 

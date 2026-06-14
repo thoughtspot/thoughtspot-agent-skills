@@ -101,7 +101,7 @@ def validate_matrix(matrix_path: Path) -> list[str]:
     if m:
         errors.append(
             f"Column header '{m.group(1).strip()}' found — rename to 'Notes' "
-            f"(blank = verified; only populate for Partial/Documented/Needs verification)"
+            f"(blank = verified; only populate for Partial/Not verified/Needs verification)"
         )
 
     m = BANNED_SECTIONS.search(content)
@@ -120,6 +120,11 @@ def validate_matrix(matrix_path: Path) -> list[str]:
         errors.append(
             "Struck-through text (~~...~~) found — remove reclassified items "
             "and merge into the appropriate Mapped section"
+        )
+
+    if re.search(r"\|\s*Documented\s*\|", content):
+        errors.append(
+            "'Documented' found in Notes column — use 'Not verified' instead"
         )
 
     return errors
@@ -169,6 +174,7 @@ def main() -> int:
         print("  - A '## Mapped Constructs' section with table rows")
         print("  - An '## Unmapped Constructs' or '## Limitations' section")
         print("  - 'Notes' as the last column header (not 'Verified' or 'Verified Against')")
+        print("  - 'Not verified' (not 'Documented') for items not live-tested")
         print("  - No 'Last verified:' date line, '## Test Workbooks', or struck-through text")
         print()
         print("To defer: add the skill to BACKLOG in this file with a justification.")
