@@ -4,24 +4,6 @@ For a full mapping of what IS supported, see [coverage-matrix.md](coverage-matri
 
 ---
 
-## #1 — sql_view generation path for subquery-backed SVs — VERIFIED NOT APPLICABLE
-
-Snowflake's `tables()` block does not support subquery sources — only named database
-objects (tables or views). Verified 2026-06-13 against a live Snowflake instance.
-
-Named views in `tables()` are handled correctly — they work identically to physical
-tables (verified on BL018_TEST_SV with EMPLOYEE_SUMMARY_VW).
-
-Since the input scenario (subquery-backed SV sources) cannot occur in the current
-Snowflake SV specification, no implementation is needed. If a future SV version adds
-subquery support, this item would need to be reopened and implemented using the same
-pattern as `ts-convert-from-databricks-mv` (Step 2c) and `ts-convert-from-tableau`
-(Step 5c).
-
-Status: VERIFIED — NOT APPLICABLE (2026-06-13)
-
----
-
 ## #2 — Custom instructions mapping — NOT IMPLEMENTED (LOW)
 
 Snowflake SVs support `CUSTOM_INSTRUCTIONS` with `AI_QUESTION_CATEGORIZATION` and
@@ -75,19 +57,3 @@ already parses `primary key` for join target identification; `unique_keys` would
 no value to the converted model.
 
 Status: NOT IMPLEMENTED — LOW priority (no ThoughtSpot equivalent)
-
----
-
-## #6 — ASOF joins — VERIFIED
-
-ASOF joins (`references TABLE(COL1, ASOF COL2)`) are mapped in the SKILL.md to
-ThoughtSpot `joins[].on` expressions with `=` on the equi column and `>=` on the
-ASOF column.
-
-Verified end-to-end on BL018_TEST_SV (2026-06-14):
-- Added `SALARY_RATES` table with `EFFECTIVE_DATE` column
-- Added ASOF relationship: `EMP_TO_RATE as EMPLOYEES(DEPARTMENT,HIRE_DATE) references SALARY_RATES(DEPARTMENT, asof EFFECTIVE_DATE)`
-- Model imported successfully with join expression: `(([EMPLOYEES::DEPARTMENT] = [SALARY_RATES::DEPARTMENT]) AND ([EMPLOYEES::HIRE_DATE] >= [SALARY_RATES::EFFECTIVE_DATE]))`
-- Round-trip confirmed: exported model preserves the compound predicate
-
-Status: VERIFIED (2026-06-14)

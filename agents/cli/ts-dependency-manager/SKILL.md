@@ -442,7 +442,7 @@ Call the `ts metadata report` command to do the walk. It returns the same data t
 ts metadata report <source-guid> --profile {profile_name} --format json --depth 3 > /tmp/{slug}_report.json
 ```
 
-Then parse the JSON. The shape is documented in [ts-metadata-report design spec](../../../docs/superpowers/specs/2026-05-28-ts-metadata-report-design.md). Key fields:
+Then parse the JSON. Key fields:
 
 - `source` — `{ "input", "guid", "type", "name", "parent" }`
 - `dependents[]` — flat list, each with `guid / name / type / hops / owner / modified_at / risk{tag,reason}`

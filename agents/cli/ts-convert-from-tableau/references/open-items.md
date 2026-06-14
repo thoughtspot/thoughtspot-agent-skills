@@ -15,35 +15,12 @@ Status: NEEDS VERIFICATION against live cluster
 
 ---
 
-## #2 — Connection schema fetch for empty `externalDatabases` — VERIFIED WORKAROUND
-
-When the REST v2 `connections get` endpoint returns no tables (empty `externalDatabases`),
-the Callosum `fetchConnection` API can be used with an explicit `database` parameter.
-However, the `ts` CLI may not expose this. In that case, ask the user for the database
-name and proceed with `YOUR_DATABASE`/`YOUR_SCHEMA` placeholders — ThoughtSpot issues a
-warning, not an error, for placeholder values.
-
-Status: WORKAROUND DOCUMENTED in Step 4
-
----
-
 ## #3 — COLLECTION datasources — NOT IMPLEMENTED
 
 Tableau COLLECTION datasources (multiple primary data sources combined) should generate
 one model per underlying table. This edge case is not handled in v1.0.0.
 
 Status: DEFERRED to v1.1.0
-
----
-
-## #4 — Custom SQL relations — RESOLVED
-
-Custom SQL relations now generate `sql_view:` TMLs instead of extracting table names
-from the SQL string. The full SQL text is preserved in `sql_query:`, columns are mapped
-via `sql_output_column`, and the SQL View is referenced by name in the model's
-`model_tables[]`. See Step 5c in SKILL.md and `tableau-tml-rules.md` "SQL View TML Rules".
-
-Status: RESOLVED in v1.1.0
 
 ---
 
@@ -82,24 +59,6 @@ Status: NEEDS VERIFICATION
 
 ---
 
-## #8 — Multi-datasource worksheets (data blending) — DONE (2026-06-14)
-
-Tableau workbooks that blend data from multiple datasources now produce a single merged
-ThoughtSpot model. The blend graph is extracted from `<datasource-relationships>` XML
-(Step 3e), datasources connected by blend relationships are grouped into connected
-components, and each component produces one model with inline `LEFT_OUTER` joins derived
-from the blend's `<column-mapping>` link fields.
-
-Cross-datasource formulas resolve naturally within the merged model — all columns from
-all blended datasources exist in the same model.
-
-Affects 90 of 140 audited workbooks (64%). Star topologies (1 primary → N secondaries)
-are supported.
-
-Status: DONE
-
----
-
 ## #9 — Tab support (multiple dashboards → tabs) — NOT IMPLEMENTED
 
 When a Tableau workbook has multiple dashboard sheets, v1.0.0 creates one liveboard per
@@ -111,138 +70,9 @@ Status: DEFERRED to v1.1.0
 
 ---
 
-## #10 — Dynamic Sets — Phase 2a + 2b + 2c DONE
-
-Phase 2a DONE: static sets (top-level `<group>` with `function='union'`+`function='member'`
-groupfilter trees) → ThoughtSpot `GROUP_BASED` column sets (`cohort_type: SIMPLE`). Detected
-by `function='union'`+`function='member'` presence and absence of `function='end'`/`'except'`/`'intersect'`.
-
-Phase 2b DONE (2026-06-12): Top-N/Bottom-N sets (`function='end'` in groupfilter) →
-ThoughtSpot `ADVANCED` query sets (`cohort_type: ADVANCED`, `cohort_grouping_type:
-COLUMN_BASED`) with embedded answer holding a rank formula + parameter-filter formula.
-Live-verified on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). See SKILL.md
-Step 5b "Query-set TML emission" and worked example
-`agents/shared/worked-examples/tableau/topn-set-to-query-set.md`.
-
-Phase 2c DONE (2026-06-14): All set operations now translatable:
-- **Member-list intersect** (`function='intersect'` where both children are member/union
-  sub-trees) → compute intersection at conversion time → GROUP_BASED column set of common
-  members.
-- **All-except-Top-N** (`function='except'` where excluded side contains `function='end'`) →
-  query set with inverted rank filter (`[rank] > N` instead of `<= N`). Same pattern as
-  Phase 2b, just inverted.
-- **Condition-based sets** (`function='filter'` with aggregate condition like `SUM(Sales) > X`)
-  → query set with a single boolean condition formula. Same ADVANCED/COLUMN_BASED pattern.
-- **Mixed computed set operations** (member-list ∩ Top-N, condition ∩ condition, nested
-  set-ops) → multi-formula query set. Each side generates its own formula(s); the
-  `search_query` combines all filters with `= true` (intersect) or `= true`/`= false` (except).
-  Deeply nested cases flagged for review.
-
-Still no equivalent:
-- **Worksheet set actions** (`<action>` on a set) — logged and omitted.
-
-Status: Phase 2a DONE (2026-06-12); Phase 2b DONE (2026-06-12); Phase 2c DONE (2026-06-14)
-
----
-
-## #11 — Geospatial functions — DONE (Phase 3, 2026-06-14)
-
-Explicit detect+log policy added. `MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`
-are now detected by the classifier (added to the regex list), classified under a dedicated
-"Geospatial (omit+log)" tier row in the audit report, and handled:
-- `MAKEPOINT(lat, lon)` → decompose; migrate lat/lon as individual ATTRIBUTE columns; omit
-  the spatial formula.
-- `DISTANCE`/`BUFFER`/`AREA` → omit + flag prominently (spatial computation lost).
-- Added to the Untranslatable Patterns table in `tableau-formula-translation.md` with the
-  full Geospatial Policy section.
-
-Status: DONE
-
----
-
-## #12 — Missing function-table entries — DONE (Phase 1, 2026-06-12)
-DATEPARSE/DATETIME/EXP/PI/trig/PROPER/ASCII/CHAR/STARTSWITH/ENDSWITH added to
-tableau-formula-translation.md, all grounded against the 26.6.0 formula reference.
-PI/RADIANS/DEGREES use literal composites (no native); PROPER/ASCII/CHAR map to
-scalar sql_*_op pass-through (no native equivalent — PT1). Trig converts radians→degrees.
-Status: DONE.
-
----
-
 ## #13 — REGEXP family + FINDNTH — PASS-THROUGH ONLY
+
 REGEXP_EXTRACT/MATCH/REPLACE, FINDNTH have no native TS equivalent — mapped to
 sql_*_op pass-through (warehouse-dialect-specific) or omit+log.
-Status: DONE pending confirmation.
 
----
-
-## #14 — Extended WINDOW_*/RUNNING_* — DOCUMENTED AS TABLE CALCS
-WINDOW_STDEV/PERCENTILE/COUNT/MEDIAN and RUNNING_COUNT documented as answer-level
-table calcs (EXC1) with aggregate fallbacks; no model-formula form.
-Status: DONE.
-
----
-
-## #15 — Non-Snowflake/Databricks RDBMS sources — DONE (Phase 4, 2026-06-14)
-Redshift (15 files) and Postgres (1 file) dialect notes added to SKILL.md datasource
-type detection section. Key differences documented: `LISTAGG` → Redshift vs Postgres
-`string_agg`. No other mapping changes needed — ThoughtSpot formula translation is
-warehouse-agnostic; dialect only matters for `sql_*_op` pass-through functions.
-Status: DONE.
-
----
-
-## #16 — Non-warehouse sources — DONE (Phase 4, 2026-06-14)
-Explicit unsupported-source policy added to SKILL.md: `cloudfile:googledrive-excel-direct`,
-`google-sheets`, `ogrdirect` (spatial/OGR), `webdata-direct`, `CustomMapbox` — skip the
-datasource entirely, log that data must be loaded into a warehouse first, surface in audit
-report under "Skipped sources".
-Status: DONE.
-
----
-
-## #17 — INDEX() prevalence — DONE (Phase 4, 2026-06-14)
-INDEX() correctly untranslatable but appears in ~43 of 127 audited workbooks, usually for
-Top-N row numbering. Added a prevalence note to SKILL.md Step 5b: when INDEX() is used for
-ranking/Top-N intent (e.g. `INDEX() <= 10`), recommend `rank()` or answer-level `top N`
-keyword as a substitute. Log message added.
-Status: DONE.
-
----
-
-## #18 — Row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) — VERIFIED (2026-06-15)
-
-BL-024. Tiered decision tree added: Top-N filter intent → native rank/query set;
-display numbering/offset/window-bound → native ThoughtSpot window functions; ambiguous
-addressing → omit + log (unchanged). Affects 39 workbooks (INDEX), 21 (LOOKUP),
-18 (FIRST/LAST/SIZE) in the 140-workbook corpus.
-
-New Step 3f extracts `<table-calc>` addressing attributes (`ordering-type`, `ordering-field`,
-`<order>` children) from both column definitions and worksheet-level `<column-instance>`
-overrides. Formula translation reference updated with native function templates.
-
-**Live verification (se-thoughtspot, 2026-06-15):**
-
-Primary approach: native TS functions (no SQL pass-through needed):
-
-| Function | Native TS formula | Verified |
-|---|---|---|
-| LAG(N) | `moving_sum([m], N, -N, [sort])` | ✓ DATE, VARCHAR |
-| LEAD(N) | `moving_sum([m], -N, N, [sort])` | ✓ DATE, VARCHAR |
-| FIRST | `first_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
-| LAST | `last_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
-| INDEX | `rank(sum([m]), 'asc')` | ✓ DATE |
-| SIZE | `sql_int_aggregate_op("COUNT(*) OVER()")` | ✓ (no ORDER BY) |
-
-`moving_sum` offset convention: `(N, -N)` = single row N positions back (LAG),
-`(-N, N)` = single row N positions forward (LEAD).
-
-SQL pass-through with dates also works when: (1) ORDER BY date expression matches
-the search query's date aggregate (e.g., `start_of_month([date])` with `.monthly`),
-and (2) all shelf GROUP BY columns are in PARTITION BY. Example:
-`sql_int_aggregate_op("LEAD(SUM({0}), 1) OVER (PARTITION BY {1} ORDER BY {2})", [Sales], [Region], start_of_month([Order Date]))`
-with search `[Sales] [formula] [Order Date].monthly [Region]`.
-
-Liveboard GUID: `4253d395-bae3-4ea6-9ab7-76d90d7cb86c`, table: SUPERSTORE.
-
-Status: VERIFIED
+Status: Pass-through implemented; not verified against live cluster
