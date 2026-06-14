@@ -478,7 +478,7 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 
 **Source:** Audit of 127 workbooks in `tableau-migration-testing/twb/inactive/` (2026-06-10)
 **Affects:** ts-convert-from-tableau, `agents/shared/mappings/tableau/tableau-formula-translation.md`
-**Status:** In progress — **Phase 1 DONE (PR #48)**, **Phase 2a DONE (PR #49)**, **Phase 2b DONE (2026-06-12)**; Phase 2c + 3 + 4 open
+**Status:** In progress — **Phase 1 DONE (PR #48)**, **Phase 2a DONE (PR #49)**, **Phase 2b DONE (2026-06-12)**, **Phase 2c/3/4 DONE (PR #66)**, **Phase 5 (data blending) DONE (2026-06-14)**
 **Full plan:** [`superpowers/plans/2026-06-11-tableau-mapping-gaps.md`](superpowers/plans/2026-06-11-tableau-mapping-gaps.md)
 
 > **Phase 1 (function table) — DONE (PR #48):** added DATEPARSE, EXP, trig (radians→degrees fix),
@@ -498,8 +498,14 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 > param/literal, ordering measure. Full emission template + worked example
 > (`topn-set-to-query-set.md`) added. The Dynamic-Sets gap (previously noted at line ~500) is now
 > addressed for Top-N/Bottom-N. Open-items #10 Phase 2b closed.
-> **Remaining:** Phase 2c (`intersect`/computed `except`), Phase 3 (geospatial MAKEPOINT/MAKELINE),
-> Phase 4 (source coverage + INDEX note). See the full plan.
+> **Phase 2c/3/4 (PR #66):** All set operations now translatable (condition-based, member-list
+> intersect, all-except-Top-N, mixed computed); geospatial detect+log policy; unsupported
+> source policy (google-sheets, OGR, webdata); Redshift/Postgres dialect notes; INDEX()
+> prevalence note. Open-items #10–#17 closed.
+> **Phase 5 — Data blending (2026-06-14):** blend-connected datasources merge into single
+> model, linking fields → LEFT_OUTER inline joins, cross-datasource formulas resolve within
+> merged model. Affects 90/140 audited workbooks (64%). Star and transitive topologies
+> supported. Open-item #8 closed.
 
 ### Problem
 
@@ -1291,3 +1297,93 @@ as the SV coverage matrix:
 
 - NEW `agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md`
 - NEW `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md`
+
+---
+
+## BL-024 — Close the row-offset table-calc gap with window functions (INDEX/LOOKUP/FIRST/LAST/SIZE)
+
+**Source:** Sigma-vs-ThoughtSpot Tableau-migration comparison over a 140-workbook corpus (2026-06-14)
+**Affects:** ts-convert-from-tableau (primarily); pattern applies to any converter that translates table calcs
+**Status:** Not started
+**Related:** BL-009 (Tableau mapping gaps), BL-020/BL-023 (coverage matrix)
+
+### Problem
+
+`ts-convert-from-tableau` currently classifies the row-offset table calculations
+`INDEX()`, `LOOKUP()`, `FIRST()`, `LAST()`, `SIZE()`, and `PREVIOUS_VALUE()` as
+**Untranslatable** (omit + log). In a scan of 140 real Tableau workbooks these were the
+single largest ThoughtSpot blocker: `INDEX()` in **39** workbooks, `LOOKUP()` in **21**,
+`FIRST/LAST/PREVIOUS_VALUE/SIZE` in **18**. The comparison's competitor (Sigma) handles the
+same constructs — it maps them to native window math placed on the chart axis — which is
+most of its measured migration-completeness advantage on this corpus.
+
+The reason these are listed untranslatable is **not** that SQL can't express them: warehouse
+SQL has `ROW_NUMBER`/`LAG`/`LEAD`/`FIRST_VALUE`/`LAST_VALUE`/`COUNT(*) OVER`. The blocker is the
+**addressing context** — Tableau derives the `ORDER BY`/`PARTITION BY` from the viz's
+compute-using direction, which a model-level TML formula doesn't carry. The skill already
+solves the identical problem for `WINDOW_*`/`RUNNING_*` by extracting the worksheet shelf sort
+and emitting `moving_*`/`cumulative_*`; the same extraction applies here.
+
+> **Why this is NOT "just always emit a pass-through":** ThoughtSpot does not validate
+> pass-through SQL at import, and it folds referenced columns into `GROUP BY`. A pass-through
+> with a *guessed* `ORDER BY` imports clean and returns plausible-but-wrong numbers at query
+> time — worse than an honest omission. Coverage must never come at the cost of silent wrong
+> results. (See also the SQL-passthrough constraints in
+> `agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`.)
+
+### Proposed approach — tiered, never a blanket pass-through
+
+1. **Native first (no SQL).** Translate the *intent*, not the function:
+   - `INDEX() <= N` (and `RANK`/`INDEX`-based Top-N) used as a **filter** → route to the
+     existing Top-N / query-set machinery (the skill already builds `ADVANCED` query sets for
+     Top-N sets). This is the most common `INDEX()` use and needs no SQL.
+   - `LOOKUP(agg, ±n)`, `FIRST()`/`LAST()` used as window **bounds/offsets** → native
+     `moving_*`/`cumulative_*` with the recovered shelf sort.
+2. **Gated pass-through fallback** — only when the worksheet yields an **unambiguous** sort +
+   partition. Emit an **answer-level** (viz-scoped) `sql_*_aggregate_op` with an explicit
+   `OVER (PARTITION BY … ORDER BY …)`, wrapped in `group_aggregate()` to satisfy the GROUP BY
+   engine — mirrors how Sigma places these on the chart.
+
+   | Tableau | Answer-level pass-through (Snowflake-flavored) |
+   |---|---|
+   | `INDEX()` (display row number) | `sql_int_aggregate_op ( "ROW_NUMBER() OVER (ORDER BY {0})" , [sort] )` |
+   | `LOOKUP(SUM([m]), -1)` | `LAG(...) OVER (PARTITION BY … ORDER BY …)` |
+   | `FIRST()` / `LAST()` (standalone) | `FIRST_VALUE/LAST_VALUE(...) OVER (...)` |
+   | `SIZE()` | `COUNT(*) OVER (PARTITION BY …)` |
+3. **Omit-and-log only when addressing is ambiguous** — pane-relative / restart-every /
+   compute-along a non-axis dim, or genuinely recursive `PREVIOUS_VALUE` (a recursive CTE, not
+   a scalar). Keep current behavior; do not guess an order.
+4. **Always flag + report.** List every emitted pass-through in the migration report with its
+   SQL and the standing caveats: must be **admin-enabled**, is **dialect-specific** (loses
+   warehouse portability), and is **unvalidated** (verify values post-import).
+
+### Decision tree (per detected table calc)
+
+```
+Intent is a Top-N / filter?               → native Top-N / query set            (best)
+Intent is a running/offset/window-bound?  → native moving_*/cumulative_*        (portable)
+Else, worksheet sort+partition
+  unambiguously recoverable?              → answer-level sql_*_aggregate_op + flag
+Else                                      → omit + log (current behavior)
+```
+
+### Longer-term (separate, platform-level — out of skill scope)
+
+The portable end-state is **native context-following window functions**
+(`row_number`/`lag`/`lead`/`first`/`last`/`percentile` that adapt `PARTITION BY`/`ORDER BY` to
+the search query), extending the family ThoughtSpot already started with
+`cumulative_*`/`moving_*`/`rank()`. That closes the gap without dialect-locked, unvalidated
+pass-through. Note as a product input; not implementable in the skill.
+
+### Files affected
+
+- `agents/shared/mappings/tableau/tableau-formula-translation.md` — move
+  `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` out of "Untranslatable"; add the tiered decision tree
+  and answer-level pass-through forms
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — apply the decision tree in the table-calc
+  translation step (reuse the existing shelf-sort extraction used for `moving_*`/`cumulative_*`)
+- `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md` (from BL-023) —
+  reclassify these constructs once implemented
+- Verification: re-run against the `tableau-migration-testing` corpus; expect the
+  `INDEX`/`LOOKUP`/`FIRST`/`LAST` blocker count to fall from ~60 workbooks toward the
+  ambiguous-addressing residue only
