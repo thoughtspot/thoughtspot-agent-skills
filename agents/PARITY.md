@@ -14,27 +14,26 @@ filesystem.
 | `agents/cli/` | Claude Code + Cortex Code CLI (local terminal) | `ts` CLI | OS Keychain + `~/.claude/` profiles | `../../shared/mappings/...`, `../../shared/schemas/...` | Symlinks from `~/.claude/skills/` and `~/.snowflake/cortex/skills/` |
 | `agents/claude/` | Claude Code only (annex — `ts-profile-snowflake`) | `ts` CLI | OS Keychain + `~/.claude/` profiles | `../../shared/mappings/...`, `../../shared/schemas/...` | Symlinks from `~/.claude/skills/` |
 | `agents/coco-snowsight/` | Snowsight Workspace (no shell) | Stored procedures | Snowflake Secrets | `../../shared/mappings/...`, `../../shared/schemas/...` | Stage → Workspace copy (`stage-sync.sh`) |
-| `agents/cursor/` | Cursor AI (IDE rules) | `ts` CLI | OS Keychain + `~/.cursor/` profiles | `~/.cursor/shared/mappings/...`, `~/.cursor/shared/schemas/...` | Symlinks from `~/.cursor/rules/` |
 
 ## Skill Matrix
 
-| Skill | cli | claude | coco-snowsight | cursor |
-|---|---|---|---|---|
-| ts-convert-from-databricks-mv | Y | — | — | Y |
-| ts-convert-from-snowflake-sv | Y | — | Y | Y |
-| ts-convert-from-tableau | Y | — | — | Y |
-| ts-convert-to-databricks-mv | Y | — | — | Y |
-| ts-convert-to-snowflake-sv | Y | — | Y | Y |
-| ts-dependency-manager | Y | — | — | Y |
-| ts-object-answer-promote | Y | — | — | Y |
-| ts-object-model-coach | Y | — | — | Y |
-| ts-profile-databricks | Y | — | — | Y |
-| ts-profile-snowflake | — | Y | — | Y |
-| ts-profile-thoughtspot | Y | — | Y | Y |
-| ts-recipe-formula-business-days-snowflake | Y | — | Y | Y |
-| ts-recipe-formula-hms-display-snowflake | Y | — | Y | Y |
-| ts-setup-sv | — | — | Y | — |
-| ts-variable-timezone | Y | — | — | Y |
+| Skill | cli | claude | coco-snowsight |
+|---|---|---|---|
+| ts-convert-from-databricks-mv | Y | — | — |
+| ts-convert-from-snowflake-sv | Y | — | Y |
+| ts-convert-from-tableau | Y | — | — |
+| ts-convert-to-databricks-mv | Y | — | — |
+| ts-convert-to-snowflake-sv | Y | — | Y |
+| ts-dependency-manager | Y | — | — |
+| ts-object-answer-promote | Y | — | — |
+| ts-object-model-coach | Y | — | — |
+| ts-profile-databricks | Y | — | — |
+| ts-profile-snowflake | — | Y | — |
+| ts-profile-thoughtspot | Y | — | Y |
+| ts-recipe-formula-business-days-snowflake | Y | — | Y |
+| ts-recipe-formula-hms-display-snowflake | Y | — | Y |
+| ts-setup-sv | — | — | Y |
+| ts-variable-timezone | Y | — | — |
 
 ## What to Sync
 
@@ -56,7 +55,7 @@ These are inherently different per runtime:
 
 - API call mechanism (stored procedure vs `ts` CLI)
 - Authentication flow (Snowflake Secrets vs OS Keychain)
-- File paths (relative shared refs vs `~/.claude/` vs `~/.cursor/`)
+- File paths (relative shared refs vs `~/.claude/`)
 - SQL execution method (`snowflake_sql_execute` vs `snow sql` vs Python connector)
 - Deployment instructions
 
@@ -71,4 +70,3 @@ When making a change to a skill:
 5. Update `synced-from` markers on mirrors to reflect the new CLI version
 6. For coco-snowsight: run `./scripts/stage-sync.sh` after push
 7. For cli/claude: symlinks update automatically on `git pull`
-8. For cursor: symlinks update automatically on `git pull`

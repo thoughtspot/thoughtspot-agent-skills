@@ -1,8 +1,7 @@
 # ThoughtSpot Agent Skills
 
 A collection of skills and tools for working with ThoughtSpot, packaged for
-multiple runtimes: **Claude Code**, **Cortex Code CLI**, **Snowsight Workspaces**,
-and **Cursor AI**.
+multiple runtimes: **Claude Code**, **Cortex Code CLI**, and **Snowsight Workspaces**.
 
 ---
 
@@ -78,7 +77,6 @@ thoughtspot-agent-skills/
 │   ├── cli/        — Canonical CLI skills (Claude Code + Cortex Code CLI)
 │   ├── claude/     — Claude Code-only skills (ts-profile-snowflake)
 │   ├── coco-snowsight/ — Snowsight Workspace skills (stored procedures)
-│   ├── cursor/     — Cursor AI rules (.mdc format)
 │   └── shared/     — Shared reference files used by all runtimes
 │       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules
 │       ├── mappings/tableau/            — Tableau → ThoughtSpot formula and TML rules
@@ -162,32 +160,6 @@ install required — runs entirely within Snowflake using stored procedures.
 
 See **[agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md)** for stage
 setup and Workspace deployment.
-
----
-
-## Cursor AI Rules
-
-Rules installed into `.cursor/rules/` in your project directory. Triggered by natural
-language in the Cursor AI chat.
-
-| Rule | What it does |
-|---|---|
-| `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
-| `ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles |
-| `ts-profile-databricks` | Add, update, test, or delete Databricks profiles |
-| `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model |
-| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View |
-| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model |
-| `ts-object-answer-promote` | Promote formulas from a saved Answer into a Model |
-| `ts-object-model-coach` | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements ⚠️ Untested in Cursor |
-| `ts-dependency-manager` | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards ⚠️ Untested in Cursor |
-| `ts-variable-timezone` | Search, set, or remove timezone values for the `ts_user_timezone` variable ⚠️ Beta in 26.5, EA in 26.6, Untested in Cursor |
-| `ts-recipe-formula-business-days-snowflake` | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
-| `ts-recipe-formula-hms-display-snowflake` | Deploy four Snowflake scalar UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` |
-| `ts-convert-from-tableau` | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot, with optional liveboard migration ⚠️ Untested in Cursor |
-
-See **[agents/cursor/SETUP.md](agents/cursor/SETUP.md)** for installation.
 
 ---
 

@@ -53,13 +53,13 @@ def test_load_sync_debt(tmp_path, monkeypatch):
         # Mirror sync debt
         | Mirror | At | CLI now | Gap | Decision |
         |---|---|---|---|---|
-        | agents/cursor/rules/foo.mdc | v1.0.0 | v2.0.0 | big gap | sync |
+        | agents/coco-snowsight/foo/SKILL.md | v1.0.0 | v2.0.0 | big gap | sync |
     """))
     monkeypatch.setattr(cms, "ROOT", tmp_path)
     (tmp_path / "agents").mkdir()
     debt.rename(tmp_path / "agents" / "SYNC-DEBT.md")
     paths = cms.load_sync_debt()
-    assert "agents/cursor/rules/foo.mdc" in paths
+    assert "agents/coco-snowsight/foo/SKILL.md" in paths
 
 
 def test_load_sync_debt_missing(tmp_path, monkeypatch):

@@ -65,11 +65,9 @@ def load_sync_debt() -> set[str]:
 
 
 def discover_mirrors() -> list[Path]:
-    """Find all mirror files (CoCo SKILL.md + Cursor .mdc)."""
+    """Find all mirror files (CoCo SKILL.md)."""
     mirrors = []
     for p in sorted((ROOT / "agents/coco-snowsight").glob("*/SKILL.md")):
-        mirrors.append(p)
-    for p in sorted((ROOT / "agents/cursor/rules").glob("*.mdc")):
         mirrors.append(p)
     return mirrors
 
@@ -84,7 +82,7 @@ def check():
 
     for mirror in mirrors:
         rel = str(mirror.relative_to(ROOT))
-        skill_name = mirror.parent.name if mirror.suffix == ".md" else mirror.stem
+        skill_name = mirror.parent.name
 
         if skill_name in COCO_ONLY:
             results.append(("SKIP", rel, "runtime-only skill (no CLI source)"))

@@ -149,12 +149,10 @@ The same family rule applies to **every runtime** the repo serves:
 |---|---|---|
 | `agents/cli/` | `<skill>/SKILL.md` | Directory name |
 | `agents/coco-snowsight/` | `<skill>/SKILL.md` | Directory name |
-| `agents/cursor/` | `rules/<skill>.mdc` (flat) | File stem (`.mdc` removed) |
 
 Where a skill exists in multiple runtimes, all copies must share the same
-name — `agents/cli/ts-convert-to-snowflake-sv`,
-`agents/coco-snowsight/ts-convert-to-snowflake-sv`, and
-`agents/cursor/rules/ts-convert-to-snowflake-sv.mdc` are all the same skill.
+name — `agents/cli/ts-convert-to-snowflake-sv` and
+`agents/coco-snowsight/ts-convert-to-snowflake-sv` are the same skill.
 The validator catches new skills added to ANY of these locations.
 
 ---

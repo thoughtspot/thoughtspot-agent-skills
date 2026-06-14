@@ -74,15 +74,9 @@ def find_skills(root: Path) -> list[tuple[str, str, Path]]:
       - agents/cli/<skill>/SKILL.md            (directory layout)
       - agents/claude/<skill>/SKILL.md         (directory layout)
       - agents/coco-snowsight/<skill>/SKILL.md (directory layout)
-      - agents/cursor/rules/<skill>.mdc        (flat .mdc layout — name = stem)
-
-    The cursor layout is checked too because nothing prevents a contributor
-    from adding `agents/cursor/rules/ts-bad-name.mdc`. The skill-name rules
-    apply regardless of which runtime serves the skill.
     """
     found: list[tuple[str, str, Path]] = []
 
-    # CLI + Claude + CoCo: <skill>/SKILL.md
     for runtime in ("cli", "claude", "coco-snowsight"):
         runtime_dir = root / "agents" / runtime
         if not runtime_dir.is_dir():
@@ -90,12 +84,6 @@ def find_skills(root: Path) -> list[tuple[str, str, Path]]:
         for child in sorted(runtime_dir.iterdir()):
             if child.is_dir() and (child / "SKILL.md").is_file():
                 found.append((runtime, child.name, child))
-
-    # Cursor: agents/cursor/rules/<skill>.mdc
-    cursor_rules = root / "agents" / "cursor" / "rules"
-    if cursor_rules.is_dir():
-        for child in sorted(cursor_rules.glob("*.mdc")):
-            found.append(("cursor", child.stem, child))
 
     return found
 
@@ -119,7 +107,7 @@ def main() -> int:
     root = Path(args.root).resolve()
     skills = find_skills(root)
     if not skills:
-        print(f"No skills found under {root}/agents/{{cli,claude,coco-snowsight,cursor}}/. Nothing to check.")
+        print(f"No skills found under {root}/agents/{{cli,claude,coco-snowsight}}/. Nothing to check.")
         return 0
 
     failures: list[tuple[str, Path]] = []

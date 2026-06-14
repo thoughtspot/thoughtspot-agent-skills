@@ -12,7 +12,6 @@ RUNTIMES = {
     "cli": lambda: {p.parent.name for p in (ROOT / "agents/cli").glob("*/SKILL.md")},
     "claude": lambda: {p.parent.name for p in (ROOT / "agents/claude").glob("*/SKILL.md")},
     "coco-snowsight": lambda: {p.parent.name for p in (ROOT / "agents/coco-snowsight").glob("*/SKILL.md")},
-    "cursor": lambda: {p.stem for p in (ROOT / "agents/cursor/rules").glob("*.mdc")},
 }
 
 

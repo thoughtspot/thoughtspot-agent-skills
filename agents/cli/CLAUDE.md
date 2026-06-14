@@ -61,7 +61,6 @@ breaks the shared convention.
 
 Substantive skill changes must also be made in:
 - `agents/coco-snowsight/<skill>/SKILL.md` — if the skill has a Snowsight version
-- `agents/cursor/rules/<skill>.mdc` — Cursor mirror
 
 See `agents/PARITY.md` for the full cross-agent mapping.
 

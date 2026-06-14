@@ -7,7 +7,6 @@ Covers:
   agents/cli/*/SKILL.md             — Canonical CLI skills (Claude Code + Cortex Code CLI)
   agents/claude/*/SKILL.md          — Claude Code-only skills
   agents/coco-snowsight/*/SKILL.md  — Snowflake Cortex (CoCo) skills
-  agents/cursor/rules/*.mdc         — Cursor AI rules
 
 Every file must have:
   ## Changelog
@@ -44,7 +43,7 @@ def _git_show(repo_root: Path, ref: str) -> str | None:
 
 
 def _staged_skill_files(repo_root: Path) -> list[str]:
-    """Repo-relative paths of staged SKILL.md / .mdc skill files (added/modified)."""
+    """Repo-relative paths of staged SKILL.md skill files (added/modified)."""
     result = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
         capture_output=True, text=True, cwd=repo_root,
@@ -54,8 +53,6 @@ def _staged_skill_files(repo_root: Path) -> list[str]:
         if f.endswith("/SKILL.md") and f.startswith(
             ("agents/cli/", "agents/claude/", "agents/coco-snowsight/")
         ):
-            out.append(f)
-        elif f.startswith("agents/cursor/rules/") and f.endswith(".mdc"):
             out.append(f)
     return out
 
@@ -147,13 +144,6 @@ def collect_skill_files(repo_root: Path) -> list[Path]:
     files += sorted(
         f for f in (repo_root / "agents" / "coco-snowsight").glob("*/SKILL.md")
         if str(f.relative_to(repo_root)) in tracked_coco
-    )
-
-    # Cursor rules: agents/cursor/rules/*.mdc
-    tracked_cursor = get_tracked_files(repo_root, "agents/cursor")
-    files += sorted(
-        f for f in (repo_root / "agents" / "cursor" / "rules").glob("*.mdc")
-        if str(f.relative_to(repo_root)) in tracked_cursor
     )
 
     return files

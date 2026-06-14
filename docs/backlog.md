@@ -122,7 +122,7 @@ metric patterns (all metrics on a single table).
 **Source:** Analysis of Snowflake Semantic View `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (Step 9 — formula translation)
 **Status:** Done (2026-06-13) — identifier resolution engine adds group_aggregate wrapping with group_* shorthand
-> Implemented in CLI SKILL.md Step 9a (identifier resolution pre-pass), shared rules (ts-from-snowflake-rules.md), and formula translation (ts-snowflake-formula-translation.md). Option B (group_aggregate, no schema changes) chosen as default. Mirrored to CoCo and Cursor.
+> Implemented in CLI SKILL.md Step 9a (identifier resolution pre-pass), shared rules (ts-from-snowflake-rules.md), and formula translation (ts-snowflake-formula-translation.md). Option B (group_aggregate, no schema changes) chosen as default. Mirrored to CoCo.
 
 ### Problem
 
@@ -177,7 +177,7 @@ The engine computes: `AVG( COUNT(locations) per company )`.
 **Source:** Gap analysis of `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (Step 4 parser + Step 9 translation)
 **Status:** Done (2026-06-13) — Step 4 extracts facts block; facts become standalone formulas in Step 8
-> Facts parsed as `{table_alias, fact_name, expression, comment, synonyms, access_modifier}`. Public facts emitted as `formulas[]` entries with `column_type: ATTRIBUTE`. Private facts emitted but noted in report. Mirrored to CoCo and Cursor.
+> Facts parsed as `{table_alias, fact_name, expression, comment, synonyms, access_modifier}`. Public facts emitted as `formulas[]` entries with `column_type: ATTRIBUTE`. Private facts emitted but noted in report. Mirrored to CoCo.
 **Full analysis:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md) — GAP-01
 
 ### Problem
@@ -216,7 +216,7 @@ prerequisite for correct metric-on-fact translation.
 **Source:** Gap analysis of `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (Step 9)
 **Status:** Done (2026-06-13) — identifier resolution pre-pass resolves fact references to formula names
-> Three-step resolution in Step 9a: physical column → `[TABLE::col]`; fact → `[Fact Display Name]` formula reference; metric → double aggregation. Mirrored to CoCo and Cursor.
+> Three-step resolution in Step 9a: physical column → `[TABLE::col]`; fact → `[Fact Display Name]` formula reference; metric → double aggregation. Mirrored to CoCo.
 **Full analysis:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md) — GAP-12
 
 ### Problem
@@ -242,7 +242,7 @@ Add a resolution step before formula translation:
 **Source:** Field observations (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv
 **Status:** Done (2026-06-13) — joinless SV guard skips Step 7 and produces model with no joins
-> If no `relationships` block exists, Steps 7 (join mapping) and related sections are skipped. Model TML produced with `model_tables[]` entries and no `joins_with` entries. Mirrored to CoCo and Cursor.
+> If no `relationships` block exists, Steps 7 (join mapping) and related sections are skipped. Model TML produced with `model_tables[]` entries and no `joins_with` entries. Mirrored to CoCo.
 
 ### Problem
 
@@ -286,7 +286,7 @@ a client layer existed.
 
 ### Proposed approach
 
-Build `agents/databricks/` as a fourth runtime alongside CLI, Cursor, and CoCo:
+Build `agents/databricks/` as a third runtime alongside CLI and CoCo:
 
 1. **`ts_client.py` notebook** — single-file `ThoughtSpotClient` class with full ts-cli
    parity (auth, metadata, TML, connections, tables, users, orgs, variables) plus
@@ -754,7 +754,7 @@ named differently. Tableau correctly has no `*-to-rules.md` (it is convert-*from
 ### Proposed approach
 
 Low-priority cosmetic alignment (no capability gap): consider renaming
-`tableau-tml-rules.md` → `tableau-from-rules.md` (update all SKILL.md + cursor/coco mirror
+`tableau-tml-rules.md` → `tableau-from-rules.md` (update all SKILL.md + coco mirror
 references), and optionally splitting Tableau property/type content into a
 `tableau-properties.md` to mirror SV/MV. Fits the BL-012 cross-skill-consistency theme; the
 conversion-consistency-auditor could then assert the naming convention.
@@ -765,7 +765,8 @@ conversion-consistency-auditor could then assert the naming convention.
 
 **Source:** 2026-06-13 mirror parity audit (Plan 3)
 **Affects:** All 7 behind-version Cursor `.mdc` mirrors (see `agents/SYNC-DEBT.md`)
-**Status:** Open
+**Status:** Done (2026-06-14) — Cursor runtime retired
+> Retired: `agents/cursor/` deleted, all validators/rules/docs updated to remove Cursor references. No one was using Cursor with these skills and there was no way to test it. See PR for full change list.
 
 ### Problem
 
@@ -958,8 +959,6 @@ Schema reference: `agents/shared/schemas/thoughtspot-feedback-tml.md`
 - `agents/shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` — range join rules, filter mapping rules, verified query translation rules
 - `docs/sv-to-ts-gap-analysis.md` — correct GAP-05, GAP-08, and GAP-10 assessments
 - `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` — mirror changes
-- `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror changes
-
 ---
 
 ## BL-019 — Databricks MV: audit mapping gaps equivalent to BL-018 (SV parity)
@@ -1246,9 +1245,6 @@ When a table has no declared relationship in the source, the converter should:
 - `agents/cli/ts-convert-from-snowflake-sv/SKILL.md` — add unjoined-table check after Step 6
 - `agents/cli/ts-convert-from-databricks-mv/SKILL.md` — add unjoined-table check after table discovery
 - `agents/cli/ts-convert-from-tableau/SKILL.md` — add unjoined-table check after datasource parsing
-- `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror
-- `agents/cursor/rules/ts-convert-from-databricks-mv.mdc` — mirror
-- `agents/cursor/rules/ts-convert-from-tableau.mdc` — mirror
 
 ---
 

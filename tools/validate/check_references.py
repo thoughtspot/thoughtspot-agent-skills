@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-check_references.py — verify all file paths referenced in SKILL.md and .mdc files exist.
+check_references.py — verify all file paths referenced in SKILL.md files exist.
 
-Scans every SKILL.md in agents/cli/, agents/claude/, and agents/coco-snowsight/,
-and every .mdc in agents/cursor/rules/, for markdown links [text](path) and maps
-runtime-specific path prefixes back to repo paths before checking existence.
+Scans every SKILL.md in agents/cli/, agents/claude/, and agents/coco-snowsight/
+for markdown links [text](path) and maps runtime-specific path prefixes back to
+repo paths before checking existence.
 
 Path mappings:
   Claude / CLI skills  (~/.claude/...):
@@ -14,11 +14,6 @@ Path mappings:
 
   CoCo skills (relative ../../shared/...):
     ../../shared/             → agents/shared/   (from skill dir two levels deep)
-
-  Cursor rules  (~/.cursor/...):
-    ~/.cursor/shared/         → agents/shared/
-    ~/.cursor/shared/mappings/ → agents/shared/mappings/
-    ~/.cursor/rules/          → agents/cursor/rules/
 
 Usage:
     python tools/validate/check_references.py
@@ -51,19 +46,10 @@ COCO_PREFIX_MAP = {
     "../../shared/": "agents/shared/",
 }
 
-CURSOR_PREFIX_MAP = {
-    "~/.cursor/shared/mappings/": "agents/shared/mappings/",
-    "~/.cursor/shared/": "agents/shared/",
-    "~/.cursor/rules/": "agents/cursor/rules/",
-}
-
-
 def _prefix_map_for(skill_file: Path) -> dict:
     path_str = str(skill_file)
     if "agents/coco" in path_str:
         return COCO_PREFIX_MAP
-    if "agents/cursor" in path_str:
-        return CURSOR_PREFIX_MAP
     return CLAUDE_PREFIX_MAP
 
 
@@ -145,7 +131,7 @@ def check_skill_file(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check SKILL.md and .mdc file references.")
+    parser = argparse.ArgumentParser(description="Check SKILL.md file references.")
     parser.add_argument("--root", default=".", help="Repo root directory (default: current dir)")
     args = parser.parse_args()
 
@@ -153,12 +139,11 @@ def main() -> int:
     skill_files = (
         list(repo_root.glob("agents/cli/*/SKILL.md")) +
         list(repo_root.glob("agents/claude/*/SKILL.md")) +
-        list(repo_root.glob("agents/coco-snowsight/*/SKILL.md")) +
-        list(repo_root.glob("agents/cursor/rules/*.mdc"))
+        list(repo_root.glob("agents/coco-snowsight/*/SKILL.md"))
     )
 
     if not skill_files:
-        print("No SKILL.md or .mdc files found.")
+        print("No SKILL.md files found.")
         return 1
 
     tracked = _git_tracked(repo_root)

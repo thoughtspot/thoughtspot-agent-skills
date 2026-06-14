@@ -85,31 +85,30 @@ if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-test
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
 fi
 
-# Skill naming — every skill across all runtimes (Claude / CoCo / Cursor) must
+# Skill naming — every skill across all runtimes (Claude / CoCo) must
 # match a documented family pattern (see .claude/rules/skill-naming.md).
-# Runs when a SKILL.md, a Cursor .mdc rule, the rule itself, or the validator
-# is added/renamed.
-if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKILL\.md|.*\.mdc)|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
+# Runs when a SKILL.md, the rule itself, or the validator is added/renamed.
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
   run_check "skill naming"       "tools/validate/check_skill_naming.py --root $REPO_ROOT"
 fi
 
-# Runtime coverage — Cursor mirrors Claude; CoCo's divergences are documented
-# in EXPECTED_DIVERGENCES (see .claude/rules/runtime-coverage.md).
+# Runtime coverage — CoCo's divergences are documented in EXPECTED_DIVERGENCES
+# (see .claude/rules/runtime-coverage.md).
 # Runs whenever a skill file is added or renamed in any runtime, or when the
 # rule/validator itself changes.
-if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKILL\.md|.*\.mdc)|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)'; then
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)'; then
   run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root $REPO_ROOT"
 fi
 
 # Parity matrix — generated from the filesystem, must match committed PARITY.md
 # Runs when any skill file is added/renamed or PARITY.md itself changes
-if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight|cursor)/.*/(SKILL\.md|.*\.mdc)|agents/PARITY\.md)'; then
+if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|agents/PARITY\.md)'; then
   run_check "parity matrix"      "tools/validate/generate_parity.py --check"
 fi
 
 # Mirror sync — check synced-from markers against CLI source versions
 # Runs when any mirror file or SYNC-DEBT.md changes
-if echo "$STAGED" | grep -qE '(agents/(coco-snowsight|cursor)/|agents/SYNC-DEBT\.md)'; then
+if echo "$STAGED" | grep -qE '(agents/coco-snowsight/|agents/SYNC-DEBT\.md)'; then
   run_check "mirror sync"         "tools/validate/check_mirror_sync.py"
 fi
 
@@ -152,25 +151,25 @@ fi
 # inventory and require explicit confirmation that every skill belongs in this repo.
 # This prevents accidentally committing skills that live in other projects.
 # (The agents/claude -> agents/cli rename meant this only watched agents/claude/ —
-#  CLI/CoCo/Cursor skill additions slipped through unaudited. Now spans all runtimes.)
+#  CLI/CoCo skill additions slipped through unaudited. Now spans all runtimes.)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-if [ "$CURRENT_BRANCH" = "main" ] && echo "$STAGED" | grep -qE '^agents/(cli|claude|coco-snowsight|cursor)/'; then
+if [ "$CURRENT_BRANCH" = "main" ] && echo "$STAGED" | grep -qE '^agents/(cli|claude|coco-snowsight)/'; then
   # What skill-level changes are in this commit? Names keep the runtime prefix
   # (e.g. cli/ts-dependency-manager) so the same skill name across runtimes is unambiguous.
   ADDING=$(git diff --cached --name-only --diff-filter=A \
-    | grep -E '^agents/(cli|claude|coco-snowsight|cursor)/[^/]+/SKILL\.md$' \
+    | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/SKILL\.md$' \
     | sed 's|agents/||;s|/SKILL\.md||' | sort)
   REMOVING=$(git diff --cached --name-only --diff-filter=D \
-    | grep -E '^agents/(cli|claude|coco-snowsight|cursor)/[^/]+/SKILL\.md$' \
+    | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/SKILL\.md$' \
     | sed 's|agents/||;s|/SKILL\.md||' | sort)
   UPDATING=$(git diff --cached --name-only \
-    | grep -E '^agents/(cli|claude|coco-snowsight|cursor)/[^/]+/' \
+    | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/' \
     | sed -E 's|^agents/([^/]+)/([^/]+)/.*|\1/\2|' | sort -u \
     | grep -vxF "$ADDING" | grep -vxF "$REMOVING")
 
   # Skills on disk after staging (find reflects the post-staged filesystem state)
-  ALL_SKILLS=$(find agents/cli agents/claude agents/coco-snowsight agents/cursor \
+  ALL_SKILLS=$(find agents/cli agents/claude agents/coco-snowsight \
       -maxdepth 2 -name 'SKILL.md' 2>/dev/null \
     | sed 's|^agents/||;s|/SKILL\.md$||' | sort)
 
