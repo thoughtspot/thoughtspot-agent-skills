@@ -555,6 +555,30 @@ The graph keys are datasource `name` attributes (the `federated.xxx` IDs from th
 - Number of blend relationships found
 - For each: primary datasource → secondary datasource, with linking columns listed
 
+**Date-grain linking columns:**
+
+When a `<column-instance>` has a `derivation` other than `"None"` (e.g. `"Month"`,
+`"Month-Trunc"`, `"Year"`, `"Year-Trunc"`), the blend links at a specific time grain.
+For the ThoughtSpot model join, the physical date column is used directly — ThoughtSpot's
+date bucketing at query time handles the grain alignment.
+
+However, if the source and target columns are physically different date columns with
+different native grains (e.g. source has daily `Order Date`, target has monthly
+`Month of Order Date` that is already pre-truncated), the join requires a
+**date-truncation formula** or **SQL View** to materialize the matching grain.
+
+**Resolution strategy:**
+1. If both columns are date/datetime type and the derivation indicates a truncation
+   (`Month-Trunc`, `Year-Trunc`), emit a model formula:
+   `date_trunc ( 'month' , [TABLE::Order Date] )` and use that formula as the join key
+   via a SQL View (the formula can't be a direct join key in model TML).
+2. **Surface the grain mismatch** to the user in the review checkpoint with a recommendation:
+   - "Blend links `Order Date` (daily) to `Month of Order Date` (monthly) at month grain.
+     Recommend: create a SQL View with `DATE_TRUNC('MONTH', ORDER_DATE) AS ORDER_MONTH` and
+     join on `ORDER_MONTH = MONTH_OF_ORDER_DATE`."
+3. If both columns are the same physical type and grain, use them directly in the join `on`
+   clause — no materialization needed.
+
 **No model merging happens here** — this step only extracts the relationships. Model
 merging happens in Step 5b.
 
@@ -849,6 +873,16 @@ When `blend_graph` is non-empty, datasources connected by blend relationships pr
 5. **Column name conflicts:** when merging, if two datasources define columns with the same
    display name but different semantics, disambiguate by prefixing with the datasource
    display name (e.g. `Orders Revenue` vs `Targets Revenue`). Log every rename.
+
+6. **Star topologies** (one primary → multiple secondaries): when `blend_graph[primary_ds]`
+   has more than one entry, each secondary datasource gets its own `joins[]` entry on the
+   secondary's `model_tables` entry. All joins are `LEFT_OUTER`. The joins are independent —
+   each secondary joins to the primary, not to each other.
+
+7. **Transitive blends** (A blends to B, B blends to C): these are chained, not star. Build a
+   join chain: A → B → C. The `blend_graph` connected-component logic groups them, and each
+   pairwise relationship generates its own join. ThoughtSpot navigates the join path
+   transitively.
 
 The `model_tables[]` section references both regular tables (from Step 5a) and SQL
 Views (from Step 5c) — both are referenced by `name` in the same way.
