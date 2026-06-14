@@ -111,7 +111,7 @@ Status: DEFERRED to v1.1.0
 
 ---
 
-## #10 — Dynamic Sets — Phase 2a + 2b DONE; 2c deferred
+## #10 — Dynamic Sets — Phase 2a + 2b + 2c DONE
 
 Phase 2a DONE: static sets (top-level `<group>` with `function='union'`+`function='member'`
 groupfilter trees) → ThoughtSpot `GROUP_BASED` column sets (`cohort_type: SIMPLE`). Detected
@@ -124,21 +124,39 @@ Live-verified on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). See SKILL.md
 Step 5b "Query-set TML emission" and worked example
 `agents/shared/worked-examples/tableau/topn-set-to-query-set.md`.
 
-Deferred (logged, never mis-translated):
-- **Phase 2c** — Set operations (`function='intersect'`, or `function='except'` of a
-  computed/non-member sub-tree) → no ThoughtSpot equivalent yet.
-- **No equivalent** — Worksheet set actions (`<action>` on a set) — logged and omitted.
+Phase 2c DONE (2026-06-14): All set operations now translatable:
+- **Member-list intersect** (`function='intersect'` where both children are member/union
+  sub-trees) → compute intersection at conversion time → GROUP_BASED column set of common
+  members.
+- **All-except-Top-N** (`function='except'` where excluded side contains `function='end'`) →
+  query set with inverted rank filter (`[rank] > N` instead of `<= N`). Same pattern as
+  Phase 2b, just inverted.
+- **Condition-based sets** (`function='filter'` with aggregate condition like `SUM(Sales) > X`)
+  → query set with a single boolean condition formula. Same ADVANCED/COLUMN_BASED pattern.
+- **Mixed computed set operations** (member-list ∩ Top-N, condition ∩ condition, nested
+  set-ops) → multi-formula query set. Each side generates its own formula(s); the
+  `search_query` combines all filters with `= true` (intersect) or `= true`/`= false` (except).
+  Deeply nested cases flagged for review.
 
-Status: Phase 2a DONE (2026-06-12); Phase 2b DONE (2026-06-12); Phase 2c DEFERRED
+Still no equivalent:
+- **Worksheet set actions** (`<action>` on a set) — logged and omitted.
+
+Status: Phase 2a DONE (2026-06-12); Phase 2b DONE (2026-06-12); Phase 2c DONE (2026-06-14)
 
 ---
 
-## #11 — Geospatial functions — DEFERRED (Phase 3)
+## #11 — Geospatial functions — DONE (Phase 3, 2026-06-14)
 
-Tableau geospatial functions (MAKELINE, MAKEPOINT, DISTANCE, etc.) have no ThoughtSpot
-formula equivalent. See parent plan for Phase 3 (future round).
+Explicit detect+log policy added. `MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`
+are now detected by the classifier (added to the regex list), classified under a dedicated
+"Geospatial (omit+log)" tier row in the audit report, and handled:
+- `MAKEPOINT(lat, lon)` → decompose; migrate lat/lon as individual ATTRIBUTE columns; omit
+  the spatial formula.
+- `DISTANCE`/`BUFFER`/`AREA` → omit + flag prominently (spatial computation lost).
+- Added to the Untranslatable Patterns table in `tableau-formula-translation.md` with the
+  full Geospatial Policy section.
 
-Status: DEFERRED
+Status: DONE
 
 ---
 
@@ -161,4 +179,31 @@ Status: DONE pending confirmation.
 ## #14 — Extended WINDOW_*/RUNNING_* — DOCUMENTED AS TABLE CALCS
 WINDOW_STDEV/PERCENTILE/COUNT/MEDIAN and RUNNING_COUNT documented as answer-level
 table calcs (EXC1) with aggregate fallbacks; no model-formula form.
+Status: DONE.
+
+---
+
+## #15 — Non-Snowflake/Databricks RDBMS sources — DONE (Phase 4, 2026-06-14)
+Redshift (15 files) and Postgres (1 file) dialect notes added to SKILL.md datasource
+type detection section. Key differences documented: `LISTAGG` → Redshift vs Postgres
+`string_agg`. No other mapping changes needed — ThoughtSpot formula translation is
+warehouse-agnostic; dialect only matters for `sql_*_op` pass-through functions.
+Status: DONE.
+
+---
+
+## #16 — Non-warehouse sources — DONE (Phase 4, 2026-06-14)
+Explicit unsupported-source policy added to SKILL.md: `cloudfile:googledrive-excel-direct`,
+`google-sheets`, `ogrdirect` (spatial/OGR), `webdata-direct`, `CustomMapbox` — skip the
+datasource entirely, log that data must be loaded into a warehouse first, surface in audit
+report under "Skipped sources".
+Status: DONE.
+
+---
+
+## #17 — INDEX() prevalence — DONE (Phase 4, 2026-06-14)
+INDEX() correctly untranslatable but appears in ~43 of 127 audited workbooks, usually for
+Top-N row numbering. Added a prevalence note to SKILL.md Step 5b: when INDEX() is used for
+ranking/Top-N intent (e.g. `INDEX() <= 10`), recommend `rank()` or answer-level `top N`
+keyword as a substitute. Log message added.
 Status: DONE.

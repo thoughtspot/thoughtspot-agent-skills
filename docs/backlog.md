@@ -506,6 +506,18 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 > model, linking fields → LEFT_OUTER inline joins, cross-datasource formulas resolve within
 > merged model. Affects 90/140 audited workbooks (64%). Star and transitive topologies
 > supported. Open-item #8 closed.
+> **Phase 2c (set operations + condition sets) — DONE (2026-06-14):** member-list intersect →
+> GROUP_BASED cohort of common members; all-except-Top-N → query set with inverted rank filter
+> (`[rank] > N`); condition-based sets (`function='filter'`) → query set with boolean condition
+> formula; mixed computed set operations (member ∩ Top-N, condition ∩ condition, nested set-ops)
+> → multi-formula query set with combined filters in `search_query`. All Tableau set types now
+> translatable except set controls (→ interactive filter) and set actions (no equivalent).
+> **Phase 3 (geospatial) — DONE (2026-06-14):** explicit detect+log policy for MAKEPOINT/MAKELINE/
+> DISTANCE/BUFFER/AREA. MAKEPOINT decomposes lat/lon to individual attribute columns. Added to
+> classifier regex, untranslatable table, and dedicated audit report row.
+> **Phase 4 (source coverage) — DONE (2026-06-14):** unsupported-source policy (google-sheets,
+> ogrdirect, webdata-direct, CustomMapbox → skip + log); Redshift/Postgres dialect notes for
+> pass-through SQL; INDEX() prevalence note (recommend rank() / top-N substitute).
 
 ### Problem
 
