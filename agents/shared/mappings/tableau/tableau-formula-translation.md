@@ -657,7 +657,7 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
 
 | Tableau | Pass-through ThoughtSpot formula | Notes |
 |---|---|---|
-| `RANK(SUM([col]))` partitioned | `sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] )` | Native `rank()` has no partition support. ⚑ flag for review (PT1) |
+| `RANK(SUM([col]))` partitioned | `group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] ) , query_groups ( ) + { [table::dim] } , query_filters ( ) )` | Native `rank()` has no partition support. Always wrap in `group_aggregate` — see `thoughtspot-formula-patterns.md` "`group_aggregate` wrapping" section. ⚑ flag for review (PT1) |
 | `DENSE_RANK(SUM([col]))` | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [table::col] )` | ⚑ flag for review (PT1) |
 
 ### Functions with no native ThoughtSpot equivalent — pass-through
@@ -678,11 +678,11 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
    running → `cumulative_*`, rank → `rank()`) before falling back to pass-through
 2. **Aggregation inside the SQL string** — ThoughtSpot adds columns to GROUP BY; bare
    column references without aggregation cause errors
-3. **Wrap complex window functions in `group_aggregate()`** — prevents query generation
-   errors when partition columns or date parts are involved:
-   ```
-   group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] ) , query_groups () + { dim } , query_filters () )
-   ```
+3. **Wrap pass-through window functions in `group_aggregate()`** — resolves partition
+   column conflicts, aggregate function errors, HAVING clause issues, and drill-down
+   support. See `thoughtspot-formula-patterns.md` → "`group_aggregate` wrapping for
+   pass-through window functions" for the full pattern and benefits. Always use this
+   wrapping for partitioned pass-through functions (rank, dense_rank, row_number, etc.).
    ⚑ flag for review — aggregate pass-through (PT1)
 4. **No validation** — ThoughtSpot does not validate the SQL string; errors surface at
    query time from the warehouse

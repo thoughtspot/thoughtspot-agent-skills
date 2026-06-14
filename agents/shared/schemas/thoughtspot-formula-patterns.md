@@ -485,11 +485,45 @@ sql_int_aggregate_op ( "LEAD(SUM({0}), 1) OVER (PARTITION BY {1} ORDER BY {2})" 
 # search_query must include: [Order Date].monthly [Region] [Sales] [formula]
 ```
 
+### `group_aggregate` wrapping for pass-through window functions
+
+Wrapping a `sql_*_aggregate_op` window function in `group_aggregate` resolves
+multiple limitations at once:
+
+1. **Mandatory partition columns** — the PARTITION BY column is guaranteed to be in
+   the GROUP BY via `query_groups() + {col}`, even if the user's search doesn't
+   include it. Without wrapping, the formula breaks when the partition column is
+   absent from the search.
+2. **Aggregate function conflicts** — ThoughtSpot's SQL generator can misplace
+   aggregate expressions inside window functions. `group_aggregate` isolates the
+   aggregation context.
+3. **HAVING clause compatibility** — bare pass-through window functions can conflict
+   with ThoughtSpot-generated HAVING clauses. The wrapper prevents this.
+4. **Drill-down support** — wrapped formulas remain valid when the user drills into
+   additional dimensions, because `query_groups()` dynamically includes them.
+
+**Pattern — partitioned rank:**
+```
+# Without wrapping — breaks if [Account Region] is not in the search
+sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [Account Region] , [Account Revenue] )
+
+# With group_aggregate wrapping — always works
+group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [Account Region] , [Account Revenue] ) , query_groups ( ) + { [Account Region] } , query_filters ( ) )
+```
+
+The `query_groups() + {col}` grouping ensures the partition column is always
+present in the GROUP BY. `query_filters()` passes through all user-applied filters.
+
+**When to wrap:** wrap any `sql_*_aggregate_op` window function that has a
+`PARTITION BY` clause referencing a column that may not be in the user's search.
+Unwrapped formulas are valid only when the partition column is guaranteed to be in
+every search that uses the formula.
+
 **Prefer native functions** (`moving_sum` for LAG/LEAD, `first_value`/`last_value`,
 `rank`) when they cover the use case — they handle all column types without
-GROUP BY matching concerns. Use `sql_*_aggregate_op` window functions only when
-native functions can't express the required semantics (e.g., `DENSE_RANK`,
-partitioned rank, `ROW_NUMBER`).
+GROUP BY matching concerns. Use `sql_*_aggregate_op` window functions (with
+`group_aggregate` wrapping) when native functions can't express the required
+semantics (e.g., `DENSE_RANK`, partitioned rank, `ROW_NUMBER`).
 
 ---
 
