@@ -485,6 +485,68 @@ before sorting. The topological sort must use display names, not internal IDs.
 Count `<dashboard>` elements in the TWB. Save the count and names — this is shown
 in Step 8 when asking whether to migrate dashboards.
 
+### 3e. Extract blend relationships (data blending)
+
+Parse the `<datasource-relationships>` element at the workbook root (child of `<workbook>`).
+If absent, no blending is used — skip this step.
+
+**Build the blend graph:**
+
+```python
+blend_graph = {}  # {source_ds_name: [{target_ds_name, column_mappings}]}
+
+ds_rels = root.find('.//datasource-relationships')
+if ds_rels is not None:
+    # Build a map of datasource-dependencies: ds_id → {column_instance_name → base_column_name}
+    dep_map = {}
+    for dep in ds_rels.findall('datasource-dependencies'):
+        ds_id = dep.get('datasource')
+        instance_to_col = {}
+        for col_inst in dep.findall('column-instance'):
+            instance_to_col[col_inst.get('name')] = col_inst.get('column')
+        dep_map[ds_id] = instance_to_col
+
+    # Parse each datasource-relationship (pairwise blend link)
+    for rel in ds_rels.findall('datasource-relationship'):
+        source_ds = rel.get('source')   # primary datasource
+        target_ds = rel.get('target')   # secondary datasource
+        col_maps = []
+        for m in rel.findall('column-mapping/map'):
+            # key format: [federated.xxx].[instance_name]
+            # Extract the instance_name portion after the datasource prefix
+            src_key = m.get('key')
+            tgt_key = m.get('value')
+
+            # Parse instance name from fully-qualified reference
+            src_inst = src_key.split('].[')[1].rstrip(']') if '].[' in src_key else src_key
+            tgt_inst = tgt_key.split('].[')[1].rstrip(']') if '].[' in tgt_key else tgt_key
+
+            # Resolve to base column names via dep_map
+            src_col = dep_map.get(source_ds, {}).get(src_inst, src_inst)
+            tgt_col = dep_map.get(target_ds, {}).get(tgt_inst, tgt_inst)
+
+            # Strip brackets from column names: [Category] → Category
+            src_col = src_col.strip('[]')
+            tgt_col = tgt_col.strip('[]')
+
+            col_maps.append({'source_col': src_col, 'target_col': tgt_col})
+
+        blend_graph.setdefault(source_ds, []).append({
+            'target_ds': target_ds,
+            'column_mappings': col_maps,
+        })
+```
+
+Store `blend_graph` alongside the per-datasource extraction results from Step 3b.
+The graph keys are datasource `name` attributes (the `federated.xxx` IDs from the XML).
+
+**What to log:**
+- Number of blend relationships found
+- For each: primary datasource → secondary datasource, with linking columns listed
+
+**No model merging happens here** — this step only extracts the relationships. Model
+merging happens in Step 5b.
+
 ---
 
 ## Step 4 — Select ThoughtSpot Connection
