@@ -178,9 +178,6 @@ Use this as the canonical limitations reference.
 | 105 | Audit mode (A) — parse-only, no auth | Coverage report with per-tier formula classification |
 | 106 | Migrate mode (M) — full conversion + import | Full pipeline Steps 1–11 |
 | 107 | Multi-file audit | Directory scanning, per-file + combined summary |
-| 108 | Dialect support: Snowflake (primary) | All pass-through SQL uses Snowflake syntax; skill confirms dialect with user if unknown |
-| 109 | Dialect support: Redshift | Dialect notes for `LISTAGG`/type casting; skill confirms dialect with user if unknown |
-| 110 | Dialect support: Postgres | Dialect notes for `string_agg`/type casting; skill confirms dialect with user if unknown |
 
 ---
 
