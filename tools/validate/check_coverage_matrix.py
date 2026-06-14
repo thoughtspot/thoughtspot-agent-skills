@@ -6,8 +6,11 @@ Rule: every `ts-convert-*` skill under agents/cli/ must have a
 `references/coverage-matrix.md` file documenting what the converter maps
 and what it doesn't.
 
-The validator checks existence and basic structure (must contain both
-"Mapped Constructs" and "Unmapped Constructs" / "Limitations" sections).
+The validator checks:
+  1. Existence of the file
+  2. Required sections (Mapped Constructs, Unmapped Constructs/Limitations)
+  3. Minimum table row count
+  4. Format consistency (Notes column convention, no stale patterns)
 
 Skills on the BACKLOG set are exempt — they need a coverage matrix but
 don't have one yet. Each entry must include a target date or PR reference.
@@ -35,6 +38,21 @@ BACKLOG: dict[str, str] = {
     "ts-convert-to-databricks-mv": "backlog — add after Tableau matrix ships",
 }
 
+BANNED_COLUMN_NAMES = re.compile(
+    r"^\|\s*#\s*\|[^|]*\|[^|]*\|\s*(Verified|Verified Against)\s*\|",
+    re.MULTILINE,
+)
+
+BANNED_SECTIONS = re.compile(
+    r"^##\s+(Test\s+Workbooks|Test\s+Semantic\s+Views)\s*$",
+    re.MULTILINE,
+)
+
+LAST_VERIFIED_LINE = re.compile(
+    r"^Last\s+verified:",
+    re.MULTILINE,
+)
+
 
 def find_convert_skills(root: Path) -> list[tuple[str, Path]]:
     """Return (skill_name, skill_dir) for every ts-convert-* skill."""
@@ -53,7 +71,7 @@ def find_convert_skills(root: Path) -> list[tuple[str, Path]]:
 
 
 def validate_matrix(matrix_path: Path) -> list[str]:
-    """Check the coverage matrix has the required sections. Return errors."""
+    """Check the coverage matrix has the required sections and format. Return errors."""
     errors: list[str] = []
     try:
         content = matrix_path.read_text(encoding="utf-8")
@@ -75,6 +93,33 @@ def validate_matrix(matrix_path: Path) -> list[str]:
         errors.append(
             f"Only {mapped_tables} table rows found — expected at least 5 "
             f"(mapped + unmapped constructs)"
+        )
+
+    # --- Format consistency checks ---
+
+    m = BANNED_COLUMN_NAMES.search(content)
+    if m:
+        errors.append(
+            f"Column header '{m.group(1).strip()}' found — rename to 'Notes' "
+            f"(blank = verified; only populate for Partial/Documented/Needs verification)"
+        )
+
+    m = BANNED_SECTIONS.search(content)
+    if m:
+        errors.append(
+            f"Section '## {m.group(1)}' found — test details belong in "
+            f"open-items.md or commit history, not the coverage matrix"
+        )
+
+    if LAST_VERIFIED_LINE.search(content):
+        errors.append(
+            "'Last verified:' line found — remove date stamps from coverage matrix"
+        )
+
+    if re.search(r"~~[^~]+~~", content):
+        errors.append(
+            "Struck-through text (~~...~~) found — remove reclassified items "
+            "and merge into the appropriate Mapped section"
         )
 
     return errors
@@ -123,6 +168,8 @@ def main() -> int:
         print("Every ts-convert-* skill must have references/coverage-matrix.md with:")
         print("  - A '## Mapped Constructs' section with table rows")
         print("  - An '## Unmapped Constructs' or '## Limitations' section")
+        print("  - 'Notes' as the last column header (not 'Verified' or 'Verified Against')")
+        print("  - No 'Last verified:' date line, '## Test Workbooks', or struck-through text")
         print()
         print("To defer: add the skill to BACKLOG in this file with a justification.")
         return 1
