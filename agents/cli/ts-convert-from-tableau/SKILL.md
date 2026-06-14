@@ -105,7 +105,8 @@ Enter A / M:
   1.  Authenticate to ThoughtSpot .......................... auto
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
-      calculated fields, blend relationships ............ auto
+      calculated fields, blend relationships,
+      table-calc addressing ............................ auto
   4.  Select ThoughtSpot connection (required) ............ you choose
   4.5 Confirm source tables (reuse vs. create; search) .... you choose
   5.  Generate TML files (table + sql_view + model) ...... auto
@@ -605,6 +606,79 @@ different native grains (e.g. source has daily `Order Date`, target has monthly
 
 **No model merging happens here** — this step only extracts the relationships. Model
 merging happens in Step 5b.
+
+---
+
+## Step 3f — Table-calc addressing extraction
+
+For every datasource, scan `<column>` elements that have a `<calculation class='tableau'>`
+child containing a `<table-calc>` element. Build a **column-level addressing map**:
+
+```python
+# table_calc_addressing[calc_internal_id] = {
+#     'ordering_type': 'Rows' | 'Columns' | 'Table' | 'CellInPane' | 'Field',
+#     'ordering_field': '<field_name>' or None,
+#     'order_fields': ['<field1>', '<field2>'] or [],    # from <order field='...'> children
+#     'quick_calc_type': 'PctTotal' | 'PctDiff' | 'Difference' | 'PctRank' | None,
+#     'address_offset': int or None,                      # from <address><value>N</value>
+# }
+table_calc_addressing = {}
+
+for column in datasource.findall('.//column'):
+    calc = column.find('calculation[@class="tableau"]')
+    if calc is None:
+        continue
+    tc = calc.find('table-calc')
+    if tc is None:
+        continue
+    calc_id = column.get('name')  # e.g. '[Calculation_953355781789577216]'
+    entry = {
+        'ordering_type': tc.get('ordering-type', 'Rows'),
+        'ordering_field': tc.get('ordering-field'),
+        'order_fields': [o.get('field') for o in tc.findall('order')],
+        'quick_calc_type': tc.get('type'),
+        'address_offset': None,
+    }
+    addr = tc.find('address/value')
+    if addr is not None and addr.text:
+        entry['address_offset'] = int(addr.text)
+    table_calc_addressing[calc_id] = entry
+```
+
+Then, for each `<worksheet>`, scan its `<column-instance>` elements for `<table-calc>`
+children. These are **view-level overrides** — they take precedence over the column-level
+definition for that worksheet:
+
+```python
+# ws_table_calc_overrides[worksheet_name][calc_internal_id] = { same shape as above }
+ws_table_calc_overrides = {}
+
+for worksheet in root.findall('.//worksheet'):
+    ws_name = worksheet.get('name')
+    ws_table_calc_overrides[ws_name] = {}
+    for ci in worksheet.findall('.//column-instance'):
+        tc = ci.find('table-calc')
+        if tc is None:
+            continue
+        # column-instance 'column' attr references the calc's internal ID
+        calc_id = ci.get('column')
+        entry = {
+            'ordering_type': tc.get('ordering-type', 'Rows'),
+            'ordering_field': tc.get('ordering-field'),
+            'order_fields': [o.get('field') for o in tc.findall('order')],
+            'quick_calc_type': tc.get('type'),
+            'address_offset': None,
+        }
+        addr = tc.find('address/value')
+        if addr is not None and addr.text:
+            entry['address_offset'] = int(addr.text)
+        ws_table_calc_overrides[ws_name][calc_id] = entry
+```
+
+**Resolution order** when translating a table-calc formula used on worksheet W:
+1. Check `ws_table_calc_overrides[W][calc_id]` — view-level override
+2. Fall back to `table_calc_addressing[calc_id]` — column-level definition
+3. If neither exists, treat as `ordering_type='Rows'` (Tableau default)
 
 ---
 
