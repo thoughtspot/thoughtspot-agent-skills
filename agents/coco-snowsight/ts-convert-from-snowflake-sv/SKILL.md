@@ -527,9 +527,30 @@ Snowflake → ThoughtSpot type mapping:
 
 ### Step 5: Find join names (Scenario A only)
 
-**Joinless semantic views (GAP-03):** if the relationships block is empty or absent
-(no relationships were parsed in Step 2), skip this step entirely. Proceed to Step 6
-with `model_tables` entries that have no `joins[]` or `referencing_join`.
+If the SV has only ONE table, skip this step — no joins needed.
+
+**Joinless semantic views (GAP-03) — multi-table SVs with no relationships:**
+
+If the SV has multiple tables but no `relationships(...)` block, ThoughtSpot requires
+joins for cross-table queries. Present the user with discovery options:
+
+1. **Auto-discover from database PK/FK constraints:**
+   ```sql
+   SHOW IMPORTED KEYS IN TABLE {db}.{schema}.{table};
+   ```
+   Build joins from FK→PK pairs. Composite FKs (same constraint name, multiple rows)
+   become composite equi-joins. Present for user confirmation.
+
+2. **Analyse column overlap (deeper dive):** scan matching column names across tables,
+   check composite key uniqueness (`COUNT(*) vs COUNT(DISTINCT(cols))`), validate
+   cardinality (`MAX(cnt)` from grouped query). Present suggestions with evidence.
+
+3. **User specifies joins manually:** prompt for from/to tables, columns, cardinality.
+
+4. **Skip:** create a **separate model per table** (cross-table queries require joins;
+   without them, each table needs its own model).
+
+Discovered joins are treated as inline `joins[]` in Step 6 (Scenario B pattern).
 
 ---
 

@@ -150,11 +150,15 @@ Map the Semantic View DDL to ThoughtSpot Model TML:
 - Dimensions → ATTRIBUTE columns
 - Facts → ATTRIBUTE formula columns (row-level expressions metrics build on)
 - Metrics → MEASURE columns with formula expressions
-- Relationships → `joins_with` entries; if the SV has no relationships, skip join
-  resolution and produce `model_tables` with no `joins_with` entries
+- Relationships → inline `joins[]` entries on the FROM table
   - **Range joins:** `on: "[FROM::COL] >= [TO::START] and [FROM::COL] < [TO::END]"` (half-open)
   - **ASOF joins:** equi columns with `=`, ASOF column with `>=`
   - **Composite equi-joins:** `"[FROM::COL1] = [TO::COL1] and [FROM::COL2] = [TO::COL2]"`
+  - **Joinless SVs (multi-table, no relationships):** prompt user for join discovery:
+    (1) auto-discover from database PK/FK constraints (`SHOW IMPORTED KEYS`),
+    (2) analyse column overlap + cardinality via live queries (deeper dive),
+    (3) user specifies joins manually,
+    (4) skip — create a separate model per table (no cross-table queries)
 - SQL expressions → ThoughtSpot formulas (use the formula translation reference)
 - Filter labels → boolean formula columns (ATTRIBUTE, `column_type: ATTRIBUTE`)
 - Duplicate `column_id` check (I8): scan for duplicate `column_id` values; convert the second to a formula

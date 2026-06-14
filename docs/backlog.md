@@ -1183,7 +1183,7 @@ category and skip all others).
 
 **Source:** BL-018 live testing — EMPLOYEE_SUMMARY_VW had no declared relationship in the SV (2026-06-13)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, ts-convert-from-tableau
-**Status:** Open
+**Status:** In progress — SV converter join discovery workflow implemented (2026-06-14); Databricks MV and Tableau pending
 **Priority:** Medium — prevents orphan tables silently entering models without joins
 
 ### Problem
