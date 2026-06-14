@@ -181,7 +181,9 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
 | **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
-| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), **FIRST()**, **LAST()**, PREVIOUS_VALUE (standalone partition-position table calcs — e.g. the comma-separated-list-of-set-members technique; **not** FIRST()/LAST() as `WINDOW_*`/`RUNNING_*` offset args, which map to moving/cumulative); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy) |
+| **Row-offset (native)** | Table calc with recoverable intent → native TS function | `INDEX() <= N` (Top-N filter intent → `rank()` + query set); `INDEX()` display numbering when sort is `Field` with a date → `rank()` |
+| **Row-offset (pass-through)** | Table calc with recoverable sort → answer-level SQL | `INDEX()` (→ `ROW_NUMBER`), `LOOKUP()` (→ `LAG`/`LEAD`), `FIRST()`/`LAST()` standalone (→ `FIRST_VALUE`/`LAST_VALUE`), `SIZE()` (→ `COUNT(*) OVER`) — **only when `<table-calc>` addressing yields an unambiguous sort/partition** ⚑ flag PT1 |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` **when addressing is ambiguous** (CellInPane, multi-dim Table, or no shelf sort); `PREVIOUS_VALUE` (true recursion — not the string-aggregation technique); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
@@ -200,13 +202,19 @@ TOTAL\s*\(
 MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
 ```
 
-**`FIRST()`/`LAST()` precedence.** These are untranslatable **standalone** (partition-position
-calcs like `LAST()=0`, or the comma-separated-list-of-members technique using
-`FIRST()`/`LAST()`/`LOOKUP()`/`PREVIOUS_VALUE()`). BUT `FIRST()`/`0` also appear as the **offset
-arguments** of a `WINDOW_*`/`RUNNING_*` window (e.g. `WINDOW_SUM(SUM([x]), FIRST(), 0)`) — there they
-belong to the moving/cumulative mapping, not the untranslatable tier. So **match `RUNNING_*`/`WINDOW_*`
-first**; only classify `FIRST()`/`LAST()` as untranslatable when they are **not** inside a window
-function's argument list.
+Detection of `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` routes through the **tiered decision
+tree** (see Row-Offset Table Calculations in `tableau-formula-translation.md`): these
+functions are detected by the same regexes above, then classified by intent and addressing
+recoverability — they are no longer unconditionally untranslatable.
+
+**`FIRST()`/`LAST()` precedence.** These appear in three contexts — match in this order:
+1. **As `WINDOW_*`/`RUNNING_*` offset args** (e.g. `WINDOW_SUM(SUM([x]), FIRST(), 0)`) →
+   part of the moving/cumulative mapping (not standalone). Match `RUNNING_*`/`WINDOW_*` first.
+2. **As part of the string-aggregation CSV technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE
+   building a delimited string) → translate intent to `LISTAGG` (see String aggregation section).
+3. **Standalone** (e.g. `LAST()=0`, or standalone `FIRST()`) → apply the Row-Offset Table
+   Calculations decision tree: emit `FIRST_VALUE`/`LAST_VALUE` pass-through if sort is
+   recoverable, else omit + log.
 
 **Parameter references.** Detect `[Parameters].[...]` pattern — this is Tableau's
 cross-datasource parameter reference syntax. These formulas use translatable syntax
@@ -1246,17 +1254,45 @@ Formula translation rules: use `tableau-formula-translation.md`.
   filtering and display even without a map visualization. For `DISTANCE`/`BUFFER`/`AREA`,
   flag more prominently (the spatial computation is lost, not just the wrapper). See
   `tableau-formula-translation.md` "Geospatial Policy". Log each omission.
-- **INDEX() prevalence note:** `INDEX()` is correctly untranslatable, but it appears in
-  ~43 of the 127 audited workbooks, usually implementing Top-N row numbering or ranking.
-  When you encounter `INDEX()` used for ranking/filtering intent (e.g. `INDEX() <= 10`),
-  recommend the ThoughtSpot substitute: `rank()` model formula or an answer-level `top N`
-  keyword search — not literal positional addressing. Surface this in the log:
-  `"INDEX() used for ranking/Top-N intent — consider rank() or answer-level 'top N' instead."`
-- **Truly untranslatable formulas** (LOOKUP, INDEX, SIZE, FIRST, LAST, PREVIOUS_VALUE — standalone
-  partition-position table calcs that are NOT part of the string-aggregation technique above): omit
+- **Row-offset table calculations** (`INDEX`, `LOOKUP`, `FIRST`, `LAST`, `SIZE` —
+  standalone, NOT as `WINDOW_*`/`RUNNING_*` offset args). Apply the tiered decision tree
+  from `tableau-formula-translation.md` "Row-Offset Table Calculations":
+
+  1. **Top-N filter intent** — `INDEX() <= N` or `INDEX() = N` inside an IF/CASE or set
+     filter → route to the existing query-set machinery (Step 5b query-set emission).
+     Use `rank ( [measure] , 'desc' )` + filter formula `[rank] <= N`.
+
+  2. **Native rank** — `INDEX()` used for display row numbering where `ordering_type` is
+     `Field` with a single date/continuous dimension → `rank ( [measure] , 'asc' )`.
+
+  3. **Gated pass-through** — sort/partition is unambiguously recoverable from the
+     `<table-calc>` addressing (Step 3f) + worksheet shelf (Step 9b):
+     - `INDEX()` → answer-level `sql_int_aggregate_op ( "ROW_NUMBER() OVER (ORDER BY {0})" , [sort_col] )`
+     - `LOOKUP(agg, N)` where N > 0 → `sql_*_aggregate_op ( "LEAD({0}, N) OVER (ORDER BY {1})" , [measure] , [sort_col] )`
+     - `LOOKUP(agg, N)` where N < 0 → `sql_*_aggregate_op ( "LAG({0}, abs(N)) OVER (ORDER BY {1})" , [measure] , [sort_col] )`
+     - `FIRST()` standalone → `sql_*_aggregate_op ( "FIRST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )`
+     - `LAST()` standalone → `sql_*_aggregate_op ( "LAST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )`
+     - `SIZE()` → `sql_int_aggregate_op ( "COUNT(*) OVER (PARTITION BY {0})" , [partition_col] )`
+     - All pass-throughs are **answer-level only** (in `answer.formulas[]`, not model `formulas[]`).
+     - ⚑ Always flag for review (PT1): admin-enabled, dialect-specific, unvalidated.
+
+  4. **Omit + log** — addressing is ambiguous (`ordering_type='CellInPane'`, multi-dim
+     `Table`, or no deterministic shelf sort). Log: `"[func]() — addressing context is
+     ambiguous (ordering_type={type}); omit + log."` This is the current behavior,
+     preserved for genuinely unrecoverable cases.
+
+  **Resolving the sort column:** Use the `table_calc_addressing` / `ws_table_calc_overrides`
+  maps from Step 3f. Check the worksheet override first, then fall back to the column-level
+  definition. Map `ordering_type` to a sort column per the resolution table in
+  `tableau-formula-translation.md` "Row-Offset Table Calculations". If resolution fails,
+  fall through to Tier 4.
+
+- **`PREVIOUS_VALUE()` (true recursion)** — still untranslatable (recursive CTE, not a
+  scalar expression). Omit + log. The string-aggregation exception (FIRST/LAST/LOOKUP/
+  PREVIOUS_VALUE CSV technique → LISTAGG) takes precedence and is handled above.
+- **Other truly untranslatable formulas** (k-means clustering, geospatial): unchanged — omit
   from `formulas[]` entirely, omit the corresponding `columns[]` entry, and log the
-  omission for the Step 12 limitations report. Never generate a placeholder — incorrect
-  syntax fails the entire model import.
+  omission. See `tableau-formula-translation.md` "Untranslatable Patterns".
 - Every join MUST have a non-empty `on` field. Multi-column joins are fine —
   `on: "[A::k1] = [B::k1] AND [A::k2] = [B::k2]"`.
 - **Join keys must be physical columns — you cannot join on a model formula.** And a
