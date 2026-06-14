@@ -105,7 +105,7 @@ Enter A / M:
   1.  Authenticate to ThoughtSpot .......................... auto
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
-      calculated fields .................................. auto
+      calculated fields, blend relationships ............ auto
   4.  Select ThoughtSpot connection (required) ............ you choose
   4.5 Confirm source tables (reuse vs. create; search) .... you choose
   5.  Generate TML files (table + sql_view + model) ...... auto
@@ -1693,6 +1693,9 @@ Will NOT migrate ({K}):
   # if none: "Nothing omitted — full coverage."
 
 Dashboards: {N}  (liveboard migration offered after import)
+
+Blended models: {N} model(s) merged from {M} datasources via data blending
+  - {primary_ds} ← {secondary_ds} on [{col1}, {col2}]  (LEFT_OUTER, {cardinality})
 
 Proceed?
   yes   — import the table + model TMLs

@@ -82,13 +82,21 @@ Status: NEEDS VERIFICATION
 
 ---
 
-## #8 — Multi-datasource worksheets — NOT IMPLEMENTED
+## #8 — Multi-datasource worksheets (data blending) — DONE (2026-06-14)
 
-Tableau worksheets can blend data from multiple datasources. v1.0.0 assumes each worksheet
-uses a single datasource. Blended worksheets will produce an incomplete liveboard
-visualization.
+Tableau workbooks that blend data from multiple datasources now produce a single merged
+ThoughtSpot model. The blend graph is extracted from `<datasource-relationships>` XML
+(Step 3e), datasources connected by blend relationships are grouped into connected
+components, and each component produces one model with inline `LEFT_OUTER` joins derived
+from the blend's `<column-mapping>` link fields.
 
-Status: DEFERRED to v1.1.0
+Cross-datasource formulas resolve naturally within the merged model — all columns from
+all blended datasources exist in the same model.
+
+Affects 90 of 140 audited workbooks (64%). Star topologies (1 primary → N secondaries)
+are supported.
+
+Status: DONE
 
 ---
 
