@@ -478,7 +478,7 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 
 **Source:** Audit of 127 workbooks in `tableau-migration-testing/twb/inactive/` (2026-06-10)
 **Affects:** ts-convert-from-tableau, `agents/shared/mappings/tableau/tableau-formula-translation.md`
-**Status:** In progress — **Phase 1 DONE (PR #48)**, **Phase 2a DONE (PR #49)**, **Phase 2b DONE (2026-06-12)**; Phase 2c + 3 + 4 open
+**Status:** Done — **Phase 1 DONE (PR #48)**, **Phase 2a DONE (PR #49)**, **Phase 2b DONE (2026-06-12)**, **Phase 2c + 3 + 4 DONE (2026-06-14)**
 **Full plan:** [`superpowers/plans/2026-06-11-tableau-mapping-gaps.md`](superpowers/plans/2026-06-11-tableau-mapping-gaps.md)
 
 > **Phase 1 (function table) — DONE (PR #48):** added DATEPARSE, EXP, trig (radians→degrees fix),
@@ -498,8 +498,18 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 > param/literal, ordering measure. Full emission template + worked example
 > (`topn-set-to-query-set.md`) added. The Dynamic-Sets gap (previously noted at line ~500) is now
 > addressed for Top-N/Bottom-N. Open-items #10 Phase 2b closed.
-> **Remaining:** Phase 2c (`intersect`/computed `except`), Phase 3 (geospatial MAKEPOINT/MAKELINE),
-> Phase 4 (source coverage + INDEX note). See the full plan.
+> **Phase 2c (set operations + condition sets) — DONE (2026-06-14):** member-list intersect →
+> GROUP_BASED cohort of common members; all-except-Top-N → query set with inverted rank filter
+> (`[rank] > N`); condition-based sets (`function='filter'`) → query set with boolean condition
+> formula; mixed computed set operations (member ∩ Top-N, condition ∩ condition, nested set-ops)
+> → multi-formula query set with combined filters in `search_query`. All Tableau set types now
+> translatable except set controls (→ interactive filter) and set actions (no equivalent).
+> **Phase 3 (geospatial) — DONE (2026-06-14):** explicit detect+log policy for MAKEPOINT/MAKELINE/
+> DISTANCE/BUFFER/AREA. MAKEPOINT decomposes lat/lon to individual attribute columns. Added to
+> classifier regex, untranslatable table, and dedicated audit report row.
+> **Phase 4 (source coverage) — DONE (2026-06-14):** unsupported-source policy (google-sheets,
+> ogrdirect, webdata-direct, CustomMapbox → skip + log); Redshift/Postgres dialect notes for
+> pass-through SQL; INDEX() prevalence note (recommend rank() / top-N substitute).
 
 ### Problem
 

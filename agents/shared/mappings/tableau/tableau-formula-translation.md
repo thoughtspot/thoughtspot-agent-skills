@@ -627,6 +627,11 @@ model import. A missing formula produces a functional model with reduced coverag
 | True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
 | References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
 | `DATETIME(expr)` | No `to_datetime` cast. If the column is already a datetime type, reference it directly; if it's a string, only `to_date` (date-only) exists — omit + log the time component. |
+| `MAKEPOINT(lat, lon)` | Geospatial point constructor — no ThoughtSpot formula equivalent. **Do not silently drop.** If the underlying lat/lon columns exist, migrate them as individual `ATTRIBUTE` columns (latitude + longitude are useful filter/display dimensions); omit the `MAKEPOINT` formula + log. See "Geospatial policy" below. |
+| `MAKELINE(point1, point2)` | Geospatial line constructor — no ThoughtSpot equivalent. Omit + log. The endpoint lat/lon columns are migrated individually if present. |
+| `DISTANCE(point1, point2, unit)` | Geospatial distance — no ThoughtSpot equivalent. Omit + log. |
+| `BUFFER(geom, distance, unit)` | Geospatial buffer — no ThoughtSpot equivalent. Omit + log. |
+| `AREA(geom, unit)` | Geospatial area — no ThoughtSpot equivalent. Omit + log. |
 
 **Formerly untranslatable, now mapped:**
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
@@ -663,6 +668,36 @@ sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [Ca
   (LISTAGG over the in-set rows = the "in list"; over the out-set rows = the "out list").
 - **Often a plain table of the values is the better ThoughtSpot UX** than a pre-concatenated string —
   offer both.
+
+---
+
+## Geospatial Policy
+
+Tableau geospatial functions (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) construct
+spatial objects from lat/lon columns. ThoughtSpot has no spatial data type or point/line constructors.
+
+**Policy — detect, decompose, log (never silent):**
+
+1. **Detect** `MAKEPOINT(`, `MAKELINE(`, `DISTANCE(`, `BUFFER(`, `AREA(` in calculated fields
+   (use the same `FUNCTION\s*\(` pattern as other untranslatable functions).
+2. **Decompose `MAKEPOINT(lat, lon)`:** if the two arguments resolve to physical columns (latitude
+   and longitude), ensure those columns are migrated as individual `ATTRIBUTE` columns on the model.
+   They are useful as filter and display dimensions even without a map visualization. Omit the
+   `MAKEPOINT` wrapper formula.
+3. **Omit the geospatial formula** from the model TML — do not generate a stub or placeholder.
+4. **Log** each omission:
+   `"Geospatial: '<calc name>' uses MAKEPOINT/MAKELINE/DISTANCE — no ThoughtSpot equivalent. Underlying lat/lon columns migrated as individual attributes. Omitted the spatial formula."`
+5. **Surface in the audit report** under a dedicated "Geospatial" row (see Tier table note below).
+
+**Calcs that ONLY wrap `MAKEPOINT`** (e.g. `MAKEPOINT([Latitude], [Longitude])`) are pure spatial
+constructors — their underlying columns carry all the analytical value. Calcs that use `DISTANCE`
+or `BUFFER` lose the spatial computation entirely; flag these more prominently:
+`"Geospatial: '<calc name>' computes DISTANCE/BUFFER — spatial calculation lost; lat/lon columns available for filtering but distance metric needs manual recreation."`
+
+**Classifier detection patterns** (add to the existing regex list):
+```
+MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
+```
 
 ---
 

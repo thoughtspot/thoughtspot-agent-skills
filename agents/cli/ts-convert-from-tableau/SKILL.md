@@ -174,13 +174,13 @@ based on the patterns in `tableau-formula-translation.md`:
 
 | Tier | Description | Examples |
 |---|---|---|
-| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key); **static sets** (`<group>` with `union`/`member`) → `GROUP_BASED` column-set cohort — incl. ones anchored on a **formula column**, with a **`%null%`** member (via `EQ {Null}`), or an **`except` member-list** (via `NE`) (Phase 2a); **Top-N/Bottom-N sets** (`function='end'`) → query set (`cohort_type: ADVANCED`, `COLUMN_BASED`) via a rank formula + parameter-filter formula (Phase 2b) |
+| **Native / Set** | Direct ThoughtSpot mapping exists | IF/THEN, IFNULL, DATEDIFF, LEFT, ABS, ROUND, IIF; **bins** (`class='bin'`) → `floor([x]/size)*size` or BIN_BASED cohort; **manual groups** (`class='categorical-bin'`, incl. fields named "… clusters") → `GROUP_BASED` cohort; `Number of Records`/row counts → `count([column])` (**prompt** for the column; default the primary key); **static sets** (`<group>` with `union`/`member`) → `GROUP_BASED` column-set cohort — incl. ones anchored on a **formula column**, with a **`%null%`** member (via `EQ {Null}`), or an **`except` member-list** (via `NE`) (Phase 2a); **Top-N/Bottom-N sets** (`function='end'`) → query set (`cohort_type: ADVANCED`, `COLUMN_BASED`) via a rank formula + parameter-filter formula (Phase 2b); **condition-based sets** (`function='filter'`) → query set with aggregate condition formula (Phase 2c); **member-list intersect** → `GROUP_BASED` cohort of common members (Phase 2c); **all-except-Top-N** → query set with inverted rank filter (Phase 2c); **computed set operations** (intersect/except of mixed types) → multi-formula query set (Phase 2c) |
 | **LOD** | LOD expression → `group_aggregate()` | `{FIXED dim : SUM(col)}`; **`TOTAL(SUM(x))`** / percent-of-total → `group_aggregate(..., {}, query_filters())` |
 | **Cumulative** | Running calculation → `cumulative_*()` | RUNNING_SUM, RUNNING_AVG |
 | **Moving** | Window table calc → `moving_*()` | WINDOW_SUM, WINDOW_AVG (when sort attr determinable) |
 | **Pass-through** | Valid SQL but no native function → `sql_*_aggregate_op()` | Partitioned RANK, DENSE_RANK, WINDOW_* without sort context |
-| **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **`intersect`** / `except` of a *computed* sub-tree → Phase 2c deferred; **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
-| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), **FIRST()**, **LAST()**, PREVIOUS_VALUE (standalone partition-position table calcs — e.g. the comma-separated-list-of-set-members technique; **not** FIRST()/LAST() as `WINDOW_*`/`RUNNING_*` offset args, which map to moving/cumulative); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`) |
+| **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | LOOKUP, INDEX, SIZE(), **FIRST()**, **LAST()**, PREVIOUS_VALUE (standalone partition-position table calcs — e.g. the comma-separated-list-of-set-members technique; **not** FIRST()/LAST() as `WINDOW_*`/`RUNNING_*` offset args, which map to moving/cumulative); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy) |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
@@ -196,6 +196,7 @@ RUNNING_(SUM|AVG|MAX|MIN|COUNT)\s*\(
 WINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(
 RANK(_UNIQUE|_MODIFIED|_DENSE|_PERCENTILE)?\s*\(
 TOTAL\s*\(
+MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
 ```
 
 **`FIRST()`/`LAST()` precedence.** These are untranslatable **standalone** (partition-position
@@ -259,6 +260,7 @@ Audit: {workbook_name}
   │ Pass-through            {N}     {%}   DENSE_RANK    │
   │ Parameter ref (auto)    {N}     {%}   static list   │
   │ Parameter ref (query)   {N}     {%}   SQL lookup    │
+  │ Geospatial (omit+log)   {N}     {%}   MAKEPOINT     │
   │ Untranslatable          {N}     {%}   LOOKUP        │
   └──────────────────────────────────────────────────────┘
 
@@ -266,9 +268,9 @@ Audit: {workbook_name}
   ┌──────────────────────────────────────────────────────┐
   │ Set tier                Count    Notes               │
   ├──────────────────────────────────────────────────────┤
-  │ Native / column set     {N}      static → GROUP_BASED cohort (Phase 2a) │
-  │ Query set {N}           {N}      Top-N/Bottom-N → ADVANCED cohort (Phase 2b) │
-  │ Partial / deferred      {N}      set-ops (2c) + actions                 │
+  │ Native / column set     {N}      static + member-intersect → GROUP_BASED cohort (2a/2c) │
+  │ Query set               {N}      Top-N, condition, all-except-Top-N, mixed ops → ADVANCED (2b/2c) │
+  │ Partial / deferred      {N}      set controls + set actions (no equivalent)     │
   └──────────────────────────────────────────────────────┘
 
   Parameters:           {N} total ({N} static, {N} SQL-lookup — query at migration)
@@ -278,7 +280,8 @@ Audit: {workbook_name}
   Migration coverage:   {(all except untranslatable) / total}%
                          (all parameters auto-created — static or queried)
   Untranslatable:       {N} formula(s) — will be omitted
-  Deferred sets:        {N} (set-ops/actions — flagged for manual creation)
+  Geospatial:           {N} formula(s) — spatial funcs omitted; lat/lon cols migrated as attributes
+  Deferred sets:        {N} (set controls/actions — flagged for manual creation)
   SQL-lookup params:    {N} — need warehouse connection at migration time
   Pass-through formulas require SQL Passthrough Functions enabled.
   ──────────────────────────────────────────────────
@@ -403,6 +406,27 @@ Tableau datasource" for the full rule.
   - File-based sources (CSV/Excel) imply the data was loaded into the warehouse out of
     band; bind the table to the connection that now exposes it (Step 4/4.5).
 - Otherwise, it is a **Live** datasource — proceed with extraction.
+
+**Non-warehouse sources — explicit unsupported policy:** The following Tableau connection
+classes are NOT warehouse-bound and cannot be mapped to a ThoughtSpot connection:
+`cloudfile:googledrive-excel-direct`, `google-sheets`, `ogrdirect` (spatial/OGR),
+`webdata-direct` (web data connector), `CustomMapbox`. When any of these appear as a
+datasource's connection class, do NOT assume a warehouse table exists. Instead:
+1. Log: `"Datasource '<name>' uses a non-warehouse source (<class>) — cannot map to a ThoughtSpot connection. Skipped; data must be loaded into a warehouse first."`
+2. Skip the datasource entirely (do not generate table or model TML for it).
+3. Surface in the audit report under a "Skipped sources" section.
+
+**Redshift and Postgres dialect notes:** When `<connection class="redshift">` or
+`<connection class="postgres">` is detected, pass-through SQL (`sql_*_op`) formulas
+should use the corresponding dialect syntax. Key differences from Snowflake:
+- String concatenation: `||` (same as Snowflake)
+- Date truncation: `date_trunc('month', col)` (same syntax, both dialects)
+- `LISTAGG` → Redshift: `LISTAGG(col, ',') WITHIN GROUP (ORDER BY col)`; Postgres: `string_agg(col, ',' ORDER BY col)`
+- Type casting: Redshift uses `::type`; Postgres uses `CAST(x AS type)` or `::type`
+
+No other mapping changes are needed — the Tableau-to-ThoughtSpot formula translation is
+warehouse-agnostic (ThoughtSpot formulas are the target, not SQL). The dialect only matters
+for `sql_*_op` pass-through functions.
 
 **Relation wrapper handling:** TWB XML wraps `<relation>` elements in one of three
 structures. Check in order:
@@ -947,6 +971,18 @@ Formula translation rules: use `tableau-formula-translation.md`.
   aggregation** (`sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [col] )`,
   answer-level, ⚑ flag for review per PT1) or a plain table of the values. The feeder/`Last` scaffolding
   calcs collapse into the one LISTAGG formula. See `tableau-formula-translation.md` "String aggregation".
+- **Geospatial formulas** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`): omit the
+  spatial formula entirely. For `MAKEPOINT(lat, lon)`, ensure the underlying latitude and
+  longitude columns are migrated as individual `ATTRIBUTE` columns — they are useful for
+  filtering and display even without a map visualization. For `DISTANCE`/`BUFFER`/`AREA`,
+  flag more prominently (the spatial computation is lost, not just the wrapper). See
+  `tableau-formula-translation.md` "Geospatial Policy". Log each omission.
+- **INDEX() prevalence note:** `INDEX()` is correctly untranslatable, but it appears in
+  ~43 of the 127 audited workbooks, usually implementing Top-N row numbering or ranking.
+  When you encounter `INDEX()` used for ranking/filtering intent (e.g. `INDEX() <= 10`),
+  recommend the ThoughtSpot substitute: `rank()` model formula or an answer-level `top N`
+  keyword search — not literal positional addressing. Surface this in the log:
+  `"INDEX() used for ranking/Top-N intent — consider rank() or answer-level 'top N' instead."`
 - **Truly untranslatable formulas** (LOOKUP, INDEX, SIZE, FIRST, LAST, PREVIOUS_VALUE — standalone
   partition-position table calcs that are NOT part of the string-aggregation technique above): omit
   from `formulas[]` entirely, omit the corresponding `columns[]` entry, and log the
@@ -1068,10 +1104,107 @@ For each `<group>` element, inspect its `<groupfilter>` tree and classify:
   not B"). `operator: NE` is a valid cohort operator (live-verified 2026-06-12). Any `%null%` in the
   excluded side needs no condition — it's already excluded by `combine_non_group_values` (catch-all).
   Anchor + member rules are the same as a static set.
-- **`intersect`, or `except` of a non-member sub-tree (Phase 2c — defer):** groupfilter tree contains
-  `function='intersect'`, or an `except` whose excluded side is itself a computed set (Top-N, another
-  set-op) rather than a flat member list. Do NOT translate. Log:
-  `"Set '<name>' uses an intersect / computed set operation → no ThoughtSpot equivalent yet (Phase 2c) — omitted, flag for manual creation."`
+- **`intersect` of two member lists (Phase 2c — TRANSLATABLE):** groupfilter tree has
+  `function='intersect'` and **both** children are member/union sub-trees (no `function='end'`,
+  `'filter'`, or nested set-op). Compute the **set intersection at conversion time** — the members
+  common to both lists. Emit a `GROUP_BASED` column set with `operator: EQ` conditions for the
+  shared members (same emission as a static set). If the intersection is empty, log and skip:
+  `"Set '<name>' intersect yields zero common members — omitted."` Otherwise log:
+  `"Set '<name>' is an intersect of two member lists → column set (GROUP_BASED, {N} common members, Phase 2c) — flag for review."`
+
+- **`except` where the excluded side is a Top-N/Bottom-N (Phase 2c — TRANSLATABLE):** groupfilter
+  tree has `function='except'` and the excluded child contains `function='end'`. This means "all
+  dimension values EXCEPT the Top/Bottom N" — the **complement** of the Top-N set. Translate to a
+  query set using an **inverted rank filter**: `[formula_rank] > N` (or `> [param]`) instead of
+  `<= N`. All other emission rules are identical to Phase 2b (same rank formula, same anchor/measure,
+  same static-vs-dynamic form selection). Log:
+  `"Set '<name>' is 'all except Top/Bottom-N' → query set with inverted rank filter (Phase 2c) — flag for review."`
+
+- **Condition-based set (Phase 2c — TRANSLATE to a query set):** groupfilter tree contains
+  `function='filter'` (with a `quantitative` or `expression` child specifying an aggregate condition
+  like `SUM([Sales]) > 10000`). This is a Tableau set created via the **Condition tab** — membership
+  is determined by an aggregate condition evaluated per dimension member at query time.
+
+  Detection:
+  - `function='filter'` in the groupfilter tree (distinct from `'end'` which is Top-N).
+  - The condition expression is in the `expression` attribute or a `<groupfilter function='quantitative'>`
+    child with `<groupfilter function='range' from='...' to='...'/>` bounds.
+  - The `level='[Dim]'` attribute → anchor column display name (same resolution as static/Top-N sets).
+
+  Extract:
+  - Set `caption` → cohort name.
+  - The aggregate expression (e.g. `SUM([Sales])`) → translate through the formula translation
+    reference to a ThoughtSpot formula.
+  - The comparison operator and threshold(s) from the `range` element or the expression itself.
+
+  Emit as a query set (`cohort_type: ADVANCED`, `cohort_grouping_type: COLUMN_BASED`) with:
+  - One formula: the translated condition as a boolean expression
+    (e.g. `sum ( [Model_1::Sales] ) > 10000`). Set `properties.column_type: ATTRIBUTE`.
+  - `search_query: "[<measure>] [<dimension>] [formula_condition] [formula_condition] = true"`
+  - Same `answer` structure as the Top-N query set (tables, table_paths, answer_columns, display_mode).
+
+  Log: `"Set '<name>' is a condition-based set (condition: <expr>) → query set with condition
+  formula (Phase 2c) — flag for review."`
+
+- **Computed set operations — intersect / except of mixed types (Phase 2c — TRANSLATE to a
+  multi-formula query set):** a set operation (`intersect` or `except`) where at least one side
+  is a computed set (Top-N, condition-based) and the other is a member list, a computed set, or
+  `level-members` (all). The query set's embedded answer can hold **multiple formulas** — compose
+  each side's filter logic into the same answer and combine via the `search_query`.
+
+  **Composition rules — build one formula per side, then combine:**
+
+  | Side type | Formula to generate |
+  |---|---|
+  | Member list (`union`/`member`) | `formula_members`: `[Model_1::Dim] = 'val1' or [Model_1::Dim] = 'val2' or ...` (one `or` per member). Set `properties.column_type: ATTRIBUTE`. |
+  | Top-N (`function='end'`) | `formula_rank`: `rank ( sum ( [Model_1::measure] ) , 'desc' )` + `formula_topn`: `[formula_rank] <= N` (or `<= [Model_1::param]`). Same as Phase 2b. |
+  | Condition (`function='filter'`) | `formula_cond`: translated aggregate condition (e.g. `sum ( [Model_1::Sales] ) > 10000`). Set `properties.column_type: ATTRIBUTE`. |
+
+  **Combining in `search_query`:**
+
+  | Operation | search_query pattern |
+  |---|---|
+  | **Intersect** (A ∩ B) | `"[measure] [dimension] ... [formula_a] = true [formula_b] = true"` — both filters must pass (AND). |
+  | **Except** (A EXCEPT B) | `"[measure] [dimension] ... [formula_a] = true [formula_b] = false"` — A passes, B fails. For Top-N exclusion, invert the rank filter: `[formula_rank] > N` instead of `<= N`, then use `= true`. |
+
+  The `answer_columns`, `table_columns`, and `ordered_column_ids` include the dimension, the
+  aggregated measure, and every formula column. The `display_mode` is `TABLE_MODE`.
+
+  **Example — "East States ∩ Top 10 by Revenue":**
+  ```yaml
+  cohort:
+    name: East Top Revenue
+    answer:
+      formulas:
+      - id: formula_members
+        name: member_filter
+        expr: "[Model_1::State] = 'NY' or [Model_1::State] = 'CA' or [Model_1::State] = 'TX'"
+        properties:
+          column_type: ATTRIBUTE
+      - id: formula_rank
+        name: rank
+        expr: "rank ( sum ( [Model_1::Revenue] ) , 'desc' )"
+        properties:
+          column_type: ATTRIBUTE
+      - id: formula_topn
+        name: topn_filter
+        expr: "[formula_rank] <= 10"
+      search_query: "[Revenue] [State] [formula_rank] [formula_members] = true [formula_topn] = true"
+      # ... tables, table_paths, answer_columns, display_mode as per Phase 2b
+    config:
+      cohort_type: ADVANCED
+      cohort_grouping_type: COLUMN_BASED
+      anchor_column_id: State
+      return_column_id: State
+  ```
+
+  Log: `"Set '<name>' is a computed set operation (<op> of <type-A> and <type-B>) → query set
+  with {N} formulas (Phase 2c) — flag for review."`
+
+  **Deeply nested set-ops:** if a side is itself a set operation (e.g. `(A ∩ B) EXCEPT C`),
+  recursively decompose — flatten all member lists into one `or` formula, and each computed side
+  into its own formula pair. The search_query combines all filters. Flag deeply nested cases
+  prominently: `"Nested set operation — {depth} levels deep; verify the combined filter logic."`
 
 - **Set control / dynamic set (no static members) → an interactive filter; drop the scaffolding.** A set
   whose groupfilter tree is **`level-members` only** (`ui-enumeration="all"`, `ui-builder="filter-group"`)
@@ -1115,12 +1248,17 @@ references the parameter, which must exist on the model first.
 >                            measure+filter, NOT migrated                [confirm filter ≈ the control]
 >   ✓ State_TopN           → query set (rank desc by SUM gallons, N=topN param)   [verify ranking + N]
 >   ✓ State_BottomN        → query set (rank asc by SUM gallons, N=topN param)    [verify ranking + N]
->   ⊘ <set-op set>         → DEFERRED (intersect/computed except, Phase 2c) — flagged for manual creation
+>   ✓ Region_Intersect     → column set (GROUP_BASED, 4 common members from intersect)   [verify membership]
+>   ✓ State_NotTopN        → query set (inverted rank desc, all except top N)          [verify ranking + N]
+>   ✓ HighRevCustomers     → query set (condition: SUM(Revenue) > 10000)               [verify condition]
+>   ✓ East_TopRevenue     → query set (member-list ∩ Top-N, 3 formulas)              [verify combined filter]
 > ```
 > The reinterpreted ones (`except`→`NE`, `%null%`→`{Null}`, formula-anchor, set-control→filter,
-> collapsed `IF [Set]` calcs, **Top-N/Bottom-N → query set**) especially need a human eye — call them
-> out explicitly, don't bury them. For Top-N/Bottom-N sets, explicitly call out any dropped ranking
-> nuances (null-padding, conditional measure) so the user can verify the ranking matches intent.
+> collapsed `IF [Set]` calcs, **Top-N/Bottom-N → query set**, **condition-based → query set**,
+> **member-list intersect → computed common members**, **all-except-Top-N → inverted rank**)
+> especially need a human eye — call them out explicitly, don't bury them. For Top-N/Bottom-N
+> and condition-based sets, explicitly call out any dropped ranking nuances (null-padding,
+> conditional measure) or simplified conditions so the user can verify the result matches intent.
 
 #### Set IN/OUT semantics — the column set IS the In/Out classification
 
