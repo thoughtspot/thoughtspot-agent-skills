@@ -58,6 +58,7 @@ Use this as the canonical limitations reference.
 | 40 | Division by zero | `safe_divide()` or `if ( b = 0 ) then null else a/b` | |
 | 41 | `REGEXP_EXTRACT/MATCH/REPLACE` | `sql_string_op/sql_bool_op` pass-through (Snowflake REGEXP_*) | Documented |
 | 42 | `FINDNTH(s, sub, n)` | `sql_int_op("REGEXP_INSTR({0},{1},1,{2})")` pass-through | Documented |
+| 108 | `ISMEMBEROF("group")` | `ts_groups = 'group'` — TS handles multi-value list membership natively with `=` | |
 
 ### Formula Translation — Aggregates
 
@@ -101,9 +102,10 @@ Use this as the canonical limitations reference.
 | # | Tableau Function(s) | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
 | 60 | `RANK(SUM([col]))` | `rank ( sum ( [t::col] ) , 'desc' )` (direction arg required) | |
-| 61 | `RANK_UNIQUE` | `rank()` (competition ranking; tie-handling difference documented) | |
+| 61 | `RANK_UNIQUE` | `rank()` (competition ranking; ties possible — use #109 `ROW_NUMBER()` for guaranteed uniqueness) | |
 | 62 | Partitioned `RANK` | `group_aggregate ( sql_int_aggregate_op("rank() over (...)") , query_groups() + {dim} , query_filters() )` — always wrapped | |
 | 63 | `RANK_DENSE` / `RANK_MODIFIED` | `sql_int_aggregate_op("dense_rank() over (...)")` pass-through | |
+| 109 | `RANK_UNIQUE` (unique ranks, no ties) | `sql_int_aggregate_op("ROW_NUMBER() OVER (ORDER BY ...)")` pass-through | |
 
 ### Formula Translation — Row-Offset Table Calculations
 
@@ -190,51 +192,49 @@ Use this as the canonical limitations reference.
 | L1 | `PREVIOUS_VALUE()` (true recursion) | Recursive table calc; no SQL equivalent | Omit + log. String-aggregation CSV technique IS handled separately (#71) |
 | L2 | True statistical clustering (k-means — analytics-engine "Clusters" calc) | No ThoughtSpot equivalent | Omit + log. Note: `categorical-bin` (manual groups) IS translatable (#92) |
 | L3 | `RAWSQL_*()` functions | Direct SQL passthrough; not portable | Omit + log |
-| L4 | `ISMEMBEROF()` | User-specific function; no equivalent | Omit + log |
-| L5 | COLLECTION datasources (multiple primary data sources combined) | Not implemented | Deferred (open-items #3) |
-| L6 | Row-offset table calcs with ambiguous addressing (`CellInPane`, multi-dim `Table`) | Sort/partition context unrecoverable | Omit + log |
-| L7 | Bare `FIRST()` as filter (e.g. `IF FIRST() == 0`) | Row-position test; no TS equivalent. `FIRST()` returns offset, not value | Omit + log |
-| L8 | Bare `LAST()` standalone | Returns offset-to-end; no TS equivalent | Omit + log |
+| L4 | COLLECTION datasources (multiple primary data sources combined) | Not implemented | Deferred (open-items #3) |
+| L5 | Row-offset table calcs with ambiguous addressing (`CellInPane`, multi-dim `Table`) | Sort/partition context unrecoverable | Omit + log |
+| L6 | Bare `FIRST()` as filter (e.g. `IF FIRST() == 0`) | Row-position test; no TS equivalent. `FIRST()` returns offset, not value | Omit + log |
+| L7 | Bare `LAST()` standalone | Returns offset-to-end; no TS equivalent | Omit + log |
 
 ### MEDIUM — Partial translation or admin enablement required
 
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
-| L9 | Set actions (`<action>` on a set) | No interactive set membership changes in TS | Omit + log |
-| L10 | All SQL pass-through functions (RANK partitioned, DENSE_RANK, SIZE, REGEXP, UPPER/LOWER, PROPER, ASCII, CHAR) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review |
-| L11 | `rank()` tie handling | TS `rank()` is competition ranking (1,1,3) — no `ROW_NUMBER()` equivalent for unique ranks | Document the difference |
-| L12 | Geospatial formulas (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) | No spatial data types or constructors | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
-| L13 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |
-| L14 | Liveboard layout coordinate system | Exact ThoughtSpot grid units not fully verified | Open-items #6 |
-| L15 | Inline answer TML in liveboard | Nested `answer:` blocks inside `visualizations[]` not confirmed | Open-items #5 |
-| L16 | NOTE_TILE structure | Exact TML structure not fully verified | Open-items #7 |
-| L17 | Multi-dashboard → tabs | Liveboard tabs TML structure not implemented | Open-items #9 — deferred to v1.1.0; creates separate liveboards |
+| L8 | Set actions (`<action>` on a set) | No interactive set membership changes in TS | Omit + log |
+| L9 | All SQL pass-through functions (RANK partitioned, DENSE_RANK, SIZE, REGEXP, UPPER/LOWER, PROPER, ASCII, CHAR) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review |
+| L10 | Geospatial formulas (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) | No spatial data types or constructors | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
+| L11 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |
+| L12 | Liveboard layout coordinate system | Exact ThoughtSpot grid units not fully verified | Open-items #6 |
+| L13 | Inline answer TML in liveboard | Nested `answer:` blocks inside `visualizations[]` not confirmed | Open-items #5 |
+| L14 | NOTE_TILE structure | Exact TML structure not fully verified | Open-items #7 |
+| L15 | Multi-dashboard → tabs | Liveboard tabs TML structure not implemented | Open-items #9 — deferred to v1.1.0; creates separate liveboards |
 
 ### LOW — Cosmetic or edge-case
 
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
-| L18 | SQL-lookup parameter values | ThoughtSpot `list_config` is static; no live-query capability | Point-in-time snapshot; document staleness |
-| L19 | `RUNNING_COUNT` | No `cumulative_count` function | Approximate with `cumulative_sum(1, [sort_attr])` at answer level |
-| L20 | Bitmap/image zones | Images not migratable to liveboard tiles | Skipped |
-| L21 | Web/extension zones | No equivalent | Skipped |
-| L22 | Flipboard/Story interaction | Flip navigation lost | Content salvaged; interaction dropped |
-| L23 | Legend/color zones | TS draws its own legends | Skipped |
-| L24 | `DATEDIFF('week', ...)` boundary semantics | Week-start semantics differ between Tableau and TS | Flag per workbook for manual verification |
-| L25 | Manual group value snapshot | `categorical-bin` values from TWB authoring time may not exist in current data | Flag as data-fidelity limitation |
+| L16 | SQL-lookup parameter values | ThoughtSpot `list_config` is static; no live-query capability | Point-in-time snapshot; document staleness |
+| L17 | `RUNNING_COUNT` | No `cumulative_count` function | Approximate with `cumulative_sum(1, [sort_attr])` at answer level |
+| L18 | Bitmap/image zones | Images not migratable to liveboard tiles | Skipped |
+| L19 | Web/extension zones | No equivalent | Skipped |
+| L20 | Flipboard/Story interaction | Flip navigation lost | Content salvaged; interaction dropped |
+| L21 | Legend/color zones | TS draws its own legends | Skipped |
+| L22 | `DATEDIFF('week', ...)` boundary semantics | Week-start semantics differ between Tableau and TS | Flag per workbook for manual verification |
+| L23 | Manual group value snapshot | `categorical-bin` values from TWB authoring time may not exist in current data | Flag as data-fidelity limitation |
 
 ### Notes on limitations
 
-**L1–L4** are truly untranslatable — the functions have no SQL or ThoughtSpot equivalent.
+**L1–L3** are truly untranslatable — the functions have no SQL or ThoughtSpot equivalent.
 The skill detects them, omits them cleanly, and logs them in the audit report.
 
-**L5** (COLLECTION datasources) is the only HIGH-severity structural gap. Data blending
+**L4** (COLLECTION datasources) is the only HIGH-severity structural gap. Data blending
 (#4) handles the common multi-datasource case; COLLECTION is a separate, rarer construct.
 
-**L7–L8** (bare FIRST/LAST) are distinct from LOOKUP(agg, FIRST/LAST) (#68–69) — see
+**L6–L7** (bare FIRST/LAST) are distinct from LOOKUP(agg, FIRST/LAST) (#68–69) — see
 the decision tree in `tableau-formula-translation.md` tiers 5a–6c.
 
-**L10** (pass-through functions) — SQL Passthrough Functions are **enabled by default** in
+**L9** (pass-through functions) — SQL Passthrough Functions are **enabled by default** in
 ThoughtSpot. This is only a limitation if an admin has explicitly turned it off in
 Admin > Search & SpotIQ. All pass-through formulas are flagged with `PT1` in the audit
 report for visibility. Native alternatives are used wherever possible — SQL pass-through
