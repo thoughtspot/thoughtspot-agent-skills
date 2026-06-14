@@ -39,14 +39,14 @@ Use this as the canonical limitations reference.
 | 21 | `STARTSWITH/ENDSWITH` | `strpos(s,sub) = 1` / `substr` idiom | |
 | 22 | `PROPER/ASCII/CHAR` | `sql_string_op("INITCAP/ASCII/CHR({0})")` | Pass-through |
 | 23 | `SPLIT(s, delim, n)` | `substr`/`strpos` chain | Not verified |
-| 24 | `DATEDIFF` (day/month/year/hour/minute/week) | `diff_days/diff_months/diff_years/diff_time` | Args reversed vs Tableau |
+| 24 | `DATEDIFF` (all units) | `diff_days`/`diff_months`/`diff_years`/`diff_time` | Args reversed vs Tableau |
 | 25 | `DATETRUNC` | `start_of_month/quarter/week/year` | |
 | 26 | `DATEADD` | `add_days/add_months/add_years` | |
-| 27 | `DATEPART` (month/day/year/hour/quarter/week/dayofyear/weekday) | `month_number/day/year/hour_of_day/quarter_number/week_number_of_year/day_number_of_year/day_of_week` | |
+| 27 | `DATEPART` (all units) | Per-unit functions | `month`→`month_number`, `quarter`→`quarter_number`, `week`→`week_number_of_year`, `dayofyear`→`day_number_of_year`, `weekday`→`day_of_week` |
 | 28 | `DATENAME('month', d)` | `month ( [date] )` | Returns name, not number |
 | 29 | `DATEPARSE(format, s)` | `to_date ( s , format )` | Args flipped vs Tableau |
-| 30 | `TODAY()/NOW()/DATE()/YEAR()/MONTH()/DAY()` | `today()/now()/date()/year()/month_number()/day()` | |
-| 31 | `ABS/ROUND/CEILING/FLOOR/SQRT/POWER/LOG/LN/EXP` | `abs/round/ceil/floor/sqrt/pow/log10/ln/exp` | |
+| 30 | `TODAY`/`NOW`/`DATE`/`YEAR`/`MONTH`/`DAY` | `today`/`now`/`date`/`year`/`month_number`/`day` | |
+| 31 | `ABS`/`ROUND`/`CEILING`/`FLOOR`/`SQRT`/`POWER`/`LOG`/`LN`/`EXP` | `abs`/`round`/`ceil`/`floor`/`sqrt`/`pow`/`log10`/`ln`/`exp` | |
 | 32 | `SIN/COS/TAN` (and inverse trig) | Radians-to-degrees conversion applied | |
 | 33 | `PI()/RADIANS()/DEGREES()` | Literal composites | No native equivalent |
 | 34 | `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Partial; truncate-toward-zero |

@@ -12,10 +12,10 @@ Use this as the canonical limitations reference.
 | # | Semantic View Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
 | 1 | `tables (DB.SCHEMA.TABLE)` block | `model_tables[]` entries | |
-| 2 | `tables (DB.SCHEMA.VIEW)` — view-backed sources | Same as physical tables (TS tables can point to views) | |
+| 2 | `tables (DB.SCHEMA.VIEW)` — view-backed sources | `model_tables[]` entries | TS tables can point to views |
 | 3 | Table aliases (explicit + implicit) | `model_tables[].name` | |
-| 4 | `primary key (col)` on table entries | Join target identification (not written to TML) | |
-| 5 | Table-level `comment='...'` | TS Table TML `table.description` (separate update) | |
+| 4 | `primary key (col)` on table entries | Join target identification | Not written to TML |
+| 5 | Table-level `comment='...'` | `table.description` | Separate Table TML update |
 | 6 | Top-level `comment='...'` (after metrics) | `model.description` | |
 
 ### Joins and Relationships
@@ -34,7 +34,7 @@ Use this as the canonical limitations reference.
 |---|---|---|---|
 | 12 | `dimensions (TABLE.COL as NAME)` | `columns[]` with `column_type: ATTRIBUTE` | |
 | 13 | Computed dimensions (`DATEDIFF`, `CONCAT`, `CASE/WHEN`) | `formulas[]` with `column_type: ATTRIBUTE` | |
-| 14 | `with synonyms=('...',...)` on dimensions/metrics | First → column `name`; rest → `properties.synonyms` | |
+| 14 | `with synonyms=('...',...)` on dimensions/metrics | `column.name` + `properties.synonyms` | First synonym → name; rest → synonyms |
 | 15 | `comment='...'` on dimensions/metrics | column `description` | |
 
 ### Facts and Metrics
@@ -44,25 +44,25 @@ Use this as the canonical limitations reference.
 | 16 | `facts (TABLE.NAME as EXPR)` — row-level expressions | `formulas[]` entries (MEASURE or ATTRIBUTE) | |
 | 17 | `labels = (filter)` on facts/dimensions — filter labels | Boolean formula column (`column_type: ATTRIBUTE`) | |
 | 18 | Simple metrics: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` | `columns[]` with `column_type: MEASURE` + `aggregation` | |
-| 19 | `COUNT(DISTINCT col)` | `unique count([T::col])` formula (never `COUNT_DISTINCT` aggregation — I5) | |
+| 19 | `COUNT(DISTINCT col)` | `unique count([T::col])` formula | Never COUNT_DISTINCT aggregation (I5) |
 | 20 | Complex metric expressions (multi-column, arithmetic) | `formulas[]` with translated ThoughtSpot formula | |
 | 21 | `non additive by (col asc nulls last) as AGG(...)` — semi-additive | `last_value(agg(...), query_groups(), {date})` formula | |
 | 22 | `non additive by (col desc nulls last) as AGG(...)` | `first_value(agg(...), query_groups(), {date})` formula | |
 | 23 | Window functions: `OVER (PARTITION BY ... ORDER BY ...)` | `group_sum` / `group_aggregate` formula | |
 | 24 | `PARTITION BY EXCLUDING` | `group_aggregate(... query_groups()-{dim})` | |
 | 25 | Cumulative: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` | `cumulative_sum` / `cumulative_avg` formula | |
-| 26 | Metric-on-fact resolution (`AVG(table.fact_name)`) | `average([formula_<id>])` — references fact by formula `id` | |
-| 27 | Double aggregation / metric-on-metric (`AVG(table.count_metric)`) | `average(group_count([T::col], [DIM::pk]))` — `group_*` shorthands | |
+| 26 | Metric-on-fact resolution (`AVG(table.fact_name)`) | `average([formula_<id>])` | References fact by formula `id` |
+| 27 | Double aggregation / metric-on-metric (`AVG(table.count_metric)`) | `average(group_count([T::col], [DIM::pk]))` | `group_*` shorthands |
 | 28 | Window metrics referencing other metrics | Combined window + double-agg translation | |
-| 29 | Duplicate `column_id` detection (I8) | Second metric on same column → formula | |
+| 29 | Duplicate `column_id` detection (I8) | Formula with unique `column_id` | Second metric on same column gets formula |
 
 ### Verified Queries and Metadata
 
 | # | Semantic View Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
 | 30 | `ai_verified_queries (QUERY_NAME AS (...))` | NLS Feedback TML (`REFERENCE_QUESTION` entries) | |
-| 31 | `with extension (CA='...')` | Parsed for type confirmation; not mapped to TML | |
-| 32 | `constraint ... distinct range between START and END` on table entries | Parsed; used to identify range join endpoints | |
+| 31 | `with extension (CA='...')` | Parsed only | Type confirmation; not mapped to TML |
+| 32 | `constraint ... distinct range between START and END` on table entries | Parsed only | Identifies range join endpoints |
 
 ### Operational Modes
 
