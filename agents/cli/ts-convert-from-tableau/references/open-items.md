@@ -207,3 +207,19 @@ Top-N row numbering. Added a prevalence note to SKILL.md Step 5b: when INDEX() i
 ranking/Top-N intent (e.g. `INDEX() <= 10`), recommend `rank()` or answer-level `top N`
 keyword as a substitute. Log message added.
 Status: DONE.
+
+---
+
+## #18 — Row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) — DONE (2026-06-14)
+
+BL-024. Tiered decision tree added: Top-N filter intent → native rank/query set;
+display numbering/offset/window-bound → answer-level `sql_*_aggregate_op` pass-through
+(gated on unambiguous `<table-calc>` addressing from Step 3f); ambiguous addressing →
+omit + log (unchanged). Affects 39 workbooks (INDEX), 21 (LOOKUP), 18 (FIRST/LAST/SIZE)
+in the 140-workbook corpus.
+
+New Step 3f extracts `<table-calc>` addressing attributes (`ordering-type`, `ordering-field`,
+`<order>` children) from both column definitions and worksheet-level `<column-instance>`
+overrides. Formula translation reference updated with SQL templates and resolution table.
+
+Status: DONE — NEEDS LIVE VERIFICATION against a workbook with INDEX/LOOKUP table calcs
