@@ -77,6 +77,7 @@ snow stage copy agents/shared/schemas/thoughtspot-sql-view-tml.md @SKILLS.PUBLIC
 snow stage copy agents/shared/worked-examples/tableau/liveboard-kpi-sparkline.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/tableau/static-set-to-column-set.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/tableau/topn-set-to-query-set.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
+snow stage copy agents/shared/worked-examples/tableau/data-blend-to-model.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/tableau/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-to-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
