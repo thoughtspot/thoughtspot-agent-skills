@@ -132,16 +132,6 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 
 See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for installation and setup.
 
-### ts-variable-timezone version requirements
-
-> ⚠️ **Beta in ThoughtSpot 26.5, Early Access in 26.6 — requires a support ticket to enable.**
-
-| ThoughtSpot version | Status | Notes |
-|---|---|---|
-| 26.5 | Beta | Must be enabled by your ThoughtSpot admin via a support ticket |
-| 26.6 | Early Access | Must be enabled by your ThoughtSpot admin via a support ticket |
-| Post-GA | Generally Available | Enabled by default |
-
 ---
 
 ## Snowsight Workspace Skills
