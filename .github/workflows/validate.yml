@@ -19,7 +19,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install test/runtime deps
-        run: pip install pytest pyyaml
+        run: |
+          pip install pytest pyyaml
+          pip install -e tools/ts-cli
 
       - name: Run validators (full-repo mode)
         run: |
