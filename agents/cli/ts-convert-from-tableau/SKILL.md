@@ -2017,6 +2017,18 @@ each matches intent before import.
 Reviewer checks before import:
 - Every translated division has a div-by-zero guard (FT "Division-by-zero" section)
 
+**Row-offset table calculations.** For each formula classified as Row-offset (native or
+pass-through), display:
+- The original Tableau formula
+- The resolved sort column and how it was determined (from `<table-calc>` `ordering_type`/
+  `ordering_field`, or from worksheet shelf)
+- The ThoughtSpot translation (native `rank()` or answer-level `sql_*_aggregate_op`)
+- For pass-throughs: the full SQL template with the resolved column names filled in
+
+Ask the user to confirm the sort resolution is correct before proceeding to import.
+If any sort resolution looks wrong, the user can override it or choose to omit that
+formula instead.
+
 Wait for confirmation. **no** cancels. **file** writes the TMLs and skips to Step 12
 (report only, no import). **yes** imports:
 
