@@ -1276,13 +1276,17 @@ Formula translation rules: use `tableau-formula-translation.md`.
      `<table-calc>` addressing (Step 3f) + worksheet shelf (Step 9b). Uses native
      ThoughtSpot functions (no SQL pass-through, works with all column types):
      - `INDEX()` → `rank ( sum ( [measure] ) , 'asc' )` (ranks by value, not row position — acceptable)
-     - `LOOKUP(agg, N)` where N < 0 (LAG) → `moving_sum ( [measure] , abs(N) , abs(N) , [sort_col] )`
-     - `LOOKUP(agg, 1)` (LEAD 1) → `moving_sum ( [measure] , 0 , 1 , [sort_col] ) - sum ( [measure] )`
-     - `LOOKUP(agg, N)` where N > 1 (LEAD N) → `moving_sum ( [measure] , 0 , N , [sort_col] ) - moving_sum ( [measure] , 0 , N-1 , [sort_col] )`
+     - `LOOKUP(agg, N)` where N < 0 (LAG) → `moving_sum ( [measure] , abs(N) , -abs(N) , [sort_col] )`
+     - `LOOKUP(agg, N)` where N > 0 (LEAD) → `moving_sum ( [measure] , -N , N , [sort_col] )`
      - `FIRST()` standalone → `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
      - `LAST()` standalone → `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )`
      - `SIZE()` → `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` ⚑ flag PT1 (only row-offset needing pass-through)
      - All are **answer-level only** (in `answer.formulas[]`, not model `formulas[]`).
+     - **SQL pass-through alternative:** when exact SQL semantics are needed (e.g.,
+       partitioned LEAD/LAG with date bucketing), `sql_*_aggregate_op` works if the
+       ORDER BY date expression matches the search query's date aggregate (e.g.,
+       `start_of_month([date])` with `[date].monthly`) and all shelf GROUP BY columns
+       are in PARTITION BY. See `tableau-formula-translation.md` "SQL pass-through alternative".
 
   4. **Omit + log** — addressing is ambiguous (`ordering_type='CellInPane'`, multi-dim
      `Table`, or no deterministic shelf sort). Log: `"[func]() — addressing context is

@@ -524,9 +524,8 @@ Apply in order — stop at the first match:
 |---|---|---|---|
 | 1 | `INDEX() <= N` or `INDEX() = N` used as a **filter** (inside an IF/CASE that gates row visibility, or a set filter) | Route to existing Top-N / query-set machinery (SKILL.md Step 5b). Use `rank ( [measure] , 'desc' )` + filter `[rank] <= N`. | **Native** |
 | 2 | `INDEX()` used for **display row numbering** (standalone on a shelf, not filtering) AND `ordering_type` is `Rows` or `Field` with a known sort column | Emit answer-level: `rank ( sum ( [measure] ) , 'asc' )`. Note: ranks by measure value, not row position — acceptable for display numbering. | **Native** |
-| 3 | `LOOKUP(agg, N)` where N > 0 (forward offset = LEAD) AND sort column is known AND N = 1 | Emit answer-level: `moving_sum ( [measure] , 0 , 1 , [sort_col] ) - sum ( [measure] )` | **Native** |
-| 3b | `LOOKUP(agg, N)` where N > 1 (forward offset > 1) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , 0 , N , [sort_col] ) - moving_sum ( [measure] , 0 , N-1 , [sort_col] )` | **Native** |
-| 4 | `LOOKUP(agg, N)` where N < 0 (backward offset = LAG) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , abs(N) , abs(N) , [sort_col] )` | **Native** |
+| 3 | `LOOKUP(agg, N)` where N > 0 (forward offset = LEAD) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , -N , N , [sort_col] )` | **Native** |
+| 4 | `LOOKUP(agg, N)` where N < 0 (backward offset = LAG) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , abs(N) , -abs(N) , [sort_col] )` | **Native** |
 | 5 | `FIRST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
 | 6 | `LAST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
 | 7 | `SIZE()` (unpartitioned) | Emit answer-level: `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` ⚑ flag PT1 | **Pass-through (SIZE only)** |
@@ -551,21 +550,25 @@ Given the `table_calc_addressing` entry (from Step 3f) and the worksheet shelf d
 These are answer-level formulas. Use display-name column references (`[Sales]`), not
 `[TABLE::col]` model references.
 
+The `moving_sum` offset convention: positive start = preceding (backward), negative
+start = following (forward). The end offset uses opposite sign to select a single row:
+`(N, -N)` = exactly the row N positions back, `(-N, N)` = exactly N positions forward.
+
 ```
 # INDEX() → rank (ranks by measure value — approximates row numbering)
 rank ( sum ( [Sales] ) , 'asc' )
 
-# LOOKUP(SUM([Sales]), -1) → LAG via moving_sum
-moving_sum ( [Sales] , 1 , 1 , [Order Date] )
+# LOOKUP(SUM([Sales]), -1) → LAG(1)
+moving_sum ( [Sales] , 1 , -1 , [Order Date] )
 
 # LOOKUP(SUM([Sales]), -3) → LAG(3)
-moving_sum ( [Sales] , 3 , 3 , [Order Date] )
+moving_sum ( [Sales] , 3 , -3 , [Order Date] )
 
-# LOOKUP(SUM([Sales]), 1) → LEAD(1) via moving_sum minus current
-moving_sum ( [Sales] , 0 , 1 , [Order Date] ) - sum ( [Sales] )
+# LOOKUP(SUM([Sales]), 1) → LEAD(1)
+moving_sum ( [Sales] , -1 , 1 , [Order Date] )
 
-# LOOKUP(SUM([Sales]), 2) → LEAD(2) via moving_sum difference
-moving_sum ( [Sales] , 0 , 2 , [Order Date] ) - moving_sum ( [Sales] , 0 , 1 , [Order Date] )
+# LOOKUP(SUM([Sales]), 2) → LEAD(2)
+moving_sum ( [Sales] , -2 , 2 , [Order Date] )
 
 # FIRST() → first_value
 first_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
@@ -577,27 +580,47 @@ last_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
 sql_int_aggregate_op ( "COUNT(*) OVER ()" )
 ```
 
-### Why native functions, not SQL pass-through
-
-Live-verified (se-thoughtspot, 2026-06-15): `sql_*_aggregate_op` with `ORDER BY` inside
-a window function fails for DATE and numeric columns due to a ThoughtSpot GROUP BY
-generation mismatch (Snowflake error: `"column is not a valid group by expression"`).
-VARCHAR columns work, but most Tableau table calcs sort by date.
+### Why native functions over SQL pass-through (default)
 
 Native ThoughtSpot functions (`moving_sum`, `first_value`, `last_value`, `rank`) handle
-all column types correctly — verified with DATE, VARCHAR, and INT64 ORDER BY columns.
+all column types correctly, require no admin enablement, and are validated at import
+time — verified with DATE, VARCHAR, and INT64 columns (se-thoughtspot, 2026-06-15).
 
-### Caveats for native row-offset formulas
+### SQL pass-through alternative (when exact SQL semantics are needed)
+
+SQL pass-through (`sql_*_aggregate_op`) with `ORDER BY` **does work** for DATE columns
+when two conditions are met (live-verified 2026-06-15):
+
+1. **Date aggregate in the search must match the ORDER BY expression.** If the search
+   query uses `[Order Date].monthly`, the pass-through ORDER BY must use
+   `start_of_month([Order Date])` — both resolve to `DATE_TRUNC('MONTH', ...)` in
+   Snowflake. A raw `[Order Date]` in ORDER BY mismatches the monthly GROUP BY and
+   produces `"column is not a valid group by expression"`.
+
+2. **All shelf GROUP BY columns must appear in PARTITION BY.** Every non-measure column
+   in the `search_query` generates a GROUP BY clause. The pass-through window function
+   must include all of them in its `PARTITION BY` or Snowflake rejects the query.
+
+Example (LEAD with monthly date bucketing and region partition):
+```
+sql_int_aggregate_op ( "LEAD(SUM({0}), 1) OVER (PARTITION BY {1} ORDER BY {2})" , [Sales] , [Region] , start_of_month ( [Order Date] ) )
+search_query: "[Sales] [formula_name] [Order Date].monthly [Region]"
+```
+
+Use SQL pass-through when you need exact SQL window function semantics (e.g.,
+`ROW_NUMBER`, `DENSE_RANK`, partitioned `LEAD`/`LAG`). Default to native functions
+for simpler cases.
+
+### Caveats for row-offset formulas
 
 1. **`rank()` is not `ROW_NUMBER()`** — ties share a rank and the next rank is skipped
    (1,1,3 not 1,2,3). Acceptable for display numbering; document the difference.
-2. **`moving_sum` LEAD formula** — the subtraction pattern
-   (`moving_sum(0,N) - moving_sum(0,N-1)`) is semantically correct but produces `null`
-   at the last N rows (no following rows). This matches Tableau's LOOKUP behavior.
-3. **Answer-level only** — these are viz-scoped formulas, not model formulas; they
+2. **Answer-level only** — these are viz-scoped formulas, not model formulas; they
    don't participate in search/Spotter discovery.
-4. **SIZE() only** uses `sql_int_aggregate_op` — requires admin enablement for SQL
-   pass-through functions. All other row-offset formulas are fully native.
+3. **SIZE() only** uses `sql_int_aggregate_op` — requires admin enablement for SQL
+   pass-through functions. All other native row-offset formulas are fully native.
+4. **SQL pass-through** (when used) requires admin enablement, is dialect-specific
+   (Snowflake), and is not validated at import time — verify values post-import.
 
 ---
 

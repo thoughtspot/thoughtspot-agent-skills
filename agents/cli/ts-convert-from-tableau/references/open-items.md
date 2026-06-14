@@ -223,19 +223,25 @@ overrides. Formula translation reference updated with native function templates.
 
 **Live verification (se-thoughtspot, 2026-06-15):**
 
-`sql_*_aggregate_op` with `ORDER BY` inside window functions fails for DATE and numeric
-columns due to ThoughtSpot GROUP BY generation mismatch (Snowflake error:
-`"column is not a valid group by expression"`). VARCHAR columns work, but most Tableau
-table calcs sort by date. Replaced SQL pass-through with native TS functions:
+Primary approach: native TS functions (no SQL pass-through needed):
 
 | Function | Native TS formula | Verified |
 |---|---|---|
-| LAG(N) | `moving_sum([m], N, N, [sort])` | ✓ DATE, VARCHAR |
-| LEAD(1) | `moving_sum([m], 0, 1, [sort]) - sum([m])` | ✓ DATE, VARCHAR |
+| LAG(N) | `moving_sum([m], N, -N, [sort])` | ✓ DATE, VARCHAR |
+| LEAD(N) | `moving_sum([m], -N, N, [sort])` | ✓ DATE, VARCHAR |
 | FIRST | `first_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
 | LAST | `last_value(sum([m]), query_groups(), {[sort]})` | ✓ DATE |
 | INDEX | `rank(sum([m]), 'asc')` | ✓ DATE |
 | SIZE | `sql_int_aggregate_op("COUNT(*) OVER()")` | ✓ (no ORDER BY) |
+
+`moving_sum` offset convention: `(N, -N)` = single row N positions back (LAG),
+`(-N, N)` = single row N positions forward (LEAD).
+
+SQL pass-through with dates also works when: (1) ORDER BY date expression matches
+the search query's date aggregate (e.g., `start_of_month([date])` with `.monthly`),
+and (2) all shelf GROUP BY columns are in PARTITION BY. Example:
+`sql_int_aggregate_op("LEAD(SUM({0}), 1) OVER (PARTITION BY {1} ORDER BY {2})", [Sales], [Region], start_of_month([Order Date]))`
+with search `[Sales] [formula] [Order Date].monthly [Region]`.
 
 Liveboard GUID: `4253d395-bae3-4ea6-9ab7-76d90d7cb86c`, table: SUPERSTORE.
 
