@@ -586,30 +586,11 @@ Native ThoughtSpot functions (`moving_sum`, `first_value`, `last_value`, `rank`)
 all column types correctly, require no admin enablement, and are validated at import
 time — verified with DATE, VARCHAR, and INT64 columns (se-thoughtspot, 2026-06-15).
 
-### SQL pass-through alternative (when exact SQL semantics are needed)
-
-SQL pass-through (`sql_*_aggregate_op`) with `ORDER BY` **does work** for DATE columns
-when two conditions are met (live-verified 2026-06-15):
-
-1. **Date aggregate in the search must match the ORDER BY expression.** If the search
-   query uses `[Order Date].monthly`, the pass-through ORDER BY must use
-   `start_of_month([Order Date])` — both resolve to `DATE_TRUNC('MONTH', ...)` in
-   Snowflake. A raw `[Order Date]` in ORDER BY mismatches the monthly GROUP BY and
-   produces `"column is not a valid group by expression"`.
-
-2. **All shelf GROUP BY columns must appear in PARTITION BY.** Every non-measure column
-   in the `search_query` generates a GROUP BY clause. The pass-through window function
-   must include all of them in its `PARTITION BY` or Snowflake rejects the query.
-
-Example (LEAD with monthly date bucketing and region partition):
-```
-sql_int_aggregate_op ( "LEAD(SUM({0}), 1) OVER (PARTITION BY {1} ORDER BY {2})" , [Sales] , [Region] , start_of_month ( [Order Date] ) )
-search_query: "[Sales] [formula_name] [Order Date].monthly [Region]"
-```
-
-Use SQL pass-through when you need exact SQL window function semantics (e.g.,
-`ROW_NUMBER`, `DENSE_RANK`, partitioned `LEAD`/`LAG`). Default to native functions
-for simpler cases.
+For `moving_sum` offset semantics (LAG/LEAD single-row patterns) and SQL pass-through
+window function rules (ORDER BY must match GROUP BY, all search dimensions in PARTITION
+BY), see `thoughtspot-formula-patterns.md` — "Moving Functions" and "Window functions
+inside `sql_*_aggregate_op`" sections. Those rules are platform-agnostic and apply to
+all converters, not just Tableau.
 
 ### Caveats for row-offset formulas
 
