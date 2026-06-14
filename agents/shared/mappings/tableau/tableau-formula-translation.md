@@ -30,7 +30,7 @@ Reference for converting Tableau calculated field expressions to ThoughtSpot TML
 | `DATETRUNC('week', TODAY()) + 1` | `add_days ( start_of_week ( today () ) , 1 )` | Do NOT use + operator on dates |
 | `DATEADD('day', n, d)` | `add_days ( d , n )` | Also `add_months`, `add_years` |
 | `DATEPART('month', d)` | `month_number ( d )` | Also `day()` (day of month), `year`, `quarter_number`, `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` |
-| `DATENAME('month', d)` | `month_number ( d )` | ThoughtSpot has no month-name function; use number |
+| `DATENAME('month', d)` | `month ( d )` | Returns month name (e.g. "January"). Use `month_number()` if numeric value needed |
 | `TODAY()` | `today ()` | |
 | `NOW()` | `now ()` | |
 | `DATE(d)` | `date ( d )` | Does not accept string literals |
@@ -699,8 +699,9 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
    ⚑ flag for review — aggregate pass-through (PT1)
 4. **No validation** — ThoughtSpot does not validate the SQL string; errors surface at
    query time from the warehouse
-5. **Pass-through must be enabled** — admins can disable via Admin > Search & SpotIQ >
-   SQL Passthrough Functions. Document usage in `MIGRATION_LIMITATIONS.md`
+5. **Pass-through is enabled by default** — only a limitation if an admin has explicitly
+   turned it off via Admin > Search & SpotIQ > SQL Passthrough Functions. Document
+   usage in `MIGRATION_LIMITATIONS.md`
 
 ### Translation priority order
 
@@ -733,7 +734,7 @@ model import. A missing formula produces a functional model with reduced coverag
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
 | True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
 | References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
-| `DATETIME(expr)` | No `to_datetime` cast. If the column is already a datetime type, reference it directly; if it's a string, only `to_date` (date-only) exists — omit + log the time component. |
+| `DATETIME(expr)` | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp. Returns a proper datetime type. If the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15. |
 | `MAKEPOINT(lat, lon)` | Geospatial point constructor — no ThoughtSpot formula equivalent. **Do not silently drop.** If the underlying lat/lon columns exist, migrate them as individual `ATTRIBUTE` columns (latitude + longitude are useful filter/display dimensions); omit the `MAKEPOINT` formula + log. See "Geospatial policy" below. |
 | `MAKELINE(point1, point2)` | Geospatial line constructor — no ThoughtSpot equivalent. Omit + log. The endpoint lat/lon columns are migrated individually if present. |
 | `DISTANCE(point1, point2, unit)` | Geospatial distance — no ThoughtSpot equivalent. Omit + log. |

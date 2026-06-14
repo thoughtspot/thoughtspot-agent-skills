@@ -427,9 +427,11 @@ Used when ThoughtSpot's native functions don't cover the required expression.
 | `sql_double_op(template, args...)` | DOUBLE | Double dimension |
 | `sql_bool_op(template, args...)` | BOOLEAN | Boolean dimension |
 | `sql_date_op(template, args...)` | DATE | Date dimension |
+| `sql_date_time_op(template, args...)` | DATETIME | Datetime dimension (verified 2026-06-15) |
 | `sql_string_aggregate_op(template, args...)` | VARCHAR | String aggregate/metric |
 | `sql_int_aggregate_op(template, args...)` | INTEGER | Integer aggregate/metric |
 | `sql_number_aggregate_op(template, args...)` | NUMBER | Numeric aggregate/metric |
+| `sql_date_time_aggregate_op(template, args...)` | DATETIME | Datetime aggregate/metric |
 
 ```
 # Initcap with replace

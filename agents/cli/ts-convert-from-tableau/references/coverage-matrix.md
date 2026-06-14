@@ -180,6 +180,16 @@ Last verified: 2026-06-15 (BL-024 row-offset table calcs on se-thoughtspot)
 | 105 | Dialect support: Redshift | Dialect notes for `LISTAGG`/type casting | Yes (#15) |
 | 106 | Dialect support: Postgres | Dialect notes for `string_agg`/type casting | Yes (#15) |
 
+### Corrections from Review (formerly listed as limitations)
+
+| # | Tableau Construct | ThoughtSpot Equivalent | Verified |
+|---|---|---|---|
+| 107 | `DATENAME('month', d)` | `month ( [date] )` — returns month name natively (e.g. "january") | Yes (se-thoughtspot, 2026-06-15) |
+| 108 | `WINDOW_STDEV/WINDOW_COUNT` (sliding window) | `moving_*` family — same as WINDOW_SUM/AVG (#54) | Documented |
+| 109 | `WINDOW_PERCENTILE/WINDOW_MEDIAN` (sliding window) | `sql_*_aggregate_op` pass-through: `PERCENTILE_CONT/MEDIAN(...) OVER (...)` | Documented |
+| 110 | `max([date])` in formula filters — "latest year in data" | `group_aggregate ( max ( [date] ) , {} , {} )` — global max date, dynamic | Yes (se-thoughtspot, 2026-06-15) |
+| 111 | `DATETIME(expr)` cast | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` pass-through | Yes (se-thoughtspot, 2026-06-15) |
+
 ---
 
 ## Unmapped Constructs (Limitations)
@@ -202,8 +212,8 @@ Last verified: 2026-06-15 (BL-024 row-offset table calcs on se-thoughtspot)
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
 | L9 | Set actions (`<action>` on a set) | No interactive set membership changes in TS | Omit + log |
-| L10 | `DATETIME(expr)` cast | No `to_datetime`; only `to_date` | Reference datetime columns directly; time component lost for string conversions |
-| L11 | All SQL pass-through functions (RANK partitioned, DENSE_RANK, SIZE, REGEXP, UPPER/LOWER, PROPER, ASCII, CHAR) | Require SQL Passthrough Functions enabled by admin | Flagged with PT1 marker for review |
+| ~~L10~~ | ~~`DATETIME(expr)` cast~~ | ~~No native `to_datetime`~~ | Moved to Mapped (#111): `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — verified on se-thoughtspot |
+| L11 | All SQL pass-through functions (RANK partitioned, DENSE_RANK, SIZE, REGEXP, UPPER/LOWER, PROPER, ASCII, CHAR) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review |
 | L12 | `rank()` tie handling | TS `rank()` is competition ranking (1,1,3) — no `ROW_NUMBER()` equivalent for unique ranks | Document the difference |
 | L13 | Geospatial formulas (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) | No spatial data types or constructors | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
 | L14 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |
@@ -218,15 +228,15 @@ Last verified: 2026-06-15 (BL-024 row-offset table calcs on se-thoughtspot)
 |---|---|---|---|
 | L19 | SQL-lookup parameter values | ThoughtSpot `list_config` is static; no live-query capability | Point-in-time snapshot; document staleness |
 | L20 | `RUNNING_COUNT` | No `cumulative_count` function | Approximate with `cumulative_sum(1, [sort_attr])` at answer level |
-| L21 | `DATENAME('month', d)` | No month-name function | Use `month_number()` (number, not name) |
+| ~~L21~~ | ~~`DATENAME('month', d)`~~ | ~~No month-name function~~ | Moved to Mapped (#107): `month([date])` returns month name natively |
 | L22 | Bitmap/image zones | Images not migratable to liveboard tiles | Skipped |
 | L23 | Web/extension zones | No equivalent | Skipped |
 | L24 | Flipboard/Story interaction | Flip navigation lost | Content salvaged; interaction dropped |
 | L25 | Legend/color zones | TS draws its own legends | Skipped |
-| L26 | `WINDOW_STDEV/PERCENTILE/COUNT/MEDIAN` (windowed, non-aggregate) | No windowed model-formula equivalent | Answer-level only; plain aggregate fallback |
+| ~~L26~~ | ~~`WINDOW_STDEV/PERCENTILE/COUNT/MEDIAN`~~ | ~~No windowed model-formula equivalent~~ | Moved to Mapped (#108–109): `moving_*` for sliding windows, `sql_*_aggregate_op` pass-through for others |
 | L27 | `DATEDIFF('week', ...)` boundary semantics | Week-start semantics differ between Tableau and TS | Flag per workbook for manual verification |
 | L28 | Manual group value snapshot | `categorical-bin` values from TWB authoring time may not exist in current data | Flag as data-fidelity limitation |
-| L29 | `max([date])` in formula filters | Cannot compute "latest year in data" dynamically inside a formula filter | Anchor to literal year or `currentdate()` |
+| ~~L29~~ | ~~`max([date])` in formula filters~~ | ~~Cannot compute dynamically~~ | Moved to Mapped (#110): `group_aggregate ( max ( [date] ) , {} , {} )` returns global max date; or query set for "rows where date = max" |
 
 ### Notes on limitations
 
@@ -239,10 +249,11 @@ The skill detects them, omits them cleanly, and logs them in the audit report.
 **L7–L8** (bare FIRST/LAST) are distinct from LOOKUP(agg, FIRST/LAST) (#64–65) — see
 the decision tree in `tableau-formula-translation.md` tiers 5a–6c.
 
-**L11** (pass-through functions) is the broadest MEDIUM limitation. All pass-through
-formulas are flagged with `PT1` in the audit report so admins know which ThoughtSpot
-setting to enable. Native alternatives are used wherever possible — SQL pass-through is
-the last resort (see the translation priority order in `tableau-formula-translation.md`).
+**L11** (pass-through functions) — SQL Passthrough Functions are **enabled by default** in
+ThoughtSpot. This is only a limitation if an admin has explicitly turned it off in
+Admin > Search & SpotIQ. All pass-through formulas are flagged with `PT1` in the audit
+report for visibility. Native alternatives are used wherever possible — SQL pass-through
+is the last resort (see the translation priority order in `tableau-formula-translation.md`).
 
 ---
 
