@@ -509,6 +509,84 @@ sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" ,
 
 ---
 
+## Row-Offset Table Calculations
+
+Tableau's row-offset table calculations (`INDEX`, `LOOKUP`, `FIRST`, `LAST`, `SIZE`) were
+previously classified as Untranslatable because they derive their `ORDER BY`/`PARTITION BY`
+from the visualization layout. With the `<table-calc>` addressing extraction (SKILL.md
+Step 3f), the sort/partition context is now recoverable for most cases.
+
+### Decision tree (per detected table-calc formula)
+
+Apply in order — stop at the first match:
+
+| # | Condition | Action | Tier |
+|---|---|---|---|
+| 1 | `INDEX() <= N` or `INDEX() = N` used as a **filter** (inside an IF/CASE that gates row visibility, or a set filter) | Route to existing Top-N / query-set machinery (SKILL.md Step 5b). Use `rank ( [measure] , 'desc' )` + filter `[rank] <= N`. | **Native** |
+| 2 | `INDEX()` used for **display row numbering** (standalone on a shelf, not filtering) AND `ordering_type` is `Rows` or `Field` with a known sort column | Emit answer-level: `sql_int_aggregate_op ( "ROW_NUMBER() OVER (ORDER BY {0})" , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
+| 3 | `LOOKUP(agg, N)` where N > 0 AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "LEAD({0}, N) OVER (ORDER BY {1})" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
+| 4 | `LOOKUP(agg, N)` where N < 0 AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "LAG({0}, abs(N)) OVER (ORDER BY {1})" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
+| 5 | `FIRST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "FIRST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
+| 6 | `LAST()` (standalone, not as WINDOW_* offset) AND sort column is known | Emit answer-level: `sql_*_aggregate_op ( "LAST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [measure] , [sort_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
+| 7 | `SIZE()` AND partition dims are known (from `ordering_type='Field'` + `order_fields`) | Emit answer-level: `sql_int_aggregate_op ( "COUNT(*) OVER (PARTITION BY {0})" , [partition_col] )` ⚑ flag PT1 | **Pass-through (gated)** |
+| 8 | Any of the above but sort/partition is **not** recoverable (`ordering_type='CellInPane'`, or `ordering_type='Rows'`/`'Columns'` with no deterministic shelf sort, or `ordering_type='Table'` spanning multiple dims) | **Omit + log** (current behavior). Log message: `"[func]() — addressing context is ambiguous (ordering_type={type}); omit + log."` | **Omit** |
+
+### Resolving the sort column from `<table-calc>` addressing
+
+Given the `table_calc_addressing` entry (from Step 3f) and the worksheet shelf data
+(from Step 9b), resolve the sort column:
+
+| `ordering_type` | Sort column resolution |
+|---|---|
+| `Field` (with `ordering_field`) | The named field — resolve through the calc_id → display_name map |
+| `Field` (with `<order>` children) | The first `<order field='...'>` child — resolve through the map. Additional `<order>` fields become `PARTITION BY` dimensions. |
+| `Rows` | The first date/continuous dimension on the Rows shelf (from Step 9b). If no date on Rows, fall through to Tier 8 (ambiguous). |
+| `Columns` | The first date/continuous dimension on the Columns shelf (from Step 9b). If none, Tier 8. |
+| `Table` | Both Rows + Columns shelf dims in sequence. Only unambiguous for simple layouts (one dim on each); for complex multi-dim, Tier 8. |
+| `CellInPane` | Always ambiguous → Tier 8. |
+
+### SQL templates (Snowflake-flavored)
+
+These are answer-level formulas. Use display-name column references (`[Sales]`), not
+`[TABLE::col]` model references.
+
+```
+# INDEX() → ROW_NUMBER
+sql_int_aggregate_op ( "ROW_NUMBER() OVER (ORDER BY {0})" , [Order Date] )
+
+# LOOKUP(SUM([Sales]), -1) → LAG
+sql_int_aggregate_op ( "LAG({0}, 1) OVER (ORDER BY {1})" , [Sales] , [Order Date] )
+
+# LOOKUP(SUM([Sales]), 2) → LEAD
+sql_int_aggregate_op ( "LEAD({0}, 2) OVER (ORDER BY {1})" , [Sales] , [Order Date] )
+
+# FIRST() → FIRST_VALUE
+sql_int_aggregate_op ( "FIRST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [Sales] , [Order Date] )
+
+# LAST() → LAST_VALUE
+sql_int_aggregate_op ( "LAST_VALUE({0}) OVER (ORDER BY {1} ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)" , [Sales] , [Order Date] )
+
+# SIZE() → COUNT(*) OVER
+sql_int_aggregate_op ( "COUNT(*) OVER (PARTITION BY {0})" , [Category] )
+```
+
+When partition dimensions are known (from `<order>` children beyond the first), add
+`PARTITION BY` to the template:
+```
+sql_int_aggregate_op ( "ROW_NUMBER() OVER (PARTITION BY {0} ORDER BY {1})" , [Category] , [Order Date] )
+```
+
+### Pass-through caveats (always log with the formula)
+
+Every emitted pass-through MUST be accompanied by these standing caveats in the
+migration report:
+1. **Admin-enabled** — `sql_*_op` pass-through requires admin enablement on the ThoughtSpot instance
+2. **Dialect-specific** — the SQL is Snowflake-flavored; other warehouses need different syntax
+3. **Unvalidated** — ThoughtSpot does not validate pass-through SQL at import; verify values post-import
+4. **Answer-level only** — these are viz-scoped formulas, not model formulas; they don't participate in search/Spotter discovery
+
+---
+
 ## Conditional aggregates (Tableau `AGG(IF cond THEN x END)`)
 
 ThoughtSpot model formulas MAY be aggregate (see invariants I5 and ts-model-conversion-invariants.md:33). Do NOT convert to row-level with `else ''` — empty string becomes a countable distinct value (COUNTD off by one) and changes SUM/AVG denominators. Use the `*_if` family; the bare `IF` with no ELSE is NULL in Tableau, which aggregates ignore — `else null` preserves that exactly.
@@ -599,8 +677,9 @@ When converting a Tableau formula, try in this order:
 
 1. **Native ThoughtSpot function** — direct mapping from the Function Mapping table
 2. **LOD / cumulative / rank** — sections above
-3. **Pass-through function** — this section (embed valid Snowflake SQL)
-4. **Omit and log** — truly untranslatable (next section)
+3. **Row-offset table calcs** — tiered decision tree (native Top-N, native rank, or gated pass-through)
+4. **Pass-through function** — this section (embed valid Snowflake SQL)
+5. **Omit and log** — truly untranslatable (next section)
 
 ---
 
@@ -618,11 +697,8 @@ model import. A missing formula produces a functional model with reduced coverag
 
 | Tableau Feature | Reason |
 |---|---|
-| `LOOKUP()` | Table calculation — references rows by offset; no SQL equivalent |
-| `INDEX()` | Table calculation — row numbering without aggregation context |
 | `ISMEMBEROF()` | User-specific function — no equivalent |
-| `SIZE()`, `FIRST()`, `LAST()` | Table calculations — partition-aware row addressing; no SQL equivalent. **Exception — recognise the *intent*:** when `FIRST()`/`LAST()`/`LOOKUP()`/`PREVIOUS_VALUE()` together implement the **comma-separated-list-of-values technique** (concatenate a column's values into one string, e.g. Jonathan Drummey's CSV technique), don't omit — translate the *intent* to string aggregation (see below). |
-| `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent (but see the string-aggregation note above). |
+| `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent (but see the string-aggregation note below, and the **Row-Offset Table Calculations** section for `FIRST()`/`LAST()` as standalone window-bound functions). |
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
 | True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
 | References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
@@ -645,6 +721,10 @@ model import. A missing formula produces a functional model with reduced coverag
 - Partitioned `RANK` → `sql_int_aggregate_op()` with `partition by` ⚑ flag for review (PT1)
 - **Comma-separated list of values** (Tableau's `FIRST`/`LAST`/`LOOKUP`/`PREVIOUS_VALUE` CSV technique) →
   string aggregation, see below
+- `INDEX()` → `rank()` (Top-N filter intent) or `sql_int_aggregate_op("ROW_NUMBER() OVER (...)")` (display row number, answer-level, gated) — see Row-Offset Table Calculations section
+- `LOOKUP(agg, ±n)` → `sql_*_aggregate_op("LAG/LEAD(...) OVER (...)")` (answer-level, gated) — see Row-Offset Table Calculations section
+- `FIRST()`, `LAST()` (standalone) → `sql_*_aggregate_op("FIRST_VALUE/LAST_VALUE(...) OVER (...)")` (answer-level, gated) — see Row-Offset Table Calculations section
+- `SIZE()` → `sql_int_aggregate_op("COUNT(*) OVER (PARTITION BY ...)")` (answer-level, gated) — see Row-Offset Table Calculations section
 
 ---
 
