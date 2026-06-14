@@ -67,7 +67,7 @@ automatically.
 
 **Source:** Full gap analysis against production SV `DEMO.SEMANTIC_TESTING.SHIFTS7_PAYROLL1` (2026-06-11)
 **Affects:** ts-convert-from-snowflake-sv (all steps)
-**Status:** In progress — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); GAP-04/05/08/10 mapped + SKILL.md parsing complete (2026-06-14); remaining LOW gaps tracked below
+**Status:** Done — BL-003, BL-003b, BL-003c, BL-004, GAP-13 implemented (2026-06-13); GAP-04/05/08/10 mapped + SKILL.md parsing (2026-06-14); live-verified via BL018_TEST_SV (2026-06-14); remaining LOW gaps (GAP-06/07/09/11) tracked in `references/open-items.md`
 **Full spec:** [`sv-to-ts-gap-analysis.md`](sv-to-ts-gap-analysis.md)
 
 ### Summary
@@ -808,7 +808,8 @@ its `synced-from` marker.
 
 **Source:** Post-identifier-resolution review of unmapped SV features (2026-06-13)
 **Affects:** ts-convert-from-snowflake-sv, sv-to-ts-gap-analysis.md
-**Status:** In progress — documentation and mapping rules complete (2026-06-13); SKILL.md parsing complete (2026-06-14); live verification pending
+**Status:** Done (2026-06-14) — documentation, SKILL.md parsing, and live verification complete
+> Live-verified on se-thoughtspot via BL018_TEST_SV (GUID: 93b6ff6b). All 4 sub-items confirmed: range join (EMP_TO_PERIOD), filter label (IS_SENIOR → boolean formula), composite equi-join (discovered via column overlap on EMPLOYEE_SUMMARY_VW), verified queries (3 entries → NLS Feedback TML). Also verified: I8 duplicate column_id detection, metric-on-fact resolution, view-backed table source. Coverage matrix added to `references/coverage-matrix.md`.
 **Corrects:** GAP-08 (range joins), GAP-10 (filter labels), GAP-04 (view-backed sources), GAP-05 (verified queries)
 
 ### Problem
@@ -1248,3 +1249,49 @@ When a table has no declared relationship in the source, the converter should:
 - `agents/cursor/rules/ts-convert-from-snowflake-sv.mdc` — mirror
 - `agents/cursor/rules/ts-convert-from-databricks-mv.mdc` — mirror
 - `agents/cursor/rules/ts-convert-from-tableau.mdc` — mirror
+
+---
+
+## BL-023 — Coverage matrix reference docs for Databricks MV and Tableau converters
+
+**Source:** BL-018 completion — SV converter now has `references/coverage-matrix.md` (2026-06-14)
+**Affects:** ts-convert-from-databricks-mv, ts-convert-from-tableau
+**Status:** Not started
+**Related:** BL-014 (DBX MV coverage review), BL-009 (Tableau mapping gaps)
+
+### Problem
+
+The SV converter now has a `references/coverage-matrix.md` that clearly lists every
+mapped construct, every limitation, and the test objects used for verification. This
+serves as user-facing limitations documentation.
+
+The Databricks MV and Tableau converters have no equivalent — their coverage is
+scattered across gap-analysis docs, backlog items, and open-items files. Users cannot
+easily determine what a converter handles vs what it does not.
+
+### Proposed approach
+
+Create `references/coverage-matrix.md` for each converter, following the same structure
+as the SV coverage matrix:
+
+1. **Mapped constructs** — table of every source construct handled, the ThoughtSpot
+   equivalent, and which test object verified it
+2. **Unmapped constructs (limitations)** — table with severity and workaround
+3. **Test objects** — list of verified test sources
+
+| Converter | Source for coverage data | Test objects |
+|---|---|---|
+| `ts-convert-from-databricks-mv` | `ts-from-databricks-rules.md`, `ts-databricks-properties.md`, BL-014 findings | `ts-from-databricks.md` + `ts-from-databricks-sql-view.md` worked examples |
+| `ts-convert-from-tableau` | `tableau-tml-rules.md`, `tableau-formula-translation.md`, BL-009 findings | `tableau-migration-testing` corpus |
+
+### Dependencies
+
+- **BL-014** (DBX MV coverage review) should run first for the Databricks matrix — it
+  identifies the full unmapped surface
+- **BL-009** (Tableau mapping gaps, Phases 2c/3/4) should be referenced for known
+  Tableau limitations
+
+### Files affected
+
+- NEW `agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md`
+- NEW `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md`
