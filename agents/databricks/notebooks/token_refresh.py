@@ -1,3 +1,4 @@
+# Databricks notebook source
 """
 token_refresh.py — Scheduled token refresh for ThoughtSpot profiles in Databricks Secrets.
 

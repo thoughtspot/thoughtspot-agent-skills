@@ -1,3 +1,4 @@
+# Databricks notebook source
 """
 ts_client.py — ThoughtSpotClient for Databricks notebooks.
 

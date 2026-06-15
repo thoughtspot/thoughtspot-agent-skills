@@ -1,3 +1,4 @@
+# Databricks notebook source
 """
 ts_profile_setup.py — Profile setup wizard for ThoughtSpot in Databricks notebooks.
 
