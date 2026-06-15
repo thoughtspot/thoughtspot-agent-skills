@@ -62,8 +62,8 @@ Resolution:
 | `strlen(s)` | `LENGTH(s)` | |
 | `strpos(s, sub)` | `LOCATE(sub, s)` | Argument order reversed |
 | `substr(s, start, len)` | `SUBSTRING(s, start, len)` | |
-| `lower(s)` | `LOWER(s)` | |
-| `upper(s)` | `UPPER(s)` | |
+| ~~`lower(s)`~~ | `LOWER(s)` | Not a native TS function — use `sql_string_op("LOWER({0})", s)` pass-through |
+| ~~`upper(s)`~~ | `UPPER(s)` | Not a native TS function — use `sql_string_op("UPPER({0})", s)` pass-through |
 | `trim(s)` | `TRIM(s)` | |
 | `ltrim(s)` | `LTRIM(s)` | |
 | `rtrim(s)` | `RTRIM(s)` | |
@@ -104,15 +104,15 @@ Resolution:
 | `now()` | `CURRENT_TIMESTAMP()` | |
 | `date(ts)` | `DATE(ts)` or `date_trunc('day', ts)` | |
 | `year(d)` | `YEAR(d)` | |
-| `month_number(d)` | `MONTH(d)` | **Not** `month()` — rejected by TS formula parser. Use `month_number()`. |
-| `day_of_month(d)` | `DAY(d)` | |
-| `day_of_week(d)` | `DAYOFWEEK(d)` | TS: 1=Mon; Databricks: 1=Sun — adjust |
-| `day_of_year(d)` | `DAYOFYEAR(d)` | |
-| `hour(ts)` | `HOUR(ts)` | |
-| `minute(ts)` | `MINUTE(ts)` | |
-| `second(ts)` | `SECOND(ts)` | |
-| `quarter(d)` | `QUARTER(d)` | |
-| `week_of_year(d)` | `WEEKOFYEAR(d)` | |
+| `month_number(d)` | `MONTH(d)` | `month()` also exists but returns the name (e.g. "January"), not the number |
+| `day(d)` | `DAY(d)` | Extracts day of month (1–31). `day_of_month` does not exist in TS. |
+| `day_number_of_week(d)` | `DAYOFWEEK(d)` | TS `day_number_of_week` returns number (1=Mon, 7=Sun); Databricks `DAYOFWEEK` returns number (1=Sun). `day_of_week(d)` also exists but returns the name (e.g. "Friday"). |
+| `day_number_of_year(d)` | `DAYOFYEAR(d)` | TS function is `day_number_of_year`, not `day_of_year` |
+| `hour_of_day(ts)` | `HOUR(ts)` | TS function is `hour_of_day`, not `hour` |
+| ~~`minute(ts)`~~ | `MINUTE(ts)` | Not a native TS function — use `sql_int_op("MINUTE({0})", ts)` pass-through |
+| ~~`second(ts)`~~ | `SECOND(ts)` | Not a native TS function — use `sql_int_op("SECOND({0})", ts)` pass-through |
+| `quarter_number(d)` | `QUARTER(d)` | TS function is `quarter_number`, not `quarter` |
+| `week_number_of_year(d)` | `WEEKOFYEAR(d)` | TS function is `week_number_of_year`, not `week_of_year` |
 | `start_of_month(d)` | `date_trunc('month', d)` | |
 | `start_of_quarter(d)` | `date_trunc('quarter', d)` | |
 | `start_of_year(d)` | `date_trunc('year', d)` | |
@@ -123,11 +123,11 @@ Resolution:
 | `diff_months(start, end)` | `MONTHS_BETWEEN(end, start)` | Returns fractional months |
 | `year(d)` | `EXTRACT(YEAR FROM d)` | `EXTRACT` form — same as `YEAR(d)` |
 | `month_number(d)` | `EXTRACT(MONTH FROM d)` | `EXTRACT` form — same as `MONTH(d)` |
-| `day_of_month(d)` | `EXTRACT(DAY FROM d)` | `EXTRACT` form — same as `DAY(d)` |
-| `hour(ts)` | `EXTRACT(HOUR FROM ts)` | `EXTRACT` form — same as `HOUR(ts)` |
+| `day(d)` | `EXTRACT(DAY FROM d)` | `EXTRACT` form — same as `DAY(d)` |
+| `hour_of_day(ts)` | `EXTRACT(HOUR FROM ts)` | `EXTRACT` form — same as `HOUR(ts)` |
 | `add_days(d, n)` | `DATE_ADD(d, n)` | |
 | `add_months(d, n)` | `ADD_MONTHS(d, n)` | |
-| `date_format(d, fmt)` | `DATE_FORMAT(d, fmt)` | Format strings may differ slightly |
+| ~~`date_format(d, fmt)`~~ | `DATE_FORMAT(d, fmt)` | Not a native TS function — use `sql_string_op("DATE_FORMAT({0}, 'fmt')", d)` pass-through |
 
 ### Conditional / Logic Functions
 
@@ -519,11 +519,11 @@ formula equivalents:
 | `MONTHS_BETWEEN(end, start)` | `diff_months(start, end)` — arg order reversed |
 | `EXTRACT(YEAR FROM d)` | `year(d)` |
 | `EXTRACT(MONTH FROM d)` | `month_number(d)` |
-| `EXTRACT(DAY FROM d)` | `day_of_month(d)` |
-| `EXTRACT(HOUR FROM ts)` | `hour(ts)` |
+| `EXTRACT(DAY FROM d)` | `day(d)` |
+| `EXTRACT(HOUR FROM ts)` | `hour_of_day(ts)` |
 | `YEAR(d)` | `year(d)` |
 | `MONTH(d)` | `month_number(d)` |
-| `DAYOFWEEK(d)` | `day_of_week(d)` — adjust: Databricks 1=Sun, TS 1=Mon |
+| `DAYOFWEEK(d)` | `day_number_of_week(d)` — Databricks 1=Sun, TS 1=Mon; `day_of_week(d)` also exists but returns the name |
 | `ROUND(x, n)` | `round(x, n)` |
 | `CAST(x AS type)` | Depends on target type; often implicit in TS |
 | `x / NULLIF(y, 0)` | `safe_divide(x, y)` |
