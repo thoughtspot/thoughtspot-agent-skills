@@ -145,7 +145,7 @@ target workspace and creates the token refresh job:
 
 ## Step 3: Create a ThoughtSpot profile
 
-1. Open `ts_profile_setup` notebook in your Databricks workspace
+1. In your Databricks workspace, navigate to **Workspace > /Workspace/thoughtspot-skills/notebooks/ts_profile_setup**
 2. Attach to any cluster
 3. Run all cells — widgets appear at the top
 4. Fill in:
