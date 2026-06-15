@@ -145,19 +145,25 @@ target workspace and creates the token refresh job:
 
 ## Step 3: Create a ThoughtSpot profile
 
-1. In your Databricks workspace, navigate to **Workspace > /Workspace/thoughtspot-skills/notebooks/ts_profile_setup**
+1. In your Databricks workspace, navigate to
+   **Workspace > /Workspace/thoughtspot-skills/notebooks/ts_profile_setup**
 2. Attach to any interactive compute (all-purpose cluster or serverless notebook)
-3. Run all cells — widgets appear at the top
-4. Fill in:
-   - **Profile name:** a short name (e.g. `production`, `staging`)
-   - **ThoughtSpot URL:** your instance URL (e.g. `https://mycompany.thoughtspot.cloud`)
-   - **Auth method:** `bearer_token`, `password`, or `secret_key`
+3. **Run Cell 1** — input widgets appear at the top of the notebook
+4. Fill in the widgets:
+   - **Profile Name:** a short name (e.g. `default`, `production`, `staging`)
+   - **ThoughtSpot Base URL:** your instance URL (e.g. `https://mycompany.thoughtspot.cloud`)
+   - **Auth Method:** select `bearer_token`, `password`, or `secret_key` from the dropdown
    - **Username:** your ThoughtSpot username or email
    - **Credential:** your token, password, or secret key
-5. Run all cells again to store the profile
+5. **Run Cell 2** — this stores the values in Databricks Secrets and immediately
+   clears all widgets so the credential is no longer visible in the notebook UI
+6. **Run Cell 3** — tests the connection by calling ThoughtSpot `whoami()`.
+   If you used a profile name other than `default`, edit the name in the cell first
 
-The credential is stored in Databricks Secrets scope `thoughtspot-{profile}` and
-never appears in notebook output.
+> **Security note:** Do not save the notebook between Cell 1 and Cell 2.
+> Widget values are held in the notebook UI state — saving before Cell 2 clears
+> them would persist the credential in the saved notebook. Cell 2 calls
+> `removeAll()` to clear widgets immediately after storing to Secrets.
 
 ---
 
