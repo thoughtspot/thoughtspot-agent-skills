@@ -1,0 +1,32 @@
+bundle:
+  name: thoughtspot-skills
+
+workspace:
+  root_path: /Workspace/thoughtspot-skills
+
+sync:
+  include:
+    - "notebooks/**"
+    - "skills/**"
+    - "../../shared/**"
+
+resources:
+  jobs:
+    token_refresh:
+      name: "ThoughtSpot Token Refresh"
+      schedule:
+        quartz_cron_expression: "0 0 */12 * * ?"
+        timezone_id: UTC
+      tasks:
+        - task_key: refresh
+          notebook_task:
+            notebook_path: notebooks/token_refresh
+
+targets:
+  dev:
+    default: true
+    workspace:
+      host: https://your-workspace.cloud.databricks.com
+  prod:
+    workspace:
+      host: https://your-workspace.cloud.databricks.com
