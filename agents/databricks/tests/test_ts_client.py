@@ -1313,3 +1313,152 @@ class TestVariablesSetRemove:
         assert len(scopes) == 2  # 1 org × 2 users
         user_ids = {s["user_identifier"] for s in scopes}
         assert user_ids == {"user-a", "user-b"}
+
+
+# ===========================================================================
+# token_refresh — refresh_all_profiles()
+# ===========================================================================
+
+import sys as _sys
+
+_notebooks_dir = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "notebooks")
+)
+if _notebooks_dir not in _sys.path:
+    _sys.path.insert(0, _notebooks_dir)
+
+from token_refresh import refresh_all_profiles  # noqa: E402
+
+
+class TestTokenRefresh:
+    """Tests for refresh_all_profiles() in notebooks/token_refresh.py."""
+
+    def _mock_token_post(self, token_value="fresh-token-xyz"):
+        """Build a mock requests.post response returning a fresh token."""
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.ok = True
+        resp.json.return_value = {"token": token_value}
+        return resp
+
+    def test_refreshes_password_profile(self, mock_dbutils):
+        """A password profile gets a fresh token fetched and stored back."""
+        scope = "thoughtspot-staging"
+        mock_dbutils.secrets.createScope(scope)
+        mock_dbutils.secrets.put(scope, "base_url", "https://ts.example.com")
+        mock_dbutils.secrets.put(scope, "auth_method", "password")
+        mock_dbutils.secrets.put(scope, "username", "admin@example.com")
+        mock_dbutils.secrets.put(scope, "password", "super-secret-pw")
+
+        with patch("requests.post", return_value=self._mock_token_post("fresh-token-xyz")) as mock_post:
+            results = refresh_all_profiles(mock_dbutils)
+
+        assert results["staging"] == "OK"
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args
+        # Endpoint URL
+        assert "/api/rest/2.0/auth/token/full" in call_kwargs[0][0]
+        # Request body contains username and password
+        body = call_kwargs[1]["json"]
+        assert body["username"] == "admin@example.com"
+        assert body["password"] == "super-secret-pw"
+        assert "secret_key" not in body
+        # Token stored back
+        stored_token = mock_dbutils.secrets.get(scope, "token")
+        assert stored_token == "fresh-token-xyz"
+
+    def test_skips_bearer_token_profiles(self, mock_dbutils):
+        """A bearer_token profile is skipped — no HTTP call made."""
+        scope = "thoughtspot-prod"
+        mock_dbutils.secrets.createScope(scope)
+        mock_dbutils.secrets.put(scope, "base_url", "https://ts.example.com")
+        mock_dbutils.secrets.put(scope, "auth_method", "bearer_token")
+        mock_dbutils.secrets.put(scope, "username", "admin@example.com")
+        mock_dbutils.secrets.put(scope, "token", "static-bearer-token")
+
+        with patch("requests.post") as mock_post:
+            results = refresh_all_profiles(mock_dbutils)
+
+        assert results["prod"] == "SKIPPED"
+        mock_post.assert_not_called()
+
+    def test_refreshes_secret_key_profile(self, mock_dbutils):
+        """A secret_key profile gets a fresh token fetched using secret_key in the body."""
+        scope = "thoughtspot-dev"
+        mock_dbutils.secrets.createScope(scope)
+        mock_dbutils.secrets.put(scope, "base_url", "https://ts.example.com")
+        mock_dbutils.secrets.put(scope, "auth_method", "secret_key")
+        mock_dbutils.secrets.put(scope, "username", "admin@example.com")
+        mock_dbutils.secrets.put(scope, "secret_key", "my-secret-key-999")
+
+        with patch("requests.post", return_value=self._mock_token_post("sk-fresh-token")) as mock_post:
+            results = refresh_all_profiles(mock_dbutils)
+
+        assert results["dev"] == "OK"
+        body = mock_post.call_args[1]["json"]
+        assert body["secret_key"] == "my-secret-key-999"
+        assert "password" not in body
+        assert mock_dbutils.secrets.get(scope, "token") == "sk-fresh-token"
+
+    def test_ignores_non_thoughtspot_scopes(self, mock_dbutils):
+        """Scopes not starting with 'thoughtspot-' are not processed."""
+        mock_dbutils.secrets.createScope("databricks-config")
+        mock_dbutils.secrets.put("databricks-config", "token", "db-token")
+
+        with patch("requests.post") as mock_post:
+            results = refresh_all_profiles(mock_dbutils)
+
+        assert results == {}
+        mock_post.assert_not_called()
+
+    def test_handles_missing_auth_method(self, mock_dbutils):
+        """A scope missing auth_method key returns an ERROR result."""
+        scope = "thoughtspot-broken"
+        mock_dbutils.secrets.createScope(scope)
+        mock_dbutils.secrets.put(scope, "base_url", "https://ts.example.com")
+        # auth_method intentionally omitted
+
+        results = refresh_all_profiles(mock_dbutils)
+
+        assert results["broken"].startswith("ERROR:")
+
+    def test_handles_http_error(self, mock_dbutils):
+        """An HTTP error from the token endpoint is caught and returned as ERROR."""
+        scope = "thoughtspot-flaky"
+        mock_dbutils.secrets.createScope(scope)
+        mock_dbutils.secrets.put(scope, "base_url", "https://ts.example.com")
+        mock_dbutils.secrets.put(scope, "auth_method", "password")
+        mock_dbutils.secrets.put(scope, "username", "admin@example.com")
+        mock_dbutils.secrets.put(scope, "password", "pw")
+
+        bad_resp = MagicMock()
+        bad_resp.status_code = 500
+        bad_resp.ok = False
+
+        with patch("requests.post", return_value=bad_resp):
+            results = refresh_all_profiles(mock_dbutils)
+
+        assert results["flaky"].startswith("ERROR:")
+
+    def test_mixed_profiles(self, mock_dbutils):
+        """Multiple profiles of different types are handled independently."""
+        # bearer_token profile
+        scope_bearer = "thoughtspot-p1"
+        mock_dbutils.secrets.createScope(scope_bearer)
+        mock_dbutils.secrets.put(scope_bearer, "base_url", "https://ts.example.com")
+        mock_dbutils.secrets.put(scope_bearer, "auth_method", "bearer_token")
+        mock_dbutils.secrets.put(scope_bearer, "token", "static-token")
+
+        # password profile
+        scope_pw = "thoughtspot-p2"
+        mock_dbutils.secrets.createScope(scope_pw)
+        mock_dbutils.secrets.put(scope_pw, "base_url", "https://ts.example.com")
+        mock_dbutils.secrets.put(scope_pw, "auth_method", "password")
+        mock_dbutils.secrets.put(scope_pw, "username", "user@example.com")
+        mock_dbutils.secrets.put(scope_pw, "password", "pw123")
+
+        with patch("requests.post", return_value=self._mock_token_post("fresh-p2-token")):
+            results = refresh_all_profiles(mock_dbutils)
+
+        assert results["p1"] == "SKIPPED"
+        assert results["p2"] == "OK"
