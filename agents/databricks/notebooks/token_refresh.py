@@ -1,4 +1,9 @@
 # Databricks notebook source
+# DBTITLE 1,Install dependencies
+# MAGIC %pip install -q requests
+
+# COMMAND ----------
+
 """
 token_refresh.py — Scheduled token refresh for ThoughtSpot profiles in Databricks Secrets.
 
@@ -59,14 +64,14 @@ def refresh_all_profiles(dbutils) -> dict:
     results: dict = {}
 
     scopes = dbutils.secrets.listScopes()
-    thoughtspot_scopes = [s for s in scopes if s.startswith("thoughtspot-")]
+    thoughtspot_scopes = [s.name for s in scopes if s.name.startswith("thoughtspot-")]
 
     for scope in thoughtspot_scopes:
         profile = scope[len("thoughtspot-"):]
 
         try:
             auth_method = dbutils.secrets.get(scope, "auth_method")
-        except KeyError:
+        except Exception:
             results[profile] = "ERROR: missing auth_method"
             continue
 

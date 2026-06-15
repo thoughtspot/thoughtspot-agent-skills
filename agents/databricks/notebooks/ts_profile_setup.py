@@ -1,4 +1,9 @@
 # Databricks notebook source
+# DBTITLE 1,Install dependencies
+# MAGIC %pip install -q requests
+
+# COMMAND ----------
+
 """
 ts_profile_setup.py — Profile setup wizard for ThoughtSpot in Databricks notebooks.
 
@@ -239,7 +244,8 @@ def list_profiles(dbutils) -> list[dict]:
         ``auth_method``, ``username``.
     """
     profiles = []
-    for scope in dbutils.secrets.listScopes():
+    for s in dbutils.secrets.listScopes():
+        scope = s.name if hasattr(s, "name") else s
         if not scope.startswith("thoughtspot-"):
             continue
         name = scope[len("thoughtspot-"):]
@@ -247,7 +253,7 @@ def list_profiles(dbutils) -> list[dict]:
             base_url = dbutils.secrets.get(scope, "base_url")
             auth_method = dbutils.secrets.get(scope, "auth_method")
             username = dbutils.secrets.get(scope, "username")
-        except KeyError:
+        except Exception:
             base_url = auth_method = username = "?"
         profiles.append({
             "name": name,
