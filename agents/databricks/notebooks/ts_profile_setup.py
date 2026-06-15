@@ -4,29 +4,29 @@
 
 # COMMAND ----------
 
-"""
-ts_profile_setup.py — Profile setup wizard for ThoughtSpot in Databricks notebooks.
+# DBTITLE 1,Load ThoughtSpotClient
+# MAGIC %run ./ts_client
 
-Consumed via ``%run ./ts_profile_setup`` in Databricks notebooks, or imported
-directly in tests (add ``agents/databricks/notebooks/`` to sys.path first).
+# COMMAND ----------
+
+"""
+ts_profile_setup.py — CRUD manager for ThoughtSpot profiles in Databricks Secrets.
+
+Actions: Create, List, Update, Delete, Test.
+
+Consumed interactively from a Databricks notebook (action dropdown + widgets),
+or imported directly in tests (add ``agents/databricks/notebooks/`` to sys.path).
 
 Design
 ------
-- Widget-driven: uses ``dbutils.widgets`` to collect inputs interactively.
-- Secrets-backed: stores credentials in Databricks Secrets under a scope
-  named ``thoughtspot-{profile_name}``.
-- Testable: all logic lives in plain functions — no notebook-level side effects
-  at import time.
+- Widget-driven: action dropdown selects the operation; input widgets collect
+  parameters for Create/Update/Delete/Test.
+- Secrets-backed: credentials stored in Databricks Secrets under scope
+  ``thoughtspot-{profile_name}``.
+- Testable: all logic lives in plain functions — no side effects at import time.
 """
 
 from __future__ import annotations
-
-import os as _os
-import sys as _sys
-
-_nb_dir = _os.getcwd()
-if _nb_dir not in _sys.path:
-    _sys.path.insert(0, _nb_dir)
 
 import requests as _requests
 
@@ -40,9 +40,11 @@ _CREDENTIAL_KEY_MAP: dict[str, str] = {
     "secret_key": "secret_key",
 }
 
+_ACTIONS: list[str] = ["List", "Create", "Update", "Delete", "Test"]
+
 
 # ---------------------------------------------------------------------------
-# Secrets write helpers — dbutils.secrets is read-only in Databricks;
+# Secrets REST API helpers — dbutils.secrets is read-only in Databricks;
 # writes go through the REST API.
 # ---------------------------------------------------------------------------
 
@@ -64,7 +66,7 @@ def _create_scope(dbutils, scope: str) -> None:
         timeout=30,
     )
     if resp.status_code == 409:
-        return  # scope already exists
+        return
     resp.raise_for_status()
 
 
@@ -90,7 +92,7 @@ def _delete_scope(dbutils, scope: str) -> None:
         timeout=30,
     )
     if resp.status_code == 404:
-        return  # scope doesn't exist — nothing to delete
+        return
     resp.raise_for_status()
 
 
@@ -99,20 +101,7 @@ def _delete_scope(dbutils, scope: str) -> None:
 # ---------------------------------------------------------------------------
 
 def setup_widgets(dbutils) -> None:
-    """Register input widgets for the profile setup notebook.
-
-    Creates the following widgets (all text unless noted):
-    - ``profile_name``  — profile slug used to name the Secrets scope (default "default")
-    - ``base_url``      — root URL of the ThoughtSpot instance
-    - ``username``      — ThoughtSpot username / e-mail
-    - ``credential``    — token, password, or secret key value
-    - ``auth_method``   — dropdown: bearer_token | password | secret_key
-
-    Parameters
-    ----------
-    dbutils:
-        The Databricks ``dbutils`` object (real or mock).
-    """
+    """Show input widgets for creating a new profile (blank defaults)."""
     dbutils.widgets.text("profile_name", "default", "Profile Name")
     dbutils.widgets.text("base_url", "", "ThoughtSpot Base URL")
     dbutils.widgets.text("username", "", "Username")
@@ -125,47 +114,49 @@ def setup_widgets(dbutils) -> None:
     )
 
 
+def setup_update_widgets(profile_name: str, dbutils) -> None:
+    """Show input widgets pre-populated with existing profile values.
+
+    Reads ``base_url``, ``auth_method``, and ``username`` from the existing
+    scope and uses them as widget defaults. The credential widget is always
+    blank — leave it empty to keep the existing credential, or enter a new
+    value to replace it.
+
+    Falls back to blank defaults if the profile doesn't exist.
+    """
+    scope = f"thoughtspot-{profile_name}"
+    try:
+        base_url = dbutils.secrets.get(scope, "base_url")
+        auth_method = dbutils.secrets.get(scope, "auth_method")
+        username = dbutils.secrets.get(scope, "username")
+    except Exception:
+        base_url = ""
+        auth_method = "bearer_token"
+        username = ""
+
+    dbutils.widgets.text("profile_name", profile_name, "Profile Name")
+    dbutils.widgets.text("base_url", base_url, "ThoughtSpot Base URL")
+    dbutils.widgets.text("username", username, "Username")
+    dbutils.widgets.text("credential", "", "New credential (blank = keep existing)")
+    dbutils.widgets.dropdown(
+        "auth_method",
+        auth_method,
+        ["bearer_token", "password", "secret_key"],
+        "Auth Method",
+    )
+
+
 # ---------------------------------------------------------------------------
-# Profile creation
+# Create
 # ---------------------------------------------------------------------------
 
 def create_profile(dbutils) -> str:
-    """Read widget values and store them as Databricks Secrets.
-
-    Reads the following widgets (register them first with :func:`setup_widgets`
-    or set them via ``dbutils.widgets._set`` in tests):
-
-    - ``profile_name``
-    - ``base_url``  (trailing ``/`` stripped)
-    - ``auth_method``
-    - ``username``
-    - ``credential``
+    """Read widget values and store a new profile in Databricks Secrets.
 
     Creates the scope ``thoughtspot-{profile_name}`` if it does not already
-    exist, then stores:
+    exist, stores all fields, then clears widgets.
 
-    ===============  =======================================================
-    Secret key       Value
-    ===============  =======================================================
-    ``base_url``     Stripped base URL
-    ``auth_method``  The selected auth method
-    ``username``     The username
-    ``token``        credential (when auth_method == "bearer_token")
-    ``password``     credential (when auth_method == "password")
-    ``secret_key``   credential (when auth_method == "secret_key")
-    ===============  =======================================================
-
-    Clears all widgets after successful storage.
-
-    Parameters
-    ----------
-    dbutils:
-        The Databricks ``dbutils`` object (real or mock).
-
-    Returns
-    -------
-    str
-        The name of the Secrets scope created / used.
+    Returns the scope name.
     """
     profile_name = dbutils.widgets.get("profile_name")
     base_url = dbutils.widgets.get("base_url").rstrip("/")
@@ -175,73 +166,60 @@ def create_profile(dbutils) -> str:
 
     scope = f"thoughtspot-{profile_name}"
 
-    # Create scope via REST API (idempotent).
     _create_scope(dbutils, scope)
-
-    # Store non-sensitive metadata via REST API.
     _put_secret(dbutils, scope, "base_url", base_url)
     _put_secret(dbutils, scope, "auth_method", auth_method)
     _put_secret(dbutils, scope, "username", username)
 
-    # Store credential under the method-specific key.
     credential_key = _CREDENTIAL_KEY_MAP[auth_method]
     _put_secret(dbutils, scope, credential_key, credential)
 
-    # Clear widgets so sensitive values are no longer displayed.
     dbutils.widgets.removeAll()
-
     return scope
 
 
 # ---------------------------------------------------------------------------
-# Connection test
+# Update
 # ---------------------------------------------------------------------------
 
-def test_profile(profile_name: str, dbutils) -> dict:
-    """Test a stored ThoughtSpot profile by calling ``whoami()``.
+def update_profile(dbutils) -> str:
+    """Read widget values and update an existing profile.
 
-    Imports :class:`ThoughtSpotClient` from the sibling ``ts_client`` notebook,
-    instantiates it for the given profile, and calls ``whoami()``.
+    Same as :func:`create_profile` except:
+    - Does NOT create a new scope (the scope must already exist).
+    - Skips the credential write if the credential widget is blank,
+      preserving the existing credential in Secrets.
 
-    Parameters
-    ----------
-    profile_name:
-        The profile name (not the scope name) to test.
-    dbutils:
-        The Databricks ``dbutils`` object (real or mock).
-
-    Returns
-    -------
-    dict
-        The parsed JSON response from ``GET /api/rest/2.0/auth/session/user``.
+    Returns the scope name.
     """
-    from ts_client import ThoughtSpotClient  # noqa: PLC0415 — sibling notebook import
+    profile_name = dbutils.widgets.get("profile_name")
+    base_url = dbutils.widgets.get("base_url").rstrip("/")
+    auth_method = dbutils.widgets.get("auth_method")
+    username = dbutils.widgets.get("username")
+    credential = dbutils.widgets.get("credential")
 
-    client = ThoughtSpotClient(profile=profile_name, dbutils=dbutils)
-    return client.whoami()
+    scope = f"thoughtspot-{profile_name}"
+
+    _put_secret(dbutils, scope, "base_url", base_url)
+    _put_secret(dbutils, scope, "auth_method", auth_method)
+    _put_secret(dbutils, scope, "username", username)
+
+    if credential:
+        credential_key = _CREDENTIAL_KEY_MAP[auth_method]
+        _put_secret(dbutils, scope, credential_key, credential)
+
+    dbutils.widgets.removeAll()
+    return scope
 
 
 # ---------------------------------------------------------------------------
-# List profiles
+# List
 # ---------------------------------------------------------------------------
 
 def list_profiles(dbutils) -> list[dict]:
     """List all ThoughtSpot profiles stored in Databricks Secrets.
 
-    Scans all scopes starting with ``thoughtspot-`` and returns metadata
-    for each (profile name, base URL, auth method, username). Credential
-    values are never included.
-
-    Parameters
-    ----------
-    dbutils:
-        The Databricks ``dbutils`` object (real or mock).
-
-    Returns
-    -------
-    list[dict]
-        Each dict contains: ``name``, ``scope``, ``base_url``,
-        ``auth_method``, ``username``.
+    Returns metadata only — credential values are never included.
     """
     profiles = []
     for s in dbutils.secrets.listScopes():
@@ -266,87 +244,98 @@ def list_profiles(dbutils) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Delete profile
+# Delete
 # ---------------------------------------------------------------------------
 
 def delete_profile(profile_name: str, dbutils) -> str:
-    """Delete a ThoughtSpot profile from Databricks Secrets.
-
-    Removes the entire scope ``thoughtspot-{profile_name}`` and all secrets
-    within it. Idempotent — does not raise if the scope doesn't exist.
-
-    Parameters
-    ----------
-    profile_name:
-        The profile name (not the scope name).
-    dbutils:
-        The Databricks ``dbutils`` object (real or mock).
-
-    Returns
-    -------
-    str
-        The scope name that was deleted.
-    """
+    """Delete a ThoughtSpot profile (scope + all secrets). Idempotent."""
     scope = f"thoughtspot-{profile_name}"
     _delete_scope(dbutils, scope)
     return scope
 
 
+# ---------------------------------------------------------------------------
+# Test
+# ---------------------------------------------------------------------------
+
+def test_profile(profile_name: str, dbutils) -> dict:
+    """Test a profile by calling ThoughtSpot ``whoami()``.
+
+    Returns the parsed JSON user dict on success.
+    """
+    from ts_client import ThoughtSpotClient  # noqa: PLC0415
+
+    client = ThoughtSpotClient(profile=profile_name, dbutils=dbutils)
+    return client.whoami()
+
+
 # COMMAND ----------
 
-# Cell 1: List all ThoughtSpot profiles.
+# DBTITLE 1,Pick an action
 try:
-    profiles = list_profiles(dbutils)  # noqa: F821
-    if profiles:
-        for p in profiles:
-            print(f"  {p['name']:20s}  {p['auth_method']:14s}  {p['base_url']}  ({p['username']})")
-    else:
-        print("No ThoughtSpot profiles found. Run Cell 2 to create one.")
+    dbutils.widgets.dropdown(  # noqa: F821
+        "action", "List", _ACTIONS, "Action",
+    )
 except NameError:
     pass
 
 # COMMAND ----------
 
-# Cell 2: Display input widgets for creating or updating a profile.
-# After running this cell, fill in the widget values at the top of the notebook
-# BEFORE running Cell 3.
+# DBTITLE 1,Setup — prepare widgets for the selected action
 try:
-    setup_widgets(dbutils)  # noqa: F821 — injected by Databricks
+    _action = dbutils.widgets.get("action")  # noqa: F821
+
+    if _action == "Create":
+        setup_widgets(dbutils)
+
+    elif _action == "Update":
+        dbutils.widgets.text("profile_name", "default", "Profile to Update")
+        _pn = dbutils.widgets.get("profile_name")
+        setup_update_widgets(_pn, dbutils)
+
+    elif _action in ("Delete", "Test"):
+        dbutils.widgets.text("profile_name", "default", "Profile Name")
+
+    elif _action == "List":
+        print("No setup needed — run the next cell.")
+
 except NameError:
     pass
 
 # COMMAND ----------
 
-# Cell 3: Store the profile in Databricks Secrets and clear widgets.
-# To update an existing profile, enter the same profile name — values are overwritten.
-# The credential is moved to Secrets immediately and the widgets are removed
-# so the value is no longer visible in the notebook UI.
-# WARNING: Do not save the notebook between Cell 2 and Cell 3 — widget values
-# would persist in the saved notebook state.
+# DBTITLE 1,Execute
 try:
-    scope = create_profile(dbutils)  # noqa: F821
-    print(f"Profile stored in Secrets scope: {scope}")
-except NameError:
-    pass
+    _action = dbutils.widgets.get("action")  # noqa: F821
 
-# COMMAND ----------
+    if _action == "Create":
+        _scope = create_profile(dbutils)
+        print(f"Created profile in scope: {_scope}")
 
-# Cell 4: Test the connection by calling ThoughtSpot whoami().
-# Edit the profile name below if you used something other than "default".
-try:
-    result = test_profile("default", dbutils)  # noqa: F821
-    print(result)
-except NameError:
-    pass
+    elif _action == "List":
+        _profiles = list_profiles(dbutils)
+        if _profiles:
+            print(f"  {'Name':20s}  {'Auth':14s}  {'URL':40s}  Username")
+            print(f"  {'─' * 20}  {'─' * 14}  {'─' * 40}  {'─' * 30}")
+            for _p in _profiles:
+                print(f"  {_p['name']:20s}  {_p['auth_method']:14s}  {_p['base_url']:40s}  {_p['username']}")
+        else:
+            print("No ThoughtSpot profiles found. Select Create to add one.")
 
-# COMMAND ----------
+    elif _action == "Update":
+        _scope = update_profile(dbutils)
+        print(f"Updated profile in scope: {_scope}")
 
-# Cell 5: Delete a profile.
-# Change the profile name below, then run this cell.
-# WARNING: This permanently removes the scope and all its secrets.
-try:
-    # deleted_scope = delete_profile("profile-to-delete", dbutils)  # noqa: F821
-    # print(f"Deleted scope: {deleted_scope}")
-    print("Uncomment the lines above and set the profile name to delete.")
+    elif _action == "Delete":
+        _pn = dbutils.widgets.get("profile_name")
+        _scope = delete_profile(_pn, dbutils)
+        print(f"Deleted scope: {_scope}")
+        dbutils.widgets.removeAll()
+
+    elif _action == "Test":
+        _pn = dbutils.widgets.get("profile_name")
+        _result = test_profile(_pn, dbutils)
+        print(_result)
+
 except NameError:
     pass

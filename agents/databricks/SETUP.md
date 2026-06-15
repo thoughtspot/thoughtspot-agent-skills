@@ -143,26 +143,45 @@ target workspace and creates the token refresh job:
 
 ---
 
-## Step 3: Create a ThoughtSpot profile
+## Step 3: Manage ThoughtSpot profiles
 
-1. In your Databricks workspace, navigate to
-   **Workspace > /Workspace/thoughtspot-skills/notebooks/ts_profile_setup**
-2. Attach to any interactive compute (all-purpose cluster or serverless notebook)
-3. **Run Cell 1** — input widgets appear at the top of the notebook
-4. Fill in the widgets:
-   - **Profile Name:** a short name (e.g. `default`, `production`, `staging`)
-   - **ThoughtSpot Base URL:** your instance URL (e.g. `https://mycompany.thoughtspot.cloud`)
-   - **Auth Method:** select `bearer_token`, `password`, or `secret_key` from the dropdown
+Open `ts_profile_setup` in your workspace:
+**Workspace > /Workspace/thoughtspot-skills/notebooks/ts_profile_setup**
+
+Attach to any interactive compute (all-purpose cluster or serverless notebook).
+
+The notebook uses an **action dropdown** to select the operation:
+
+| Action | What it does |
+|---|---|
+| **List** | Show all stored ThoughtSpot profiles (name, auth method, URL) |
+| **Create** | Store a new profile in Databricks Secrets |
+| **Update** | Modify an existing profile (credential field blank = keep existing) |
+| **Delete** | Remove a profile and all its secrets |
+| **Test** | Call ThoughtSpot `whoami()` to verify the connection |
+
+### Workflow
+
+1. **Run "Install dependencies"** (first cell) — once per cluster attach
+2. **Run "Pick an action"** — select an action from the dropdown
+3. **Run "Setup"** — widgets appear for the selected action (skip for List)
+4. Fill in the widget values
+5. **Run "Execute"** — performs the action
+
+### Creating your first profile
+
+1. Select **Create** from the action dropdown
+2. Run Setup — fill in the widgets:
+   - **Profile Name:** a short name (e.g. `default`, `production`)
+   - **ThoughtSpot Base URL:** e.g. `https://mycompany.thoughtspot.cloud`
+   - **Auth Method:** `bearer_token`, `password`, or `secret_key`
    - **Username:** your ThoughtSpot username or email
    - **Credential:** your token, password, or secret key
-5. **Run Cell 2** — this stores the values in Databricks Secrets and immediately
-   clears all widgets so the credential is no longer visible in the notebook UI
-6. **Run Cell 3** — tests the connection by calling ThoughtSpot `whoami()`.
-   If you used a profile name other than `default`, edit the name in the cell first
+3. Run Execute — credential is stored in Secrets and widgets are cleared
 
-> **Security note:** Do not save the notebook between Cell 1 and Cell 2.
-> Widget values are held in the notebook UI state — saving before Cell 2 clears
-> them would persist the credential in the saved notebook. Cell 2 calls
+> **Security note:** Do not save the notebook between Setup and Execute.
+> Widget values are held in the notebook UI state — saving before Execute
+> would persist the credential in the saved notebook. Execute calls
 > `removeAll()` to clear widgets immediately after storing to Secrets.
 
 ---
