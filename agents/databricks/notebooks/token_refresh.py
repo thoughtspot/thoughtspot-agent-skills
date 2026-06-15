@@ -21,6 +21,24 @@ Usage from a notebook:
 import requests
 
 
+# ---------------------------------------------------------------------------
+# Secrets write helper — dbutils.secrets is read-only; writes use REST API.
+# ---------------------------------------------------------------------------
+
+def _put_secret(dbutils, scope: str, key: str, value: str) -> None:
+    """Write a secret value via the Databricks Secrets REST API."""
+    ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+    host = ctx.apiUrl().get().rstrip("/")
+    token = ctx.apiToken().get()
+    resp = requests.post(
+        f"{host}/api/2.0/secrets/put",
+        json={"scope": scope, "key": key, "string_value": value},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+
 def refresh_all_profiles(dbutils) -> dict:
     """Refresh ThoughtSpot tokens for all password and secret_key profiles.
 
@@ -93,7 +111,7 @@ def refresh_all_profiles(dbutils) -> dict:
                 results[profile] = "ERROR: no token in response"
                 continue
 
-            dbutils.secrets.put(scope, "token", token)
+            _put_secret(dbutils, scope, "token", token)
             results[profile] = "OK"
 
         except Exception as e:

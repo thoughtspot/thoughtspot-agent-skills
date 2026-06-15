@@ -16,6 +16,8 @@ Design
 
 from __future__ import annotations
 
+import requests as _requests
+
 # ---------------------------------------------------------------------------
 # Credential key map
 # ---------------------------------------------------------------------------
@@ -25,6 +27,45 @@ _CREDENTIAL_KEY_MAP: dict[str, str] = {
     "password": "password",
     "secret_key": "secret_key",
 }
+
+
+# ---------------------------------------------------------------------------
+# Secrets write helpers — dbutils.secrets is read-only in Databricks;
+# writes go through the REST API.
+# ---------------------------------------------------------------------------
+
+def _workspace_auth(dbutils) -> tuple[str, dict]:
+    """Extract the workspace host and auth headers from the notebook context."""
+    ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+    host = ctx.apiUrl().get().rstrip("/")
+    token = ctx.apiToken().get()
+    return host, {"Authorization": f"Bearer {token}"}
+
+
+def _create_scope(dbutils, scope: str) -> None:
+    """Create a Databricks Secrets scope via REST API (idempotent)."""
+    host, headers = _workspace_auth(dbutils)
+    resp = _requests.post(
+        f"{host}/api/2.0/secrets/scopes/create",
+        json={"scope": scope},
+        headers=headers,
+        timeout=30,
+    )
+    if resp.status_code == 409:
+        return  # scope already exists
+    resp.raise_for_status()
+
+
+def _put_secret(dbutils, scope: str, key: str, value: str) -> None:
+    """Write a secret value via REST API."""
+    host, headers = _workspace_auth(dbutils)
+    resp = _requests.post(
+        f"{host}/api/2.0/secrets/put",
+        json={"scope": scope, "key": key, "string_value": value},
+        headers=headers,
+        timeout=30,
+    )
+    resp.raise_for_status()
 
 
 # ---------------------------------------------------------------------------
@@ -108,20 +149,17 @@ def create_profile(dbutils) -> str:
 
     scope = f"thoughtspot-{profile_name}"
 
-    # Create scope — ignore error if it already exists.
-    try:
-        dbutils.secrets.createScope(scope)
-    except Exception:
-        pass
+    # Create scope via REST API (idempotent).
+    _create_scope(dbutils, scope)
 
-    # Store non-sensitive metadata.
-    dbutils.secrets.put(scope, "base_url", base_url)
-    dbutils.secrets.put(scope, "auth_method", auth_method)
-    dbutils.secrets.put(scope, "username", username)
+    # Store non-sensitive metadata via REST API.
+    _put_secret(dbutils, scope, "base_url", base_url)
+    _put_secret(dbutils, scope, "auth_method", auth_method)
+    _put_secret(dbutils, scope, "username", username)
 
     # Store credential under the method-specific key.
     credential_key = _CREDENTIAL_KEY_MAP[auth_method]
-    dbutils.secrets.put(scope, credential_key, credential)
+    _put_secret(dbutils, scope, credential_key, credential)
 
     # Clear widgets so sensitive values are no longer displayed.
     dbutils.widgets.removeAll()

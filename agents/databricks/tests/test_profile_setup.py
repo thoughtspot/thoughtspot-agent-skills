@@ -32,6 +32,24 @@ def _import_setup():
     return create_profile, test_profile
 
 
+def _patch_secrets_api(mock_dbutils):
+    """Patch _create_scope and _put_secret to delegate to the mock dbutils.
+
+    In production these use the Databricks REST API; in tests we redirect
+    them to the in-memory MockSecrets so assertions on _scopes still work.
+    """
+    def _mock_create_scope(dbutils, scope):
+        mock_dbutils.secrets.createScope(scope)
+
+    def _mock_put_secret(dbutils, scope, key, value):
+        mock_dbutils.secrets.put(scope, key, value)
+
+    return (
+        patch("ts_profile_setup._create_scope", side_effect=_mock_create_scope),
+        patch("ts_profile_setup._put_secret", side_effect=_mock_put_secret),
+    )
+
+
 # ===========================================================================
 # TestCreateProfile
 # ===========================================================================
@@ -42,6 +60,7 @@ class TestCreateProfile:
     def test_creates_scope_and_stores_secrets(self, mock_dbutils):
         """bearer_token profile: scope created and all four secrets stored correctly."""
         create_profile, _ = _import_setup()
+        p1, p2 = _patch_secrets_api(mock_dbutils)
 
         mock_dbutils.widgets._set("profile_name", "staging")
         mock_dbutils.widgets._set("base_url", "https://staging.thoughtspot.cloud/")
@@ -49,7 +68,8 @@ class TestCreateProfile:
         mock_dbutils.widgets._set("username", "user@example.com")
         mock_dbutils.widgets._set("credential", "my-bearer-token")
 
-        scope = create_profile(mock_dbutils)
+        with p1, p2:
+            scope = create_profile(mock_dbutils)
 
         assert scope == "thoughtspot-staging"
         assert "thoughtspot-staging" in mock_dbutils.secrets._scopes
@@ -65,6 +85,7 @@ class TestCreateProfile:
     def test_password_auth_stores_password_key(self, mock_dbutils):
         """password auth: credential stored under key 'password'."""
         create_profile, _ = _import_setup()
+        p1, p2 = _patch_secrets_api(mock_dbutils)
 
         mock_dbutils.widgets._set("profile_name", "prod")
         mock_dbutils.widgets._set("base_url", "https://prod.thoughtspot.cloud")
@@ -72,7 +93,8 @@ class TestCreateProfile:
         mock_dbutils.widgets._set("username", "admin@corp.com")
         mock_dbutils.widgets._set("credential", "s3cr3t!")
 
-        scope = create_profile(mock_dbutils)
+        with p1, p2:
+            scope = create_profile(mock_dbutils)
 
         secrets = mock_dbutils.secrets._scopes[scope]
         assert secrets["password"] == "s3cr3t!"
@@ -82,6 +104,7 @@ class TestCreateProfile:
     def test_secret_key_auth_stores_secret_key(self, mock_dbutils):
         """secret_key auth: credential stored under key 'secret_key'."""
         create_profile, _ = _import_setup()
+        p1, p2 = _patch_secrets_api(mock_dbutils)
 
         mock_dbutils.widgets._set("profile_name", "dev")
         mock_dbutils.widgets._set("base_url", "https://dev.thoughtspot.cloud")
@@ -89,7 +112,8 @@ class TestCreateProfile:
         mock_dbutils.widgets._set("username", "svc@corp.com")
         mock_dbutils.widgets._set("credential", "sk-abcdef123456")
 
-        scope = create_profile(mock_dbutils)
+        with p1, p2:
+            scope = create_profile(mock_dbutils)
 
         secrets = mock_dbutils.secrets._scopes[scope]
         assert secrets["secret_key"] == "sk-abcdef123456"
@@ -99,6 +123,7 @@ class TestCreateProfile:
     def test_widgets_cleared_after_setup(self, mock_dbutils):
         """Widgets are removed after create_profile returns."""
         create_profile, _ = _import_setup()
+        p1, p2 = _patch_secrets_api(mock_dbutils)
 
         mock_dbutils.widgets._set("profile_name", "default")
         mock_dbutils.widgets._set("base_url", "https://ts.example.com")
@@ -106,13 +131,15 @@ class TestCreateProfile:
         mock_dbutils.widgets._set("username", "admin@example.com")
         mock_dbutils.widgets._set("credential", "tok-xyz")
 
-        create_profile(mock_dbutils)
+        with p1, p2:
+            create_profile(mock_dbutils)
 
         assert mock_dbutils.widgets._values == {}
 
     def test_existing_scope_does_not_raise(self, mock_dbutils):
         """create_profile does not raise when the scope already exists."""
         create_profile, _ = _import_setup()
+        p1, p2 = _patch_secrets_api(mock_dbutils)
 
         # Pre-create the scope to simulate an existing profile.
         mock_dbutils.secrets.createScope("thoughtspot-default")
@@ -123,8 +150,8 @@ class TestCreateProfile:
         mock_dbutils.widgets._set("username", "admin@example.com")
         mock_dbutils.widgets._set("credential", "tok-new")
 
-        # Should not raise even though the scope already exists.
-        scope = create_profile(mock_dbutils)
+        with p1, p2:
+            scope = create_profile(mock_dbutils)
         assert scope == "thoughtspot-default"
         assert mock_dbutils.secrets._scopes["thoughtspot-default"]["token"] == "tok-new"
 
