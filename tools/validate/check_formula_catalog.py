@@ -95,7 +95,7 @@ def _extract_ts_segments(line: str, ts_col: int | None) -> list[str]:
         return []
 
     cells = line.split("|")[1:-1]
-    data_cells = [c for c in cells]
+    data_cells = cells
     if not data_cells or _SEPARATOR_RE.match(line.strip()):
         return []
 
@@ -140,7 +140,7 @@ def scan_mapping(
             ts_col = _find_ts_column(line)
             continue
 
-        # Reset column tracking on separator rows (new table)
+        # Skip separator rows (column tracking persists until next header)
         if _SEPARATOR_RE.match(line.strip()):
             continue
 
