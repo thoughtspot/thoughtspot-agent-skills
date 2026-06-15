@@ -11,7 +11,7 @@ Databricks Asset Bundles.
 |---|---|
 | Databricks workspace | With Unity Catalog enabled |
 | Databricks CLI | `pip install databricks-cli` (v0.18+) |
-| Databricks authentication | CLI configured: `databricks configure` or env vars |
+| Databricks authentication | CLI configured via `/ts-profile-databricks`, `databricks configure`, or env vars |
 | ThoughtSpot instance | Cloud or Software, with REST API v2 enabled |
 | ThoughtSpot credentials | Bearer token, password, or secret key |
 
@@ -19,14 +19,29 @@ Databricks Asset Bundles.
 
 ## Step 1: Configure deployment target
 
-Edit `databricks.yml` and set the workspace host for your target:
+If you've already run `/ts-profile-databricks`, you can pull the workspace host
+from your existing profile instead of looking it up again:
+
+```bash
+python3 -c "
+import json, os
+profiles = json.load(open(os.path.expanduser('~/.claude/databricks-profiles.json')))
+for p in profiles:
+    print(f\"{p['name']:20s} {p['host']}\")
+"
+```
+
+Copy the host URL for your target workspace and set it in `databricks.yml`:
 
 ```yaml
 targets:
   dev:
     workspace:
-      host: https://your-workspace.cloud.databricks.com
+      host: https://dbc-xxxxx.cloud.databricks.com  # from your profile
 ```
+
+If you don't have a profile yet, use your workspace URL directly — you can
+set up a profile later with `/ts-profile-databricks`.
 
 ---
 
