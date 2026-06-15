@@ -40,8 +40,13 @@ targets:
       host: https://dbc-xxxxx.cloud.databricks.com  # from your profile
 ```
 
-If you don't have a profile yet, use your workspace URL directly — you can
-set up a profile later with `/ts-profile-databricks`.
+If you don't have a profile yet, find your workspace URL by logging into
+Databricks and copying the URL from the browser address bar. It looks like
+`https://dbc-abc123.cloud.databricks.com` (AWS) or
+`https://adb-1234567890.1.azuredatabricks.net` (Azure). Use the
+**workspace-level** URL, not the account-level `https://accounts.cloud.databricks.com`.
+
+You can set up a full profile later with `/ts-profile-databricks`.
 
 ---
 
