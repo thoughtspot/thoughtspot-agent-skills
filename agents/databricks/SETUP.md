@@ -31,7 +31,8 @@ for p in profiles:
 "
 ```
 
-Copy the host URL for your target workspace and set it in `databricks.yml`:
+Copy the host URL for your target workspace and set it in
+`agents/databricks/databricks.yml`:
 
 ```yaml
 targets:
