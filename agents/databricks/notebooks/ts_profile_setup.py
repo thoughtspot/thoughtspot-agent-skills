@@ -75,6 +75,20 @@ def _put_secret(dbutils, scope: str, key: str, value: str) -> None:
     resp.raise_for_status()
 
 
+def _delete_scope(dbutils, scope: str) -> None:
+    """Delete a Databricks Secrets scope and all its secrets via REST API."""
+    host, headers = _workspace_auth(dbutils)
+    resp = _requests.post(
+        f"{host}/api/2.0/secrets/scopes/delete",
+        json={"scope": scope},
+        headers=headers,
+        timeout=30,
+    )
+    if resp.status_code == 404:
+        return  # scope doesn't exist — nothing to delete
+    resp.raise_for_status()
+
+
 # ---------------------------------------------------------------------------
 # Widget setup
 # ---------------------------------------------------------------------------
@@ -202,22 +216,106 @@ def test_profile(profile_name: str, dbutils) -> dict:
     return client.whoami()
 
 
+# ---------------------------------------------------------------------------
+# List profiles
+# ---------------------------------------------------------------------------
+
+def list_profiles(dbutils) -> list[dict]:
+    """List all ThoughtSpot profiles stored in Databricks Secrets.
+
+    Scans all scopes starting with ``thoughtspot-`` and returns metadata
+    for each (profile name, base URL, auth method, username). Credential
+    values are never included.
+
+    Parameters
+    ----------
+    dbutils:
+        The Databricks ``dbutils`` object (real or mock).
+
+    Returns
+    -------
+    list[dict]
+        Each dict contains: ``name``, ``scope``, ``base_url``,
+        ``auth_method``, ``username``.
+    """
+    profiles = []
+    for scope in dbutils.secrets.listScopes():
+        if not scope.startswith("thoughtspot-"):
+            continue
+        name = scope[len("thoughtspot-"):]
+        try:
+            base_url = dbutils.secrets.get(scope, "base_url")
+            auth_method = dbutils.secrets.get(scope, "auth_method")
+            username = dbutils.secrets.get(scope, "username")
+        except KeyError:
+            base_url = auth_method = username = "?"
+        profiles.append({
+            "name": name,
+            "scope": scope,
+            "base_url": base_url,
+            "auth_method": auth_method,
+            "username": username,
+        })
+    return profiles
+
+
+# ---------------------------------------------------------------------------
+# Delete profile
+# ---------------------------------------------------------------------------
+
+def delete_profile(profile_name: str, dbutils) -> str:
+    """Delete a ThoughtSpot profile from Databricks Secrets.
+
+    Removes the entire scope ``thoughtspot-{profile_name}`` and all secrets
+    within it. Idempotent — does not raise if the scope doesn't exist.
+
+    Parameters
+    ----------
+    profile_name:
+        The profile name (not the scope name).
+    dbutils:
+        The Databricks ``dbutils`` object (real or mock).
+
+    Returns
+    -------
+    str
+        The scope name that was deleted.
+    """
+    scope = f"thoughtspot-{profile_name}"
+    _delete_scope(dbutils, scope)
+    return scope
+
+
 # COMMAND ----------
 
-# Cell 1: Display input widgets.
+# Cell 1: List all ThoughtSpot profiles.
+try:
+    profiles = list_profiles(dbutils)  # noqa: F821
+    if profiles:
+        for p in profiles:
+            print(f"  {p['name']:20s}  {p['auth_method']:14s}  {p['base_url']}  ({p['username']})")
+    else:
+        print("No ThoughtSpot profiles found. Run Cell 2 to create one.")
+except NameError:
+    pass
+
+# COMMAND ----------
+
+# Cell 2: Display input widgets for creating or updating a profile.
 # After running this cell, fill in the widget values at the top of the notebook
-# BEFORE running Cell 2.
+# BEFORE running Cell 3.
 try:
     setup_widgets(dbutils)  # noqa: F821 — injected by Databricks
 except NameError:
-    pass  # Not in Databricks — skip (e.g. during test import)
+    pass
 
 # COMMAND ----------
 
-# Cell 2: Store the profile in Databricks Secrets and clear widgets.
+# Cell 3: Store the profile in Databricks Secrets and clear widgets.
+# To update an existing profile, enter the same profile name — values are overwritten.
 # The credential is moved to Secrets immediately and the widgets are removed
 # so the value is no longer visible in the notebook UI.
-# WARNING: Do not save the notebook between Cell 1 and Cell 2 — widget values
+# WARNING: Do not save the notebook between Cell 2 and Cell 3 — widget values
 # would persist in the saved notebook state.
 try:
     scope = create_profile(dbutils)  # noqa: F821
@@ -227,10 +325,22 @@ except NameError:
 
 # COMMAND ----------
 
-# Cell 3: Test the connection by calling ThoughtSpot whoami().
+# Cell 4: Test the connection by calling ThoughtSpot whoami().
 # Edit the profile name below if you used something other than "default".
 try:
     result = test_profile("default", dbutils)  # noqa: F821
     print(result)
+except NameError:
+    pass
+
+# COMMAND ----------
+
+# Cell 5: Delete a profile.
+# Change the profile name below, then run this cell.
+# WARNING: This permanently removes the scope and all its secrets.
+try:
+    # deleted_scope = delete_profile("profile-to-delete", dbutils)  # noqa: F821
+    # print(f"Deleted scope: {deleted_scope}")
+    print("Uncomment the lines above and set the profile name to delete.")
 except NameError:
     pass

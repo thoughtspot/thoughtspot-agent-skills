@@ -46,6 +46,10 @@ class MockSecrets:
         """List all scope names."""
         return builtins.list(self._scopes.keys())
 
+    def deleteScope(self, scope: str) -> None:
+        """Delete a scope and all its secrets."""
+        self._scopes.pop(scope, None)
+
 
 class MockWidgets:
     """In-memory replacement for dbutils.widgets."""
