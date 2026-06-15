@@ -371,6 +371,204 @@ class ThoughtSpotClient:
         return self._request_with_retry("POST", path, **kwargs)
 
     # ------------------------------------------------------------------
+    # Metadata API
+    # ------------------------------------------------------------------
+
+    _BUCKET_TO_TYPE: dict = {
+        "TABLE": "LOGICAL_TABLE",
+        "MODEL": "LOGICAL_TABLE",
+        "WORKSHEET": "LOGICAL_TABLE",
+        "SQL_VIEW": "LOGICAL_TABLE",
+        "VIEW": "LOGICAL_TABLE",
+        "ONE_TO_ONE_LOGICAL": "LOGICAL_TABLE",
+        "AGGR_WORKSHEET": "LOGICAL_TABLE",
+        "LOGICAL_COLUMN": "LOGICAL_COLUMN",
+        "ANSWER": "ANSWER",
+        "LIVEBOARD": "LIVEBOARD",
+        "PINBOARD": "LIVEBOARD",
+        "SET": "SET",
+        "COHORT": "SET",
+        "FEEDBACK": "FEEDBACK",
+    }
+
+    def metadata_search(
+        self,
+        *,
+        type: str,
+        subtypes=None,
+        name: Optional[str] = None,
+        guid: Optional[str] = None,
+        tags=None,
+        include_hidden: bool = False,
+        fetch_all: bool = False,
+    ) -> list:
+        """Search for metadata objects.
+
+        POST /api/rest/2.0/metadata/search
+
+        Parameters
+        ----------
+        type:
+            Metadata type (required), e.g. ``"LOGICAL_TABLE"``, ``"ANSWER"``.
+        subtypes:
+            Optional list of subtypes to filter by.
+        name:
+            Optional name pattern (passed as ``name_pattern`` in the request).
+        guid:
+            Optional GUID to filter by (passed as ``identifier`` in the request).
+        tags:
+            Optional list of tag identifiers to filter by.
+        include_hidden:
+            Whether to include hidden objects.
+        fetch_all:
+            If True, auto-paginates until an empty page is returned.
+
+        Returns
+        -------
+        list[dict]
+            List of metadata objects matching the search criteria.
+        """
+        page_size = 500
+        offset = 0
+        results: list = []
+
+        while True:
+            metadata_filter: dict = {"type": type}
+            if subtypes:
+                metadata_filter["sub_types"] = subtypes
+            if name is not None:
+                metadata_filter["name_pattern"] = name
+            if guid is not None:
+                metadata_filter["identifier"] = guid
+            if tags:
+                metadata_filter["tag_identifiers"] = tags
+
+            body: dict = {
+                "metadata": [metadata_filter],
+                "include_hidden_objects": include_hidden,
+                "record_size": page_size,
+                "record_offset": offset,
+            }
+
+            resp = self.post("/api/rest/2.0/metadata/search", json=body)
+            page = resp.json()
+
+            if not page:
+                break
+
+            results.extend(page)
+
+            if not fetch_all or len(page) < page_size:
+                break
+
+            offset += page_size
+
+        return results
+
+    def metadata_get(self, guid: str, *, type: str) -> dict:
+        """Retrieve a single metadata object by GUID.
+
+        Parameters
+        ----------
+        guid:
+            The GUID of the object to retrieve.
+        type:
+            Metadata type, e.g. ``"LOGICAL_TABLE"``.
+
+        Returns
+        -------
+        dict
+            The metadata object.
+
+        Raises
+        ------
+        ThoughtSpotAPIError
+            With status_code 404 if no object with the given GUID is found.
+        """
+        results = self.metadata_search(
+            type=type,
+            subtypes=None,
+            name=None,
+            guid=guid,
+            tags=None,
+            include_hidden=False,
+            fetch_all=False,
+        )
+        if not results:
+            raise ThoughtSpotAPIError(
+                404,
+                f"No metadata object found with guid={guid!r} and type={type!r}",
+                "/api/rest/2.0/metadata/search",
+            )
+        return results[0]
+
+    def metadata_dependents(self, guids: list, *, type: str) -> list:
+        """Return objects that depend on the given GUIDs.
+
+        POST /api/rest/2.0/metadata/search with ``dependent_object_version: "V2"``.
+
+        Parameters
+        ----------
+        guids:
+            List of source object GUIDs to find dependents for.
+        type:
+            Metadata type of the source objects.
+
+        Returns
+        -------
+        list[dict]
+            Flattened list of dependent objects, each with keys:
+            ``source_guid``, ``type`` (normalized), ``id``, ``name``.
+        """
+        body: dict = {
+            "metadata": [{"type": type, "identifier": g} for g in guids],
+            "dependent_object_version": "V2",
+        }
+        resp = self.post("/api/rest/2.0/metadata/search", json=body)
+        raw: dict = resp.json()
+
+        flat: list = []
+        for source_guid, buckets in raw.items():
+            for bucket_name, items in buckets.items():
+                normalized_type = self._BUCKET_TO_TYPE.get(bucket_name, bucket_name)
+                for item in items:
+                    flat.append(
+                        {
+                            "source_guid": source_guid,
+                            "type": normalized_type,
+                            "id": item.get("id"),
+                            "name": item.get("name"),
+                        }
+                    )
+        return flat
+
+    def metadata_delete(self, guids: list, *, type: str) -> dict:
+        """Delete metadata objects by GUID.
+
+        POST /api/rest/2.0/metadata/delete
+
+        Parameters
+        ----------
+        guids:
+            List of GUIDs to delete.
+        type:
+            Metadata type of the objects to delete.
+
+        Returns
+        -------
+        dict
+            Response body as a dict, or empty dict if no JSON body returned.
+        """
+        body: dict = {
+            "metadata": [{"identifier": g, "type": type} for g in guids],
+        }
+        resp = self.post("/api/rest/2.0/metadata/delete", json=body)
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+
+    # ------------------------------------------------------------------
     # Auth API
     # ------------------------------------------------------------------
 

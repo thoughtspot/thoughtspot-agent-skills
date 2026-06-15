@@ -456,3 +456,195 @@ class TestLogout:
         client.logout()
         token = client.get_token()
         assert token == "test-bearer-token-abc123"
+
+
+# ===========================================================================
+# metadata_search()
+# ===========================================================================
+
+class TestMetadataSearch:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_basic_search_returns_results(self, profile_secrets):
+        """metadata_search returns a list of objects from the API response."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        items = [{"id": "abc-1", "name": "Sales Table", "type": "LOGICAL_TABLE"}]
+        with patch("requests.request", return_value=self._ok_resp(items)):
+            result = client.metadata_search(
+                type="LOGICAL_TABLE",
+                subtypes=None,
+                name=None,
+                guid=None,
+                tags=None,
+                include_hidden=False,
+                fetch_all=False,
+            )
+        assert result == items
+
+    def test_fetch_all_paginates(self, profile_secrets):
+        """fetch_all=True paginates until a page smaller than page_size is returned."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        page1 = [{"id": f"id-{i}"} for i in range(500)]
+        page2 = [{"id": "id-last"}]
+        with patch("requests.request", side_effect=[
+            self._ok_resp(page1),
+            self._ok_resp(page2),
+        ]) as mock_req:
+            result = client.metadata_search(
+                type="LOGICAL_TABLE",
+                subtypes=None,
+                name=None,
+                guid=None,
+                tags=None,
+                include_hidden=False,
+                fetch_all=True,
+            )
+        # page1=500 (full) → request page2; page2=1 (partial) → stop
+        assert mock_req.call_count == 2
+        assert len(result) == 501
+
+    def test_name_filter_sets_name_pattern(self, profile_secrets):
+        """Passing name= sets name_pattern in the request body."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.metadata_search(
+                type="LOGICAL_TABLE",
+                subtypes=None,
+                name="Sales%",
+                guid=None,
+                tags=None,
+                include_hidden=False,
+                fetch_all=False,
+            )
+        body = mock_req.call_args[1]["json"]
+        assert body.get("metadata", [{}])[0].get("name_pattern") == "Sales%"
+
+    def test_guid_filter_sets_identifier(self, profile_secrets):
+        """Passing guid= sets identifier in the request body."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.metadata_search(
+                type="LOGICAL_TABLE",
+                subtypes=None,
+                name=None,
+                guid="abc-123",
+                tags=None,
+                include_hidden=False,
+                fetch_all=False,
+            )
+        body = mock_req.call_args[1]["json"]
+        assert body.get("metadata", [{}])[0].get("identifier") == "abc-123"
+
+
+# ===========================================================================
+# metadata_get()
+# ===========================================================================
+
+class TestMetadataGet:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_returns_single_object(self, profile_secrets):
+        """metadata_get returns the first matching result."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        obj = {"id": "abc-1", "name": "MyTable"}
+        with patch("requests.request", return_value=self._ok_resp([obj])):
+            result = client.metadata_get("abc-1", type="LOGICAL_TABLE")
+        assert result == obj
+
+    def test_raises_on_not_found(self, profile_secrets):
+        """metadata_get raises ThoughtSpotAPIError(404) if no results returned."""
+        mock_dbutils, _ = profile_secrets
+        client, ThoughtSpotAPIError = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])):
+            with pytest.raises(ThoughtSpotAPIError) as exc_info:
+                client.metadata_get("nonexistent-guid", type="LOGICAL_TABLE")
+        assert exc_info.value.status_code == 404
+
+
+# ===========================================================================
+# metadata_dependents()
+# ===========================================================================
+
+class TestMetadataDependents:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_flat_normalization(self, profile_secrets):
+        """Dependents response is flattened with normalized types."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        api_response = {
+            "source-guid-1": {
+                "ANSWER": [
+                    {"id": "ans-1", "name": "My Answer"},
+                ],
+                "PINBOARD": [
+                    {"id": "lb-1", "name": "My Liveboard"},
+                ],
+            }
+        }
+        with patch("requests.request", return_value=self._ok_resp(api_response)):
+            result = client.metadata_dependents(
+                ["source-guid-1"],
+                type="LOGICAL_TABLE",
+            )
+        assert len(result) == 2
+        types = {item["type"] for item in result}
+        assert "ANSWER" in types
+        assert "LIVEBOARD" in types  # PINBOARD → LIVEBOARD
+        source_guids = {item["source_guid"] for item in result}
+        assert source_guids == {"source-guid-1"}
+        ids = {item["id"] for item in result}
+        assert ids == {"ans-1", "lb-1"}
+
+
+# ===========================================================================
+# metadata_delete()
+# ===========================================================================
+
+class TestMetadataDelete:
+    def _ok_resp(self, body=None):
+        r = MagicMock()
+        r.status_code = 204
+        r.json.return_value = body or {}
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_correct_payload_shape(self, profile_secrets):
+        """metadata_delete sends correct payload with GUID list and type."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        guids = ["guid-1", "guid-2"]
+        with patch("requests.request", return_value=self._ok_resp()) as mock_req:
+            result = client.metadata_delete(guids, type="LOGICAL_TABLE")
+        body = mock_req.call_args[1]["json"]
+        assert "metadata" in body
+        assert len(body["metadata"]) == 2
+        identifiers = {item["identifier"] for item in body["metadata"]}
+        assert identifiers == {"guid-1", "guid-2"}
+        types = {item["type"] for item in body["metadata"]}
+        assert types == {"LOGICAL_TABLE"}
+        assert isinstance(result, dict)
