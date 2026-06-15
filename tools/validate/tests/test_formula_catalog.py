@@ -158,6 +158,17 @@ def test_sql_op_templates_skipped():
     assert not errors, errors
 
 
+SAMPLE_MAPPING_SQL_IN_SECOND_COL = """\
+### Date / Time Functions
+
+| ThoughtSpot | Databricks SQL | Notes |
+|---|---|---|
+| `start_of_month(d)` | `date_trunc('month', d)` | |
+| `start_of_quarter(d)` | `date_trunc('quarter', d)` | |
+| `date(ts)` | `DATE(ts)` or `date_trunc('day', ts)` | |
+"""
+
+
 def test_snowflake_bidi_nonexistent_caught():
     valid, nonexistent = check_formula_catalog.parse_catalog(SAMPLE_CATALOG)
     errors, warnings = check_formula_catalog.scan_mapping(
@@ -165,3 +176,12 @@ def test_snowflake_bidi_nonexistent_caught():
     )
     assert any("upper" in e and "ERROR" in e for e in errors), errors
     assert not any("concat" in e for e in errors), errors
+
+
+def test_sql_in_second_column_not_flagged():
+    """date_trunc in the Databricks SQL column should not trigger an error."""
+    valid, nonexistent = check_formula_catalog.parse_catalog(SAMPLE_CATALOG)
+    errors, warnings = check_formula_catalog.scan_mapping(
+        SAMPLE_MAPPING_SQL_IN_SECOND_COL, "test-databricks.md", valid, nonexistent,
+    )
+    assert not any("date_trunc" in e for e in errors), errors

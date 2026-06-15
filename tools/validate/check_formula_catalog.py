@@ -43,13 +43,13 @@ def parse_catalog(text: str) -> tuple[set[str], set[str]]:
     return valid, nonexistent
 
 
-# Extracts TS function names from mapping file table cells.
-_TS_FUNC_IN_CELL_RE = re.compile(r"`(?:~~)?([a-z_][a-z0-9_ ]*)\s*\(")
+# Extracts TS function names from text.
+_TS_FUNC_RE = re.compile(r"`(?:~~)?([a-z_][a-z0-9_ ]*)\s*\(")
 
-# Detects strikethrough wrapping on a function reference in a mapping file.
+# Detects strikethrough wrapping on a function reference.
 _STRIKETHROUGH_FUNC_RE = re.compile(r"~~`([a-z_][a-z0-9_ ]*)\s*\(")
 
-# Detects sql_*_op template calls — skip function names inside the template string.
+# Detects sql_*_op template calls — skip the whole line.
 _SQL_OP_RE = re.compile(r'`sql_[a-z_]+_op\s*\(')
 
 COMPLEX_PATTERN_PREFIXES = (
@@ -65,6 +65,59 @@ def _is_complex_pattern(name: str) -> bool:
     return any(name.startswith(p) or name == p.rstrip("_") for p in COMPLEX_PATTERN_PREFIXES)
 
 
+_TS_COLUMN_KEYWORDS = ("thoughtspot", "ts syntax", "ts formula")
+_SEPARATOR_RE = re.compile(r"^\|[\s\-|]+\|$")
+
+
+def _find_ts_column(header_line: str) -> int | None:
+    """Return the 0-based data-cell index that holds ThoughtSpot content, or None."""
+    cells = header_line.split("|")[1:-1]
+    for i, cell in enumerate(cells):
+        lower = cell.strip().lower()
+        if any(kw in lower for kw in _TS_COLUMN_KEYWORDS):
+            return i
+    return None
+
+
+def _extract_ts_segments(line: str, ts_col: int | None) -> list[str]:
+    """Extract the ThoughtSpot-side text from a markdown table data row.
+
+    Only processes table rows (lines starting with ``|``). Non-table lines
+    return empty — prose and code blocks are not scanned.
+
+    Table formats handled:
+    - Bidirectional (Snowflake): cells contain ``→``.
+      TS segments are: before ``→`` in cell 0, after ``→`` in cell 1.
+    - Unidirectional: extract from the detected TS column (``ts_col``),
+      or cell 0 if the header didn't identify a TS column.
+    """
+    if not line.strip().startswith("|"):
+        return []
+
+    cells = line.split("|")[1:-1]
+    data_cells = [c for c in cells]
+    if not data_cells or _SEPARATOR_RE.match(line.strip()):
+        return []
+
+    # Bidirectional: cells contain → separator
+    if "→" in line and any("→" in c for c in data_cells):
+        segments = []
+        for i, cell in enumerate(data_cells):
+            if "→" in cell:
+                parts = cell.split("→")
+                if i == 0:
+                    segments.append(parts[0])  # TS is before →
+                else:
+                    segments.append(parts[-1])  # TS is after →
+        return segments
+
+    # Unidirectional: use detected TS column, default to cell 0
+    col = ts_col if ts_col is not None else 0
+    if col < len(data_cells):
+        return [data_cells[col]]
+    return []
+
+
 def scan_mapping(
     text: str,
     filename: str,
@@ -74,14 +127,31 @@ def scan_mapping(
     """Scan a mapping file for TS function references. Returns (errors, warnings)."""
     errors: list[str] = []
     warnings: list[str] = []
+    ts_col: int | None = None
 
     for line_no, line in enumerate(text.splitlines(), 1):
         if _SQL_OP_RE.search(line):
             continue
 
-        strikethrough_names = {m.group(1) for m in _STRIKETHROUGH_FUNC_RE.finditer(line)}
+        # Detect TS column from table headers
+        if line.strip().startswith("|") and any(
+            kw in line.lower() for kw in _TS_COLUMN_KEYWORDS
+        ):
+            ts_col = _find_ts_column(line)
+            continue
 
-        for m in _TS_FUNC_IN_CELL_RE.finditer(line):
+        # Reset column tracking on separator rows (new table)
+        if _SEPARATOR_RE.match(line.strip()):
+            continue
+
+        ts_segments = _extract_ts_segments(line, ts_col)
+        if not ts_segments:
+            continue
+        combined = " ".join(ts_segments)
+
+        strikethrough_names = {m.group(1) for m in _STRIKETHROUGH_FUNC_RE.finditer(combined)}
+
+        for m in _TS_FUNC_RE.finditer(combined):
             name = m.group(1).strip()
             if not name or name in strikethrough_names:
                 continue
