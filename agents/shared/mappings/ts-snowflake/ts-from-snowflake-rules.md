@@ -353,8 +353,8 @@ ThoughtSpot:    [TABLE_ID::col_name]
 | `CONCAT(a, b)` | `concat ( [a] , [b] )` |
 | `SUBSTR(x, start, len)` | `substr ( [x] , start , len )` |
 | `LENGTH(x)` | `strlen ( [x] )` |
-| `UPPER(x)` | `upper ( [x] )` |
-| `LOWER(x)` | `lower ( [x] )` |
+| `UPPER(x)` | `sql_string_op ( "UPPER({0})" , [x] )` — no native `upper` in TS |
+| `LOWER(x)` | `sql_string_op ( "LOWER({0})" , [x] )` — no native `lower` in TS |
 
 **Numeric functions:**
 
