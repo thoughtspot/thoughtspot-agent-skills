@@ -99,3 +99,60 @@ def scan_mapping(
                 )
 
     return errors, warnings
+
+
+CATALOG_PATH = "agents/shared/schemas/thoughtspot-formula-patterns.md"
+MAPPING_DIR = "agents/shared/mappings"
+
+
+def run(root: Path, show_warnings: bool = False) -> int:
+    """Run the full cross-check. Returns the number of errors."""
+    catalog_file = root / CATALOG_PATH
+    if not catalog_file.exists():
+        print(f"ERROR: catalog not found: {catalog_file}", file=sys.stderr)
+        return 1
+
+    valid, nonexistent = parse_catalog(catalog_file.read_text())
+
+    mapping_dir = root / MAPPING_DIR
+    if not mapping_dir.exists():
+        print(f"ERROR: mapping directory not found: {mapping_dir}", file=sys.stderr)
+        return 1
+
+    all_errors: list[str] = []
+    all_warnings: list[str] = []
+
+    for md_file in sorted(mapping_dir.rglob("*.md")):
+        rel = md_file.relative_to(root)
+        errors, warnings = scan_mapping(md_file.read_text(), str(rel), valid, nonexistent)
+        all_errors.extend(errors)
+        all_warnings.extend(warnings)
+
+    for e in all_errors:
+        print(e, file=sys.stderr)
+    if show_warnings:
+        for w in all_warnings:
+            print(w, file=sys.stderr)
+
+    if all_errors:
+        print(
+            f"\n{len(all_errors)} error(s) found. Fix the TS function references above.",
+            file=sys.stderr,
+        )
+    return len(all_errors)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path("."), help="Repo root")
+    parser.add_argument(
+        "--all", action="store_true", dest="show_all",
+        help="Show warnings (unknown functions) in addition to errors",
+    )
+    args = parser.parse_args()
+    error_count = run(args.root, show_warnings=args.show_all)
+    sys.exit(1 if error_count > 0 else 0)
+
+
+if __name__ == "__main__":
+    main()
