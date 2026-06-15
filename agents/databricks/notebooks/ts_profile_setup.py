@@ -162,9 +162,10 @@ def test_profile(profile_name: str, dbutils) -> dict:
 # Cell 1: Display input widgets.
 # After running this cell, fill in the widget values at the top of the notebook
 # BEFORE running Cell 2.
-import builtins as _builtins
-if hasattr(_builtins, "dbutils"):
+try:
     setup_widgets(dbutils)  # noqa: F821 — injected by Databricks
+except NameError:
+    pass  # Not in Databricks — skip (e.g. during test import)
 
 # COMMAND ----------
 
@@ -173,14 +174,18 @@ if hasattr(_builtins, "dbutils"):
 # so the value is no longer visible in the notebook UI.
 # WARNING: Do not save the notebook between Cell 1 and Cell 2 — widget values
 # would persist in the saved notebook state.
-if hasattr(_builtins, "dbutils"):
+try:
     scope = create_profile(dbutils)  # noqa: F821
     print(f"Profile stored in Secrets scope: {scope}")
+except NameError:
+    pass
 
 # COMMAND ----------
 
 # Cell 3: Test the connection by calling ThoughtSpot whoami().
 # Edit the profile name below if you used something other than "default".
-if hasattr(_builtins, "dbutils"):
+try:
     result = test_profile("default", dbutils)  # noqa: F821
     print(result)
+except NameError:
+    pass
