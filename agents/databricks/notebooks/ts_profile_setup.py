@@ -16,6 +16,13 @@ Design
 
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+
+_nb_dir = _os.getcwd()
+if _nb_dir not in _sys.path:
+    _sys.path.insert(0, _nb_dir)
+
 import requests as _requests
 
 # ---------------------------------------------------------------------------
