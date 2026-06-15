@@ -243,10 +243,14 @@ class ThoughtSpotClient:
             url,
             json=body,
             headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=30,
         )
 
         if resp.status_code in (401, 403):
             raise ThoughtSpotAPIError(resp.status_code, resp.text, url)
+
+        if not resp.ok:
+            raise ThoughtSpotAPIError(resp.status_code, resp.text[:500], url)
 
         data = resp.json()
         token = data["token"]
@@ -324,7 +328,9 @@ class ThoughtSpotClient:
         url = f"{self._base_url}{path}"
         headers = self._auth_headers()
         kwargs.setdefault("headers", {})
-        kwargs["headers"] = {**headers, **kwargs["headers"]}
+        caller_headers = dict(kwargs["headers"])
+        kwargs["headers"] = {**headers, **caller_headers}
+        kwargs.setdefault("timeout", 60)
 
         resp = requests.request(method, url, **kwargs)
 
@@ -332,7 +338,7 @@ class ThoughtSpotClient:
             # Stale token — clear cache, re-auth, and retry once.
             self.logout()
             headers = self._auth_headers()
-            kwargs["headers"] = {**headers}
+            kwargs["headers"] = {**headers, **caller_headers}
             resp = requests.request(method, url, **kwargs)
 
         if not resp.ok:

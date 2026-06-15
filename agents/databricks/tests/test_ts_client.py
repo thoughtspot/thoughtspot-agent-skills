@@ -213,6 +213,23 @@ class TestPasswordAuth:
         assert client._token_expiry is not None
         assert client._token_expiry > time.time()
 
+    def test_password_exchange_500_raises_api_error(self, password_dbutils):
+        """A 500 from the token exchange endpoint raises ThoughtSpotAPIError, not JSONDecodeError."""
+        client, _ = _make_client(password_dbutils)
+        resp_500 = MagicMock()
+        resp_500.status_code = 500
+        resp_500.ok = False
+        resp_500.text = "<html><body>Internal Server Error</body></html>"
+        # json() should never be called — if it were, it would raise JSONDecodeError
+        resp_500.json.side_effect = Exception("json() must not be called on a 500 HTML body")
+
+        mod = _import_ts_client()
+        with patch("requests.request", return_value=resp_500):
+            with pytest.raises(mod.ThoughtSpotAPIError) as exc_info:
+                client.get_token()
+        assert exc_info.value.status_code == 500
+        assert "/api/rest/2.0/auth/token/full" in exc_info.value.endpoint
+
 
 # ===========================================================================
 # Auth — secret_key
