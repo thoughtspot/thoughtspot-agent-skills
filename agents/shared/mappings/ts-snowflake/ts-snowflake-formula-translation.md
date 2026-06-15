@@ -180,8 +180,8 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `left ( [x] , [n] )` → `LEFT(x, n)` | `LEFT(x, n)` → `left ( [x] , [n] )` |
 | `right ( [x] , [n] )` → `RIGHT(x, n)` | `RIGHT(x, n)` → `right ( [x] , [n] )` |
 | `strpos ( [x] , 'val' )` → `POSITION('val' IN x)` | `POSITION('val' IN x)` → `strpos ( [x] , 'val' )` |
-| `upper ( [x] )` → `UPPER(x)` | `UPPER(x)` → `upper ( [x] )` |
-| `lower ( [x] )` → `LOWER(x)` | `LOWER(x)` → `lower ( [x] )` |
+| `sql_string_op ( "UPPER({0})" , [x] )` → `UPPER(x)` | `UPPER(x)` → `sql_string_op ( "UPPER({0})" , [x] )` — no native `upper` in TS |
+| `sql_string_op ( "LOWER({0})" , [x] )` → `LOWER(x)` | `LOWER(x)` → `sql_string_op ( "LOWER({0})" , [x] )` — no native `lower` in TS |
 | `trim ( [x] )` → `TRIM(x)` | `TRIM(x)` → `trim ( [x] )` |
 | `replace ( [x] , [old] , [new] )` → `REPLACE(x, old, new)` | `REPLACE(x, old, new)` → `replace ( [x] , [old] , [new] )` |
 | `contains ( [x] , 'val' )` → `CONTAINS(x, 'val')` | `CONTAINS(x, 'val')` → `contains ( [x] , 'val' )` |
@@ -210,7 +210,7 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `quarter_number ( [date] , fiscal )` → **Untranslatable** — fiscal calendar | — |
 | `month ( [date] )` → `MONTH(date)` | `MONTH(date)` → `month ( [date] )` |
 | `day ( [date] )` → `DAY(date)` | `DAY(date)` → `day ( [date] )` |
-| `hour ( [date] )` → `HOUR(date)` | `HOUR(date)` → `hour ( [date] )` |
+| `hour_of_day ( [date] )` → `HOUR(date)` | `HOUR(date)` → `hour_of_day ( [date] )` |
 | `date ( [datetime] )` → `DATE(datetime)` | `DATE(datetime)` → `date ( [datetime] )` |
 | `start_of_month ( [date] )` → `DATE_TRUNC('MONTH', date)` | `DATE_TRUNC('MONTH', date)` → `start_of_month ( [date] )` |
 | `diff_days ( [end] , [start] )` → `DATEDIFF('day', start, end)` | `DATEDIFF('day', start, end)` → `diff_days ( [end] , [start] )` |
@@ -222,7 +222,6 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | `add_days ( [date] , [n] )` → `DATEADD('day', n, date)` | `DATEADD('day', n, date)` → `add_days ( [date] , [n] )` |
 | `add_weeks ( [date] , [n] )` → `DATEADD('week', n, date)` | `DATEADD('week', n, date)` → `add_weeks ( [date] , [n] )` |
 | `add_months ( [date] , [n] )` → `DATEADD('month', n, date)` | `DATEADD('month', n, date)` → `add_months ( [date] , [n] )` |
-| `date_trunc ( 'month' , [date] )` → `DATE_TRUNC('MONTH', date)` | `DATE_TRUNC('MONTH', date)` → `date_trunc ( 'month' , [date] )` |
 
 Note: `DATEDIFF` argument order is reversed — ThoughtSpot uses `(end, start)`,
 Snowflake uses `(part, start, end)`. `DATEADD` argument order also differs —

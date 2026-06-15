@@ -118,6 +118,12 @@ if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/validate/check_cover
   run_check "coverage matrix"     "tools/validate/check_coverage_matrix.py --root $REPO_ROOT"
 fi
 
+# Formula catalog cross-check — mapping files must only reference valid TS functions
+# from thoughtspot-formula-patterns.md. Runs when any mapping or the catalog is touched.
+if echo "$STAGED" | grep -qE 'agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)'; then
+  run_check "formula catalog"     "tools/validate/check_formula_catalog.py --root $REPO_ROOT"
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then

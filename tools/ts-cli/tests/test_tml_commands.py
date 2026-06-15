@@ -22,7 +22,18 @@ from typer.testing import CliRunner
 from ts_cli.cli import app
 
 
-runner = CliRunner(mix_stderr=False)
+try:
+    runner = CliRunner(mix_stderr=False)
+except TypeError:
+    runner = CliRunner()
+
+
+def _all_output(result):
+    """Return combined stdout+stderr, compatible with all Click versions."""
+    try:
+        return (result.stdout or "") + (result.stderr or "")
+    except ValueError:
+        return result.output or ""
 
 
 # ---------------------------------------------------------------------------
@@ -140,19 +151,19 @@ class TestExportTypeFeedbackGuard:
     def test_feedback_error_message_mentions_dependent_objects(self):
         """User must know how to find the correct GUID."""
         result = runner.invoke(app, ["tml", "export", "some-guid", "--type", "FEEDBACK"])
-        output = (result.stdout or "") + (result.stderr or "")
+        output = _all_output(result)
         assert "dependents" in output.lower()
 
     def test_feedback_error_message_mentions_guid(self):
         """User must understand they need the feedback object's own GUID."""
         result = runner.invoke(app, ["tml", "export", "some-guid", "--type", "FEEDBACK"])
-        output = (result.stdout or "") + (result.stderr or "")
+        output = _all_output(result)
         assert "guid" in output.lower()
 
     def test_other_type_does_not_exit_early(self):
         """--type LOGICAL_TABLE should reach the client (and fail on missing profile, not on type)."""
         result = runner.invoke(app, ["tml", "export", "some-guid", "--type", "LOGICAL_TABLE"])
-        output = (result.stdout or "") + (result.stderr or "")
+        output = _all_output(result)
         # Should fail on missing profile, not on type
         assert "FEEDBACK" not in output
         assert "feedback" not in output.lower()
