@@ -1,7 +1,8 @@
 # ThoughtSpot Agent Skills
 
 A collection of skills and tools for working with ThoughtSpot, packaged for
-multiple runtimes: **Claude Code**, **Cortex Code CLI**, and **Snowsight Workspaces**.
+multiple runtimes: **Claude Code**, **Cortex Code CLI**, **Snowsight Workspaces**,
+and **Databricks** (Genie Code).
 
 ---
 
@@ -77,8 +78,10 @@ thoughtspot-agent-skills/
 │   ├── cli/        — Canonical CLI skills (Claude Code + Cortex Code CLI)
 │   ├── claude/     — Claude Code-only skills (ts-profile-snowflake)
 │   ├── coco-snowsight/ — Snowsight Workspace skills (stored procedures)
+│   ├── databricks/ — Databricks runtime (Genie Code, Asset Bundles)
 │   └── shared/     — Shared reference files used by all runtimes
 │       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules
+│       ├── mappings/ts-databricks/      — ThoughtSpot ↔ Databricks Metric View mapping rules
 │       ├── mappings/tableau/            — Tableau → ThoughtSpot formula and TML rules
 │       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV)
 │       └── worked-examples/snowflake/   — End-to-end conversion examples
@@ -150,6 +153,30 @@ install required — runs entirely within Snowflake using stored procedures.
 
 See **[agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md)** for stage
 setup and Workspace deployment.
+
+---
+
+## Databricks Skills (Genie Code)
+
+Skills deployed to a Databricks workspace via Asset Bundles. Uses
+`ThoughtSpotClient` — a single-file Python class with full ts-cli parity,
+consumed via `%run` in Databricks notebooks.
+
+| Skill | What it does |
+|---|---|
+| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View |
+| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model |
+
+**Also included:**
+
+| Notebook | Purpose |
+|---|---|
+| `ts_client.py` | ThoughtSpotClient — 19 methods, auth via Databricks Secrets, in-memory token caching |
+| `ts_profile_setup.py` | Widget-driven profile creation (stores credentials in Databricks Secrets) |
+| `token_refresh.py` | Scheduled job for credential rotation (12h cron) |
+
+See **[agents/databricks/SETUP.md](agents/databricks/SETUP.md)** for deployment
+with `databricks bundle deploy`.
 
 ---
 
