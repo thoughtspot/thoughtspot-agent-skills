@@ -17,6 +17,26 @@ Databricks Asset Bundles.
 
 ---
 
+## What `databricks.yml` does
+
+`agents/databricks/databricks.yml` is a
+[Databricks Asset Bundle](https://docs.databricks.com/en/dev-tools/bundles/index.html)
+configuration file. Running `databricks bundle deploy` reads this file and
+deploys everything to your workspace in one command:
+
+| Section | What it controls |
+|---|---|
+| `bundle.name` | Bundle identity (`thoughtspot-skills`) |
+| `workspace.root_path` | Where files land in the workspace (`/Workspace/thoughtspot-skills`) |
+| `sync.include` | Which local files are synced — notebooks, skills, and shared references |
+| `resources.jobs.token_refresh` | A scheduled Databricks Workflow Job that runs `token_refresh.py` every 12 hours to keep ThoughtSpot auth tokens fresh (password and secret_key profiles only; bearer_token profiles are skipped) |
+| `targets` | Named deployment targets (`dev`, `prod`) — each points to a workspace host URL |
+
+You only need to edit the `targets` section (Step 1 below). Everything else
+works out of the box.
+
+---
+
 ## Step 1: Configure deployment target
 
 If you've already run `/ts-profile-databricks`, you can pull the workspace host
