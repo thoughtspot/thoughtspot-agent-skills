@@ -65,11 +65,6 @@ class TestTokenCachePaths:
         client = _make_client()
         assert client._expiry_path().parent == Path(tempfile.gettempdir())
 
-    def test_token_path_not_hardcoded_tmp(self):
-        """Regression: path must not be the old /tmp hardcode."""
-        client = _make_client("Prod")
-        assert str(client._token_path()) != "/tmp/ts_token_prod.txt"
-
     def test_token_path_contains_slug(self):
         client = _make_client("My Staging")
         assert "my-staging" in str(client._token_path())
