@@ -793,3 +793,523 @@ class TestTmlImport:
             result = client.tml_import(["worksheet:\n  name: Sales\n"])
         assert isinstance(result, list)
         assert result == [api_response]
+
+
+# ===========================================================================
+# connections_list()
+# ===========================================================================
+
+class TestConnectionsList:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_auto_pagination_two_pages(self, profile_secrets):
+        """connections_list paginates when first page is full (500 items)."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        page1 = [{"id": f"conn-{i}"} for i in range(500)]
+        page2 = [{"id": "conn-last"}]
+        with patch("requests.request", side_effect=[
+            self._ok_resp(page1),
+            self._ok_resp(page2),
+        ]) as mock_req:
+            result = client.connections_list(type="SNOWFLAKE")
+        assert mock_req.call_count == 2
+        assert len(result) == 501
+
+    def test_stops_on_partial_page(self, profile_secrets):
+        """connections_list stops when page is smaller than page_size."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        page = [{"id": "conn-1"}, {"id": "conn-2"}]
+        with patch("requests.request", return_value=self._ok_resp(page)) as mock_req:
+            result = client.connections_list()
+        assert mock_req.call_count == 1
+        assert len(result) == 2
+
+    def test_type_sent_in_body(self, profile_secrets):
+        """connections_list sends the type filter in the request body."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.connections_list(type="DATABRICKS")
+        body = mock_req.call_args[1]["json"]
+        assert body.get("data_warehouse_types") == ["DATABRICKS"]
+
+
+# ===========================================================================
+# connections_get()
+# ===========================================================================
+
+class TestConnectionsGet:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_uses_v1_endpoint(self, profile_secrets):
+        """connections_get POSTs to the v1 fetchConnection endpoint."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp({"id": "conn-1"})) as mock_req:
+            result = client.connections_get("conn-1")
+        url = mock_req.call_args[0][1]
+        assert "/tspublic/v1/connection/fetchConnection" in url
+
+    def test_sends_connection_id(self, profile_secrets):
+        """connections_get sends connection_id and includeColumns in the body."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp({})) as mock_req:
+            client.connections_get("my-conn-guid")
+        body = mock_req.call_args[1]["json"]
+        assert body["connection_id"] == "my-conn-guid"
+        assert body["includeColumns"] is True
+
+    def test_returns_json(self, profile_secrets):
+        """connections_get returns the parsed JSON response."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        conn_data = {"id": "conn-1", "name": "My Snowflake"}
+        with patch("requests.request", return_value=self._ok_resp(conn_data)):
+            result = client.connections_get("conn-1")
+        assert result == conn_data
+
+
+# ===========================================================================
+# _merge_tables() (static method)
+# ===========================================================================
+
+class TestMergeTables:
+    def _get_merge_tables(self):
+        mod = _import_ts_client()
+        return mod.ThoughtSpotClient._merge_tables
+
+    def test_preserves_existing_tables(self):
+        """_merge_tables keeps existing tables when no new tables overlap."""
+        _merge_tables = self._get_merge_tables()
+        fetch_response = {
+            "dataWarehouseInfo": {
+                "databases": [
+                    {
+                        "name": "MYDB",
+                        "schemas": [
+                            {
+                                "name": "PUBLIC",
+                                "tables": [
+                                    {"name": "EXISTING_TABLE", "columns": [{"name": "id", "type": "INT"}]},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        new_tables = [
+            {"db": "MYDB", "schema": "PUBLIC", "name": "NEW_TABLE",
+             "columns": [{"name": "col1", "type": "VARCHAR"}]},
+        ]
+        result = _merge_tables(fetch_response, new_tables)
+        # Find the db
+        db = next(d for d in result if d["name"] == "MYDB")
+        schema = next(s for s in db["schemas"] if s["name"] == "PUBLIC")
+        table_names = {t["name"] for t in schema["tables"]}
+        assert "EXISTING_TABLE" in table_names
+        assert "NEW_TABLE" in table_names
+
+    def test_appends_missing_columns_to_existing_table(self):
+        """_merge_tables appends only missing columns to an existing table."""
+        _merge_tables = self._get_merge_tables()
+        fetch_response = {
+            "dataWarehouseInfo": {
+                "databases": [
+                    {
+                        "name": "MYDB",
+                        "schemas": [
+                            {
+                                "name": "PUBLIC",
+                                "tables": [
+                                    {
+                                        "name": "MY_TABLE",
+                                        "columns": [{"name": "col_a", "type": "INT"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        new_tables = [
+            {
+                "db": "MYDB",
+                "schema": "PUBLIC",
+                "name": "MY_TABLE",
+                "columns": [
+                    {"name": "col_a", "type": "INT"},   # already exists — should not duplicate
+                    {"name": "col_b", "type": "VARCHAR"},  # new column
+                ],
+            }
+        ]
+        result = _merge_tables(fetch_response, new_tables)
+        db = next(d for d in result if d["name"] == "MYDB")
+        schema = next(s for s in db["schemas"] if s["name"] == "PUBLIC")
+        table = next(t for t in schema["tables"] if t["name"] == "MY_TABLE")
+        col_names = [c["name"] for c in table["columns"]]
+        assert col_names.count("col_a") == 1  # not duplicated
+        assert "col_b" in col_names
+
+    def test_new_table_has_required_fields(self):
+        """New tables added via _merge_tables have selected, linked, and column flags."""
+        _merge_tables = self._get_merge_tables()
+        result = _merge_tables({}, [
+            {"db": "DB1", "schema": "S1", "name": "TBL",
+             "columns": [{"name": "x", "type": "INT"}]},
+        ])
+        db = next(d for d in result if d["name"] == "DB1")
+        schema = next(s for s in db["schemas"] if s["name"] == "S1")
+        table = next(t for t in schema["tables"] if t["name"] == "TBL")
+        assert table["selected"] is True
+        assert table["linked"] is True
+        col = table["columns"][0]
+        assert col["selected"] is True
+        assert col["isLinkedActive"] is True
+
+
+# ===========================================================================
+# connections_add_tables()
+# ===========================================================================
+
+class TestConnectionsAddTables:
+    def _ok_resp(self, body=None):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body or {}
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_calls_update_endpoint(self, profile_secrets):
+        """connections_add_tables POSTs to the v2 connections update endpoint."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        # connections_get response + update response
+        fetch_resp = self._ok_resp({"dataWarehouseInfo": {"databases": []}})
+        update_resp = self._ok_resp({"status": "ok"})
+        with patch("requests.request", side_effect=[fetch_resp, update_resp]) as mock_req:
+            client.connections_add_tables("conn-1", [
+                {"db": "DB", "schema": "S", "name": "T",
+                 "columns": [{"name": "col1", "type": "INT"}]},
+            ])
+        # Second call should be the update
+        urls = [c[0][1] for c in mock_req.call_args_list]
+        assert any("/api/rest/2.0/connections/conn-1/update" in u for u in urls)
+
+    def test_graceful_on_fetch_failure(self, profile_secrets):
+        """connections_add_tables falls back to empty state if connections_get fails."""
+        mock_dbutils, _ = profile_secrets
+        client, ThoughtSpotAPIError = _make_client(mock_dbutils)
+        fetch_err_resp = MagicMock()
+        fetch_err_resp.status_code = 500
+        fetch_err_resp.text = "server error"
+        fetch_err_resp.ok = False
+        update_resp = self._ok_resp({})
+        with patch("requests.request", side_effect=[fetch_err_resp, update_resp]):
+            # Should not raise even if connections_get returns an error
+            client.connections_add_tables("conn-1", [
+                {"db": "DB", "schema": "S", "name": "T",
+                 "columns": [{"name": "col1", "type": "INT"}]},
+            ])
+
+
+# ===========================================================================
+# _build_table_tml() (static method)
+# ===========================================================================
+
+class TestBuildTableTml:
+    def _get_build_table_tml(self):
+        mod = _import_ts_client()
+        return mod.ThoughtSpotClient._build_table_tml
+
+    def test_produces_valid_yaml(self):
+        """_build_table_tml returns a parseable YAML string with a 'table' root."""
+        import yaml
+        _build_table_tml = self._get_build_table_tml()
+        spec = {
+            "name": "ORDERS",
+            "db": "MYDB",
+            "schema": "PUBLIC",
+            "connection_name": "My Snowflake",
+            "columns": [
+                {"name": "ORDER_ID", "type": "INT64", "kind": "ATTRIBUTE"},
+                {"name": "REVENUE", "type": "DOUBLE", "kind": "MEASURE"},
+            ],
+        }
+        tml_str = _build_table_tml(spec)
+        parsed = yaml.safe_load(tml_str)
+        assert "table" in parsed
+        assert parsed["table"]["name"] == "ORDERS"
+        assert parsed["table"]["db"] == "MYDB"
+        assert parsed["table"]["schema"] == "PUBLIC"
+
+    def test_measure_columns_get_aggregation_sum(self):
+        """_build_table_tml adds aggregation: SUM for MEASURE columns."""
+        import yaml
+        _build_table_tml = self._get_build_table_tml()
+        spec = {
+            "name": "SALES",
+            "db": "DB",
+            "schema": "S",
+            "connection_name": "Conn",
+            "columns": [
+                {"name": "AMOUNT", "type": "DOUBLE", "kind": "MEASURE"},
+                {"name": "CATEGORY", "type": "VARCHAR", "kind": "ATTRIBUTE"},
+            ],
+        }
+        tml_str = _build_table_tml(spec)
+        parsed = yaml.safe_load(tml_str)
+        cols = {c["name"]: c for c in parsed["table"]["columns"]}
+        assert cols["AMOUNT"]["properties"].get("aggregation") == "SUM"
+        assert "aggregation" not in cols["CATEGORY"].get("properties", {})
+
+    def test_db_column_name_always_present(self):
+        """_build_table_tml always includes db_column_name on every column."""
+        import yaml
+        _build_table_tml = self._get_build_table_tml()
+        spec = {
+            "name": "T",
+            "db": "D",
+            "schema": "S",
+            "connection_name": "C",
+            "columns": [
+                {"name": "MY_COL", "type": "INT"},  # no explicit db_column_name
+            ],
+        }
+        tml_str = _build_table_tml(spec)
+        parsed = yaml.safe_load(tml_str)
+        col = parsed["table"]["columns"][0]
+        assert "db_column_name" in col
+        assert col["db_column_name"] == "MY_COL"
+
+
+# ===========================================================================
+# tables_create()
+# ===========================================================================
+
+class TestTablesCreate:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_creates_tml_and_returns_guid(self, profile_secrets):
+        """tables_create imports TML and returns {table_name: guid}."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        import_response = [
+            {"response": {"header": {"id_guid": "new-table-guid-123"}}}
+        ]
+        with patch("requests.request", return_value=self._ok_resp(import_response)):
+            result = client.tables_create([
+                {
+                    "name": "ORDERS",
+                    "db": "MYDB",
+                    "schema": "PUBLIC",
+                    "connection_name": "My Snowflake",
+                    "columns": [{"name": "ID", "type": "INT64", "kind": "ATTRIBUTE"}],
+                }
+            ])
+        assert "ORDERS" in result
+        assert result["ORDERS"] == "new-table-guid-123"
+
+    def test_returns_none_on_unrecoverable_error(self, profile_secrets):
+        """tables_create returns None for a table that fails with a non-JDBC error."""
+        mock_dbutils, ThoughtSpotAPIError = _make_client(
+            profile_secrets[0]
+        )
+        mock_dbutils, _ = profile_secrets
+        client, ThoughtSpotAPIError = _make_client(mock_dbutils)
+        err_resp = MagicMock()
+        err_resp.status_code = 400
+        err_resp.text = "Invalid TML"
+        err_resp.ok = False
+        with patch("requests.request", return_value=err_resp):
+            result = client.tables_create([
+                {
+                    "name": "BAD_TABLE",
+                    "db": "DB",
+                    "schema": "S",
+                    "connection_name": "C",
+                    "columns": [],
+                }
+            ], retries=1, retry_delay=0)
+        assert result["BAD_TABLE"] is None
+
+
+# ===========================================================================
+# users_search()
+# ===========================================================================
+
+class TestUsersSearch:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_basic_search_returns_list(self, profile_secrets):
+        """users_search returns the API response as a list."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        users = [{"id": "user-1", "name": "alice"}]
+        with patch("requests.request", return_value=self._ok_resp(users)):
+            result = client.users_search()
+        assert result == users
+
+    def test_name_filter_sent(self, profile_secrets):
+        """users_search sends name_pattern when name is provided."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.users_search(name="alice")
+        body = mock_req.call_args[1]["json"]
+        assert body.get("name_pattern") == "alice"
+
+
+# ===========================================================================
+# orgs_search()
+# ===========================================================================
+
+class TestOrgsSearch:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_basic_search_returns_list(self, profile_secrets):
+        """orgs_search returns the API response as a list."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        orgs = [{"id": "org-1", "name": "Acme"}]
+        with patch("requests.request", return_value=self._ok_resp(orgs)):
+            result = client.orgs_search()
+        assert result == orgs
+
+    def test_status_filter_sent(self, profile_secrets):
+        """orgs_search sends status in the body when provided."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.orgs_search(status="ACTIVE")
+        body = mock_req.call_args[1]["json"]
+        assert body.get("status") == "ACTIVE"
+
+
+# ===========================================================================
+# variables_search()
+# ===========================================================================
+
+class TestVariablesSearch:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_basic_search_returns_list(self, profile_secrets):
+        """variables_search returns the API response as a list."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        variables = [{"id": "var-1", "name": "timezone"}]
+        with patch("requests.request", return_value=self._ok_resp(variables)):
+            result = client.variables_search()
+        assert result == variables
+
+    def test_response_content_always_sent(self, profile_secrets):
+        """variables_search always sends response_content=METADATA_AND_VALUES."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.variables_search(identifier="timezone")
+        body = mock_req.call_args[1]["json"]
+        assert body.get("response_content") == "METADATA_AND_VALUES"
+        assert body.get("variable_identifiers") == ["timezone"]
+
+
+# ===========================================================================
+# variables_set() and variables_remove()
+# ===========================================================================
+
+class TestVariablesSetRemove:
+    def _ok_resp(self, body=None):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body or {}
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_variables_set_sends_replace_operation(self, profile_secrets):
+        """variables_set sends operation=REPLACE."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp()) as mock_req:
+            client.variables_set("timezone", "America/Chicago", orgs=["org-1"])
+        body = mock_req.call_args[1]["json"]
+        assert body["operation"] == "REPLACE"
+        assert body["variable_identifier"] == "timezone"
+
+    def test_variables_remove_sends_remove_operation(self, profile_secrets):
+        """variables_remove sends operation=REMOVE."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp()) as mock_req:
+            client.variables_remove("timezone", "America/Chicago", orgs=["org-1"])
+        body = mock_req.call_args[1]["json"]
+        assert body["operation"] == "REMOVE"
+
+    def test_org_level_scope_when_no_users(self, profile_secrets):
+        """variables_set builds org-level scopes when users is not provided."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp()) as mock_req:
+            client.variables_set("timezone", "UTC", orgs=["org-1", "org-2"])
+        body = mock_req.call_args[1]["json"]
+        scopes = body["variable_values"][0]["scopes"]
+        assert len(scopes) == 2
+        assert all("org_identifier" in s for s in scopes)
+        assert all("user_identifier" not in s for s in scopes)
+
+    def test_per_user_scopes_when_users_provided(self, profile_secrets):
+        """variables_set builds per-user scopes when users list is provided."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp()) as mock_req:
+            client.variables_set(
+                "timezone", "UTC",
+                orgs=["org-1"],
+                users=["user-a", "user-b"],
+            )
+        body = mock_req.call_args[1]["json"]
+        scopes = body["variable_values"][0]["scopes"]
+        assert len(scopes) == 2  # 1 org × 2 users
+        user_ids = {s["user_identifier"] for s in scopes}
+        assert user_ids == {"user-a", "user-b"}

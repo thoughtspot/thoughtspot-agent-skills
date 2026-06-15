@@ -734,6 +734,633 @@ class ThoughtSpotClient:
         return list(data)
 
     # ------------------------------------------------------------------
+    # Connections API
+    # ------------------------------------------------------------------
+
+    def connections_list(self, *, type: str = "SNOWFLAKE") -> list:
+        """List data connections.
+
+        POST /api/rest/2.0/connection/search — auto-paginates until all pages
+        are retrieved.
+
+        Parameters
+        ----------
+        type:
+            Connection type to filter by (default ``"SNOWFLAKE"``).
+
+        Returns
+        -------
+        list[dict]
+            All matching connection objects.
+        """
+        page_size = 500
+        offset = 0
+        results: list = []
+
+        while True:
+            body: dict = {
+                "data_warehouse_types": [type],
+                "record_size": page_size,
+                "record_offset": offset,
+            }
+            resp = self.post("/api/rest/2.0/connection/search", json=body)
+            page = resp.json()
+
+            if not page:
+                break
+
+            results.extend(page)
+
+            if len(page) < page_size:
+                break
+
+            offset += page_size
+
+        return results
+
+    def connections_get(self, connection_id: str) -> dict:
+        """Fetch a single connection with full table/column metadata.
+
+        POST /tspublic/v1/connection/fetchConnection (v1 endpoint).
+
+        Parameters
+        ----------
+        connection_id:
+            The GUID of the connection to fetch.
+
+        Returns
+        -------
+        dict
+            Full connection object including ``dataWarehouseInfo``.
+        """
+        body: dict = {
+            "connection_id": connection_id,
+            "includeColumns": True,
+        }
+        resp = self.post("/tspublic/v1/connection/fetchConnection", json=body)
+        return resp.json()
+
+    def connections_add_tables(self, connection_id: str, tables: list) -> dict:
+        """Add tables (and their columns) to an existing connection.
+
+        Fetches the current connection state, merges the new tables using
+        :meth:`_merge_tables`, then POSTs the updated configuration.
+
+        Parameters
+        ----------
+        connection_id:
+            The GUID of the connection to update.
+        tables:
+            List of table spec dicts, each with keys:
+            ``db``, ``schema``, ``name``, ``columns``
+            (each column: ``name``, ``type``).
+
+        Returns
+        -------
+        dict
+            The API response body, or empty dict if no JSON body returned.
+        """
+        try:
+            fetch_response = self.connections_get(connection_id)
+        except Exception:
+            fetch_response = {}
+
+        merged = self._merge_tables(fetch_response, tables)
+
+        body: dict = {
+            "data_warehouse_config": {
+                "externalDatabases": merged,
+            },
+            "validate": True,
+        }
+        resp = self.post(
+            f"/api/rest/2.0/connections/{connection_id}/update", json=body
+        )
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _merge_tables(fetch_response: dict, new_tables: list) -> list:
+        """Merge new tables into an existing connection hierarchy.
+
+        Preserves existing tables and columns, appending only missing columns
+        to existing tables and creating full hierarchy entries for new ones.
+
+        Parameters
+        ----------
+        fetch_response:
+            Raw response from ``connections_get`` (may be empty dict on failure).
+        new_tables:
+            List of table spec dicts, each with:
+            - ``db`` (str): database name
+            - ``schema`` (str): schema name
+            - ``name`` (str): table name
+            - ``columns`` (list[dict]): each with ``name`` and ``type``
+
+        Returns
+        -------
+        list
+            Updated ``externalDatabases`` hierarchy suitable for the
+            ``data_warehouse_config`` payload.
+        """
+        # Extract existing hierarchy from either key name the API may use.
+        dw_info = fetch_response.get("dataWarehouseInfo", {})
+        existing_dbs: list = dw_info.get("databases", []) or dw_info.get(
+            "externalDatabases", []
+        )
+
+        # Build a nested index: db → schema → table → table_dict
+        db_index: dict = {}
+        for db_entry in existing_dbs:
+            db_name = db_entry.get("name", "")
+            db_index[db_name] = {"_entry": db_entry, "schemas": {}}
+            for schema_entry in db_entry.get("schemas", []):
+                schema_name = schema_entry.get("name", "")
+                db_index[db_name]["schemas"][schema_name] = {
+                    "_entry": schema_entry,
+                    "tables": {},
+                }
+                for table_entry in schema_entry.get("tables", []):
+                    table_name = table_entry.get("name", "")
+                    db_index[db_name]["schemas"][schema_name]["tables"][
+                        table_name
+                    ] = table_entry
+
+        # Merge new tables into the index.
+        for spec in new_tables:
+            db_name = spec["db"]
+            schema_name = spec["schema"]
+            table_name = spec["name"]
+            columns = spec.get("columns", [])
+
+            # Ensure db exists.
+            if db_name not in db_index:
+                db_index[db_name] = {"_entry": {"name": db_name, "schemas": []}, "schemas": {}}
+
+            # Ensure schema exists.
+            if schema_name not in db_index[db_name]["schemas"]:
+                db_index[db_name]["schemas"][schema_name] = {
+                    "_entry": {"name": schema_name, "tables": []},
+                    "tables": {},
+                }
+
+            schema_idx = db_index[db_name]["schemas"][schema_name]
+
+            if table_name in schema_idx["tables"]:
+                # Table already exists — append only missing columns.
+                existing_table = schema_idx["tables"][table_name]
+                existing_col_names = {
+                    c.get("name") for c in existing_table.get("columns", [])
+                }
+                for col in columns:
+                    if col["name"] not in existing_col_names:
+                        new_col = {
+                            "name": col["name"],
+                            "type": col["type"],
+                            "selected": True,
+                            "isLinkedActive": True,
+                        }
+                        existing_table.setdefault("columns", []).append(new_col)
+            else:
+                # New table — build full entry.
+                built_columns = [
+                    {
+                        "name": c["name"],
+                        "type": c["type"],
+                        "selected": True,
+                        "isLinkedActive": True,
+                    }
+                    for c in columns
+                ]
+                table_entry = {
+                    "name": table_name,
+                    "type": "TABLE",
+                    "selected": True,
+                    "linked": True,
+                    "columns": built_columns,
+                }
+                schema_idx["tables"][table_name] = table_entry
+
+        # Reconstruct the externalDatabases list from the index.
+        result_dbs: list = []
+        for db_name, db_data in db_index.items():
+            result_schemas: list = []
+            for schema_name, schema_data in db_data["schemas"].items():
+                result_tables = list(schema_data["tables"].values())
+                schema_entry = dict(schema_data["_entry"])
+                schema_entry["name"] = schema_name
+                schema_entry["tables"] = result_tables
+                result_schemas.append(schema_entry)
+            db_entry = dict(db_data["_entry"])
+            db_entry["name"] = db_name
+            db_entry["schemas"] = result_schemas
+            result_dbs.append(db_entry)
+
+        return result_dbs
+
+    # ------------------------------------------------------------------
+    # Tables API
+    # ------------------------------------------------------------------
+
+    def tables_create(
+        self, tables: list, *, retries: int = 3, retry_delay: float = 5.0
+    ) -> dict:
+        """Create ThoughtSpot table objects from a list of specs.
+
+        For each spec, builds a table TML via :meth:`_build_table_tml`,
+        imports it via :meth:`tml_import`, and resolves the resulting GUID.
+        Retries on JDBC/connection-metadata errors.
+
+        Parameters
+        ----------
+        tables:
+            List of table spec dicts, each with:
+            - ``name`` (str): table name (used as the TML display name)
+            - ``db`` (str): database name
+            - ``schema`` (str): schema name
+            - ``db_table`` (str, optional): physical table name (defaults to ``name``)
+            - ``connection_name`` (str): display name of the data connection
+            - ``columns`` (list[dict]): column specs with ``name``, ``type``,
+              ``kind`` (``"ATTRIBUTE"`` or ``"MEASURE"``), and optional
+              ``db_column_name``
+        retries:
+            Maximum number of attempts per table on JDBC errors (default 3).
+        retry_delay:
+            Seconds to wait between retries (default 5.0).
+
+        Returns
+        -------
+        dict
+            Mapping of table name → GUID string, or ``None`` if the table
+            failed to import after all retries.
+        """
+        result: dict = {}
+
+        for spec in tables:
+            table_name = spec["name"]
+            tml_str = self._build_table_tml(spec)
+            guid = None
+
+            for attempt in range(retries):
+                try:
+                    import_result = self.tml_import([tml_str], create_new=True)
+                    # Resolve GUID from import response.
+                    # Response shape: list of items, each with response.header.id_guid
+                    # or object_guids list, depending on the API version.
+                    for item in import_result:
+                        # V2 import response shape: {"response": {"header": {"id_guid": ...}}}
+                        header = (
+                            item.get("response", {})
+                            .get("header", {})
+                        )
+                        candidate = header.get("id_guid") or header.get("id")
+                        if candidate:
+                            guid = candidate
+                            break
+                        # Alternative shape: {"object_guids": [...]}
+                        guids_list = item.get("object_guids", [])
+                        if guids_list:
+                            guid = guids_list[0]
+                            break
+                    break  # Success — exit retry loop.
+
+                except ThoughtSpotAPIError as exc:
+                    error_text = str(exc)
+                    is_jdbc = "JDBC" in error_text or "CONNECTION_METADATA" in error_text
+                    if is_jdbc and attempt < retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    # Either not a retryable error, or out of retries.
+                    guid = None
+                    break
+
+            result[table_name] = guid
+
+        return result
+
+    @staticmethod
+    def _build_table_tml(spec: dict) -> str:
+        """Build a YAML TML string for a single table.
+
+        Parameters
+        ----------
+        spec:
+            Table specification dict with keys:
+            - ``name`` (str): TML display name
+            - ``db`` (str): database name
+            - ``schema`` (str): schema name
+            - ``db_table`` (str, optional): physical table name
+            - ``connection_name`` (str): data connection display name
+            - ``columns`` (list[dict]): each with ``name``, ``type``,
+              ``kind`` (``"ATTRIBUTE"`` or ``"MEASURE"``), and optional
+              ``db_column_name``
+
+        Returns
+        -------
+        str
+            YAML-formatted TML string ready for import.
+        """
+        name = spec["name"]
+        db = spec["db"]
+        schema = spec["schema"]
+        db_table = spec.get("db_table", name)
+        connection_name = spec["connection_name"]
+        columns = spec.get("columns", [])
+
+        tml_columns = []
+        for col in columns:
+            col_name = col["name"]
+            col_type = col["type"]
+            col_kind = col.get("kind", "ATTRIBUTE")
+            db_col_name = col.get("db_column_name", col_name)
+
+            col_entry: dict = {
+                "name": col_name,
+                "db_column_name": db_col_name,
+                "properties": {
+                    "column_type": col_kind,
+                },
+                "db_column_properties": {
+                    "data_type": col_type,
+                },
+            }
+            if col_kind == "MEASURE":
+                col_entry["properties"]["aggregation"] = "SUM"
+
+            tml_columns.append(col_entry)
+
+        tml_dict: dict = {
+            "table": {
+                "name": name,
+                "db": db,
+                "schema": schema,
+                "db_table": db_table,
+                "connection": {
+                    "name": connection_name,
+                },
+                "columns": tml_columns,
+            }
+        }
+
+        return yaml.dump(tml_dict, default_flow_style=False, allow_unicode=True)
+
+    # ------------------------------------------------------------------
+    # Users and Groups API
+    # ------------------------------------------------------------------
+
+    def users_search(
+        self,
+        *,
+        name: Optional[str] = None,
+        org: Optional[str] = None,
+        limit: int = 20,
+    ) -> list:
+        """Search for ThoughtSpot users.
+
+        POST /api/rest/2.0/users/search
+
+        Parameters
+        ----------
+        name:
+            Optional name pattern to filter users by.
+        org:
+            Optional org identifier to filter users by.
+        limit:
+            Maximum number of results to return (default 20).
+
+        Returns
+        -------
+        list[dict]
+            List of matching user objects.
+        """
+        body: dict = {"record_size": limit}
+        if name is not None:
+            body["name_pattern"] = name
+        if org is not None:
+            body["org_identifiers"] = [org]
+        resp = self.post("/api/rest/2.0/users/search", json=body)
+        return resp.json()
+
+    def groups_search(
+        self,
+        *,
+        name: Optional[str] = None,
+        org: Optional[str] = None,
+        include_users: bool = False,
+        limit: int = 20,
+    ) -> list:
+        """Search for ThoughtSpot groups.
+
+        POST /api/rest/2.0/groups/search
+
+        Parameters
+        ----------
+        name:
+            Optional name pattern to filter groups by.
+        org:
+            Optional org identifier to filter groups by.
+        include_users:
+            If True, include group members in the response.
+        limit:
+            Maximum number of results to return (default 20).
+
+        Returns
+        -------
+        list[dict]
+            List of matching group objects.
+        """
+        body: dict = {
+            "record_size": limit,
+            "include_user_count": include_users,
+        }
+        if name is not None:
+            body["name_pattern"] = name
+        if org is not None:
+            body["org_identifiers"] = [org]
+        resp = self.post("/api/rest/2.0/groups/search", json=body)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Orgs API
+    # ------------------------------------------------------------------
+
+    def orgs_search(
+        self,
+        *,
+        status: Optional[str] = None,
+        name: Optional[str] = None,
+        limit: int = 200,
+    ) -> list:
+        """Search for ThoughtSpot orgs.
+
+        POST /api/rest/2.0/orgs/search
+
+        Parameters
+        ----------
+        status:
+            Optional org status filter (e.g. ``"ACTIVE"``).
+        name:
+            Optional name pattern to filter orgs by.
+        limit:
+            Maximum number of results to return (default 200).
+
+        Returns
+        -------
+        list[dict]
+            List of matching org objects.
+        """
+        body: dict = {"record_size": limit}
+        if status is not None:
+            body["status"] = status
+        if name is not None:
+            body["name_pattern"] = name
+        resp = self.post("/api/rest/2.0/orgs/search", json=body)
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Variables (Template Variables) API
+    # ------------------------------------------------------------------
+
+    def variables_search(self, *, identifier: Optional[str] = None) -> list:
+        """Search for template variables.
+
+        POST /api/rest/2.0/template/variables/search
+
+        Parameters
+        ----------
+        identifier:
+            Optional identifier (name or GUID) to filter variables by.
+
+        Returns
+        -------
+        list[dict]
+            List of matching variable objects with metadata and current values.
+        """
+        body: dict = {"response_content": "METADATA_AND_VALUES"}
+        if identifier is not None:
+            body["variable_identifiers"] = [identifier]
+        resp = self.post("/api/rest/2.0/template/variables/search", json=body)
+        return resp.json()
+
+    def variables_set(
+        self,
+        variable: str,
+        value: str,
+        *,
+        orgs: list,
+        users: Optional[list] = None,
+    ) -> dict:
+        """Set a template variable value for one or more orgs (and optionally users).
+
+        POST /api/rest/2.0/template/variables/update-values with
+        ``operation=REPLACE``.
+
+        Parameters
+        ----------
+        variable:
+            Identifier (name or GUID) of the variable to set.
+        value:
+            The value to assign.
+        orgs:
+            List of org identifiers to scope the assignment to.
+        users:
+            Optional list of user identifiers.  When provided, the value is
+            set per-user within each org; when omitted the value is set at
+            the org level.
+
+        Returns
+        -------
+        dict
+            API response body, or empty dict if no JSON body returned.
+        """
+        scopes = self._build_variable_scopes(orgs=orgs, users=users)
+        body: dict = {
+            "variable_identifier": variable,
+            "operation": "REPLACE",
+            "variable_values": [
+                {"value": value, "scopes": scopes},
+            ],
+        }
+        resp = self.post("/api/rest/2.0/template/variables/update-values", json=body)
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+
+    def variables_remove(
+        self,
+        variable: str,
+        value: str,
+        *,
+        orgs: list,
+        users: Optional[list] = None,
+    ) -> dict:
+        """Remove a template variable value for one or more orgs (and optionally users).
+
+        POST /api/rest/2.0/template/variables/update-values with
+        ``operation=REMOVE``.
+
+        Parameters
+        ----------
+        variable:
+            Identifier (name or GUID) of the variable to update.
+        value:
+            The value to remove.
+        orgs:
+            List of org identifiers to scope the removal to.
+        users:
+            Optional list of user identifiers.  When provided, the removal is
+            scoped per-user within each org; when omitted it is org-level.
+
+        Returns
+        -------
+        dict
+            API response body, or empty dict if no JSON body returned.
+        """
+        scopes = self._build_variable_scopes(orgs=orgs, users=users)
+        body: dict = {
+            "variable_identifier": variable,
+            "operation": "REMOVE",
+            "variable_values": [
+                {"value": value, "scopes": scopes},
+            ],
+        }
+        resp = self.post("/api/rest/2.0/template/variables/update-values", json=body)
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _build_variable_scopes(*, orgs: list, users: Optional[list]) -> list:
+        """Build the scopes list for a variable update-values request.
+
+        Parameters
+        ----------
+        orgs:
+            List of org identifiers.
+        users:
+            Optional list of user identifiers.  When provided, one scope entry
+            is created per (org, user) pair.  When omitted, one org-level entry
+            is created per org.
+
+        Returns
+        -------
+        list[dict]
+            Scopes list for the ``variable_values[].scopes`` field.
+        """
+        scopes: list = []
+        for org in orgs:
+            if users:
+                for user in users:
+                    scopes.append({"org_identifier": org, "user_identifier": user})
+            else:
+                scopes.append({"org_identifier": org})
+        return scopes
+
+    # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
 
