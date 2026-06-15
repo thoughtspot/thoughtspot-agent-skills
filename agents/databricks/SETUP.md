@@ -73,16 +73,28 @@ You can set up a full profile later with `/ts-profile-databricks`.
 
 ## Step 2: Deploy
 
+The `-t` flag selects which target from `databricks.yml` to deploy to. Use
+`dev` for development or `prod` for production — each target points to the
+workspace host you configured in Step 1.
+
 ```bash
 cd agents/databricks
 databricks bundle deploy -t dev
 ```
 
-This deploys:
+To deploy to production instead:
+
+```bash
+databricks bundle deploy -t prod
+```
+
+This syncs the following files to `/Workspace/thoughtspot-skills` in the
+target workspace and creates the token refresh job:
+
 - **Notebooks:** `ts_client.py`, `ts_profile_setup.py`, `token_refresh.py`
 - **Skills:** Two Genie Code conversion skills
 - **Shared files:** Mappings, schemas, worked examples from `agents/shared/`
-- **Token refresh job:** Scheduled every 12 hours
+- **Token refresh job:** Scheduled every 12 hours (see `databricks.yml` section above)
 
 ---
 
