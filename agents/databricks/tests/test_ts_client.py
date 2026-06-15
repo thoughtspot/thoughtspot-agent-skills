@@ -648,3 +648,148 @@ class TestMetadataDelete:
         types = {item["type"] for item in body["metadata"]}
         assert types == {"LOGICAL_TABLE"}
         assert isinstance(result, dict)
+
+
+# ===========================================================================
+# tml_export()
+# ===========================================================================
+
+class TestTmlExport:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_basic_export(self, profile_secrets):
+        """tml_export returns raw list of edoc/info dicts when parse=False."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        api_response = [
+            {"edoc": "guid: abc-123\nworksheet:\n  name: Sales\n", "info": {"id": "abc-123", "name": "Sales"}},
+        ]
+        with patch("requests.request", return_value=self._ok_resp(api_response)):
+            result = client.tml_export(["abc-123"])
+        assert result == api_response
+
+    def test_export_with_parse(self, profile_secrets):
+        """tml_export with parse=True returns list of dicts with type, guid, tml, info."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        edoc = "worksheet:\n  name: Sales\n"
+        api_response = [
+            {"edoc": edoc, "info": {"id": "abc-123", "name": "Sales"}},
+        ]
+        with patch("requests.request", return_value=self._ok_resp(api_response)):
+            result = client.tml_export(["abc-123"], parse=True)
+        assert len(result) == 1
+        item = result[0]
+        assert item["type"] == "worksheet"
+        assert item["guid"] == "abc-123"
+        assert isinstance(item["tml"], dict)
+        assert item["tml"]["worksheet"]["name"] == "Sales"
+        assert item["info"] == {"id": "abc-123", "name": "Sales"}
+
+    def test_export_fqn_and_associated_flags(self, profile_secrets):
+        """tml_export with fqn=True and associated=True sets export_fqn and export_associated in body."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.tml_export(["abc-123"], fqn=True, associated=True)
+        body = mock_req.call_args[1]["json"]
+        assert body.get("export_fqn") is True
+        assert body.get("export_associated") is True
+
+    def test_export_obj_id_flags(self, profile_secrets):
+        """tml_export with include_obj_id and include_obj_id_ref sends export_options with those flags."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.tml_export(
+                ["abc-123"],
+                include_obj_id=True,
+                include_obj_id_ref=True,
+                include_guid=False,
+            )
+        body = mock_req.call_args[1]["json"]
+        opts = body.get("export_options", {})
+        assert opts.get("include_obj_id") is True
+        assert opts.get("include_obj_id_ref") is True
+        assert opts.get("include_guid") is False
+
+    def test_export_no_export_options_when_defaults(self, profile_secrets):
+        """tml_export with all default options does NOT include export_options in the body."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.tml_export(["abc-123"])
+        body = mock_req.call_args[1]["json"]
+        assert "export_options" not in body
+
+    def test_feedback_type_raises(self, profile_secrets):
+        """tml_export with type='FEEDBACK' raises ValueError mentioning FEEDBACK."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with pytest.raises(ValueError, match="FEEDBACK"):
+            client.tml_export(["abc-123"], type="FEEDBACK")
+
+    def test_feedback_type_case_insensitive(self, profile_secrets):
+        """tml_export with type='feedback' (lowercase) also raises ValueError."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with pytest.raises(ValueError, match="FEEDBACK"):
+            client.tml_export(["abc-123"], type="feedback")
+
+
+# ===========================================================================
+# tml_import()
+# ===========================================================================
+
+class TestTmlImport:
+    def _ok_resp(self, body):
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = body
+        r.text = ""
+        r.ok = True
+        return r
+
+    def test_basic_import(self, profile_secrets):
+        """tml_import returns a list from the API response."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        api_response = [{"response": {"status": {"status_code": "OK"}}}]
+        with patch("requests.request", return_value=self._ok_resp(api_response)):
+            result = client.tml_import(["worksheet:\n  name: Sales\n"])
+        assert isinstance(result, list)
+        assert result == api_response
+
+    def test_import_create_new_default_false(self, profile_secrets):
+        """tml_import sends create_new=False by default."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.tml_import(["worksheet:\n  name: Sales\n"])
+        body = mock_req.call_args[1]["json"]
+        assert body.get("create_new") is False
+
+    def test_import_policy_flag(self, profile_secrets):
+        """tml_import passes import_policy=ALL_OR_NONE when specified."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.tml_import(["worksheet:\n  name: Sales\n"], policy="ALL_OR_NONE")
+        body = mock_req.call_args[1]["json"]
+        assert body.get("import_policy") == "ALL_OR_NONE"
+
+    def test_import_wraps_dict_response_in_list(self, profile_secrets):
+        """tml_import wraps a dict response in a list for consistent return type."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        api_response = {"response": {"status": {"status_code": "OK"}}}
+        with patch("requests.request", return_value=self._ok_resp(api_response)):
+            result = client.tml_import(["worksheet:\n  name: Sales\n"])
+        assert isinstance(result, list)
+        assert result == [api_response]

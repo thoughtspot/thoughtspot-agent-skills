@@ -582,6 +582,158 @@ class ThoughtSpotClient:
         return resp.json()
 
     # ------------------------------------------------------------------
+    # TML API
+    # ------------------------------------------------------------------
+
+    def tml_export(
+        self,
+        guids: list,
+        *,
+        fqn: bool = False,
+        associated: bool = False,
+        format: str = "YAML",
+        parse: bool = False,
+        type: Optional[str] = None,
+        include_obj_id: bool = False,
+        include_obj_id_ref: bool = False,
+        include_guid: bool = True,
+    ) -> list:
+        """Export TML for one or more objects.
+
+        POST /api/rest/2.0/metadata/tml/export
+
+        Parameters
+        ----------
+        guids:
+            List of object GUIDs to export.
+        fqn:
+            If True, export with fully-qualified names (``export_fqn=True``).
+        associated:
+            If True, also export associated objects (``export_associated=True``).
+        format:
+            TML format: ``"YAML"`` (default) or ``"JSON"``.
+        parse:
+            If False (default), return the raw API response (list of dicts with
+            ``edoc`` and ``info`` keys).  If True, parse each edoc and return a
+            list of dicts with keys ``type``, ``guid``, ``tml``, and ``info``.
+        type:
+            Optional metadata type filter.  Passing ``"FEEDBACK"`` (any case)
+            raises ``ValueError`` — FEEDBACK objects cannot be exported as TML;
+            use :meth:`metadata_dependents` to locate FEEDBACK GUIDs instead.
+        include_obj_id:
+            If True, include ``obj_id`` fields in the exported TML.
+        include_obj_id_ref:
+            If True, include ``obj_id_ref`` fields in the exported TML.
+        include_guid:
+            If False, omit ``guid`` fields from the exported TML (default True).
+
+        Returns
+        -------
+        list[dict]
+            Raw API response items when ``parse=False``, or parsed items when
+            ``parse=True``.
+
+        Raises
+        ------
+        ValueError
+            If *type* is ``"FEEDBACK"`` (case-insensitive).
+        ThoughtSpotAPIError
+            On any non-2xx API response.
+        """
+        if type is not None and type.upper() == "FEEDBACK":
+            raise ValueError(
+                "FEEDBACK objects cannot be exported as TML. "
+                "Use metadata_dependents() to find FEEDBACK GUIDs."
+            )
+
+        body: dict = {
+            "metadata": [{"identifier": g} for g in guids],
+            "export_fqn": fqn,
+            "export_associated": associated,
+            "formattype": format,
+        }
+
+        # Only include export_options when any option deviates from its default.
+        if include_obj_id or include_obj_id_ref or not include_guid:
+            export_options: dict = {}
+            if include_obj_id:
+                export_options["include_obj_id"] = True
+            if include_obj_id_ref:
+                export_options["include_obj_id_ref"] = True
+            if not include_guid:
+                export_options["include_guid"] = False
+            body["export_options"] = export_options
+
+        resp = self.post("/api/rest/2.0/metadata/tml/export", json=body)
+        data: list = resp.json()
+
+        if not parse:
+            return data
+
+        parsed_items: list = []
+        for item in data:
+            edoc: str = item.get("edoc", "")
+            info: dict = item.get("info", {})
+            tml: dict = _parse_edoc(edoc, fmt=format)
+            tml_type: Optional[str] = _detect_tml_type(tml)
+            guid: str = info.get("id", "")
+            parsed_items.append(
+                {
+                    "type": tml_type,
+                    "guid": guid,
+                    "tml": tml,
+                    "info": info,
+                }
+            )
+
+        return parsed_items
+
+    def tml_import(
+        self,
+        tmls: list,
+        *,
+        policy: str = "PARTIAL",
+        create_new: bool = False,
+    ) -> list:
+        """Import TML objects into ThoughtSpot.
+
+        POST /api/rest/2.0/metadata/tml/import
+
+        Parameters
+        ----------
+        tmls:
+            List of TML strings (YAML or JSON) to import.
+        policy:
+            Import policy: ``"PARTIAL"`` (default, imports what it can) or
+            ``"ALL_OR_NONE"`` (fail the whole batch on any error).
+        create_new:
+            If True, always create new objects even if a matching GUID exists.
+            Defaults to False — True silently creates duplicates if called
+            repeatedly on the same TML.
+
+        Returns
+        -------
+        list[dict]
+            List of import response objects.  A dict response is wrapped in a
+            list for consistent return type.
+
+        Raises
+        ------
+        ThoughtSpotAPIError
+            On any non-2xx API response.
+        """
+        body: dict = {
+            "metadata_tmls": tmls,
+            "import_policy": policy,
+            "create_new": create_new,
+        }
+        resp = self.post("/api/rest/2.0/metadata/tml/import", json=body)
+        data = resp.json()
+        if isinstance(data, dict):
+            return [data]
+        return list(data)
+
+    # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
 
