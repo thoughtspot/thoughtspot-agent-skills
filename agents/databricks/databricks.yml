@@ -4,6 +4,17 @@ bundle:
 workspace:
   root_path: /Workspace/thoughtspot-skills
 
+# Grant CAN_MANAGE to users or groups that need to deploy this bundle.
+# The deploying identity (user or Service Principal) must be listed here
+# OR have workspace-level permissions on the root_path above.
+# Uncomment and edit the entries below:
+#
+# permissions:
+#   - level: CAN_MANAGE
+#     user_name: your-email@company.com
+#   - level: CAN_MANAGE
+#     service_principal_name: your-service-principal-name
+
 sync:
   include:
     - "notebooks/**"

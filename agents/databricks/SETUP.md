@@ -12,6 +12,7 @@ Databricks Asset Bundles.
 | Databricks workspace | With Unity Catalog enabled |
 | Databricks CLI | `pip install databricks-cli` (v0.18+) |
 | Databricks authentication | CLI configured via `/ts-profile-databricks`, `databricks configure`, or env vars |
+| Workspace permissions | The deploying identity (user or Service Principal) must have **CAN_MANAGE** on the bundle's workspace path — see Step 1b below |
 | ThoughtSpot instance | Cloud or Software, with REST API v2 enabled |
 | ThoughtSpot credentials | Bearer token, password, or secret key |
 
@@ -68,6 +69,50 @@ Databricks and copying the URL from the browser address bar. It looks like
 **workspace-level** URL, not the account-level `https://accounts.cloud.databricks.com`.
 
 You can set up a full profile later with `/ts-profile-databricks`.
+
+---
+
+## Step 1b: Configure bundle permissions
+
+The identity deploying the bundle (your user account or a Service Principal)
+needs **CAN_MANAGE** permission on the workspace path `/Workspace/thoughtspot-skills`.
+Without this, `databricks bundle deploy` fails with `access denied` on the
+deployment lock file.
+
+**Option A — Add permissions in `databricks.yml` (recommended)**
+
+Uncomment and edit the `permissions` block in `agents/databricks/databricks.yml`:
+
+```yaml
+permissions:
+  - level: CAN_MANAGE
+    user_name: your-email@company.com
+```
+
+Or for a Service Principal:
+
+```yaml
+permissions:
+  - level: CAN_MANAGE
+    service_principal_name: your-service-principal-name
+```
+
+**Finding your identity:**
+
+| Auth type | How to find your identity |
+|---|---|
+| User account | Your Databricks login email — run `databricks current-user me --profile {profile} -o json` and look for `userName` |
+| Service Principal | The SP display name — run `databricks service-principals list --profile {profile} -o json` and find your SP by `applicationId` matching the `client_id` in your profile |
+
+**Option B — Grant permissions in the Databricks UI**
+
+1. Open your Databricks workspace in a browser
+2. Navigate to **Workspace** in the left sidebar
+3. If `/Workspace/thoughtspot-skills` already exists (from a prior deploy
+   attempt), right-click it > **Permissions** > add your user or SP with
+   **Can Manage**
+4. If it doesn't exist yet, create the folder manually first, then set
+   permissions
 
 ---
 
@@ -192,4 +237,5 @@ databricks bundle deploy -t dev
 | `Secret not found` | Re-run `ts_profile_setup` — the scope may not exist |
 | `401 Unauthorized` | Token expired — run the refresh job or re-run setup |
 | `databricks bundle deploy` fails | Check CLI auth: `databricks auth login` |
+| `access denied` / `deployment lock` | The deploying identity lacks **CAN_MANAGE** on the workspace path — see Step 1b |
 | Token refresh job fails | Check job logs — credential may have changed |
