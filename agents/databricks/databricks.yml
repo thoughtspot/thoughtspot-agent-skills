@@ -20,13 +20,13 @@ resources:
       tasks:
         - task_key: refresh
           notebook_task:
-            notebook_path: notebooks/token_refresh
+            notebook_path: notebooks/token_refresh.py
 
 targets:
   dev:
     default: true
     workspace:
-      host: https://your-workspace.cloud.databricks.com
+      host: https://dbc-3472b2da-8a4e.cloud.databricks.com
   prod:
     workspace:
       host: https://your-workspace.cloud.databricks.com
