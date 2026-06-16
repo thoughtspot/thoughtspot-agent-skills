@@ -118,19 +118,19 @@ permissions:
 
 ## Step 2: Deploy
 
-The `-t` flag selects which target from `databricks.yml` to deploy to. Use
-`dev` for development or `prod` for production — each target points to the
-workspace host you configured in Step 1.
+Always use `deploy.sh` instead of raw `databricks bundle deploy`. The script
+copies shared references from `agents/shared/` into a local `shared/` dir
+(gitignored) so the bundle can include them, then runs the bundle deploy.
 
 ```bash
 cd agents/databricks
-databricks bundle deploy -t dev
+./deploy.sh -t dev
 ```
 
 To deploy to production instead:
 
 ```bash
-databricks bundle deploy -t prod
+./deploy.sh -t prod
 ```
 
 This syncs the following files to `/Workspace/thoughtspot-skills` in the
@@ -138,8 +138,11 @@ target workspace and creates the token refresh job:
 
 - **Notebooks:** `ts_client.py`, `ts_profile_setup.py`, `token_refresh.py`
 - **Skills:** Two Genie Code conversion skills
-- **Shared files:** Mappings, schemas, worked examples from `agents/shared/`
+- **Shared files:** Mappings and schemas copied from `agents/shared/` (single source of truth)
 - **Token refresh job:** Scheduled every 12 hours (see `databricks.yml` section above)
+
+> **Do not run `databricks bundle deploy` directly** — the shared references
+> won't be included. Always use `deploy.sh`.
 
 ---
 
@@ -242,12 +245,12 @@ via Step 3 above.
 
 ## Updating
 
-Re-run the deploy command after pulling changes:
+Re-run the deploy script after pulling changes:
 
 ```bash
 cd agents/databricks
 git pull
-databricks bundle deploy -t dev
+./deploy.sh -t dev
 ```
 
 ---

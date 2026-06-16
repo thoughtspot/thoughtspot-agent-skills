@@ -67,6 +67,9 @@ tools/smoke-tests/smoke_ts_model_builder.py
 # Databricks shared content — not yet published to remote
 agents/shared/worked-examples/unity-catalog/
 
+# Databricks bundle — shared/ is copied from agents/shared/ at deploy time
+agents/databricks/shared/
+
 # Implementation plans — local working artifacts, not part of the published repo
 # (design specs under docs/superpowers/specs/ ARE tracked; plans are not)
 docs/superpowers/plans/
