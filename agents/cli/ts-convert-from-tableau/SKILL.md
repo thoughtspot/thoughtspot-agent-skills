@@ -10,7 +10,11 @@ tables, columns, joins, and calculated fields, then generates Table TMLs and a M
 TML per datasource. Optionally converts Tableau dashboards into ThoughtSpot Liveboards
 with approximate layout mapping.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions (where the next question depends on
+the answer), waiting for each. But **batch independent questions into a single
+multi-question prompt** to cut round-trips and keep the migration fast — e.g. mode + scope,
+the count-column + bin-style + cohort-handling decisions, or theme + parameter-chips. See
+**Efficiency** in Step 0.
 
 ---
 
@@ -100,21 +104,34 @@ with optional dashboard-to-liveboard migration.
 
 Enter A / M:
 
+### Migrate scope (ask right after M — see Step 1.5)
+
+When the user picks **M**, immediately ask **what to migrate** — this decides which steps run:
+
+  **1  Models + Liveboards** — full flow (tables/models, then dashboards → liveboards). _(default)_
+  **2  Tables + Models only** — build the data layer; **skip dashboards/liveboards**
+      (skip Steps 8–11; go model → Step 11.5 coverage → Step 12 report).
+  **3  Liveboards only** — the model(s) **already exist** in ThoughtSpot; skip table/model
+      creation (skip Steps 4–7.5) and build liveboards on a **user-selected existing model**
+      (see Step 1.5 model picker). Still parse the TWB for dashboards (Step 3).
+
 ### Steps (Migrate mode)
 
   1.  Authenticate to ThoughtSpot .......................... auto
+  1.5 Choose migration scope (Models+LB / Models only / LB only;
+      LB-only → pick an existing model) ................. you choose
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields, blend relationships,
       table-calc addressing ............................ auto
-  4.  Confirm source tables (ask first; reuse/create/search) you choose
-  4.5 Select ThoughtSpot connection (create path only) .... you choose
-  5.  Generate TML files (table + sql_view + model) ...... auto
-  5.5 Confirm Spotter (AI search) enablement (default Y) .. you choose
-  6.  Validate against ThoughtSpot (up to 10 fix cycles) .. auto
-  7.  Review checkpoint (formula map + omissions) + import  you confirm
-  7.5 Confirm the model is correct (test in Search/Spotter)  you confirm
-  8.  Migrate dashboards? + separate vs single-tabbed (2+) . you choose (skip → Step 12)
+  4.  Confirm source tables (ask first; reuse/create/search) you choose  [scope 1,2]
+  4.5 Select ThoughtSpot connection (create path only) .... you choose  [scope 1,2]
+  5.  Generate TML files (table + sql_view + model) ...... auto          [scope 1,2]
+  5.5 Confirm Spotter (AI search) enablement (default Y) .. you choose   [scope 1,2]
+  6.  Validate against ThoughtSpot (up to 10 fix cycles) .. auto         [scope 1,2]
+  7.  Review checkpoint (formula map + omissions) + import  you confirm  [scope 1,2]
+  7.5 Confirm the model is correct (test in Search/Spotter)  you confirm [scope 1,2]
+  8.  Migrate dashboards? + separate vs single-tabbed (2+) . you choose (skip → Step 12) [scope 1,3]
   9.  Parse dashboard layout and map to grid ............... auto
   9d. Orphan worksheets (not on a dashboard) — add as tiles? you choose
  10.  Generate liveboard TML (export model for params first) auto
@@ -125,8 +142,28 @@ Enter A / M:
  11.5 Formula coverage answers (every formula testable) ... auto
  12.  Migration report (outcomes + links + formula map) ... auto
 
-Confirmation required: Steps 4.5, 5.5, 7, 7.5, 8, 9d, 11
+Confirmation required: Steps 1.5, 4.5, 5.5, 7, 7.5, 8, 9d, 11
 Auto-executed: Steps 1, 3, 5, 6, 9, 10, 12
+Scope 3 (LB only) skips 4–7.5; scope 2 (Models only) skips 8–11.
+
+### Efficiency — keep the migration fast
+
+The flow is interactive, but most of the wall-clock cost is avoidable. Apply these:
+
+- **Batch independent prompts.** Use a single multi-question prompt for decisions that don't
+  depend on each other: *mode + scope*; the *count-column + bin-style + cohort-handling*
+  decisions; *theme + parameter-chips*. Only serialize genuinely dependent questions
+  (e.g. search-scope → connection name).
+- **Parse the TWB in one pass.** Extract datasources, columns, calc fields, parameters,
+  dashboards, zones, and table-calc addressing in a *single* script — not one Bash call per
+  element.
+- **Read the model's real `obj_id` once, up front** (Step 10-pre) — exporting the model
+  once yields `obj_id` **and** `parameters[].id` **and** the resolved column names. This
+  prevents the slow build→import→fail→delete→re-import liveboard cycle (see the obj_id rule
+  in Step 7 / Step 10-pre).
+- **Don't fetch what you don't need.** Skip `ts connections list` / `ts connections get`
+  whenever the user names the connection or the tables are reused (Steps 4/4.5). Skip the
+  whole model/table layer entirely in scope 3 (LB only).
 
 ### Steps (Audit mode)
 
@@ -139,7 +176,8 @@ No auth, no TML generation, no import. Supports multiple files in one run.
 
 ---
 
-If Audit mode, proceed to Step A1. If Migrate mode, proceed to Step 1.
+If Audit mode, proceed to Step A1. If Migrate mode, proceed to Step 1 (then Step 1.5 picks
+the migration scope, which gates the later steps).
 
 ---
 
@@ -380,6 +418,94 @@ source ~/.zshenv && ts auth whoami --profile "{profile_name}"
 ```
 
 Save `{base_url}` and `{profile_name}` for all subsequent steps.
+
+---
+
+## Step 1.5 — Choose Migration Scope
+
+Right after auth, ask **what to migrate** (this can be batched with the profile choice when
+there are multiple profiles). The answer gates which later steps run:
+
+```
+What should I migrate?
+  1  Models + Liveboards — build/reuse tables & models, then dashboards → liveboards  (default)
+  2  Tables + Models only — build the data layer; skip dashboards/liveboards
+  3  Liveboards only — models already exist; skip table/model creation and build
+                       liveboards on an existing model I help you pick
+
+Enter 1 / 2 / 3:
+```
+
+Apply the scope:
+
+| Scope | Runs | Skips |
+|---|---|---|
+| **1 Models + Liveboards** | all steps | — |
+| **2 Tables + Models only** | 2–7.5, then 11.5 (coverage), 12 | **8–11** (dashboards/liveboards) |
+| **3 Liveboards only** | 1.5a model picker, 2–3 (parse, dashboards), 8–12 | **4–7.5** (table/model creation) |
+
+For scope **2**, after Step 7.5 jump straight to Step 11.5 then Step 12.
+
+For scope **3**, there is no model to build — the user selects an **existing** model, and the
+liveboard tiles reference *its* columns/formulas. Run **Step 1.5a** below to pick it, then
+parse the TWB (Steps 2–3) and continue at Step 8. (Step 9b maps each worksheet's shelves to
+the **chosen model's** columns by display name — surface any field that has no matching
+column rather than guessing.)
+
+### Step 1.5a — Pick an existing model (scope 3 only)
+
+A ThoughtSpot **Model is a `worksheetVersion: V2` logical table** — there is **no `MODEL`
+subtype** in `metadata search`. Find models with `--subtype WORKSHEET` (which returns
+worksheets *and* models) and keep only those whose `metadata_header.worksheetVersion == "V2"`.
+
+**Prompt how to identify the model — don't list every model by default** (the full list is
+slow on a large instance). Mirror the connection picker (Step 4.5):
+
+```
+How would you like to choose the model?
+  G  GUID         — paste the model's GUID; I'll fetch it directly      (fastest)
+  N  Name it      — type the exact model name
+  F  Filter       — give a partial string; I'll list matching models
+  L  List all     — show every model and pick by number   (slow — scans all worksheets)
+
+Enter G / N / F / L:
+```
+
+Resolve the choice:
+
+- **G (GUID)** — fetch directly and confirm it's a model:
+  ```bash
+  source ~/.zshenv && ts metadata search --guid {model_guid} --profile {profile_name}
+  ```
+  Verify `metadata_type == "LOGICAL_TABLE"` and `metadata_header.worksheetVersion == "V2"`.
+  If V1 (a classic worksheet) or not found, say so and re-ask.
+- **N (name it)** — exact-name search, filter to V2:
+  ```bash
+  source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "{model_name}" --profile {profile_name}
+  ```
+  Exactly one V2 match → use it; none/ambiguous → show closest and re-ask.
+- **F (filter)** — `--name "%{partial}%"`, keep V2 matches, show a short numbered list
+  (name, obj_id, guid) and pick from it.
+- **L (list all)** — **warn it's slow**, then `--subtype WORKSHEET --all`, keep V2, show the
+  numbered list. Only use when the user can't name/filter.
+
+```bash
+# F / L pattern (filter applied client-side to V2 only)
+source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{partial}%" --profile {profile_name}
+```
+
+From the chosen model capture and save: `{model_guid}` (`metadata_id`), **`{model_obj_id}`**
+(`metadata_obj_id` — the **real** obj_id; see the obj_id rule in Step 7), and `{model_name}`
+(`metadata_name`). Then **export it once** (Step 10-pre) to read its columns, formulas, and
+`parameters[].id` for building liveboard tiles. Confirm the picked model with the user before
+proceeding:
+
+```
+Using existing model: {model_name}
+  {base_url}/#/data/tables/{model_guid}
+  Columns: {n}   Formulas: {f}   Parameters: {names}
+Build liveboards on this model? (yes / pick another)
+```
 
 ---
 
@@ -2131,6 +2257,25 @@ are used by Step 10 if the user proceeds with dashboard migration. Also save
 `{formula_column_map}` (Tableau calc field caption → ThoughtSpot formula display name)
 and `{parameter_map}` from the TWB parse.
 
+> **A requested `obj_id` on a fresh model is NOT honored — read back the REAL one.** When
+> you import a brand-new model, ThoughtSpot **ignores** any `obj_id` you put in the TML and
+> assigns its own, derived as `{Model-Name-with-dashes}-{guid8}` (e.g. requested
+> `P1UKBankCustomers-bankdemo1` became `P1-UK-Bank-Customers-49347340`). **Never reuse the
+> obj_id you wrote into the TML for downstream references** — capture the model's *actual*
+> `obj_id` after import and use only that for:
+> - every liveboard viz `answer.tables[].obj_id` (Step 10c) — a wrong obj_id makes **every
+>   tile fail to bind** (`"No table with object_id … found"`), forcing a delete + re-import;
+> - the cohort `worksheet.obj_id` (Step 5b) — cohort binding is more lenient (it may resolve
+>   by name and still import), but use the real obj_id anyway for correctness.
+>
+> Capture it from any of these (cheapest first): the **import response header** `objId`;
+> `ts metadata search --guid {model_guid}` → `metadata_obj_id`; or the model export
+> (Step 10-pre). Save it as `{model_obj_id}`. Doing this **once, up front** (Step 10-pre,
+> alongside the parameter UUIDs) is the single biggest speed win — it removes the
+> build→fail→delete→re-import liveboard cycle entirely.
+
+Save the model's real `{model_obj_id}` now (read it from the import response `objId`).
+
 ---
 
 ## Step 7.5 — Confirm the Model (before any liveboards)
@@ -2175,10 +2320,15 @@ user confirms the model.
 
 ## Step 8 — Migrate Dashboards?
 
+**Scope gate:** if the user chose **scope 2 (Tables + Models only)** in Step 1.5, skip this
+entire step and Steps 9–11 — go straight to **Step 11.5** (coverage) then **Step 12**. In
+**scope 3 (Liveboards only)** this step is the entry point (the model came from Step 1.5a);
+the liveboard tiles reference that model's columns (Step 10-pre export).
+
 If Step 3d found zero `<dashboard>` elements, skip to **Step 11.5** (a model-only workbook
 still benefits from coverage answers), then Step 12.
 
-Otherwise, present the decision:
+Otherwise (scope 1 or 3 with dashboards), present the decision:
 
 ```
 The workbook contains {N} dashboard(s):
@@ -2310,22 +2460,29 @@ view (a different aggregation, a different dimension breakdown) — the user can
 
 ## Step 10 — Generate Liveboard TML
 
-### 10-pre. Export model and check for parameters (BEFORE generating TML)
+### 10-pre. Export model — capture obj_id, parameters, and resolved column names (BEFORE generating TML)
 
-**Do this first, before writing any liveboard YAML.** Export each model referenced by the
-liveboard to discover parameters and their UUIDs:
+**Do this first, before writing any liveboard YAML.** One export of each model referenced by
+the liveboard gives you everything the tiles need — do it once and reuse:
 
 ```bash
 source ~/.zshenv && ts tml export {model_guid} --profile {profile_name}
 ```
 
-Parse the exported model for `parameters[]` entries. If any exist, record:
-- `name` — the parameter display name
-- `id` — the UUID assigned by ThoughtSpot (needed for `parameter_overrides[].key`)
+From the export (and/or `ts metadata search --guid {model_guid}`) record:
+- **`obj_id`** — the model's **real** `obj_id` (the export root / `metadata_obj_id`). Save as
+  `{model_obj_id}` and use it for **every** liveboard viz `answer.tables[].obj_id`. **Do NOT
+  use the obj_id you wrote into the model TML** — a fresh model's requested obj_id is
+  reassigned by ThoughtSpot, and a stale ref makes every tile fail to bind (see the obj_id
+  rule in Step 7). This is the fix for the build→fail→delete→re-import cycle.
+- `parameters[]` — for each, `name` (display name) and `id` (the UUID ThoughtSpot assigned,
+  needed for `parameter_overrides[].key` in Step 10f). **If you skip this, Step 10f cannot be
+  completed** — the UUIDs aren't in the TWB or the import response.
+- column + formula **display names** — the exact names tiles must reference (and, in scope 3,
+  the only columns available; map TWB shelf fields to these and surface any with no match).
 
-These will be used in Step 10f to add `parameter_overrides` and `ordered_chips` to the
-liveboard TML. **If you skip this step, Step 10f cannot be completed** — the UUIDs are
-not available from the TWB or from the import response.
+(In **scope 3 / Liveboards only**, the model already exists from Step 1.5a — this export is
+the single source of its obj_id, columns, formulas, and parameter UUIDs.)
 
 ### 10a. Resolve chart types
 
@@ -2493,7 +2650,7 @@ liveboard:
       tables:
       - id: "Model Name"
         name: "Model Name"
-        obj_id: ModelNameNoSpaces-{guid8}   # NOT fqn — a viz-level fqn is dropped on import
+        obj_id: "{model_obj_id}"            # the model's REAL obj_id from Step 10-pre (NOT the one you wrote into the model TML, NOT fqn — a viz-level fqn is dropped on import)
       search_query: "[Sales Channel] [Total Revenue]"
       answer_columns:                         # RESOLVED names (see below)
       - name: Sales Channel
@@ -2963,6 +3120,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.13.0 | 2026-06-16 | **Add a migration-scope choice, fix the model `obj_id` reuse bug, and add efficiency guidance.** (1) New **Step 1.5 — migration scope**: ask right after auth whether to migrate **Models + Liveboards** (default), **Tables + Models only** (skip Steps 8–11), or **Liveboards only** (skip Steps 4–7.5, build on an existing model). New **Step 1.5a model picker** for the LB-only path mirrors the connection prompt — **G** GUID / **N** name / **F** filter / **L** list-all (slow); models are found via `--subtype WORKSHEET` filtered to `metadata_header.worksheetVersion == "V2"` (there is no `MODEL` subtype). Steps annotated with the scopes that run them. (2) **obj_id read-back rule (Step 7 + 10-pre + 10c)**: a requested `obj_id` on a *fresh* model import is **not honored** — ThoughtSpot reassigns `{Name-with-dashes}-{guid8}`. Reusing the written obj_id made every liveboard tile fail to bind and forced a delete + re-import. Now: read the model's **real** obj_id back (import-response `objId` / `metadata search --guid` / export) and use only that for viz `tables[].obj_id` and cohort `worksheet.obj_id`. (3) **Efficiency** block + relaxed the one-question rule: batch independent prompts, parse the TWB in one pass, capture obj_id + parameter UUIDs + resolved names in a single Step 10-pre export. |
 | 1.12.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 4c connection-scoped search path.** The 4c "C — within a connection" path now explicitly presents the Step 4.5 N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Broadened the Step 4.5 title to "(create path or connection-scoped search)" so it's the canonical home of the prompt for both the create and the search-scope cases. Mirrors the same fix in ts-convert-from-snowflake-sv and ts-convert-from-databricks-mv. |
 | 1.12.0 | 2026-06-16 | Step 4.5 connection selection: add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-snowflake-sv and ts-convert-from-databricks-mv. |
 | 1.11.0 | 2026-06-16 | **Reorder Step 4 / 4.5 so the source-table question comes first — don't waste time on unnecessary ThoughtSpot searches.** New **Step 4 — Confirm Source Tables** runs immediately after the parse and *before* any connection selection or search, with an explicit guard: do NOT run `ts metadata search` / `ts connections list` / `ts connections get` until the user answers E (exist) / N (don't) / ? (not sure). New **4c scoped-search choice** for the E/? paths — **C** search within a specific connection (fastest) vs **I** entire instance — and always search by `--name "%table%"` pattern, never `--all`-then-filter. Connection selection moves to **Step 4.5 (create path only)**, skipped entirely when every table is reused; the slow/404-prone `ts connections get` v1 schema fetch is now a documented fallback (ask the user for db/schema first). Mirrors the `ts-convert-from-databricks-mv` Step 7/8 ask-before-search flow. |
