@@ -45,6 +45,81 @@ def list_connections(
     print(json.dumps(all_connections))
 
 
+def _adapt_v2_databases(v2_dbs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert a v2 ``connection/search`` ``databases`` hierarchy into the
+    legacy ``fetchConnection`` key shape that ``_merge_tables`` and the v2
+    update payload expect.
+
+    v2 keys (``data_type``, ``is_linked_active``, ``auto_created``) are renamed
+    to the legacy keys (``type``, ``isLinkedActive``, ``isAutoCreated``) so that
+    tables preserved from the existing connection serialize correctly when fed
+    to ``POST /api/rest/2.0/connections/{id}/update``.
+    """
+    databases: List[Dict[str, Any]] = []
+    for db in v2_dbs or []:
+        schemas: List[Dict[str, Any]] = []
+        for sch in db.get("schemas", []) or []:
+            tables: List[Dict[str, Any]] = []
+            for t in sch.get("tables", []) or []:
+                tables.append({
+                    "name": t.get("name"),
+                    "type": t.get("type", "TABLE"),
+                    "description": t.get("description", ""),
+                    "selected": t.get("selected", True),
+                    "linked": t.get("linked", True),
+                    "columns": [
+                        {
+                            "name": c.get("name"),
+                            "type": c.get("data_type", "VARCHAR"),
+                            "selected": c.get("selected", True),
+                            "isLinkedActive": c.get("is_linked_active", True),
+                        }
+                        for c in (t.get("columns") or [])
+                    ],
+                })
+            schemas.append({"name": sch.get("name"), "tables": tables})
+        databases.append({
+            "name": db.get("name"),
+            "isAutoCreated": db.get("auto_created", False),
+            "schemas": schemas,
+        })
+    return databases
+
+
+def _fetch_connection_v2(client: ThoughtSpotClient, connection_id: str) -> Dict[str, Any]:
+    """Fetch a connection's warehouse-object hierarchy via the v2
+    ``POST /api/rest/2.0/connection/search`` endpoint, adapted to the legacy
+    ``{"dataWarehouseInfo": {"databases": [...]}}`` shape.
+
+    Replaces the removed v1 ``/tspublic/v1/connection/fetchConnection`` endpoint
+    (404 on ThoughtSpot Cloud builds where the legacy tspublic API is dropped).
+
+    NOTE: server-side warehouse introspection (databases/tables/columns) is only
+    returned for connections that authenticate with a stored SERVICE_ACCOUNT.
+    OAuth/PKCE/per-user connections return connection metadata with an *empty*
+    hierarchy — the same practical limitation v1 had, with no API-side
+    workaround. Callers must tolerate an empty hierarchy (``add-tables`` does).
+    To discover tables already registered as ThoughtSpot objects, use
+    ``ts metadata search`` instead of this command.
+    """
+    resp = client.post(
+        "/api/rest/2.0/connection/search",
+        json={
+            "connections": [{"identifier": connection_id}],
+            "data_warehouse_object_type": "COLUMN",
+            "include_details": True,
+            "record_size": -1,
+            "record_offset": 0,
+        },
+    )
+    data = resp.json()
+    conns = data if isinstance(data, list) else data.get("data", data)
+    conn = conns[0] if isinstance(conns, list) and conns else (conns or {})
+    dwo = conn.get("data_warehouse_objects") or {}
+    v2_dbs = dwo.get("databases", []) if isinstance(dwo, dict) else []
+    return {"dataWarehouseInfo": {"databases": _adapt_v2_databases(v2_dbs)}}
+
+
 @app.command("get")
 def get_connection(
     connection_id: str = typer.Argument(..., help="Connection GUID"),
@@ -52,22 +127,20 @@ def get_connection(
 ) -> None:
     """Fetch full connection details including existing tables and columns.
 
-    NOTE: Still uses the v1 endpoint (POST /tspublic/v1/connection/fetchConnection)
-    because a v2 equivalent that returns the full database/schema/table/column
-    hierarchy has not yet been identified. Update this command once the v2
-    fetch endpoint is confirmed in the REST Playground.
+    Uses the v2 endpoint POST /api/rest/2.0/connection/search (the v1
+    /tspublic/v1/connection/fetchConnection endpoint was removed on newer
+    ThoughtSpot Cloud builds and returns 404).
 
-    Output: raw JSON response (dataWarehouseInfo containing the full
-    database/schema/table hierarchy).
+    Output: JSON in the legacy shape (dataWarehouseInfo.databases) for
+    backward compatibility. The hierarchy is populated only for connections
+    that authenticate with a stored SERVICE_ACCOUNT; OAuth/PKCE connections
+    return an empty hierarchy (use `ts metadata search` to find already-
+    registered tables instead).
 
     Requires CAN_CREATE_OR_EDIT_CONNECTIONS privilege.
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-    resp = client.post(
-        "/tspublic/v1/connection/fetchConnection",
-        json={"connection_id": connection_id, "includeColumns": True},
-    )
-    print(json.dumps(resp.json()))
+    print(json.dumps(_fetch_connection_v2(client, connection_id)))
 
 
 @app.command("add-tables")
@@ -93,9 +166,9 @@ def add_tables(
       }
     ]
 
-    Fetches the current connection state (v1 fetch — see 'ts connections get'),
-    merges the new tables in without delinking any existing tables, then POSTs
-    the merged payload to the v2 update endpoint:
+    Fetches the current connection state (v2 connection/search — see
+    'ts connections get'), merges the new tables in without delinking any
+    existing tables, then POSTs the merged payload to the v2 update endpoint:
       POST /api/rest/2.0/connections/{connection_identifier}/update
 
     Output: JSON response from the update call.
@@ -110,20 +183,16 @@ def add_tables(
 
     client = ThoughtSpotClient(resolve_profile(profile))
 
-    # 1. Fetch current connection state.
-    # Try v1 first; fall back to an empty hierarchy on 404 (newer ThoughtSpot
-    # instances have removed the v1 fetchConnection endpoint).
+    # 1. Fetch current connection state via the v2 connection/search endpoint.
+    #    Falls back to an empty hierarchy on any error, or when the connection's
+    #    auth type (OAuth/PKCE) yields no server-side introspection.
     fetch_data: Dict[str, Any] = {}
     try:
-        fetch_resp = client.post(
-            "/tspublic/v1/connection/fetchConnection",
-            json={"connection_id": connection_id, "includeColumns": True},
-        )
-        fetch_data = fetch_resp.json()
+        fetch_data = _fetch_connection_v2(client, connection_id)
     except Exception:
-        # 404 or other error — proceed with empty hierarchy (new tables only)
+        # Error or unavailable — proceed with empty hierarchy (new tables only)
         print(
-            "Warning: could not fetch existing connection state (v1 endpoint unavailable). "
+            "Warning: could not fetch existing connection state. "
             "Proceeding without preserving existing registered tables.",
             file=sys.stderr,
         )

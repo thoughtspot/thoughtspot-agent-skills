@@ -616,15 +616,37 @@ and ask the same question for each.
 
 Skip this step if the user answered **N** in Step 7 — go directly to Step 8B.
 
-**Search ThoughtSpot for table objects:**
+**Choose the search scope first.** A whole-instance scan is the slow path — on a
+large instance `--all` pulls every table. Offer the narrower option and search by
+**table-name pattern** (`--name`), never `--all`-then-filter:
 
-```bash
-source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile {profile}
+```
+How should I search for these tables?
+  C  Within a specific connection — fastest; search that one connection's tables
+  I  Entire ThoughtSpot instance  — broader, slower
+
+Enter C / I :
 ```
 
-Filter the JSON to match the MV source table by database + schema + table name
-(`metadata_header.database_stripes`, `metadata_header.schema_stripes`, `metadata_name`).
-Build a map: `physical_table_name -> {metadata_id, metadata_name}`.
+**Search by name (both scopes start here):**
+
+```bash
+source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
+```
+
+- **C (within a connection)** → keep only results whose
+  `metadata_header.dataSourceName` equals the chosen connection name (each result
+  carries its connection there, e.g. `"APJ_DBX"`). Fastest, and unambiguous when the
+  same table name exists on several connections.
+- **I (entire instance)** → run the name search above with no connection filter.
+
+Filter the JSON to match the MV source table by table name (`metadata_name`) and, for
+the connection scope, `metadata_header.dataSourceName`; use
+`metadata_header.database_stripes` / `metadata_header.schema_stripes` to disambiguate
+same-named tables. Build a map: `physical_table_name -> {metadata_id, metadata_name}`.
+
+> Only fall back to `--all` (fetch every table) when no usable name pattern can be
+> formed (e.g. the name is too generic). Tell the user that cost before running it.
 
 **Export TMLs for found tables to verify columns:**
 
@@ -1240,6 +1262,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.0 | 2026-06-16 | Step 8A table discovery: add a **connection-scoped vs instance-wide search choice** and search by `--name "%table%"` pattern instead of `--all`-then-filter. Connection scope filters results on `metadata_header.dataSourceName` (verified field). Avoids slow whole-instance scans on large instances. Mirrors the ts-convert-from-tableau Step 4c change. |
 | 1.3.0 | 2026-06-12 | Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). |
 | 1.2.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |
 | 1.1.0 | 2026-06-11 | Preserve existing Spotter setting on in-place model updates (don't reset to default). Drop `TEST_MV_` prefix — model name uses the bare MV name (N1); cite canonical conversion invariants doc. |

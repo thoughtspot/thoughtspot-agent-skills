@@ -49,6 +49,8 @@ REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-object-model-coach":                    ["--model-guid"],
     "ts-convert-to-snowflake-sv":               ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-convert-from-snowflake-sv":             ["--sf-profile", "--sv-fqn"],
+    "ts-convert-to-databricks-mv":              ["--dbx-profile", "--model-guid"],
+    "ts-convert-from-databricks-mv":            ["--dbx-profile", "--mv-fqn"],
     "ts-recipe-formula-business-days-snowflake": ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-recipe-formula-hms-display-snowflake":   ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
 }

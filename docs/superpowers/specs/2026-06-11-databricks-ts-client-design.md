@@ -136,7 +136,9 @@ class ThoughtSpotClient:
         """POST /api/rest/2.0/connection/search — auto-paginates."""
 
     def connections_get(self, connection_id: str) -> dict:
-        """POST /tspublic/v1/connection/fetchConnection"""
+        """POST /api/rest/2.0/connection/search — adapted to legacy
+        dataWarehouseInfo shape. (Originally v1 fetchConnection; migrated to v2
+        after the v1 tspublic endpoint was removed on newer builds.)"""
 
     def connections_add_tables(self, connection_id: str,
                                tables: list[dict]) -> dict:

@@ -855,33 +855,48 @@ class TestConnectionsGet:
         r.ok = True
         return r
 
-    def test_uses_v1_endpoint(self, profile_secrets):
-        """connections_get POSTs to the v1 fetchConnection endpoint."""
+    def test_uses_v2_search_endpoint(self, profile_secrets):
+        """connections_get POSTs to the v2 connection/search endpoint."""
         mock_dbutils, _ = profile_secrets
         client, _ = _make_client(mock_dbutils)
-        with patch("requests.request", return_value=self._ok_resp({"id": "conn-1"})) as mock_req:
-            result = client.connections_get("conn-1")
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
+            client.connections_get("conn-1")
         url = mock_req.call_args[0][1]
-        assert "/tspublic/v1/connection/fetchConnection" in url
+        assert "/api/rest/2.0/connection/search" in url
+        assert "/tspublic/v1/" not in url
 
-    def test_sends_connection_id(self, profile_secrets):
-        """connections_get sends connection_id and includeColumns in the body."""
+    def test_sends_v2_request_body(self, profile_secrets):
+        """connections_get sends the connection identifier and COLUMN object type."""
         mock_dbutils, _ = profile_secrets
         client, _ = _make_client(mock_dbutils)
-        with patch("requests.request", return_value=self._ok_resp({})) as mock_req:
+        with patch("requests.request", return_value=self._ok_resp([])) as mock_req:
             client.connections_get("my-conn-guid")
         body = mock_req.call_args[1]["json"]
-        assert body["connection_id"] == "my-conn-guid"
-        assert body["includeColumns"] is True
+        assert body["connections"] == [{"identifier": "my-conn-guid"}]
+        assert body["data_warehouse_object_type"] == "COLUMN"
+        assert body["record_size"] == -1
 
-    def test_returns_json(self, profile_secrets):
-        """connections_get returns the parsed JSON response."""
+    def test_adapts_v2_to_legacy_shape(self, profile_secrets):
+        """connections_get adapts the v2 hierarchy to dataWarehouseInfo.databases."""
         mock_dbutils, _ = profile_secrets
         client, _ = _make_client(mock_dbutils)
-        conn_data = {"id": "conn-1", "name": "My Snowflake"}
-        with patch("requests.request", return_value=self._ok_resp(conn_data)):
+        v2_body = [{"name": "C", "data_warehouse_objects": {"databases": [
+            {"name": "D", "schemas": [{"name": "S", "tables": [
+                {"name": "T", "columns": [{"name": "C1", "data_type": "INT64"}]}]}]}]}}]
+        with patch("requests.request", return_value=self._ok_resp(v2_body)):
             result = client.connections_get("conn-1")
-        assert result == conn_data
+        dbs = result["dataWarehouseInfo"]["databases"]
+        assert dbs[0]["name"] == "D"
+        col = dbs[0]["schemas"][0]["tables"][0]["columns"][0]
+        assert col == {"name": "C1", "type": "INT64", "selected": True, "isLinkedActive": True}
+
+    def test_empty_hierarchy_for_oauth_connection(self, profile_secrets):
+        """An OAuth/PKCE connection (no warehouse objects) yields an empty hierarchy."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp([{"name": "APJ_TAB"}])):
+            result = client.connections_get("conn-1")
+        assert result == {"dataWarehouseInfo": {"databases": []}}
 
 
 # ===========================================================================

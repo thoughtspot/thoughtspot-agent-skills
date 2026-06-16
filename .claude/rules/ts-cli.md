@@ -103,13 +103,25 @@ python tools/validate/check_version_sync.py
 
 ---
 
-## v1 API migration trigger
+## No v1 endpoints (migration complete — 2026-06-16)
 
-`ts connections get` and `ts connections add-tables` use the v1 endpoint
-(`/tspublic/v1/connection/fetchConnection`). Migrate to v2 when:
+The repo no longer calls any v1 (`/tspublic/v1/...`) endpoint. The last one,
+`/tspublic/v1/connection/fetchConnection`, was removed on newer ThoughtSpot Cloud
+builds (returns 404) and has been **migrated to the v2 endpoint**
+`POST /api/rest/2.0/connection/search` (confirmed via
+`get-rest-api-reference(apiName: "searchConnection")`):
 
-1. A v2 endpoint returning the full database/schema/table hierarchy is confirmed
-   via `get-rest-api-reference(query: "connection fetch database schema table hierarchy")`
-   (or by exact `apiName:` if you know the operation ID)
-2. Update the command, its docstring, and `tools/ts-cli/README.md`
-3. Bump the version in both `__init__.py` and `pyproject.toml`
+- `ts connections get` / `ts connections add-tables` — `_fetch_connection_v2` +
+  `_adapt_v2_databases` in `tools/ts-cli/ts_cli/commands/connections.py`
+- `connections_get` in `agents/databricks/notebooks/ts_client.py`
+
+**Caveat:** v2 `connection/search` only returns the warehouse database/table/column
+hierarchy for connections that authenticate with a stored `SERVICE_ACCOUNT`. OAuth/PKCE
+connections return connection metadata with an empty hierarchy (a real ThoughtSpot
+limitation, not a CLI bug). To find tables already registered as ThoughtSpot objects,
+use `ts metadata search --name "%table%"` and filter on `metadata_header.dataSourceName`
+for a connection-scoped result — **do not** rely on connection introspection.
+
+If a new v1 endpoint is ever introduced, migrate it to the v2 equivalent before use:
+confirm the v2 spec via `get-rest-api-reference`, update the command/docstring/README,
+and bump the version in both `__init__.py` and `pyproject.toml`.

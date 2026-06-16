@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-16
+- chore: migrate the last v1 API (`/tspublic/v1/connection/fetchConnection`, removed/404 on newer builds) to v2 `connection/search`; ts-cli v0.9.0 (`_fetch_connection_v2`/`_adapt_v2_databases`) + databricks `ts_client.py`; no v1 endpoints remain in the repo
+- feat: ts-convert-from-tableau v1.11.0 — reorder so the source-table question (exist/create/search) comes before any connection selection or search; add connection-scoped vs instance-wide search (`--name` pattern, `metadata_header.dataSourceName` filter)
+- feat: add the same connection-scoped vs instance-wide table search to ts-convert-from-snowflake-sv (v1.10.0) and ts-convert-from-databricks-mv (v1.4.0)
+
 ## 2026-06-14
 - feat: BL-024 — row-offset table calcs (INDEX/LOOKUP/FIRST/LAST/SIZE) translate via native TS window functions (`moving_sum`, `first_value`, `last_value`, `rank`) instead of SQL pass-through (which fails for DATE/numeric ORDER BY columns); ts-convert-from-tableau v1.10.0; live-verified 2026-06-15
 - chore: retire Cursor runtime — delete `agents/cursor/` (14 .mdc rules, SETUP.md, install scripts), remove all Cursor references from validators, pre-commit hook, rules, README, backlog, and auditor; closes BL-017

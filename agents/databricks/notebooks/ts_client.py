@@ -779,27 +779,80 @@ class ThoughtSpotClient:
 
         return results
 
+    @staticmethod
+    def _adapt_v2_databases(v2_dbs: list) -> list:
+        """Convert a v2 ``connection/search`` ``databases`` hierarchy into the
+        legacy ``fetchConnection`` key shape that :meth:`_merge_tables` and the
+        v2 update payload expect (``data_type`` -> ``type``,
+        ``is_linked_active`` -> ``isLinkedActive``, ``auto_created`` ->
+        ``isAutoCreated``).
+        """
+        databases: list = []
+        for db in v2_dbs or []:
+            schemas: list = []
+            for sch in db.get("schemas", []) or []:
+                tables: list = []
+                for t in sch.get("tables", []) or []:
+                    tables.append({
+                        "name": t.get("name"),
+                        "type": t.get("type", "TABLE"),
+                        "description": t.get("description", ""),
+                        "selected": t.get("selected", True),
+                        "linked": t.get("linked", True),
+                        "columns": [
+                            {
+                                "name": c.get("name"),
+                                "type": c.get("data_type", "VARCHAR"),
+                                "selected": c.get("selected", True),
+                                "isLinkedActive": c.get("is_linked_active", True),
+                            }
+                            for c in (t.get("columns") or [])
+                        ],
+                    })
+                schemas.append({"name": sch.get("name"), "tables": tables})
+            databases.append({
+                "name": db.get("name"),
+                "isAutoCreated": db.get("auto_created", False),
+                "schemas": schemas,
+            })
+        return databases
+
     def connections_get(self, connection_id: str) -> dict:
         """Fetch a single connection with full table/column metadata.
 
-        POST /tspublic/v1/connection/fetchConnection (v1 endpoint).
+        Uses the v2 endpoint POST /api/rest/2.0/connection/search. The v1
+        ``/tspublic/v1/connection/fetchConnection`` endpoint was removed on newer
+        ThoughtSpot Cloud builds (404).
+
+        The warehouse hierarchy is only populated for connections that
+        authenticate with a stored SERVICE_ACCOUNT; OAuth/PKCE connections return
+        an empty hierarchy (the same limitation v1 had).
 
         Parameters
         ----------
         connection_id:
-            The GUID of the connection to fetch.
+            The GUID or name of the connection to fetch.
 
         Returns
         -------
         dict
-            Full connection object including ``dataWarehouseInfo``.
+            Connection object in the legacy ``{"dataWarehouseInfo":
+            {"databases": [...]}}`` shape for backward compatibility.
         """
         body: dict = {
-            "connection_id": connection_id,
-            "includeColumns": True,
+            "connections": [{"identifier": connection_id}],
+            "data_warehouse_object_type": "COLUMN",
+            "include_details": True,
+            "record_size": -1,
+            "record_offset": 0,
         }
-        resp = self.post("/tspublic/v1/connection/fetchConnection", json=body)
-        return resp.json()
+        resp = self.post("/api/rest/2.0/connection/search", json=body)
+        data = resp.json()
+        conns = data if isinstance(data, list) else data.get("data", data)
+        conn = conns[0] if isinstance(conns, list) and conns else (conns or {})
+        dwo = conn.get("data_warehouse_objects") or {}
+        v2_dbs = dwo.get("databases", []) if isinstance(dwo, dict) else []
+        return {"dataWarehouseInfo": {"databases": self._adapt_v2_databases(v2_dbs)}}
 
     def connections_add_tables(self, connection_id: str, tables: list) -> dict:
         """Add tables (and their columns) to an existing connection.

@@ -42,12 +42,16 @@ Tokens are cached per-profile in `/tmp/ts_token_<slug>.txt` (permissions 0600) a
 by `client.py`. Do not change this path without updating the auth documentation in
 `agents/cli/ts-profile-thoughtspot/SKILL.md` (Technical Reference section).
 
-## v1 API limitation
+## Connection fetch (v2)
 
-`connections get` and `connections add-tables` use `/tspublic/v1/connection/fetchConnection`
-because a v2 equivalent returning the full database/schema/table hierarchy has not been
-confirmed. When a v2 endpoint is confirmed in the REST Playground, migrate and update
-the docstring and README.md.
+`connections get` and `connections add-tables` fetch connection state via the v2
+endpoint `POST /api/rest/2.0/connection/search` (helper `_fetch_connection_v2`), adapted
+to the legacy `dataWarehouseInfo.databases` shape via `_adapt_v2_databases`. This replaced
+the v1 `/tspublic/v1/connection/fetchConnection` endpoint, which was removed on newer
+ThoughtSpot Cloud builds (404). The warehouse hierarchy is only populated for
+`SERVICE_ACCOUNT` connections; OAuth/PKCE connections return an empty hierarchy (callers
+tolerate this — `add-tables` proceeds with new tables only). No remaining v1 endpoints are
+used anywhere in the repo.
 
 ## Adding a command
 

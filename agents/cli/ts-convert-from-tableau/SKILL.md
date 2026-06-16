@@ -40,7 +40,7 @@ Ask one question at a time. Wait for each answer before proceeding.
   connection exposes them.** This skill creates ThoughtSpot *logical* objects (Table, Model,
   cohorts, Liveboard) **over existing physical tables** — it does **not** create warehouse
   tables or load/populate data. A ThoughtSpot table binds to a live connection that already
-  surfaces the physical table and its columns (see Step 4 / `thoughtspot-table-tml.md`); if no
+  surfaces the physical table and its columns (see Step 4.5 / `thoughtspot-table-tml.md`); if no
   such connection/table exists, set that up first (the data pipeline is out of scope). The
   skill *may read* the warehouse for confirmation (value formats, ranges, membership) — with
   your authorization — but never loads or modifies data.
@@ -107,8 +107,8 @@ Enter A / M:
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields, blend relationships,
       table-calc addressing ............................ auto
-  4.  Select ThoughtSpot connection (required) ............ you choose
-  4.5 Confirm source tables (reuse vs. create; search) .... you choose
+  4.  Confirm source tables (ask first; reuse/create/search) you choose
+  4.5 Select ThoughtSpot connection (create path only) .... you choose
   5.  Generate TML files (table + sql_view + model) ...... auto
   5.5 Confirm Spotter (AI search) enablement (default Y) .. you choose
   6.  Validate against ThoughtSpot (up to 10 fix cycles) .. auto
@@ -431,7 +431,7 @@ merged unless a `<datasource-relationship>` explicitly links them. See Step 5b
   - The relation has two parents in `<metadata-records>` — the live source (e.g.
     `[Amazon Sales data.csv]`) and `[Extract]`. **Use the live-source relation; ignore the
     `[Extract]` relation.** The physical table name comes from the live source (mapped to
-    its warehouse table per Step 4).
+    its warehouse table per Step 4.5).
   - Only treat a datasource as truly skippable when there is **no** resolvable underlying
     connection (a pure Tableau-authored extract with no source) — and say so in the report.
   - File-based sources (CSV/Excel) imply the data was loaded into the warehouse out of
@@ -701,114 +701,92 @@ for worksheet in root.findall('.//worksheet'):
 
 ---
 
-## Step 4 — Select ThoughtSpot Connection
+## Step 4 — Confirm Source Tables (ask before searching)
 
-List available connections and let the user select:
+This is the **first** thing after the parse — **before** selecting a connection, searching
+ThoughtSpot, or fetching any schema. Getting the order wrong wastes the user's time:
+scanning the whole instance, or pulling a connection's schema, when the user already knows
+whether the tables exist is pure overhead (and the connection-schema fetch is slow and can
+404). **Ask first; act second.** This step only **asks and confirms** — it never loads or
+modifies warehouse data. It mirrors `ts-convert-from-databricks-mv` Step 7.
 
-```bash
-source ~/.zshenv && ts connections list --profile {profile_name}
-```
+> **Do NOT run `ts metadata search`, `ts connections list`, or `ts connections get` until
+> the user has answered the question in 4a.** No exploratory "let me just check" searches —
+> the answer decides whether *any* search runs, and at what scope. An ungated
+> `ts metadata search --all` on a large instance is exactly the wasted work this step exists
+> to prevent.
 
-`ts connections list` auto-paginates and returns all connections. Display the results
-as a numbered list showing connection name, type, and database. If only one connection
-exists, auto-select it and confirm with the user.
+### 4a — Present the table inventory and ask
 
-```
-Available ThoughtSpot connections:
-
-  1. SNOWFLAKE_PROD    (RDBMS_SNOWFLAKE)   — PROD_DB
-  2. ANALYTICS_DW      (RDBMS_SNOWFLAKE)   — ANALYTICS_DB
-
-Which connection should the generated tables use? (Enter number):
-```
-
-Save the selected connection's exact `name` value as `{connection_name}`. This name is
-used in SQL View TMLs (where `connection.name` is required) and for schema resolution.
-
-If the user selects a connection, fetch the schema to resolve db/schema/table names:
-
-```bash
-source ~/.zshenv && ts connections get {connection_id} --profile {profile_name}
-```
-
-Parse the response to extract available databases, schemas, and table names. For each
-physical table from Step 3, find the best match (case-insensitive) in the connection
-schema. Save the resolved `{db}`, `{schema}`, and `{db_table}` for each table.
-
-If the connection response has no tables (empty `externalDatabases`), ask the user for
-the database and schema names directly.
-
-A connection is **required** — there is no skip path. ThoughtSpot tables are logical
-objects over a **live** connection: the physical table must already exist in the database
-and the connection must already exist for the table to be created at all. You cannot
-generate a usable table without one, so do not offer placeholders or a dry-run mode —
-they only produce objects that can never bind to data. If the user has no suitable
-connection, stop and tell them a connection exposing the source tables must be created
-first (the data pipeline / connection setup is out of this skill's scope).
-
-Use the selected connection's exact **name** in every table TML and SQL View TML — never
-a GUID. The v2 API cannot search connections by name, so the name string is both
-necessary and sufficient; do not try to resolve it to an ID. See
-`../../shared/schemas/thoughtspot-table-tml.md` "Connection Reference".
-
----
-
-## Step 4.5 — Confirm Source Tables & Search Decision
-
-Step 4 resolved a `{db}`/`{schema}`/`{db_table}` for each physical table — but resolving
-a *name* is not the same as confirming the table is actually there. A model TML that
-points at a table the connection can't see will still *import* cleanly, yet every search
-and liveboard built on it comes back empty. That failure is silent and easy to miss, so
-confirm the source situation before generating anything. This step only **searches and
-confirms** — it never loads or modifies warehouse data (that is the data pipeline's job,
-not this skill's). It mirrors `ts-convert-from-databricks-mv` Step 8.
-
-### 4.5a — Present the table list and ask (do NOT search yet)
-
-Show the user the full inventory of physical tables from Step 3, then ask whether those
-tables already exist as ThoughtSpot Table objects. **Ask before searching.** Searching
-ThoughtSpot for every table on every run is wasteful when the user already knows the
-answer — so the search is gated behind the user's response, not run up front.
+Show the full inventory of physical tables from Step 3, then ask whether they already exist
+as ThoughtSpot Table objects:
 
 ```
 Source tables referenced by {workbook_name} ({N} total):
-
-  1. AGENT_SKILLS.AMAZON_SALES_DATA.AMAZON_SALES_DATA
-  2. AGENT_SKILLS.DUAL_AXIS_EXAMPLE.LISTOFORDERS
+  1. P1-UK-Bank-Customers
   …
 
 Do these already exist as ThoughtSpot Table objects?
-  E  Exist      — reuse them (I'll look up their GUIDs)
-  N  Don't exist — create new Table TMLs            (default)
-  ?  Unsure     — search ThoughtSpot to find out
+  E  Exist       — reuse them (I'll look up their GUIDs)
+  N  Don't exist — create new on a connection            (default)
+  ?  Not sure    — search ThoughtSpot to find out
 
 Enter E / N / ? :
 ```
 
-If the tables differ in status (some exist, some don't), the user can say so — accept a
-per-table answer or let them point out the exceptions.
+If the tables differ in status (some exist, some don't), accept a per-table answer.
 
-### 4.5b — Act on the answer
+### 4b — Act on the answer
 
-- **N (don't exist)** → create a new Table TML for each in Step 5a (the default path).
-  No search.
-- **E (exist)** or **? (unsure)** → *now* search ThoughtSpot to locate/confirm:
+- **N (don't exist)** → **no search.** Go to **Step 4.5** to pick the connection, then
+  create Table TMLs in Step 5a (the default path).
+- **E (exist)** → search to find the GUIDs — but **choose the scope first** (4c).
+- **? (not sure)** → search — **choose the scope first** (4c). Report what was / wasn't
+  found; reuse the found ones, treat not-found tables as create (Step 4.5 + 5a).
 
-  ```bash
-  source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile {profile_name}
-  ```
+### 4c — Choose the search scope (E and ? paths only)
 
-  Match on database + schema + table name (`metadata_header.database_stripes`,
-  `metadata_header.schema_stripes`, `metadata_name`). For each table found, reuse its
-  name/GUID in the model's `model_tables[]` and **skip generating a Table TML** for it in
-  Step 5a. For **?**, report what was/wasn't found and treat the not-found ones as create.
-  For **E**, if a table the user expected is not found, say so and confirm before falling
-  back to create.
+A whole-instance scan is the slow path. Always offer the narrower option, and search by
+**table-name pattern** (`--name`) so the API does the filtering — never pull every table
+and filter locally:
 
-### 4.5c — Confirm any missing sources before proceeding
+```
+How should I search for these tables?
+  C  Within a specific connection — fastest; I'll list connections and search that one
+  I  Entire ThoughtSpot instance  — broader, slower
 
-If any table the plan intends to **create** is *not found* in the connection, surface it
-and require confirmation — this is the silent-failure case:
+Enter C / I :
+```
+
+```bash
+# Targeted by name — both scopes start here (NOT `--all`)
+source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile_name}
+```
+
+- **C (within a connection)** → first pick the connection (Step 4.5), then run the name
+  search above and **keep only results whose `metadata_header.dataSourceName` equals the
+  chosen connection name** (verified 2026-06-16: each search result carries its connection
+  in `metadata_header.dataSourceName`, e.g. `"APJ_TAB"`). Fastest, and unambiguous when the
+  same table name exists on several connections.
+- **I (entire instance)** → run the name search above with no connection filter.
+
+Match on table name (`metadata_name`) and, for the connection scope,
+`metadata_header.dataSourceName`. (db/schema also appear in `metadata_header` —
+`database_stripes` / `schema_stripes` — use them to disambiguate same-named tables within
+one connection.) For each table found, reuse its
+name/GUID in the model's `model_tables[]` and **skip generating a Table TML** for it in
+Step 5a. If a table the user said **Exists** is not found, say so and confirm before falling
+back to create.
+
+> Only fall back to `--all` (fetch every table) when no usable name pattern can be formed
+> (e.g. the name is too generic). Tell the user that cost before running it.
+
+### 4d — Confirm any missing sources before proceeding
+
+If any table the plan intends to **create** is *not found* on the chosen connection,
+surface it and require confirmation — this is the silent-failure case (a model TML that
+points at a table the connection can't see still *imports* cleanly, yet every search and
+liveboard built on it comes back empty):
 
 ```
 ⚠ The following table(s) are not visible to connection "{connection_name}":
@@ -820,6 +798,60 @@ and require confirmation — this is the silent-failure case:
 ```
 
 Do not proceed past this warning without the user's confirmation.
+
+---
+
+## Step 4.5 — Select ThoughtSpot Connection (create path)
+
+Run this **only when a table will be created** (the **N** path, or tables not found on the
+**E** / **?** paths) or to scope a connection search in 4c. **If every table was matched to
+an existing object, skip this step** — reusing tables needs no connection work.
+
+List connections and let the user pick:
+
+```bash
+source ~/.zshenv && ts connections list --profile {profile_name}
+```
+
+`ts connections list` auto-paginates and returns all connections. Display them as a
+numbered list (name, type, database). If only one exists, auto-select and confirm.
+
+```
+Available ThoughtSpot connections:
+  1. SNOWFLAKE_PROD    (RDBMS_SNOWFLAKE)   — PROD_DB
+  2. ANALYTICS_DW      (RDBMS_SNOWFLAKE)   — ANALYTICS_DB
+
+Which connection should the generated tables use? (Enter number):
+```
+
+Save the selected connection's exact `name` value as `{connection_name}`.
+
+**Resolving db / schema / table for new tables.** Each new table needs the `{db}`,
+`{schema}`, and `{db_table}` it maps to on the chosen connection. Prefer the cheapest
+source:
+
+1. **Ask the user** for the db / schema (and table name if it differs from the source) —
+   usually instant, and they know it.
+2. **Only if they're unsure**, fetch the connection schema to resolve names:
+   ```bash
+   source ~/.zshenv && ts connections get {connection_id} --profile {profile_name}
+   ```
+   This uses the v1 `fetchConnection` endpoint — it can be slow and returns 404 on some
+   connection types, so treat it as the **fallback, not the default**. If it returns no
+   tables (empty `externalDatabases`) or fails, ask the user for the names directly.
+
+A connection is **required** for any table being created — there is no skip path.
+ThoughtSpot tables are logical objects over a **live** connection: the physical table must
+already exist in the database and the connection must already exist for the table to be
+created at all. Do not offer placeholders or a dry-run mode — they only produce objects
+that can never bind to data. If the user has no suitable connection, stop and tell them a
+connection exposing the source tables must be created first (the data pipeline / connection
+setup is out of this skill's scope).
+
+Use the connection's exact **name** in every table TML and SQL View TML — never a GUID. The
+v2 API cannot search connections by name, so the name string is both necessary and
+sufficient; do not try to resolve it to an ID. See
+`../../shared/schemas/thoughtspot-table-tml.md` "Connection Reference".
 
 ---
 
@@ -865,13 +897,13 @@ Key rules:
   directly (case-sensitive); never look up a GUID — the v2 API cannot search connections
   by name, and the name is what the TML needs. See `../../shared/schemas/thoughtspot-table-tml.md`
   "Connection Reference".
-- Use the `db`, `schema` values resolved from Step 4 (the connection is required, so these
+- Use the `db`, `schema` values resolved from Step 4.5 (the connection is required, so these
   are always real).
 - **`db_column_name` must match the physical column the connection exposes — not the
   Tableau name.** When a file source (CSV/Excel) was loaded into the warehouse, the loader
   usually normalizes names (`Item Type` → `ITEM_TYPE`: spaces→`_`, upper-cased). Use the
   warehouse column name for `db_column_name` (and the friendly Tableau caption for the
-  model column's display `name`). If unsure, the connection schema from Step 4
+  model column's display `name`). If unsure, the connection schema from Step 4.5
   (`externalDatabases`) lists the real column names; validation reports
   `column not found in connection` when they don't match.
 - **Date stored as VARCHAR — flag it.** If the Tableau column is typed `date`/`datetime`
@@ -1038,7 +1070,7 @@ See `../../shared/schemas/ts-model-conversion-invariants.md` for full detail.
 > Using `aggregation: COUNT_DISTINCT` silently flips `column_type` from MEASURE to ATTRIBUTE.
 >
 > **I6 — Connection referenced by name, never GUID.** In every table and sql_view TML block,
-> use `connection: name: "{name}"` — the display name from Step 4. GUIDs are environment-specific
+> use `connection: name: "{name}"` — the display name from Step 4.5. GUIDs are environment-specific
 > and will fail on any ThoughtSpot instance other than the one they were exported from.
 > See `../../shared/schemas/ts-model-conversion-invariants.md` (I1–I6).
 
@@ -1135,7 +1167,7 @@ express the step). Plain ranges (no `granularity`) keep `range_config`.
 (no static `<member>` elements in the TWB), query the warehouse at migration time to
 populate `list_config.list_choice[]`:
 1. Extract the SQL query or column reference from the Tableau parameter definition
-2. Execute against the warehouse connection from Step 4
+2. Execute against the warehouse connection from Step 4.5
 3. Use the distinct result values as `list_choice[]` entries
 4. Log in `MIGRATION_LIMITATIONS.md` that these values are a point-in-time snapshot
 
@@ -1865,7 +1897,7 @@ sql_view:
 ```
 
 Key rules:
-- `connection.name` is **required** — use `{connection_name}` from Step 4
+- `connection.name` is **required** — use `{connection_name}` from Step 4.5
 - `sql_query` contains the full SQL text from the Tableau `<relation>` element (decode
   HTML entities)
 - `sql_output_column` must match a column name or alias from the SQL query output
@@ -2907,6 +2939,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.11.0 | 2026-06-16 | **Reorder Step 4 / 4.5 so the source-table question comes first — don't waste time on unnecessary ThoughtSpot searches.** New **Step 4 — Confirm Source Tables** runs immediately after the parse and *before* any connection selection or search, with an explicit guard: do NOT run `ts metadata search` / `ts connections list` / `ts connections get` until the user answers E (exist) / N (don't) / ? (not sure). New **4c scoped-search choice** for the E/? paths — **C** search within a specific connection (fastest) vs **I** entire instance — and always search by `--name "%table%"` pattern, never `--all`-then-filter. Connection selection moves to **Step 4.5 (create path only)**, skipped entirely when every table is reused; the slow/404-prone `ts connections get` v1 schema fetch is now a documented fallback (ask the user for db/schema first). Mirrors the `ts-convert-from-databricks-mv` Step 7/8 ask-before-search flow. |
 | 1.10.0 | 2026-06-14 | Add row-offset table-calc translation (BL-024): tiered decision tree for INDEX/LOOKUP/FIRST/LAST/SIZE — native rank/Top-N, native window functions (`moving_sum`, `first_value`, `last_value`, `rank`), or omit based on `<table-calc>` addressing recoverability. New Step 3f extracts addressing context from TWB XML. Live-verified 2026-06-15: SQL pass-through `ORDER BY` fails for DATE/numeric columns; replaced with native TS functions that work for all column types. |
 | 1.9.1 | 2026-06-12 | **Fix static query-set `search_query` token order** (v1.9.0 follow-up, now live-verified). A static (fixed-N) Top-N query set's search is **`top N [dimension] [measure]`** — anchor dimension FIRST, then measure — not `[measure] [dimension]`. Verified against an exported set "Static Top 10" on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). Also corrected the static-form `config` defaults to the verified values: `hide_excluded_query_values: false` (shows an "Others" remainder bucket) + `group_excluded_query_values: "Others"`, with a note that hide/show is a display choice. Dropped the "static-form export not yet captured" caveat — it's now ground-truthed. Added the verified static export to `thoughtspot-sets-tml.md`. (Dynamic form unchanged.) |
 | 1.9.0 | 2026-06-12 | **Top-N/Bottom-N sets → ThoughtSpot query sets (BL-009 Phase 2b).** Replace Phase-2b deferral with a verified translation: Tableau `<group>` whose `<groupfilter>` tree contains `function='end'` → `cohort_type: ADVANCED`, `cohort_grouping_type: COLUMN_BASED` cohort, in **one of two forms by `count`**: (a) **dynamic** (parameter-driven N, `count='[Parameters].[X]'`) — embedded answer with a rank formula (`rank(sum(measure),'desc'/'asc')` for top/bottom) + a parameter-filter formula (`[formula_rank] <= [<alias>::<param>]`), N read from the migrated model parameter (live-verified ground truth); (b) **static** (fixed N, literal `count='N'`) — a plain `search_query: "top N [measure] [dimension]"` / `"bottom N …"` keyword search, no formulas (the `top N` keyword form is correct for fixed N — not wrong). Detection rules: `end='top'` → `top N`/`'desc'`; `end='bottom'` → `bottom N`/`'asc'`. Both emission templates added (Section 5b). **Stepped range → `list_config`:** a Tableau `<range granularity='N' .../>` parameter enumerates min→max by step → `list_config` (NOT `range_config` which loses the step); a count parameter for a Top-N set must use `list_config`. Import order: model (with param) → cohort. Tier table + audit coverage table updated (Top-N moved from "Partial/deferred" → "Native/Set"). Dropped nuances (null-pad, conditional measure) flagged for review. All live-verified 2026-06-12 on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). New worked example `worked-examples/tableau/topn-set-to-query-set.md`. Schema `thoughtspot-sets-tml.md` updated with verified COLUMN_BASED pattern. |

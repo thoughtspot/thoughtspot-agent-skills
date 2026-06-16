@@ -657,15 +657,37 @@ Enter Y / N / ?:
 
 Skip this step if the user answered **N** in Step 5 — go directly to Step 6B.
 
-**Search ThoughtSpot for all table objects:**
+**Choose the search scope first.** A whole-instance scan is the slow path — on a
+large instance `--all` pulls every table. Offer the narrower option and search by
+**table-name pattern** (`--name`), never `--all`-then-filter:
 
-```bash
-source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile {profile}
+```
+How should I search for these tables?
+  C  Within a specific connection — fastest; search that one connection's tables
+  I  Entire ThoughtSpot instance  — broader, slower
+
+Enter C / I :
 ```
 
-Filter the JSON to match each semantic view base table by database + schema + table name
-(`metadata_header.database_stripes`, `metadata_header.schema_stripes`, `metadata_name`).
-Build a map: `physical_table_name → {metadata_id, metadata_name}`.
+**Search by name (both scopes start here):**
+
+```bash
+source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
+```
+
+- **C (within a connection)** → keep only results whose
+  `metadata_header.dataSourceName` equals the chosen connection name (each result
+  carries its connection there, e.g. `"APJ_SNOW"`). Fastest, and unambiguous when the
+  same table name exists on several connections.
+- **I (entire instance)** → run the name search above with no connection filter.
+
+Filter the JSON to match each semantic view base table by table name (`metadata_name`)
+and, for the connection scope, `metadata_header.dataSourceName`; use
+`metadata_header.database_stripes` / `metadata_header.schema_stripes` to disambiguate
+same-named tables. Build a map: `physical_table_name → {metadata_id, metadata_name}`.
+
+> Only fall back to `--all` (fetch every table) when no usable name pattern can be
+> formed (e.g. the name is too generic). Tell the user that cost before running it.
 
 **Export TMLs for all found tables in one call to verify columns:**
 
@@ -1729,6 +1751,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.10.0 | 2026-06-16 | Step 6A table discovery: add a **connection-scoped vs instance-wide search choice** and search by `--name "%table%"` pattern instead of `--all`-then-filter. Connection scope filters results on `metadata_header.dataSourceName` (verified field). Avoids slow whole-instance scans on large instances. Mirrors the ts-convert-from-tableau Step 4c change. |
 | 1.9.0 | 2026-06-13 | Identifier resolution engine: facts parsing (BL-003b), metric→fact resolution (BL-003c), double aggregation via group_aggregate (BL-003), window metrics referencing metrics (GAP-13), joinless SV handling (GAP-03/BL-004). |
 | 1.8.0 | 2026-06-13 | Fail-loud parsing (C5): Step 4x scans for facts, AI clauses, cortex search, private, unknown grammar. LEFT_OUTER join default (F5). Fix SV discovery SQL (F8). Fix Mode C comparison to translate before diff (F7). |
 | 1.7.1 | 2026-06-13 | Add "never normalise API response names" rule (reverse-port from CoCo). |

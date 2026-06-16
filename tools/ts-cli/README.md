@@ -453,13 +453,16 @@ Fetch full connection details including the database/schema/table/column hierarc
 ts connections get 1f428ed0-c672-435d-a7e1-b4781e5f492c
 ```
 
-**Output:** Raw JSON from `POST /tspublic/v1/connection/fetchConnection`.
+**Output:** JSON in the legacy `dataWarehouseInfo.databases` shape, adapted from
+`POST /api/rest/2.0/connection/search` (the v2 endpoint).
 
-> **Note:** This command uses the v1 API endpoint as no v2 equivalent that returns
-> the full table/column hierarchy has been confirmed yet. It requires the
-> `CAN_CREATE_OR_EDIT_CONNECTIONS` privilege and may return a 500 error on some
-> ThoughtSpot instances. Update this command once a v2 fetch endpoint is confirmed
-> in the REST Playground.
+> **Note:** This command now uses the v2 `connection/search` endpoint — the v1
+> `/tspublic/v1/connection/fetchConnection` endpoint was removed on newer
+> ThoughtSpot Cloud builds (returns 404). Requires the
+> `CAN_CREATE_OR_EDIT_CONNECTIONS` privilege. The database/table/column hierarchy
+> is only populated for connections that authenticate with a stored
+> `SERVICE_ACCOUNT`; OAuth/PKCE/per-user connections return an empty hierarchy
+> (use `ts metadata search` to find already-registered tables instead).
 
 ---
 
