@@ -15,7 +15,7 @@ The conversion logic is identical — only the I/O layer differs.
 ## Setup
 
 ```python
-%run ../notebooks/ts_client
+%run ../../notebooks/ts_client
 client = ThoughtSpotClient("my-profile")
 ```
 
@@ -23,16 +23,16 @@ client = ThoughtSpotClient("my-profile")
 
 ## References
 
-Same shared references as the CLI version — deployed to the workspace by the Asset Bundle:
+All paths relative to the `.assistant/skills/` root:
 
 | File | Purpose |
 |---|---|
-| shared/mappings/ts-databricks/ts-to-databricks-rules.md | Column classification, aggregation, data type rules |
-| shared/mappings/ts-databricks/ts-databricks-formula-translation.md | Formula translation rules |
-| shared/mappings/ts-databricks/ts-databricks-properties.md | Property coverage matrix |
-| shared/schemas/databricks-metric-view.md | Metric View DDL syntax and YAML schema |
-| shared/schemas/thoughtspot-table-tml.md | Table TML field reference |
-| shared/schemas/thoughtspot-model-tml.md | Model TML field reference |
+| `../shared/mappings/ts-databricks/ts-to-databricks-rules.md` | Column classification, aggregation, data type rules |
+| `../shared/mappings/ts-databricks/ts-databricks-formula-translation.md` | Formula translation rules |
+| `../shared/mappings/ts-databricks/ts-databricks-properties.md` | Property coverage matrix |
+| `../shared/schemas/databricks-metric-view.md` | Metric View DDL syntax and YAML schema |
+| `../shared/schemas/thoughtspot-table-tml.md` | Table TML field reference |
+| `../shared/schemas/thoughtspot-model-tml.md` | Model TML field reference |
 
 ---
 

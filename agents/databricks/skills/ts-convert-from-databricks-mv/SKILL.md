@@ -15,7 +15,7 @@ The conversion logic is identical — only the I/O layer differs.
 ## Setup
 
 ```python
-%run ../notebooks/ts_client
+%run ../../notebooks/ts_client
 client = ThoughtSpotClient("my-profile")
 ```
 
@@ -23,14 +23,14 @@ client = ThoughtSpotClient("my-profile")
 
 ## References
 
-Same shared references as the CLI version:
+All paths relative to the `.assistant/skills/` root:
 
 | File | Purpose |
 |---|---|
-| shared/mappings/ts-databricks/ts-from-databricks-rules.md | Column classification and type mapping rules |
-| shared/mappings/ts-databricks/ts-databricks-formula-translation.md | Formula translation rules |
-| shared/schemas/thoughtspot-table-tml.md | Table TML field reference |
-| shared/schemas/thoughtspot-model-tml.md | Model TML field reference |
+| `../shared/mappings/ts-databricks/ts-from-databricks-rules.md` | Column classification and type mapping rules |
+| `../shared/mappings/ts-databricks/ts-databricks-formula-translation.md` | Formula translation rules |
+| `../shared/schemas/thoughtspot-table-tml.md` | Table TML field reference |
+| `../shared/schemas/thoughtspot-model-tml.md` | Model TML field reference |
 
 ---
 

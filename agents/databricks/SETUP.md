@@ -231,15 +231,28 @@ tml = client.tml_export(["abc-123"], fqn=True, associated=True, parse=True)
 
 ## Genie Code usage
 
-In Genie Code Agent mode, skills are invoked as conversation commands:
+`deploy.sh` installs skills into your personal `.assistant/` workspace path
+where Genie discovers them automatically:
 
 ```
-/ts-convert-to-databricks-mv
-/ts-convert-from-databricks-mv
+/Workspace/Users/<your-email>/.assistant/
+  skills/
+    ts-convert-from-databricks-mv/SKILL.md
+    ts-convert-to-databricks-mv/SKILL.md
+    shared/mappings/ts-databricks/...
+    shared/schemas/...
+  notebooks/
+    ts_client                              ← notebook for %run
 ```
 
 Each skill uses `ThoughtSpotClient` internally — you just need a profile configured
 via Step 3 above.
+
+To verify the deployment:
+
+```bash
+databricks workspace list /Workspace/Users/<your-email>/.assistant/skills
+```
 
 ---
 
