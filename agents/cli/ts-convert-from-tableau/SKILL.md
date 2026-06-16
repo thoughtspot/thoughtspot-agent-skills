@@ -763,10 +763,13 @@ Enter C / I :
 source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile_name}
 ```
 
-- **C (within a connection)** → first pick the connection (Step 4.5), then run the name
-  search above and **keep only results whose `metadata_header.dataSourceName` equals the
-  chosen connection name** (verified 2026-06-16: each search result carries its connection
-  in `metadata_header.dataSourceName`, e.g. `"APJ_TAB"`). Fastest, and unambiguous when the
+- **C (within a connection)** → **first identify the connection using the
+  N (name it) / F (filter by substring) / L (list all) prompt in Step 4.5 — present that
+  prompt and let the user choose; do NOT run `ts connections list` and dump every connection
+  by default.** Once the connection is chosen, run the name search above and **keep only
+  results whose `metadata_header.dataSourceName` equals the chosen connection name**
+  (verified 2026-06-16: each search result carries its connection in
+  `metadata_header.dataSourceName`, e.g. `"APJ_TAB"`). Fastest, and unambiguous when the
   same table name exists on several connections.
 - **I (entire instance)** → run the name search above with no connection filter.
 
@@ -801,7 +804,7 @@ Do not proceed past this warning without the user's confirmation.
 
 ---
 
-## Step 4.5 — Select ThoughtSpot Connection (create path)
+## Step 4.5 — Select ThoughtSpot Connection (create path or connection-scoped search)
 
 Run this **only when a table will be created** (the **N** path, or tables not found on the
 **E** / **?** paths) or to scope a connection search in 4c. **If every table was matched to
@@ -2960,6 +2963,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.12.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 4c connection-scoped search path.** The 4c "C — within a connection" path now explicitly presents the Step 4.5 N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Broadened the Step 4.5 title to "(create path or connection-scoped search)" so it's the canonical home of the prompt for both the create and the search-scope cases. Mirrors the same fix in ts-convert-from-snowflake-sv and ts-convert-from-databricks-mv. |
 | 1.12.0 | 2026-06-16 | Step 4.5 connection selection: add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-snowflake-sv and ts-convert-from-databricks-mv. |
 | 1.11.0 | 2026-06-16 | **Reorder Step 4 / 4.5 so the source-table question comes first — don't waste time on unnecessary ThoughtSpot searches.** New **Step 4 — Confirm Source Tables** runs immediately after the parse and *before* any connection selection or search, with an explicit guard: do NOT run `ts metadata search` / `ts connections list` / `ts connections get` until the user answers E (exist) / N (don't) / ? (not sure). New **4c scoped-search choice** for the E/? paths — **C** search within a specific connection (fastest) vs **I** entire instance — and always search by `--name "%table%"` pattern, never `--all`-then-filter. Connection selection moves to **Step 4.5 (create path only)**, skipped entirely when every table is reused; the slow/404-prone `ts connections get` v1 schema fetch is now a documented fallback (ask the user for db/schema first). Mirrors the `ts-convert-from-databricks-mv` Step 7/8 ask-before-search flow. |
 | 1.10.0 | 2026-06-14 | Add row-offset table-calc translation (BL-024): tiered decision tree for INDEX/LOOKUP/FIRST/LAST/SIZE — native rank/Top-N, native window functions (`moving_sum`, `first_value`, `last_value`, `rank`), or omit based on `<table-calc>` addressing recoverability. New Step 3f extracts addressing context from TWB XML. Live-verified 2026-06-15: SQL pass-through `ORDER BY` fails for DATE/numeric columns; replaced with native TS functions that work for all column types. |

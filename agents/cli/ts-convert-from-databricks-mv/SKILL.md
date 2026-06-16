@@ -634,10 +634,13 @@ Enter C / I :
 source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
 ```
 
-- **C (within a connection)** → keep only results whose
-  `metadata_header.dataSourceName` equals the chosen connection name (each result
-  carries its connection there, e.g. `"APJ_DBX"`). Fastest, and unambiguous when the
-  same table name exists on several connections.
+- **C (within a connection)** → **first identify the connection using the
+  N (name it) / F (filter by substring) / L (list all) prompt in Step 8B — present that
+  prompt and let the user choose; do NOT run `ts connections list` and dump every
+  connection by default.** Then keep only results whose `metadata_header.dataSourceName`
+  equals the chosen connection name (each result carries its connection there, e.g.
+  `"APJ_DBX"`). Fastest, and unambiguous when the same table name exists on several
+  connections.
 - **I (entire instance)** → run the name search above with no connection filter.
 
 Filter the JSON to match the MV source table by table name (`metadata_name`) and, for
@@ -683,7 +686,7 @@ the model.
 
 ---
 
-### Step 8B: Create ThoughtSpot Table objects (Scenario B)
+### Step 8B: Create ThoughtSpot Table objects (Scenario B) — also the connection picker for the Step 8A connection-scoped search
 
 **Get all column names and types for the source table:**
 
@@ -1283,6 +1286,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 8A connection-scoped search path.** The 8A "C — within a connection" path now explicitly presents the Step 8B N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Mirrors the same fix in ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
 | 1.5.0 | 2026-06-16 | Connection selection (Step 8B): add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list --type DATABRICKS`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
 | 1.4.0 | 2026-06-16 | Step 8A table discovery: add a **connection-scoped vs instance-wide search choice** and search by `--name "%table%"` pattern instead of `--all`-then-filter. Connection scope filters results on `metadata_header.dataSourceName` (verified field). Avoids slow whole-instance scans on large instances. Mirrors the ts-convert-from-tableau Step 4c change. |
 | 1.3.0 | 2026-06-12 | Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). |
