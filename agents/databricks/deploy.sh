@@ -6,10 +6,29 @@
 #   2. Genie  → /Workspace/Users/<email>/.assistant/  (skills, shared refs, ts_client)
 #
 # Usage:
-#   ./deploy.sh          # deploys to the default target (dev)
-#   ./deploy.sh -t prod  # deploys to prod
+#   ./deploy.sh -u your-email@company.com          # deploys to dev (default)
+#   ./deploy.sh -u your-email@company.com -t prod  # deploys to prod
+#
+# The -u flag is required — Genie discovers skills under the user's personal
+# workspace path, not the Service Principal's.
 
 set -euo pipefail
+
+# --- Parse -u flag ---
+USER_EMAIL=""
+BUNDLE_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -u) USER_EMAIL="$2"; shift 2 ;;
+        *)  BUNDLE_ARGS+=("$1"); shift ;;
+    esac
+done
+
+if [ -z "$USER_EMAIL" ]; then
+    echo "Error: -u <email> is required."
+    echo "Usage: ./deploy.sh -u your-email@company.com [-t dev|prod]"
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -32,19 +51,12 @@ echo "✓ Copied shared references → $SHARED_DST"
 
 # --- Deploy bundle (notebooks + token refresh job) ---
 cd "$SCRIPT_DIR"
-databricks bundle deploy "$@"
+databricks bundle deploy "${BUNDLE_ARGS[@]+"${BUNDLE_ARGS[@]}"}"
 echo "✓ Bundle deployed"
 
 # --- Deploy Genie skills to user's .assistant/ path ---
 echo ""
 echo "Deploying Genie skills to .assistant/ ..."
-
-USER_EMAIL=$(databricks current-user me --output json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['userName'])")
-if [ -z "$USER_EMAIL" ]; then
-    echo "⚠ Could not detect workspace user — skipping .assistant/ deploy."
-    echo "  Run 'databricks auth login' or set DATABRICKS_TOKEN."
-    exit 0
-fi
 
 ASSISTANT_ROOT="/Workspace/Users/${USER_EMAIL}/.assistant"
 

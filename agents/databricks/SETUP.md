@@ -120,17 +120,21 @@ permissions:
 
 Always use `deploy.sh` instead of raw `databricks bundle deploy`. The script
 copies shared references from `agents/shared/` into a local `shared/` dir
-(gitignored) so the bundle can include them, then runs the bundle deploy.
+(gitignored) so the bundle can include them, then runs the bundle deploy and
+imports skills into your personal `.assistant/` path for Genie discovery.
+
+The `-u` flag is **required** — it specifies the Databricks user whose
+`.assistant/` directory receives the skills:
 
 ```bash
 cd agents/databricks
-./deploy.sh -t dev
+./deploy.sh -u your-email@company.com -t dev
 ```
 
 To deploy to production instead:
 
 ```bash
-./deploy.sh -t prod
+./deploy.sh -u your-email@company.com -t prod
 ```
 
 This syncs the following files to `/Workspace/thoughtspot-skills` in the
@@ -231,28 +235,58 @@ tml = client.tml_export(["abc-123"], fqn=True, associated=True, parse=True)
 
 ## Genie Code usage
 
-`deploy.sh` installs skills into your personal `.assistant/` workspace path
-where Genie discovers them automatically:
+Skills must live under your **personal** workspace path for Genie to discover them.
+`deploy.sh` handles this automatically, or you can set it up manually.
+
+### Target layout
 
 ```
 /Workspace/Users/<your-email>/.assistant/
   skills/
     ts-convert-from-databricks-mv/SKILL.md
     ts-convert-to-databricks-mv/SKILL.md
-    shared/mappings/ts-databricks/...
-    shared/schemas/...
+  shared/
+    mappings/ts-databricks/...
+    schemas/...
   notebooks/
     ts_client                              ← notebook for %run
 ```
 
-Each skill uses `ThoughtSpotClient` internally — you just need a profile configured
-via Step 3 above.
+### Option A: CLI deploy (recommended)
 
-To verify the deployment:
+`deploy.sh` copies skills, shared references, and `ts_client` into your
+`.assistant/` path automatically. See [Step 2](#step-2-deploy).
+
+### Option B: Manual setup (no Databricks CLI)
+
+If you don't have the Databricks CLI installed, you can set up Genie skills
+manually through the Databricks workspace UI:
+
+1. In the workspace sidebar, navigate to your home folder
+   (`/Workspace/Users/<your-email>/`)
+2. Create the following folder structure:
+   - `.assistant/skills/ts-convert-from-databricks-mv/`
+   - `.assistant/skills/ts-convert-to-databricks-mv/`
+   - `.assistant/shared/mappings/ts-databricks/`
+   - `.assistant/shared/schemas/`
+   - `.assistant/notebooks/`
+3. Upload each skill's `SKILL.md` into its matching workspace folder
+4. Upload the shared reference files from `agents/shared/`:
+   - `mappings/ts-databricks/*.md` → `.assistant/shared/mappings/ts-databricks/`
+   - `schemas/databricks-metric-view.md`, `thoughtspot-table-tml.md`,
+     `thoughtspot-model-tml.md` → `.assistant/shared/schemas/`
+5. Import `agents/databricks/notebooks/ts_client.py` as a **Notebook** (not a
+   file) into `.assistant/notebooks/` — this is required for `%run` to work
+6. Similarly import `ts_profile_setup.py` and `token_refresh.py` as notebooks
+
+### Verify
 
 ```bash
 databricks workspace list /Workspace/Users/<your-email>/.assistant/skills
 ```
+
+Each skill uses `ThoughtSpotClient` internally — you just need a profile configured
+via Step 3 above.
 
 ---
 
@@ -263,7 +297,7 @@ Re-run the deploy script after pulling changes:
 ```bash
 cd agents/databricks
 git pull
-./deploy.sh -t dev
+./deploy.sh -u your-email@company.com -t dev
 ```
 
 ---
