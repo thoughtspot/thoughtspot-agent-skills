@@ -1,4 +1,9 @@
 # Databricks notebook source
+# DBTITLE 1,Install dependencies
+# MAGIC %pip install -q requests pyyaml
+
+# COMMAND ----------
+
 # DBTITLE 1,Load ThoughtSpotClient
 # MAGIC %run ./ts_client
 
