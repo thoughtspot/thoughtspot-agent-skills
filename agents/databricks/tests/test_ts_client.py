@@ -1330,6 +1330,13 @@ if _notebooks_dir not in _sys.path:
 from token_refresh import refresh_all_profiles  # noqa: E402
 
 
+def _patch_refresh_put_secret(mock_dbutils):
+    """Patch token_refresh._put_secret to delegate to mock_dbutils.secrets.put."""
+    def _mock_put(dbutils, scope, key, value):
+        mock_dbutils.secrets.put(scope, key, value)
+    return patch("token_refresh._put_secret", side_effect=_mock_put)
+
+
 class TestTokenRefresh:
     """Tests for refresh_all_profiles() in notebooks/token_refresh.py."""
 
@@ -1350,7 +1357,8 @@ class TestTokenRefresh:
         mock_dbutils.secrets.put(scope, "username", "admin@example.com")
         mock_dbutils.secrets.put(scope, "password", "super-secret-pw")
 
-        with patch("requests.post", return_value=self._mock_token_post("fresh-token-xyz")) as mock_post:
+        with _patch_refresh_put_secret(mock_dbutils), \
+             patch("requests.post", return_value=self._mock_token_post("fresh-token-xyz")) as mock_post:
             results = refresh_all_profiles(mock_dbutils)
 
         assert results["staging"] == "OK"
@@ -1391,7 +1399,8 @@ class TestTokenRefresh:
         mock_dbutils.secrets.put(scope, "username", "admin@example.com")
         mock_dbutils.secrets.put(scope, "secret_key", "my-secret-key-999")
 
-        with patch("requests.post", return_value=self._mock_token_post("sk-fresh-token")) as mock_post:
+        with _patch_refresh_put_secret(mock_dbutils), \
+             patch("requests.post", return_value=self._mock_token_post("sk-fresh-token")) as mock_post:
             results = refresh_all_profiles(mock_dbutils)
 
         assert results["dev"] == "OK"
@@ -1457,7 +1466,8 @@ class TestTokenRefresh:
         mock_dbutils.secrets.put(scope_pw, "username", "user@example.com")
         mock_dbutils.secrets.put(scope_pw, "password", "pw123")
 
-        with patch("requests.post", return_value=self._mock_token_post("fresh-p2-token")):
+        with _patch_refresh_put_secret(mock_dbutils), \
+             patch("requests.post", return_value=self._mock_token_post("fresh-p2-token")):
             results = refresh_all_profiles(mock_dbutils)
 
         assert results["p1"] == "SKIPPED"

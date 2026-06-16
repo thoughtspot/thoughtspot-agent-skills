@@ -1,4 +1,9 @@
 # Databricks notebook source
+# DBTITLE 1,Install dependencies
+# MAGIC %pip install -q requests
+
+# COMMAND ----------
+
 """
 token_refresh.py — Scheduled token refresh for ThoughtSpot profiles in Databricks Secrets.
 
@@ -21,6 +26,24 @@ Usage from a notebook:
 import requests
 
 
+# ---------------------------------------------------------------------------
+# Secrets write helper — dbutils.secrets is read-only; writes use REST API.
+# ---------------------------------------------------------------------------
+
+def _put_secret(dbutils, scope: str, key: str, value: str) -> None:
+    """Write a secret value via the Databricks Secrets REST API."""
+    ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+    host = ctx.apiUrl().get().rstrip("/")
+    token = ctx.apiToken().get()
+    resp = requests.post(
+        f"{host}/api/2.0/secrets/put",
+        json={"scope": scope, "key": key, "string_value": value},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+
 def refresh_all_profiles(dbutils) -> dict:
     """Refresh ThoughtSpot tokens for all password and secret_key profiles.
 
@@ -41,14 +64,14 @@ def refresh_all_profiles(dbutils) -> dict:
     results: dict = {}
 
     scopes = dbutils.secrets.listScopes()
-    thoughtspot_scopes = [s for s in scopes if s.startswith("thoughtspot-")]
+    thoughtspot_scopes = [s.name for s in scopes if s.name.startswith("thoughtspot-")]
 
     for scope in thoughtspot_scopes:
         profile = scope[len("thoughtspot-"):]
 
         try:
             auth_method = dbutils.secrets.get(scope, "auth_method")
-        except KeyError:
+        except Exception:
             results[profile] = "ERROR: missing auth_method"
             continue
 
@@ -93,7 +116,7 @@ def refresh_all_profiles(dbutils) -> dict:
                 results[profile] = "ERROR: no token in response"
                 continue
 
-            dbutils.secrets.put(scope, "token", token)
+            _put_secret(dbutils, scope, "token", token)
             results[profile] = "OK"
 
         except Exception as e:

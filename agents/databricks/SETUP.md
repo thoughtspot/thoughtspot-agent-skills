@@ -143,21 +143,43 @@ target workspace and creates the token refresh job:
 
 ---
 
-## Step 3: Create a ThoughtSpot profile
+## Step 3: Manage ThoughtSpot profiles
 
-1. Open `ts_profile_setup` notebook in your Databricks workspace
-2. Attach to any cluster
-3. Run all cells — widgets appear at the top
-4. Fill in:
-   - **Profile name:** a short name (e.g. `production`, `staging`)
-   - **ThoughtSpot URL:** your instance URL (e.g. `https://mycompany.thoughtspot.cloud`)
-   - **Auth method:** `bearer_token`, `password`, or `secret_key`
+Open `ts_profile_setup` in your workspace:
+**Workspace > /Workspace/thoughtspot-skills/notebooks/ts_profile_setup**
+
+Attach to any interactive compute (all-purpose cluster or serverless notebook).
+
+The notebook displays an **ipywidgets button bar** with five actions:
+
+| Button | What it does |
+|---|---|
+| **List** | Show all stored ThoughtSpot profiles in an HTML table |
+| **Create** | Show form fields for a new profile; click Save to store in Secrets |
+| **Update** | Select an existing profile, edit fields (rename supported); Save |
+| **Delete** | Select a profile and click Confirm Delete |
+| **Test** | Select a profile and click Run Test — calls ThoughtSpot `whoami()` |
+
+### Workflow
+
+1. **Run all cells** — the first cell installs dependencies, the second loads
+   `ThoughtSpotClient`, the third defines functions, and the last renders the
+   button UI
+2. **Click a button** to perform an action — forms appear inline, results
+   display in the output area below the buttons
+3. Credentials are entered via a **password field** (masked) and stored
+   directly in Databricks Secrets — they are never saved in the notebook
+
+### Creating your first profile
+
+1. Click **Create**
+2. Fill in the form:
+   - **Profile:** a short name (e.g. `default`, `production`)
+   - **URL:** e.g. `https://mycompany.thoughtspot.cloud`
    - **Username:** your ThoughtSpot username or email
-   - **Credential:** your token, password, or secret key
-5. Run all cells again to store the profile
-
-The credential is stored in Databricks Secrets scope `thoughtspot-{profile}` and
-never appears in notebook output.
+   - **Auth:** `bearer_token`, `password`, or `secret_key`
+   - **Credential:** your token, password, or secret key (masked)
+3. Click **Save** — credential is stored in Secrets and the form clears
 
 ---
 

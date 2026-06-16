@@ -6,6 +6,7 @@ can run without a live Databricks cluster.
 """
 
 import builtins
+from types import SimpleNamespace
 
 import pytest
 
@@ -42,9 +43,13 @@ class MockSecrets:
             raise KeyError(f"Scope '{scope}' not found.")
         return builtins.list(self._scopes[scope].keys())
 
-    def listScopes(self) -> "list[str]":
-        """List all scope names."""
-        return builtins.list(self._scopes.keys())
+    def listScopes(self):
+        """List all scopes as objects with a .name attribute (matches real Databricks)."""
+        return [SimpleNamespace(name=k) for k in self._scopes]
+
+    def deleteScope(self, scope: str) -> None:
+        """Delete a scope and all its secrets."""
+        self._scopes.pop(scope, None)
 
 
 class MockWidgets:
