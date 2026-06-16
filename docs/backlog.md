@@ -1399,3 +1399,43 @@ pass-through. Note as a product input; not implementable in the skill.
 - Verification: re-run against the `tableau-migration-testing` corpus; expect the
   `INDEX`/`LOOKUP`/`FIRST`/`LAST` blocker count to fall from ~60 workbooks toward the
   ambiguous-addressing residue only
+
+---
+
+## BL-025 — Review connection-selection parity for the Databricks Genie agent skill
+
+**Source:** Live Tableau migration session (2026-06-16) — connection-identification feature (PR #88)
+**Affects:** agents/databricks/skills/ts-convert-from-databricks-mv (Genie Code runtime)
+**Status:** Open
+**Related:** PR #88 (connection-identification prompt in the three CLI from-* skills)
+
+### Problem
+
+PR #88 added a how-to-identify-the-connection prompt (N name it / F filter by partial
+string / L list all) to the connection-selection step of the three **CLI** from-* conversion
+skills (`agents/cli/ts-convert-from-tableau`, `-from-snowflake-sv`, `-from-databricks-mv`).
+
+The **Databricks Genie agent** skill (`agents/databricks/skills/ts-convert-from-databricks-mv`)
+is a separate runtime (runs inside Databricks via `ThoughtSpotClient` / `%run ts_client`,
+deployed by `databricks bundle deploy`). It is currently a thin ~63-line mirror with **no
+explicit connection-selection step** — its steps are read MV → map to TML → import. So the
+new prompt was not (and could not be 1:1) applied there.
+
+### Question to resolve
+
+Should the Genie skill gain an explicit connection-selection step for parity? The Genie
+runtime already has `ThoughtSpotClient.connections_list()` (in `notebooks/ts_client.py`), so
+the same N/F/L prompt is feasible using that instead of the `ts` CLI. Decide whether:
+1. The Genie skill should surface connection selection at all (today it relies on the
+   connection name being baked into the generated table TML), and if so
+2. Mirror the N/F/L prompt against `client.connections_list()`, keeping wording consistent
+   with the CLI skills.
+
+Also review the sibling `agents/databricks/skills/ts-convert-to-databricks-mv` for any
+analogous list-pick UX that should match.
+
+### Notes
+
+- `agents/databricks/` is not part of the root CLAUDE.md change-impact mirror set (cli /
+  claude / coco-snowsight); it is its own deployable runtime, so parity is a deliberate
+  review, not an automatic validator requirement.
