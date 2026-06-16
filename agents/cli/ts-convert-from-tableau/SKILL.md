@@ -807,23 +807,44 @@ Run this **only when a table will be created** (the **N** path, or tables not fo
 **E** / **?** paths) or to scope a connection search in 4c. **If every table was matched to
 an existing object, skip this step** — reusing tables needs no connection work.
 
-List connections and let the user pick:
+**Choose how to identify the connection — don't dump the full list by default.** A long
+connection list is noise when the user already knows the one they want. Ask first:
+
+```
+How would you like to choose the ThoughtSpot connection?
+  N  Name it     — type the exact connection name; I'll use it directly
+  F  Filter      — give a partial string; I'll list only connections that match
+  L  List all    — show every connection and pick by number
+
+Enter N / F / L:
+```
+
+Then fetch the connections once (auto-paginated, returns all):
 
 ```bash
 source ~/.zshenv && ts connections list --profile {profile_name}
 ```
 
-`ts connections list` auto-paginates and returns all connections. Display them as a
-numbered list (name, type, database). If only one exists, auto-select and confirm.
+Resolve the user's choice against that result:
 
-```
-Available ThoughtSpot connections:
-  1. SNOWFLAKE_PROD    (RDBMS_SNOWFLAKE)   — PROD_DB
-  2. ANALYTICS_DW      (RDBMS_SNOWFLAKE)   — ANALYTICS_DB
+- **N (name it)** — match the typed name against the returned `name` values
+  (case-sensitive). Exactly one match → use it. No match → show the closest names and
+  re-ask. Don't fabricate a name the list doesn't contain — the table TML needs the exact,
+  case-sensitive connection name.
+- **F (filter)** — keep connections whose `name` contains the string (case-insensitive),
+  show them as a short numbered list (name, type, database), and pick from that. One match
+  → auto-select and confirm; none → widen the string or switch to **L**.
+- **L (list all)** — show the full numbered list and pick by number:
 
-Which connection should the generated tables use? (Enter number):
-```
+  ```
+  Available ThoughtSpot connections:
+    1. SNOWFLAKE_PROD    (RDBMS_SNOWFLAKE)   — PROD_DB
+    2. ANALYTICS_DW      (RDBMS_SNOWFLAKE)   — ANALYTICS_DB
 
+  Which connection should the generated tables use? (Enter number):
+  ```
+
+If only one connection exists in total, auto-select it and confirm regardless of the choice.
 Save the selected connection's exact `name` value as `{connection_name}`.
 
 **Resolving db / schema / table for new tables.** Each new table needs the `{db}`,
@@ -2939,6 +2960,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.12.0 | 2026-06-16 | Step 4.5 connection selection: add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-snowflake-sv and ts-convert-from-databricks-mv. |
 | 1.11.0 | 2026-06-16 | **Reorder Step 4 / 4.5 so the source-table question comes first — don't waste time on unnecessary ThoughtSpot searches.** New **Step 4 — Confirm Source Tables** runs immediately after the parse and *before* any connection selection or search, with an explicit guard: do NOT run `ts metadata search` / `ts connections list` / `ts connections get` until the user answers E (exist) / N (don't) / ? (not sure). New **4c scoped-search choice** for the E/? paths — **C** search within a specific connection (fastest) vs **I** entire instance — and always search by `--name "%table%"` pattern, never `--all`-then-filter. Connection selection moves to **Step 4.5 (create path only)**, skipped entirely when every table is reused; the slow/404-prone `ts connections get` v1 schema fetch is now a documented fallback (ask the user for db/schema first). Mirrors the `ts-convert-from-databricks-mv` Step 7/8 ask-before-search flow. |
 | 1.10.0 | 2026-06-14 | Add row-offset table-calc translation (BL-024): tiered decision tree for INDEX/LOOKUP/FIRST/LAST/SIZE — native rank/Top-N, native window functions (`moving_sum`, `first_value`, `last_value`, `rank`), or omit based on `<table-calc>` addressing recoverability. New Step 3f extracts addressing context from TWB XML. Live-verified 2026-06-15: SQL pass-through `ORDER BY` fails for DATE/numeric columns; replaced with native TS functions that work for all column types. |
 | 1.9.1 | 2026-06-12 | **Fix static query-set `search_query` token order** (v1.9.0 follow-up, now live-verified). A static (fixed-N) Top-N query set's search is **`top N [dimension] [measure]`** — anchor dimension FIRST, then measure — not `[measure] [dimension]`. Verified against an exported set "Static Top 10" on se-thoughtspot (model `TEST_SV_DMSI_AI_CONTEXT`). Also corrected the static-form `config` defaults to the verified values: `hide_excluded_query_values: false` (shows an "Others" remainder bucket) + `group_excluded_query_values: "Others"`, with a note that hide/show is a display choice. Dropped the "static-form export not yet captured" caveat — it's now ground-truthed. Added the verified static export to `thoughtspot-sets-tml.md`. (Dynamic form unchanged.) |

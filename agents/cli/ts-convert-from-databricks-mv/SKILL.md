@@ -696,16 +696,37 @@ Execute via the SQL execution pattern. The response `data_array` contains rows
 the data type mapping in
 [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md).
 
-Ask the user to confirm which ThoughtSpot connection to use (or auto-select if only
-one Databricks connection exists):
+**Choose how to identify the connection — don't dump the full list by default.** A long
+connection list is noise when the user already knows the one they want. Ask first:
+
+```
+How would you like to choose the ThoughtSpot connection?
+  N  Name it     — type the exact connection name; I'll use it directly
+  F  Filter      — give a partial string; I'll list only connections that match
+  L  List all    — show every connection and pick by number
+
+Enter N / F / L:
+```
+
+Then fetch the connections once (auto-paginated, returns all of the specified type):
 
 ```bash
 source ~/.zshenv && ts connections list --type DATABRICKS --profile {profile}
 ```
 
-`ts connections list` auto-paginates and returns all connections of the specified type.
-Display matching connections and ask the user to confirm. Once confirmed,
-use the exact `name` value from the API response.
+Resolve the user's choice against that result:
+
+- **N (name it)** — match the typed name against the returned `name` values
+  (case-sensitive). Exactly one match → use it. No match → show the closest names and
+  re-ask. Don't fabricate a name the list doesn't contain — the table TML needs the exact,
+  case-sensitive connection name.
+- **F (filter)** — keep connections whose `name` contains the string (case-insensitive),
+  show them as a short numbered list (name, type, database), and pick from that. One match
+  → auto-select and confirm; none → widen the string or switch to **L**.
+- **L (list all)** — show the full numbered list and pick by number.
+
+If only one connection exists in total, auto-select it and confirm regardless of the choice.
+Use the exact `name` value from the API response in the table TML.
 
 Create the ThoughtSpot Table object:
 
@@ -1262,6 +1283,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-06-16 | Connection selection (Step 8B): add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list --type DATABRICKS`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
 | 1.4.0 | 2026-06-16 | Step 8A table discovery: add a **connection-scoped vs instance-wide search choice** and search by `--name "%table%"` pattern instead of `--all`-then-filter. Connection scope filters results on `metadata_header.dataSourceName` (verified field). Avoids slow whole-instance scans on large instances. Mirrors the ts-convert-from-tableau Step 4c change. |
 | 1.3.0 | 2026-06-12 | Adopt PT1 pass-through policy (scalar reliable; flag aggregate pass-through for review). |
 | 1.2.0 | 2026-06-12 | Add pre-import validation gate (I1/I2/I4/I5) before model TML import (BL-001). |

@@ -793,15 +793,41 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    ```
    This returns every column for every table/view in the schema in one round-trip.
 
-2. Ask the user to confirm which ThoughtSpot connection to use (or auto-select if
-   only one matches the semantic view's database). Use the connection **name** directly
+2. Choose which ThoughtSpot connection to use. Use the connection **name** directly
    in table TML — no GUID lookup is needed or possible from available procedures.
 
-   `ts connections list` auto-paginates and returns all connections. Filter the
-   output by the user's connection name to confirm it exists.
+   **Choose how to identify the connection — don't dump the full list by default.** A long
+   connection list is noise when the user already knows the one they want. Ask first:
 
-   Display matching connections and ask the user to confirm. Once confirmed, use the
-   exact `name` value from the API response.
+   ```
+   How would you like to choose the ThoughtSpot connection?
+     N  Name it     — type the exact connection name; I'll use it directly
+     F  Filter      — give a partial string; I'll list only connections that match
+     L  List all    — show every connection and pick by number
+
+   Enter N / F / L:
+   ```
+
+   Then fetch the connections once (auto-paginated, returns all):
+
+   ```bash
+   source ~/.zshenv && ts connections list --profile {profile}
+   ```
+
+   Resolve the user's choice against that result:
+
+   - **N (name it)** — match the typed name against the returned `name` values
+     (case-sensitive). Exactly one match → use it. No match → show the closest names and
+     re-ask. Don't fabricate a name the list doesn't contain — the table TML needs the
+     exact, case-sensitive connection name.
+   - **F (filter)** — keep connections whose `name` contains the string (case-insensitive),
+     show them as a short numbered list (name, type, database), and pick from that. One
+     match → auto-select and confirm; none → widen the string or switch to **L**.
+   - **L (list all)** — show the full numbered list and pick by number.
+
+   If only one connection exists in total (or only one matches the semantic view's
+   database), auto-select it and confirm regardless of the choice. Use the exact `name`
+   value from the API response.
 
 3. Create ThoughtSpot Table objects for all tables in one command:
    ```bash
@@ -1751,6 +1777,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.11.0 | 2026-06-16 | Connection selection (Step 6B): add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single/database-matched connection still auto-selects. Mirrors the same prompt added to ts-convert-from-tableau and ts-convert-from-databricks-mv. |
 | 1.10.0 | 2026-06-16 | Step 6A table discovery: add a **connection-scoped vs instance-wide search choice** and search by `--name "%table%"` pattern instead of `--all`-then-filter. Connection scope filters results on `metadata_header.dataSourceName` (verified field). Avoids slow whole-instance scans on large instances. Mirrors the ts-convert-from-tableau Step 4c change. |
 | 1.9.0 | 2026-06-13 | Identifier resolution engine: facts parsing (BL-003b), metric→fact resolution (BL-003c), double aggregation via group_aggregate (BL-003), window metrics referencing metrics (GAP-13), joinless SV handling (GAP-03/BL-004). |
 | 1.8.0 | 2026-06-13 | Fail-loud parsing (C5): Step 4x scans for facts, AI clauses, cortex search, private, unknown grammar. LEFT_OUTER join default (F5). Fix SV discovery SQL (F8). Fix Mode C comparison to translate before diff (F7). |
