@@ -29,6 +29,7 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 | [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md) | SQL View TML structure — for custom SQL datasources |
 | [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure reference |
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
+| [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
 | [references/open-items.md](references/open-items.md) | Known validation quirks and workarounds |
 | [references/liveboard-style-themes.md](references/liveboard-style-themes.md) | Step 10.5 curated themes — brand tokens + per-chart `viz_style` color palettes |
@@ -2505,6 +2506,13 @@ in the description — never fall back to TABLE_MODE as a lazy alternative.
 | Map (lat/long generated + geo role) | `GEO_BUBBLE` (or `GEO_AREA` for a filled/choropleth map) |
 | "Measure Names / Measure Values" KPI block | `KPI` — **one tile per measure** (see KPI rule below) |
 
+For the **authoritative `answer.chart.type` enum (44 valid values)**, per-type shelf shapes,
+the geo/candlestick caveats, and a full **analytical-intent → chart-type** mapping (for
+choosing a better chart than the source used), see
+[`../../shared/schemas/thoughtspot-chart-types.md`](../../shared/schemas/thoughtspot-chart-types.md).
+`GAUGE` is **not** a valid type, and one invalid enum value fails the whole import — validate
+the type before importing.
+
 **KPI rule.** A Tableau scorecard/KPI worksheet (Measure Names + Measure Values, no
 dimension) maps poorly to a single tile. Emit **one KPI viz per measure** — that's the
 idiomatic ThoughtSpot KPI (headline + sparkline + period-over-period). **ALWAYS include a date
@@ -3120,6 +3128,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.13.1 | 2026-06-17 | Cite the new shared **`thoughtspot-chart-types.md`** reference (verified 44-value `answer.chart.type` enum + analytical-intent → chart-type mapping) from the References table and Step 10a; note that `GAUGE` is invalid and one bad enum value fails the whole import. (Reference promoted from `docs/` to `agents/shared/schemas/` and added to the CoCo stage-copy list.) |
 | 1.13.0 | 2026-06-16 | **Add a migration-scope choice, fix the model `obj_id` reuse bug, and add efficiency guidance.** (1) New **Step 1.5 — migration scope**: ask right after auth whether to migrate **Models + Liveboards** (default), **Tables + Models only** (skip Steps 8–11), or **Liveboards only** (skip Steps 4–7.5, build on an existing model). New **Step 1.5a model picker** for the LB-only path mirrors the connection prompt — **G** GUID / **N** name / **F** filter / **L** list-all (slow); models are found via `--subtype WORKSHEET` filtered to `metadata_header.worksheetVersion == "V2"` (there is no `MODEL` subtype). Steps annotated with the scopes that run them. (2) **obj_id read-back rule (Step 7 + 10-pre + 10c)**: a requested `obj_id` on a *fresh* model import is **not honored** — ThoughtSpot reassigns `{Name-with-dashes}-{guid8}`. Reusing the written obj_id made every liveboard tile fail to bind and forced a delete + re-import. Now: read the model's **real** obj_id back (import-response `objId` / `metadata search --guid` / export) and use only that for viz `tables[].obj_id` and cohort `worksheet.obj_id`. (3) **Efficiency** block + relaxed the one-question rule: batch independent prompts, parse the TWB in one pass, capture obj_id + parameter UUIDs + resolved names in a single Step 10-pre export. |
 | 1.12.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 4c connection-scoped search path.** The 4c "C — within a connection" path now explicitly presents the Step 4.5 N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Broadened the Step 4.5 title to "(create path or connection-scoped search)" so it's the canonical home of the prompt for both the create and the search-scope cases. Mirrors the same fix in ts-convert-from-snowflake-sv and ts-convert-from-databricks-mv. |
 | 1.12.0 | 2026-06-16 | Step 4.5 connection selection: add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-snowflake-sv and ts-convert-from-databricks-mv. |

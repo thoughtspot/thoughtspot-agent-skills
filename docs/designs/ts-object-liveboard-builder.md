@@ -6,7 +6,7 @@ reviews the model and proposes new KPIs/measures to improve analytics._
 
 Status: **proposal / for review** · Author: migration session 2026-06-16 · Backlog:
 **BL-026** ([`docs/backlog.md`](../backlog.md)) · Companion:
-[`docs/reference/thoughtspot-chart-types.md`](../reference/thoughtspot-chart-types.md)
+[`agents/shared/schemas/thoughtspot-chart-types.md`](../../agents/shared/schemas/thoughtspot-chart-types.md)
 
 ---
 
@@ -178,7 +178,7 @@ Modes: **Build** (full), **Enrich-only** (stages 1–2, 5-measures, 7 — no liv
 Extract the liveboard mechanics into shared references consumed by **both** skills:
 
 - `agents/shared/schemas/thoughtspot-chart-types.md` — the verified enum + intent mapping
-  (promote the companion reference here when wired; update coco SETUP stage list).
+  (**done** — promoted to shared, cited by `ts-convert-from-tableau`, on the coco stage list).
 - `agents/shared/mappings/analytics/kpi-library.md` — domain → KPI patterns (§6.5).
 - `agents/shared/mappings/analytics/chart-selection.md` — intent + roles + cardinality →
   chart type (§6.7), the decision logic.
@@ -231,10 +231,12 @@ The biggest risk is a confident-but-wrong "expert" board. Guardrails:
 
 ## 11. Plan of action (phasing)
 
-- **Phase 0 — foundations (this PR):** verified chart-types reference (done) + this design.
+- **Phase 0 — foundations (this PR):** verified chart-types reference promoted to
+  `agents/shared/schemas/thoughtspot-chart-types.md`, cited by `ts-convert-from-tableau`, on
+  the coco stage list (done) + this design.
 - **Phase 1 — shared library:** author `chart-selection.md` + `kpi-library.md` (seed with
-  2–3 domains: banking, retail, generic), promote chart-types to `agents/shared/`, wire coco
-  SETUP. Refactor Tableau Step 10a to cite `chart-selection.md`.
+  2–3 domains: banking, retail, generic). Refactor Tableau Step 10a to also cite
+  `chart-selection.md`.
 - **Phase 2 — builder skill, Plan-only mode:** model picker + profiling + classification +
   domain detection + recommendation → write a board spec. No writes. Smoke test on
   `P1-UK-Bank-Customers`. This is independently valuable (item 3's "review + suggest").

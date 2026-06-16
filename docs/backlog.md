@@ -1448,7 +1448,7 @@ analogous list-pick UX that should match.
 **Affects:** new skill `agents/cli/ts-object-liveboard-builder`; shared analytics references; `ts-convert-from-tableau` (optional hand-off)
 **Status:** Open — design complete, not yet scheduled
 **Design:** [`docs/designs/ts-object-liveboard-builder.md`](designs/ts-object-liveboard-builder.md)
-**Reference:** [`docs/reference/thoughtspot-chart-types.md`](reference/thoughtspot-chart-types.md) (verified chart-type enum + intent mapping)
+**Reference:** [`agents/shared/schemas/thoughtspot-chart-types.md`](../agents/shared/schemas/thoughtspot-chart-types.md) (verified chart-type enum + intent mapping)
 **Related:** PR #92 (this design + chart-type reference); complements `ts-convert-from-tableau`, distinct from `ts-object-model-coach`
 
 ### Problem
