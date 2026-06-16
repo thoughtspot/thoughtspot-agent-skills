@@ -150,39 +150,36 @@ Open `ts_profile_setup` in your workspace:
 
 Attach to any interactive compute (all-purpose cluster or serverless notebook).
 
-The notebook uses an **action dropdown** to select the operation:
+The notebook displays an **ipywidgets button bar** with five actions:
 
-| Action | What it does |
+| Button | What it does |
 |---|---|
-| **List** | Show all stored ThoughtSpot profiles (name, auth method, URL) |
-| **Create** | Store a new profile in Databricks Secrets |
-| **Update** | Modify an existing profile (credential field blank = keep existing) |
-| **Delete** | Remove a profile and all its secrets |
-| **Test** | Call ThoughtSpot `whoami()` to verify the connection |
+| **List** | Show all stored ThoughtSpot profiles in an HTML table |
+| **Create** | Show form fields for a new profile; click Save to store in Secrets |
+| **Update** | Select an existing profile, edit fields (rename supported); Save |
+| **Delete** | Select a profile and click Confirm Delete |
+| **Test** | Select a profile and click Run Test — calls ThoughtSpot `whoami()` |
 
 ### Workflow
 
-1. **Run "Install dependencies"** (first cell) — once per cluster attach
-2. **Run "Pick an action"** — select an action from the dropdown
-3. **Run "Setup"** — widgets appear for the selected action (skip for List)
-4. Fill in the widget values
-5. **Run "Execute"** — performs the action
+1. **Run all cells** — the first cell installs dependencies, the second loads
+   `ThoughtSpotClient`, the third defines functions, and the last renders the
+   button UI
+2. **Click a button** to perform an action — forms appear inline, results
+   display in the output area below the buttons
+3. Credentials are entered via a **password field** (masked) and stored
+   directly in Databricks Secrets — they are never saved in the notebook
 
 ### Creating your first profile
 
-1. Select **Create** from the action dropdown
-2. Run Setup — fill in the widgets:
-   - **Profile Name:** a short name (e.g. `default`, `production`)
-   - **ThoughtSpot Base URL:** e.g. `https://mycompany.thoughtspot.cloud`
-   - **Auth Method:** `bearer_token`, `password`, or `secret_key`
+1. Click **Create**
+2. Fill in the form:
+   - **Profile:** a short name (e.g. `default`, `production`)
+   - **URL:** e.g. `https://mycompany.thoughtspot.cloud`
    - **Username:** your ThoughtSpot username or email
-   - **Credential:** your token, password, or secret key
-3. Run Execute — credential is stored in Secrets and widgets are cleared
-
-> **Security note:** Do not save the notebook between Setup and Execute.
-> Widget values are held in the notebook UI state — saving before Execute
-> would persist the credential in the saved notebook. Execute calls
-> `removeAll()` to clear widgets immediately after storing to Secrets.
+   - **Auth:** `bearer_token`, `password`, or `secret_key`
+   - **Credential:** your token, password, or secret key (masked)
+3. Click **Save** — credential is stored in Secrets and the form clears
 
 ---
 
