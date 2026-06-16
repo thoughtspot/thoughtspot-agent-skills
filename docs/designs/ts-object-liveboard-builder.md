@@ -4,7 +4,8 @@ _A standalone skill that builds the **best possible** ThoughtSpot Liveboard for 
 applying BI + domain expertise — rather than faithfully mirroring a source dashboard. Also
 reviews the model and proposes new KPIs/measures to improve analytics._
 
-Status: **proposal / for review** · Author: migration session 2026-06-16 · Companion:
+Status: **proposal / for review** · Author: migration session 2026-06-16 · Backlog:
+**BL-026** ([`docs/backlog.md`](../backlog.md)) · Companion:
 [`docs/reference/thoughtspot-chart-types.md`](../reference/thoughtspot-chart-types.md)
 
 ---

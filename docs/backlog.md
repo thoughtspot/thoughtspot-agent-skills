@@ -1439,3 +1439,52 @@ analogous list-pick UX that should match.
 - `agents/databricks/` is not part of the root CLAUDE.md change-impact mirror set (cli /
   claude / coco-snowsight); it is its own deployable runtime, so parity is a deliberate
   review, not an automatic validator requirement.
+
+---
+
+## BL-026 — `ts-object-liveboard-builder` skill: build the best liveboard for a domain + suggest KPIs
+
+**Source:** Live chart-type testing + design session (2026-06-16)
+**Affects:** new skill `agents/cli/ts-object-liveboard-builder`; shared analytics references; `ts-convert-from-tableau` (optional hand-off)
+**Status:** Open — design complete, not yet scheduled
+**Design:** [`docs/designs/ts-object-liveboard-builder.md`](designs/ts-object-liveboard-builder.md)
+**Reference:** [`docs/reference/thoughtspot-chart-types.md`](reference/thoughtspot-chart-types.md) (verified chart-type enum + intent mapping)
+**Related:** PR #92 (this design + chart-type reference); complements `ts-convert-from-tableau`, distinct from `ts-object-model-coach`
+
+### Problem
+
+`ts-convert-from-tableau` is deliberately *faithful* — it inherits the source dashboard's
+gaps (missing KPIs, dated chart choices, no exec summary). A user with a good ThoughtSpot
+**Model but no dashboard** has nothing to migrate at all. There is no skill that asks *given
+this data, what is the best analytical product we could build?* — answered as a senior BI +
+domain analyst — nor one that **reviews a model and proposes the KPIs/measures it's missing**.
+
+### Proposed approach
+
+A standalone, model-first skill **`ts-object-liveboard-builder`** (family `ts-object-*`,
+parallel to `ts-object-model-builder`). Core is a **7-stage recommendation engine**: profile
+the model → classify column roles → detect domain → build an analytical agenda → match a
+domain **KPI library** → propose **new measures the model lacks** → select chart types (from
+the verified 24) → compose an opinionated board (exec summary + themed tabs). Plan-first
+approval; grounded only in real columns; reversible model changes. Reuses the model picker
+(G/N/F/L) and the obj_id read-back rule from `ts-convert-from-tableau`. Liveboard emission +
+chart selection extracted to shared references consumed by both skills.
+
+Modes: **Build** (full), **Enrich-only** (review model → suggest/create measures, no
+liveboard — directly satisfies the "suggest KPIs to improve analytics" ask), **Plan-only**
+(write a board spec, no writes).
+
+### Phasing
+
+See the design doc §11. Phase 0 (this PR): verified chart-types reference + design. Phase 1:
+shared `chart-selection.md` + `kpi-library.md`. Phase 2 (min useful release): builder skill in
+Plan-only/Enrich mode. Phase 3: Build mode (emission). Phase 4: measure creation. Phase 5:
+Tableau "enhance instead of mirror" hand-off. Phase 6: domain-library growth + evals.
+
+### Open questions (from the design)
+
+1. New measures on the existing model (reversible) vs a copy?
+2. Which domains to seed in the KPI library first (beyond banking/retail/generic)?
+3. Tableau hand-off: replace the faithful board, or add a "Recommended" one alongside?
+4. Plan delivery: in-chat table and/or a written `*.plan.md` artifact?
+5. Keep enrichment inside the builder, or commit now to a future `ts-object-model-enrich`?
