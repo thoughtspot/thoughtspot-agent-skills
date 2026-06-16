@@ -141,6 +141,14 @@ Each kept intent + the column roles + cardinality select a chart type from the *
 TREEMAP; correlation → SCATTER, +magnitude → BUBBLE; concentration → PARETO; flow → SANKEY;
 geo → GEO_AREA (only if a column is geo-tagged, else fall back to BAR + flag).
 
+**New charting library (`ADVANCED_*`, early access).** When the target cluster has it
+enabled, the builder can emit `ADVANCED_*` types whose `custom_chart_config` shelf model
+(`x-axis` / `y-axis` / `slice-with-color` / `trellis-by`) maps **cleanly onto this engine's
+output** — series and small-multiples become first-class shelves rather than implicit extra
+columns. Default to standard types for portability; make advanced an opt-in target. See the
+chart-types reference "New charting library" section for the verified encoding rules
+(don't mix `custom_chart_config` with a standard type).
+
 ### 6.8 Board composition
 Assemble an opinionated layout, not a tile dump: **Tab 1 Executive Summary** (KPI row +
 the 2–3 most important charts), **Tab 2+ analytical themes** (Trends, Segmentation,
