@@ -413,6 +413,39 @@ per-object status and GUIDs of created/updated objects.
 
 ---
 
+### `ts tml lint`
+
+Lint TML **locally** for the model invariants that ThoughtSpot's `VALIDATE_ONLY`
+import policy does **not** catch — the ones it accepts silently and then mis-behaves on
+(drops a formula, flips a measure to an attribute, breaks a join at query time). No
+ThoughtSpot connection needed; pure structural check. Run it before `ts tml import` to
+fail loud.
+
+Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
+
+| Rule | What it catches |
+|---|---|
+| guid placement | `guid:` nested inside `table:`/`model:` instead of at the document root |
+| I1 | a `formulas[]` entry with no paired `columns[]` entry (`formula_id` == `id`) — silently dropped |
+| I2 | an `aggregation:` under a `formulas[]` entry (only `columns[]` may carry it) |
+| I4 | `model_tables[].id` != `name` — joins silently fail at query time |
+| I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE |
+
+```bash
+# Lint the same payload you would import
+cat tmls.json | ts tml lint
+
+# Gate an import on a clean lint
+cat tmls.json | ts tml lint && cat tmls.json | ts tml import --policy ALL_OR_NONE
+```
+
+**Input (stdin):** JSON string or array of TML strings — the same shape `ts tml import` reads.
+
+**Output:** JSON `{"clean": bool, "results": [{index, type, name, findings: [...]}]}`.
+**Exit code** is `1` if any document has findings, else `0` — so it composes with `&&`.
+
+---
+
 ### `ts connections list`
 
 List all available data connections. Results are auto-paginated — all connections

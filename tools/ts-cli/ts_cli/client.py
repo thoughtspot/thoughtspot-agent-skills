@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -12,6 +13,37 @@ from typing import Any, Dict, Optional, Tuple
 import requests
 
 PROFILES_PATH = Path.home() / ".claude" / "thoughtspot-profiles.json"
+
+
+def format_http_error(method: str, url: str, resp: "requests.Response") -> str:
+    """Build a single-line, secret-free diagnostic for a non-2xx response.
+
+    The ThoughtSpot error body (when JSON) carries `debug`/`error`/`message` fields that
+    pinpoint the failure far better than a Python traceback. We surface those and NEVER
+    echo request headers (which hold the bearer token).
+    """
+    detail = ""
+    body = (resp.text or "").strip()
+    if body:
+        try:
+            data = resp.json()
+            if isinstance(data, dict):
+                detail = str(
+                    data.get("debug")
+                    or data.get("error")
+                    or data.get("message")
+                    or data.get("incident_id")
+                    or body
+                )
+            else:
+                detail = body
+        except ValueError:
+            detail = body
+    detail = " ".join(detail.split())  # collapse whitespace/newlines to one line
+    if len(detail) > 500:
+        detail = detail[:500] + "…"
+    suffix = f" — {detail}" if detail else ""
+    return f"ThoughtSpot API {resp.status_code} on {method} {url}{suffix}"
 
 
 def _slugify(name: str) -> str:
@@ -274,14 +306,21 @@ class ThoughtSpotClient:
         headers = kwargs.pop("headers", {})
         headers.update(self._auth_headers())
         kwargs.setdefault("verify", self._verify_ssl)
+        url = f"{self._base_url}{path}"
         resp = requests.request(
             method,
-            f"{self._base_url}{path}",
+            url,
             headers=headers,
             timeout=kwargs.pop("timeout", 60),
             **kwargs,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            # Central, traceback-free failure path: one diagnostic line on stderr,
+            # exit 1. Callers that need the raw status in a 2xx body (e.g. tables
+            # import, where JDBC errors arrive as 200) are unaffected — those never
+            # reach here. Skill code piping our stdout JSON gets a clean signal.
+            print(format_http_error(method, url, resp), file=sys.stderr)
+            raise SystemExit(1)
         return resp
 
     def get(self, path: str, **kwargs: Any) -> requests.Response:
