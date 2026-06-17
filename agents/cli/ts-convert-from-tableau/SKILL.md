@@ -1226,6 +1226,26 @@ See `../../shared/schemas/ts-model-conversion-invariants.md` for full detail.
 > and will fail on any ThoughtSpot instance other than the one they were exported from.
 > See `../../shared/schemas/ts-model-conversion-invariants.md` (I1–I6).
 
+> **MEASURE vs ATTRIBUTE classification — don't under-classify, or tiles show no value.**
+> A column/formula tagged `ATTRIBUTE` when it should be `MEASURE` imports fine but renders
+> as a dimension — KPIs and chart y-axes come up **empty**. Classify deliberately
+> (live-verified 2026-06-17):
+> - **Formula is a MEASURE if it (transitively) produces a number** — it contains an aggregate
+>   (`sum`/`average`/`max`/`min`/`count`/`group_aggregate`) or a ratio (`/`), **or it references
+>   another MEASURE formula** by `[formula_<id>]`. The reference case is the trap: a dynamic
+>   selector like `if [Param] = 'All' then [formula_Overall_Pct] else [formula_True_Pct]` has no
+>   aggregate of its *own* but is a measure because every branch is one. Resolve measure-ness
+>   over the formula dependency graph, not just the formula's own text.
+> - **A numeric physical column defaults to MEASURE** (`INT64`/`DOUBLE`) **unless it is clearly a
+>   dimension** — a key/id (`*_ID`), a calendar number (`FISCAL_*_NUM`, `*_YEAR`, `*_QUARTER`),
+>   a name (`*_NAME`), or a date. Tableau's `role` is an unreliable signal here: counts like
+>   `QA_FALSE`, `TP_CONNECTIONS`, `BRAND_ID_COUNT` arrive with no `measure` role and would
+>   otherwise be mis-tagged ATTRIBUTE. When unsure, prefer MEASURE for a plain numeric metric.
+> - **Bare (unbracketed) column references** appear in Tableau formulas (e.g.
+>   `SUM(CONSISTENCY_NUMERATOR)`, not `SUM([CONSISTENCY_NUMERATOR])`). Qualify **every** physical
+>   column name to `[TABLE::COL]`, not only the bracketed ones, or the formula fails with
+>   *"Search did not find …"*.
+
 **Template:**
 
 ```yaml
@@ -1290,7 +1310,7 @@ in the model TML. Omit `id` — ThoughtSpot assigns it on import.
 
 | Tableau `param-domain-type` | Tableau `datatype` | ThoughtSpot `data_type` | Config |
 |---|---|---|---|
-| `list` | `string` | `VARCHAR` | `list_config` with `list_choice[]` from `<member>` values |
+| `list` | `string` | `CHAR` | `list_config` with `list_choice[]` from `<member>` values. **Use `CHAR`, not `VARCHAR`** — a string **parameter** typed `VARCHAR` is rejected on import (*"Invalid parameter"*); the model-TML string parameter type is `CHAR` (live-verified 2026-06-17). This is parameters only — table *columns* still use `VARCHAR`. |
 | `list` | `date` | `DATE` | `list_config` with date values (strip `#` delimiters) |
 | `list` | `integer` | `INT64` | `list_config` |
 | `list` | `real` | `DOUBLE` | `list_config` |
@@ -3156,6 +3176,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.14.1 | 2026-06-17 | **Measure-classification + string-parameter-type fixes (from the Catalog Health live migration).** (1) Step 5b parameter mapping: a string **parameter** must be `CHAR`, **not `VARCHAR`** — ThoughtSpot rejects a `VARCHAR` list parameter on import (table *columns* are unaffected). (2) New **MEASURE vs ATTRIBUTE classification** rule in Step 5b: a formula is a MEASURE if it *transitively* produces a number (own aggregate/ratio **or references another MEASURE formula** by `[formula_<id>]` — e.g. a dynamic `if [Param] then [formula_…Pct]` selector); a numeric physical column **defaults to MEASURE** unless it's clearly a dimension (`*_ID`/`*_NUM`/`*_NAME`/date) — Tableau's `role` under-tags counts; and **bare unbracketed column refs** must be qualified to `[TABLE::COL]`. Under-classifying as ATTRIBUTE makes KPIs/chart y-axes render empty. (Assumes PR #92 → v1.14.0 merges first; renumber if not.) |
 | 1.14.0 | 2026-06-17 | **Add a charting-library choice (Step 10-charts): prompt Legacy (default, portable) vs Muze (new charting library, early access).** On Muze, emit `ADVANCED_*` + `custom_chart_config` (shelf model `x-axis`/`y-axis`/`slice-with-color`/`trellis-by`) for cartesian/pivot intents — mapping Tableau's Color shelf → `slice-with-color` and small multiples → `trellis-by` for a closer migration — and fall back to Legacy types for non-cartesian intents (pie/scatter/geo/etc.). Backed by the expanded `thoughtspot-chart-types.md` "Muze charting library" spec (verified live on se-thoughtspot 2026-06-17: Muze/`ADVANCED_*` family = 10 cartesian/pivot types only; `custom_chart_config` on a Legacy type is rejected; pivot/combo/simple charts auto-resolve). |
 | 1.13.1 | 2026-06-17 | Cite the new shared **`thoughtspot-chart-types.md`** reference (verified 44-value `answer.chart.type` enum + analytical-intent → chart-type mapping) from the References table and Step 10a; note that `GAUGE` is invalid and one bad enum value fails the whole import. (Reference promoted from `docs/` to `agents/shared/schemas/` and added to the CoCo stage-copy list.) |
 | 1.13.0 | 2026-06-16 | **Add a migration-scope choice, fix the model `obj_id` reuse bug, and add efficiency guidance.** (1) New **Step 1.5 — migration scope**: ask right after auth whether to migrate **Models + Liveboards** (default), **Tables + Models only** (skip Steps 8–11), or **Liveboards only** (skip Steps 4–7.5, build on an existing model). New **Step 1.5a model picker** for the LB-only path mirrors the connection prompt — **G** GUID / **N** name / **F** filter / **L** list-all (slow); models are found via `--subtype WORKSHEET` filtered to `metadata_header.worksheetVersion == "V2"` (there is no `MODEL` subtype). Steps annotated with the scopes that run them. (2) **obj_id read-back rule (Step 7 + 10-pre + 10c)**: a requested `obj_id` on a *fresh* model import is **not honored** — ThoughtSpot reassigns `{Name-with-dashes}-{guid8}`. Reusing the written obj_id made every liveboard tile fail to bind and forced a delete + re-import. Now: read the model's **real** obj_id back (import-response `objId` / `metadata search --guid` / export) and use only that for viz `tables[].obj_id` and cohort `worksheet.obj_id`. (3) **Efficiency** block + relaxed the one-question rule: batch independent prompts, parse the TWB in one pass, capture obj_id + parameter UUIDs + resolved names in a single Step 10-pre export. |
