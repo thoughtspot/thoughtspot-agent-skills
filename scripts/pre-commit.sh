@@ -124,6 +124,13 @@ if echo "$STAGED" | grep -qE 'agents/shared/(mappings/|schemas/thoughtspot-formu
   run_check "formula catalog"     "tools/validate/check_formula_catalog.py --root $REPO_ROOT"
 fi
 
+# No v1 endpoints — the repo is v1-free (.claude/rules/ts-cli.md). Guard against a
+# new /tspublic/v1/ call slipping into the CLI or Databricks client. Runs when any
+# Python source under tools/ or agents/ is staged, or the validator itself changes.
+if echo "$STAGED" | grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/check_no_v1_endpoints\.py)'; then
+  run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root $REPO_ROOT"
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then

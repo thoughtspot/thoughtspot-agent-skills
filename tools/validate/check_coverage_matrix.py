@@ -32,11 +32,30 @@ import sys
 from pathlib import Path
 
 
+# Skills that need a coverage matrix but don't have one yet. Each justification
+# MUST carry a target date (YYYY-MM-DD) or a PR/backlog reference (#NNN / BL-NNN)
+# so the exemption is traceable and can be chased down — a dateless "backlog"
+# note never expires and quietly rots (repo audit finding). Enforced by
+# _bad_backlog_justifications() below.
 BACKLOG: dict[str, str] = {
-    "ts-convert-from-databricks-mv": "backlog — add after Tableau matrix ships",
-    "ts-convert-to-snowflake-sv": "backlog — add after Tableau matrix ships",
-    "ts-convert-to-databricks-mv": "backlog — add after Tableau matrix ships",
+    "ts-convert-from-databricks-mv": "needs matrix — target 2026-08-31 (BL-029)",
+    "ts-convert-to-snowflake-sv": "needs matrix — target 2026-08-31 (BL-029)",
+    "ts-convert-to-databricks-mv": "needs matrix — target 2026-08-31 (BL-029)",
 }
+
+# A valid justification mentions an ISO date or a #NNN / BL-NNN reference.
+_BACKLOG_REF_RE = re.compile(r"\d{4}-\d{2}-\d{2}|#\d+|BL-\d+")
+
+
+def _bad_backlog_justifications() -> list[str]:
+    """Return error strings for BACKLOG entries whose justification is dateless /
+    unreferenced. Keeps deferred coverage matrices from becoming permanent."""
+    return [
+        f"BACKLOG['{name}'] justification has no target date or #NNN/BL-NNN reference: "
+        f"{just!r}"
+        for name, just in BACKLOG.items()
+        if not _BACKLOG_REF_RE.search(just)
+    ]
 
 BANNED_COLUMN_NAMES = re.compile(
     r"^\|\s*#\s*\|[^|]*\|[^|]*\|\s*(Verified|Verified Against)\s*\|",
@@ -145,6 +164,11 @@ def main() -> int:
         return 0
 
     failures: list[tuple[str, str]] = []
+
+    # Self-check the exemption list before anything else: every BACKLOG entry must
+    # be traceable (dated or referenced), or the whole validator fails.
+    for msg in _bad_backlog_justifications():
+        failures.append(("(BACKLOG)", msg))
 
     for name, skill_dir in skills:
         matrix_path = skill_dir / "references" / "coverage-matrix.md"

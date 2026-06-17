@@ -90,16 +90,34 @@ _URL_CREDS = re.compile(r"https?://[A-Za-z0-9._~\-]+:[A-Za-z0-9._~\-!$&'()*+,;=@
 # Template variable placeholder in the same line (e.g. Bearer {ts_token})
 _TEMPLATE_VAR = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}")
 
-# Common placeholder markers in values
-_PLACEHOLDER_MARKERS = (
-    "YOUR_", "your_", "REPLACE", "replace", "EXAMPLE", "example",
-    "PLACEHOLDER", "placeholder", "xxx", "XXX", "<", "[",
-    "INSERT_", "insert_", "MY_", "my_", "test", "TEST",
-    "dummy", "DUMMY", "fake", "FAKE",
+# Template-delimiter markers — these denote `<token>` / `[token]` / `{token}`
+# documentation syntax and are legitimate ANYWHERE in a value.
+_TEMPLATE_DELIMITERS = ("<", "[", "{")
+
+# Long, unambiguous placeholder words — safe to match as a value PREFIX or as a
+# whole \W-delimited token (e.g. "YOUR_TOKEN", "replace-me", "example.com").
+_PLACEHOLDER_PREFIXES = (
+    "your", "replace", "example", "placeholder", "insert",
+    "dummy", "sample", "changeme", "redacted",
+)
+
+# Short, ambiguous markers — a genuine leaked secret can contain these three or
+# four letters by chance, so they count ONLY as a whole \W-delimited token, never
+# as an arbitrary substring or prefix. "testSecret9f3a…" is therefore NOT
+# exempted, but "my_db" / "xxx" / "test_key" still are. (Audit security fix:
+# anchor short markers.)
+_PLACEHOLDER_TOKENS = (
+    "my", "xxx", "test", "fake",
 )
 
 
 _IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _has_token(value_low: str, word: str) -> bool:
+    """True if `word` appears in `value_low` as a whole token (delimited by
+    non-alphanumerics on both sides). Underscore counts as a delimiter."""
+    return bool(re.search(rf'(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])', value_low))
 
 
 def _is_placeholder_value(value: str) -> bool:
@@ -109,7 +127,17 @@ def _is_placeholder_value(value: str) -> bool:
     # e.g. password=passphrase_bytes — 'passphrase_bytes' is a variable, not a secret
     if _IDENTIFIER_RE.match(value):
         return True
-    return any(value.startswith(m) or m in value for m in _PLACEHOLDER_MARKERS)
+    # Template-delimiter syntax anywhere → documentation placeholder.
+    if any(d in value for d in _TEMPLATE_DELIMITERS):
+        return True
+    low = value.lower()
+    for w in _PLACEHOLDER_PREFIXES:
+        if low.startswith(w) or _has_token(low, w):
+            return True
+    for w in _PLACEHOLDER_TOKENS:
+        if _has_token(low, w):
+            return True
+    return False
 
 
 def _line_has_template(line: str) -> bool:

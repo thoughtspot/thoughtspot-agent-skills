@@ -46,6 +46,7 @@ jobs:
           # contents, so they work in a clean CI checkout.
           python3 tools/validate/check_coverage_matrix.py --root .
           python3 tools/validate/check_formula_catalog.py --root .
+          python3 tools/validate/check_no_v1_endpoints.py --root .
           python3 tools/validate/check_mirror_sync.py
           python3 tools/validate/generate_parity.py --check
 

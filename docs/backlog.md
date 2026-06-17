@@ -1075,3 +1075,27 @@ Tableau "enhance instead of mirror" hand-off. Phase 6: domain-library growth + e
 4. Plan delivery: in-chat table and/or a written `*.plan.md` artifact?
 5. Keep enrichment inside the builder, or commit now to a future `ts-object-model-enrich`?
 
+---
+
+## BL-029 — Coverage matrices for the remaining three conversion skills
+
+**Related:** `tools/validate/check_coverage_matrix.py` BACKLOG set; repo quality audit (codification follow-up)
+
+### Problem
+
+Three `ts-convert-*` skills still lack a `references/coverage-matrix.md` and are exempted in
+the validator's `BACKLOG` set: `ts-convert-from-databricks-mv`, `ts-convert-to-snowflake-sv`,
+`ts-convert-to-databricks-mv`. The original justification ("add after Tableau matrix ships")
+went stale once the Tableau matrix shipped, and was dateless — so the exemption never
+expired. The validator now requires every BACKLOG justification to carry a target date or a
+`#NNN`/`BL-NNN` reference; these three point here with a target of **2026-08-31**.
+
+### Proposed approach
+
+Author a coverage matrix for each, mirroring the structure of the shipped
+`ts-convert-from-snowflake-sv` and `ts-convert-from-tableau` matrices (Mapped Constructs +
+Unmapped Constructs/Limitations, `Notes` as the last column, no `Last verified:` line). Then
+remove each skill from the `BACKLOG` set in `check_coverage_matrix.py` as its matrix lands.
+
+**Target:** 2026-08-31.
+
