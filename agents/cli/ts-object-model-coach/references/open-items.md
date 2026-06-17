@@ -1,4 +1,4 @@
-# Open Items — ts-coach-model
+# Open Items — ts-object-model-coach
 
 Items that need verification against a live ThoughtSpot (or Snowflake) instance before
 the skill is considered fully verified. Update each item with findings after testing.
