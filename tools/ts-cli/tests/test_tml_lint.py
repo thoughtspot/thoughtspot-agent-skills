@@ -93,6 +93,25 @@ def test_i5_does_not_flag_formula_columns():
     assert lint_tml(data) == []
 
 
+def test_i8_duplicate_column_id_is_flagged():
+    data = _clean_model()
+    data["model"]["columns"] = [
+        {"name": "Total Salary", "column_id": "EMP::SALARY", "properties": {"aggregation": "SUM"}},
+        {"name": "Avg Salary", "column_id": "EMP::SALARY", "properties": {"aggregation": "AVERAGE"}},
+    ]
+    findings = lint_tml(data)
+    assert any(f.startswith("I8:") and "EMP::SALARY" in f for f in findings)
+
+
+def test_i8_unique_column_ids_pass():
+    data = _clean_model()
+    data["model"]["columns"] = [
+        {"name": "Total Salary", "column_id": "EMP::SALARY", "properties": {"aggregation": "SUM"}},
+        {"name": "Headcount", "column_id": "EMP::ID", "properties": {"aggregation": "COUNT"}},
+    ]
+    assert not any(f.startswith("I8:") for f in lint_tml(data))
+
+
 def test_multiple_violations_accumulate():
     data = _clean_model()
     data["model"]["guid"] = "x"

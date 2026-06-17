@@ -430,6 +430,7 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I2 | an `aggregation:` under a `formulas[]` entry (only `columns[]` may carry it) |
 | I4 | `model_tables[].id` != `name` — joins silently fail at query time |
 | I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE |
+| I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
 
 ```bash
 # Lint the same payload you would import

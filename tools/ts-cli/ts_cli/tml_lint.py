@@ -2,8 +2,8 @@
 
 ThoughtSpot accepts TML that violates these and then behaves wrong (silently drops a
 formula, flips a measure to an attribute, breaks a join at query time). Catching them
-locally — before import — is the only way to fail loud. Rules mirror invariants I1/I2/I4/I5
-in `agents/shared/schemas/ts-model-conversion-invariants.md`.
+locally — before import — is the only way to fail loud. Rules mirror invariants
+I1/I2/I4/I5/I8 in `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
 Pure functions over a parsed TML dict so they are trivially unit-testable.
 """
@@ -79,6 +79,25 @@ def lint_tml(data: dict) -> list[str]:
             findings.append(
                 f"I5: column '{c.get('name', '?')}' uses aggregation: COUNT_DISTINCT — "
                 f"this flips MEASURE → ATTRIBUTE silently. Use a `unique count(...)` formula instead."
+            )
+
+    # I8 — every column_id in columns[] must be unique. A duplicate is a HARD import
+    # rejection ("columns should have unique column_id values"). When a source defines
+    # two metrics on one physical column, only one may be a column_id entry; the rest
+    # must be formulas[].
+    id_counts: dict[str, int] = {}
+    for c in columns:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("column_id")
+        if cid:
+            id_counts[cid] = id_counts.get(cid, 0) + 1
+    for cid, n in id_counts.items():
+        if n > 1:
+            findings.append(
+                f"I8: column_id '{cid}' appears {n} times in columns[] — ThoughtSpot "
+                f"rejects the import ('columns should have unique column_id values'). Keep one "
+                f"column_id entry and express the other aggregation(s) as formulas[]."
             )
 
     return findings
