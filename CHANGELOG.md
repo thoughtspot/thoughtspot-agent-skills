@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-17
+- fix: ts-convert-from-tableau v1.14.1 — string **parameters** must be `CHAR` not `VARCHAR` (ThoughtSpot rejects VARCHAR list params); add a MEASURE-vs-ATTRIBUTE classification rule (formula is a measure if it transitively references a measure formula; numeric physical columns default to MEASURE; qualify bare unbracketed column refs). From the live Catalog Health Workbook migration.
+- docs: add BL-027 (explicit table→ThoughtSpot binding instead of search-and-guess) and BL-028 (Audit mode for the visualization layer) to the backlog — both from the Catalog Health migration.
+
 ## 2026-06-16
 - chore: migrate the last v1 API (`/tspublic/v1/connection/fetchConnection`, removed/404 on newer builds) to v2 `connection/search`; ts-cli v0.9.0 (`_fetch_connection_v2`/`_adapt_v2_databases`) + databricks `ts_client.py`; no v1 endpoints remain in the repo
 - feat: ts-convert-from-tableau v1.11.0 — reorder so the source-table question (exist/create/search) comes before any connection selection or search; add connection-scoped vs instance-wide search (`--name` pattern, `metadata_header.dataSourceName` filter)

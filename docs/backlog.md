@@ -1439,3 +1439,106 @@ analogous list-pick UX that should match.
 - `agents/databricks/` is not part of the root CLAUDE.md change-impact mirror set (cli /
   claude / coco-snowsight); it is its own deployable runtime, so parity is a deliberate
   review, not an automatic validator requirement.
+
+---
+
+## BL-027 — Explicit table→ThoughtSpot binding (user-supplied GUID / db.schema.table) instead of search-and-guess
+
+**Source:** Live Catalog Health Workbook migration session (2026-06-17)
+**Affects:** ts-convert-from-tableau (Step 4 / 4.5 — physical table resolution)
+**Status:** Open
+**Related:** BL-025 (connection-selection N/F/L prompt, PR #88), BL-022 (unjoined-table suggestion)
+
+### Problem
+
+The skill resolves each Tableau table to a warehouse table by parsing the TWB
+relation name (`[DB].[SCHEMA].[TABLE]`, `[sqlproxy]`, etc.) and then matching it
+against the chosen connection — effectively a search-and-guess. When the parsed
+name is wrong, the generated table/SQL-View TML binds to a non-existent object and
+fails at `VALIDATE_ONLY`/import with "table does not exist", with no easy way for
+the user to correct the binding.
+
+This was hit live on the **Catalog Health Workbook**: the two **sqlproxy
+(Published Datasource)** sources resolved from `connection.get('dbname')`, which
+was a mangled concatenation
+(`CATALOG_HEALTH_PRODUCT_COMPLETENESSPRD_DATALAKEHOUSE_..._DATA_CATALOG`). The
+real object is `PRD_DATALAKEHOUSE.DATA_CATALOG.CATALOG_HEALTH_PRODUCT_COMPLETENESS`
+and it existed in Snowflake (as `AGENT_SKILLS.DATA_CATALOG.<table>`), but the
+skill reported it missing because it bound to the garbage name. The same class of
+failure occurs whenever the TWB's `[DB]` differs from the target connection's
+database, or a Published Datasource hides the real schema/table.
+
+### Proposed approach
+
+Add an explicit **table-binding step** so the user can pin each Tableau table to a
+real ThoughtSpot/warehouse object rather than relying on inference:
+
+1. **Show the resolved binding per table** — after Step 4/4.5, print a table:
+   `Tableau ref → resolved db.schema.table (+ connection)` with a confidence flag.
+2. **Allow per-table override**, accepting either:
+   - an existing **ThoughtSpot table GUID** (look it up, confirm its
+     db/schema/db_table, and bind to it), or
+   - an explicit **`db` / `schema` / `db_table`** triple.
+3. **Force confirmation for low-confidence bindings** rather than silently emitting
+   a guess: sqlproxy `dbname` that isn't a clean identifier; `[DB].[SCHEMA].[TABLE]`
+   where `DB` ≠ the selected connection's database; any name not found on the
+   connection during a (optional) live existence check.
+4. **Persist the mapping** (a `table_mapping` override, mirroring the
+   tableau-migration-testing harness's `table_mapping.csv`) so re-runs and audit
+   mode don't re-prompt.
+5. **sqlproxy resolution fix** — for Published Datasources, prefer the real
+   `schema.table` parsed from the datasource caption
+   (`... (DB.SCHEMA.TABLE) (SCHEMA)`) / metadata-records over the opaque `dbname`,
+   and surface it as the default in the binding table.
+
+### Files affected
+
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — new per-table binding/override step (Step 4/4.5); low-confidence confirmation gate
+- `agents/shared/mappings/tableau/tableau-tml-rules.md` — sqlproxy `dbname` resolution rule; explicit-binding + cross-database notes
+- `agents/cli/ts-convert-from-tableau/references/open-items.md` — sqlproxy mis-binding + cross-DB binding items
+
+---
+
+## BL-028 — Audit mode: assess the visualization layer (chart types + dashboard→liveboard), not just the data layer
+
+**Source:** Live Catalog Health Workbook migration session (2026-06-17)
+**Affects:** ts-convert-from-tableau (Audit mode, Steps A1–A4 / Migration Coverage Report)
+**Status:** Open
+**Related:** BL-023 (Tableau coverage matrix), BL-026 (liveboard builder + verified chart-types reference), BL-015 (audit-mode parity), BL-009 (Tableau mapping gaps)
+
+### Problem
+
+The Tableau Audit mode (Steps A1–A4) classifies **data-layer** constructs only —
+formulas, sets, joins, sources — and the Migration Coverage Report reflects that.
+It says nothing about the **visualization layer**: which chart/mark types each
+worksheet uses, whether they map to a ThoughtSpot chart type, and how migratable
+the dashboard→liveboard layout is. So a user assessing feasibility sees data-layer
+coverage but no signal on whether the *visuals* will come across — even though the
+skill already migrates dashboards to liveboards "with layout approximation", and a
+verified ThoughtSpot chart-type enum now exists
+(`agents/shared/schemas/thoughtspot-chart-types.md`, PR #92).
+
+### Proposed approach
+
+Extend Audit mode to classify the viz layer alongside the data layer:
+
+1. **Parse each worksheet's chart/mark type** — `<pane>`/`<mark class=...>`,
+   dual-axis, combo marks, table/text, maps, etc. — plus dashboard layout
+   (`<dashboard>`/`<zone>` structure).
+2. **Classify each against the verified chart-type enum** into tiers:
+   **Native** (direct ThoughtSpot equivalent) / **Approximate** (maps with layout
+   or encoding loss) / **Unsupported** (no equivalent — e.g. certain map/custom
+   marks).
+3. **Add a "Visualization coverage" section to the Migration Coverage Report (A4)**:
+   per-chart-type counts + %, which sheets map cleanly vs approximate vs have no
+   equivalent, and dashboard→liveboard layout-fidelity notes.
+4. **Fold viz coverage into the go / caution / no-go recommendation** (e.g. "data
+   layer 90% native, but 4 of 12 sheets use unsupported map marks → caution").
+5. Reuse the chart-type intent mapping shared with BL-026 so the auditor and the
+   liveboard builder classify consistently.
+
+### Files affected
+
+- `agents/cli/ts-convert-from-tableau/SKILL.md` — Audit steps (classify worksheet chart types + dashboard layout); coverage report (A4) viz-coverage section + recommendation
+- `agents/shared/schemas/thoughtspot-chart-types.md` — reuse/extend the chart-type + intent mapping for the classifier
+- `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md` (from BL-023) — add visualization-layer rows
