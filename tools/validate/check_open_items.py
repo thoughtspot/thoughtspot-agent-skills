@@ -18,32 +18,44 @@ import sys
 from pathlib import Path
 
 # Patterns that indicate an unresolved item
-_STATUS_UNTESTED = re.compile(r'\*\*Status:\*\*\s+UNTESTED', re.MULTILINE)
+# Item headers come in two styles across the repo: `## Item 4 — …` and `## #4 — …`.
+# The original regex only matched `## Item N`, so it silently ignored 6 of 7 files.
+_ITEM_HEADER = re.compile(r'^##\s+(#?\s*(?:Item\s+)?\d+[^\n]*)', re.MULTILINE)
 _PLACEHOLDER = re.compile(r'\[Record result here\]')
-_ITEM_HEADER = re.compile(r'^## (Item \d+[^\n]*)', re.MULTILINE)
+
+# Status markers meaning "not verified before ship". Matched as whole tokens anywhere in
+# the item's section — the repo uses several formats (`**Status:** UNTESTED`,
+# `Status: NOT IMPLEMENTED`, `— NEEDS VERIFICATION`, `… UNVERIFIED`).
+_UNRESOLVED_MARKERS = ["UNTESTED", "NEEDS VERIFICATION", "UNVERIFIED", "NOT IMPLEMENTED"]
+_MARKER_RE = re.compile(
+    r'(?<![A-Za-z])(' + '|'.join(re.escape(m) for m in _UNRESOLVED_MARKERS) + r')(?![A-Za-z])'
+)
 
 
 def check_open_items_file(path: Path) -> list[tuple[str, str]]:
     """
     Return list of (item_title, reason) for unresolved items.
-    reason is 'Status: UNTESTED' or 'Finding not recorded'.
+
+    Unresolved = the section contains an unresolved status marker
+    (UNTESTED / NEEDS VERIFICATION / UNVERIFIED / NOT IMPLEMENTED) or the
+    `[Record result here]` placeholder. Handles both `## Item N` and `## #N` headers.
     """
     content = path.read_text(encoding="utf-8")
 
-    # Split into sections at each ## Item N header
     splits = list(_ITEM_HEADER.finditer(content))
     if not splits:
         return []
 
     unresolved = []
     for i, match in enumerate(splits):
-        title = match.group(1).strip()
+        title = " ".join(match.group(1).split())  # normalise whitespace
         start = match.start()
         end = splits[i + 1].start() if i + 1 < len(splits) else len(content)
         section = content[start:end]
 
-        if _STATUS_UNTESTED.search(section):
-            unresolved.append((title, "Status: UNTESTED"))
+        marker = _MARKER_RE.search(section)
+        if marker:
+            unresolved.append((title, f"Status: {marker.group(1)}"))
         elif _PLACEHOLDER.search(section):
             unresolved.append((title, "Finding not recorded"))
 

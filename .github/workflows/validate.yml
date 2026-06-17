@@ -44,13 +44,21 @@ jobs:
           # Filesystem-state gates that previously ran ONLY in pre-commit (bypassable
           # via --no-verify with no server-side catch). They derive purely from repo
           # contents, so they work in a clean CI checkout.
-          # (suggest_repo_changelog --check is intentionally NOT added here: it diffs
-          # `git diff --cached`, which is empty in a CI checkout — it needs a base-diff
-          # mode to enforce server-side. Tracked for validator hardening.)
           python3 tools/validate/check_coverage_matrix.py --root .
           python3 tools/validate/check_formula_catalog.py --root .
           python3 tools/validate/check_mirror_sync.py
           python3 tools/validate/generate_parity.py --check
+
+      - name: Changelog gate (PR only)
+        # The repo-changelog gate is staged-diff-based in pre-commit (empty in a CI
+        # checkout). --base diffs the PR's commits against the target branch so it
+        # enforces server-side too: a new skill / ts-cli bump / new shared file must
+        # carry a CHANGELOG.md change in the same PR.
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          python3 tools/validate/suggest_repo_changelog.py --root . --check \
+            --base "origin/${{ github.base_ref }}"
 
       - name: Run unit + validator tests
         run: pytest tools/ts-cli/tests/ tools/validate/tests/ -q

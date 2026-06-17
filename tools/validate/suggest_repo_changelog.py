@@ -33,11 +33,16 @@ TODAY = str(date.today())
 
 # ── git helpers ───────────────────────────────────────────────────────────────
 
-def get_staged_files(repo_root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-status"],
-        capture_output=True, text=True, cwd=repo_root,
+def get_staged_files(repo_root: Path, base: str | None = None) -> list[str]:
+    """Changed files. Default: staged (`git diff --cached`). With `base`, the commits a
+    PR introduces (`git diff <base>...HEAD`) — so the gate can enforce server-side in CI,
+    where nothing is staged."""
+    cmd = (
+        ["git", "diff", f"{base}...HEAD", "--name-status"]
+        if base
+        else ["git", "diff", "--cached", "--name-status"]
     )
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_root)
     return result.stdout.splitlines()
 
 
@@ -74,10 +79,15 @@ def _skill_changelog_version(text: str) -> tuple[int, int, int] | None:
     return None
 
 
-def detect_significant_changes(staged_lines: list[str], repo_root: Path) -> list[tuple[str, str]]:
+def detect_significant_changes(
+    staged_lines: list[str], repo_root: Path, new_ref: str = ":", old_ref: str = "HEAD:"
+) -> list[tuple[str, str]]:
     """
     Return a list of (type, description) tuples for significant staged changes.
     type is one of: 'new-skill', 'ts-cli-bump', 'new-shared', 'skill-bump'
+
+    new_ref/old_ref are git-show prefixes for the "after"/"before" contents of a path:
+    staged mode uses ':'/'HEAD:'; base (CI) mode uses 'HEAD:'/'<base>:'.
     """
     changes = []
     for line in staged_lines:
@@ -98,8 +108,8 @@ def detect_significant_changes(staged_lines: list[str], repo_root: Path) -> list
         # convention). Catches large skill evolutions that warrant a repo-level note.
         elif status == "M" and path.endswith("/SKILL.md") and "/" in path:
             skill_name = path.split("/")[2] if len(path.split("/")) > 2 else Path(path).parent.name
-            new_v = _skill_changelog_version(_git_show(f":{path}", repo_root))
-            old_v = _skill_changelog_version(_git_show(f"HEAD:{path}", repo_root))
+            new_v = _skill_changelog_version(_git_show(f"{new_ref}{path}", repo_root))
+            old_v = _skill_changelog_version(_git_show(f"{old_ref}{path}", repo_root))
             if new_v and old_v and new_v[:2] > old_v[:2]:
                 nv = ".".join(map(str, new_v))
                 changes.append(("skill-bump", f"feat: update {skill_name} to v{nv}"))
@@ -110,7 +120,7 @@ def detect_significant_changes(staged_lines: list[str], repo_root: Path) -> list
             "tools/ts-cli/ts_cli/__init__.py",
         ):
             # Read the new version from the staged file
-            m = re.search(r'version\s*=\s*["\']([^"\']+)["\']', _git_show(f":{path}", repo_root))
+            m = re.search(r'version\s*=\s*["\']([^"\']+)["\']', _git_show(f"{new_ref}{path}", repo_root))
             ver = m.group(1) if m else "?"
             changes.append(("ts-cli-bump", f"chore: bump ts-cli to v{ver}"))
 
@@ -194,11 +204,18 @@ def main() -> int:
         help="Gating mode: exit non-zero (no prompt) if a significant staged change has no "
              "same-day CHANGELOG.md entry. Works in non-TTY (CI / agent commits).",
     )
+    parser.add_argument(
+        "--base", default=None,
+        help="Enforce against a PR's commits instead of the staged index: diff "
+             "<base>...HEAD (e.g. --base origin/main). Use in CI, where nothing is staged.",
+    )
     args = parser.parse_args()
 
     repo_root = Path(args.root).resolve()
     changelog_path = repo_root / CHANGELOG
-    staged_lines = get_staged_files(repo_root)
+    staged_lines = get_staged_files(repo_root, base=args.base)
+    # In base (CI) mode, "after"/"before" contents come from HEAD / the base ref.
+    new_ref, old_ref = ("HEAD:", f"{args.base}:") if args.base else (":", "HEAD:")
 
     # The gate is PER-COMMIT, not per-day: a significant change must carry its own
     # staged CHANGELOG.md hunk. A pre-existing "## <today>" section from an earlier
@@ -207,7 +224,7 @@ def main() -> int:
     if changelog_already_staged(staged_lines):
         return 0
 
-    changes = detect_significant_changes(staged_lines, repo_root)
+    changes = detect_significant_changes(staged_lines, repo_root, new_ref=new_ref, old_ref=old_ref)
     if not changes:
         return 0
 
