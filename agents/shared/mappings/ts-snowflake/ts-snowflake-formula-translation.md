@@ -1,3 +1,5 @@
+<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Formula Translation Reference — Snowflake
 
 Bidirectional translation rules between ThoughtSpot formulas and **Snowflake** Semantic

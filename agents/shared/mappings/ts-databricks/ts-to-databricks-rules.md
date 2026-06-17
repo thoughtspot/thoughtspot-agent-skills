@@ -1,3 +1,5 @@
+<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Mapping Rules Reference
 
 ThoughtSpot → Databricks Metric View conversion tables. Consult during Steps 4–9.

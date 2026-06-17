@@ -1,3 +1,5 @@
+<!-- currency: tableau — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Tableau → ThoughtSpot TML Generation Rules
 
 Critical invariants for producing valid ThoughtSpot TML from a Tableau TWB. Every rule here has been verified against a live ThoughtSpot import.

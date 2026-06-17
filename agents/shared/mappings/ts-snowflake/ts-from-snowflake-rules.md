@@ -1,3 +1,5 @@
+<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Reverse Mapping Rules Reference
 
 Snowflake Semantic View DDL → ThoughtSpot Model TML. Consult during Steps 4–9.

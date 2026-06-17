@@ -1,3 +1,5 @@
+<!-- currency: tableau — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Tableau → ThoughtSpot Formula Translation
 
 Reference for converting Tableau calculated field expressions to ThoughtSpot TML formula expressions.
