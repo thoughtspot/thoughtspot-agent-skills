@@ -71,9 +71,23 @@ ThoughtSpot is rolling out a new charting library, the **`ADVANCED_*`** chart fa
 **early access** — enabled on the SE cluster (`se-thoughtspot`), not yet GA. _All findings
 below verified live on se-thoughtspot 2026-06-17._
 
-The classic types and the advanced types map 1:1 by intent (`COLUMN` ↔ `ADVANCED_COLUMN`,
-etc.). The important difference is **how the encoding (which column goes on which shelf) is
-expressed**:
+### Scope — which types the advanced library covers
+
+The `ADVANCED_*` family is currently **only the cartesian + pivot types** (10 of them):
+
+```
+ADVANCED_COLUMN  ADVANCED_BAR  ADVANCED_LINE  ADVANCED_AREA
+ADVANCED_STACKED_COLUMN  ADVANCED_STACKED_BAR  ADVANCED_STACKED_AREA
+ADVANCED_LINE_COLUMN  ADVANCED_LINE_STACKED_COLUMN  ADVANCED_PIVOT_TABLE
+```
+
+There is **no** `ADVANCED_SCATTER`, `ADVANCED_PIE`, `ADVANCED_HEATMAP`, `ADVANCED_SANKEY`,
+etc. So advanced charting applies to bar/line/area/column/combo/pivot migrations; every other
+intent (composition, correlation, flow, geo, distribution, funnel, …) stays on the standard
+types.
+
+The classic and advanced types map 1:1 by intent (`COLUMN` ↔ `ADVANCED_COLUMN`, etc.). The
+important difference is **how the encoding (which column goes on which shelf) is expressed**:
 
 | | Standard chart (`COLUMN`, `BAR`, …) | Advanced chart (`ADVANCED_*`) |
 |---|---|---|
@@ -107,9 +121,41 @@ chart:
   display_mode: CHART_MODE
 ```
 
-Shelf keys: **`x-axis`**, **`y-axis`**, **`slice-with-color`** (series/color),
-**`trellis-by`** (facets). Each populated shelf carries `axes: [{type: FLAT, column: <display
-name>}]` + `mode: AXIS_DRIVEN`; an empty shelf carries just `mode: AXIS_DRIVEN`.
+Shelf keys (cartesian types): **`x-axis`**, **`y-axis`**, **`slice-with-color`**
+(series/color), **`trellis-by`** (facets / small multiples). Each populated shelf carries
+`axes: [{type: FLAT, column: <display name>}]` + `mode: AXIS_DRIVEN`; an empty shelf carries
+just `mode: AXIS_DRIVEN`. (`type: FLAT` and `mode: AXIS_DRIVEN` are the only values observed.)
+
+### Tableau alignment — why advanced is a closer migration target
+
+The shelf model maps almost 1:1 onto Tableau's encoding shelves, so a Tableau viz that uses
+Color or small-multiples migrates more faithfully to one advanced chart than to a standard
+chart (where a second dimension is an implicit extra column):
+
+| Tableau shelf | Advanced shelf | Standard-chart equivalent |
+|---|---|---|
+| Columns | `x-axis` | `axis_configs.x` |
+| Rows | `y-axis` | `axis_configs.y` |
+| Color | `slice-with-color` | a 2nd column in `chart_columns` (implicit) |
+| small multiples (row/col trellis) | `trellis-by` | **not expressible** |
+
+Example: a Tableau bar of customers by Region, colored by Gender → one
+`ADVANCED_STACKED_COLUMN` with `x-axis: Region`, `y-axis: Number of Records`,
+`slice-with-color: Gender`.
+
+### Per-type behavior (verified live)
+
+- **Cartesian shelves** (`x-axis`/`y-axis`/`slice-with-color`/`trellis-by`) apply to COLUMN,
+  BAR, LINE, AREA and their STACKED forms. `trellis-by` round-trips faithfully.
+- **`ADVANCED_PIVOT_TABLE`** does **not** use `custom_chart_config` — it auto-resolves
+  rows/columns/values from `chart_columns` + `search_query` (the block is dropped on export).
+- **Combos** (`ADVANCED_LINE_COLUMN`, `ADVANCED_LINE_STACKED_COLUMN`) accept two+ measures
+  and **auto-resolve** which measure is the line vs the column; no `custom_chart_config`
+  required. Fine-grained line/column + secondary-axis control lives in `client_state_v2`
+  `axisProperties` (`axisType: Y`, `isOpposite: true` for the secondary axis).
+- **The shelf vocabulary is permissive, not strictly validated.** An unknown shelf key (e.g.
+  `size`) on a cartesian type is *accepted and retained* but ignored at render — so don't rely
+  on rejection to validate; only the four cartesian shelves above actually render.
 
 ### Verified rules (live on se-thoughtspot)
 
@@ -126,12 +172,16 @@ name>}]` + `mode: AXIS_DRIVEN`; an empty shelf carries just `mode: AXIS_DRIVEN`.
 
 ### Guidance for generators (Tableau skill, liveboard-builder)
 
-- **Default to standard chart types** for portability — they work on every cluster.
-- Emit `ADVANCED_*` + `custom_chart_config` only when the target cluster has the new library
-  enabled (e.g. SE), or when you specifically need its richer encoding (`slice-with-color`,
-  `trellis-by`). The shelf model is a cleaner fit for the liveboard-builder's intent →
-  encoding step (series and small-multiples become first-class shelves rather than implicit
-  extra columns).
+- **Default to standard chart types, but PROMPT the user to choose** standard vs the advanced
+  library before generating chart TML. Standard is the portable default (works on every
+  cluster); advanced is early access (the target cluster must have it enabled — e.g. SE).
+- When the user picks **advanced**: emit `ADVANCED_*` + `custom_chart_config` for the
+  cartesian/pivot intents (bar/column/line/area/stacked/combo/pivot), and **fall back to the
+  standard type** for any intent with no advanced equivalent (pie, scatter/bubble, heatmap,
+  treemap, sankey, funnel, waterfall, pareto, spider, geo, candlestick, KPI). Map Tableau's
+  Color shelf → `slice-with-color` and small multiples → `trellis-by` for a closer migration.
+- The shelf model is also a cleaner fit for the liveboard-builder's intent → encoding step
+  (series and small-multiples become first-class shelves rather than implicit extra columns).
 - `client_state_v2` differs slightly between the two (the advanced export omits
   `responsiveLayoutPreference` and trims some `kpiColumnProperties`/`systemSeriesColors`
   defaults) — these are cosmetic defaults, not required for a valid import.

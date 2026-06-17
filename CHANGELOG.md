@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-17
+- docs: add `agents/shared/schemas/thoughtspot-chart-types.md` — verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping + full **new charting library (`ADVANCED_*`)** spec (custom_chart_config shelf model, early-access, verified live on se-thoughtspot); cited by ts-convert-from-tableau
+- feat: ts-convert-from-tableau v1.14.0 — add a Standard-vs-Advanced charting-library prompt (Step 10-charts); on Advanced, emit `ADVANCED_*` + `custom_chart_config` (Tableau Color → slice-with-color, small multiples → trellis-by) for cartesian/pivot intents with standard fallback for the rest
+- docs: add BL-026 + design `docs/designs/ts-object-liveboard-builder.md` (build-the-best-liveboard skill)
+
 ## 2026-06-16
 - chore: migrate the last v1 API (`/tspublic/v1/connection/fetchConnection`, removed/404 on newer builds) to v2 `connection/search`; ts-cli v0.9.0 (`_fetch_connection_v2`/`_adapt_v2_databases`) + databricks `ts_client.py`; no v1 endpoints remain in the repo
 - feat: ts-convert-from-tableau v1.11.0 — reorder so the source-table question (exist/create/search) comes before any connection selection or search; add connection-scoped vs instance-wide search (`--name` pattern, `metadata_header.dataSourceName` filter)
