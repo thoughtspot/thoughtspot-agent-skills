@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Answer TML — Structure Reference
 
 How a saved ThoughtSpot Answer is represented in TML. Verified against a live instance

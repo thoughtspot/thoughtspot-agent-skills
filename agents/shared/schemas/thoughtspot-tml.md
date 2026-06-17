@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot TML Parsing Reference
 
 Known pitfalls when exporting and parsing ThoughtSpot TML via the REST API.

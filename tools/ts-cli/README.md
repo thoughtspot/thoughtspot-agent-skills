@@ -399,8 +399,8 @@ cat tmls.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
 | Flag | Default | Description |
 |---|---|---|
 | `--profile`, `-p` | first profile | Profile to use |
-| `--policy` | `PARTIAL` | Import policy: `PARTIAL` or `ALL_OR_NONE` |
-| `--create-new / --no-create-new` | `--create-new` | Create new objects if they don't exist |
+| `--policy` | `PARTIAL` | Import policy, passed through to the API: `PARTIAL`, `ALL_OR_NONE`, `PARTIAL_OBJECT`, or `VALIDATE_ONLY` (dry-run server-side validation) |
+| `--create-new / --no-create-new` | `--no-create-new` | Create new objects. Default updates existing objects only; pass `--create-new` for brand-new TML with no existing GUID |
 
 **Input (stdin):** JSON array of TML strings, e.g.:
 

@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Feedback TML — Structure Reference
 
 How `nls_feedback` (Spotter coaching) entries are represented in TML for import via

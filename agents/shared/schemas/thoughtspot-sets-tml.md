@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Sets TML — Structure Reference
 
 How ThoughtSpot sets (cohorts) are represented in TML. Sets are custom column groupings —

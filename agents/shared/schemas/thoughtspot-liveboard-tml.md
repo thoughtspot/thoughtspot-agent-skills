@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Liveboard TML — Structure Reference
 
 How a ThoughtSpot Liveboard is represented in TML. Verified against a live instance

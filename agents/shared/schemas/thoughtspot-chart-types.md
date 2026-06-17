@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Chart Types — verified enum + intent mapping
 
 _Verified live on se-thoughtspot 2026-06-16 against model `P1-UK-Bank-Customers`

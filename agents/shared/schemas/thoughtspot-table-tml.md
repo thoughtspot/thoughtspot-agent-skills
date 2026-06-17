@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Table TML — Construction Reference
 
 How to construct a valid ThoughtSpot Table TML for import via the REST API or

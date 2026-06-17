@@ -68,14 +68,14 @@ def resolve_profile(profile: Optional[str]) -> str:
     if not PROFILES_PATH.exists():
         raise SystemExit(
             f"No profiles file found at {PROFILES_PATH}.\n"
-            "Run /ts-profile-setup to create a profile first."
+            "Run /ts-profile-thoughtspot to create a profile first."
         )
     raw = json.loads(PROFILES_PATH.read_text())
     profiles = raw if isinstance(raw, list) else list(raw.values())
     if not profiles:
         raise SystemExit(
             "No ThoughtSpot profiles configured.\n"
-            "Run /ts-profile-setup to add a profile."
+            "Run /ts-profile-thoughtspot to add a profile."
         )
     return profiles[0]["name"]
 
@@ -126,7 +126,7 @@ class ThoughtSpotClient:
             raise SystemExit(
                 f"Profile '{profile_name}' not found.\n"
                 f"Available profiles: {available}\n"
-                "Run /ts-profile-setup to add a profile."
+                "Run /ts-profile-thoughtspot to add a profile."
             )
         self._profile = profiles[profile_name]
         self._profile_name = profile_name
@@ -241,7 +241,7 @@ class ThoughtSpotClient:
                 raise SystemExit(
                     f"Authentication failed ({resp.status_code}) for profile '{self._profile_name}'.\n"
                     "Password may be wrong or expired.\n"
-                    "Run /ts-profile-setup → U → Refresh credential."
+                    "Run /ts-profile-thoughtspot → U → Refresh credential."
                 )
             resp.raise_for_status()
             data = resp.json()
@@ -264,7 +264,7 @@ class ThoughtSpotClient:
                 raise SystemExit(
                     f"Authentication failed ({resp.status_code}) for profile '{self._profile_name}'.\n"
                     "Secret key may be wrong or expired.\n"
-                    "Run /ts-profile-setup → U → Refresh credential."
+                    "Run /ts-profile-thoughtspot → U → Refresh credential."
                 )
             resp.raise_for_status()
             data = resp.json()

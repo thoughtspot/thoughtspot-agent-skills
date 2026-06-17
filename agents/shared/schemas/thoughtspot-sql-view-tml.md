@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot SQL View TML — Structure Reference
 
 How a ThoughtSpot SQL View is represented in TML. A SQL View is a query-backed

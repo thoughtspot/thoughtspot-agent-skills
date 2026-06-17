@@ -1,3 +1,5 @@
+<!-- currency: snowflake — 2026-06 (verified against published semantic-view YAML spec) -->
+
 # Snowflake Semantic View YAML Schema
 
 Full schema reference for `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`. Use during
@@ -64,24 +66,29 @@ relationships:                    # Optional. Defined at the top level (not unde
     right_column: string          # Physical column name on right_table.
 ```
 
-### DDL-only constructs (not in YAML schema)
+### Advanced constructs — DDL vs YAML coverage
 
-The DDL format (`CREATE SEMANTIC VIEW` / `GET_DDL`) supports additional constructs
-that have no YAML equivalent in `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
+> **Currency note — verified 2026-06-17 against the published
+> [semantic-view YAML spec](https://docs.snowflake.com/en/user-guide/views-semantic/semantic-view-yaml-spec).**
+> The published YAML spec has **expanded**: several constructs once exclusive to the DDL
+> form are now expressible in YAML. The `YAML?` column below reflects the **spec's
+> capability**, not the converter's current behaviour — the to-snowflake-sv converter does
+> **not yet emit** the newly-YAML-capable constructs; that change is pending a live
+> `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` round-trip test (**BL-031**). The from-snowflake-sv
+> direction parses DDL via `GET_DDL` and is unaffected.
 
-| Construct | DDL syntax | Notes |
-|---|---|---|
-| `facts` | `facts ( TABLE.COL as alias.NAME, ... )` | Row-level named expressions referenced by metrics |
-| `private` / `public` | Visibility modifier on dims/metrics | Controls Cortex Analyst visibility |
-| `unique` / `range between` | `unique (TABLE.COL) distinct ... range between X and Y` | Uniqueness/range constraints |
-| `with cortex search service` | On dimensions | Links a dimension to a Cortex Search service |
-| `ai_sql_generation` | `ai_sql_generation = 'ON'\|'OFF'` | Cortex Analyst SQL generation toggle |
-| `ai_question_categorization` | `ai_question_categorization = 'ON'\|'OFF'` | Cortex Analyst question categorization toggle |
-| `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | Cortex Analyst verified query examples |
-| `using <relationship>` | On metrics | Specifies which relationship path to use for cross-table metrics |
-
-The from-snowflake-sv skill parses DDL via `GET_DDL` and must handle all of these.
-The to-snowflake-sv skill emits DDL via `CREATE SEMANTIC VIEW` and may emit these where supported.
+| Construct | DDL syntax | YAML? | Notes |
+|---|---|---|---|
+| `facts` | `facts ( TABLE.COL as alias.NAME, ... )` | ✅ now — per-table `facts:` | Spec adds a per-table `facts:` key (name/synonyms/description/access_modifier/expr/data_type/labels/tags). Converter still down-converts facts→metrics until BL-031. |
+| `private` / `public` | visibility modifier on dims/metrics | ✅ now — `access_modifier` | `access_modifier: private_access` / `public_access` |
+| `unique` | `unique (TABLE.COL)` | ✅ now — `unique: <bool>` | Dimension property |
+| `range between` | `... range between X and Y` | DDL-only | No confirmed YAML equivalent |
+| filter labels | `labels = (filter)` | ✅ now — `labels: [filter]` | Marks a dimension/fact as a filter |
+| `with cortex search service` | on dimensions | ✅ now — `cortex_search_service:` | Links a dimension to a Cortex Search service |
+| `ai_sql_generation` | `ai_sql_generation = 'ON'\|'OFF'` | DDL-only | Cortex Analyst SQL generation toggle |
+| `ai_question_categorization` | `ai_question_categorization = 'ON'\|'OFF'` | DDL-only | Cortex Analyst question categorization toggle |
+| `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | DDL-only | Verified queries (→ NLS Feedback TML on the TS side) |
+| `using <relationship>` | on metrics | ✅ — `using_relationships` | Relationship path for cross-table metrics |
 
 ### What is NOT supported in YAML
 
@@ -89,10 +96,14 @@ The following fields are **not** part of the YAML schema. Including them causes 
 
 | Field | Notes |
 |---|---|
-| `relationship_type` | Not supported — omit entirely |
-| `join_type` | Not supported — omit entirely |
+| `relationship_type` | Not supported — omit entirely (verified still-correct 2026-06-17: the spec states semantic views don't use it) |
+| `join_type` | Not supported — omit entirely (verified still-correct 2026-06-17) |
 | `default_aggregation` | Not supported in `metrics` — omit entirely |
-| `sample_values` | Not supported in `dimensions` — omit entirely |
+
+> **Now supported (was listed here as a parse error):** `sample_values` **is** a valid
+> `dimensions` property and Snowflake **recommends** it to improve Cortex Analyst accuracy
+> (verified 2026-06-17 against the YAML spec + Cortex Analyst best-practices). Do not strip
+> it. Populating it from the converter is tracked in **BL-031**.
 
 ---
 

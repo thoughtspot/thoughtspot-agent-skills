@@ -47,6 +47,9 @@ jobs:
           python3 tools/validate/check_coverage_matrix.py --root .
           python3 tools/validate/check_formula_catalog.py --root .
           python3 tools/validate/check_no_v1_endpoints.py --root .
+          # Presence gate: every shared mapping/schema must carry a currency anchor
+          # (staleness is soft and never fails — only missing/malformed anchors do).
+          python3 tools/validate/check_mapping_currency.py --root . --check
           python3 tools/validate/check_mirror_sync.py
           python3 tools/validate/generate_parity.py --check
 

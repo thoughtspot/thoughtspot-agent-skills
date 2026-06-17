@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Alert TML — Structure Reference
 
 How a ThoughtSpot Monitor Alert (scheduled or threshold-based notification) is

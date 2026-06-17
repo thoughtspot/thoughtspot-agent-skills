@@ -1099,3 +1099,141 @@ remove each skill from the `BACKLOG` set in `check_coverage_matrix.py` as its ma
 
 **Target:** 2026-08-31.
 
+---
+
+## BL-030 — ThoughtSpot model-level NL instructions: migrate model-coach off manual paste to the `ai/instructions` API
+
+**Source:** first full audit sweep, 2026-06-17 (angle 13). See `docs/audit/2026-06-17-full.md` findings #1–#3.
+
+### Problem
+
+`ts-object-model-coach` writes `instructions.md` for the user to **manually paste** into
+Settings → Coach Spotter → Instructions, because open-item #4 (probed 2026-04-25) found no
+working API — it tried `sage/spotter/metadata` route prefixes and got 500s. The product has
+since shipped a programmatic surface the open-item missed: **`POST /api/rest/2.0/ai/instructions/set`**
+and **`/ai/instructions/get`** (Beta since 10.15.0.cl), payload
+`{data_source_identifier, nl_instructions_info:[{instructions:[...], scope:'GLOBAL'}]}`,
+requiring `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`.
+
+### Approach
+
+1. Re-probe `ai/instructions/set|get` against a live instance (the route the open-item missed).
+2. Add a `ts` command wrapping set/get; replace the manual-paste fallback in model-coach Step 6.5/8b/9a.
+3. Re-frame `model-instructions-schema.md` "Where it lives in TML" around the API (scope `GLOBAL` only today), not a TML round-trip — re-validate the round-trip assumption before any v1.1 TML work.
+4. Add a model-level instructions note to `thoughtspot-model-tml.md` once the API-vs-TML question is settled (`tml_probes.py:129` already reads `model.model_instructions.data_model_instructions`).
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-031 — Snowflake to-SV converter: emit `facts[]` / `sample_values` / filter-labels in YAML mode
+
+**Source:** full audit sweep 2026-06-17 (angle 13), findings #4–#6. Referenced from `agents/shared/schemas/snowflake-schema.md`.
+
+### Problem
+
+The published semantic-view YAML spec now accepts constructs the converter still treats as
+DDL-only or unsupported: per-table `facts:`, dimension `sample_values:` (Snowflake-recommended
+for Cortex Analyst accuracy), `labels: [filter]`, `unique:`, `cortex_search_service:`,
+`access_modifier:`. The schema doc has been corrected (2026-06-17); the **converter emit
+behaviour has deliberately not changed** pending verification.
+
+### Approach
+
+1. Verify each construct against a live `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` round-trip
+   (the agent verified against published docs, not a live warehouse).
+2. Update `to-snowflake-sv` to emit `facts[]` natively (instead of down-converting to metrics)
+   and populate `sample_values` for dimensions; stop stripping the now-valid fields.
+3. Bump the `snowflake-schema.md` currency anchor to a live-verified date.
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-032 — Databricks Metric Views: parser support for GA constructs (`materialization:`, `fields:`), retire v0.1 framing
+
+**Source:** full audit sweep 2026-06-17 (angle 13), findings #8–#10. Referenced from `agents/shared/schemas/databricks-metric-view.md`.
+
+### Problem
+
+Metric Views went GA 2026-04-02 (schema doc corrected). Remaining work: the `from-databricks`
+parser keys only on `dimensions:` (misses the GA `fields:` alias) and ignores the top-level
+`materialization:` block (could be silently dropped or error); the v0.1 section is framed as a
+co-equal current option (docs now document 1.1 only, default 1.1); the measure `window:` field
+underpins a large translation block but is marked **Experimental** in current docs.
+
+### Approach
+
+1. Extend the `from-databricks` parser for `materialization:` and the `fields:`/`dimensions:` alias.
+2. Condense the v0.1 section to "legacy — may be encountered"; confirm the parser still reads it.
+3. Re-verify the `window:` `range`/`offset`/`semiadditive` shape against the current build before relying on the rolling/semi-additive translations.
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-033 — Dependency & CI supply-chain hygiene
+
+**Source:** full audit sweep 2026-06-17 (angle 16), findings #16–#19.
+
+### Problem
+
+No dependency-vulnerability gate (no `pip-audit`/`safety` step, no `.github/dependabot.yml`);
+`requires-python` floor is `>=3.9` (EOL Oct 2025, never exercised — CI tests only 3.12); runtime
+deps are floor-only with no lockfile (`requests>=2.28` permits CVE-affected <2.32.0); CI installs
+unpinned tooling (`pip install pytest pyyaml`).
+
+### Approach
+
+1. Add a `pip-audit` job to `validate.yml` + a `.github/dependabot.yml` (pip + github-actions).
+2. Raise the Python floor to `>=3.10` (or add 3.10/3.11 to a CI matrix if the floor is kept).
+3. Add a constraints/lockfile; bump the `requests` floor to `>=2.32.0`; pin or extras-ify CI tooling deps.
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-034 — tools/ & ts-cli quality polish
+
+**Source:** full audit sweep 2026-06-17 (angles 4, 5, 14), findings across tools-quality / ts-cli-gaps / performance.
+
+### Problem
+
+A cluster of low/medium tool-quality issues: `model-coach` exports feedback TML one GUID per
+round-trip (`ts tml export` takes multiple GUIDs — pure batch win, no attribution trade-off);
+`databricks_sql` polls only on `PENDING` and ignores `RUNNING`; `import_tml` GUID back-fill uses a
+brittle first-name regex; `report` deep-probe swallows all errors as "alias not supported"; `report`
+walker re-queries leaf ANSWER/LIVEBOARD dependents; `report` resolver multi-part name lookup likely
+never matches 2-/3-part names; the `model-coach` changelog claims a FEEDBACK export flag the CLI
+rejects; `.gitignore` has ~4 stale entries pointing to non-existent paths.
+
+### Approach
+
+Fix opportunistically, each with a focused test. The batch-export and `databricks_sql` `RUNNING`
+poll are the highest-value. None are urgent.
+
+**Target:** 2026-10-31.
+
+---
+
+## BL-035 — Test-suite integrity gaps
+
+**Source:** full audit sweep 2026-06-17 (angle 6).
+
+### Problem
+
+Two assertions can't actually fail: `ts-dependency-manager`'s round-trip step treats an **ERROR
+import as success** (the round-trip assertion is vacuous), and the `to-databricks` DDL "validation"
+asserts substrings on a string the test itself just built (tautological). Plus
+`smoke_ts-metadata-report.py` is orphaned (never run by any harness, leaving `ts metadata report`
+unexercised), the `smoke-tests/README.md` Scripts table is stale (lists 3 of 11), and the
+business-days recipe smoke header references an old skill name.
+
+### Approach
+
+1. Make the dependency-manager round-trip step fail on a non-OK import status.
+2. Replace the tautological to-databricks assertion with a real parse/round-trip check.
+3. Wire or remove the orphaned report smoke test; refresh the smoke README table; fix the stale header.
+
+**Target:** 2026-10-31.
+

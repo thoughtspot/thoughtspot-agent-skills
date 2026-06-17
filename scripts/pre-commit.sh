@@ -131,9 +131,11 @@ if echo "$STAGED" | grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/ch
   run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root $REPO_ROOT"
 fi
 
-# Mapping currency — SOFT nudge (never blocks) when a platform mapping is edited
-# without a current currency anchor (.claude/rules/repo-audit.md, angle 13).
-if echo "$STAGED" | grep -qE '^agents/shared/mappings/.*\.md$'; then
+# Currency anchors — SOFT nudge here (prints missing + stale anchors, never blocks the
+# commit) when a shared mapping OR schema file is edited. Presence is hard-gated in CI
+# (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.
+# (.claude/rules/repo-audit.md, angle 13.)
+if echo "$STAGED" | grep -qE '^agents/shared/(mappings|schemas)/.*\.md$'; then
   python3 tools/validate/check_mapping_currency.py --root "$REPO_ROOT" --staged || true
 fi
 

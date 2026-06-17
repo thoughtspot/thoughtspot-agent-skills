@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Connection — Reference
 
 How to discover, reference, and update ThoughtSpot connections when building

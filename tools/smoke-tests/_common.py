@@ -119,7 +119,7 @@ def load_sf_profile(profile_name: str) -> dict:
     if not _SF_PROFILES_PATH.exists():
         raise RuntimeError(
             f"No Snowflake profiles file found at {_SF_PROFILES_PATH}. "
-            "Run /snowflake-profile-setup to create a profile."
+            "Run /ts-profile-snowflake to create a profile."
         )
 
     raw = json.loads(_SF_PROFILES_PATH.read_text(encoding="utf-8"))

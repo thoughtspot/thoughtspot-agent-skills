@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot View TML — Structure Reference (AGGR_WORKSHEET)
 
 How a ThoughtSpot View (Aggregated Worksheet) is represented in TML. Views are

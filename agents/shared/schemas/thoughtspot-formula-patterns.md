@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+
 # ThoughtSpot Formula Patterns — Reference
 
 Platform-agnostic reference for ThoughtSpot formula syntax, functions, and model TML

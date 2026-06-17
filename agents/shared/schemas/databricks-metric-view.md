@@ -1,10 +1,18 @@
+<!-- currency: databricks — 2026-06 (verified against GA Metric Views docs) -->
+
 # Databricks Metric View Schema
 
 Reference for Databricks Unity Catalog Metric Views. Metric Views define reusable
 semantic layers with dimensions, measures, and filters using YAML embedded in SQL DDL.
 
-**Preview channel required:** Metric Views are a Preview feature. The SQL warehouse
-must be on the Preview channel — Current channel warehouses return `PARSE_SYNTAX_ERROR`.
+**Generally available (verified 2026-06-17).** Unity Catalog Business Semantics (which
+includes Metric Views) went **GA on 2026-04-02**. The earlier "Preview channel required"
+instruction is **obsolete** — do **not** flip warehouses to the Preview channel. Current
+requirement: a SQL warehouse running **Databricks Runtime 17.3 or above** plus `CAN USE`
+permission. (A `PARSE_SYNTAX_ERROR` on a GA-era runtime is no longer attributable to the
+warehouse channel.) Sources: Databricks "Redefining the Semantics Data Layer" (2026-04) and
+the [create/edit](https://docs.databricks.com/aws/en/business-semantics/metric-views/create-edit)
++ [YAML reference](https://docs.databricks.com/aws/en/business-semantics/metric-views/yaml-reference) docs.
 
 ---
 
@@ -54,7 +62,14 @@ DROP VIEW {catalog}.{schema}.{view_name}
 
 ---
 
-## Version 0.1 — Single Source
+## Version 0.1 — Single Source (legacy)
+
+> **Legacy spec version (note added 2026-06-17).** The current GA YAML reference documents
+> **version 1.1** only, and the `version` field **defaults to 1.1**; v0.1 is no longer
+> surfaced in the product docs. Treat this section as "may be encountered on older Metric
+> Views" — the from-databricks parser must still read it, but **emit v1.1 for all
+> conversions**. Newer GA constructs (top-level `materialization:`, `fields:` as an alias
+> for `dimensions:`) are tracked in **BL-032**.
 
 Single source table, flat list of dimensions and measures, optional global filter.
 Column metadata is limited to `name`, `expr`, and `window` — no `display_name`,

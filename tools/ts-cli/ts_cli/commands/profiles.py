@@ -58,7 +58,7 @@ def list_profiles(
     if not profiles:
         typer.echo(
             f"No profiles found in {PROFILES_PATH}.\n"
-            "Run /ts-profile-setup to add a profile."
+            "Run /ts-profile-thoughtspot to add a profile."
         )
         raise typer.Exit(1)
 
