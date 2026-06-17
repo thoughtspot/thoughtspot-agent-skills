@@ -114,8 +114,11 @@ anchor to its mapping/schema files.** That is the entire expansion cost.
 | Scope | When | How |
 |---|---|---|
 | Internal validators (1–10 where automated) | Every PR | pre-commit + CI |
-| **External sweep (13, 14, 16)** | **Weekly** *(current — revisit once embedded)* | `Workflow({name: "repo-audit", args: {scope: "external"}})` |
-| Full deep audit (all angles) | Ad-hoc + before a release + when a new runtime / skill-family lands | `Workflow({name: "repo-audit", args: {scope: "full"}})` |
+| **External sweep (13, 14, 16)** | On demand, **when nudged** (~weekly threshold) | `Workflow({name: "repo-audit", args: {scope: "external"}})` |
+| Full deep audit (all angles) | On demand, **when nudged** (time or activity) + before a release / new runtime | `Workflow({name: "repo-audit", args: {scope: "full"}})` |
+
+**No scheduled cron.** Execution is nudge-driven and on-demand, not automated — see
+the rationale under Freshness triggers.
 
 Weekly is deliberately the *external* scope only — the internal angles are already
 per-PR validators, so re-running them weekly adds nothing. The weekly cadence is a
@@ -135,8 +138,18 @@ be a deliberate `Workflow` call, not unattended automation.)
 | Full audit worth considering | **time:** latest `*-full.md` older than `FULL_MAX_AGE_DAYS` (90), **OR activity:** a new skill / new runtime / 2+ new shared refs / a ts-cli bump / 40+ commits since the last full audit |
 
 The activity trigger is the important half: it fires the full audit when *substantial
-work* has landed, not just when the calendar says so. A true cron that generates the
-external report hands-off can be added later if wanted — the nudge does not require it.
+work* has landed, not just when the calendar says so.
+
+**Why nudge-on-demand and not a scheduled cron.** A sweep produces findings that a human
+must route to a validator-PR or a dated `BL-NNN`; a cron can't do that, so it would only
+generate a report that still waits on your attention — the expensive part is unchanged.
+The nudge is also *activity-aware*, so it stays silent when nothing has changed (a weekly
+cron would burn tokens regardless), and it lets you run the sweep when you have attention
+ready to act on the results. The nudge catches "it's been a week" the next time you touch
+the repo (≈daily on an active repo), and `check_mapping_currency` catches the activity
+case the instant a mapping is edited — together they cover external drift without a
+scheduled job. If a genuinely hands-off report is ever wanted, a cron can be layered on
+*top* of the same runner, but it is deliberately not part of this design.
 
 ---
 
