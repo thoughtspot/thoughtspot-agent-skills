@@ -287,3 +287,54 @@ def import_tml(
                             break
 
     print(json.dumps(data))
+
+
+@app.command("lint")
+def lint_tml_cmd() -> None:
+    """Lint TML for the model invariants VALIDATE_ONLY does not catch (I1/I2/I4/I5 + guid).
+
+    Reads the SAME stdin format as `ts tml import` — a JSON array of TML strings (or a
+    single string). No ThoughtSpot connection needed; pure local structural check. Run it
+    before import to fail loud on issues the server accepts silently.
+
+    Output: JSON {"clean": bool, "results": [{index, type, name, findings: [...]}]}.
+    Exit code 1 if any document has findings, else 0.
+
+      cat payload.json | ts tml lint
+    """
+    try:
+        payload = json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Invalid JSON on stdin: {e}")
+
+    if isinstance(payload, str):
+        tmls = [payload]
+    elif isinstance(payload, list):
+        tmls = payload
+    else:
+        raise SystemExit("stdin must be a JSON string or array of TML strings.")
+
+    from ts_cli.tml_lint import lint_tml
+
+    results = []
+    any_findings = False
+    for i, edoc in enumerate(tmls):
+        try:
+            data = parse_edoc(edoc)
+        except yaml.YAMLError as e:
+            results.append({"index": i, "type": "?", "name": None,
+                            "findings": [f"YAML parse error: {e}"]})
+            any_findings = True
+            continue
+        findings = lint_tml(data) if isinstance(data, dict) else ["TML is not a mapping"]
+        inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
+        results.append({
+            "index": i,
+            "type": detect_tml_type(data) if isinstance(data, dict) else "?",
+            "name": inner.get("name") if isinstance(inner, dict) else None,
+            "findings": findings,
+        })
+        any_findings = any_findings or bool(findings)
+
+    print(json.dumps({"clean": not any_findings, "results": results}))
+    raise SystemExit(1 if any_findings else 0)
