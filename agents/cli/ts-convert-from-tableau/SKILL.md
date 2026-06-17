@@ -938,11 +938,48 @@ Run this **only when a table will be created** (the **N** path, or tables not fo
 **E** / **?** paths) or to scope a connection search in 4c. **If every table was matched to
 an existing object, skip this step** — reusing tables needs no connection work.
 
-**Choose how to identify the connection — don't dump the full list by default.** A long
-connection list is noise when the user already knows the one they want. Ask first:
+**First: use an existing connection or create a new one.** Ask:
 
 ```
-How would you like to choose the ThoughtSpot connection?
+The generated tables need a ThoughtSpot connection that can reach the source database.
+  E  Use an existing connection
+  C  Create a new connection   (Snowflake source only, key-pair auth)
+
+Enter E / C:
+```
+
+> **When to create:** a ThoughtSpot connection only sees databases its warehouse
+> **role** is granted. If no existing connection's role can see the source database,
+> table creation fails with *"Database … does not exist in connection"* — that is the
+> signal to create one (do **not** trial-and-error existing connections to find out).
+
+**C — create a new connection.** Supported here for **Snowflake** sources via key-pair
+auth. Collect the connection name, Snowflake account identifier, user, role, warehouse,
+and the path to the **unencrypted PKCS#8 private key** (`.p8`), then run:
+
+```bash
+source ~/.zshenv && ts connections create \
+  --name "{connection_name}" \
+  --account "{account}" --user "{user}" --role "{role}" --warehouse "{warehouse}" \
+  --database "{database}" \
+  --private-key-path "{key_path}" \
+  --profile {profile_name}
+```
+
+The role must have `USAGE` on the database/schema (and `SELECT` on the tables). The
+matching **public** key must already be registered on the Snowflake user. **Credential
+handling (required):** never ask the user to paste a private key, password, or secret
+into the conversation — the key is passed **by file path only** and `ts connections
+create` never echoes it. If the source is **not** Snowflake, or password/OAuth is
+required, connection creation is out of this skill's scope: direct the user to create
+the connection in the ThoughtSpot UI, then return on the **E** path. Use the returned
+`name` as `{connection_name}`.
+
+**E — use an existing connection. Don't dump the full list by default** — a long
+connection list is noise when the user already knows the one they want. Ask:
+
+```
+How would you like to identify the connection?
   N  Name it     — type the exact connection name; I'll use it directly
   F  Filter      — give a partial string; I'll list only connections that match
   L  List all    — show every connection and pick by number
@@ -996,9 +1033,10 @@ A connection is **required** for any table being created — there is no skip pa
 ThoughtSpot tables are logical objects over a **live** connection: the physical table must
 already exist in the database and the connection must already exist for the table to be
 created at all. Do not offer placeholders or a dry-run mode — they only produce objects
-that can never bind to data. If the user has no suitable connection, stop and tell them a
-connection exposing the source tables must be created first (the data pipeline / connection
-setup is out of this skill's scope).
+that can never bind to data. If the user has no suitable connection: for a **Snowflake**
+source, create one via the **C** path above (key-pair auth); for any other source, or when
+password/OAuth is required, stop and tell them the connection must be created first in the
+ThoughtSpot UI (that connection setup is out of this skill's scope).
 
 Use the connection's exact **name** in every table TML and SQL View TML — never a GUID. The
 v2 API cannot search connections by name, so the name string is both necessary and
@@ -3177,6 +3215,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.15.0 | 2026-06-17 | Step 4.5 connection step now offers **E — use existing / C — create a new connection** (Snowflake-source only, key-pair auth via `ts connections create`). Adds the "Database does not exist in connection → role can't see it → create one" guidance and a credential-handling guardrail (private key by file path only; never pasted into chat). Non-Snowflake sources / password / OAuth remain out of scope → create in the UI and use the E path. Mirrors the connection-step change in ts-convert-from-snowflake-sv. |
 | 1.14.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
 | 1.14.1 | 2026-06-17 | **Measure-classification + string-parameter-type fixes (from the Catalog Health live migration).** (1) Step 5b parameter mapping: a string **parameter** must be `CHAR`, **not `VARCHAR`** — ThoughtSpot rejects a `VARCHAR` list parameter on import (table *columns* are unaffected). (2) New **MEASURE vs ATTRIBUTE classification** rule in Step 5b: a formula is a MEASURE if it *transitively* produces a number (own aggregate/ratio **or references another MEASURE formula** by `[formula_<id>]` — e.g. a dynamic `if [Param] then [formula_…Pct]` selector); a numeric physical column **defaults to MEASURE** unless it's clearly a dimension (`*_ID`/`*_NUM`/`*_NAME`/date) — Tableau's `role` under-tags counts; and **bare unbracketed column refs** must be qualified to `[TABLE::COL]`. Under-classifying as ATTRIBUTE makes KPIs/chart y-axes render empty. (Assumes PR #92 → v1.14.0 merges first; renumber if not.) |
 | 1.14.0 | 2026-06-17 | **Add a charting-library choice (Step 10-charts): prompt Legacy (default, portable) vs Muze (new charting library, early access).** On Muze, emit `ADVANCED_*` + `custom_chart_config` (shelf model `x-axis`/`y-axis`/`slice-with-color`/`trellis-by`) for cartesian/pivot intents — mapping Tableau's Color shelf → `slice-with-color` and small multiples → `trellis-by` for a closer migration — and fall back to Legacy types for non-cartesian intents (pie/scatter/geo/etc.). Backed by the expanded `thoughtspot-chart-types.md` "Muze charting library" spec (verified live on se-thoughtspot 2026-06-17: Muze/`ADVANCED_*` family = 10 cartesian/pivot types only; `custom_chart_config` on a Legacy type is rejected; pivot/combo/simple charts auto-resolve). |

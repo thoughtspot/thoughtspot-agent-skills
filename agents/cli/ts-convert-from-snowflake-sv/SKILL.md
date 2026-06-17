@@ -796,14 +796,30 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    ```
    This returns every column for every table/view in the schema in one round-trip.
 
-2. Choose which ThoughtSpot connection to use. Use the connection **name** directly
-   in table TML — no GUID lookup is needed or possible from available procedures.
+2. Choose which ThoughtSpot connection to use — **use an existing one or create a new
+   one**. Use the connection **name** directly in table TML — no GUID lookup is needed
+   or possible from available procedures.
 
-   **Choose how to identify the connection — don't dump the full list by default.** A long
-   connection list is noise when the user already knows the one they want. Ask first:
+   Ask first:
 
    ```
-   How would you like to choose the ThoughtSpot connection?
+   The new Table objects need a ThoughtSpot connection that can reach {database}.
+     E  Use an existing connection
+     C  Create a new connection   (Snowflake, key-pair auth)
+
+   Enter E / C:
+   ```
+
+   > **When to create:** a ThoughtSpot connection only sees databases its Snowflake
+   > **role** is granted. If no existing connection's role can see `{database}`, table
+   > creation fails with *"Database {db} does not exist in connection"* — that is the
+   > signal to create one (do **not** trial-and-error existing connections to find out).
+
+   **E — use an existing connection.** Don't dump the full list by default — a long
+   connection list is noise when the user already knows the one they want. Ask:
+
+   ```
+   How would you like to identify the connection?
      N  Name it     — type the exact connection name; I'll use it directly
      F  Filter      — give a partial string; I'll list only connections that match
      L  List all    — show every connection and pick by number
@@ -831,6 +847,30 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    If only one connection exists in total (or only one matches the semantic view's
    database), auto-select it and confirm regardless of the choice. Use the exact `name`
    value from the API response.
+
+   **C — create a new connection (Snowflake, key-pair auth).** Collect the connection
+   name, Snowflake account identifier, user, role, warehouse, and the path to the
+   **unencrypted PKCS#8 private key** (`.p8`), then run:
+
+   ```bash
+   source ~/.zshenv && ts connections create \
+     --name "{connection_name}" \
+     --account "{account}" --user "{user}" --role "{role}" --warehouse "{warehouse}" \
+     --database "{database}" \
+     --private-key-path "{key_path}" \
+     --profile {profile}
+   ```
+
+   The role must have `USAGE` on `{database}` and its schema (and `SELECT` on the
+   tables) — otherwise the tables won't resolve. The matching **public** key must already
+   be registered on the Snowflake user (`DESC USER {user}` shows `RSA_PUBLIC_KEY`).
+
+   **Credential handling (required):** never ask the user to paste a private key,
+   password, or secret into the conversation. The key is passed **by file path only** —
+   `ts connections create` reads it and never echoes it. Key-pair is the only auth this
+   path supports; for password/OAuth, direct the user to create the connection in the
+   ThoughtSpot UI and return on the **E** path. The command prints
+   `{id, name, data_warehouse_type}` — use the returned `name` for the table spec.
 
 3. Create ThoughtSpot Table objects for all tables in one command:
    ```bash
@@ -1781,6 +1821,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.12.0 | 2026-06-17 | Step 6B connection step now offers **E — use existing / C — create a new connection** (Snowflake, key-pair auth via `ts connections create`) instead of only selecting an existing one. Adds the "Database does not exist in connection → role can't see it → create one" guidance and a credential-handling guardrail (private key by file path only; never pasted into chat; password/OAuth → UI + E path). Mirrors the connection-step change in ts-convert-from-tableau; ts-convert-from-databricks-mv gets the explicit stop-and-instruct fallback. |
 | 1.11.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
 | 1.11.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 6A connection-scoped search path.** The 6A "C — within a connection" path now explicitly presents the Step 6B N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Mirrors the same fix in ts-convert-from-tableau and ts-convert-from-databricks-mv. |
 | 1.11.0 | 2026-06-16 | Connection selection (Step 6B): add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single/database-matched connection still auto-selects. Mirrors the same prompt added to ts-convert-from-tableau and ts-convert-from-databricks-mv. |

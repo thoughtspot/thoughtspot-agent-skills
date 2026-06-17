@@ -215,6 +215,106 @@ def add_tables(
     print(json.dumps(update_resp.json()))
 
 
+def _build_create_payload(
+    name: str,
+    account: str,
+    user: str,
+    role: str,
+    warehouse: str,
+    private_key: str,
+    database: Optional[str] = None,
+    description: str = "",
+) -> Dict[str, Any]:
+    """Build the POST /api/rest/2.0/connection/create body for a Snowflake
+    key-pair connection (no tables).
+
+    Mirrors the verified payload shape:
+      - configuration carries accountName / user / role / warehouse and the
+        private key under the ``private_key`` attribute (NOT ``privateKey``)
+      - authenticationType is KEY_PAIR (required — the API defaults to
+        SERVICE_ACCOUNT and rejects the key otherwise)
+      - externalDatabases is empty and validate is false (tables are added
+        later via ``ts tables create``)
+
+    Pure function — no I/O — so it can be unit-tested without a live instance.
+    """
+    config: Dict[str, Any] = {
+        "accountName": account,
+        "user": user,
+        "role": role,
+        "warehouse": warehouse,
+        "private_key": private_key,
+    }
+    if database:
+        config["database"] = database
+    return {
+        "name": name,
+        "description": description,
+        "data_warehouse_type": "SNOWFLAKE",
+        "data_warehouse_config": {
+            "configuration": config,
+            "authenticationType": "KEY_PAIR",
+            "externalDatabases": [],
+        },
+        "validate": False,
+    }
+
+
+@app.command("create")
+def create_connection(
+    profile: Optional[str] = _profile_option,
+    name: str = typer.Option(..., "--name", help="Unique name for the new connection"),
+    account: str = typer.Option(..., "--account",
+                                help="Snowflake account identifier (e.g. myorg-myaccount or account.region)"),
+    user: str = typer.Option(..., "--user", help="Snowflake username"),
+    role: str = typer.Option(..., "--role", help="Snowflake role (must see the target database/schema)"),
+    warehouse: str = typer.Option(..., "--warehouse", help="Snowflake warehouse"),
+    private_key_path: str = typer.Option(..., "--private-key-path",
+                                         help="Path to the unencrypted PKCS#8 private key (.p8) for key-pair auth"),
+    database: Optional[str] = typer.Option(None, "--database", help="Default database (optional)"),
+    description: str = typer.Option("", "--description", help="Connection description"),
+) -> None:
+    """Create a Snowflake data connection using key-pair authentication.
+
+    Creates an empty connection (no tables) via
+    POST /api/rest/2.0/connection/create with authenticationType=KEY_PAIR and
+    validate=false. Register tables afterwards with `ts tables create`
+    (referencing this connection by its name).
+
+    The private key is read from --private-key-path and sent to ThoughtSpot in
+    the create payload; its value is never printed or logged. Use an unencrypted
+    PKCS#8 (.p8) key whose matching public key is registered on the Snowflake
+    user (DESC USER shows RSA_PUBLIC_KEY).
+
+    Requires DATAMANAGEMENT or ADMINISTRATION privilege (CAN_CREATE_OR_EDIT_CONNECTIONS
+    under RBAC).
+
+    Output: JSON {id, name, data_warehouse_type} of the created connection.
+    """
+    import os
+
+    key_path = os.path.expanduser(private_key_path)
+    try:
+        with open(key_path) as fh:
+            pem = fh.read().strip()
+    except OSError as e:
+        raise SystemExit(f"Could not read private key at {private_key_path}: {e}")
+    if not pem:
+        raise SystemExit(f"Private key file is empty: {private_key_path}")
+
+    payload = _build_create_payload(
+        name, account, user, role, warehouse, pem, database, description
+    )
+    client = ThoughtSpotClient(resolve_profile(profile))
+    resp = client.post("/api/rest/2.0/connection/create", json=payload)
+    data = resp.json()
+    print(json.dumps({
+        "id": data.get("id"),
+        "name": data.get("name"),
+        "data_warehouse_type": data.get("data_warehouse_type"),
+    }))
+
+
 # ---------------------------------------------------------------------------
 # Merge logic
 # ---------------------------------------------------------------------------

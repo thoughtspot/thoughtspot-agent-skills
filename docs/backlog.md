@@ -1237,3 +1237,30 @@ business-days recipe smoke header references an old skill name.
 
 **Target:** 2026-10-31.
 
+---
+
+## BL-036 — Databricks-native connection creation
+
+**Source:** create-connection feature work 2026-06-17 (`ts connections create` + convert-from connection step).
+**Affects:** ts-cli (`connections create`), ts-convert-from-databricks-mv
+
+### Problem
+
+`ts connections create` supports **Snowflake key-pair** auth only, so `ts-convert-from-snowflake-sv`
+(and `ts-convert-from-tableau` for Snowflake sources) can create a connection in-flow. Databricks
+connections authenticate with a **Personal Access Token or OAuth (M2M)**, not key-pair — so
+`ts-convert-from-databricks-mv` has no create path and falls back to "stop & instruct" (create in the
+ThoughtSpot UI, then resume). This is path A, chosen deliberately for the initial feature.
+
+### Approach
+
+1. Extend `ts connections create` with a Databricks mode: `--host`, `--http-path`, and a PAT
+   (read from a file path or the keychain via `/ts-profile-databricks`, never pasted into chat),
+   `data_warehouse_type=DATABRICKS`, `authenticationType` per the connection API.
+2. Verify the create payload shape against `get-rest-api-reference(apiName: "createConnection")`
+   and a live Databricks-backed instance before shipping.
+3. Replace the databricks-mv "stop & instruct" fallback with the create branch (mirror the
+   Snowflake skill's E/C prompt). Add a unit test for the Databricks payload builder.
+
+**Target:** 2026-10-31.
+

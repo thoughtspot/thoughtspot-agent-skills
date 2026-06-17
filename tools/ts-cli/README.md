@@ -479,6 +479,50 @@ ts connections list --type BIGQUERY
 
 ---
 
+### `ts connections create`
+
+Create a Snowflake data connection using **key-pair** authentication (no tables).
+Register tables afterwards with `ts tables create`, referencing the connection by name.
+
+```bash
+ts connections create \
+  --name APJ_SKILLS \
+  --account myorg-myaccount \
+  --user SVC_USER \
+  --role SE_ROLE \
+  --warehouse DEMO_WH \
+  --database AGENT_SKILLS \
+  --private-key-path ~/.ssh/snowflake_private_key.p8
+```
+
+**Options:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | yes | Unique name for the new connection |
+| `--account` | yes | Snowflake account identifier (e.g. `myorg-myaccount` or `account.region`) |
+| `--user` | yes | Snowflake username |
+| `--role` | yes | Snowflake role (must see the target database/schema) |
+| `--warehouse` | yes | Snowflake warehouse |
+| `--private-key-path` | yes | Path to the unencrypted PKCS#8 private key (`.p8`) |
+| `--database` | no | Default database |
+| `--description` | no | Connection description |
+| `--profile`, `-p` | no | Profile to use |
+
+Sends `POST /api/rest/2.0/connection/create` with `authenticationType=KEY_PAIR`,
+`validate=false`, and an empty `externalDatabases`. The private key is read from
+the file path and placed under the `private_key` configuration attribute — its
+value is never printed or logged. The matching public key must be registered on
+the Snowflake user (`DESC USER` shows `RSA_PUBLIC_KEY`). Requires `DATAMANAGEMENT`
+or `ADMINISTRATION` (`CAN_CREATE_OR_EDIT_CONNECTIONS` under RBAC).
+
+**Output:** JSON `{id, name, data_warehouse_type}` of the created connection.
+
+> **Key-pair only.** This command creates Snowflake connections via key-pair auth.
+> Password/OAuth and other warehouse types (e.g. Databricks) are not supported here.
+
+---
+
 ### `ts connections get <connection-id>`
 
 Fetch full connection details including the database/schema/table/column hierarchy.

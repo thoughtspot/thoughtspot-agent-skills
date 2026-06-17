@@ -731,6 +731,15 @@ Resolve the user's choice against that result:
 If only one connection exists in total, auto-select it and confirm regardless of the choice.
 Use the exact `name` value from the API response in the table TML.
 
+> **No suitable connection?** A ThoughtSpot connection only sees catalogs its Databricks
+> credentials are granted. If no existing connection can see the source catalog, table
+> creation fails with *"Database … does not exist in connection"*. **Creating a Databricks
+> connection is out of this skill's scope** — Databricks connections authenticate with a
+> Personal Access Token or OAuth (M2M), not key-pair, so there is no `ts connections create`
+> path for them (that is `BL-036`). Stop and direct the user to create the connection in the
+> ThoughtSpot UI (credentials per `/ts-profile-databricks`), then resume on this step and
+> select it. Do **not** trial-and-error existing connections.
+
 Create the ThoughtSpot Table object:
 
 ```bash
@@ -1287,6 +1296,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.3 | 2026-06-17 | Connection step: add explicit **"no suitable connection → stop & instruct"** guidance — a connection only sees catalogs its credentials are granted; if none fits, table creation fails with *"Database does not exist in connection"*. Creating a Databricks connection is out of scope (PAT/OAuth, not key-pair — no `ts connections create` path; tracked as BL-036): direct the user to the ThoughtSpot UI, then resume and select it. Don't trial-and-error connections. (Sibling to the Snowflake/Tableau create-connection change.) |
 | 1.5.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
 | 1.5.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 8A connection-scoped search path.** The 8A "C — within a connection" path now explicitly presents the Step 8B N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Mirrors the same fix in ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
 | 1.5.0 | 2026-06-16 | Connection selection (Step 8B): add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list --type DATABRICKS`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
