@@ -23,10 +23,10 @@ WATERFALL, WHISKER_SCATTER
 - `TABLE` is not in the enum. For a tabular tile, **omit the `chart` block and set
   `display_mode: TABLE_MODE`** (the export then shows a default `chart.type` but renders as
   a table). `GRID_TABLE` / `PIVOT_TABLE` are the chart-engine table types.
-- `ADVANCED_*` are the **new charting library** (early access — see the dedicated section
+- `ADVANCED_*` are the **Muze charting library** (early access — see the dedicated section
   below). They use a different encoding block (`custom_chart_config`, not `axis_configs`).
-  The classic names are the portable default; emit `ADVANCED_*` only when targeting a cluster
-  with the new library enabled.
+  The Legacy (plain) names are the portable default; emit `ADVANCED_*` (Muze) only when
+  targeting a cluster with the Muze library enabled.
 - `CUSTOM_CHART` / `MUZE_STUDIO` are extension/custom-viz hooks — not general-purpose.
 - `GEO_EARTH_*` are the 3-D globe variants of the geo charts.
 
@@ -63,17 +63,23 @@ WATERFALL, WHISKER_SCATTER
 anchor column is geo-tagged in ThoughtSpot. `CANDLESTICK`/`WHISKER_SCATTER` import but only
 render meaningfully with OHLC / distribution-shaped inputs.
 
-## New charting library (`ADVANCED_*`) — early access
+## Muze charting library (`ADVANCED_*` types) — early access
 
-ThoughtSpot is rolling out a new charting library, the **`ADVANCED_*`** chart family
-(`ADVANCED_COLUMN`, `ADVANCED_BAR`, `ADVANCED_LINE`, `ADVANCED_AREA`, `ADVANCED_STACKED_*`,
-`ADVANCED_LINE_COLUMN`, `ADVANCED_LINE_STACKED_COLUMN`, `ADVANCED_PIVOT_TABLE`). It is
-**early access** — enabled on the SE cluster (`se-thoughtspot`), not yet GA. _All findings
-below verified live on se-thoughtspot 2026-06-17._
+ThoughtSpot has two charting libraries:
 
-### Scope — which types the advanced library covers
+- **Legacy** — the original charts. In TML these are the plain type names (`COLUMN`, `BAR`,
+  `LINE`, …) with `chart.axis_configs`.
+- **Muze** — ThoughtSpot's newer charting engine. In TML these are the **`ADVANCED_*`** type
+  names with `chart.custom_chart_config`. _(Note: the TML enum and ThoughtSpot's own internal
+  error messages call these "advanced" / the Legacy ones "standard" — the **branded** library
+  names are **Muze** and **Legacy**, but the literal `ADVANCED_*` enum values are unchanged.)_
 
-The `ADVANCED_*` family is currently **only the cartesian + pivot types** (10 of them):
+Muze is **early access** — enabled on the SE cluster (`se-thoughtspot`), not yet GA. _All
+findings below verified live on se-thoughtspot 2026-06-17._
+
+### Scope — which types the Muze library covers
+
+The `ADVANCED_*` (Muze) family is currently **only the cartesian + pivot types** (10 of them):
 
 ```
 ADVANCED_COLUMN  ADVANCED_BAR  ADVANCED_LINE  ADVANCED_AREA
@@ -82,20 +88,19 @@ ADVANCED_LINE_COLUMN  ADVANCED_LINE_STACKED_COLUMN  ADVANCED_PIVOT_TABLE
 ```
 
 There is **no** `ADVANCED_SCATTER`, `ADVANCED_PIE`, `ADVANCED_HEATMAP`, `ADVANCED_SANKEY`,
-etc. So advanced charting applies to bar/line/area/column/combo/pivot migrations; every other
-intent (composition, correlation, flow, geo, distribution, funnel, …) stays on the standard
-types.
+etc. So Muze charting applies to bar/line/area/column/combo/pivot migrations; every other
+intent (composition, correlation, flow, geo, distribution, funnel, …) stays on Legacy charts.
 
-The classic and advanced types map 1:1 by intent (`COLUMN` ↔ `ADVANCED_COLUMN`, etc.). The
+The Legacy and Muze types map 1:1 by intent (`COLUMN` ↔ `ADVANCED_COLUMN`, etc.). The
 important difference is **how the encoding (which column goes on which shelf) is expressed**:
 
-| | Standard chart (`COLUMN`, `BAR`, …) | Advanced chart (`ADVANCED_*`) |
+| | Legacy chart (`COLUMN`, `BAR`, …) | Muze chart (`ADVANCED_*`) |
 |---|---|---|
 | Encoding block | `chart.axis_configs` (`x: […]`, `y: […]`) | `chart.custom_chart_config` (shelf model) |
 | Series / color | a second column in `chart_columns` | the **`slice-with-color`** shelf |
 | Small multiples / faceting | not expressible | the **`trellis-by`** shelf |
 
-### `custom_chart_config` — the advanced encoding shelf model
+### `custom_chart_config` — the Muze encoding shelf model
 
 ```yaml
 chart:
@@ -126,13 +131,13 @@ Shelf keys (cartesian types): **`x-axis`**, **`y-axis`**, **`slice-with-color`**
 `axes: [{type: FLAT, column: <display name>}]` + `mode: AXIS_DRIVEN`; an empty shelf carries
 just `mode: AXIS_DRIVEN`. (`type: FLAT` and `mode: AXIS_DRIVEN` are the only values observed.)
 
-### Tableau alignment — why advanced is a closer migration target
+### Tableau alignment — why Muze is a closer migration target
 
 The shelf model maps almost 1:1 onto Tableau's encoding shelves, so a Tableau viz that uses
-Color or small-multiples migrates more faithfully to one advanced chart than to a standard
-chart (where a second dimension is an implicit extra column):
+Color or small-multiples migrates more faithfully to one Muze chart than to a Legacy chart
+(where a second dimension is an implicit extra column):
 
-| Tableau shelf | Advanced shelf | Standard-chart equivalent |
+| Tableau shelf | Muze shelf | Legacy-chart equivalent |
 |---|---|---|
 | Columns | `x-axis` | `axis_configs.x` |
 | Rows | `y-axis` | `axis_configs.y` |
@@ -159,30 +164,31 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 
 ### Verified rules (live on se-thoughtspot)
 
-- **Don't put `custom_chart_config` on a standard type.** A standard type (`COLUMN`) with a
-  `custom_chart_config` is rejected: *"Switching from advanced charts to standard charts
-  through TML is not supported."* One such viz **fails the whole import**.
-- **Advanced type + `axis_configs`** is accepted, but on export ThoughtSpot drops it and
-  stores neither block (it auto-resolves a simple x/y advanced chart from `chart_columns`).
-- **Advanced type + `custom_chart_config`** round-trips faithfully — including the
-  `slice-with-color` and `trellis-by` shelves. This is the canonical form for any advanced
-  chart that needs an explicit series or facet.
-- So: **standard type → `axis_configs`; advanced type → `custom_chart_config`** (or omit both
-  for a trivial x/y advanced chart). Never mix a standard type with `custom_chart_config`.
+- **Don't put `custom_chart_config` on a Legacy type.** A Legacy type (`COLUMN`) with a
+  `custom_chart_config` is rejected — ThoughtSpot's verbatim error: *"Switching from advanced
+  charts to standard charts through TML is not supported."* One such viz **fails the whole
+  import**.
+- **Muze type (`ADVANCED_*`) + `axis_configs`** is accepted, but on export ThoughtSpot drops
+  it and stores neither block (it auto-resolves a simple x/y Muze chart from `chart_columns`).
+- **Muze type + `custom_chart_config`** round-trips faithfully — including the
+  `slice-with-color` and `trellis-by` shelves. This is the canonical form for any Muze chart
+  that needs an explicit series or facet.
+- So: **Legacy type → `axis_configs`; Muze type → `custom_chart_config`** (or omit both for a
+  trivial x/y Muze chart). Never mix a Legacy type with `custom_chart_config`.
 
 ### Guidance for generators (Tableau skill, liveboard-builder)
 
-- **Default to standard chart types, but PROMPT the user to choose** standard vs the advanced
-  library before generating chart TML. Standard is the portable default (works on every
-  cluster); advanced is early access (the target cluster must have it enabled — e.g. SE).
-- When the user picks **advanced**: emit `ADVANCED_*` + `custom_chart_config` for the
+- **Default to Legacy charts, but PROMPT the user to choose** Legacy vs Muze before generating
+  chart TML. Legacy is the portable default (works on every cluster); Muze is early access (the
+  target cluster must have it enabled — e.g. SE).
+- When the user picks **Muze**: emit `ADVANCED_*` + `custom_chart_config` for the
   cartesian/pivot intents (bar/column/line/area/stacked/combo/pivot), and **fall back to the
-  standard type** for any intent with no advanced equivalent (pie, scatter/bubble, heatmap,
+  Legacy type** for any intent with no Muze equivalent (pie, scatter/bubble, heatmap,
   treemap, sankey, funnel, waterfall, pareto, spider, geo, candlestick, KPI). Map Tableau's
   Color shelf → `slice-with-color` and small multiples → `trellis-by` for a closer migration.
 - The shelf model is also a cleaner fit for the liveboard-builder's intent → encoding step
   (series and small-multiples become first-class shelves rather than implicit extra columns).
-- `client_state_v2` differs slightly between the two (the advanced export omits
+- `client_state_v2` differs slightly between the two (the Muze export omits
   `responsiveLayoutPreference` and trims some `kpiColumnProperties`/`systemSeriesColors`
   defaults) — these are cosmetic defaults, not required for a valid import.
 

@@ -6,8 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-17
-- docs: add `agents/shared/schemas/thoughtspot-chart-types.md` — verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping + full **new charting library (`ADVANCED_*`)** spec (custom_chart_config shelf model, early-access, verified live on se-thoughtspot); cited by ts-convert-from-tableau
-- feat: ts-convert-from-tableau v1.14.0 — add a Standard-vs-Advanced charting-library prompt (Step 10-charts); on Advanced, emit `ADVANCED_*` + `custom_chart_config` (Tableau Color → slice-with-color, small multiples → trellis-by) for cartesian/pivot intents with standard fallback for the rest
+- docs: add `agents/shared/schemas/thoughtspot-chart-types.md` — verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping + full **Muze charting library (`ADVANCED_*`)** spec (custom_chart_config shelf model, early-access, verified live on se-thoughtspot); cited by ts-convert-from-tableau
+- feat: ts-convert-from-tableau v1.14.0 — add a Legacy-vs-Muze charting-library prompt (Step 10-charts); on Muze, emit `ADVANCED_*` + `custom_chart_config` (Tableau Color → slice-with-color, small multiples → trellis-by) for cartesian/pivot intents with Legacy fallback for the rest
 - docs: add BL-026 + design `docs/designs/ts-object-liveboard-builder.md` (build-the-best-liveboard skill)
 
 ## 2026-06-16
