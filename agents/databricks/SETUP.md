@@ -245,12 +245,16 @@ Skills must live under your **personal** workspace path for Genie to discover th
   skills/
     ts-convert-from-databricks-mv/SKILL.md
     ts-convert-to-databricks-mv/SKILL.md
-  shared/
-    mappings/ts-databricks/...
-    schemas/...
+    shared/                                ← under skills/ (SKILL.md uses ../shared/)
+      mappings/ts-databricks/...
+      schemas/...
   notebooks/
-    ts_client                              ← notebook for %run
+    ts_client                              ← notebook for %run (../../notebooks/ts_client)
 ```
+
+> **Shared lives under `skills/`.** Each SKILL.md references shared files as `../shared/…`,
+> which resolves to `.assistant/skills/shared/` (a sibling of the skill folders) — **not**
+> `.assistant/shared/`. `deploy.sh` already places them there; the manual steps below match.
 
 ### Option A: CLI deploy (recommended)
 
@@ -267,14 +271,15 @@ manually through the Databricks workspace UI:
 2. Create the following folder structure:
    - `.assistant/skills/ts-convert-from-databricks-mv/`
    - `.assistant/skills/ts-convert-to-databricks-mv/`
-   - `.assistant/shared/mappings/ts-databricks/`
-   - `.assistant/shared/schemas/`
+   - `.assistant/skills/shared/mappings/ts-databricks/`
+   - `.assistant/skills/shared/schemas/`
    - `.assistant/notebooks/`
 3. Upload each skill's `SKILL.md` into its matching workspace folder
-4. Upload the shared reference files from `agents/shared/`:
-   - `mappings/ts-databricks/*.md` → `.assistant/shared/mappings/ts-databricks/`
+4. Upload the shared reference files from `agents/shared/` (note: under `skills/shared/`,
+   so the skills' `../shared/…` references resolve):
+   - `mappings/ts-databricks/*.md` → `.assistant/skills/shared/mappings/ts-databricks/`
    - `schemas/databricks-metric-view.md`, `thoughtspot-table-tml.md`,
-     `thoughtspot-model-tml.md` → `.assistant/shared/schemas/`
+     `thoughtspot-model-tml.md` → `.assistant/skills/shared/schemas/`
 5. Import `agents/databricks/notebooks/ts_client.py` as a **Notebook** (not a
    file) into `.assistant/notebooks/` — this is required for `%run` to work
 6. Similarly import `ts_profile_setup.py` and `token_refresh.py` as notebooks

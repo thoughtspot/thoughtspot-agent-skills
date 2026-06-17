@@ -13,6 +13,23 @@ enforced by `tools/validate/check_runtime_coverage.py`, which scans
 `agents/cli/`, `agents/claude/`, and `agents/coco-snowsight/` and merges skills by
 name.
 
+### The Databricks Genie runtime (`agents/databricks/`)
+
+`agents/databricks/skills/` is a **fourth, deliberately-separate** runtime — Databricks
+Genie Code skills deployed by `agents/databricks/deploy.sh` into a workspace `.assistant/`
+path. It is intentionally **outside** the cli/claude/coco mirror-and-version tooling:
+
+- Its skills (`ts-convert-from-databricks-mv`, `ts-convert-to-databricks-mv`) are **thin
+  shells** that defer all conversion logic to the shared mappings/schemas in `agents/shared/`
+  — they are not line-for-line mirrors of the CLI skills, so the version-mirror model in
+  `check_mirror_sync.py` (which the CoCo mirrors use) does not apply and they carry no
+  `synced-from` markers.
+- They **are** now shown in `agents/PARITY.md` (the `databricks` column) so the matrix is no
+  longer blind to them, and `generate_parity.py` scans `agents/databricks/skills/`.
+- `check_runtime_coverage.py` and the CLAUDE.md change-impact mirror set deliberately do NOT
+  include this runtime — keeping parity with the Genie skills is a manual review against the
+  shared mappings, not an automated gate.
+
 ---
 
 ## The principle

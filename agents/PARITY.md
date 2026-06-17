@@ -17,23 +17,23 @@ filesystem.
 
 ## Skill Matrix
 
-| Skill | cli | claude | coco-snowsight |
-|---|---|---|---|
-| ts-convert-from-databricks-mv | Y | — | — |
-| ts-convert-from-snowflake-sv | Y | — | Y |
-| ts-convert-from-tableau | Y | — | — |
-| ts-convert-to-databricks-mv | Y | — | — |
-| ts-convert-to-snowflake-sv | Y | — | Y |
-| ts-dependency-manager | Y | — | — |
-| ts-object-answer-promote | Y | — | — |
-| ts-object-model-coach | Y | — | — |
-| ts-profile-databricks | Y | — | — |
-| ts-profile-snowflake | — | Y | — |
-| ts-profile-thoughtspot | Y | — | Y |
-| ts-recipe-formula-business-days-snowflake | Y | — | Y |
-| ts-recipe-formula-hms-display-snowflake | Y | — | Y |
-| ts-setup-sv | — | — | Y |
-| ts-variable-timezone | Y | — | — |
+| Skill | cli | claude | coco-snowsight | databricks |
+|---|---|---|---|---|
+| ts-convert-from-databricks-mv | Y | — | — | Y |
+| ts-convert-from-snowflake-sv | Y | — | Y | — |
+| ts-convert-from-tableau | Y | — | — | — |
+| ts-convert-to-databricks-mv | Y | — | — | Y |
+| ts-convert-to-snowflake-sv | Y | — | Y | — |
+| ts-dependency-manager | Y | — | — | — |
+| ts-object-answer-promote | Y | — | — | — |
+| ts-object-model-coach | Y | — | — | — |
+| ts-profile-databricks | Y | — | — | — |
+| ts-profile-snowflake | — | Y | — | — |
+| ts-profile-thoughtspot | Y | — | Y | — |
+| ts-recipe-formula-business-days-snowflake | Y | — | Y | — |
+| ts-recipe-formula-hms-display-snowflake | Y | — | Y | — |
+| ts-setup-sv | — | — | Y | — |
+| ts-variable-timezone | Y | — | — | — |
 
 ## What to Sync
 

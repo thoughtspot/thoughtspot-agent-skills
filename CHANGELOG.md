@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-17
+- fix(databricks): correct the Genie SETUP.md shared-path — shared refs live under `.assistant/skills/shared/` (matching `deploy.sh` and the skills' `../shared/` references), not `.assistant/shared/` (the documented manual install was broken). Add a `databricks` column to `generate_parity.py`/`PARITY.md` so the Genie runtime is visible in the matrix, and document `agents/databricks/` as a deliberately-separate runtime in `runtime-coverage.md`. (From the repo quality audit.)
 - fix: ts-convert-from-tableau v1.14.1 — string **parameters** must be `CHAR` not `VARCHAR` (ThoughtSpot rejects VARCHAR list params); add a MEASURE-vs-ATTRIBUTE classification rule (formula is a measure if it transitively references a measure formula; numeric physical columns default to MEASURE; qualify bare unbracketed column refs). From the live Catalog Health Workbook migration.
 - docs: add BL-027 (explicit table→ThoughtSpot binding instead of search-and-guess) and BL-028 (Audit mode for the visualization layer) to the backlog — both from the Catalog Health migration.
 - docs: add `agents/shared/schemas/thoughtspot-chart-types.md` — verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping + full **Muze charting library (`ADVANCED_*`)** spec (custom_chart_config shelf model, early-access, verified live on se-thoughtspot); cited by ts-convert-from-tableau
