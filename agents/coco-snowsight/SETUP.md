@@ -123,47 +123,17 @@ integrations needed for the skills to call the ThoughtSpot API from within Snowf
 Paste file contents directly into the Workspace. Suitable for first-time setup
 without CLI access.
 
-**Workspace file structure:**
-
-```
-.snowflake/cortex/
-├── shared/
-│   ├── mappings/ts-snowflake/
-│   │   ├── ts-from-snowflake-rules.md
-│   │   ├── ts-snowflake-formula-translation.md
-│   │   ├── ts-snowflake-properties.md
-│   │   └── ts-to-snowflake-rules.md
-│   ├── schemas/
-│   │   ├── snowflake-schema.md
-│   │   ├── thoughtspot-tml.md
-│   │   ├── thoughtspot-connection.md
-│   │   ├── thoughtspot-table-tml.md
-│   │   ├── thoughtspot-model-tml.md
-│   │   ├── thoughtspot-feedback-tml.md
-│   │   └── thoughtspot-formula-patterns.md
-│   └── worked-examples/
-│       ├── snowflake/
-│       │   ├── ts-from-snowflake.md
-│       │   ├── ts-from-snowflake-dunder.md
-│       │   └── ts-to-snowflake.md
-│       └── tableau/
-│           ├── liveboard-kpi-sparkline.md
-│           ├── static-set-to-column-set.md
-│           └── topn-set-to-query-set.md
-└── skills/
-    ├── ts-setup-sv/
-    │   └── SKILL.md
-    ├── ts-profile-thoughtspot/
-    │   └── SKILL.md
-    ├── ts-convert-to-snowflake-sv/
-    │   └── SKILL.md
-    └── ts-convert-from-snowflake-sv/
-        └── SKILL.md
-```
+**Upload exactly the files listed in the Option A `snow stage copy` commands above** —
+that list is the single source of truth for which files CoCo needs and where they go.
+For each command, the source path (after `snow stage copy`) is the repo file to paste, and
+the destination path (after `@SKILLS.PUBLIC.SHARED/`) is the Workspace folder to paste it
+into under `.snowflake/cortex/`. (Do not maintain a separate hand-listed file tree here — it
+drifts out of sync with the Option A list, which is what `check_consistency.py` validates
+against `agents/shared/`.)
 
 For each file: right-click the target folder in the Workspace file tree →
-**New File** → paste the contents from the `agents/coco-snowsight/` and `agents/shared/`
-directories of this repository.
+**New File** → paste the contents from the matching `agents/coco-snowsight/` or
+`agents/shared/` file in this repository.
 
 After creating files, run `/ts-setup-sv` to install stored procedures.
 

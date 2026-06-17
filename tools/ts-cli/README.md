@@ -268,7 +268,7 @@ ts metadata report <source>... --profile <name> [--format json|text|md] [--fast]
 
 `<source>` accepts a 36-char GUID, `DB.SCHEMA.TABLE`, or `DB.SCHEMA.TABLE.COLUMN`. `--fast` skips TML probes (dependents walk only). Default format is `json`.
 
-Output schema: `docs/superpowers/specs/2026-05-28-ts-metadata-report-design.md` (section 6).
+Output schema: defined in code at `tools/ts-cli/ts_cli/report/schema.py` (the `DependentEntry` / `RiskTag` dataclasses).
 
 ---
 
@@ -556,6 +556,67 @@ Tables that failed after all retries are included with `null` as the GUID.
 ```
 
 Auto-retries transient JDBC errors and resolves GUIDs via metadata search after import.
+
+---
+
+### `ts orgs search`
+
+List/search orgs.
+
+```bash
+ts orgs search --profile <name> [--status ACTIVE] [--name "%pattern%"] [--limit 200]
+```
+
+---
+
+### `ts users search`
+
+List/search users (by name or email).
+
+```bash
+ts users search --profile <name> [--name "%pattern%"] [--org <org> ...] [--status ACTIVE] [--limit 20]
+```
+
+---
+
+### `ts users groups`
+
+List/search user groups.
+
+```bash
+ts users groups --profile <name> [--name "%pattern%"] [--org <org> ...] [--include-users] [--limit 20]
+```
+
+---
+
+### `ts variables search`
+
+Show template variables and their assigned values (e.g. `ts_user_timezone`).
+
+```bash
+ts variables search [<variable>] --profile <name>      # omit <variable> for all
+```
+
+---
+
+### `ts variables set`
+
+Assign a variable value at org and/or user scope (used by `ts-variable-timezone`).
+
+```bash
+ts variables set <variable> <value> --profile <name> --org <org> [--org ...] [--user <username> ...]
+# e.g. ts variables set ts_user_timezone "Australia/Sydney" --profile prod --org Primary
+```
+
+---
+
+### `ts variables remove`
+
+Remove a variable value at org and/or user scope (value must match the current assignment).
+
+```bash
+ts variables remove <variable> <value> --profile <name> --org <org> [--org ...] [--user <username> ...]
+```
 
 ---
 

@@ -557,5 +557,8 @@ wrap `sum()` or `average()` inside them. Strip the outer aggregate and pass the 
 column expression: `moving_sum([col], N, 0, [date])`, not `moving_sum(sum([col]), N, 0, [date])`.
 
 **`count(distinct col)` — use `unique count`:** ThoughtSpot does not support `count(distinct ...)`.
-Use `unique count ( [col] )` (with a space, not underscore). In MEASURE columns, set
-`aggregation: COUNT_DISTINCT`. In formulas, write `unique count ( [col] )`.
+Always express a distinct count as a **`formulas[]` entry** with `unique count ( [col] )` (with a
+space, not underscore) plus its paired `columns[]` entry. **Never** set
+`aggregation: COUNT_DISTINCT` on a physical-column `columns[]` entry — that silently flips the
+column's `column_type` from MEASURE to ATTRIBUTE (invariant **I5**). This matches the Snowflake
+mapping (`ts-snowflake-formula-translation.md`): distinct counts are formulas, not an aggregation.

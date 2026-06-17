@@ -171,7 +171,7 @@ consumed via `%run` in Databricks notebooks.
 
 | Notebook | Purpose |
 |---|---|
-| `ts_client.py` | ThoughtSpotClient — 19 methods, auth via Databricks Secrets, in-memory token caching |
+| `ts_client.py` | ThoughtSpotClient — 22 methods, auth via Databricks Secrets, in-memory token caching |
 | `ts_profile_setup.py` | Widget-driven profile creation (stores credentials in Databricks Secrets) |
 | `token_refresh.py` | Scheduled job for credential rotation (12h cron) |
 
