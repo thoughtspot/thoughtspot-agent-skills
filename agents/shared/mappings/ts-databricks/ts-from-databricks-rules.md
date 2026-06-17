@@ -1,3 +1,5 @@
+<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Reverse Mapping Rules Reference
 
 Databricks Metric View → ThoughtSpot Model TML. Consult during Steps 5–9.

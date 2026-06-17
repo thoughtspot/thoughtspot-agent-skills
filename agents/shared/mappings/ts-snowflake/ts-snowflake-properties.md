@@ -1,3 +1,5 @@
+<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # ThoughtSpot → Snowflake Property Coverage
 
 Full reference for what ThoughtSpot TML properties map to Snowflake Semantic View,

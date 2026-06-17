@@ -1,3 +1,5 @@
+<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # ThoughtSpot ↔ Databricks Metric View Property Coverage
 
 Full reference for what ThoughtSpot TML properties map to Databricks Metric View

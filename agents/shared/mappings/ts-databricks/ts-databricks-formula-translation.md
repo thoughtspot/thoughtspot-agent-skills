@@ -1,3 +1,5 @@
+<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Formula Translation Reference — Databricks
 
 Bidirectional translation rules between ThoughtSpot formulas and **Databricks SQL**

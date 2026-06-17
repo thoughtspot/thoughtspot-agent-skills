@@ -1,3 +1,5 @@
+<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+
 # Mapping Rules Reference
 
 ThoughtSpot → Snowflake Semantic View conversion tables. Consult during Steps 7–9.

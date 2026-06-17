@@ -131,6 +131,12 @@ if echo "$STAGED" | grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/ch
   run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root $REPO_ROOT"
 fi
 
+# Mapping currency — SOFT nudge (never blocks) when a platform mapping is edited
+# without a current currency anchor (.claude/rules/repo-audit.md, angle 13).
+if echo "$STAGED" | grep -qE '^agents/shared/mappings/.*\.md$'; then
+  python3 tools/validate/check_mapping_currency.py --root "$REPO_ROOT" --staged || true
+fi
+
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
@@ -144,6 +150,10 @@ fi
 #      (CI / agent-driven commits), so the entry can't be silently skipped.
 python3 tools/validate/suggest_repo_changelog.py --root $REPO_ROOT
 run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root $REPO_ROOT --check"
+
+# Audit freshness — SOFT nudge (never blocks, silent unless due) when an external
+# sweep or a full audit is due by time or by accumulated work (.claude/rules/repo-audit.md).
+python3 tools/validate/check_audit_freshness.py --root "$REPO_ROOT" || true
 
 # Only run unit tests if Python source files are staged
 if echo "$STAGED" | grep -q '\.py$'; then
