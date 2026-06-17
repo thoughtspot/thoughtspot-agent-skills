@@ -131,6 +131,13 @@ if echo "$STAGED" | grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/ch
   run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root $REPO_ROOT"
 fi
 
+# No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,
+# not a hand-rolled grep gate (.claude/rules/ts-cli.md; audit angle 11). Runs when a
+# convert skill or the validator changes.
+if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_no_inline_tml_gate\.py)'; then
+  run_check "no inline tml gate" "tools/validate/check_no_inline_tml_gate.py --root $REPO_ROOT"
+fi
+
 # Currency anchors — SOFT nudge here (prints missing + stale anchors, never blocks the
 # commit) when a shared mapping OR schema file is edited. Presence is hard-gated in CI
 # (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.

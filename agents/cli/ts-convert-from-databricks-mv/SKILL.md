@@ -1084,27 +1084,28 @@ and column summary so the user has the full picture before importing.
 
 ---
 
-#### Pre-import validation gate (I1 / I2 / I4 / I5)
+#### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
 
-Before running `ts tml import`, validate the generated **Model** TML against the hard
-invariants in [`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md).
-`--policy VALIDATE_ONLY` does **not** catch these — ThoughtSpot accepts the TML and then
-behaves wrong. Do not import until all four pass:
+Before running `ts tml import`, lint the generated **Model** TML with **`ts tml lint`** — a
+parser-based check of the hard invariants in
+[`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md)
+that `--policy VALIDATE_ONLY` does **not** catch (ThoughtSpot accepts the TML and then
+behaves wrong, or rejects it on import):
 
-- **I1** — every `formulas[]` entry has a `columns[]` entry whose `formula_id:` matches its `id:` exactly. *(Unpaired formula is silently dropped.)*
-- **I2** — no `aggregation:` key appears inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
-- **I4** — every `model_tables[]` `id:` (when present) equals its `name:` with identical case. *(Mismatch makes joins silently fail: "{table} does not exist in schema".)*
-- **I5** — no physical-column `columns[]` entry uses `aggregation: COUNT_DISTINCT`; distinct counts are `unique count ( [TABLE::col] )` formulas. *(COUNT_DISTINCT silently flips MEASURE → ATTRIBUTE.)*
+- **I1** — every `formulas[]` entry has a paired `columns[]` entry (`formula_id:` == `id:`). *(Unpaired formula silently dropped.)*
+- **I2** — no `aggregation:` inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
+- **I4** — every `model_tables[]` `id:` (when present) equals its `name:`. *(Mismatch makes joins silently fail.)*
+- **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
+- **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 
-Quick mechanical check on the generated file (replace `<file>`):
+`ts tml lint` reads the same stdin shape as `ts tml import` and exits non-zero on any
+finding, so it gates the import (replace `<file>`):
 
 ```bash
-grep -nE '^\s*aggregation:\s*COUNT_DISTINCT' <file>   # I5 — expect NO matches
-grep -nE '^\s*aggregation:' <file>                    # confirm none sit under a formulas[] entry (I2)
+python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('<file>').read_text()]))" | ts tml lint
 ```
 
-Inspect `formulas[]`/`columns[]` for I1 pairing and `model_tables[]` for I4 id==name.
-If any check fails, fix the TML and re-validate before importing.
+Do not import until it reports `"clean": true`. Fix any finding and re-lint.
 
 ---
 
@@ -1286,6 +1287,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
 | 1.5.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 8A connection-scoped search path.** The 8A "C — within a connection" path now explicitly presents the Step 8B N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Mirrors the same fix in ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
 | 1.5.0 | 2026-06-16 | Connection selection (Step 8B): add a **how-to-identify-the-connection prompt** (N name it / F filter by partial string / L list all) before dumping the full connection list. Fetch once via `ts connections list --type DATABRICKS`, then use the typed name directly, show a filtered subset, or show the full numbered list. Single connection still auto-selects. Mirrors the same prompt added to ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
 | 1.4.0 | 2026-06-16 | Step 8A table discovery: add a **connection-scoped vs instance-wide search choice** and search by `--name "%table%"` pattern instead of `--all`-then-filter. Connection scope filters results on `metadata_header.dataSourceName` (verified field). Avoids slow whole-instance scans on large instances. Mirrors the ts-convert-from-tableau Step 4c change. |

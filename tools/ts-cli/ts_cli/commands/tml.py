@@ -291,7 +291,7 @@ def import_tml(
 
 @app.command("lint")
 def lint_tml_cmd() -> None:
-    """Lint TML for the model invariants VALIDATE_ONLY does not catch (I1/I2/I4/I5 + guid).
+    """Lint TML for the model invariants VALIDATE_ONLY does not catch (I1/I2/I4/I5/I8 + guid).
 
     Reads the SAME stdin format as `ts tml import` — a JSON array of TML strings (or a
     single string). No ThoughtSpot connection needed; pure local structural check. Run it

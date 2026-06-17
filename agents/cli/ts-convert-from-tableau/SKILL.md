@@ -2120,27 +2120,28 @@ print(json.dumps([open(f).read() for f in order]))
 PY
 ```
 
-#### Pre-import validation gate (I1 / I2 / I4 / I5)
+#### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
 
-Before running `ts tml import`, validate the generated **Model** TML against the hard
-invariants in [`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md).
-`--policy VALIDATE_ONLY` does **not** catch these — ThoughtSpot accepts the TML and then
-behaves wrong. Do not import until all four pass:
+Before running `ts tml import`, lint the generated **Model** TML with **`ts tml lint`** — a
+parser-based check of the hard invariants in
+[`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md)
+that `--policy VALIDATE_ONLY` does **not** catch (ThoughtSpot accepts the TML and then
+behaves wrong, or rejects it on import):
 
-- **I1** — every `formulas[]` entry has a `columns[]` entry whose `formula_id:` matches its `id:` exactly. *(Unpaired formula is silently dropped.)*
-- **I2** — no `aggregation:` key appears inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
-- **I4** — every `model_tables[]` `id:` (when present) equals its `name:` with identical case. *(Mismatch makes joins silently fail: "{table} does not exist in schema".)*
-- **I5** — no physical-column `columns[]` entry uses `aggregation: COUNT_DISTINCT`; distinct counts are `unique count ( [TABLE::col] )` formulas. *(COUNT_DISTINCT silently flips MEASURE → ATTRIBUTE.)*
+- **I1** — every `formulas[]` entry has a paired `columns[]` entry (`formula_id:` == `id:`). *(Unpaired formula silently dropped.)*
+- **I2** — no `aggregation:` inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
+- **I4** — every `model_tables[]` `id:` (when present) equals its `name:`. *(Mismatch makes joins silently fail.)*
+- **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
+- **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 
-Quick mechanical check on the generated file (replace `<file>`):
+`ts tml lint` reads the same stdin shape as `ts tml import` and exits non-zero on any
+finding, so it gates the import (replace `<file>`):
 
 ```bash
-grep -nE '^\s*aggregation:\s*COUNT_DISTINCT' <file>   # I5 — expect NO matches
-grep -nE '^\s*aggregation:' <file>                    # confirm none sit under a formulas[] entry (I2)
+python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('<file>').read_text()]))" | ts tml lint
 ```
 
-Inspect `formulas[]`/`columns[]` for I1 pairing and `model_tables[]` for I4 id==name.
-If any check fails, fix the TML and re-validate before importing.
+Do not import until it reports `"clean": true`. Fix any finding and re-lint.
 
 Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisting:
 
@@ -3176,6 +3177,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.14.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
 | 1.14.1 | 2026-06-17 | **Measure-classification + string-parameter-type fixes (from the Catalog Health live migration).** (1) Step 5b parameter mapping: a string **parameter** must be `CHAR`, **not `VARCHAR`** — ThoughtSpot rejects a `VARCHAR` list parameter on import (table *columns* are unaffected). (2) New **MEASURE vs ATTRIBUTE classification** rule in Step 5b: a formula is a MEASURE if it *transitively* produces a number (own aggregate/ratio **or references another MEASURE formula** by `[formula_<id>]` — e.g. a dynamic `if [Param] then [formula_…Pct]` selector); a numeric physical column **defaults to MEASURE** unless it's clearly a dimension (`*_ID`/`*_NUM`/`*_NAME`/date) — Tableau's `role` under-tags counts; and **bare unbracketed column refs** must be qualified to `[TABLE::COL]`. Under-classifying as ATTRIBUTE makes KPIs/chart y-axes render empty. (Assumes PR #92 → v1.14.0 merges first; renumber if not.) |
 | 1.14.0 | 2026-06-17 | **Add a charting-library choice (Step 10-charts): prompt Legacy (default, portable) vs Muze (new charting library, early access).** On Muze, emit `ADVANCED_*` + `custom_chart_config` (shelf model `x-axis`/`y-axis`/`slice-with-color`/`trellis-by`) for cartesian/pivot intents — mapping Tableau's Color shelf → `slice-with-color` and small multiples → `trellis-by` for a closer migration — and fall back to Legacy types for non-cartesian intents (pie/scatter/geo/etc.). Backed by the expanded `thoughtspot-chart-types.md` "Muze charting library" spec (verified live on se-thoughtspot 2026-06-17: Muze/`ADVANCED_*` family = 10 cartesian/pivot types only; `custom_chart_config` on a Legacy type is rejected; pivot/combo/simple charts auto-resolve). |
 | 1.13.1 | 2026-06-17 | Cite the new shared **`thoughtspot-chart-types.md`** reference (verified 44-value `answer.chart.type` enum + analytical-intent → chart-type mapping) from the References table and Step 10a; note that `GAUGE` is invalid and one bad enum value fails the whole import. (Reference promoted from `docs/` to `agents/shared/schemas/` and added to the CoCo stage-copy list.) |
