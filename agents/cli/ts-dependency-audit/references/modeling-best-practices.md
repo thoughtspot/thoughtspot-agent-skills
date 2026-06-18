@@ -176,7 +176,7 @@ is deliberate, while "test" in a name is ambiguous.
 | P8 | Column sprawl | > 75 columns: wider GROUP BY, more complex plans beyond the Spotter impact. | Model: `len(columns[])` | Count | MEDIUM if > 75 |
 | P9 | High-cardinality attribute indexing | GUIDs, transaction IDs indexed as ATTRIBUTEs — wastes storage, pollutes Spotter suggestions with meaningless values. ID columns stored as numbers should be ATTRIBUTEs (not MEASUREs) — the issue is the indexing. | Model: `columns[].properties.index_type` + name regex (`_id$`, `_guid$`, `_uuid$`, `transaction_id`, `row_id`, `surrogate_key`) | Count | MEDIUM |
 | P10 | RLS bypass as exception | `is_bypass_rls: true` disables Row-Level Security. Legitimate use cases exist (aggregate-only models) but should be the exception. | Model: `model.properties.is_bypass_rls` | Boolean | MEDIUM (flag as exception) |
-| P11 | Secure suggestions overhead | Many indexed columns on a Spotter-enabled model. Each indexed column adds a DB lookup for suggestions. Informational — indexing is correct for searchable columns. | Model: `columns[].properties.index_type` + `model.spotter_config.is_spotter_enabled` | Count of indexed columns | INFO (> 30 indexed on Spotter model) |
+| P11 | Secure suggestions overhead | Many indexed columns on a Spotter-enabled model. Each indexed column adds a DB lookup for suggestions. Informational — indexing is correct for searchable columns. | Model: `columns[].properties.index_type` + `model.properties.spotter_config.is_spotter_enabled` | Count of indexed columns | INFO (> 30 indexed on Spotter model) |
 
 ### Scalar formula thresholds
 
@@ -265,14 +265,14 @@ model list.
 
 | # | Item | Status |
 |---|---|---|
-| OI-1 | `ts metadata search --all` performance on 1000+ models | OPEN |
-| OI-2 | API throttling on 4-way parallel TML export | OPEN |
-| OI-3 | `ts metadata dependents` — counts without full export? | OPEN |
-| OI-4 | `is_bypass_rls` in exported TML? | OPEN |
-| OI-5 | `data_model_instructions` in TML — confirmed at `model.model_instructions.data_model_instructions` | VERIFIED |
-| OI-6 | `constant_folding` — does NOT exist as a TML property. Column-picker formulas (IF parameter patterns) have no known TML flag. | OPEN — unverifiable |
-| OI-7 | `is_spotter_enabled` — confirmed at `model.spotter_config.is_spotter_enabled` | VERIFIED |
+| OI-1 | `ts metadata search --all` — 1855 models in 3m05s on champ-staging. No throttling. | VERIFIED |
+| OI-2 | Bulk TML export — avg 2.9s/model sequential, no failures. 4-way parallel untested. | PARTIALLY VERIFIED |
+| OI-3 | `ts metadata dependents` — returns typed list, empty = orphan. One call per object. | VERIFIED |
+| OI-4 | `is_bypass_rls` at `model.properties.is_bypass_rls` (boolean). `spotter_config` nested inside `properties`. | VERIFIED |
+| OI-5 | `data_model_instructions` at `model.model_instructions.data_model_instructions` | VERIFIED |
+| OI-6 | `constant_folding` — does NOT exist as a TML property. Column-picker formulas (IF parameter patterns) have no known TML flag. | PARKED |
+| OI-7 | `is_spotter_enabled` at `model.properties.spotter_config.is_spotter_enabled` | VERIFIED |
 | OI-8 | `apply_on_tables` on model filters — confirmed as progressive filter mechanism | VERIFIED |
-| OI-9 | `join_progressive` on model properties — confirmed | VERIFIED |
+| OI-9 | `join_progressive` at `model.properties.join_progressive` | VERIFIED |
 | OI-10 | Column Level Security — not in standard TML export. Beta flag `export_column_security_rules` unverified. | OPEN |
-| OI-11 | NL Instructions API — confirmed Beta since 10.15.0.cl. Not live-tested. | OPEN |
+| OI-11 | NL Instructions API — WORKS. Param: `data_source_identifier`. Returns `nl_instructions_info[].instructions[]` with `scope`. | VERIFIED |
