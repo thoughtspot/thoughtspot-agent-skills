@@ -1264,3 +1264,58 @@ ThoughtSpot UI, then resume). This is path A, chosen deliberately for the initia
 
 **Target:** 2026-10-31.
 
+---
+
+## BL-037 — Recipe skills for common data investigation patterns (cohort, funnel, segmentation, time-series, A/B, RCA)
+
+**Source:** Review of `nimrodfisher/data-analytics-skills` repo, `03-data-analysis-investigation/` (2026-06-18)
+**Affects:** New `ts-recipe-*` skills under `agents/cli/`
+**Status:** Open
+**Related:** Skill family 7 (`ts-recipe-*`) in `.claude/rules/skill-naming.md`
+
+### Problem
+
+Common analytical investigation patterns — cohort analysis, funnel analysis, segmentation,
+time-series decomposition, A/B test analysis, root-cause investigation, and business metrics
+calculation — are well-understood frameworks that users repeatedly build from scratch in
+ThoughtSpot. The `nimrodfisher/data-analytics-skills` repo packages these as generic
+Claude Code skills (markdown instructions + pandas scripts), but they are not
+ThoughtSpot-aware: they operate on raw data, not on ThoughtSpot models/answers/liveboards.
+
+ThoughtSpot-native recipe skills could produce real artifacts — formulas, answers, and
+liveboards — that implement these patterns against the user's existing models, using
+ThoughtSpot's native constructs (group_aggregate for cohort buckets, cumulative_sum for
+funnel drop-off, parameters for A/B date ranges, etc.).
+
+### Candidate skills (assess feasibility per pattern)
+
+| Pattern | Candidate skill name | Primary TS artifact | Key constructs |
+|---|---|---|---|
+| Cohort analysis | `ts-recipe-answer-cohort-analysis` | Answer + formulas | group_aggregate for cohort bucketing, date-diff for retention, pivot via search |
+| Funnel analysis | `ts-recipe-answer-funnel-analysis` | Answer + formulas | Cumulative filters, conversion rate formulas, step-over-step % |
+| Segmentation | `ts-recipe-formula-segmentation` | Model formulas | IF/CASE bucketing, group_aggregate for segment metrics |
+| Time-series | `ts-recipe-answer-time-series` | Answer + formulas | moving_average, cumulative_sum, period-over-period, seasonality via date buckets |
+| A/B testing | `ts-recipe-answer-ab-test` | Answer + formulas | Parameter-driven date ranges, group comparison formulas, statistical significance (pass-through SQL) |
+| Root-cause investigation | `ts-recipe-answer-root-cause` | Answer | Drill-down search patterns, contribution analysis via group_aggregate |
+| Business metrics | `ts-recipe-formula-business-metrics` | Model formulas | Common KPIs (CAC, LTV, churn rate, NRR) as formula templates |
+
+### Approach
+
+1. Review each `nimrodfisher` skill's process steps and determine which translate to
+   ThoughtSpot-native constructs vs which require raw SQL/pandas (and therefore don't fit).
+2. For each viable pattern, build a `ts-recipe-*` skill that takes a model as input,
+   asks the user to identify the relevant columns (e.g. "which column is the user ID?
+   which is the signup date?"), and emits formulas + an answer/liveboard.
+3. Reuse the `nimrodfisher` analytical frameworks as the domain logic reference (attribution:
+   analytical patterns inspired by `nimrodfisher/data-analytics-skills`), but all code and
+   ThoughtSpot-specific logic is original.
+
+### Notes
+
+- Each recipe is independent — no need to ship all at once. Start with the highest-value
+  pattern (likely cohort or time-series, as these are the most-requested in ThoughtSpot).
+- The `nimrodfisher` repo is MIT-licensed generic markdown — patterns are common analytical
+  knowledge, not proprietary. The value-add is the ThoughtSpot-native implementation.
+
+**Target:** Assess feasibility by 2026-09-30; ship first recipe by 2026-12-31.
+

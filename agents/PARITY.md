@@ -24,6 +24,7 @@ filesystem.
 | ts-convert-from-tableau | Y | — | — | — |
 | ts-convert-to-databricks-mv | Y | — | — | Y |
 | ts-convert-to-snowflake-sv | Y | — | Y | — |
+| ts-dependency-audit | Y | — | — | — |
 | ts-dependency-manager | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |

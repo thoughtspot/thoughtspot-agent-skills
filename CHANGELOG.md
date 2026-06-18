@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-18
+- feat: add `ts-dependency-audit` skill v1.0.0 — cluster-wide ThoughtSpot environment audit across five angles (42 checks): AI Readiness (description/synonym coverage, Spotter readiness score), Data Modeling (complexity, joins, duplicates, grain, overlap classification, zero-column tables), Human Readiness (names, hidden columns, orphans, formula promotion, stale objects), Performance (SQL Views, scalar formulas, progressive joins/filters, date constraints, column sprawl), Security (PII detection, indexing without RLS, CLS gaps, credentials). Interactive HTML report with cluster heatmap, per-model scorecards, and by-check drill-down. Usage analysis (BI Server) planned for Phase 2.
+
 ## 2026-06-17
 - feat: ts-cli 0.11.0 → 0.12.0 — add `ts connections create` (Snowflake **key-pair** auth, no tables): `POST /api/rest/2.0/connection/create` with `authenticationType=KEY_PAIR`, the private key read from `--private-key-path` into the `private_key` config attribute (never logged), `validate=false`. The three `ts-convert-from-*` skills now offer **creating a new connection** at the connection step instead of only selecting an existing one (snowflake-sv full create path; tableau create path when the source is Snowflake; databricks-mv gets the explicit "stop & instruct" fallback — native PAT/OAuth create backlogged as BL-036).
 - feat: codify the pre-import TML gate (audit angle 11). `ts tml lint` now also checks **I8** (duplicate `column_id` — a hard import rejection); the three `ts-convert-from-*` skills replace their copy-pasted hand-written grep gate with a `ts tml lint` call (snowflake-sv 1.11.2, databricks-mv 1.5.2, tableau 1.14.2). New `check_no_inline_tml_gate.py` guards the migration (fails if a CLI convert skill re-adds a hand-rolled `grep … aggregation:` gate), wired into pre-commit + CI — mirroring `check_no_v1_endpoints`. ts-cli 0.10.1 → 0.11.0.
