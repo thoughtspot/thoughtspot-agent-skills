@@ -45,6 +45,7 @@ from check_smoke_tests import ALLOWLIST, NAME_ALIASES  # noqa: E402
 # Use --model-guid (not --model-name) for stable, unambiguous model identification.
 # Note: --column-name is optional for ts-object-model-coach (auto-selects first MEASURE column).
 REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
+    "ts-dependency-audit":                      ["--model-guid"],
     "ts-dependency-manager":                    ["--model-guid"],
     "ts-object-model-coach":                    ["--model-guid"],
     "ts-convert-to-snowflake-sv":               ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
