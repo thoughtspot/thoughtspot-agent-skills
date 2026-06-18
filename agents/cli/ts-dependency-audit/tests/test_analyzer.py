@@ -499,14 +499,14 @@ class TestIntegration:
 
     def test_summarise(self):
         findings = [
-            Finding("A", "A1", "DESC_COV", "RED", "test", "", "", model_name="M1"),
+            Finding("A", "A1", "DESC_COV", "HIGH", "test", "", "", model_name="M1"),
             Finding("D", "D1", "COMPLEX", "HIGH", "test", "", "", model_name="M1"),
             Finding("S", "S1", "PII", "INFO", "test", "", "", model_name="M1"),
         ]
         s = summarise(findings)
         assert s["total"] == 3
-        assert s["by_severity"]["RED"] == 1
-        assert s["model_heatmap"]["M1"]["A"] == "RED"
+        assert s["by_severity"]["HIGH"] == 2
+        assert s["model_heatmap"]["M1"]["A"] == "HIGH"
 
     def test_single_angle(self):
         m = _model(columns=[_col("c1")])

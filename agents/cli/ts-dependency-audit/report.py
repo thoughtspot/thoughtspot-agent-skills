@@ -27,15 +27,14 @@ ANGLE_LABELS = {
     "S": "Security",
 }
 
-SEVERITY_ORDER = ["CRITICAL", "RED", "HIGH", "MEDIUM", "YELLOW", "LOW", "INFO", "GREEN"]
+SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 SEVERITY_RANK = {s: i for i, s in enumerate(reversed(SEVERITY_ORDER))}
+SEVERITY_RANK["GREEN"] = 0
 
 SEVERITY_COLORS = {
     "CRITICAL": "#dc2626",
-    "RED": "#ef4444",
     "HIGH": "#f97316",
     "MEDIUM": "#eab308",
-    "YELLOW": "#eab308",
     "LOW": "#3b82f6",
     "INFO": "#6b7280",
     "GREEN": "#22c55e",
@@ -43,10 +42,8 @@ SEVERITY_COLORS = {
 
 SEVERITY_BG = {
     "CRITICAL": "#fef2f2",
-    "RED": "#fef2f2",
     "HIGH": "#fff7ed",
     "MEDIUM": "#fefce8",
-    "YELLOW": "#fefce8",
     "LOW": "#eff6ff",
     "INFO": "#f9fafb",
     "GREEN": "#f0fdf4",

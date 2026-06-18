@@ -12,7 +12,7 @@ from report import generate_html_report, ReportMeta, _worst_severity, _model_sta
 SAMPLE_FINDINGS = [
     {
         "angle": "A", "check_id": "A1", "check_name": "DESC_COVERAGE",
-        "severity": "RED", "title": "Low description coverage",
+        "severity": "HIGH", "title": "Low description coverage",
         "detail": "12% coverage", "model_name": "GTM", "score": 0.12,
     },
     {
@@ -46,9 +46,9 @@ class TestHelpers:
     def test_model_stats(self):
         stats = _model_stats(SAMPLE_FINDINGS, "GTM")
         assert stats["count"] == 2
-        assert stats["by_angle"]["A"] == "RED"
+        assert stats["by_angle"]["A"] == "HIGH"
         assert stats["by_angle"]["D"] == "HIGH"
-        assert stats["worst"] == "RED"
+        assert stats["worst"] == "HIGH"
 
     def test_model_stats_not_found(self):
         stats = _model_stats(SAMPLE_FINDINGS, "Nonexistent")

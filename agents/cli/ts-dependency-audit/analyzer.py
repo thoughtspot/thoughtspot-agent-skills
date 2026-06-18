@@ -99,15 +99,15 @@ def _severity_from_threshold(value: float, green: float, yellow: float) -> str:
     if value <= green:
         return "GREEN"
     if value <= yellow:
-        return "YELLOW"
-    return "RED"
+        return "MEDIUM"
+    return "HIGH"
 
 
-def _severity_from_fraction(fraction: float, red_below: float, yellow_below: float) -> str:
-    if fraction < red_below:
-        return "RED"
-    if fraction < yellow_below:
-        return "YELLOW"
+def _severity_from_fraction(fraction: float, high_below: float, medium_below: float) -> str:
+    if fraction < high_below:
+        return "HIGH"
+    if fraction < medium_below:
+        return "MEDIUM"
     return "GREEN"
 
 
@@ -382,13 +382,13 @@ def check_a5(model: dict, config: AuditConfig) -> list[Finding]:
 
     if score_100 >= 80:
         label = "READY"
-        severity = "GREEN"
+        severity = "INFO"
     elif score_100 >= 50:
         label = "NEEDS WORK"
-        severity = "YELLOW"
+        severity = "MEDIUM"
     else:
         label = "NOT READY"
-        severity = "RED"
+        severity = "HIGH"
 
     return [Finding(
         angle="A", check_id="A5", check_name="SPOTTER_READINESS",
@@ -435,9 +435,9 @@ def check_d1(model: dict, _config: AuditConfig) -> list[Finding]:
         if sev != "GREEN":
             findings.append(Finding(
                 angle="D", check_id="D1", check_name=f"COMPLEXITY_{metric_name.upper()}",
-                severity="HIGH" if sev == "RED" else "MEDIUM",
-                title=f"{metric_name.capitalize()}: {value} ({sev})",
-                detail=f"Threshold: GREEN <= {t['green']}, YELLOW <= {t['yellow']}, RED > {t['yellow']}",
+                severity=sev,
+                title=f"{metric_name.capitalize()}: {value}",
+                detail=f"Threshold: <= {t['green']} OK, <= {t['yellow']} review, > {t['yellow']} action needed",
                 score=value,
                 model_name=name, model_guid=guid,
                 recommendation="Consider splitting into domain-specific models" if metric_name == "tables" else "",
@@ -1326,7 +1326,7 @@ def summarise(findings: list[Finding]) -> dict[str, Any]:
         if f.model_name:
             model_angles = by_model.setdefault(f.model_name, {})
             current = model_angles.get(f.angle, "GREEN")
-            rank = {"GREEN": 0, "INFO": 1, "LOW": 2, "MEDIUM": 3, "YELLOW": 3, "HIGH": 4, "RED": 5, "CRITICAL": 6}
+            rank = {"GREEN": 0, "INFO": 1, "LOW": 2, "MEDIUM": 3, "HIGH": 4, "CRITICAL": 5}
             if rank.get(f.severity, 0) > rank.get(current, 0):
                 model_angles[f.angle] = f.severity
 
