@@ -267,7 +267,7 @@ def _build_html(**ctx) -> str:
         <tr>
           <th class="heatmap-th model-col">Model</th>
           {angle_headers}
-          <th class="heatmap-th">Findings</th>
+          <th class="heatmap-th">Overall</th>
         </tr>
       </thead>
       <tbody id="heatmap-body">
@@ -320,12 +320,15 @@ def _render_heatmap_rows(models, model_data, angles):
                 f'{sev}</td>'
             )
         worst_color = SEVERITY_COLORS.get(worst, "#22c55e")
+        worst_bg = SEVERITY_BG.get(worst, "#f0fdf4")
         rows.append(
             f'<tr class="heatmap-row" data-model="{_esc(mn)}" data-worst="{worst}">'
             f'<td class="model-name-cell">'
             f'<a href="#" onclick="showModel(\'{_esc(mn)}\'); return false;">{_esc(mn)}</a></td>'
             + "".join(cells)
-            + f'<td class="findings-count" style="color:{worst_color}">{md["count"]}</td>'
+            + f'<td class="findings-count" style="background:{worst_bg};color:{worst_color};'
+            f'border-left:3px solid {worst_color}">'
+            f'{worst} <span class="count-num">({md["count"]})</span></td>'
             f'</tr>'
         )
     return "\n".join(rows)
@@ -555,7 +558,8 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); font
 .model-name-cell { padding: 8px 12px; font-weight: 500; }
 .model-name-cell a { color: var(--text); text-decoration: none; }
 .model-name-cell a:hover { color: #0284c7; }
-.findings-count { padding: 8px 12px; font-weight: 700; text-align: center; }
+.findings-count { padding: 8px 12px; font-weight: 700; text-align: center; min-width: 110px; }
+.count-num { font-weight: 400; font-size: 12px; opacity: 0.7; }
 
 /* Model card */
 .model-card { display: none; }
