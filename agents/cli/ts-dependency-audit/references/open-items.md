@@ -65,6 +65,50 @@ properties:
 ```
 
 S4, P10, D4, and P11 can all read from `model.properties` directly.
+### #1 — Bulk metadata search performance — UNVERIFIED
+
+Large instances may have 1000+ models and 2000+ answers. The `ts metadata search --all`
+command auto-paginates, but we need to verify:
+- Latency ceiling for a full scan
+- Whether the API throttles or returns partial results on very large instances
+- Memory footprint of holding all metadata in memory
+
+**Test:** Run `ts metadata search --subtype WORKSHEET --all` on an instance with 100+ models
+and measure elapsed time and response completeness.
+
+---
+
+### #2 — Bulk TML export throttling — UNVERIFIED
+
+Step 4 exports TML at 4-way parallel concurrency. Need to verify:
+- Does the ThoughtSpot API throttle or 429 on concurrent TML exports?
+- What is the latency per export on a typical model (10-50 columns)?
+- Does `--associated` significantly increase export time?
+
+**Test:** Export 50+ model TMLs at 4-way concurrency and check for failures or slowdowns.
+
+---
+
+### #3 — Dependent counts for orphan detection — UNVERIFIED
+
+Step 5 uses `ts metadata dependents` to detect orphan models (H4) and sets (H5).
+Need to verify:
+- Does the dependents API return empty results (not errors) for objects with no dependents?
+- Can we batch this, or must it be one call per object?
+- What is the response shape when there are zero dependents?
+
+**Test:** Call `ts metadata dependents` on a model known to have zero downstream objects.
+
+---
+
+### #4 — is_bypass_rls in exported TML — UNVERIFIED
+
+S4 and P10 need `is_bypass_rls` from the model TML. Need to verify:
+- Does `is_bypass_rls` appear in `ts tml export` output?
+- Or is it only available in the `ts metadata search --include-details` response?
+- If not in TML, we need an alternative approach.
+
+**Test:** Export a model TML where `is_bypass_rls` is set and check if the field appears.
 
 ---
 
@@ -126,6 +170,17 @@ Response shape:
 A3 can now check both TML path (`data_model_instructions`) and API path
 (`ai/instructions/get`) for full NL instruction coverage. Instructions set via the
 UI appear in the API response. `scope: GLOBAL` applies to all searches on this model.
+### #8 — NL Instructions API — UNVERIFIED
+
+A3 partially depends on detecting NL Instructions set via the REST API
+(`POST /api/rest/2.0/ai/instructions/get`). Confirmed via MCP as Beta since
+10.15.0.cl. Requires `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`.
+
+**Test:** Call `ai/instructions/get` for a model with Spotter instructions configured.
+Verify response shape and whether it returns instructions set via the UI.
+
+Note: A3 works without this — `data_model_instructions` in TML (verified in #5)
+covers the TML path. This API would add coverage for instructions set only via the UI.
 
 ---
 
