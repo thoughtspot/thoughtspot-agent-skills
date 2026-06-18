@@ -165,13 +165,14 @@ def _build_html(**ctx) -> str:
 
     angle_headers = "".join(
         f'<th class="heatmap-th angle-header" data-angle="{a}">'
-        f'<a href="#checks-{a}" onclick="showView(\'checks\', \'{a}\')">{a}</a></th>'
+        f'<a href="#checks-{a}" onclick="showView(\'checks\', \'{a}\')">{ANGLE_LABELS.get(a, a)}</a></th>'
         for a in angles
     )
 
     sev_badges = "".join(
-        f'<span class="sev-badge" style="background:{SEVERITY_COLORS.get(s, "#999")}">'
-        f'{s}: {sev_counts.get(s, 0)}</span>'
+        f'<a href="#" class="sev-badge" style="background:{SEVERITY_COLORS.get(s, "#999")}"'
+        f" onclick=\"filterBySeverity('{s}'); return false;\">"
+        f'{s}: {sev_counts.get(s, 0)}</a>'
         for s in SEVERITY_ORDER if sev_counts.get(s, 0)
     )
 
@@ -513,7 +514,8 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); font
 .sidebar-angle { display: block; padding: 4px 8px; border-radius: 4px; text-decoration: none; color: var(--text); font-size: 13px; }
 .sidebar-angle:hover { background: #f1f5f9; }
 .sev-summary { display: flex; flex-wrap: wrap; gap: 4px; }
-.sev-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #fff; font-weight: 600; }
+.sev-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #fff; font-weight: 600; text-decoration: none; cursor: pointer; transition: opacity .15s; }
+.sev-badge:hover { opacity: 0.8; }
 
 /* Content */
 .content { margin-left: var(--sidebar-w); flex: 1; padding: 24px 32px; max-width: 1200px; }
@@ -549,7 +551,7 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); font
 .heatmap-row { cursor: pointer; transition: background .1s; }
 .heatmap-row:hover { background: #f1f5f9 !important; }
 .heatmap-row.hidden { display: none; }
-.heatmap-cell { padding: 8px 12px; font-size: 12px; font-weight: 700; text-align: center; min-width: 70px; }
+.heatmap-cell { padding: 8px 12px; font-size: 12px; font-weight: 700; text-align: center; min-width: 100px; }
 .model-name-cell { padding: 8px 12px; font-weight: 500; }
 .model-name-cell a { color: var(--text); text-decoration: none; }
 .model-name-cell a:hover { color: #0284c7; }
@@ -660,6 +662,30 @@ function toggleSeverity(sev) {
     const worst = row.dataset.worst;
     row.classList.toggle('hidden', hiddenSeverities.has(worst));
   });
+}
+
+function filterBySeverity(sev) {
+  showView('checks');
+  document.querySelectorAll('.check-table tbody tr').forEach(row => {
+    row.style.display = (row.dataset.sev === sev) ? '' : 'none';
+  });
+  const banner = document.getElementById('sev-filter-banner');
+  if (banner) banner.remove();
+  const content = document.querySelector('.content');
+  const div = document.createElement('div');
+  div.id = 'sev-filter-banner';
+  div.style.cssText = 'padding:8px 14px;background:#fef3c7;border-radius:6px;margin-bottom:12px;font-size:13px;display:flex;align-items:center;gap:8px;';
+  div.innerHTML = 'Showing <strong>' + sev + '</strong> findings only. <a href="#" onclick="clearSevFilter(); return false;">Show all</a>';
+  const checksView = document.getElementById('view-checks');
+  checksView.insertBefore(div, checksView.firstChild);
+}
+
+function clearSevFilter() {
+  document.querySelectorAll('.check-table tbody tr').forEach(row => {
+    row.style.display = '';
+  });
+  const banner = document.getElementById('sev-filter-banner');
+  if (banner) banner.remove();
 }
 
 showView('heatmap');
