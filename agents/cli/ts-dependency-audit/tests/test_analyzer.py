@@ -488,6 +488,7 @@ class TestIntegration:
             ],
             model_tables=[_mt("Sales", fqn="db.schema.sales")],
             description="Sales model",
+            properties={"is_bypass_rls": True},
         )
         corpus = Corpus(models=[m])
         config = AuditConfig(angles=["A", "D", "H", "P", "S"])

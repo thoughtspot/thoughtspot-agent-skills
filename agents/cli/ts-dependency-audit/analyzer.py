@@ -1293,7 +1293,6 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p11(m, config))
 
         if "S" in angles:
-            findings.extend(check_s1(m, config))
             findings.extend(check_s2(m, corpus, config))
             findings.extend(check_s4(m, config))
             findings.extend(check_s5(m, config))
