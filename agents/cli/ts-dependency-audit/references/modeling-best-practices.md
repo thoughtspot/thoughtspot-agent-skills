@@ -198,6 +198,8 @@ is deliberate, while "test" in a name is ambiguous.
 | S4 | RLS bypass + PII | `is_bypass_rls: true` AND model contains PII columns. All users see all rows including PII. | Model: `model.properties.is_bypass_rls` + S1 | Boolean (bypass + PII) | HIGH |
 | S5 | Credentials in analytics | Columns matching credential patterns (`password`, `secret_key`, `api_key`, `token`). Should never be in an analytics model. | Model: `columns[].name` (credential regex) | Count | CRITICAL |
 | S6 | Conformed dimension divergence | Same `db_column_name` across models maps to different `column_type`. Inconsistent classification can cause different access behaviour for the same data. | Model: group `columns[].db_column_name` across all models, check `column_type` | Count of divergent columns | MEDIUM |
+| S8 | RLS column data type quality | RLS rules filtering on VARCHAR columns are 2–5× slower than integer filters. Identifies tables where RLS expressions reference string-type columns. | Table: `table.rls_rules.rules[].expr` column references → `table.columns[].db_column_properties.data_type` | Count of VARCHAR RLS columns | MEDIUM |
+| S9 | RLS expression complexity | Functions wrapping columns in RLS expressions (e.g. `UPPER([path::col])`) prevent filter pushdown to the database engine. The function must evaluate row-by-row in ThoughtSpot. | Table: `table.rls_rules.rules[].expr` checked for function calls (`UPPER`, `TRIM`, `CAST`, etc.) | Count of function-wrapped RLS expressions | HIGH |
 
 ### PII regex patterns (case-insensitive)
 
@@ -224,6 +226,8 @@ Some data surfaces in two angles with different framing:
 | VARCHAR join keys | D2 (modeling quality) | P6 (query speed) |
 | Join depth | D1 metric (complexity) | P7 (query plan degradation) |
 | RLS bypass | P10 (exception review) | S4 (PII + bypass = risk) |
+| RLS column type | S8 (VARCHAR = slow filter) | S2 (PII indexed + no RLS) |
+| RLS expression | S9 (function prevents pushdown) | S8 (column type quality) |
 
 ---
 

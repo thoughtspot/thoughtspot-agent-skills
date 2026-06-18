@@ -572,6 +572,11 @@ def check_d6(model: dict, _config: AuditConfig) -> list[Finding]:
     return findings
 
 
+def _display_name(name: str, guid: str | None) -> str:
+    """Disambiguate models with the same display name by appending a short GUID."""
+    return f"{name} [{guid[:8]}]" if guid else name
+
+
 def check_d7(models: list[dict], _config: AuditConfig) -> list[Finding]:
     """D7: Model overlap & duplication (cross-model check)."""
     findings = []
@@ -583,32 +588,42 @@ def check_d7(models: list[dict], _config: AuditConfig) -> list[Finding]:
         fqns = {mt.get("fqn", mt.get("name", "")) for mt in _get_model_tables(m)}
         table_sets.append((name, guid, fqns))
 
+    seen_pairs: set[tuple[str, str]] = set()
+
     for i in range(len(table_sets)):
         for j in range(i + 1, len(table_sets)):
             n1, g1, s1 = table_sets[i]
             n2, g2, s2 = table_sets[j]
             if not s1 or not s2:
                 continue
+            pair_key = tuple(sorted([g1 or n1, g2 or n2]))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+
             intersection = s1 & s2
             union = s1 | s2
             jaccard = len(intersection) / len(union) if union else 0
+
+            dn1 = _display_name(n1, g1) if n1 == n2 else n1
+            dn2 = _display_name(n2, g2) if n1 == n2 else n2
 
             if jaccard == 1.0:
                 findings.append(Finding(
                     angle="D", check_id="D7", check_name="IDENTICAL_MODELS",
                     severity="HIGH",
-                    title=f"Identical table sets: {n1}, {n2}",
+                    title=f"Identical table sets: {dn1}, {dn2}",
                     detail=f"Both models reference the same {len(s1)} tables",
                     score=jaccard,
                     objects=[
-                        {"name": n1, "guid": g1},
-                        {"name": n2, "guid": g2},
+                        {"name": dn1, "guid": g1},
+                        {"name": dn2, "guid": g2},
                     ],
                     recommendation="Consolidate via /ts-dependency-manager (Repoint mode)",
                 ))
             elif s1 < s2 or s2 < s1:
-                subset_name = n1 if s1 < s2 else n2
-                superset_name = n2 if s1 < s2 else n1
+                subset_name = dn1 if s1 < s2 else dn2
+                superset_name = dn2 if s1 < s2 else dn1
                 findings.append(Finding(
                     angle="D", check_id="D7", check_name="MODEL_SUBSET",
                     severity="INFO",
@@ -616,8 +631,8 @@ def check_d7(models: list[dict], _config: AuditConfig) -> list[Finding]:
                     detail=f"Subset has {min(len(s1), len(s2))} tables, superset has {max(len(s1), len(s2))}",
                     score=jaccard,
                     objects=[
-                        {"name": n1, "guid": g1},
-                        {"name": n2, "guid": g2},
+                        {"name": dn1, "guid": g1},
+                        {"name": dn2, "guid": g2},
                     ],
                     recommendation="May be correctly scoped domain model — review whether the subset is needed",
                 ))
@@ -625,12 +640,12 @@ def check_d7(models: list[dict], _config: AuditConfig) -> list[Finding]:
                 findings.append(Finding(
                     angle="D", check_id="D7", check_name="MODEL_OVERLAP",
                     severity="MEDIUM" if jaccard > 0.7 else "LOW",
-                    title=f"High overlap ({jaccard:.0%}): {n1}, {n2}",
+                    title=f"High overlap ({jaccard:.0%}): {dn1}, {dn2}",
                     detail=f"Shared: {len(intersection)} tables, Union: {len(union)} tables",
                     score=jaccard,
                     objects=[
-                        {"name": n1, "guid": g1},
-                        {"name": n2, "guid": g2},
+                        {"name": dn1, "guid": g1},
+                        {"name": dn2, "guid": g2},
                     ],
                     recommendation="Review whether these serve different domains or should be consolidated",
                 ))
@@ -640,8 +655,19 @@ def check_d7(models: list[dict], _config: AuditConfig) -> list[Finding]:
 def check_d8(corpus: Corpus, _config: AuditConfig) -> list[Finding]:
     """D8: Duplicate tables — different TS objects pointing at same physical table."""
     findings = []
-    physical_map: dict[tuple, list[dict]] = {}
+    # Deduplicate table TMLs by GUID first (associated exports repeat the same table)
+    seen_guids: set[str] = set()
+    unique_tables: list[dict] = []
     for ttl in corpus.tables:
+        guid = ttl.get("guid", "")
+        if guid and guid in seen_guids:
+            continue
+        if guid:
+            seen_guids.add(guid)
+        unique_tables.append(ttl)
+
+    physical_map: dict[tuple, list[dict]] = {}
+    for ttl in unique_tables:
         tbl = ttl.get("table", {})
         conn = tbl.get("connection", {})
         key = (
@@ -659,11 +685,12 @@ def check_d8(corpus: Corpus, _config: AuditConfig) -> list[Finding]:
     for key, tables in physical_map.items():
         if len(tables) > 1:
             names = [t["name"] for t in tables]
+            fqn = f"{key[1]}.{key[2]}.{key[3]}"
             findings.append(Finding(
                 angle="D", check_id="D8", check_name="DUPLICATE_TABLE",
                 severity="HIGH",
-                title=f"Duplicate table objects: {', '.join(names)}",
-                detail=f"All point to {key[0]}.{key[1]}.{key[2]}.{key[3]}",
+                title=f"{len(tables)} TS objects → {key[3]}",
+                detail=fqn,
                 objects=tables,
                 recommendation="Consolidate to one ThoughtSpot table object",
             ))
@@ -1222,6 +1249,100 @@ def check_s5(model: dict, _config: AuditConfig) -> list[Finding]:
     return findings
 
 
+def _extract_rls_columns(table_tml: dict) -> list[tuple[str, str]]:
+    """Extract (column_name, expression) pairs from a table's rls_rules."""
+    tbl = table_tml.get("table", {})
+    rls = tbl.get("rls_rules", {})
+    if not rls:
+        return []
+    col_ref_re = re.compile(r"\[([^]]+)::([^]]+)\]")
+    results = []
+    rules = rls.get("rules", [])
+    for rule in rules:
+        expr = rule.get("expr", "")
+        for _path_id, col_name in col_ref_re.findall(expr):
+            results.append((col_name, expr))
+    return results
+
+
+def _get_table_col_types(table_tml: dict) -> dict[str, str]:
+    """Build {column_name: data_type} from a table TML."""
+    tbl = table_tml.get("table", {})
+    result = {}
+    for c in tbl.get("columns", []):
+        name = c.get("db_column_name", c.get("name", ""))
+        dtype = (c.get("db_column_properties", {}) or {}).get("data_type", "")
+        if name and dtype:
+            result[name] = dtype
+    return result
+
+
+RLS_FUNCTION_RE = re.compile(
+    r"\b(UPPER|LOWER|TRIM|SUBSTR|SUBSTRING|CONCAT|REPLACE|CAST|CONVERT|COALESCE|"
+    r"NVL|IFNULL|TO_CHAR|TO_VARCHAR|TO_NUMBER|TO_DATE|DATE_TRUNC|LEFT|RIGHT)\s*\(",
+    re.I,
+)
+
+
+def check_s8(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding]:
+    """S8: RLS column data type quality — VARCHAR filters are slower than integer."""
+    findings = []
+    name = _model_name(model)
+    guid = _model_guid(model)
+    table_tmls = corpus.table_tmls_by_model.get(guid or "", [])
+
+    for ttl in table_tmls:
+        tbl_name = ttl.get("table", {}).get("name", "?")
+        col_types = _get_table_col_types(ttl)
+        rls_cols = _extract_rls_columns(ttl)
+
+        for col_name, _expr in rls_cols:
+            dtype = col_types.get(col_name, "")
+            if not dtype:
+                continue
+            dtype_upper = dtype.upper()
+            if dtype_upper in ("VARCHAR", "CHAR", "TEXT", "STRING", "NVARCHAR", "NCHAR"):
+                findings.append(Finding(
+                    angle="S", check_id="S8", check_name="RLS_VARCHAR_FILTER",
+                    severity="MEDIUM",
+                    title=f"RLS on VARCHAR column: {tbl_name}.{col_name}",
+                    detail=f"data_type={dtype}. Integer RLS columns are 2-5x faster for filter evaluation.",
+                    model_name=name, model_guid=guid,
+                    recommendation="Consider an integer surrogate key for RLS filtering",
+                ))
+
+    return findings
+
+
+def check_s9(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding]:
+    """S9: RLS expression complexity — functions prevent pushdown."""
+    findings = []
+    name = _model_name(model)
+    guid = _model_guid(model)
+    table_tmls = corpus.table_tmls_by_model.get(guid or "", [])
+
+    for ttl in table_tmls:
+        tbl_name = ttl.get("table", {}).get("name", "?")
+        rls = ttl.get("table", {}).get("rls_rules", {})
+        if not rls:
+            continue
+        for rule in rls.get("rules", []):
+            expr = rule.get("expr", "")
+            match = RLS_FUNCTION_RE.search(expr)
+            if match:
+                func_name = match.group(1).upper()
+                findings.append(Finding(
+                    angle="S", check_id="S9", check_name="RLS_FUNCTION_IN_EXPR",
+                    severity="HIGH",
+                    title=f"Function in RLS expression: {func_name}() on {tbl_name}",
+                    detail=f"Expression: {expr[:120]}. Functions in RLS prevent filter pushdown to the database.",
+                    model_name=name, model_guid=guid,
+                    recommendation="Materialise the function result as a column and RLS on that instead",
+                ))
+
+    return findings
+
+
 def check_s6(models: list[dict], _config: AuditConfig) -> list[Finding]:
     """S6: Conformed dimension divergence."""
     findings = []
@@ -1296,6 +1417,8 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_s2(m, corpus, config))
             findings.extend(check_s4(m, config))
             findings.extend(check_s5(m, config))
+            findings.extend(check_s8(m, corpus, config))
+            findings.extend(check_s9(m, corpus, config))
 
     if "D" in angles:
         findings.extend(check_d7(corpus.models, config))

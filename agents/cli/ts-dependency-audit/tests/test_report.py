@@ -62,7 +62,7 @@ class TestGenerateReport:
         assert "<!DOCTYPE html>" in html
         assert "GTM" in html
         assert "Sales" in html
-        assert "Cluster Heatmap" in html
+        assert "Semantic Layer Health Audit" in html
 
     def test_with_meta(self):
         meta = ReportMeta(

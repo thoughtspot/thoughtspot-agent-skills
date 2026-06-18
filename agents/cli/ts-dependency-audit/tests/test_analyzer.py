@@ -36,9 +36,11 @@ from analyzer import (
     check_p10,
     check_p11,
     check_s1,
+    check_s8,
     check_s4,
     check_s5,
     check_s6,
+    check_s9,
     run_audit,
     summarise,
     _detect_pii,
@@ -113,6 +115,21 @@ def _formula(name, expr, fid=None):
     if fid:
         f["id"] = fid
     return f
+
+
+def _table_tml(name, columns=None, rls_rules=None, guid="tbl-guid-1"):
+    tbl = {"name": name, "columns": columns or []}
+    if rls_rules:
+        tbl["rls_rules"] = rls_rules
+    return {"guid": guid, "table": tbl}
+
+
+def _tbl_col(name, data_type="INT64", db_column_name=None):
+    return {
+        "name": name,
+        "db_column_name": db_column_name or name,
+        "db_column_properties": {"data_type": data_type},
+    }
 
 
 def _mt(name, fqn=None, joins=None):
@@ -461,6 +478,83 @@ class TestSChecks:
         f = check_s5(m, SPOTTER_CFG)
         assert len(f) == 2
         assert all(ff.severity == "CRITICAL" for ff in f)
+
+    def test_s8_rls_varchar_column(self):
+        table = _table_tml("Orders", columns=[
+            _tbl_col("region", data_type="VARCHAR"),
+            _tbl_col("order_id", data_type="INT64"),
+        ], rls_rules={
+            "rules": [{"expr": "[path1::region] = ts_username"}],
+        })
+        m = _model(guid="g1")
+        corpus = Corpus(models=[m], tables=[table],
+                        table_tmls_by_model={"g1": [table]})
+        f = check_s8(m, corpus, SPOTTER_CFG)
+        assert len(f) == 1
+        assert f[0].check_name == "RLS_VARCHAR_FILTER"
+        assert "region" in f[0].title
+
+    def test_s8_rls_int_column_no_finding(self):
+        table = _table_tml("Orders", columns=[
+            _tbl_col("org_id", data_type="INT64"),
+        ], rls_rules={
+            "rules": [{"expr": "[path1::org_id] = ts_groups"}],
+        })
+        m = _model(guid="g1")
+        corpus = Corpus(models=[m], tables=[table],
+                        table_tmls_by_model={"g1": [table]})
+        f = check_s8(m, corpus, SPOTTER_CFG)
+        assert len(f) == 0
+
+    def test_s8_no_rls_no_finding(self):
+        table = _table_tml("Orders", columns=[_tbl_col("region", data_type="VARCHAR")])
+        m = _model(guid="g1")
+        corpus = Corpus(models=[m], tables=[table],
+                        table_tmls_by_model={"g1": [table]})
+        f = check_s8(m, corpus, SPOTTER_CFG)
+        assert len(f) == 0
+
+    def test_s9_function_in_rls(self):
+        table = _table_tml("Orders", columns=[
+            _tbl_col("region", data_type="VARCHAR"),
+        ], rls_rules={
+            "rules": [{"expr": "UPPER([path1::region]) = ts_username"}],
+        })
+        m = _model(guid="g1")
+        corpus = Corpus(models=[m], tables=[table],
+                        table_tmls_by_model={"g1": [table]})
+        f = check_s9(m, corpus, SPOTTER_CFG)
+        assert len(f) == 1
+        assert f[0].check_name == "RLS_FUNCTION_IN_EXPR"
+        assert "UPPER" in f[0].title
+        assert f[0].severity == "HIGH"
+
+    def test_s9_no_function_no_finding(self):
+        table = _table_tml("Orders", columns=[
+            _tbl_col("region", data_type="VARCHAR"),
+        ], rls_rules={
+            "rules": [{"expr": "[path1::region] = ts_username"}],
+        })
+        m = _model(guid="g1")
+        corpus = Corpus(models=[m], tables=[table],
+                        table_tmls_by_model={"g1": [table]})
+        f = check_s9(m, corpus, SPOTTER_CFG)
+        assert len(f) == 0
+
+    def test_s9_multiple_functions(self):
+        table = _table_tml("Orders", columns=[
+            _tbl_col("region", data_type="VARCHAR"),
+        ], rls_rules={
+            "rules": [
+                {"expr": "UPPER([path1::region]) = ts_username"},
+                {"expr": "TRIM([path1::region]) = ts_groups"},
+            ],
+        })
+        m = _model(guid="g1")
+        corpus = Corpus(models=[m], tables=[table],
+                        table_tmls_by_model={"g1": [table]})
+        f = check_s9(m, corpus, SPOTTER_CFG)
+        assert len(f) == 2
 
     def test_s6_divergence(self):
         m1 = _model(name="M1", columns=[

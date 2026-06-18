@@ -14,7 +14,6 @@ Usage:
 from __future__ import annotations
 
 import html
-import json
 from dataclasses import dataclass, asdict
 from typing import Any
 
@@ -121,15 +120,8 @@ def generate_html_report(
         s = f["severity"]
         sev_counts[s] = sev_counts.get(s, 0) + 1
 
-    findings_json = json.dumps(findings, default=str)
-    models_json = json.dumps(model_data, default=str)
-    meta_json = json.dumps(asdict(meta) if hasattr(meta, '__dataclass_fields__') else {}, default=str)
-
     return _build_html(
         findings=findings,
-        findings_json=findings_json,
-        models_json=models_json,
-        meta_json=meta_json,
         meta=meta,
         angles=angles,
         sorted_models=sorted_models,
@@ -191,7 +183,7 @@ def _build_html(**ctx) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ThoughtSpot Audit Report — {_esc(meta.profile_name)}</title>
+<title>Semantic Layer Health Audit — {_esc(meta.cluster_url)}</title>
 <style>
 {_css()}
 </style>
@@ -236,7 +228,10 @@ def _build_html(**ctx) -> str:
 <main class="content">
 
   <header class="report-header">
-    <h1>ThoughtSpot Environment Audit Report</h1>
+    <h1>Semantic Layer Health Audit</h1>
+    <p class="report-desc">Scores each semantic model against five quality dimensions: AI readiness,
+    data modeling best practices, human readiness (naming, descriptions), performance, and security.
+    Use this report to identify which models need attention and where to focus improvement efforts.</p>
     <div class="header-meta">
       <div class="meta-row"><span class="meta-label">Cluster:</span> {_esc(meta.cluster_url or meta.profile_name)}</div>
       <div class="meta-row"><span class="meta-label">Date:</span> {_esc(meta.date)}</div>
@@ -294,11 +289,6 @@ def _build_html(**ctx) -> str:
 </div>
 
 <script>
-const FINDINGS = {ctx["findings_json"]};
-const MODEL_DATA = {ctx["models_json"]};
-const META = {ctx["meta_json"]};
-const SEV_RANK = {json.dumps(SEVERITY_RANK)};
-
 {_js()}
 </script>
 </body>
@@ -569,7 +559,8 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); font
 
 /* Header */
 .report-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border); }
-.report-header h1 { font-size: 22px; margin-bottom: 8px; }
+.report-header h1 { font-size: 22px; margin-bottom: 4px; }
+.report-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.4; }
 .header-meta { display: flex; flex-wrap: wrap; gap: 4px 24px; font-size: 13px; color: var(--text-secondary); }
 .meta-row { white-space: nowrap; }
 .meta-label { font-weight: 600; color: var(--text); }
