@@ -159,6 +159,7 @@ def _build_html(**ctx) -> str:
 
     heatmap_rows = _render_heatmap_rows(sorted_models, model_data, angles)
     model_cards = _render_model_cards(sorted_models, findings, angles)
+    check_summary = _render_check_summary(check_ids, checks_data)
     check_tables = _render_check_tables(check_ids, checks_data)
     sidebar_models = _render_sidebar_models(sorted_models, model_data)
     sidebar_checks = _render_sidebar_checks(check_ids, checks_data, angles)
@@ -284,6 +285,9 @@ def _build_html(**ctx) -> str:
 
   <!-- View 3: By-Check Detail -->
   <section id="view-checks" class="view">
+    <h2>Checks Overview</h2>
+    {check_summary}
+    <h2 style="margin-top:24px">Check Detail</h2>
     {check_tables}
   </section>
 
@@ -316,7 +320,7 @@ def _render_heatmap_rows(models, model_data, angles):
             cells.append(
                 f'<td class="heatmap-cell" style="background:{bg};color:{color};'
                 f'border-left:3px solid {color}" data-sev="{sev}"'
-                f' onclick="showModel(\'{_esc(mn)}\')">'
+                f" onclick=\"showModel('{_esc(mn)}', '{a}')\">"
                 f'{sev}</td>'
             )
         worst_color = SEVERITY_COLORS.get(worst, "#22c55e")
@@ -387,6 +391,48 @@ def _render_model_cards(models, findings, angles):
             f'</div>'
         )
     return "\n".join(cards)
+
+
+def _render_check_summary(check_ids, checks_data):
+    """Compact summary table: one row per check with a proportional bar."""
+    if not check_ids:
+        return ""
+    max_count = max(len(checks_data[c]) for c in check_ids) if check_ids else 1
+
+    rows = []
+    for cid in check_ids:
+        cfs = checks_data[cid]
+        if not cfs:
+            continue
+        count = len(cfs)
+        model_count = len(set(f.get("model_name", "") for f in cfs if f.get("model_name")))
+        worst = _worst_severity([f["severity"] for f in cfs])
+        color = SEVERITY_COLORS.get(worst, "#999")
+        bg = SEVERITY_BG.get(worst, "#f9fafb")
+        bar_pct = (count / max_count * 100) if max_count else 0
+        check_name = cfs[0].get("check_name", "")
+
+        rows.append(
+            f'<tr class="summary-row" onclick="scrollToCheck(\'{cid}\')">'
+            f'<td class="summary-id">{_esc(cid)}</td>'
+            f'<td class="summary-name">{_esc(check_name)}</td>'
+            f'<td style="color:{color}" class="summary-sev">{_esc(worst)}</td>'
+            f'<td class="summary-models">{model_count}</td>'
+            f'<td class="summary-bar-cell">'
+            f'<div class="summary-bar-wrap">'
+            f'<div class="summary-bar" style="width:{bar_pct:.0f}%;background:{color}"></div>'
+            f'<span class="summary-bar-label">{count}</span>'
+            f'</div></td>'
+            f'</tr>'
+        )
+
+    return (
+        f'<table class="summary-table"><thead><tr>'
+        f'<th>Check</th><th>Name</th><th>Severity</th><th>Models</th><th>Findings</th>'
+        f'</tr></thead><tbody>'
+        + "\n".join(rows)
+        + f'</tbody></table>'
+    )
 
 
 def _render_check_tables(check_ids, checks_data):
@@ -602,6 +648,21 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); font
 .detail-cell { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-cell:hover { white-space: normal; }
 
+/* Check summary */
+.summary-table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); font-size: 13px; margin-bottom: 8px; }
+.summary-table th { padding: 8px 10px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-secondary); background: #f8fafc; border-bottom: 1px solid var(--border); }
+.summary-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }
+.summary-row { cursor: pointer; transition: background .1s; }
+.summary-row:hover { background: #f1f5f9; }
+.summary-id { font-weight: 700; width: 40px; }
+.summary-name { color: var(--text-secondary); }
+.summary-sev { font-weight: 700; width: 70px; }
+.summary-models { text-align: center; width: 60px; }
+.summary-bar-cell { width: 40%; }
+.summary-bar-wrap { display: flex; align-items: center; gap: 8px; }
+.summary-bar { height: 18px; border-radius: 3px; min-width: 2px; transition: width .2s; }
+.summary-bar-label { font-weight: 600; font-size: 12px; white-space: nowrap; }
+
 @media (max-width: 900px) {
   .sidebar { display: none; }
   .content { margin-left: 0; padding: 16px; }
@@ -629,13 +690,24 @@ function showView(view, scrollTo) {
   }
 }
 
-function showModel(name) {
+function showModel(name, angle) {
   showView('model');
   document.querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
   const cards = document.querySelectorAll('.model-card');
   for (const card of cards) {
     if (card.dataset.model === name) {
       card.classList.add('active');
+      if (angle) {
+        const sections = card.querySelectorAll('.angle-section');
+        for (const sec of sections) {
+          const code = sec.querySelector('.angle-code');
+          if (code && code.textContent.trim() === angle) {
+            sec.setAttribute('open', '');
+            setTimeout(() => sec.scrollIntoView({behavior: 'smooth', block: 'start'}), 50);
+            return;
+          }
+        }
+      }
       card.scrollIntoView({behavior: 'smooth', block: 'start'});
       break;
     }
@@ -666,6 +738,11 @@ function toggleSeverity(sev) {
     const worst = row.dataset.worst;
     row.classList.toggle('hidden', hiddenSeverities.has(worst));
   });
+}
+
+function scrollToCheck(checkId) {
+  const el = document.getElementById('check-' + checkId);
+  if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 function filterBySeverity(sev) {
