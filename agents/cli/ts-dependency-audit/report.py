@@ -56,6 +56,7 @@ SEVERITY_BG = {
 @dataclass
 class ReportMeta:
     profile_name: str = ""
+    cluster_url: str = ""
     date: str = ""
     audit_profile: str = "Spotter-ready"
     scope: str = "All connections"
@@ -205,7 +206,7 @@ def _build_html(**ctx) -> str:
   <div class="sidebar-header">
     <h2>Audit Report</h2>
     <div class="meta-small">
-      <div>{_esc(meta.profile_name)}</div>
+      <div>{_esc(meta.cluster_url or meta.profile_name)}</div>
       <div>{_esc(meta.date)}</div>
     </div>
   </div>
@@ -240,7 +241,7 @@ def _build_html(**ctx) -> str:
   <header class="report-header">
     <h1>ThoughtSpot Environment Audit Report</h1>
     <div class="header-meta">
-      <div class="meta-row"><span class="meta-label">Profile:</span> {_esc(meta.profile_name)}</div>
+      <div class="meta-row"><span class="meta-label">Cluster:</span> {_esc(meta.cluster_url or meta.profile_name)}</div>
       <div class="meta-row"><span class="meta-label">Date:</span> {_esc(meta.date)}</div>
       <div class="meta-row"><span class="meta-label">Audit Profile:</span> {_esc(meta.audit_profile)}</div>
       <div class="meta-row"><span class="meta-label">Scope:</span> {_esc(meta.scope)}</div>

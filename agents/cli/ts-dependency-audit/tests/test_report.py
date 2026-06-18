@@ -67,14 +67,17 @@ class TestGenerateReport:
     def test_with_meta(self):
         meta = ReportMeta(
             profile_name="champ-staging",
+            cluster_url="https://champ-staging.thoughtspot.cloud",
             date="2026-06-18",
             audit_profile="Spotter-ready",
+            scope="Connection: Snowflake_Prod",
             model_count=2,
         )
         html = generate_html_report(SAMPLE_FINDINGS, meta)
-        assert "champ-staging" in html
+        assert "champ-staging.thoughtspot.cloud" in html
         assert "2026-06-18" in html
         assert "Spotter-ready" in html
+        assert "Snowflake_Prod" in html
 
     def test_views_present(self):
         html = generate_html_report(SAMPLE_FINDINGS)
@@ -95,6 +98,12 @@ class TestGenerateReport:
         html = generate_html_report(SAMPLE_FINDINGS)
         assert 'data-model="GTM"' in html
         assert 'data-model="Sales"' in html
+
+    def test_check_summary(self):
+        html = generate_html_report(SAMPLE_FINDINGS)
+        assert "Checks Overview" in html
+        assert "summary-table" in html
+        assert "summary-bar" in html
 
     def test_check_tables(self):
         html = generate_html_report(SAMPLE_FINDINGS)
