@@ -185,6 +185,68 @@ pass-through.
 - The inner aggregate (`sum`, `average`, `max`, `min`, `unique count`) follows standard ThoughtSpot formula syntax
 - Column references inside `group_aggregate` use `[table::column]` format
 
+### A boolean predicate inside a FIXED partition is a filter, not a grain
+
+**Do not translate every FIXED dimension as a grouping key.** A common Tableau idiom
+puts a **boolean calc** into a `{FIXED ...}` partition *and* pins that boolean to a
+single member (`=true`) on the worksheet **Filters shelf**. This is a workaround for
+Tableau's order of operations — FIXED LODs are computed *before* categorical filters, so
+the author bakes the scoping predicate into the partition to make it bite. The boolean is
+doing the job of a **filter**, not defining a real grain: the `false`/`null` rows are
+discarded, never shown as their own bucket.
+
+**Detection** — both must be true:
+1. A member of a `{FIXED ...}` partition is a boolean-valued calculated field.
+2. That same field appears on the worksheet `<filter class='categorical'>` shelf with a
+   `<groupfilter function='member' member='true' ...>` (or any single pinned member).
+
+**Translation** — move the predicate from the grouping set into the **filter argument**
+(the 3rd `group_aggregate` argument), and keep only the real dimensions in the grouping:
+
+| Tableau LOD | ThoughtSpot | Notes |
+|---|---|---|
+| `{FIXED [acct], [boolFlag] : SUM([col])}` where `[boolFlag]` is filtered `=true` | `group_aggregate ( sum ( [t::col] ) , { [acct] } , { [boolFlag] = true } )` | Predicate → filter arg; only `[acct]` is the grain |
+
+The filter is a **hard literal `{ predicate = true }`, not `query_filters()`** — because
+FIXED deliberately ignores the viz's other filters. (Use `query_filters() + { predicate
+= true }` only when the LOD should additionally respect viz filters, which diverges from
+FIXED semantics — surface the choice rather than assuming.)
+
+Equivalent inline form when you'd rather not emit a separate flag column:
+`group_aggregate ( sum ( if ( <predicate> ) then [t::col] else 0 ) , { [acct] } , {} )`.
+
+**Worked illustration (from `Weighted Usage.twb`, not live-verified):**
+
+```
+# Tableau — boolFlag is a parameter-driven date-window predicate, filtered =true on 6 sheets
+tot_weighted_usage = {FIXED [MBX_ACCT_ID], [Date Window Flag] : SUM([WEIGHTED_USAGE])}
+
+# WRONG (mechanical) — boolean as grain → emits separate true/false/null totals per account
+group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] , [Date Window Flag] } , {} )
+
+# RIGHT — boolean as filter → windowed total per account
+group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] } , { [Date Window Flag] = true } )
+```
+
+> Note: a column literally named `WEIGHTED_USAGE` is **pre-weighted at source** — this LOD
+> just sums it. It is *not* a weighted-average computation. See "Weighted average" below
+> for the fork between pre-weighted columns and weights computed in ThoughtSpot.
+
+### Weighted average
+
+A field or workbook named "weighted …" is **not** evidence of a weighted-average
+*calculation* — read the actual expression. There are two distinct situations, and they
+translate completely differently:
+
+| Situation | How to recognize it | Translation |
+|---|---|---|
+| **Pre-weighted at source** | The weighting is already baked into a physical column (e.g. `WEIGHTED_USAGE`); the workbook only `SUM()`s / LOD-aggregates it | Plain `sum ( [t::col] )` or `group_aggregate ( sum ( [t::col] ) , { grain } , … )`. **Do not** wrap a weighted-average template around it — that double-counts the weight. |
+| **Computed in-tool** | The workbook divides a weighted sum by a weight sum, e.g. `SUM([value]*[weight]) / SUM([weight])` (viz-level or inside an LOD) | See the computed weighted-average pattern in `thoughtspot-formula-patterns.md` → "Weighted average" |
+
+The headline rule: **establish which situation you are in before emitting anything.** The
+pre-weighted case is the more common one in the wild and needs no special handling beyond
+getting the grain right.
+
 ---
 
 ## Tableau Bins → bucketing formula

@@ -81,6 +81,9 @@ Use this as the canonical limitations reference.
 | 52 | `{EXCLUDE [dim] : AGG([col])}` | `group_aggregate ( ... , query_groups() - { dim } , query_filters() )` | |
 | 53 | `TOTAL(SUM([col]))` / percent-of-total | `group_aggregate ( ... , {} , query_filters() )` | |
 | 54 | `max([date])` in formula filters | `group_aggregate ( max ( [date] ) , {} , {} )` | Global max date, dynamic |
+| 110 | `{FIXED [d], [boolFlag] : AGG}` where `[boolFlag]` is pinned `=true` on the Filters shelf | `group_aggregate ( agg ( [t::col] ) , { [d] } , { [boolFlag] = true } )` | Boolean predicate inside FIXED is a **filter, not a grain** — move to the filter arg; hard `{...}`, not `query_filters()`. Check the filter shelf before treating a FIXED dim as a grouping key. See formula-translation LOD section. |
+| 111 | Weighted average — **pre-weighted source column** (e.g. `WEIGHTED_USAGE`) | `sum ( [t::col] )` / `group_aggregate ( sum ( [t::col] ) , { grain } , … )` | Weight already applied upstream — just sum. Do NOT apply a weighted-average formula on top (double-counts). Read the expression, not the field name. |
+| 112 | Weighted average — **computed** `SUM([v]*[w]) / SUM([w])` | `sum ( group_aggregate ( sum ( [v] ) * sum ( [w] ) , { grain } , query_filters () ) ) / sum ( [w] )` | Grain choice + outer-sum re-aggregation are the hard parts. See `thoughtspot-formula-patterns.md` → "Weighted average". |
 
 ### Formula Translation — Running / Cumulative
 
