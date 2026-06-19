@@ -24,7 +24,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 | [references/open-items.md](references/open-items.md) | Verified and unverified API behaviors — read before implementing each step |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config, token persistence |
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer TML structure — verified field reference for formulas, parameters, sets, data source lookup |
-| [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — needed for Liveboard fallback path in Step 2 |
+| [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure — for the deferred embedded-Answer path (open-items Item 4 / BL-039); not used by the current standalone-Answer flow |
 | [../../shared/schemas/thoughtspot-sets-tml.md](../../shared/schemas/thoughtspot-sets-tml.md) | Set TML structure — bin sets, group sets, query sets; answer-level vs reusable |
 | [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure — formula and column placement rules, self-validation checklist |
 | [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | Formula syntax, column reference syntax, YAML encoding rules |
@@ -922,6 +922,7 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.1 | 2026-06-19 | Resolve open items 4 & 5 as deferred scope — embedded-Liveboard Answers and set/cohort promotion are out of current scope (formulas + parameters only), tracked in BL-039; neither is a shipped-unverified path. Correct the Liveboard-TML reference note (no fallback path exists in Step 2). |
 | 1.2.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.1.0 | 2026-04-22 | Add parameter promotion (option P in Step 4, duplicate detection, merging) |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

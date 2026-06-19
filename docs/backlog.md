@@ -1319,3 +1319,38 @@ funnel drop-off, parameters for A/B date ranges, etc.).
 
 **Target:** Assess feasibility by 2026-09-30; ship first recipe by 2026-12-31.
 
+---
+
+## BL-039 — `ts-object-answer-promote`: support embedded Answers and set/cohort promotion
+
+**Source:** Resolving `ts-object-answer-promote` open items 4 & 5 (2026-06-19). Both were `UNTESTED`; on inspection neither is a shipped-unverified path — the skill handles **standalone Answers, formulas + parameters only** — so they were re-dispositioned as deferred scope and the open items closed.
+**Affects:** `agents/cli/ts-object-answer-promote/` (Steps 2, 3, 4); `references/open-items.md` Items 4 & 5
+**Status:** Open — enhancement, not a defect
+
+### Scope
+
+Two independent capability gaps the current skill intentionally does not cover:
+
+1. **Embedded Answers (Item 4).** Step 2 searches `ts metadata search --type ANSWER`, which
+   returns only standalone saved Answers. A formula living in a Liveboard-embedded Answer
+   can't be found or promoted today. Enhancement: detect/resolve embedded Answers out of a
+   Liveboard TML, then run the existing promotion path. Open questions: does Answer search
+   ever surface embedded Answers (expected no); the Liveboard TML structure for embedded
+   Answers; whether their formulas reuse the same `formulas[]` / `expr` shape.
+
+2. **Set/cohort promotion (Item 5).** Sets appear as `cohorts[]` in Answer TML (BIN_BASED and
+   COLUMN_BASED — structure verified). The skill detects them and tells the user they need
+   separate promotion. Enhancement: build a standalone set object from the answer-level
+   cohort entry and import it, then verify the reusable set works as a column in new Answers
+   on the same Model.
+
+### Approach
+
+Each is independent and can ship separately. Both require live-instance verification
+(`se-thoughtspot` smoke profile) before shipping — build the test objects (an embedded
+Answer in a Liveboard; a BIN_BASED and a COLUMN_BASED set), run the procedures recorded in
+the old open-items entries, and record findings. When built, re-open concrete open items for
+the specific API behaviours rather than carrying the broad gaps here.
+
+**Target:** No date — schedule when embedded-Answer or set-promotion demand is confirmed.
+

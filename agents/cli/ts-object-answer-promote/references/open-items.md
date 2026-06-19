@@ -42,15 +42,19 @@ champ-staging).
 
 **Skill steps affected:** Step 2 (Find the Answer)
 
-**Status:** UNTESTED
+**Status:** RESOLVED — deferred to BL-039 (out of current scope)
 
-**Why it matters:** `ts metadata search --type ANSWER` returns only standalone saved
-Answers. Liveboard-embedded Answers are not independent metadata objects.
+**Disposition:** The skill operates on **standalone saved Answers only**. Step 2 searches
+`ts metadata search --type ANSWER`, which by design returns only independent Answer objects;
+Liveboard-embedded Answers are not independent metadata objects and the skill never attempts
+to promote from them. There is therefore no shipped path that could produce a wrong result
+here. Resolving an embedded Answer out of a Liveboard TML and promoting from it is a future
+enhancement tracked in **BL-039**, not a correctness gap in the current skill.
 
-**What to record:**
-- [ ] Does Answer search return Liveboard-embedded Answers?
-- [ ] What is the Liveboard TML structure for embedded Answers?
-- [ ] Do embedded Answer formulas use the same `formulas[]` / `expr` structure?
+**Deferred questions (for BL-039):**
+- Does Answer search return Liveboard-embedded Answers? (expected: no)
+- Liveboard TML structure for embedded Answers
+- Whether embedded Answer formulas reuse the same `formulas[]` / `expr` structure
 
 ---
 
@@ -58,11 +62,17 @@ Answers. Liveboard-embedded Answers are not independent metadata objects.
 
 **Skill steps affected:** Step 3, Step 4
 
-**Status:** VERIFIED (structure) / UNTESTED (promotion path)
+**Status:** RESOLVED — structure VERIFIED; promotion deferred to BL-039 (out of current scope)
 
 **Finding:** Sets appear as `cohorts[]` in Answer TML, not in `formulas[]`. Two types:
-BIN_BASED (simple) and COLUMN_BASED (advanced/query).
+BIN_BASED (simple) and COLUMN_BASED (advanced/query). This structure is confirmed.
 
-**Still to test:**
-- [ ] Build standalone cohort TML from answer-level entry and import
-- [ ] Verify reusable set works as a column in new Answers on the same Model
+**Disposition:** The skill **promotes formulas and parameters only** — it detects sets and
+explicitly tells the user they require separate promotion ("Sets require separate promotion
+to standalone set objects. This skill handles formulas only"). Set promotion is not shipped
+behaviour, so there is no shipped path to verify in the current skill. Building a standalone
+set object from an answer-level cohort entry is a future enhancement tracked in **BL-039**.
+
+**Deferred questions (for BL-039):**
+- Build standalone cohort TML from an answer-level entry and import
+- Verify a reusable set works as a column in new Answers on the same Model
