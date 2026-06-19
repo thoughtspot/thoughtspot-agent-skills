@@ -102,6 +102,8 @@ These rules come from real import failures — violating them causes silent erro
 - All formula columns (ATTRIBUTE and MEASURE) need a `columns[]` entry with `formula_id:` that matches the `formulas[]` `id:`
 - `aggregation:` belongs in `columns[]` entries only — never in a `formulas[]` entry
 - Model `id:` is optional; when absent, `name:` is the join reference target in `model_tables[].joins[].with`
+- Formula cross-references (`[Other Formula]`) fail on first import — inline the expression or use a two-pass import (I9)
+- Parameters with `list_config`: use `data_type: CHAR` (not `VARCHAR`); `list_choice` entries must be `{value:, display_name:}` objects, not bare strings (I10)
 
 ## Formula classification
 

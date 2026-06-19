@@ -158,8 +158,41 @@ formulas:
   expr: "[TABLE_A::sales_amount] * [TABLE_A::quantity]"
 - id: formula_Adjusted Metric  # Level 1 — references formula_Base Metric
   name: Adjusted Metric
-  expr: "[formula_Base Metric] * 1.1"
+  expr: "[Base Metric] * 1.1"
 ```
+
+### Formula cross-references during import — inline the expression
+
+**Formula-to-formula bracket references (`[Other Formula Name]`) fail during TML
+import** with "Search did not find 'other formula name'". ThoughtSpot resolves formula
+references by display name at import time, but the referenced formula may not yet exist
+in the object when the referencing formula is being validated.
+
+**Workaround:** inline the referenced formula's expression directly into the referencing
+formula. For example, if formula B references formula A:
+
+```yaml
+# WRONG — fails with "Search did not find 'Total Sales'"
+- id: formula_Total Sales
+  name: Total Sales
+  expr: "group_aggregate ( sum ( [TABLE::AMOUNT] ) , { [TABLE::REGION] } , {} )"
+- id: formula_Above Threshold
+  name: Above Threshold
+  expr: "if ( [Total Sales] >= [Min Amount] ) then true else false"
+
+# CORRECT — inline the group_aggregate expression
+- id: formula_Total Sales
+  name: Total Sales
+  expr: "group_aggregate ( sum ( [TABLE::AMOUNT] ) , { [TABLE::REGION] } , {} )"
+- id: formula_Above Threshold
+  name: Above Threshold
+  expr: >-
+    if ( group_aggregate ( sum ( [TABLE::AMOUNT] ) , { [TABLE::REGION] } , {} ) >= [Min Amount] ) then true else false
+```
+
+**Alternative:** import base formulas first, export the model to get GUIDs assigned,
+then add dependent formulas via a second import with the exported JSON format. This is
+slower but avoids expression duplication.
 
 ### Formula ID convention
 
@@ -168,7 +201,7 @@ formulas:
 ### Column references in formulas
 
 - Physical columns: `[table_name::column_name]`
-- Other formulas: `[formula_<display_name>]` (by their `id`)
+- Formula columns (post-import): `[Formula Display Name]` (by display name, no table prefix)
 - Parameters: `[Parameter Name]` (no table prefix, no `::` separator)
 
 ### Parameter migration (Tableau `Parameters` datasource → `model.parameters[]`)
@@ -176,16 +209,35 @@ formulas:
 Tableau parameters from the `Parameters` datasource are created as ThoughtSpot model
 parameters. Omit `id` on first import — ThoughtSpot assigns it.
 
+**`data_type` for list parameters must be `CHAR`** — `VARCHAR` is listed in the schema
+but fails on import for list parameters. Use `CHAR` for all string-typed list parameters.
+(`INT64`, `DOUBLE`, `DATE`, `BOOL` are valid for non-string types.)
+
+**`list_choice` entries require `value:` and `display_name:` sub-keys** — bare string
+values are rejected. Every entry must be an object with at least `value:`.
+
 ```yaml
 parameters:
 - name: Currency
-  data_type: VARCHAR
+  data_type: CHAR
   default_value: "USD"
   list_config:
     list_choice:
     - value: USD
+      display_name: USD
     - value: CAD
+      display_name: CAD
     - value: GBP
+      display_name: GBP
+
+- name: Threshold
+  data_type: DOUBLE
+  default_value: "500"
+  range_config:
+    range_min: "0"
+    range_max: "10000"
+    include_min: true
+    include_max: true
 ```
 
 **Formula references:** Tableau `[Parameters].[Currency]` → ThoughtSpot `[Currency]`.

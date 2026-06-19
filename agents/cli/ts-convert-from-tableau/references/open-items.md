@@ -76,3 +76,77 @@ REGEXP_EXTRACT/MATCH/REPLACE, FINDNTH have no native TS equivalent — mapped to
 sql_*_op pass-through (warehouse-dialect-specific) or omit+log.
 
 Status: Pass-through implemented; not verified against live cluster
+
+---
+
+## #14 — Parameter TML: CHAR not VARCHAR, list_choice format — VERIFIED 2026-06-19
+
+Verified against se-thoughtspot (Weighted Usage migration).
+
+**Finding 1: `data_type: VARCHAR` fails for list parameters.** The model TML schema
+lists `VARCHAR` as a valid `data_type`, but import rejects it for parameters with
+`list_config`. Use `CHAR` instead. `VARCHAR` may work for free-form parameters (not tested).
+
+**Finding 2: `list_choice` entries must be objects, not bare strings.** Each entry needs
+at minimum a `value:` key; `display_name:` is recommended.
+
+```yaml
+# WRONG — fails on import
+data_type: VARCHAR
+list_config:
+  list_choice:
+  - USD
+  - CAD
+
+# CORRECT
+data_type: CHAR
+list_config:
+  list_choice:
+  - value: USD
+    display_name: USD
+  - value: CAD
+    display_name: CAD
+```
+
+**Doc fix applied:** updated `tableau-tml-rules.md` parameter example and
+`thoughtspot-model-tml.md` field descriptions (same commit).
+
+Status: VERIFIED — doc fixes applied
+
+---
+
+## #15 — Formula cross-references fail during TML import — VERIFIED 2026-06-19
+
+Verified against se-thoughtspot (Weighted Usage migration).
+
+A model formula that references another formula column by bracket notation
+(`[Other Formula Name]`) fails during import with "Search did not find 'other formula
+name'". ThoughtSpot resolves formula references by display name, but the referenced
+formula may not yet exist when the referencing formula is validated during import.
+
+**Workaround 1 (preferred):** inline the referenced formula's expression directly into
+the referencing formula.
+
+**Workaround 2:** import base formulas first (no cross-refs), export the model to get
+server-assigned IDs, then add dependent formulas via a second import using the exported
+JSON format.
+
+**Doc fix applied:** added "Formula cross-references during import" section to
+`tableau-tml-rules.md` (same commit).
+
+Status: VERIFIED — doc fixes applied
+
+---
+
+## #16 — Special characters in parameter list values — VERIFIED 2026-06-19
+
+Verified against se-thoughtspot (Weighted Usage migration).
+
+Parameter list values containing `$` and `%` characters caused import failures. Renamed
+values to avoid special characters (e.g. "$ Difference" → "Dollar Difference",
+"% Difference" → "Pct Difference").
+
+Not yet determined whether this is a YAML escaping issue or a ThoughtSpot validation
+restriction. If YAML escaping, quoting the values may work — not tested.
+
+Status: VERIFIED — workaround is to avoid special characters in parameter values

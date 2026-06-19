@@ -167,6 +167,13 @@ evaluates the formula `expr` directly — the column-level `aggregation` does no
 the result. Use `SUM` as the convention for all MEASURE formula columns; do not attempt to
 infer a "correct" aggregation from the expression shape (e.g. ratio vs. sum).
 
+**Formula cross-references fail on first import.** A formula `expr` that references another
+formula column by bracket notation (`[Other Formula Name]`) fails with "Search did not find
+'other formula name'". ThoughtSpot resolves bracket refs by display name, but the referenced
+formula does not yet exist in the model during initial import validation. **Workaround:**
+inline the referenced formula's full expression, or use a two-pass import (import base
+formulas first, export to get GUIDs, then add dependent formulas via update).
+
 ### Geo Config
 
 Assign a geographic role so ThoughtSpot can render map charts:
@@ -208,10 +215,10 @@ Runtime input parameters that users can set at query time. Referenced in `formul
 |---|---|
 | `id` | UUID assigned by ThoughtSpot. Omit on first import; ThoughtSpot assigns it. |
 | `name` | Display name — referenced in formulas as `[Parameter Name]` |
-| `data_type` | `INT64`, `DOUBLE`, `CHAR`, `VARCHAR`, `DATE`, `BOOL` |
+| `data_type` | `INT64`, `DOUBLE`, `CHAR`, `DATE`, `BOOL`. **Use `CHAR` for string-typed list parameters** — `VARCHAR` is accepted by the schema but fails on import for list parameters. |
 | `default_value` | Always a string in TML regardless of `data_type` |
 | `description` | Optional description |
-| `list_config` | Restricts values to a fixed list. Contains `list_choice[]` with `value` and optional `display_name`. |
+| `list_config` | Restricts values to a fixed list. Contains `list_choice[]` — **each entry must be an object** with `value` (required) and `display_name` (recommended). Bare string values are rejected. |
 | `range_config` | Restricts values to a numeric range. Contains `range_min`, `range_max`, `include_min`, `include_max`. |
 
 Only one of `list_config` or `range_config` may be present. Omit both for a free-form parameter.

@@ -5,12 +5,13 @@
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I8, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I10, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
-> Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7)
-> and `ts-convert-from-databricks-mv` (I1–I7). They are proven against live ThoughtSpot
-> imports; violations produce the failure modes listed below.
+> Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
+> `ts-convert-from-databricks-mv` (I1–I7), and `ts-convert-from-tableau` (I9–I10, verified
+> 2026-06-19 against se-thoughtspot). They are proven against live ThoughtSpot imports;
+> violations produce the failure modes listed below.
 
 ---
 
@@ -291,6 +292,70 @@ columns:
 **Which metric keeps the `column_id`?** Prefer keeping the SUM metric as the
 `column_id`-based entry (SUM is the most common default aggregation). Express AVG,
 MIN, MAX, COUNT, and other aggregations as formulas.
+
+---
+
+### I9 — Formula cross-references: inline the expression on first import
+
+**Rule:** A formula that references another formula column by bracket notation
+(`[Other Formula Name]`) will fail during TML import with "Search did not find
+'other formula name'". ThoughtSpot resolves formula references by display name at
+import time, but the referenced formula does not yet exist in the object when the
+referencing formula is validated.
+
+**Workaround:** Inline the referenced formula's expression directly into the
+referencing formula. For example, if formula B uses `[Total Sales]` which is defined
+as `group_aggregate(sum([TABLE::AMOUNT]), {[TABLE::REGION]}, {})`, expand formula B
+to contain the full `group_aggregate(...)` expression.
+
+**Alternative:** Import base formulas first (no cross-refs), export the model, then
+add dependent formulas via a second import using the exported JSON format.
+
+**Failure mode:** TML import returns "Search did not find '{formula_name}'" for every
+formula-to-formula bracket reference.
+
+**Applies to:** All source dialects — this is a ThoughtSpot platform constraint, not
+source-specific.
+
+---
+
+### I10 — Parameters: `CHAR` for string lists, `list_choice` as objects
+
+**Rule:** String-typed parameters with `list_config` must use `data_type: CHAR`.
+`VARCHAR` is accepted by the schema but rejected on import for list parameters.
+Each `list_choice` entry must be an object with `value:` (required) and `display_name:`
+(recommended) — bare string values are rejected.
+
+**Failure mode:** `data_type: VARCHAR` with `list_config` → "Invalid YAML/JSON syntax"
+on import. Bare `list_choice` values → same error.
+
+**Applies to:** All source dialects that generate parameters (Tableau parameters,
+future parameter support in SV/MV converters).
+
+**Correct pattern:**
+```yaml
+parameters:
+- name: Currency
+  data_type: CHAR
+  default_value: "USD"
+  list_config:
+    list_choice:
+    - value: USD
+      display_name: USD
+    - value: CAD
+      display_name: CAD
+```
+
+**Wrong (do NOT do this):**
+```yaml
+parameters:
+- name: Currency
+  data_type: VARCHAR              # WRONG — fails for list params
+  list_config:
+    list_choice:
+    - USD                          # WRONG — bare strings rejected
+    - CAD
+```
 
 ---
 
