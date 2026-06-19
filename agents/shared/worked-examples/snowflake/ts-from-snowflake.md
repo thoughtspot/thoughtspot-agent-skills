@@ -413,7 +413,6 @@ columns:
   column_id: DM_ORDER::DM_ORDER_EMPLOYEE_ID
   properties:
     column_type: ATTRIBUTE
-    is_hidden: true
 - name: "# Employees"
   formula_id: "formula_# Employees"
   properties:

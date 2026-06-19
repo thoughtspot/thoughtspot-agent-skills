@@ -1391,3 +1391,20 @@ actually determine correctness are exactly the ones a template skips:
 **Target:** Assess demand before scheduling — only build once standalone (non-migration)
 weighted-average asks are recurring. No date set.
 
+---
+
+## BL-040 — Databricks `shared/` should copy from canonical `agents/shared/` at deploy time
+
+**Source:** 2026-06-19 — discovered `agents/databricks/shared/schemas/` is a stale snapshot of `agents/shared/schemas/`, gitignored and drifting (missing range join docs, currency anchors, I11 invariant).
+**Affects:** `agents/databricks/deploy.sh`, `agents/databricks/shared/schemas/`
+**Status:** Open
+
+### Problem
+
+`agents/databricks/shared/schemas/` duplicates files from `agents/shared/schemas/` but is gitignored — no validator catches drift. The Databricks Genie Code skills read stale guidance when the canonical files are updated.
+
+### Approach
+
+Make `agents/databricks/deploy.sh` copy the relevant files from `agents/shared/` at deploy time (same pattern as CoCo's `stage-sync.sh`), eliminating the local copy as a source of truth. Remove `agents/databricks/shared/schemas/` from the repo and add the copy step to the deploy script.
+
+**Target:** Next time Databricks skills are actively worked on. No date set.

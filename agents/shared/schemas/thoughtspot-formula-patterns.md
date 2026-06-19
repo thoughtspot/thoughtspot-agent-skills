@@ -678,7 +678,6 @@ columns:
   formula_id: formula_Timezone Filter
   properties:
     column_type: ATTRIBUTE
-    is_hidden: true
 
 filters:
 - column:

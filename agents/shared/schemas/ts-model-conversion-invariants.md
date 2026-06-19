@@ -5,7 +5,7 @@
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I10, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I11, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -356,6 +356,25 @@ parameters:
     - USD                          # WRONG — bare strings rejected
     - CAD
 ```
+
+---
+
+### I11 — Never set `is_hidden: true` during conversion
+
+**Rule:** Conversion skills must not set `is_hidden: true` on any column in the
+generated Model TML. All columns should be visible by default.
+
+**Failure mode:** Hidden columns cause locked visualizations — users cannot add the
+column to searches or answers, and existing visualizations that reference it become
+uneditable. Hidden columns also produce unexpected query behaviour when ThoughtSpot
+auto-selects join paths through them.
+
+**Applies to:** All source dialects (Tableau, Snowflake SV, Databricks MV, …).
+
+**Rationale:** Visibility is a post-import curation decision that belongs to the model
+owner, not the conversion skill. The source platform may mark columns as private or
+hidden (e.g. Snowflake SV `PRIVATE` visibility), but the ThoughtSpot model should not
+mirror that — the owner should decide what to hide after reviewing the imported model.
 
 ---
 
