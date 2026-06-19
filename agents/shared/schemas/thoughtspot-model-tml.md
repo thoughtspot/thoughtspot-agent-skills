@@ -120,9 +120,45 @@ Each `joins[]` entry has `with` (always required) plus **one of two forms**:
 | Field | Required | Notes |
 |---|---|---|
 | `with` | Yes | Must equal the `name:` of the target `model_tables[]` entry exactly (case-sensitive) |
-| `on` | Yes | Quote with `'on':` — `on` is a YAML reserved word. Format: `[FROM::fk] = [TO::pk]` |
+| `on` | Yes | Quote with `'on':` — `on` is a YAML reserved word. Format: `[FROM::fk] = [TO::pk]`. Supports range/inequality operators — see Range Joins below. |
 | `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, or `OUTER`. `FULL_OUTER` is **not valid** in model TML inline joins — ThoughtSpot raises "Invalid value FULL_OUTER … Allowed values are INNER, LEFT_OUTER, OUTER, RIGHT_OUTER". Use `OUTER` for full outer joins. |
 | `cardinality` | Yes | `MANY_TO_ONE` for most fact-to-dimension joins |
+
+#### Range / Inequality Joins
+
+The `on` expression supports `>=`, `>`, `<`, `<=` operators and `and` to combine
+multiple conditions. This enables range joins (half-open interval), ASOF joins
+(temporal point-in-time), and other inequality-based relationships.
+
+**Range join** — half-open interval (`>=` start, `<` end):
+
+```yaml
+joins:
+- with: DATE_TZ_BRIDGE
+  'on': '[EVENTS::EVENT_TS] >= [DATE_TZ_BRIDGE::UTC_START_TS] and [EVENTS::EVENT_TS] < [DATE_TZ_BRIDGE::UTC_END_TS]'
+  type: LEFT_OUTER
+  cardinality: MANY_TO_ONE
+```
+
+Common use case: timezone bridge tables, SCD Type 2 effective-date ranges, rate
+tables with valid-from/valid-to windows.
+
+**ASOF join** — most recent matching row (`>=` on a temporal column):
+
+```yaml
+joins:
+- with: RATES
+  'on': '[TRADES::SYMBOL] = [RATES::SYMBOL] and [TRADES::TRADE_TS] >= [RATES::RATE_TS]'
+  type: LEFT_OUTER
+  cardinality: MANY_TO_ONE
+```
+
+**Notes:**
+- Use `LEFT_OUTER` — if the range has no match, the fact row is preserved with
+  NULLs for the target columns (same semantics as SQL `LEFT JOIN`)
+- ThoughtSpot normalises the `on` expression on export (wraps sub-expressions in
+  parentheses and uppercases `AND`)
+- The same operators work in Table TML `joins_with[].on` expressions
 
 ### `columns[]` fields
 

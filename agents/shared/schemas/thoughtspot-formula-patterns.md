@@ -613,6 +613,122 @@ Semantic Views or other static SQL targets.
 
 ---
 
+## System Variables and Formula Variables
+
+ThoughtSpot provides two categories of runtime variables — **system variables**
+(built-in, always available) and **formula variables** (admin-created via API).
+Both are available in model/answer formulas and in RLS rules, but the syntax
+differs between these two contexts.
+
+### System Variables (built-in)
+
+| Variable | Resolves to | Data type |
+|---|---|---|
+| `ts_username` | Signed-in user's username | VARCHAR |
+| `ts_groups` | List of group names the user belongs to | VARCHAR list |
+| `ts_groups_int` | List of group IDs the user belongs to | INT list |
+| `ts_org` | Current org context | VARCHAR |
+| `ts_email_domain` | Email domain of the signed-in user | VARCHAR |
+
+### Formula Variables (admin-created)
+
+Created via `POST /api/rest/2.0/template/variables/create` with `type: FORMULA_VARIABLE`.
+Referenced using `ts_var()`. Supported data types: `VARCHAR`, `INT32`, `INT64`,
+`DOUBLE`, `DATE`, `DATE_TIME`. `BOOLEAN` and `TIME` are not supported.
+
+Values can be set at three levels (most specific wins):
+- **Org level** — default for all users in the org
+- **User level** — overrides org default for a specific user
+- **Model level** — overrides org default for a specific Model
+
+Values are assigned via the Update Variable Values REST API or passed as
+security entitlements in JWT tokens (ABAC pattern).
+
+Common formula variables: `region_var`, `department_var`, `country_var`.
+Manage `ts_user_timezone` via `/ts-variable-timezone`.
+
+### Syntax: Model / Answer Formulas
+
+In formula expressions (`formulas[].expr`), use ThoughtSpot formula syntax with
+bracket notation for column references.
+
+**`ts_var()` in the formula editor currently only supports `ts_user_timezone`** —
+arbitrary formula variables (e.g. `region_var`) are not yet supported in
+model/answer formulas. Use RLS rules for those.
+
+```yaml
+formulas:
+- id: formula_Timezone Filter
+  name: Timezone Filter
+  expr: "[DATE_TZ_BRIDGE::TIMEZONE] = ts_var ( ts_user_timezone )"
+```
+
+System variables are available directly (no `ts_var()` wrapper):
+
+```
+if ( 'Admin Group' in ts_groups ) then true else false
+```
+
+Use a boolean formula as a model-level filter by adding it as a hidden
+column and referencing it in `model.filters[]`:
+
+```yaml
+columns:
+- name: Timezone Filter
+  formula_id: formula_Timezone Filter
+  properties:
+    column_type: ATTRIBUTE
+    is_hidden: true
+
+filters:
+- column:
+  - Timezone Filter
+  oper: in
+  values:
+  - "true"
+```
+
+### Syntax: RLS Rules (Table objects)
+
+RLS rules use **bare column names** (no bracket notation, no `TABLE::` prefix).
+
+**`ts_var()` in RLS can reference formula variables but currently NOT
+`ts_user_timezone`** — the timezone attribute is only available via the formula
+editor, not RLS.
+
+```
+region = ts_var(region_var)
+```
+
+```
+'data developers' in ts_groups OR Department = ts_var(department_var)
+```
+
+RLS rules are defined on Table objects, not Models. They are **not exported in
+TML** — they must be managed via the ThoughtSpot UI or REST API.
+
+### Key Differences: Formula Context vs RLS Context
+
+| Aspect | Formula (Model/Answer) | RLS (Table) |
+|---|---|---|
+| Column references | `[TABLE::COL]` bracket notation | Bare column name |
+| `ts_var()` scope | `ts_user_timezone` only | Formula variables only (not timezone) |
+| `ts_var()` syntax | `ts_var ( name )` (spaces around parens) | `ts_var(name)` (compact) |
+| System variables | `ts_username`, `ts_groups`, `ts_groups_int`, `ts_org`, `ts_email_domain` | Same |
+| Defined on | Model or Answer `formulas[]` | Table → Row Security |
+| Exported in TML | Yes (in `formulas[].expr`) | No |
+| Multi-value `=` | Standard equality | Expands to `IN (...)` clause |
+
+### Translatability
+
+Formulas referencing `ts_var()` or system variables are **untranslatable** to
+Snowflake Semantic Views, Databricks Metric Views, or other static SQL targets —
+these are ThoughtSpot runtime constructs with no SQL equivalent. When converting
+from ThoughtSpot, flag them as `UNTRANSLATABLE` with a note explaining the
+variable's purpose.
+
+---
+
 ## Formula in Model TML
 
 ### `formula_id` format

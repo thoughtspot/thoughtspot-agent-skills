@@ -88,7 +88,7 @@ table:
 |---|---|---|
 | `name` | Yes | Join identifier — used as `referencing_join` in model TML (Scenario A) |
 | `destination.name` | Yes | Exact `name` of the target ThoughtSpot table object |
-| `on` | Yes | Join condition — uses `[TABLE::col]` references. Multiple conditions joined with `AND` are supported. |
+| `on` | Yes | Join condition — uses `[TABLE::col]` references. Multiple conditions joined with `AND` are supported. Supports range/inequality operators (`>=`, `<`, `>`, `<=`) for range joins, ASOF joins, and SCD lookups — see Range Joins in [thoughtspot-model-tml.md](thoughtspot-model-tml.md). |
 | `type` | Yes | `INNER`, `LEFT_OUTER`, `RIGHT_OUTER`, `FULL_OUTER` |
 | `cardinality` | Yes | `MANY_TO_ONE`, `ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_MANY` |
 | `is_one_to_one` | No | Boolean — seen on data augmentation joins and SQL view joins |
