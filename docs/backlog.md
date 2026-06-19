@@ -1408,3 +1408,41 @@ weighted-average asks are recurring. No date set.
 Make `agents/databricks/deploy.sh` copy the relevant files from `agents/shared/` at deploy time (same pattern as CoCo's `stage-sync.sh`), eliminating the local copy as a source of truth. Remove `agents/databricks/shared/schemas/` from the repo and add the copy step to the deploy script.
 
 **Target:** Next time Databricks skills are actively worked on. No date set.
+
+---
+
+## BL-041 — `ts-recipe-model-timezone-bridge-snowflake` skill
+
+**Source:** 2026-06-19 — built and verified a timezone-aware model on champ-staging (model `f9ce44d9`). Pattern documented in [Google Doc](https://docs.google.com/document/d/1ouU8TW2EU18DUk1gScGHna1IAK4CzVHKj429YQjPXpo/edit).
+**Affects:** New skill under `agents/cli/ts-recipe-model-timezone-bridge-snowflake/`; family 7 (`ts-recipe-*`)
+**Status:** Open
+
+### Problem
+
+Customers with UTC-stored timestamps need timezone-aware reporting without materialising date keys per timezone on every fact row. The pattern — a lightweight bridge table with range joins and a `ts_var(ts_user_timezone)` formula filter — is non-obvious and easy to get wrong (range join syntax, boolean filter pattern, DST handling, fan-out prevention).
+
+### Approach
+
+Interactive recipe that collects inputs and generates all artifacts:
+
+1. **Collect inputs:** ThoughtSpot connection name, Snowflake database/schema, fact tables + their timestamp columns, list of IANA timezones to support (e.g. `America/New_York`, `Australia/Sydney`), date range for the bridge table
+2. **Generate + execute Snowflake DDL:** `DATE_TZ_BRIDGE` table using `CONVERT_TIMEZONE` + `GENERATOR` date spine, crossed with the user's timezone list
+3. **Register tables in ThoughtSpot:** table TMLs for bridge + fact tables (if not already registered)
+4. **Generate model TML:** range joins from each fact table to bridge, `ts_var(ts_user_timezone)` boolean formula filter, `unique count` measures
+5. **Import + verify:** import all TML, confirm model loads
+
+### Key design decisions
+
+- User must specify which timezones to include — the bridge table is sized per timezone (~365 rows/tz/year), and the timezone list determines which `ts_user_timezone` values are valid
+- No DIM_DATE required — ThoughtSpot auto-generates date-part hierarchies from `local_date`
+- Bridge table handles DST transitions via pre-computed UTC boundaries
+- Platform suffix `-snowflake` because bridge DDL uses Snowflake-specific functions (`CONVERT_TIMEZONE`, `GENERATOR`)
+
+### Verified patterns (from champ-staging session)
+
+- Range join syntax: `[FACT::ts] >= [BRIDGE::utc_start_ts] and [FACT::ts] < [BRIDGE::utc_end_ts]`
+- `ts_var(ts_user_timezone)` works in model formulas (formula context)
+- Boolean formula filter: `oper: in, values: ["true"]` on a hidden formula column
+- ThoughtSpot normalises `on` with parens and uppercase `AND` on export
+
+**Target:** No date set. Build when timezone-aware modelling requests recur.
