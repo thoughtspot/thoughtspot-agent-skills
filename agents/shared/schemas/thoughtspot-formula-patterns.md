@@ -531,6 +531,66 @@ semantics (e.g., `DENSE_RANK`, partitioned rank, `ROW_NUMBER`).
 
 ---
 
+## Weighted average
+
+A weighted average is `Σ(value × weight) / Σ(weight)`. In ThoughtSpot the hard part is
+never the arithmetic — it is **(1) deciding whether the weight is already applied at the
+source, and (2) choosing the grain the weighted sum is computed at.** Get either wrong and
+the formula is syntactically valid but numerically wrong.
+
+### Step 0 — the fork: is the weight already baked in?
+
+Before writing anything, determine which situation you are in:
+
+| Situation | Recognize it by | What to do |
+|---|---|---|
+| **Pre-weighted at source** | A physical column already holds the weighted quantity (a name like `WEIGHTED_USAGE`, `WEIGHTED_COST`); upstream SQL/ETL applied the weight | Just **sum it** — `sum ( [col] )`, optionally inside `group_aggregate(...)` for a fixed grain. **Do not** apply a weighted-average formula on top — that re-applies the weight and double-counts. |
+| **Computed in-tool** | You have a raw `value` and a separate `weight`, and need to combine them | Use the computed pattern below. |
+
+This fork is the single most common mistake: wrapping a `Σ(v×w)/Σ(w)` template around a
+column that was *already* weighted.
+
+### Step 1 — the computed pattern
+
+For a weighted average computed at a grouping grain (e.g. weighted unit cost across the
+lines of each product, then rolled up):
+
+```
+# Weighted average — Σ(value × weight) over {grain}, divided by Σ(weight)
+sum ( group_aggregate ( sum ( [value] ) * sum ( [weight] ) , { [grain] } , query_filters ( ) ) )
+/ sum ( [weight] )
+```
+
+The unweighted companion (a plain average across the same grain), useful as a comparison
+column:
+
+```
+average ( group_aggregate ( sum ( [value] ) , { [grain] } , query_filters ( ) ) )
+```
+
+### Step 2 — grain and re-aggregation
+
+- **`{ [grain] }`** is the level the per-group weighted sum is computed at. It is the one
+  decision a column-injection template cannot make for you — pick the grain at which the
+  weight is meaningful (per product, per account, per SKU…), not the viz's display grain.
+- The **outer `sum ( group_aggregate ( … ) )`** is what lets the measure re-aggregate when
+  shown at a coarser grain. A **bare** `group_aggregate(...)` stays pinned at `{ [grain] }`
+  (matches a Tableau `FIXED` value that repeats per row); the **wrapped** form is the
+  portable measure you can drop on any viz. For a model MEASURE column you almost always
+  want the wrapped form — and recall ThoughtSpot ignores the column's `aggregation` field,
+  so the explicit outer `sum` is what actually re-aggregates. See "`group_aggregate`
+  wrapping" above.
+- Use `query_filters()` in the filter argument when the weighted average should respect the
+  user's filters (the usual case). Use a hard `{ … }` only to pin a scope that must ignore
+  viz filters (Tableau `FIXED` semantics — see the Tableau mapping's "boolean predicate
+  inside a FIXED partition" rule).
+
+These computed forms are generalized from production formulas (weighted cost across
+product lines, with a parameter-driven window). They are not yet captured as a
+live-verified worked example — verify the grain against the source before shipping.
+
+---
+
 ## Runtime Parameters
 
 Defined in `model.parameters[]` and referenced in formula expressions with bracket notation

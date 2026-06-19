@@ -1353,4 +1353,41 @@ the old open-items entries, and record findings. When built, re-open concrete op
 the specific API behaviours rather than carrying the broad gaps here.
 
 **Target:** No date — schedule when embedded-Answer or set-promotion demand is confirmed.
+## BL-038 — `ts-recipe-formula-weighted-average` skill
+
+**Source:** Tableau migration sessions (`tableau-migration-testing/twb/test/Weighted Usage.twb`) + production weighted-cost formulas (Albertsons / JD Power). Spun out of the weighted-average mapping work (`feat/weighted-average-mapping`, 2026-06-19).
+**Affects:** New `ts-recipe-formula-weighted-average` skill under `agents/cli/` (pure-ThoughtSpot — no platform suffix); family 7 (`ts-recipe-*`)
+**Status:** Open — deferred deliberately. The mapping/coverage knowledge that makes the **converters** weighted-average-aware shipped first (see Related); this standalone interactive recipe is the second, larger deliverable.
+**Related:** BL-037 (recipe skills for investigation patterns); `thoughtspot-formula-patterns.md` → "Weighted average"; `tableau-formula-translation.md` LOD section ("boolean predicate inside a FIXED partition"); coverage-matrix rows 110–112.
+
+### Problem
+
+Users repeatedly hand-build weighted-average measures in ThoughtSpot, and get them wrong in
+predictable ways. The arithmetic (`Σ(v×w)/Σ(w)`) is trivial; the judgement is not.
+
+### Why it must NOT be a dumb template
+
+A "inject your numerator and weight columns" builder is a footgun. The two decisions that
+actually determine correctness are exactly the ones a template skips:
+
+1. **The pre-weighted vs computed fork.** A large share of real "weighted" fields are
+   *already weighted at source* (e.g. a `WEIGHTED_USAGE` column). Wrapping a `Σ(v×w)/Σ(w)`
+   template around such a column double-counts the weight. The skill must detect/ask which
+   situation it is in **before** emitting anything.
+2. **Grain.** The `{ grain }` of the inner `group_aggregate` is the level the weight is
+   meaningful at (per product, per account…), not the viz display grain. Plus the
+   bare-vs-`sum(group_aggregate(...))` re-aggregation choice.
+
+### Approach
+
+1. Reuse the now-shipped `thoughtspot-formula-patterns.md` "Weighted average" section as the
+   domain logic — the skill is the interactive front end, not a second source of truth.
+2. Step 1: ask whether a pre-weighted column exists (fork). Step 2: if computed, collect
+   value + weight columns and the grain. Step 3: emit the formula(s) and optionally insert
+   into a Model TML (mirror the `formulas[]` + `columns[]` pattern from
+   `ts-recipe-formula-business-days-snowflake`).
+3. Decide whether unweighted-companion + a verified worked example are in v1 scope.
+
+**Target:** Assess demand before scheduling — only build once standalone (non-migration)
+weighted-average asks are recurring. No date set.
 
