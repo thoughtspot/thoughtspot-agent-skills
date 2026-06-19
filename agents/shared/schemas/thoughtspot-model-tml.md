@@ -55,7 +55,6 @@ model:
     column_id: FACT_TABLE::CUSTOMER_ID
     properties:
       column_type: ATTRIBUTE
-      is_hidden: true           # optional — hide FK columns from search bar
   - name: "Order Count"
     formula_id: formula_Order Count   # references a formulas[] entry by its id
     properties:
@@ -170,7 +169,7 @@ joins:
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
 | `properties.aggregation` | No | For MEASURE: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT`. Valid on both `column_id` and `formula_id` entries. **Warning:** `COUNT_DISTINCT` on a `column_id` causes ThoughtSpot to silently override `column_type` to `ATTRIBUTE`. Always use a `formulas[]` entry with `unique count ( [TABLE::col] )` instead. |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text-search indexing. `PREFIX_ONLY` indexes only the string prefix (faster prefix search on long strings). Omit for full indexing (default). |
-| `properties.is_hidden` | No | `true` hides the column from the search bar. Use for FK columns and RLS key columns. |
+| `properties.is_hidden` | No | `true` hides the column from the search bar. **Do not set during conversion or model creation** — hidden columns cause locked visualizations and unexpected query behaviour. Leave visibility decisions to the model owner after import. |
 | `properties.is_additive` | No | `true` marks a column as additive — used on semi-additive models to explicitly allow summation across time. |
 | `properties.format_pattern` | No | Number display format string. Common values: `"#,##0"` (integer), `"#,##0.0%"` (percentage), `"###0"` (plain). |
 | `properties.currency_type.iso_code` | No | ISO currency code (e.g. `USD`, `EUR`) — adds currency symbol and formatting to a measure. |
