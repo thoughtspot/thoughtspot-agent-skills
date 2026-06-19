@@ -170,6 +170,7 @@ Functions" for the full `group_aggregate` reference.
 | `{FIXED [d1], [d2] : AVG([col])}` | `group_aggregate ( average ( [table::col] ) , { d1 , d2 } , {} )` | Multiple dimensions in partition |
 | `{INCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () + { dim } , query_filters () )` | Adds dimension to whatever the query already groups by |
 | `{EXCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () - { dim } , query_filters () )` | Removes dimension from the query's grouping |
+| `{FIXED : MAX([col])}` (no dims) | `group_aggregate ( max ( [table::col] ) , { } , { } )` | Grand FIXED — single scalar across entire dataset (e.g. global max date). Same as no-keyword form below. |
 | `{SUM([col])}` (no LOD keyword) | `group_aggregate ( sum ( [table::col] ) , {} , {} )` | Grand total — no partitioning |
 | `TOTAL(SUM([col]))` | `group_aggregate ( sum ( [table::col] ) , {} , query_filters () )` | Table-calc grand total that **respects filters** — `{}` grouping (whole table) + `query_filters()`. Use this as the denominator for percent-of-total. |
 | `SUM([x]) / TOTAL(SUM([x]))` (percent of total) | `sum ( [table::x] ) / group_aggregate ( sum ( [table::x] ) , {} , query_filters () )` | Common idiom: row/group value ÷ filtered grand total |
@@ -185,7 +186,25 @@ pass-through.
 - The inner aggregate (`sum`, `average`, `max`, `min`, `unique count`) follows standard ThoughtSpot formula syntax
 - Column references inside `group_aggregate` use `[table::column]` format
 
-### A boolean predicate inside a FIXED partition is a filter, not a grain
+### Common pattern: relative time via grand FIXED
+
+Tableau authors use `{FIXED : MAX([date])}` (grand FIXED, no dimensions) to get a
+global scalar — typically the latest date in the dataset. This appears in relative-time
+calculations like "weeks from latest date":
+
+```
+# Tableau
+DATEDIFF('week', {FIXED : MAX([WEEK_ENDING])}, [WEEK_ENDING])
+
+# ThoughtSpot — group_aggregate with empty grouping = grand scalar
+diff_days ( group_aggregate ( max ( [TABLE::WEEK_ENDING] ) , { } , { } ) , [TABLE::WEEK_ENDING] ) / 7
+```
+
+**Do not substitute `today()` for `{FIXED : MAX([date])}`** — the Tableau author chose
+the dataset's max date deliberately (it may lag behind today, or the data may be
+historical). `today()` changes the semantics and produces different filter ranges.
+
+### A predicate inside a FIXED partition is a filter, not a grain
 
 **Do not translate every FIXED dimension as a grouping key.** A common Tableau idiom
 puts a **boolean calc** into a `{FIXED ...}` partition *and* pins that boolean to a
@@ -196,9 +215,12 @@ doing the job of a **filter**, not defining a real grain: the `false`/`null` row
 discarded, never shown as their own bucket.
 
 **Detection** — both must be true:
-1. A member of a `{FIXED ...}` partition is a boolean-valued calculated field.
+1. A member of a `{FIXED ...}` partition is a calculated field that acts as a filter
+   predicate — either boolean-valued (`true`/`false`) or string-valued with a small
+   set of states where only one is used (e.g. `'in range'`/`'out of range'`).
 2. That same field appears on the worksheet `<filter class='categorical'>` shelf with a
-   `<groupfilter function='member' member='true' ...>` (or any single pinned member).
+   `<groupfilter function='member' member='true' ...>` (or any single pinned member),
+   **OR** is filtered to a single value in the dashboard's search query / filter bar.
 
 **Translation** — move the predicate from the grouping set into the **filter argument**
 (the 3rd `group_aggregate` argument), and keep only the real dimensions in the grouping:
@@ -215,17 +237,30 @@ FIXED semantics — surface the choice rather than assuming.)
 Equivalent inline form when you'd rather not emit a separate flag column:
 `group_aggregate ( sum ( if ( <predicate> ) then [t::col] else 0 ) , { [acct] } , {} )`.
 
-**Worked illustration (from `Weighted Usage.twb`, not live-verified):**
+**Worked illustration (from `Weighted Usage.twb`, live-verified 2026-06-19):**
 
 ```
-# Tableau — boolFlag is a parameter-driven date-window predicate, filtered =true on 6 sheets
-tot_weighted_usage = {FIXED [MBX_ACCT_ID], [Date Window Flag] : SUM([WEIGHTED_USAGE])}
+# Tableau — lookback filter is a parameter-driven date-window predicate,
+# filtered ='in range' on worksheets. Returns 'in range' / 'out of range' (string, not boolean).
+tot_weighted_usage = {FIXED [MBX_ACCT_ID], [lookback filter] : SUM([WEIGHTED_USAGE])}
 
-# WRONG (mechanical) — boolean as grain → emits separate true/false/null totals per account
-group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] , [Date Window Flag] } , {} )
+# WRONG (mechanical) — predicate as grain → emits separate in-range/out-of-range totals per account
+group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] , [lookback filter] } , {} )
 
-# RIGHT — boolean as filter → windowed total per account
-group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] } , { [Date Window Flag] = true } )
+# WRONG (I9) — formula cross-ref in grouping fails during TML import
+# ("Search did not find 'lookback filter'")
+group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] , [lookback filter] } , {} )
+
+# RIGHT — predicate as filter via query_filters() → respects the search-level
+# [lookback filter].'in range' constraint. Use query_filters() when the predicate
+# is already applied as a search/dashboard filter (common for FIXED + filter-shelf pattern).
+group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] } , query_filters ( ) )
+
+# ALSO RIGHT — hard literal filter when you want to enforce the value regardless
+# of whether the user has it in their search query:
+group_aggregate ( sum ( [t::WEIGHTED_USAGE] ) , { [MBX_ACCT_ID] } , { [lookback filter] = 'in range' } )
+# (Note: this form requires the formula column to already exist on the model — it will fail
+# during first import due to I9. Use query_filters() or the inline-if workaround instead.)
 ```
 
 > Note: a column literally named `WEIGHTED_USAGE` is **pre-weighted at source** — this LOD
