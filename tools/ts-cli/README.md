@@ -637,6 +637,46 @@ Auto-retries transient JDBC errors and resolves GUIDs via metadata search after 
 
 ---
 
+### `ts spotql generate-sql` / `ts spotql fetch-data`
+
+Run SpotQL (Semantic SQL) against a ThoughtSpot Model. The caller supplies the SpotQL
+statement and the Model's GUID — these commands do **not** do natural-language → SpotQL.
+
+- `generate-sql` validates the statement and returns the warehouse SQL it compiles to
+  (does not execute).
+- `fetch-data` executes the statement and returns result rows.
+
+```bash
+ts spotql generate-sql '<SpotQL>' --model <model-guid> --profile <name>
+ts spotql fetch-data   '<SpotQL>' --model <model-guid> --profile <name>
+```
+
+**Example:**
+
+```bash
+ts spotql fetch-data \
+  'SELECT "Product Category", SUM("Amount") AS total_amount
+   FROM "Dunder Mifflin Sales & Inventory" AS "t1" GROUP BY "Product Category"' \
+  --model 4da3a07f-fe29-4d20-8758-260eb1315071 --profile champ-staging
+```
+
+**Output (JSON to stdout):**
+
+- `generate-sql` → `{status, executable_sql, errors}`
+- `fetch-data` → `{status, columns, rows, errors}`
+
+`columns` are `{index, type}` — SpotQL returns per-query column GUIDs (not stable names),
+so the SELECT ordinal is the usable identifier. A query that is rejected or fails to
+execute returns a non-`SUCCESS` `status` with a populated `errors[]` (and exit code 0) —
+these are structured query errors, not transport failures.
+
+> **SpotQL requires an external cloud data warehouse.** The endpoints only support Models
+> backed by an external CDW (Snowflake, Databricks, BigQuery, …). A Model over Falcon /
+> imported / system data (`DEFAULT` datasource) returns
+> `"This API only supports external cloud data warehouses"`.
+
+---
+
 ### `ts orgs search`
 
 List/search orgs.

@@ -302,7 +302,14 @@ class ThoughtSpotClient:
             "Accept": "application/json",
         }
 
-    def request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        raise_for_status: bool = True,
+        **kwargs: Any,
+    ) -> requests.Response:
         headers = kwargs.pop("headers", {})
         headers.update(self._auth_headers())
         kwargs.setdefault("verify", self._verify_ssl)
@@ -314,7 +321,7 @@ class ThoughtSpotClient:
             timeout=kwargs.pop("timeout", 60),
             **kwargs,
         )
-        if not resp.ok:
+        if raise_for_status and not resp.ok:
             # Central, traceback-free failure path: one diagnostic line on stderr,
             # exit 1. Callers that need the raw status in a 2xx body (e.g. tables
             # import, where JDBC errors arrive as 200) are unaffected — those never

@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-25
+- chore: bump ts-cli to v0.13.0 — add `ts spotql generate-sql` / `ts spotql fetch-data` (run SpotQL Semantic SQL against a Model; JSON output, structured query errors); add `raise_for_status` opt-out to the HTTP client so callers can surface 4xx query-error bodies
 - refactor: rename `ts-dependency-audit` → `ts-audit` — the skill is a read-only health assessment, not a dependency-graph operation; add new `ts-audit` naming family (#8) to `skill-naming.md` and `check_skill_naming.py`
 
 ## 2026-06-18

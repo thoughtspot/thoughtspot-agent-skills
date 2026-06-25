@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import auth, connections, metadata, orgs, profiles, tables, tml, users, variables
+from ts_cli.commands import auth, connections, metadata, orgs, profiles, spotql, tables, tml, users, variables
 
 app = typer.Typer(
     name="ts",
@@ -18,6 +18,7 @@ app.add_typer(orgs.app, name="orgs")
 app.add_typer(tables.app, name="tables")
 app.add_typer(tml.app, name="tml")
 app.add_typer(profiles.app, name="profiles")
+app.add_typer(spotql.app, name="spotql")
 app.add_typer(users.app, name="users")
 app.add_typer(variables.app, name="variables")
 
