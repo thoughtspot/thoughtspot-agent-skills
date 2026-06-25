@@ -113,8 +113,8 @@ For a Model it is rooted at `model:` with these parts:
 | Column | How to tell | In SpotQL |
 |---|---|---|
 | **Attribute** | `properties.column_type: ATTRIBUTE` | group by it |
-| **Raw measure** | `column_type: MEASURE`, **no** aggregating formula (a plain `column_id`, or a `formula_id` whose `expr` has no aggregate) | `SUM`/`AVG`/`MIN`/`MAX` |
-| **Aggregate-formula measure** | `column_type: MEASURE` **and** its `formulas[].expr` contains an aggregate — `sum`, `count`, `group_aggregate`, `last_value`, `first_value`, … | **`AGG(...)`** — never `SUM` (errors `NESTED_AGGREGATE_NOT_SUPPORTED`) |
+| **Raw measure** | `properties.column_type: MEASURE`, **no** aggregating formula (a plain `column_id`, or a `formula_id` whose `expr` has no aggregate) | `SUM`/`AVG`/`MIN`/`MAX` |
+| **Aggregate-formula measure** | `properties.column_type: MEASURE` **and** its `formulas[].expr` contains an aggregate — `sum`, `count`, `group_aggregate`, `last_value`, `first_value`, … | **`AGG(...)`** — never `SUM` (errors `NESTED_AGGREGATE_NOT_SUPPORTED`) |
 
 See `spotql-rules.md` § Aggregation for the full rule and the "compile-it-to-check" probe if
 a column is ambiguous. If TML export is FORBIDDEN, you lack access to that Model — pick
