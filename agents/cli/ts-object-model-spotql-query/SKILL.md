@@ -91,17 +91,34 @@ clause in Step 3.
 
 ### Step 2 — Learn the schema
 
-Export the Model's TML to see its columns (names, `column_type` ATTRIBUTE/MEASURE,
-datatypes):
+Export the Model's TML to see its columns:
 
 ```bash
 source ~/.zshenv && ts tml export {model_guid} --profile "{profile}"
 ```
 
-The TML body is in the `edoc` field (YAML). Read the `columns:` list — column `name`
-values are the **exact** identifiers you must use in SpotQL (case-sensitive), and
-`column_type` tells you which are measures (aggregate them) vs attributes (group by them).
-If TML export is FORBIDDEN, you lack access to that Model — pick another or ask the user.
+The TML body is in the `edoc` field. It is a structured document — JSON or YAML depending on
+build (`yaml.safe_load` parses both; `ts tml export … --parse` returns it already parsed).
+For a Model it is rooted at `model:` with these parts:
+
+- **`model.columns[]`** — each entry's `name` is the **exact** identifier you must use in
+  SpotQL (case-sensitive). The column kind is at **`properties.column_type`** (ATTRIBUTE or
+  MEASURE) — note it is **nested under `properties`**, not a direct child of the column.
+- **`model.formulas[]`** — formula definitions. A formula column references one by carrying a
+  **`formula_id`** that matches a `formulas[].id`; that formula's **`expr`** is where the
+  aggregation logic lives.
+
+**Classify every column** — this drives the `SUM`-vs-`AGG` decision in Step 3:
+
+| Column | How to tell | In SpotQL |
+|---|---|---|
+| **Attribute** | `properties.column_type: ATTRIBUTE` | group by it |
+| **Raw measure** | `column_type: MEASURE`, **no** aggregating formula (a plain `column_id`, or a `formula_id` whose `expr` has no aggregate) | `SUM`/`AVG`/`MIN`/`MAX` |
+| **Aggregate-formula measure** | `column_type: MEASURE` **and** its `formulas[].expr` contains an aggregate — `sum`, `count`, `group_aggregate`, `last_value`, `first_value`, … | **`AGG(...)`** — never `SUM` (errors `NESTED_AGGREGATE_NOT_SUPPORTED`) |
+
+See `spotql-rules.md` § Aggregation for the full rule and the "compile-it-to-check" probe if
+a column is ambiguous. If TML export is FORBIDDEN, you lack access to that Model — pick
+another or ask the user.
 
 ### Step 3 — Write the SpotQL
 
