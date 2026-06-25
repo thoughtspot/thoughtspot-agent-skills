@@ -87,8 +87,9 @@ Error — HTTP **400** with a structured envelope; the validation code is bracke
 ```
 
 Pull the `[CODE]` / `Error Code: CODE` out of `error.message.debug` to surface a meaningful
-message. Do **not** `raise_for_status()` blindly — query errors are 400s you want to parse,
-not crash on.
+message (`code` here is the HTTP status, not the validation code — the validation code lives
+inside `debug`). Do **not** `raise_for_status()` blindly — query errors are 400s you want to
+parse, not crash on.
 
 ## 4. `fetch-data` response
 
@@ -118,7 +119,7 @@ Four gotchas that the format forces:
 2. **Column `name` is an unstable per-query GUID** — it changes every run. Use the **SELECT
    ordinal** (position 0, 1, 2, …) as the identifier and map it to your own column label.
 3. **`INT64` arrives as a JSON string** (`"int64Val": "1672107"`, not a number) to avoid
-   float precision loss — parse with `int()`.
+   integer precision loss — parse with `int()`.
 4. **Every cell carries all type fields** (`stringVal`, `int64Val`, `doubleVal`, `boolVal`,
    …) with zeros/empties for the irrelevant ones. Use the **column-level `type`** to pick
    which field to read; check `nullVal` first.
@@ -130,9 +131,13 @@ Transposes the columnar `fetch-data` result to rows, keyed to SELECT order. Mirr
 
 ```python
 TYPE_FIELD = {
-    "CHAR": "stringVal", "VARCHAR": "stringVal", "STRING": "stringVal",
-    "INT32": "int32Val", "INT64": "int64Val",
-    "DOUBLE": "doubleVal", "FLOAT": "floatVal", "BOOL": "boolVal",
+    "CHAR": "stringVal", "VARCHAR": "stringVal", "STRING": "stringVal", "TYPE_STRING": "stringVal",
+    "INT32": "int32Val", "TYPE_INT32": "int32Val",
+    "INT64": "int64Val", "TYPE_INT64": "int64Val",
+    "DOUBLE": "doubleVal", "TYPE_DOUBLE": "doubleVal",
+    "FLOAT": "floatVal", "TYPE_FLOAT": "floatVal",
+    "BOOL": "boolVal", "BOOLEAN": "boolVal", "TYPE_BOOL": "boolVal",
+    "BYTES": "bytesVal", "TYPE_BYTES": "bytesVal",
 }
 
 def parse_fetch_data(resp_json):
@@ -142,7 +147,15 @@ def parse_fetch_data(resp_json):
     def cell_value(cell, col_type):
         if cell.get("nullVal"):
             return None
-        field = TYPE_FIELD.get(col_type, "stringVal")
+        field = TYPE_FIELD.get(col_type)
+        if field is None:
+            for f in ("stringVal", "int64Val", "int32Val", "doubleVal", "floatVal", "boolVal", "bytesVal"):
+                v = cell.get(f)
+                if v not in (None, "", 0, 0.0, False):
+                    field = f
+                    break
+        if field is None:
+            return None
         val = cell.get(field)
         if field == "int64Val" and isinstance(val, str):
             return int(val)          # int64 is JSON-encoded as a string
@@ -152,7 +165,8 @@ def parse_fetch_data(resp_json):
     col_values = [c.get("value", []) for c in raw_cols]
     n_rows = max((len(v) for v in col_values), default=0)
     return [
-        [cell_value(col_values[c][r], col_types[c]) for c in range(len(raw_cols))]
+        [cell_value(col_values[c][r] if r < len(col_values[c]) else {"nullVal": True}, col_types[c])
+         for c in range(len(raw_cols))]
         for r in range(n_rows)
     ]
 ```
