@@ -114,6 +114,13 @@ correct behaviour is unclear from the TML, say so rather than silently `SUM`.
 
 ## When there's no working form
 
-True rolling N-period frames (`ROWS BETWEEN`), `LAG/LEAD` offset > 1, `PERCENTILE_CONT`,
-`NTILE`, and set operations have no reliable SpotQL form today. Don't emit a query that
-looks right but returns wrong numbers — explain the limitation instead.
+Still no reliable SpotQL form today: non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`,
+subqueries (`IN (SELECT …)` / `FROM (SELECT …)`), set operations (`UNION` silently drops a
+branch), `QUALIFY` and `FILTER (WHERE …)` (both silently dropped), `ROLLUP`/`CUBE`,
+self-joins, and non-equi joins. Don't emit a query that looks right but returns wrong
+numbers — explain the limitation instead.
+
+Several constructs that *used* to be unsupported now work — `NTILE`, explicit `LAG`/`LEAD`
+offsets, `ROWS BETWEEN` window frames (so true rolling N-period averages are now
+expressible), multi-CTE joins, and aggregate×literal arithmetic. See `limitations.md` for
+the current, dated, ticket-linked list.

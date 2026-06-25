@@ -86,10 +86,10 @@ expression.
 
 ## Hard prohibitions (these are silent or hard failures)
 
-- **No arithmetic between an aggregate and a numeric literal.** `SUM("x") * 100`,
-  `SUM("x") / 100.0`, `SUM("x") * 30` all silently return **type=UNKNOWN, all-zero values**.
-  Aggregate-to-aggregate is fine: `SUM("a") / NULLIF(SUM("b"), 0)`. For "× 100" percentages,
-  compute the ratio of aggregates and present it as a rate — don't multiply by 100 in SQL.
+- **Arithmetic between an aggregate and a numeric literal** (`SUM("x") * 100`, `/ 100.0`)
+  works on current builds — verified champ-staging 2026-06-25. (It silently returned zeros
+  on older builds — see `limitations.md`; if you ever see all-zero results, that's the tell.)
+  For division still wrap the denominator in `NULLIF(…, 0)` to avoid divide-by-zero.
 - **No `SELECT *`** — enumerate columns. Inside a CTE it is hard-rejected.
 - **No subqueries anywhere** — no `FROM (SELECT …)`, no `WHERE col IN (SELECT …)`, no
   `WHERE EXISTS (…)`, no scalar subselects. Use named CTEs and JOINs instead.
@@ -107,9 +107,13 @@ expression.
 
 ## CTEs
 
-- Allowed and useful for multi-step logic, but each CTE sources from the one Model (or
-  JOINs an earlier CTE — never `FROM another_cte`'s transformed result; inline instead).
+- Allowed and useful for multi-step logic. Each CTE sources from the one Model. Joining
+  two or more model-derived CTEs in the main SELECT, and a CTE selecting `FROM` an earlier
+  CTE (chained CTEs), **both work on current builds** (were broken on older ones — see
+  `limitations.md`).
 - `SELECT` may appear only at the start of a CTE definition or the main query.
+- Still rejected: **self-joining** a CTE (`SELF_JOIN`) and **non-equi** `JOIN … ON`
+  (only `=` allowed) — see `limitations.md`.
 
 ## CAST
 
@@ -125,6 +129,8 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
 
 ## When you can't answer it
 
-If the question needs something SpotQL can't express (true rolling N-period frames,
-`PERCENTILE_CONT`, set operations, `NTILE`, a column the Model doesn't have, or a
-non-CDW Model), don't force a wrong query. State plainly what's not supported and why.
+If the question needs something SpotQL can't express (set operations, non-`MEDIAN`
+percentiles, per-group `STDDEV`/`VAR`, subqueries, offset->1 `LAG`/`LEAD`, true rolling
+N-period frames, a column the Model doesn't have, or a non-CDW Model), don't force a wrong
+query. State plainly what's not supported and why. The full, current list (with what's been
+*fixed* — e.g. `NTILE` and literal arithmetic now work) is in `limitations.md`.

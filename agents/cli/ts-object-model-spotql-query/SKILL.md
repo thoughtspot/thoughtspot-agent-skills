@@ -31,6 +31,7 @@ compositions — they are *uses* of this skill, not built into it.
 | [references/spotql-rules.md](references/spotql-rules.md) | **Always, before writing SpotQL.** The hard constraints + dialect rules that make a statement valid (single-Model `FROM`, mandatory aliases, the literal-arithmetic trap, etc.). |
 | [references/udf-reference.md](references/udf-reference.md) | Any question involving dates/time, ranking, or statistics — the SpotQL UDF catalogue (use these instead of `DATE_TRUNC`/`NOW()`/etc.). |
 | [references/patterns.md](references/patterns.md) | Complex shapes: last-N-periods, year-over-year, top-N / top-N-per-group, period-over-period, anomaly detection. |
+| [references/limitations.md](references/limitations.md) | **What SpotQL can't do** — hard-unsupported constructs, silent wrong-answer traps (e.g. `UNION` drops a branch), and what's been *fixed* on current builds. Read before telling a user something can't be done, and for the known-limitation-retest use case. |
 | [references/use-cases.md](references/use-cases.md) | When the user wants to *build on* this skill — tutorial, agent building-block, accuracy/regression/feature/limitation testing. |
 | [references/open-items.md](references/open-items.md) | Verification status of the API behaviour this skill relies on. |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | If no ThoughtSpot profile is configured yet. |

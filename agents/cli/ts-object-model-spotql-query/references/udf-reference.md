@@ -79,12 +79,14 @@ WHERE DIFF_MONTH(START_OF_CURRENT_MONTH(), "t1"."Order Date") BETWEEN 1 AND 12
 
 ## Window functions — `OVER (PARTITION BY … ORDER BY …)`
 
-| Works | Broken — avoid |
-|---|---|
-| `RANK()`, `DENSE_RANK()`, `ROW_NUMBER()` | `NTILE(n)` — execution error |
-| `LAG(col)`, `LEAD(col)` (default offset 1) | `LAG(col, 2)` / `LEAD(col, 2)` — explicit offset silently collapses to 1 |
-| `SUM(col) OVER (PARTITION BY … ORDER BY …)` (cumulative) | `… ROWS BETWEEN n PRECEDING …` — frame clause is stripped |
-| `STDDEV_SAMP(SUM(col)) OVER ()` (anomaly pattern) | |
+Working on current builds: `RANK()`, `DENSE_RANK()`, `ROW_NUMBER()`, `NTILE(n)`,
+`LAG(col)`/`LEAD(col)` (and explicit offsets `LAG(col, N)`), `NTH_VALUE(col, N)`,
+`SUM(col) OVER (PARTITION BY … ORDER BY …)` (cumulative and with explicit
+`ROWS BETWEEN …` frames), and `STDDEV_SAMP(SUM(col)) OVER ()` (the anomaly pattern).
+
+`NTILE`, explicit `LAG`/`LEAD` offsets > 1, `NTH_VALUE`, and `ROWS BETWEEN` frames were all
+broken on older builds and are now fixed (verified champ-staging 2026-06-25 / SCAL-306544).
+See `limitations.md` for the dated, ticket-linked list.
 
 For "compare to N rows back" (N>1) or "true rolling N-period average", there is no working
 SpotQL form — see `patterns.md` / say it can't be done.
