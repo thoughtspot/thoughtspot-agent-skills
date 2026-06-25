@@ -35,6 +35,7 @@ from analyzer import (
     check_p9,
     check_p10,
     check_p11,
+    check_p13,
     check_s1,
     check_s8,
     check_s4,
@@ -566,6 +567,57 @@ class TestSChecks:
         f = check_s6([m1, m2], SPOTTER_CFG)
         assert len(f) == 1
         assert "status" in f[0].title
+
+
+# ---------------------------------------------------------------------------
+# P13
+# ---------------------------------------------------------------------------
+
+class TestP13:
+    def test_p13_many_rls_rules(self):
+        tbl = _table_tml("Sales", rls_rules={
+            "rules": [
+                {"expr": "[Sales::region] = ts_username"},
+                {"expr": "[Sales::country] = ts_username"},
+                {"expr": "[Sales::division] = ts_username"},
+                {"expr": "[Sales::team] = ts_username"},
+            ],
+        })
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p13(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].check_id == "P13"
+        assert findings[0].severity == "MEDIUM"
+        assert "4" in findings[0].title
+
+    def test_p13_high_severity(self):
+        rules = [{"expr": f"[Sales::col{i}] = ts_username"} for i in range(7)]
+        tbl = _table_tml("Sales", rls_rules={"rules": rules})
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p13(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].severity == "HIGH"
+
+    def test_p13_few_rules_no_finding(self):
+        tbl = _table_tml("Sales", rls_rules={
+            "rules": [
+                {"expr": "[Sales::region] = ts_username"},
+                {"expr": "[Sales::country] = ts_username"},
+            ],
+        })
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p13(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 0
+
+    def test_p13_no_rls_no_finding(self):
+        tbl = _table_tml("Sales")
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p13(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 0
 
 
 # ---------------------------------------------------------------------------

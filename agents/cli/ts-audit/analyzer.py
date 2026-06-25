@@ -1153,6 +1153,34 @@ def check_p11(model: dict, _config: AuditConfig) -> list[Finding]:
     )]
 
 
+def check_p13(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding]:
+    """P13: RLS rule density — many rules per table compound query cost."""
+    findings = []
+    name = _model_name(model)
+    guid = _model_guid(model)
+    table_tmls = corpus.table_tmls_by_model.get(guid or "", [])
+
+    for ttl in table_tmls:
+        tbl_name = ttl.get("table", {}).get("name", "?")
+        rls = ttl.get("table", {}).get("rls_rules", {})
+        if not rls:
+            continue
+        rule_count = len(rls.get("rules", []))
+        if rule_count <= 3:
+            continue
+        severity = "HIGH" if rule_count > 6 else "MEDIUM"
+        findings.append(Finding(
+            angle="P", check_id="P13", check_name="RLS_RULE_DENSITY",
+            severity=severity,
+            title=f"{rule_count} RLS rules on table {tbl_name}",
+            detail="Each RLS rule evaluates independently on every query — cost compounds linearly",
+            score=rule_count,
+            model_name=name, model_guid=guid,
+            recommendation="Review whether rules can be consolidated or simplified",
+        ))
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # S — Security checks
 # ---------------------------------------------------------------------------
@@ -1412,6 +1440,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p9(m, config))
             findings.extend(check_p10(m, config))
             findings.extend(check_p11(m, config))
+            findings.extend(check_p13(m, corpus, config))
 
         if "S" in angles:
             findings.extend(check_s2(m, corpus, config))

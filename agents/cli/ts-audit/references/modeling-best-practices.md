@@ -178,6 +178,7 @@ is deliberate, while "test" in a name is ambiguous.
 | P10 | RLS bypass as exception | `is_bypass_rls: true` disables Row-Level Security. Legitimate use cases exist (aggregate-only models) but should be the exception. | Model: `model.properties.is_bypass_rls` | Boolean | MEDIUM (flag as exception) |
 | P11 | Secure suggestions overhead | Many indexed columns on a Spotter-enabled model. Each indexed column adds a DB lookup for suggestions. Informational — indexing is correct for searchable columns. | Model: `columns[].properties.index_type` + `model.properties.spotter_config.is_spotter_enabled` | Count of indexed columns | INFO (> 30 indexed on Spotter model) |
 | P11 | Secure suggestions overhead | Many indexed columns on a Spotter-enabled model. Each indexed column adds a DB lookup for suggestions. Informational — indexing is correct for searchable columns. | Model: `columns[].properties.index_type` + `model.spotter_config.is_spotter_enabled` | Count of indexed columns | INFO (> 30 indexed on Spotter model) |
+| P13 | RLS rule density | Many RLS rules per table — each evaluates independently on every query, cost compounds linearly. | Table: `table.rls_rules.rules[]` count per table | Count. MEDIUM > 3. HIGH > 6. | MEDIUM / HIGH |
 
 ### Scalar formula thresholds
 
