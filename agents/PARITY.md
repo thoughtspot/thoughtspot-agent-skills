@@ -9,6 +9,7 @@
 | ts-dependency-manager | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |
+| ts-object-model-spotql-query | Y | — | — | — |
 | ts-profile-databricks | Y | — | — | — |
 | ts-profile-snowflake | — | Y | — | — |
 | ts-profile-thoughtspot | Y | — | Y | — |

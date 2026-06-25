@@ -29,6 +29,14 @@
       "ts_profile": "YOUR_PROFILE_IF_DIFFERENT",
       "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
     },
+    "ts-object-model-spotql-query": {
+      "_comment": "Model must be backed by an external cloud data warehouse (Snowflake/Databricks/etc.); --spotql is a known-good statement against it.",
+      "extra_args": [
+        "--model-guid", "YOUR_EXTERNAL_CDW_MODEL_GUID_HERE",
+        "--spotql", "SELECT \"t1\".\"<attribute>\", SUM(\"t1\".\"<measure>\") AS \"Total\" FROM \"<Model Display Name>\" AS \"t1\" GROUP BY \"t1\".\"<attribute>\"",
+        "--min-rows", "1"
+      ]
+    },
     "ts-convert-to-snowflake-sv": {
       "ts_profile": "YOUR_OTHER_PROFILE",
       "extra_args": [

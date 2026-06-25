@@ -91,6 +91,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.snowflake/cortex/skills/ts-object-model-coach
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-spotql-query \
+      ~/.snowflake/cortex/skills/ts-object-model-spotql-query
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.snowflake/cortex/skills/ts-variable-timezone
 
@@ -143,6 +146,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-promote \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.claude/skills/ts-object-model-coach
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-spotql-query \
+      ~/.claude/skills/ts-object-model-spotql-query
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-variable-timezone \
       ~/.claude/skills/ts-variable-timezone
