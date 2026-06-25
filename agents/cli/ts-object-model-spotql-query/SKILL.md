@@ -221,4 +221,5 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-06-25 | Add `references/integration.md` (raw SpotQL API for non-CLI consumers); Step 6 emits paste-ready request bodies; fix Step 2 TML parsing (`properties.column_type`, `formulas[]` via `formula_id`) with deterministic raw-vs-aggregate-formula classification; add capability summary; Step 1 accepts Model GUID/URL with search as fallback. |
 | 1.0.0 | 2026-06-25 | Initial release — query a Model with SpotQL via `ts spotql`; generate-sql + fetch-data + review. |

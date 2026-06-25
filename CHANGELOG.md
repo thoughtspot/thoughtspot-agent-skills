@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-25
+- feat: update `ts-object-model-spotql-query` to v1.1.0 — add `references/integration.md` (raw SpotQL API for non-CLI consumers); Step 6 emits paste-ready request bodies; Step 2 TML parsing hardened (`properties.column_type`, `formulas[]` via `formula_id`, deterministic raw-vs-aggregate-formula classification); capability summary added; Step 1 accepts Model GUID/URL with search as fallback. Record `connection_type` / callosum endpoint finding in open-items.md.
 - feat: add `ts-object-model-spotql-query` skill v1.0.0 — query a ThoughtSpot Model with SpotQL: write Semantic SQL (grounded in bundled rules/UDF/pattern references lifted from agent-expressibility-eval), validate it to warehouse SQL via `ts spotql generate-sql`, execute via `fetch-data`, and review the results. The single-question primitive; accuracy / regression / feature / known-limitation testing are documented as compositions over it. Verified live on champ-staging.
 - chore: bump ts-cli to v0.13.0 — add `ts spotql generate-sql` / `ts spotql fetch-data` (run SpotQL Semantic SQL against a Model; JSON output, structured query errors); add `raise_for_status` opt-out to the HTTP client so callers can surface 4xx query-error bodies
 - refactor: rename `ts-dependency-audit` → `ts-audit` — the skill is a read-only health assessment, not a dependency-graph operation; add new `ts-audit` naming family (#8) to `skill-naming.md` and `check_skill_naming.py`

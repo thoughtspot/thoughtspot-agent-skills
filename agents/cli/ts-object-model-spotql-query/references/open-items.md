@@ -47,6 +47,17 @@ Conclusion: **aggregate-formula columns must use `AGG()`, never `SUM()`; raw mea
 `SUM()`/etc.** Encoded in `spotql-rules.md` § Aggregation and `udf-reference.md`. No
 translation layer needed — `AGG()` is native SpotQL the API accepts directly.
 
+## #4 — `connection_type` + callosum endpoint surface — VERIFIED (live) 2026-06-25
+
+The SpotQL endpoints are **callosum** (`POST /callosum/v1/v2/data/spotql/generate-sql` and
+`.../fetch-data`), **not** the public `/api/rest/2.0/` REST API — the SpotterCode MCP / dev
+docs do not index them. Documented for integrators in `references/integration.md`.
+
+The playground schema for `generate-sql` lists a `connection_type` field that `fetch-data`
+does not. It is **optional**: the `ts` CLI sends neither `connection_type` nor any extra
+field and both calls succeed against the external-CDW "Dunder Mifflin Sales & Inventory"
+Model. Treat `connection_type` as build/connection-specific — omit for standard CDW.
+
 ---
 
 ## Keeping `limitations.md` current
