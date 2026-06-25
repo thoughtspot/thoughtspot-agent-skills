@@ -115,7 +115,7 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 |---|---|
 | [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model |
 | [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
-| [`ts-object-model-spotql-query`](agents/cli/ts-object-model-spotql-query/SKILL.md) | Query a Model with SpotQL — write Semantic SQL, validate it to warehouse SQL, execute it, and review the data results; includes a reference for calling the SpotQL API from your own product or agent |
+| [`ts-object-model-spotql-query`](agents/cli/ts-object-model-spotql-query/SKILL.md) | Query a Model with SpotQL — write Semantic SQL, validate it to warehouse SQL, execute it, and review the data results; includes a reference for calling the SpotQL API from your own product or agent. New to SpotQL? Start with [**Why SpotQL**](agents/cli/ts-object-model-spotql-query/references/architecture.md) — the architecture & trust model vs raw DB SQL. |
 | [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
 | [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards |
 | [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |

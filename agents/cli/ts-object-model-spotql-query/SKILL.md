@@ -34,6 +34,10 @@ I can:
 - **Explain the rules** — what SpotQL can and can't express: aggregation (`SUM` vs `AGG`),
   the date/time UDFs, query patterns (top-N, year-over-year, semi-additive measures), and
   the known limitations.
+- **Explain *why* SpotQL exists** — the architecture and its trust/correctness guarantees
+  versus raw warehouse SQL (the LLM's SQL is never executed; RLS/CLS, Model joins/filters,
+  governed metrics, custom calendars and multi-fact trap resolution are all applied
+  deterministically). See `references/architecture.md`.
 
 The one requirement is below: the Model must be backed by an external cloud data warehouse.
 
@@ -49,6 +53,7 @@ The one requirement is below: the Model must be backed by an external cloud data
 
 | File | When to read it |
 |---|---|
+| [references/architecture.md](references/architecture.md) | **The "why".** What actually executes (ThoughtSpot compiles SpotQL → deterministic warehouse SQL; the LLM's SQL is never run) and the value prop vs raw DB SQL — RLS/CLS, Model joins/filters, governed metrics/LOD/semi-additive, custom calendars, multi-fact chasm/fan-trap resolution. Read when asked "what's the point of SpotQL?" or "is this safe to trust?". |
 | [references/spotql-rules.md](references/spotql-rules.md) | **Always, before writing SpotQL.** The hard constraints + dialect rules that make a statement valid (single-Model `FROM`, mandatory aliases, the literal-arithmetic trap, etc.). |
 | [references/udf-reference.md](references/udf-reference.md) | Any question involving dates/time, ranking, or statistics — the SpotQL UDF catalogue (use these instead of `DATE_TRUNC`/`NOW()`/etc.). |
 | [references/patterns.md](references/patterns.md) | Complex shapes: last-N-periods, year-over-year, top-N / top-N-per-group, period-over-period, anomaly detection. |
@@ -224,6 +229,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-06-25 | Add `references/architecture.md` — the "why SpotQL" value proposition and architecture vs raw DB SQL (LLM SQL never executed; RLS/CLS, Model joins/filters, governed metrics/LOD/semi-additive, custom calendars, multi-fact chasm/fan-trap resolution; hybrid token/SpotQL NL flow with a unified verification layer across both transformers — co-existence + parity, not replacement). New capability bullet + References row linking it. |
 | 1.1.1 | 2026-06-25 | Correct compilation attribution: ThoughtSpot (not the skill/agent) compiles SpotQL to warehouse SQL, deterministically; clarify in the intro and capability summary. |
 | 1.1.0 | 2026-06-25 | Add `references/integration.md` (raw SpotQL API for non-CLI consumers); Step 6 emits paste-ready request bodies; fix Step 2 TML parsing (`properties.column_type`, `formulas[]` via `formula_id`) with deterministic raw-vs-aggregate-formula classification; add capability summary; Step 1 accepts Model GUID/URL with search as fallback. |
 | 1.0.0 | 2026-06-25 | Initial release — query a Model with SpotQL via `ts spotql`; generate-sql + fetch-data + review. |
