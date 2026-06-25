@@ -103,37 +103,37 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 
 | Skill | What it does | Coverage |
 |---|---|---|
-| `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | — |
-| `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) |
-| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | — |
-| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | — |
-| `ts-convert-from-tableau` | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) |
+| [`ts-convert-to-snowflake-sv`](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | — |
+| [`ts-convert-from-snowflake-sv`](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) |
+| [`ts-convert-to-databricks-mv`](agents/cli/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | — |
+| [`ts-convert-from-databricks-mv`](agents/cli/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | — |
+| [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
 | Skill | What it does |
 |---|---|
-| `ts-object-answer-promote` | Promote formulas and parameters from a saved Answer into a Model |
-| `ts-object-model-coach` | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
-| `ts-object-model-spotql-query` | Query a Model with SpotQL — write Semantic SQL, validate it to warehouse SQL, execute it, and review the data results |
-| `ts-audit` | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
-| `ts-dependency-manager` | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards |
-| `ts-variable-timezone` | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
+| [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model |
+| [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
+| [`ts-object-model-spotql-query`](agents/cli/ts-object-model-spotql-query/SKILL.md) | Query a Model with SpotQL — write Semantic SQL, validate it to warehouse SQL, execute it, and review the data results |
+| [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
+| [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards |
+| [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
 
 **Connection Profiles** — manage credentials and connections
 
 | Skill | What it does |
 |---|---|
-| `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles |
-| `ts-profile-snowflake` | Add, update, test, or delete Snowflake profiles (**Claude Code only** — Cortex Code manages Snowflake connections natively) |
-| `ts-profile-databricks` | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile |
+| [`ts-profile-thoughtspot`](agents/cli/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles |
+| [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (**Claude Code only** — Cortex Code manages Snowflake connections natively) |
+| [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile |
 
 **Recipes** — pre-built analytical capabilities for ThoughtSpot
 
 | Skill | What it builds | Platform |
 |---|---|---|
-| `ts-recipe-formula-business-days-snowflake` | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | Snowflake |
-| `ts-recipe-formula-hms-display-snowflake` | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | Snowflake |
+| [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | Snowflake |
+| [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | Snowflake |
 
 See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for installation and setup.
 
@@ -146,12 +146,12 @@ install required — runs entirely within Snowflake using stored procedures.
 
 | Skill | What it does |
 |---|---|
-| `ts-profile-thoughtspot` | Add, update, test, or delete ThoughtSpot profiles (uses Snowflake Secrets) |
-| `ts-setup-sv` | Install or upgrade stored procedures required by the other skills |
-| `ts-recipe-formula-business-days-snowflake` | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
-| `ts-recipe-formula-hms-display-snowflake` | Deploy four Snowflake scalar UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` |
-| `ts-convert-to-snowflake-sv` | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| `ts-convert-from-snowflake-sv` | Convert a Snowflake Semantic View into a ThoughtSpot Model |
+| [`ts-profile-thoughtspot`](agents/coco-snowsight/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles (uses Snowflake Secrets) |
+| [`ts-setup-sv`](agents/coco-snowsight/ts-setup-sv/SKILL.md) | Install or upgrade stored procedures required by the other skills |
+| [`ts-recipe-formula-business-days-snowflake`](agents/coco-snowsight/ts-recipe-formula-business-days-snowflake/SKILL.md) | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
+| [`ts-recipe-formula-hms-display-snowflake`](agents/coco-snowsight/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Deploy four Snowflake scalar UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` |
+| [`ts-convert-to-snowflake-sv`](agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View |
+| [`ts-convert-from-snowflake-sv`](agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model |
 
 See **[agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md)** for stage
 setup and Workspace deployment.
@@ -166,8 +166,8 @@ consumed via `%run` in Databricks notebooks.
 
 | Skill | What it does |
 |---|---|
-| `ts-convert-to-databricks-mv` | Convert a ThoughtSpot model to a Databricks Metric View |
-| `ts-convert-from-databricks-mv` | Convert a Databricks Metric View into a ThoughtSpot Model |
+| [`ts-convert-to-databricks-mv`](agents/databricks/skills/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View |
+| [`ts-convert-from-databricks-mv`](agents/databricks/skills/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model |
 
 **Also included:**
 
