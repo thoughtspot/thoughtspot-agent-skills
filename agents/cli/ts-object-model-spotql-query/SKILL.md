@@ -16,6 +16,24 @@ onboarding tutorial, a drop-in for your own agent, or the per-question engine of
 accuracy / regression / feature test suite. See `references/use-cases.md` for those
 compositions — they are *uses* of this skill, not built into it.
 
+## What this skill does
+
+If asked "what can you do?", this is the answer. Given a question about a ThoughtSpot Model
+I can:
+
+- **Answer it** — write the SpotQL, compile it to the warehouse SQL ThoughtSpot runs,
+  execute it, and return the rows as a table.
+- **Show the work** — the SpotQL, the generated warehouse SQL, the raw JSON, or just the
+  data table, at whatever depth you want.
+- **Help you integrate** — hand you ready-to-paste API request bodies and point you at
+  `references/integration.md` (auth, endpoints, response parsing) to call SpotQL from your
+  own product or agent.
+- **Explain the rules** — what SpotQL can and can't express: aggregation (`SUM` vs `AGG`),
+  the date/time UDFs, query patterns (top-N, year-over-year, semi-additive measures), and
+  the known limitations.
+
+The one requirement is below: the Model must be backed by an external cloud data warehouse.
+
 > **SpotQL requires an external cloud data warehouse.** The SpotQL endpoints only work on
 > Models backed by Snowflake / Databricks / BigQuery / etc. A Model over Falcon, imported
 > data, or system data (`DEFAULT` datasource) is rejected with *"This API only supports
