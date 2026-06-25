@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HTML report generator for ts-dependency-audit.
+HTML report generator for ts-audit.
 
 Takes findings from the analyzer and produces a single self-contained HTML file
 with three views: cluster heatmap, model scorecard, and by-check detail.

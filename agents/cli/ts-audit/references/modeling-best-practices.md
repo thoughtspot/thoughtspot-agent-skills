@@ -1,6 +1,6 @@
 # Modeling Best Practices — Audit Framework & Checklist
 
-Authoritative reference for `ts-dependency-audit`. Every check references the TML
+Authoritative reference for `ts-audit`. Every check references the TML
 field it inspects so the analysis engine can be implemented deterministically.
 
 The skill reads this file at runtime. Changes here change audit behaviour.

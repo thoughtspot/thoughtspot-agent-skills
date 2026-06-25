@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ts-dependency-audit analysis engine.
+ts-audit analysis engine.
 
 Takes a TML corpus (exported model/table/answer TMLs + metadata) and runs
 all audit checks, producing a list of findings. Called by the skill's Step 5.

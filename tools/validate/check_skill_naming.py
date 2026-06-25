@@ -57,6 +57,10 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         re.compile(r"ts-recipe-(formula|answer|liveboard|model)-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
         "analytical recipe: ts-recipe-{ts-artifact-type}-{concept}[-{platform}]",
     ),
+    "ts-audit": (
+        re.compile(r"ts-audit"),
+        "environment / object audit: ts-audit",
+    ),
 }
 
 # Skills that legitimately don't match any family. Each entry must include a

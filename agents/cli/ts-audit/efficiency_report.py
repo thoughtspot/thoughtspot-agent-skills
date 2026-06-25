@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Data Objects Health Audit report generator for ts-dependency-audit.
+Data Objects Health Audit report generator for ts-audit.
 
 Analyses cross-model sprawl: duplicate tables, overlapping models, table
 reuse patterns, conformed dimension divergence. Produces a single self-

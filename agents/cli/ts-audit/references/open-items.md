@@ -1,4 +1,4 @@
-# Open Items — ts-dependency-audit
+# Open Items — ts-audit
 
 Verification items to test against a live ThoughtSpot instance before each phase ships.
 

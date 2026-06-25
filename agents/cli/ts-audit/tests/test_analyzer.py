@@ -1,4 +1,4 @@
-"""Unit tests for the ts-dependency-audit analysis engine."""
+"""Unit tests for the ts-audit analysis engine."""
 from __future__ import annotations
 
 import sys

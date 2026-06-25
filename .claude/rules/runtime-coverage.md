@@ -89,6 +89,7 @@ Today's coverage (verified 2026-06-14):
 | `ts-convert-from-snowflake-sv` | ✓ | ✓ | Full mirror across all runtimes |
 | `ts-convert-to-databricks-mv` | ✓ | — | CoCo: Databricks CLI not available in Snowsight runtime |
 | `ts-convert-to-snowflake-sv` | ✓ | ✓ | |
+| `ts-audit` | ✓ | — | CoCo: cluster-wide TML scan + analysis too heavy for Snowsight runtime |
 | `ts-dependency-manager` | ✓ | — | CoCo: graph walk too heavy for Snowsight runtime |
 | `ts-object-answer-promote` | ✓ | — | CoCo: complex search-query manipulation not supported |
 | `ts-object-model-coach` | ✓ | — | CoCo: interactive coaching workflow doesn't fit stored-proc model |

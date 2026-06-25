@@ -37,7 +37,7 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
     ("ts-variable-timezone", "coco-snowsight"):
         "REST v2 template/variables endpoint not available in Snowsight stored-proc runtime",
-    ("ts-dependency-audit", "coco-snowsight"):
+    ("ts-audit", "coco-snowsight"):
         "Cluster-wide TML scan + analysis too heavy for Snowsight stored-proc runtime",
     ("ts-dependency-manager", "coco-snowsight"):
         "Graph walk + alias propagation too heavy for Snowsight stored-proc runtime",

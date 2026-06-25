@@ -5,8 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-25
+- refactor: rename `ts-dependency-audit` → `ts-audit` — the skill is a read-only health assessment, not a dependency-graph operation; add new `ts-audit` naming family (#8) to `skill-naming.md` and `check_skill_naming.py`
+
 ## 2026-06-18
-- feat: add `ts-dependency-audit` skill v1.0.0 — cluster-wide ThoughtSpot environment audit across five angles (42 checks): AI Readiness (description/synonym coverage, Spotter readiness score), Data Modeling (complexity, joins, duplicates, grain, overlap classification, zero-column tables), Human Readiness (names, hidden columns, orphans, formula promotion, stale objects), Performance (SQL Views, scalar formulas, progressive joins/filters, date constraints, column sprawl), Security (PII detection, indexing without RLS, CLS gaps, credentials). Interactive HTML report with cluster heatmap, per-model scorecards, and by-check drill-down. Usage analysis (BI Server) planned for Phase 2.
+- feat: add `ts-audit` skill v1.0.0 (originally `ts-dependency-audit`) — cluster-wide ThoughtSpot environment audit across five angles (42 checks): AI Readiness (description/synonym coverage, Spotter readiness score), Data Modeling (complexity, joins, duplicates, grain, overlap classification, zero-column tables), Human Readiness (names, hidden columns, orphans, formula promotion, stale objects), Performance (SQL Views, scalar formulas, progressive joins/filters, date constraints, column sprawl), Security (PII detection, indexing without RLS, CLS gaps, credentials). Interactive HTML report with cluster heatmap, per-model scorecards, and by-check drill-down. Usage analysis (BI Server) planned for Phase 2.
 
 ## 2026-06-17
 - feat: ts-cli 0.11.0 → 0.12.0 — add `ts connections create` (Snowflake **key-pair** auth, no tables): `POST /api/rest/2.0/connection/create` with `authenticationType=KEY_PAIR`, the private key read from `--private-key-path` into the `private_key` config attribute (never logged), `validate=false`. The three `ts-convert-from-*` skills now offer **creating a new connection** at the connection step instead of only selecting an existing one (snowflake-sv full create path; tableau create path when the source is Snowflake; databricks-mv gets the explicit "stop & instruct" fallback — native PAT/OAuth create backlogged as BL-036).

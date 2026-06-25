@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-smoke_ts_dependency_audit.py — live smoke test for ts-dependency-audit.
+smoke_ts_audit.py — live smoke test for ts-audit.
 
 Verifies the audit workflow against a real ThoughtSpot instance:
   1.  ThoughtSpot auth
@@ -13,7 +13,7 @@ Verifies the audit workflow against a real ThoughtSpot instance:
   8.  Verify PII column name pattern matching
 
 Usage:
-    python tools/smoke-tests/smoke_ts_dependency_audit.py \\
+    python tools/smoke-tests/smoke_ts_audit.py \\
         --ts-profile production \\
         --model-guid abc123...          # a model with at least one dependent
 
@@ -69,7 +69,7 @@ def detect_pii(column_name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 def run_smoke_test(ts_profile: str, model_guid: str) -> int:
-    print(f"\n=== ts-dependency-audit smoke test ===")
+    print(f"\n=== ts-audit smoke test ===")
     print(f"    Profile:    {ts_profile}")
     print(f"    Model GUID: {model_guid}")
     print()
@@ -226,7 +226,7 @@ def run_smoke_test(ts_profile: str, model_guid: str) -> int:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="ts-dependency-audit smoke test")
+    parser = argparse.ArgumentParser(description="ts-audit smoke test")
     parser.add_argument("--ts-profile", required=True, help="ThoughtSpot profile name")
     parser.add_argument("--model-guid", required=True, help="GUID of a model to audit")
     args = parser.parse_args()

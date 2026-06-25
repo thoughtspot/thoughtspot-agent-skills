@@ -19,6 +19,9 @@
   "default_org": "Primary",
 
   "skills": {
+    "ts-audit": {
+      "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
+    },
     "ts-dependency-manager": {
       "extra_args": ["--model-guid", "YOUR_MODEL_GUID_HERE"]
     },

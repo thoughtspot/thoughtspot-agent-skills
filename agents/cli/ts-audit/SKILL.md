@@ -1,5 +1,5 @@
 ---
-name: ts-dependency-audit
+name: ts-audit
 description: Scan a ThoughtSpot environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — and generate a prioritised audit report with actionable recommendations linking to existing skills.
 ---
 
@@ -72,7 +72,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 On skill invocation, display this plan before doing any work:
 
 ---
-**ts-dependency-audit** — scan your ThoughtSpot environment across five angles.
+**ts-audit** — scan your ThoughtSpot environment across five angles.
 Read-only — produces a prioritised report with actionable recommendations.
 
 ### A. Steps
@@ -254,7 +254,7 @@ Export TML for all enumerated objects. Use the same caching pattern as
 ### Cache directory
 
 ```
-~/.cache/ts-dependency-audit/tml-corpus/
+~/.cache/ts-audit/tml-corpus/
 ```
 
 ### Cache key

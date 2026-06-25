@@ -79,8 +79,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv \
       ~/.snowflake/cortex/skills/ts-convert-from-snowflake-sv
 
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-audit \
-      ~/.snowflake/cortex/skills/ts-dependency-audit
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-audit \
+      ~/.snowflake/cortex/skills/ts-audit
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-manager \
       ~/.snowflake/cortex/skills/ts-dependency-manager
@@ -132,8 +132,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv \
       ~/.claude/skills/ts-convert-from-snowflake-sv
 
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-audit \
-      ~/.claude/skills/ts-dependency-audit
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-audit \
+      ~/.claude/skills/ts-audit
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-dependency-manager \
       ~/.claude/skills/ts-dependency-manager

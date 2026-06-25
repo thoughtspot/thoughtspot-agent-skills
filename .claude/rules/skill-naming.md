@@ -20,17 +20,18 @@ extend the rule with a new one.
 
 ---
 
-## The nine families
+## The ten families
 
 | # | Family | Pattern | Semantic | Members |
 |---|---|---|---|---|
 | 1 | `ts-object-*` | `ts-object-{type}-{verb}` | Single-object scoped operation. Third token is the **object type** (model, answer, liveboard, etc.); fourth is the **verb** (promote, builder, coach, etc.). | `ts-object-answer-promote`, `ts-object-model-builder`, `ts-object-model-coach` |
 | 2 | `ts-profile-*` | `ts-profile-{platform}` | Credential setup for a specific platform. Second token is the platform name. | `ts-profile-thoughtspot`, `ts-profile-snowflake` |
 | 3 | `ts-convert-*` | `ts-convert-{direction}-{format}` | Cross-platform schema conversion. Third token is `to` or `from`; fourth is the target/source format. | `ts-convert-to-snowflake-sv`, `ts-convert-from-snowflake-sv`, `ts-convert-from-tableau` |
-| 4 | `ts-dependency-*` | `ts-dependency-{verb}` | Cross-object dependency-graph operation (audit, walk, rewrite, cleanup). | `ts-dependency-manager` |
+| 4 | `ts-dependency-*` | `ts-dependency-{verb}` | Cross-object dependency-graph operation (walk, rewrite, cleanup). | `ts-dependency-manager` |
 | 5 | `ts-variable-*` | `ts-variable-{specifier}` | Manage a specific platform variable across all its operations (search, set, remove). Second token is the variable's short name. | `ts-variable-timezone` *(planned)* |
 | 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure used by other skills. | `ts-setup-sv` |
 | 7 | `ts-recipe-*` | `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]` | Build a specific analytical capability in ThoughtSpot. Second token is the primary ThoughtSpot artifact produced (`formula`, `answer`, `liveboard`, `model`). Third+ tokens describe the concept (`business-days`, `hms-display`, `abc-analysis`). Optional platform suffix (`-snowflake`, `-databricks`) present only when the recipe deploys to an external platform; omitted for pure-ThoughtSpot recipes. | `ts-recipe-formula-business-days-snowflake` |
+| 8 | `ts-audit` | `ts-audit` | Read-only health assessment of a ThoughtSpot environment or individual objects. Scans across multiple angles (AI readiness, data modeling, performance, security) and produces a prioritised report with actionable recommendations. Distinct from `ts-dependency-*` which actively modifies the dependency graph. | `ts-audit` |
 
 ---
 
@@ -105,7 +106,17 @@ recipes. This family is distinct from `ts-setup-*` (which deploys
 infrastructure for other skills) and `ts-object-*` (which operates on an
 existing object the user already has).
 
-### 8. None of the above match
+### 8. Is the skill a read-only health assessment or audit of ThoughtSpot objects?
+
+→ **`ts-audit`**. Pattern: `ts-audit`.
+
+This family is for skills that scan a ThoughtSpot environment (or individual
+objects within it) across multiple quality angles and produce a report with
+prioritised findings. Distinct from `ts-dependency-*` which actively modifies
+objects via the dependency graph, and from `ts-object-*` which operates on a
+single object instance.
+
+### 9. None of the above match
 
 → **Extend the rule**. See "Adding a new family" below. The validator
 will fail until either (a) a new family is added or (b) the skill is
