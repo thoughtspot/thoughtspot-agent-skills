@@ -7,9 +7,12 @@ description: Ask a question of a ThoughtSpot Model and get the answer as data �
 
 Turn a question about a ThoughtSpot **Model** into an answer. You (the agent) write a
 SpotQL statement grounded in the rules in `references/`, then run it through two `ts`
-commands: `generate-sql` (compiles it to warehouse SQL and validates) and `fetch-data`
-(executes it and returns rows). The result is a **review** the user can inspect at the
-level they care about — the data table, the SpotQL, the warehouse SQL, or the raw JSON.
+commands: `generate-sql` (**ThoughtSpot** compiles it to warehouse SQL and validates it)
+and `fetch-data` (**ThoughtSpot** executes it and returns rows). You never compile or
+translate SpotQL yourself — ThoughtSpot does the SpotQL→SQL compilation, deterministically,
+so the warehouse SQL and the results are exactly what the platform would run. The result is
+a **review** the user can inspect at the level they care about — the data table, the
+SpotQL, the warehouse SQL, or the raw JSON.
 
 This skill is the **primitive**. It is the foundation other things build on: an
 onboarding tutorial, a drop-in for your own agent, or the per-question engine of an
@@ -21,8 +24,8 @@ compositions — they are *uses* of this skill, not built into it.
 If asked "what can you do?", this is the answer. Given a question about a ThoughtSpot Model
 I can:
 
-- **Answer it** — write the SpotQL, compile it to the warehouse SQL ThoughtSpot runs,
-  execute it, and return the rows as a table.
+- **Answer it** — write the SpotQL and hand it to ThoughtSpot, which compiles it to the
+  warehouse SQL and executes it; I return the rows as a table.
 - **Show the work** — the SpotQL, the generated warehouse SQL, the raw JSON, or just the
   data table, at whatever depth you want.
 - **Help you integrate** — hand you ready-to-paste API request bodies and point you at
@@ -221,5 +224,6 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-06-25 | Correct compilation attribution: ThoughtSpot (not the skill/agent) compiles SpotQL to warehouse SQL, deterministically; clarify in the intro and capability summary. |
 | 1.1.0 | 2026-06-25 | Add `references/integration.md` (raw SpotQL API for non-CLI consumers); Step 6 emits paste-ready request bodies; fix Step 2 TML parsing (`properties.column_type`, `formulas[]` via `formula_id`) with deterministic raw-vs-aggregate-formula classification; add capability summary; Step 1 accepts Model GUID/URL with search as fallback. |
 | 1.0.0 | 2026-06-25 | Initial release — query a Model with SpotQL via `ts spotql`; generate-sql + fetch-data + review. |
