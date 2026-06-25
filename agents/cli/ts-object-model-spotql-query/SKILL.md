@@ -63,17 +63,31 @@ Pick the depth from how the user framed the request:
 
 ### Step 1 — Pick the profile and the Model
 
-If multiple profiles exist in `~/.claude/thoughtspot-profiles.json`, ask which to use.
-Confirm it authenticates and find the Model:
+If multiple profiles exist in `~/.claude/thoughtspot-profiles.json`, ask which to use, then
+confirm it authenticates:
 
 ```bash
 source ~/.zshenv && ts auth whoami --profile "{profile}"
-source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{search}%" --profile "{profile}"
 ```
 
-Models are `LOGICAL_TABLE` with header `type: WORKSHEET`. Save the `metadata_id` (GUID) —
-that is the `--model` identifier for SpotQL. Save the Model's display name too; you need
-it for the `FROM` clause.
+**Always ask the user which Model to query.** Accept any of these — you do not need a name
+to search for if you already have an identifier:
+
+- **A GUID** — use it directly as `{model_guid}`.
+- **A ThoughtSpot URL** — extract the GUID from the path. Users often have the Model open in
+  a browser, e.g. `…/#/data/tables/4da3a07f-…` or `…/#/data/embrace/4da3a07f-…` — the GUID
+  is the path segment after `tables/` / `embrace/`.
+- **A name, or nothing** — fall back to search and let the user pick:
+
+  ```bash
+  source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{search}%" --profile "{profile}"
+  ```
+
+  Present matches with **name + GUID + owner + modified date** so the user can disambiguate.
+
+Models are `LOGICAL_TABLE` with header `type: WORKSHEET`. Whichever path you took, **confirm
+the resolved Model display name** back to the user — you need it verbatim for the `FROM`
+clause in Step 3.
 
 ### Step 2 — Learn the schema
 
