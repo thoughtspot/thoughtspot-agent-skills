@@ -46,3 +46,35 @@ Findings:
 Conclusion: **aggregate-formula columns must use `AGG()`, never `SUM()`; raw measures use
 `SUM()`/etc.** Encoded in `spotql-rules.md` § Aggregation and `udf-reference.md`. No
 translation layer needed — `AGG()` is native SpotQL the API accepts directly.
+
+---
+
+## Keeping `limitations.md` current
+
+`limitations.md` carries a currency anchor (`<!-- currency: spotql — YYYY-MM (...) -->`).
+The repo's `check_mapping_currency.py` (wired into pre-commit and CI via `ANCHORED_FILES`)
+**soft-nudges** when that anchor is stale (> 6 months) or missing — never blocks, because
+external product behaviour can't gate a PR. This is the agreed approach: a nudge, not a
+live Jira call in the commit hook.
+
+### Refreshing limitations from the Jira epics (on demand, not per-commit)
+
+When the nudge fires (or before a release), refresh against the two epics — but **confirm
+every change with a live probe**, because a ticket can be Closed without the behaviour
+changing (`PERCENTILE_CONT` is Closed as MEDIAN-only yet still errors live):
+
+1. **Pull current ticket statuses** from the two epics via the Atlassian MCP:
+   - `getJiraIssue` / `searchJiraIssuesUsingJql` with
+     `parent in (SCAL-306544, SCAL-316371)` (cloudId `thoughtspot.atlassian.net`),
+     fields `summary,status`.
+2. **Diff against `limitations.md`** — flag rows whose SCAL ticket status changed
+   (Open→Closed = candidate "now works" to remove; new Open child = candidate new row).
+3. **Re-probe each flagged construct live** with `ts spotql generate-sql` / `fetch-data`
+   against an external-CDW model (e.g. the Dunder Mifflin smoke model) — the probe, not the
+   ticket, is the source of truth.
+4. **Update the file**: remove rows that now work (and relax the matching rule in
+   `spotql-rules.md` / `udf-reference.md` / `patterns.md`); add newly-confirmed limitations
+   with their SCAL ref. **Bump the currency anchor** to clear the nudge.
+
+This pairs with the skill's known-limitation-retest use case (`use-cases.md` #6) — the
+suite of "expected-to-fail" questions is the executable form of this re-probe.

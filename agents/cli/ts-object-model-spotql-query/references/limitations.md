@@ -1,7 +1,9 @@
-# SpotQL limitations — what doesn't work (and what now does)
+# SpotQL limitations — what doesn't work
 
-What SpotQL can't do, what fails *silently* (wrong numbers, no error), and what was broken
-but is now fixed. **SpotQL behaviour is build-specific and moving fast** — treat this as a
+<!-- currency: spotql — 2026-06 (champ-staging; epics SCAL-306544 / SCAL-316371) -->
+
+What SpotQL can't do, and what fails *silently* (wrong numbers, no error).
+**SpotQL behaviour is build-specific and moving fast** — treat this as a
 dated snapshot, not gospel. When in doubt, probe with `ts spotql generate-sql` /
 `fetch-data` (see the retest use case in `use-cases.md`).
 
@@ -49,21 +51,6 @@ scalar outer SELECT (`patterns.md` § Statistics); `MEDIAN` works scalar. "A or 
 | `SUM(CASE WHEN <raw-date '>=' literal> …)` | aggregate returns type-UNKNOWN, all zeros — use integer date-parts inside CASE | [SCAL-319329](https://thoughtspot.atlassian.net/browse/SCAL-319329) |
 | `ROUND(x, N)` | rounds to the nearest **multiple of N**, not N decimal places | [SCAL-319323](https://thoughtspot.atlassian.net/browse/SCAL-319323) |
 
-## ✅ Now works (was broken in the older catalogue) — don't apply the old workarounds
-
-| Construct | Ref |
-|---|---|
-| Aggregate × numeric literal — `SUM("x") * 100`, `/ 100.0` (no longer zeros) | ✓ live |
-| `NTILE(n)` | ✓ live · [SCAL-317244](https://thoughtspot.atlassian.net/browse/SCAL-317244) |
-| `ROWS BETWEEN …` explicit window frame (now preserved) | ✓ live · [SCAL-313194](https://thoughtspot.atlassian.net/browse/SCAL-313194) |
-| ≥2 model-derived CTEs JOINed in the main SELECT | ✓ live · [SCAL-314708](https://thoughtspot.atlassian.net/browse/SCAL-314708) |
-| CTE selecting `FROM` another CTE (chained CTEs) | ticket · [SCAL-314709](https://thoughtspot.atlassian.net/browse/SCAL-314709) |
-| `LAG(col, N)` / `LEAD(col, N)` explicit offset > 1 | ticket · [SCAL-314621](https://thoughtspot.atlassian.net/browse/SCAL-314621) |
-| `NTH_VALUE(col, N)` | ticket · [SCAL-314622](https://thoughtspot.atlassian.net/browse/SCAL-314622) |
-| `STDDEV` scalar (no GROUP BY); `STDDEV` vs `STDDEV_POP` default fixed | ticket · [SCAL-314705](https://thoughtspot.atlassian.net/browse/SCAL-314705), [SCAL-314706](https://thoughtspot.atlassian.net/browse/SCAL-314706) |
-| `CASE` in `GROUP BY`; `GREATEST`/`LEAST` var-args; `SELECT <const> AS x`; `OFFSET` | tickets · [SCAL-314710](https://thoughtspot.atlassian.net/browse/SCAL-314710), [SCAL-316385](https://thoughtspot.atlassian.net/browse/SCAL-316385), [SCAL-316386](https://thoughtspot.atlassian.net/browse/SCAL-316386), [SCAL-318291](https://thoughtspot.atlassian.net/browse/SCAL-318291) |
-| `AGG()` on aggregate-formula columns | ✓ live |
-
 ## 🔧 In flight — open bugs (behaviour may change; treat results with care)
 
 | Issue | Status | Ref |
@@ -82,8 +69,11 @@ scalar outer SELECT (`patterns.md` § Statistics); `MEDIAN` works scalar. "A or 
 
 ## Maintaining this file
 
-When you re-probe a ❌/⚠️ row and it now works, move it to **Now works**, date it, cite the
-SCAL ticket if one flipped to Closed, and relax the matching rule in `spotql-rules.md` /
-`udf-reference.md`. When you hit a new failure, check it against
+When you re-probe a ❌/⚠️ row and it now works, **remove it** (it's no longer a limitation)
+and relax the matching rule in `spotql-rules.md` / `udf-reference.md` / `patterns.md`, then
+bump the currency anchor at the top. When you hit a new failure, check it against
 [SCAL-316371](https://thoughtspot.atlassian.net/browse/SCAL-316371) first — it's probably
-already logged.
+already logged. To find which rows are worth re-probing, refresh ticket statuses from the
+two epics (see `open-items.md` § Refreshing limitations from Jira) — but always confirm with
+a live probe, since a ticket can be Closed without the behaviour actually changing (e.g.
+`PERCENTILE_CONT` is closed as MEDIAN-only yet still errors).

@@ -35,6 +35,11 @@ from pathlib import Path
 
 # ── CONFIG (repo-specific) ───────────────────────────────────────────────────
 ANCHORED_DIRS = ("agents/shared/mappings", "agents/shared/schemas")
+# Individual files (outside the dirs above) that also carry a currency anchor — e.g. a
+# skill reference encoding external product behaviour that moves (SpotQL limitations).
+ANCHORED_FILES = (
+    "agents/cli/ts-object-model-spotql-query/references/limitations.md",
+)
 STALE_MONTHS = 6
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -77,6 +82,8 @@ def check_file(path: Path, today: date) -> tuple[str, str] | None:
 
 
 def _is_anchored_path(rel: str) -> bool:
+    if rel in ANCHORED_FILES:
+        return True
     return rel.endswith(".md") and any(rel.startswith(d + "/") for d in ANCHORED_DIRS)
 
 
@@ -98,6 +105,10 @@ def _all_anchored_files(repo_root: Path) -> list[Path]:
         base = repo_root / d
         if base.is_dir():
             files.extend(base.rglob("*.md"))
+    for f in ANCHORED_FILES:
+        p = repo_root / f
+        if p.exists():
+            files.append(p)
     return sorted(files)
 
 
@@ -129,7 +140,7 @@ def main() -> int:
         return 1 if (args.check and blocking) else 0
 
     if not args.staged:
-        print(f"All {len(files)} mapping/schema file(s) have a current currency anchor.")
+        print(f"All {len(files)} anchored file(s) have a current currency anchor.")
     return 0
 
 
