@@ -168,6 +168,18 @@ Present the result at the depth from the top of this section:
   emit JSON; you make it readable.
 - **🧠 Generated SpotQL** (developer): the statement you wrote.
 - **🗄️ Warehouse SQL** (developer): `executable_sql` from Step 4.
+- **📋 Request bodies** (developer): the ready-to-paste API bodies for the session's query,
+  pre-filled with the SpotQL you wrote and the Model GUID — so the user can run it from the
+  REST playground or their own code. (See `references/integration.md` for auth and response
+  parsing.)
+
+  ```text
+  POST /callosum/v1/v2/data/spotql/generate-sql
+  { "spotql_query": "<the SpotQL from Step 3>", "model_identifier": "<model_guid>" }
+
+  POST /callosum/v1/v2/data/spotql/fetch-data
+  { "spotql_query": "<the SpotQL from Step 3>", "model_identifier": "<model_guid>" }
+  ```
 - **❌ Errors:** if any `status` was not `SUCCESS`, show the code + message and what you
   changed (or why it can't be answered).
 
