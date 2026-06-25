@@ -69,11 +69,13 @@ WHERE DIFF_MONTH(START_OF_CURRENT_MONTH(), "t1"."Order Date") BETWEEN 1 AND 12
 | `STDDEV_SAMP` / `STDDEV_POP`, `VAR_SAMP` / `VAR_POP`, `MEDIAN` | **Scalar context only** (no `GROUP BY` in the same query) — see `patterns.md`. Always write the explicit `_SAMP`/`_POP` suffix; bare `STDDEV` silently means `_POP`. |
 | `PERCENTILE_CONT` / `PERCENTILE_DISC` / `APPROX_PERCENTILE` | ✗ Not supported. Only `MEDIAN` works as a percentile. |
 
-> `AGG(template_col)` appears in the SpotQL reference as a wrapper for aggregate-template
-> (formula) columns. This skill writes **real aggregates** (`SUM`, etc.) directly, which is
-> verified working; `SUM` is correct for additive measure formulas (ThoughtSpot ignores a
-> formula's own aggregation). The `AGG()` form is documented but unverified through this
-> skill — see `open-items.md`.
+> **`AGG(col)` — for aggregate-formula columns (verified live 2026-06-25).** A formula
+> column whose expression already contains an aggregate (`sum`, `count`, `group_aggregate`,
+> `last_value(sum(...))`, …) must be wrapped in `AGG("col")` so it isn't re-aggregated.
+> **Do not `SUM` it** — `SUM("aggregate formula")` errors with
+> `NESTED_AGGREGATE_NOT_SUPPORTED`. Use real aggregates (`SUM`/`AVG`/…) only on **raw**
+> measure columns. `AGG()`'s argument must be a bare column reference. See `spotql-rules.md`
+> § Aggregation for how to tell the two apart.
 
 ## Window functions — `OVER (PARTITION BY … ORDER BY …)`
 

@@ -29,12 +29,20 @@ SpotQL only supports Models backed by an external cloud data warehouse. A Falcon
 warehouses. The model's datasource type (DEFAULT) is not supported."` Confirmed against the
 "Discover Monitoring Data" Model. Documented in SKILL.md and spotql-rules.md.
 
-## #3 — `AGG(template_col)` wrapper — DEFERRED (not used by this skill)
+## #3 — `AGG()` on aggregate-formula columns — VERIFIED (live) 2026-06-25
 
-The SpotQL reference documents an `AGG(aggregate_template_col)` wrapper for formula columns
-with embedded aggregation. This skill writes **real aggregates** (`SUM`, etc.) directly,
-which is verified working, so `AGG()` is not on the skill's path. If a future need arises
-(a formula column whose aggregation must be preserved and differs from SUM), verify the
-`AGG()` form live before relying on it. Not a blocker — the skill's guidance (SUM for
-additive measure formulas) is verified and matches ThoughtSpot's behaviour of ignoring a
-formula's own aggregation setting.
+Verified live on champ-staging against the Dunder Mifflin Model, which has aggregate-formula
+columns (`# Employees` = `count(...)`, `Inventory Balance` = `last_value(sum(...))`,
+`Category Quantity` = `sum(group_aggregate(...))`). (spotQL-testing could never confirm
+this — its retail-apparel model had no aggregate-formula columns; its AGG tests are marked
+UNKNOWN/exploratory in `docs/test-inventory.md`.)
+
+Findings:
+- `SELECT … AGG("t1"."# Employees") … GROUP BY …` → **SUCCESS** with correct per-category
+  counts.
+- `SUM("t1"."# Employees")` on the same column → **`NESTED_AGGREGATE_NOT_SUPPORTED`**.
+- A bare reference to the aggregate-formula column also compiles.
+
+Conclusion: **aggregate-formula columns must use `AGG()`, never `SUM()`; raw measures use
+`SUM()`/etc.** Encoded in `spotql-rules.md` § Aggregation and `udf-reference.md`. No
+translation layer needed — `AGG()` is native SpotQL the API accepts directly.

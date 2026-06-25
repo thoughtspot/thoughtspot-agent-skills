@@ -95,10 +95,22 @@ FROM per_cat
 ## Semi-additive measures
 
 **When:** a measure that must not be summed across time — e.g. an inventory balance, an
-account balance (TML aggregation `last_value` / `first_value`). Summing double-counts. Take
-the latest value per entity (e.g. via `ROW_NUMBER()` ordered by date desc, filter rank=1),
-or `MAX` of the period, depending on the measure's semantics. If the right behaviour is
-unclear from the TML, say so rather than silently `SUM`.
+account balance.
+
+**First choice — use the Model's own formula.** If the Model already has a semi-additive
+**aggregate-formula** column (its formula is `last_value(sum(...))` / `first_value(...)` —
+e.g. `Inventory Balance`), just wrap it in `AGG()`. The formula encodes the
+non-additivity; `AGG()` returns the right number. Do **not** `SUM` it (that double-counts
+*and* errors `NESTED_AGGREGATE_NOT_SUPPORTED` on an aggregate formula).
+
+```sql
+SELECT "t1"."Product Category", AGG("t1"."Inventory Balance") AS "Inventory Balance"
+FROM "Model" AS "t1" GROUP BY "t1"."Product Category"
+```
+
+**Only if no such column exists:** hand-roll "latest value per entity" with
+`ROW_NUMBER()` over the raw measure ordered by date desc, filtered to rank 1. If the
+correct behaviour is unclear from the TML, say so rather than silently `SUM`.
 
 ## When there's no working form
 

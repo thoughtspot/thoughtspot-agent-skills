@@ -94,9 +94,11 @@ question. The essentials (full list in the rules file):
 
 - `FROM "Model Display Name" AS "t1"` — the one Model only, always aliased.
 - Every column reference alias-prefixed and double-quoted: `"t1"."Product Category"`.
-- Measures get a real aggregate (`SUM` is the default for additive measures);
-  attributes go in `GROUP BY`. Alias only computed/aggregate expressions, in Title Case:
-  `SUM("t1"."Amount") AS "Total Sales"`. Never alias a plain model column.
+- **Raw measures** get a real aggregate (`SUM` is the default): `SUM("t1"."Amount")`.
+  **Aggregate-formula columns** (formula already contains `sum`/`count`/`group_aggregate`/
+  `last_value(...)`) get **`AGG("t1"."# Employees")`** — never `SUM` (that errors
+  `NESTED_AGGREGATE_NOT_SUPPORTED`). Attributes go in `GROUP BY`. See `spotql-rules.md`.
+  Alias only computed/aggregate expressions, in Title Case. Never alias a plain model column.
 - **Never** `SELECT *`, `COUNT(*)`, subqueries, set operations, or arithmetic between an
   aggregate and a numeric literal (it silently returns zeros — see the rules).
 - Dates: use the SpotQL UDFs (`YEAR_NUMBER`, `DIFF_MONTH`, `START_OF_CURRENT_MONTH()`, …),
