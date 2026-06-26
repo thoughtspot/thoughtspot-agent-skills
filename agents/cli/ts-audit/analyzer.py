@@ -771,6 +771,11 @@ def _classify_table_role(model: dict) -> dict[str, str]:
     return roles
 
 
+def _refs_table(column_ref: str, table_name: str) -> bool:
+    """Return True if column_ref is a ThoughtSpot Table::Column reference for table_name."""
+    return column_ref.startswith(f"{table_name}::")
+
+
 def _check_fanout_mitigations(model: dict, target_table: str) -> bool:
     """Check if the model has parameters/filters/formulas that constrain a target table."""
     m = model.get("model", {})
@@ -778,18 +783,24 @@ def _check_fanout_mitigations(model: dict, target_table: str) -> bool:
     filters = m.get("filters", [])
     formulas = m.get("formulas", [])
 
+    # Use prefix-aware matching: ThoughtSpot column refs are "Table::Column"
     filter_refs_target = any(
-        target_table in (f.get("column", "") or "")
+        _refs_table(f.get("column", "") or "", target_table)
         for f in filters
     )
     if filter_refs_target:
         return True
 
     if params:
+        # Formula expressions use [Table::Column] syntax — substring match is acceptable
         all_exprs = " ".join(f.get("expr", "") for f in formulas)
+        # Filter column refs use prefix-aware check to avoid false positives
         all_filter_cols = " ".join(f.get("column", "") or "" for f in filters)
-        combined = all_exprs + all_filter_cols
-        if target_table in combined:
+        filter_col_refs_target = any(
+            _refs_table(f.get("column", "") or "", target_table)
+            for f in filters
+        )
+        if target_table in all_exprs or filter_col_refs_target:
             return True
 
     return False
@@ -854,15 +865,16 @@ def check_d11(model: dict, _config: AuditConfig) -> list[Finding]:
             ))
 
         if FANOUT_NAME_RE.search(target):
+            name_mitigated = _check_fanout_mitigations(model, target)
             already_flagged = any(
                 f.check_id == "D11" and target in f.title
                 for f in findings
             )
-            if not already_flagged:
-                severity = "INFO"
+            # Suppress entirely when mitigated and no other D11 signal already flagged this target
+            if not already_flagged and not name_mitigated:
                 findings.append(Finding(
                     angle="D", check_id="D11", check_name="FANOUT_NAME",
-                    severity=severity,
+                    severity="INFO",
                     title=f"Potential conversion/rate table: {target}",
                     detail=f"Join to '{target}' — if this is a conversion/rate table, "
                            f"confirm a parameter or filter constrains it to a single target value",

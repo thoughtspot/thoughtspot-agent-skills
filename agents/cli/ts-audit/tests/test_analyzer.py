@@ -1033,6 +1033,30 @@ class TestD11:
         assert len(mitigated) >= 1
         assert all(f.severity == "INFO" for f in mitigated)
 
+    def test_d11_fact_to_fact(self):
+        """Two fact tables joined — risk of row multiplication."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
+                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
+                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
+                _col("Amount", column_id="Orders::amount", column_type="MEASURE"),
+                _col("Shipping", column_id="Orders::shipping", column_type="MEASURE"),
+                _col("Total", column_id="Orders::total", column_type="MEASURE"),
+                _col("Fee", column_id="Orders::fee", column_type="MEASURE"),
+            ],
+            model_tables=[
+                _mt("Sales", joins=[{"with": "Orders", "type": "LEFT_OUTER",
+                                     "cardinality": "MANY_TO_ONE",
+                                     "on": "[Sales::order_id] = [Orders::id]"}]),
+                _mt("Orders"),
+            ],
+        )
+        findings = check_d11(m, SPOTTER_CFG)
+        assert any(f.check_name == "FANOUT_FACT_TO_FACT" for f in findings)
+        assert any(f.severity == "MEDIUM" for f in findings)
+
     def test_d11_classify_table_role(self):
         m = _model(columns=[
             _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
