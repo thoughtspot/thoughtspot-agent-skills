@@ -5,10 +5,9 @@ import json
 import os
 import random
 import re
-import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from urllib.parse import quote
 
 import requests
@@ -256,6 +255,8 @@ class TableauClient:
         When name_filter is given, uses the Tableau REST API filter parameter
         (exact match) instead of paging through all results.
         """
+        if not self._token:
+            self.signin()
         all_ds: list = []
         page = 1
         while True:
@@ -293,6 +294,8 @@ class TableauClient:
         the same api_version path as the REST API). Returns the list of field
         objects from the response.
         """
+        if not self._token:
+            self.signin()
         resp = self.request(
             "POST",
             "/api/v1/vizql-data-service/read-metadata",
@@ -349,6 +352,7 @@ def datasource(
     """Get datasource details, optionally with field metadata."""
     p = _resolve_tableau_profile(profile)
     client = TableauClient(p)
+    client.signin()
 
     path = f"{client._base_path()}/datasources/{datasource_id}"
     resp = client.request("GET", path)
