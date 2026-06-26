@@ -1209,6 +1209,53 @@ def check_p14(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding
     return findings
 
 
+STRING_TYPES = {"VARCHAR", "CHAR", "TEXT", "STRING", "NVARCHAR", "NCHAR"}
+
+
+def _get_table_col_casing(table_tml: dict) -> dict[str, str | None]:
+    """Build {column_name: value_casing or None} for string columns."""
+    tbl = table_tml.get("table", {})
+    result = {}
+    for c in tbl.get("columns", []):
+        col_name = c.get("db_column_name", c.get("name", ""))
+        dtype = (c.get("db_column_properties", {}) or {}).get("data_type", "")
+        if dtype.upper() in STRING_TYPES:
+            casing = (c.get("properties", {}) or {}).get("value_casing")
+            result[col_name] = casing
+    return result
+
+
+def check_p15(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding]:
+    """P15: RLS column casing — VARCHAR RLS columns without UPPER/LOWER casing."""
+    findings = []
+    name = _model_name(model)
+    guid = _model_guid(model)
+    table_tmls = corpus.table_tmls_by_model.get(guid or "", [])
+
+    for ttl in table_tmls:
+        tbl_name = ttl.get("table", {}).get("name", "?")
+        rls_cols = _extract_rls_columns(ttl)
+        if not rls_cols:
+            continue
+        col_casing = _get_table_col_casing(ttl)
+        for col_name, _expr in rls_cols:
+            if col_name not in col_casing:
+                continue
+            casing = col_casing[col_name]
+            if casing in ("UPPER", "LOWER"):
+                continue
+            casing_display = casing if casing else "absent"
+            findings.append(Finding(
+                angle="P", check_id="P15", check_name="RLS_COLUMN_CASING",
+                severity="MEDIUM",
+                title=f"RLS on VARCHAR column {tbl_name}.{col_name} (value_casing={casing_display})",
+                detail="Without UPPER or LOWER casing, the database cannot use indexes efficiently for RLS filtering",
+                model_name=name, model_guid=guid,
+                recommendation="Set value_casing to UPPER or LOWER on the underlying table column",
+            ))
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # S — Security checks
 # ---------------------------------------------------------------------------
@@ -1477,6 +1524,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p11(m, config))
             findings.extend(check_p13(m, corpus, config))
             findings.extend(check_p14(m, corpus, config))
+            findings.extend(check_p15(m, corpus, config))
 
         if "S" in angles:
             findings.extend(check_s2(m, corpus, config))

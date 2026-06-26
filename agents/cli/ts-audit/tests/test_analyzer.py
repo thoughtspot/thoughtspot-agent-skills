@@ -37,6 +37,7 @@ from analyzer import (
     check_p11,
     check_p13,
     check_p14,
+    check_p15,
     check_s1,
     check_s8,
     check_s4,
@@ -132,6 +133,17 @@ def _tbl_col(name, data_type="INT64", db_column_name=None):
         "db_column_name": db_column_name or name,
         "db_column_properties": {"data_type": data_type},
     }
+
+
+def _tbl_col_with_casing(name, data_type="VARCHAR", db_column_name=None, value_casing=None):
+    c = {
+        "name": name,
+        "db_column_name": db_column_name or name,
+        "db_column_properties": {"data_type": data_type},
+    }
+    if value_casing is not None:
+        c.setdefault("properties", {})["value_casing"] = value_casing
+    return c
 
 
 def _mt(name, fqn=None, joins=None):
@@ -661,6 +673,58 @@ class TestP14:
         m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
         corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
         findings = check_p14(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 0
+
+
+# ---------------------------------------------------------------------------
+# P15
+# ---------------------------------------------------------------------------
+
+class TestP15:
+    def test_p15_varchar_rls_unknown_casing(self):
+        tbl = _table_tml("Sales", columns=[
+            _tbl_col_with_casing("region", data_type="VARCHAR", value_casing="UNKNOWN"),
+        ], rls_rules={
+            "rules": [{"expr": "[Sales::region] = ts_username"}],
+        })
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p15(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].check_id == "P15"
+        assert findings[0].severity == "MEDIUM"
+
+    def test_p15_varchar_rls_no_casing(self):
+        tbl = _table_tml("Sales", columns=[
+            _tbl_col_with_casing("region", data_type="VARCHAR"),
+        ], rls_rules={
+            "rules": [{"expr": "[Sales::region] = ts_username"}],
+        })
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p15(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 1
+
+    def test_p15_varchar_rls_upper_no_finding(self):
+        tbl = _table_tml("Sales", columns=[
+            _tbl_col_with_casing("region", data_type="VARCHAR", value_casing="UPPER"),
+        ], rls_rules={
+            "rules": [{"expr": "[Sales::region] = ts_username"}],
+        })
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p15(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 0
+
+    def test_p15_int_rls_no_finding(self):
+        tbl = _table_tml("Sales", columns=[
+            _tbl_col("user_id", data_type="INT64"),
+        ], rls_rules={
+            "rules": [{"expr": "[Sales::user_id] = ts_username"}],
+        })
+        m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
+        corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
+        findings = check_p15(m, corpus, SPOTTER_CFG)
         assert len(findings) == 0
 
 
