@@ -7,6 +7,7 @@
 | ts-convert-to-databricks-mv | Y | — | — | Y |
 | ts-convert-to-snowflake-sv | Y | — | Y | — |
 | ts-dependency-manager | Y | — | — | — |
+| ts-load-source-data | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |
 | ts-object-model-spotql-query | Y | — | — | — |

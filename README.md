@@ -120,6 +120,12 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 | [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards |
 | [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
 
+**Data Loading** — load source data into warehouses for ThoughtSpot
+
+| Skill | What it does |
+|---|---|
+| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to |
+
 **Connection Profiles** — manage credentials and connections
 
 | Skill | What it does |

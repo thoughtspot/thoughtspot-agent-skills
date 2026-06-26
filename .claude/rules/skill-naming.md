@@ -20,7 +20,7 @@ extend the rule with a new one.
 
 ---
 
-## The ten families
+## The eleven families
 
 | # | Family | Pattern | Semantic | Members |
 |---|---|---|---|---|
@@ -32,6 +32,7 @@ extend the rule with a new one.
 | 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure used by other skills. | `ts-setup-sv` |
 | 7 | `ts-recipe-*` | `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]` | Build a specific analytical capability in ThoughtSpot. Second token is the primary ThoughtSpot artifact produced (`formula`, `answer`, `liveboard`, `model`). Third+ tokens describe the concept (`business-days`, `hms-display`, `abc-analysis`). Optional platform suffix (`-snowflake`, `-databricks`) present only when the recipe deploys to an external platform; omitted for pure-ThoughtSpot recipes. | `ts-recipe-formula-business-days-snowflake` |
 | 8 | `ts-audit` | `ts-audit` | Read-only health assessment of a ThoughtSpot environment or individual objects. Scans across multiple angles (AI readiness, data modeling, performance, security) and produces a prioritised report with actionable recommendations. Distinct from `ts-dependency-*` which actively modifies the dependency graph. | `ts-audit` |
+| 9 | `ts-load-*` | `ts-load-{specifier}` | Load source data into a warehouse. Specifier describes the data domain or purpose. | `ts-load-source-data` |
 
 ---
 
@@ -116,7 +117,16 @@ prioritised findings. Distinct from `ts-dependency-*` which actively modifies
 objects via the dependency graph, and from `ts-object-*` which operates on a
 single object instance.
 
-### 9. None of the above match
+### 9. Does the skill load or provision data in an external warehouse?
+
+→ **`ts-load-*`**. Pattern: `ts-load-{specifier}`.
+
+This family is for skills that take source data (CSV, manifest, schema definitions)
+and load it into a warehouse (Snowflake, Databricks, etc.) so that ThoughtSpot can
+connect to it. Distinct from `ts-setup-*` (which installs procedures/infrastructure)
+and `ts-convert-*` (which converts between platform schemas).
+
+### 10. None of the above match
 
 → **Extend the rule**. See "Adding a new family" below. The validator
 will fail until either (a) a new family is added or (b) the skill is

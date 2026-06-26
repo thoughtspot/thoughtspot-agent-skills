@@ -118,6 +118,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-tableau \
       ~/.snowflake/cortex/skills/ts-profile-tableau
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-load-source-data \
+      ~/.snowflake/cortex/skills/ts-load-source-data
+
 # Symlink shared reference files
 ln -s ~/thoughtspot-agent-skills/agents/shared \
       ~/.snowflake/cortex/shared
@@ -176,6 +179,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-tableau \
       ~/.claude/skills/ts-profile-tableau
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-load-source-data \
+      ~/.claude/skills/ts-load-source-data
 
 # Claude-only: Snowflake profile management
 ln -s ~/thoughtspot-agent-skills/agents/claude/ts-profile-snowflake \

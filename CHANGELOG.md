@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-27
+- feat: add `ts-load-source-data` skill v1.0.0 — load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to; adds `ts-load-*` naming family to skill-naming.md and check_skill_naming.py
+
 ## 2026-06-26
 - feat: add `ts load` CLI command group — schema inference, synthetic data generation, Snowflake loading
 - chore: bump ts-cli to v0.15.0

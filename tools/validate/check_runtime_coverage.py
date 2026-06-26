@@ -71,6 +71,8 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "TWB XML parsing and TML generation require shell access and LLM reasoning; not supported in stored-proc runtime",
     ("ts-profile-tableau", "coco-snowsight"):
         "Tableau Server not accessible from Snowsight stored-proc runtime",
+    ("ts-load-source-data", "coco-snowsight"):
+        "Warehouse loading requires shell access and external tool orchestration; not supported in Snowsight stored-proc runtime",
 }
 
 

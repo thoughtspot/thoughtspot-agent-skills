@@ -61,6 +61,10 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         re.compile(r"ts-audit"),
         "environment / object audit: ts-audit",
     ),
+    "ts-load-*": (
+        re.compile(r"ts-load-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
+        "data loading: ts-load-{specifier}",
+    ),
 }
 
 # Skills that legitimately don't match any family. Each entry must include a
