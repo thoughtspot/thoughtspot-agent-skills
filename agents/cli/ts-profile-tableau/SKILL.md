@@ -177,6 +177,16 @@ Ask which profile to remove, then:
 security delete-generic-password -s "tableau-{slug}" -a "{account}"
 ```
 
+```powershell
+# Windows
+python -c "import keyring; keyring.delete_password('tableau-{slug}', '{account}')"
+```
+
+```bash
+# Linux
+python3 -c "import keyring; keyring.delete_password('tableau-{slug}', '{account}')"
+```
+
 3. Show the user the env var line to remove from `~/.zshenv`
 
 ---

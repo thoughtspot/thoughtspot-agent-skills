@@ -1,4 +1,4 @@
-"""ts profiles — list configured ThoughtSpot and Snowflake profiles."""
+"""ts profiles — list configured ThoughtSpot, Snowflake, and Tableau profiles."""
 from __future__ import annotations
 
 import json
@@ -58,7 +58,7 @@ def list_profiles(
             server = p.get("server_url", "")
             site = p.get("site_content_url", "")
             identity = p.get("username", "") or p.get("pat_name", "")
-            typer.echo(f"  {p['name']:30s}  {auth_method:10s}  {identity:30s}  {server}")
+            typer.echo(f"  {p['name']:30s}  {auth_method:10s}  {identity:30s}  {server}  site={site}")
         return
 
     if snowflake:

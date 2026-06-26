@@ -738,6 +738,69 @@ ts variables remove <variable> <value> --profile <name> --org <org> [--org ...] 
 
 ---
 
+### `ts tableau signin`
+
+Sign in to Tableau Server/Cloud and verify credentials.
+
+```bash
+ts tableau signin
+ts tableau signin --profile "Tableau Cloud Prod"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | first profile | Tableau profile name (default: first profile in `~/.claude/tableau-profiles.json`) |
+
+**Output:** JSON `{site_id, api_version, user_id}` on success.
+
+---
+
+### `ts tableau datasources`
+
+List published datasources on the Tableau site.
+
+```bash
+ts tableau datasources
+ts tableau datasources --name "Sales Data"
+ts tableau datasources --profile "Tableau Cloud Prod"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | first profile | Tableau profile name |
+| `--name`, `-n` | (none) | Exact datasource name filter |
+
+**Output:** JSON array of datasource objects from the Tableau REST API. Auto-paginates — all
+results are returned. When `--name` is given, uses a server-side exact-match filter.
+
+---
+
+### `ts tableau datasource <ID>`
+
+Get details of a single datasource by UUID, optionally with field metadata.
+
+```bash
+ts tableau datasource abc-123-def
+ts tableau datasource abc-123-def --fields
+ts tableau datasource abc-123-def --profile "Tableau Cloud Prod"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | first profile | Tableau profile name |
+| `--fields`, `-f` | false | Include VizQL field metadata via `POST /api/v1/vizql-data-service/read-metadata` |
+
+**Output:** JSON datasource object. When `--fields` is given, a `fields` key is added to the
+response containing the VizQL field list.
+
+---
+
 ## Piping and scripting
 
 All commands write JSON to stdout, making them easy to pipe into `jq` or Python:

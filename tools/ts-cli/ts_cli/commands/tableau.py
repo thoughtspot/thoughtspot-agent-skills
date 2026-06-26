@@ -130,6 +130,8 @@ class TableauClient:
 
         Returns a dict with site_id, api_version, and user_id.
         """
+        from xml.sax.saxutils import quoteattr
+
         profile = self._profile
         auth = profile.get("auth", "password")
         credential = self._get_credential()
@@ -138,9 +140,9 @@ class TableauClient:
             pat_name = profile.get("pat_name", "")
             body = (
                 f'<tsRequest>'
-                f'<credentials personalAccessTokenName="{pat_name}" '
-                f'personalAccessTokenSecret="{credential}">'
-                f'<site contentUrl="{self.site_content_url}"/>'
+                f'<credentials personalAccessTokenName={quoteattr(pat_name)} '
+                f'personalAccessTokenSecret={quoteattr(credential)}>'
+                f'<site contentUrl={quoteattr(self.site_content_url)}/>'
                 f'</credentials>'
                 f'</tsRequest>'
             )
@@ -148,8 +150,8 @@ class TableauClient:
             username = profile.get("username", "")
             body = (
                 f'<tsRequest>'
-                f'<credentials name="{username}" password="{credential}">'
-                f'<site contentUrl="{self.site_content_url}"/>'
+                f'<credentials name={quoteattr(username)} password={quoteattr(credential)}>'
+                f'<site contentUrl={quoteattr(self.site_content_url)}/>'
                 f'</credentials>'
                 f'</tsRequest>'
             )
