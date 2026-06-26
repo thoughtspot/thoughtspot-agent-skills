@@ -40,6 +40,7 @@ from analyzer import (
     check_p15,
     check_p16,
     check_p17,
+    check_p18,
     check_s1,
     check_s8,
     check_s4,
@@ -834,6 +835,41 @@ class TestP17:
         ]
         m = _model(formulas=formulas)
         findings = check_p17(m, SPOTTER_CFG)
+        assert len(findings) == 0
+
+
+class TestP18:
+    def test_p18_count_distinct(self):
+        m = _model(columns=[
+            _col("Unique Customers", column_id="Sales::customer_id",
+                 column_type="MEASURE", aggregation="COUNT_DISTINCT"),
+            _col("Revenue", column_id="Sales::revenue",
+                 column_type="MEASURE", aggregation="SUM"),
+        ])
+        findings = check_p18(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].check_id == "P18"
+        assert findings[0].severity == "INFO"
+        assert "1" in findings[0].title
+        assert "Unique Customers" in findings[0].detail
+
+    def test_p18_multiple_count_distinct(self):
+        m = _model(columns=[
+            _col("Unique Customers", column_id="Sales::cust_id",
+                 column_type="MEASURE", aggregation="COUNT_DISTINCT"),
+            _col("Unique Products", column_id="Sales::prod_id",
+                 column_type="MEASURE", aggregation="COUNT_DISTINCT"),
+        ])
+        findings = check_p18(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].score == 2
+
+    def test_p18_no_count_distinct(self):
+        m = _model(columns=[
+            _col("Revenue", column_id="Sales::revenue",
+                 column_type="MEASURE", aggregation="SUM"),
+        ])
+        findings = check_p18(m, SPOTTER_CFG)
         assert len(findings) == 0
 
 

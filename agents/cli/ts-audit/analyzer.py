@@ -1346,6 +1346,28 @@ def check_p17(model: dict, _config: AuditConfig) -> list[Finding]:
     )]
 
 
+def check_p18(model: dict, _config: AuditConfig) -> list[Finding]:
+    """P18: COUNT_DISTINCT measures — most expensive aggregation type."""
+    columns = _get_columns(model)
+    cd_cols = [
+        c.get("name", "?") for c in columns
+        if (c.get("properties", {}) or {}).get("aggregation") == "COUNT_DISTINCT"
+    ]
+    if not cd_cols:
+        return []
+    col_list = ", ".join(cd_cols[:5])
+    suffix = f" (+{len(cd_cols) - 5} more)" if len(cd_cols) > 5 else ""
+    return [Finding(
+        angle="P", check_id="P18", check_name="COUNT_DISTINCT_MEASURES",
+        severity="INFO",
+        title=f"{len(cd_cols)} column(s) use COUNT_DISTINCT",
+        detail=f"Columns: {col_list}{suffix}. Most expensive aggregation on most warehouses.",
+        score=len(cd_cols),
+        model_name=_model_name(model), model_guid=_model_guid(model),
+        recommendation="Review whether approximate distinct (HLL) or pre-aggregation is viable",
+    )]
+
+
 # ---------------------------------------------------------------------------
 # S — Security checks
 # ---------------------------------------------------------------------------
@@ -1617,6 +1639,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p15(m, corpus, config))
             findings.extend(check_p16(m, config))
             findings.extend(check_p17(m, config))
+            findings.extend(check_p18(m, config))
 
         if "S" in angles:
             findings.extend(check_s2(m, corpus, config))
