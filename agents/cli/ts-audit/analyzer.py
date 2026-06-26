@@ -1256,6 +1256,39 @@ def check_p15(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding
     return findings
 
 
+IF_RE = re.compile(r"\bif\s*\(", re.I)
+
+
+def _count_if_nesting(expr: str) -> int:
+    """Count if() occurrences as a proxy for nesting depth."""
+    return len(IF_RE.findall(expr))
+
+
+def check_p16(model: dict, _config: AuditConfig) -> list[Finding]:
+    """P16: Formula nesting depth — deeply nested if() conditionals."""
+    findings = []
+    formulas = _get_formulas(model)
+    if not formulas:
+        return findings
+    for f in formulas:
+        fname = f.get("name", "?")
+        expr = f.get("expr", "")
+        depth = _count_if_nesting(expr)
+        if depth <= 3:
+            continue
+        severity = "LOW" if depth > 5 else "INFO"
+        findings.append(Finding(
+            angle="P", check_id="P16", check_name="FORMULA_NESTING_DEPTH",
+            severity=severity,
+            title=f"Formula '{fname}' has {depth} levels of if() nesting",
+            detail="Each nesting level adds branching in the ThoughtSpot calculation engine at query time",
+            score=depth,
+            model_name=_model_name(model), model_guid=_model_guid(model),
+            recommendation="Consider a CASE-style approach or materialising the logic in the warehouse",
+        ))
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # S — Security checks
 # ---------------------------------------------------------------------------
@@ -1525,6 +1558,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p13(m, corpus, config))
             findings.extend(check_p14(m, corpus, config))
             findings.extend(check_p15(m, corpus, config))
+            findings.extend(check_p16(m, config))
 
         if "S" in angles:
             findings.extend(check_s2(m, corpus, config))

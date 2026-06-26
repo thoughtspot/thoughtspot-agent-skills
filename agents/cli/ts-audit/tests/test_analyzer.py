@@ -38,6 +38,7 @@ from analyzer import (
     check_p13,
     check_p14,
     check_p15,
+    check_p16,
     check_s1,
     check_s8,
     check_s4,
@@ -50,6 +51,7 @@ from analyzer import (
     _detect_stale,
     _normalise_expr,
     _join_depth,
+    _count_if_nesting,
 )
 
 
@@ -725,6 +727,46 @@ class TestP15:
         m = _model(model_tables=[_mt("Sales", fqn="tbl-guid-1")])
         corpus = Corpus(models=[m], table_tmls_by_model={"guid-1": [tbl]})
         findings = check_p15(m, corpus, SPOTTER_CFG)
+        assert len(findings) == 0
+
+
+# ---------------------------------------------------------------------------
+# P16
+# ---------------------------------------------------------------------------
+
+class TestP16:
+    def test_count_if_nesting_deep(self):
+        expr = "if(a, if(b, if(c, if(d, 1, 2), 3), 4), 5)"
+        assert _count_if_nesting(expr) == 4
+
+    def test_count_if_nesting_none(self):
+        assert _count_if_nesting("sum([Sales::Revenue])") == 0
+
+    def test_p16_deep_nesting_info(self):
+        expr = "if(a, if(b, if(c, if(d, 1, 2), 3), 4), 5)"
+        m = _model(formulas=[_formula("Deep Formula", expr)])
+        findings = check_p16(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].check_id == "P16"
+        assert findings[0].severity == "INFO"
+        assert "Deep Formula" in findings[0].title
+
+    def test_p16_very_deep_nesting_low(self):
+        expr = "if(a, if(b, if(c, if(d, if(e, if(f, 1, 2), 3), 4), 5), 6), 7)"
+        m = _model(formulas=[_formula("Very Deep", expr)])
+        findings = check_p16(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].severity == "LOW"
+
+    def test_p16_shallow_no_finding(self):
+        expr = "if(a, if(b, if(c, 1, 2), 3), 4)"
+        m = _model(formulas=[_formula("Shallow", expr)])
+        findings = check_p16(m, SPOTTER_CFG)
+        assert len(findings) == 0
+
+    def test_p16_no_formulas_no_finding(self):
+        m = _model()
+        findings = check_p16(m, SPOTTER_CFG)
         assert len(findings) == 0
 
 
