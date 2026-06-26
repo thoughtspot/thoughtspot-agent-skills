@@ -279,6 +279,10 @@ auto-detect → ask. Prove in the harness first, then promote into the skill. Re
 `ts-profile-snowflake` / `ts-profile-databricks`. **Open question:** non-prod Databricks
 workspace + catalog for the live load test.
 
+**Status (2026-06-26):** v1 shipped — Snowflake loading (both `method:python` and
+`method:cli`), schema inference, synthetic data generation, four input modes.
+Databricks loading deferred to v2.
+
 ---
 
 ## BL-011 — `ts-object-connection-create` skill + `ts connections create` CLI
