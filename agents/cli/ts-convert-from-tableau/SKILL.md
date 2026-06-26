@@ -128,7 +128,7 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
       calculated fields, blend relationships,
       table-calc addressing ............................ auto
   3.5 Resolve published datasources (sqlproxy → API) ... auto/you choose  [scope 1,2]
-  4.  Confirm source tables (ask first; reuse/create/search) you choose  [scope 1,2]
+  4.  Confirm source tables (reuse/GUID/create/search) ..... you choose  [scope 1,2]
   4.5 Select ThoughtSpot connection (create path only) .... you choose  [scope 1,2]
   5.  Generate TML files (table + sql_view + model) ...... auto          [scope 1,2]
   5.5 Confirm Spotter (AI search) enablement (default Y) .. you choose   [scope 1,2]
@@ -913,11 +913,12 @@ Source tables referenced by {workbook_name} ({N} total):
   …
 
 Do these already exist as ThoughtSpot Table objects?
-  E  Exist       — reuse them (I'll look up their GUIDs)
+  E  Exist       — reuse them (I'll search for their GUIDs)
+  G  Have GUIDs  — provide GUIDs directly (fastest, no search needed)
   N  Don't exist — create new on a connection            (default)
-  ?  Not sure    — search ThoughtSpot to find out
+  ?  Not sure    — search ThoughtSpot to check (avoids creating duplicates)
 
-Enter E / N / ? :
+Enter E / G / N / ? :
 ```
 
 If the tables differ in status (some exist, some don't), accept a per-table answer.
@@ -926,9 +927,25 @@ If the tables differ in status (some exist, some don't), accept a per-table answ
 
 - **N (don't exist)** → **no search.** Go to **Step 4.5** to pick the connection, then
   create Table TMLs in Step 5a (the default path).
+
+  > **Deduplication note:** if you are migrating **multiple workbooks** that share the same
+  > published datasource, the tables from the first migration already exist. Choosing **N**
+  > again creates duplicates. If this is a second (or later) workbook migration, consider
+  > **E**, **G**, or **?** instead to reuse the tables already in ThoughtSpot.
+
+- **G (have GUIDs)** → **no search.** For each table, ask the user to provide the GUID
+  (the `id` value from ThoughtSpot, e.g. from a previous migration or from the UI). Use
+  the provided GUIDs in the model's `model_tables[]` entries and **skip generating Table
+  TMLs** for those tables. If the user has GUIDs for some tables but not all, treat the
+  remaining tables as **N** (create via Step 4.5 + 5a).
+
 - **E (exist)** → search to find the GUIDs — but **choose the scope first** (4c).
+  Searching ensures the tables are not duplicated and resolves their GUIDs automatically.
+
 - **? (not sure)** → search — **choose the scope first** (4c). Report what was / wasn't
   found; reuse the found ones, treat not-found tables as create (Step 4.5 + 5a).
+  This is the safest option when migrating into an instance that may already have
+  some of these tables.
 
 ### 4c — Choose the search scope (E and ? paths only)
 
