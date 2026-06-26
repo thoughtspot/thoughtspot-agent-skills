@@ -6,6 +6,7 @@ import os
 import random
 import re
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
@@ -289,6 +290,133 @@ class TableauClient:
 
         return all_ds
 
+    def download_datasource(self, datasource_id: str, output_dir: Path) -> dict:
+        """Download a published datasource's content from Tableau Server/Cloud.
+
+        Downloads the datasource as a TDSX (zip) file, extracts it, and returns
+        metadata about the extracted files. Validates CSV files for row integrity.
+
+        Returns a dict with keys: tdsx_path, extracted_dir, files, data_files,
+        and validation (per-file row counts + any corrupt lines found).
+        """
+        if not self._token:
+            self.signin()
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        path = f"{self._base_path()}/datasources/{datasource_id}/content"
+        # Accept: */* — the content endpoint returns binary (octet-stream);
+        # Tableau Cloud returns 406 if Accept is application/json or application/octet-stream.
+        resp = self.request("GET", path, headers={"Accept": "*/*"}, timeout=120)
+
+        content_disp = resp.headers.get("Content-Disposition", "")
+        if "filename=" in content_disp:
+            fname = content_disp.split("filename=")[-1].strip(' "\'')
+        else:
+            fname = f"{datasource_id}.tdsx"
+        tdsx_path = output_dir / fname
+
+        tdsx_path.write_bytes(resp.content)
+        typer.echo(f"Downloaded {len(resp.content)} bytes → {tdsx_path}", err=True)
+
+        extracted_dir = output_dir / tdsx_path.stem
+        data_files: list[dict] = []
+        all_files: list[str] = []
+
+        if zipfile.is_zipfile(tdsx_path):
+            extracted_dir.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(tdsx_path, "r") as zf:
+                zf.extractall(extracted_dir)
+                all_files = zf.namelist()
+
+            for file_name in all_files:
+                file_path = extracted_dir / file_name
+                if not file_path.is_file():
+                    continue
+                ext = file_path.suffix.lower()
+                if ext in (".csv", ".tsv", ".txt"):
+                    validation = self._validate_csv(file_path)
+                    data_files.append({
+                        "name": file_name,
+                        "path": str(file_path),
+                        "type": "csv",
+                        "validation": validation,
+                    })
+                elif ext == ".hyper":
+                    data_files.append({
+                        "name": file_name,
+                        "path": str(file_path),
+                        "type": "hyper",
+                    })
+        else:
+            all_files = [fname]
+            ext = tdsx_path.suffix.lower()
+            if ext in (".csv", ".tsv", ".txt"):
+                validation = self._validate_csv(tdsx_path)
+                data_files.append({
+                    "name": fname,
+                    "path": str(tdsx_path),
+                    "type": "csv",
+                    "validation": validation,
+                })
+
+        return {
+            "tdsx_path": str(tdsx_path),
+            "extracted_dir": str(extracted_dir),
+            "files": all_files,
+            "data_files": data_files,
+        }
+
+    @staticmethod
+    def _validate_csv(file_path: Path) -> dict:
+        """Check a CSV file for row integrity — column count consistency and corrupt lines.
+
+        Uses Python's csv module to handle quoted fields correctly (e.g.
+        "First Aid Kit, Office Size" is one field, not two).
+        """
+        import csv as csv_mod
+
+        corrupt_lines: list[dict] = []
+        total_lines = 0
+        header_col_count = 0
+        raw_lines: list[str] = []
+
+        with open(file_path, "r", errors="replace") as f:
+            raw_lines = f.readlines()
+            total_lines = len(raw_lines)
+
+        if total_lines == 0:
+            return {
+                "total_lines": 0,
+                "data_rows": 0,
+                "header_columns": 0,
+                "corrupt_lines": [],
+                "is_valid": True,
+            }
+
+        with open(file_path, "r", errors="replace") as f:
+            reader = csv_mod.reader(f)
+            for row_num, row in enumerate(reader, 1):
+                if row_num == 1:
+                    header_col_count = len(row)
+                    continue
+                if len(row) != header_col_count:
+                    raw_content = raw_lines[row_num - 1].strip() if row_num <= len(raw_lines) else ""
+                    corrupt_lines.append({
+                        "line": row_num,
+                        "expected_columns": header_col_count,
+                        "actual_columns": len(row),
+                        "content": raw_content[:120],
+                    })
+
+        return {
+            "total_lines": total_lines,
+            "data_rows": total_lines - 1,
+            "header_columns": header_col_count,
+            "corrupt_lines": corrupt_lines,
+            "is_valid": len(corrupt_lines) == 0,
+        }
+
     def datasource_fields(self, datasource_id: str) -> list:
         """Fetch field metadata for a datasource via the VizQL Data Service.
 
@@ -365,3 +493,21 @@ def datasource(
         ds_info["fields"] = field_list
 
     print(json.dumps(ds_info))
+
+
+@app.command()
+def download(
+    datasource_id: str = typer.Argument(..., help="Datasource UUID"),
+    profile: Optional[str] = _profile_option,
+    output_dir: str = typer.Option(".", "--output-dir", "-o",
+                                    help="Directory to save downloaded content"),
+) -> None:
+    """Download a published datasource's content (TDSX) and extract data files.
+
+    Downloads the datasource, extracts the TDSX archive, and validates any CSV
+    files for row integrity (column count consistency, corrupt lines).
+    """
+    p = _resolve_tableau_profile(profile)
+    client = TableauClient(p)
+    result = client.download_datasource(datasource_id, Path(output_dir))
+    print(json.dumps(result, indent=2))

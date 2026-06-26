@@ -880,10 +880,37 @@ not in the file.
 4. Merge the resolved fields into the parsed datasource structure, replacing opaque
    sqlproxy column references with real names and types. Proceed to Step 4.
 
+5. For **textscan** (CSV) or **excel-direct** sources: offer to download the source data
+   for warehouse provisioning. This is essential when the data only exists in Tableau Cloud
+   and has not been loaded into a warehouse:
+
+   ```bash
+   # Download the published datasource content
+   ts tableau download {datasource_id} --profile {PROFILE} --output-dir {output_dir}
+   ```
+
+   The command downloads the TDSX archive, extracts it, and **validates CSV files** for row
+   integrity (column count consistency, corrupt lines). Check the `validation` result:
+
+   - If `is_valid: false` — report the corrupt lines and offer to auto-fix (strip them)
+     before proceeding to warehouse load. The DunderMifflin live test (2026-06-26) found a
+     corrupt line (`1tou`) in a Tableau Cloud textscan download — this is a known Tableau
+     artifact.
+   - If `is_valid: true` — proceed; the CSV is clean for loading.
+
+   Surface: "The data for datasource '{name}' is a {type} file hosted on Tableau Cloud. It
+   needs to be loaded into a warehouse table before ThoughtSpot can connect to it. I've
+   downloaded and validated it — {row_count} rows, {status}. Shall I help set up the warehouse
+   table? (This will require a Snowflake/Databricks connection.)"
+
+   If the user says yes, this is the handoff point for **BL-010 (`ts-load-source-data`)** when
+   that skill is built. Until then, guide the user through manual warehouse provisioning
+   (CREATE TABLE + stage + COPY INTO for Snowflake, or INSERT VALUES for Databricks).
+
 ### Prerequisites
 
 - Tableau profile configured via `/ts-profile-tableau` (optional — skill degrades gracefully)
-- `ts` CLI v0.14.0+ (includes `ts tableau` commands)
+- `ts` CLI v0.15.0+ (includes `ts tableau` commands including `download`)
 
 ---
 
