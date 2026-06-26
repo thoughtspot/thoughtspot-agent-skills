@@ -1289,6 +1289,63 @@ def check_p16(model: dict, _config: AuditConfig) -> list[Finding]:
     return findings
 
 
+BRACKET_REF_RE = re.compile(r"\[([^\]]+)\]")
+
+
+def _formula_chain_depth(formulas: list[dict]) -> tuple[int, list[str]]:
+    """Find the longest formula-references-formula chain. Returns (depth, chain_names)."""
+    formula_names = {f.get("name", "") for f in formulas}
+    deps: dict[str, set[str]] = {}
+    for f in formulas:
+        fname = f.get("name", "")
+        expr = f.get("expr", "")
+        refs = set()
+        for ref in BRACKET_REF_RE.findall(expr):
+            if "::" not in ref and ref in formula_names and ref != fname:
+                refs.add(ref)
+        deps[fname] = refs
+
+    max_depth = 0
+    max_chain: list[str] = []
+    for start in formula_names:
+        visited: set[str] = set()
+        stack: list[tuple[str, list[str]]] = [(start, [start])]
+        while stack:
+            node, path = stack.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            if len(path) > max_depth:
+                max_depth = len(path)
+                max_chain = path[:]
+            for dep in deps.get(node, set()):
+                if dep not in visited:
+                    stack.append((dep, path + [dep]))
+
+    return max_depth, max_chain
+
+
+def check_p17(model: dict, _config: AuditConfig) -> list[Finding]:
+    """P17: Formula reference chains — formulas referencing formulas."""
+    formulas = _get_formulas(model)
+    if not formulas:
+        return []
+    depth, chain = _formula_chain_depth(formulas)
+    if depth <= 2:
+        return []
+    severity = "LOW" if depth > 3 else "INFO"
+    chain_str = " → ".join(chain)
+    return [Finding(
+        angle="P", check_id="P17", check_name="FORMULA_CHAIN_DEPTH",
+        severity=severity,
+        title=f"Formula chain {depth} deep: {chain_str}",
+        detail="Each link adds a computation layer at query time",
+        score=depth,
+        model_name=_model_name(model), model_guid=_model_guid(model),
+        recommendation="Consider inlining or materialising intermediate steps in the warehouse",
+    )]
+
+
 # ---------------------------------------------------------------------------
 # S — Security checks
 # ---------------------------------------------------------------------------
@@ -1559,6 +1616,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p14(m, corpus, config))
             findings.extend(check_p15(m, corpus, config))
             findings.extend(check_p16(m, config))
+            findings.extend(check_p17(m, config))
 
         if "S" in angles:
             findings.extend(check_s2(m, corpus, config))

@@ -39,6 +39,7 @@ from analyzer import (
     check_p14,
     check_p15,
     check_p16,
+    check_p17,
     check_s1,
     check_s8,
     check_s4,
@@ -52,6 +53,7 @@ from analyzer import (
     _normalise_expr,
     _join_depth,
     _count_if_nesting,
+    _formula_chain_depth,
 )
 
 
@@ -767,6 +769,71 @@ class TestP16:
     def test_p16_no_formulas_no_finding(self):
         m = _model()
         findings = check_p16(m, SPOTTER_CFG)
+        assert len(findings) == 0
+
+
+# ---------------------------------------------------------------------------
+# P17
+# ---------------------------------------------------------------------------
+
+class TestP17:
+    def test_formula_chain_depth_3(self):
+        formulas = [
+            _formula("A", "[B] + 1"),
+            _formula("B", "[C] * 2"),
+            _formula("C", "sum([Sales::Revenue])"),
+        ]
+        depth, chain = _formula_chain_depth(formulas)
+        assert depth == 3
+        assert len(chain) == 3
+
+    def test_formula_chain_depth_1(self):
+        formulas = [
+            _formula("A", "sum([Sales::Revenue])"),
+        ]
+        depth, chain = _formula_chain_depth(formulas)
+        assert depth == 1
+
+    def test_formula_chain_no_cross_refs(self):
+        formulas = [
+            _formula("A", "[Sales::col1] + 1"),
+            _formula("B", "[Sales::col2] * 2"),
+        ]
+        depth, chain = _formula_chain_depth(formulas)
+        assert depth == 1
+
+    def test_p17_deep_chain_info(self):
+        formulas = [
+            _formula("A", "[B] + 1"),
+            _formula("B", "[C] * 2"),
+            _formula("C", "sum([Sales::Revenue])"),
+        ]
+        m = _model(formulas=formulas)
+        findings = check_p17(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].check_id == "P17"
+        assert findings[0].severity == "INFO"
+        assert "3" in findings[0].title
+
+    def test_p17_very_deep_chain_low(self):
+        formulas = [
+            _formula("A", "[B] + 1"),
+            _formula("B", "[C] * 2"),
+            _formula("C", "[D] + 3"),
+            _formula("D", "sum([Sales::Revenue])"),
+        ]
+        m = _model(formulas=formulas)
+        findings = check_p17(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].severity == "LOW"
+
+    def test_p17_short_chain_no_finding(self):
+        formulas = [
+            _formula("A", "[B] + 1"),
+            _formula("B", "sum([Sales::Revenue])"),
+        ]
+        m = _model(formulas=formulas)
+        findings = check_p17(m, SPOTTER_CFG)
         assert len(findings) == 0
 
 

@@ -182,6 +182,7 @@ is deliberate, while "test" in a name is ambiguous.
 | P14 | RLS formula complexity | Functions in RLS expressions (if, contains, concat, etc.) prevent index and partition pruning — forces row-by-row evaluation. | Table: `table.rls_rules.rules[].expr` for function patterns | Count of function-wrapped expressions | MEDIUM |
 | P15 | RLS column casing | VARCHAR columns used in RLS without `value_casing` set to UPPER or LOWER — database cannot use indexes efficiently for RLS filtering. | Table: `table.rls_rules` column refs → `columns[].properties.value_casing` | Count of uncased VARCHAR RLS columns | MEDIUM |
 | P16 | Formula nesting depth | Deeply nested `if()` conditionals in model formulas — each level adds branching in the ThoughtSpot calculation engine. | Model: `formulas[].expr` count of `if(` occurrences | Max depth per formula. INFO > 3. LOW > 5. | INFO / LOW |
+| P17 | Formula reference chains | Formulas referencing other formulas — each link adds a calculation layer at query time. Bracket refs without `::` that match a formula name = cross-reference. | Model: `formulas[].expr` for `[FormulaName]` refs matching `formulas[].name` | Chain depth (BFS). INFO > 2. LOW > 3. | INFO / LOW |
 
 ### Scalar formula thresholds
 
