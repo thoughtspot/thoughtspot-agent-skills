@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-26
+- feat: add `ts load` CLI command group — schema inference, synthetic data generation, Snowflake loading
+- chore: bump ts-cli to v0.15.0
 - chore: bump ts-cli to v0.14.0 — register `ts tableau` command group (signin, datasources, datasource); add `--tableau` flag to `ts profiles list`
 - feat: add `ts-profile-tableau` skill v1.0.0 — Tableau Server/Cloud credential setup (password + PAT auth), profile management (add/list/test/remove), stored in `~/.claude/tableau-profiles.json`
 - feat: add `ts tableau` CLI commands (ts-cli 0.14.0) — `signin` (PAT + password auth), `datasources` (list/search with auto-pagination), `datasource` (detail + `--fields` for VizQL read-metadata). TableauClient with 401 retry and retryable-error backoff

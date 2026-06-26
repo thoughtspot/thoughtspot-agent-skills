@@ -822,3 +822,66 @@ ts tml export e61c7c4c-68a4-4174-b393-a0104ae3bd00 --fqn --parse \
 ts metadata search --subtype WORKSHEET --all \
   | jq -r '.[].metadata_name'
 ```
+
+---
+
+## `ts load` — Source data loading
+
+### `ts load infer`
+
+Infer table schemas from source data (CSV directory, Tableau download JSON, or manifest).
+
+```
+ts load infer --source <path>
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--source`, `-s` | Path to CSV directory, Tableau download JSON, or manifest JSON (required) |
+
+**Output:** JSON with `source_type` and `tables[]` array containing `table_name`, `row_count`, and `columns[]` with `name`, `db_column_name`, `inferred_type`.
+
+### `ts load generate`
+
+Generate synthetic sample data from a schema definition.
+
+```
+ts load generate --source schema.json --rows 500 --output ./generated/
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source`, `-s` | — | Path to schema JSON or `ts load infer` output (required) |
+| `--rows`, `-r` | `100` | Number of rows per table |
+| `--output`, `-o` | `.` | Directory to write generated CSV files |
+
+**Output:** JSON array of `{table_name, rows, file}` per generated table.
+
+### `ts load snowflake`
+
+Load CSV data into Snowflake tables. Auth via Snowflake profile (`~/.claude/snowflake-profiles.json`).
+
+```
+ts load snowflake --source ./csvs/ --profile Production \
+    --database AGENT_SKILLS --schema SALES
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source`, `-s` | — | Path to CSV directory, download JSON, or manifest (required) |
+| `--profile`, `-p` | — | Snowflake profile name (required) |
+| `--database`, `-d` | — | Target database (required) |
+| `--schema` | — | Target schema (required) |
+| `--if-exists` | `error` | Action when table exists: `error`, `skip`, `replace` |
+| `--warehouse`, `-w` | from profile | Snowflake warehouse override |
+| `--role`, `-r` | from profile | Snowflake role override |
+| `--generate-sample` | `false` | Generate synthetic data for schema-only sources |
+| `--rows` | `100` | Rows to generate (with `--generate-sample`) |
+
+**Output:** JSON with `database`, `schema`, `profile`, and `tables[]` array containing `table_name`, `status`, `rows_loaded`, `columns`, `source_file`.
