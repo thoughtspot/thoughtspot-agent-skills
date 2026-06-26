@@ -1181,6 +1181,34 @@ def check_p13(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding
     return findings
 
 
+def check_p14(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding]:
+    """P14: RLS formula complexity — functions prevent index/partition use."""
+    findings = []
+    name = _model_name(model)
+    guid = _model_guid(model)
+    table_tmls = corpus.table_tmls_by_model.get(guid or "", [])
+
+    for ttl in table_tmls:
+        tbl_name = ttl.get("table", {}).get("name", "?")
+        rls = ttl.get("table", {}).get("rls_rules", {})
+        if not rls:
+            continue
+        for rule in rls.get("rules", []):
+            expr = rule.get("expr", "")
+            match = RLS_PERF_FUNCTION_RE.search(expr)
+            if match:
+                func_name = match.group(1).upper()
+                findings.append(Finding(
+                    angle="P", check_id="P14", check_name="RLS_FUNCTION_PERF",
+                    severity="MEDIUM",
+                    title=f"Function {func_name}() in RLS on {tbl_name}",
+                    detail=f"Expression: {expr[:120]}. Functions in RLS prevent index/partition pruning.",
+                    model_name=name, model_guid=guid,
+                    recommendation="Materialise the function result as a warehouse column and filter on that",
+                ))
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # S — Security checks
 # ---------------------------------------------------------------------------
@@ -1308,6 +1336,13 @@ def _get_table_col_types(table_tml: dict) -> dict[str, str]:
 RLS_FUNCTION_RE = re.compile(
     r"\b(UPPER|LOWER|TRIM|SUBSTR|SUBSTRING|CONCAT|REPLACE|CAST|CONVERT|COALESCE|"
     r"NVL|IFNULL|TO_CHAR|TO_VARCHAR|TO_NUMBER|TO_DATE|DATE_TRUNC|LEFT|RIGHT)\s*\(",
+    re.I,
+)
+
+RLS_PERF_FUNCTION_RE = re.compile(
+    r"\b(UPPER|LOWER|TRIM|SUBSTR|SUBSTRING|CONCAT|REPLACE|CAST|CONVERT|"
+    r"COALESCE|NVL|IFNULL|TO_CHAR|TO_VARCHAR|TO_NUMBER|TO_DATE|DATE_TRUNC|"
+    r"LEFT|RIGHT|CONTAINS|STARTS_WITH|ENDS_WITH|IF|IN)\s*\(",
     re.I,
 )
 
@@ -1441,6 +1476,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p10(m, config))
             findings.extend(check_p11(m, config))
             findings.extend(check_p13(m, corpus, config))
+            findings.extend(check_p14(m, corpus, config))
 
         if "S" in angles:
             findings.extend(check_s2(m, corpus, config))
