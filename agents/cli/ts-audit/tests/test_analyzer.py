@@ -22,6 +22,7 @@ from analyzer import (
     check_d6,
     check_d9,
     check_d10,
+    check_d11,
     check_d7,
     check_d8,
     check_h1,
@@ -55,6 +56,8 @@ from analyzer import (
     _join_depth,
     _count_if_nesting,
     _formula_chain_depth,
+    _classify_table_role,
+    _check_fanout_mitigations,
 )
 
 
@@ -916,3 +919,128 @@ class TestIntegration:
         angles = {f.angle for f in findings}
         assert "A" not in angles
         assert "D" not in angles
+
+
+# ---------------------------------------------------------------------------
+# D11 — Fan-out join risk
+# ---------------------------------------------------------------------------
+
+class TestD11:
+    def test_d11_fact_to_dim_no_finding(self):
+        """Correct star schema: fact sources join to dimension (MANY_TO_ONE)."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
+                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
+                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
+                _col("Region", column_id="Region::name", column_type="ATTRIBUTE"),
+            ],
+            model_tables=[
+                _mt("Sales", joins=[{"with": "Region", "type": "LEFT_OUTER",
+                                     "cardinality": "MANY_TO_ONE",
+                                     "on": "[Sales::region_id] = [Region::id]"}]),
+                _mt("Region"),
+            ],
+        )
+        findings = check_d11(m, SPOTTER_CFG)
+        assert len(findings) == 0
+
+    def test_d11_dim_to_fact_reversed(self):
+        """Reversed: dimension sources join to fact."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
+                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
+                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
+                _col("Region", column_id="Region::name", column_type="ATTRIBUTE"),
+            ],
+            model_tables=[
+                _mt("Sales"),
+                _mt("Region", joins=[{"with": "Sales", "type": "LEFT_OUTER",
+                                      "cardinality": "ONE_TO_MANY",
+                                      "on": "[Region::id] = [Sales::region_id]"}]),
+            ],
+        )
+        findings = check_d11(m, SPOTTER_CFG)
+        assert len(findings) >= 1
+        assert any(f.severity == "MEDIUM" for f in findings)
+
+    def test_d11_one_to_many_cardinality(self):
+        """ONE_TO_MANY is explicit fan-out regardless of table roles."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
+                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
+                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
+                _col("Rate", column_id="Rates::rate", column_type="ATTRIBUTE"),
+            ],
+            model_tables=[
+                _mt("Sales", joins=[{"with": "Rates", "type": "LEFT_OUTER",
+                                     "cardinality": "ONE_TO_MANY",
+                                     "on": "[Sales::currency] = [Rates::source]"}]),
+                _mt("Rates"),
+            ],
+        )
+        findings = check_d11(m, SPOTTER_CFG)
+        assert len(findings) >= 1
+        assert any(f.check_name == "FANOUT_CARDINALITY" for f in findings)
+
+    def test_d11_fanout_name_match(self):
+        """Target table with conversion/rate naming pattern."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
+                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
+                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
+                _col("Rate", column_id="Currency_Rate::rate", column_type="ATTRIBUTE"),
+            ],
+            model_tables=[
+                _mt("Sales", joins=[{"with": "Currency_Rate", "type": "LEFT_OUTER",
+                                     "cardinality": "MANY_TO_ONE",
+                                     "on": "[Sales::ccy] = [Currency_Rate::source]"}]),
+                _mt("Currency_Rate"),
+            ],
+        )
+        findings = check_d11(m, SPOTTER_CFG)
+        assert len(findings) >= 1
+        assert any(f.check_name == "FANOUT_NAME" for f in findings)
+
+    def test_d11_fanout_mitigated_by_filter(self):
+        """Fan-out name match but model has a filter on the target table — severity reduced."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
+                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
+                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
+                _col("Rate", column_id="Currency_Rate::rate", column_type="ATTRIBUTE"),
+                _col("Target CCY", column_id="Currency_Rate::target_ccy", column_type="ATTRIBUTE"),
+            ],
+            model_tables=[
+                _mt("Sales", joins=[{"with": "Currency_Rate", "type": "LEFT_OUTER",
+                                     "cardinality": "ONE_TO_MANY",
+                                     "on": "[Sales::ccy] = [Currency_Rate::source]"}]),
+                _mt("Currency_Rate"),
+            ],
+            filters=[{"column": "Currency_Rate::target_ccy", "oper": "EQ", "values": ["USD"]}],
+        )
+        findings = check_d11(m, SPOTTER_CFG)
+        mitigated = [f for f in findings if "mitigated" in f.detail.lower()]
+        assert len(mitigated) >= 1
+        assert all(f.severity == "INFO" for f in mitigated)
+
+    def test_d11_classify_table_role(self):
+        m = _model(columns=[
+            _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+            _col("Qty", column_id="Sales::qty", column_type="MEASURE"),
+            _col("Disc", column_id="Sales::disc", column_type="MEASURE"),
+            _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
+            _col("Region", column_id="Region::name", column_type="ATTRIBUTE"),
+        ])
+        roles = _classify_table_role(m)
+        assert roles["Sales"] == "fact"
+        assert roles["Region"] == "dimension"

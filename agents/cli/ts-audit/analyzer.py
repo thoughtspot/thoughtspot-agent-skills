@@ -239,6 +239,11 @@ SQL_PASSTHROUGH_RE = re.compile(
     r"sql_(int|string|bool|date|double)_aggregate_op", re.I
 )
 
+FANOUT_NAME_RE = re.compile(
+    r"(RATE|CURRENCY|EXCHANGE|FX|CONVERSION|XREF|CROSS_REF|BRIDGE|MAPPING)",
+    re.I,
+)
+
 
 def _detect_pii(name: str) -> tuple[str, str] | None:
     lower = name.lower()
@@ -741,6 +746,130 @@ def check_d10(model: dict, _config: AuditConfig) -> list[Finding]:
             model_name=_model_name(model), model_guid=_model_guid(model),
             recommendation="" if is_bridge else "Remove from model or select columns",
         ))
+    return findings
+
+
+def _classify_table_role(model: dict) -> dict[str, str]:
+    """Classify each table as 'fact', 'dimension', or 'unknown' using D6 heuristic."""
+    cbt = _columns_by_table(model)
+    roles: dict[str, str] = {}
+    for tname, cols in cbt.items():
+        measures = sum(
+            1 for c in cols
+            if (c.get("properties", {}) or {}).get("column_type", "") == "MEASURE"
+        )
+        if measures > 3:
+            roles[tname] = "fact"
+        elif cols:
+            roles[tname] = "dimension"
+        else:
+            roles[tname] = "unknown"
+    for mt in _get_model_tables(model):
+        tname = mt.get("name", "")
+        if tname not in roles:
+            roles[tname] = "unknown"
+    return roles
+
+
+def _check_fanout_mitigations(model: dict, target_table: str) -> bool:
+    """Check if the model has parameters/filters/formulas that constrain a target table."""
+    m = model.get("model", {})
+    params = m.get("parameters", [])
+    filters = m.get("filters", [])
+    formulas = m.get("formulas", [])
+
+    filter_refs_target = any(
+        target_table in (f.get("column", "") or "")
+        for f in filters
+    )
+    if filter_refs_target:
+        return True
+
+    if params:
+        all_exprs = " ".join(f.get("expr", "") for f in formulas)
+        all_filter_cols = " ".join(f.get("column", "") or "" for f in filters)
+        combined = all_exprs + all_filter_cols
+        if target_table in combined:
+            return True
+
+    return False
+
+
+def check_d11(model: dict, _config: AuditConfig) -> list[Finding]:
+    """D11: Fan-out join risk — direction, cardinality, naming + mitigation."""
+    findings = []
+    name = _model_name(model)
+    guid = _model_guid(model)
+    roles = _classify_table_role(model)
+
+    for src_table, join in _all_joins(model):
+        target = join.get("with", "")
+        cardinality = join.get("cardinality", "")
+        src_role = roles.get(src_table, "unknown")
+        tgt_role = roles.get(target, "unknown")
+        mitigated = _check_fanout_mitigations(model, target)
+
+        if cardinality == "ONE_TO_MANY":
+            severity = "INFO" if mitigated else "MEDIUM"
+            detail = (f"ONE_TO_MANY join: {src_table} → {target}. "
+                      f"Each source row produces multiple output rows.")
+            if mitigated:
+                detail += " Fan-out risk appears mitigated by parameter/filter — confirm."
+            else:
+                detail += " No visible constraint — confirm users select a single value."
+            findings.append(Finding(
+                angle="D", check_id="D11", check_name="FANOUT_CARDINALITY",
+                severity=severity,
+                title=f"ONE_TO_MANY join: {src_table} → {target}",
+                detail=detail,
+                model_name=name, model_guid=guid,
+                recommendation="Add a parameter or filter to constrain the target table to a single value",
+            ))
+
+        if src_role == "dimension" and tgt_role == "fact":
+            severity = "INFO" if mitigated else "MEDIUM"
+            detail = (f"Reversed join direction: dimension '{src_table}' sources join to "
+                      f"fact '{target}'. Star schema joins should go fact → dimension.")
+            if mitigated:
+                detail += " Fan-out risk appears mitigated by parameter/filter — confirm."
+            findings.append(Finding(
+                angle="D", check_id="D11", check_name="FANOUT_REVERSED_DIRECTION",
+                severity=severity,
+                title=f"Reversed join: {src_table} (dim) → {target} (fact)",
+                detail=detail,
+                model_name=name, model_guid=guid,
+                recommendation="Review join direction — facts should source joins to dimensions",
+            ))
+
+        if src_role == "fact" and tgt_role == "fact":
+            severity = "INFO" if mitigated else "MEDIUM"
+            findings.append(Finding(
+                angle="D", check_id="D11", check_name="FANOUT_FACT_TO_FACT",
+                severity=severity,
+                title=f"Fact-to-fact join: {src_table} → {target}",
+                detail=f"Two fact tables joined — risk of row multiplication. "
+                       f"{'Fan-out appears mitigated.' if mitigated else 'No visible constraint.'}",
+                model_name=name, model_guid=guid,
+                recommendation="Review whether an intermediate dimension or bridge table is needed",
+            ))
+
+        if FANOUT_NAME_RE.search(target):
+            already_flagged = any(
+                f.check_id == "D11" and target in f.title
+                for f in findings
+            )
+            if not already_flagged:
+                severity = "INFO"
+                findings.append(Finding(
+                    angle="D", check_id="D11", check_name="FANOUT_NAME",
+                    severity=severity,
+                    title=f"Potential conversion/rate table: {target}",
+                    detail=f"Join to '{target}' — if this is a conversion/rate table, "
+                           f"confirm a parameter or filter constrains it to a single target value",
+                    model_name=name, model_guid=guid,
+                    recommendation="Add a parameter for target value selection if not already present",
+                ))
+
     return findings
 
 
@@ -1619,6 +1748,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_d6(m, config))
             findings.extend(check_d9(m, config))
             findings.extend(check_d10(m, config))
+            findings.extend(check_d11(m, config))
 
         if "H" in angles:
             findings.extend(check_h1(m, config))
