@@ -1091,8 +1091,35 @@ If only one connection exists in total, auto-select it and confirm regardless of
 Save the selected connection's exact `name` value as `{connection_name}`.
 
 **Resolving db / schema / table for new tables.** Each new table needs the `{db}`,
-`{schema}`, and `{db_table}` it maps to on the chosen connection. Prefer the cheapest
-source:
+`{schema}`, and `{db_table}` it maps to on the chosen connection. The Tableau workbook
+contains the *source environment's* database paths — these may not match the target
+ThoughtSpot connection (e.g. a consultant running the migration in their own environment
+with a different database). Always confirm before using them.
+
+Show the TWB-extracted paths and ask:
+
+```
+The Tableau workbook references these source database paths:
+  - {source_db}.{source_schema}.{table_1}
+  - {source_db}.{source_schema}.{table_2}
+  …
+
+Do these match your ThoughtSpot connection's database and schema?
+  Y  Yes — use these paths as-is
+  D  Different database/schema — I'll provide the correct values
+  T  Per-table — some match, some don't (I'll confirm each)
+
+Enter Y / D / T:
+```
+
+- **Y** → use the TWB-extracted `{db}`, `{schema}`, and `{db_table}` values directly.
+- **D** → ask for the target `{db}` and `{schema}` once. Apply them to all tables (table
+  names stay the same unless the user overrides). This is the common consultant scenario
+  where all tables live in the same database but under a different name.
+- **T** → walk through each table and confirm or override its `{db}`, `{schema}`, and
+  `{db_table}`. Use this when tables span multiple databases or schemas in the target.
+
+If the user doesn't know the correct paths:
 
 1. **Ask the user** for the db / schema (and table name if it differs from the source) —
    usually instant, and they know it.
