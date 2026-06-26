@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from report import generate_html_report, ReportMeta, _worst_severity, _model_stats
+from report import generate_html_report, ReportMeta, _worst_severity, _model_stats, _disambiguate_model_names, CHECK_DESCRIPTIONS
 
 
 SAMPLE_FINDINGS = [
@@ -140,3 +140,95 @@ class TestGenerateReport:
         html = generate_html_report(xss_findings)
         assert '<script>alert("xss")</script>' not in html
         assert "&lt;script&gt;" in html
+
+    def test_check_descriptions_present(self):
+        """Each check section in the detail view has a description paragraph."""
+        html = generate_html_report(SAMPLE_FINDINGS)
+        assert 'class="check-desc"' in html
+        assert "Spotter" in html  # A1 description mentions Spotter
+
+    def test_disambiguate_same_name_models(self):
+        """Same-name models with different GUIDs get numbered suffixes."""
+        findings = [
+            {"angle": "D", "check_id": "D3", "check_name": "OUTER_JOIN",
+             "severity": "HIGH", "title": "FULL OUTER join: A → B",
+             "detail": "Performance risk", "model_name": "GTM", "model_guid": "g1"},
+            {"angle": "D", "check_id": "D3", "check_name": "OUTER_JOIN",
+             "severity": "HIGH", "title": "FULL OUTER join: A → B",
+             "detail": "Performance risk", "model_name": "GTM", "model_guid": "g2"},
+            {"angle": "D", "check_id": "D3", "check_name": "OUTER_JOIN",
+             "severity": "HIGH", "title": "FULL OUTER join: C → D",
+             "detail": "Performance risk", "model_name": "Sales", "model_guid": "s1"},
+        ]
+        result = _disambiguate_model_names(findings)
+        gtm_names = sorted(set(r["model_name"] for r in result if "GTM" in r["model_name"]))
+        assert gtm_names == ["GTM #1", "GTM #2"]
+        sales = [r for r in result if r["model_name"] == "Sales"]
+        assert len(sales) == 1
+
+    def test_disambiguate_no_collision(self):
+        """Unique model names are unchanged."""
+        findings = [
+            {"angle": "A", "check_id": "A1", "check_name": "DESC",
+             "severity": "HIGH", "title": "Low", "detail": "",
+             "model_name": "GTM", "model_guid": "g1"},
+            {"angle": "A", "check_id": "A1", "check_name": "DESC",
+             "severity": "HIGH", "title": "Low", "detail": "",
+             "model_name": "Sales", "model_guid": "s1"},
+        ]
+        result = _disambiguate_model_names(findings)
+        names = sorted(r["model_name"] for r in result)
+        assert names == ["GTM", "Sales"]
+
+    def test_disambiguate_separate_model_cards(self):
+        """Disambiguated models produce separate model cards and distinct rows."""
+        findings = [
+            {"angle": "A", "check_id": "A1", "check_name": "DESC",
+             "severity": "HIGH", "title": "Low coverage",
+             "detail": "12%", "model_name": "GTM", "model_guid": "g1"},
+            {"angle": "A", "check_id": "A1", "check_name": "DESC",
+             "severity": "HIGH", "title": "Low coverage",
+             "detail": "12%", "model_name": "GTM", "model_guid": "g2"},
+        ]
+        html = generate_html_report(findings)
+        assert "GTM #1" in html
+        assert "GTM #2" in html
+        assert html.count('<tr data-sev="HIGH"') == 2
+        assert 'data-model="GTM #1"' in html
+        assert 'data-model="GTM #2"' in html
+
+    def test_summary_shows_all_checks(self):
+        """Summary table includes rows for every check in CHECK_DESCRIPTIONS, not just those with findings."""
+        html = generate_html_report(SAMPLE_FINDINGS)
+        for cid in CHECK_DESCRIPTIONS:
+            assert f'>{cid}</td>' in html, f"Missing summary row for {cid}"
+
+    def test_summary_zero_findings_row(self):
+        """Checks with zero findings show GREEN severity and 0 count."""
+        html = generate_html_report(SAMPLE_FINDINGS)
+        assert 'data-sev="GREEN" data-count="0"' in html
+
+    def test_summary_has_descriptions(self):
+        """Summary table contains the description column."""
+        html = generate_html_report(SAMPLE_FINDINGS)
+        assert 'class="summary-desc"' in html
+        assert "Spotter" in html
+
+    def test_summary_filter_controls(self):
+        """Summary has angle, severity, and issues-only filter controls."""
+        html = generate_html_report(SAMPLE_FINDINGS)
+        assert 'id="summary-angle-filter"' in html
+        assert 'id="summary-sev-filter"' in html
+        assert 'id="summary-issues-only"' in html
+
+    def test_sidebar_summary_link(self):
+        """Sidebar contains a link to the checks summary."""
+        html = generate_html_report(SAMPLE_FINDINGS)
+        assert 'id="nav-summary"' in html
+        assert "Checks Summary" in html
+
+    def test_summary_filter_js(self):
+        """JS functions for summary filtering are embedded."""
+        html = generate_html_report(SAMPLE_FINDINGS)
+        assert "function filterSummaryTable" in html
+        assert "function scrollToSummary" in html

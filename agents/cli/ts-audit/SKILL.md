@@ -210,16 +210,16 @@ the presence of `worksheetVersion` in the response.
 ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile "{profile_name}"
 ```
 
-**For D angle — discover Sets via dependents:**
-
-For each model, query dependents to discover Sets (Cohorts):
+**For D or H angle — query dependents for each model:**
 
 ```bash
 ts metadata dependents "{model_guid}" --profile "{profile_name}"
 ```
 
-Sets appear in the `COHORT` bucket. Sets are NOT directly searchable via
-`ts metadata search` — only discoverable through the dependents API.
+Store the full response in `corpus.dependents[model_guid]`. D angle uses
+dependents to discover Sets (COHORT bucket — not searchable via
+`ts metadata search`). H angle uses dependents for H4 (orphan model
+detection) and H8 (formula promotion candidates).
 
 **For H angle (formula checks) — also enumerate answers:**
 
@@ -364,6 +364,15 @@ Note: bridge tables with zero columns but hidden columns are a legitimate patter
 the hidden column exists to ensure query plan correctness without cluttering the UI.
 See H3 exception (b).
 
+**D11. Fan-out join risk** — joins that risk row multiplication: reversed direction
+relative to table roles, fact-to-fact joins, ONE_TO_MANY cardinality, or
+conversion/rate table naming patterns. Severity reduced if mitigated by a parameter,
+model filter, or conditional formula.
+
+**D12. Conformed dimension divergence** — same physical column (`db_column_name`)
+classified differently across models (e.g. ATTRIBUTE in one, MEASURE in another).
+Causes inconsistent aggregation and search behaviour for the same underlying data.
+
 ---
 
 ### 5-H. Human Readiness
@@ -441,9 +450,6 @@ ATTRIBUTEs. Wastes storage, pollutes Spotter suggestions. Note: ID columns store
 as numbers should be ATTRIBUTEs (not MEASUREs) — the issue is the indexing, not the
 column type.
 
-**P10. RLS bypass as exception** — `is_bypass_rls: true`. Legitimate use cases exist
-but should be the exception.
-
 **P11. Secure suggestions overhead** — many indexed columns on a Spotter-enabled model.
 Informational only — helps identify where selective de-indexing improves response time.
 
@@ -467,8 +473,9 @@ no masking formula exists (e.g. `if(is_group_member(...))` referencing the PII c
 **S5. Credentials in analytics** — columns matching credential patterns. Severity
 CRITICAL — should never be in an analytics model.
 
-**S6. Conformed dimension divergence** — same `db_column_name` across models maps to
-different `column_type`. Inconsistent classification = different access behaviour.
+**S10. RLS bypass as exception** — `is_bypass_rls: true` disables Row-Level Security,
+meaning all users see all rows regardless of RLS rules. Legitimate for aggregate-only
+models but should be the exception.
 
 ---
 

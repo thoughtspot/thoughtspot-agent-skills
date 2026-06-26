@@ -77,6 +77,7 @@ Two profiles with different pass/fail thresholds. User selects at audit start.
 | D9 | SQL pass-through function usage | `sql_*_aggregate_op` formulas. Legitimate for timezone conversions; overuse indicates TS formula limitations being worked around. | Model: `formulas[].expr` regex for `sql_int_aggregate_op`, `sql_string_aggregate_op`, `sql_bool_aggregate_op` | Count / total formulas | LOW (flag if > 20%) |
 | D10 | Zero-column tables | Tables in `model_tables[]` with no columns referencing them via `columns[].column_id`. If the table participates in joins (bridge/intermediary), flag as INFO — may cause query generation issues. If the table is a leaf node (no joins in either direction), flag as MEDIUM — no reason to include it. | Model: `columns[].column_id` split on `::` → table name. Cross-reference against `model_tables[].name`. For leaf detection: check `joins[].with` and which tables source joins. | Count by role (bridge vs leaf) | Bridge = INFO, Leaf = MEDIUM |
 | D11 | Fan-out join risk | Joins that risk row multiplication — reversed direction relative to table roles (dimension sources join to fact), fact-to-fact joins, ONE_TO_MANY cardinality, or conversion/rate table naming patterns. Severity reduced if mitigated by a parameter, model filter, or conditional formula. | Model: `model_tables[].joins[]` cardinality + `columns[].properties.column_type` table role classification + parameter/filter/formula mitigation check | Signal + mitigation → severity | MEDIUM (unmitigated) / INFO (mitigated or naming-only) |
+| D12 | Conformed dimension divergence | Same `db_column_name` across models classified differently (e.g. ATTRIBUTE in one model, MEASURE in another). Causes inconsistent aggregation and search behaviour for the same underlying data. | Model: group `columns[].db_column_name` across all models, check `column_type` | Count of divergent columns | MEDIUM |
 
 ### D1 complexity thresholds
 
@@ -176,7 +177,6 @@ is deliberate, while "test" in a name is ambiguous.
 | P7 | Join depth | Deep chains degrade query plan complexity. > 5 = consider splitting. | Model (same data as D1 join depth) | Depth value | HIGH if > 5 |
 | P8 | Column sprawl | > 75 columns: wider GROUP BY, more complex plans beyond the Spotter impact. | Model: `len(columns[])` | Count | MEDIUM if > 75 |
 | P9 | High-cardinality attribute indexing | GUIDs, transaction IDs indexed as ATTRIBUTEs — wastes storage, pollutes Spotter suggestions with meaningless values. ID columns stored as numbers should be ATTRIBUTEs (not MEASUREs) — the issue is the indexing. | Model: `columns[].properties.index_type` + name regex (`_id$`, `_guid$`, `_uuid$`, `transaction_id`, `row_id`, `surrogate_key`) | Count | MEDIUM |
-| P10 | RLS bypass as exception | `is_bypass_rls: true` disables Row-Level Security. Legitimate use cases exist (aggregate-only models) but should be the exception. | Model: `model.properties.is_bypass_rls` | Boolean | MEDIUM (flag as exception) |
 | P11 | Secure suggestions overhead | Many indexed columns on a Spotter-enabled model. Each indexed column adds a DB lookup for suggestions. Informational — indexing is correct for searchable columns. | Model: `columns[].properties.index_type` + `model.properties.spotter_config.is_spotter_enabled` | Count of indexed columns | INFO (> 30 indexed on Spotter model) |
 | P11 | Secure suggestions overhead | Many indexed columns on a Spotter-enabled model. Each indexed column adds a DB lookup for suggestions. Informational — indexing is correct for searchable columns. | Model: `columns[].properties.index_type` + `model.spotter_config.is_spotter_enabled` | Count of indexed columns | INFO (> 30 indexed on Spotter model) |
 | P13 | RLS rule density | Many RLS rules per table — each evaluates independently on every query, cost compounds linearly. | Table: `table.rls_rules.rules[]` count per table | Count. MEDIUM > 3. HIGH > 6. | MEDIUM / HIGH |
@@ -205,9 +205,9 @@ is deliberate, while "test" in a name is ambiguous.
 | S3 | Column Level Security gaps | PII columns without CLS rules or data masking formulas. CLS is not in standard TML export — requires Beta flag `export_column_security_rules` (open item OI-10). Heuristic fallback: flag PII where no masking formula exists. | Model: `formulas[].expr` checked for masking patterns (`if(is_group_member(...))`, hash/redact referencing PII names) | Count of unprotected PII | HIGH |
 | S4 | RLS bypass + PII | `is_bypass_rls: true` AND model contains PII columns. All users see all rows including PII. | Model: `model.properties.is_bypass_rls` + S1 | Boolean (bypass + PII) | HIGH |
 | S5 | Credentials in analytics | Columns matching credential patterns (`password`, `secret_key`, `api_key`, `token`). Should never be in an analytics model. | Model: `columns[].name` (credential regex) | Count | CRITICAL |
-| S6 | Conformed dimension divergence | Same `db_column_name` across models maps to different `column_type`. Inconsistent classification can cause different access behaviour for the same data. | Model: group `columns[].db_column_name` across all models, check `column_type` | Count of divergent columns | MEDIUM |
 | S8 | RLS column data type quality | RLS rules filtering on VARCHAR columns are 2–5× slower than integer filters. Identifies tables where RLS expressions reference string-type columns. | Table: `table.rls_rules.rules[].expr` column references → `table.columns[].db_column_properties.data_type` | Count of VARCHAR RLS columns | MEDIUM |
 | S9 | RLS expression complexity | Functions wrapping columns in RLS expressions (e.g. `UPPER([path::col])`) prevent filter pushdown to the database engine. The function must evaluate row-by-row in ThoughtSpot. | Table: `table.rls_rules.rules[].expr` checked for function calls (`UPPER`, `TRIM`, `CAST`, etc.) | Count of function-wrapped RLS expressions | HIGH |
+| S10 | RLS bypass as exception | `is_bypass_rls: true` disables Row-Level Security — all users see all rows regardless of RLS rules. Legitimate for aggregate-only models but should be the exception. | Model: `model.properties.is_bypass_rls` | Boolean | MEDIUM (flag as exception) |
 
 ### PII regex patterns (case-insensitive)
 
@@ -233,7 +233,7 @@ Some data surfaces in two angles with different framing:
 | Progressive joins | D4 (modeling anti-pattern) | P4 (performance impact) |
 | VARCHAR join keys | D2 (modeling quality) | P6 (query speed) |
 | Join depth | D1 metric (complexity) | P7 (query plan degradation) |
-| RLS bypass | P10 (exception review) | S4 (PII + bypass = risk) |
+| RLS bypass | S10 (exception review) | S4 (PII + bypass = risk) |
 | RLS column type | S8 (VARCHAR = slow filter) | S2 (PII indexed + no RLS) |
 | RLS expression | S9 (function prevents pushdown) | S8 (column type quality) |
 

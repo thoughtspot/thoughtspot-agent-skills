@@ -69,7 +69,7 @@ SAMPLE_FINDINGS = [
         "objects": [{"name": "CUSTOMER", "guid": "t1"}, {"name": "CUSTOMER_v2", "guid": "t2"}],
     },
     {
-        "check_id": "S6", "check_name": "CONFORMED_DIM_DIVERGENCE",
+        "check_id": "D12", "check_name": "CONFORMED_DIM_DIVERGENCE",
         "severity": "MEDIUM", "title": "Divergent classification: Revenue",
         "detail": "ATTRIBUTE in GTM; MEASURE in Sales",
     },

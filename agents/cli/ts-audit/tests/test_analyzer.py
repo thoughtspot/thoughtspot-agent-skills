@@ -34,7 +34,7 @@ from analyzer import (
     check_p5,
     check_p8,
     check_p9,
-    check_p10,
+    check_s10,
     check_p11,
     check_p13,
     check_p14,
@@ -42,11 +42,13 @@ from analyzer import (
     check_p16,
     check_p17,
     check_p18,
+    check_p19,
+    check_h11,
     check_s1,
     check_s8,
     check_s4,
     check_s5,
-    check_s6,
+    check_d12,
     check_s9,
     run_audit,
     summarise,
@@ -342,6 +344,32 @@ class TestDChecks:
         assert len(f) == 1
         assert "Orphan" in f[0].title
 
+    def test_d5_formula_ref_not_orphan(self):
+        """A table with no joins but referenced in formulas is not an orphan."""
+        m = _model(
+            model_tables=[
+                _mt("Fact", joins=[{"with": "Dim", "on": "", "type": "INNER"}]),
+                _mt("Dim"),
+                _mt("Stats"),
+            ],
+            formulas=[{"name": "Avg", "expr": "[Stats::Value] / [Stats::Count]"}],
+        )
+        f = check_d5(m, SPOTTER_CFG)
+        assert len(f) == 0
+
+    def test_d5_column_ref_not_orphan(self):
+        """A table with no joins but referenced via column_id is not an orphan."""
+        m = _model(
+            model_tables=[
+                _mt("Fact", joins=[{"with": "Dim", "on": "", "type": "INNER"}]),
+                _mt("Dim"),
+                _mt("Lookup"),
+            ],
+            columns=[_col("val", column_id="Lookup::val")],
+        )
+        f = check_d5(m, SPOTTER_CFG)
+        assert len(f) == 0
+
     def test_d7_identical(self):
         m1 = _model(name="M1", guid="g1", model_tables=[_mt("T1", fqn="f1"), _mt("T2", fqn="f2")])
         m2 = _model(name="M2", guid="g2", model_tables=[_mt("T1", fqn="f1"), _mt("T2", fqn="f2")])
@@ -459,14 +487,16 @@ class TestPChecks:
         m = _model(columns=[_col(f"c{i}") for i in range(50)])
         assert check_p8(m, SPOTTER_CFG) == []
 
-    def test_p10_bypass(self):
+    def test_s10_bypass(self):
         m = _model(properties={"is_bypass_rls": True})
-        f = check_p10(m, SPOTTER_CFG)
+        f = check_s10(m, SPOTTER_CFG)
         assert len(f) == 1
+        assert f[0].angle == "S"
+        assert f[0].check_id == "S10"
 
-    def test_p10_no_bypass(self):
+    def test_s10_no_bypass(self):
         m = _model(properties={"is_bypass_rls": False})
-        assert check_p10(m, SPOTTER_CFG) == []
+        assert check_s10(m, SPOTTER_CFG) == []
 
     def test_p11_spotter_many_indexed(self):
         cols = [_col(f"c{i}", index_type="PREFIX_AND_SUBSTRING") for i in range(35)]
@@ -578,15 +608,17 @@ class TestSChecks:
         f = check_s9(m, corpus, SPOTTER_CFG)
         assert len(f) == 2
 
-    def test_s6_divergence(self):
+    def test_d12_divergence(self):
         m1 = _model(name="M1", columns=[
             _col("status", column_type="ATTRIBUTE", db_column_name="status"),
         ])
         m2 = _model(name="M2", columns=[
             _col("status", column_type="MEASURE", db_column_name="status"),
         ])
-        f = check_s6([m1, m2], SPOTTER_CFG)
+        f = check_d12([m1, m2], SPOTTER_CFG)
         assert len(f) == 1
+        assert f[0].angle == "D"
+        assert f[0].check_id == "D12"
         assert "status" in f[0].title
 
 
@@ -927,54 +959,48 @@ class TestIntegration:
 
 class TestD11:
     def test_d11_fact_to_dim_no_finding(self):
-        """Correct star schema: fact sources join to dimension (MANY_TO_ONE)."""
+        """Correct star schema: fact (hub) sources join to dimension (lookup)."""
         m = _model(
             columns=[
                 _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
-                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
-                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
-                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
                 _col("Region", column_id="Region::name", column_type="ATTRIBUTE"),
             ],
             model_tables=[
+                # Sales is a hub: Detail1 and Detail2 join TO it (inbound=2), it joins OUT to Region
                 _mt("Sales", joins=[{"with": "Region", "type": "LEFT_OUTER",
                                      "cardinality": "MANY_TO_ONE",
                                      "on": "[Sales::region_id] = [Region::id]"}]),
                 _mt("Region"),
+                _mt("Detail1", joins=[{"with": "Sales"}]),
+                _mt("Detail2", joins=[{"with": "Sales"}]),
             ],
         )
         findings = check_d11(m, SPOTTER_CFG)
         assert len(findings) == 0
 
-    def test_d11_dim_to_fact_reversed(self):
-        """Reversed: dimension sources join to fact."""
+    def test_d11_detail_to_fact_no_finding(self):
+        """Detail/child table joining to hub parent — normal pattern, no finding."""
         m = _model(
             columns=[
                 _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
-                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
-                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
-                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
-                _col("Region", column_id="Region::name", column_type="ATTRIBUTE"),
+                _col("Product", column_id="LineItems::product", column_type="ATTRIBUTE"),
             ],
             model_tables=[
                 _mt("Sales"),
-                _mt("Region", joins=[{"with": "Sales", "type": "LEFT_OUTER",
-                                      "cardinality": "ONE_TO_MANY",
-                                      "on": "[Region::id] = [Sales::region_id]"}]),
+                _mt("LineItems", joins=[{"with": "Sales", "type": "RIGHT_OUTER"}]),
+                _mt("OtherDetail", joins=[{"with": "Sales"}]),
             ],
         )
         findings = check_d11(m, SPOTTER_CFG)
-        assert len(findings) >= 1
-        assert any(f.severity == "MEDIUM" for f in findings)
+        # LineItems (detail, inbound=0, outbound=1) → Sales (dimension, inbound=2, outbound=0)
+        # No fact-to-fact, no ONE_TO_MANY, no name match
+        assert len(findings) == 0
 
     def test_d11_one_to_many_cardinality(self):
         """ONE_TO_MANY is explicit fan-out regardless of table roles."""
         m = _model(
             columns=[
                 _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
-                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
-                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
-                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
                 _col("Rate", column_id="Rates::rate", column_type="ATTRIBUTE"),
             ],
             model_tables=[
@@ -993,9 +1019,6 @@ class TestD11:
         m = _model(
             columns=[
                 _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
-                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
-                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
-                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
                 _col("Rate", column_id="Currency_Rate::rate", column_type="ATTRIBUTE"),
             ],
             model_tables=[
@@ -1014,9 +1037,6 @@ class TestD11:
         m = _model(
             columns=[
                 _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
-                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
-                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
-                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
                 _col("Rate", column_id="Currency_Rate::rate", column_type="ATTRIBUTE"),
                 _col("Target CCY", column_id="Currency_Rate::target_ccy", column_type="ATTRIBUTE"),
             ],
@@ -1034,37 +1054,137 @@ class TestD11:
         assert all(f.severity == "INFO" for f in mitigated)
 
     def test_d11_fact_to_fact(self):
-        """Two fact tables joined — risk of row multiplication."""
+        """Two hub tables joined — chasm/fan trap risk."""
         m = _model(
             columns=[
                 _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
-                _col("Quantity", column_id="Sales::qty", column_type="MEASURE"),
-                _col("Discount", column_id="Sales::disc", column_type="MEASURE"),
-                _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
                 _col("Amount", column_id="Orders::amount", column_type="MEASURE"),
-                _col("Shipping", column_id="Orders::shipping", column_type="MEASURE"),
-                _col("Total", column_id="Orders::total", column_type="MEASURE"),
-                _col("Fee", column_id="Orders::fee", column_type="MEASURE"),
             ],
             model_tables=[
+                # Both Sales and Orders are hubs: each has inbound >= 2 AND outbound > 0
                 _mt("Sales", joins=[{"with": "Orders", "type": "LEFT_OUTER",
-                                     "cardinality": "MANY_TO_ONE",
-                                     "on": "[Sales::order_id] = [Orders::id]"}]),
-                _mt("Orders"),
+                                     "on": "[Sales::order_id] = [Orders::id]"},
+                                    {"with": "DimA"}]),
+                _mt("Orders", joins=[{"with": "DimB"}]),
+                # Inbound for Sales: DetailS1, DetailS2
+                _mt("DetailS1", joins=[{"with": "Sales"}]),
+                _mt("DetailS2", joins=[{"with": "Sales"}]),
+                # Inbound for Orders: DetailO1, DetailO2
+                _mt("DetailO1", joins=[{"with": "Orders"}]),
+                _mt("DetailO2", joins=[{"with": "Orders"}]),
+                _mt("DimA"),
+                _mt("DimB"),
             ],
         )
         findings = check_d11(m, SPOTTER_CFG)
         assert any(f.check_name == "FANOUT_FACT_TO_FACT" for f in findings)
         assert any(f.severity == "MEDIUM" for f in findings)
 
-    def test_d11_classify_table_role(self):
-        m = _model(columns=[
-            _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
-            _col("Qty", column_id="Sales::qty", column_type="MEASURE"),
-            _col("Disc", column_id="Sales::disc", column_type="MEASURE"),
-            _col("Tax", column_id="Sales::tax", column_type="MEASURE"),
-            _col("Region", column_id="Region::name", column_type="ATTRIBUTE"),
-        ])
+    def test_d11_classify_topology(self):
+        """Topology-based classification: hub, dimension, detail."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Sales::revenue", column_type="MEASURE"),
+                _col("Region", column_id="Region::name", column_type="ATTRIBUTE"),
+                _col("Item", column_id="LineItems::product", column_type="ATTRIBUTE"),
+            ],
+            model_tables=[
+                # Sales: inbound=2 (LineItems, Contacts join to it), outbound=1 (joins to Region) → fact
+                _mt("Sales", joins=[{"with": "Region"}]),
+                # Region: inbound=1 (Sales), outbound=0 → dimension
+                _mt("Region"),
+                # LineItems: inbound=0, outbound=1 → detail
+                _mt("LineItems", joins=[{"with": "Sales"}]),
+                # Contacts: inbound=0, outbound=1 → detail
+                _mt("Contacts", joins=[{"with": "Sales"}]),
+            ],
+        )
         roles = _classify_table_role(m)
         assert roles["Sales"] == "fact"
         assert roles["Region"] == "dimension"
+        assert roles["LineItems"] == "detail"
+        assert roles["Contacts"] == "detail"
+
+    def test_d11_classify_isolated_table(self):
+        """Isolated table (no joins) falls back to column composition."""
+        m = _model(
+            columns=[
+                _col("Revenue", column_id="Big::revenue", column_type="MEASURE"),
+                _col("Qty", column_id="Big::qty", column_type="MEASURE"),
+                _col("Disc", column_id="Big::disc", column_type="MEASURE"),
+                _col("Tax", column_id="Big::tax", column_type="MEASURE"),
+                _col("Name", column_id="Small::name", column_type="ATTRIBUTE"),
+            ],
+            model_tables=[_mt("Big"), _mt("Small")],
+        )
+        roles = _classify_table_role(m)
+        assert roles["Big"] == "fact"
+        assert roles["Small"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# H11 — Column group coverage
+# ---------------------------------------------------------------------------
+
+class TestH11:
+    def test_h11_few_columns_no_finding(self):
+        """Models with < 30 columns don't trigger regardless of groups."""
+        cols = [_col(f"c{i}", column_id=f"T::{i}") for i in range(20)]
+        m = _model(columns=cols)
+        assert check_h11(m, SPOTTER_CFG) == []
+
+    def test_h11_many_columns_no_groups(self):
+        """30+ columns with no column_groups → finding."""
+        cols = [_col(f"c{i}", column_id=f"T::{i}") for i in range(40)]
+        m = _model(columns=cols)
+        findings = check_h11(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].check_id == "H11"
+        assert findings[0].severity == "LOW"
+
+    def test_h11_many_columns_with_groups(self):
+        """30+ columns with column_groups defined → no finding."""
+        cols = [_col(f"c{i}", column_id=f"T::{i}") for i in range(40)]
+        m = _model(columns=cols)
+        m["model"]["column_groups"] = [{"column_group_info": [{"name": "Measures"}]}]
+        findings = check_h11(m, SPOTTER_CFG)
+        assert len(findings) == 0
+
+    def test_h11_severity_escalates(self):
+        """60+ columns without groups → MEDIUM severity."""
+        cols = [_col(f"c{i}", column_id=f"T::{i}") for i in range(70)]
+        m = _model(columns=cols)
+        findings = check_h11(m, SPOTTER_CFG)
+        assert findings[0].severity == "MEDIUM"
+
+
+# ---------------------------------------------------------------------------
+# P19 — Aggregate awareness
+# ---------------------------------------------------------------------------
+
+class TestP19:
+    def test_p19_small_model_no_finding(self):
+        """Models with < 5 tables don't trigger."""
+        m = _model(model_tables=[_mt("A"), _mt("B"), _mt("C")])
+        assert check_p19(m, SPOTTER_CFG) == []
+
+    def test_p19_large_model_no_agg(self):
+        """5+ tables without aggregated_models → finding."""
+        m = _model(model_tables=[_mt(f"T{i}") for i in range(6)])
+        findings = check_p19(m, SPOTTER_CFG)
+        assert len(findings) == 1
+        assert findings[0].check_id == "P19"
+        assert findings[0].severity == "INFO"
+
+    def test_p19_large_model_with_agg(self):
+        """5+ tables with aggregated_models → no finding."""
+        m = _model(model_tables=[_mt(f"T{i}") for i in range(6)])
+        m["model"]["aggregated_models"] = [{"id": "agg-guid-1"}]
+        findings = check_p19(m, SPOTTER_CFG)
+        assert len(findings) == 0
+
+    def test_p19_severity_escalates(self):
+        """10+ tables → LOW severity."""
+        m = _model(model_tables=[_mt(f"T{i}") for i in range(12)])
+        findings = check_p19(m, SPOTTER_CFG)
+        assert findings[0].severity == "LOW"

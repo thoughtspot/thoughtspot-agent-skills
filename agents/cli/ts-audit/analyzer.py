@@ -434,18 +434,38 @@ def check_d1(model: dict, _config: AuditConfig) -> list[Finding]:
         ("formulas", len(formulas)),
     ]
 
+    METRIC_DETAIL = {
+        "tables": "Number of tables joined in the model. More tables means wider queries and more complex join plans.",
+        "columns": "Total columns exposed by the model. Wide models increase GROUP BY clause size and memory usage.",
+        "joins": "Total join relationships defined. Each join adds a table scan or hash-join step to the query plan.",
+        "depth": "Longest chain of joins from any table to the furthest reachable table. "
+                 "Deep chains force the query engine to process joins sequentially rather than in parallel.",
+        "formulas": "Number of formulas in the model. Each formula is evaluated at query time; "
+                    "high counts increase calculation overhead.",
+    }
+
+    METRIC_REC = {
+        "tables": "Consider splitting into domain-specific models",
+        "columns": "Hide or remove columns that are not used in answers or searches",
+        "joins": "Review whether all joins are needed — remove unused table relationships",
+        "depth": "Flatten the join graph by connecting tables to a central fact rather than chaining through intermediaries",
+        "formulas": "Move reusable calculations to the warehouse as views or computed columns",
+    }
+
     for metric_name, value in metrics:
         t = COMPLEXITY_THRESHOLDS[metric_name]
         sev = _severity_from_threshold(value, t["green"], t["yellow"])
         if sev != "GREEN":
+            detail = METRIC_DETAIL[metric_name]
+            detail += f" (≤{t['green']} pass, ≤{t['yellow']} review, >{t['yellow']} action needed)"
             findings.append(Finding(
                 angle="D", check_id="D1", check_name=f"COMPLEXITY_{metric_name.upper()}",
                 severity=sev,
                 title=f"{metric_name.capitalize()}: {value}",
-                detail=f"Threshold: <= {t['green']} OK, <= {t['yellow']} review, > {t['yellow']} action needed",
+                detail=detail,
                 score=value,
                 model_name=name, model_guid=guid,
-                recommendation="Consider splitting into domain-specific models" if metric_name == "tables" else "",
+                recommendation=METRIC_REC[metric_name],
             ))
     return findings
 
@@ -528,23 +548,39 @@ def check_d4(model: dict, _config: AuditConfig) -> list[Finding]:
     )]
 
 
+def _tables_referenced_in_formulas(model: dict) -> set[str]:
+    """Return table names referenced via [Table::Column] in formula expressions."""
+    refs: set[str] = set()
+    for f in _get_formulas(model):
+        expr = f.get("expr", "")
+        for match in re.findall(r'\[([^]]+)::', expr):
+            refs.add(match)
+    for c in _get_columns(model):
+        cid = c.get("column_id", "")
+        if "::" in cid:
+            refs.add(cid.split("::")[0])
+    return refs
+
+
 def check_d5(model: dict, _config: AuditConfig) -> list[Finding]:
-    """D5: Orphan tables in model (no joins in either direction)."""
+    """D5: Orphan tables in model (no joins and no formula/column references)."""
     findings = []
     targets = _join_targets(model)
     sources = _join_sources(model)
     connected = targets | sources
+    formula_refs = _tables_referenced_in_formulas(model)
     for mt in _get_model_tables(model):
         tname = mt.get("name", "")
-        if tname not in connected:
-            findings.append(Finding(
-                angle="D", check_id="D5", check_name="ORPHAN_TABLE_IN_MODEL",
-                severity="HIGH",
-                title=f"Unjoined table: {tname}",
-                detail="Table has no join in either direction — Cartesian product risk",
-                model_name=_model_name(model), model_guid=_model_guid(model),
-                recommendation="Add a join or remove from the model",
-            ))
+        if tname in connected or tname in formula_refs:
+            continue
+        findings.append(Finding(
+            angle="D", check_id="D5", check_name="ORPHAN_TABLE_IN_MODEL",
+            severity="HIGH",
+            title=f"Unjoined table: {tname}",
+            detail="Table has no join in either direction and no column or formula references — Cartesian product risk",
+            model_name=_model_name(model), model_guid=_model_guid(model),
+            recommendation="Add a join or remove from the model",
+        ))
     return findings
 
 
@@ -750,29 +786,61 @@ def check_d10(model: dict, _config: AuditConfig) -> list[Finding]:
 
 
 def _classify_table_role(model: dict) -> dict[str, str]:
-    """Classify each table as 'fact', 'dimension', or 'unknown' using D6 heuristic."""
+    """Classify tables using join topology (primary) and column composition (fallback).
+
+    Topology signals:
+    - "dimension": only receives joins (inbound > 0, outbound == 0) — lookup table
+    - "fact": hub with many inbound joins and outbound joins (inbound >= 2, outbound > 0)
+    - "detail": leaf that only joins outward (inbound == 0, outbound >= 1)
+
+    When topology is ambiguous (inbound == 1, outbound > 0), fall back to
+    column composition: > 3 measures → "fact", otherwise "dimension".
+
+    Isolated tables (no joins) use column composition only.
+    """
+    inbound: dict[str, int] = {}
+    outbound: dict[str, int] = {}
+    for mt in _get_model_tables(model):
+        src = mt.get("name", "")
+        for j in mt.get("joins", []):
+            tgt = j.get("with", "")
+            inbound[tgt] = inbound.get(tgt, 0) + 1
+            outbound[src] = outbound.get(src, 0) + 1
+
     cbt = _columns_by_table(model)
-    roles: dict[str, str] = {}
-    for tname, cols in cbt.items():
-        measures = sum(
-            1 for c in cols
+
+    def _measure_count(tname: str) -> int:
+        return sum(
+            1 for c in cbt.get(tname, [])
             if (c.get("properties", {}) or {}).get("column_type", "") == "MEASURE"
         )
-        if measures > 3:
-            roles[tname] = "fact"
-        elif cols:
-            roles[tname] = "dimension"
-        else:
-            roles[tname] = "unknown"
+
+    roles: dict[str, str] = {}
     for mt in _get_model_tables(model):
         tname = mt.get("name", "")
-        if tname not in roles:
-            roles[tname] = "unknown"
+        i = inbound.get(tname, 0)
+        o = outbound.get(tname, 0)
+
+        if i > 0 and o == 0:
+            roles[tname] = "dimension"
+        elif i >= 2 and o > 0:
+            roles[tname] = "fact"
+        elif i == 0 and o >= 1:
+            roles[tname] = "detail"
+        elif i == 1 and o > 0:
+            roles[tname] = "fact" if _measure_count(tname) > 3 else "dimension"
+        else:
+            roles[tname] = "fact" if _measure_count(tname) > 3 else "unknown"
+
     return roles
 
 
-def _refs_table(column_ref: str, table_name: str) -> bool:
+def _refs_table(column_ref, table_name: str) -> bool:
     """Return True if column_ref is a ThoughtSpot Table::Column reference for table_name."""
+    if isinstance(column_ref, list):
+        return any(isinstance(c, str) and c.startswith(f"{table_name}::") for c in column_ref)
+    if not isinstance(column_ref, str):
+        return False
     return column_ref.startswith(f"{table_name}::")
 
 
@@ -795,7 +863,10 @@ def _check_fanout_mitigations(model: dict, target_table: str) -> bool:
         # Formula expressions use [Table::Column] syntax — substring match is acceptable
         all_exprs = " ".join(f.get("expr", "") for f in formulas)
         # Filter column refs use prefix-aware check to avoid false positives
-        all_filter_cols = " ".join(f.get("column", "") or "" for f in filters)
+        all_filter_cols = " ".join(
+            " ".join(c for c in col if isinstance(c, str)) if isinstance(col, list) else (col or "")
+            for col in (f.get("column", "") for f in filters)
+        )
         filter_col_refs_target = any(
             _refs_table(f.get("column", "") or "", target_table)
             for f in filters
@@ -807,7 +878,11 @@ def _check_fanout_mitigations(model: dict, target_table: str) -> bool:
 
 
 def check_d11(model: dict, _config: AuditConfig) -> list[Finding]:
-    """D11: Fan-out join risk — direction, cardinality, naming + mitigation."""
+    """D11: Fan-out join risk — cardinality, hub-to-hub joins, naming + mitigation.
+
+    Uses topology-based role classification so that normal patterns
+    (detail→fact, fact→dimension) are not flagged.
+    """
     findings = []
     name = _model_name(model)
     guid = _model_guid(model)
@@ -837,31 +912,17 @@ def check_d11(model: dict, _config: AuditConfig) -> list[Finding]:
                 recommendation="Add a parameter or filter to constrain the target table to a single value",
             ))
 
-        if src_role == "dimension" and tgt_role == "fact":
-            severity = "INFO" if mitigated else "MEDIUM"
-            detail = (f"Reversed join direction: dimension '{src_table}' sources join to "
-                      f"fact '{target}'. Star schema joins should go fact → dimension.")
-            if mitigated:
-                detail += " Fan-out risk appears mitigated by parameter/filter — confirm."
-            findings.append(Finding(
-                angle="D", check_id="D11", check_name="FANOUT_REVERSED_DIRECTION",
-                severity=severity,
-                title=f"Reversed join: {src_table} (dim) → {target} (fact)",
-                detail=detail,
-                model_name=name, model_guid=guid,
-                recommendation="Review join direction — facts should source joins to dimensions",
-            ))
-
         if src_role == "fact" and tgt_role == "fact":
             severity = "INFO" if mitigated else "MEDIUM"
             findings.append(Finding(
                 angle="D", check_id="D11", check_name="FANOUT_FACT_TO_FACT",
                 severity=severity,
                 title=f"Fact-to-fact join: {src_table} → {target}",
-                detail=f"Two fact tables joined — risk of row multiplication. "
-                       f"{'Fan-out appears mitigated.' if mitigated else 'No visible constraint.'}",
+                detail=f"Two hub tables joined (both receive multiple inbound joins) "
+                       f"— potential chasm trap or fan trap. "
+                       f"{'Fan-out appears mitigated.' if mitigated else 'Verify join is many-to-one.'}",
                 model_name=name, model_guid=guid,
-                recommendation="Review whether an intermediate dimension or bridge table is needed",
+                recommendation="Confirm the join is many-to-one, or add a bridge table to control cardinality",
             ))
 
         if FANOUT_NAME_RE.search(target):
@@ -870,7 +931,6 @@ def check_d11(model: dict, _config: AuditConfig) -> list[Finding]:
                 f.check_id == "D11" and target in f.title
                 for f in findings
             )
-            # Suppress entirely when mitigated and no other D11 signal already flagged this target
             if not already_flagged and not name_mitigated:
                 findings.append(Finding(
                     angle="D", check_id="D11", check_name="FANOUT_NAME",
@@ -994,12 +1054,16 @@ def check_h3(model: dict, _config: AuditConfig) -> list[Finding]:
 
 def check_h4(corpus: Corpus, _config: AuditConfig) -> list[Finding]:
     """H4: Orphan models (zero dependents)."""
+    if not corpus.dependents:
+        return []
     findings = []
     for m in corpus.models:
         guid = _model_guid(m)
         if not guid:
             continue
-        deps = corpus.dependents.get(guid, [])
+        if guid not in corpus.dependents:
+            continue
+        deps = corpus.dependents[guid]
         if not deps:
             findings.append(Finding(
                 angle="H", check_id="H4", check_name="ORPHAN_MODEL",
@@ -1131,6 +1195,30 @@ def check_h10_columns(model: dict, _config: AuditConfig) -> list[Finding]:
     )]
 
 
+def check_h11(model: dict, _config: AuditConfig) -> list[Finding]:
+    """H11: Column group coverage — models with many columns but no data panel folders."""
+    m = model.get("model", {})
+    columns = _get_columns(model)
+    col_count = len(columns)
+    if col_count < 30:
+        return []
+
+    groups = m.get("column_groups", [])
+    if groups:
+        return []
+
+    return [Finding(
+        angle="H", check_id="H11", check_name="NO_COLUMN_GROUPS",
+        severity="LOW" if col_count < 60 else "MEDIUM",
+        title=f"{col_count} columns with no column groups defined",
+        detail="Column groups organise the search bar into folders. "
+               "Without them, users must scroll an unsorted list to find columns.",
+        score=col_count,
+        model_name=_model_name(model), model_guid=_model_guid(model),
+        recommendation="Add column_groups to organise columns into logical folders (e.g. Measures, Dates, Customer)",
+    )]
+
+
 # ---------------------------------------------------------------------------
 # P — Performance checks
 # ---------------------------------------------------------------------------
@@ -1255,16 +1343,16 @@ def check_p9(model: dict, _config: AuditConfig) -> list[Finding]:
     )]
 
 
-def check_p10(model: dict, _config: AuditConfig) -> list[Finding]:
-    """P10: RLS bypass as exception."""
+def check_s10(model: dict, _config: AuditConfig) -> list[Finding]:
+    """S10: RLS bypass as exception."""
     props = _get_properties(model)
     if not props.get("is_bypass_rls"):
         return []
     return [Finding(
-        angle="P", check_id="P10", check_name="RLS_BYPASS",
+        angle="S", check_id="S10", check_name="RLS_BYPASS",
         severity="MEDIUM",
         title="is_bypass_rls is true",
-        detail="RLS bypass disables Row-Level Security. Legitimate for aggregate-only models but should be the exception.",
+        detail="RLS bypass disables Row-Level Security — all users see all rows regardless of RLS rules. Legitimate for aggregate-only models but should be the exception.",
         model_name=_model_name(model), model_guid=_model_guid(model),
         recommendation="Review whether RLS bypass is intentional",
     )]
@@ -1509,6 +1597,35 @@ def check_p18(model: dict, _config: AuditConfig) -> list[Finding]:
     )]
 
 
+def check_p19(model: dict, _config: AuditConfig) -> list[Finding]:
+    """P19: Aggregate awareness — large models without pre-aggregated models configured."""
+    m = model.get("model", {})
+    mt = _get_model_tables(model)
+    table_count = len(mt)
+    if table_count < 5:
+        return []
+
+    agg_models = m.get("aggregated_models", [])
+    if agg_models:
+        return []
+
+    join_count = sum(len(t.get("joins", [])) for t in mt)
+    col_count = len(_get_columns(model))
+
+    return [Finding(
+        angle="P", check_id="P19", check_name="NO_AGGREGATE_AWARENESS",
+        severity="INFO" if table_count < 10 else "LOW",
+        title=f"No aggregate models configured ({table_count} tables, {join_count} joins)",
+        detail="Aggregate awareness routes queries to pre-aggregated models when the "
+               "query grain matches, reducing warehouse compute. Models with many tables "
+               "and joins benefit most.",
+        score=table_count,
+        model_name=_model_name(model), model_guid=_model_guid(model),
+        recommendation="Consider creating aggregate models for common query patterns "
+                       "(e.g. daily/weekly rollups) and associating them via aggregated_models",
+    )]
+
+
 # ---------------------------------------------------------------------------
 # S — Security checks
 # ---------------------------------------------------------------------------
@@ -1706,8 +1823,8 @@ def check_s9(model: dict, corpus: Corpus, _config: AuditConfig) -> list[Finding]
     return findings
 
 
-def check_s6(models: list[dict], _config: AuditConfig) -> list[Finding]:
-    """S6: Conformed dimension divergence."""
+def check_d12(models: list[dict], _config: AuditConfig) -> list[Finding]:
+    """D12: Conformed dimension divergence — same db column classified differently across models."""
     findings = []
     col_types: dict[str, dict[str, set[str]]] = {}
 
@@ -1725,11 +1842,11 @@ def check_s6(models: list[dict], _config: AuditConfig) -> list[Finding]:
             for ctype, model_names in type_map.items():
                 detail_parts.append(f"{ctype} in {', '.join(sorted(model_names)[:3])}")
             findings.append(Finding(
-                angle="S", check_id="S6", check_name="CONFORMED_DIM_DIVERGENCE",
+                angle="D", check_id="D12", check_name="CONFORMED_DIM_DIVERGENCE",
                 severity="MEDIUM",
                 title=f"Divergent classification: {db_col}",
                 detail="; ".join(detail_parts),
-                recommendation="Standardize column_type across models for consistent access control",
+                recommendation="Standardise column_type across models so the same column behaves consistently",
             ))
     return findings
 
@@ -1767,6 +1884,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_h2(m, config))
             findings.extend(check_h3(m, config))
             findings.extend(check_h10_columns(m, config))
+            findings.extend(check_h11(m, config))
 
         if "P" in angles:
             findings.extend(check_p2(m, config))
@@ -1774,7 +1892,6 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p5(m, config))
             findings.extend(check_p8(m, config))
             findings.extend(check_p9(m, config))
-            findings.extend(check_p10(m, config))
             findings.extend(check_p11(m, config))
             findings.extend(check_p13(m, corpus, config))
             findings.extend(check_p14(m, corpus, config))
@@ -1782,6 +1899,7 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_p16(m, config))
             findings.extend(check_p17(m, config))
             findings.extend(check_p18(m, config))
+            findings.extend(check_p19(m, config))
 
         if "S" in angles:
             findings.extend(check_s2(m, corpus, config))
@@ -1789,19 +1907,18 @@ def run_audit(corpus: Corpus, config: AuditConfig) -> list[Finding]:
             findings.extend(check_s5(m, config))
             findings.extend(check_s8(m, corpus, config))
             findings.extend(check_s9(m, corpus, config))
+            findings.extend(check_s10(m, config))
 
     if "D" in angles:
         findings.extend(check_d7(corpus.models, config))
         findings.extend(check_d8(corpus, config))
+        findings.extend(check_d12(corpus.models, config))
 
     if "H" in angles:
         findings.extend(check_h4(corpus, config))
         findings.extend(check_h7(corpus, config))
         findings.extend(check_h8(corpus, config))
         findings.extend(check_h10_objects(corpus, config))
-
-    if "S" in angles:
-        findings.extend(check_s6(corpus.models, config))
 
     return findings
 

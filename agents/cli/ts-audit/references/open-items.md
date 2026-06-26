@@ -64,7 +64,7 @@ properties:
     is_spotter_enabled: true
 ```
 
-S4, P10, D4, and P11 can all read from `model.properties` directly.
+S4, S10, D4, and P11 can all read from `model.properties` directly.
 ### #1 — Bulk metadata search performance — UNVERIFIED
 
 Large instances may have 1000+ models and 2000+ answers. The `ts metadata search --all`
@@ -103,7 +103,7 @@ Need to verify:
 
 ### #4 — is_bypass_rls in exported TML — UNVERIFIED
 
-S4 and P10 need `is_bypass_rls` from the model TML. Need to verify:
+S4 and S10 need `is_bypass_rls` from the model TML. Need to verify:
 - Does `is_bypass_rls` appear in `ts tml export` output?
 - Or is it only available in the `ts metadata search --include-details` response?
 - If not in TML, we need an alternative approach.

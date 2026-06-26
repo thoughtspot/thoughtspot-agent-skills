@@ -169,7 +169,7 @@ def build_corpus_stats(findings: list[dict], models: list[dict]) -> CorpusStats:
                 "model_name": f.get("model_name", ""),
                 "model_guid": f.get("model_guid", ""),
             })
-        elif cid == "S6":
+        elif cid == "D12":
             stats.dimension_divergence.append({
                 "title": f["title"],
                 "detail": f.get("detail", ""),
