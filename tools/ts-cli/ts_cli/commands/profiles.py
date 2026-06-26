@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 
 from ts_cli.client import PROFILES_PATH, load_profiles
+from ts_cli.commands.tableau import load_tableau_profiles, TABLEAU_PROFILES_PATH
 
 app = typer.Typer(help="Profile management commands.")
 
@@ -32,13 +33,34 @@ def list_profiles(
         False, "--snowflake",
         help="List Snowflake profiles instead of ThoughtSpot profiles.",
     ),
+    tableau: bool = typer.Option(
+        False, "--tableau",
+        help="List Tableau profiles instead of ThoughtSpot profiles.",
+    ),
 ) -> None:
     """List configured profiles.
 
     By default lists ThoughtSpot profiles (from ~/.claude/thoughtspot-profiles.json).
     Use --snowflake to list Snowflake profiles (from ~/.claude/snowflake-profiles.json).
+    Use --tableau to list Tableau profiles (from ~/.claude/tableau-profiles.json).
     Credentials are never shown.
     """
+    if tableau:
+        tab_profiles = load_tableau_profiles()
+        if not tab_profiles:
+            typer.echo(
+                f"No Tableau profiles found in {TABLEAU_PROFILES_PATH}.\n"
+                "Run /ts-profile-tableau to add a profile."
+            )
+            raise typer.Exit(1)
+        for p in tab_profiles:
+            auth_method = p.get("auth", "unknown")
+            server = p.get("server_url", "")
+            site = p.get("site_content_url", "")
+            identity = p.get("username", "") or p.get("pat_name", "")
+            typer.echo(f"  {p['name']:30s}  {auth_method:10s}  {identity:30s}  {server}")
+        return
+
     if snowflake:
         sf_profiles = load_snowflake_profiles()
         if not sf_profiles:
