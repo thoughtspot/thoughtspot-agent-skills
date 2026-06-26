@@ -226,3 +226,167 @@ def infer(
     """Infer table schemas from source data."""
     result = infer_schema(Path(source))
     print(json.dumps(result, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# Column name → data generator mapping
+# ---------------------------------------------------------------------------
+
+_FIRST_NAMES = ["Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Hank",
+                "Iris", "Jack", "Karen", "Leo", "Mia", "Noah", "Olivia", "Paul",
+                "Quinn", "Rosa", "Sam", "Tina"]
+_LAST_NAMES = ["Chen", "Martinez", "Smith", "Johnson", "Williams", "Brown", "Jones",
+               "Garcia", "Miller", "Davis", "Rodriguez", "Wilson", "Moore", "Taylor",
+               "Anderson", "Thomas", "Jackson", "White", "Harris", "Martin"]
+_CITIES = ["Seattle", "Portland", "Denver", "Austin", "Chicago", "Miami", "Boston",
+           "Phoenix", "Atlanta", "Detroit", "Dallas", "Orlando", "Memphis", "Reno",
+           "Boise", "Tampa", "Tucson", "Omaha", "Fresno", "Mesa"]
+_REGIONS = ["West", "East", "North", "South", "Central", "Pacific", "Atlantic",
+            "Mountain", "Midwest", "Southeast"]
+_STATUSES = ["Active", "Pending", "Closed", "Open", "Cancelled", "Processing",
+             "Shipped", "Delivered", "Returned", "On Hold"]
+
+
+def _pick_generator(col_name: str, col_type: str, rng):
+    """Return a generator function for a column based on name and type patterns."""
+    lower = col_name.lower()
+
+    if ("id" in lower or "key" in lower) and "INTEGER" in col_type:
+        counter = [0]
+        def gen_seq():
+            counter[0] += 1
+            return str(counter[0])
+        return gen_seq
+
+    if "email" in lower:
+        def gen_email():
+            return f"user_{rng.randint(1, 9999)}@example.com"
+        return gen_email
+
+    if any(w in lower for w in ("name", "customer")):
+        def gen_name():
+            return f"{rng.choice(_FIRST_NAMES)} {rng.choice(_LAST_NAMES)}"
+        return gen_name
+
+    if any(w in lower for w in ("date", "_at", "_on")) or "DATE" in col_type:
+        def gen_date():
+            y = rng.randint(2023, 2025)
+            m = rng.randint(1, 12)
+            d = rng.randint(1, 28)
+            return f"{y}-{m:02d}-{d:02d}"
+        return gen_date
+
+    if any(w in lower for w in ("price", "amount", "cost", "sales", "revenue")):
+        def gen_money():
+            return f"{rng.uniform(1, 10000):.2f}"
+        return gen_money
+
+    if any(w in lower for w in ("quantity", "count", "qty")):
+        def gen_qty():
+            return str(rng.randint(1, 100))
+        return gen_qty
+
+    if any(w in lower for w in ("status", "state", "type", "category")):
+        def gen_cat():
+            return rng.choice(_STATUSES)
+        return gen_cat
+
+    if any(w in lower for w in ("city",)):
+        def gen_city():
+            return rng.choice(_CITIES)
+        return gen_city
+
+    if any(w in lower for w in ("region",)):
+        def gen_region():
+            return rng.choice(_REGIONS)
+        return gen_region
+
+    if "phone" in lower:
+        def gen_phone():
+            return f"555-{rng.randint(0, 9999):04d}"
+        return gen_phone
+
+    if any(w in lower for w in ("percent", "ratio", "rate")):
+        def gen_pct():
+            return f"{rng.uniform(0, 1):.4f}"
+        return gen_pct
+
+    if "BOOLEAN" in col_type:
+        def gen_bool():
+            return rng.choice(["true", "false"])
+        return gen_bool
+    if "INTEGER" in col_type:
+        def gen_int():
+            return str(rng.randint(1, 1000))
+        return gen_int
+    if "FLOAT" in col_type:
+        def gen_float():
+            return f"{rng.uniform(0, 1000):.2f}"
+        return gen_float
+    if "TIMESTAMP" in col_type:
+        def gen_ts():
+            y = rng.randint(2023, 2025)
+            m = rng.randint(1, 12)
+            d = rng.randint(1, 28)
+            h = rng.randint(0, 23)
+            mi = rng.randint(0, 59)
+            s = rng.randint(0, 59)
+            return f"{y}-{m:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
+        return gen_ts
+
+    counter = [0]
+    def gen_default():
+        counter[0] += 1
+        return f"val_{counter[0]:05d}"
+    return gen_default
+
+
+def generate_csv(table_schema: dict, rows: int, output_dir: Path, seed: int = 42) -> Path:
+    """Generate a CSV file with synthetic data for one table schema."""
+    import random
+    rng = random.Random(seed)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    table_name = table_schema["table_name"]
+    columns = table_schema["columns"]
+    csv_path = output_dir / f"{table_name}.csv"
+
+    generators = []
+    for col in columns:
+        col_name = col.get("db_column_name", col.get("name", ""))
+        col_type = col.get("inferred_type", col.get("type", "VARCHAR(256)"))
+        generators.append(_pick_generator(col_name, col_type, rng))
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv_mod.writer(f)
+        header = [col.get("db_column_name", col.get("name")) for col in columns]
+        writer.writerow(header)
+        for _ in range(rows):
+            writer.writerow([gen() for gen in generators])
+
+    return csv_path
+
+
+def generate_all(source_path: Path, rows: int, output_dir: Path, seed: int = 42) -> list[dict]:
+    """Generate CSVs for all tables in a schema/manifest file."""
+    schema = infer_schema(source_path)
+    results = []
+    for tbl in schema["tables"]:
+        csv_path = generate_csv(tbl, rows=rows, output_dir=output_dir, seed=seed)
+        results.append({
+            "table_name": tbl["table_name"],
+            "rows": rows,
+            "file": str(csv_path),
+        })
+    return results
+
+
+@app.command()
+def generate(
+    source: str = typer.Option(..., "--source", "-s", help="Path to schema JSON or infer output"),
+    rows: int = typer.Option(100, "--rows", "-r", help="Number of rows to generate per table"),
+    output_dir: str = typer.Option(".", "--output", "-o", help="Directory to write generated CSVs"),
+) -> None:
+    """Generate synthetic sample data from a schema definition."""
+    result = generate_all(Path(source), rows=rows, output_dir=Path(output_dir))
+    print(json.dumps(result, indent=2, default=str))
