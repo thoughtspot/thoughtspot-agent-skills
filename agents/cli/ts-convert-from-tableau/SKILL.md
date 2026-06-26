@@ -41,6 +41,8 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 - ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
 - `ts` CLI installed: `pip install -e tools/ts-cli`
 - Tableau workbook file (`.twb` or `.twbx`) accessible on disk
+- Tableau profile configured (optional) — run `/ts-profile-tableau` if migrating workbooks
+  with published datasources (`sqlproxy`). Not needed for workbooks with direct connections.
 - **The source tables and their data already exist in a warehouse, and a ThoughtSpot
   connection exposes them.** This skill creates ThoughtSpot *logical* objects (Table, Model,
   cohorts, Liveboard) **over existing physical tables** — it does **not** create warehouse
@@ -125,6 +127,7 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields, blend relationships,
       table-calc addressing ............................ auto
+  3.5 Resolve published datasources (sqlproxy → API) ... auto/you choose  [scope 1,2]
   4.  Confirm source tables (ask first; reuse/create/search) you choose  [scope 1,2]
   4.5 Select ThoughtSpot connection (create path only) .... you choose  [scope 1,2]
   5.  Generate TML files (table + sql_view + model) ...... auto          [scope 1,2]
@@ -826,6 +829,61 @@ for worksheet in root.findall('.//worksheet'):
 1. Check `ws_table_calc_overrides[W][calc_id]` — view-level override
 2. Fall back to `table_calc_addressing[calc_id]` — column-level definition
 3. If neither exists, treat as `ordering_type='Rows'` (Tableau default)
+
+---
+
+## Step 3.5 — Resolve Published Datasources (sqlproxy)
+
+> Runs only if Step 3 detected one or more datasources with `<connection class="sqlproxy">`.
+> Skipped entirely if all datasources have direct warehouse connections.
+
+When a Tableau workbook references a **published datasource** on Tableau Server/Cloud,
+the TWB XML contains `<connection class="sqlproxy">` with a `dbname` attribute naming the
+published datasource. The actual warehouse table/column definitions are on the server,
+not in the file.
+
+### Flow
+
+1. Prompt: "Found **{N}** published datasource(s) hosted on Tableau Server. To resolve
+   the underlying columns and formulas, I need to query the Tableau REST API.
+   Do you have a Tableau profile configured? (Run `/ts-profile-tableau` to set one up)"
+
+2. If the user declines or has no profile:
+   - Log: "Proceeding without Tableau API resolution. Published datasource columns will
+     use display names from the TWB file. Column mapping may need manual confirmation
+     in Step 4."
+   - Continue to Step 4 with the TWB `<metadata-records>` column info.
+
+3. For each sqlproxy datasource, extract `dbname` from the `<connection>` element, then:
+
+   ```bash
+   # Find the published datasource by name
+   ts tableau datasources --profile {PROFILE} --name "{dbname}"
+   ```
+
+   Parse the JSON output to get the datasource `id`.
+
+   ```bash
+   # Get field metadata
+   ts tableau datasource {id} --profile {PROFILE} --fields
+   ```
+
+   The `fields` array contains:
+
+   | Field | Use |
+   |---|---|
+   | `fieldCaption` | Column display name → ThoughtSpot column name |
+   | `dataType` | `real`/`integer`/`string`/`date`/`datetime`/`boolean` → TS data type |
+   | `columnClass` | `COLUMN` (physical), `CALCULATION` (formula), `BIN`, `GROUP` |
+   | `formula` | For calculated fields — the Tableau formula text for Step 5 translation |
+
+4. Merge the resolved fields into the parsed datasource structure, replacing opaque
+   sqlproxy column references with real names and types. Proceed to Step 4.
+
+### Prerequisites
+
+- Tableau profile configured via `/ts-profile-tableau` (optional — skill degrades gracefully)
+- `ts` CLI v0.14.0+ (includes `ts tableau` commands)
 
 ---
 

@@ -7,6 +7,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-06-26
 - chore: bump ts-cli to v0.14.0 — register `ts tableau` command group (signin, datasources, datasource); add `--tableau` flag to `ts profiles list`
+- feat: add `ts-profile-tableau` skill v1.0.0 — Tableau Server/Cloud credential setup (password + PAT auth), profile management (add/list/test/remove), stored in `~/.claude/tableau-profiles.json`
+- feat: add `ts tableau` CLI commands (ts-cli 0.14.0) — `signin` (PAT + password auth), `datasources` (list/search with auto-pagination), `datasource` (detail + `--fields` for VizQL read-metadata). TableauClient with 401 retry and retryable-error backoff
+- feat: add Step 3.5 to `ts-convert-from-tableau` — auto-resolve published datasources (sqlproxy) via Tableau REST API; graceful degradation when no Tableau profile configured
 
 ## 2026-06-25
 - feat: update `ts-object-model-spotql-query` to v1.2.0 — add `references/architecture.md`, the "Why SpotQL" value-prop & architecture reference vs raw DB SQL: ThoughtSpot never executes SpotQL (compiles it to deterministic warehouse SQL via the same QueryGen as Liveboards/Answers/Search/Spotter; the LLM's SQL is intent, never run); semantic-layer guarantees (RLS/CLS, model filters, join defs, governed metrics/LOD/semi-additive, custom calendars, multi-fact chasm/fan-trap resolution); architecture advantages (determinism/traceability, cross-product consistency, physical-layer abstraction + dialect portability, single point of change, governed scale); the hybrid Token-based-Answers (primary) + SpotQL (expressibility fallback) flow with a verification layer unified across both transformers (co-existence + parity). Mermaid diagram + ASCII fallback. SKILL.md capability bullet + References row; README skills table deep-links it as the "Why SpotQL" starting point.

@@ -12,6 +12,7 @@
 | ts-object-model-spotql-query | Y | — | — | — |
 | ts-profile-databricks | Y | — | — | — |
 | ts-profile-snowflake | — | Y | — | — |
+| ts-profile-tableau | Y | — | — | — |
 | ts-profile-thoughtspot | Y | — | Y | — |
 | ts-recipe-formula-business-days-snowflake | Y | — | Y | — |
 | ts-recipe-formula-hms-display-snowflake | Y | — | Y | — |

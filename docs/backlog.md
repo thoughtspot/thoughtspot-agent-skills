@@ -1446,3 +1446,28 @@ Interactive recipe that collects inputs and generates all artifacts:
 - ThoughtSpot normalises `on` with parens and uppercase `AND` on export
 
 **Target:** No date set. Build when timezone-aware modelling requests recur.
+
+---
+
+## BL-042 — Tableau REST API integration: live-instance testing
+
+**Source:** Design spec `docs/superpowers/specs/2026-06-26-tableau-api-integration-design.md`
+**Affects:** ts-profile-tableau, `ts tableau` CLI commands, ts-convert-from-tableau Step 3.5
+**Status:** In progress — Tableau Cloud developer site active, API connectivity verified
+
+### Problem
+
+The Tableau REST API integration (profile skill, CLI commands, Step 3.5) was built from
+API documentation and the sigma-migration-skills reference implementation. Core API
+operations (signin, datasource search, VizQL read-metadata, workbook download) have been
+verified against a live Tableau Cloud instance, but the full end-to-end Step 3.5 flow
+(sqlproxy detection → API resolution → field merge → table creation) has not been tested
+as part of a complete migration.
+
+### Proposed approach
+
+1. Complete a full `ts-convert-from-tableau` migration of the DunderMifflin workbook
+   (confirmed sqlproxy with published datasource)
+2. Verify field metadata merge produces correct table TML column types
+3. Test PAT auth path when PATs are enabled on the developer site
+4. Document any API response shape surprises in `references/open-items.md`
