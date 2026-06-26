@@ -1,7 +1,10 @@
 """Unit tests for ts tableau commands — profile loading, request construction, response parsing."""
 from __future__ import annotations
 
+import csv
+import io
 import json
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -252,6 +255,130 @@ class TestDatasourceParsing:
 
         assert len(result) == 1
         assert result[0]["name"] == "Solo"
+
+    def test_download_extracts_tdsx_and_validates_csv(self, tmp_path):
+        profile = {
+            "name": "Dev",
+            "server_url": "https://tableau.example.com",
+            "site_content_url": "site",
+            "auth": "password",
+            "username": "u",
+            "password_env": "PW",
+        }
+        client = TableauClient(profile)
+        client._token = "token"
+        client._site_id = "site-id"
+
+        csv_content = "Name,Amount,Date\nAlice,100,2024-01-01\nBob,200,2024-01-02\n"
+        tdsx_bytes = io.BytesIO()
+        with zipfile.ZipFile(tdsx_bytes, "w") as zf:
+            zf.writestr("Data/SalesData.csv", csv_content)
+        tdsx_bytes.seek(0)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.ok = True
+        mock_resp.content = tdsx_bytes.read()
+        mock_resp.headers = {"Content-Disposition": 'filename="SalesData.tdsx"'}
+
+        with patch.object(client, "request", return_value=mock_resp):
+            result = client.download_datasource("ds-uuid", tmp_path)
+
+        assert len(result["data_files"]) == 1
+        csv_file = result["data_files"][0]
+        assert csv_file["type"] == "csv"
+        assert csv_file["validation"]["is_valid"] is True
+        assert csv_file["validation"]["data_rows"] == 2
+        assert csv_file["validation"]["header_columns"] == 3
+        assert Path(csv_file["path"]).exists()
+
+    def test_download_detects_corrupt_csv_lines(self, tmp_path):
+        profile = {
+            "name": "Dev",
+            "server_url": "https://tableau.example.com",
+            "site_content_url": "site",
+            "auth": "password",
+            "username": "u",
+            "password_env": "PW",
+        }
+        client = TableauClient(profile)
+        client._token = "token"
+        client._site_id = "site-id"
+
+        csv_content = "ID,Name,Value\n1,Alice,100\ncorrupt_line\n3,Charlie,300\n"
+        tdsx_bytes = io.BytesIO()
+        with zipfile.ZipFile(tdsx_bytes, "w") as zf:
+            zf.writestr("Data/BadData.csv", csv_content)
+        tdsx_bytes.seek(0)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.ok = True
+        mock_resp.content = tdsx_bytes.read()
+        mock_resp.headers = {"Content-Disposition": 'filename="BadData.tdsx"'}
+
+        with patch.object(client, "request", return_value=mock_resp):
+            result = client.download_datasource("ds-uuid", tmp_path)
+
+        csv_file = result["data_files"][0]
+        assert csv_file["validation"]["is_valid"] is False
+        assert len(csv_file["validation"]["corrupt_lines"]) == 1
+        corrupt = csv_file["validation"]["corrupt_lines"][0]
+        assert corrupt["line"] == 3
+        assert corrupt["expected_columns"] == 3
+        assert corrupt["actual_columns"] == 1
+        assert "corrupt_line" in corrupt["content"]
+
+    def test_download_non_zip_file(self, tmp_path):
+        profile = {
+            "name": "Dev",
+            "server_url": "https://tableau.example.com",
+            "site_content_url": "site",
+            "auth": "password",
+            "username": "u",
+            "password_env": "PW",
+        }
+        client = TableauClient(profile)
+        client._token = "token"
+        client._site_id = "site-id"
+
+        csv_content = b"Col1,Col2\nA,1\nB,2\n"
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.ok = True
+        mock_resp.content = csv_content
+        mock_resp.headers = {"Content-Disposition": 'filename="export.csv"'}
+
+        with patch.object(client, "request", return_value=mock_resp):
+            result = client.download_datasource("ds-uuid", tmp_path)
+
+        assert len(result["data_files"]) == 1
+        assert result["data_files"][0]["type"] == "csv"
+        assert result["data_files"][0]["validation"]["is_valid"] is True
+
+    def test_validate_csv_static(self, tmp_path):
+        csv_path = tmp_path / "test.csv"
+        csv_path.write_text("A,B,C\n1,2,3\n4,5,6\nBAD\n7,8,9\n")
+        result = TableauClient._validate_csv(csv_path)
+        assert result["total_lines"] == 5
+        assert result["data_rows"] == 4
+        assert result["is_valid"] is False
+        assert len(result["corrupt_lines"]) == 1
+        assert result["corrupt_lines"][0]["line"] == 4
+
+    def test_validate_csv_quoted_fields(self, tmp_path):
+        csv_path = tmp_path / "quoted.csv"
+        csv_path.write_text(
+            'ID,Name,Value\n'
+            '1,"First Aid Kit, Office Size",100\n'
+            '2,"Hammermill, Great White, 20lb",200\n'
+        )
+        result = TableauClient._validate_csv(csv_path)
+        assert result["is_valid"] is True
+        assert result["data_rows"] == 2
+        assert result["header_columns"] == 3
+        assert len(result["corrupt_lines"]) == 0
 
     def test_datasource_fields_parses_data(self):
         profile = {

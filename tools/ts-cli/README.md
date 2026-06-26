@@ -801,6 +801,47 @@ response containing the VizQL field list.
 
 ---
 
+### `ts tableau download <ID>`
+
+Download a published datasource's content (TDSX archive) and extract data files.
+Validates CSV files for row integrity (column count consistency, corrupt lines).
+
+```bash
+ts tableau download abc-123-def
+ts tableau download abc-123-def --output-dir ./data
+ts tableau download abc-123-def --profile "Tableau Cloud Prod"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile`, `-p` | first profile | Tableau profile name |
+| `--output-dir`, `-o` | `.` | Directory to save downloaded content |
+
+**Output:** JSON object with keys:
+
+| Key | Description |
+|---|---|
+| `tdsx_path` | Path to the downloaded TDSX file |
+| `extracted_dir` | Path to the extracted archive directory |
+| `files` | List of all files in the archive |
+| `data_files` | List of data files (CSV, Hyper) with validation results |
+
+Each CSV in `data_files` includes a `validation` object:
+
+```json
+{
+  "total_lines": 201,
+  "data_rows": 200,
+  "header_columns": 10,
+  "corrupt_lines": [{"line": 40, "expected_columns": 10, "actual_columns": 1, "content": "1tou"}],
+  "is_valid": false
+}
+```
+
+---
+
 ## Piping and scripting
 
 All commands write JSON to stdout, making them easy to pipe into `jq` or Python:
