@@ -6,7 +6,6 @@ import json
 import math
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -176,7 +175,7 @@ def infer_column_types(csv_path: Path, max_rows: int = 1000) -> list[dict]:
 def _count_csv_rows(csv_path: Path) -> int:
     """Count data rows in a CSV (excludes header)."""
     with open(csv_path, encoding="utf-8", errors="replace") as f:
-        return sum(1 for _ in f) - 1
+        return max(0, sum(1 for _ in f) - 1)
 
 
 def infer_schema(source_path: Path) -> dict:
@@ -509,8 +508,7 @@ def _load_via_cli(profile: dict, tables: list[dict], database: str,
         )
         rows_loaded = 0
         if row_result.returncode == 0:
-            import re as re_mod
-            match = re_mod.search(r"(\d+)", row_result.stdout)
+            match = re.search(r"(\d+)", row_result.stdout)
             if match:
                 rows_loaded = int(match.group(1))
 
@@ -585,18 +583,27 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
             table_name = tbl["table_name"]
             fqn = f"{database}.{schema}.{table_name}"
 
-            if if_exists == "replace":
-                cur.execute(f"DROP TABLE IF EXISTS {fqn}")
-                ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
-                cur.execute(ddl)
-            elif if_exists == "skip":
-                ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
-                # CREATE TABLE IF NOT EXISTS — no-op if already exists
-                cur.execute(ddl.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
-            else:
-                # if_exists == "error": plain CREATE TABLE — fails if already exists
-                ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
-                cur.execute(ddl)
+            cur.execute(
+                f"SELECT COUNT(*) FROM information_schema.tables "
+                f"WHERE table_catalog='{database}' AND table_schema='{schema}' "
+                f"AND table_name='{table_name}'"
+            )
+            table_exists = cur.fetchone()[0] > 0
+
+            if table_exists:
+                if if_exists == "error":
+                    raise SystemExit(f"Table {fqn} already exists. Use --if-exists skip|replace.")
+                if if_exists == "skip":
+                    typer.echo(f"  Skipping {fqn} (already exists)", err=True)
+                    results.append({"table_name": table_name, "status": "skipped",
+                                    "rows_loaded": 0, "columns": len(tbl["columns"]),
+                                    "source_file": tbl.get("file", "")})
+                    continue
+                if if_exists == "replace":
+                    cur.execute(f"DROP TABLE IF EXISTS {fqn}")
+
+            ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
+            cur.execute(ddl)
 
             csv_path = csv_dir / tbl.get("file", f"{table_name}.csv")
             if csv_path.exists():

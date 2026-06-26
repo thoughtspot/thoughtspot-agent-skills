@@ -1,10 +1,9 @@
 """Unit tests for ts load commands — source detection, name sanitisation, schema inference."""
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -387,7 +386,7 @@ class TestLoadViaPython:
                     "default_warehouse": "WH", "default_role": "ROLE"}
 
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (2,)
+        mock_cursor.fetchone.side_effect = [(0,), (2,)]
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
 

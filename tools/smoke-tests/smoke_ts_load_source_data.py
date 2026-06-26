@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _common import SmokeTestResult, SkipStep  # noqa: E402
+from _common import SmokeTestResult  # noqa: E402
 
 
 def run_ts_load(args: list[str]) -> dict | list:
