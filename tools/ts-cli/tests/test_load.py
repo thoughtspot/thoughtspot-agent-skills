@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch, call
 
 import pytest
 
@@ -270,3 +271,136 @@ class TestGenerateAll:
         assert result[0]["table_name"] == "ORDERS"
         assert result[0]["rows"] == 10
         assert (output_dir / "ORDERS.csv").exists()
+
+
+class TestLoadSnowflakeProfile:
+    def test_load_list_format(self, tmp_path):
+        profiles_file = tmp_path / "snowflake-profiles.json"
+        profiles_file.write_text(json.dumps([
+            {"name": "Production", "method": "cli", "cli_connection": "prod",
+             "default_warehouse": "WH", "default_role": "ROLE"},
+        ]))
+        from ts_cli.commands.load import load_snowflake_profile
+        with patch("ts_cli.commands.load.SF_PROFILES_PATH", profiles_file):
+            p = load_snowflake_profile("Production")
+        assert p["cli_connection"] == "prod"
+
+    def test_load_wrapped_format(self, tmp_path):
+        profiles_file = tmp_path / "snowflake-profiles.json"
+        profiles_file.write_text(json.dumps({"profiles": [
+            {"name": "Dev", "method": "python", "account": "acct",
+             "username": "user", "auth": "key_pair",
+             "default_warehouse": "WH", "default_role": "ROLE"},
+        ]}))
+        from ts_cli.commands.load import load_snowflake_profile
+        with patch("ts_cli.commands.load.SF_PROFILES_PATH", profiles_file):
+            p = load_snowflake_profile("Dev")
+        assert p["method"] == "python"
+
+    def test_profile_not_found_exits(self, tmp_path):
+        profiles_file = tmp_path / "snowflake-profiles.json"
+        profiles_file.write_text(json.dumps([{"name": "Other"}]))
+        from ts_cli.commands.load import load_snowflake_profile
+        with patch("ts_cli.commands.load.SF_PROFILES_PATH", profiles_file):
+            with pytest.raises(SystemExit):
+                load_snowflake_profile("Missing")
+
+    def test_no_file_exits(self, tmp_path):
+        missing = tmp_path / "nonexistent.json"
+        from ts_cli.commands.load import load_snowflake_profile
+        with patch("ts_cli.commands.load.SF_PROFILES_PATH", missing):
+            with pytest.raises(SystemExit):
+                load_snowflake_profile("Any")
+
+
+class TestBuildCreateTableSql:
+    def test_basic_ddl(self):
+        from ts_cli.commands.load import _build_create_table_sql
+        columns = [
+            {"db_column_name": "ID", "inferred_type": "INTEGER"},
+            {"db_column_name": "NAME", "inferred_type": "VARCHAR(256)"},
+            {"db_column_name": "PRICE", "inferred_type": "FLOAT"},
+        ]
+        sql = _build_create_table_sql("MY_TABLE", columns, "DB", "SCH")
+        assert "CREATE TABLE DB.SCH.MY_TABLE" in sql
+        assert "ID INTEGER" in sql
+        assert "NAME VARCHAR(256)" in sql
+        assert "PRICE FLOAT" in sql
+
+    def test_uses_type_field_when_present(self):
+        from ts_cli.commands.load import _build_create_table_sql
+        columns = [{"db_column_name": "X", "type": "DATE"}]
+        sql = _build_create_table_sql("T", columns, "DB", "SCH")
+        assert "X DATE" in sql
+
+
+class TestLoadViaCli:
+    def test_builds_correct_commands(self, tmp_path):
+        csv_file = tmp_path / "SALES.csv"
+        csv_file.write_text("ID,AMOUNT\n1,9.99\n")
+        tables = [{
+            "table_name": "SALES",
+            "columns": [
+                {"db_column_name": "ID", "inferred_type": "INTEGER"},
+                {"db_column_name": "AMOUNT", "inferred_type": "FLOAT"},
+            ],
+            "has_data": True,
+            "file": "SALES.csv",
+        }]
+        profile = {"method": "cli", "cli_connection": "myconn",
+                    "default_warehouse": "WH", "default_role": "ROLE"}
+
+        from ts_cli.commands.load import _load_via_cli
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+
+        with patch("ts_cli.commands.load.subprocess.run", return_value=mock_result) as mock_run:
+            results = _load_via_cli(profile, tables, "DB", "SCH", "WH", "ROLE",
+                                     "error", tmp_path)
+
+        assert len(results) == 1
+        assert results[0]["status"] == "created"
+        calls_made = [str(c) for c in mock_run.call_args_list]
+        assert any("CREATE DATABASE" in c for c in calls_made)
+        assert any("CREATE SCHEMA" in c for c in calls_made)
+        assert any("CREATE TABLE" in c for c in calls_made)
+        assert any("COPY INTO" in c for c in calls_made)
+
+
+class TestLoadViaPython:
+    def test_builds_correct_queries(self, tmp_path):
+        csv_file = tmp_path / "ORDERS.csv"
+        csv_file.write_text("ID,TOTAL\n1,50.00\n")
+        tables = [{
+            "table_name": "ORDERS",
+            "columns": [
+                {"db_column_name": "ID", "inferred_type": "INTEGER"},
+                {"db_column_name": "TOTAL", "inferred_type": "FLOAT"},
+            ],
+            "has_data": True,
+            "file": "ORDERS.csv",
+        }]
+        profile = {"method": "python", "account": "acct", "username": "user",
+                    "auth": "key_pair", "private_key_path": "~/.ssh/key.p8",
+                    "default_warehouse": "WH", "default_role": "ROLE"}
+
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (2,)
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        from ts_cli.commands.load import _load_via_python
+
+        with patch("ts_cli.commands.load._connect_python", return_value=mock_conn):
+            results = _load_via_python(profile, tables, "DB", "SCH", "WH", "ROLE",
+                                        "error", tmp_path)
+
+        assert len(results) == 1
+        assert results[0]["status"] == "created"
+        executed = [str(c) for c in mock_cursor.execute.call_args_list]
+        assert any("CREATE DATABASE" in q for q in executed)
+        assert any("CREATE TABLE" in q for q in executed)
+        assert any("PUT" in q for q in executed)
+        assert any("COPY INTO" in q for q in executed)

@@ -5,6 +5,7 @@ import csv as csv_mod
 import json
 import math
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -390,3 +391,290 @@ def generate(
     """Generate synthetic sample data from a schema definition."""
     result = generate_all(Path(source), rows=rows, output_dir=Path(output_dir))
     print(json.dumps(result, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# Snowflake profile loading
+# ---------------------------------------------------------------------------
+
+SF_PROFILES_PATH = Path.home() / ".claude" / "snowflake-profiles.json"
+
+
+def load_snowflake_profile(profile_name: str) -> dict:
+    """Load a Snowflake profile from ~/.claude/snowflake-profiles.json."""
+    if not SF_PROFILES_PATH.exists():
+        raise SystemExit(
+            f"No Snowflake profiles found at {SF_PROFILES_PATH}.\n"
+            "Run /ts-profile-snowflake to create one."
+        )
+    raw = json.loads(SF_PROFILES_PATH.read_text(encoding="utf-8"))
+    if isinstance(raw, dict) and "profiles" in raw:
+        profiles = raw["profiles"]
+    elif isinstance(raw, list):
+        profiles = raw
+    else:
+        raise SystemExit(f"Unexpected format in {SF_PROFILES_PATH}")
+
+    for p in profiles:
+        if p.get("name") == profile_name:
+            return p
+
+    available = [p.get("name") for p in profiles]
+    raise SystemExit(
+        f"Profile '{profile_name}' not found. Available: {', '.join(str(n) for n in available)}"
+    )
+
+
+def _build_create_table_sql(table_name: str, columns: list[dict],
+                             database: str, schema: str) -> str:
+    """Build a CREATE TABLE DDL statement."""
+    col_defs = []
+    for col in columns:
+        db_name = col.get("db_column_name", col.get("name", "UNKNOWN"))
+        col_type = col.get("inferred_type", col.get("type", "VARCHAR(256)"))
+        col_defs.append(f"  {db_name} {col_type}")
+    cols_sql = ",\n".join(col_defs)
+    return f"CREATE TABLE {database}.{schema}.{table_name} (\n{cols_sql}\n)"
+
+
+# ---------------------------------------------------------------------------
+# Snowflake loading: method:cli
+# ---------------------------------------------------------------------------
+
+def _run_snow_sql(connection: str, query: str) -> None:
+    """Execute a SQL statement via the snow CLI."""
+    result = subprocess.run(
+        ["snow", "sql", "-c", connection, "-q", query],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"snow sql failed: {result.stderr.strip()}", err=True)
+        raise SystemExit(1)
+
+
+def _load_via_cli(profile: dict, tables: list[dict], database: str,
+                   schema: str, warehouse: str, role: str,
+                   if_exists: str, csv_dir: Path) -> list[dict]:
+    """Load CSV data into Snowflake via the snow CLI."""
+    conn = profile["cli_connection"]
+
+    _run_snow_sql(conn, f"CREATE DATABASE IF NOT EXISTS {database}")
+    _run_snow_sql(conn, f"CREATE SCHEMA IF NOT EXISTS {database}.{schema}")
+    _run_snow_sql(conn, f"USE WAREHOUSE {warehouse}")
+
+    results = []
+    for tbl in tables:
+        table_name = tbl["table_name"]
+        fqn = f"{database}.{schema}.{table_name}"
+
+        check = subprocess.run(
+            ["snow", "sql", "-c", conn, "-q",
+             f"SELECT COUNT(*) FROM information_schema.tables WHERE table_catalog='{database}' AND table_schema='{schema}' AND table_name='{table_name}'"],
+            capture_output=True, text=True,
+        )
+        table_exists = "1" in check.stdout if check.returncode == 0 else False
+
+        if table_exists:
+            if if_exists == "error":
+                raise SystemExit(f"Table {fqn} already exists. Use --if-exists skip|replace.")
+            if if_exists == "skip":
+                typer.echo(f"  Skipping {fqn} (already exists)", err=True)
+                results.append({"table_name": table_name, "status": "skipped",
+                                "rows_loaded": 0, "columns": len(tbl["columns"]),
+                                "source_file": tbl.get("file", "")})
+                continue
+            if if_exists == "replace":
+                _run_snow_sql(conn, f"DROP TABLE IF EXISTS {fqn}")
+
+        ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
+        _run_snow_sql(conn, ddl)
+
+        csv_path = csv_dir / tbl.get("file", f"{table_name}.csv")
+        if csv_path.exists():
+            stage_name = f"@{database}.{schema}.%{table_name}"
+            subprocess.run(
+                ["snow", "stage", "copy", str(csv_path), stage_name, "-c", conn],
+                capture_output=True, text=True, check=True,
+            )
+            copy_sql = (
+                f"COPY INTO {fqn} FROM {stage_name} "
+                f"FILE_FORMAT=(TYPE=CSV FIELD_OPTIONALLY_ENCLOSED_BY='\"' SKIP_HEADER=1)"
+            )
+            _run_snow_sql(conn, copy_sql)
+            _run_snow_sql(conn, f"REMOVE {stage_name}")
+
+        row_result = subprocess.run(
+            ["snow", "sql", "-c", conn, "-q", f"SELECT COUNT(*) FROM {fqn}"],
+            capture_output=True, text=True,
+        )
+        rows_loaded = 0
+        if row_result.returncode == 0:
+            import re as re_mod
+            match = re_mod.search(r"(\d+)", row_result.stdout)
+            if match:
+                rows_loaded = int(match.group(1))
+
+        results.append({"table_name": table_name, "status": "created",
+                        "rows_loaded": rows_loaded, "columns": len(tbl["columns"]),
+                        "source_file": tbl.get("file", "")})
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Snowflake loading: method:python
+# ---------------------------------------------------------------------------
+
+def _connect_python(profile: dict, warehouse: str, role: str):
+    """Connect to Snowflake via snowflake.connector using profile credentials."""
+    try:
+        import snowflake.connector
+    except ImportError:
+        raise SystemExit(
+            "snowflake-connector-python is required for method:python profiles.\n"
+            "Install it: pip install snowflake-connector-python"
+        )
+
+    account = profile["account"]
+    username = profile["username"]
+    auth = profile.get("auth", "password")
+
+    if auth == "key_pair":
+        import os
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.backends import default_backend
+        key_path = os.path.expanduser(profile.get("private_key_path", "~/.ssh/snowflake_key.p8"))
+        with open(key_path, "rb") as f:
+            private_key = serialization.load_pem_private_key(f.read(), password=None, backend=default_backend())
+        private_key_bytes = private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        return snowflake.connector.connect(
+            account=account, user=username, private_key=private_key_bytes,
+            warehouse=warehouse, role=role,
+        )
+    else:
+        import os
+        password_env = profile.get("password_env", "")
+        password = os.environ.get(password_env, "")
+        if not password:
+            raise SystemExit(f"Password env var {password_env} is empty. Source your shell profile first.")
+        return snowflake.connector.connect(
+            account=account, user=username, password=password,
+            warehouse=warehouse, role=role,
+        )
+
+
+def _load_via_python(profile: dict, tables: list[dict], database: str,
+                      schema: str, warehouse: str, role: str,
+                      if_exists: str, csv_dir: Path) -> list[dict]:
+    """Load CSV data into Snowflake via snowflake.connector."""
+    conn = _connect_python(profile, warehouse, role)
+    cur = conn.cursor()
+
+    try:
+        cur.execute(f"CREATE DATABASE IF NOT EXISTS {database}")
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {database}.{schema}")
+        cur.execute(f"USE DATABASE {database}")
+        cur.execute(f"USE SCHEMA {schema}")
+
+        results = []
+        for tbl in tables:
+            table_name = tbl["table_name"]
+            fqn = f"{database}.{schema}.{table_name}"
+
+            if if_exists == "replace":
+                cur.execute(f"DROP TABLE IF EXISTS {fqn}")
+                ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
+                cur.execute(ddl)
+            elif if_exists == "skip":
+                ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
+                # CREATE TABLE IF NOT EXISTS — no-op if already exists
+                cur.execute(ddl.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
+            else:
+                # if_exists == "error": plain CREATE TABLE — fails if already exists
+                ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
+                cur.execute(ddl)
+
+            csv_path = csv_dir / tbl.get("file", f"{table_name}.csv")
+            if csv_path.exists():
+                cur.execute(f"PUT file://{csv_path} @%{table_name}")
+                cur.execute(
+                    f"COPY INTO {table_name} FROM @%{table_name} "
+                    f"FILE_FORMAT=(TYPE=CSV FIELD_OPTIONALLY_ENCLOSED_BY='\"' SKIP_HEADER=1)"
+                )
+                cur.execute(f"REMOVE @%{table_name}")
+
+            cur.execute(f"SELECT COUNT(*) FROM {fqn}")
+            rows_loaded = cur.fetchone()[0]
+
+            results.append({"table_name": table_name, "status": "created",
+                            "rows_loaded": rows_loaded, "columns": len(tbl["columns"]),
+                            "source_file": tbl.get("file", "")})
+
+        return results
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.command()
+def snowflake(
+    source: str = typer.Option(..., "--source", "-s", help="Path to CSV directory, download JSON, or manifest JSON"),
+    profile: str = typer.Option(..., "--profile", "-p", help="Snowflake profile name from ~/.claude/snowflake-profiles.json"),
+    database: str = typer.Option(..., "--database", "-d", help="Target Snowflake database"),
+    schema: str = typer.Option(..., "--schema", help="Target Snowflake schema"),
+    if_exists: str = typer.Option("error", "--if-exists", help="Action when table exists: error|skip|replace"),
+    warehouse: Optional[str] = typer.Option(None, "--warehouse", "-w", help="Warehouse (default: from profile)"),
+    role: Optional[str] = typer.Option(None, "--role", "-r", help="Role (default: from profile)"),
+    generate_sample: bool = typer.Option(False, "--generate-sample", help="Generate synthetic data for schema-only sources"),
+    rows: int = typer.Option(100, "--rows", help="Rows to generate (with --generate-sample)"),
+) -> None:
+    """Load CSV data into Snowflake tables."""
+    if if_exists not in ("error", "skip", "replace"):
+        raise SystemExit("--if-exists must be one of: error, skip, replace")
+
+    sf_profile = load_snowflake_profile(profile)
+    wh = warehouse or sf_profile.get("default_warehouse", "")
+    rl = role or sf_profile.get("default_role", "")
+
+    if not wh:
+        raise SystemExit("No warehouse specified. Use --warehouse or set default_warehouse in profile.")
+
+    source_path = Path(source)
+    inferred = infer_schema(source_path)
+
+    csv_dir = source_path if source_path.is_dir() else source_path.parent
+
+    if inferred["source_type"] == "schema_only":
+        if not generate_sample:
+            raise SystemExit(
+                "Source is schema-only (no data files). "
+                "Use --generate-sample to generate synthetic data, or provide CSVs."
+            )
+        import tempfile
+        gen_dir = Path(tempfile.mkdtemp(prefix="ts_load_gen_"))
+        for tbl in inferred["tables"]:
+            generate_csv(tbl, rows=rows, output_dir=gen_dir)
+        csv_dir = gen_dir
+        for tbl in inferred["tables"]:
+            tbl["file"] = f"{tbl['table_name']}.csv"
+            tbl["has_data"] = True
+
+    method = sf_profile.get("method", "python")
+    if method == "cli":
+        table_results = _load_via_cli(sf_profile, inferred["tables"], database,
+                                       schema, wh, rl, if_exists, csv_dir)
+    else:
+        table_results = _load_via_python(sf_profile, inferred["tables"], database,
+                                          schema, wh, rl, if_exists, csv_dir)
+
+    output = {
+        "database": database,
+        "schema": schema,
+        "profile": profile,
+        "tables": table_results,
+    }
+    print(json.dumps(output, indent=2))
