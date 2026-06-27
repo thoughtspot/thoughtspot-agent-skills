@@ -190,7 +190,7 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 
 **Source:** Audit of 127 workbooks in `tableau-migration-testing/twb/inactive/` (2026-06-10)
 **Affects:** ts-convert-from-tableau, `agents/shared/mappings/tableau/tableau-formula-translation.md`
-**Status:** In progress — **Phase 1 DONE (PR #48)**, **Phase 2a DONE (PR #49)**, **Phase 2b DONE (2026-06-12)**, **Phase 2c/3/4 DONE (PR #66)**, **Phase 5 (data blending) DONE (2026-06-14)**
+**Status:** Complete — all 5 phases shipped. Phase 1 (PR #48), Phase 2a (PR #49), Phase 2b (2026-06-12), Phase 2c/3/4 (PR #66), Phase 5 data blending (2026-06-14)
 **Full plan:** [`superpowers/plans/2026-06-11-tableau-mapping-gaps.md`](superpowers/plans/2026-06-11-tableau-mapping-gaps.md)
 
 > **Phase 1 (function table) — DONE (PR #48):** added DATEPARSE, EXP, trig (radians→degrees fix),
@@ -1507,7 +1507,7 @@ whether the same gap (audit overpromises vs actual migration rate) exists.
 
 **Source:** Design spec `docs/superpowers/specs/2026-06-26-tableau-api-integration-design.md`
 **Affects:** ts-profile-tableau, `ts tableau` CLI commands, ts-convert-from-tableau Step 3.5
-**Status:** In progress — Tableau Cloud developer site active, API connectivity verified
+**Status:** Complete — API connectivity verified on live Tableau Cloud instance (PR #121 signin/datasources, PR #122 download with CSV validation); Step 3.5 sqlproxy resolution shipped (PR #121)
 
 ### Problem
 
@@ -1532,7 +1532,7 @@ as part of a complete migration.
 
 **Source:** CPG Merch Promotion Performance migration (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 3, A2, A4, 5b, 12
-**Status:** Not started
+**Status:** Implemented — Step 3g orphan detection, A4 orphan section, 5b exclusion guard, Step 12 root cause category, migrate-mode E/A prompt
 
 ### Problem
 
@@ -1595,7 +1595,7 @@ for calc in datasource['calculated_fields']:
 
 **Source:** CPG Merch Promotion Performance migration (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 3e, 5b, A4, 7, 12; data-blend-to-model worked example
-**Status:** Not started
+**Status:** Implemented — A4 blend risk table (HIGH/MED/LOW classification), Step 7 HIGH-risk R/S/M prompt, Step 12 blend-context review category. Remaining: worked example caveat section (#3), coverage matrix note (#4)
 
 ### Problem
 
@@ -1677,7 +1677,7 @@ else:
 
 **Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 5b, 7, A3, A4; ts-cli `ts tableau translate-formulas`
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — all 7 items complete. #1 ifnull(X,0) stripping (default-on for measures), #2 sum_if/count_if/average_if conversion (default-on), #3 rank() completion, #4 operator spacing, #5 if/then/else structural validation (balanced parens/brackets, orphaned else detection), #6 physical ref qualification, #7 name clash detection
 
 ### Problem
 
@@ -1744,7 +1744,7 @@ pre-transforms) for the ordered transform pipeline that codifies reactive Phase 
 
 **Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps A3, A4
-**Status:** Not started
+**Status:** Implemented — complexity distribution (Simple/Medium/Complex), realistic coverage estimate (subtracts orphans + circular + unresolvable), per-datasource breakdown
 
 ### Problem
 
@@ -1786,7 +1786,7 @@ Pass-through, etc.) and reports cross-reference depth. But it does not capture:
 
 **Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 7, 7.5
-**Status:** Not started
+**Status:** Implemented — Phase 1.5 checkpoint added between base model import and formula import (yes/search/no prompt)
 
 ### Problem
 
@@ -1815,7 +1815,7 @@ the current implementation doesn't pause between Phase 1 and Phase 2 in practice
 
 **Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 5b, 7; ts-cli `ts tableau translate-formulas`
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — all 5 items complete. #1 deterministic CLI pipeline, #2 `validate_pre_import()`, #3 targeted retry (only re-import failing formulas), #4 context cache (preserve column registry/DAG between retries), #5 migration effort estimate in audit report
 **Priority:** HIGH
 
 ### Problem
@@ -1867,7 +1867,7 @@ transforms, the pipeline architecture itself has inefficiencies:
 **Source:** CPG Merch Promotion Performance Phase 2 summary (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 5b, 7; ts-cli `ts tableau translate-formulas`;
   agents/shared/mappings/tableau/tableau-formula-translation.md
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — all 9 transforms complete. Cross-ref inlining, END stripping, if/then/else validation, ifnull stripping (default-on), sum_if conversion (default-on), operator spacing, rank() completion, physical ref resolution, name clash detection + auto-rename.
 **Priority:** HIGH
 
 ### Problem
@@ -1947,7 +1947,7 @@ are deterministic cleanup (always apply).
 
 **Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 3.5, 4, 4.5
-**Status:** Not started
+**Status:** Implemented — #1 Tableau API progress label, #2 T (trust) connection option, #3+#4 compound prompt (connection + db + schema in one question)
 **Priority:** MEDIUM
 
 ### Problem
@@ -2011,7 +2011,7 @@ confirmation — four prompts collapsed to one.
 **Affects:** ts-convert-from-tableau Steps 3, 5b, A3, A4, 12;
   ts-cli `ts tableau translate-formulas`;
   agents/shared/mappings/tableau/tableau-formula-translation.md
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — `convert_no_keyword_lod()` pre-transform P2
 **Priority:** HIGH
 
 ### Problem
@@ -2074,7 +2074,7 @@ the SKILL.md — the implementation just needs to follow through.
 
 **Source:** CPG Merch Promotion Performance migration (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 12, A4
-**Status:** Not started
+**Status:** Implemented — Step 12 and Step A4 report templates updated with Excluded Formulas (grouped by root cause) and Formulas Needing Review (5 categories) sections
 **Priority:** HIGH
 
 ### Problem
@@ -2139,7 +2139,7 @@ Root cause summary:
 **Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
 **Affects:** ts-convert-from-tableau Step 5b; ts-cli `ts tableau translate-formulas`;
   agents/shared/mappings/tableau/tableau-formula-translation.md
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — `rewrite_date_arithmetic()` pre-transform P4 + `--date-columns` CLI option
 **Priority:** HIGH
 
 ### Problem
@@ -2200,7 +2200,7 @@ pipeline, after structural validation but before column reference qualification:
 **Affects:** ts-convert-from-tableau Steps 5b, A3;
   ts-cli `ts tableau translate-formulas`;
   agents/shared/mappings/tableau/tableau-formula-translation.md
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — `convert_scalar_max_min()` pre-transform P3
 **Priority:** HIGH
 
 ### Problem
@@ -2248,7 +2248,7 @@ blocker was no-keyword LOD recognition (BL-052).
 **Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 3, 5b, A3;
   ts-cli `ts tableau translate-formulas`
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — `strip_comments()` pre-transform P0
 **Priority:** MEDIUM
 
 ### Problem
@@ -2318,7 +2318,7 @@ This should be step 0 — before any other transform, including cross-formula in
 **Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
 **Affects:** ts-convert-from-tableau Steps 3, 3.5, 5b;
   ts-cli `ts tableau translate-formulas`
-**Status:** Not started
+**Status:** Implemented (ts-cli v0.17.0) — `rewrite_csq_aliases()` + `build_csq_column_map()` + `--csq-map` CLI option
 **Priority:** HIGH
 
 ### Problem

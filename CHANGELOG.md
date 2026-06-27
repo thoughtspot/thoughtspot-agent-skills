@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-27
+- chore: bump ts-cli to v0.17.0 — 9 new pre-transforms (ifnull stripping, sum_if conversion, date arithmetic, scalar MAX/MIN, comment stripping, CSQ alias resolution, no-keyword LOD, if/then/else validation, operator spacing); 156 new tests
+- feat: update `ts-convert-from-tableau` — orphan calc detection (Step 3g), Phase 1.5 base model checkpoint, excluded formulas + review flags report sections (BL-053), blend risk classification (BL-045), formula complexity + realistic coverage estimate (BL-047), targeted retry with context cache (BL-049), compound connection prompt (BL-051)
 - feat: add `ts-load-source-data` skill v1.0.0 — load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to; adds `ts-load-*` naming family to skill-naming.md and check_skill_naming.py
 - feat: add `ts tableau translate-formulas` CLI command (ts-cli 0.16.0) — deterministic 14-step Tableau → ThoughtSpot formula translation pipeline with dependency DAG, cross-reference resolution, column scoping, parameter conflict detection. Pure-function engine in `tableau_translate.py`
 - chore: bump ts-cli to v0.16.0

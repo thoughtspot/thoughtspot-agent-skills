@@ -335,15 +335,27 @@ Audit: {workbook_name}
   │ Circular dependencies    {N}    {%}   Cannot resolve │
   └──────────────────────────────────────────────────────┘
 
-  Effective migration coverage:
-    Single-pass (Level 0+1): {N}/{total} ({%}%) — achievable without multi-pass
-    All levels (0–N):        {N}/{total} ({%}%) — achievable with dependency resolution
-    Circular (unresolvable): {N} — will be omitted
+  Formula complexity (effort estimate):
+  ┌──────────────────────────────────────────────────────┐
+  │ Complexity              Count    %     Criteria      │
+  ├──────────────────────────────────────────────────────┤
+  │ Simple (1–2)            {N}     {%}   ≤1 function, no cross-refs, no nesting │
+  │ Medium (3–5)            {N}     {%}   2–3 functions or 1 cross-ref or 1 nesting level │
+  │ Complex (6+)            {N}     {%}   4+ functions, 2+ cross-refs, or deep nesting │
+  └──────────────────────────────────────────────────────┘
+  Score = nesting_depth + cross_ref_count + function_count (each function/operator = 1)
 
-  ⚠ The tier classification above reports SYNTAX-LEVEL translatability.
-  Cross-reference depth determines what ACTUALLY migrates. A formula classified
-  "Native" may still require dependency resolution if it references other
-  calculated fields. Effective migration coverage is the realistic number.
+  Effective migration coverage:
+    Syntax-level:            {N}/{total} ({%}%) — based on tier classification only
+    After orphan exclusion:  {N}/{total} ({%}%) — minus {N} orphan inherited calcs
+    After dep resolution:    {N}/{total} ({%}%) — minus {N} circular, {N} unresolvable cross-refs
+    ──────────────────────
+    Realistic estimate:      {N}/{total} ({%}%)
+
+  ⚠ The tier classification reports SYNTAX-LEVEL translatability. The realistic
+  estimate accounts for orphan calcs (Step 3g), circular dependencies, and
+  unresolvable cross-references. A formula classified "Native" may still not
+  migrate if it depends on an orphan or circular chain.
 
   Tableau Sets (top-level <group> elements — separate from calculated fields):
   ┌──────────────────────────────────────────────────────┐
@@ -368,33 +380,72 @@ Audit: {workbook_name}
   Row-offset native formulas (LAG, LEAD, LOOKUP(agg,FIRST/LAST), INDEX) use native TS functions — no pass-through needed.
   Bare FIRST()/LAST() standalone → omitted (returns offset, not value — no TS equivalent).
 
-  ⚠ Needs Review — no-keyword LOD formulas:  {N} formula(s)
+  Migration effort estimate:
+    Formula translation:  deterministic (CLI pipeline, no LLM calls)
+    Phase 1 import:       ~1-2 minutes (tables + base model)
+    Phase 2 import:       ~{N} retry cycles expected
+      Simple formulas:    {N} — likely import on first try
+      Medium formulas:    {N} — may need 1-2 retries
+      Complex formulas:   {N} — expect structural fixes
+    Estimated total:      {M}-{N} minutes (model only, excludes liveboard)
+
+  Orphan inherited calcs:  {N} formula(s) referencing missing tables
   ┌──────────────────────────────────────────────────────────────────────────┐
-  │ These formulas use Tableau's no-keyword LOD syntax ({AGG([col])})       │
-  │ which computes a grand scalar that respects dimension filters.          │
-  │ Translated to group_aggregate(..., {}, query_filters()) — the closest  │
-  │ ThoughtSpot equivalent — but Tableau's filter ordering (LOD computed    │
-  │ after dimension filters, before table-calc filters) has no exact        │
-  │ ThoughtSpot match. The user MUST verify these produce correct results   │
-  │ with and without search filters applied.                                │
+  │ These calcs were inherited from a parent/copied datasource and          │
+  │ reference tables not present in this datasource. They are               │
+  │ non-functional in Tableau and will be excluded from migration.          │
   │                                                                         │
-  │ Common pattern: {COUNTD([ID])} = 1 (context detection — "is the user   │
-  │ looking at one record or many?")                                        │
+  │ Missing tables: {table1}, {table2}, …                                   │
   │                                                                         │
-  │  #   Formula Name              Tableau Expression                       │
-  │  1   {name}                    {AGG([col])} ...                          │
+  │  #   Formula Name              Missing Table Reference                  │
+  │  1   {name}                    {TABLE_NAME}                             │
   │  …                                                                      │
+  │                                                                         │
+  │ (Includes {N} transitive orphans — depend on a direct orphan)           │
   └──────────────────────────────────────────────────────────────────────────┘
 
-  Data Blending (resolve federated IDs to datasource captions for display):
-  ┌──────────────────────────────────────────────────────┐
-  │ Primary Datasource   Secondary DS(s)   Link Columns  │
-  ├──────────────────────────────────────────────────────┤
-  │ {ds_caption}         {ds_caption}      {col1}, {col2}│
-  └──────────────────────────────────────────────────────┘
+  ⚠ Formulas Needing Review:  {N} formula(s)
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  #   Formula Name              Category           What to Verify        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │  1   {name}                    No-keyword LOD      Test with/without    │
+  │                                                    search filters       │
+  │  2   {name}                    Blend-context        Compare totals      │
+  │  3   {name}                    Pass-through SQL     SQL Passthrough on? │
+  │  4   {name}                    ifnull stripped      Verify null display │
+  │  5   {name}                    sum_if rewrite       Verify aggregation  │
+  │  …                                                                      │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ Categories:                                                             │
+  │  No-keyword LOD   {AGG([col])} → group_aggregate — filter context may  │
+  │                   differ (Tableau: after dim filters, before table-calc)│
+  │  Blend-context    Secondary datasource ref — post-agg blend vs row join│
+  │  Pass-through SQL sql_*_aggregate_op — requires cluster setting enabled│
+  │  ifnull stripped  ifnull(measure,0) removed — TS handles NULLs natively│
+  │  sum_if rewrite   sum(if…then…else 0) → sum_if() — semantically equiv │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  Data Blending — post-aggregation semantics:
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ ⚠ Tableau blends aggregate the secondary datasource independently     │
+  │ before joining. ThoughtSpot model joins operate at row level.          │
+  │ If both sides are fact tables at different grains, aggregation         │
+  │ results may differ.                                                    │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ Primary DS          Secondary DS       Link Cols    Risk               │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ {ds_caption}        {ds_caption}       {col1, …}   {HIGH/MED/LOW}     │
+  │ …                                                                      │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ Risk: HIGH = both sides have measures (fact×fact — aggregation may     │
+  │              diverge)                                                   │
+  │       MED  = secondary has measures but likely reference table         │
+  │       LOW  = secondary is dimension-only                               │
+  └──────────────────────────────────────────────────────────────────────────┘
   Blended datasources:  {N} of {total} — will merge into single model(s)
   Blend relationships:  {M} total
   Star topologies:      {S} (1 primary → 2+ secondaries)
+  HIGH-risk blends:     {N} — verify aggregation results post-migration
   ──────────────────────────────────────────────────
 ```
 
@@ -403,15 +454,31 @@ are auto-migratable: static params are created directly in the model TML; SQL-lo
 params are populated by querying the warehouse at migration time. The formula reference
 `[Parameters].[Name]` is rewritten to `[Name]` in both cases.
 
-If any formulas are classified as Row-offset or Untranslatable, list them:
+If any formulas are classified as Row-offset, list them:
 
 ```
   Row-offset formulas (translated via decision tree):
     - {formula_name}: {tier} — {tableau_expr} → {ts_expr or "omit (ambiguous)"}
     - ...
+```
 
-  Untranslatable formulas (will be omitted):
-    - {formula_name}: {reason} — {expression excerpt}
+**Excluded formulas** — every formula that will NOT be migrated, grouped by root cause:
+
+```
+  Excluded Formulas: {N} total
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ Root Cause               Count  Potential Resolution                    │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ Untranslatable function  {N}    No TS equivalent — SQL view or UDF      │
+  │ Missing table in model   {N}    Add source tables, then create formula  │
+  │ Circular dependency      {N}    Break cycle by inlining one formula     │
+  │ Complex date arithmetic  {N}    Rewrite with TS date funcs or warehouse │
+  │ Geospatial function      {N}    Spatial not supported — lat/lon as attr │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  Per-formula detail:
+    {Root cause category} ({N}):
+    - {formula_name}: {tableau_expr} — {what the user can do}
     - ...
 ```
 
@@ -436,19 +503,37 @@ If any formulas are classified as Pass-through, list them with the generated exp
 Write the report to `/tmp/ts_tableau_mig/audit/{workbook_name}_audit.md` and display
 it inline.
 
+**Per-datasource breakdown** (when a workbook has multiple datasources):
+
+Report coverage **per datasource**, not just workbook-wide. Different datasources within
+the same workbook can have very different effective migration rates (e.g. a full datasource
+at 73% vs a copied subset at 54%). A combined number hides this.
+
+```
+  Per-datasource coverage:
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ Datasource              Tables  Calcs  Orphans  Realistic Coverage     │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ {ds_name_1}             {N}     {N}    {N}      {N}/{N} ({%}%)         │
+  │ {ds_name_2} (copy)      {N}     {N}    {N}      {N}/{N} ({%}%)         │
+  └──────────────────────────────────────────────────────────────────────────┘
+```
+
 **Combined summary (multiple files):**
 
 ```
 Audit Summary: {N} workbook(s)
 ══════════════════════════════════════════════════════
 
-  Workbook                          Tables  Calcs  Coverage
-  ─────────────────────────────────────────────────────────
-  {workbook_1}                      {N}     {N}    {%}%
-  {workbook_2}                      {N}     {N}    {%}%
+  Workbook                          Tables  Calcs  Orphans  Coverage
+  ─────────────────────────────────────────────────────────────────────
+  {workbook_1}                      {N}     {N}    {N}      {%}%
+  {workbook_2}                      {N}     {N}    {N}      {%}%
   ...
-  ─────────────────────────────────────────────────────────
-  Total                             {N}     {N}    {%}%
+  ─────────────────────────────────────────────────────────────────────
+  Total                             {N}     {N}    {N}      {%}%
+
+  Coverage = realistic estimate (after orphan + circular + cross-ref exclusion)
 ```
 
 After the audit, exit cleanly. Do NOT proceed to Migrate mode steps.
@@ -874,6 +959,62 @@ for worksheet in root.findall('.//worksheet'):
 
 ---
 
+## Step 3g — Orphan calc detection (copied datasources)
+
+When a Tableau datasource is a **copy** of another (common with published datasource
+clones), it inherits **all calculated fields** from the original — including ones that
+reference tables no longer present in the copy. These orphan calcs are non-functional in
+Tableau and will fail at ThoughtSpot import.
+
+After Step 3b extraction, for each datasource:
+
+```python
+ds_tables = {t['name'].upper() for t in datasource['physical_tables']}
+orphan_calcs = set()
+
+# Direct orphans: reference a table not in this datasource
+for calc in datasource['calculated_fields']:
+    for ref in re.findall(r'\[([^\]]+)::', calc['expr']):
+        if ref.upper() not in ds_tables:
+            orphan_calcs.add(calc['name'])
+            break
+
+# Transitive orphans: depend on a direct orphan
+changed = True
+while changed:
+    changed = False
+    for calc in datasource['calculated_fields']:
+        if calc['name'] in orphan_calcs:
+            continue
+        for ref_name in calc.get('formula_refs', []):
+            if ref_name in orphan_calcs:
+                orphan_calcs.add(calc['name'])
+                changed = True
+                break
+```
+
+Store `orphan_calcs` per datasource alongside the extraction results.
+
+**What to log** (if any orphans found):
+> ⚠ Datasource `{name}`: {N} orphan calc(s) reference missing tables: {table1, table2, …}
+> These are non-functional inherited fields and will be excluded from migration.
+
+**In migrate mode:** surface the orphan count and the missing tables before proceeding.
+Ask the user to confirm exclusion — in rare cases they may want to add the missing tables
+to the connection and model instead:
+> {N} calculated fields reference tables not in this datasource ({table1, table2, …}).
+> These appear to be inherited from a parent datasource and are non-functional.
+> **E** — Exclude them (default, recommended)
+> **A** — Add the missing tables to the model (you'll need to confirm they exist in Step 4)
+
+If the user chooses **A**, add the missing tables to the datasource's table list and
+re-run Step 4 table confirmation for the new tables only. Remove the affected calcs
+from `orphan_calcs` so they enter the translation pipeline.
+
+**In audit mode:** no prompt — just report the orphan count in the A4 audit report.
+
+---
+
 ## Step 3.5 — Resolve Published Datasources (sqlproxy)
 
 > Runs only if Step 3 detected one or more datasources with `<connection class="sqlproxy">`.
@@ -897,6 +1038,9 @@ not in the file.
    - Continue to Step 4 with the TWB `<metadata-records>` column info.
 
 3. For each sqlproxy datasource, extract `dbname` from the `<connection>` element, then:
+
+   **Progress label:** `"Querying Tableau API (not ThoughtSpot) to resolve published datasource columns…"`
+   — make it clear this is a Tableau Server query, not a ThoughtSpot metadata search.
 
    ```bash
    # Find the published datasource by name
@@ -1186,11 +1330,29 @@ How would you like to identify the connection?
   N  Name it     — type the exact connection name; I'll use it directly
   F  Filter      — give a partial string; I'll list only connections that match
   L  List all    — show every connection and pick by number
+  T  Trust       — type the name and skip validation (faster — import will fail
+                   cleanly if the name is wrong)
 
-Enter N / F / L:
+Enter N / F / L / T:
 ```
 
-Then fetch the connections once (auto-paginated, returns all):
+**T — trust the name.** Use the typed name directly without running `ts connections list`.
+This skips validation but is faster on instances with many connections. The import will
+return a clear error (`"Connection 'X' not found"`) if the name is wrong.
+
+**Compound prompt (N or T path).** When the user takes the N or T path, offer the
+db/schema confirmation in the same prompt to eliminate sequential questions:
+
+```
+Connection: ____________  (exact ThoughtSpot connection name)
+Database:   ____________  (or press Enter to use '{twb_extracted_db}')
+Schema:     ____________  (or press Enter to use '{twb_extracted_schema}')
+```
+
+This replaces the separate db/schema confirmation loop below when the user provides
+all three in one response.
+
+For N/F/L, fetch the connections once (auto-paginated, returns all):
 
 ```bash
 source ~/.zshenv && ts connections list --profile {profile_name}
@@ -1576,8 +1738,14 @@ This replaces ad-hoc translation and applies all 14 transforms from
 [`../../shared/mappings/tableau/tableau-formula-translation.md`](../../shared/mappings/tableau/tableau-formula-translation.md)
 in the mandatory execution order.
 
+**Orphan exclusion:** Before building the translation input, remove any calcs in
+`orphan_calcs` (from Step 3g). These reference missing tables and will fail at import.
+Do not include them in `classification.json` — they are reported separately in the
+"Excluded Formulas" section of the migration report (root cause: "Orphan inherited calc —
+references table not in datasource").
+
 **Inputs needed:**
-- `classification.json` — from the Step 3 TWB parse (formula name, caption, expression, datatype, role)
+- `classification.json` — from the Step 3 TWB parse (formula name, caption, expression, datatype, role), **excluding orphan calcs**
 - `table_columns.json` — `{"TABLE_NAME": ["COL1", "COL2", ...]}` map from Step 5a table generation
 - `parameters.json` — from the Step 3 parameter extraction (internal name → caption mapping)
 - `--tables` — comma-separated list of tables in THIS model (for column scoping)
@@ -2547,6 +2715,14 @@ Dashboards: {N}  (liveboard migration offered after import)
 Blended models: {N} model(s) merged from {M} datasources via data blending
   - {primary_ds} ← {secondary_ds} on [{col1}, {col2}]  (LEFT_OUTER, {cardinality})
 
+  ⚠ HIGH-risk blend(s): {N}  (both sides have measures — fact×fact)
+    {primary} ← {secondary}: Tableau aggregates {secondary} to {link_cols} grain
+    before joining. ThoughtSpot joins at row level — aggregation may diverge.
+    Options:
+      R — proceed with row-level join (ThoughtSpot chasm trap may handle it)
+      S — create a SQL View that pre-aggregates the secondary to the linking grain
+      M — keep as separate models (no blend merge)
+
 Proceed?
   yes   — import the table + model TMLs
   no    — cancel
@@ -2616,9 +2792,39 @@ Parse the response. Extract the GUID for each imported object. On failure, fix t
 table/connection errors and retry — Phase 1 errors are always structural (wrong
 connection name, missing column), never formula syntax.
 
+**Phase 1.5 — Base model review checkpoint:**
+
+After Phase 1 succeeds, pause and let the user verify the base model before adding
+formulas. This catches structural issues (wrong table bindings, missing columns, broken
+joins) before they compound into Phase 2 retry cycles:
+
+```
+Base model imported: {model_name}
+  {base_url}/#/data/tables/{model_guid}
+
+  Tables:     {N} bound to connection "{connection_name}"
+  Columns:    {N} physical columns ({a} attribute, {m} measure)
+  Joins:      {N}
+  Parameters: {names or "none"}
+
+  Please verify in ThoughtSpot:
+    1. Open the model link above
+    2. Check that all tables show data (no "table not found" errors)
+    3. Confirm column types look correct (especially date columns)
+    4. If joins exist, try a search spanning two tables
+
+  Ready to add {F} translated formulas (Phase 2)?
+    yes    — proceed to formula import
+    search — try some searches first (suggest test questions)
+    no     — stop here; model is ready for manual formula work
+```
+
+If the user chooses **search**, suggest 3 natural-language test questions grounded in the
+model's physical columns (no formulas yet). After testing, re-prompt yes/no.
+
 **Phase 2 — Add formulas:**
 
-After Phase 1 succeeds, add all translated formulas to the model TML:
+After the user confirms, add all translated formulas to the model TML:
 
 1. Pin the model's GUID at the TML root (`guid:` field)
 2. Add `formulas[]` entries from the `ts tableau translate-formulas` output
@@ -2631,15 +2837,29 @@ python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{model_file}').
   | ts tml import --policy ALL_OR_NONE --no-create-new --profile {profile_name}
 ```
 
-If the Phase 2 import fails:
-1. Parse the error response to identify the failing formula(s)
-2. Remove the failing formula from `formulas[]` AND its paired `columns[]` entry
-3. Log the removal: `"Skipped: {name} — {error_message}"`
-4. Re-lint and re-import (up to 5 retry cycles)
-5. After all retries, report:
-   - Formulas successfully imported
-   - Formulas skipped with reasons
+If the Phase 2 import fails, use **targeted retry** — only re-process the failing
+formulas, not the full batch:
+
+1. Parse the error response to identify the failing formula(s) by name
+2. Remove **only** the failing formulas from `formulas[]` AND their paired `columns[]` entries
+3. Log each removal: `"Skipped: {name} — {error_message}"`
+4. Re-lint the reduced TML and re-import (up to 5 retry cycles)
+5. On each retry, keep a **context cache**: the column registry, formula dependency map,
+   and table/join structure from Phase 1 are unchanged — do not re-derive them. Only
+   recompute the `formulas[]` and `columns[]` sections.
+6. After all retries, report:
+   - Formulas successfully imported (count + names)
+   - Formulas skipped with reasons (count + per-formula error)
    - Suggestion: review skipped formulas for manual fix
+
+**Context cache:** between retry cycles, preserve:
+- The model's GUID, `obj_id`, table list, column registry, and join structure (unchanged)
+- The translated formula set (only remove failing entries, don't re-translate)
+- The parameter map and cross-reference DAG
+
+Do **not** re-run `ts tableau translate-formulas` on retry — the translation is
+deterministic and won't produce a different result. Only remove the failing formula
+and re-import the reduced set.
 
 This ensures the model ALWAYS exists after Phase 1, and formula errors are isolated
 rather than blocking the entire import.
@@ -3544,22 +3764,49 @@ rule). Set conversions are semantic reinterpretations — list each so the user 
 | State_TopN | Top-N | ✓ query set (rank desc by SUM, N=topN param) | verify ranking + N |
 | State_BottomN | Bottom-N | ✓ query set (rank asc by SUM, N=topN param) | verify ranking + N |
 
-**Partial / not migrated** — repeat the ◑/⊘ rows with the reason and what the user can do.
+**Excluded formulas** — every ⊘ row from the formula mapping table, grouped by root cause.
+Include the root cause summary first, then per-formula detail under each heading:
 
-**⚠ Needs review — no-keyword LOD formulas** — list every formula that uses Tableau's
-`{AGG([col])}` syntax (no FIXED/INCLUDE/EXCLUDE keyword). These are translated to
-`group_aggregate(..., {}, query_filters())` which is the closest ThoughtSpot equivalent,
-but the semantic match is not guaranteed. Tableau computes no-keyword LODs after dimension
-filters but before table-calc filters — a specific order-of-operations point with no exact
-ThoughtSpot equivalent.
+Root cause summary:
+| Root Cause | Count | Potential Resolution |
+|---|---|---|
+| Orphan inherited calc | {N} | Non-functional — references tables not in this datasource (copied from parent). Add missing tables or leave excluded |
+| Missing table in model | {N} | Add source table(s) to the connection and model, then create the formula |
+| Untranslatable function | {N} | No ThoughtSpot equivalent — consider a SQL view or Snowflake UDF |
+| Circular dependency | {N} | Break the cycle by inlining one formula into the other |
+| Complex date arithmetic | {N} | Rewrite with ThoughtSpot date functions or pre-compute in warehouse |
+| Geospatial function | {N} | Spatial functions not supported — lat/lon columns migrated as attributes |
 
-| Tableau field | Tableau expression | ThoughtSpot expression | What to verify |
+### {Root cause category} ({N} formulas)
+| # | Formula Name | Tableau Expression | Potential Resolution |
 |---|---|---|---|
-| {name} | `{COUNTD([col])}` | `group_aggregate(unique_count([t::col]), {}, query_filters())` | Does the count change correctly when filters are applied/removed? |
+| 1 | {name} | `{expr}` | {specific to this formula — what the user can do} |
 
-The user must test each of these formulas in ThoughtSpot Search with and without filters
-to confirm the behaviour matches Tableau. If a formula should compute an absolute total
-regardless of filters, change `query_filters()` to `{}`.
+Omit root cause categories with zero formulas.
+
+**⚠ Formulas needing review** — formulas that WERE migrated (✅ in the mapping table) but
+require user verification. The ThoughtSpot behaviour may differ from Tableau in specific
+conditions. List every flagged formula with a specific verification question:
+
+| # | Formula Name | Review Category | What to Verify |
+|---|---|---|---|
+| 1 | {name} | No-keyword LOD | Test with/without search filters — does the value change as expected? |
+| 2 | {name} | Blend-context | Row-level join may produce different aggregation — compare totals |
+| 3 | {name} | Pass-through SQL | Confirm SQL Passthrough Functions is enabled on the cluster |
+| 4 | {name} | `ifnull` stripped | NULL handling deferred to ThoughtSpot — verify nulls display correctly |
+| 5 | {name} | `sum_if` rewrite | Simplified from `if/then/else` — verify aggregation matches |
+
+Review category reference:
+| Category | When flagged | What to verify |
+|---|---|---|
+| No-keyword LOD | `{AGG([col])}` → `group_aggregate(..., {}, query_filters())` | Tableau computes after dimension filters, before table-calc filters — no exact TS match. Test with/without search filters. If the formula should be an absolute total, change `query_filters()` to `{}`. |
+| Blend-context | Formula references columns from a blended secondary datasource | Row-level join may aggregate differently than Tableau's post-agg blend — compare totals |
+| Pass-through SQL | `sql_*_aggregate_op` or `sql_*_op` functions | Requires SQL Passthrough Functions enabled; verify SQL dialect matches your warehouse |
+| `ifnull` stripped | `ifnull(measure, 0)` wrapper removed (default) | NULL handling deferred to ThoughtSpot query engine — verify nulls display correctly in charts/tables |
+| `sum_if` rewrite | `sum(if(cond) then expr else 0)` → `sum_if(cond, expr)` (default) | Semantically equivalent but verify aggregation matches original |
+
+Omit categories with zero formulas. The `ifnull` stripped and `sum_if` rewrite counts come
+from the `translate_formulas` stats (`ifnull_stripped`, `agg_if_conversions`).
 ```
 
 A console one-liner (`Tables: N · Models: N · Liveboards: N`) is fine as a closing line, but
