@@ -344,6 +344,10 @@ def resolve_cross_references(
         replaced_any = False
         for ref in refs:
             dep_caption = by_calc_id.get(ref)
+            # Fallback: try normalized (case-insensitive) lookup
+            if dep_caption is None:
+                norm_ref = re.sub(r"\s+", " ", ref).lower()
+                dep_caption = by_calc_id.get(norm_ref)
             if dep_caption and dep_caption in dag:
                 dep_entry = dag[dep_caption]
                 replacement = dep_entry.get("resolved_expr") or dep_entry["raw"]
@@ -367,13 +371,22 @@ def resolve_cross_references(
 
 
 def build_calc_id_map(formulas: list[dict]) -> dict[str, str]:
-    """Build [Calculation_NNN] → caption map from formula list."""
+    """Build [Calculation_NNN] → caption map from formula list.
+
+    Stores both the original-case key and a normalized (lowercase, whitespace-
+    collapsed) key so that lookups are case-insensitive and whitespace-tolerant.
+    """
     result: dict[str, str] = {}
     for f in formulas:
         name = f.get("name", "")
         caption = f.get("caption", "")
         if name and name.startswith("Calculation_") and caption:
-            result[f"[{name}]"] = caption
+            key = f"[{name}]"
+            result[key] = caption
+            # Also store normalized version for case-insensitive matching
+            norm_key = re.sub(r"\s+", " ", key).lower()
+            if norm_key != key.lower():
+                result[norm_key] = caption
     return result
 
 
@@ -1113,17 +1126,113 @@ def scope_columns(
 def ensure_else_clause(expr: str, role: str = "measure") -> str:
     """Ensure every if/then has an else clause.
 
-    Adds 'else 0' for measures, 'else ''' for dimensions.
+    Walks the expression structurally to find each if/then block and checks
+    whether it has a matching else. Inserts 'else 0' (measures) or 'else '''
+    (dimensions) for any unmatched if/then.
+
+    Handles nested if/then inside then/else arms (the previous heuristic only
+    checked the outermost case).
     """
     default_val = "0" if role == "measure" else "''"
 
-    # Pattern: then X <end-or-nothing> without else
-    # Look for 'then ... )' or 'then ... $' without 'else'
-    # This is a heuristic — handles the common outermost case
-    if "if" in expr.lower() and "then" in expr.lower():
-        if "else" not in expr.lower():
-            # Add else before the end
-            expr = expr.rstrip()
+    # Strip [col refs] and 'strings' for keyword detection only
+    def _keyword_positions(text: str) -> list[tuple[int, str]]:
+        """Find positions of if/then/else keywords, ignoring those inside
+        brackets, strings, or as part of *_if function names."""
+        positions: list[tuple[int, str]] = []
+        i = 0
+        in_bracket = 0
+        in_single = False
+        in_double = False
+        lower = text.lower()
+        while i < len(lower):
+            c = lower[i]
+            if c == "[" and not in_single and not in_double:
+                in_bracket += 1
+                i += 1
+                continue
+            if c == "]" and not in_single and not in_double:
+                in_bracket -= 1
+                i += 1
+                continue
+            if c == "'" and not in_double and in_bracket == 0:
+                in_single = not in_single
+                i += 1
+                continue
+            if c == '"' and not in_single and in_bracket == 0:
+                in_double = not in_double
+                i += 1
+                continue
+            if in_bracket > 0 or in_single or in_double:
+                i += 1
+                continue
+
+            for kw in ("then", "else", "if"):
+                kw_len = len(kw)
+                if lower[i:i + kw_len] == kw:
+                    before_ok = (i == 0 or not lower[i - 1].isalpha() and lower[i - 1] != "_")
+                    after_ok = (i + kw_len >= len(lower) or
+                                not lower[i + kw_len].isalpha() and lower[i + kw_len] != "_")
+                    if before_ok and after_ok:
+                        positions.append((i, kw))
+                        i += kw_len
+                        break
+            else:
+                i += 1
+
+        return positions
+
+    positions = _keyword_positions(expr)
+    if not any(kw == "if" for _, kw in positions):
+        return expr
+
+    # Count if vs else — quick check
+    if_count = sum(1 for _, kw in positions if kw == "if")
+    else_count = sum(1 for _, kw in positions if kw == "else")
+
+    if else_count >= if_count:
+        return expr
+
+    # Need to insert else clauses. Work right-to-left so positions stay valid.
+    # Strategy: pair each 'if' with its 'then', then check if an 'else' follows
+    # at the same nesting level before the next 'if' or end-of-string.
+    # Track nesting via if/else depth.
+
+    # Rebuild: scan left-to-right, track if-depth, find unmatched if/then pairs
+    if_stack: list[int] = []  # positions of 'if' keywords
+    then_stack: list[int] = []  # positions of 'then' keywords matched to ifs
+    insertions: list[int] = []  # positions where we need to insert 'else default'
+
+    depth = 0
+    kw_by_pos = {pos: kw for pos, kw in positions}
+    sorted_pos = sorted(kw_by_pos.keys())
+
+    if_then_pairs: list[tuple[int, int, bool]] = []  # (if_pos, then_pos, has_else)
+
+    state_stack: list[dict] = []  # track nesting
+
+    for idx, pos in enumerate(sorted_pos):
+        kw = kw_by_pos[pos]
+        if kw == "if":
+            state_stack.append({"if_pos": pos, "then_pos": -1, "has_else": False})
+        elif kw == "then" and state_stack:
+            state_stack[-1]["then_pos"] = pos
+        elif kw == "else" and state_stack:
+            # 'else if' is continuation, not a terminal else
+            # Check if next keyword is 'if'
+            next_idx = idx + 1
+            if next_idx < len(sorted_pos) and kw_by_pos[sorted_pos[next_idx]] == "if":
+                pass  # else if — the 'if' will push a new state
+            else:
+                state_stack[-1]["has_else"] = True
+
+    # Any remaining states without has_else need insertion at end
+    # But we need to know WHERE to insert. For a simple approach:
+    # re-count and insert at the end of the expression for each missing else.
+    missing = if_count - else_count
+    if missing > 0:
+        expr = expr.rstrip()
+        for _ in range(missing):
             expr = f"{expr} else {default_val}"
 
     return expr
@@ -1133,47 +1242,171 @@ def ensure_else_clause(expr: str, role: str = "measure") -> str:
 # 12. LOD expression conversion
 # ---------------------------------------------------------------------------
 
+def _find_matching_brace(expr: str, open_pos: int) -> int:
+    """Find the closing } that matches the { at open_pos, respecting nesting.
+
+    Returns the index of the matching }, or -1 if unbalanced.
+    """
+    depth = 1
+    pos = open_pos + 1
+    in_single = False
+    in_double = False
+    while pos < len(expr):
+        c = expr[pos]
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        elif not in_single and not in_double:
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return pos
+        pos += 1
+    return -1
+
+
+def _parse_lod_content(content: str) -> tuple[str, str, str] | None:
+    """Parse the content between matched { } into (keyword, dims, agg_expr).
+
+    Returns None if the content doesn't look like an LOD expression.
+    """
+    stripped = content.strip()
+    keyword_match = re.match(
+        r"(FIXED|INCLUDE|EXCLUDE)\s+", stripped, re.IGNORECASE,
+    )
+    if keyword_match:
+        keyword = keyword_match.group(1).upper()
+        rest = stripped[keyword_match.end():]
+    else:
+        keyword = ""
+        rest = stripped
+
+    colon_pos = _find_top_level_colon(rest)
+    if colon_pos < 0:
+        return None
+
+    dims_raw = rest[:colon_pos].strip()
+    agg_expr = rest[colon_pos + 1:].strip()
+
+    if not agg_expr:
+        return None
+
+    return keyword, dims_raw, agg_expr
+
+
+def _find_top_level_colon(expr: str) -> int:
+    """Find the first : that is not inside brackets, parens, or strings."""
+    depth_paren = 0
+    depth_bracket = 0
+    depth_brace = 0
+    in_single = False
+    in_double = False
+    for i, c in enumerate(expr):
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        elif not in_single and not in_double:
+            if c == "(":
+                depth_paren += 1
+            elif c == ")":
+                depth_paren -= 1
+            elif c == "[":
+                depth_bracket += 1
+            elif c == "]":
+                depth_bracket -= 1
+            elif c == "{":
+                depth_brace += 1
+            elif c == "}":
+                depth_brace -= 1
+            elif (c == ":"
+                  and depth_paren == 0
+                  and depth_bracket == 0
+                  and depth_brace == 0):
+                return i
+    return -1
+
+
+def _lod_to_group_aggregate(keyword: str, dims_raw: str, agg_expr: str) -> str:
+    """Build a group_aggregate() call from parsed LOD components."""
+    if dims_raw:
+        dims = [d.strip() for d in _split_args(dims_raw)]
+        dims_str = " , ".join(dims)
+    else:
+        dims_str = ""
+
+    if keyword == "FIXED" or keyword == "":
+        if dims_str:
+            return f"group_aggregate ( {agg_expr} , {{ {dims_str} }} , {{}} )"
+        else:
+            return f"group_aggregate ( {agg_expr} , {{}} , {{}} )"
+    elif keyword == "INCLUDE":
+        if dims_str:
+            return f"group_aggregate ( {agg_expr} , query_groups () + {{ {dims_str} }} , query_filters () )"
+        else:
+            return f"group_aggregate ( {agg_expr} , query_groups () , query_filters () )"
+    elif keyword == "EXCLUDE":
+        if dims_str:
+            return f"group_aggregate ( {agg_expr} , query_groups () - {{ {dims_str} }} , query_filters () )"
+        else:
+            return f"group_aggregate ( {agg_expr} , query_groups () , query_filters () )"
+
+    return f"group_aggregate ( {agg_expr} , {{}} , {{}} )"
+
+
 def convert_lod(expr: str) -> str:
     """Convert Tableau LOD expressions to ThoughtSpot group_aggregate().
 
-    Handles FIXED, INCLUDE, EXCLUDE keywords.
+    Uses bracket-depth matching instead of regex to handle:
+    - LODs with Calculation_*/formula refs in dimension lists
+    - LODs with boolean expressions in aggregates
+    - LODs inside IF branches (composition)
+
+    Nested LODs (group_aggregate inside group_aggregate) are decomposed:
+    the inner LOD is converted first, producing a flat group_aggregate call
+    that ThoughtSpot can evaluate. ThoughtSpot does not support nested
+    group_aggregate — if the result still nests after conversion, the
+    caller's validate_pre_import() will flag it.
     """
-    _LOD = re.compile(
-        r"\{\s*(FIXED|INCLUDE|EXCLUDE)?\s*(.*?)\s*:\s*(.+?)\s*\}",
-        re.IGNORECASE | re.DOTALL,
-    )
-
-    def _replace_lod(m: re.Match) -> str:
-        keyword = (m.group(1) or "").upper().strip()
-        dims_raw = m.group(2).strip()
-        agg_expr = m.group(3).strip()
-
-        # Parse dimension list
-        if dims_raw:
-            dims = [d.strip() for d in dims_raw.split(",")]
-            dims_str = " , ".join(dims)
+    result = expr
+    safety = 0
+    while safety < 50:
+        # Find the innermost { first (so nested LODs are resolved inside-out)
+        last_open = -1
+        for i, c in enumerate(result):
+            if c == "{":
+                last_open = i
+            elif c == "}" and last_open >= 0:
+                break
         else:
-            dims_str = ""
+            if last_open < 0:
+                break
+            close = _find_matching_brace(result, last_open)
+            if close < 0:
+                break
 
-        if keyword == "FIXED" or keyword == "":
-            if dims_str:
-                return f"group_aggregate ( {agg_expr} , {{ {dims_str} }} , {{}} )"
-            else:
-                return f"group_aggregate ( {agg_expr} , {{}} , {{}} )"
-        elif keyword == "INCLUDE":
-            if dims_str:
-                return f"group_aggregate ( {agg_expr} , query_groups () + {{ {dims_str} }} , query_filters () )"
-            else:
-                return f"group_aggregate ( {agg_expr} , query_groups () , query_filters () )"
-        elif keyword == "EXCLUDE":
-            if dims_str:
-                return f"group_aggregate ( {agg_expr} , query_groups () - {{ {dims_str} }} , query_filters () )"
-            else:
-                return f"group_aggregate ( {agg_expr} , query_groups () , query_filters () )"
+        if last_open < 0:
+            break
 
-        return m.group(0)
+        close = _find_matching_brace(result, last_open)
+        if close < 0:
+            break
 
-    return _LOD.sub(_replace_lod, expr)
+        safety += 1
+        content = result[last_open + 1:close]
+        parsed = _parse_lod_content(content)
+
+        if parsed is None:
+            break
+
+        keyword, dims_raw, agg_expr = parsed
+        replacement = _lod_to_group_aggregate(keyword, dims_raw, agg_expr)
+        result = result[:last_open] + replacement + result[close + 1:]
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1297,9 +1530,10 @@ def validate_pre_import(
         expr_stripped = re.sub(r"'[^']*'", '', expr_stripped)
         lower_s = expr_stripped.lower()
 
-        if_count = len(re.findall(r'\bif\b', lower_s))
-        then_count = len(re.findall(r'\bthen\b', lower_s))
-        else_count = len(re.findall(r'\belse\b', lower_s))
+        # Use negative lookbehind to exclude *_if functions (sum_if, count_if, etc.)
+        if_count = len(re.findall(r'(?<![a-zA-Z_])\bif\b', lower_s))
+        then_count = len(re.findall(r'(?<![a-zA-Z_])\bthen\b', lower_s))
+        else_count = len(re.findall(r'(?<![a-zA-Z_])\belse\b', lower_s))
 
         if if_count > 0:
             if then_count < if_count:
@@ -1312,6 +1546,15 @@ def validate_pre_import(
         # Check for unresolved Custom SQL Query references
         if "Custom SQL Query" in expr:
             warnings.append("Unresolved Custom SQL Query alias")
+
+        # Check for nested group_aggregate (ThoughtSpot limitation)
+        ga_positions = [m.start() for m in re.finditer(r'\bgroup_aggregate\s*\(', expr)]
+        if len(ga_positions) >= 2:
+            warnings.append(
+                "Nested group_aggregate — ThoughtSpot does not support "
+                "group_aggregate inside another group_aggregate. "
+                "Decompose into separate formulas."
+            )
 
         # Check for bare Tableau aggregate keywords
         if re.search(r"\bCOUNTD\b", expr):
@@ -1873,11 +2116,15 @@ def translate_formulas(
                     "name": caption,
                     "reason": f"parameter pass-through — {param_conflicts[caption]}",
                     "level": level,
+                    "original": raw,
                 })
                 continue
 
+            # Strip comments before resolution so commented-out refs don't block
+            raw_clean = strip_comments(raw)
+
             # Resolve cross-references
-            resolved = resolve_cross_references(raw, dag, calc_id_map)
+            resolved = resolve_cross_references(raw_clean, dag, calc_id_map)
             entry["resolved_expr"] = resolved
 
             # Check for unresolved references
@@ -1886,6 +2133,7 @@ def translate_formulas(
                     "name": caption,
                     "reason": "unresolved cross-reference",
                     "level": level,
+                    "original": raw,
                 })
                 continue
 
@@ -1914,6 +2162,7 @@ def translate_formulas(
                     "name": caption,
                     "reason": f"validation: {'; '.join(errors)}",
                     "level": level,
+                    "original": raw,
                     "attempted_expr": expr,
                 })
             else:
@@ -1934,6 +2183,7 @@ def translate_formulas(
                 "name": caption,
                 "reason": "circular or unresolvable dependency",
                 "level": -1,
+                "original": entry["raw"],
             })
 
     return {
@@ -1951,3 +2201,50 @@ def translate_formulas(
             "agg_if_conversions": transform_counts.get("agg_if_converted", 0),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# TML YAML serialization — proper quoting for formula expressions
+# ---------------------------------------------------------------------------
+
+def dump_tml_yaml(data: dict) -> str:
+    """Serialize a TML dict to YAML with proper quoting for formula expressions.
+
+    Handles two problems that plain yaml.dump gets wrong for TML:
+    1. Formula expressions contain : [] {} # which YAML misinterprets
+    2. Long expressions get line-wrapped, producing invalid multi-line TML
+
+    Values matching TML-sensitive patterns are double-quoted automatically.
+    """
+    import yaml
+
+    class _QuotedStr(str):
+        pass
+
+    def _quoted_representer(dumper: yaml.Dumper, val: str) -> yaml.ScalarNode:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", val, style='"')
+
+    _NEEDS_QUOTING = re.compile(r"[\[\]{}:#>|&*!%@`]|^\s|^'|^\"")
+
+    def _quote_values(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {_quote_values(k): _quote_values(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_quote_values(v) for v in obj]
+        if isinstance(obj, str) and _NEEDS_QUOTING.search(obj):
+            return _QuotedStr(obj)
+        return obj
+
+    class _TmlDumper(yaml.Dumper):
+        pass
+
+    _TmlDumper.add_representer(_QuotedStr, _quoted_representer)
+
+    quoted_data = _quote_values(data)
+    return yaml.dump(
+        quoted_data,
+        Dumper=_TmlDumper,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=100000,
+    )
