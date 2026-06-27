@@ -2383,3 +2383,50 @@ for csq_name, csq_cols in csq_columns.items():
 | Custom SQL Query6 | DAILY_METRICS | 2/2 (100%) | DATE, PROMOTION_ID |
 | Custom SQL Query1 | PROMOTION_METRICS | 3/3 (100%) | LEVEL, PROMOTION_ID, UPDATED_AT |
 | Custom SQL Query3 | CATEGORY_SHARE | 3/3 (100%) | CPG_NAME, LEVEL, PERIOD_TYPE |
+
+---
+
+## BL-058 — ts-object-model-erd: interactive ERD renderer for ThoughtSpot Models
+
+**Source:** Design spec `docs/superpowers/specs/2026-06-27-ts-object-model-erd-design.md`;
+  implementation plan `docs/superpowers/plans/2026-06-27-ts-object-model-erd.md` (local, gitignored);
+  validated mockup `agents/cli/ts-object-model-erd/reference/mockup.html`
+**Affects:** New skill `agents/cli/ts-object-model-erd/`; new shared module `agents/shared/erd/`;
+  future `ts-audit` integration (per-model ERD in `audit_report.html`)
+**Status:** Spec approved + plan written + mockup validated — ready for implementation
+**Priority:** MEDIUM
+
+### Problem
+
+ThoughtSpot's in-product model/join viewer is hard to use, requires a login plus object
+permissions, and can't overlay analysis. There is no way to hand someone a shareable,
+self-contained picture of a Model's structure — tables, joins, columns, RLS — for review
+or migration QA.
+
+### Proposed approach (approach C — validated by mockup)
+
+A new skill that renders an existing Model (Model TML + its Table TMLs) into a single
+self-contained, interactive HTML ERD that opens in any browser with no TS login.
+
+- **Python (stdlib + pyyaml)** owns the testable core: `parser.py` parses the Model TML and
+  stitches its Table TMLs (RLS, join cardinality, join type, and join origin all live in the
+  **table** TMLs, not the model); `erd_data.py` assembles a multi-model bundle (index +
+  switcher + model cap with logging + `--redact-rls`); `render.py` inlines the renderer and
+  injects the model JSON.
+- **Renderer is a static vanilla-SVG asset** (`agents/shared/erd/renderer.{css,js}`, ported
+  from the validated mockup) so `ts-audit` can reuse it. No JS build step, no external libs.
+- **Inputs:** local TML files, or live export via `ts tml export "{guid}" --fqn --associated`.
+- **Features (all proven in the mockup):** layouts (organic / star / layered →↓) with
+  orthogonal routing; focus/ghosting + shift-click compare with shortest join path; column
+  modes (collapsed / keys / flagged / all); findings overlay (populated later by ts-audit);
+  RLS overlay + secured-subgraph isolate; Arrow vs Crow's-foot notation; table-vs-model join
+  origin badges; localStorage saved layouts + bake-on-export.
+
+### Scope notes
+
+- Render-from-TML only. **Image → TML ingestion** (`ts-convert-from-image` /
+  `ts-object-model-from-sketch`) is a separate, opposite-direction skill that would reuse this
+  renderer behind a human-review loop — not part of this item.
+- 8-task TDD plan already written; follow it task-by-task.
+- Verify the real `rls_rules` field shape against a live `ts tml export` of a secured table
+  (read defensively in the plan; repo schema docs don't document it).
