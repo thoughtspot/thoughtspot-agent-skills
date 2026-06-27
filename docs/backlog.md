@@ -2430,3 +2430,52 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 - 8-task TDD plan already written; follow it task-by-task.
 - Verify the real `rls_rules` field shape against a live `ts tml export` of a secured table
   (read defensively in the plan; repo schema docs don't document it).
+
+---
+
+## BL-059 — ts-audit: set (cohort) usage analysis checks
+
+**Source:** Live testing on champ-staging (2026-06-26) — Dunder Mifflin Sales model (`0e4406c7-d978-4be7-abd7-c34e8f7da835`, 44 reusable cohorts)
+**Affects:** `agents/cli/ts-audit/analyzer.py` (new checks), `agents/cli/ts-audit/report.py` (report sections)
+**Status:** Open — research complete, implementation deferred
+**Related:** `agents/shared/schemas/thoughtspot-sets-tml.md` (set TML structure reference)
+
+### Problem
+
+ThoughtSpot sets (cohorts) count as columns on a model — a model with 100 columns and 200 sets exposes 300 accessible columns to users, causing UX overload. Sets can also drift (identical definitions across multiple sets) and cluster on a small number of base columns. The `ts-audit` health report has no visibility into set usage patterns.
+
+### Verified discovery mechanism
+
+Sets are **not** returned via `ts metadata dependents` COHORT bucket on a model. They **are** returned via `ts tml export <model-guid> --fqn --associated` as `type=cohort` items alongside tables. The audit pipeline already does `--associated` exports, so the cohort data is available — it just needs to be extracted from the export response and populated into the `Corpus.sets` field (which exists but is never populated).
+
+Consumer counting for individual sets: `ts metadata dependents <set-guid> --type LOGICAL_COLUMN` returns answers/liveboards that use the set.
+
+### Proposed checks
+
+| Check ID | Name | What it detects | Severity |
+|---|---|---|---|
+| D12 | Set count check | Models where `columns + sets > threshold` (e.g. 150). Too many accessible columns degrades UX (search suggestions, column picker overload). | WARNING at 150, CRITICAL at 300 |
+| D13 | Unused set detection | Reusable sets with 0 consumers (`ts metadata dependents` returns empty). Unused reusable sets add noise — suggest deleting or converting to answer-level. | WARNING |
+| D14 | Duplicate set definition | Sets with identical `config` blocks (same `cohort_type`, `cohort_grouping_type`, `anchor_column_id`, and filter/bin config). Definition drift — multiple sets doing the same thing. | WARNING |
+| D15 | Base column concentration | Anchor column usage analysis — which base columns (`config.anchor_column_id`) are used across sets, and how often. High concentration on one column may indicate over-segmentation. | INFO |
+
+### Key technical details
+
+- **Set TML structure:** `cohort.config.cohort_type` (SIMPLE = column set, ADVANCED = query set), `cohort.config.cohort_grouping_type` (BIN_BASED / GROUP_BASED / COLUMN_BASED), `cohort.config.anchor_column_id` (base column the set operates on), `cohort.worksheet` (model binding)
+- **Corpus integration:** `Corpus.sets: list[dict]` field exists at `analyzer.py:83` but is never populated. Populate from `--associated` export filtering for `type=cohort`
+- **Test model:** Dunder Mifflin Sales on champ-staging — 44 reusable cohorts, mix of SIMPLE and ADVANCED, consumer counts ranging from 0 to multiple
+
+### Implementation notes
+
+1. **Extract sets from `--associated` export** — filter the export response for items with `type=cohort`, parse each cohort TML, populate `Corpus.sets`
+2. **D12 (set count)** — count columns from model TML + count sets from corpus, compare against threshold
+3. **D13 (unused sets)** — for each set GUID, run `ts metadata dependents <guid> --type LOGICAL_COLUMN`; flag those with 0 dependents
+4. **D14 (duplicate definitions)** — hash the relevant `config` fields across all sets; group by hash; flag groups with >1 member
+5. **D15 (base column concentration)** — extract `anchor_column_id` from each set; count frequency; report distribution
+
+### Dependencies
+
+- The audit pipeline's `--associated` export already retrieves cohort TMLs — no additional API calls needed for discovery
+- D13 (unused sets) requires one `ts metadata dependents` call per set — could be batched or rate-limited for models with many sets
+
+**Target:** No date set — implement when ts-audit is next actively worked on.
