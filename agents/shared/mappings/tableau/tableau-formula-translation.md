@@ -14,6 +14,7 @@ CLI command implements this pipeline automatically.
 
 | Step | Transform | Error if skipped |
 |---|---|---|
+| 0 | **Comment stripping**: remove `//` line comments (but not `//` inside string literals — e.g. URLs) | `//` misidentified as an operator; formulas excluded unnecessarily |
 | 1 | **Parameter prefix strip**: `[Parameters].[X]` → `[X]` | "Search did not find 'Parameters'" |
 | 2 | **Internal parameter name mapping**: `[Parameter 6]` → `[Engagement Type]` (build mapping from TWB parse: internal name → caption) | Formula references invisible internal names |
 | 3 | **Cross-reference resolution**: `[Calculation_*]` → inline expression or display name (via dependency DAG — see tableau-tml-rules.md) | "Search did not find 'Calculation_...'" |
@@ -110,8 +111,9 @@ command detects pass-through conflicts automatically and skips them.
 | `LN(x)` | `ln ( x )` | |
 | `POWER(x, n)` | `pow ( x , n )` | |
 | `SQRT(x)` | `sqrt ( x )` | |
-| `MIN(a, b)` (scalar) | `if ( a < b ) then a else b` | ThoughtSpot `min` is aggregate-only |
-| `MAX(a, b)` (scalar) | `if ( a > b ) then a else b` | ThoughtSpot `max` is aggregate-only |
+| `MIN(a, b)` (scalar, 2-arg) | `if ( a < b ) then a else b` | ThoughtSpot `min` is aggregate-only. See "Scalar MAX/MIN detection" below |
+| `MAX(a, b)` (scalar, 2-arg) | `if ( a > b ) then a else b` | ThoughtSpot `max` is aggregate-only. See "Scalar MAX/MIN detection" below |
+| `MAX(expr, 0)` (clamp to zero) | `if ( expr > 0 ) then expr else 0` | Common shorthand — defensive null/negative guard. When `expr` is a CASE/IF, consider adding `else 0` to the inner expression instead (simpler, avoids duplicating `expr`) |
 | `COUNTD(x)` | `unique count ( x )` | Aggregate only |
 | `AVG(x)` | `average ( x )` | Aggregate only |
 | `ATTR(x)` | `x` | No equivalent; just reference the column |
@@ -133,6 +135,44 @@ command detects pass-through conflicts automatically and skips them.
 | `PI()` | `3.14159265358979` | No native `pi()` — use the literal (dialect-free). (alternatively `sql_double_op ( "pi()" )` — documented pass-through) |
 | `RADIANS(n)` | `n * 3.14159265358979 / 180` | No native `radians()` — use the literal composite. (alternatively `sql_double_op ( "radians({0})" , n )` — documented pass-through) |
 | `DEGREES(n)` | `n * 180 / 3.14159265358979` | No native `degrees()` — use the literal composite. (alternatively `sql_double_op ( "degrees({0})" , n )` — documented pass-through) |
+
+### Scalar MAX/MIN detection
+
+Tableau's `MAX()` and `MIN()` are **overloaded** — one-arg is aggregate (`MAX([col])`),
+two-arg is scalar (`MAX(a, b)` — returns the greater of two values). ThoughtSpot's `max()`
+and `min()` are aggregate-only. The pipeline must distinguish the two forms:
+
+**Detection:** count the top-level arguments (commas not inside nested parentheses). If
+exactly 2 arguments → scalar → rewrite to `if/then/else`. If 1 argument → aggregate →
+translate to `max()` / `min()` as normal.
+
+**Common shorthand — `MAX(expr, 0)` / `MIN(expr, 0)`** (clamp to zero):
+
+```
+# Tableau — defensive guard: never return negative / null
+MAX(CASE [Param] WHEN 'Sales' THEN [SALES_FORECAST]
+                 WHEN 'Revenue' THEN [REVENUE_FORECAST] END, 0)
+
+# ThoughtSpot — option A: literal rewrite
+if ( ( if ( [Param] = 'Sales' ) then [t::SALES_FORECAST]
+       else if ( [Param] = 'Revenue' ) then [t::REVENUE_FORECAST]
+       else 0 ) > 0 )
+then ( if ( [Param] = 'Sales' ) then [t::SALES_FORECAST]
+       else if ( [Param] = 'Revenue' ) then [t::REVENUE_FORECAST]
+       else 0 )
+else 0
+
+# ThoughtSpot — option B: simpler — add else 0 to the inner CASE (avoids duplicating expr)
+if ( [Param] = 'Sales' ) then [t::SALES_FORECAST]
+else if ( [Param] = 'Revenue' ) then [t::REVENUE_FORECAST]
+else 0
+```
+
+Option B is preferred when the second argument is `0` — adding `else 0` to the inner
+expression achieves the same result without duplicating the expression tree. The pipeline
+should detect `MAX(expr, 0)` / `MIN(expr, 0)` as a special case and apply option B.
+
+For the general case (`MAX(a, b)` where `b` is not `0`), use option A.
 
 ### Year-over-year / period comparisons — make them dynamic, don't copy hardcoded years
 
@@ -230,7 +270,8 @@ Functions" for the full `group_aggregate` reference.
 | `{INCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () + { dim } , query_filters () )` | Adds dimension to whatever the query already groups by |
 | `{EXCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () - { dim } , query_filters () )` | Removes dimension from the query's grouping |
 | `{FIXED : MAX([col])}` (no dims) | `group_aggregate ( max ( [table::col] ) , { } , { } )` | Grand FIXED — single scalar across entire dataset (e.g. global max date). Same as no-keyword form below. |
-| `{SUM([col])}` (no LOD keyword) | `group_aggregate ( sum ( [table::col] ) , {} , {} )` | Grand total — no partitioning |
+| `{SUM([col])}` (no LOD keyword) | `group_aggregate ( sum ( [table::col] ) , {} , query_filters () )` | Grand total — no partitioning. **Default to `query_filters()`** so the result respects the user's search filters (see "No-keyword LOD filter context" below). Use `{}` only when the formula must ignore filters (rare). ⚑ **Flag for user review in migration report.** |
+| `{COUNTD([col])}` (no LOD keyword) | `group_aggregate ( unique_count ( [table::col] ) , {} , query_filters () )` | Grand distinct count. Same `query_filters()` default. Common pattern: `{COUNTD([ID])} = 1` to detect single-record context (e.g. one promotion selected). ⚑ **Flag for user review.** |
 | `TOTAL(SUM([col]))` | `group_aggregate ( sum ( [table::col] ) , {} , query_filters () )` | Table-calc grand total that **respects filters** — `{}` grouping (whole table) + `query_filters()`. Use this as the denominator for percent-of-total. |
 | `SUM([x]) / TOTAL(SUM([x]))` (percent of total) | `sum ( [table::x] ) / group_aggregate ( sum ( [table::x] ) , {} , query_filters () )` | Common idiom: row/group value ÷ filtered grand total |
 
@@ -238,6 +279,40 @@ Functions" for the full `group_aggregate` reference.
 case has a clean LOD translation (above) — same `group_aggregate` family Snowflake/Databricks
 use. Other `TOTAL()` partitionings (e.g. along a specific pane direction) may still need
 pass-through.
+
+### No-keyword LOD filter context — `query_filters()` vs `{}`
+
+A no-keyword LOD like `{COUNTD([PROMOTION_ID])}` computes a grand scalar in Tableau.
+Crucially, Tableau's no-keyword LODs are computed **after** dimension filters — so when
+the user filters a dashboard to a single promotion, `{COUNTD([PROMOTION_ID])}` returns 1,
+not the total count across all data.
+
+In ThoughtSpot, the **filter argument** of `group_aggregate` controls this:
+- `query_filters()` — respects the user's search filters (matches Tableau's no-keyword LOD behaviour)
+- `{}` — ignores all filters (true grand total, always returns the same value)
+
+**Default to `query_filters()`** for no-keyword LODs, but **the behaviour may not be
+identical to Tableau**. Tableau computes no-keyword LODs after dimension filters but
+before table-calc filters — a specific point in Tableau's order of operations that has
+no exact ThoughtSpot equivalent. `query_filters()` respects all active search filters,
+which is the closest match but not guaranteed to produce the same results in all cases.
+
+The common pattern `IF {COUNTD([ID])} = 1 THEN ... ELSE ...` is a context-detection
+formula that checks whether the user is looking at one record or many. With
+`query_filters()` it responds to the user's search filters (likely correct). With `{}`
+it always sees the full dataset (likely wrong for this use case). But edge cases exist —
+particularly when the Tableau workbook relies on the specific filter ordering.
+
+**⚑ Always flag for user review — audit AND migration report.** These formulas are
+translatable but the semantic equivalence is not guaranteed. The user must verify that:
+1. The formula produces the expected values when filters are applied
+2. The formula produces the expected values when no filters are applied
+3. The context-detection behaviour (e.g. single vs multi promotion) works correctly
+
+Do NOT silently translate and move on. The audit (Step A4) should call out no-keyword LOD
+formulas as a separate "Needs Review" category alongside the translation tiers. The
+migration report (Step 12) should list each one with the original Tableau expression and
+the ThoughtSpot translation so the user can compare.
 
 **Syntax rules for `group_aggregate`:**
 - Dimensions use curly braces: `{ dim1 , dim2 }`

@@ -368,6 +368,24 @@ Audit: {workbook_name}
   Row-offset native formulas (LAG, LEAD, LOOKUP(agg,FIRST/LAST), INDEX) use native TS functions — no pass-through needed.
   Bare FIRST()/LAST() standalone → omitted (returns offset, not value — no TS equivalent).
 
+  ⚠ Needs Review — no-keyword LOD formulas:  {N} formula(s)
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ These formulas use Tableau's no-keyword LOD syntax ({AGG([col])})       │
+  │ which computes a grand scalar that respects dimension filters.          │
+  │ Translated to group_aggregate(..., {}, query_filters()) — the closest  │
+  │ ThoughtSpot equivalent — but Tableau's filter ordering (LOD computed    │
+  │ after dimension filters, before table-calc filters) has no exact        │
+  │ ThoughtSpot match. The user MUST verify these produce correct results   │
+  │ with and without search filters applied.                                │
+  │                                                                         │
+  │ Common pattern: {COUNTD([ID])} = 1 (context detection — "is the user   │
+  │ looking at one record or many?")                                        │
+  │                                                                         │
+  │  #   Formula Name              Tableau Expression                       │
+  │  1   {name}                    {AGG([col])} ...                          │
+  │  …                                                                      │
+  └──────────────────────────────────────────────────────────────────────────┘
+
   Data Blending (resolve federated IDs to datasource captions for display):
   ┌──────────────────────────────────────────────────────┐
   │ Primary Datasource   Secondary DS(s)   Link Columns  │
@@ -3527,6 +3545,21 @@ rule). Set conversions are semantic reinterpretations — list each so the user 
 | State_BottomN | Bottom-N | ✓ query set (rank asc by SUM, N=topN param) | verify ranking + N |
 
 **Partial / not migrated** — repeat the ◑/⊘ rows with the reason and what the user can do.
+
+**⚠ Needs review — no-keyword LOD formulas** — list every formula that uses Tableau's
+`{AGG([col])}` syntax (no FIXED/INCLUDE/EXCLUDE keyword). These are translated to
+`group_aggregate(..., {}, query_filters())` which is the closest ThoughtSpot equivalent,
+but the semantic match is not guaranteed. Tableau computes no-keyword LODs after dimension
+filters but before table-calc filters — a specific order-of-operations point with no exact
+ThoughtSpot equivalent.
+
+| Tableau field | Tableau expression | ThoughtSpot expression | What to verify |
+|---|---|---|---|
+| {name} | `{COUNTD([col])}` | `group_aggregate(unique_count([t::col]), {}, query_filters())` | Does the count change correctly when filters are applied/removed? |
+
+The user must test each of these formulas in ThoughtSpot Search with and without filters
+to confirm the behaviour matches Tableau. If a formula should compute an absolute total
+regardless of filters, change `query_filters()` to `{}`.
 ```
 
 A console one-liner (`Tables: N · Models: N · Liveboards: N`) is fine as a closing line, but
