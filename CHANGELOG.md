@@ -6,6 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-06-27
+- feat: add `ts tableau build-model` command (ts-cli 0.18.0) — deterministic TWB-to-model-TML pipeline: parses TWB XML, resolves all internal refs (Calculation_ and copy-style), translates formulas, resolves name collisions, applies formula_ prefix, fixes double aggregation, splits into phased import files by dependency level. New `model_builder.py` module with pure functions for all 8 model-level transforms
+- chore: bump ts-cli to v0.18.0
+- feat: update `ts-convert-from-tableau` — add scope 4 (Models only) and scope 5 (Tables only) migration modes with per-step scope annotations
 - chore: bump ts-cli to v0.17.0 — 9 new pre-transforms (ifnull stripping, sum_if conversion, date arithmetic, scalar MAX/MIN, comment stripping, CSQ alias resolution, no-keyword LOD, if/then/else validation, operator spacing); 156 new tests
 - feat: update `ts-convert-from-tableau` — orphan calc detection (Step 3g), Phase 1.5 base model checkpoint, excluded formulas + review flags report sections (BL-053), blend risk classification (BL-045), formula complexity + realistic coverage estimate (BL-047), targeted retry with context cache (BL-049), compound connection prompt (BL-051)
 - feat: add `ts-load-source-data` skill v1.0.0 — load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to; adds `ts-load-*` naming family to skill-naming.md and check_skill_naming.py

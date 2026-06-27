@@ -117,43 +117,52 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
   **3  Liveboards only** — the model(s) **already exist** in ThoughtSpot; skip table/model
       creation (skip Steps 4–7.5) and build liveboards on a **user-selected existing model**
       (see Step 1.5 model picker). Still parse the TWB for dashboards (Step 3).
+  **4  Models only** — tables **already exist** in ThoughtSpot; skip table creation but
+      build model(s) with formulas. Reuse existing table GUIDs (Step 4 E/G path).
+      (skip Steps 5a table TML generation, 8–11; run Steps 4→5b→5.5→6→7→7.5→11.5→12).
+  **5  Tables only** — generate and import table TMLs only; **skip models and liveboards**
+      (run Steps 4→4.5→5a→6→12). Useful when tables need to be created/updated before
+      a separate model migration pass.
 
 ### Steps (Migrate mode)
 
   1.  Authenticate to ThoughtSpot .......................... auto
-  1.5 Choose migration scope (Models+LB / Models only / LB only;
-      LB-only → pick an existing model) ................. you choose
+  1.5 Choose migration scope (1–5; see below) .......... you choose
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields, blend relationships,
       table-calc addressing ............................ auto
-  3.5 Resolve published datasources (sqlproxy → API) ... auto/you choose  [scope 1,2]
-  3.6 Confirm joins (present/suggest/range join option) . you confirm   [scope 1,2]
-  4.  Confirm source tables (reuse/GUID/create/search) ..... you choose  [scope 1,2]
-  4.5 Select ThoughtSpot connection (create path only) .... you choose  [scope 1,2]
-  5.  Generate TML files (table + sql_view + model) ...... auto          [scope 1,2]
-      5b includes: ts tableau translate-formulas (CLI pipeline)
-  5.5 Confirm Spotter (AI search) enablement (default Y) .. you choose   [scope 1,2]
-  6.  Validate against ThoughtSpot (up to 10 fix cycles) .. auto         [scope 1,2]
-  7.  Review checkpoint + two-phase import:               you confirm   [scope 1,2]
+  3.5 Resolve published datasources (sqlproxy → API) ... auto/you choose  [scope 1,2,4,5]
+  3.6 Confirm joins (present/suggest/range join option) . you confirm   [scope 1,2,4]
+  4.  Confirm source tables (reuse/GUID/create/search) ..... you choose  [scope 1,2,4,5]
+  4.5 Select ThoughtSpot connection (create path only) .... you choose  [scope 1,2,5]
+  5.  Generate TML files ................................. auto          [scope 1,2,4,5]
+      5a Table TMLs (+ sql_view) ......................... auto          [scope 1,2,5]
+      5b Model TML + formula translation ................. auto          [scope 1,2,4]
+  5.5 Confirm Spotter (AI search) enablement (default Y) .. you choose   [scope 1,2,4]
+  6.  Validate against ThoughtSpot (up to 10 fix cycles) .. auto         [scope 1,2,4,5]
+  7.  Review checkpoint + two-phase import:               you confirm   [scope 1,2,4]
       Phase 1: base model (tables, columns, joins, params — NO formulas)
       Phase 2: add formulas (GUID-pinned update, iterative error recovery)
-  7.5 Confirm the model is correct (test in Search/Spotter)  you confirm [scope 1,2]
+  7.5 Confirm the model is correct (test in Search/Spotter)  you confirm [scope 1,2,4]
   8.  Migrate dashboards? + separate vs single-tabbed (2+) . you choose (skip → Step 12) [scope 1,3]
-  9.  Parse dashboard layout and map to grid ............... auto
-  9d. Orphan worksheets (not on a dashboard) — add as tiles? you choose
- 10c. Choose charting library (Legacy default / Muze) ........ you choose
- 10.  Generate liveboard TML (export model for params first) auto
- 10f. Add referenced parameters to the header? (default Y) . you choose
- 10g. Add a "Migration Summary" tab (migrated/decisions/omitted) auto
- 10.5 Pick a liveboard style (curated theme; default) ..... you choose
- 11.  Import liveboard ..................................... you confirm
- 11.5 Formula coverage answers (every formula testable) ... auto
- 12.  Migration report (outcomes + links + formula map) ... auto
+  9.  Parse dashboard layout and map to grid ............... auto         [scope 1,3]
+  9d. Orphan worksheets (not on a dashboard) — add as tiles? you choose   [scope 1,3]
+ 10c. Choose charting library (Legacy default / Muze) ........ you choose  [scope 1,3]
+ 10.  Generate liveboard TML (export model for params first) auto         [scope 1,3]
+ 10f. Add referenced parameters to the header? (default Y) . you choose   [scope 1,3]
+ 10g. Add a "Migration Summary" tab (migrated/decisions/omitted) auto     [scope 1,3]
+ 10.5 Pick a liveboard style (curated theme; default) ..... you choose    [scope 1,3]
+ 11.  Import liveboard ..................................... you confirm   [scope 1,3]
+ 11.5 Formula coverage answers (every formula testable) ... auto         [scope 1,2,4]
+ 12.  Migration report (outcomes + links + formula map) ... auto         [scope 1,2,3,4,5]
 
 Confirmation required: Steps 1.5, 3.6, 4.5, 5.5, 7, 7.5, 8, 9d, 11
-Auto-executed: Steps 1, 3, 5, 6, 9, 10, 12
-Scope 3 (LB only) skips 4–7.5; scope 2 (Models only) skips 8–11.
+Auto-executed: Steps 1, 3, 5, 6, 9, 10, 11.5, 12
+Scope 2 (Tables + Models) skips 8–11; runs 11.5 then 12.
+Scope 3 (LB only) skips 4–7.5; runs 1.5a model picker then 8–12.
+Scope 4 (Models only) skips 4.5, 5a, 8–11; runs 4(E/G), 5b, 6–7.5, 11.5, 12.
+Scope 5 (Tables only) skips 5b, 5.5–7.5, 8–11.5; runs 4, 4.5, 5a, 6, 12.
 
 ### Efficiency — keep the migration fast
 
@@ -564,8 +573,11 @@ What should I migrate?
   2  Tables + Models only — build the data layer; skip dashboards/liveboards
   3  Liveboards only — models already exist; skip table/model creation and build
                        liveboards on an existing model I help you pick
+  4  Models only — tables already exist in ThoughtSpot; skip table creation,
+                   build model(s) referencing existing tables
+  5  Tables only — generate and import table TMLs; skip models and liveboards
 
-Enter 1 / 2 / 3:
+Enter 1 / 2 / 3 / 4 / 5:
 ```
 
 Apply the scope:
@@ -575,6 +587,8 @@ Apply the scope:
 | **1 Models + Liveboards** | all steps | — |
 | **2 Tables + Models only** | 2–7.5, then 11.5 (coverage), 12 | **8–11** (dashboards/liveboards) |
 | **3 Liveboards only** | 1.5a model picker, 2–3 (parse, dashboards), 8–12 | **4–7.5** (table/model creation) |
+| **4 Models only** | 2–3 (parse), 4 (E/G to find existing tables), 5b (model TML + formulas), 5.5, 6, 7, 7.5, 11.5, 12 | **4.5** (connection — tables already bound), **5a** (table TMLs), **8–11** (liveboards) |
+| **5 Tables only** | 2–3 (parse), 4, 4.5, 5a (table TMLs), 6, 12 | **5b** (model), **5.5–7.5**, **8–11** |
 
 For scope **2**, after Step 7.5 jump straight to Step 11.5 then Step 12.
 
@@ -583,6 +597,17 @@ liveboard tiles reference *its* columns/formulas. Run **Step 1.5a** below to pic
 parse the TWB (Steps 2–3) and continue at Step 8. (Step 9b maps each worksheet's shelves to
 the **chosen model's** columns by display name — surface any field that has no matching
 column rather than guessing.)
+
+For scope **4**, tables already exist in ThoughtSpot — the user provides GUIDs or searches
+for them (Step 4, **E** or **G** path). No connection selection or table TML generation
+needed. The model TML references existing tables by GUID. This is the common path for
+consultant/remote migrations where tables were loaded separately (e.g. via
+`/ts-load-source-data` or manual warehouse provisioning + `ts tables create`). After
+Step 7.5, jump to Step 11.5 then Step 12.
+
+For scope **5**, only table TMLs are generated and imported. No model, no formulas, no
+liveboard. Useful for a phased migration where tables are set up first, then models are
+created in a second pass (scope 4).
 
 ### Step 1.5a — Pick an existing model (scope 3 only)
 
@@ -1022,20 +1047,58 @@ from `orphan_calcs` so they enter the translation pipeline.
 
 When a Tableau workbook references a **published datasource** on Tableau Server/Cloud,
 the TWB XML contains `<connection class="sqlproxy">` with a `dbname` attribute naming the
-published datasource. The actual warehouse table/column definitions are on the server,
-not in the file.
+published datasource.
+
+**What the TWB DOES contain for sqlproxy datasources** (extract these in Step 3b regardless
+of API access — they are `<column>` elements directly under the `<datasource>` element):
+- All **calculated fields** with full Tableau formula text (same as direct-connection
+  datasources)
+- **Column definitions** with captions, datatypes, and roles
+- **Metadata records** (local-name, remote-name, local-type, parent) — often complete enough
+  for column mapping
+
+**What the TWB does NOT contain** (only available via the Tableau API):
+- The **physical table structure** (table names, joins, db/schema/table paths)
+- The **connection details** (database, schema) that link to the warehouse
+
+This means **formula extraction and translation work without API access** — the Tableau API
+adds physical table resolution and join definitions, not the formulas.
 
 ### Flow
 
-1. Prompt: "Found **{N}** published datasource(s) hosted on Tableau Server. To resolve
-   the underlying columns and formulas, I need to query the Tableau REST API.
-   Do you have a Tableau profile configured? (Run `/ts-profile-tableau` to set one up)"
+> **ASK before querying the Tableau API.** The user may be a consultant conducting a remote
+> migration without access to the customer's Tableau Server. Do NOT attempt any API call
+> before asking — a failed API call wastes 30–60 seconds and confuses the flow.
 
-2. If the user declines or has no profile:
-   - Log: "Proceeding without Tableau API resolution. Published datasource columns will
-     use display names from the TWB file. Column mapping may need manual confirmation
-     in Step 4."
-   - Continue to Step 4 with the TWB `<metadata-records>` column info.
+1. Prompt — **always, before any API call**:
+
+   ```
+   Found {N} published datasource(s) hosted on Tableau Server:
+     - {ds_caption_1} ({M} columns, {C} calculated fields extracted from TWB)
+     - {ds_caption_2} ({M} columns, {C} calculated fields extracted from TWB)
+
+   The TWB already contains all column definitions and calculated fields.
+   The Tableau API would additionally resolve the physical table structure
+   (table names, joins, db/schema paths) — but this is optional.
+
+   Do you have access to the Tableau Server hosting these datasources?
+     Y  Yes — query the Tableau API for table structure   (requires /ts-profile-tableau)
+     N  No  — proceed with TWB metadata only              (common for consultant/remote migrations)
+
+   Enter Y / N:
+   ```
+
+2. If the user chooses **N** (no API access):
+   - Log: `"Proceeding with TWB-embedded metadata — {M} columns, {C} calculated fields
+     already extracted. Physical table names and joins will be confirmed manually in
+     Steps 3.6 and 4."`
+   - The TWB's `<column>` elements (captions, datatypes, roles) and `<metadata-records>`
+     (local-name → remote-name mapping) provide enough for formula translation and column
+     mapping. The physical table names come from `<metadata-record>` `parent-name` attributes
+     (e.g. `[Custom SQL Query3]`, `[Table_Name]`).
+   - **Skip to Step 3.6** (join confirmation) — the user will provide or confirm joins and
+     table mappings manually. This is the normal path for consultant/remote migrations.
+   - Continue to Step 4 with the TWB column info.
 
 3. For each sqlproxy datasource, extract `dbname` from the `<connection>` element, then:
 
@@ -1175,6 +1238,10 @@ modifies warehouse data. It mirrors `ts-convert-from-databricks-mv` Step 7.
 > to prevent.
 
 ### 4a — Present the table inventory and ask
+
+> **Scope 4 (Models only):** tables already exist by definition. Skip choices N and ? —
+> present only **E** and **G** and default to G if the user has the GUIDs. The user chose
+> scope 4 specifically because the tables are in ThoughtSpot already.
 
 Show the full inventory of physical tables from Step 3, then ask whether they already exist
 as ThoughtSpot Table objects:
@@ -1447,6 +1514,9 @@ mkdir -p /tmp/ts_tableau_mig/output/{workbook_name}
 
 ### 5a. Table TML — one per physical table (skip custom SQL relations)
 
+> **Scope gate:** runs for scopes 1, 2, 5. **Skip for scope 3** (LB only — no tables)
+> and **scope 4** (Models only — tables already exist; use GUIDs from Step 4).
+
 For each physical table identified in Step 3 with `type="table"`, generate a
 `.table.tml` file. **Skip custom SQL relations** — those are handled in Step 5c.
 
@@ -1517,6 +1587,9 @@ Key rules:
 Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{TABLE_NAME}.table.tml`.
 
 ### 5b. Model TML — one per datasource (strict separation)
+
+> **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (LB only — model already
+> exists) and **scope 5** (Tables only — no model generated).
 
 Generate one `.model.tml` per datasource the workbook **actually uses** — don't blindly
 merge independent datasources, but also don't materialize an unused model for every
@@ -2585,6 +2658,9 @@ like regular tables.
 
 ## Step 5.5 — Spotter Enablement
 
+> **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (model already exists)
+> and **scope 5** (no model generated).
+
 Before validating, confirm whether Spotter (AI search) should be enabled for each model
 — the same step `ts-convert-from-snowflake-sv` and `ts-convert-from-databricks-mv` run.
 Spotter is the primary natural-language interface for a Model, and a migrated workbook
@@ -2674,6 +2750,9 @@ After 10 cycles with remaining errors, stop and report to the user:
 ---
 
 ## Step 7 — Review Checkpoint & Import
+
+> **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (model already exists)
+> and **scope 5** (no model — tables imported in Step 6 only).
 
 Before importing, show the user a review summary — the same convention the
 `ts-convert-from-snowflake-sv` and `ts-convert-from-databricks-mv` skills use. The user
@@ -2903,6 +2982,8 @@ Save the model's real `{model_obj_id}` now (read it from the import response `ob
 
 ## Step 7.5 — Confirm the Model (before any liveboards)
 
+> **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** and **scope 5**.
+
 Pause and have the user verify the model is correct **before** building liveboards on it.
 Every liveboard viz references this model's columns and formulas, so a wrong model means
 re-doing every tile — far cheaper to catch it here. (Do this even when there are no
@@ -2943,10 +3024,11 @@ user confirms the model.
 
 ## Step 8 — Migrate Dashboards?
 
-**Scope gate:** if the user chose **scope 2 (Tables + Models only)** in Step 1.5, skip this
-entire step and Steps 9–11 — go straight to **Step 11.5** (coverage) then **Step 12**. In
-**scope 3 (Liveboards only)** this step is the entry point (the model came from Step 1.5a);
-the liveboard tiles reference that model's columns (Step 10-pre export).
+**Scope gate:** if the user chose **scope 2 (Tables + Models only)**, **scope 4 (Models
+only)**, or **scope 5 (Tables only)** in Step 1.5, skip this entire step and Steps 9–11 —
+go straight to **Step 11.5** (coverage, scopes 2/4) then **Step 12**. In **scope 3
+(Liveboards only)** this step is the entry point (the model came from Step 1.5a); the
+liveboard tiles reference that model's columns (Step 10-pre export).
 
 If Step 3d found zero `<dashboard>` elements, skip to **Step 11.5** (a model-only workbook
 still benefits from coverage answers), then Step 12.
@@ -3655,6 +3737,9 @@ For each successfully imported liveboard, display the URL:
 
 ## Step 11.5 — Formula Coverage Answers
 
+> **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (liveboard-only — formulas
+> belong to the pre-existing model) and **scope 5** (no model or formulas).
+
 A workbook often defines **more formulas than its dashboards actually visualize** — and a
 model-only workbook (no dashboards) visualizes none. Those formulas are valid on the model but
 have no quick way to be *seen and tested*. So make every formula reachable:
@@ -3687,6 +3772,8 @@ This is the safety net that makes a migration verifiable: no formula is migrated
 ---
 
 ## Step 12 — Migration Report
+
+> **Scope gate:** runs for **all scopes** (1–5). Every migration produces a report.
 
 Produce a **written migration report** — not just a console line. Write it to
 `/tmp/ts_tableau_mig/output/MIGRATION_REPORT.md` and display it inline. The report is the
@@ -3819,6 +3906,7 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.17.0 | 2026-06-27 | **Add `ts tableau build-model` CLI command and migration scopes 4/5.** (1) New `model_builder.py` module (ts-cli 0.18.0): deterministic TWB→model-TML pipeline with pure functions for all 8 model-level transforms — `formula_` prefix for cross-references, double-aggregation detection/fix, name collision resolution (formula/param→rename, column/formula→drop column), parameter extraction/ordering, phased import splitting by dependency level. Resolves BOTH `[Calculation_NNN]` and copy-style `[Field (copy)_NNN]` internal refs (root cause of prior translation failures). (2) `build_formula_levels` computes correct dependency DAG from raw calcs before reference resolution — fixes all-at-level-0 bug. CPG Merch DS1: 6 dependency levels, 7 import phases. (3) New scopes: **4 Models only** (tables exist, build model+formulas), **5 Tables only** (generate/import table TMLs only). Per-step scope annotations on all steps. 28 unit tests. |
 | 1.16.0 | 2026-06-27 | **Close the audit-vs-migration gap: CLI formula translation pipeline, two-phase import, join confirmation, cross-reference depth reporting.** (1) New Step 5b CLI reference: `ts tableau translate-formulas` (ts-cli 0.16.0) — deterministic 14-step Tableau→ThoughtSpot formula translation with dependency DAG, cross-reference resolution via inlining, column scoping, parameter conflict detection. Replaces ad-hoc LLM translation. (2) Step 7 two-phase model import: Phase 1 imports base model (tables, columns, joins, params — no formulas) for guaranteed success; Phase 2 adds formulas with GUID-pinned update and iterative error recovery (up to 5 cycles). One bad formula no longer blocks the entire import. (3) Step 3.6 join confirmation: detected joins presented for user confirmation; missing joins (common with published datasources/sqlproxy) suggested from shared column names with explicit D/S/P prompt — never silently added. (4) Step A3/A4 cross-reference depth reporting: Level 0/1/2+/circular counts plus "effective migration coverage" that distinguishes syntax-level translatability from what actually migrates after dependency resolution. Coverage matrix entries #113–#116. |
 | 1.15.0 | 2026-06-17 | Step 4.5 connection step now offers **E — use existing / C — create a new connection** (Snowflake-source only, key-pair auth via `ts connections create`). Adds the "Database does not exist in connection → role can't see it → create one" guidance and a credential-handling guardrail (private key by file path only; never pasted into chat). Non-Snowflake sources / password / OAuth remain out of scope → create in the UI and use the E path. Mirrors the connection-step change in ts-convert-from-snowflake-sv. |
 | 1.14.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |

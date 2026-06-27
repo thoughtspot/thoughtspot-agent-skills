@@ -10,6 +10,7 @@ ts_cli/
   cli.py              — Typer app entry point; registers command groups
   client.py           — ThoughtSpotClient REST wrapper; handles token caching and auth
   tml_lint.py         — Pre-import TML linter (pure functions, no I/O)
+  model_builder.py     — Tableau TWB → ThoughtSpot model TML builder (pure functions, no I/O beyond XML parse)
   tableau_translate.py — Tableau → ThoughtSpot formula translation engine (pure functions, no I/O)
   commands/
     auth.py       — ts auth (whoami, logout)
@@ -26,7 +27,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.17.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.18.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

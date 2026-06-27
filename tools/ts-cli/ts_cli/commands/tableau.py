@@ -619,3 +619,160 @@ def translate_formulas_cmd(
     )
 
     print(json.dumps(result["stats"]))
+
+
+@app.command("build-model")
+def build_model_cmd(
+    twb_file: str = typer.Argument(..., help="Path to .twb or .twbx file"),
+    connection_name: str = typer.Option(..., "--connection", "-c",
+                                         help="ThoughtSpot connection name"),
+    output_dir: str = typer.Option(".", "--output-dir", "-o",
+                                    help="Directory for output TML files"),
+    model_name: Optional[str] = typer.Option(None, "--model-name", "-m",
+                                              help="Model name (default: derived from TWB)"),
+    datasource_name: Optional[str] = typer.Option(None, "--datasource", "-d",
+                                                    help="Filter to a single datasource"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                  help="Report only — don't write files"),
+) -> None:
+    """Parse a Tableau workbook and build import-ready ThoughtSpot model TML.
+
+    Extracts tables, columns, joins, parameters, and calculated fields from
+    the TWB XML, translates formulas, resolves name collisions, applies
+    formula_ prefix for cross-references, detects double aggregation, and
+    outputs phased model TML files ready for ts tml import.
+    """
+    from ts_cli.model_builder import (
+        build_formula_levels,
+        build_model_tml,
+        parse_twb,
+        resolve_all_internal_refs,
+        resolve_name_collisions,
+        split_for_phased_import,
+    )
+    from ts_cli.tableau_translate import translate_formulas, dump_tml_yaml
+
+    twb_path = Path(twb_file)
+    if not twb_path.exists():
+        typer.echo(f"File not found: {twb_file}", err=True)
+        raise SystemExit(1)
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Parse TWB
+    typer.echo(f"Parsing {twb_path.name}...", err=True)
+    parsed = parse_twb(twb_path)
+
+    # Filter datasources
+    datasources = parsed["datasources"]
+    if datasource_name:
+        datasources = [ds for ds in datasources if ds["name"] == datasource_name]
+        if not datasources:
+            available = [ds["name"] for ds in parsed["datasources"]]
+            typer.echo(
+                f"Datasource '{datasource_name}' not found.\n"
+                f"Available: {', '.join(available)}",
+                err=True,
+            )
+            raise SystemExit(1)
+
+    all_results = []
+    for ds in datasources:
+        ds_name = ds["name"]
+        name = model_name or ds_name.replace(" ", "_")
+        slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+        typer.echo(f"\n{'='*60}", err=True)
+        typer.echo(f"Datasource: {ds_name}", err=True)
+        typer.echo(f"  Tables: {len(ds['tables'])}", err=True)
+        typer.echo(f"  Columns: {len(ds['columns'])}", err=True)
+        typer.echo(f"  Calculated fields: {len(ds['calculated_fields'])}", err=True)
+        typer.echo(f"  Parameters: {len(parsed['parameters'])}", err=True)
+
+        # Step 2: Resolve internal references + translate formulas
+        scoped_columns = ds.get("col_table_map", {})
+
+        # Build dependency levels from raw calcs (before resolution strips refs)
+        raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])
+
+        # Pre-process: resolve copy-style and Calculation_ refs to display names
+        resolved_calcs = resolve_all_internal_refs(
+            ds["calculated_fields"], ds["calc_map"],
+        )
+
+        translate_result = translate_formulas(
+            formulas=resolved_calcs,
+            scoped_columns=scoped_columns,
+            param_map=parsed["param_map"],
+            parameters=parsed["parameters"],
+            calc_id_map=ds["calc_map"],
+        )
+
+        translated = translate_result["translated"]
+        skipped = translate_result["skipped"]
+        typer.echo(
+            f"  Translated: {len(translated)}/{len(ds['calculated_fields'])} formulas",
+            err=True,
+        )
+        if skipped:
+            typer.echo(f"  Skipped: {len(skipped)}", err=True)
+            for s in skipped[:5]:
+                typer.echo(f"    - {s['name']}: {s['reason'][:80]}", err=True)
+
+        # Step 3: Resolve name collisions
+        cleaned_cols, cleaned_formulas, rename_map = resolve_name_collisions(
+            ds["columns"], translated, parsed["parameters"],
+        )
+        if rename_map:
+            typer.echo(f"  Renamed: {rename_map}", err=True)
+
+        # Step 4: Build model TML
+        model_tml = build_model_tml(
+            model_name=name,
+            connection_name=connection_name,
+            tables=ds["tables"],
+            columns=cleaned_cols,
+            joins=ds["joins"],
+            parameters=parsed["parameters"],
+            translated_formulas=cleaned_formulas,
+            formula_rename_map=rename_map,
+        )
+
+        # Step 5: Split for phased import — use levels from raw DAG, not translator
+        levels = {}
+        for f in cleaned_formulas:
+            fname = f["name"]
+            levels[fname] = raw_levels.get(fname, 0)
+        phases = split_for_phased_import(model_tml, levels)
+
+        typer.echo(f"  Phases: {len(phases)} (phase 0 = base, then per dependency level)", err=True)
+        for i, phase in enumerate(phases):
+            fc = len(phase["model"].get("formulas", []))
+            typer.echo(f"    Phase {i}: {fc} formulas", err=True)
+
+        result = {
+            "datasource": ds_name,
+            "model_name": name,
+            "tables": len(ds["tables"]),
+            "columns": len(cleaned_cols),
+            "formulas_translated": len(translated),
+            "formulas_skipped": len(skipped),
+            "formulas_total": len(ds["calculated_fields"]),
+            "parameters": len(parsed["parameters"]),
+            "name_renames": rename_map,
+            "phases": len(phases),
+        }
+
+        if not dry_run:
+            for i, phase in enumerate(phases):
+                fname = f"{slug}.phase{i}.model.tml"
+                fpath = out_path / fname
+                yaml_str = dump_tml_yaml(phase)
+                fpath.write_text(yaml_str)
+                typer.echo(f"  Wrote: {fpath}", err=True)
+                result[f"phase_{i}_file"] = str(fpath)
+
+        all_results.append(result)
+
+    print(json.dumps(all_results, indent=2))

@@ -925,6 +925,57 @@ Stdout prints the stats summary JSON; the full result goes to `--output`.
 
 ---
 
+### `ts tableau build-model`
+
+Parse a Tableau workbook and build import-ready ThoughtSpot model TML. Combines
+TWB parsing, formula translation, name collision resolution, formula-prefix
+application, double-aggregation detection, and phased import splitting into a
+single deterministic pipeline.
+
+```bash
+ts tableau build-model "workbook.twbx" \
+  --connection "MY_CONNECTION" \
+  --output-dir ./output \
+  --model-name "My Model" \
+  --datasource "DS Name"
+```
+
+**Options:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `twb_file` (arg) | yes | Path to `.twb` or `.twbx` file |
+| `--connection`, `-c` | yes | ThoughtSpot connection name |
+| `--output-dir`, `-o` | no | Output directory (default: `.`) |
+| `--model-name`, `-m` | no | Model name (default: derived from datasource name) |
+| `--datasource`, `-d` | no | Filter to a single datasource |
+| `--dry-run` | no | Report stats only — don't write files |
+
+**Pipeline steps:**
+
+1. Parse TWB XML — extract tables, columns, joins, calculated fields, parameters
+2. Build dependency levels from raw calculated fields (before reference resolution)
+3. Resolve all internal references (`[Calculation_NNN]` and copy-style `[Field (copy)_NNN]`)
+4. Translate formulas to ThoughtSpot syntax (via `tableau_translate.py`)
+5. Resolve name collisions (formula/param clashes → rename; column/formula clashes → drop column)
+6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix
+7. Split into phased import files (phase 0 = base, then per dependency level)
+
+**Output:** One set of phased TML files per datasource:
+
+```
+output/
+  my_model.phase_0.model.tml    # Base: tables, columns, joins, params — no formulas
+  my_model.phase_1.model.tml    # Level 0 formulas (no cross-refs)
+  my_model.phase_2.model.tml    # + Level 1 formulas (reference level 0)
+  ...
+```
+
+Stdout: JSON array with per-datasource stats (tables, columns, translated/skipped
+formulas, rename map, phase count).
+
+---
+
 ## Piping and scripting
 
 All commands write JSON to stdout, making them easy to pipe into `jq` or Python:
