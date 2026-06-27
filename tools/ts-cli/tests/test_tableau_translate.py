@@ -8,26 +8,365 @@ import pytest
 
 from ts_cli.tableau_translate import (
     build_calc_id_map,
+    build_csq_column_map,
     build_dependency_dag,
+    build_param_renames,
+    complete_rank_args,
+    convert_agg_if,
     convert_case_when,
     convert_if_then,
     convert_iif,
     convert_int,
     convert_lod,
+    convert_no_keyword_lod,
+    convert_scalar_max_min,
     convert_string_concat,
     convert_total,
+    detect_name_clashes,
     detect_param_conflicts,
     ensure_else_clause,
     map_date_functions,
     map_functions,
     map_parameter_names,
+    normalize_operator_spacing,
     resolve_cross_references,
+    rewrite_csq_aliases,
+    rewrite_date_arithmetic,
+    sanitise_parameter_name,
+    sanitise_parameter_refs,
     scope_columns,
+    strip_comments,
+    strip_ifnull_zero,
     strip_parameter_prefix,
     translate_formulas,
     translate_single,
     validate_output,
+    validate_pre_import,
 )
+
+
+# ---------------------------------------------------------------------------
+# Pre-0. Comment stripping (BL-056)
+# ---------------------------------------------------------------------------
+
+class TestStripComments:
+    def test_basic_comment(self):
+        result = strip_comments("[Lift] / [Cost] //SUM([Redemption Cost])")
+        assert result == "[Lift] / [Cost]"
+
+    def test_preserves_url_in_string(self):
+        result = strip_comments("'https://coda.io/d/doc'")
+        assert "https://coda.io/d/doc" in result
+
+    def test_multiline_comment(self):
+        formula = "[Sales]\n// This is a comment\n+ [Revenue]"
+        result = strip_comments(formula)
+        assert "Sales" in result
+        assert "Revenue" in result
+        assert "This is a comment" not in result
+
+    def test_no_comment(self):
+        assert strip_comments("[Sales] + [Revenue]") == "[Sales] + [Revenue]"
+
+    def test_comment_after_expression(self):
+        result = strip_comments("SUM([Sales]) // total sales\n+ [Tax]")
+        assert "SUM([Sales])" in result
+        assert "+ [Tax]" in result
+        assert "total sales" not in result
+
+    def test_double_slash_in_double_quotes(self):
+        result = strip_comments('"some//path"')
+        assert '"some//path"' in result
+
+
+# ---------------------------------------------------------------------------
+# Pre-1. Custom SQL Query alias resolution (BL-057)
+# ---------------------------------------------------------------------------
+
+class TestRewriteCsqAliases:
+    def test_basic_rewrite(self):
+        result = rewrite_csq_aliases(
+            "[DATE (Custom SQL Query8)]",
+            {"Custom SQL Query8": "FORECAST"},
+        )
+        assert result == "[FORECAST::DATE]"
+
+    def test_multiple_aliases(self):
+        expr = "[DATE (Custom SQL Query8)] + [SALES (Custom SQL Query6)]"
+        result = rewrite_csq_aliases(
+            expr,
+            {"Custom SQL Query8": "FORECAST", "Custom SQL Query6": "DAILY_METRICS"},
+        )
+        assert "[FORECAST::DATE]" in result
+        assert "[DAILY_METRICS::SALES]" in result
+
+    def test_unknown_csq_preserved(self):
+        result = rewrite_csq_aliases(
+            "[DATE (Custom SQL Query99)]",
+            {"Custom SQL Query8": "FORECAST"},
+        )
+        assert result == "[DATE (Custom SQL Query99)]"
+
+    def test_no_csq_map(self):
+        result = rewrite_csq_aliases("[DATE (Custom SQL Query8)]", {})
+        assert result == "[DATE (Custom SQL Query8)]"
+
+    def test_column_with_spaces(self):
+        result = rewrite_csq_aliases(
+            "[PERIOD TYPE (Custom SQL Query8)]",
+            {"Custom SQL Query8": "FORECAST"},
+        )
+        assert result == "[FORECAST::PERIOD TYPE]"
+
+
+class TestBuildCsqColumnMap:
+    def test_definitive_match(self):
+        csq_columns = {
+            "Custom SQL Query8": {"CATEGORY", "DATE", "LEVEL", "PERIOD_TYPE", "PROMOTION_ID"},
+        }
+        model_tables = {
+            "FORECAST": {"CATEGORY", "DATE", "LEVEL", "PERIOD_TYPE", "PROMOTION_ID", "AMOUNT"},
+        }
+        definitive, ambiguous = build_csq_column_map(csq_columns, model_tables)
+        assert definitive["Custom SQL Query8"] == "FORECAST"
+        assert len(ambiguous) == 0
+
+    def test_ambiguous_match(self):
+        csq_columns = {
+            "Custom SQL Query1": {"DATE", "ID", "AMOUNT", "TAX"},
+        }
+        model_tables = {
+            "ORDERS": {"DATE", "ID"},
+            "INVOICES": {"DATE", "ID", "TOTAL"},
+        }
+        definitive, ambiguous = build_csq_column_map(csq_columns, model_tables)
+        assert len(definitive) == 0
+        assert "Custom SQL Query1" in ambiguous
+
+    def test_no_match(self):
+        csq_columns = {"Custom SQL Query1": {"A", "B", "C"}}
+        model_tables = {"TABLE1": {"X", "Y", "Z"}}
+        definitive, ambiguous = build_csq_column_map(csq_columns, model_tables)
+        assert len(definitive) == 0
+        assert len(ambiguous) == 0
+
+
+# ---------------------------------------------------------------------------
+# Pre-2. No-keyword LOD (BL-052)
+# ---------------------------------------------------------------------------
+
+class TestConvertNoKeywordLod:
+    def test_countd(self):
+        result = convert_no_keyword_lod("{COUNTD([PROMOTION_ID])}")
+        assert "group_aggregate ( unique count ( [PROMOTION_ID] ) , {} , query_filters () )" in result
+
+    def test_sum(self):
+        result = convert_no_keyword_lod("{SUM([SALES])}")
+        assert "group_aggregate ( sum ( [SALES] ) , {} , query_filters () )" in result
+
+    def test_max(self):
+        result = convert_no_keyword_lod("{MAX([DATE])}")
+        assert "group_aggregate ( max ( [DATE] ) , {} , query_filters () )" in result
+
+    def test_attr(self):
+        result = convert_no_keyword_lod("{ATTR([CATEGORY])}")
+        assert "group_aggregate ( max ( [CATEGORY] ) , {} , query_filters () )" in result
+
+    def test_does_not_match_fixed_lod(self):
+        expr = "{FIXED [Dim] : SUM([Sales])}"
+        result = convert_no_keyword_lod(expr)
+        assert result == expr
+
+    def test_does_not_match_include_lod(self):
+        expr = "{INCLUDE [Dim] : SUM([Sales])}"
+        result = convert_no_keyword_lod(expr)
+        assert result == expr
+
+    def test_avg(self):
+        result = convert_no_keyword_lod("{AVG([PRICE])}")
+        assert "group_aggregate ( average ( [PRICE] ) , {} , query_filters () )" in result
+
+
+# ---------------------------------------------------------------------------
+# Pre-3. Scalar MAX/MIN (BL-055)
+# ---------------------------------------------------------------------------
+
+class TestConvertScalarMaxMin:
+    def test_max_two_args(self):
+        result = convert_scalar_max_min("MAX([Sales], [Revenue])")
+        assert "if ( [Sales] > [Revenue] ) then [Sales] else [Revenue]" in result
+
+    def test_min_two_args(self):
+        result = convert_scalar_max_min("MIN([Sales], [Revenue])")
+        assert "if ( [Sales] < [Revenue] ) then [Sales] else [Revenue]" in result
+
+    def test_max_with_zero(self):
+        result = convert_scalar_max_min("MAX([Profit], 0)")
+        assert "if ( [Profit] > 0 ) then [Profit] else 0" in result
+
+    def test_min_with_zero(self):
+        result = convert_scalar_max_min("MIN([Profit], 0)")
+        assert "if ( [Profit] < 0 ) then [Profit] else 0" in result
+
+    def test_aggregate_max_preserved(self):
+        result = convert_scalar_max_min("MAX([Sales])")
+        assert result == "MAX([Sales])"
+
+    def test_aggregate_min_preserved(self):
+        result = convert_scalar_max_min("MIN([Date])")
+        assert result == "MIN([Date])"
+
+
+# ---------------------------------------------------------------------------
+# Pre-4. Date arithmetic (BL-054)
+# ---------------------------------------------------------------------------
+
+class TestRewriteDateArithmetic:
+    def test_date_call_plus(self):
+        result = rewrite_date_arithmetic("DATE([START_DATE]) + 1")
+        assert "add_days ( DATE([START_DATE]) , 1 )" in result
+
+    def test_date_call_minus(self):
+        result = rewrite_date_arithmetic("DATE([END_DATE]) - 7")
+        assert "add_days ( DATE([END_DATE]) , -7 )" in result
+
+    def test_date_column_plus(self):
+        result = rewrite_date_arithmetic(
+            "[START_DATE] + 1",
+            date_columns={"START_DATE"},
+        )
+        assert "add_days ( [START_DATE] , 1 )" in result
+
+    def test_non_date_column_not_rewritten(self):
+        result = rewrite_date_arithmetic("[SALES] + 1")
+        assert result == "[SALES] + 1"
+
+    def test_non_date_column_without_set(self):
+        result = rewrite_date_arithmetic("[START_DATE] + 1")
+        assert result == "[START_DATE] + 1"
+
+    def test_scoped_date_column(self):
+        result = rewrite_date_arithmetic(
+            "[TABLE::START_DATE] + 1",
+            date_columns={"START_DATE"},
+        )
+        assert "add_days ( [TABLE::START_DATE] , 1 )" in result
+
+
+# ---------------------------------------------------------------------------
+# Operator spacing (BL-046 #4)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeOperatorSpacing:
+    def test_no_spaces(self):
+        result = normalize_operator_spacing("[A]+[B]")
+        assert "[A] + [B]" in result
+
+    def test_minus_no_space(self):
+        result = normalize_operator_spacing("[A]-[B]")
+        assert "[A] - [B]" in result
+
+    def test_already_spaced(self):
+        result = normalize_operator_spacing("[A] + [B]")
+        assert result == "[A] + [B]"
+
+    def test_preserves_string_content(self):
+        result = normalize_operator_spacing("'a+b'")
+        assert result == "'a+b'"
+
+    def test_preserves_bracket_content(self):
+        result = normalize_operator_spacing("[Col-Name]")
+        assert result == "[Col-Name]"
+
+    def test_multiply(self):
+        result = normalize_operator_spacing("[A]*[B]")
+        assert "[A] * [B]" in result
+
+    def test_divide(self):
+        result = normalize_operator_spacing("[A]/[B]")
+        assert "[A] / [B]" in result
+
+
+# ---------------------------------------------------------------------------
+# rank() argument completion (BL-046 #3)
+# ---------------------------------------------------------------------------
+
+class TestCompleteRankArgs:
+    def test_single_arg(self):
+        result = complete_rank_args("rank([Sales])")
+        assert "rank ( [Sales] , 'desc' )" in result
+
+    def test_two_args_preserved(self):
+        result = complete_rank_args("rank([Sales], 'asc')")
+        assert result == "rank([Sales], 'asc')"
+
+    def test_no_rank(self):
+        result = complete_rank_args("sum([Sales])")
+        assert result == "sum([Sales])"
+
+
+# ---------------------------------------------------------------------------
+# Parameter sanitisation (BL-050 #6)
+# ---------------------------------------------------------------------------
+
+class TestSanitiseParameterName:
+    def test_slash(self):
+        assert sanitise_parameter_name("Platform/Placement") == "Platform Placement"
+
+    def test_backslash(self):
+        assert sanitise_parameter_name("Foo\\Bar") == "Foo Bar"
+
+    def test_clean_name(self):
+        assert sanitise_parameter_name("Metric") == "Metric"
+
+    def test_multiple_special(self):
+        assert sanitise_parameter_name("A/B:C") == "A B C"
+
+
+class TestSanitiseParameterRefs:
+    def test_basic(self):
+        result = sanitise_parameter_refs(
+            "IF [Platform/Placement] = 'web' THEN 1 END",
+            {"Platform/Placement": "Platform Placement"},
+        )
+        assert "[Platform Placement]" in result
+        assert "Platform/Placement" not in result
+
+
+class TestBuildParamRenames:
+    def test_detects_unsafe(self):
+        params = [{"caption": "Platform/Placement"}, {"caption": "Metric"}]
+        renames = build_param_renames(params)
+        assert "Platform/Placement" in renames
+        assert renames["Platform/Placement"] == "Platform Placement"
+        assert "Metric" not in renames
+
+
+# ---------------------------------------------------------------------------
+# Name clash detection (BL-050 #9)
+# ---------------------------------------------------------------------------
+
+class TestDetectNameClashes:
+    def test_case_insensitive_clash(self):
+        clashes = detect_name_clashes(
+            formula_names={"Sales"},
+            column_names={"SALES"},
+        )
+        assert "Sales" in clashes
+
+    def test_no_clash(self):
+        clashes = detect_name_clashes(
+            formula_names={"Profit Margin"},
+            column_names={"SALES"},
+        )
+        assert len(clashes) == 0
+
+    def test_exact_match(self):
+        clashes = detect_name_clashes(
+            formula_names={"SALES"},
+            column_names={"SALES"},
+        )
+        assert "SALES" in clashes
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +721,169 @@ class TestDetectParamConflicts:
 
 
 # ---------------------------------------------------------------------------
+# Pre-import validation (BL-049 #2)
+# ---------------------------------------------------------------------------
+
+class TestValidatePreImport:
+    def test_clean(self):
+        issues = validate_pre_import([
+            {"name": "Sales Total", "expr": "sum ( [ORDERS::SALES] )"},
+        ])
+        assert len(issues) == 0
+
+    def test_unbalanced_parens(self):
+        issues = validate_pre_import([
+            {"name": "Bad Formula", "expr": "if ( [X] > 5 then [Y]"},
+        ])
+        assert len(issues) == 1
+        assert any("parentheses" in w for w in issues[0]["warnings"])
+
+    def test_name_clash(self):
+        issues = validate_pre_import(
+            [{"name": "Sales", "expr": "sum ( [ORDERS::SALES] )"}],
+            column_names={"SALES"},
+        )
+        assert len(issues) == 1
+        assert any("clashes" in w for w in issues[0]["warnings"])
+
+    def test_unresolved_csq(self):
+        issues = validate_pre_import([
+            {"name": "Bad Ref", "expr": "[DATE (Custom SQL Query99)]"},
+        ])
+        assert len(issues) == 1
+        assert any("Custom SQL" in w for w in issues[0]["warnings"])
+
+    def test_if_without_else(self):
+        issues = validate_pre_import([
+            {"name": "Missing Else", "expr": "if ( [X] > 5 ) then [Y]"},
+        ])
+        assert len(issues) == 1
+        assert any("else" in w for w in issues[0]["warnings"])
+
+    def test_if_without_then(self):
+        issues = validate_pre_import([
+            {"name": "Bad If", "expr": "if ( [X] > 5 ) [Y] else [Z]"},
+        ])
+        assert len(issues) == 1
+        assert any("then" in w for w in issues[0]["warnings"])
+
+    def test_orphaned_else(self):
+        issues = validate_pre_import([
+            {"name": "Bad Else", "expr": "[Sales] else [Revenue]"},
+        ])
+        assert len(issues) == 1
+        assert any("Orphaned" in w for w in issues[0]["warnings"])
+
+    def test_keyword_in_column_name_not_flagged(self):
+        issues = validate_pre_import([
+            {"name": "OK", "expr": "if ( [If Flag] = 'Y' ) then [Then Value] else [Else Value]"},
+        ])
+        assert len(issues) == 0
+
+    def test_balanced_nested_if(self):
+        issues = validate_pre_import([
+            {"name": "Nested", "expr": "if ( [A] > 0 ) then if ( [B] > 0 ) then [C] else [D] else [E]"},
+        ])
+        assert len(issues) == 0
+
+
+# ---------------------------------------------------------------------------
+# Strip ifnull(X, 0) (BL-046 #1)
+# ---------------------------------------------------------------------------
+
+class TestStripIfnullZero:
+    def test_basic_strip(self):
+        result = strip_ifnull_zero("ifnull ( [Sales] , 0 )")
+        assert result == "[Sales]"
+
+    def test_nested_strip(self):
+        result = strip_ifnull_zero("ifnull ( sum ( [Sales] ) , 0 )")
+        assert result == "sum ( [Sales] )"
+
+    def test_non_zero_default_preserved(self):
+        result = strip_ifnull_zero("ifnull ( [Sales] , -1 )")
+        assert "ifnull" in result
+        assert "-1" in result
+
+    def test_string_default_preserved(self):
+        result = strip_ifnull_zero("ifnull ( [Name] , 'N/A' )")
+        assert "ifnull" in result
+
+    def test_multiple_ifnull(self):
+        result = strip_ifnull_zero("ifnull ( [A] , 0 ) + ifnull ( [B] , 0 )")
+        assert "ifnull" not in result
+        assert "[A]" in result
+        assert "[B]" in result
+
+    def test_mixed_defaults(self):
+        result = strip_ifnull_zero("ifnull ( [A] , 0 ) + ifnull ( [B] , -1 )")
+        assert "[A]" in result
+        assert "ifnull ( [B] , -1 )" in result
+
+    def test_no_ifnull(self):
+        assert strip_ifnull_zero("[Sales] + [Revenue]") == "[Sales] + [Revenue]"
+
+    def test_zn_converted_then_stripped(self):
+        """ZN maps to ifnull(X, 0) in map_functions; strip removes it."""
+        from ts_cli.tableau_translate import map_functions
+        zn_result = map_functions("ZN([Sales])")
+        stripped = strip_ifnull_zero(zn_result)
+        assert "ifnull" not in stripped
+        assert "[Sales]" in stripped
+
+
+# ---------------------------------------------------------------------------
+# agg(if...else 0/null) → agg_if (BL-046 #2)
+# ---------------------------------------------------------------------------
+
+class TestConvertAggIf:
+    def test_sum_if(self):
+        result = convert_agg_if("sum ( if ( [PERIOD] = 'promo' ) then [SALES] else 0 )")
+        assert "sum_if" in result
+        assert "[PERIOD] = 'promo'" in result
+        assert "[SALES]" in result
+        assert "else" not in result
+
+    def test_count_if(self):
+        result = convert_agg_if("count ( if ( [Active] = 1 ) then [ID] else null )")
+        assert "count_if" in result
+        assert "[Active] = 1" in result
+        assert "[ID]" in result
+
+    def test_average_if(self):
+        result = convert_agg_if("average ( if ( [Type] = 'A' ) then [Score] else 0 )")
+        assert "average_if" in result
+
+    def test_no_conversion_without_if(self):
+        result = convert_agg_if("sum ( [Sales] )")
+        assert result == "sum ( [Sales] )"
+        assert "sum_if" not in result
+
+    def test_no_conversion_with_nonzero_else(self):
+        result = convert_agg_if("sum ( if ( [X] > 0 ) then [Y] else -1 )")
+        assert "sum_if" not in result
+        assert "sum" in result
+
+    def test_nested_if_in_then(self):
+        expr = "sum ( if ( [A] > 0 ) then if ( [B] > 0 ) then [C] else [D] else 0 )"
+        result = convert_agg_if(expr)
+        assert "sum_if" in result
+        assert "[A] > 0" in result
+        assert "[C]" in result
+
+    def test_no_else_implicit_null(self):
+        result = convert_agg_if("sum ( if ( [Active] = 1 ) then [Sales] )")
+        assert "sum_if" in result
+        assert "[Active] = 1" in result
+        assert "[Sales]" in result
+
+    def test_max_not_converted(self):
+        result = convert_agg_if("max ( if ( [X] > 0 ) then [Y] else 0 )")
+        assert "max" in result
+        assert "_if" not in result
+
+
+# ---------------------------------------------------------------------------
 # Dependency DAG
 # ---------------------------------------------------------------------------
 
@@ -410,7 +912,7 @@ class TestBuildDependencyDag:
 
 class TestTranslateSingle:
     def test_simple_if(self):
-        expr, errors = translate_single(
+        expr, errors, _ = translate_single(
             "IF [PERIOD_TYPE]='pre' THEN [CPG_SALES] END",
             role="measure",
         )
@@ -420,7 +922,7 @@ class TestTranslateSingle:
         assert errors == []
 
     def test_case_with_params(self):
-        expr, errors = translate_single(
+        expr, errors, _ = translate_single(
             "CASE [Parameters].[Parameter 3 1]\nWHEN 'Sales' THEN [SALES]\nWHEN 'Revenue' THEN [REVENUE]\nEND",
             role="measure",
             param_map={"Parameter 3 1": "Metric"},
@@ -432,7 +934,7 @@ class TestTranslateSingle:
         assert errors == []
 
     def test_datetrunc_date(self):
-        expr, errors = translate_single(
+        expr, errors, _ = translate_single(
             "DATE(DATETRUNC('month', [DATE]))",
             role="dimension",
         )
@@ -441,15 +943,18 @@ class TestTranslateSingle:
         assert errors == []
 
     def test_zn_expression(self):
-        expr, errors = translate_single(
+        expr, errors, _ = translate_single(
             "ZN([Sales]) + ZN([Revenue])",
             role="measure",
         )
-        assert "ifnull" in expr
+        # ifnull(X, 0) auto-stripped for measures (BL-046 #1)
+        assert "ifnull" not in expr
         assert "ZN" not in expr
+        assert "[Sales]" in expr
+        assert "[Revenue]" in expr
 
     def test_column_scoping(self):
-        expr, errors = translate_single(
+        expr, errors, _ = translate_single(
             "SUM([SALES])",
             role="measure",
             scoped_columns={"SALES": "ORDERS"},
@@ -457,7 +962,7 @@ class TestTranslateSingle:
         assert "[ORDERS::SALES]" in expr
 
     def test_datediff_reorder(self):
-        expr, errors = translate_single(
+        expr, errors, _ = translate_single(
             "DATEDIFF('day', [Start], [End])",
             role="measure",
         )
@@ -548,3 +1053,197 @@ class TestTranslateFormulas:
         ]
         result = translate_formulas(formulas)
         assert 0 in result["stats"]["levels"]
+
+
+# ---------------------------------------------------------------------------
+# Integration: pre-transforms through translate_single pipeline
+# ---------------------------------------------------------------------------
+
+class TestPreTransformIntegration:
+    def test_comment_stripped_before_translation(self):
+        expr, errors, _ = translate_single(
+            "[Lift] / [Cost] //SUM([Redemption Cost])",
+            role="measure",
+        )
+        assert "Redemption" not in expr
+        assert errors == []
+
+    def test_csq_alias_rewritten(self):
+        expr, errors, _ = translate_single(
+            "SUM([SALES (Custom SQL Query8)])",
+            role="measure",
+            csq_to_table={"Custom SQL Query8": "FORECAST"},
+        )
+        assert "[FORECAST::SALES]" in expr
+        assert "Custom SQL" not in expr
+        assert errors == []
+
+    def test_no_keyword_lod_translated(self):
+        expr, errors, _ = translate_single(
+            "{COUNTD([PROMOTION_ID])}",
+            role="measure",
+        )
+        assert "group_aggregate" in expr
+        assert "unique count" in expr
+        assert errors == []
+
+    def test_scalar_max_rewritten(self):
+        expr, errors, _ = translate_single(
+            "MAX([Profit], 0)",
+            role="measure",
+        )
+        assert "if ( [Profit] > 0 ) then [Profit] else 0" in expr
+        assert errors == []
+
+    def test_date_arithmetic_rewritten(self):
+        expr, errors, _ = translate_single(
+            "DATE([START_DATE]) + 1",
+            role="dimension",
+        )
+        assert "add_days" in expr
+        assert errors == []
+
+    def test_cpg_merch_isr_formula(self):
+        """Real formula from CPG Merch migration: ISR 30D with comment."""
+        expr, errors, _ = translate_single(
+            "[Lift] / [Cost] //SUM([Redemption Cost])",
+            role="measure",
+            scoped_columns={"Lift": "PROMO", "Cost": "PROMO"},
+        )
+        assert "[PROMO::Lift]" in expr
+        assert "[PROMO::Cost]" in expr
+        assert "Redemption" not in expr
+
+    def test_cpg_merch_forecast_csq(self):
+        """Real pattern from CPG Merch: Custom SQL Query8 → FORECAST."""
+        expr, errors, _ = translate_single(
+            "IF [PERIOD_TYPE (Custom SQL Query8)] = 'promo' THEN [SALES (Custom SQL Query8)] END",
+            role="measure",
+            csq_to_table={"Custom SQL Query8": "FORECAST"},
+        )
+        assert "[FORECAST::PERIOD_TYPE]" in expr
+        assert "[FORECAST::SALES]" in expr
+        assert "Custom SQL" not in expr
+        assert "else 0" in expr
+
+    def test_operator_spacing_in_pipeline(self):
+        expr, errors, _ = translate_single("[A]-[B]", role="measure")
+        assert "-" in expr
+        assert errors == []
+
+    def test_rank_completion_in_pipeline(self):
+        expr, errors, _ = translate_single("RANK([Sales])", role="measure")
+        assert "'desc'" in expr
+        assert errors == []
+
+    def test_ifnull_stripped_for_measure(self):
+        """ZN wrapping on a measure is automatically stripped."""
+        expr, errors, notes = translate_single(
+            "ZN([Sales])",
+            role="measure",
+        )
+        assert "ifnull" not in expr
+        assert "[Sales]" in expr
+        assert notes.get("ifnull_stripped") == 1
+        assert errors == []
+
+    def test_ifnull_preserved_for_dimension(self):
+        """ifnull stripping only applies to measures."""
+        expr, errors, notes = translate_single(
+            "ZN([Name])",
+            role="dimension",
+        )
+        assert "ifnull" in expr
+        assert notes.get("ifnull_stripped") is None
+
+    def test_sum_if_conversion(self):
+        """SUM(IF cond THEN measure END) → sum_if(cond, measure)."""
+        expr, errors, notes = translate_single(
+            "SUM(IF [PERIOD_TYPE]='promo' THEN [SALES] END)",
+            role="measure",
+        )
+        assert "sum_if" in expr
+        assert "PERIOD_TYPE" in expr
+        assert "SALES" in expr
+        assert notes.get("agg_if_converted") == 1
+        assert errors == []
+
+    def test_cpg_merch_full_pattern(self):
+        """Real CPG pattern: SUM(IF...THEN...END) with CSQ aliases."""
+        expr, errors, notes = translate_single(
+            "SUM(IF [PERIOD_TYPE (Custom SQL Query8)] = 'promo' THEN [SALES (Custom SQL Query8)] END)",
+            role="measure",
+            csq_to_table={"Custom SQL Query8": "FORECAST"},
+        )
+        assert "sum_if" in expr
+        assert "[FORECAST::PERIOD_TYPE]" in expr or "PERIOD_TYPE" in expr
+        assert "[FORECAST::SALES]" in expr or "SALES" in expr
+        assert "Custom SQL" not in expr
+        assert errors == []
+
+
+class TestBatchIntegration:
+    def test_param_sanitisation(self):
+        """Parameter with / in name gets sanitised across all formula refs."""
+        formulas = [
+            {
+                "caption": "Platform Filter",
+                "name": "Calculation_1",
+                "formula": "IF [Parameters].[Platform/Placement] = 'web' THEN [SALES] END",
+                "role": "measure",
+                "datatype": "real",
+                "datasource": "test",
+            },
+        ]
+        parameters = [{"caption": "Platform/Placement"}]
+        result = translate_formulas(formulas, parameters=parameters)
+        assert result["stats"]["param_renames"] == 1
+        if result["translated"]:
+            assert "Platform/Placement" not in result["translated"][0]["expr"]
+
+    def test_name_clash_auto_rename(self):
+        """Formula named 'Sales' collides with column 'SALES'."""
+        formulas = [
+            {
+                "caption": "Sales",
+                "name": "Calculation_1",
+                "formula": "SUM([REVENUE])",
+                "role": "measure",
+                "datatype": "real",
+                "datasource": "test",
+            },
+        ]
+        result = translate_formulas(
+            formulas,
+            scoped_columns={"SALES": "ORDERS", "REVENUE": "ORDERS"},
+        )
+        assert result["stats"]["name_clashes"] == 1
+        assert result["translated"][0]["name"] == "Formula Sales"
+
+    def test_ifnull_and_agg_if_stats(self):
+        """Batch stats report ifnull stripping and agg_if conversions."""
+        formulas = [
+            {
+                "caption": "Promo Sales",
+                "name": "Calculation_1",
+                "formula": "SUM(IF [PERIOD]='promo' THEN [SALES] END)",
+                "role": "measure",
+                "datatype": "real",
+                "datasource": "test",
+            },
+            {
+                "caption": "Safe Revenue",
+                "name": "Calculation_2",
+                "formula": "ZN([REVENUE])",
+                "role": "measure",
+                "datatype": "real",
+                "datasource": "test",
+            },
+        ]
+        result = translate_formulas(formulas)
+        assert result["stats"]["agg_if_conversions"] >= 1
+        assert result["stats"]["ifnull_stripped"] >= 1
+        t1 = next(t for t in result["translated"] if t["name"] == "Promo Sales")
+        assert "sum_if" in t1["expr"]
+        t2 = next(t for t in result["translated"] if t["name"] == "Safe Revenue")
+        assert "ifnull" not in t2["expr"]

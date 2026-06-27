@@ -857,7 +857,9 @@ ts tableau translate-formulas \
   --table-columns table_columns.json \
   --parameters parameters.json \
   --param-map param_map.json \
-  --calc-map calc_map.json
+  --calc-map calc_map.json \
+  --csq-map csq_to_table.json \
+  --date-columns START_DATE,END_DATE,SHIP_DATE
 ```
 
 **Options:**
@@ -872,6 +874,8 @@ ts tableau translate-formulas \
 | `--parameters` | no | JSON file with parameter definitions |
 | `--param-map` | no | JSON file mapping internal param names → captions |
 | `--calc-map` | no | JSON file mapping `[Calculation_NNN]` → caption |
+| `--csq-map` | no | JSON file mapping Custom SQL Query aliases → table names |
+| `--date-columns` | no | Comma-separated date column names for arithmetic rewrite |
 
 **Input file formats:**
 
@@ -880,6 +884,7 @@ ts tableau translate-formulas \
 - `parameters.json`: `[{caption, name, ...}]`
 - `param_map.json`: `{"Parameter 3 1": "Metric", ...}`
 - `calc_map.json`: `{"[Calculation_123]": "Sales Total", ...}`
+- `csq_to_table.json`: `{"Custom SQL Query8": "FORECAST", ...}`
 
 **Output:** JSON file with:
 
@@ -891,7 +896,16 @@ ts tableau translate-formulas \
 }
 ```
 
-**Translation pipeline (14 ordered steps):**
+**Translation pipeline (5 pre-transforms + 14 ordered steps):**
+
+Pre-transforms (run first, in order):
+- P0. Strip `//` line comments (preserve `//` inside string literals)
+- P1. Rewrite Custom SQL Query aliases → `[TABLE::COL]`
+- P2. No-keyword LOD `{AGG([col])}` → `group_aggregate(..., {}, query_filters())`
+- P3. Scalar `MAX(a,b)` / `MIN(a,b)` → `if(a > b) then a else b`
+- P4. Date arithmetic `DATE([col])+N` → `add_days(date([col]), N)`
+
+Main pipeline:
 1. Strip `[Parameters].[X]` → `[X]`
 2. Map internal parameter names to captions
 3. Resolve `[Calculation_*]` cross-references (dependency DAG, topological sort)

@@ -5,11 +5,248 @@ No I/O, no network calls — trivially unit-testable.
 
 The pipeline applies transforms in a fixed order. Each step's output feeds the next.
 Reordering or skipping steps produces the errors documented inline.
+
+Pre-transform order (runs before the main pipeline on each formula):
+  0. Strip Tableau // line comments (BL-056)
+  1. Rewrite Custom SQL Query aliases → table-qualified refs (BL-057)
+  2. Convert no-keyword LOD {AGG([col])} → group_aggregate (BL-052)
+  3. Detect and rewrite scalar MAX(a,b) / MIN(a,b) (BL-055)
+  4. Rewrite date arithmetic DATE()+N → add_days (BL-054)
+
+Post-pipeline transforms (runs after the main pipeline on each formula):
+  13b. Strip ifnull(X, 0) for measures — TS handles NULLs automatically (BL-046 #1)
+  13c. Convert agg(if...else 0/null) → agg_if (sum_if, count_if, average_if) (BL-046 #2)
 """
 from __future__ import annotations
 
 import re
 from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Pre-0. Strip Tableau // line comments (BL-056)
+# ---------------------------------------------------------------------------
+
+def strip_comments(formula: str) -> str:
+    """Strip Tableau // line comments, preserving // inside string literals."""
+    result: list[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(formula):
+        c = formula[i]
+        if c == "'" and not in_double:
+            in_single = not in_single
+            result.append(c)
+            i += 1
+        elif c == '"' and not in_single:
+            in_double = not in_double
+            result.append(c)
+            i += 1
+        elif (c == '/' and i + 1 < len(formula) and formula[i + 1] == '/'
+              and not in_single and not in_double):
+            newline = formula.find('\n', i)
+            if newline == -1:
+                break
+            i = newline
+        else:
+            result.append(c)
+            i += 1
+    return ''.join(result).strip()
+
+
+# ---------------------------------------------------------------------------
+# Pre-1. Custom SQL Query alias resolution (BL-057)
+# ---------------------------------------------------------------------------
+
+def rewrite_csq_aliases(
+    expr: str,
+    csq_to_table: dict[str, str],
+) -> str:
+    """Rewrite [COL (Custom SQL Query N)] → [TABLE::COL].
+
+    csq_to_table: {"Custom SQL Query8": "FORECAST", ...}
+    """
+    if not csq_to_table:
+        return expr
+
+    _CSQ_REF = re.compile(
+        r"\[([^\]]+?)\s+\((Custom SQL Query\s*\d+)\)\]",
+        re.IGNORECASE,
+    )
+
+    def _replace(m: re.Match) -> str:
+        col = m.group(1).strip()
+        csq = m.group(2).strip()
+        csq_norm = re.sub(r"\s+", " ", csq)
+        table = csq_to_table.get(csq_norm)
+        if table:
+            return f"[{table}::{col}]"
+        return m.group(0)
+
+    return _CSQ_REF.sub(_replace, expr)
+
+
+def build_csq_column_map(
+    csq_columns: dict[str, set[str]],
+    model_tables: dict[str, set[str]],
+    threshold: float = 0.8,
+) -> tuple[dict[str, str], dict[str, tuple[str, float]]]:
+    """Match Custom SQL Query aliases to model tables by column overlap.
+
+    Returns (definitive_map, ambiguous_map).
+    definitive_map: {csq_name: table_name} for matches >= threshold.
+    ambiguous_map: {csq_name: (best_table, score)} for matches >= 0.5 but < threshold.
+    """
+    definitive: dict[str, str] = {}
+    ambiguous: dict[str, tuple[str, float]] = {}
+
+    for csq_name, csq_cols in csq_columns.items():
+        if not csq_cols:
+            continue
+        best_match = None
+        best_score = 0.0
+        for table_name, table_cols in model_tables.items():
+            overlap = csq_cols & table_cols
+            score = len(overlap) / len(csq_cols)
+            if score > best_score:
+                best_match = table_name
+                best_score = score
+        if best_match and best_score >= threshold:
+            definitive[csq_name] = best_match
+        elif best_match and best_score >= 0.5:
+            ambiguous[csq_name] = (best_match, best_score)
+
+    return definitive, ambiguous
+
+
+# ---------------------------------------------------------------------------
+# Pre-2. No-keyword LOD: {AGG([col])} → group_aggregate (BL-052)
+# ---------------------------------------------------------------------------
+
+_NO_KEYWORD_LOD_AGG_MAP = {
+    "COUNTD": "unique count",
+    "COUNT": "count",
+    "SUM": "sum",
+    "AVG": "average",
+    "MAX": "max",
+    "MIN": "min",
+    "MEDIAN": "median",
+    "ATTR": "max",
+}
+
+def convert_no_keyword_lod(expr: str) -> str:
+    """Convert {AGG([col])} (no FIXED/INCLUDE/EXCLUDE) → group_aggregate.
+
+    Only matches braces with no keyword before the aggregate — the keyword forms
+    are handled by convert_lod().
+    """
+    _PATTERN = re.compile(
+        r"\{\s*(COUNTD|COUNT|SUM|AVG|MAX|MIN|MEDIAN|ATTR)\s*\((.+?)\)\s*\}",
+        re.IGNORECASE,
+    )
+
+    def _replace(m: re.Match) -> str:
+        agg = m.group(1).upper()
+        inner = m.group(2).strip()
+        ts_agg = _NO_KEYWORD_LOD_AGG_MAP.get(agg, agg.lower())
+        return f"group_aggregate ( {ts_agg} ( {inner} ) , {{}} , query_filters () )"
+
+    return _PATTERN.sub(_replace, expr)
+
+
+# ---------------------------------------------------------------------------
+# Pre-3. Scalar MAX(a,b) / MIN(a,b) detection (BL-055)
+# ---------------------------------------------------------------------------
+
+def convert_scalar_max_min(expr: str) -> str:
+    """Convert two-arg MAX(a, b) → if(a > b) then a else b. Same for MIN."""
+    result = expr
+    result = _convert_scalar_fn(result, "MAX", ">")
+    result = _convert_scalar_fn(result, "MIN", "<")
+    return result
+
+
+def _convert_scalar_fn(expr: str, fn: str, op: str) -> str:
+    _PAT = re.compile(rf"\b{fn}\s*\(", re.IGNORECASE)
+
+    result = expr
+    safety = 0
+    while safety < 50:
+        m = _PAT.search(result)
+        if not m:
+            break
+        safety += 1
+
+        extracted = _extract_function_args(result, m.end() - 1)
+        if not extracted:
+            break
+        args, end_pos = extracted
+
+        if len(args) == 2:
+            a = args[0].strip()
+            b = args[1].strip()
+            if b == "0":
+                replacement = f"if ( {a} {op} 0 ) then {a} else 0"
+            else:
+                replacement = f"if ( {a} {op} {b} ) then {a} else {b}"
+            result = result[:m.start()] + replacement + result[end_pos:]
+        elif len(args) == 1:
+            break
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Pre-4. Date arithmetic: DATE()+N → add_days (BL-054)
+# ---------------------------------------------------------------------------
+
+def rewrite_date_arithmetic(expr: str, date_columns: set[str] | None = None) -> str:
+    """Rewrite date +/- integer patterns to add_days().
+
+    Only rewrites when one side is clearly a date:
+    - DATE([col]) + N / DATE([col]) - N (always — DATE() call is explicit)
+    - [date_col] + N / [date_col] - N (only if col is in date_columns set)
+    """
+    date_columns = date_columns or set()
+    date_columns_upper = {c.upper() for c in date_columns}
+
+    # Pattern 1: DATE(...) +/- N — always a date
+    _DATE_CALL = re.compile(
+        r"(date\s*\([^)]+\))\s*([+-])\s*(\d+)",
+        re.IGNORECASE,
+    )
+
+    def _replace_date_call(m: re.Match) -> str:
+        date_expr = m.group(1).strip()
+        operator = m.group(2)
+        n = m.group(3)
+        if operator == "-":
+            return f"add_days ( {date_expr} , -{n} )"
+        return f"add_days ( {date_expr} , {n} )"
+
+    result = _DATE_CALL.sub(_replace_date_call, expr)
+
+    # Pattern 2: [col] +/- N where col is a known date column
+    if date_columns_upper:
+        _COL_ARITH = re.compile(
+            r"\[([^\]]+)\]\s*([+-])\s*(\d+)",
+        )
+
+        def _replace_col(m: re.Match) -> str:
+            col = m.group(1).strip()
+            col_name = col.split("::")[-1] if "::" in col else col
+            if col_name.upper() in date_columns_upper:
+                operator = m.group(2)
+                n = m.group(3)
+                if operator == "-":
+                    return f"add_days ( [{col}] , -{n} )"
+                return f"add_days ( [{col}] , {n} )"
+            return m.group(0)
+
+        result = _COL_ARITH.sub(_replace_col, result)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1009,6 +1246,87 @@ def validate_output(expr: str) -> list[str]:
     return errors
 
 
+def validate_pre_import(
+    translated: list[dict],
+    column_names: set[str] | None = None,
+    formula_names: set[str] | None = None,
+) -> list[dict]:
+    """Pre-import structural validation to catch issues before ThoughtSpot import.
+
+    Checks each translated formula for common patterns that cause import failures.
+    Returns a list of {name, warnings: [str]} for formulas with issues.
+    """
+    column_names = column_names or set()
+    formula_names = formula_names or set()
+    col_upper = {c.upper() for c in column_names}
+    formula_upper = {f.upper() for f in formula_names}
+    all_names_upper = col_upper | formula_upper
+
+    issues: list[dict] = []
+
+    for entry in translated:
+        name = entry.get("name", "")
+        expr = entry.get("expr", "")
+        warnings: list[str] = []
+
+        # Check for unbalanced parentheses
+        depth = 0
+        for c in expr:
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            if depth < 0:
+                break
+        if depth != 0:
+            warnings.append(f"Unbalanced parentheses (depth={depth})")
+
+        # Check for unbalanced brackets
+        b_depth = 0
+        for c in expr:
+            if c == "[":
+                b_depth += 1
+            elif c == "]":
+                b_depth -= 1
+        if b_depth != 0:
+            warnings.append(f"Unbalanced brackets (depth={b_depth})")
+
+        # if/then/else structural validation (BL-046 #5)
+        # Strip [col refs] and 'strings' to avoid false matches
+        expr_stripped = re.sub(r'\[[^\]]*\]', '', expr)
+        expr_stripped = re.sub(r"'[^']*'", '', expr_stripped)
+        lower_s = expr_stripped.lower()
+
+        if_count = len(re.findall(r'\bif\b', lower_s))
+        then_count = len(re.findall(r'\bthen\b', lower_s))
+        else_count = len(re.findall(r'\belse\b', lower_s))
+
+        if if_count > 0:
+            if then_count < if_count:
+                warnings.append(f"if without matching then ({if_count} if, {then_count} then)")
+            if else_count < if_count:
+                warnings.append(f"if/then without else ({if_count} if, {else_count} else)")
+        if else_count > if_count:
+            warnings.append(f"Orphaned else clause ({else_count} else, {if_count} if)")
+
+        # Check for unresolved Custom SQL Query references
+        if "Custom SQL Query" in expr:
+            warnings.append("Unresolved Custom SQL Query alias")
+
+        # Check for bare Tableau aggregate keywords
+        if re.search(r"\bCOUNTD\b", expr):
+            warnings.append("Unrewritten COUNTD (should be 'unique count')")
+
+        # Name clash with existing column
+        if name.upper() in col_upper:
+            warnings.append(f"Formula name '{name}' clashes with column name")
+
+        if warnings:
+            issues.append({"name": name, "warnings": warnings})
+
+    return issues
+
+
 # ---------------------------------------------------------------------------
 # 16. Parameter name conflict detection
 # ---------------------------------------------------------------------------
@@ -1043,6 +1361,338 @@ def detect_param_conflicts(
 
 
 # ---------------------------------------------------------------------------
+# 17. Operator spacing (BL-046 #4 / BL-050 #6)
+# ---------------------------------------------------------------------------
+
+_BINARY_OPS = re.compile(
+    r"(?<=[^\s=!<>])([+\-*/=]|!=|>=|<=|<>|<(?!=)|>(?!=))(?=[^\s=])",
+)
+
+def normalize_operator_spacing(expr: str) -> str:
+    """Ensure spaces around binary operators.
+
+    ThoughtSpot requires spaces: [A] - [B], not [A]-[B].
+    Preserves operators inside strings, brackets, and function names.
+    """
+    result: list[str] = []
+    in_single = False
+    in_double = False
+    in_bracket = 0
+    i = 0
+
+    while i < len(expr):
+        c = expr[i]
+
+        if c == "'" and not in_double:
+            in_single = not in_single
+            result.append(c)
+            i += 1
+            continue
+        if c == '"' and not in_single:
+            in_double = not in_double
+            result.append(c)
+            i += 1
+            continue
+        if in_single or in_double:
+            result.append(c)
+            i += 1
+            continue
+
+        if c == '[':
+            in_bracket += 1
+            result.append(c)
+            i += 1
+            continue
+        if c == ']':
+            in_bracket -= 1
+            result.append(c)
+            i += 1
+            continue
+        if in_bracket > 0:
+            result.append(c)
+            i += 1
+            continue
+
+        if c in ('+', '-', '*', '/') and c != '-':
+            # Check for multi-char ops
+            if c == '/' and i + 1 < len(expr) and expr[i + 1] == '/':
+                result.append(c)
+                i += 1
+                continue
+            left = ''.join(result).rstrip()
+            if left and left[-1] not in ('(', ',', ' '):
+                if not result[-1:] == [' ']:
+                    result.append(' ')
+            result.append(c)
+            if i + 1 < len(expr) and expr[i + 1] != ' ':
+                result.append(' ')
+            i += 1
+            continue
+        if c == '-':
+            # Distinguish unary minus from binary minus
+            left_stripped = ''.join(result).rstrip()
+            if left_stripped and left_stripped[-1] in (')', ']', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'):
+                if not result[-1:] == [' ']:
+                    result.append(' ')
+                result.append(c)
+                if i + 1 < len(expr) and expr[i + 1] != ' ':
+                    result.append(' ')
+                i += 1
+                continue
+
+        result.append(c)
+        i += 1
+
+    return ''.join(result)
+
+
+# ---------------------------------------------------------------------------
+# 18. rank() argument completion (BL-046 #3 / BL-050 #7)
+# ---------------------------------------------------------------------------
+
+def complete_rank_args(expr: str) -> str:
+    """Ensure rank() has two arguments: expression and sort order.
+
+    ThoughtSpot rank(expr) fails — must be rank(expr, 'asc'|'desc').
+    Defaults to 'desc' when not specified (matches Tableau default).
+    """
+    _RANK = re.compile(r"\brank\s*\(", re.IGNORECASE)
+
+    result = expr
+    safety = 0
+    while safety < 20:
+        m = _RANK.search(result)
+        if not m:
+            break
+        safety += 1
+
+        extracted = _extract_function_args(result, m.end() - 1)
+        if not extracted:
+            break
+        args, end_pos = extracted
+
+        if len(args) == 1:
+            inner = args[0].strip()
+            replacement = f"rank ( {inner} , 'desc' )"
+            result = result[:m.start()] + replacement + result[end_pos:]
+        else:
+            break
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 19. Parameter name sanitisation (BL-050 #6)
+# ---------------------------------------------------------------------------
+
+_PARAM_UNSAFE = re.compile(r"[/\\:*?\"<>|]")
+
+def sanitise_parameter_name(name: str) -> str:
+    """Remove characters not allowed in ThoughtSpot parameter names."""
+    return _PARAM_UNSAFE.sub(" ", name).strip()
+
+
+def sanitise_parameter_refs(
+    expr: str,
+    param_renames: dict[str, str],
+) -> str:
+    """Rewrite formula references to use sanitised parameter names.
+
+    param_renames: {"Platform/Placement": "Platform Placement", ...}
+    """
+    for old_name, new_name in param_renames.items():
+        expr = expr.replace(f"[{old_name}]", f"[{new_name}]")
+    return expr
+
+
+def build_param_renames(parameters: list[dict]) -> dict[str, str]:
+    """Detect parameters needing sanitisation and build a rename map.
+
+    Returns: { original_name: sanitised_name } for names that changed.
+    """
+    renames: dict[str, str] = {}
+    for p in parameters:
+        caption = p.get("caption", p.get("name", ""))
+        if caption and _PARAM_UNSAFE.search(caption):
+            renames[caption] = sanitise_parameter_name(caption)
+    return renames
+
+
+# ---------------------------------------------------------------------------
+# 20. Column/formula name clash detection (BL-046 #7 / BL-050 #9)
+# ---------------------------------------------------------------------------
+
+def detect_name_clashes(
+    formula_names: set[str],
+    column_names: set[str],
+) -> dict[str, str]:
+    """Detect case-insensitive collisions between formula and column names.
+
+    Returns: { formula_name: suggested_rename }
+    """
+    col_upper = {c.upper(): c for c in column_names}
+    clashes: dict[str, str] = {}
+    for fname in formula_names:
+        if fname.upper() in col_upper:
+            clashes[fname] = f"Formula {fname}"
+    return clashes
+
+
+# ---------------------------------------------------------------------------
+# 21. Strip ifnull(X, 0) wrapping for measures (BL-046 #1)
+# ---------------------------------------------------------------------------
+
+def strip_ifnull_zero(expr: str) -> str:
+    """Strip ifnull(X, 0) → X.
+
+    ThoughtSpot handles NULL aggregation automatically. Wrapping measures
+    in ifnull(..., 0) is unnecessary and can change semantics (e.g., AVG
+    with zeros vs excluded NULLs).
+    """
+    _IFNULL = re.compile(r"\bifnull\s*\(", re.IGNORECASE)
+    result = expr
+    safety = 0
+    offset = 0
+    while safety < 50:
+        m = _IFNULL.search(result, offset)
+        if not m:
+            break
+        safety += 1
+        extracted = _extract_function_args(result, m.end() - 1)
+        if not extracted:
+            offset = m.end()
+            continue
+        args, end_pos = extracted
+        if len(args) == 2 and args[1].strip() == '0':
+            inner = args[0].strip()
+            result = result[:m.start()] + inner + result[end_pos:]
+        else:
+            offset = end_pos
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 22. agg(if...else 0/null) → agg_if conversion (BL-046 #2)
+# ---------------------------------------------------------------------------
+
+_AGG_IF_MAP = {
+    "sum": "sum_if",
+    "count": "count_if",
+    "average": "average_if",
+}
+
+
+def _find_last_top_level_else(s: str) -> int:
+    """Find the position of the last top-level 'else' keyword."""
+    depth = 0
+    bracket_depth = 0
+    in_string = False
+    last_pos = -1
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if in_string:
+            if c == "'":
+                in_string = False
+            i += 1
+            continue
+        if c == "'":
+            in_string = True
+            i += 1
+            continue
+        if c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+        elif c == '[':
+            bracket_depth += 1
+        elif c == ']':
+            bracket_depth -= 1
+        elif depth == 0 and bracket_depth == 0 and i + 4 <= len(s):
+            if (s[i:i + 4].lower() == 'else'
+                    and (i == 0 or not s[i - 1].isalnum())
+                    and (i + 4 >= len(s) or not s[i + 4].isalnum())):
+                last_pos = i
+        i += 1
+    return last_pos
+
+
+def _parse_if_else_for_agg(s: str) -> tuple[str, str, str | None] | None:
+    """Parse 'if ( condition ) then expr [else val]' using balanced parens.
+
+    Returns (condition, then_expr, else_val) or None.
+    else_val is None when there is no else clause (implicit null).
+    """
+    s = s.strip()
+    if not re.match(r'^if\s*\(', s, re.IGNORECASE):
+        return None
+
+    paren_start = s.index('(')
+    depth = 1
+    pos = paren_start + 1
+    while pos < len(s) and depth > 0:
+        if s[pos] == '(':
+            depth += 1
+        elif s[pos] == ')':
+            depth -= 1
+        pos += 1
+    if depth != 0:
+        return None
+
+    condition = s[paren_start + 1:pos - 1].strip()
+    rest = s[pos:].strip()
+
+    then_match = re.match(r'^then\s+', rest, re.IGNORECASE)
+    if not then_match:
+        return None
+
+    after_then = rest[then_match.end():]
+    last_else_pos = _find_last_top_level_else(after_then)
+    if last_else_pos < 0:
+        return condition, after_then.strip(), None
+
+    then_expr = after_then[:last_else_pos].strip()
+    else_val = after_then[last_else_pos + 4:].strip()
+    return condition, then_expr, else_val
+
+
+def convert_agg_if(expr: str) -> str:
+    """Convert agg(if(cond) then expr [else 0/null]) → agg_if(cond, expr).
+
+    Handles both explicit else 0/null and missing else (implicit null).
+    ThoughtSpot's _if aggregates (sum_if, count_if, average_if) are simpler
+    and eliminate the missing-else error class entirely.
+    """
+    for agg_name, if_name in _AGG_IF_MAP.items():
+        pat = re.compile(rf"\b{agg_name}\s*\(", re.IGNORECASE)
+        result = expr
+        safety = 0
+        offset = 0
+        while safety < 50:
+            m = pat.search(result, offset)
+            if not m:
+                break
+            safety += 1
+            extracted = _extract_function_args(result, m.end() - 1)
+            if not extracted:
+                offset = m.end()
+                continue
+            args, end_pos = extracted
+            if len(args) == 1:
+                inner = args[0].strip()
+                parsed = _parse_if_else_for_agg(inner)
+                if parsed:
+                    condition, then_expr, else_val = parsed
+                    if else_val is None or else_val.lower() in ('0', 'null'):
+                        replacement = f"{if_name} ( {condition} , {then_expr} )"
+                        result = result[:m.start()] + replacement + result[end_pos:]
+                        continue
+            offset = end_pos
+        expr = result
+    return expr
+
+
+# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
@@ -1053,12 +1703,32 @@ def translate_single(
     param_map: dict[str, str] | None = None,
     formula_names: set[str] | None = None,
     parameter_names: set[str] | None = None,
-) -> tuple[str, list[str]]:
+    csq_to_table: dict[str, str] | None = None,
+    date_columns: set[str] | None = None,
+) -> tuple[str, list[str], dict[str, int]]:
     """Apply the full translation pipeline to a single formula expression.
 
-    Returns (translated_expr, validation_errors).
+    Returns (translated_expr, validation_errors, transform_notes).
+    transform_notes: counts of auto-applied transforms (e.g. ifnull_stripped, agg_if_converted).
     """
+    notes: dict[str, int] = {}
     expr = raw_expr
+
+    # Pre-0. Strip // line comments (BL-056)
+    expr = strip_comments(expr)
+
+    # Pre-1. Rewrite Custom SQL Query aliases (BL-057)
+    if csq_to_table:
+        expr = rewrite_csq_aliases(expr, csq_to_table)
+
+    # Pre-2. No-keyword LOD (BL-052) — before keyword LOD so braces are consumed
+    expr = convert_no_keyword_lod(expr)
+
+    # Pre-3. Scalar MAX/MIN (BL-055) — before function mapping replaces MAX/MIN
+    expr = convert_scalar_max_min(expr)
+
+    # Pre-4. Date arithmetic (BL-054) — before date function mapping
+    expr = rewrite_date_arithmetic(expr, date_columns=date_columns)
 
     # 1. Strip parameter prefix
     expr = strip_parameter_prefix(expr)
@@ -1094,6 +1764,12 @@ def translate_single(
     # 11. String concatenation
     expr = convert_string_concat(expr, role)
 
+    # 11b. Operator spacing (BL-046 #4)
+    expr = normalize_operator_spacing(expr)
+
+    # 11c. rank() argument completion (BL-046 #3)
+    expr = complete_rank_args(expr)
+
     # 12. Column scoping
     if scoped_columns:
         expr = scope_columns(
@@ -1103,7 +1779,20 @@ def translate_single(
             parameter_names=parameter_names,
         )
 
-    # 13. Mandatory else clause
+    # 12b. Strip ifnull(X, 0) for measures (BL-046 #1)
+    if role == "measure":
+        stripped = strip_ifnull_zero(expr)
+        if stripped != expr:
+            notes["ifnull_stripped"] = 1
+            expr = stripped
+
+    # 12c. Convert agg(if...then[...else 0/null]) → agg_if (BL-046 #2)
+    converted = convert_agg_if(expr)
+    if converted != expr:
+        notes["agg_if_converted"] = 1
+        expr = converted
+
+    # 13. Mandatory else clause (for remaining if/then without else)
     expr = ensure_else_clause(expr, role)
 
     # 14. Clean up whitespace
@@ -1112,7 +1801,7 @@ def translate_single(
     # 15. Validate
     errors = validate_output(expr)
 
-    return expr, errors
+    return expr, errors, notes
 
 
 def translate_formulas(
@@ -1121,6 +1810,8 @@ def translate_formulas(
     param_map: dict[str, str] | None = None,
     parameters: list[dict] | None = None,
     calc_id_map: dict[str, str] | None = None,
+    csq_to_table: dict[str, str] | None = None,
+    date_columns: set[str] | None = None,
 ) -> dict:
     """Translate a batch of Tableau formulas to ThoughtSpot syntax.
 
@@ -1142,8 +1833,15 @@ def translate_formulas(
     # Detect parameter conflicts
     param_conflicts = detect_param_conflicts(formulas, parameters)
 
-    # Collect formula and parameter names for column scoping
+    # Sanitise parameter names (BL-050 #6)
+    param_renames = build_param_renames(parameters)
+
+    # Detect column/formula name clashes (BL-050 #9)
     formula_names = {f.get("caption", "") for f in formulas if f.get("caption")}
+    column_names = set(scoped_columns.keys()) if scoped_columns else set()
+    name_clashes = detect_name_clashes(formula_names, column_names)
+
+    # Collect formula and parameter names for column scoping
     parameter_names = {
         p.get("caption", p.get("name", ""))
         for p in parameters
@@ -1154,6 +1852,7 @@ def translate_formulas(
     translated: list[dict] = []
     skipped: list[dict] = []
     level_counts: dict[int, int] = {}
+    transform_counts: dict[str, int] = {}
 
     max_level = max((e["level"] for e in dag.values()), default=0)
 
@@ -1190,16 +1889,25 @@ def translate_formulas(
                 })
                 continue
 
+            # Apply parameter name sanitisation to resolved expression
+            if param_renames:
+                resolved = sanitise_parameter_refs(resolved, param_renames)
+
             # Translate
             role = f.get("role", "measure")
-            expr, errors = translate_single(
+            expr, errors, notes = translate_single(
                 resolved,
                 role=role,
                 scoped_columns=scoped_columns,
                 param_map=param_map,
                 formula_names=formula_names,
                 parameter_names=parameter_names,
+                csq_to_table=csq_to_table,
+                date_columns=date_columns,
             )
+
+            for note_key, note_count in notes.items():
+                transform_counts[note_key] = transform_counts.get(note_key, 0) + note_count
 
             if errors:
                 skipped.append({
@@ -1210,8 +1918,9 @@ def translate_formulas(
                 })
             else:
                 column_type = "MEASURE" if role == "measure" else "ATTRIBUTE"
+                output_name = name_clashes.get(caption, caption)
                 translated.append({
-                    "name": caption,
+                    "name": output_name,
                     "expr": expr,
                     "column_type": column_type,
                     "level": level,
@@ -1236,5 +1945,9 @@ def translate_formulas(
             "skipped": len(skipped),
             "levels": level_counts,
             "param_conflicts": len(param_conflicts),
+            "param_renames": len(param_renames),
+            "name_clashes": len(name_clashes),
+            "ifnull_stripped": transform_counts.get("ifnull_stripped", 0),
+            "agg_if_conversions": transform_counts.get("agg_if_converted", 0),
         },
     }

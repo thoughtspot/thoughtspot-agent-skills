@@ -531,6 +531,10 @@ def translate_formulas_cmd(
                                                  help="JSON file mapping [Calculation_NNN]→caption"),
     datasource: Optional[str] = typer.Option(None, "--datasource", "-d",
                                               help="Filter to a single datasource name"),
+    csq_map_file: Optional[str] = typer.Option(None, "--csq-map",
+                                                help="JSON file mapping Custom SQL Query aliases→table names"),
+    date_columns_opt: Optional[str] = typer.Option(None, "--date-columns",
+                                                    help="Comma-separated date column names for arithmetic rewrite"),
 ) -> None:
     """Translate Tableau calculated fields to ThoughtSpot formula syntax.
 
@@ -582,12 +586,26 @@ def translate_formulas_cmd(
         if cm_path.exists():
             calc_id_map = json.loads(cm_path.read_text())
 
+    # Load Custom SQL Query alias map
+    csq_to_table: dict[str, str] | None = None
+    if csq_map_file:
+        csq_path = Path(csq_map_file)
+        if csq_path.exists():
+            csq_to_table = json.loads(csq_path.read_text())
+
+    # Parse date columns
+    date_columns: set[str] | None = None
+    if date_columns_opt:
+        date_columns = {c.strip() for c in date_columns_opt.split(",") if c.strip()}
+
     result = translate_formulas(
         formulas=classification,
         scoped_columns=scoped_columns,
         param_map=param_map,
         parameters=parameters,
         calc_id_map=calc_id_map,
+        csq_to_table=csq_to_table,
+        date_columns=date_columns,
     )
 
     output_path = Path(output_file)

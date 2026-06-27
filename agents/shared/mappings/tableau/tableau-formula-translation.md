@@ -14,7 +14,11 @@ CLI command implements this pipeline automatically.
 
 | Step | Transform | Error if skipped |
 |---|---|---|
-| 0 | **Comment stripping**: remove `//` line comments (but not `//` inside string literals — e.g. URLs) | `//` misidentified as an operator; formulas excluded unnecessarily |
+| P0 | **Comment stripping** (BL-056): remove `//` line comments (preserve `//` inside string literals — e.g. URLs) | `//` misidentified as an operator; formulas excluded unnecessarily |
+| P1 | **Custom SQL Query alias resolution** (BL-057): `[COL (Custom SQL Query N)]` → `[TABLE::COL]` using column-overlap mapping | Formulas referencing CSQ aliases excluded as untranslatable |
+| P2 | **No-keyword LOD conversion** (BL-052): `{AGG([col])}` → `group_aggregate(ts_agg([col]), {}, query_filters())` — must run before keyword LOD step | No-keyword LODs excluded as "raw LOD braces" |
+| P3 | **Scalar MAX/MIN detection** (BL-055): 2-arg `MAX(a, b)` → `if (a > b) then a else b`; 1-arg aggregate preserved | Scalar MAX/MIN misclassified as aggregate or untranslatable |
+| P4 | **Date arithmetic rewrite** (BL-054): `DATE([col]) + N` → `add_days(date([col]), N)` | Date ± integer fails — ThoughtSpot does not support arithmetic on dates |
 | 1 | **Parameter prefix strip**: `[Parameters].[X]` → `[X]` | "Search did not find 'Parameters'" |
 | 2 | **Internal parameter name mapping**: `[Parameter 6]` → `[Engagement Type]` (build mapping from TWB parse: internal name → caption) | Formula references invisible internal names |
 | 3 | **Cross-reference resolution**: `[Calculation_*]` → inline expression or display name (via dependency DAG — see tableau-tml-rules.md) | "Search did not find 'Calculation_...'" |
@@ -28,7 +32,9 @@ CLI command implements this pipeline automatically.
 | 11 | **Date function mapping**: DATETRUNC→start_of_*, DATEDIFF→diff_* (reversed args), DATEADD→add_*, DATEPART→unit functions | Wrong function names + incorrect argument order |
 | 12 | **String concatenation**: `[a] + [b]` (string context) → `concat([a], [b])` | TS `+` is numeric-only — "Search did not find '+ ...'" |
 | 13 | **Column scoping**: `[COL]` → `[TABLE::COL]` per model's table set | "Search did not find 'col'" — unscoped refs fail |
-| 14 | **Mandatory else clause**: every `if/then` MUST have an `else` (type-matched: `else 0` for measures, `else ''` for attributes) | "Unknown data type" or "Expecting a Numeric token" |
+| 13b | **ifnull(X, 0) stripping** (BL-046 #1): strip `ifnull(X, 0)` for measures — TS handles NULL aggregation automatically | Unnecessary wrapping; can change AVG semantics (zeros vs excluded NULLs) |
+| 13c | **agg_if conversion** (BL-046 #2): `sum(if(cond) then expr [else 0/null])` → `sum_if(cond, expr)` — also count_if, average_if | Missing-else errors; more complex formula than needed |
+| 14 | **Mandatory else clause**: every remaining `if/then` MUST have an `else` (type-matched: `else 0` for measures, `else ''` for attributes) | "Unknown data type" or "Expecting a Numeric token" |
 
 After all steps, **validate**: reject any formula still containing `END`, `CASE`, `WHEN`,
 `unique_count` (underscore), `date_trunc`, bare `+` on strings, or `ELSEIF`.
@@ -43,7 +49,9 @@ ts tableau translate-formulas \
   --table-columns table_columns.json \
   --parameters parameters.json \
   --param-map param_map.json \
-  --calc-map calc_map.json
+  --calc-map calc_map.json \
+  --csq-map csq_to_table.json \
+  --date-columns START_DATE,END_DATE,SHIP_DATE
 ```
 
 See `tools/ts-cli/README.md` for full option reference.
