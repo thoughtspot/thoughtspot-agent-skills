@@ -2390,7 +2390,7 @@ for csq_name, csq_cols in csq_columns.items():
 
 **Source:** Design spec `docs/superpowers/specs/2026-06-27-ts-object-model-erd-design.md`;
   implementation plan `docs/superpowers/plans/2026-06-27-ts-object-model-erd.md` (local, gitignored);
-  validated mockup `agents/cli/ts-object-model-erd/reference/mockup.html`
+  validated mockup `docs/superpowers/specs/2026-06-27-ts-object-model-erd-mockup.html`
 **Affects:** New skill `agents/cli/ts-object-model-erd/`; new shared module `agents/shared/erd/`;
   future `ts-audit` integration (per-model ERD in `audit_report.html`)
 **Status:** Spec approved + plan written + mockup validated — ready for implementation
