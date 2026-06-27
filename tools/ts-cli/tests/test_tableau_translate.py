@@ -24,6 +24,7 @@ from ts_cli.tableau_translate import (
     convert_total,
     detect_name_clashes,
     detect_param_conflicts,
+    dump_tml_yaml,
     ensure_else_clause,
     map_date_functions,
     map_functions,
@@ -635,6 +636,37 @@ class TestEnsureElseClause:
         result = ensure_else_clause(expr, role="dimension")
         assert result == expr
 
+    def test_nested_if_without_else(self):
+        """E2: Inner if/then without else inside a then arm."""
+        expr = "if ( [A] > 0 ) then if ( [B] > 0 ) then [C] else 'No'"
+        result = ensure_else_clause(expr, role="measure")
+        # Should add else for the inner if that has no else
+        assert result.count("else") == 2
+
+    def test_two_ifs_one_else(self):
+        """E2: Two if/then blocks but only one else."""
+        expr = "if ( [A] > 0 ) then if ( [B] > 0 ) then [C] else [D]"
+        result = ensure_else_clause(expr, role="measure")
+        assert result.count("else") == 2
+
+    def test_all_ifs_have_else(self):
+        """No insertion needed when all ifs have else clauses."""
+        expr = "if ( [A] > 0 ) then if ( [B] > 0 ) then [C] else [D] else [E]"
+        result = ensure_else_clause(expr, role="measure")
+        assert result == expr
+
+    def test_sum_if_not_counted(self):
+        """E8: sum_if contains 'if' but should not count as a real if keyword."""
+        expr = "sum_if ( [Sales] , [Region] = 'West' )"
+        result = ensure_else_clause(expr, role="measure")
+        assert result == expr
+
+    def test_count_if_not_counted(self):
+        """E8: count_if should not trigger else insertion."""
+        expr = "count_if ( [Region] = 'West' )"
+        result = ensure_else_clause(expr, role="measure")
+        assert result == expr
+
 
 # ---------------------------------------------------------------------------
 # LOD expression conversion
@@ -661,6 +693,48 @@ class TestConvertLod:
     def test_grand_fixed(self):
         result = convert_lod("{FIXED : MAX([Date])}")
         assert "group_aggregate ( MAX([Date]) , {} , {} )" in result
+
+    def test_exclude_with_calc_ref_in_dims(self):
+        """E1: EXCLUDE LOD with Calculation_* ref in dimension list."""
+        result = convert_lod(
+            "{EXCLUDE [Customer Type], [Redeemer Comp Customer Type] : SUM([Sales])}"
+        )
+        assert "group_aggregate" in result
+        assert "query_groups () - {" in result
+        assert "SUM([Sales])" in result
+
+    def test_fixed_with_boolean_in_aggregate(self):
+        """E1: FIXED LOD with boolean expression inside MAX."""
+        result = convert_lod("{FIXED [PROMOTION_ID] : MAX([LEVEL] = 'category')}")
+        assert "group_aggregate" in result
+        assert "{ [PROMOTION_ID] }" in result
+        assert "MAX([LEVEL] = 'category')" in result
+
+    def test_lod_inside_if_branch(self):
+        """E1: LOD expression embedded inside an IF/THEN branch."""
+        expr = "IF MAX([LEVEL])='campaign' THEN MAX({FIXED [Campaign] : SUM([Cost])}) ELSE SUM([Cost]) END"
+        result = convert_lod(expr)
+        assert "group_aggregate ( SUM([Cost]) , { [Campaign] } , {} )" in result
+        assert "IF MAX([LEVEL])='campaign'" in result
+
+    def test_nested_lod_innermost_first(self):
+        """E1: Nested LODs are resolved inside-out."""
+        expr = "{FIXED [A] : MAX({FIXED [B] : SUM([C])})}"
+        result = convert_lod(expr)
+        # Inner LOD should be converted; outer may produce nested group_aggregate
+        assert "group_aggregate" in result
+        # The inner {FIXED [B] : SUM([C])} should be resolved
+        assert "{FIXED [B]" not in result
+
+    def test_fixed_with_formula_crossref(self):
+        """E1: FIXED LOD wrapping a formula cross-reference."""
+        result = convert_lod("{FIXED [Campaign] : [Redemption Cost]}")
+        assert "group_aggregate ( [Redemption Cost] , { [Campaign] } , {} )" in result
+
+    def test_no_braces_passthrough(self):
+        """Expressions without { } pass through unchanged."""
+        expr = "SUM([Sales]) / SUM([Cost])"
+        assert convert_lod(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -1247,3 +1321,37 @@ class TestBatchIntegration:
         assert "sum_if" in t1["expr"]
         t2 = next(t for t in result["translated"] if t["name"] == "Safe Revenue")
         assert "ifnull" not in t2["expr"]
+
+
+# ---------------------------------------------------------------------------
+# TML YAML serialization (E4)
+# ---------------------------------------------------------------------------
+
+class TestDumpTmlYaml:
+    def test_formula_expr_quoted(self):
+        tml = {"model": {"formulas": [
+            {"id": "formula_Rev", "name": "Rev", "expr": "sum ( [TABLE::COL] )"}
+        ]}}
+        out = dump_tml_yaml(tml)
+        assert '"sum ( [TABLE::COL] )"' in out
+
+    def test_no_line_wrap(self):
+        long_expr = "if ( " + " and ".join(f"[COL_{i}] > 0" for i in range(30)) + " ) then 1 else 0"
+        tml = {"model": {"formulas": [{"expr": long_expr}]}}
+        out = dump_tml_yaml(tml)
+        expr_lines = [l for l in out.split("\n") if "if (" in l or "COL_" in l]
+        assert len(expr_lines) == 1
+
+    def test_on_key_preserved(self):
+        tml = {"model": {"model_tables": [{"joins": [
+            {"with": "DIM", "on": "[FACT::FK] = [DIM::PK]"}
+        ]}]}}
+        out = dump_tml_yaml(tml)
+        assert "'on':" in out
+        assert '"[FACT::FK] = [DIM::PK]"' in out
+
+    def test_plain_strings_unquoted(self):
+        tml = {"model": {"name": "My Model"}}
+        out = dump_tml_yaml(tml)
+        assert "name: My Model" in out
+        assert '"My Model"' not in out

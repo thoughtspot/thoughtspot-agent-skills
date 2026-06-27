@@ -328,6 +328,22 @@ the ThoughtSpot translation so the user can compare.
 - The inner aggregate (`sum`, `average`, `max`, `min`, `unique count`) follows standard ThoughtSpot formula syntax
 - Column references inside `group_aggregate` use `[table::column]` format
 
+### Platform limitation: nested `group_aggregate` not supported
+
+Tableau supports nested LOD expressions — e.g. `{FIXED [A] : SUM({FIXED [B] : MAX([col])})}`.
+ThoughtSpot does **not** support nesting `group_aggregate()` inside another `group_aggregate()`.
+This is a platform limitation, not a translation gap.
+
+**Workaround:** decompose nested LODs into separate formulas:
+1. Create the inner LOD as its own formula (e.g. `inner_max = group_aggregate(max([col]), {B}, {})`)
+2. Reference it in the outer LOD (e.g. `outer_sum = group_aggregate(sum([inner_max]), {A}, {})`)
+
+This requires two-phase import (the inner formula must exist before the outer one can reference it).
+
+**Detection:** the translation engine flags any output containing two or more `group_aggregate(`
+occurrences as a validation warning. In audit mode, classify these as **Platform Limitation**,
+not Untranslatable — the formula IS expressible in ThoughtSpot, just not as a single expression.
+
 ### Common pattern: relative time via grand FIXED
 
 Tableau authors use `{FIXED : MAX([date])}` (grand FIXED, no dimensions) to get a
