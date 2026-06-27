@@ -11,7 +11,9 @@ from ts_cli.model_builder import (
     build_model_tml,
     expr_is_aggregated,
     extract_parameters,
+    filter_unresolvable_formulas,
     fix_double_aggregation,
+    merge_formulas_into_model,
     resolve_name_collisions,
     split_for_phased_import,
 )
@@ -456,3 +458,164 @@ class TestBuildModelIntegration:
         cleaned_cols, cleaned_formulas, _ = resolve_name_collisions(columns, formulas, [])
         assert len(cleaned_cols) == 0
         assert len(cleaned_formulas) == 1
+
+
+# ===================================================================
+# Merge formulas into existing model
+# ===================================================================
+
+class TestMergeFormulas:
+
+    def _make_existing_model(self):
+        return {
+            "guid": "abc-123",
+            "model": {
+                "name": "TestModel",
+                "model_tables": [{"name": "T", "fqn": "table-guid-1"}],
+                "formulas": [
+                    {"id": "formula_Sales LY", "name": "Sales LY", "expr": "old expr 1"},
+                    {"id": "formula_Units LY", "name": "Units LY", "expr": "old expr 2"},
+                ],
+                "columns": [
+                    {"name": "COL1", "column_id": "T::COL1", "properties": {"column_type": "ATTRIBUTE"}},
+                    {"name": "Sales LY", "formula_id": "formula_Sales LY", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+                    {"name": "Units LY", "formula_id": "formula_Units LY", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+                ],
+                "properties": {"is_bypass_rls": False},
+            },
+        }
+
+    def test_skips_existing_by_default(self):
+        existing = self._make_existing_model()
+        translated = [
+            {"id": "formula_Sales LY", "name": "Sales LY", "expr": "new expr 1", "column_type": "MEASURE"},
+        ]
+        merged = merge_formulas_into_model(existing, translated)
+        f = next(f for f in merged["model"]["formulas"] if f["id"] == "formula_Sales LY")
+        assert f["expr"] == "old expr 1"
+        assert merged["_merge_stats"]["skipped_existing"] == 1
+        assert merged["_merge_stats"]["updated"] == 0
+
+    def test_updates_existing_when_opted_in(self):
+        existing = self._make_existing_model()
+        translated = [
+            {"id": "formula_Sales LY", "name": "Sales LY", "expr": "new expr 1", "column_type": "MEASURE"},
+        ]
+        merged = merge_formulas_into_model(existing, translated, update_existing=True)
+        f = next(f for f in merged["model"]["formulas"] if f["id"] == "formula_Sales LY")
+        assert f["expr"] == "new expr 1"
+        assert merged["_merge_stats"]["updated"] == 1
+        assert merged["_merge_stats"]["skipped_existing"] == 0
+
+    def test_adds_new_formula(self):
+        existing = self._make_existing_model()
+        translated = [
+            {"id": "formula_New Calc", "name": "New Calc", "expr": "1 + 1", "column_type": "MEASURE"},
+        ]
+        merged = merge_formulas_into_model(existing, translated)
+        assert len(merged["model"]["formulas"]) == 3
+        new_f = next(f for f in merged["model"]["formulas"] if f["id"] == "formula_New Calc")
+        assert new_f["expr"] == "1 + 1"
+        new_col = next(c for c in merged["model"]["columns"] if c.get("formula_id") == "formula_New Calc")
+        assert new_col["properties"]["column_type"] == "MEASURE"
+        assert merged["_merge_stats"]["added"] == 1
+
+    def test_preserves_model_structure(self):
+        existing = self._make_existing_model()
+        translated = [
+            {"id": "formula_Sales LY", "name": "Sales LY", "expr": "updated", "column_type": "MEASURE"},
+        ]
+        merged = merge_formulas_into_model(existing, translated)
+        assert merged["guid"] == "abc-123"
+        assert merged["model"]["model_tables"][0]["fqn"] == "table-guid-1"
+        assert merged["model"]["properties"]["is_bypass_rls"] is False
+
+    def test_does_not_mutate_input(self):
+        existing = self._make_existing_model()
+        original_expr = existing["model"]["formulas"][0]["expr"]
+        translated = [
+            {"id": "formula_Sales LY", "name": "Sales LY", "expr": "changed", "column_type": "MEASURE"},
+        ]
+        merge_formulas_into_model(existing, translated)
+        assert existing["model"]["formulas"][0]["expr"] == original_expr
+
+
+# ===================================================================
+# Pre-merge filtering
+# ===================================================================
+
+class TestFilterUnresolvable:
+
+    _COMMON = dict(
+        existing_formula_ids={"formula_Existing"},
+        model_column_names={"ORDERS", "SALES", "CAMPAIGN_ID"},
+        formula_names={"Existing Formula", "Other Formula"},
+        parameter_names={"Metric"},
+    )
+
+    def test_drops_sqlproxy_ref(self):
+        formulas = [
+            {"id": "f1", "name": "Brand", "expr": "[sqlproxy::BRAND_UPC]"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 0
+        assert dropped == ["Brand"]
+
+    def test_drops_csq_ref(self):
+        formulas = [
+            {"id": "f2", "name": "Date Range", "expr": "[COL (Custom SQL Query6)]"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 0
+        assert dropped == ["Date Range"]
+
+    def test_drops_bare_column_ref(self):
+        formulas = [
+            {"id": "f3", "name": "My Orders", "expr": "if ( [PERIOD] = 'promo' ) then [ORDERS] else 0"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 0
+        assert dropped == ["My Orders"]
+
+    def test_drops_unconverted_string_concat(self):
+        formulas = [
+            {"id": "f4", "name": "Label", "expr": "[A] + ' : ' + [B]"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 0
+        assert dropped == ["Label"]
+
+    def test_keeps_clean_formula(self):
+        formulas = [
+            {"id": "f5", "name": "Profit", "expr": "sum ( [formula_Existing Formula] ) / [Metric]"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 1
+        assert len(dropped) == 0
+
+    def test_drops_unknown_bare_ref(self):
+        formulas = [
+            {"id": "f6", "name": "Bad", "expr": "if ( [PERIOD_TYPE] = 'promo' ) then [UNKNOWN_COL] else 0"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 0
+        assert dropped == ["Bad"]
+
+    def test_keeps_existing_formula_ids(self):
+        formulas = [
+            {"id": "formula_Existing", "name": "Existing", "expr": "[sqlproxy::BAD]"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 1
+        assert len(dropped) == 0
+
+    def test_keeps_formula_with_bracket_in_string_literal(self):
+        formulas = [
+            {
+                "id": "f1", "name": "Label",
+                "expr": "concat ( '[' , to_string ( [TABLE::ID]) , '] ' , [TABLE::NAME] )",
+            },
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 1
+        assert len(dropped) == 0

@@ -160,14 +160,14 @@ def convert_no_keyword_lod(expr: str) -> str:
 # ---------------------------------------------------------------------------
 
 def convert_scalar_max_min(expr: str) -> str:
-    """Convert two-arg MAX(a, b) → if(a > b) then a else b. Same for MIN."""
+    """Convert two-arg MAX(a, b) → greatest(a, b). Same for MIN → least."""
     result = expr
-    result = _convert_scalar_fn(result, "MAX", ">")
-    result = _convert_scalar_fn(result, "MIN", "<")
+    result = _convert_scalar_fn(result, "MAX", "greatest")
+    result = _convert_scalar_fn(result, "MIN", "least")
     return result
 
 
-def _convert_scalar_fn(expr: str, fn: str, op: str) -> str:
+def _convert_scalar_fn(expr: str, fn: str, ts_fn: str) -> str:
     _PAT = re.compile(rf"\b{fn}\s*\(", re.IGNORECASE)
 
     result = expr
@@ -186,10 +186,7 @@ def _convert_scalar_fn(expr: str, fn: str, op: str) -> str:
         if len(args) == 2:
             a = args[0].strip()
             b = args[1].strip()
-            if b == "0":
-                replacement = f"if ( {a} {op} 0 ) then {a} else 0"
-            else:
-                replacement = f"if ( {a} {op} {b} ) then {a} else {b}"
+            replacement = f"{ts_fn} ( {a} , {b} )"
             result = result[:m.start()] + replacement + result[end_pos:]
         elif len(args) == 1:
             break
@@ -421,12 +418,47 @@ def map_parameter_names(
 # 3. CASE/WHEN → if/else if
 # ---------------------------------------------------------------------------
 
+def _find_matching_end(text: str) -> int | None:
+    """Find the END that closes the current CASE block, respecting nesting.
+
+    ``text`` starts right after the opening CASE keyword.  Returns the
+    index *past* the matching END, or None if no match is found.  Nested
+    CASE/END pairs and ``END`` inside square-bracket column names (e.g.
+    ``[End Date]``) are handled correctly.
+    """
+    depth = 1
+    i = 0
+    while i < len(text):
+        if text[i] == "[":
+            close = text.find("]", i + 1)
+            if close != -1:
+                i = close + 1
+                continue
+        kw_match = re.match(r"\bCASE\b", text[i:], re.IGNORECASE)
+        if kw_match:
+            depth += 1
+            i += kw_match.end()
+            continue
+        kw_match = re.match(r"\bEND\b", text[i:], re.IGNORECASE)
+        if kw_match:
+            depth -= 1
+            if depth == 0:
+                return i + kw_match.end()
+            i += kw_match.end()
+            continue
+        i += 1
+    return None
+
+
 def convert_case_when(expr: str) -> str:
     """Convert Tableau CASE/WHEN/END to ThoughtSpot if/else if/else chain.
 
     Handles:
       CASE [field] WHEN 'a' THEN x WHEN 'b' THEN y ELSE z END
     → if ( [field] = 'a' ) then x else if ( [field] = 'b' ) then y else z
+
+    Correctly handles CASE blocks nested inside IF/ELSE by finding the
+    matching END before scanning for WHEN clauses.
     """
     _CASE = re.compile(
         r"\bCASE\b\s+(.+?)\s+WHEN\b",
@@ -442,31 +474,34 @@ def convert_case_when(expr: str) -> str:
         safety += 1
 
         case_field = m.group(1).strip()
-        rest = result[m.end():]
+        after_case = result[m.start() + 4:]  # after "CASE"
+        end_offset = _find_matching_end(after_case)
+        if end_offset is None:
+            break
 
-        # Parse WHEN ... THEN ... pairs
+        block_end = m.start() + 4 + end_offset
+        block_content = result[m.end():block_end]
+
+        # Strip the trailing END keyword from block_content
+        block_content = re.sub(r"\s*\bEND\b\s*$", "", block_content, flags=re.IGNORECASE)
+
+        # Parse WHEN ... THEN ... pairs within the bounded block
         clauses: list[tuple[str, str]] = []
         else_val = None
-        pos = 0
         when_pattern = re.compile(
-            r"(?:^|\bWHEN\b)\s*(.+?)\s+THEN\s+(.+?)(?=\s+WHEN\b|\s+ELSE\b|\s+END\b)",
+            r"(?:^|\bWHEN\b)\s*(.+?)\s+THEN\s+(.+?)(?=\s+WHEN\b|\s+ELSE\b|$)",
             re.IGNORECASE | re.DOTALL,
         )
-        for wm in when_pattern.finditer(rest):
+        pos = 0
+        for wm in when_pattern.finditer(block_content):
             clauses.append((wm.group(1).strip(), wm.group(2).strip()))
             pos = wm.end()
 
-        # Find ELSE
-        else_match = re.search(r"\bELSE\b\s+(.+?)\s+END\b", rest[pos:], re.IGNORECASE | re.DOTALL)
+        # Find ELSE within the block
+        else_match = re.search(r"\bELSE\b\s+(.+)", block_content[pos:],
+                               re.IGNORECASE | re.DOTALL)
         if else_match:
             else_val = else_match.group(1).strip()
-            end_pos = m.start() + len("CASE") + len(m.group(1)) + len(" WHEN") + pos + else_match.end()
-        else:
-            end_match = re.search(r"\bEND\b", rest[pos:], re.IGNORECASE)
-            if end_match:
-                end_pos = m.start() + len("CASE") + len(m.group(1)) + len(" WHEN") + pos + end_match.end()
-            else:
-                break
 
         # Build if/else if chain
         parts = []
@@ -478,7 +513,7 @@ def convert_case_when(expr: str) -> str:
             parts.append(f"else {else_val}")
 
         replacement = " ".join(parts)
-        result = result[:m.start()] + replacement + result[end_pos:]
+        result = result[:m.start()] + replacement + result[block_end:]
 
     return result
 
@@ -967,30 +1002,66 @@ def convert_string_concat(expr: str, role: str = "dimension") -> str:
 
     Only applies when the formula role is 'dimension' (string context)
     or the expression contains STR() / to_string() / string literals adjacent to +.
+
+    Works at any nesting depth: finds contiguous chains of
+    ``operand + operand`` where at least one operand is a string literal,
+    and wraps the chain in ``concat()``.
     """
     if role == "measure" and "to_string" not in expr.lower() and "str(" not in expr.lower():
         return expr
 
-    # Detect string + patterns:
-    # - 'literal' + expr
-    # - expr + 'literal'
-    # - to_string(...) + expr
-    _STR_PLUS = re.compile(
-        r"((?:'[^']*'|to_string\s*\([^)]*\)|\[[^\]]+\])\s*)\+(\s*(?:'[^']*'|to_string\s*\([^)]*\)|\[[^\]]+\]))",
-        re.IGNORECASE,
-    )
-
-    if not _STR_PLUS.search(expr):
+    if "+" not in expr:
         return expr
 
-    # Split on top-level + and rebuild as concat()
-    # This is a simplified approach — handles common patterns
-    parts = _split_on_plus(expr)
-    if len(parts) > 1 and _looks_like_string_concat(parts, role):
-        inner = " , ".join(p.strip() for p in parts)
-        return f"concat ( {inner} )"
+    return _replace_string_plus_chains(expr, role)
 
-    return expr
+
+_CONCAT_OPERAND = (
+    r"(?:"
+    r"\[[^\]]+\]"                   # [column ref]
+    r"|'[^']*'"                     # 'string literal'
+    r"|to_string\s*\([^)]*\)"       # to_string(...)
+    r")"
+)
+
+_CONCAT_PAIR = re.compile(
+    rf"({_CONCAT_OPERAND})\s*\+\s*({_CONCAT_OPERAND})",
+    re.IGNORECASE,
+)
+
+
+def _replace_string_plus_chains(expr: str, role: str) -> str:
+    """Replace ``a + 'x' + b`` chains with ``concat(a, 'x', b)`` at any depth.
+
+    Uses iterative regex matching: finds pairs of operands around ``+`` where
+    at least one is a string literal (or the role is ``dimension``), collects
+    the full chain, and replaces with ``concat()``.  Merges adjacent results
+    so ``concat(a, b) + c`` collapses to ``concat(a, b, c)``.
+    """
+    result = expr
+    safety = 0
+    while safety < 50:
+        m = _CONCAT_PAIR.search(result)
+        if not m:
+            break
+        left, right = m.group(1).strip(), m.group(2).strip()
+        has_string = role == "dimension" or "'" in left or "'" in right
+        if not has_string:
+            break
+        safety += 1
+        # Extend chain rightward: keep matching + OPERAND after the pair
+        chain = [left, right]
+        end = m.end()
+        ext = re.compile(r"\s*\+\s*" + _CONCAT_OPERAND, re.IGNORECASE)
+        while True:
+            em = ext.match(result, end)
+            if not em:
+                break
+            chain.append(em.group(0).split("+", 1)[1].strip())
+            end = em.end()
+        inner = " , ".join(chain)
+        result = result[:m.start()] + f"concat ( {inner} )" + result[end:]
+    return result
 
 
 def _split_on_plus(expr: str) -> list[str]:
@@ -1226,14 +1297,56 @@ def ensure_else_clause(expr: str, role: str = "measure") -> str:
             else:
                 state_stack[-1]["has_else"] = True
 
-    # Any remaining states without has_else need insertion at end
-    # But we need to know WHERE to insert. For a simple approach:
-    # re-count and insert at the end of the expression for each missing else.
     missing = if_count - else_count
     if missing > 0:
         expr = expr.rstrip()
-        for _ in range(missing):
-            expr = f"{expr} else {default_val}"
+
+        first_if_pos = min(pos for pos, kw in positions if kw == "if")
+        depth_at_if = 0
+        in_brk = False
+        for j in range(first_if_pos):
+            c = expr[j]
+            if c == "[":
+                in_brk = True
+            elif c == "]":
+                in_brk = False
+            elif not in_brk:
+                if c == "(":
+                    depth_at_if += 1
+                elif c == ")":
+                    depth_at_if -= 1
+
+        if depth_at_if == 0:
+            for _ in range(missing):
+                expr = f"{expr} else {default_val}"
+        else:
+            last_then_pos = max(pos for pos, kw in positions if kw == "then")
+            scan_start = last_then_pos + 4  # len("then")
+            depth = depth_at_if
+            insert_pos = len(expr)
+            in_brk2 = False
+            in_sq = False
+            for j in range(scan_start, len(expr)):
+                c = expr[j]
+                if c == "[" and not in_sq:
+                    in_brk2 = True
+                elif c == "]" and not in_sq:
+                    in_brk2 = False
+                elif c == "'" and not in_brk2:
+                    in_sq = not in_sq
+                elif not in_brk2 and not in_sq:
+                    if c == "(":
+                        depth += 1
+                    elif c == ")":
+                        if depth == depth_at_if:
+                            insert_pos = j
+                            break
+                        depth -= 1
+                    elif c == "," and depth == depth_at_if:
+                        insert_pos = j
+                        break
+            elses = " ".join(f"else {default_val}" for _ in range(missing))
+            expr = expr[:insert_pos].rstrip() + " " + elses + " " + expr[insert_pos:].lstrip()
 
     return expr
 
@@ -1781,6 +1894,16 @@ def detect_name_clashes(
     return clashes
 
 
+def apply_name_clash_renames(expr: str, name_clashes: dict[str, str]) -> str:
+    """Update ``[formula_X]`` references in *expr* when X was renamed by name-clash detection."""
+    for original, renamed in name_clashes.items():
+        old_ref = f"[formula_{original}]"
+        new_ref = f"[formula_{renamed}]"
+        if old_ref in expr:
+            expr = expr.replace(old_ref, new_ref)
+    return expr
+
+
 # ---------------------------------------------------------------------------
 # 21. Strip ifnull(X, 0) wrapping for measures (BL-046 #1)
 # ---------------------------------------------------------------------------
@@ -1819,6 +1942,7 @@ def strip_ifnull_zero(expr: str) -> str:
 # ---------------------------------------------------------------------------
 
 _AGG_IF_MAP = {
+    "unique count": "unique_count_if",
     "sum": "sum_if",
     "count": "count_if",
     "average": "average_if",
@@ -2168,6 +2292,9 @@ def translate_formulas(
             else:
                 column_type = "MEASURE" if role == "measure" else "ATTRIBUTE"
                 output_name = name_clashes.get(caption, caption)
+                # Update cross-references to renamed formulas
+                if name_clashes:
+                    expr = apply_name_clash_renames(expr, name_clashes)
                 translated.append({
                     "name": output_name,
                     "expr": expr,

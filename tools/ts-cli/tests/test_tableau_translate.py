@@ -7,6 +7,7 @@ from __future__ import annotations
 import pytest
 
 from ts_cli.tableau_translate import (
+    apply_name_clash_renames,
     build_calc_id_map,
     build_csq_column_map,
     build_dependency_dag,
@@ -195,19 +196,19 @@ class TestConvertNoKeywordLod:
 class TestConvertScalarMaxMin:
     def test_max_two_args(self):
         result = convert_scalar_max_min("MAX([Sales], [Revenue])")
-        assert "if ( [Sales] > [Revenue] ) then [Sales] else [Revenue]" in result
+        assert result == "greatest ( [Sales] , [Revenue] )"
 
     def test_min_two_args(self):
         result = convert_scalar_max_min("MIN([Sales], [Revenue])")
-        assert "if ( [Sales] < [Revenue] ) then [Sales] else [Revenue]" in result
+        assert result == "least ( [Sales] , [Revenue] )"
 
     def test_max_with_zero(self):
         result = convert_scalar_max_min("MAX([Profit], 0)")
-        assert "if ( [Profit] > 0 ) then [Profit] else 0" in result
+        assert result == "greatest ( [Profit] , 0 )"
 
     def test_min_with_zero(self):
         result = convert_scalar_max_min("MIN([Profit], 0)")
-        assert "if ( [Profit] < 0 ) then [Profit] else 0" in result
+        assert result == "least ( [Profit] , 0 )"
 
     def test_aggregate_max_preserved(self):
         result = convert_scalar_max_min("MAX([Sales])")
@@ -216,6 +217,13 @@ class TestConvertScalarMaxMin:
     def test_aggregate_min_preserved(self):
         result = convert_scalar_max_min("MIN([Date])")
         assert result == "MIN([Date])"
+
+    def test_max_with_case_expr(self):
+        result = convert_scalar_max_min(
+            "MAX(CASE [X] WHEN 'A' THEN [Y] WHEN 'B' THEN [Z] END, 0)"
+        )
+        assert result.startswith("greatest ( ")
+        assert result.endswith(" , 0 )")
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +377,20 @@ class TestDetectNameClashes:
         )
         assert "SALES" in clashes
 
+    def test_apply_renames_updates_cross_refs(self):
+        clashes = {"Units": "Formula Units", "Sales": "Formula Sales"}
+        expr = "sum ( [formula_Units] ) / sum ( [formula_Sales] )"
+        result = apply_name_clash_renames(expr, clashes)
+        assert "[formula_Formula Units]" in result
+        assert "[formula_Formula Sales]" in result
+        assert "[formula_Units]" not in result
+
+    def test_apply_renames_no_match_unchanged(self):
+        clashes = {"Units": "Formula Units"}
+        expr = "sum ( [formula_Profit] )"
+        result = apply_name_clash_renames(expr, clashes)
+        assert result == expr
+
 
 # ---------------------------------------------------------------------------
 # Parameter handling
@@ -429,6 +451,35 @@ class TestConvertCaseWhen:
         assert "else if ( [X] = 'b' ) then 2" in result
         assert "else 0" in result
         assert "END" not in result
+
+    def test_case_nested_inside_if_else(self):
+        expr = (
+            "IF [FLAG]>1 THEN "
+            "CASE [TYPE] WHEN 'a' THEN [COL_A] WHEN 'b' THEN [COL_B] END "
+            "ELSE "
+            "CASE [TYPE] WHEN 'a' THEN [COL_C] WHEN 'b' THEN [COL_D] END "
+            "END"
+        )
+        result = convert_case_when(expr)
+        assert "CASE" not in result
+        assert result.count("if ( [TYPE]") == 4
+        assert "[COL_A]" in result
+        assert "[COL_D]" in result
+        # Outer IF's ELSE and END preserved for convert_if_then
+        assert "ELSE" in result
+        # Full pipeline produces clean output
+        full = convert_if_then(result)
+        assert "END" not in full
+        assert "CASE" not in full
+        assert "[COL_A]" in full
+        assert "[COL_D]" in full
+
+    def test_case_with_end_in_column_name(self):
+        expr = "CASE [X] WHEN 'a' THEN [END_DATE_PRE] WHEN 'b' THEN [END_DATE_LY] END"
+        result = convert_case_when(expr)
+        assert "[END_DATE_PRE]" in result
+        assert "[END_DATE_LY]" in result
+        assert "CASE" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +623,17 @@ class TestConvertStringConcat:
         assert "+" in result
         assert "concat" not in result
 
+    def test_nested_plus_inside_if_else(self):
+        expr = (
+            "if ( [Tier] = 'Two' ) then [A] + ' : ' + [B] "
+            "else if ( [Tier] = 'Three' ) then [A] + ' : ' + [B] + ' : ' + [C] "
+            "else ''"
+        )
+        result = convert_string_concat(expr, role="dimension")
+        assert "+" not in result
+        assert "then concat ( [A] , ' : ' , [B] )" in result
+        assert "then concat ( [A] , ' : ' , [B] , ' : ' , [C] )" in result
+
 
 # ---------------------------------------------------------------------------
 # Column scoping
@@ -666,6 +728,29 @@ class TestEnsureElseClause:
         expr = "count_if ( [Region] = 'West' )"
         result = ensure_else_clause(expr, role="measure")
         assert result == expr
+
+    def test_if_inside_ifnull_inserts_before_comma(self):
+        """else clause goes inside ifnull(), before the comma separator."""
+        expr = "ifnull ( if ( [X] = 'a' ) then [Y] , 'default' )"
+        result = ensure_else_clause(expr, role="dimension")
+        assert "else ''" in result
+        assert result.index("else ''") < result.index(", 'default'")
+
+    def test_chained_else_if_inside_ifnull(self):
+        """Chained else-if inside ifnull — one missing else, inserted before comma."""
+        expr = ("ifnull ( if ( [T] = 'A' ) then [X] "
+                "else if ( [T] = 'B' ) then [Y] "
+                "else if ( [T] = 'C' ) then [Z] , 'Unknown' )")
+        result = ensure_else_clause(expr, role="dimension")
+        assert "else ''" in result
+        assert result.index("else ''") < result.index(", 'Unknown'")
+
+    def test_if_inside_concat_inserts_before_comma(self):
+        """else clause goes inside concat(), before the comma separator."""
+        expr = "concat ( if ( [X] = 1 ) then 'a' , 'b' )"
+        result = ensure_else_clause(expr, role="dimension")
+        assert "else ''" in result
+        assert result.index("else ''") < result.index(", 'b'")
 
 
 # ---------------------------------------------------------------------------
@@ -956,6 +1041,13 @@ class TestConvertAggIf:
         assert "max" in result
         assert "_if" not in result
 
+    def test_unique_count_if(self):
+        result = convert_agg_if("unique count ( if ( [Cohort] = 'New' ) then [ID] )")
+        assert "unique_count_if" in result
+        assert "unique count_if" not in result
+        assert "[Cohort] = 'New'" in result
+        assert "[ID]" in result
+
 
 # ---------------------------------------------------------------------------
 # Dependency DAG
@@ -1166,7 +1258,7 @@ class TestPreTransformIntegration:
             "MAX([Profit], 0)",
             role="measure",
         )
-        assert "if ( [Profit] > 0 ) then [Profit] else 0" in expr
+        assert "greatest ( [Profit] , 0 )" in expr
         assert errors == []
 
     def test_date_arithmetic_rewritten(self):

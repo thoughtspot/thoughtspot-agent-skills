@@ -624,16 +624,20 @@ def translate_formulas_cmd(
 @app.command("build-model")
 def build_model_cmd(
     twb_file: str = typer.Argument(..., help="Path to .twb or .twbx file"),
-    connection_name: str = typer.Option(..., "--connection", "-c",
-                                         help="ThoughtSpot connection name"),
+    connection_name: str = typer.Option("", "--connection", "-c",
+                                         help="ThoughtSpot connection name (required unless --existing-guid)"),
     output_dir: str = typer.Option(".", "--output-dir", "-o",
                                     help="Directory for output TML files"),
     model_name: Optional[str] = typer.Option(None, "--model-name", "-m",
                                               help="Model name (default: derived from TWB)"),
     datasource_name: Optional[str] = typer.Option(None, "--datasource", "-d",
                                                     help="Filter to a single datasource"),
+    existing_guid: Optional[str] = typer.Option(None, "--existing-guid",
+                                                  help="GUID of existing model to merge formulas into"),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p",
+                                            help="ThoughtSpot profile (required with --existing-guid)"),
     dry_run: bool = typer.Option(False, "--dry-run",
-                                  help="Report only — don't write files"),
+                                  help="Report only — don't write files or import"),
 ) -> None:
     """Parse a Tableau workbook and build import-ready ThoughtSpot model TML.
 
@@ -641,7 +645,17 @@ def build_model_cmd(
     the TWB XML, translates formulas, resolves name collisions, applies
     formula_ prefix for cross-references, detects double aggregation, and
     outputs phased model TML files ready for ts tml import.
+
+    With --existing-guid: exports the existing model, merges new formulas
+    into it (skipping existing), filters unresolvable references, and
+    imports the merged model.
     """
+    if existing_guid and not profile:
+        typer.echo("--profile is required when using --existing-guid", err=True)
+        raise SystemExit(1)
+    if not existing_guid and not connection_name:
+        typer.echo("--connection is required when not using --existing-guid", err=True)
+        raise SystemExit(1)
     from ts_cli.model_builder import (
         build_formula_levels,
         build_model_tml,
@@ -693,6 +707,52 @@ def build_model_cmd(
         # Step 2: Resolve internal references + translate formulas
         scoped_columns = ds.get("col_table_map", {})
 
+        # When merging into an existing model, export it early so we can
+        # fix sqlproxy→actual-table mapping before translation
+        existing_tml = None
+        if existing_guid:
+            import subprocess as _sp
+            typer.echo(f"\n  Exporting existing model {existing_guid}...", err=True)
+            export_proc = _sp.run(
+                ["ts", "tml", "export", existing_guid, "--profile", profile, "--parse"],
+                capture_output=True, text=True,
+            )
+            if export_proc.returncode != 0:
+                typer.echo(f"  Export failed: {export_proc.stderr[:200]}", err=True)
+                raise SystemExit(1)
+            existing_tml = json.loads(export_proc.stdout)[0]["tml"]
+            typer.echo(
+                f"  Existing model: {len(existing_tml['model']['formulas'])} formulas",
+                err=True,
+            )
+
+            # Fix sqlproxy scoping: derive column→table from existing model
+            has_sqlproxy = any(t == "sqlproxy" for t in scoped_columns.values())
+            if has_sqlproxy:
+                col_to_table: dict[str, str] = {}
+                for col in existing_tml["model"]["columns"]:
+                    col_id = col.get("column_id", "")
+                    if "::" in col_id:
+                        tbl, cname = col_id.split("::", 1)
+                        col_to_table[cname.upper()] = tbl
+                fixed_scoped: dict[str, str] = {}
+                for col_key, tbl in scoped_columns.items():
+                    base = re.sub(r"\s*\(Custom SQL Query\d*\)\s*$", "", col_key)
+                    lookup = base.upper()
+                    actual_tbl = col_to_table.get(lookup, tbl) if tbl == "sqlproxy" else tbl
+                    fixed_scoped[col_key] = actual_tbl
+                    if base != col_key and lookup in col_to_table and base not in fixed_scoped:
+                        fixed_scoped[base] = col_to_table[lookup]
+                for cname, tbl in col_to_table.items():
+                    if cname not in {k.upper() for k in fixed_scoped}:
+                        fixed_scoped[cname] = tbl
+                remapped = sum(
+                    1 for k in fixed_scoped
+                    if k in scoped_columns and fixed_scoped[k] != scoped_columns[k]
+                )
+                typer.echo(f"  Remapped {remapped}/{len(scoped_columns)} sqlproxy columns", err=True)
+                scoped_columns = fixed_scoped
+
         # Build dependency levels from raw calcs (before resolution strips refs)
         raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])
 
@@ -727,52 +787,187 @@ def build_model_cmd(
         if rename_map:
             typer.echo(f"  Renamed: {rename_map}", err=True)
 
-        # Step 4: Build model TML
-        model_tml = build_model_tml(
-            model_name=name,
-            connection_name=connection_name,
-            tables=ds["tables"],
-            columns=cleaned_cols,
-            joins=ds["joins"],
-            parameters=parsed["parameters"],
-            translated_formulas=cleaned_formulas,
-            formula_rename_map=rename_map,
-        )
+        if existing_guid:
+            # --- Merge-into-existing flow ---
+            from ts_cli.model_builder import (
+                add_formula_prefix,
+                fix_double_aggregation,
+                filter_unresolvable_formulas,
+                merge_formulas_into_model,
+            )
+            import subprocess
 
-        # Step 5: Split for phased import — use levels from raw DAG, not translator
-        levels = {}
-        for f in cleaned_formulas:
-            fname = f["name"]
-            levels[fname] = raw_levels.get(fname, 0)
-        phases = split_for_phased_import(model_tml, levels)
+            # Strip CSQ suffixes from scoped column references
+            _CSQ_IN_REF = re.compile(
+                r"\[([^\]]+?)\s+\(\s*Custom SQL Query\d*\)\]"
+            )
+            for f in cleaned_formulas:
+                f["expr"] = _CSQ_IN_REF.sub(r"[\1]", f["expr"])
 
-        typer.echo(f"  Phases: {len(phases)} (phase 0 = base, then per dependency level)", err=True)
-        for i, phase in enumerate(phases):
-            fc = len(phase["model"].get("formulas", []))
-            typer.echo(f"    Phase {i}: {fc} formulas", err=True)
+            existing_ids = {f["id"] for f in existing_tml["model"]["formulas"]}
+            existing_cols = {
+                c.get("column_id", "").split("::")[-1]
+                for c in existing_tml["model"]["columns"]
+                if "::" in c.get("column_id", "")
+            }
+            formula_names = {f["name"] for f in existing_tml["model"]["formulas"]}
+            new_formula_names = {f["name"] for f in cleaned_formulas}
+            all_formula_names = formula_names | new_formula_names
+            param_names = {
+                p["name"] for p in existing_tml["model"].get("parameters", [])
+            }
 
-        result = {
-            "datasource": ds_name,
-            "model_name": name,
-            "tables": len(ds["tables"]),
-            "columns": len(cleaned_cols),
-            "formulas_translated": len(translated),
-            "formulas_skipped": len(skipped),
-            "formulas_total": len(ds["calculated_fields"]),
-            "parameters": len(parsed["parameters"]),
-            "name_renames": rename_map,
-            "phases": len(phases),
-        }
+            formula_exprs = {f["name"]: f["expr"] for f in cleaned_formulas}
+            formula_dicts = []
+            for f in cleaned_formulas:
+                expr = add_formula_prefix(f["expr"], all_formula_names, param_names)
+                expr = fix_double_aggregation(expr, formula_exprs)
+                formula_dicts.append({
+                    "expr": expr,
+                    "id": f"formula_{f['name']}",
+                    "name": f["name"],
+                })
+            kept, dropped_names = filter_unresolvable_formulas(
+                formula_dicts, existing_ids, existing_cols, formula_names, param_names
+            )
+            typer.echo(
+                f"  Filter: {len(kept)} kept, {len(dropped_names)} dropped",
+                err=True,
+            )
+            if dropped_names:
+                for dn in dropped_names[:10]:
+                    typer.echo(f"    - {dn}", err=True)
 
-        if not dry_run:
+            merged = merge_formulas_into_model(existing_tml, kept)
+            stats = merged["_merge_stats"]
+            typer.echo(
+                f"  Merge: added={stats['added']}, skipped={stats['skipped_existing']}",
+                err=True,
+            )
+            if stats.get("added_names"):
+                for an in stats["added_names"]:
+                    typer.echo(f"    + {an}", err=True)
+
+            result = {
+                "datasource": ds_name,
+                "model_name": name,
+                "existing_guid": existing_guid,
+                "formulas_translated": len(translated),
+                "formulas_skipped": len(skipped),
+                "formulas_filtered": len(dropped_names),
+                "formulas_added": stats["added"],
+                "formulas_skipped_existing": stats["skipped_existing"],
+            }
+
+            if not dry_run and stats["added"] > 0:
+                dropped_on_import: list[str] = []
+                for _attempt in range(10):
+                    import_tml = {
+                        k: v for k, v in merged.items() if not k.startswith("_")
+                    }
+                    tml_str = json.dumps(import_tml)
+                    import_proc = subprocess.run(
+                        [
+                            "ts", "tml", "import",
+                            "--profile", profile,
+                            "--policy", "ALL_OR_NONE",
+                        ],
+                        input=json.dumps([tml_str]),
+                        capture_output=True, text=True,
+                    )
+                    if import_proc.returncode != 0:
+                        typer.echo(f"  Import failed: {import_proc.stderr[:200]}", err=True)
+                        raise SystemExit(1)
+                    import_result = json.loads(import_proc.stdout)
+                    status = import_result[0]["response"]["status"]["status_code"]
+                    if status == "OK":
+                        result["import_status"] = status
+                        typer.echo(f"  Import: OK", err=True)
+                        break
+                    msg = import_result[0]["response"]["status"].get("error_message", "")
+                    # Parse failing formula name from error
+                    err_match = re.search(r"Formula:\s*([^,]+),\s*Error:", msg)
+                    if not err_match:
+                        result["import_status"] = status
+                        result["import_error"] = msg
+                        typer.echo(f"  Import: {status} — {msg[:200]}", err=True)
+                        break
+                    bad_name = err_match.group(1).strip()
+                    err_detail = msg.split("Error:", 1)[-1].strip()[:120] if "Error:" in msg else ""
+                    typer.echo(f"  Import error on '{bad_name}': {err_detail} — dropping", err=True)
+                    dropped_on_import.append(bad_name)
+                    fid = f"formula_{bad_name}"
+                    merged["model"]["formulas"] = [
+                        f for f in merged["model"]["formulas"]
+                        if f.get("id") != fid
+                    ]
+                    merged["model"]["columns"] = [
+                        c for c in merged["model"]["columns"]
+                        if c.get("formula_id") != fid
+                    ]
+                    stats["added"] -= 1
+                    if stats["added"] <= 0:
+                        typer.echo("  All new formulas dropped — nothing to import", err=True)
+                        result["import_status"] = "SKIPPED"
+                        break
+                else:
+                    result["import_status"] = "ERROR"
+                    result["import_error"] = "Max retry attempts exceeded"
+                if dropped_on_import:
+                    result["formulas_dropped_on_import"] = dropped_on_import
+                    result["formulas_added"] = stats["added"]
+            elif dry_run:
+                typer.echo("  Dry run — skipping import", err=True)
+            else:
+                typer.echo("  No new formulas to add — skipping import", err=True)
+
+            all_results.append(result)
+        else:
+            # --- Generate-files flow (original) ---
+            model_tml = build_model_tml(
+                model_name=name,
+                connection_name=connection_name,
+                tables=ds["tables"],
+                columns=cleaned_cols,
+                joins=ds["joins"],
+                parameters=parsed["parameters"],
+                translated_formulas=cleaned_formulas,
+                formula_rename_map=rename_map,
+            )
+
+            levels = {}
+            for f in cleaned_formulas:
+                fname = f["name"]
+                levels[fname] = raw_levels.get(fname, 0)
+            phases = split_for_phased_import(model_tml, levels)
+
+            typer.echo(f"  Phases: {len(phases)} (phase 0 = base, then per dependency level)", err=True)
             for i, phase in enumerate(phases):
-                fname = f"{slug}.phase{i}.model.tml"
-                fpath = out_path / fname
-                yaml_str = dump_tml_yaml(phase)
-                fpath.write_text(yaml_str)
-                typer.echo(f"  Wrote: {fpath}", err=True)
-                result[f"phase_{i}_file"] = str(fpath)
+                fc = len(phase["model"].get("formulas", []))
+                typer.echo(f"    Phase {i}: {fc} formulas", err=True)
 
-        all_results.append(result)
+            result = {
+                "datasource": ds_name,
+                "model_name": name,
+                "tables": len(ds["tables"]),
+                "columns": len(cleaned_cols),
+                "formulas_translated": len(translated),
+                "formulas_skipped": len(skipped),
+                "formulas_total": len(ds["calculated_fields"]),
+                "parameters": len(parsed["parameters"]),
+                "name_renames": rename_map,
+                "phases": len(phases),
+            }
+
+            if not dry_run:
+                for i, phase in enumerate(phases):
+                    fname = f"{slug}.phase{i}.model.tml"
+                    fpath = out_path / fname
+                    yaml_str = dump_tml_yaml(phase)
+                    fpath.write_text(yaml_str)
+                    typer.echo(f"  Wrote: {fpath}", err=True)
+                    result[f"phase_{i}_file"] = str(fpath)
+
+            all_results.append(result)
 
     print(json.dumps(all_results, indent=2))

@@ -699,6 +699,150 @@ def _build_model_parameters(parameters: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Merge formulas into an existing model
+# ---------------------------------------------------------------------------
+
+def merge_formulas_into_model(
+    existing_tml: dict,
+    translated_formulas: list[dict],
+    formula_levels: dict[str, int] | None = None,
+    update_existing: bool = False,
+) -> dict:
+    """Merge translated formulas into an existing model TML for GUID-pinned update.
+
+    For each translated formula:
+    - If it matches an existing formula (by formula_id) and ``update_existing``
+      is True, update the expression.  Default is False — existing expressions
+      are kept as-is because they already have correct table-qualified column
+      references that the translator may not reproduce.
+    - If it's new, add the formula and its column entry (skipping names that
+      collide case-insensitively with existing columns).
+
+    Returns the merged model TML dict ready for import.
+    """
+    import copy
+    merged = copy.deepcopy(existing_tml)
+    model = merged["model"]
+
+    existing_formulas = {f["id"]: f for f in model.get("formulas", [])}
+    existing_col_names_lower = {
+        c["name"].lower() for c in model.get("columns", [])
+    }
+
+    updated = 0
+    skipped_existing = 0
+    added = 0
+    added_names: list[str] = []
+    skipped_collisions: list[str] = []
+    for tf in translated_formulas:
+        fid = tf["id"]
+        if fid in existing_formulas:
+            if update_existing:
+                existing_formulas[fid]["expr"] = tf["expr"]
+                if "name" in tf:
+                    existing_formulas[fid]["name"] = tf["name"]
+                updated += 1
+            else:
+                skipped_existing += 1
+        else:
+            if tf["name"].lower() in existing_col_names_lower:
+                skipped_collisions.append(tf["name"])
+                continue
+            model["formulas"].append(tf)
+            col_entry = {
+                "name": tf["name"],
+                "formula_id": fid,
+                "properties": {
+                    "column_type": tf.get("column_type", "MEASURE"),
+                },
+            }
+            if tf.get("column_type") == "MEASURE":
+                col_entry["properties"]["aggregation"] = "SUM"
+            model["columns"].append(col_entry)
+            existing_col_names_lower.add(tf["name"].lower())
+            added += 1
+            added_names.append(tf["name"])
+
+    merged["_merge_stats"] = {
+        "updated": updated,
+        "skipped_existing": skipped_existing,
+        "added": added,
+        "added_names": added_names,
+        "skipped_collisions": skipped_collisions,
+        "existing_total": len(existing_formulas),
+    }
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Pre-merge filtering
+# ---------------------------------------------------------------------------
+
+def filter_unresolvable_formulas(
+    formulas: list[dict],
+    existing_formula_ids: set[str],
+    model_column_names: set[str],
+    formula_names: set[str],
+    parameter_names: set[str],
+) -> tuple[list[str], list[dict]]:
+    """Drop new formulas with references that won't resolve in ThoughtSpot.
+
+    Checks for:
+    - ``sqlproxy::`` table references (published datasource artifact)
+    - ``Custom SQL Query`` references (unmapped CSQ)
+    - Bare column names that match physical columns but lack table qualifiers
+    - Unresolvable bare references (not a column, formula, or parameter)
+    - ``+`` string concatenation that wasn't converted to ``concat()``
+
+    Returns (kept, dropped_names).
+    """
+    import re
+    kept: list[dict] = []
+    dropped: list[str] = []
+    col_upper = {c.upper() for c in model_column_names}
+    formula_upper = {n.upper() for n in formula_names}
+    param_upper = {n.upper() for n in parameter_names}
+
+    for f in formulas:
+        if f.get("id") in existing_formula_ids:
+            kept.append(f)
+            continue
+        expr = f.get("expr", "")
+        if "sqlproxy::" in expr.lower():
+            dropped.append(f.get("name", f.get("id", "?")))
+            continue
+        if "custom sql query" in expr.lower():
+            dropped.append(f.get("name", f.get("id", "?")))
+            continue
+        # + between string literal and ref (unconverted string concat)
+        if re.search(r"'\s*\+\s*\[", expr) or re.search(r"\]\s*\+\s*'", expr):
+            dropped.append(f.get("name", f.get("id", "?")))
+            continue
+        # Bare references — unscoped physical columns or unknown names
+        # Strip string literals before extracting refs to avoid false
+        # positives from brackets inside strings like concat('[', ...)
+        expr_no_strings = re.sub(r"'[^']*'", "", expr)
+        has_bad_ref = False
+        for ref in re.findall(r"\[([^\]]+)\]", expr_no_strings):
+            if "::" in ref:
+                continue
+            if ref.startswith("formula_"):
+                continue
+            if ref in parameter_names or ref in formula_names:
+                continue
+            if ref.upper() in param_upper or ref.upper() in formula_upper:
+                continue
+            has_bad_ref = True
+            break
+        if has_bad_ref:
+            dropped.append(f.get("name", f.get("id", "?")))
+            continue
+        kept.append(f)
+
+    return kept, dropped
+
+
+# ---------------------------------------------------------------------------
 # Phased import splitting
 # ---------------------------------------------------------------------------
 
