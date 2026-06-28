@@ -507,6 +507,29 @@ class TestConvertIfThen:
         result = convert_if_then("[Sales] + [Revenue]")
         assert result == "[Sales] + [Revenue]"
 
+    def test_nested_if_in_condition(self):
+        """Nested IF blocks inside an outer IF condition are converted correctly."""
+        expr = (
+            "IF (IF [P]='M' THEN [A] ELSEIF [P]='Q' THEN [B] END "
+            "= IF [P]='M' THEN [C] ELSEIF [P]='Q' THEN [D] END) "
+            "THEN 'Yes' ELSE 'No' END"
+        )
+        result = convert_if_then(expr)
+        assert "if ( [P]='M' ) then [A]" in result
+        assert "else if ( [P]='Q' ) then [B]" in result
+        assert "if ( [P]='M' ) then [C]" in result
+        assert "else if ( [P]='Q' ) then [D]" in result
+        assert "else 'No'" in result
+        assert "END" not in result
+        assert result.count("else null") == 2
+
+    def test_column_with_parens_in_brackets(self):
+        """Column refs like [Budget Sub Line (copy)] don't break IF conversion."""
+        expr = "IF [X]=1 THEN [Col (copy)] ELSE [Y] END"
+        result = convert_if_then(expr)
+        assert "if ( [X]=1 ) then [Col (copy)]" in result
+        assert "else [Y]" in result
+
 
 # ---------------------------------------------------------------------------
 # IIF conversion
@@ -569,6 +592,13 @@ class TestMapDateFunctions:
     def test_datetrunc_quarter(self):
         result = map_date_functions("DATETRUNC('quarter', [Date])")
         assert "start_of_quarter ( [Date] )" in result
+
+    def test_datetrunc_column_with_parens(self):
+        """Parens inside bracket refs don't break DATETRUNC arg extraction."""
+        result = map_date_functions(
+            "DATETRUNC('month', [Budget Sub Line (copy)])"
+        )
+        assert "start_of_month ( [Budget Sub Line (copy)] )" in result
 
     def test_datediff_day(self):
         result = map_date_functions("DATEDIFF('day', [Start], [End])")
@@ -672,6 +702,27 @@ class TestScopeColumns:
         )
         assert "[Metric]" in result  # not scoped
         assert "[ORDERS::SALES]" in result
+
+    def test_table_suffix_stripped_when_scoped(self):
+        result = scope_columns(
+            "sum ( [booked_gbp (agg_lineitem_daily)] )",
+            {"booked_gbp (agg_lineitem_daily)": "agg_lineitem_daily"},
+        )
+        assert "[agg_lineitem_daily::booked_gbp]" in result
+
+    def test_table_suffix_kept_when_table_mismatch(self):
+        result = scope_columns(
+            "[booked_gbp (other_table)]",
+            {"booked_gbp (other_table)": "agg_lineitem_daily"},
+        )
+        assert "[agg_lineitem_daily::booked_gbp (other_table)]" in result
+
+    def test_no_suffix_still_works(self):
+        result = scope_columns(
+            "[booked_gbp]",
+            {"booked_gbp": "agg_partner_delivery_daily"},
+        )
+        assert "[agg_partner_delivery_daily::booked_gbp]" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1447,3 +1498,56 @@ class TestDumpTmlYaml:
         out = dump_tml_yaml(tml)
         assert "name: My Model" in out
         assert '"My Model"' not in out
+
+
+# ---------------------------------------------------------------------------
+# validate_pre_import — new checks (B2)
+# ---------------------------------------------------------------------------
+
+class TestValidatePreImportNewChecks:
+
+    def test_in_with_parens_flagged(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "F1", "expr": "if [T::Status] in ('A', 'B') then 1 else 0"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 1
+        assert any("curly braces" in w for w in issues[0]["warnings"])
+
+    def test_in_with_curly_braces_passes(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "F1", "expr": "if [T::Status] in {'A', 'B'} then 1 else 0"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 0
+
+    def test_add_quarters_flagged(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "F1", "expr": "add_quarters ( [T::Date] , 1 )"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 1
+        assert any("add_quarters" in w for w in issues[0]["warnings"])
+
+    def test_add_years_flagged(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "F1", "expr": "add_years ( [T::Date] , 2 )"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 1
+        assert any("add_years" in w for w in issues[0]["warnings"])
+
+    def test_add_months_passes(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "F1", "expr": "add_months ( [T::Date] , 3 )"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 0
+
+    def test_bare_date_literal_flagged(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "F1", "expr": "if [T::Date] > '2024-01-01' then 1 else 0"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 1
+        assert any("Bare date literal" in w for w in issues[0]["warnings"])
+
+    def test_date_in_to_date_passes(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "F1", "expr": "if [T::Date] > to_date( '2024-01-01' , 'yyyy-MM-dd' ) then 1 else 0"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 0

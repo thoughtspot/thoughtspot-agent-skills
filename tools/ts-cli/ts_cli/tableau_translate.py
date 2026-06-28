@@ -522,57 +522,112 @@ def convert_case_when(expr: str) -> str:
 # 4. IF/THEN/ELSEIF/ELSE/END → ThoughtSpot if/then/else
 # ---------------------------------------------------------------------------
 
-def convert_if_then(expr: str) -> str:
-    """Convert Tableau IF/THEN/ELSEIF/ELSE/END to ThoughtSpot syntax.
+def _convert_if_content(content: str) -> str:
+    """Convert the body of one IF...END block (no nested IFs) to TS syntax.
 
-    - Strip END keyword
-    - ELSEIF → else if
-    - Wrap conditions in parentheses: IF cond THEN → if ( cond ) then
+    *content* is everything between the IF and END keywords.
+    Returns: ``if ( cond ) then val [else if ( cond ) then val]* [else val]``
     """
-    result = expr
+    result = content
 
-    # ELSEIF → else if (must happen before IF conversion)
+    # ELSEIF → else if
     result = re.sub(r"\bELSEIF\b", "else if", result, flags=re.IGNORECASE)
 
-    # Strip END keyword — but NOT inside square brackets (e.g. [End Date])
-    # Use negative lookbehind for [ to avoid corrupting column references
-    result = re.sub(r"(?<!\[)\bEND\b(?!\])\s*$", "", result, flags=re.IGNORECASE).rstrip()
-    result = re.sub(r"(?<!\[)\bEND\b(?!\])(?=\s*[)\]/,])", "", result, flags=re.IGNORECASE)
-    result = re.sub(r"(?<!\[)\bEND\b(?!\])", "", result, flags=re.IGNORECASE)
-
-    # IF ... THEN → if ( ... ) then
-    # Match IF followed by content up to THEN
-    def _wrap_if_condition(m: re.Match) -> str:
+    # Leading condition → if ( cond ) then.
+    # Case-sensitive THEN: already-lowercased inner blocks won't match.
+    m = re.match(r"(.+?)\s+\bTHEN\b", result, flags=re.DOTALL)
+    if m:
         cond = m.group(1).strip()
-        # Don't double-wrap if already parenthesized
         if cond.startswith("(") and cond.endswith(")"):
-            return f"if {cond} then"
-        return f"if ( {cond} ) then"
+            prefix = f"if {cond} then"
+        else:
+            prefix = f"if ( {cond} ) then"
+        result = prefix + result[m.end():]
 
-    result = re.sub(
-        r"\bIF\b\s+(.+?)\s+\bTHEN\b",
-        _wrap_if_condition,
-        result,
-        flags=re.IGNORECASE,
-    )
-
-    # else if ... then → else if ( ... ) then
-    def _wrap_else_if_condition(m: re.Match) -> str:
+    # else if cond THEN → else if ( cond ) then
+    def _wrap_else_if(m: re.Match) -> str:
         cond = m.group(1).strip()
         if cond.startswith("(") and cond.endswith(")"):
             return f"else if {cond} then"
         return f"else if ( {cond} ) then"
 
     result = re.sub(
-        r"\belse\s+if\b\s+(.+?)\s+\bthen\b",
-        _wrap_else_if_condition,
+        r"\belse\s+if\b\s+(.+?)\s+\bTHEN\b",
+        _wrap_else_if,
         result,
-        flags=re.IGNORECASE,
+        flags=re.DOTALL,
     )
 
-    # Lowercase THEN, ELSE
+    # Lowercase remaining uppercase keywords
     result = re.sub(r"\bTHEN\b", "then", result)
     result = re.sub(r"\bELSE\b", "else", result)
+
+    return result
+
+
+# Innermost IF...END: an IF whose body contains no nested uppercase IF.
+_INNER_IF_END = re.compile(
+    r"\bIF\b((?:(?!\bIF\b).)*?)\bEND\b", re.DOTALL
+)
+
+
+def convert_if_then(expr: str) -> str:
+    """Convert Tableau IF/THEN/ELSEIF/ELSE/END to ThoughtSpot syntax.
+
+    Handles nested IF blocks by processing inside-out: the innermost
+    IF...END block is converted first (to lowercase), so subsequent
+    iterations skip it and find the next-outer block.
+    """
+    # Protect bracketed column references ([End Date], [IF Status])
+    _brackets: list[str] = []
+
+    def _protect(m: re.Match) -> str:
+        _brackets.append(m.group(0))
+        return f"\x00B{len(_brackets) - 1}\x00"
+
+    result = re.sub(r"\[[^\]]*\]", _protect, expr)
+
+    # Convert innermost IF...END blocks outward
+    safety = 0
+    while safety < 50:
+        safety += 1
+        m = _INNER_IF_END.search(result)
+        if not m:
+            break
+        converted = _convert_if_content(m.group(1))
+        tentative = result[: m.start()] + converted + result[m.end():]
+        # Inner blocks (more uppercase IF remaining) need a terminal else
+        # so ensure_else_clause doesn't miscount later.
+        is_inner = bool(re.search(r"\bIF\b", tentative))
+        has_terminal_else = bool(
+            re.search(r"\belse\b(?!\s+if\b)", converted, re.IGNORECASE)
+        )
+        if is_inner and not has_terminal_else:
+            converted += " else null"
+        result = result[: m.start()] + converted + result[m.end():]
+
+    # Fallback: remaining uppercase IF...THEN without a matching END
+    def _wrap_if_condition(m: re.Match) -> str:
+        cond = m.group(1).strip()
+        if cond.startswith("(") and cond.endswith(")"):
+            return f"if {cond} then"
+        return f"if ( {cond} ) then"
+
+    result = re.sub(
+        r"\bIF\b\s+(.+?)\s+\bTHEN\b", _wrap_if_condition, result, flags=re.DOTALL
+    )
+    result = re.sub(r"\bELSEIF\b", "else if", result, flags=re.IGNORECASE)
+
+    # Lowercase remaining standalone keywords
+    result = re.sub(r"\bTHEN\b", "then", result)
+    result = re.sub(r"\bELSE\b", "else", result)
+    result = re.sub(r"(?<!\[)\bEND\b(?!\])", "", result)
+
+    # Restore bracketed references
+    def _restore(m: re.Match) -> str:
+        return _brackets[int(m.group(1))]
+
+    result = re.sub(r"\x00B(\d+)\x00", _restore, result)
 
     return result
 
@@ -621,10 +676,11 @@ def convert_iif(expr: str) -> str:
 
 
 def _split_args(s: str) -> list[str]:
-    """Split a string on top-level commas, respecting parentheses and brackets."""
+    """Split a string on top-level commas, respecting (), [], and {} nesting."""
     args: list[str] = []
     depth = 0
     bracket_depth = 0
+    brace_depth = 0
     current: list[str] = []
     in_string = False
     string_char = ""
@@ -652,7 +708,13 @@ def _split_args(s: str) -> list[str]:
         elif ch == "]":
             bracket_depth -= 1
             current.append(ch)
-        elif ch == "," and depth == 0 and bracket_depth == 0:
+        elif ch == "{":
+            brace_depth += 1
+            current.append(ch)
+        elif ch == "}":
+            brace_depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0 and bracket_depth == 0 and brace_depth == 0:
             args.append("".join(current))
             current = []
         else:
@@ -847,17 +909,31 @@ def _extract_function_args(expr: str, start_pos: int) -> tuple[list[str], int] |
     """Extract arguments from a function call starting at the open paren position.
 
     Returns (args_list, end_pos_after_close_paren) or None if unbalanced.
+    Tracks (), [], and {} nesting so LOD braces don't break arg extraction.
     """
     if start_pos >= len(expr) or expr[start_pos] != "(":
         return None
 
     depth = 1
+    brace_depth = 0
+    bracket_depth = 0
     pos = start_pos + 1
     while pos < len(expr) and depth > 0:
-        if expr[pos] == "(":
-            depth += 1
-        elif expr[pos] == ")":
-            depth -= 1
+        ch = expr[pos]
+        if ch == "(":
+            if brace_depth == 0 and bracket_depth == 0:
+                depth += 1
+        elif ch == ")":
+            if brace_depth == 0 and bracket_depth == 0:
+                depth -= 1
+        elif ch == "{":
+            brace_depth += 1
+        elif ch == "}":
+            brace_depth -= 1
+        elif ch == "[":
+            bracket_depth += 1
+        elif ch == "]":
+            bracket_depth -= 1
         pos += 1
 
     if depth != 0:
@@ -1170,6 +1246,8 @@ def scope_columns(
 
     _COL_REF = re.compile(r"\[([^\]]+)\]")
 
+    _TABLE_SUFFIX = re.compile(r"^(.+?)\s+\(([^)]+)\)$")
+
     def _replace_col(m: re.Match) -> str:
         ref = m.group(1)
         # Already scoped (has ::)
@@ -1184,10 +1262,48 @@ def scope_columns(
         # Look up table
         table = scoped_columns.get(ref)
         if table:
+            # Strip "(table)" suffix — the TABLE:: prefix provides the scoping
+            suffix_match = _TABLE_SUFFIX.match(ref)
+            if suffix_match and suffix_match.group(2) == table:
+                return f"[{table}::{suffix_match.group(1)}]"
             return f"[{table}::{ref}]"
         return m.group(0)
 
     return _COL_REF.sub(_replace_col, expr)
+
+
+# ---------------------------------------------------------------------------
+# 10b. Fix IN (...) → in {...}
+# ---------------------------------------------------------------------------
+
+_IN_PAREN = re.compile(r"\bin\s*\(", re.IGNORECASE)
+
+
+def fix_in_parentheses(expr: str) -> str:
+    """Replace IN (...) with in {...} — ThoughtSpot requires curly braces for set membership."""
+    result = expr
+    safety = 0
+    while safety < 20:
+        m = _IN_PAREN.search(result)
+        if not m:
+            break
+        # Skip "not in (" — ThoughtSpot doesn't support NOT IN
+        before = result[:m.start()].rstrip()
+        if before.lower().endswith("not"):
+            safety += 1
+            # Move past this match to avoid infinite loop
+            result = result[:m.end()] + result[m.end():]
+            break
+        safety += 1
+        paren_start = m.end() - 1
+        extracted = _extract_function_args(result, paren_start)
+        if not extracted:
+            break
+        args, end_pos = extracted
+        items = ", ".join(a.strip() for a in args)
+        replacement = f"in {{ {items} }}"
+        result = result[:m.start()] + replacement + result[end_pos:]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1204,7 +1320,19 @@ def ensure_else_clause(expr: str, role: str = "measure") -> str:
     Handles nested if/then inside then/else arms (the previous heuristic only
     checked the outermost case).
     """
-    default_val = "0" if role == "measure" else "''"
+    _DATE_INDICATORS = re.compile(
+        r"::Date\b|start_of_month|start_of_quarter|start_of_year|start_of_week"
+        r"|add_days|add_months|diff_days|diff_months|to_date|today\s*\("
+        r"|now\s*\(",
+        re.IGNORECASE,
+    )
+    then_branch_is_date = bool(_DATE_INDICATORS.search(expr))
+    if role == "measure":
+        default_val = "0"
+    elif then_branch_is_date:
+        default_val = "null"
+    else:
+        default_val = "''"
 
     # Strip [col refs] and 'strings' for keyword detection only
     def _keyword_positions(text: str) -> list[tuple[int, str]]:
@@ -1672,6 +1800,27 @@ def validate_pre_import(
         # Check for bare Tableau aggregate keywords
         if re.search(r"\bCOUNTD\b", expr):
             warnings.append("Unrewritten COUNTD (should be 'unique count')")
+
+        # IN with parentheses instead of curly braces
+        if re.search(r'\bin\s*\(', expr, re.IGNORECASE):
+            if not re.search(r'\bnot\s+in\s*\(', expr, re.IGNORECASE):
+                warnings.append("IN uses parentheses — ThoughtSpot requires curly braces: in {a, b, c}")
+
+        # Non-existent ThoughtSpot functions
+        if re.search(r'\badd_quarters\s*\(', expr, re.IGNORECASE):
+            warnings.append("add_quarters() does not exist — use add_months(expr, N*3)")
+        if re.search(r'\badd_years\s*\(', expr, re.IGNORECASE):
+            warnings.append("add_years() does not exist — use add_months(expr, N*12)")
+
+        # Bare date literal not wrapped in to_date()
+        bare_date = re.search(r"'(\d{4}-\d{2}-\d{2})'", expr)
+        if bare_date:
+            before = expr[:bare_date.start()]
+            if not before.rstrip().lower().endswith("to_date("):
+                warnings.append(
+                    f"Bare date literal '{bare_date.group(1)}' — "
+                    "wrap in to_date('YYYY-MM-DD', 'yyyy-MM-dd')"
+                )
 
         # Name clash with existing column
         if name.upper() in col_upper:
@@ -2161,6 +2310,9 @@ def translate_single(
 
     # 13. Mandatory else clause (for remaining if/then without else)
     expr = ensure_else_clause(expr, role)
+
+    # 13b. Fix IN (...) → in {...} (ThoughtSpot requires curly braces)
+    expr = fix_in_parentheses(expr)
 
     # 14. Clean up whitespace
     expr = re.sub(r"\s+", " ", expr).strip()

@@ -138,6 +138,13 @@ if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validat
   run_check "no inline tml gate" "tools/validate/check_no_inline_tml_gate.py --root $REPO_ROOT"
 fi
 
+# No inline Python TML assembly — CLI convert skills must use `ts tableau build-model`,
+# not hand-rolled Python heredocs for formula import. Runs when a convert skill or the
+# validator changes.
+if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_skill_cli_usage\.py)'; then
+  run_check "no inline tml assembly" "tools/validate/check_skill_cli_usage.py --root $REPO_ROOT"
+fi
+
 # Currency anchors — SOFT nudge here (prints missing + stale anchors, never blocks the
 # commit) when a shared mapping OR schema file is edited. Presence is hard-gated in CI
 # (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.

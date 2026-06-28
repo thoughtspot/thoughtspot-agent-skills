@@ -148,7 +148,41 @@ def extract_parameters(root: ET.Element) -> list[dict]:
             }
 
         params.append(param)
+    return _normalize_date_params(params)
+
+
+def _normalize_date_params(params: list[dict]) -> list[dict]:
+    """Convert Tableau date defaults to ThoughtSpot MM/DD/YYYY format.
+
+    Tableau uses #YYYY-MM-DD# or YYYY-MM-DD; ThoughtSpot DATE parameters
+    require MM/DD/YYYY.
+    """
+    for p in params:
+        if p.get("data_type") not in ("DATE", "DATE_TIME"):
+            continue
+        if p.get("default_value"):
+            p["default_value"] = _reformat_tableau_date(p["default_value"])
+        rc = p.get("range_config")
+        if rc:
+            if rc.get("min"):
+                rc["min"] = _reformat_tableau_date(rc["min"])
+            if rc.get("max"):
+                rc["max"] = _reformat_tableau_date(rc["max"])
+        lc = p.get("list_config")
+        if lc:
+            for choice in lc.get("list_choice", []):
+                if choice.get("value"):
+                    choice["value"] = _reformat_tableau_date(choice["value"])
     return params
+
+
+def _reformat_tableau_date(val: str) -> str:
+    """Strip Tableau # delimiters and convert YYYY-MM-DD → MM/DD/YYYY."""
+    val = val.strip("#").strip()
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", val)
+    if m:
+        return f"{m[2]}/{m[3]}/{m[1]}"
+    return val
 
 
 def _tableau_type_to_ts_param(datatype: str) -> str:
@@ -281,20 +315,35 @@ def parse_twb(twb_path: str | Path) -> dict:
     }
 
 
+def _strip_brackets(s: str) -> str:
+    return s.replace("[", "").replace("]", "")
+
+
 def _extract_tables(ds: ET.Element) -> list[dict]:
-    """Extract physical table definitions from a datasource."""
+    """Extract physical table definitions from a datasource.
+
+    Uses the relation ``name`` attribute as the table identity. When a TWB joins
+    the same physical table twice, Tableau assigns a distinct ``name`` (e.g.
+    ``d_partner1``) while keeping the same ``table`` path. We preserve that alias
+    so downstream model TML can reference both table instances independently.
+    """
     tables = []
     seen = set()
     for rel in ds.findall(".//relation[@type='table']"):
+        rel_name = rel.get("name", "")
         tbl = rel.get("table", "")
-        name = tbl.strip("[]").split(".")[-1] if tbl else ""
+        physical_name = _strip_brackets(tbl).split(".")[-1] if tbl else ""
+        name = rel_name or physical_name
         if not name or name in seen:
             continue
         seen.add(name)
-        tables.append({
+        entry: dict = {
             "name": name,
-            "db_table": tbl.strip("[]"),
-        })
+            "db_table": _strip_brackets(tbl),
+        }
+        if rel_name and rel_name != physical_name:
+            entry["alias_of"] = physical_name
+        tables.append(entry)
     return tables
 
 
@@ -346,8 +395,8 @@ def _extract_joins(ds: ET.Element) -> list[dict]:
             children = rel.findall("./relation[@type='table']")
             left_table = right_table = ""
             if len(children) >= 2:
-                left_table = children[0].get("table", "").strip("[]").split(".")[-1]
-                right_table = children[1].get("table", "").strip("[]").split(".")[-1]
+                left_table = children[0].get("name", "") or _strip_brackets(children[0].get("table", "")).split(".")[-1]
+                right_table = children[1].get("name", "") or _strip_brackets(children[1].get("table", "")).split(".")[-1]
             joins.append({
                 "type": join_type,
                 "left_table": left_table,
@@ -724,9 +773,13 @@ def merge_formulas_into_model(
     merged = copy.deepcopy(existing_tml)
     model = merged["model"]
 
-    existing_formulas = {f["id"]: f for f in model.get("formulas", [])}
+    if "formulas" not in model:
+        model["formulas"] = []
+    if "columns" not in model:
+        model["columns"] = []
+    existing_formulas = {f["id"]: f for f in model["formulas"]}
     existing_col_names_lower = {
-        c["name"].lower() for c in model.get("columns", [])
+        c["name"].lower() for c in model["columns"]
     }
 
     updated = 0

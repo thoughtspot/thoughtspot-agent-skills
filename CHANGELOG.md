@@ -5,6 +5,15 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-06-28
+- feat: add Migration Pace (Fast/Complete) to ts-convert-from-tableau — Fast parks failed formulas; Complete enters bounded fix cycle; Step 12.5 resume prompt for post-report fixes
+- feat: add `--max-retries` flag and enriched `formulas_dropped_on_import` dict to `build-model` command
+- feat: wire `ts tableau build-model` into SKILL.md Step 7 Phase 2 — replaces inline Python formula assembly (root cause of 1,389-tool-call migration)
+- feat: add dual-join table alias detection to model_builder — same physical table with different aliases (e.g. `d_partner` / `d_partner1`) now preserved
+- feat: add `validate_pre_import()` + `add_formula_prefix()` integration to `build-model` command (both flows)
+- chore: bump ts-cli to v0.20.0
+- chore: add `check_skill_cli_usage.py` regression validator — prevents drift back to inline Python TML assembly
+
 ## 2026-06-27
 - feat: add `ts tableau build-model` command (ts-cli 0.18.0) — deterministic TWB-to-model-TML pipeline: parses TWB XML, resolves all internal refs (Calculation_ and copy-style), translates formulas, resolves name collisions, applies formula_ prefix, fixes double aggregation, splits into phased import files by dependency level. New `model_builder.py` module with pure functions for all 8 model-level transforms
 - chore: bump ts-cli to v0.18.0

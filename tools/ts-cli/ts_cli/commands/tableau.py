@@ -638,6 +638,8 @@ def build_model_cmd(
                                             help="ThoughtSpot profile (required with --existing-guid)"),
     dry_run: bool = typer.Option(False, "--dry-run",
                                   help="Report only — don't write files or import"),
+    max_retries: int = typer.Option(10, "--max-retries",
+                                     help="Maximum formula-drop retry cycles (default 10)"),
 ) -> None:
     """Parse a Tableau workbook and build import-ready ThoughtSpot model TML.
 
@@ -722,7 +724,7 @@ def build_model_cmd(
                 raise SystemExit(1)
             existing_tml = json.loads(export_proc.stdout)[0]["tml"]
             typer.echo(
-                f"  Existing model: {len(existing_tml['model']['formulas'])} formulas",
+                f"  Existing model: {len(existing_tml['model'].get('formulas', []))} formulas",
                 err=True,
             )
 
@@ -780,6 +782,17 @@ def build_model_cmd(
             for s in skipped[:5]:
                 typer.echo(f"    - {s['name']}: {s['reason'][:80]}", err=True)
 
+        # Pre-import validation (catches issues before ThoughtSpot rejects them)
+        from ts_cli.tableau_translate import validate_pre_import
+        col_names = {c["name"] for c in ds["columns"]}
+        formula_name_set = {f["name"] for f in translated}
+        validation_issues = validate_pre_import(translated, col_names, formula_name_set)
+        if validation_issues:
+            typer.echo(f"  Validation warnings: {len(validation_issues)}", err=True)
+            for vi in validation_issues[:10]:
+                for w in vi["warnings"]:
+                    typer.echo(f"    ! {vi['name']}: {w}", err=True)
+
         # Step 3: Resolve name collisions
         cleaned_cols, cleaned_formulas, rename_map = resolve_name_collisions(
             ds["columns"], translated, parsed["parameters"],
@@ -804,13 +817,13 @@ def build_model_cmd(
             for f in cleaned_formulas:
                 f["expr"] = _CSQ_IN_REF.sub(r"[\1]", f["expr"])
 
-            existing_ids = {f["id"] for f in existing_tml["model"]["formulas"]}
+            existing_ids = {f["id"] for f in existing_tml["model"].get("formulas", [])}
             existing_cols = {
                 c.get("column_id", "").split("::")[-1]
-                for c in existing_tml["model"]["columns"]
+                for c in existing_tml["model"].get("columns", [])
                 if "::" in c.get("column_id", "")
             }
-            formula_names = {f["name"] for f in existing_tml["model"]["formulas"]}
+            formula_names = {f["name"] for f in existing_tml["model"].get("formulas", [])}
             new_formula_names = {f["name"] for f in cleaned_formulas}
             all_formula_names = formula_names | new_formula_names
             param_names = {
@@ -858,10 +871,20 @@ def build_model_cmd(
                 "formulas_added": stats["added"],
                 "formulas_skipped_existing": stats["skipped_existing"],
             }
+            if validation_issues:
+                result["validation_warnings"] = validation_issues
 
             if not dry_run and stats["added"] > 0:
-                dropped_on_import: list[str] = []
-                for _attempt in range(10):
+                expr_by_fid = {
+                    f["id"]: f.get("expr", "")
+                    for f in merged["model"]["formulas"]
+                }
+                original_by_name = {
+                    c.get("caption", c.get("name", "")): c.get("formula", "")
+                    for c in ds.get("calculated_fields", [])
+                }
+                dropped_on_import: list[dict] = []
+                for _attempt in range(max_retries):
                     import_tml = {
                         k: v for k, v in merged.items() if not k.startswith("_")
                     }
@@ -882,6 +905,13 @@ def build_model_cmd(
                     status = import_result[0]["response"]["status"]["status_code"]
                     if status == "OK":
                         result["import_status"] = status
+                        obj_list = import_result[0].get("response", {}).get("object", [])
+                        if obj_list:
+                            returned_guid = obj_list[0].get("header", {}).get("id_guid")
+                            if returned_guid:
+                                result["updated_model_guid"] = returned_guid
+                        if "updated_model_guid" not in result:
+                            result["updated_model_guid"] = existing_guid
                         typer.echo(f"  Import: OK", err=True)
                         break
                     msg = import_result[0]["response"]["status"].get("error_message", "")
@@ -895,8 +925,13 @@ def build_model_cmd(
                     bad_name = err_match.group(1).strip()
                     err_detail = msg.split("Error:", 1)[-1].strip()[:120] if "Error:" in msg else ""
                     typer.echo(f"  Import error on '{bad_name}': {err_detail} — dropping", err=True)
-                    dropped_on_import.append(bad_name)
                     fid = f"formula_{bad_name}"
+                    dropped_on_import.append({
+                        "name": bad_name,
+                        "expr": expr_by_fid.get(fid, ""),
+                        "error": err_detail,
+                        "original_tableau": original_by_name.get(bad_name, ""),
+                    })
                     merged["model"]["formulas"] = [
                         f for f in merged["model"]["formulas"]
                         if f.get("id") != fid
@@ -924,6 +959,19 @@ def build_model_cmd(
             all_results.append(result)
         else:
             # --- Generate-files flow (original) ---
+            from ts_cli.model_builder import (
+                add_formula_prefix,
+                fix_double_aggregation,
+            )
+            gen_formula_names = {f["name"] for f in cleaned_formulas}
+            gen_param_names = {p["name"] for p in parsed["parameters"]}
+            gen_formula_exprs = {f["name"]: f["expr"] for f in cleaned_formulas}
+            for f in cleaned_formulas:
+                f["expr"] = add_formula_prefix(
+                    f["expr"], gen_formula_names, gen_param_names,
+                )
+                f["expr"] = fix_double_aggregation(f["expr"], gen_formula_exprs)
+
             model_tml = build_model_tml(
                 model_name=name,
                 connection_name=connection_name,
@@ -958,6 +1006,8 @@ def build_model_cmd(
                 "name_renames": rename_map,
                 "phases": len(phases),
             }
+            if validation_issues:
+                result["validation_warnings"] = validation_issues
 
             if not dry_run:
                 for i, phase in enumerate(phases):

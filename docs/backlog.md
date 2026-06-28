@@ -2479,3 +2479,97 @@ Consumer counting for individual sets: `ts metadata dependents <set-guid> --type
 - D13 (unused sets) requires one `ts metadata dependents` call per set — could be batched or rate-limited for models with many sets
 
 **Target:** No date set — implement when ts-audit is next actively worked on.
+
+---
+
+## BL-060 — Tableau: detect nested-if-in-comparison formula pattern
+
+**Source:** Ads Commercial Dashboard migration (2026-06-27) — 1 formula hit this pattern
+**Affects:** `tools/ts-cli/ts_cli/tableau_translate.py` (`validate_pre_import()`)
+**Status:** Open — deferred from the build-model pipeline work (PR on `feat/build-model-pipeline`)
+
+### Problem
+
+A formula like `sum(X) < if(Y) then Z else W` is valid Tableau syntax but fails
+ThoughtSpot import because the comparison operator binds before the `if` keyword.
+ThoughtSpot requires parentheses: `sum(X) < (if(Y) then Z else W)`. This pattern
+was hit once in the Ads migration and manually fixed during the import retry loop.
+
+### Why deferred
+
+Detecting this reliably requires understanding operator precedence in formula
+expressions — a regex can't distinguish `< if(` in a comparison context from `< if(`
+inside a string literal or a different syntactic position. Low frequency (1 occurrence
+across 2 full migrations) doesn't justify the AST-level parsing needed.
+
+### Proposed approach
+
+Add a check to `validate_pre_import()` that looks for `<comparison_op> if(` patterns
+outside of string literals. False positives are acceptable as warnings (the user
+confirms or ignores). Alternatively, wrap all `if/then/else` blocks on the right side
+of comparisons in parentheses during the translation step.
+
+**Target:** No date set — revisit if the pattern recurs in future migrations.
+
+---
+
+## BL-061 — Tableau: integrate `tml_lint()` into `build-model` command
+
+**Source:** Build-model pipeline design (2026-06-27)
+**Affects:** `tools/ts-cli/ts_cli/commands/tableau.py` (`build_model` command)
+**Status:** Open — deferred as belt-and-suspenders with `validate_pre_import()`
+
+### Problem
+
+`tml_lint()` (in `tml_lint.py`) validates structural TML invariants (I1 duplicate
+`aggregation:` on formulas, I2 missing `formula_id`, I4 `COUNTD` on physical columns,
+I5 `aggregation:` inside `formulas[]`, I8 duplicate `column_id`). It runs via
+`ts tml lint` at the CLI level but is never called from within the `build-model`
+command pipeline. This means structural issues are only caught at ThoughtSpot import
+time, not during the build step.
+
+### Why deferred
+
+`validate_pre_import()` is now wired into `build-model` (as of v0.19.0) and catches
+the most common formula-level issues. The structural invariants `tml_lint()` checks
+are less likely to be violated by the builder (which generates TML programmatically)
+than by hand-edited TML. Adding it is incremental safety, not a gap fix.
+
+### Proposed approach
+
+After `build_model_tml()` generates the model dict, serialize to YAML and run
+`tml_lint()` on the result. Surface warnings to stderr + include in the JSON output.
+Do not block the import — let the retry loop handle actual failures.
+
+**Target:** No date set — add when build-model is next touched.
+
+---
+
+## BL-062 — Tableau: detect misplaced-else-in-aggregate formula pattern
+
+**Source:** Ads Commercial Dashboard migration (2026-06-27) — 1 formula hit this pattern
+**Affects:** `tools/ts-cli/ts_cli/tableau_translate.py` (`validate_pre_import()`)
+**Status:** Open — deferred from the build-model pipeline work
+
+### Problem
+
+A formula like `sum(if X then Y else) + sum(if A then B else)` uses Tableau's
+implicit-else syntax (bare `else` with no value = NULL). ThoughtSpot requires an
+explicit value after `else`: `sum(if X then Y else 0) + ...`. The translator
+sometimes produces the bare `else)` pattern when the source formula has no else
+clause and the translation inserts a synthetic one without a value.
+
+### Why deferred
+
+Detecting bare `else)` reliably (vs. `else <expr>)`) requires context-aware parsing
+to distinguish the aggregate-boundary `)` from a sub-expression `)`. Low frequency
+(1 occurrence across 2 full migrations). The import retry loop catches it and the
+fix is mechanical (`else)` → `else 0)`).
+
+### Proposed approach
+
+Add a regex check to `validate_pre_import()` for `else\s*\)` — warn that the else
+clause may be missing a default value. False positives possible if a legitimate
+expression ends with `)` after `else`, but rare enough to be acceptable as a warning.
+
+**Target:** No date set — revisit if the pattern recurs in future migrations.

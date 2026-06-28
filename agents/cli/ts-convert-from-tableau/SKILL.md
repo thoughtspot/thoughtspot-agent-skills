@@ -127,7 +127,7 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
 ### Steps (Migrate mode)
 
   1.  Authenticate to ThoughtSpot .......................... auto
-  1.5 Choose migration scope (1–5; see below) .......... you choose
+  1.5 Choose migration scope (1–5) and pace (F/C) ...... you choose
   2.  Locate and extract the TWB file ...................... you provide path
   3.  Parse TWB XML — extract tables, columns, joins,
       calculated fields, blend relationships,
@@ -156,8 +156,9 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
  11.  Import liveboard ..................................... you confirm   [scope 1,3]
  11.5 Formula coverage answers (every formula testable) ... auto         [scope 1,2,4]
  12.  Migration report (outcomes + links + formula map) ... auto         [scope 1,2,3,4,5]
+ 12.5 Resume prompt — fix parked formulas? .............. you choose    [scope 1,2,4; if parked]
 
-Confirmation required: Steps 1.5, 3.6, 4.5, 5.5, 7, 7.5, 8, 9d, 11
+Confirmation required: Steps 1.5, 3.6, 4.5, 5.5, 7, 7.5, 8, 9d, 11, 12.5
 Auto-executed: Steps 1, 3, 5, 6, 9, 10, 11.5, 12
 Scope 2 (Tables + Models) skips 8–11; runs 11.5 then 12.
 Scope 3 (LB only) skips 4–7.5; runs 1.5a model picker then 8–12.
@@ -577,7 +578,11 @@ What should I migrate?
                    build model(s) referencing existing tables
   5  Tables only — generate and import table TMLs; skip models and liveboards
 
-Enter 1 / 2 / 3 / 4 / 5:
+Migration pace?  (scopes 1, 2, 4 only — omit for scopes 3 and 5)
+  F  Fast — import formulas, park any failures, move on  (default)
+  C  Complete — after import, attempt to fix each failure (slower)
+
+Enter scope (1-5) and pace (F/C):
 ```
 
 Apply the scope:
@@ -589,6 +594,10 @@ Apply the scope:
 | **3 Liveboards only** | 1.5a model picker, 2–3 (parse, dashboards), 8–12 | **4–7.5** (table/model creation) |
 | **4 Models only** | 2–3 (parse), 4 (E/G to find existing tables), 5b (model TML + formulas), 5.5, 6, 7, 7.5, 11.5, 12 | **4.5** (connection — tables already bound), **5a** (table TMLs), **8–11** (liveboards) |
 | **5 Tables only** | 2–3 (parse), 4, 4.5, 5a (table TMLs), 6, 12 | **5b** (model), **5.5–7.5**, **8–11** |
+
+Save the pace as `{migration_pace}` (`F` or `C`). Default `F` if the user enters only a
+scope number or skips the pace question. For scopes 3 and 5, `{migration_pace}` is always
+`F` (no formula imports, so the pace has no effect).
 
 For scope **2**, after Step 7.5 jump straight to Step 11.5 then Step 12.
 
@@ -1159,7 +1168,7 @@ adds physical table resolution and join definitions, not the formulas.
 ### Prerequisites
 
 - Tableau profile configured via `/ts-profile-tableau` (optional — skill degrades gracefully)
-- `ts` CLI v0.16.0+ (includes `ts tableau` commands including `download` and `translate-formulas`)
+- `ts` CLI v0.20.0+ (includes `ts tableau build-model` with `--max-retries` and enriched error reporting)
 
 ---
 
@@ -2901,47 +2910,139 @@ Base model imported: {model_name}
 If the user chooses **search**, suggest 3 natural-language test questions grounded in the
 model's physical columns (no formulas yet). After testing, re-prompt yes/no.
 
-**Phase 2 — Add formulas:**
+**Phase 2 — Add formulas via `build-model`:**
 
-After the user confirms, add all translated formulas to the model TML:
-
-1. Pin the model's GUID at the TML root (`guid:` field)
-2. Add `formulas[]` entries from the `ts tableau translate-formulas` output
-3. Add paired `columns[]` entries for each formula (with `formula_id:`, I1)
-4. Lint with `ts tml lint` (I1/I2/I4/I5/I8 checks)
-5. Import with `--no-create-new` (update in place):
+After the user confirms the base model, add all translated formulas in one CLI call:
 
 ```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{model_file}').read_text()]))" \
-  | ts tml import --policy ALL_OR_NONE --no-create-new --profile {profile_name}
+ts tableau build-model \
+  --twb-file {workdir}/{workbook}.twb \
+  --existing-guid {model_guid} \
+  --profile {profile_name} \
+  --datasource "{datasource_name}" \
+  --output-dir {workdir}/output
 ```
 
-If the Phase 2 import fails, use **targeted retry** — only re-process the failing
-formulas, not the full batch:
+This command runs the full formula pipeline internally:
+1. Re-parses the TWB to extract calculated fields and parameters
+2. Translates all formulas through the 14-transform pipeline
+3. Runs `validate_pre_import()` — reports warnings for IN-with-parens, non-existent
+   functions (`add_quarters`/`add_years`), bare date literals, unbalanced parens/brackets,
+   missing else clauses, and other structural issues
+4. Applies `formula_` prefix for cross-references (resolves the I9 invariant)
+5. Detects and fixes double aggregation (`sum([formula_X])` where X is already aggregated)
+6. Filters unresolvable references (sqlproxy, bare column refs, unconverted concat)
+7. Merges new formulas into the existing model (skips formulas already present)
+8. Imports with up to 10 retry cycles, dropping failing formulas on each retry
 
-1. Parse the error response to identify the failing formula(s) by name
-2. Remove **only** the failing formulas from `formulas[]` AND their paired `columns[]` entries
-3. Log each removal: `"Skipped: {name} — {error_message}"`
-4. Re-lint the reduced TML and re-import (up to 5 retry cycles)
-5. On each retry, keep a **context cache**: the column registry, formula dependency map,
-   and table/join structure from Phase 1 are unchanged — do not re-derive them. Only
-   recompute the `formulas[]` and `columns[]` sections.
-6. After all retries, report:
-   - Formulas successfully imported (count + names)
-   - Formulas skipped with reasons (count + per-formula error)
-   - Suggestion: review skipped formulas for manual fix
+Parse the JSON output to report results to the user:
 
-**Context cache:** between retry cycles, preserve:
-- The model's GUID, `obj_id`, table list, column registry, and join structure (unchanged)
-- The translated formula set (only remove failing entries, don't re-translate)
-- The parameter map and cross-reference DAG
+```
+{
+  "formulas_translated": N,
+  "formulas_skipped": N,
+  "formulas_filtered": N,
+  "formulas_added": N,
+  "formulas_skipped_existing": N,
+  "formulas_dropped_on_import": [
+    {
+      "name": "Formula Name",
+      "expr": "attempted ThoughtSpot expression",
+      "error": "ThoughtSpot error message",
+      "original_tableau": "raw Tableau expression"
+    }
+  ],
+  "validation_warnings": [...],
+  "updated_model_guid": "guid",
+  "import_status": "OK"
+}
+```
 
-Do **not** re-run `ts tableau translate-formulas` on retry — the translation is
-deterministic and won't produce a different result. Only remove the failing formula
-and re-import the reduced set.
+**If `formulas_dropped_on_import` is empty (or absent):** Report success. Proceed to
+Step 7.5 regardless of migration pace.
 
-This ensures the model ALWAYS exists after Phase 1, and formula errors are isolated
-rather than blocking the entire import.
+**If `formulas_dropped_on_import` is non-empty — behaviour depends on `{migration_pace}`:**
+
+### Fast mode (`{migration_pace}` = `F`)
+
+Report the parked count and a summary table, then move on:
+
+```
+Phase 2 complete:
+  ✅ {formulas_added} formulas imported successfully
+  ⏸ {len(dropped)} formulas parked (will appear in final report)
+
+Parked formulas:
+  | # | Name | Error (summary) |
+  |---|------|-----------------|
+  | 1 | {name} | {error truncated to ~60 chars} |
+
+These are recorded for the migration report. You can attempt fixes
+after the migration is complete (Step 12.5).
+
+Proceeding to model confirmation...
+```
+
+Save `{parked_formulas}` (the full list of dicts from `formulas_dropped_on_import`)
+for use in Steps 12 and 12.5.
+
+### Complete mode (`{migration_pace}` = `C`)
+
+Enter the **formula fix cycle** — a bounded loop that attempts to fix and re-import
+each dropped formula:
+
+**Caps:**
+- Max formulas to attempt: **15** (if more are dropped, park the rest)
+- Max attempts per formula: **3**
+
+**Process (in dependency order — level-0 formulas first):**
+
+For each dropped formula (up to 15):
+
+1. **Analyze the error** — read the `error` and `expr` fields from the dropped dict
+2. **Determine if fixable:**
+   - Skip if the error references another parked formula (dependency chain — fix the
+     dependency first, then retry this one)
+   - Skip if the error indicates a missing table/column in the model (structural issue,
+     not an expression fix)
+3. **Attempt a fix:**
+   - Rewrite the expression based on the error (e.g. parenthesise, fix function name,
+     add `TABLE::` qualifier, wrap date literal in `to_date()`)
+   - Export the current model: `ts tml export {model_guid} --profile {profile_name} --parse`
+   - Add the fixed formula as a new `formulas[]` entry with matching `columns[]` entry
+   - Import: `ts tml import --profile {profile_name} --policy ALL_OR_NONE` (with `guid` pinned)
+   - On success: formula is now ✅ Migrated; remove from parked list
+   - On failure: record the new error; decrement attempt counter; try a different fix
+   - After 3 failures: mark as ⏸ Parked (exhausted)
+
+4. **After fixing level-0 formulas**, retry level-1+ formulas whose dependencies are
+   now imported (they may succeed without expression changes)
+
+Report after the fix cycle:
+
+```
+Fix cycle complete:
+  ✅ {fixed_count}/{total_attempted} formulas fixed and imported
+  ⏸ {remaining_parked} formulas remain parked
+
+Fixed:
+  - {name1}: {what was changed}
+
+Still parked:
+  - {name2}: {error after last attempt}
+```
+
+Save `{parked_formulas}` (the remaining parked list) for Steps 12 and 12.5.
+
+---
+
+Report validation warnings regardless of pace:
+- If `validation_warnings` is non-empty: surface warnings — these indicate formulas
+  that may have syntax issues but were still attempted
+
+Do **not** manually assemble TML, write Python scripts to add formulas, or call
+`ts tml import` directly for Phase 2. The `build-model --existing-guid` command
+handles translation, prefix, validation, merge, and retry internally.
 
 > **Updating something that already exists.** If Step 4.5 found an existing object, or a
 > first import already created one and you need to re-import (e.g. to set Spotter, fix a
@@ -3837,8 +3938,10 @@ dynamic vs anchored YoY, orphan worksheets added/left off, separate vs tabbed li
 | Profit forecast | `MODEL_QUANTILE(…)` | — | ⊘ Not migrated — no ThoughtSpot equivalent (placeholder tile built) |
 
 Status values: **✅ Migrated** (model or answer-level — say which), **◑ Partial** (built but
-with a caveat — approximation, N/A on current data, placeholder), **⊘ Not migrated** (omitted;
-give the reason). Every calculated field from Step 3 must appear in exactly one row.
+with a caveat — approximation, N/A on current data, placeholder), **⏸ Parked** (import
+attempted, failed, deferred — show error and potential fix), **⊘ Not migrated** (omitted
+before import; give the reason). Every calculated field from Step 3 must appear in exactly
+one row.
 
 **Sets** — every Tableau set, how it was handled, and what to verify (per the MANDATORY set-review
 rule). Set conversions are semantic reinterpretations — list each so the user can confirm intent:
@@ -3850,6 +3953,17 @@ rule). Set conversions are semantic reinterpretations — list each so the user 
 | 01. Month Set | set control | filter on `Order Month`; IF-[Set] calcs collapsed to measure+filter | confirm filter ≈ control |
 | State_TopN | Top-N | ✓ query set (rank desc by SUM, N=topN param) | verify ranking + N |
 | State_BottomN | Bottom-N | ✓ query set (rank asc by SUM, N=topN param) | verify ranking + N |
+
+**⏸ Parked formulas** — formulas that `build-model` attempted to import but failed after
+retry cycles. Only present when `{parked_formulas}` is non-empty. Include the attempted
+expression and error so the user (or Step 12.5) can diagnose:
+
+| # | Name | Attempted Expression | Error | Original Tableau | Potential Fix |
+|---|------|---------------------|-------|------------------|--------------|
+| 1 | {name} | `{expr}` | {error} | `{original_tableau}` | {LLM assessment of what might fix it} |
+
+If the Complete-mode fix cycle was run, note which formulas were fixed (moved to ✅) and
+which exhausted their 3 attempts. Include the last error for exhausted formulas.
 
 **Excluded formulas** — every ⊘ row from the formula mapping table, grouped by root cause.
 Include the root cause summary first, then per-formula detail under each heading:
@@ -3902,10 +4016,53 @@ in-product **Migration Summary** tab (Step 10g) and any `MIGRATION_LIMITATIONS.m
 
 ---
 
+## Step 12.5 — Resume Prompt (Fix Parked Formulas)
+
+> **Scope gate:** runs for scopes **1, 2, 4** (wherever formulas are imported).
+> **Condition:** only runs when `{parked_formulas}` is non-empty.
+
+After delivering the Step 12 report, prompt:
+
+```
+{N} formula(s) are parked. Would you like me to attempt fixes now?
+
+  Y  Yes — analyze each error and attempt a rewrite  (up to 15 formulas, 3 attempts each)
+  N  No  — leave parked; fix manually in ThoughtSpot
+  S  Select — pick which ones to attempt
+
+Enter Y / N / S:
+```
+
+**If N:** End the migration. The report stands as-is.
+
+**If S:** Show the parked formulas with numbers. The user picks which to attempt (e.g.
+`1,3,5` or `1-5`). Apply the same caps (max 15, max 3 attempts each).
+
+**If Y or S:** Enter the same fix cycle as the Complete-mode cycle in Step 7 Phase 2:
+
+1. Export the current model: `ts tml export {model_guid} --profile {profile_name} --parse`
+2. For each selected formula (in dependency order):
+   a. Analyze the `error` and `expr` from the parked record
+   b. Skip if the error references another parked formula (fix dependencies first)
+   c. Rewrite the expression based on the error
+   d. Add as a new `formulas[]` entry with matching `columns[]` entry
+   e. Import: `ts tml import --profile {profile_name} --policy ALL_OR_NONE` (GUID pinned)
+   f. On success: move to ✅ Migrated
+   g. On failure after 3 attempts: remains ⏸ Parked
+3. After fixing level-0 formulas, retry level-1+ whose dependencies were just fixed
+
+After the cycle, **regenerate the Step 12 report** with updated formula statuses. Parked
+formulas that were fixed move to ✅ in the formula mapping table; the ⏸ Parked section
+shrinks or disappears.
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.19.0 | 2026-06-28 | **Migration Pace — Fast vs Complete.** (1) New Step 1.5 pace choice: **F**ast (default) parks failed formulas and moves on; **C**omplete enters a bounded fix cycle (max 15 formulas, 3 attempts each) after `build-model`. (2) Step 7 Phase 2 now branches on pace — Fast reports parked count and proceeds; Complete enters export→fix→import loop for each dropped formula. (3) New ⏸ Parked formula status in Step 12 migration report — shows attempted expression, error, original Tableau, and potential fix. (4) New Step 12.5 resume prompt — after the report, offers Y/N/S to attempt fixes on parked formulas (same fix cycle, same caps). (5) `build-model` `--max-retries` flag (default 10, was hardcoded). (6) `formulas_dropped_on_import` enriched from `list[str]` to `list[dict]` with `name`, `expr`, `error`, `original_tableau` fields. Prerequisite: ts-cli v0.20.0. |
+| 1.18.0 | 2026-06-28 | **Wire `ts tableau build-model` into SKILL.md + close validation gaps + dual-join alias detection.** (1) Step 7 Phase 2 rewritten: replaces 40 lines of inline Python formula assembly with a single `ts tableau build-model --existing-guid` call (root cause of 1,389 tool calls in the Ads migration). (2) `validate_pre_import()` now called from `build-model` command (both flows) — catches IN-with-parens, non-existent functions (`add_quarters`/`add_years`), and bare date literals before import. (3) `add_formula_prefix()` + `fix_double_aggregation()` now run in the generate-files flow (previously only in the merge flow). (4) Date parameter normalization: Tableau `#YYYY-MM-DD#` → ThoughtSpot `MM/DD/YYYY`. (5) `--existing-guid` flow returns `updated_model_guid` in JSON output. (6) Dual-join table alias detection: when the same physical table appears twice with different `name` attributes (e.g. `d_partner` / `d_partner1`), both are preserved with `alias_of` tracking. (7) New `check_skill_cli_usage.py` regression validator prevents drift back to inline Python TML assembly. Prerequisite bumped to ts-cli v0.19.0. |
 | 1.17.0 | 2026-06-27 | **Add `ts tableau build-model` CLI command and migration scopes 4/5.** (1) New `model_builder.py` module (ts-cli 0.18.0): deterministic TWB→model-TML pipeline with pure functions for all 8 model-level transforms — `formula_` prefix for cross-references, double-aggregation detection/fix, name collision resolution (formula/param→rename, column/formula→drop column), parameter extraction/ordering, phased import splitting by dependency level. Resolves BOTH `[Calculation_NNN]` and copy-style `[Field (copy)_NNN]` internal refs (root cause of prior translation failures). (2) `build_formula_levels` computes correct dependency DAG from raw calcs before reference resolution — fixes all-at-level-0 bug. CPG Merch DS1: 6 dependency levels, 7 import phases. (3) New scopes: **4 Models only** (tables exist, build model+formulas), **5 Tables only** (generate/import table TMLs only). Per-step scope annotations on all steps. 28 unit tests. |
 | 1.16.0 | 2026-06-27 | **Close the audit-vs-migration gap: CLI formula translation pipeline, two-phase import, join confirmation, cross-reference depth reporting.** (1) New Step 5b CLI reference: `ts tableau translate-formulas` (ts-cli 0.16.0) — deterministic 14-step Tableau→ThoughtSpot formula translation with dependency DAG, cross-reference resolution via inlining, column scoping, parameter conflict detection. Replaces ad-hoc LLM translation. (2) Step 7 two-phase model import: Phase 1 imports base model (tables, columns, joins, params — no formulas) for guaranteed success; Phase 2 adds formulas with GUID-pinned update and iterative error recovery (up to 5 cycles). One bad formula no longer blocks the entire import. (3) Step 3.6 join confirmation: detected joins presented for user confirmation; missing joins (common with published datasources/sqlproxy) suggested from shared column names with explicit D/S/P prompt — never silently added. (4) Step A3/A4 cross-reference depth reporting: Level 0/1/2+/circular counts plus "effective migration coverage" that distinguishes syntax-level translatability from what actually migrates after dependency resolution. Coverage matrix entries #113–#116. |
 | 1.15.0 | 2026-06-17 | Step 4.5 connection step now offers **E — use existing / C — create a new connection** (Snowflake-source only, key-pair auth via `ts connections create`). Adds the "Database does not exist in connection → role can't see it → create one" guidance and a credential-handling guardrail (private key by file path only; never pasted into chat). Non-Snowflake sources / password / OAuth remain out of scope → create in the UI and use the E path. Mirrors the connection-step change in ts-convert-from-snowflake-sv. |
