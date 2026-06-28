@@ -186,6 +186,16 @@ Step 12.
 
 ---
 
+## CLI-first rule — no inline Python for TML operations
+
+**Every** ThoughtSpot API call, TML generation, and model import in this skill **must** go
+through a `ts` CLI command. Do not write inline Python scripts to export/merge/import TML,
+iterate over formula failures, or assemble model JSON. If a CLI command fails or produces
+wrong results, **fix the CLI** (`tools/ts-cli/`) and re-run — do not work around it with
+manual scripting.
+
+---
+
 ## Step 0 — Overview
 
 On skill invocation, display this plan before doing any work:
