@@ -102,7 +102,7 @@ def to_snake(name):
 ## Snowflake Field Entry Templates
 
 Fields are **nested under their owning table** in the output YAML, not at the top level.
-Do not include `sample_values` or `default_aggregation` — these are not supported.
+Do not include `default_aggregation` — it is not supported. `sample_values` IS valid and Snowflake recommends it for Cortex Analyst accuracy.
 
 **Table entry (with primary_key — required when table is the right side of a relationship):**
 ```yaml

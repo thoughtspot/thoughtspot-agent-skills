@@ -651,7 +651,7 @@ metrics:
   - table: dm_date_dim
     dimension: date
     sort_direction: ascending
-    nulls_position: last
+    null_order: last
 ```
 
 **Important:** The `non_additive_dimensions` should reference the **joined date
@@ -659,7 +659,7 @@ dimension table** (e.g. `dm_date_dim.date`), not a local FK column on the
 fact table. Use a **single shared date dimension** when multiple fact tables
 (e.g. orders and inventory) join to the same date table — this allows Cortex Analyst
 to answer cross-domain questions like "sales and inventory balance last quarter"
-through one shared time dimension. Include `nulls_position: last` to match the
+through one shared time dimension. Include `null_order: last` to match the
 ThoughtSpot `last_value` behaviour.
 
 **Naming:** The metric name must not collide (case-insensitive) with the physical
@@ -998,7 +998,7 @@ tables:
     - table: dm_date_dim
       dimension: date
       sort_direction: ascending
-      nulls_position: last
+      null_order: last
 
 relationships:
 - name: dm_order_detail_to_dm_order
@@ -1083,7 +1083,7 @@ relationships:
    reference the physical column directly — no `facts` section needed. The non-additive
    dimension should reference the **joined date dimension table** (e.g.
    `dm_date_dim.date`), not a local FK column on the fact table.
-   Include `nulls_position: last` to match ThoughtSpot's `last_value` behaviour.
+   Include `null_order: last` to match ThoughtSpot's `last_value` behaviour.
 
 7. **Metric naming must avoid cycles.** Snowflake's cycle detection is
    case-insensitive. If the physical column is `FILLED_INVENTORY`, don't name the

@@ -206,7 +206,7 @@ Run all checks before calling `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
 | Case-sensitive identifiers | Lowercase schemas/tables detected via SHOW and wrapped in `'"value"'` in `base_table`; lowercase columns double-quoted inline in `expr` |
 | Reserved words quoted | Column names that are SQL reserved words are double-quoted in `expr` |
 | Join key identifiers | `primary_key.columns` and `relationship_columns` use bare identifiers — wrapper views (Step 5) ensure all are uppercase before this point |
-| Unsupported fields absent | No `relationship_type`, `join_type`, `default_aggregation`, `sample_values` |
+| Unsupported fields absent | No `relationship_type`, `join_type`, `default_aggregation` |
 | Valid `data_type` | Dimensions/time_dimensions only: one of `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700. |
 | No untranslatable formulas | Columns with untranslatable ThoughtSpot formulas are **omitted** entirely |
 

@@ -158,8 +158,8 @@ credential config and the registered table/column hierarchy. Useful for:
 ts connections get {connection_id} --profile {profile}
 ```
 
-> **Note:** `ts connections get` uses the v1 API. It requires
-> `CAN_CREATE_OR_EDIT_CONNECTIONS` privilege and may return a 500 on some instances.
+> **Note:** `ts connections get` uses the v2 API (`POST /api/rest/2.0/connection/search`,
+> migrated 2026-06-16). It requires `CAN_CREATE_OR_EDIT_CONNECTIONS` privilege.
 > If it fails, fall back to checking the connection in the ThoughtSpot UI.
 
 ---

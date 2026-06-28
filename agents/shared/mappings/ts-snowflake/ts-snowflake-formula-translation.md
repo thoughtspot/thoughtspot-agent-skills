@@ -848,7 +848,7 @@ TABLE.METRIC_NAME NON ADDITIVE BY (DATE_DIM_TABLE.DATE_COL ASC NULLS LAST) AS SU
    date table — this enables cross-domain queries (e.g. "sales and inventory balance
    last quarter") through one shared time dimension.
 
-3. **Include `nulls_position: last`** to match ThoughtSpot `last_value` behaviour.
+3. **Include `null_order: last`** to match ThoughtSpot `last_value` behaviour.
 
 4. **Metric name must not collide (case-insensitive) with the physical column name.**
    Snowflake cycle detection is case-insensitive. If the column is `FILLED_INVENTORY`,
@@ -863,8 +863,8 @@ The `sort_direction` (or DDL `asc`/`desc`) determines which extreme is selected:
 
 | ThoughtSpot | DDL inline form (from `GET_DDL`) | YAML / structured form | Selects |
 |---|---|---|---|
-| `last_value(sum(m), query_groups(), {date_col})` | `METRIC non additive by (DATE_DIM.DATE asc nulls last) as SUM(fact.m)` | `non_additive_dimensions: [{... sort_direction: ascending, nulls_position: last}]` | Most-recent (max date) — closing snapshot |
-| `first_value(sum(m), query_groups(), {date_col})` | `METRIC non additive by (DATE_DIM.DATE desc nulls last) as SUM(fact.m)` | `non_additive_dimensions: [{... sort_direction: descending, nulls_position: last}]` | Earliest (min date) — opening snapshot |
+| `last_value(sum(m), query_groups(), {date_col})` | `METRIC non additive by (DATE_DIM.DATE asc nulls last) as SUM(fact.m)` | `non_additive_dimensions: [{... sort_direction: ascending, null_order: last}]` | Most-recent (max date) — closing snapshot |
+| `first_value(sum(m), query_groups(), {date_col})` | `METRIC non additive by (DATE_DIM.DATE desc nulls last) as SUM(fact.m)` | `non_additive_dimensions: [{... sort_direction: descending, null_order: last}]` | Earliest (min date) — opening snapshot |
 
 `asc` → "take the LAST value when sorted ASC" → max date → `last_value`
 `desc` → "take the LAST value when sorted DESC" → min date → `first_value`
@@ -915,7 +915,7 @@ tables:
     - table: dm_date_dim               # joined date dimension table — not the fact table
       dimension: date_value            # time_dimension field name on that table
       sort_direction: ascending
-      nulls_position: last             # matches ThoughtSpot last_value behaviour
+      null_order: last             # matches ThoughtSpot last_value behaviour
 ```
 
 **Reverse translation (semantic view → ThoughtSpot):**

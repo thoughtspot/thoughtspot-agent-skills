@@ -1047,7 +1047,7 @@ tables:
     - table: dm_date_dim_inventory     # the DATE DIMENSION table — not the fact table
       dimension: balance_date          # time_dimension name on that table
       sort_direction: ascending        # ascending = last_value (most recent); descending = first_value (earliest)
-      nulls_position: last
+      null_order: last
 ```
 
 **Direction matrix (TS → SV):**

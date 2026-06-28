@@ -594,7 +594,7 @@ measures:
 | Cross-measure refs | Via SQL expressions | `MEASURE(measure_name)` + `ANY_VALUE(dim_name)` |
 | Global filter | Not a concept | `filter:` block |
 | CA extension | `with extension (CA='...')` | Not applicable |
-| Preview required | No | Yes — Preview channel on SQL warehouse |
+| Preview required | No | No — GA since 2026-04-02 |
 
 ---
 
