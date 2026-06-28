@@ -20,6 +20,17 @@ ts tml export {guid} --profile {name} --fqn --associated
 requests.post(f"{base_url}/api/rest/2.0/metadata/tml/export", headers=..., json=...)
 ```
 
+**The same rule applies at runtime.** When executing a skill, use the CLI commands the
+SKILL.md specifies. Do not rewrite a `ts tableau build-model` call as an inline Python
+script that manually calls `ts tml export` → merges JSON → calls `ts tml import` in a
+loop. The higher-level commands (`build-model`, `translate-formulas`, `tables create`)
+encode edge-case fixes (parameter conflict renaming, cross-reference resolution,
+iterative retry, double-aggregation detection) that manual scripts will miss.
+
+**If a CLI command fails:** diagnose and fix the CLI code in `tools/ts-cli/`, then re-run.
+Do not work around it with manual scripting — that hides the bug and ensures the next
+migration hits the same issue.
+
 **Exceptions — direct API calls are legitimate in:**
 - `references/open-items.md` — self-contained test scripts to verify unverified API behaviour
   before a CLI command is written. These are temporary scaffolding, not skill logic.
