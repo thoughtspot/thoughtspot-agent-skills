@@ -11,7 +11,15 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - feat: wire `ts tableau build-model` into SKILL.md Step 7 Phase 2 — replaces inline Python formula assembly (root cause of 1,389-tool-call migration)
 - feat: add dual-join table alias detection to model_builder — same physical table with different aliases (e.g. `d_partner` / `d_partner1`) now preserved
 - feat: add `validate_pre_import()` + `add_formula_prefix()` integration to `build-model` command (both flows)
-- chore: bump ts-cli to v0.20.0
+- feat: add `fix_bare_refs()` post-pass — table-qualifies bare `[Column]` refs and prefixes formula cross-refs in `build-model --existing-guid` flow
+- feat: add single-table force-remap for sqlproxy columns — 100% remap when model has one table
+- feat: add `max(bool)=false` pattern detection to `validate_pre_import()`
+- fix: strip Tableau double-quote wrapping from parameter defaults and member values
+- fix: orphaned END/CASE keyword strip after failed `convert_if_then`/`convert_case_when` parsing
+- fix: extend `_DATE_INDICATORS` regex to catch date column names (prevents `else ''` on date expressions)
+- fix: `--max-retries` default 10→25 for complex workbooks with cascading formula dependencies
+- docs: update SKILL.md — auth via `ts profiles list`, model TML schema read, GUID capture, duplicate detection, datasource name matching
+- chore: bump ts-cli to v0.21.0
 - chore: add `check_skill_cli_usage.py` regression validator — prevents drift back to inline Python TML assembly
 
 ## 2026-06-27

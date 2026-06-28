@@ -115,8 +115,8 @@ def extract_parameters(root: ET.Element) -> list[dict]:
         if name.startswith("["):
             name = name.strip("[]")
         datatype = col.get("datatype", "string")
-        value = col.get("value", "")
-        alias = col.get("alias", "")
+        value = col.get("value", "").strip('"')
+        alias = col.get("alias", "").strip('"')
 
         ts_type = _tableau_type_to_ts_param(datatype)
         param: dict[str, Any] = {
@@ -129,8 +129,8 @@ def extract_parameters(root: ET.Element) -> list[dict]:
         if members:
             choices = []
             for m in members:
-                val = m.get("value", "")
-                display = m.get("alias", val)
+                val = m.get("value", "").strip('"')
+                display = m.get("alias", val).strip('"')
                 if val.startswith("&quot;"):
                     val = val.replace("&quot;", "")
                 if display.startswith("&quot;"):
@@ -825,6 +825,61 @@ def merge_formulas_into_model(
         "existing_total": len(existing_formulas),
     }
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Post-translation bare-reference fix
+# ---------------------------------------------------------------------------
+
+def fix_bare_refs(
+    expr: str,
+    formula_names: set[str],
+    parameter_names: set[str],
+    column_lookup: dict[str, str],
+    table_name: str,
+) -> str:
+    """Table-qualify bare [COLUMN] refs and prefix [formula_NAME] cross-refs.
+
+    After translation, some references remain bare (no ``::`` qualifier, no
+    ``formula_`` prefix).  This pass resolves them:
+
+    - ``[Name]`` where Name is a known formula → ``[formula_Name]``
+    - ``[COL]`` where COL (case-insensitive) is a physical column → ``[table::COL]``
+    - Parameter refs and already-qualified refs are left unchanged.
+
+    column_lookup maps upper-cased column name → canonical db_column_name.
+    """
+    import re
+
+    def _replace(m: re.Match) -> str:
+        ref = m.group(1)
+        if "::" in ref or ref.startswith("formula_"):
+            return m.group(0)
+        if ref in parameter_names:
+            return m.group(0)
+        if ref in formula_names:
+            return f"[formula_{ref}]"
+        if ref.upper() in column_lookup:
+            return f"[{table_name}::{column_lookup[ref.upper()]}]"
+        return m.group(0)
+
+    return re.sub(r"\[([^\]]+)\]", _replace, expr)
+
+
+def build_column_lookup(model_tml: dict) -> dict[str, str]:
+    """Build upper(name) → db_column_name map from a model's columns.
+
+    Indexes by both the display name and the column_id suffix so either
+    form resolves.
+    """
+    lookup: dict[str, str] = {}
+    for c in model_tml.get("model", {}).get("columns", []):
+        cid = c.get("column_id", "")
+        if "::" in cid:
+            _, col = cid.split("::", 1)
+            lookup[col.upper()] = col
+            lookup[c["name"].upper()] = col
+    return lookup
 
 
 # ---------------------------------------------------------------------------

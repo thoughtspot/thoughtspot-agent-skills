@@ -572,8 +572,16 @@ After the audit, exit cleanly. Do NOT proceed to Migrate mode steps.
 
 ## Step 1 — Authenticate
 
-Read `~/.claude/thoughtspot-profiles.json`. If multiple profiles exist, display a
-numbered menu and ask the user to choose. If only one profile, use it automatically.
+Run `ts profiles list` to discover available ThoughtSpot profiles. If no profiles
+exist, run `/ts-profile-thoughtspot` to create one. If multiple profiles exist,
+display a numbered menu and ask the user to choose. If only one profile, use it
+automatically.
+
+```bash
+ts profiles list
+```
+
+Then verify the chosen profile:
 
 ```bash
 source ~/.zshenv && ts auth whoami --profile "{profile_name}"
@@ -1619,6 +1627,11 @@ Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{TABLE_NAME}.tabl
 
 > **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (LB only — model already
 > exists) and **scope 5** (Tables only — no model generated).
+
+Before generating model TML, read `agents/shared/schemas/thoughtspot-model-tml.md` for the
+correct structure. Key: use `model_tables` (not `tables`) for table references; `guid:` goes
+at the document root (not nested inside `model:`); every formula needs a paired `columns[]`
+entry with matching `formula_id`.
 
 Generate one `.model.tml` per datasource the workbook **actually uses** — don't blindly
 merge independent datasources, but also don't materialize an unused model for every
@@ -2889,6 +2902,11 @@ print(json.dumps([open(f).read() for f in order]))
 PY
 ```
 
+**Before importing, check for duplicates** — if Phase 1 has already been imported (e.g.
+from a retry or previous attempt), search for existing models by name before importing.
+If a duplicate exists, delete it with `ts metadata delete` before proceeding, or pin its
+GUID and import with `--no-create-new` to update in place.
+
 Import with `--create-new`:
 
 ```bash
@@ -2896,9 +2914,19 @@ cat /tmp/ts_tableau_mig/{workbook_name}_phase1.json \
   | ts tml import --policy ALL_OR_NONE --create-new --profile {profile_name}
 ```
 
-Parse the response. Extract the GUID for each imported object. On failure, fix the
-table/connection errors and retry — Phase 1 errors are always structural (wrong
-connection name, missing column), never formula syntax.
+Parse the response. Extract the GUID for each imported object. **Capture the model GUID
+from the Phase 1 import response** (`response.object[0].header.id_guid`) — this is
+required for Phase 2 (`--existing-guid`). If the import response does not include a GUID
+(e.g. update case), search for the model:
+
+```bash
+ts metadata search --type LOGICAL_TABLE --name '{model_name}' --profile {profile_name}
+```
+
+Save the GUID as `{model_guid}`.
+
+On failure, fix the table/connection errors and retry — Phase 1 errors are always
+structural (wrong connection name, missing column), never formula syntax.
 
 **Phase 1.5 — Base model review checkpoint:**
 
@@ -2932,7 +2960,16 @@ model's physical columns (no formulas yet). After testing, re-prompt yes/no.
 
 **Phase 2 — Add formulas via `build-model`:**
 
-After the user confirms the base model, add all translated formulas in one CLI call:
+After the user confirms the base model, add all translated formulas in one CLI call.
+`build-model` parses the TWB directly — do not prepare intermediate files
+(`classification.json`, `table_columns.json`, `parameters.json`, `calc_id_map.json`)
+for it. Those files are inputs to `ts tableau translate-formulas` (Step 5b), not to
+`build-model`.
+
+**The `--datasource` value must match the full datasource name as shown in the TWB parse
+output, including any `| Project : ...` suffix** (e.g.
+`"cpg_merch_promotion_prod | Project : Production Data Sources"`, not just
+`"cpg_merch_promotion_prod"`). The TWB parse (Step 3) reports the full name.
 
 ```bash
 ts tableau build-model \

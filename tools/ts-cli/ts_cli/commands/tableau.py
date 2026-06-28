@@ -638,8 +638,8 @@ def build_model_cmd(
                                             help="ThoughtSpot profile (required with --existing-guid)"),
     dry_run: bool = typer.Option(False, "--dry-run",
                                   help="Report only — don't write files or import"),
-    max_retries: int = typer.Option(10, "--max-retries",
-                                     help="Maximum formula-drop retry cycles (default 10)"),
+    max_retries: int = typer.Option(25, "--max-retries",
+                                     help="Maximum formula-drop retry cycles (default 25)"),
 ) -> None:
     """Parse a Tableau workbook and build import-ready ThoughtSpot model TML.
 
@@ -729,31 +729,53 @@ def build_model_cmd(
             )
 
             # Fix sqlproxy scoping: derive column→table from existing model
+            model_tables = existing_tml["model"].get("model_tables", [])
             has_sqlproxy = any(t == "sqlproxy" for t in scoped_columns.values())
             if has_sqlproxy:
-                col_to_table: dict[str, str] = {}
-                for col in existing_tml["model"]["columns"]:
-                    col_id = col.get("column_id", "")
-                    if "::" in col_id:
-                        tbl, cname = col_id.split("::", 1)
-                        col_to_table[cname.upper()] = tbl
-                fixed_scoped: dict[str, str] = {}
-                for col_key, tbl in scoped_columns.items():
-                    base = re.sub(r"\s*\(Custom SQL Query\d*\)\s*$", "", col_key)
-                    lookup = base.upper()
-                    actual_tbl = col_to_table.get(lookup, tbl) if tbl == "sqlproxy" else tbl
-                    fixed_scoped[col_key] = actual_tbl
-                    if base != col_key and lookup in col_to_table and base not in fixed_scoped:
-                        fixed_scoped[base] = col_to_table[lookup]
-                for cname, tbl in col_to_table.items():
-                    if cname not in {k.upper() for k in fixed_scoped}:
-                        fixed_scoped[cname] = tbl
-                remapped = sum(
-                    1 for k in fixed_scoped
-                    if k in scoped_columns and fixed_scoped[k] != scoped_columns[k]
-                )
-                typer.echo(f"  Remapped {remapped}/{len(scoped_columns)} sqlproxy columns", err=True)
-                scoped_columns = fixed_scoped
+                if len(model_tables) == 1:
+                    # Single-table model: force ALL columns to the one table
+                    single_table = model_tables[0]["name"]
+                    fixed_scoped: dict[str, str] = {}
+                    for col_key in scoped_columns:
+                        base = re.sub(r"\s*\(Custom SQL Query\d*\)\s*$", "", col_key)
+                        fixed_scoped[col_key] = single_table
+                        if base != col_key:
+                            fixed_scoped[base] = single_table
+                    for col in existing_tml["model"]["columns"]:
+                        cid = col.get("column_id", "")
+                        if "::" in cid:
+                            _, cname = cid.split("::", 1)
+                            if cname not in {k.upper() for k in fixed_scoped}:
+                                fixed_scoped[cname] = single_table
+                    typer.echo(
+                        f"  Single-table model: forced all columns → {single_table}",
+                        err=True,
+                    )
+                    scoped_columns = fixed_scoped
+                else:
+                    col_to_table: dict[str, str] = {}
+                    for col in existing_tml["model"]["columns"]:
+                        col_id = col.get("column_id", "")
+                        if "::" in col_id:
+                            tbl, cname = col_id.split("::", 1)
+                            col_to_table[cname.upper()] = tbl
+                    fixed_scoped = {}
+                    for col_key, tbl in scoped_columns.items():
+                        base = re.sub(r"\s*\(Custom SQL Query\d*\)\s*$", "", col_key)
+                        lookup = base.upper()
+                        actual_tbl = col_to_table.get(lookup, tbl) if tbl == "sqlproxy" else tbl
+                        fixed_scoped[col_key] = actual_tbl
+                        if base != col_key and lookup in col_to_table and base not in fixed_scoped:
+                            fixed_scoped[base] = col_to_table[lookup]
+                    for cname, tbl in col_to_table.items():
+                        if cname not in {k.upper() for k in fixed_scoped}:
+                            fixed_scoped[cname] = tbl
+                    remapped = sum(
+                        1 for k in fixed_scoped
+                        if k in scoped_columns and fixed_scoped[k] != scoped_columns[k]
+                    )
+                    typer.echo(f"  Remapped {remapped}/{len(scoped_columns)} sqlproxy columns", err=True)
+                    scoped_columns = fixed_scoped
 
         # Build dependency levels from raw calcs (before resolution strips refs)
         raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])
@@ -805,6 +827,8 @@ def build_model_cmd(
             from ts_cli.model_builder import (
                 add_formula_prefix,
                 fix_double_aggregation,
+                fix_bare_refs,
+                build_column_lookup,
                 filter_unresolvable_formulas,
                 merge_formulas_into_model,
             )
@@ -829,6 +853,23 @@ def build_model_cmd(
             param_names = {
                 p["name"] for p in existing_tml["model"].get("parameters", [])
             }
+
+            # Post-translation: fix bare column/formula refs
+            col_lookup = build_column_lookup(existing_tml)
+            model_tables = existing_tml["model"].get("model_tables", [])
+            if model_tables:
+                primary_table = model_tables[0]["name"]
+                bare_fixed = 0
+                for f in cleaned_formulas:
+                    before = f["expr"]
+                    f["expr"] = fix_bare_refs(
+                        f["expr"], all_formula_names, param_names,
+                        col_lookup, primary_table,
+                    )
+                    if f["expr"] != before:
+                        bare_fixed += 1
+                if bare_fixed:
+                    typer.echo(f"  Fixed bare refs in {bare_fixed} formulas", err=True)
 
             formula_exprs = {f["name"]: f["expr"] for f in cleaned_formulas}
             formula_dicts = []

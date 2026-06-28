@@ -961,6 +961,38 @@ ts tableau build-model "workbook.twbx" \
 6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix
 7. Split into phased import files (phase 0 = base, then per dependency level)
 
+**Merge mode** (`--existing-guid`): merge translated formulas into an already-imported
+model. This is the Phase 2 flow used by the Tableau migration skill:
+
+```bash
+ts tableau build-model "workbook.twbx" \
+  --connection "MY_CONNECTION" \
+  --existing-guid "d561cee7-ed26-4f79-b353-6a2dc26879d6" \
+  --datasource "DS Name" \
+  --profile se-thoughtspot \
+  --max-retries 25
+```
+
+| Flag | Description |
+|---|---|
+| `--existing-guid`, `-g` | GUID of an already-imported model — exports it, merges formulas in, and re-imports |
+| `--max-retries` | Max import retry iterations for formula errors (default: 25) |
+| `--profile`, `-p` | ThoughtSpot profile for API calls |
+
+**Sqlproxy remapping:** when the TWB uses published datasources (Tableau Server
+`sqlproxy` tables), the parser sees synthetic table names like `"Custom SQL Query"`.
+`build-model` automatically remaps these columns to the target ThoughtSpot table:
+
+- **Single-table models**: all sqlproxy columns are force-mapped to the one table
+- **Multi-table models**: columns are matched by name against all model tables
+
+Unresolvable sqlproxy references and `Custom SQL Query` aliases are stripped from
+formulas before import via `filter_unresolvable_formulas()`.
+
+**Bare-reference resolution:** after sqlproxy remapping, a post-pass (`fix_bare_refs`)
+table-qualifies bare `[Column]` references and prefixes `[FormulaName]` cross-references
+with `formula_` to match ThoughtSpot's naming convention.
+
 **Output:** One set of phased TML files per datasource:
 
 ```

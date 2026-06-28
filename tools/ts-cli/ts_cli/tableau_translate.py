@@ -1323,7 +1323,10 @@ def ensure_else_clause(expr: str, role: str = "measure") -> str:
     _DATE_INDICATORS = re.compile(
         r"::Date\b|start_of_month|start_of_quarter|start_of_year|start_of_week"
         r"|add_days|add_months|diff_days|diff_months|to_date|today\s*\("
-        r"|now\s*\(",
+        r"|now\s*\("
+        r"|\b(?:START|END|CREATED|UPDATED|MODIFIED)_DATE\b"
+        r"|DATE_(?:FROM|TO|START|END|LY|PRE)\b"
+        r"|\bDATE\]",
         re.IGNORECASE,
     )
     then_branch_is_date = bool(_DATE_INDICATORS.search(expr))
@@ -1822,6 +1825,13 @@ def validate_pre_import(
                     "wrap in to_date('YYYY-MM-DD', 'yyyy-MM-dd')"
                 )
 
+        # max(boolean_expr)=false pattern — ThoughtSpot can't aggregate a boolean
+        if re.search(r'\bmax\s*\([^)]*=[^)]*\)\s*=\s*false', expr, re.IGNORECASE):
+            warnings.append(
+                "max([col]='value')=false pattern — rewrite as "
+                "count_if([col] != 'value') = 0 or similar"
+            )
+
         # Name clash with existing column
         if name.upper() in col_upper:
             warnings.append(f"Formula name '{name}' clashes with column name")
@@ -2314,7 +2324,11 @@ def translate_single(
     # 13b. Fix IN (...) → in {...} (ThoughtSpot requires curly braces)
     expr = fix_in_parentheses(expr)
 
-    # 14. Clean up whitespace
+    # 14. Strip orphaned END/CASE/WHEN keywords that survived conversion
+    expr = re.sub(r"(?<!\[)\bEND\b(?!\])", "", expr, flags=re.IGNORECASE)
+    expr = re.sub(r"(?<!\[)\bCASE\b(?!\])", "", expr, flags=re.IGNORECASE)
+
+    # 14b. Clean up whitespace
     expr = re.sub(r"\s+", " ", expr).strip()
 
     # 15. Validate

@@ -9,11 +9,13 @@ from ts_cli.model_builder import (
     _extract_joins,
     _extract_tables,
     add_formula_prefix,
+    build_column_lookup,
     build_formula_levels,
     build_model_tml,
     expr_is_aggregated,
     extract_parameters,
     filter_unresolvable_formulas,
+    fix_bare_refs,
     fix_double_aggregation,
     merge_formulas_into_model,
     resolve_name_collisions,
@@ -772,7 +774,7 @@ class TestBuildModelCmdSignature:
         sig = inspect.signature(build_model_cmd)
         param = sig.parameters.get("max_retries")
         assert param is not None, "--max-retries parameter missing from build_model_cmd"
-        assert param.default.default == 10
+        assert param.default.default == 25
 
     def test_max_retries_is_int_type(self):
         """--max-retries should be typed as int."""
@@ -824,3 +826,125 @@ class TestDroppedFormulaDictStructure:
         }
         assert dropped["expr"] == ""
         assert dropped["original_tableau"] == ""
+
+
+# ---------------------------------------------------------------------------
+# fix_bare_refs
+# ---------------------------------------------------------------------------
+
+
+class TestFixBareRefs:
+    """Tests for fix_bare_refs — table-qualify bare column refs, prefix formula refs."""
+
+    COLUMN_LOOKUP = {
+        "SALES": "SALES",
+        "REGION": "REGION",
+        "START_DATE": "START_DATE",
+    }
+    FORMULA_NAMES = {"Growth Rate", "YoY Change"}
+    PARAM_NAMES = {"Currency", "Date Range"}
+    TABLE = "vw_dim_promo"
+
+    def test_qualifies_bare_column(self):
+        result = fix_bare_refs(
+            "[SALES] + 1",
+            self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert result == "[vw_dim_promo::SALES] + 1"
+
+    def test_prefixes_formula_ref(self):
+        result = fix_bare_refs(
+            "[Growth Rate] * 100",
+            self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert result == "[formula_Growth Rate] * 100"
+
+    def test_leaves_already_qualified(self):
+        expr = "[vw_dim_promo::SALES]"
+        result = fix_bare_refs(
+            expr, self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert result == expr
+
+    def test_leaves_already_prefixed_formula(self):
+        expr = "[formula_Growth Rate]"
+        result = fix_bare_refs(
+            expr, self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert result == expr
+
+    def test_leaves_parameter_unchanged(self):
+        expr = "[Currency]"
+        result = fix_bare_refs(
+            expr, self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert result == expr
+
+    def test_case_insensitive_column_match(self):
+        result = fix_bare_refs(
+            "[sales]",
+            self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert result == "[vw_dim_promo::SALES]"
+
+    def test_unknown_ref_unchanged(self):
+        expr = "[Unknown Thing]"
+        result = fix_bare_refs(
+            expr, self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert result == expr
+
+    def test_mixed_refs(self):
+        result = fix_bare_refs(
+            "if [REGION] = 'APAC' then [Growth Rate] else [SALES]",
+            self.FORMULA_NAMES, self.PARAM_NAMES,
+            self.COLUMN_LOOKUP, self.TABLE,
+        )
+        assert "[vw_dim_promo::REGION]" in result
+        assert "[formula_Growth Rate]" in result
+        assert "[vw_dim_promo::SALES]" in result
+
+
+# ---------------------------------------------------------------------------
+# build_column_lookup
+# ---------------------------------------------------------------------------
+
+
+class TestBuildColumnLookup:
+    """Tests for build_column_lookup — model column → db_column_name map."""
+
+    def test_basic_lookup(self):
+        tml = {
+            "model": {
+                "columns": [
+                    {"name": "Sales Amount", "column_id": "vw_fact::SALES_AMT"},
+                    {"name": "Region", "column_id": "vw_dim::REGION"},
+                ]
+            }
+        }
+        lookup = build_column_lookup(tml)
+        assert lookup["SALES_AMT"] == "SALES_AMT"
+        assert lookup["SALES AMOUNT"] == "SALES_AMT"
+        assert lookup["REGION"] == "REGION"
+
+    def test_empty_model(self):
+        assert build_column_lookup({}) == {}
+        assert build_column_lookup({"model": {}}) == {}
+        assert build_column_lookup({"model": {"columns": []}}) == {}
+
+    def test_skips_columns_without_qualifier(self):
+        tml = {
+            "model": {
+                "columns": [
+                    {"name": "Orphan", "column_id": "NO_SEPARATOR"},
+                ]
+            }
+        }
+        assert build_column_lookup(tml) == {}

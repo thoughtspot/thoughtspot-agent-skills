@@ -1551,3 +1551,16 @@ class TestValidatePreImportNewChecks:
         formulas = [{"name": "F1", "expr": "if [T::Date] > to_date( '2024-01-01' , 'yyyy-MM-dd' ) then 1 else 0"}]
         issues = validate_pre_import(formulas)
         assert len(issues) == 0
+
+    def test_max_bool_false_warns(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "Active Flag", "expr": "max([T::STATUS]='ACTIVE')=false"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 1
+        assert "max([col]='value')=false" in issues[0]["warnings"][0]
+
+    def test_max_without_bool_no_warning(self):
+        from ts_cli.tableau_translate import validate_pre_import
+        formulas = [{"name": "Max Sales", "expr": "max([T::SALES])"}]
+        issues = validate_pre_import(formulas)
+        assert len(issues) == 0
