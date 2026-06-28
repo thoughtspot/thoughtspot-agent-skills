@@ -986,12 +986,9 @@ model import. A missing formula produces a functional model with reduced coverag
 
 | Tableau Feature | Reason |
 |---|---|
-| `ISMEMBEROF()` | User-specific function — no equivalent |
 | `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent (but see the string-aggregation note below, and the **Row-Offset Table Calculations** section for `FIRST()`/`LAST()` as standalone window-bound functions). |
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
 | True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
-| References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
-| `DATETIME(expr)` | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp. Returns a proper datetime type. If the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15. |
 | `MAKEPOINT(lat, lon)` | Geospatial point constructor — no ThoughtSpot formula equivalent. **Do not silently drop.** If the underlying lat/lon columns exist, migrate them as individual `ATTRIBUTE` columns (latitude + longitude are useful filter/display dimensions); omit the `MAKEPOINT` formula + log. See "Geospatial policy" below. |
 | `MAKELINE(point1, point2)` | Geospatial line constructor — no ThoughtSpot equivalent. Omit + log. The endpoint lat/lon columns are migrated individually if present. |
 | `DISTANCE(point1, point2, unit)` | Geospatial distance — no ThoughtSpot equivalent. Omit + log. |
@@ -999,6 +996,9 @@ model import. A missing formula produces a functional model with reduced coverag
 | `AREA(geom, unit)` | Geospatial area — no ThoughtSpot equivalent. Omit + log. |
 
 **Formerly untranslatable, now mapped:**
+- `ISMEMBEROF("group")` → `ts_groups = 'group'` — multi-value list membership handled natively with `=` (reclassified 2026-06-28)
+- `DATETIME(expr)` → `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp; if the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15 (reclassified 2026-06-28)
+- SQL-lookup Tableau Parameters → query the warehouse at migration time and populate `list_choice[]` with a point-in-time snapshot. See "SQL-lookup parameters (query at migration time)" section below (reclassified 2026-06-28)
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
 - `TOTAL(SUM(...))` / percent-of-total → `group_aggregate(..., {}, query_filters())` (see LOD section)
 - Tableau **bins** (`class='bin'`) → `floor([x]/size)*size` bucketing formula (see Tableau Bins section)

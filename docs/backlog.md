@@ -2573,3 +2573,123 @@ clause may be missing a default value. False positives possible if a legitimate
 expression ends with `)` after `else`, but rare enough to be acceptable as a warning.
 
 **Target:** No date set — revisit if the pattern recurs in future migrations.
+
+---
+
+## BL-063 — Extract CLI-based formula translation for Snowflake and Databricks converters
+
+**Source:** Architectural comparison of conversion skill implementations (2026-06-28)
+**Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, tools/ts-cli
+**Status:** Open — assess feasibility before scheduling
+**Related:** BL-032 (Databricks parser support), BL-014 (Databricks coverage review)
+
+### Problem
+
+The Tableau converter delegates formula translation and model building to deterministic
+CLI commands (`ts tableau translate-formulas` — 14-step pipeline in `tableau_translate.py`,
+85KB; `ts tableau build-model` — 8 transforms in `model_builder.py`, 35KB). The LLM
+orchestrates the workflow and makes judgment calls but does not do the translation itself.
+
+The Snowflake and Databricks converters follow a fundamentally different pattern: the LLM
+reads the mapping docs (`ts-snowflake-formula-translation.md`, `ts-databricks-formula-translation.md`)
+and performs the translation inline — parsing DDL/YAML, translating formulas, and assembling
+TML directly. There are 7-11 inline Python blocks in each SKILL.md for parsing/validation
+helpers, but no CLI commands for formula translation or model building.
+
+This means:
+1. **Translation quality depends on the LLM correctly applying mapping docs every time** —
+   the Tableau CLI pipeline is deterministic and produces identical output for identical input.
+2. **Mapping-doc errors propagate to output** — the 2026-06-28 audit found contradictions
+   within mapping files (wrong field names, stale "untranslatable" entries). The CLI pipeline
+   is immune to these because the logic is in code, not docs the LLM interprets.
+3. **No unit-testable translation path** — the Tableau pipeline has `pytest` coverage for
+   pure functions; the Snowflake/Databricks translation is only testable via end-to-end
+   smoke tests with a live instance.
+
+### Proposed approach
+
+Extract `ts snowflake translate-formulas` and `ts databricks translate-formulas` CLI
+commands, mirroring the Tableau pattern:
+
+1. **Input:** parsed source structure (DDL parse result / YAML parse result) + column map
+2. **Output:** JSON with translated ThoughtSpot formula expressions + dependency DAG +
+   cross-reference depth (same shape as `ts tableau translate-formulas`)
+3. **Logic:** encode the mapping rules from the formula-translation.md files as code —
+   identifier resolution, double-aggregation detection, cross-reference inlining, pass-through
+   gating (PT1 policy)
+4. **Unit tests:** pure-function tests for each translation rule, no live instance needed
+
+### Phasing
+
+| Phase | Scope | Estimate |
+|---|---|---|
+| 1 | `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formulas | ~2 weeks |
+| 2 | `ts databricks translate-formulas` — Databricks SQL → ThoughtSpot formulas | ~2 weeks |
+| 3 | Reverse direction (`ts snowflake translate-formulas --reverse`) for to-SV | ~1 week |
+| 4 | Update SKILL.md files to use CLI commands instead of inline LLM translation | ~1 week |
+
+### Decision to make first
+
+Assess whether the translation rules are stable enough to codify. If the mapping docs
+are still actively evolving (new constructs being added frequently), the LLM-driven
+approach has an advantage: updating a markdown file is faster than updating code + tests.
+Once the mapping surface stabilises, extraction becomes higher-value.
+
+**Target:** Assess feasibility by 2026-09-30. Schedule extraction only if mapping churn
+has slowed and the quality gap is confirmed via smoke-test comparison.
+
+---
+
+## BL-064 — External audit 2026-06-28: Databricks + Snowflake product-currency fixes
+
+**Source:** External audit sweep 2026-06-28 (angle 13 — product currency)
+**Affects:** agents/shared/schemas/databricks-metric-view.md, agents/shared/schemas/snowflake-schema.md, agents/shared/mappings/ts-databricks/, agents/shared/mappings/ts-snowflake/
+**Status:** Open
+**Related:** BL-032 (Databricks parser support — overlapping scope)
+
+### Problem
+
+The 2026-06-28 external audit found 4 high-severity and 9 medium-severity product-currency
+findings across Databricks and Snowflake. These represent drift between our mapping/schema
+docs and the current product state.
+
+### High-severity (parse errors or silent data loss on current builds)
+
+1. **`nulls_position` → `null_order`** — wrong Snowflake YAML field name in 8 locations
+   across 4 files. Semi-additive metric conversions will break when Snowflake tightens
+   YAML validation. Mechanical rename.
+2. **`fields:` is canonical; `dimensions:` is backward-compat** — Databricks parser
+   only recognizes `dimensions:`, missing all MVs authored with the GA-preferred `fields:`.
+   Overlaps BL-032.
+3. **Window `offset` requires Runtime 18.1** — documented as 17.3-compatible. Users on
+   17.3 get `PARSE_SYNTAX_ERROR` for period-over-period measures.
+4. **`cardinality:` join field undocumented** — `many_to_one`/`one_to_many` (Runtime 18.1+).
+   Parser has no handling for this construct.
+
+### Medium-severity (stale claims, schema gaps)
+
+5. `sample_values` listed as both supported and unsupported in snowflake-schema.md
+6. `verified_queries` now YAML-supported; schema marks it DDL-only
+7. `custom_instructions`/`module_custom_instructions` YAML fields not documented
+8. `unique_keys` shown with wrong YAML structure in properties file
+9. Complete Schema block missing ~15 now-supported YAML fields
+10. Three new Databricks window range types undocumented (`leading`, `all`, inclusive/exclusive)
+11. Phantom `entities:`/`db_connection:` syntax in ts-to-databricks-rules.md
+12. `safe_divide` "No DIV0" comment is wrong; comparison table still says "Preview required"
+13. `materialization:` block not documented
+
+### ThoughtSpot medium-severity (separate, lower urgency)
+
+14. RLS rules ARE in table TML — schemas say they are not
+15. New TML export options (`export_column_security_rules`, `export_with_column_aliases`)
+16. `PARTIAL_OBJECT` import policy + async TML import endpoint undocumented
+
+### Approach
+
+Fix items 1-4 immediately (high severity). Items 5-13 fix as part of the next
+schema/mapping update cycle. Items 14-16 document opportunistically.
+
+For Databricks items that overlap BL-032: merge into BL-032's scope rather than
+duplicating work. BL-032's target (2026-09-30) applies.
+
+**Target:** High-severity items by 2026-07-15. Medium-severity items by 2026-09-30.
