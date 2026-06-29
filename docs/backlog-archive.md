@@ -536,3 +536,1018 @@ Schema reference: `agents/shared/schemas/thoughtspot-feedback-tml.md`
 - `agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md` — mirror changes
 ---
 
+---
+
+## BL-009 — Tableau conversion mapping gaps (functions, dynamic sets, geospatial, sources)
+
+**Source:** Audit of 127 workbooks in `tableau-migration-testing/twb/inactive/` (2026-06-10)
+**Affects:** ts-convert-from-tableau, `agents/shared/mappings/tableau/tableau-formula-translation.md`
+**Status:** Complete — all 5 phases shipped. Phase 1 (PR #48), Phase 2a (PR #49), Phase 2b (2026-06-12), Phase 2c/3/4 (PR #66), Phase 5 data blending (2026-06-14)
+**Full plan:** [`superpowers/plans/2026-06-11-tableau-mapping-gaps.md`](superpowers/plans/2026-06-11-tableau-mapping-gaps.md)
+
+> **Phase 1 (function table) — DONE (PR #48):** added DATEPARSE, EXP, trig (radians→degrees fix),
+> STARTSWITH/ENDSWITH, PI/RADIANS/DEGREES composites, PROPER/ASCII/CHAR/REGEXP_*/FINDNTH
+> scalar pass-through, WINDOW_*/RUNNING_COUNT/DATETIME notes; fixed the UPPER/LOWER bug; all
+> grounded against the 26.6.0 formula reference + live-validated. Introduced the PT1 pass-through
+> policy. Open-items #12/#13/#14 closed.
+> **Phase 2a (static sets → column sets) — DONE (PR #49, 2026-06-12, live/UI-verified on se-thoughtspot):**
+> bind via `worksheet:` (not `model:`); `%null%` via the `{Null}` grouping value; `except` member-list
+> via `operator: NE`; formula-column anchors (resolve calc id → display name + emit formula column);
+> set controls → interactive filter + migrate anchor calc + drop IF-[Set] scaffolding; EVERY set
+> conversion flagged for user review (Step 7 + Step 12). Worked example added.
+> **Phase 2b (Top-N/Bottom-N sets → query sets) — DONE (2026-06-12, live-verified on se-thoughtspot):**
+> `cohort_type: ADVANCED`, `cohort_grouping_type: COLUMN_BASED`, embedded answer with rank formula
+> (`rank(sum(measure),'desc'/'asc')`) + parameter-filter formula (`[formula_rank] <= [alias::param]`).
+> Stepped range params → `list_config`. Detection: `function='end'`, `end='top'/'bottom'`, `count`
+> param/literal, ordering measure. Full emission template + worked example
+> (`topn-set-to-query-set.md`) added. The Dynamic-Sets gap (previously noted at line ~500) is now
+> addressed for Top-N/Bottom-N. Open-items #10 Phase 2b closed.
+> **Phase 2c/3/4 (PR #66):** All set operations now translatable (condition-based, member-list
+> intersect, all-except-Top-N, mixed computed); geospatial detect+log policy; unsupported
+> source policy (google-sheets, OGR, webdata); Redshift/Postgres dialect notes; INDEX()
+> prevalence note. Open-items #10–#17 closed.
+> **Phase 5 — Data blending (2026-06-14):** blend-connected datasources merge into single
+> model, linking fields → LEFT_OUTER inline joins, cross-datasource formulas resolve within
+> merged model. Affects 90/140 audited workbooks (64%). Star and transitive topologies
+> supported. Open-item #8 closed.
+> **Phase 2c (set operations + condition sets) — DONE (2026-06-14):** member-list intersect →
+> GROUP_BASED cohort of common members; all-except-Top-N → query set with inverted rank filter
+> (`[rank] > N`); condition-based sets (`function='filter'`) → query set with boolean condition
+> formula; mixed computed set operations (member ∩ Top-N, condition ∩ condition, nested set-ops)
+> → multi-formula query set with combined filters in `search_query`. All Tableau set types now
+> translatable except set controls (→ interactive filter) and set actions (no equivalent).
+> **Phase 3 (geospatial) — DONE (2026-06-14):** explicit detect+log policy for MAKEPOINT/MAKELINE/
+> DISTANCE/BUFFER/AREA. MAKEPOINT decomposes lat/lon to individual attribute columns. Added to
+> classifier regex, untranslatable table, and dedicated audit report row.
+> **Phase 4 (source coverage) — DONE (2026-06-14):** unsupported-source policy (google-sheets,
+> ogrdirect, webdata-direct, CustomMapbox → skip + log); Redshift/Postgres dialect notes for
+> pass-through SQL; INDEX() prevalence note (recommend rank() / top-N substitute).
+
+### Problem
+
+Corpus audit (53,126 calc fields, 411 dashboards) surfaced patterns the skill does not map.
+Confirmed absent from the mapping file as of 2026-06-11 (manual-groups→cohort is already
+shipped via changelog 1.5.5 and is NOT part of this):
+
+- **Dynamic Sets** (Top-N sets, `<groupfilter>`) — 86 files, zero mapping. Largest gap.
+  Target TML already exists: `agents/shared/schemas/thoughtspot-sets-tml.md`.
+- **Missing function-table entries** — `DATEPARSE` (93×, highest-value), `REGEXP_*`/`FINDNTH`,
+  `MAKEPOINT`(362×)/`MAKELINE` geospatial (no policy → silent drop), `WINDOW_STDEV/PERCENTILE/
+  COUNT/MEDIAN` + `RUNNING_COUNT` (~80× mis-flagged), `EXP/PI/trig/PROPER/ASCII/CHAR/
+  STARTSWITH/ENDSWITH`. (`QUARTER`/`WEEK` already partially present — verify, don't duplicate.)
+- **Source coverage** — Redshift(15)/Postgres(1) RDBMS examples are Snowflake-dialect only;
+  no "unsupported source" policy for google-sheets/drive, ogr/spatial, webdata, mapbox.
+
+### Proposed approach
+
+Phased per the plan: (1) fill the function table, (2) add dynamic-Sets translation wired to
+`thoughtspot-sets-tml.md`, (3) explicit geospatial policy, (4) broaden source coverage + INDEX
+prevalence note. Validate with the tiered test workbooks listed in the plan via the
+`tableau-migration-testing` harness. Open-items #10–#17 (drafted in the plan) append to
+`agents/cli/ts-convert-from-tableau/references/open-items.md`.
+
+---
+
+---
+
+## BL-010 — `ts-load-source-data` skill (generic Snowflake/Databricks loader)
+
+**Source:** Generalising the Snowflake-only `tableau-migration-testing` loader (2026-06-11)
+**Affects:** NEW skill `agents/cli/ts-load-source-data`; `tableau-migration-testing` harness
+**Status:** Not started
+**Full plan:** [`superpowers/plans/2026-06-11-ts-load-source-data.md`](superpowers/plans/2026-06-11-ts-load-source-data.md)
+
+### Problem
+
+The convert-from skills assume source tables already exist in a warehouse, but there's no
+warehouse-agnostic way to create + load them. The existing harness is Snowflake-only
+(PUT/stage/COPY INTO, `snowflake.connector`).
+
+### Proposed approach
+
+New skill with a generic loader core behind a `WarehouseAdapter` (Snowflake + Databricks).
+Pluggable manifest producers (TWB primary, CSV-dir, manifest JSON). **Decisions:** Databricks
+load = `INSERT … VALUES` batches (no volume); **DB layer only — no connection creation** (hands
+off to BL-011); Snowflake supports `method:python` AND `method:cli`; warehouse chosen by profile
+auto-detect → ask. Prove in the harness first, then promote into the skill. Reuses
+`ts-profile-snowflake` / `ts-profile-databricks`. **Open question:** non-prod Databricks
+workspace + catalog for the live load test.
+
+**Status (2026-06-26):** v1 shipped — Snowflake loading (both `method:python` and
+`method:cli`), schema inference, synthetic data generation, four input modes.
+Databricks loading deferred to v2.
+
+---
+
+---
+
+## BL-042 — Tableau REST API integration: live-instance testing
+
+**Source:** Design spec `docs/superpowers/specs/2026-06-26-tableau-api-integration-design.md`
+**Affects:** ts-profile-tableau, `ts tableau` CLI commands, ts-convert-from-tableau Step 3.5
+**Status:** Complete — API connectivity verified on live Tableau Cloud instance (PR #121 signin/datasources, PR #122 download with CSV validation); Step 3.5 sqlproxy resolution shipped (PR #121)
+
+### Problem
+
+The Tableau REST API integration (profile skill, CLI commands, Step 3.5) was built from
+API documentation and the sigma-migration-skills reference implementation. Core API
+operations (signin, datasource search, VizQL read-metadata, workbook download) have been
+verified against a live Tableau Cloud instance, but the full end-to-end Step 3.5 flow
+(sqlproxy detection → API resolution → field merge → table creation) has not been tested
+as part of a complete migration.
+
+### Proposed approach
+
+1. Complete a full `ts-convert-from-tableau` migration of the DunderMifflin workbook
+   (confirmed sqlproxy with published datasource)
+2. Verify field metadata merge produces correct table TML column types
+3. Test PAT auth path when PATs are enabled on the developer site
+4. Document any API response shape surprises in `references/open-items.md`
+
+---
+
+---
+
+## BL-044 — Tableau: detect orphan inherited calcs in copied datasources
+
+**Source:** CPG Merch Promotion Performance migration (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 3, A2, A4, 5b, 12
+**Status:** Implemented — Step 3g orphan detection, A4 orphan section, 5b exclusion guard, Step 12 root cause category, migrate-mode E/A prompt
+
+### Problem
+
+When a Tableau published datasource is a **copy** of another (TWB name contains `(copy)`,
+or the datasource is a subset clone), it inherits **all calculated fields** from the
+original — including ones that reference tables no longer present in the copy. Tableau
+silently ignores these orphan calcs; they are non-functional dead weight.
+
+In the CPG Merch migration, the tentpole datasource was a copy of the main datasource
+with only 3 of the original 9 tables. It inherited 116 of 117 formulas from the main
+datasource, but 41 of them referenced tables (PRODUCT_METRICS, CATEGORY_SHARE,
+DAILY_METRICS, CUSTOMER_ORDERS) that don't exist in the copy. These orphan calcs were
+translated, carried through to Phase 2 import, and failed — wasting ~30 minutes of
+migration time.
+
+The sigma-migration-skills repo handles this indirectly via Jaccard similarity clustering
+on field overlap (detecting duplicate datasources) and scoped calc extraction per
+dashboard. Neither approach explicitly detects orphan calcs.
+
+### Proposed approach
+
+1. **Step 3 (parse) — orphan calc detection.** After extracting tables and calcs from
+   each datasource, cross-reference every calc's `[TABLE::COL]` references against the
+   datasource's actual table set. If a calc references a table not in the datasource,
+   mark it as an orphan. Transitively mark any calc that depends on an orphan.
+
+2. **Step A4 (audit report) — orphan section.** Add an "Orphan inherited calcs" section
+   to the audit report showing: count, the referenced missing tables, and a note that
+   these calcs are non-functional in Tableau and will be excluded from migration.
+
+3. **Step 5b / Phase 2 — automatic exclusion.** Exclude orphan calcs from the formula
+   translation pipeline. Currently these get translated, fail at import, and consume
+   retry cycles. Excluding them up front saves time and tokens.
+
+4. **Step 12 (migration report) — orphan tally.** Report orphan calcs separately from
+   "excluded due to translation failure" — they are a different category (never
+   functional, not a translation gap).
+
+5. **User confirmation.** During migrate mode, surface the orphan count and list of
+   missing tables. Ask the user to confirm exclusion — in rare cases they may want to
+   add the missing tables to the model instead.
+
+### Detection heuristic
+
+```python
+# After Step 3b extraction, for each datasource:
+ds_tables = {mt['name'].upper() for mt in datasource['model_tables']}
+orphan_calcs = set()
+for calc in datasource['calculated_fields']:
+    for ref in re.findall(r'\[([^\]]+)::', calc['expr']):
+        if ref.upper() not in ds_tables:
+            orphan_calcs.add(calc['name'])
+            break
+# Transitively mark dependents of orphans
+```
+
+---
+
+---
+
+## BL-045 — Tableau: blend post-aggregation semantics warning + audit flag
+
+**Source:** CPG Merch Promotion Performance migration (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 3e, 5b, A4, 7, 12; data-blend-to-model worked example
+**Status:** Implemented — A4 blend risk table (HIGH/MED/LOW classification), Step 7 HIGH-risk R/S/M prompt, Step 12 blend-context review category. Remaining: worked example caveat section (#3), coverage matrix note (#4)
+
+### Problem
+
+Tableau blending is a **post-aggregation LEFT JOIN**: the secondary datasource is
+aggregated independently to the linking-field grain, then joined to the primary's
+aggregated results. This is fundamentally different from a ThoughtSpot model join, which
+joins at the **row level** and lets the query engine aggregate afterward.
+
+The current skill (Step 5b) merges blended datasources into a single model with
+`LEFT_OUTER` joins. For simple cases (one fact + one dimension/reference table), the
+result is equivalent. But when **both sides are fact tables at different grains**, a
+row-level join produces fan-out and **wrong aggregation results** — exactly the scenario
+blending was designed to avoid.
+
+The worked example (`data-blend-to-model.md`) mentions "ThoughtSpot's chasm trap
+protection aggregates each fact independently" but does not explicitly flag the semantic
+difference or warn that results may diverge.
+
+The sigma-migration-skills repo explicitly documents this: "Tableau aggregates the
+secondary to the linking-field grain before joining" and recommends grouped helper
+elements to reproduce the aggregation level.
+
+### Proposed approach
+
+1. **Step A4 (audit report) — blend semantics flag.** When blending is detected, add a
+   warning section:
+   ```
+   ⚠ Data Blending — post-aggregation semantics
+     Tableau blends aggregate the secondary datasource independently before
+     joining. ThoughtSpot model joins operate at row level. If both sides are
+     fact tables at different grains, aggregation results may differ.
+     Blends detected: {N}
+     ┌─────────────────────────────────────────────────────────────┐
+     │ Primary DS        Secondary DS       Link Cols   Risk      │
+     ├─────────────────────────────────────────────────────────────┤
+     │ {name}            {name}             {cols}      {H/M/L}   │
+     └─────────────────────────────────────────────────────────────┘
+     Risk: HIGH = both sides have measures (fact×fact blend)
+           MEDIUM = secondary has measures but is likely a reference table
+           LOW = secondary is dimension-only
+   ```
+
+2. **Step 7 (review checkpoint) — user confirmation.** For HIGH-risk blends, explicitly
+   ask the user: "This blend joins two fact tables. ThoughtSpot's row-level join may
+   produce different aggregation results than Tableau's post-aggregation blend. Options:
+   (a) proceed with row-level join (ThoughtSpot chasm trap may handle it),
+   (b) create a SQL View that pre-aggregates the secondary to the linking grain,
+   (c) keep as separate models (no blend merge)."
+
+3. **Worked example update.** Update `data-blend-to-model.md` to add a "Semantic
+   Caveat" section documenting the post-aggregation difference and when it matters.
+
+4. **Coverage matrix.** Update row #4 (Data blending) notes to add: "Post-aggregation
+   semantics: secondary is aggregated to linking grain in Tableau; ThoughtSpot joins at
+   row level — verify results when both sides are fact tables."
+
+### Risk classification heuristic
+
+```python
+# For each blend edge in blend_graph:
+secondary_ds = datasources[target_ds]
+secondary_has_measures = any(
+    col['role'] == 'measure' for col in secondary_ds['columns']
+)
+primary_has_measures = any(
+    col['role'] == 'measure' for col in datasources[source_ds]['columns']
+)
+if primary_has_measures and secondary_has_measures:
+    risk = 'HIGH'  # fact × fact — aggregation may diverge
+elif secondary_has_measures:
+    risk = 'MEDIUM'
+else:
+    risk = 'LOW'
+```
+
+---
+
+---
+
+## BL-046 — Tableau: formula translation determinism improvements
+
+**Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 5b, 7, A3, A4; ts-cli `ts tableau translate-formulas`
+**Status:** Implemented (ts-cli v0.17.0) — all 7 items complete. #1 ifnull(X,0) stripping (default-on for measures), #2 sum_if/count_if/average_if conversion (default-on), #3 rank() completion, #4 operator spacing, #5 if/then/else structural validation (balanced parens/brackets, orphaned else detection), #6 physical ref qualification, #7 name clash detection
+
+### Problem
+
+The CPG Merch migration (161 + 117 formulas) revealed several patterns where the formula
+translation pipeline produces errors that require manual intervention, adding ~30–60
+minutes and significant token cost. These are not translation gaps (the functions exist
+in ThoughtSpot) but determinism gaps — known patterns that should produce correct output
+on the first pass.
+
+Observations from the migration:
+
+1. **`ifnull(measure, 0)` is unnecessary.** ThoughtSpot query generation handles NULL
+   automatically. The pattern `ifnull(if(PERIOD_TYPE='promo') then SALES else null, 0)`
+   should simplify to `if(PERIOD_TYPE='promo') then SALES else null`. Prompt the user
+   whether to keep or strip `ifnull` wrapping on measures.
+
+2. **`sum_if` / `unique_count_if` / `average_if` alternatives.** Tableau's
+   `IF condition THEN measure END` (no ELSE) translates to
+   `if(condition) then measure else null` in ThoughtSpot. For aggregated measures, the
+   native `sum_if(condition, measure)` is simpler and avoids the missing-ELSE error
+   class entirely. The pipeline should offer this as an alternative.
+
+3. **`rank()` requires 2 arguments.** ThoughtSpot `rank(expr, 'asc'|'desc')` needs the
+   sort direction. The pipeline should always emit both arguments. This is documented in
+   `thoughtspot-formula-patterns.md` but the Tableau translation step doesn't enforce it.
+
+4. **Missing spaces around operators.** Expressions like `[A]-[B]` fail; ThoughtSpot
+   requires `[A] - [B]`. The pipeline's operator-spacing step should catch all binary
+   operators (`+`, `-`, `*`, `/`, `=`, `!=`, `>`, `<`, `>=`, `<=`).
+
+5. **`if/then/else` structure validation.** ThoughtSpot `if` is self-terminating (no
+   `end` keyword) and every `if` MUST have an `else`. The pipeline should validate this
+   structurally before import, not rely on import errors to surface it.
+
+6. **Physical column refs must be table-qualified in model formulas.** `[SALES]` fails;
+   `[TABLE::SALES]` works. The qualifier step should enforce this for ALL physical column
+   references, not just ambiguous ones.
+
+7. **Formula/column name clash detection.** Physical column `SALES` and formula `Sales`
+   collide case-insensitively. The pipeline should detect these at translation time and
+   auto-rename the formula (e.g., `Promo Sales`) before import.
+
+### Proposed approach
+
+Add or fix these transforms in `ts tableau translate-formulas` (ts-cli):
+
+| # | Transform | Current state | Fix |
+|---|---|---|---|
+| 1 | Strip `ifnull(measure, 0)` | Not implemented | Add as optional transform; prompt user |
+| 2 | `IF/THEN/END` → `sum_if` etc. | Not implemented | Detect `SUM(IF...THEN...ELSE NULL)` → `sum_if(condition, expr)` |
+| 3 | `rank()` second arg | Missing | Always emit `'desc'` (or infer from Tableau sort) |
+| 4 | Operator spacing | Partial | Regex all binary operators |
+| 5 | `if/else` validation | Not pre-validated | Structural check before import |
+| 6 | Physical ref qualification | Partial (ambiguous only) | Qualify ALL physical column refs |
+| 7 | Name clash detection | Not implemented | Case-insensitive check; auto-rename formula |
+
+**See also:** BL-049 (pipeline performance) for the architectural efficiency improvements
+that reduce cost even when individual transforms are correct. BL-050 (systematic
+pre-transforms) for the ordered transform pipeline that codifies reactive Phase 2 fixes.
+
+---
+
+---
+
+## BL-047 — Tableau: audit should report formula complexity and effective migration rate
+
+**Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps A3, A4
+**Status:** Implemented — complexity distribution (Simple/Medium/Complex), realistic coverage estimate (subtracts orphans + circular + unresolvable), per-datasource breakdown
+
+### Problem
+
+The audit mode (Step A3/A4) classifies formulas by translation tier (Native, LOD,
+Pass-through, etc.) and reports cross-reference depth. But it does not capture:
+
+1. **Formula complexity** — a formula with 5 nested `if/then/else` and 3 cross-references
+   is much harder to migrate than a simple `SUM([col])`. The audit should report a
+   complexity distribution so users can estimate migration effort.
+
+2. **Effective migration rate vs audit promise** — the CPG Merch audit would have shown
+   high syntax-level coverage, but the actual migration rate was 73% (Model 1) and 54%
+   (Model 2) after accounting for orphan calcs, cross-reference inlining failures,
+   structural errors, and missing tables. The gap between "audit says migratable" and
+   "actually migrates" needs to be visible in the audit.
+
+3. **Blend + orphan impact on coverage** — the audit shows formula tiers per-datasource
+   but doesn't account for orphan calcs (BL-044) or blend post-aggregation risk (BL-045).
+   These should reduce the reported coverage number.
+
+### Proposed approach
+
+1. **Complexity scoring per formula.** Score based on: nesting depth, cross-reference
+   count, function count, operator count, string length. Report distribution:
+   `Simple (1-2) / Medium (3-5) / Complex (6+)`.
+
+2. **Effective coverage estimate.** After tier classification, subtract: orphan calcs
+   (BL-044), formulas with unresolvable circular deps, formulas requiring manual
+   structural fixes (broken if/else, missing args). Report both "syntax coverage" and
+   "effective coverage" with the gap explained.
+
+3. **Per-model breakdown.** When multiple datasources exist, report coverage per
+   datasource/model — not just workbook-wide. The CPG Merch tentpole datasource had 54%
+   effective coverage vs 73% for the main datasource; a combined number would hide this.
+
+---
+
+---
+
+## BL-048 — Tableau: user review checkpoint before formula import (Step 7.5 enhancement)
+
+**Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 7, 7.5
+**Status:** Implemented — Phase 1.5 checkpoint added between base model import and formula import (yes/search/no prompt)
+
+### Problem
+
+The current flow imports the base model (Phase 1), then immediately proceeds to formula
+import (Phase 2). The user has no opportunity to review the base model in ThoughtSpot
+(check table bindings, column types, join correctness) before formulas are added.
+
+The user observed that reviewing the base model in ThoughtSpot Search/Spotter before
+adding formulas would catch issues earlier and reduce costly Phase 2 retry cycles.
+
+### Proposed approach
+
+After Phase 1 import succeeds, add an explicit checkpoint:
+
+1. Provide the ThoughtSpot URL to the imported model
+2. Ask the user to verify: tables bound correctly, columns visible, joins working,
+   parameters present
+3. Only proceed to Phase 2 after user confirms
+
+This is already partially described in Step 7.5 ("Confirm the model is correct") but
+the current implementation doesn't pause between Phase 1 and Phase 2 in practice.
+
+---
+
+---
+
+## BL-049 — Tableau: Phase 2 pipeline performance and token cost
+
+**Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 5b, 7; ts-cli `ts tableau translate-formulas`
+**Status:** Implemented (ts-cli v0.17.0) — all 5 items complete. #1 deterministic CLI pipeline, #2 `validate_pre_import()`, #3 targeted retry (only re-import failing formulas), #4 context cache (preserve column registry/DAG between retries), #5 migration effort estimate in audit report
+**Priority:** HIGH
+
+### Problem
+
+The CPG Merch migration took over 1.5 hours and consumed significant tokens. Most of the
+wall-clock time was in Phase 2 (formula import): translating 161 formulas per model,
+retrying import errors, fixing structural issues, and re-importing. The retry cycle
+(translate → import → fail → diagnose → fix → re-import) is the dominant cost.
+
+This is distinct from BL-046 (determinism of individual transforms). Even with perfect
+transforms, the pipeline architecture itself has inefficiencies:
+
+1. **Per-formula LLM round-trips.** Each formula is translated individually with a separate
+   LLM call. Batching formulas (e.g., groups of 10-20 with shared context) would reduce
+   round-trips and allow the model to see cross-formula patterns.
+
+2. **Import-error-driven debugging.** The pipeline imports, waits for ThoughtSpot to report
+   errors, then fixes. A pre-validation step that catches syntax errors, missing refs, and
+   structural issues *before* import would eliminate most retry cycles.
+
+3. **Retry scope is too broad.** When one formula fails, the entire batch is often
+   re-evaluated. Isolating failures and only re-translating the broken formula would save
+   time.
+
+4. **Context re-computation.** Each retry rebuilds the full model context. Caching the model
+   state and column registry between retries would reduce per-cycle overhead.
+
+### Proposed approach
+
+| # | Change | Expected impact |
+|---|---|---|
+| 1 | Batch formula translation (10-20 per LLM call) | ~5-10x fewer round-trips |
+| 2 | Pre-import structural validation (syntax, refs, name clashes) | Eliminate ~60% of retry cycles |
+| 3 | Targeted retry (only failed formulas, not full batch) | ~3x faster error recovery |
+| 4 | Column/formula registry cache across retries | ~2x faster per-cycle |
+| 5 | Token budget estimation in audit report | User can decide scope before committing |
+
+### Relationship to other items
+
+- BL-046 (determinism) reduces the *number* of errors to fix
+- BL-047 (audit complexity) sets *expectations* about effort
+- BL-048 (user checkpoint) prevents wasted Phase 2 work on a bad base model
+- BL-049 (this) reduces the *cost of the pipeline itself* even when errors remain
+
+---
+
+---
+
+## BL-050 — Tableau: codify Phase 2 reactive fixes as systematic pre-transforms
+
+**Source:** CPG Merch Promotion Performance Phase 2 summary (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 5b, 7; ts-cli `ts tableau translate-formulas`;
+  agents/shared/mappings/tableau/tableau-formula-translation.md
+**Status:** Implemented (ts-cli v0.17.0) — all 9 transforms complete. Cross-ref inlining, END stripping, if/then/else validation, ifnull stripping (default-on), sum_if conversion (default-on), operator spacing, rank() completion, physical ref resolution, name clash detection + auto-rename.
+**Priority:** HIGH
+
+### Problem
+
+During the CPG Merch Phase 2 import, several fixes were applied **reactively** after import
+failures — fixes that should be **systematic pre-transforms** applied before the first
+import attempt. These are not hypothetical: they were discovered and manually applied
+during a real migration, and they will recur on every Tableau workbook with similar
+patterns.
+
+The reactive fixes from the migration summary:
+
+1. **Cross-formula reference inlining.** ThoughtSpot TML import does NOT resolve
+   formula-to-formula references — even when the target formula exists in the same model.
+   All `[Other Formula]` references must be inlined (expanded to the target formula's
+   expression) before import. The `ts tableau translate-formulas` command performs
+   topological-sort inlining, but in this migration it was invoked late (after initial
+   import failures). It must be the **first** transform, not a retry fix.
+
+2. **Tableau `end` keyword stripping.** Tableau `IF...THEN...END` uses `END` as a
+   terminator. ThoughtSpot formulas are self-terminating (no `end`). The pipeline should
+   strip trailing `end` keywords after translating `if/then/else` structure. This was
+   a recurring fix in Phase 2.
+
+3. **Dangling `else` at wrong nesting level.** Complex nested `if/then/else` expressions
+   sometimes have an `else` that belongs to an outer `if` but is positioned at an inner
+   nesting level. The pipeline needs a structural validation pass that matches each
+   `if/then/else` triad and flags orphaned `else` clauses before import.
+
+4. **Table-qualified refs use display name, not column_id.** In model formulas,
+   `[TABLE::COLUMN]` uses the **display name** of both the table and the column — not the
+   `column_id` or `db_column_name`. When a physical column has been renamed in the model
+   (e.g., `SALES` → `PM SALES`), refs must use the new display name. The pipeline must
+   resolve refs against the model's column registry, not the raw datasource column names.
+
+5. **Duplicate column name detection at model construction.** Physical column `SALES` and
+   formula column `Sales` collide case-insensitively in ThoughtSpot. This was detected
+   at import time and fixed by renaming the formula column. Detection should happen at
+   model construction (Step 5) with auto-rename, not at import (Step 7).
+
+6. **Parameter name sanitisation.** ThoughtSpot parameter names cannot contain `/`, `\`,
+   or other special characters. Tableau parameter `Platform/Placement` → rename to
+   `Platform Placement` (or similar). Apply during Step 5 parameter creation; update all
+   formula references to use the sanitised name. In the CPG Merch migration, 1 formula
+   was excluded solely because its parameter name contained `/`.
+
+### Key finding (invariant)
+
+**ThoughtSpot TML import does not resolve formula cross-references.** This is an import
+engine limitation, not a skill bug. Document in:
+- `agents/shared/schemas/thoughtspot-model-tml.md` — add to the invariants list
+- `agents/shared/mappings/tableau/tableau-tml-rules.md` — add as a TML generation rule
+- `agents/cli/ts-convert-from-tableau/SKILL.md` Step 5b — confirm inlining is mandatory
+
+### Proposed transform order
+
+These pre-transforms should run in this sequence (each depends on prior):
+
+```
+1. Cross-formula inlining (topological sort + expand)
+2. Tableau `end` keyword stripping
+3. if/then/else structural validation (match triads, flag orphans)
+4. ifnull stripping (optional, per user pref — see BL-046 #1)
+5. IF/THEN/END → sum_if conversion (optional — see BL-046 #2)
+6. Operator spacing normalization
+7. rank() argument completion
+8. Physical ref → table-qualified display name resolution
+9. Column/formula name clash detection + auto-rename
+```
+
+Steps 1–3 are structural (must happen). Steps 4–5 are optional (prompt user). Steps 6–9
+are deterministic cleanup (always apply).
+
+---
+
+---
+
+## BL-051 — Tableau: eliminate unnecessary metadata fetching when connection is known
+
+**Source:** CPG Merch Promotion Performance migration observations (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 3.5, 4, 4.5
+**Status:** Implemented — #1 Tableau API progress label, #2 T (trust) connection option, #3+#4 compound prompt (connection + db + schema in one question)
+**Priority:** MEDIUM
+
+### Problem
+
+During the CPG Merch migration, the user provided the connection name early in the
+process, yet the skill still performed metadata searches or connection schema fetches
+that added wall-clock time. The SKILL.md has guardrails (Step 4 "ask before searching",
+Step 4.5 N/F/L prompt, `ts connections get` as last-resort fallback), but there are gaps
+in the fast path:
+
+1. **sqlproxy resolution (Step 3.5) is opaque.** When the TWB has published datasources,
+   the skill queries the Tableau API to resolve columns. This is necessary, but the user
+   doesn't know whether it's searching *Tableau* or *ThoughtSpot*. The progress feedback
+   doesn't distinguish between the two, so it feels like unnecessary ThoughtSpot searching.
+
+2. **Connection validation requires `ts connections list`.** Even when the user types the
+   exact connection name (N path), the skill runs `ts connections list` to validate it
+   exists. On an instance with many connections, this adds latency. When the user is
+   *certain* of the name, an option to skip validation and use it directly would be faster
+   (the import will fail cleanly if the name is wrong).
+
+3. **db/schema confirmation could be earlier.** The TWB parse (Step 3) already extracts
+   `{db}.{schema}.{table}` paths. If the user could confirm these paths *at the same time*
+   as answering E/N/? (Step 4a), the skill could skip the entire Step 4.5 db/schema
+   confirmation loop when paths are confirmed.
+
+4. **No "I'll provide everything" fast path.** A power user who knows the connection name,
+   db, schema, and that tables don't exist should be able to provide all four in one prompt
+   and skip Steps 4a–4.5 entirely. The current flow asks 3–4 sequential questions when one
+   compound prompt would suffice.
+
+### Proposed approach
+
+| # | Change | Impact |
+|---|---|---|
+| 1 | Add progress labels: "Querying Tableau API (not ThoughtSpot)…" in Step 3.5 | Clarity — user knows what's happening |
+| 2 | Add a "T — trust the name" option alongside N/F/L for connection selection | Skip `ts connections list` when user is certain |
+| 3 | Merge Step 4a + db/schema confirmation into one compound prompt | Eliminate one round-trip for the N (create) path |
+| 4 | Add a "power user" compound prompt for N path: connection + db + schema in one question | Skip 3 sequential prompts for users who know their setup |
+
+### Compound prompt example (N path)
+
+```
+Source tables ({N} total): TABLE_A, TABLE_B, TABLE_C
+
+These tables don't exist yet — I'll create Table TMLs for them.
+
+Connection: ____________  (exact ThoughtSpot connection name)
+Database:   ____________  (or press Enter to use '{twb_extracted_db}')
+Schema:     ____________  (or press Enter to use '{twb_extracted_schema}')
+```
+
+This replaces: Step 4a (E/N/?) → Step 4.5 (E/C?) → Step 4.5 N/F/L → Step 4.5 db/schema
+confirmation — four prompts collapsed to one.
+
+---
+
+---
+
+## BL-052 — Tableau: translate no-keyword LOD expressions ({AGG([col])})
+
+**Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 3, 5b, A3, A4, 12;
+  ts-cli `ts tableau translate-formulas`;
+  agents/shared/mappings/tableau/tableau-formula-translation.md
+**Status:** Implemented (ts-cli v0.17.0) — `convert_no_keyword_lod()` pre-transform P2
+**Priority:** HIGH
+
+### Problem
+
+No-keyword LOD expressions like `{COUNTD([PROMOTION_ID])}` and `{MAX([COL])}` are
+currently classified as untranslatable ("raw LOD braces") and excluded from the
+formula translation pipeline. In the CPG Merch migration this excluded 5 formulas
+directly plus 2 dependents — all of which are translatable.
+
+The mapping reference (`tableau-formula-translation.md`) already documents the
+no-keyword LOD → `group_aggregate(..., {}, query_filters())` pattern (updated
+2026-06-27), but the `ts tableau translate-formulas` command and the Step A3 classifier
+do not recognise the pattern.
+
+### Semantic caveat
+
+No-keyword LODs are translatable but **not semantically identical**. Tableau computes
+them after dimension filters but before table-calc filters — a specific point in
+Tableau's order of operations with no exact ThoughtSpot equivalent. The translation
+uses `query_filters()` as the closest match, but results may differ in edge cases.
+
+Every no-keyword LOD formula must be flagged for user review in both the audit (Step A4)
+and migration report (Step 12). This is already documented in the mapping reference and
+the SKILL.md — the implementation just needs to follow through.
+
+### What to implement
+
+1. **Step A3 classifier** — recognise `{AGG([col])}` (where AGG is any of COUNTD, COUNT,
+   SUM, AVG, MAX, MIN, MEDIAN, ATTR) as the "LOD → group_agg" tier, not untranslatable.
+   Detection regex: `\{(COUNTD|COUNT|SUM|AVG|MAX|MIN|MEDIAN|ATTR)\s*\(` (no FIXED/
+   INCLUDE/EXCLUDE keyword before the aggregate).
+
+2. **`ts tableau translate-formulas`** — add a transform step that converts `{AGG([col])}`
+   to `group_aggregate(ts_agg([table::col]), {}, query_filters())`, mapping Tableau
+   aggregate names to ThoughtSpot equivalents (COUNTD → unique_count, AVG → average,
+   etc.).
+
+3. **Step A4 audit report** — the "Needs Review" section (added 2026-06-27) lists these.
+   Implementation must populate it from the classifier output.
+
+4. **Step 12 migration report** — the "Needs review — no-keyword LOD formulas" section
+   (added 2026-06-27) lists each with original/translated expression and what to verify.
+
+### Aggregate mapping
+
+| Tableau | ThoughtSpot |
+|---|---|
+| `COUNTD` | `unique_count` |
+| `COUNT` | `count` |
+| `SUM` | `sum` |
+| `AVG` | `average` |
+| `MAX` | `max` |
+| `MIN` | `min` |
+| `MEDIAN` | `median` |
+| `ATTR` | `max` (ATTR returns the value if all rows agree — `max` is the closest) |
+
+---
+
+---
+
+## BL-053 — Tableau: migration report must include excluded formulas and review flags
+
+**Source:** CPG Merch Promotion Performance migration (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 12, A4
+**Status:** Implemented — Step 12 and Step A4 report templates updated with Excluded Formulas (grouped by root cause) and Formulas Needing Review (5 categories) sections
+**Priority:** HIGH
+
+### Problem
+
+The Step 12 migration report has a formula mapping table (every calc field with status
+✅/◑/⊘), but it lacks two dedicated sections that a user needs for post-migration work:
+
+1. **Excluded formulas with reasons.** During the CPG Merch migration an `excluded_formulas.md`
+   was created ad-hoc. This should be a standard part of every migration report — grouped
+   by root cause, with the Tableau expression and a potential resolution for each category.
+
+2. **Formulas that need review.** No-keyword LODs, blend-context formulas, formulas where
+   `query_filters()` vs `{}` was a judgement call, pass-through SQL formulas — these are
+   migrated but the user must verify they produce correct results. Currently they appear
+   in the formula mapping table as ✅ with no flag. They need a separate "Needs Review"
+   section with the specific question the user should answer for each one.
+
+### Proposed report structure
+
+```markdown
+## Excluded Formulas
+
+{N} formulas were not migrated. Grouped by root cause:
+
+### {Root cause category} ({N} formulas)
+
+| # | Formula Name | Tableau Expression | Potential Resolution |
+|---|---|---|---|
+| 1 | {name} | {expr} | {what the user can do} |
+
+Root cause summary:
+| Root Cause | Count | Potential Resolution |
+|---|---|---|
+| Missing table in model | {N} | Add tables or restructure model |
+| Complex date arithmetic | {N} | Rewrite with TS date functions or pre-compute |
+| ... | ... | ... |
+
+## Formulas Needing Review
+
+{N} formulas were migrated but require user verification:
+
+| # | Formula Name | Reason for Review | What to Verify |
+|---|---|---|---|
+| 1 | Level CPG Category | No-keyword LOD — filter context may differ | Test with/without filters applied |
+| 2 | {name} | Pass-through SQL | Confirm SQL passthrough is enabled |
+```
+
+### What counts as "needs review"
+
+| Category | Flag text |
+|---|---|
+| No-keyword LOD (`{AGG([col])}`) | Filter context may differ from Tableau — test with/without search filters |
+| Blend-context formula (BL-045) | Row-level join may produce different aggregation than Tableau's post-agg blend |
+| Pass-through SQL (`sql_*_aggregate_op`) | Requires SQL Passthrough Functions enabled on the cluster |
+| `ifnull` stripping (if applied) | NULL handling now deferred to ThoughtSpot query engine — verify nulls display correctly |
+| `sum_if` rewrite (if applied) | Simplified from if/then/else — verify aggregation matches |
+
+---
+
+---
+
+## BL-054 — Tableau: date arithmetic operator rewrite (DATE()+N → add_days)
+
+**Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
+**Affects:** ts-convert-from-tableau Step 5b; ts-cli `ts tableau translate-formulas`;
+  agents/shared/mappings/tableau/tableau-formula-translation.md
+**Status:** Implemented (ts-cli v0.17.0) — `rewrite_date_arithmetic()` pre-transform P4 + `--date-columns` CLI option
+**Priority:** HIGH
+
+### Problem
+
+Tableau allows arithmetic operators on dates: `DATE([col]) + 1` adds one day,
+`[date_col] - 7` subtracts seven days. ThoughtSpot does not support `+` or `-` on date
+types — these must be rewritten to `add_days()`.
+
+In the CPG Merch migration, the "Start Date" formula used `DATE([START_DATE_CAMPAIGN])+1`
+inside a `datediff('hour', ...)` conditional. This was classified as "complex date
+arithmetic" and excluded, but the only untranslatable element was the `+1` on a date — the
+rest (`datediff`, `dateadd`, `IF/THEN/ELSE`) all have direct mappings.
+
+This pattern is common in Tableau workbooks. It blocked 1 formula directly and 13 more
+transitively (the entire Promo Period filter chain depended on it).
+
+### Scope
+
+The transform must handle:
+
+| Tableau pattern | ThoughtSpot |
+|---|---|
+| `DATE([col]) + N` | `add_days ( date ( [t::col] ) , N )` |
+| `DATE([col]) - N` | `add_days ( date ( [t::col] ) , -N )` |
+| `[date_col] + N` | `add_days ( [t::date_col] , N )` |
+| `[date_col] - N` | `add_days ( [t::date_col] , -N )` |
+
+Detection: a `+` or `-` operator where one side is a date-typed column or `DATE()` call
+and the other is a numeric literal. Do not rewrite `+`/`-` between two numbers — only
+date±integer patterns.
+
+### Where it fits in BL-050 transform order
+
+This should run as part of step 6 (operator normalisation) in the BL-050 pre-transform
+pipeline, after structural validation but before column reference qualification:
+
+```
+...
+5. IF/THEN/END → sum_if conversion (optional)
+6. Operator normalisation — spacing + date arithmetic rewrite   ← here
+7. rank() argument completion
+...
+```
+
+### Relationship to other items
+
+- BL-050 item #6 (operator spacing) — this extends that step with date-specific rewrites
+- BL-052 (no-keyword LOD) — 2 of the 14 "date arithmetic" formulas were actually blocked
+  by no-keyword LODs, not date functions
+- The 4 "date range comparison" formulas were blocked by Custom SQL Query alias resolution
+  (a Step 3 parsing issue, not a formula translation issue)
+
+---
+
+---
+
+## BL-055 — Tableau: detect and translate scalar MAX(a,b) / MIN(a,b)
+
+**Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 5b, A3;
+  ts-cli `ts tableau translate-formulas`;
+  agents/shared/mappings/tableau/tableau-formula-translation.md
+**Status:** Implemented (ts-cli v0.17.0) — `convert_scalar_max_min()` pre-transform P3
+**Priority:** HIGH
+
+### Problem
+
+Tableau's `MAX()` and `MIN()` are overloaded — one-arg is aggregate, two-arg is scalar
+(returns the greater/lesser of two values). ThoughtSpot only has aggregate `max()` /
+`min()`. The pipeline does not distinguish the two forms, so scalar `MAX(expr, 0)` is
+either passed through as aggregate `max()` (wrong) or flagged as untranslatable.
+
+In the CPG Merch migration, 4 formulas were excluded as "Scalar MAX(expr, 0)". On
+review, only 1 (Forecasted Sales) actually used scalar `MAX(a, 0)`. The other 3 used
+aggregate `MAX()` inside FIXED LOD expressions and were misclassified — their real
+blocker was no-keyword LOD recognition (BL-052).
+
+### What to implement
+
+1. **Argument-count detection in `ts tableau translate-formulas`.** Count top-level
+   arguments (commas not inside nested parens/brackets). 2 args → scalar rewrite;
+   1 arg → aggregate `max()` / `min()`.
+
+2. **`MAX(expr, 0)` / `MIN(expr, 0)` special case.** When the second arg is `0`, add
+   `else 0` to the inner expression instead of wrapping in `if (expr > 0) then expr
+   else 0` — avoids duplicating the expression tree. Already documented in the mapping
+   reference ("Scalar MAX/MIN detection" section, added 2026-06-27).
+
+3. **General case `MAX(a, b)`.** Rewrite to `if (a > b) then a else b`. For `MIN(a, b)`
+   → `if (a < b) then a else b`.
+
+4. **Step A3 classifier.** Stop classifying two-arg `MAX`/`MIN` as untranslatable. Route
+   to the "Native" tier.
+
+### Mapping (already in tableau-formula-translation.md)
+
+| Tableau | ThoughtSpot | Notes |
+|---|---|---|
+| `MAX(a, b)` (2-arg) | `if ( a > b ) then a else b` | General case |
+| `MIN(a, b)` (2-arg) | `if ( a < b ) then a else b` | General case |
+| `MAX(expr, 0)` | Add `else 0` to inner expr | Preferred simplification |
+| `MAX([col])` (1-arg) | `max ( [t::col] )` | Aggregate — unchanged |
+
+---
+
+---
+
+## BL-056 — Tableau: strip // line comments and handle // inside string literals
+
+**Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 3, 5b, A3;
+  ts-cli `ts tableau translate-formulas`
+**Status:** Implemented (ts-cli v0.17.0) — `strip_comments()` pre-transform P0
+**Priority:** MEDIUM
+
+### Problem
+
+Tableau formulas support `//` as a line comment. The pipeline treated `//` as an
+unsupported operator and excluded 3 formulas:
+
+- **ISR 30D / ISR 60D** — `[Lift] / [Cost] //SUM([Redemption Cost])`. The `//` is a
+  commented-out alternative denominator. The actual formula is a simple division.
+- **Link** — `'https://coda.io/...'`. The `//` is inside a string literal (URL), not a
+  comment or operator.
+
+All 3 are translatable once `//` is handled correctly.
+
+### What to implement
+
+Add a comment-stripping pre-parse step in `ts tableau translate-formulas`:
+
+1. **Strip `//` line comments** — remove `//` and everything after it to end of line,
+   but only when `//` is NOT inside a string literal (single or double quotes).
+2. **Preserve `//` inside string literals** — URLs and other string constants must not
+   be modified.
+
+Detection: scan left-to-right tracking quote state. When `//` is encountered outside
+quotes, truncate the line there. Inside quotes, leave as-is.
+
+```python
+def strip_tableau_comments(formula):
+    result = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(formula):
+        c = formula[i]
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        elif c == '/' and i + 1 < len(formula) and formula[i+1] == '/' \
+                and not in_single and not in_double:
+            # Skip to end of line
+            newline = formula.find('\n', i)
+            if newline == -1:
+                break
+            i = newline
+            continue
+        result.append(c)
+        i += 1
+    return ''.join(result)
+```
+
+### Where it fits in BL-050 transform order
+
+This should be step 0 — before any other transform, including cross-formula inlining:
+
+```
+0. Strip Tableau // line comments              ← here (new)
+1. Cross-formula inlining (topological sort)
+2. Tableau `end` keyword stripping
+...
+```
+
+---
+
+---
+
+## BL-057 — Tableau: resolve Custom SQL Query aliases to model table names
+
+**Source:** CPG Merch Promotion Performance excluded formulas review (2026-06-27)
+**Affects:** ts-convert-from-tableau Steps 3, 3.5, 5b;
+  ts-cli `ts tableau translate-formulas`
+**Status:** Implemented (ts-cli v0.17.0) — `rewrite_csq_aliases()` + `build_csq_column_map()` + `--csq-map` CLI option
+**Priority:** HIGH
+
+### Problem
+
+When a Tableau datasource uses Custom SQL Queries as its relations (common with published
+datasources), calculated fields reference columns with the query alias suffix:
+`[DATE (Custom SQL Query8)]`, `[CATEGORY (Custom SQL Query8)]`. During migration,
+Step 3/3.5 resolves the sqlproxy datasource to physical tables (e.g. FORECAST,
+DAILY_METRICS), but the **formula column references retain the Custom SQL Query alias**.
+The formula pipeline can't match `[DATE (Custom SQL Query8)]` to any model column and
+excludes the formula as untranslatable.
+
+In the CPG Merch migration, this excluded 6 formulas directly — all of which are
+translatable once the alias is resolved. Custom SQL Query8 maps 100% to the FORECAST
+table (all 5 columns: CATEGORY, DATE, LEVEL, PERIOD_TYPE, PROMOTION_ID). Custom SQL
+Query6 maps to DAILY_METRICS (DATE, PROMOTION_ID).
+
+### What to implement
+
+1. **Step 3 — build Custom SQL Query → table mapping.** During TWB parsing, for each
+   datasource, extract the `<relation>` elements that define Custom SQL Queries and match
+   their columns against the resolved table set. Use column-overlap scoring (as verified
+   above: 100% match = definitive, 60%+ = likely, <50% = ambiguous → prompt user).
+
+2. **Step 5b / translate-formulas — alias rewriting.** Before formula translation, rewrite
+   `[COL (Custom SQL Query N)]` → `[TABLE::COL]` using the mapping from Step 3. This runs
+   before cross-reference resolution (step 1 in BL-050) since inlined formulas may also
+   contain these aliases.
+
+3. **Step A3/A4 — stop classifying as untranslatable.** Formulas with Custom SQL Query
+   aliases should be reclassified based on their *resolved* expression, not the raw alias.
+
+### Detection and mapping heuristic
+
+```python
+# For each Custom SQL Query, find all columns it contains
+# (from <metadata-record> elements with local-name containing "Custom SQL Query")
+csq_columns = extract_csq_columns(datasource)
+
+# Match against model tables by column overlap
+for csq_name, csq_cols in csq_columns.items():
+    best_match = None
+    best_score = 0
+    for table_name, table_cols in model_tables.items():
+        overlap = set(csq_cols) & set(table_cols)
+        score = len(overlap) / len(csq_cols)
+        if score > best_score:
+            best_match = table_name
+            best_score = score
+    if best_score >= 0.8:
+        csq_to_table[csq_name] = best_match  # definitive
+    elif best_score >= 0.5:
+        # prompt user to confirm
+        pass
+```
+
+### CPG Merch mappings (verified)
+
+| Custom SQL Query | Model Table | Match | Key Columns |
+|---|---|---|---|
+| Custom SQL Query8 | FORECAST | 5/5 (100%) | CATEGORY, DATE, LEVEL, PERIOD_TYPE, PROMOTION_ID |
+| Custom SQL Query6 | DAILY_METRICS | 2/2 (100%) | DATE, PROMOTION_ID |
+| Custom SQL Query1 | PROMOTION_METRICS | 3/3 (100%) | LEVEL, PROMOTION_ID, UPDATED_AT |
+| Custom SQL Query3 | CATEGORY_SHARE | 3/3 (100%) | CPG_NAME, LEVEL, PERIOD_TYPE |
+
+---
