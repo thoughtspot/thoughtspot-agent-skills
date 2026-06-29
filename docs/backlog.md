@@ -2656,12 +2656,12 @@ docs and the current product state.
 ### High-severity (parse errors or silent data loss on current builds)
 
 1. **`nulls_position` → `null_order`** — **FIXED** (PR #136). Renamed in all 9 occurrences.
-2. **`fields:` is canonical; `dimensions:` is backward-compat** — **FIXED** (PR #TBD).
+2. **`fields:` is canonical; `dimensions:` is backward-compat** — **FIXED** (PR #137).
    Parser now checks `fields:` first, falls back to `dimensions:`. Schema doc updated.
    Overlaps BL-032 (broader v0.1 retirement remains open).
-3. **Window `offset` requires Runtime 18.1** — **FIXED** (PR #TBD). Runtime gate
+3. **Window `offset` requires Runtime 18.1** — **FIXED** (PR #137). Runtime gate
    documented in schema, SKILL.md, and mapping rules. Warning emitted in to-databricks.
-4. **`cardinality:` join field undocumented** — **FIXED** (PR #TBD). Schema documents
+4. **`cardinality:` join field undocumented** — **FIXED** (PR #137). Schema documents
    `cardinality:` as Runtime 18.1+ alternative to `rely:`. Parser extended to handle both.
 
 ### Medium-severity (stale claims, schema gaps)
