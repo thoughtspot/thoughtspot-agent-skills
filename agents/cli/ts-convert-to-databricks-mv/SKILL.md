@@ -686,7 +686,12 @@ measures:
         range: current
 ```
 
-**Period filter (flow metrics) → `order:` truncated period:**
+**Period filter (flow metrics) → `order:` truncated period (requires Runtime 18.1+ for `offset`):**
+
+> **Runtime gate:** Measures with `offset` require **Runtime 18.1+**. If the target
+> warehouse runs Runtime 17.3, warn the user that period-over-period measures will cause
+> `PARSE_SYNTAX_ERROR` and offer to omit `offset` (the base current-period measure without
+> `offset` still works on 17.3).
 
 ```yaml
 # sum_if(diff_months([date], today()) = 0, [m]) → current month
