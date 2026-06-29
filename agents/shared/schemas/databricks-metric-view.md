@@ -182,6 +182,11 @@ multi-source join support. **Use v1.1 even for single-source MVs** — it suppor
 
 ### Schema — Single Source (v1.1)
 
+> **`fields:` vs `dimensions:` (GA 2026-04).** The GA YAML reference uses `fields:`
+> as the canonical key for dimension columns. `dimensions:` is accepted as a backward-
+> compatible alias. Parsers must check for `fields:` first, falling back to `dimensions:`.
+> The `to-databricks` direction continues emitting `dimensions:` (accepted by all runtimes).
+
 ```yaml
 version: 1.1                        # Required. "1.1" for rich metadata.
 comment: >-                         # Optional. View-level description.
@@ -191,7 +196,7 @@ source: catalog.schema.table_name   # Single-source mode — same as v0.1.
 
 filter: <sql_boolean_expression>    # Optional. Global WHERE clause.
 
-dimensions:
+dimensions:                         # GA canonical key is `fields:`; `dimensions:` accepted for backward compat.
   - name: <identifier>              # Required. Machine-readable identifier.
     expr: <sql_expression>          # Required. SQL expression or column reference.
     display_name: '<label>'         # Optional. Human-readable label.
@@ -226,8 +231,12 @@ joins:                              # Optional. Dimension table joins.
   - name: <alias>                   # Required. Alias used in expr references.
     source: <catalog.schema.dim>    # Required. Fully qualified dimension table.
     "on": source.<fk> = <alias>.<pk>  # Required. Join condition.
-    rely:                           # Optional. Cardinality hint for query optimizer.
+    rely:                           # Optional. Cardinality hint (pre-18.1 syntax).
       at_most_one_match: true       # Declares many-to-one relationship.
+    cardinality: many_to_one        # Optional (Runtime 18.1+). Alternative to rely: block.
+                                    # Values: many_to_one, one_to_many.
+                                    # Equivalent: cardinality: many_to_one ↔ rely: { at_most_one_match: true }.
+                                    # When both are present, cardinality: takes precedence.
     joins:                          # Optional. NESTED sub-joins under this join.
       - name: <sub_alias>
         source: <catalog.schema.sub_dim>
@@ -237,7 +246,7 @@ joins:                              # Optional. Dimension table joins.
 
 filter: <sql_boolean_expression>    # Optional. Uses alias.column or source.column syntax.
 
-dimensions:
+dimensions:                         # GA canonical key is `fields:`; `dimensions:` accepted for backward compat.
   - name: <identifier>
     expr: <alias>.<column>          # References use join alias prefix (dot-path for nested).
     display_name: '<label>'
@@ -296,8 +305,16 @@ joins:
 - `orders.customers.COL` — nested join column (through orders)
 - `products.category.COL` — nested join column (through products)
 
-**`rely: { at_most_one_match: true }`** declares a many-to-one cardinality hint,
-telling the optimizer each fact row matches at most one dimension row.
+**Cardinality hints** tell the optimizer each fact row matches at most one dimension
+row. Two equivalent syntaxes exist:
+
+| Syntax | Runtime | Example |
+|---|---|---|
+| `rely: { at_most_one_match: true }` | All (pre-18.1 and later) | Original syntax |
+| `cardinality: many_to_one` | 18.1+ only | GA-era alternative; also supports `one_to_many` |
+
+When both `rely:` and `cardinality:` are present on the same join, `cardinality:`
+takes precedence. Parsers must check `cardinality:` first, falling back to `rely:`.
 
 **Sibling-level references do NOT work.** A join's `on` clause cannot reference
 another join at the same level — only `source` or the parent join alias. Nesting
@@ -331,7 +348,11 @@ measures:
 | `currency` | `currency_code`, `decimal_places` | ISO 4217 code (USD, EUR, etc.) |
 | `percentage` | `decimal_places` | Value is multiplied by 100 for display |
 
-### Window with Offset — Period-over-Period (verified 2026-05-26)
+### Window with Offset — Period-over-Period (verified 2026-05-26; requires Runtime 18.1+)
+
+> **Runtime gate:** The `offset` property requires **Runtime 18.1+**. On Runtime 17.3,
+> MVs with `offset` in a `window:` entry cause `PARSE_SYNTAX_ERROR`. The base `window:`
+> syntax (`order`, `range`, `semiadditive`) works on Runtime 17.3+; only `offset` is gated.
 
 The `window:` field supports an `offset` property for period comparisons:
 
@@ -445,7 +466,7 @@ Without `MEASURE()`, the query fails with `METRIC_VIEW_MISSING_MEASURE_FUNCTION`
 | Column fields | `name`, `expr`, `window` only | + `display_name`, `comment`, `synonyms`, `format:` |
 | View-level comment | Not supported | `comment:` at top level |
 | Column references | Direct column name | Direct (single-source) or `alias.column` dot-path (multi-source) |
-| Joins | Not supported | Nested `joins:` with `rely: { at_most_one_match: true }` — star schema support |
+| Joins | Not supported | Nested `joins:` with `rely:` or `cardinality:` (18.1+) — star schema support |
 | LOD | Not available | Dimension window functions: `AGG() OVER (PARTITION BY ...)` |
 | Cross-measure refs | Not available | `MEASURE(name)` in measure `expr` |
 | Semi-additive | `window` with `semiadditive` | Same — `semiadditive` required in both versions |
