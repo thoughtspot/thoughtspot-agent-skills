@@ -316,6 +316,10 @@ ThoughtSpot `sum_if` patterns with `diff_months`/`diff_quarters`/`diff_years` ma
 metrics (revenue, quantity) where `range: current` means "filter to the current
 period."
 
+> **Runtime gate:** Measures with `offset` require **Runtime 18.1+**. On Runtime 17.3,
+> `offset` causes `PARSE_SYNTAX_ERROR`. The base current-period measure (no `offset`)
+> works on 17.3+.
+
 | ThoughtSpot formula | MV `window` |
 |---|---|
 | `sum_if(diff_months([date], today()) = 0, [m])` | `window: [{order: month_dim, semiadditive: last, range: current}]` |

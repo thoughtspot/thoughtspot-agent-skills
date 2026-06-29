@@ -33,7 +33,7 @@ The `View Text` value is a YAML string. Parse it to extract:
 - `version` — determines v0.1 (single-source) vs v1.1 (multi-source) path
 - `source` — fully qualified source table name (v0.1)
 - `entities` — list of source tables with aliases (v1.1)
-- `dimensions` — list of dimension definitions
+- `fields` or `dimensions` — list of dimension definitions (`fields:` is the GA-canonical key; `dimensions:` is accepted for backward compat — check `fields` first)
 - `measures` — list of measure definitions
 - `filter` — optional global filter expression
 
@@ -422,7 +422,15 @@ model_tables:
     name: DM_CUSTOMER
 ```
 
-**`rely: { at_most_one_match: true }`** → `cardinality: MANY_TO_ONE` in ThoughtSpot.
+**Cardinality mapping** — two MV syntaxes, same ThoughtSpot output:
+
+| MV syntax | ThoughtSpot join `cardinality:` |
+|---|---|
+| `rely: { at_most_one_match: true }` | `MANY_TO_ONE` |
+| `cardinality: many_to_one` (Runtime 18.1+) | `MANY_TO_ONE` |
+| `cardinality: one_to_many` (Runtime 18.1+) | `ONE_TO_MANY` |
+
+When both `rely:` and `cardinality:` are present, `cardinality:` takes precedence.
 
 ### Column References in v1.1
 
