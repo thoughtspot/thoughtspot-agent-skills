@@ -67,6 +67,7 @@ Two scenarios are supported:
 | `measures[].window` with `range: cumulative` | `cumulative_sum([m], [date])` |
 | `measures[].expr` with `FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` conditional aggregate (e.g., `sum_if`, `unique_count_if`) |
 | `COUNT(*)` | Formula: `count ( 1 )` |
+| `fields[]` (GA alias for `dimensions[]`) | Same mapping as `dimensions[]` above — `fields:` is checked first, `dimensions:` is the fallback |
 | Growth % (MoM, QoQ, YoY) | Inline `sum_if` expressions for both periods — cross-formula refs not supported during TML import |
 | `joins:` (nested hierarchy) | One Table TML per source; model `joins[]` from parent→child hierarchy |
 | `filter:` (any) | Boolean formula column `[MV Filter]` — users apply `[MV Filter] = true`. Always create, never description-only. |
@@ -308,7 +309,7 @@ mv_yaml = yaml.safe_load(yaml_string)
 version = mv_yaml.get("version", "0.1")
 source_fqn = mv_yaml.get("source", "")          # fact table FQN
 joins = mv_yaml.get("joins", [])                  # v1.1: nested dimension joins
-dimensions = mv_yaml.get("dimensions", [])
+dimensions = mv_yaml.get("fields", mv_yaml.get("dimensions", []))  # GA uses fields:; dimensions: is backward compat
 measures = mv_yaml.get("measures", [])
 mv_filter = mv_yaml.get("filter", "")
 ```
@@ -427,13 +428,18 @@ def walk_joins(join_list, parent_alias="source"):
         alias = j["name"]
         source_fqn = j["source"]
         on_clause = j["on"]
+        cardinality_field = j.get("cardinality", "")       # Runtime 18.1+: "many_to_one" or "one_to_many"
         rely = j.get("rely", {})
+        if cardinality_field:
+            many_to_one = cardinality_field == "many_to_one"
+        else:
+            many_to_one = rely.get("at_most_one_match", False)
         tables.append({
             "alias": alias,
             "source": source_fqn,
             "on": on_clause,
             "parent": parent_alias,
-            "many_to_one": rely.get("at_most_one_match", False),
+            "many_to_one": many_to_one,
         })
         # Recurse into nested sub-joins
         sub_joins = j.get("joins", [])
@@ -516,6 +522,11 @@ underlying physical column. Formula references in `moving_sum`'s sort position f
 with a `⚠ WINDOW` marker so the user can verify the translation is correct. Window
 semantics (daily grain assumption, offset direction, period boundaries) vary between
 platforms and are the most likely source of subtle data mismatches.
+
+**Runtime note:** If the source MV uses `offset` in any `window:` entry, the MV was
+authored on a Runtime 18.1+ warehouse. This has no impact on the `from-databricks`
+parser (it reads what exists), but note it in the review checkpoint for the user's
+awareness.
 
 **Why COUNT_DISTINCT is a formula, not a simple aggregate:** Using `aggregation: COUNT_DISTINCT`
 on a direct `column_id` causes ThoughtSpot to silently override `column_type: MEASURE` to
