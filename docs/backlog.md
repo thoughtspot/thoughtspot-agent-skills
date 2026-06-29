@@ -2655,16 +2655,14 @@ docs and the current product state.
 
 ### High-severity (parse errors or silent data loss on current builds)
 
-1. **`nulls_position` → `null_order`** — wrong Snowflake YAML field name in 8 locations
-   across 4 files. Semi-additive metric conversions will break when Snowflake tightens
-   YAML validation. Mechanical rename.
-2. **`fields:` is canonical; `dimensions:` is backward-compat** — Databricks parser
-   only recognizes `dimensions:`, missing all MVs authored with the GA-preferred `fields:`.
-   Overlaps BL-032.
-3. **Window `offset` requires Runtime 18.1** — documented as 17.3-compatible. Users on
-   17.3 get `PARSE_SYNTAX_ERROR` for period-over-period measures.
-4. **`cardinality:` join field undocumented** — `many_to_one`/`one_to_many` (Runtime 18.1+).
-   Parser has no handling for this construct.
+1. **`nulls_position` → `null_order`** — **FIXED** (PR #136). Renamed in all 9 occurrences.
+2. **`fields:` is canonical; `dimensions:` is backward-compat** — **FIXED** (PR #TBD).
+   Parser now checks `fields:` first, falls back to `dimensions:`. Schema doc updated.
+   Overlaps BL-032 (broader v0.1 retirement remains open).
+3. **Window `offset` requires Runtime 18.1** — **FIXED** (PR #TBD). Runtime gate
+   documented in schema, SKILL.md, and mapping rules. Warning emitted in to-databricks.
+4. **`cardinality:` join field undocumented** — **FIXED** (PR #TBD). Schema documents
+   `cardinality:` as Runtime 18.1+ alternative to `rely:`. Parser extended to handle both.
 
 ### Medium-severity (stale claims, schema gaps)
 
