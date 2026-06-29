@@ -1082,10 +1082,25 @@ walker re-queries leaf ANSWER/LIVEBOARD dependents; `report` resolver multi-part
 never matches 2-/3-part names; the `model-coach` changelog claims a FEEDBACK export flag the CLI
 rejects; `.gitignore` has ~4 stale entries pointing to non-existent paths.
 
+### Additional scope (codification sweep 2026-06-29)
+
+Three new ts-cli commands identified by the angle #11b codification sweep that belong here:
+
+- **`ts tml strip-columns`** — remove unused columns from Table/View TML before repoint
+  (ts-dependency-manager Steps 9b–9c, ~250 lines of mechanical logic today)
+- **`ts tml repoint`** — repoint a TML object's table/connection references
+  (ts-dependency-manager Steps 9b–9c, paired with strip-columns)
+- **`ts tml export-corpus`** — parallel cached TML export with local cache directory
+  (ts-audit Step 2, ts-object-model-coach Step 4.5; shared infrastructure pattern)
+
+These are reusable TML manipulation primitives. See `docs/audit/2026-06-29-codification-sweep.md`
+priorities #6 and #8.
+
 ### Approach
 
 Fix opportunistically, each with a focused test. The batch-export and `databricks_sql` `RUNNING`
-poll are the highest-value. None are urgent.
+poll are the highest-value. The three codification-sweep commands (`strip-columns`, `repoint`,
+`export-corpus`) are medium priority — implement when the consuming skills are next touched.
 
 **Target:** 2026-10-31.
 
@@ -1605,12 +1620,16 @@ commands, mirroring the Tableau pattern:
    gating (PT1 policy)
 4. **Unit tests:** pure-function tests for each translation rule, no live instance needed
 
-### Phasing
+### Phasing (expanded per codification sweep 2026-06-29)
 
 | Phase | Scope | Estimate |
 |---|---|---|
-| 1 | `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formulas | ~2 weeks |
-| 2 | `ts databricks translate-formulas` — Databricks SQL → ThoughtSpot formulas | ~2 weeks |
+| 1a | `ts snowflake parse-sv` — parse SV DDL into structured JSON | ~1 week |
+| 1b | `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formulas | ~2 weeks |
+| 1c | `ts snowflake build-model` — assemble Model TML from parsed/translated data (adapter for existing `model_builder.py`) | ~1 week |
+| 2a | `ts databricks parse-mv` — parse MV YAML into structured JSON | ~1 week |
+| 2b | `ts databricks translate-formulas` — Databricks SQL → ThoughtSpot formulas | ~2 weeks |
+| 2c | `ts databricks build-model` — assemble Model TML from parsed/translated data | ~1 week |
 | 3 | Reverse direction (`ts snowflake translate-formulas --reverse`) for to-SV | ~1 week |
 | 4 | Update SKILL.md files to use CLI commands instead of inline LLM translation | ~1 week |
 
@@ -1677,3 +1696,106 @@ For Databricks items that overlap BL-032: merge into BL-032's scope rather than
 duplicating work. BL-032's target (2026-09-30) applies.
 
 **Target:** High-severity items by 2026-07-15. Medium-severity items by 2026-09-30.
+
+---
+
+## BL-065 — Codify ts-audit engine as `ts audit run`
+
+**Source:** codification sweep 2026-06-29 (angle #11b), priority #1.
+**Affects:** `agents/cli/ts-audit/`, `tools/ts-cli/`.
+**Status:** OPEN.
+
+### Problem
+
+All 42 ts-audit checks (A1–A5, D1–D12, H1–H10, P1–P11, S1–S5) are threshold comparisons
+against TML fields. The LLM re-implements the entire analysis engine every invocation —
+re-reading the rubric, re-parsing TML, re-applying thresholds, re-formatting the report.
+This is the highest token cost per invocation of any skill and produces non-deterministic
+severity ratings for identical inputs.
+
+### Approach
+
+Build `ts audit run` as a deterministic Python command in ts-cli:
+1. Export TML corpus (via `ts tml export` or future `export-corpus`)
+2. Run all 42 checks as pure functions against the parsed TML
+3. Output a structured JSON report (findings array with check ID, severity, object, detail)
+4. SKILL.md becomes: call `ts audit run`, then LLM summarises/prioritises the JSON report
+
+The Tableau `translate-formulas` pipeline is the reference pattern — same shape (deterministic
+engine produces structured output, LLM interprets for the user).
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-066 — Codify formula promotion as `ts model promote-formula`
+
+**Source:** codification sweep 2026-06-29 (angle #11b), priority #4.
+**Affects:** `agents/cli/ts-object-answer-promote/`, `tools/ts-cli/`.
+**Status:** OPEN.
+
+### Problem
+
+ts-object-answer-promote Steps 8–10 (duplicate detection, reference mapping,
+column_type inference, TML merge) are entirely mechanical — the LLM reads answer formulas,
+maps them to model columns, infers ATTRIBUTE/MEASURE from aggregation patterns, and emits
+a merged Model TML. No judgment is needed; the operation is a deterministic merge.
+
+### Approach
+
+Build `ts model promote-formula` in ts-cli:
+- Input: answer GUID + model GUID (+ profile)
+- Export both TMLs, extract answer formulas, detect duplicates against model formulas,
+  infer column_type from aggregation, emit merged Model TML
+- Output: JSON with added formulas, skipped duplicates, and the updated TML
+
+**Target:** 2026-10-31.
+
+---
+
+## BL-067 — Codify Tableau set/cohort detection and TML generation
+
+**Source:** codification sweep 2026-06-29 (angle #11b), priority #5.
+**Affects:** `agents/cli/ts-convert-from-tableau/`, `tools/ts-cli/`.
+**Status:** OPEN.
+
+### Problem
+
+ts-convert-from-tableau Step 5b (set/cohort detection + TML generation, ~400 lines of prompt)
+is fully mechanical. Every set type (fixed, dynamic, combined) has a fully specified mapping
+to ThoughtSpot filter/parameter TML. The LLM re-derives this mapping on each invocation.
+
+### Approach
+
+Extend `model_builder.py` with `extract_sets()` and `build_cohort_tml()`:
+- `extract_sets()`: identify Tableau sets in the parsed workbook, classify by type
+- `build_cohort_tml()`: emit the corresponding ThoughtSpot filter/parameter TML
+- Wire into `ts tableau build-model` or as a standalone `ts tableau build-sets` command
+
+**Target:** 2026-10-31.
+
+---
+
+## BL-068 — Codify Tableau dashboard-to-liveboard conversion
+
+**Source:** codification sweep 2026-06-29 (angle #11b), priority #7.
+**Affects:** `agents/cli/ts-convert-from-tableau/`, `tools/ts-cli/`.
+**Status:** OPEN.
+
+### Problem
+
+ts-convert-from-tableau Steps 9a–9c + 10c (dashboard zone parsing + liveboard TML assembly)
+are mechanical: parse Tableau dashboard zones from the TWB XML, map each zone to a ThoughtSpot
+liveboard visualization tile, emit Liveboard TML with layout. The LLM re-derives the
+zone→tile mapping on every invocation.
+
+### Approach
+
+Build `ts tableau build-liveboard` in ts-cli:
+- Input: parsed TWB (from `parse_twb()`) + answer GUIDs (from prior import)
+- Parse dashboard zones, map to liveboard tiles with layout coordinates
+- Emit Liveboard TML ready for import
+- Extends the existing Tableau codification pattern (`parse_twb` → `translate-formulas` →
+  `build-model` → **`build-liveboard`**)
+
+**Target:** 2026-12-31.

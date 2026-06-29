@@ -107,7 +107,17 @@ Ranked by (token savings per invocation) × (invocation frequency) × (codificat
 
 ## Next steps
 
-Route each finding per the two-bucket rule:
-1. File new BL items for ts-audit engine, Tableau set codification, formula promotion
-2. Update BL-063 scope to include parse + build commands (not just translate)
-3. Implementation order: #1 (ts-audit) is highest value and self-contained
+All findings routed per the two-bucket rule:
+
+| Finding | Backlog item | Status |
+|---|---|---|
+| ts audit run engine | BL-065 (new) | OPEN |
+| Snowflake SV parse + translate + build | BL-063 (expanded) | OPEN |
+| Databricks MV parse + translate + build | BL-063 (expanded) | OPEN |
+| ts model promote-formula | BL-066 (new) | OPEN |
+| Tableau set/cohort codification | BL-067 (new) | OPEN |
+| TML strip-columns + repoint | BL-034 (expanded) | OPEN |
+| Tableau build-liveboard | BL-068 (new) | OPEN |
+| ts tml export-corpus | BL-034 (expanded) | OPEN |
+
+Implementation order: #1 (ts-audit / BL-065) is highest value and self-contained.
