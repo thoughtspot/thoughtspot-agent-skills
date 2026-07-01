@@ -16,19 +16,728 @@
   --sev-low:#3b82f6; --sev-info:#6B7480; --sev-green:#2E8B62;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --sidebar-w:210px;
+  --topbar-h:44px;
 }
-body { margin:0; font-family:var(--sans); color:var(--ink); background:var(--ground); }
+
+/* ── Reset ── */
+*,*::before,*::after{box-sizing:border-box;}
+body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--ground);
+  font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums;}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+a{color:var(--accent);text-decoration:none;}
+a:hover{text-decoration:underline;}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px;}
+
+/* ── Layout shell ── */
+#app{display:flex;min-height:100vh;}
+
+.sidebar{
+  width:var(--sidebar-w);flex-shrink:0;background:var(--surface);
+  border-right:1px solid var(--hair);display:flex;flex-direction:column;
+  position:fixed;top:0;left:0;bottom:0;z-index:100;
+  overflow-y:auto;overflow-x:hidden;
+}
+.sidebar-header{
+  padding:14px 16px 10px;border-bottom:1px solid var(--hair);
+  display:flex;align-items:center;gap:8px;flex-shrink:0;
+}
+.sidebar-header .logo{
+  font-weight:700;font-size:14px;letter-spacing:-.02em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sidebar-header .logo-sub{
+  font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);font-weight:600;
+}
+
+.sidebar-nav{padding:6px 0;flex-shrink:0;}
+.sidebar-nav a{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 16px;font-size:13px;font-weight:500;
+  color:var(--ink);text-decoration:none;
+  border-left:3px solid transparent;transition:background .1s;
+}
+.sidebar-nav a:hover{background:var(--ground);}
+.sidebar-nav a.active{
+  background:var(--accent-soft);color:var(--accent);
+  border-left-color:var(--accent);font-weight:600;
+}
+.sidebar-nav a .nav-icon{width:16px;text-align:center;font-size:14px;flex-shrink:0;}
+.sidebar-nav a .badge{
+  margin-left:auto;background:var(--crit);color:#fff;
+  font-size:10px;font-weight:700;padding:1px 6px;
+  border-radius:10px;min-width:18px;text-align:center;
+}
+.sidebar-divider{height:1px;background:var(--hair);margin:6px 16px;}
+
+.sidebar-section-label{
+  padding:8px 16px 4px;font-size:10px;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);font-weight:600;
+  display:flex;align-items:center;gap:4px;cursor:pointer;
+  user-select:none;
+}
+.sidebar-section-label .chevron{
+  font-size:9px;transition:transform .15s;
+}
+.sidebar-section-label.collapsed .chevron{transform:rotate(-90deg);}
+
+.sidebar-model-list{padding:0 0 8px;}
+.sidebar-model-list a{
+  display:block;padding:3px 16px 3px 28px;font-size:12px;
+  color:var(--muted);text-decoration:none;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:color .1s;
+}
+.sidebar-model-list a:hover{color:var(--ink);background:var(--ground);}
+.sidebar-model-list a.active{color:var(--accent);font-weight:600;}
+
+/* Hamburger toggle (mobile) */
+.hamburger{
+  display:none;position:fixed;top:8px;left:8px;z-index:200;
+  width:36px;height:36px;background:var(--surface);border:1px solid var(--hair);
+  border-radius:6px;font-size:18px;align-items:center;justify-content:center;
+  box-shadow:0 1px 3px rgba(0,0,0,.08);
+}
+
+/* Main area */
+.main{
+  margin-left:var(--sidebar-w);flex:1;min-width:0;
+  display:flex;flex-direction:column;
+}
+
+/* Topbar */
+.topbar{
+  position:sticky;top:0;z-index:50;background:var(--surface);
+  border-bottom:1px solid var(--hair);
+  padding:0 24px;height:var(--topbar-h);
+  display:flex;align-items:center;gap:12px;
+}
+.breadcrumb{
+  font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;
+  white-space:nowrap;
+}
+.breadcrumb .sep{color:var(--hair);}
+.breadcrumb .current{color:var(--ink);font-weight:600;}
+
+.filter-pills{
+  margin-left:auto;display:flex;gap:4px;flex-shrink:0;
+}
+.filter-pill{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;
+  border:1px solid var(--hair);background:var(--surface);
+  transition:all .12s;cursor:pointer;user-select:none;
+  letter-spacing:.01em;
+}
+.filter-pill .dot{
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+}
+.filter-pill.active{border-color:currentColor;background:currentColor;}
+.filter-pill.active .pill-label{color:#fff;}
+.filter-pill.active .dot{background:#fff;}
+
+.filter-pill[data-sev="CRITICAL"]{color:var(--sev-critical);}
+.filter-pill[data-sev="CRITICAL"] .dot{background:var(--sev-critical);}
+.filter-pill[data-sev="HIGH"]{color:var(--sev-high);}
+.filter-pill[data-sev="HIGH"] .dot{background:var(--sev-high);}
+.filter-pill[data-sev="MEDIUM"]{color:var(--sev-medium);}
+.filter-pill[data-sev="MEDIUM"] .dot{background:var(--sev-medium);}
+.filter-pill[data-sev="LOW"]{color:var(--sev-low);}
+.filter-pill[data-sev="LOW"] .dot{background:var(--sev-low);}
+.filter-pill[data-sev="INFO"]{color:var(--sev-info);}
+.filter-pill[data-sev="INFO"] .dot{background:var(--sev-info);}
+
+/* View containers */
+.view{display:none;padding:24px;flex:1;}
+.view.active{display:block;}
+
+/* ── Dashboard ── */
+.dash-header{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  padding:16px 20px;margin-bottom:16px;
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 24px;
+}
+.dash-header .cluster-url{
+  font-weight:600;font-size:14px;display:inline-flex;align-items:center;gap:4px;
+}
+.dash-header .cluster-url .ext{font-size:11px;color:var(--muted);}
+.dash-header .meta-item{
+  font-size:12px;color:var(--muted);
+}
+.dash-header .meta-item strong{color:var(--ink);font-weight:600;}
+.dash-header .angles{
+  display:flex;gap:4px;margin-left:0;
+}
+.dash-header .angle-tag{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+  padding:2px 7px;border-radius:3px;background:var(--ground);color:var(--muted);
+}
+
+/* Severity cards */
+.sev-cards{
+  display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px;
+}
+.sev-card{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  padding:12px 16px;cursor:pointer;transition:box-shadow .12s,border-color .12s;
+  position:relative;overflow:hidden;
+}
+.sev-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.06);border-color:var(--muted);}
+.sev-card::before{
+  content:"";position:absolute;top:0;left:0;right:0;height:3px;
+}
+.sev-card[data-sev="CRITICAL"]::before{background:var(--sev-critical);}
+.sev-card[data-sev="HIGH"]::before{background:var(--sev-high);}
+.sev-card[data-sev="MEDIUM"]::before{background:var(--sev-medium);}
+.sev-card[data-sev="LOW"]::before{background:var(--sev-low);}
+.sev-card[data-sev="INFO"]::before{background:var(--sev-info);}
+.sev-card .sev-count{
+  font-size:28px;font-weight:700;line-height:1;
+}
+.sev-card[data-sev="CRITICAL"] .sev-count{color:var(--sev-critical);}
+.sev-card[data-sev="HIGH"] .sev-count{color:var(--sev-high);}
+.sev-card[data-sev="MEDIUM"] .sev-count{color:var(--sev-medium);}
+.sev-card[data-sev="LOW"] .sev-count{color:var(--sev-low);}
+.sev-card[data-sev="INFO"] .sev-count{color:var(--sev-info);}
+.sev-card .sev-label{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);margin-top:4px;
+}
+
+/* Heatmap */
+.heatmap-wrap{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  padding:16px 20px;margin-bottom:16px;overflow-x:auto;
+}
+.heatmap-title{
+  font-size:13px;font-weight:600;margin-bottom:12px;
+}
+.heatmap{
+  border-collapse:collapse;width:100%;min-width:500px;
+}
+.heatmap th{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--muted);padding:6px 8px;text-align:center;
+  border-bottom:1px solid var(--hair);
+}
+.heatmap th.model-col{
+  text-align:left;min-width:140px;max-width:200px;
+}
+.heatmap th.angle-col{cursor:pointer;}
+.heatmap th.angle-col:hover{color:var(--accent);}
+.heatmap td{padding:4px;text-align:center;border-bottom:1px solid var(--hair-2);}
+.heatmap td.model-name{
+  text-align:left;padding:6px 8px;font-size:12px;font-weight:500;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:200px;
+}
+.heatmap td.model-name a{color:var(--ink);text-decoration:none;}
+.heatmap td.model-name a:hover{color:var(--accent);text-decoration:underline;}
+.heatmap .cell{
+  display:inline-block;width:28px;height:22px;border-radius:3px;
+  cursor:pointer;transition:opacity .1s;
+}
+.heatmap .cell:hover{opacity:.75;}
+.heatmap .cell[data-severity="CRITICAL"]{background:var(--sev-critical);}
+.heatmap .cell[data-severity="HIGH"]{background:var(--sev-high);}
+.heatmap .cell[data-severity="MEDIUM"]{background:var(--sev-medium);}
+.heatmap .cell[data-severity="LOW"]{background:var(--sev-low);}
+.heatmap .cell[data-severity="INFO"]{background:var(--sev-info);}
+.heatmap .cell[data-severity="PASS"]{background:var(--sev-green);}
+.heatmap .cell[data-severity="NONE"]{background:var(--hair-2);}
+
+/* Stats strip */
+.stats-strip{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
+}
+.stat-box{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  padding:12px 16px;text-align:center;
+}
+.stat-box .stat-value{
+  font-size:22px;font-weight:700;line-height:1;color:var(--accent);
+}
+.stat-box .stat-label{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);margin-top:4px;
+}
+
+/* Placeholder views */
+.view-placeholder{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:300px;color:var(--muted);
+}
+.view-placeholder .ph-icon{font-size:32px;margin-bottom:12px;opacity:.4;}
+.view-placeholder .ph-text{font-size:14px;font-weight:500;}
+.view-placeholder .ph-sub{font-size:12px;margin-top:4px;}
+
+/* ── Responsive ── */
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%);transition:transform .2s;}
+  .sidebar.open{transform:translateX(0);box-shadow:4px 0 20px rgba(0,0,0,.12);}
+  .hamburger{display:flex;}
+  .main{margin-left:0;}
+  .topbar{padding-left:52px;}
+  .sev-cards{grid-template-columns:repeat(3,1fr);}
+  .stats-strip{grid-template-columns:repeat(2,1fr);}
+  .dash-header{padding:12px 16px;}
+  .view{padding:16px;}
+}
+@media(max-width:480px){
+  .sev-cards{grid-template-columns:repeat(2,1fr);}
+  .filter-pills{display:none;}
+}
+
+/* ── Print ── */
+@media print{
+  .sidebar,.hamburger,.topbar{display:none!important;}
+  .main{margin-left:0!important;}
+  .view{padding:12px 0!important;}
+  .sev-card::before{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .heatmap .cell{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sev-card .sev-label::after{
+    content:" (" attr(data-count) ")";
+  }
+}
 </style>
 </head>
 <body>
-<div id="app"></div>
+
+<button class="hamburger" aria-label="Toggle sidebar">&#9776;</button>
+
+<div id="app">
+  <nav class="sidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar-header">
+      <div>
+        <div class="logo">ThoughtSpot Audit</div>
+        <div class="logo-sub">Health Report</div>
+      </div>
+    </div>
+    <div class="sidebar-nav" id="sidebar-nav"></div>
+  </nav>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb" id="breadcrumb"></div>
+      <div class="filter-pills" id="filter-pills"></div>
+    </div>
+
+    <div class="view" id="v-dashboard"></div>
+    <div class="view" id="v-scorecard"></div>
+    <div class="view" id="v-crossmodel"></div>
+    <div class="view" id="v-objectmap"></div>
+    <div class="view" id="v-cleanup"></div>
+  </main>
+</div>
+
 <script id="audit-data" type="application/json">{{AUDIT_DATA}}</script>
 <script>
 (function(){
-  var raw = document.getElementById('audit-data').textContent;
-  var D = JSON.parse(raw);
-  var app = document.getElementById('app');
-  app.textContent = 'Report loaded: ' + D.F.length + ' findings';
+"use strict";
+
+/* ── Parse data ── */
+var raw = document.getElementById("audit-data").textContent;
+var D = JSON.parse(raw);
+
+/* ── Constants ── */
+var SEVS = ["CRITICAL","HIGH","MEDIUM","LOW","INFO"];
+var SEV_ORDER = {};
+SEVS.forEach(function(s,i){ SEV_ORDER[s] = i; });
+
+var ANGLE_LABELS = {
+  ai:"AI Readiness", data_modeling:"Data Modeling", human:"Human Readiness",
+  performance:"Performance", security:"Security"
+};
+var ANGLE_SHORT = {A:"ai",D:"data_modeling",H:"human",P:"performance",S:"security"};
+var ANGLE_CODES = {ai:"A",data_modeling:"D",human:"H",performance:"P",security:"S"};
+
+/* ── State ── */
+var activeSevs = {};
+SEVS.forEach(function(s){ activeSevs[s] = true; });
+var builtViews = {};
+var currentRoute = null;
+
+/* ── Helpers ── */
+function $(sel,ctx){ return (ctx||document).querySelector(sel); }
+function $$(sel,ctx){ return Array.prototype.slice.call((ctx||document).querySelectorAll(sel)); }
+function el(tag,cls,html){
+  var e = document.createElement(tag);
+  if(cls) e.className = cls;
+  if(html !== undefined) e.innerHTML = html;
+  return e;
+}
+
+function worstSev(findings){
+  var worst = 999;
+  for(var i=0;i<findings.length;i++){
+    var idx = SEV_ORDER[findings[i].s];
+    if(idx !== undefined && idx < worst) worst = idx;
+  }
+  return worst < 999 ? SEVS[worst] : "NONE";
+}
+
+function countCritHigh(){
+  var c = 0;
+  if(D.S && D.S.bs){
+    c += (D.S.bs.CRITICAL||0) + (D.S.bs.HIGH||0);
+  }
+  return c;
+}
+
+/* ── Build sidebar ── */
+function buildSidebar(){
+  var nav = document.getElementById("sidebar-nav");
+  var badge = countCritHigh();
+
+  var links = [
+    {hash:"#dashboard", icon:"▣", label:"Dashboard", badge: badge > 0 ? badge : null},
+    {hash:"#crossmodel", icon:"≡", label:"Cross-Model"},
+    {hash:"#objectmap", icon:"⬡", label:"Object Map"},
+    {hash:"#cleanup", icon:"✂", label:"Cleanup"}
+  ];
+
+  var html = "";
+  links.forEach(function(lk){
+    html += '<a href="'+lk.hash+'" data-route="'+lk.hash+'">';
+    html += '<span class="nav-icon">'+lk.icon+'</span>';
+    html += '<span>'+lk.label+'</span>';
+    if(lk.badge) html += '<span class="badge">'+lk.badge+'</span>';
+    html += '</a>';
+  });
+
+  html += '<div class="sidebar-divider"></div>';
+  html += '<div class="sidebar-section-label" id="models-toggle"><span class="chevron">▾</span> Models</div>';
+  html += '<div class="sidebar-model-list" id="sidebar-models"></div>';
+  nav.innerHTML = html;
+
+  /* Model list */
+  var models = getModelList();
+  var mlist = document.getElementById("sidebar-models");
+  var mhtml = "";
+  models.forEach(function(m){
+    mhtml += '<a href="#model/'+m.g+'" data-route="#model/'+m.g+'" title="'+m.n+'">'+m.n+'</a>';
+  });
+  mlist.innerHTML = mhtml;
+
+  /* Toggle models section */
+  var toggle = document.getElementById("models-toggle");
+  toggle.addEventListener("click",function(){
+    toggle.classList.toggle("collapsed");
+    mlist.style.display = toggle.classList.contains("collapsed") ? "none" : "";
+  });
+}
+
+function getModelList(){
+  /* Prefer corpus models (ordered), fall back to lookup */
+  if(D.C && D.C.m && D.C.m.length > 0){
+    return D.C.m.map(function(cm){ return D.L[cm.mi]; });
+  }
+  return D.L || [];
+}
+
+/* ── Build filter pills ── */
+function buildFilterPills(){
+  var container = document.getElementById("filter-pills");
+  var html = "";
+  SEVS.forEach(function(s){
+    html += '<button class="filter-pill active" data-sev="'+s+'" title="Toggle '+s+' findings">';
+    html += '<span class="dot"></span>';
+    html += '<span class="pill-label">'+s.charAt(0)+s.slice(1).toLowerCase()+'</span>';
+    html += '</button>';
+  });
+  container.innerHTML = html;
+
+  $$(".filter-pill",container).forEach(function(pill){
+    pill.addEventListener("click",function(){
+      var sev = pill.getAttribute("data-sev");
+      toggleSeverity(sev);
+      pill.classList.toggle("active");
+    });
+  });
+}
+
+function toggleSeverity(sev){
+  activeSevs[sev] = !activeSevs[sev];
+  /* Dispatch a custom event so views can react */
+  document.dispatchEvent(new CustomEvent("sev-filter-changed",{detail:{severity:sev,active:activeSevs[sev]}}));
+}
+
+/* ── Breadcrumb ── */
+function updateBreadcrumb(parts){
+  var bc = document.getElementById("breadcrumb");
+  var html = '<span>Audit</span>';
+  parts.forEach(function(p,i){
+    html += ' <span class="sep">/</span> ';
+    if(i === parts.length - 1){
+      html += '<span class="current">'+p+'</span>';
+    } else {
+      html += '<span>'+p+'</span>';
+    }
+  });
+  bc.innerHTML = html;
+}
+
+/* ── Router ── */
+function parseRoute(){
+  var hash = location.hash || "#dashboard";
+  if(hash === "#") hash = "#dashboard";
+  var parts = hash.substring(1).split("/");
+  return {view: parts[0], id: parts[1] || null, sub: parts[2] || null, raw: hash};
+}
+
+function navigate(hash){
+  if(hash && hash !== location.hash){
+    location.hash = hash;
+  }
+}
+
+function onRoute(){
+  var route = parseRoute();
+  currentRoute = route;
+
+  /* Hide all views */
+  $$(".view").forEach(function(v){ v.classList.remove("active"); });
+
+  /* Update sidebar active state */
+  $$(".sidebar-nav a").forEach(function(a){ a.classList.remove("active"); });
+  $$(".sidebar-model-list a").forEach(function(a){ a.classList.remove("active"); });
+
+  var viewId, breadcrumbParts;
+
+  switch(route.view){
+    case "model":
+      viewId = "v-scorecard";
+      var modelName = route.id ? findModelName(route.id) : "Model";
+      breadcrumbParts = ["Models",modelName];
+      if(route.sub) breadcrumbParts.push(ANGLE_LABELS[route.sub]||route.sub);
+      /* Highlight sidebar model */
+      var mLink = $('[data-route="#model/'+route.id+'"]');
+      if(mLink) mLink.classList.add("active");
+      if(!builtViews.scorecard){ buildPlaceholder("v-scorecard","Model Scorecard","Individual model findings and details"); builtViews.scorecard=true; }
+      break;
+    case "crossmodel":
+      viewId = "v-crossmodel";
+      breadcrumbParts = ["Cross-Model"];
+      highlightNav("#crossmodel");
+      if(!builtViews.crossmodel){ buildPlaceholder("v-crossmodel","Cross-Model Analysis","Table reuse, model overlaps, and cross-cutting findings"); builtViews.crossmodel=true; }
+      break;
+    case "objectmap":
+      viewId = "v-objectmap";
+      breadcrumbParts = ["Object Map"];
+      highlightNav("#objectmap");
+      if(!builtViews.objectmap){ buildPlaceholder("v-objectmap","Object Map","Dependency graph and object relationships"); builtViews.objectmap=true; }
+      break;
+    case "cleanup":
+      viewId = "v-cleanup";
+      breadcrumbParts = ["Cleanup"];
+      highlightNav("#cleanup");
+      if(!builtViews.cleanup){ buildPlaceholder("v-cleanup","Cleanup Actions","Actionable cleanup recommendations"); builtViews.cleanup=true; }
+      break;
+    default: /* dashboard */
+      viewId = "v-dashboard";
+      breadcrumbParts = ["Dashboard"];
+      highlightNav("#dashboard");
+      if(!builtViews.dashboard){ buildDashboard(); builtViews.dashboard=true; }
+      break;
+  }
+
+  var viewEl = document.getElementById(viewId);
+  if(viewEl) viewEl.classList.add("active");
+  updateBreadcrumb(breadcrumbParts);
+}
+
+function highlightNav(hash){
+  var link = $('[data-route="'+hash+'"]',document.getElementById("sidebar-nav"));
+  if(link) link.classList.add("active");
+}
+
+function findModelName(guid){
+  for(var i=0;i<D.L.length;i++){
+    if(D.L[i].g === guid) return D.L[i].n;
+  }
+  return guid;
+}
+
+/* ── Build placeholder ── */
+function buildPlaceholder(containerId,title,desc){
+  var c = document.getElementById(containerId);
+  c.innerHTML = '<div class="view-placeholder">'+
+    '<div class="ph-icon">⚒</div>'+
+    '<div class="ph-text">'+title+'</div>'+
+    '<div class="ph-sub">'+desc+' &mdash; view coming soon</div>'+
+    '</div>';
+}
+
+/* ── Build Dashboard ── */
+function buildDashboard(){
+  var c = document.getElementById("v-dashboard");
+  var html = "";
+
+  /* Header bar */
+  html += '<div class="dash-header">';
+  if(D.C){
+    if(D.C.u){
+      html += '<a class="cluster-url" href="'+D.C.u+'" target="_blank" rel="noopener">'+D.C.u+' <span class="ext">↗</span></a>';
+    }
+    if(D.C.p) html += '<span class="meta-item">Profile: <strong>'+D.C.p+'</strong></span>';
+    if(D.C.dt) html += '<span class="meta-item">Date: <strong>'+D.C.dt+'</strong></span>';
+    if(D.C.ar && D.C.ar.length > 0){
+      html += '<div class="angles">';
+      D.C.ar.forEach(function(code){
+        var a = ANGLE_SHORT[code] || code;
+        html += '<span class="angle-tag">'+(ANGLE_LABELS[a]||a)+'</span>';
+      });
+      html += '</div>';
+    }
+  } else {
+    html += '<span class="meta-item">Audit report &mdash; no corpus data</span>';
+  }
+  html += '</div>';
+
+  /* Severity cards */
+  html += '<div class="sev-cards">';
+  SEVS.forEach(function(s){
+    var count = (D.S && D.S.bs) ? (D.S.bs[s]||0) : 0;
+    html += '<div class="sev-card" data-sev="'+s+'" tabindex="0" role="button" aria-label="'+count+' '+s.toLowerCase()+' findings">';
+    html += '<div class="sev-count">'+count+'</div>';
+    html += '<div class="sev-label" data-count="'+count+'">'+s+'</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  /* Heatmap */
+  html += buildHeatmap();
+
+  /* Stats strip */
+  html += '<div class="stats-strip">';
+  var os = (D.S && D.S.os) || {};
+  var stats = [
+    {v: os.models || 0, l: "Models"},
+    {v: os.tables || 0, l: "Tables"},
+    {v: D.S ? (D.S.cr||0) : 0, l: "Checks Run"},
+    {v: D.F ? D.F.length : 0, l: "Total Findings"}
+  ];
+  stats.forEach(function(s){
+    html += '<div class="stat-box"><div class="stat-value">'+s.v+'</div><div class="stat-label">'+s.l+'</div></div>';
+  });
+  html += '</div>';
+
+  c.innerHTML = html;
+
+  /* Wire up severity card clicks */
+  $$(".sev-card",c).forEach(function(card){
+    card.addEventListener("click",function(){
+      navigate("#crossmodel?severity="+card.getAttribute("data-sev"));
+    });
+    card.addEventListener("keydown",function(e){
+      if(e.key === "Enter" || e.key === " "){
+        e.preventDefault();
+        navigate("#crossmodel?severity="+card.getAttribute("data-sev"));
+      }
+    });
+  });
+
+  /* Wire up heatmap cell clicks */
+  $$(".heatmap .cell",c).forEach(function(cell){
+    cell.addEventListener("click",function(){
+      var guid = cell.getAttribute("data-guid");
+      var angle = cell.getAttribute("data-angle");
+      if(guid && angle) navigate("#model/"+guid+"/"+angle);
+    });
+  });
+}
+
+/* ── Heatmap builder ── */
+function buildHeatmap(){
+  if(!D.F || D.F.length === 0){
+    return '<div class="heatmap-wrap"><div class="heatmap-title">Cluster Heatmap</div>'+
+           '<p style="color:var(--muted);font-size:12px;">No findings to display.</p></div>';
+  }
+
+  /* Determine angles present */
+  var anglesPresent = {};
+  D.F.forEach(function(f){ anglesPresent[f.a] = true; });
+  var angleKeys = Object.keys(ANGLE_LABELS).filter(function(a){ return anglesPresent[a]; });
+
+  /* Group findings by model index */
+  var byModel = {};
+  D.F.forEach(function(f){
+    if(!byModel[f.mi]) byModel[f.mi] = {};
+    if(!byModel[f.mi][f.a]) byModel[f.mi][f.a] = [];
+    byModel[f.mi][f.a].push(f);
+  });
+
+  /* Build rows: [{mi, name, guid, worstOverall, cells:{angle:severity}}] */
+  var rows = [];
+  Object.keys(byModel).forEach(function(mi){
+    mi = parseInt(mi);
+    var m = D.L[mi];
+    if(!m) return;
+    var cells = {};
+    var allFindings = [];
+    angleKeys.forEach(function(a){
+      var ff = byModel[mi][a] || [];
+      cells[a] = ff.length > 0 ? worstSev(ff) : "NONE";
+      allFindings = allFindings.concat(ff);
+    });
+    rows.push({mi:mi, n:m.n, g:m.g, worst: worstSev(allFindings), cells:cells});
+  });
+
+  /* Sort by worst severity descending (critical first) */
+  rows.sort(function(a,b){
+    return (SEV_ORDER[a.worst]||99) - (SEV_ORDER[b.worst]||99);
+  });
+
+  /* Build table */
+  var html = '<div class="heatmap-wrap">';
+  html += '<div class="heatmap-title">Cluster Heatmap</div>';
+  html += '<table class="heatmap"><thead><tr>';
+  html += '<th class="model-col">Model</th>';
+  angleKeys.forEach(function(a){
+    html += '<th class="angle-col" data-angle="'+a+'" title="Filter by '+ANGLE_LABELS[a]+'">'+
+            (ANGLE_CODES[a]||a.charAt(0).toUpperCase())+'</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  rows.forEach(function(r){
+    html += '<tr>';
+    html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+r.n+'">'+r.n+'</a></td>';
+    angleKeys.forEach(function(a){
+      var sev = r.cells[a] || "NONE";
+      html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+r.g+'" data-angle="'+a+
+              '" title="'+r.n+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0"></span></td>';
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+
+  return html;
+}
+
+/* ── Hamburger ── */
+var hamburger = $(".hamburger");
+var sidebar = $(".sidebar");
+if(hamburger && sidebar){
+  hamburger.addEventListener("click",function(){
+    sidebar.classList.toggle("open");
+  });
+  /* Close on link click (mobile) */
+  sidebar.addEventListener("click",function(e){
+    if(e.target.closest("a[data-route]") && window.innerWidth <= 768){
+      sidebar.classList.remove("open");
+    }
+  });
+}
+
+/* ── Init ── */
+buildSidebar();
+buildFilterPills();
+window.addEventListener("hashchange", onRoute);
+onRoute();
+
 })();
 </script>
 </body>
