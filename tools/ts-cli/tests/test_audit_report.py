@@ -111,6 +111,27 @@ def test_render_report_escapes_xss():
     assert '\\u003c' in html or '&lt;' in html
 
 
+def test_compact_payload_includes_model_description():
+    data = generate_test_data(include_corpus=True)
+    payload = compact_payload(data)
+    first_model = payload["C"]["m"][0]
+    assert "ds" in first_model
+    assert isinstance(first_model["ds"], str)
+    assert len(first_model["ds"]) > 0
+
+
+def test_compact_payload_includes_ai_analysis():
+    data = generate_test_data(include_corpus=True)
+    payload = compact_payload(data)
+    first_model = payload["C"]["m"][0]
+    assert "ai" in first_model
+    assert "pe" in first_model["ai"]
+    assert "qu" in first_model["ai"]
+    assert "st" in first_model["ai"]
+    assert len(first_model["ai"]["pe"]) >= 1
+    assert len(first_model["ai"]["qu"]) >= 1
+
+
 def test_compact_payload_includes_check_meta():
     data = generate_test_data()
     payload = compact_payload(data)

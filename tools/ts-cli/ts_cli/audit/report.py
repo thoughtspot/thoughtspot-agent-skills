@@ -79,8 +79,16 @@ def compact_payload(data: dict) -> dict:
                 "fc": m.get("formula_count", 0),
                 "jc": m.get("join_count", 0),
                 "jd": m.get("join_depth", 0),
+                "ds": m.get("description", ""),
                 "mt": [{"n": t["name"], "f": t["fqn"]} for t in m.get("model_tables", [])],
             }
+            ai = m.get("ai_analysis")
+            if ai:
+                cm["ai"] = {
+                    "pe": ai.get("personas", []),
+                    "qu": ai.get("questions", []),
+                    "st": ai.get("structure", ""),
+                }
             compact_models.append(cm)
 
         compact_reuse = [

@@ -101,15 +101,30 @@ def generate_test_data(
                 "fqn": f"ANALYTICS.PUBLIC.{tname}",
             })
 
+        first_word = name.split()[0].lower()
         models_meta.append({
             "guid": guid,
             "name": name,
+            "description": f"Analytical model for {name.lower()} covering key business metrics and dimensions.",
             "table_count": table_count,
             "column_count": table_count * 8 + i * 5,
             "formula_count": 3 + i * 2,
             "join_count": max(0, table_count - 1),
             "join_depth": min(table_count, 4 + i % 3),
             "model_tables": model_tables,
+            "ai_analysis": {
+                "personas": [
+                    f"Business analysts tracking {name.lower()} performance",
+                    f"Executives reviewing {first_word} KPIs",
+                ],
+                "questions": [
+                    f"What is the trend in {first_word} over the last quarter?",
+                    f"Which regions have the highest {first_word} growth?",
+                    f"How does {first_word} compare year-over-year?",
+                ],
+                "structure": f"Star schema with {table_count} tables at depth {min(table_count, 4 + i % 3)}. "
+                             f"Central fact table joins to {min(table_count - 1, 5)} dimension tables.",
+            },
         })
 
     findings = []

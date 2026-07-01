@@ -307,6 +307,30 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .scorecard-header .header-actions{
   display:flex;gap:8px;margin-top:12px;
 }
+.model-desc{
+  font-size:12px;color:var(--muted);line-height:1.5;margin:8px 0 0;
+  font-style:italic;
+}
+.ai-panel{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  margin-bottom:10px;overflow:hidden;
+}
+.ai-panel > summary{
+  display:flex;align-items:center;gap:8px;padding:12px 16px;
+  cursor:pointer;user-select:none;font-weight:600;font-size:13px;
+  list-style:none;
+}
+.ai-panel > summary::-webkit-details-marker{display:none;}
+.ai-panel > summary::before{
+  content:"▸";font-size:10px;color:var(--muted);transition:transform .15s;flex-shrink:0;
+}
+.ai-panel[open] > summary::before{transform:rotate(90deg);}
+.ai-panel > summary:hover{background:var(--ground);}
+.ai-panel-body{padding:0 16px 12px;}
+.ai-sub{margin-bottom:10px;}
+.ai-sub h4{font-size:12px;font-weight:600;color:var(--ink);margin:0 0 4px;text-transform:uppercase;letter-spacing:.04em;}
+.ai-sub ul{margin:0;padding:0 0 0 16px;font-size:12px;color:var(--muted);line-height:1.5;}
+.ai-sub p{margin:0;font-size:12px;color:var(--muted);line-height:1.5;}
 .erd-btn{
   display:inline-flex;align-items:center;gap:6px;
   padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;
@@ -1072,6 +1096,11 @@ function buildScorecard(D, guid, filterAngle){
     titleHtml += '</div>';
   }
 
+  /* Model description */
+  if(cm && cm.ds){
+    titleHtml += '<div class="model-desc">'+esc(cm.ds)+'</div>';
+  }
+
   /* Actions */
   titleHtml += '<div class="header-actions">';
   if(D.C && D.C.u){
@@ -1082,6 +1111,57 @@ function buildScorecard(D, guid, filterAngle){
 
   hdr.innerHTML = titleHtml;
   c.appendChild(hdr);
+
+  /* ── AI Analysis panel ── */
+  if(cm && cm.ai){
+    var aiPanel = document.createElement("details");
+    aiPanel.className = "ai-panel";
+    aiPanel.open = true;
+
+    var aiSummary = document.createElement("summary");
+    aiSummary.textContent = "Model Analysis";
+    aiPanel.appendChild(aiSummary);
+
+    var aiBody = el("div","ai-panel-body");
+
+    if(cm.ai.pe && cm.ai.pe.length > 0){
+      var perSec = el("div","ai-sub");
+      perSec.innerHTML = '<h4>Target Personas</h4>';
+      var perUl = document.createElement("ul");
+      cm.ai.pe.forEach(function(p){
+        var li = document.createElement("li");
+        li.textContent = p;
+        perUl.appendChild(li);
+      });
+      perSec.appendChild(perUl);
+      aiBody.appendChild(perSec);
+    }
+
+    if(cm.ai.qu && cm.ai.qu.length > 0){
+      var qSec = el("div","ai-sub");
+      qSec.innerHTML = '<h4>Business Questions</h4>';
+      var qUl = document.createElement("ul");
+      cm.ai.qu.forEach(function(q){
+        var li = document.createElement("li");
+        li.textContent = q;
+        qUl.appendChild(li);
+      });
+      qSec.appendChild(qUl);
+      aiBody.appendChild(qSec);
+    }
+
+    if(cm.ai.st){
+      var stSec = el("div","ai-sub");
+      stSec.innerHTML = '<h4>Model Structure</h4>';
+      var stP = document.createElement("p");
+      stP.textContent = cm.ai.st;
+      stSec.appendChild(stP);
+      aiBody.appendChild(stSec);
+    }
+
+    aiPanel.appendChild(aiBody);
+    c.appendChild(aiPanel);
+  }
 
   /* ── Angle sections ── */
   var angles = (D.C && D.C.ar && D.C.ar.length > 0) ? D.C.ar : ["A","D","H","P","S"];
