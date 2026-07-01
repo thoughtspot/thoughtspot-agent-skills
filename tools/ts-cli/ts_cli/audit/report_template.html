@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ThoughtSpot Audit Report</title>
+<style>
+:root {
+  --ground:#F6F7F9; --surface:#FFFFFF; --surface-2:#FBFCFD;
+  --ink:#161B26; --muted:#6B7480; --hair:#E2E6EC; --hair-2:#EDF0F4;
+  --accent:#1E6FA8; --accent-soft:#EAF2F8;
+  --warn:#B5730A; --warn-soft:#FBF1DF;
+  --crit:#C2382E; --crit-soft:#FBE9E7;
+  --ok:#2E8B62; --ok-soft:#E6F3EC;
+  --sev-critical:#C2382E; --sev-high:#f97316; --sev-medium:#eab308;
+  --sev-low:#3b82f6; --sev-info:#6B7480; --sev-green:#2E8B62;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+body { margin:0; font-family:var(--sans); color:var(--ink); background:var(--ground); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script id="audit-data" type="application/json">{{AUDIT_DATA}}</script>
+<script>
+(function(){
+  var raw = document.getElementById('audit-data').textContent;
+  var D = JSON.parse(raw);
+  var app = document.getElementById('app');
+  app.textContent = 'Report loaded: ' + D.F.length + ' findings';
+})();
+</script>
+</body>
+</html>
