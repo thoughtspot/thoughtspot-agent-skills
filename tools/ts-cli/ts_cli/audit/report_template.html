@@ -1005,6 +1005,10 @@ function onRoute(){
   var viewEl = document.getElementById(viewId);
   if(viewEl) viewEl.classList.add("active");
   updateBreadcrumb(breadcrumbParts, breadcrumbLinks);
+
+  /* Severity filter pills only apply to Cross-Model and Scorecard */
+  var pills = document.getElementById("filter-pills");
+  if(pills) pills.style.display = (route.view === "crossmodel" || route.view === "model") ? "" : "none";
 }
 
 function highlightNav(hash){
