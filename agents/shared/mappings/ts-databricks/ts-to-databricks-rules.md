@@ -144,16 +144,20 @@ measures:
     display_name: 'Total Sales'
 ```
 
-### Multi-Source (v1.1 with `entities:`)
+### Multi-Source (v1.1 with `joins:`)
 
-Column references use `entity_alias.column` prefix:
+Column references use `alias.column` dot-path prefix. Multi-source uses the
+top-level `source:` for the fact table and `joins:` for dimension tables
+(see the Multi-Table Model Mapping section below and the schema reference
+in `agents/shared/schemas/databricks-metric-view.md`):
 
 ```yaml
-entities:
-  - name: sales
-    db_connection: catalog.schema.fact_sales
+source: catalog.schema.fact_sales
+joins:
   - name: stores
-    db_connection: catalog.schema.dim_stores
+    source: catalog.schema.dim_stores
+    "on": source.store_id = stores.store_id
+    rely: { at_most_one_match: true }
 
 dimensions:
   - name: store_name
@@ -162,7 +166,7 @@ dimensions:
 
 measures:
   - name: total_sales
-    expr: SUM(sales.sales_amount)
+    expr: SUM(source.sales_amount)
     display_name: 'Total Sales'
 ```
 

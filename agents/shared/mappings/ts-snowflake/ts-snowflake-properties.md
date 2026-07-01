@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: snowflake — 2026-07 (parameters updated: Snowflake variables now GA) -->
 
 # ThoughtSpot → Snowflake Property Coverage
 
@@ -243,13 +243,18 @@ be auto-mapped and require one of three user-directed options at the checkpoint:
 
 ### Parameters (`parameters[]`)
 
-**Status: Hard blocker**
+**Status: Partial — Snowflake variables now GA, manual mapping required**
 
 ThoughtSpot parameters are runtime variables (date ranges, metric selectors, locale).
-No equivalent in Snowflake Semantic View.
+Snowflake variables (session and bind variables) are now GA and can serve as the
+equivalent construct. However, automated mapping is not yet implemented — the parameter
+semantics differ enough (ThoughtSpot parameters are UI-driven with list/range configs;
+Snowflake variables are session-scoped SQL constructs) that a mechanical 1:1 translation
+is not reliable without user review.
 
-Impact: formulas referencing parameters are **omitted** from the YAML. All parameters are
-listed in the Unmapped Properties Report.
+Impact: formulas referencing parameters are still **omitted** from the YAML. All
+parameters are listed in the Unmapped Properties Report with a note that Snowflake
+variables are the recommended re-implementation path.
 
 ---
 
@@ -451,5 +456,5 @@ section that has no entries for the current model.
 | Table-level synonyms | Populate `tables[].synonyms[]` from the model's table description or TML table name variants; currently left absent. |
 | `primary_key` / `unique_keys` | If ThoughtSpot ever exposes PK declarations in TML (or if they can be inferred from connection metadata), populate these for better Cortex Analyst query planning. |
 | Complex SQL views | Add SQL dialect translation for ThoughtSpot-specific syntax to improve portability of complex `sql_query` strings to Snowflake. |
-| Parameters | Re-implement parameter logic as multiple concrete columns, or as Snowflake dynamic tables. Monitor Snowflake for parameterised expression support. |
+| Parameters | Snowflake variables are now GA. Build automated mapping from ThoughtSpot `parameters[]` to Snowflake session/bind variables — requires handling list configs, range constraints, and default values. Until then, parameters are logged in the Unmapped Report with Snowflake variables as the recommended manual re-implementation path. |
 | Window / LOD / semi-additive functions | A companion skill could assist interactively with window function rewrites, CTE generation, and semi-additive view creation. |
