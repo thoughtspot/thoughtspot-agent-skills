@@ -46,7 +46,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 | File | Purpose |
 |---|---|
-| [references/modeling-best-practices.md](references/modeling-best-practices.md) | Authoritative audit framework: all 42 checks, thresholds, PII patterns, scoring conventions, TML field references, open items |
+| [references/check-catalog.md](references/check-catalog.md) | All audit checks: what they detect, severity logic, and how to add/modify/remove checks |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [../ts-dependency-manager/SKILL.md](../ts-dependency-manager/SKILL.md) | Action skill for audit findings (remove/repoint) |
 | [../ts-object-answer-promote/SKILL.md](../ts-object-answer-promote/SKILL.md) | Formula promotion from answer to model |
@@ -164,8 +164,8 @@ Assessment profile — sets pass/fail thresholds:
 Enter 1 or 2:
 ```
 
-Store the profile. Thresholds are defined in
-[references/modeling-best-practices.md](references/modeling-best-practices.md).
+Store the profile. Thresholds are defined in each check function
+(see [references/check-catalog.md](references/check-catalog.md)).
 
 ### 2c. Connection scope
 
@@ -318,9 +318,8 @@ Check definitions, thresholds, and severity logic are implemented in:
 | `checks_security.py` | Security | S1–S5, S8–S10 |
 
 See [references/check-catalog.md](references/check-catalog.md) for the full catalog
-with severity logic per check. See
-[references/modeling-best-practices.md](references/modeling-best-practices.md) for
-thresholds, PII patterns, and scoring conventions.
+with severity logic per check, and instructions for adding, modifying, or
+removing checks.
 
 ### Phase 2 — Usage Analysis (future)
 

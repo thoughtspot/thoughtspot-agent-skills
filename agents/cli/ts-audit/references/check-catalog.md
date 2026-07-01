@@ -1,10 +1,70 @@
 # Audit Check Catalog
 
-Single source of truth for all audit checks. Each check is implemented as a
-`check_XX` function in the corresponding Python module under
-`tools/ts-cli/ts_cli/audit/`.
+Single source of truth for all audit checks. Each check is a Python function
+(`check_XX`) in the corresponding module under `tools/ts-cli/ts_cli/audit/`.
 
-To add a new check, see `tools/ts-cli/CLAUDE.md` — "Adding an audit check."
+The check function **is** the rule — thresholds, patterns, conditions, and
+severity mapping are all in the function body. There is no separate rules file.
+
+---
+
+## How checks work
+
+Each check function receives an `AuditContext` (the exported TML data for one
+model) and returns a list of `Finding` objects. The engine auto-discovers checks
+via the `ALL_CHECKS` list in each module.
+
+```
+checks_ai.py      → ALL_CHECKS = [check_a1, check_a2, ...]   → AI Readiness angle
+checks_data.py    → ALL_CHECKS = [check_d1, check_d2, ...]   → Data Modeling angle
+checks_human.py   → ALL_CHECKS = [check_h1, check_h2, ...]   → Human Readiness angle
+checks_perf.py    → ALL_CHECKS = [check_p1, check_p2, ...]   → Performance angle
+checks_security.py → ALL_CHECKS = [check_s1, check_s2, ...]  → Security angle
+```
+
+---
+
+## Adding a check
+
+1. **Write the function** in the appropriate `checks_*.py` module. Follow the
+   existing pattern — receive `AuditContext`, return `list[Finding]`:
+
+   ```python
+   def check_a6(ctx: AuditContext) -> list:
+       # Your rule logic — thresholds, conditions, severity
+       total = len(ctx.columns)
+       with_token_limit = sum(1 for c in ctx.columns if ...)
+       ratio = with_token_limit / total if total else 1.0
+       severity = "RED" if ratio < 0.5 else "YELLOW" if ratio < 0.8 else "GREEN"
+       return [Finding(check_id="A6", severity=severity, score=ratio, ...)]
+   ```
+
+2. **Add the function to `ALL_CHECKS`** at the bottom of the same file:
+
+   ```python
+   ALL_CHECKS = [check_a1, check_a2, check_a3, check_a4, check_a5, check_a6]
+   ```
+
+3. **Add a unit test** in `tools/ts-cli/tests/` — test the function in isolation
+   with a mock `AuditContext`.
+
+4. **Add a row** to the check table below (this file) under the correct angle.
+
+5. **Bump version** in both `ts_cli/__init__.py` and `pyproject.toml`.
+
+6. **Validate**: `pytest tools/ts-cli/tests/ && python tools/validate/check_version_sync.py`
+
+## Modifying a check
+
+Edit the function directly — change thresholds, conditions, severity logic.
+Update the severity logic column in the table below if it changed. Bump version
+(PATCH for threshold tweaks, MINOR for new detection logic).
+
+## Removing a check
+
+Delete the function, remove it from `ALL_CHECKS`, remove its row from the table
+below, delete its tests. Bump version (MAJOR — consumers may depend on the
+check ID appearing in reports).
 
 ---
 
