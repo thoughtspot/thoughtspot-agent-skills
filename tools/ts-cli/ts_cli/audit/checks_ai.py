@@ -8,9 +8,10 @@ from ts_cli.audit.findings import Finding
 _ANGLE = "ai"
 
 _NAME_ANTI = re.compile(
-    r"^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d|^[A-Z_]+$",
+    r"^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d",
     re.IGNORECASE,
 )
+_NAME_ANTI_UPPER = re.compile(r"^[A-Z][A-Z0-9]*_[A-Z0-9_]+$")
 
 
 def check_a1(ctx: AuditContext) -> list:
@@ -107,7 +108,7 @@ def check_a5(ctx: AuditContext) -> list:
             or (m.get("model_instructions", {}).get("data_model_instructions") or "").strip()
         )
         has_desc = bool((m.get("description") or "").strip())
-        anti = sum(1 for c in cols if _NAME_ANTI.match(c.get("name", "")))
+        anti = sum(1 for c in cols if _NAME_ANTI.match(c.get("name", "")) or _NAME_ANTI_UPPER.match(c.get("name", "")))
         name_quality = ((total - anti) / total) * 100 if total else 100
         score = (
             desc_pct * 0.30
