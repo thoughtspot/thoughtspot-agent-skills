@@ -37,6 +37,7 @@ Done items have moved to [`backlog-archive.md`](backlog-archive.md):
 - BL-055 — Tableau: scalar MAX/MIN detection — Complete (2026-06-27) — ts-cli v0.17.0
 - BL-056 — Tableau: strip line comments — Complete (2026-06-27) — ts-cli v0.17.0
 - BL-057 — Tableau: CSQ alias resolution — Complete (2026-06-27) — ts-cli v0.17.0
+- BL-065 — Codify ts-audit engine as `ts audit run` — Complete (2026-07-01) — 51 deterministic checks across 5 modules, `ts audit run` + `ts audit report` CLI commands, 32 unit tests
 
 ---
 
@@ -1696,35 +1697,6 @@ For Databricks items that overlap BL-032: merge into BL-032's scope rather than
 duplicating work. BL-032's target (2026-09-30) applies.
 
 **Target:** High-severity items by 2026-07-15. Medium-severity items by 2026-09-30.
-
----
-
-## BL-065 — Codify ts-audit engine as `ts audit run`
-
-**Source:** codification sweep 2026-06-29 (angle #11b), priority #1.
-**Affects:** `agents/cli/ts-audit/`, `tools/ts-cli/`.
-**Status:** OPEN.
-
-### Problem
-
-All 42 ts-audit checks (A1–A5, D1–D12, H1–H10, P1–P11, S1–S5) are threshold comparisons
-against TML fields. The LLM re-implements the entire analysis engine every invocation —
-re-reading the rubric, re-parsing TML, re-applying thresholds, re-formatting the report.
-This is the highest token cost per invocation of any skill and produces non-deterministic
-severity ratings for identical inputs.
-
-### Approach
-
-Build `ts audit run` as a deterministic Python command in ts-cli:
-1. Export TML corpus (via `ts tml export` or future `export-corpus`)
-2. Run all 42 checks as pure functions against the parsed TML
-3. Output a structured JSON report (findings array with check ID, severity, object, detail)
-4. SKILL.md becomes: call `ts audit run`, then LLM summarises/prioritises the JSON report
-
-The Tableau `translate-formulas` pipeline is the reference pattern — same shape (deterministic
-engine produces structured output, LLM interprets for the user).
-
-**Target:** 2026-09-30.
 
 ---
 
