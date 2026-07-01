@@ -78,3 +78,16 @@ used anywhere in the repo.
 4. Update any `SKILL.md` that uses the command
 5. Add unit tests in `tools/ts-cli/tests/`
 6. Bump version in both `__init__.py` and `pyproject.toml`
+
+## Adding an audit check
+
+1. Write the `check_XX` function in the appropriate `audit/checks_*.py` module
+   (AI → `checks_ai.py`, Data → `checks_data.py`, etc.). The function receives
+   an `AuditContext` and returns a list of `Finding` objects.
+2. Add the function to `ALL_CHECKS` in the same module — this is the registry
+   that `run_audit()` iterates.
+3. Add unit tests in `tools/ts-cli/tests/` covering the check's logic.
+4. Add a row to `agents/cli/ts-audit/references/check-catalog.md` with the check ID,
+   what it detects, and severity logic.
+5. Bump version in both `__init__.py` and `pyproject.toml`.
+6. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
