@@ -49,7 +49,7 @@ for new codification opportunities.
 | 8 | Cross-runtime skill drift | CLI / CoCo / Databricks mirrors in sync; parity matrix current | `check_mirror_sync`, `check_runtime_coverage`, `generate_parity --check`, `check_skill_naming` |
 | 9 | Conversion consistency | The conversion skills agree with each other against the invariants | `conversion-consistency-auditor` agent, `check_coverage_matrix`, `check_formula_catalog` |
 | 10 | Security | No secrets, no v1 endpoints, credential-handling rules honoured | `check_secrets`, `check_no_v1_endpoints` |
-| 11 | Codification | Repeated skill logic that should become `ts` CLI / shared reference / validator | MANUAL |
+| 11 | Codification | (a) Repeated skill logic that should become `ts` CLI / shared reference / validator; (b) *agentic → deterministic*: skill steps that are mechanical transformations (parsing, type mapping, TML emission, formula rewriting) currently executed by the LLM but codifiable as deterministic Python — yielding faster, cheaper, more reproducible results. The Tableau `translate-formulas` pipeline (ts-cli v0.17.0) is the reference pattern. | MANUAL |
 | 12 | Synthesis / advise | Prioritise findings, route each to a bucket | MANUAL (the sweep's final step) |
 
 ### External / dynamic — "are our assumptions still true as the products move?"
@@ -185,3 +185,4 @@ that repo's validators. The date/age/activity machinery is unchanged.
 |---|---|---|
 | 2026-06-17 | Rubric established | 12 internal angles + external 13/14/16; 15 parked; weekly external cadence |
 | 2026-06 | Full (inaugural, 12-angle) | PRs #90–#100; BL-026/027/028/029. See `docs/audit/`. |
+| 2026-06-29 | Angle #11 expanded | Added "agentic → deterministic" sub-dimension: classify skill steps as judgment-required vs mechanical, codify mechanical steps as ts-cli commands |
