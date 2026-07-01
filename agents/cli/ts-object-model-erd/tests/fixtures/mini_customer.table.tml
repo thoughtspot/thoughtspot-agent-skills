@@ -1,0 +1,14 @@
+guid: tbl-customer-001
+table:
+  name: CUSTOMER
+  columns:
+  - name: NAME
+    properties:
+      column_type: ATTRIBUTE
+  - name: CUSTOMER_CODE
+    properties:
+      column_type: ATTRIBUTE
+  rls_rules:
+  - name: Territory scope
+    expression: "[CUSTOMER::REGION] IN (ts_user_territories())"
+    applies_to: All non-admin groups
