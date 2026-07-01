@@ -484,7 +484,15 @@ function parseRoute(){
   var hash = location.hash || "#dashboard";
   if(hash === "#") hash = "#dashboard";
   var parts = hash.substring(1).split("/");
-  return {view: parts[0], id: parts[1] || null, sub: parts[2] || null, raw: hash};
+  var view = parts[0];
+  var query = "";
+  /* Strip query string from view */
+  var qIdx = view.indexOf("?");
+  if(qIdx !== -1){
+    query = view.substring(qIdx + 1);
+    view = view.substring(0, qIdx);
+  }
+  return {view: view, id: parts[1] || null, sub: parts[2] || null, query: query, raw: hash};
 }
 
 function navigate(hash){
@@ -645,6 +653,15 @@ function buildDashboard(){
       var guid = cell.getAttribute("data-guid");
       var angle = cell.getAttribute("data-angle");
       if(guid && angle) navigate("#model/"+guid+"/"+angle);
+    });
+  });
+
+  /* Wire up angle column header clicks */
+  var angleHeaders = c.querySelectorAll("th.angle-col");
+  Array.prototype.slice.call(angleHeaders).forEach(function(th){
+    th.style.cursor = "pointer";
+    th.addEventListener("click",function(){
+      navigate("#crossmodel?angle="+th.getAttribute("data-angle"));
     });
   });
 }
