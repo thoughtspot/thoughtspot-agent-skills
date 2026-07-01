@@ -455,6 +455,79 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   .filter-pills{display:none;}
 }
 
+/* ── Cross-Model view ── */
+.crossmodel-filter{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  padding:10px 14px;margin-bottom:12px;
+}
+.crossmodel-filter input[type="search"]{
+  flex:1;min-width:160px;padding:5px 10px;border:1px solid var(--hair);
+  border-radius:6px;font:inherit;font-size:12px;color:var(--ink);
+  background:var(--ground);outline:none;
+}
+.crossmodel-filter input[type="search"]:focus{
+  border-color:var(--accent);background:var(--surface);
+}
+.crossmodel-filter label{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap;
+}
+.crossmodel-filter .cm-count{
+  margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap;
+}
+
+.crossmodel-wrap{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  overflow:hidden;overflow-x:auto;
+}
+.crossmodel-table{
+  border-collapse:collapse;width:100%;min-width:600px;
+}
+.crossmodel-table thead{position:sticky;top:var(--topbar-h);z-index:10;}
+.crossmodel-table th{
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--muted);padding:8px 10px;text-align:left;
+  background:var(--surface-2);border-bottom:2px solid var(--hair);
+  white-space:nowrap;cursor:pointer;user-select:none;
+  transition:color .1s;
+}
+.crossmodel-table th:hover{color:var(--accent);}
+.crossmodel-table th.sort-asc::after{content:" ▲";font-size:9px;color:var(--accent);}
+.crossmodel-table th.sort-desc::after{content:" ▼";font-size:9px;color:var(--accent);}
+.crossmodel-table td{
+  padding:7px 10px;border-bottom:1px solid var(--hair-2);
+  font-size:12px;vertical-align:middle;
+}
+.crossmodel-table tbody tr:nth-child(even):not(.group-header){background:var(--ground);}
+.crossmodel-table tbody tr:hover:not(.group-header){background:var(--accent-soft);}
+.crossmodel-table .col-sev{width:90px;}
+.crossmodel-table .col-check{width:70px;font-family:var(--mono);font-size:10px;}
+.crossmodel-table .col-angle{width:110px;}
+.crossmodel-table .col-model{min-width:140px;}
+.crossmodel-table .col-detail{min-width:200px;max-width:400px;}
+.crossmodel-table .model-link{color:var(--ink);font-weight:500;}
+.crossmodel-table .model-link:hover{color:var(--accent);text-decoration:underline;}
+.crossmodel-table .ts-icon{
+  font-size:9px;color:var(--muted);margin-left:4px;text-decoration:none;
+  display:inline-flex;align-items:center;gap:2px;
+}
+.crossmodel-table .ts-icon:hover{color:var(--accent);}
+.crossmodel-table .detail-cell{
+  white-space:pre-wrap;word-break:break-word;color:var(--ink);line-height:1.4;
+}
+.group-header td{
+  background:var(--surface-2)!important;font-weight:700;font-size:11px;
+  color:var(--muted);padding:5px 10px;border-top:2px solid var(--hair);
+  border-bottom:1px solid var(--hair);
+}
+.group-header .gh-id{
+  font-family:var(--mono);color:var(--ink);margin-right:6px;
+}
+.group-header .gh-count{
+  font-weight:500;color:var(--muted);
+}
+
 /* ── Print ── */
 @media print{
   .sidebar,.hamburger,.topbar{display:none!important;}
@@ -524,6 +597,7 @@ SEVS.forEach(function(s){ activeSevs[s] = true; });
 var builtViews = {};
 var currentRoute = null;
 var _sevFilterListener = null;
+var _crossmodelSevListener = null;
 
 /* ── Helpers ── */
 function $(sel,ctx){ return (ctx||document).querySelector(sel); }
@@ -694,9 +768,25 @@ function onRoute(){
       break;
     case "crossmodel":
       viewId = "v-crossmodel";
-      breadcrumbParts = ["Cross-Model"];
       highlightNav("#crossmodel");
-      if(!builtViews.crossmodel){ buildPlaceholder("v-crossmodel","Cross-Model Analysis","Table reuse, model overlaps, and cross-cutting findings"); builtViews.crossmodel=true; }
+      /* Parse query params from hash (e.g. ?severity=HIGH or ?angle=D) */
+      var cmFilters = {};
+      if(route.query){
+        route.query.split("&").forEach(function(part){
+          var kv = part.split("=");
+          if(kv.length === 2) cmFilters[kv[0]] = decodeURIComponent(kv[1]);
+        });
+      }
+      /* Build descriptive breadcrumb */
+      var cmCrumb = "Cross-Model";
+      if(cmFilters.severity) cmCrumb = "Cross-Model — "+cmFilters.severity;
+      else if(cmFilters.angle){
+        var angleLabel = ANGLE_LABELS[ANGLE_SHORT[cmFilters.angle]||cmFilters.angle] || cmFilters.angle;
+        cmCrumb = "Cross-Model — "+angleLabel;
+      }
+      breadcrumbParts = ["Dashboard", cmCrumb];
+      /* Always rebuild — filters change on each navigation */
+      buildCrossModel(D, cmFilters);
       break;
     case "objectmap":
       viewId = "v-objectmap";
@@ -991,6 +1081,290 @@ function buildPlaceholder(containerId,title,desc){
     '<div class="ph-text">'+title+'</div>'+
     '<div class="ph-sub">'+desc+' &mdash; view coming soon</div>'+
     '</div>';
+}
+
+/* ── Build Cross-Model view ── */
+function buildCrossModel(D, initialFilters){
+  var c = document.getElementById("v-crossmodel");
+  c.innerHTML = "";
+
+  /* Remove old listener before rebuilding */
+  if(_crossmodelSevListener) document.removeEventListener("sev-filter-changed", _crossmodelSevListener);
+
+  initialFilters = initialFilters || {};
+
+  /* Resolve initial filter values */
+  var initSev = initialFilters.severity || null;  /* e.g. "HIGH" */
+  var initAngle = initialFilters.angle || null;   /* e.g. "D" (short code) or full angle name */
+
+  /* Normalise angle filter: convert short code to full angle name if needed */
+  if(initAngle && ANGLE_SHORT[initAngle]){
+    initAngle = ANGLE_SHORT[initAngle]; /* "D" → "data_modeling" */
+  }
+
+  var findings = D.F || [];
+
+  /* Sort state */
+  var sortCol = "s";   /* default: sort by severity */
+  var sortDir = "asc"; /* "asc" | "desc" */
+
+  /* ── Filter toolbar ── */
+  var toolbar = el("div","crossmodel-filter");
+  var searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.placeholder = "Search models, check IDs, details…";
+  searchInput.setAttribute("aria-label","Search findings");
+  toolbar.appendChild(searchInput);
+
+  var groupLabel = el("label","");
+  var groupChk = document.createElement("input");
+  groupChk.type = "checkbox";
+  groupChk.id = "cm-group-by-check";
+  groupLabel.appendChild(groupChk);
+  groupLabel.appendChild(document.createTextNode(" Group by check ID"));
+  toolbar.appendChild(groupLabel);
+
+  var countEl = el("span","cm-count","");
+  toolbar.appendChild(countEl);
+  c.appendChild(toolbar);
+
+  /* ── Table wrapper ── */
+  var wrap = el("div","crossmodel-wrap");
+  var table = el("table","crossmodel-table");
+  table.setAttribute("role","grid");
+
+  /* Header */
+  var thead = document.createElement("thead");
+  var hrow = document.createElement("tr");
+  var cols = [
+    {key:"s",  label:"Severity", cls:"col-sev"},
+    {key:"ci", label:"Check",    cls:"col-check"},
+    {key:"a",  label:"Angle",    cls:"col-angle"},
+    {key:"mi", label:"Model",    cls:"col-model"},
+    {key:"d",  label:"Detail",   cls:"col-detail"}
+  ];
+  var thEls = [];
+  cols.forEach(function(col){
+    var th = el("th", col.cls, col.label);
+    th.setAttribute("data-col", col.key);
+    th.setAttribute("tabindex","0");
+    thEls.push(th);
+    hrow.appendChild(th);
+  });
+  thead.appendChild(hrow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement("tbody");
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  c.appendChild(wrap);
+
+  /* ── Sort function ── */
+  function sortFindings(arr){
+    return arr.slice().sort(function(a,b){
+      var av, bv, cmp = 0;
+      if(sortCol === "s"){
+        av = SEV_ORDER[a.s] !== undefined ? SEV_ORDER[a.s] : 99;
+        bv = SEV_ORDER[b.s] !== undefined ? SEV_ORDER[b.s] : 99;
+        cmp = av - bv;
+      } else if(sortCol === "ci"){
+        av = a.ci || "";
+        bv = b.ci || "";
+        cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+      } else if(sortCol === "a"){
+        av = (ANGLE_LABELS[a.a] || a.a || "").toLowerCase();
+        bv = (ANGLE_LABELS[b.a] || b.a || "").toLowerCase();
+        cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+      } else if(sortCol === "mi"){
+        av = (D.L[a.mi] ? D.L[a.mi].n : "").toLowerCase();
+        bv = (D.L[b.mi] ? D.L[b.mi].n : "").toLowerCase();
+        cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+      } else if(sortCol === "d"){
+        av = (a.d || "").toLowerCase();
+        bv = (b.d || "").toLowerCase();
+        cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }
+
+  /* ── Update sort header indicators ── */
+  function updateSortHeaders(){
+    thEls.forEach(function(th){
+      th.classList.remove("sort-asc","sort-desc");
+      if(th.getAttribute("data-col") === sortCol){
+        th.classList.add(sortDir === "asc" ? "sort-asc" : "sort-desc");
+      }
+    });
+  }
+
+  /* ── Check if a row passes text search ── */
+  function rowMatchesSearch(f, searchTerm){
+    if(!searchTerm) return true;
+    var term = searchTerm.toLowerCase();
+    var modelName = (D.L[f.mi] ? D.L[f.mi].n : "").toLowerCase();
+    var detail = (f.d || "").toLowerCase();
+    var checkId = (f.ci || "").toLowerCase();
+    var angle = (ANGLE_LABELS[f.a] || f.a || "").toLowerCase();
+    return modelName.indexOf(term) !== -1
+        || detail.indexOf(term) !== -1
+        || checkId.indexOf(term) !== -1
+        || angle.indexOf(term) !== -1;
+  }
+
+  /* ── Build a single data row ── */
+  function buildRow(f){
+    var tr = document.createElement("tr");
+    tr.setAttribute("data-severity", f.s);
+    tr.setAttribute("data-angle", f.a);
+    var mi = f.mi;
+    tr.setAttribute("data-model", mi);
+    tr.setAttribute("data-check", f.ci || "");
+
+    /* Severity cell */
+    var tdSev = el("td","col-sev");
+    tdSev.innerHTML = severityPill(f.s);
+    tr.appendChild(tdSev);
+
+    /* Check ID cell */
+    var tdCheck = el("td","col-check");
+    tdCheck.textContent = f.ci || "";
+    tr.appendChild(tdCheck);
+
+    /* Angle cell */
+    var tdAngle = el("td","col-angle");
+    tdAngle.textContent = ANGLE_LABELS[f.a] || f.a || "";
+    tr.appendChild(tdAngle);
+
+    /* Model cell */
+    var tdModel = el("td","col-model");
+    var model = D.L[mi];
+    if(model){
+      var mHtml = '<a class="model-link" href="#model/'+model.g+'" data-route="#model/'+model.g+'">'+model.n+'</a>';
+      if(D.C && D.C.u){
+        mHtml += '<a class="ts-icon" href="'+D.C.u+'/#/data/tables/'+model.g+'" target="_blank" rel="noopener" title="Open in ThoughtSpot">↗</a>';
+      }
+      tdModel.innerHTML = mHtml;
+    } else {
+      tdModel.textContent = "(model "+mi+")";
+    }
+    tr.appendChild(tdModel);
+
+    /* Detail cell */
+    var tdDetail = el("td","col-detail detail-cell");
+    tdDetail.textContent = f.d || "";
+    tr.appendChild(tdDetail);
+
+    return tr;
+  }
+
+  /* ── Render table body ── */
+  function renderTable(){
+    var searchTerm = searchInput.value;
+    var grouped = groupChk.checked;
+    var sorted = sortFindings(findings);
+
+    /* Apply initial angle filter */
+    var visible = sorted.filter(function(f){
+      if(initSev && f.s !== initSev) return false;
+      if(initAngle && f.a !== initAngle) return false;
+      return true;
+    });
+
+    /* Apply text search */
+    var filtered = visible.filter(function(f){
+      return rowMatchesSearch(f, searchTerm);
+    });
+
+    tbody.innerHTML = "";
+    var shownCount = 0;
+
+    if(grouped){
+      /* Group by check ID */
+      var groups = {};
+      var groupOrder = [];
+      filtered.forEach(function(f){
+        var key = f.ci || "(no check)";
+        if(!groups[key]){ groups[key] = []; groupOrder.push(key); }
+        groups[key].push(f);
+      });
+
+      groupOrder.forEach(function(key){
+        var gFindings = groups[key];
+        /* Group header row */
+        var ghTr = document.createElement("tr");
+        ghTr.className = "group-header";
+        var ghTd = document.createElement("td");
+        ghTd.colSpan = cols.length;
+        ghTd.innerHTML = '<span class="gh-id">'+key+'</span>'+
+                         '<span class="gh-count">'+gFindings.length+' finding'+(gFindings.length!==1?'s':'')+'</span>';
+        ghTr.appendChild(ghTd);
+        tbody.appendChild(ghTr);
+
+        gFindings.forEach(function(f){
+          var tr = buildRow(f);
+          if(!activeSevs[f.s]) tr.style.display = "none";
+          else shownCount++;
+          tbody.appendChild(tr);
+        });
+      });
+    } else {
+      filtered.forEach(function(f){
+        var tr = buildRow(f);
+        if(!activeSevs[f.s]) tr.style.display = "none";
+        else shownCount++;
+        tbody.appendChild(tr);
+      });
+    }
+
+    countEl.textContent = shownCount + " finding" + (shownCount !== 1 ? "s" : "");
+  }
+
+  /* ── Wire header sort clicks ── */
+  thEls.forEach(function(th){
+    th.addEventListener("click",function(){
+      var col = th.getAttribute("data-col");
+      if(sortCol === col){
+        sortDir = sortDir === "asc" ? "desc" : "asc";
+      } else {
+        sortCol = col;
+        sortDir = "asc";
+      }
+      updateSortHeaders();
+      renderTable();
+    });
+    th.addEventListener("keydown",function(e){
+      if(e.key === "Enter" || e.key === " "){ e.preventDefault(); th.click(); }
+    });
+  });
+
+  /* ── Wire search input ── */
+  searchInput.addEventListener("input", renderTable);
+
+  /* ── Wire group-by checkbox ── */
+  groupChk.addEventListener("change", renderTable);
+
+  /* ── Wire severity filter ── */
+  function applyCrossmodelSevFilter(){
+    $$("tr[data-severity]", tbody).forEach(function(tr){
+      var sev = tr.getAttribute("data-severity");
+      tr.style.display = activeSevs[sev] ? "" : "none";
+    });
+    /* Recount visible */
+    var shown = $$("tr[data-severity]", tbody).filter(function(tr){ return tr.style.display !== "none"; }).length;
+    countEl.textContent = shown + " finding" + (shown !== 1 ? "s" : "");
+  }
+  _crossmodelSevListener = applyCrossmodelSevFilter;
+  document.addEventListener("sev-filter-changed", _crossmodelSevListener);
+
+  /* ── Set initial sort indicator ── */
+  updateSortHeaders();
+
+  /* ── Pre-populate search box if angle filter applied (for UX clarity) ── */
+  /* Not setting search text — angle filter is structural, not text-based */
+
+  /* ── Initial render ── */
+  renderTable();
 }
 
 /* ── Build Dashboard ── */
