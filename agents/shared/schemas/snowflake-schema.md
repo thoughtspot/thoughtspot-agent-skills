@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-06 (verified against published semantic-view YAML spec) -->
+<!-- currency: snowflake — 2026-07 (variables GA, schema block expanded) -->
 
 # Snowflake Semantic View YAML Schema
 
@@ -35,6 +35,13 @@ tables:                           # Required. At least one entry.
     expr: string                  # SQL expression. e.g. table_alias.COLUMN_NAME
                                   # Quote reserved words: table_alias."date"
     data_type: string             # TEXT | NUMBER | DATE | TIMESTAMP | BOOLEAN
+    unique: boolean               # Optional. Marks dimension as having unique values.
+    sample_values:                # Optional. Example values — improves Cortex Analyst accuracy.
+    - string                      # Recommended by Snowflake best-practices for NL queries.
+    access_modifier: string       # Optional. "private_access" | "public_access"
+    labels:                       # Optional. e.g. [filter] — marks dimension as a filter.
+    - string
+    cortex_search_service: string # Optional. Links dimension to a Cortex Search service.
 
   time_dimensions:                # Optional. Nested under the owning table.
   - name: string                  # Unique across all dimensions, time_dimensions, metrics.
@@ -43,6 +50,25 @@ tables:                           # Required. At least one entry.
     description: string
     expr: string                  # e.g. table_alias.DATE_COLUMN
     data_type: string             # DATE | TIMESTAMP
+    unique: boolean               # Optional.
+    sample_values:                # Optional.
+    - string
+    access_modifier: string       # Optional. "private_access" | "public_access"
+    labels:                       # Optional.
+    - string
+
+  facts:                          # Optional. Per-table raw numeric columns (no aggregation).
+  - name: string                  # Unique across all dims/time_dims/metrics/facts.
+    synonyms:
+    - string
+    description: string
+    expr: string                  # e.g. table_alias.COLUMN_NAME
+    data_type: string             # NUMBER | TEXT | etc.
+    access_modifier: string       # Optional. "private_access" | "public_access"
+    labels:                       # Optional.
+    - string
+    # tags:                       # TODO: verify — listed in advanced constructs table but
+    #   - string                  # exact YAML syntax not yet confirmed via live round-trip.
 
   metrics:                        # Optional. Nested under the owning table.
                                   # NOTE: The keyword is "metrics", NOT "measures".
@@ -56,6 +82,11 @@ tables:                           # Required. At least one entry.
                                   # Cortex Analyst (CA) extension JSON, which Cortex then
                                   # rejects at query time with error 392700 "unknown field
                                   # data_type". Omit data_type from metrics entirely.
+    access_modifier: string       # Optional. "private_access" | "public_access"
+    labels:                       # Optional.
+    - string
+    using_relationships:          # Optional. Relationship path for cross-table metrics.
+    - string
 
 relationships:                    # Optional. Defined at the top level (not under tables).
 - name: string                    # Unique relationship name.
@@ -64,6 +95,12 @@ relationships:                    # Optional. Defined at the top level (not unde
   relationship_columns:           # At least one entry.
   - left_column: string           # Physical column name on left_table.
     right_column: string          # Physical column name on right_table.
+
+variables:                        # Optional. GA June 2026. Top-level session/bind variables.
+- name: string                    # Variable identifier.
+  data_type: string               # NUMBER | VARCHAR | DATE | TIMESTAMP | BOOLEAN
+  default_value: string           # Optional. Default value when not overridden per-query.
+  description: string             # Optional. Human-facing description.
 ```
 
 ### Advanced constructs — DDL vs YAML coverage
