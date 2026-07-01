@@ -512,7 +512,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   overflow:hidden;overflow-x:auto;
 }
 .crossmodel-table{
-  border-collapse:collapse;width:100%;min-width:600px;
+  border-collapse:separate;border-spacing:0;width:100%;min-width:600px;
 }
 .crossmodel-table thead{position:sticky;top:var(--topbar-h);z-index:10;box-shadow:0 1px 3px rgba(0,0,0,.06);}
 .crossmodel-table th{
@@ -777,7 +777,6 @@ var builtViews = {};
 var currentRoute = null;
 var _sevFilterListener = null;
 var _crossmodelSevListener = null;
-var _dashSevListener = null;
 
 /* ── Helpers ── */
 function $(sel,ctx){ return (ctx||document).querySelector(sel); }
@@ -999,7 +998,7 @@ function onRoute(){
       breadcrumbParts = ["Dashboard"];
       breadcrumbLinks = [];
       highlightNav("#dashboard");
-      buildDashboard();
+      if(!builtViews.dashboard){ buildDashboard(); builtViews.dashboard=true; }
       break;
   }
 
@@ -2521,7 +2520,6 @@ function buildCrossModel(D, initialFilters){
 
 /* ── Build Dashboard ── */
 function buildDashboard(){
-  if(_dashSevListener) document.removeEventListener("sev-filter-changed",_dashSevListener);
   var c = document.getElementById("v-dashboard");
   var html = "";
 
@@ -2625,26 +2623,6 @@ function buildDashboard(){
     });
   });
 
-  /* Wire severity filter to heatmap */
-  function applyDashboardSevFilter(){
-    $$(".heatmap tbody tr",c).forEach(function(tr){
-      var cells = $$(".cell",tr);
-      var hasVisibleSev = false;
-      cells.forEach(function(cell){
-        var sev = cell.getAttribute("data-severity");
-        if(sev && sev !== "NONE" && activeSevs[sev]) hasVisibleSev = true;
-      });
-      tr.style.display = hasVisibleSev ? "" : "none";
-    });
-    /* Dim severity cards whose filter is inactive */
-    $$(".sev-card",c).forEach(function(card){
-      var sev = card.getAttribute("data-sev");
-      card.style.opacity = activeSevs[sev] ? "1" : "0.35";
-    });
-  }
-  _dashSevListener = applyDashboardSevFilter;
-  document.addEventListener("sev-filter-changed",_dashSevListener);
-  applyDashboardSevFilter();
 }
 
 /* ── Heatmap builder ── */
