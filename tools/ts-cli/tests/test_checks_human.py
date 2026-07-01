@@ -94,5 +94,5 @@ def test_h10_passes_clean_names():
     assert check_h10(ctx) == []
 
 
-def test_all_checks_has_ten_entries():
-    assert len(ALL_CHECKS) == 10
+def test_all_checks_has_nine_entries():
+    assert len(ALL_CHECKS) == 9

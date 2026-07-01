@@ -124,9 +124,12 @@ def check_s5(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         for c in (m.get("columns") or []):
-            if _CREDENTIAL_PATTERNS.search(c.get("name", "")):
+            name = c.get("name", "")
+            match = _CREDENTIAL_PATTERNS.search(name)
+            if match:
+                severity = "CRITICAL" if match.group().lower() != "token" else "HIGH"
                 findings.append(Finding(
-                    check_id="S5", angle=_ANGLE, severity="CRITICAL",
+                    check_id="S5", angle=_ANGLE, severity=severity,
                     object_type="column", object_name=c.get("name", ""),
                     object_guid=ctx.guid_for(model),
                     detail=f"Credential column '{c.get('name', '')}' in analytics model",

@@ -20,6 +20,16 @@ ts_cli/
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
     tableau.py    — ts tableau (signin, datasources, download, translate-formulas)
+    audit.py      — ts audit run
+  audit/
+    __init__.py       — run_audit() entry point, angle module registry
+    context.py        — AuditContext dataclass + build_context()
+    findings.py       — Finding dataclass + build_summary()
+    checks_ai.py      — AI readiness checks (A1-A5)
+    checks_data.py    — Data modeling checks (D1-D12)
+    checks_human.py   — Human readiness checks (H1-H10)
+    checks_perf.py    — Performance checks (P1-P18)
+    checks_security.py — Security checks (S1-S10)
 ```
 
 Each command group is a separate module in `commands/`. `cli.py` imports and registers each.
@@ -27,7 +37,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.21.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.22.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

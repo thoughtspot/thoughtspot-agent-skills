@@ -174,12 +174,18 @@ def check_h6(ctx: AuditContext) -> list:
 
 def check_h7(ctx: AuditContext) -> list:
     findings = []
+    model_table_fqns = set()
+    for model in ctx.models:
+        for mt in (model.get("model", {}).get("model_tables") or []):
+            mt_fqn = mt.get("fqn", "")
+            if mt_fqn:
+                model_table_fqns.add(mt_fqn)
     for answer in ctx.answers:
         a = answer.get("answer", {})
         aname = a.get("name", "")
         for tref in (a.get("tables") or []):
             fqn = tref.get("fqn", "")
-            if fqn and not any(fqn in str(m) for m in ctx.models):
+            if fqn and fqn not in model_table_fqns:
                 findings.append(Finding(
                     check_id="H7", angle=_ANGLE, severity="MEDIUM",
                     object_type="answer", object_name=aname,
@@ -270,5 +276,5 @@ def check_h10(ctx: AuditContext) -> list:
 
 ALL_CHECKS = [
     check_h1, check_h2, check_h3, check_h4, check_h5,
-    check_h6, check_h7, check_h8, check_h9, check_h10,
+    check_h7, check_h8, check_h9, check_h10,
 ]

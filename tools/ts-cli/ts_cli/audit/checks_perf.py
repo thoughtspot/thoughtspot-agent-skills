@@ -341,7 +341,7 @@ def check_p16(ctx: AuditContext) -> list:
                 check_id="P16", angle=_ANGLE, severity=severity,
                 object_type="formula", object_name=f.get("name", ""),
                 object_guid=ctx.guid_for(model),
-                detail=f"Formula has {depth} nested if() levels",
+                detail=f"Formula has {depth} if() calls",
                 metric=depth, threshold={"info": 3, "low": 5},
             ))
     return findings
