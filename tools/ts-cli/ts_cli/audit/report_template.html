@@ -273,6 +273,171 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .view-placeholder .ph-text{font-size:14px;font-weight:500;}
 .view-placeholder .ph-sub{font-size:12px;margin-top:4px;}
 
+/* ── Scorecard ── */
+.scorecard-header{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  padding:16px 20px;margin-bottom:16px;
+}
+.scorecard-header .model-title{
+  font-size:18px;font-weight:700;line-height:1.2;margin-bottom:4px;
+}
+.scorecard-header .model-guid{
+  font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px;
+}
+.scorecard-header .model-stats{
+  display:flex;flex-wrap:wrap;gap:16px;
+}
+.scorecard-header .stat-item{
+  display:flex;flex-direction:column;align-items:center;
+  min-width:60px;
+}
+.scorecard-header .stat-item .stat-val{
+  font-size:20px;font-weight:700;line-height:1;color:var(--accent);
+}
+.scorecard-header .stat-item .stat-lbl{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);margin-top:2px;
+}
+.scorecard-header .header-actions{
+  display:flex;gap:8px;margin-top:12px;
+}
+.erd-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;
+  background:var(--accent);color:#fff;border:1px solid var(--accent);
+  cursor:pointer;transition:opacity .12s;
+}
+.erd-btn:hover{opacity:.85;}
+.ts-link-btn{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;
+  background:var(--surface);color:var(--accent);border:1px solid var(--hair);
+  text-decoration:none;cursor:pointer;transition:background .12s;
+}
+.ts-link-btn:hover{background:var(--accent-soft);text-decoration:none;}
+
+.angle-section{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  margin-bottom:10px;overflow:hidden;
+}
+.angle-section > summary{
+  display:flex;align-items:center;gap:8px;padding:12px 16px;
+  cursor:pointer;user-select:none;font-weight:600;font-size:13px;
+  list-style:none;
+}
+.angle-section > summary::-webkit-details-marker{display:none;}
+.angle-section > summary::before{
+  content:"▸";font-size:10px;color:var(--muted);transition:transform .15s;flex-shrink:0;
+}
+.angle-section[open] > summary::before{transform:rotate(90deg);}
+.angle-section > summary:hover{background:var(--ground);}
+.angle-section .angle-name{flex:1;}
+.angle-section .angle-count{
+  font-size:11px;color:var(--muted);font-weight:500;
+}
+.angle-section.sev-CRITICAL{border-left:3px solid var(--sev-critical);}
+.angle-section.sev-HIGH{border-left:3px solid var(--sev-high);}
+.angle-section.sev-MEDIUM{border-left:3px solid var(--sev-medium);}
+.angle-section.sev-LOW{border-left:3px solid var(--sev-low);}
+.angle-section.sev-INFO{border-left:3px solid var(--sev-info);}
+.angle-section.sev-NONE{border-left:3px solid var(--hair);}
+.angle-section.sev-PASS{border-left:3px solid var(--sev-green);}
+
+.findings-body{padding:0 16px 12px;}
+.finding-card{
+  border:1px solid var(--hair-2);border-radius:6px;padding:10px 12px;
+  margin-top:8px;background:var(--surface-2);
+  transition:border-color .1s;
+}
+.finding-card:hover{border-color:var(--hair);}
+.finding-card.hidden-by-filter{display:none;}
+.finding-card .card-top{
+  display:flex;align-items:center;gap:8px;margin-bottom:6px;
+}
+.finding-card .check-badge{
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  background:var(--ground);color:var(--muted);
+  padding:2px 7px;border-radius:3px;border:1px solid var(--hair);
+  flex-shrink:0;
+}
+.sev-pill{
+  display:inline-flex;align-items:center;font-size:10px;font-weight:700;
+  padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;
+  flex-shrink:0;
+}
+.sev-pill.sev-critical{background:var(--crit-soft);color:var(--sev-critical);}
+.sev-pill.sev-high{background:#fff4ec;color:var(--sev-high);}
+.sev-pill.sev-medium{background:#fefce8;color:#92400e;}
+.sev-pill.sev-low{background:#eff6ff;color:var(--sev-low);}
+.sev-pill.sev-info{background:var(--ground);color:var(--sev-info);}
+
+.finding-card .detail-text{
+  font-size:12px;color:var(--ink);margin-bottom:6px;line-height:1.4;
+}
+
+.metric-bar-wrap{margin-bottom:6px;}
+.metric-bar-label{
+  font-size:11px;color:var(--muted);margin-bottom:3px;
+  display:flex;justify-content:space-between;
+}
+.metric-bar{
+  height:6px;border-radius:3px;background:var(--hair-2);overflow:hidden;
+}
+.metric-bar-fill{
+  height:100%;border-radius:3px;background:var(--sev-critical);
+  transition:width .3s;
+}
+.metric-bar-fill.ok{background:var(--sev-green);}
+
+.finding-recommendation{
+  font-size:11px;color:var(--accent);background:var(--accent-soft);
+  border-radius:4px;padding:4px 8px;margin-top:4px;
+}
+
+.dependents-panel{
+  background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  margin-top:10px;overflow:hidden;
+}
+.dependents-panel > summary{
+  display:flex;align-items:center;gap:8px;padding:12px 16px;
+  cursor:pointer;user-select:none;font-weight:600;font-size:13px;
+  list-style:none;
+}
+.dependents-panel > summary::-webkit-details-marker{display:none;}
+.dependents-panel > summary::before{
+  content:"▸";font-size:10px;color:var(--muted);transition:transform .15s;flex-shrink:0;
+}
+.dependents-panel[open] > summary::before{transform:rotate(90deg);}
+.dependents-panel > summary:hover{background:var(--ground);}
+.dependents-body{padding:0 16px 12px;}
+.dependent-item{
+  display:flex;align-items:center;gap:8px;padding:6px 0;
+  border-bottom:1px solid var(--hair-2);
+}
+.dependent-item:last-child{border-bottom:none;}
+.dep-type-badge{
+  font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;
+  flex-shrink:0;
+}
+.dep-type-badge.ANSWER{background:var(--accent-soft);color:var(--accent);}
+.dep-type-badge.LIVEBOARD{background:var(--ok-soft);color:var(--ok);}
+.dep-name{font-size:12px;font-weight:500;flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dep-guid{font-family:var(--mono);font-size:10px;color:var(--muted);flex-shrink:0;}
+.dep-link{font-size:11px;color:var(--accent);flex-shrink:0;}
+
+.erd-container{
+  background:var(--accent-soft);border:2px dashed var(--accent);
+  border-radius:8px;padding:24px;margin-top:12px;text-align:center;
+  color:var(--accent);
+}
+.erd-container .erd-msg{
+  font-size:13px;font-weight:500;margin-top:8px;
+}
+.erd-container .erd-sub{
+  font-size:11px;color:var(--muted);margin-top:4px;
+}
+
 /* ── Responsive ── */
 @media(max-width:768px){
   .sidebar{transform:translateX(-100%);transition:transform .2s;}
@@ -519,11 +684,12 @@ function onRoute(){
       viewId = "v-scorecard";
       var modelName = route.id ? findModelName(route.id) : "Model";
       breadcrumbParts = ["Models",modelName];
-      if(route.sub) breadcrumbParts.push(ANGLE_LABELS[route.sub]||route.sub);
+      if(route.sub) breadcrumbParts.push(ANGLE_FULL_NAMES[route.sub]||ANGLE_LABELS[ANGLE_SHORT[route.sub]]||route.sub);
       /* Highlight sidebar model */
       var mLink = $('[data-route="#model/'+route.id+'"]');
       if(mLink) mLink.classList.add("active");
-      if(!builtViews.scorecard){ buildPlaceholder("v-scorecard","Model Scorecard","Individual model findings and details"); builtViews.scorecard=true; }
+      /* Always rebuild scorecard — different model = different content */
+      buildScorecard(D, route.id, route.sub||null);
       break;
     case "crossmodel":
       viewId = "v-crossmodel";
@@ -566,6 +732,250 @@ function findModelName(guid){
     if(D.L[i].g === guid) return D.L[i].n;
   }
   return guid;
+}
+
+/* ── Scorecard helpers ── */
+var ANGLE_FULL_NAMES = {
+  A:"AI Readiness",D:"Data Modeling",H:"Human Readiness",P:"Performance",S:"Security"
+};
+
+var RECOMMENDATIONS = {
+  A1:"Run /ts-object-model-coach to improve descriptions, synonyms, AI context",
+  A2:"Run /ts-object-model-coach to improve descriptions, synonyms, AI context",
+  A3:"Run /ts-object-model-coach to improve descriptions, synonyms, AI context",
+  A4:"Run /ts-object-model-coach to improve descriptions, synonyms, AI context",
+  A5:"Run /ts-object-model-coach to improve descriptions, synonyms, AI context",
+  D7:"Run /ts-dependency-manager (Repoint mode) to consolidate overlapping models",
+  D8:"Run /ts-dependency-manager (Remove mode) to remove duplicate table objects",
+  H3:"Remove unnecessary hidden columns via TML reimport",
+  H4:"Run /ts-dependency-manager (Remove mode) if confirmed unused",
+  H8:"Run /ts-object-answer-promote to promote formula to model",
+  S1:"Review security settings via ThoughtSpot UI or TML reimport",
+  S2:"Review security settings via ThoughtSpot UI or TML reimport",
+  S3:"Review security settings via ThoughtSpot UI or TML reimport",
+  S4:"Review security settings via ThoughtSpot UI or TML reimport",
+  S5:"Review security settings via ThoughtSpot UI or TML reimport"
+};
+
+function severityPill(sev){
+  var lower = (sev||"").toLowerCase();
+  return '<span class="sev-pill sev-'+lower+'">'+(sev||"")+'</span>';
+}
+
+function tsLink(clusterUrl, guid, type){
+  if(!clusterUrl || !guid) return "";
+  var path = type === "ANSWER" ? "saved-answer" : (type === "LIVEBOARD" ? "pinboard" : "data/tables");
+  return '<a class="dep-link ts-link-btn" href="'+clusterUrl+'/#/'+path+'/'+guid+'" target="_blank" rel="noopener">Open ↗</a>';
+}
+
+function findCorpusModel(guid){
+  if(!D.C || !D.C.m) return null;
+  for(var i=0;i<D.C.m.length;i++){
+    var cm = D.C.m[i];
+    if(D.L[cm.mi] && D.L[cm.mi].g === guid) return cm;
+  }
+  return null;
+}
+
+/* ── Build scorecard ── */
+function buildScorecard(D, guid, filterAngle){
+  var c = document.getElementById("v-scorecard");
+  c.innerHTML = "";
+
+  /* Model metadata */
+  var modelName = findModelName(guid);
+  var cm = findCorpusModel(guid);
+
+  /* ── Header ── */
+  var hdr = el("div","scorecard-header");
+  var titleHtml = '<div class="model-title">'+modelName+'</div>';
+  titleHtml += '<div class="model-guid">'+guid+'</div>';
+
+  /* Stats from corpus */
+  if(cm){
+    titleHtml += '<div class="model-stats">';
+    var statItems = [
+      {v:cm.tc,l:"Tables"},
+      {v:cm.cc,l:"Columns"},
+      {v:cm.fc,l:"Formulas"},
+      {v:cm.jc,l:"Joins"},
+      {v:cm.jd,l:"Join Depth"}
+    ];
+    statItems.forEach(function(s){
+      titleHtml += '<div class="stat-item"><div class="stat-val">'+s.v+'</div><div class="stat-lbl">'+s.l+'</div></div>';
+    });
+    titleHtml += '</div>';
+  }
+
+  /* Actions */
+  titleHtml += '<div class="header-actions">';
+  if(D.C && D.C.u){
+    titleHtml += '<a class="ts-link-btn" href="'+D.C.u+'/#/data/tables/'+guid+'" target="_blank" rel="noopener">Open in ThoughtSpot ↗</a>';
+  }
+  titleHtml += '<button class="erd-btn" id="erd-toggle-'+guid+'" data-erd-ready="false">ERD Diagram</button>';
+  titleHtml += '</div>';
+
+  hdr.innerHTML = titleHtml;
+  c.appendChild(hdr);
+
+  /* ── Angle sections ── */
+  var angles = (D.C && D.C.ar && D.C.ar.length > 0) ? D.C.ar : ["A","D","H","P","S"];
+
+  /* Find model index for this guid */
+  var modelIdx = -1;
+  for(var li=0;li<D.L.length;li++){
+    if(D.L[li].g === guid){ modelIdx = li; break; }
+  }
+
+  /* Group findings by angle code */
+  var findingsByAngle = {};
+  if(D.F){
+    D.F.forEach(function(f){
+      /* Map full angle name to code */
+      var code = ANGLE_CODES[f.a] || f.a;
+      if(f.mi === modelIdx){
+        if(!findingsByAngle[code]) findingsByAngle[code] = [];
+        findingsByAngle[code].push(f);
+      }
+    });
+  }
+
+  angles.forEach(function(angleCode){
+    var angleFindings = findingsByAngle[angleCode] || [];
+    var ws = worstSev(angleFindings);
+    var isExpandDefault = (ws === "CRITICAL" || ws === "HIGH");
+    var isFilterMatch = !filterAngle || filterAngle === angleCode;
+
+    var section = document.createElement("details");
+    section.className = "angle-section sev-"+(ws||"NONE");
+    if((isExpandDefault && isFilterMatch) || (filterAngle === angleCode)){
+      section.open = true;
+    }
+
+    /* Summary */
+    var fullName = ANGLE_FULL_NAMES[angleCode] || angleCode;
+    var summaryEl = document.createElement("summary");
+    summaryEl.innerHTML = '<span class="angle-name">'+fullName+'</span>'+
+      (ws && ws !== "NONE" ? severityPill(ws) : '')+
+      '<span class="angle-count">'+angleFindings.length+' finding'+(angleFindings.length!==1?'s':'')+'</span>';
+    section.appendChild(summaryEl);
+
+    /* Body */
+    var body = el("div","findings-body");
+
+    if(angleFindings.length === 0){
+      var noFind = el("div","","");
+      noFind.style.cssText = "font-size:12px;color:var(--muted);padding:4px 0;";
+      noFind.textContent = "No findings for this angle.";
+      body.appendChild(noFind);
+    } else {
+      angleFindings.forEach(function(f){
+        var card = el("div","finding-card");
+        card.setAttribute("data-severity",f.s);
+        if(!activeSevs[f.s]) card.classList.add("hidden-by-filter");
+
+        /* Card top: check badge + sev pill */
+        var topHtml = '<div class="card-top">';
+        topHtml += '<span class="check-badge">'+f.ci+'</span>';
+        topHtml += severityPill(f.s);
+        topHtml += '</div>';
+
+        /* Detail text */
+        topHtml += '<div class="detail-text">'+f.d+'</div>';
+
+        /* Metric bar */
+        if(f.me !== undefined && f.me !== null && f.th){
+          var metricPct = Math.round(f.me);
+          var thresholdGreen = f.th.green || 80;
+          var fillWidth = Math.min(100, Math.round(f.me / thresholdGreen * 100));
+          var isOk = f.me >= thresholdGreen;
+          topHtml += '<div class="metric-bar-wrap">';
+          topHtml += '<div class="metric-bar-label">';
+          topHtml += '<span>'+metricPct+'%</span>';
+          topHtml += '<span>threshold: '+thresholdGreen+'%</span>';
+          topHtml += '</div>';
+          topHtml += '<div class="metric-bar"><div class="metric-bar-fill'+(isOk?' ok':'')+'" style="width:'+fillWidth+'%"></div></div>';
+          topHtml += '</div>';
+        }
+
+        /* Recommendation */
+        var rec = RECOMMENDATIONS[f.ci];
+        if(rec){
+          topHtml += '<div class="finding-recommendation">&#128161; '+rec+'</div>';
+        }
+
+        card.innerHTML = topHtml;
+        body.appendChild(card);
+      });
+    }
+
+    section.appendChild(body);
+    c.appendChild(section);
+  });
+
+  /* ── ERD placeholder ── */
+  var erdContainer = el("div","erd-container");
+  erdContainer.id = "erd-"+guid;
+  erdContainer.innerHTML = '<div style="font-size:20px;">⬡</div>'+
+    '<div class="erd-msg">ERD Diagram</div>'+
+    '<div class="erd-sub">Click "ERD Diagram" button above to load</div>';
+  c.appendChild(erdContainer);
+
+  /* ── Dependents panel ── */
+  var depsPanel = document.createElement("details");
+  depsPanel.className = "dependents-panel";
+  depsPanel.open = true;
+
+  var deps = (D.C && D.C.dp && D.C.dp[guid]) ? D.C.dp[guid] : [];
+  var depSummary = document.createElement("summary");
+  depSummary.innerHTML = 'Downstream Consumers <span style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:500;">'+deps.length+' object'+(deps.length!==1?'s':'')+'</span>';
+  depsPanel.appendChild(depSummary);
+
+  var depBody = el("div","dependents-body");
+  if(deps.length === 0){
+    var noDeps = el("div","","No downstream consumers found.");
+    noDeps.style.cssText = "font-size:12px;color:var(--muted);padding:4px 0;";
+    depBody.appendChild(noDeps);
+  } else {
+    deps.forEach(function(dep){
+      var item = el("div","dependent-item");
+      var typeHtml = '<span class="dep-type-badge '+dep.t+'">'+dep.t+'</span>';
+      var nameHtml = '<span class="dep-name" title="'+dep.n+'">'+dep.n+'</span>';
+      var guidHtml = '<span class="dep-guid">'+dep.g+'</span>';
+      var linkHtml = (D.C && D.C.u) ? tsLink(D.C.u, dep.g, dep.t) : "";
+      item.innerHTML = typeHtml + nameHtml + guidHtml + linkHtml;
+      depBody.appendChild(item);
+    });
+  }
+  depsPanel.appendChild(depBody);
+  c.appendChild(depsPanel);
+
+  /* ── Wire up ERD button ── */
+  var erdBtn = document.getElementById("erd-toggle-"+guid);
+  if(erdBtn){
+    erdBtn.addEventListener("click",function(){
+      var erd = document.getElementById("erd-"+guid);
+      if(erd){
+        erd.innerHTML = '<div style="font-size:20px;">⬡</div>'+
+          '<div class="erd-msg">ERD diagram — coming soon</div>'+
+          '<div class="erd-sub">Use /ts-object-model-erd for standalone ERD rendering.</div>';
+        erd.scrollIntoView({behavior:"smooth",block:"nearest"});
+      }
+    });
+  }
+
+  /* ── Listen for severity filter changes ── */
+  function applySevFilter(){
+    $$(".finding-card",c).forEach(function(card){
+      var sev = card.getAttribute("data-severity");
+      if(activeSevs[sev]){
+        card.classList.remove("hidden-by-filter");
+      } else {
+        card.classList.add("hidden-by-filter");
+      }
+    });
+  }
+  document.addEventListener("sev-filter-changed", applySevFilter);
 }
 
 /* ── Build placeholder ── */
