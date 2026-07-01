@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-01
-- feat: add shared ERD renderer module (`agents/shared/erd/`) — data-driven CSS + JS ported from validated mockup
+- feat: add shared ERD renderer module (`agents/shared/erd/`) — data-driven CSS + JS + render.py ported from validated mockup
 - feat: update ts-audit to v2.2.0 — report UI fixes (accessible heatmap, clickable breadcrumbs/KPIs, check metadata, AI analysis panel)
 - chore: bump ts-cli to v0.24.0
 - feat: add `ts audit report` command — unified HTML report
