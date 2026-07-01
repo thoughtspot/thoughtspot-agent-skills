@@ -134,6 +134,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .filter-pill .dot{
   width:7px;height:7px;border-radius:50%;flex-shrink:0;
 }
+.filter-pill .pill-label{
+  line-height:1;
+}
 .filter-pill.active{border-color:currentColor;background:currentColor;}
 .filter-pill.active .pill-label{color:#fff;}
 .filter-pill.active .dot{background:#fff;}
@@ -225,7 +228,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .heatmap th.model-col{
   text-align:left;min-width:140px;max-width:200px;
 }
-.heatmap th.angle-col{cursor:pointer;}
+.heatmap th.angle-col{min-width:90px;cursor:pointer;}
 .heatmap th.angle-col:hover{color:var(--accent);}
 .heatmap td{padding:4px;text-align:center;border-bottom:1px solid var(--hair-2);}
 .heatmap td.model-name{
@@ -850,15 +853,16 @@ function toggleSeverity(sev){
 }
 
 /* ── Breadcrumb ── */
-function updateBreadcrumb(parts){
+function updateBreadcrumb(parts, links){
   var bc = document.getElementById("breadcrumb");
-  var html = '<span>Audit</span>';
+  var html = '<a href="#dashboard" style="color:var(--muted);text-decoration:none;">Audit</a>';
   parts.forEach(function(p,i){
     html += ' <span class="sep">/</span> ';
     if(i === parts.length - 1){
       html += '<span class="current">'+esc(p)+'</span>';
     } else {
-      html += '<span>'+esc(p)+'</span>';
+      var href = (links && links[i]) ? links[i] : "#dashboard";
+      html += '<a href="'+href+'" style="color:var(--muted);text-decoration:none;">'+esc(p)+'</a>';
     }
   });
   bc.innerHTML = html;
@@ -897,13 +901,14 @@ function onRoute(){
   $$(".sidebar-nav a").forEach(function(a){ a.classList.remove("active"); });
   $$(".sidebar-model-list a").forEach(function(a){ a.classList.remove("active"); });
 
-  var viewId, breadcrumbParts;
+  var viewId, breadcrumbParts, breadcrumbLinks;
 
   switch(route.view){
     case "model":
       viewId = "v-scorecard";
       var modelName = route.id ? findModelName(route.id) : "Model";
       breadcrumbParts = ["Dashboard",modelName];
+      breadcrumbLinks = ["#dashboard"];
       if(route.sub) breadcrumbParts.push(ANGLE_FULL_NAMES[route.sub]||ANGLE_LABELS[ANGLE_SHORT[route.sub]]||route.sub);
       /* Highlight sidebar model */
       var mLink = $('[data-route="#model/'+route.id+'"]');
@@ -930,6 +935,7 @@ function onRoute(){
         cmCrumb = "Cross-Model — "+angleLabel;
       }
       breadcrumbParts = ["Dashboard", cmCrumb];
+      breadcrumbLinks = ["#dashboard"];
       /* Always rebuild — filters change on each navigation */
       buildCrossModel(D, cmFilters);
       break;
@@ -938,18 +944,21 @@ function onRoute(){
       viewId = "v-objectmap";
       var omSub = route.id || "overlaps";
       breadcrumbParts = ["Object Map", omSub.charAt(0).toUpperCase()+omSub.slice(1)];
+      breadcrumbLinks = ["#objectmap"];
       highlightNav("#objectmap");
       buildObjectMap(D, omSub);
       break;
     case "cleanup":
       viewId = "v-cleanup";
       breadcrumbParts = ["Cleanup"];
+      breadcrumbLinks = [];
       highlightNav("#cleanup");
       buildCleanup(D);
       break;
     default: /* dashboard */
       viewId = "v-dashboard";
       breadcrumbParts = ["Dashboard"];
+      breadcrumbLinks = [];
       highlightNav("#dashboard");
       if(!builtViews.dashboard){ buildDashboard(); builtViews.dashboard=true; }
       break;
@@ -957,7 +966,7 @@ function onRoute(){
 
   var viewEl = document.getElementById(viewId);
   if(viewEl) viewEl.classList.add("active");
-  updateBreadcrumb(breadcrumbParts);
+  updateBreadcrumb(breadcrumbParts, breadcrumbLinks);
 }
 
 function highlightNav(hash){
@@ -2514,7 +2523,7 @@ function buildHeatmap(){
   html += '<th class="model-col">Model</th>';
   angleKeys.forEach(function(a){
     html += '<th class="angle-col" data-angle="'+a+'" title="Filter by '+ANGLE_LABELS[a]+'">'+
-            (ANGLE_CODES[a]||a.charAt(0).toUpperCase())+'</th>';
+            ANGLE_LABELS[a]+'</th>';
   });
   html += '</tr></thead><tbody>';
 
