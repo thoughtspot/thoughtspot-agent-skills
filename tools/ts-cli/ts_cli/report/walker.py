@@ -52,27 +52,34 @@ def walk_dependents_recursive(
     """Walk dependents up to `max_depth` hops, deduped by GUID.
 
     Each output row carries a `hops` field indicating distance from source.
+    GUIDs at each depth level are batched by query type to reduce API calls.
     """
     seen: dict = {}            # guid -> row
     frontier = [(source.guid, dependents_query_type_for(source), 0)]
     while frontier:
-        guid, qtype, depth = frontier.pop(0)
-        if depth >= max_depth:
-            continue
-        resp = client.post(
-            "/api/rest/2.0/metadata/search",
-            json=_build_dependents_payload([guid], qtype),
-        )
-        rows = _normalize_dependents_response(resp.json())
-        for row in rows:
-            if row["guid"] in seen:
-                continue
-            row["hops"] = depth + 1
-            seen[row["guid"]] = row
-            # Decide next-hop query type for this dependent.
-            next_type = _next_hop_type(row)
-            if next_type is not None:
-                frontier.append((row["guid"], next_type, depth + 1))
+        current_depth = frontier[0][2]
+        if current_depth >= max_depth:
+            break
+        level = []
+        while frontier and frontier[0][2] == current_depth:
+            level.append(frontier.pop(0))
+        by_type: dict = {}
+        for guid, qtype, _depth in level:
+            by_type.setdefault(qtype, []).append(guid)
+        for qtype, guids in by_type.items():
+            resp = client.post(
+                "/api/rest/2.0/metadata/search",
+                json=_build_dependents_payload(guids, qtype),
+            )
+            rows = _normalize_dependents_response(resp.json())
+            for row in rows:
+                if row["guid"] in seen:
+                    continue
+                row["hops"] = current_depth + 1
+                seen[row["guid"]] = row
+                next_type = _next_hop_type(row)
+                if next_type is not None:
+                    frontier.append((row["guid"], next_type, current_depth + 1))
     return list(seen.values())
 
 

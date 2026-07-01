@@ -105,7 +105,7 @@ variables:                        # Optional. GA June 2026. Top-level session/bi
 
 ### Advanced constructs — DDL vs YAML coverage
 
-> **Currency note — verified 2026-06-17 against the published
+> **Currency note — verified 2026-07-01 against the published
 > [semantic-view YAML spec](https://docs.snowflake.com/en/user-guide/views-semantic/semantic-view-yaml-spec).**
 > The published YAML spec has **expanded**: several constructs once exclusive to the DDL
 > form are now expressible in YAML. The `YAML?` column below reflects the **spec's
@@ -119,12 +119,12 @@ variables:                        # Optional. GA June 2026. Top-level session/bi
 | `facts` | `facts ( TABLE.COL as alias.NAME, ... )` | ✅ now — per-table `facts:` | Spec adds a per-table `facts:` key (name/synonyms/description/access_modifier/expr/data_type/labels/tags). Converter still down-converts facts→metrics until BL-031. |
 | `private` / `public` | visibility modifier on dims/metrics | ✅ now — `access_modifier` | `access_modifier: private_access` / `public_access` |
 | `unique` | `unique (TABLE.COL)` | ✅ now — `unique: <bool>` | Dimension property |
-| `range between` | `... range between X and Y` | DDL-only | No confirmed YAML equivalent |
+| `range between` | `... range between X and Y` | ✅ now — `relationship_columns[].type` (`asof` / `range`) + `right_range` | Range and ASOF joins supported via type and right_range keys |
 | filter labels | `labels = (filter)` | ✅ now — `labels: [filter]` | Marks a dimension/fact as a filter |
 | `with cortex search service` | on dimensions | ✅ now — `cortex_search_service:` | Links a dimension to a Cortex Search service |
-| `ai_sql_generation` | `ai_sql_generation = 'ON'\|'OFF'` | DDL-only | Cortex Analyst SQL generation toggle |
-| `ai_question_categorization` | `ai_question_categorization = 'ON'\|'OFF'` | DDL-only | Cortex Analyst question categorization toggle |
-| `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | DDL-only | Verified queries (→ NLS Feedback TML on the TS side) |
+| `ai_sql_generation` | `ai_sql_generation = 'ON'\|'OFF'` | ✅ now — `ai_sql_generation` | Top-level key; Cortex Analyst SQL generation toggle |
+| `ai_question_categorization` | `ai_question_categorization = 'ON'\|'OFF'` | ✅ now — `ai_question_categorization` | Top-level key; Cortex Analyst question categorization toggle |
+| `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | ✅ now — `verified_queries[]` | Top-level array; verified queries (→ NLS Feedback TML on the TS side) |
 | `using <relationship>` | on metrics | ✅ — `using_relationships` | Relationship path for cross-table metrics |
 
 ### What is NOT supported in YAML

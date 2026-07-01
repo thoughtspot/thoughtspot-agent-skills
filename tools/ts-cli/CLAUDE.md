@@ -32,6 +32,7 @@ ts_cli/
     checks_security.py — Security checks (S1-S10)
     report.py         — HTML report renderer (compact payload + template injection)
     report_template.html — Self-contained HTML template with CSS/JS
+    erd.py            — ERD data generation for audit reports (parses Model+Table TML)
     test_fixtures.py  — Realistic test data generator
 ```
 
@@ -40,7 +41,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.24.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.25.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

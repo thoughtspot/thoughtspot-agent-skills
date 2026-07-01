@@ -6,6 +6,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-01
+- feat: wire ts-object-model-erd into ts-audit report — ERD button opens interactive diagram per model
+- feat: ts-cli performance — `requests.Session` pooling, BFS frontier batching, Liveboard export batching
+- fix: bump `requests>=2.32.4` (CVE-2024-35195, CVE-2023-32681), raise Python floor to >=3.10
+- docs: update Muze charting status to phase 1 GA, Snowflake Advanced constructs YAML coverage
+- chore: bump ts-cli to v0.25.0
 - feat: add ts-object-model-erd skill
 - feat: add shared ERD renderer module (`agents/shared/erd/`) — data-driven CSS + JS + render.py ported from validated mockup
 - feat: update ts-audit to v2.2.0 — report UI fixes (accessible heatmap, clickable breadcrumbs/KPIs, check metadata, AI analysis panel)

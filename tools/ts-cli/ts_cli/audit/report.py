@@ -1,11 +1,30 @@
 """Audit report renderer — compacts JSON, injects into HTML template."""
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
 
 TEMPLATE_PATH = Path(__file__).parent / "report_template.html"
+_ERD_DIR = Path(__file__).resolve().parents[4] / "agents" / "shared" / "erd"
+
+
+def _read_erd_assets() -> dict | None:
+    """Read ERD renderer assets from the shared directory."""
+    if not _ERD_DIR.is_dir():
+        return None
+    try:
+        css = (_ERD_DIR / "renderer.css").read_text(encoding="utf-8")
+        js = (_ERD_DIR / "renderer.js").read_text(encoding="utf-8")
+        spec = importlib.util.spec_from_file_location(
+            "_erd_render", str(_ERD_DIR / "render.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        body = mod._BODY
+        return {"css": css, "js": js, "body": body}
+    except Exception:
+        return None
 
 
 def compact_payload(data: dict) -> dict:
@@ -89,6 +108,9 @@ def compact_payload(data: dict) -> dict:
                     "qu": ai.get("questions", []),
                     "st": ai.get("structure", ""),
                 }
+            erd = m.get("erd")
+            if erd:
+                cm["ed"] = erd
             compact_models.append(cm)
 
         compact_reuse = [
@@ -146,6 +168,9 @@ def compact_payload(data: dict) -> dict:
 
 def render_report(data: dict) -> str:
     payload = compact_payload(data)
+    erd_assets = _read_erd_assets()
+    if erd_assets:
+        payload["E"] = erd_assets
     json_str = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e")
 
     template = TEMPLATE_PATH.read_text(encoding="utf-8")

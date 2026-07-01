@@ -134,6 +134,8 @@ class ThoughtSpotClient:
         self._base_url = self._profile["base_url"].rstrip("/")
         self._verify_ssl: bool = self._profile.get("verify_ssl", True)
         self._token: Optional[str] = None
+        self._session = requests.Session()
+        self._session.verify = self._verify_ssl
 
     # ------------------------------------------------------------------
     # Token caching
@@ -226,7 +228,7 @@ class ThoughtSpotClient:
 
         if p.get("password_env"):
             password = self._get_credential(p["password_env"])
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
                 json={
                     "username": p["username"],
@@ -235,7 +237,6 @@ class ThoughtSpotClient:
                 },
                 headers={"Content-Type": "application/json"},
                 timeout=30,
-                verify=self._verify_ssl,
             )
             if resp.status_code in (401, 403):
                 raise SystemExit(
@@ -249,7 +250,7 @@ class ThoughtSpotClient:
 
         if p.get("secret_key_env"):
             secret_key = self._get_credential(p["secret_key_env"])
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
                 json={
                     "username": p["username"],
@@ -258,7 +259,6 @@ class ThoughtSpotClient:
                 },
                 headers={"Content-Type": "application/json"},
                 timeout=30,
-                verify=self._verify_ssl,
             )
             if resp.status_code in (401, 403):
                 raise SystemExit(
@@ -312,9 +312,8 @@ class ThoughtSpotClient:
     ) -> requests.Response:
         headers = kwargs.pop("headers", {})
         headers.update(self._auth_headers())
-        kwargs.setdefault("verify", self._verify_ssl)
         url = f"{self._base_url}{path}"
-        resp = requests.request(
+        resp = self._session.request(
             method,
             url,
             headers=headers,
