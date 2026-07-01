@@ -46,3 +46,45 @@ def test_parse_model_joins_default_unknown_without_tables():
     j = next(j for j in m["joins"] if j["name"] == "ORDERS_to_CUSTOMER")
     assert j["from"] == "ORDERS" and j["to"] == "CUSTOMER"
     assert j["card"] == "UNKNOWN" and j["origin"] == "model"
+
+
+def _mini_tables():
+    return {
+        "ORDERS": parser.load_tml(os.path.join(FIXTURES, "mini_orders.table.tml")),
+        "CUSTOMER": parser.load_tml(os.path.join(FIXTURES, "mini_customer.table.tml")),
+    }
+
+
+def test_stitch_table_join_sets_origin_and_cardinality():
+    m = parser.parse_model(_mini_model(), _mini_tables())
+    j = next(j for j in m["joins"] if j["name"] == "ORDERS_to_CUSTOMER")
+    assert j["origin"] == "table"
+    assert j["card"] == "MANY_TO_ONE"
+    assert j["type"] == "INNER"
+
+
+def test_unmatched_join_stays_model_local():
+    m = parser.parse_model(_mini_model(), _mini_tables())
+    j = next(j for j in m["joins"] if j["name"] == "ORDERS_to_REGION_local")
+    assert j["origin"] == "model"
+
+
+def test_rls_extracted_from_table_tml():
+    m = parser.parse_model(_mini_model(), _mini_tables())
+    cust = next(t for t in m["tables"] if t["id"] == "CUSTOMER")
+    assert len(cust["rls"]) == 1
+    assert cust["rls"][0]["name"] == "Territory scope"
+    assert "ts_user_territories" in cust["rls"][0]["expr"]
+
+
+def test_join_keys_added_as_hidden_columns():
+    m = parser.parse_model(_mini_model(), _mini_tables())
+    orders = next(t for t in m["tables"] if t["id"] == "ORDERS")
+    key = next(c for c in orders["cols"] if c["name"] == "CUSTOMER_CODE")
+    assert key["key"] is True and key["hidden"] is True
+
+
+def test_degraded_mode_logs_when_tables_missing():
+    msgs = []
+    parser.parse_model(_mini_model(), {}, log=msgs.append)
+    assert any("degraded" in m.lower() for m in msgs)

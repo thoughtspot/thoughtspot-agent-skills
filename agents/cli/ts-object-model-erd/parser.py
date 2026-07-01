@@ -4,6 +4,7 @@ import re
 import yaml
 
 _COLREF = re.compile(r"\[([^\]]+?)::[^\]]+?\]")
+_ONREF = re.compile(r"\[([^\]]+?)::([^\]]+?)\]")
 
 
 def load_tml(path):
@@ -27,6 +28,34 @@ def _column_role(props, is_formula):
     if is_formula:
         return "FORMULA"
     return "MEASURE" if props.get("column_type") == "MEASURE" else "ATTR"
+
+
+def _index_table_joins(table_tmls):
+    out = {}
+    for tdict in table_tmls.values():
+        tbl = tdict.get("table", {})
+        for jw in tbl.get("joins_with", []) or []:
+            out[jw.get("name")] = {
+                "card": jw.get("cardinality", "UNKNOWN"),
+                "type": jw.get("type", "UNKNOWN"),
+                "on": jw.get("on") or jw.get("'on'") or "",
+            }
+    return out
+
+
+def _rls_for_table(tdict):
+    rules = []
+    for r in (tdict.get("table", {}).get("rls_rules") or []):
+        rules.append({
+            "name": r.get("name", "RLS rule"),
+            "expr": r.get("expression") or r.get("expr") or "",
+            "scope": r.get("applies_to") or r.get("scope") or "All users",
+        })
+    return rules
+
+
+def _keys_from_on(on_expr):
+    return _ONREF.findall(on_expr or "")
 
 
 def parse_model(model_tml, table_tmls, log=None):
@@ -89,6 +118,43 @@ def parse_model(model_tml, table_tmls, log=None):
         else:
             kind = "dim"
         tables.append({"id": name, "kind": kind, "cols": cols, "rls": []})
+
+    def _log(msg):
+        if log:
+            log(msg)
+
+    table_joins = _index_table_joins(table_tmls)
+    for j in joins:
+        if j["name"] in table_joins:
+            j["origin"] = "table"
+            j["card"] = table_joins[j["name"]]["card"]
+            j["type"] = table_joins[j["name"]]["type"]
+
+    tables_by_id = {t["id"]: t for t in tables}
+
+    for name, tdict in table_tmls.items():
+        if name in tables_by_id:
+            tables_by_id[name]["rls"] = _rls_for_table(tdict)
+
+    for meta in table_joins.values():
+        for tbl, col in _keys_from_on(meta["on"]):
+            t = tables_by_id.get(tbl)
+            if not t:
+                continue
+            if not any(c["name"] == col for c in t["cols"]):
+                t["cols"].append({"name": col, "src": col, "role": "ATTR",
+                                  "agg": None, "key": True, "hidden": True, "flag": None})
+
+    referenced = {j["name"] for j in joins}
+    if referenced and not table_joins:
+        _log("Fidelity degraded: no Table TMLs provided — join cardinality/type/origin "
+             "and RLS omitted for all %d join(s)." % len(referenced))
+    else:
+        missing = sorted(n for n in referenced if n and n not in table_joins)
+        if missing:
+            _log("Fidelity degraded: %d join(s) had no Table TML definition "
+                 "(treated as model-local, cardinality unknown): %s"
+                 % (len(missing), ", ".join(missing)))
 
     return {
         "model": {"name": model.get("name", ""), "guid": guid,
