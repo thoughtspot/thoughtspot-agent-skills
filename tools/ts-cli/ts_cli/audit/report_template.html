@@ -239,8 +239,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .heatmap td.model-name a{color:var(--ink);text-decoration:none;}
 .heatmap td.model-name a:hover{color:var(--accent);text-decoration:underline;}
 .heatmap .cell{
-  display:inline-block;width:28px;height:22px;border-radius:3px;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:22px;border-radius:3px;
   cursor:pointer;transition:opacity .1s;
+  font-size:10px;font-weight:700;color:#fff;line-height:1;
 }
 .heatmap .cell:hover{opacity:.75;}
 .heatmap .cell[data-severity="CRITICAL"]{background:var(--sev-critical);}
@@ -739,6 +741,7 @@ var builtViews = {};
 var currentRoute = null;
 var _sevFilterListener = null;
 var _crossmodelSevListener = null;
+var _dashSevListener = null;
 
 /* ── Helpers ── */
 function $(sel,ctx){ return (ctx||document).querySelector(sel); }
@@ -960,7 +963,7 @@ function onRoute(){
       breadcrumbParts = ["Dashboard"];
       breadcrumbLinks = [];
       highlightNav("#dashboard");
-      if(!builtViews.dashboard){ buildDashboard(); builtViews.dashboard=true; }
+      buildDashboard();
       break;
   }
 
@@ -2389,6 +2392,7 @@ function buildCrossModel(D, initialFilters){
 
 /* ── Build Dashboard ── */
 function buildDashboard(){
+  if(_dashSevListener) document.removeEventListener("sev-filter-changed",_dashSevListener);
   var c = document.getElementById("v-dashboard");
   var html = "";
 
@@ -2473,6 +2477,27 @@ function buildDashboard(){
       navigate("#crossmodel?angle="+th.getAttribute("data-angle"));
     });
   });
+
+  /* Wire severity filter to heatmap */
+  function applyDashboardSevFilter(){
+    $$(".heatmap tbody tr",c).forEach(function(tr){
+      var cells = $$(".cell",tr);
+      var hasVisibleSev = false;
+      cells.forEach(function(cell){
+        var sev = cell.getAttribute("data-severity");
+        if(sev && sev !== "NONE" && activeSevs[sev]) hasVisibleSev = true;
+      });
+      tr.style.display = hasVisibleSev ? "" : "none";
+    });
+    /* Dim severity cards whose filter is inactive */
+    $$(".sev-card",c).forEach(function(card){
+      var sev = card.getAttribute("data-sev");
+      card.style.opacity = activeSevs[sev] ? "1" : "0.35";
+    });
+  }
+  _dashSevListener = applyDashboardSevFilter;
+  document.addEventListener("sev-filter-changed",_dashSevListener);
+  applyDashboardSevFilter();
 }
 
 /* ── Heatmap builder ── */
@@ -2532,8 +2557,9 @@ function buildHeatmap(){
     html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
+      var cellText = sev === "NONE" ? "" : sev === "PASS" ? "✓" : sev.charAt(0);
       html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+r.g+'" data-angle="'+a+
-              '" title="'+esc(r.n)+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0"></span></td>';
+              '" title="'+esc(r.n)+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0">'+cellText+'</span></td>';
     });
     html += '</tr>';
   });
