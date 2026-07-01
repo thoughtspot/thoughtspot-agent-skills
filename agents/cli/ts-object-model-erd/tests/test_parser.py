@@ -88,3 +88,50 @@ def test_degraded_mode_logs_when_tables_missing():
     msgs = []
     parser.parse_model(_mini_model(), {}, log=msgs.append)
     assert any("degraded" in m.lower() for m in msgs)
+
+
+def test_in_rls_path_detected():
+    m = parser.parse_model(_mini_model(), _mini_tables())
+    orders = next(t for t in m["tables"] if t["id"] == "ORDERS")
+    cust = next(t for t in m["tables"] if t["id"] == "CUSTOMER")
+    assert orders["in_rls_path"] is True
+    assert cust["in_rls_path"] is False
+
+
+def test_sql_view_detected():
+    sql_view_tml = {
+        "guid": "sv-001",
+        "sql_view": {
+            "name": "REVENUE_VIEW",
+            "sql_query": "SELECT * FROM raw.orders",
+        },
+    }
+    model_tml = {
+        "guid": "m-sv",
+        "model": {
+            "name": "SV Test",
+            "model_tables": [{"name": "REVENUE_VIEW"}],
+            "columns": [],
+        },
+    }
+    m = parser.parse_model(model_tml, {"REVENUE_VIEW": sql_view_tml})
+    t = m["tables"][0]
+    assert t["is_sql_view"] is True
+    assert "SELECT" in t["sql_query"]
+
+
+def test_alias_detected():
+    table_tml = {
+        "guid": "tbl-001",
+        "table": {"name": "PHYSICAL_TABLE", "columns": []},
+    }
+    model_tml = {
+        "guid": "m-alias",
+        "model": {
+            "name": "Alias Test",
+            "model_tables": [{"name": "MY_ALIAS"}],
+            "columns": [],
+        },
+    }
+    m = parser.parse_model(model_tml, {"MY_ALIAS": table_tml})
+    assert m["tables"][0]["alias_of"] == "PHYSICAL_TABLE"

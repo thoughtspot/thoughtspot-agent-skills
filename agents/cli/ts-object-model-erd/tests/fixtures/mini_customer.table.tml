@@ -10,5 +10,5 @@ table:
       column_type: ATTRIBUTE
   rls_rules:
   - name: Territory scope
-    expression: "[CUSTOMER::REGION] IN (ts_user_territories())"
+    expression: "[CUSTOMER::REGION] IN (ts_user_territories()) AND [ORDERS::STATUS] = 'active'"
     applies_to: All non-admin groups

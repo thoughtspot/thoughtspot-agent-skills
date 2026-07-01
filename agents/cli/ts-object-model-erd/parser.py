@@ -117,7 +117,9 @@ def parse_model(model_tml, table_tmls, log=None):
                 kind = "fact"
         else:
             kind = "dim"
-        tables.append({"id": name, "kind": kind, "cols": cols, "rls": []})
+        tables.append({"id": name, "kind": kind, "cols": cols, "rls": [],
+                       "is_sql_view": False, "sql_query": None,
+                       "alias_of": None, "in_rls_path": False})
 
     def _log(msg):
         if log:
@@ -135,6 +137,14 @@ def parse_model(model_tml, table_tmls, log=None):
     for name, tdict in table_tmls.items():
         if name in tables_by_id:
             tables_by_id[name]["rls"] = _rls_for_table(tdict)
+            if "sql_view" in tdict:
+                tables_by_id[name]["is_sql_view"] = True
+                tables_by_id[name]["sql_query"] = (
+                    tdict.get("sql_view", {}).get("sql_query") or "")
+            phys = (tdict.get("table", {}).get("name")
+                    or tdict.get("sql_view", {}).get("name"))
+            if phys and phys != name:
+                tables_by_id[name]["alias_of"] = phys
 
     for meta in table_joins.values():
         for tbl, col in _keys_from_on(meta["on"]):
@@ -144,6 +154,16 @@ def parse_model(model_tml, table_tmls, log=None):
             if not any(c["name"] == col for c in t["cols"]):
                 t["cols"].append({"name": col, "src": col, "role": "ATTR",
                                   "agg": None, "key": True, "hidden": True, "flag": None})
+
+    rls_referenced = set()
+    for tname, tdict in table_tmls.items():
+        for rule in (tdict.get("table", {}).get("rls_rules") or []):
+            expr = rule.get("expression") or rule.get("expr") or ""
+            for ref_table in _COLREF.findall(expr):
+                if ref_table != tname:
+                    rls_referenced.add(ref_table)
+    for t in tables:
+        t["in_rls_path"] = t["id"] in rls_referenced
 
     referenced = {j["name"] for j in joins}
     if referenced and not table_joins:

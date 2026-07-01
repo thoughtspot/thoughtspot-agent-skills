@@ -6,7 +6,7 @@ const SEV_RANK={crit:3,warn:2,info:1};
 let tableById={}, findingsByTable={}, HOT_EDGES=new Set();
 let adj={}, radj={}, undir={};
 let securedTables=[], rlsAffected=new Set();
-let LS_KEY="", savedPos={};
+let LS_KEY="", savedPos={}, NOTES_KEY="", notes={};
 let nodes=[], nodeById={}, edges=[];
 let layoutCache={};
 
@@ -25,6 +25,7 @@ let selected=null;
 
 function worstSev(id){let w=null;(findingsByTable[id]||[]).forEach(f=>{if(!w||SEV_RANK[f.sev]>SEV_RANK[w])w=f.sev;});return w;}
 function ancestors(id){const seen=new Set(),stack=[id];while(stack.length){const n=stack.pop();radj[n].forEach(p=>{if(!seen.has(p)){seen.add(p);stack.push(p);}});}return seen;}
+function connectedComponent(id){const seen=new Set([id]),q=[id];while(q.length){const n=q.shift();(undir[n]||[]).forEach(m=>{if(!seen.has(m)){seen.add(m);q.push(m);}});}return seen;}
 
 function visibleCols(t){
   if(colMode==="collapsed")return [];
@@ -38,6 +39,20 @@ let _seed=20260627; const rnd=()=>{_seed=(_seed*1664525+1013904223)>>>0;return _
 
 function loadSaved(){try{return JSON.parse(localStorage.getItem(LS_KEY))||{};}catch(e){return {};}}
 function persistSaved(){try{localStorage.setItem(LS_KEY,JSON.stringify(savedPos));}catch(e){}}
+function loadNotes(){try{return JSON.parse(localStorage.getItem(NOTES_KEY))||{};}catch(e){return {};}}
+function persistNotes(){try{localStorage.setItem(NOTES_KEY,JSON.stringify(notes));}catch(e){}}
+function clearAllNotes(){if(!confirm("Remove all notes from this model?"))return;notes={};persistNotes();renderAll();if(selected&&selected.type==="table")showTable(selected.id);else if(selected&&selected.type==="edge")showEdge(selected.id);else showOverview();}
+function notesSection(id){
+  const val=notes[id]||"";
+  return `<div class="section-label">Notes</div>
+    <textarea class="notes-area" id="note-input" placeholder="Add a note…">${esc(val)}</textarea>
+    <div class="notes-btns"><button id="note-save">Save note</button>${val?'<button id="note-del">Delete</button>':''}</div>`;
+}
+function wireNotes(id){
+  const inp=$("note-input"),sv=$("note-save"),dl=$("note-del");
+  if(sv)sv.onclick=()=>{const v=inp.value.trim();if(v)notes[id]=v;else delete notes[id];persistNotes();renderAll();};
+  if(dl)dl.onclick=()=>{delete notes[id];persistNotes();renderAll();if(selected&&selected.type==="table")showTable(selected.id);else showEdge(selected.id);};
+}
 const hasAll=m=>m&&MODEL.tables.every(t=>m[t.id]);
 function captureLayout(){const m={};nodes.forEach(n=>m[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});savedPos[layoutName]=m;persistSaved();updateSavedBadge();}
 function updateSavedBadge(){$("saved-badge").classList.toggle("on",hasAll(savedPos[layoutName]));}
@@ -170,7 +185,8 @@ function renderEdges(){
     const onPath=pe.has(e.j.name);
     const sel=selected&&selected.type==="edge"&&selected.id===e.j.name;
     const ghost=keep&&!(keep.has(e.j.from)&&keep.has(e.j.to));
-    let stroke="#9AA4B1",sw=1.6,dash="0",mk="url(#arrow)";
+    const annotated=!!notes[e.j.name];
+    let stroke=annotated?"#D97706":"#9AA4B1",sw=annotated?2:1.6,dash="0",mk="url(#arrow)";
     if(rlsEdge){stroke="#6B4FB8";sw=2.1;dash="5 3";mk="url(#arrow-rls)";}
     if(hot){stroke="#C2382E";sw=2.4;dash="6 4";mk="url(#arrow-hot)";}
     if(onPath||sel){stroke="#1E6FA8";sw=3;dash="0";mk="url(#arrow-sel)";}
@@ -191,16 +207,17 @@ function renderNodes(){
   nodes.forEach(n=>{
     const t=n.t,isFact=t.kind==="fact";n.h=nodeHeight(t);
     const sev=showF?worstSev(t.id):null;
-    const secured=showR&&t.rls,affected=showR&&!t.rls&&rlsAffected.has(t.id);
+    const secured=showR&&t.rls&&t.rls.length,affected=showR&&!(t.rls&&t.rls.length)&&rlsAffected.has(t.id);
+    const inRlsPath=t.in_rls_path&&!secured;
     const inFocus=focusSet.includes(t.id);
     const ghost=keep&&!keep.has(t.id);
     const g=NS_el("g",{class:"node"+(ghost?" ghost":""),transform:`translate(${n.x},${n.y})`},gNodes);
 
     let stroke=isFact?"#1E6FA8":"#C8CFD8",sw=isFact?1.6:1.2;
-    if(secured){stroke="#6B4FB8";sw=2.2;} else if(affected){stroke="#A88FD8";sw=1.6;}
+    if(secured){stroke="#6B4FB8";sw=2.2;} else if(inRlsPath){stroke="#D97706";sw=2.2;} else if(affected){stroke="#A88FD8";sw=1.6;}
     if(sev==="crit"){stroke="#C2382E";sw=2.2;} else if(sev==="warn"){stroke="#B5730A";sw=2;}
     if(inFocus){stroke="#1E6FA8";sw=2.8;}
-    let fill=secured?"#FBFAFE":affected?"#FCFBFE":"#fff";
+    let fill=secured?"#FBFAFE":inRlsPath?"#FFFBEB":affected?"#FCFBFE":t.is_sql_view?"#F0FDFA":"#fff";
 
     NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill,stroke,"stroke-width":sw,style:"filter:drop-shadow(0 2px 5px rgba(20,27,38,.08))"},g);
     const hbg=secured?"#F0ECF9":isFact?"#EAF2F8":"#EEF0F3";
@@ -214,6 +231,13 @@ function renderNodes(){
     const bw=isFact?30:26;
     NS_el("rect",{x:bx-bw,y:9,width:bw,height:14,rx:4,fill:isFact?"#1E6FA8":"#C8CFD8"},g);
     const bd=NS_el("text",{class:"nbadge",x:bx-bw/2,y:19,"text-anchor":"middle",fill:isFact?"#fff":"#5A626E"},g);bd.textContent=isFact?"FACT":"DIM";
+    bx-=bw+4;
+    if(t.is_sql_view){const svw=18;NS_el("rect",{x:bx-svw,y:9,width:svw,height:14,rx:4,fill:"#0D9488"},g);
+      NS_el("text",{class:"nbadge",x:bx-svw/2,y:19,"text-anchor":"middle",fill:"#fff"},g).textContent="SV";bx-=svw+3;}
+    if(t.alias_of){const aw=14;NS_el("rect",{x:bx-aw,y:9,width:aw,height:14,rx:4,fill:"#7C3AED"},g);
+      NS_el("text",{class:"nbadge",x:bx-aw/2,y:19,"text-anchor":"middle",fill:"#fff"},g).textContent="A";bx-=aw+3;}
+    if(notes[t.id]){const nw=14;NS_el("rect",{x:bx-nw,y:9,width:nw,height:14,rx:4,fill:"#D97706"},g);
+      NS_el("text",{class:"nbadge",x:bx-nw/2,y:19.5,"text-anchor":"middle",fill:"#fff","font-size":10},g).textContent="✎";bx-=nw+3;}
 
     const cols=visibleCols(t);
     cols.forEach((c,i)=>{const y=HEAD_H+i*ROW_H;
@@ -226,6 +250,7 @@ function renderNodes(){
 
     enableDrag(g,n);
     g.addEventListener("click",ev=>{ev.stopPropagation();selectTable(t.id,ev.shiftKey||ev.metaKey||ev.ctrlKey);});
+    g.addEventListener("dblclick",ev=>{ev.stopPropagation();const cc=[...connectedComponent(t.id)];focusSet=cc;selected={type:"table",id:t.id};renderAll();showTable(t.id);});
   });
 }
 function renderAll(){renderEdges();renderNodes();}
@@ -296,7 +321,10 @@ function showTable(id){
   const t=tableById[id],conns=MODEL.joins.filter(j=>j.from===id||j.to===id),fs=findingsByTable[id]||[];
   let h=`<button class="backlink" id="back">← Overview</button><h2>${esc(t.id)}</h2>
     <div style="margin:2px 0 14px;display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${t.kind}">${t.kind==="fact"?"Fact table":"Dimension"}</span>
-    ${t.rls&&t.rls.length?'<span class="pill rls">🔒 Secured</span>':rlsAffected.has(id)?'<span class="pill rls">RLS inherited</span>':""}</div>
+    ${t.rls&&t.rls.length?'<span class="pill rls">🔒 Secured</span>':rlsAffected.has(id)?'<span class="pill rls">RLS inherited</span>':""}
+    ${t.is_sql_view?'<span class="pill" style="color:#0D9488;background:#F0FDFA;border-color:#99F6E4">SQL View</span>':""}
+    ${t.alias_of?`<span class="pill" style="color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE">Alias of ${esc(t.alias_of)}</span>`:""}
+    ${t.in_rls_path?'<span class="pill" style="color:#D97706;background:#FFFBEB;border-color:#FDE68A">In RLS path</span>':""}</div>
     <div class="section-label">Columns (${(t.cols||[]).length})</div><table class="cols">`;
   (t.cols||[]).forEach(c=>{const[cls,label]=ROLE_TAG[c.role]||["a","attribute"];const meta=c.key?"join key":(c.agg?`${label} · ${c.agg}`:label);
     h+=`<tr class="${c.key?"c-key":""}"><td class="c-name">${c.flag?`<span class="fdot ${c.flag}"></span>`:""}${esc(c.name)}</td>
@@ -311,9 +339,14 @@ function showTable(id){
   conns.forEach(j=>{const other=j.from===id?j.to:j.from,dir=j.from===id?"→":"←";
     h+=`<div style="font-size:12px;font-family:var(--mono);padding:5px 0;border-bottom:1px solid var(--hair-2);cursor:pointer" data-jump="${esc(j.name)}">${dir} ${esc(other)}</div>`;});
   if(fs.length){h+=`<div class="section-label">Findings (${fs.length})</div>`;fs.forEach(x=>h+=findingCard(x));}
+  if(t.is_sql_view&&t.sql_query){h+=`<div class="section-label">SQL query</div><div class="expr">${esc(t.sql_query)}</div>`;}
+  if(t.alias_of){h+=`<div class="section-label">Alias</div><p class="sub">This model table is an alias of the physical table <b style="font-family:var(--mono)">${esc(t.alias_of)}</b>. The underlying columns and data are shared.</p>`;}
+  if(t.in_rls_path){const refs=MODEL.tables.filter(x=>x.rls&&x.rls.length&&x.rls.some(r=>(r.expr||"").includes("["+t.id+"::")));
+    h+=`<div class="section-label">In RLS path</div><p class="sub">This table is referenced in RLS expressions on ${refs.length?`<b style="color:var(--rls)">${refs.map(x=>esc(x.id)).join(", ")}</b>`:"other tables"}. Changes to its data affect row-level security filtering.</p>`;}
+  h+=notesSection(id);
   h+=`<p class="note">Tip: <b>Shift-click</b> another table to compare and trace the join path between them.</p>`;
   inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};
-  inspector.querySelectorAll("[data-jump]").forEach(e=>e.onclick=()=>selectEdge(e.dataset.jump));wireFindings();inspector.scrollTop=0;
+  inspector.querySelectorAll("[data-jump]").forEach(e=>e.onclick=()=>selectEdge(e.dataset.jump));wireFindings();wireNotes(id);inspector.scrollTop=0;
 }
 function showCompare(){
   let h=`<button class="backlink" id="back">← Overview</button><h2>Comparing ${focusSet.length} tables</h2>
@@ -342,7 +375,8 @@ function showEdge(name){const j=MODEL.joins.find(x=>x.name===name),hot=HOT_EDGES
     <div class="section-label">Reference</div><div class="expr">${esc(j.name)}</div>`;
   if(hot)h+=`<div class="section-label">Flagged</div>`+findingCard(MODEL.findings.find(f=>f.check==="D-FANOUT"));
   if(secured)h+=`<div class="section-label">Security</div><p class="sub">Target <b style="color:var(--rls)">${esc(j.to)}</b> has RLS — this join propagates the row filter to <b>${esc(j.from)}</b>.</p>`;
-  inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};inspector.scrollTop=0;
+  h+=notesSection(name);
+  inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};wireNotes(name);inspector.scrollTop=0;
 }
 
 function showRlsSubgraph(){
@@ -370,6 +404,36 @@ $("reset-pos").onclick=()=>{delete savedPos[layoutName];persistSaved();
 tFind.onchange=renderAll; tRls.onchange=renderAll; tOrth.onchange=renderEdges;
 tRlsOnly.onchange=()=>{rlsOnly=tRlsOnly.checked;if(rlsOnly){focusSet=[];selected=null;}renderAll();if(rlsOnly)showRlsSubgraph();else showOverview();};
 
+// ---- share HTML ----
+function shareHTML(){
+  const doc=document.documentElement.outerHTML;
+  const dataEl=document.getElementById("erd-data");
+  if(!dataEl)return;
+  const posMap={};nodes.forEach(n=>posMap[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});
+  const state=JSON.stringify({positions:posMap,notes:notes});
+  const newScript=`window.__ERD_DATA__ = ${dataEl.textContent.split("=").slice(1).join("=").trim().replace(/;$/,"")};
+window.ERD_INITIAL_STATE = ${state};`;
+  const full=doc.replace(dataEl.outerHTML,`<script id="erd-data">${newScript}<\/script>`);
+  const blob=new Blob(["<!doctype html>\n"+full],{type:"text/html"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=(MODEL.model.name||"erd").replace(/[^a-zA-Z0-9_-]/g,"_")+"-erd.html";
+  a.click();URL.revokeObjectURL(a.href);
+}
+
+// ---- help drawer ----
+function toggleHelp(){$("help-drawer").classList.toggle("open");}
+
+$("help-btn").onclick=toggleHelp;
+$("help-close").onclick=()=>$("help-drawer").classList.remove("open");
+$("share-btn").onclick=shareHTML;
+$("clear-notes-btn").onclick=clearAllNotes;
+
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA"||e.target.tagName==="SELECT")return;
+  if(e.key==="?"||e.key==="/"){e.preventDefault();if(e.key==="/"){$("finder").focus();}else toggleHelp();}
+  if(e.key==="Escape")$("help-drawer").classList.remove("open");
+});
+
 // ---- loadModel: rebuild all model-derived state ----
 function loadModel(m){
   MODEL=m;
@@ -392,7 +456,15 @@ function loadModel(m){
   securedTables.forEach(s=>ancestors(s).forEach(a=>rlsAffected.add(a)));
 
   LS_KEY="ts-erd-layout:"+MODEL.model.name;
+  NOTES_KEY="ts-erd-notes:"+MODEL.model.name;
   savedPos=loadSaved();
+  notes=loadNotes();
+
+  const initState=window.ERD_INITIAL_STATE||null;
+  if(initState){
+    if(initState.notes){Object.keys(initState.notes).forEach(k=>{if(!notes[k])notes[k]=initState.notes[k];});persistNotes();}
+    if(initState.positions&&!hasAll(savedPos.organic)){savedPos.organic=initState.positions;persistSaved();}
+  }
 
   _seed=20260627;
   nodes=MODEL.tables.map((t,i)=>{const a=i/MODEL.tables.length*Math.PI*2;

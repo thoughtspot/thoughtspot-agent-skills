@@ -58,6 +58,11 @@ _BODY = """<header>
   <label class="toggle"><input type="checkbox" id="findings-toggle" checked> Findings</label>
   <label class="toggle rls"><input type="checkbox" id="rls-toggle"> RLS</label>
   <label class="toggle rls"><input type="checkbox" id="rlsonly-toggle"> Secured subgraph</label>
+  <div class="share-group">
+    <button class="minibtn" id="share-btn" title="Download self-contained HTML with positions and notes baked in">Share HTML</button>
+    <button class="minibtn" id="clear-notes-btn" title="Remove all notes">Clear notes</button>
+  </div>
+  <button class="minibtn" id="help-btn" title="Legend and keyboard shortcuts">? Help</button>
 </div>
 
 <main>
@@ -76,10 +81,43 @@ _BODY = """<header>
       <button id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoom-fit" title="Fit to view" aria-label="Fit to view">⤢</button>
     </div>
-    <div class="hint" id="hint">Click a table to focus \xb7 Shift-click to compare \xb7 drag to pan \xb7 scroll to zoom</div>
+    <div class="hint" id="hint">Click a table to focus \xb7 Shift-click to compare \xb7 Double-click for connected component \xb7 drag to pan \xb7 scroll to zoom</div>
   </div>
   <aside id="inspector"></aside>
-</main>"""
+</main>
+<div class="help-drawer" id="help-drawer">
+  <button class="close" id="help-close" aria-label="Close help">\xd7</button>
+  <h2>ERD Help</h2>
+  <div class="section-label">Legend</div>
+  <div class="help-legend">
+    <div class="swatch" style="background:var(--accent-soft);border-color:var(--accent)"></div><span><b>Fact table</b> — has measures or outgoing joins</span>
+    <div class="swatch" style="background:var(--dim-fill);border-color:var(--dim-stroke)"></div><span><b>Dimension</b> — joined to by facts</span>
+    <div class="swatch" style="background:var(--rls-soft);border-color:var(--rls)"></div><span><b>RLS secured</b> — has row-level security rules</span>
+    <div class="swatch" style="background:#FEF3C7;border-color:#D97706"></div><span><b>In RLS path</b> — referenced in another table’s RLS expression</span>
+    <div class="swatch" style="background:#F0FDFA;border-color:#0D9488"></div><span><b>SQL View</b> — backed by a SQL query, not a physical table</span>
+    <div class="swatch" style="background:#F0ECF9;border-color:#6B4FB8"></div><span><b>Alias</b> — a second reference to the same physical table</span>
+  </div>
+  <div class="section-label">Edge badges</div>
+  <div class="help-legend">
+    <div style="background:var(--accent);color:#fff;width:20px;height:16px;border-radius:3px;display:grid;place-items:center;font-size:9px;font-weight:700">M</div><span><b>Model-local</b> — join defined in this model only</span>
+    <div style="background:var(--dim-fill);color:var(--muted);width:20px;height:16px;border-radius:3px;display:grid;place-items:center;font-size:9px;font-weight:700">T</div><span><b>Table-level</b> — reusable join from table TML</span>
+  </div>
+  <div class="section-label">Interactions</div>
+  <div class="help-shortcut"><kbd>Click</kbd> table — focus on table and its neighbours</div>
+  <div class="help-shortcut"><kbd>Shift+Click</kbd> table — compare multiple tables, trace join path</div>
+  <div class="help-shortcut"><kbd>Double-click</kbd> table — show full connected component</div>
+  <div class="help-shortcut"><kbd>Click</kbd> edge — inspect join definition</div>
+  <div class="help-shortcut"><kbd>Click</kbd> empty space — return to model overview</div>
+  <div class="help-shortcut"><kbd>Drag</kbd> table — reposition (auto-saved)</div>
+  <div class="help-shortcut"><kbd>Scroll</kbd> — zoom in/out</div>
+  <div class="help-shortcut"><kbd>/</kbd> — focus search box</div>
+  <div class="help-shortcut"><kbd>?</kbd> — toggle this help panel</div>
+  <div class="help-shortcut"><kbd>Esc</kbd> — close this panel</div>
+  <div class="section-label">Notes</div>
+  <p class="sub">Add notes to any table or join via the side panel. Notes persist in your browser and travel with <b>Share HTML</b> exports.</p>
+  <div class="section-label">Share HTML</div>
+  <p class="sub">Downloads a self-contained HTML file with your current layout positions and notes baked in. The recipient sees your view on first load.</p>
+</div>"""
 
 
 _TEMPLATE = """<!doctype html>
@@ -88,7 +126,7 @@ _TEMPLATE = """<!doctype html>
 <title>{title}</title>
 <style>{css}</style></head>
 <body>{body}
-<script>window.__ERD_DATA__ = {data};</script>
+<script id="erd-data">window.__ERD_DATA__ = {data};</script>
 <script>{js}</script>
 </body></html>"""
 
