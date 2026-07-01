@@ -523,6 +523,7 @@ var activeSevs = {};
 SEVS.forEach(function(s){ activeSevs[s] = true; });
 var builtViews = {};
 var currentRoute = null;
+var _sevFilterListener = null;
 
 /* ── Helpers ── */
 function $(sel,ctx){ return (ctx||document).querySelector(sel); }
@@ -683,7 +684,7 @@ function onRoute(){
     case "model":
       viewId = "v-scorecard";
       var modelName = route.id ? findModelName(route.id) : "Model";
-      breadcrumbParts = ["Models",modelName];
+      breadcrumbParts = ["Dashboard",modelName];
       if(route.sub) breadcrumbParts.push(ANGLE_FULL_NAMES[route.sub]||ANGLE_LABELS[ANGLE_SHORT[route.sub]]||route.sub);
       /* Highlight sidebar model */
       var mLink = $('[data-route="#model/'+route.id+'"]');
@@ -781,6 +782,9 @@ function findCorpusModel(guid){
 function buildScorecard(D, guid, filterAngle){
   var c = document.getElementById("v-scorecard");
   c.innerHTML = "";
+
+  /* Remove old listener before rebuilding */
+  if(_sevFilterListener) document.removeEventListener("sev-filter-changed", _sevFilterListener);
 
   /* Model metadata */
   var modelName = findModelName(guid);
@@ -901,7 +905,7 @@ function buildScorecard(D, guid, filterAngle){
         /* Recommendation */
         var rec = RECOMMENDATIONS[f.ci];
         if(rec){
-          topHtml += '<div class="finding-recommendation">&#128161; '+rec+'</div>';
+          topHtml += '<div class="finding-recommendation">'+rec+'</div>';
         }
 
         card.innerHTML = topHtml;
@@ -975,7 +979,8 @@ function buildScorecard(D, guid, filterAngle){
       }
     });
   }
-  document.addEventListener("sev-filter-changed", applySevFilter);
+  _sevFilterListener = applySevFilter;
+  document.addEventListener("sev-filter-changed", _sevFilterListener);
 }
 
 /* ── Build placeholder ── */
