@@ -128,7 +128,7 @@ def compact_payload(data: dict) -> dict:
 
 def render_report(data: dict) -> str:
     payload = compact_payload(data)
-    json_str = json.dumps(payload, separators=(",", ":"))
+    json_str = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e")
 
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     return template.replace("{{AUDIT_DATA}}", json_str)

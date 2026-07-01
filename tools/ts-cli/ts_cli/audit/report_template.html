@@ -747,6 +747,13 @@ function el(tag,cls,html){
   return e;
 }
 
+function esc(s){
+  if(!s) return "";
+  var d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 function worstSev(findings){
   var worst = 999;
   for(var i=0;i<findings.length;i++){
@@ -795,7 +802,7 @@ function buildSidebar(){
   var mlist = document.getElementById("sidebar-models");
   var mhtml = "";
   models.forEach(function(m){
-    mhtml += '<a href="#model/'+m.g+'" data-route="#model/'+m.g+'" title="'+m.n+'">'+m.n+'</a>';
+    mhtml += '<a href="#model/'+m.g+'" data-route="#model/'+m.g+'" title="'+esc(m.n)+'">'+esc(m.n)+'</a>';
   });
   mlist.innerHTML = mhtml;
 
@@ -849,9 +856,9 @@ function updateBreadcrumb(parts){
   parts.forEach(function(p,i){
     html += ' <span class="sep">/</span> ';
     if(i === parts.length - 1){
-      html += '<span class="current">'+p+'</span>';
+      html += '<span class="current">'+esc(p)+'</span>';
     } else {
-      html += '<span>'+p+'</span>';
+      html += '<span>'+esc(p)+'</span>';
     }
   });
   bc.innerHTML = html;
@@ -1022,8 +1029,8 @@ function buildScorecard(D, guid, filterAngle){
 
   /* ── Header ── */
   var hdr = el("div","scorecard-header");
-  var titleHtml = '<div class="model-title">'+modelName+'</div>';
-  titleHtml += '<div class="model-guid">'+guid+'</div>';
+  var titleHtml = '<div class="model-title">'+esc(modelName)+'</div>';
+  titleHtml += '<div class="model-guid">'+esc(guid)+'</div>';
 
   /* Stats from corpus */
   if(cm){
@@ -1115,7 +1122,7 @@ function buildScorecard(D, guid, filterAngle){
         topHtml += '</div>';
 
         /* Detail text */
-        topHtml += '<div class="detail-text">'+f.d+'</div>';
+        topHtml += '<div class="detail-text">'+esc(f.d)+'</div>';
 
         /* Metric bar */
         if(f.me !== undefined && f.me !== null && f.th){
@@ -1173,9 +1180,9 @@ function buildScorecard(D, guid, filterAngle){
   } else {
     deps.forEach(function(dep){
       var item = el("div","dependent-item");
-      var typeHtml = '<span class="dep-type-badge '+dep.t+'">'+dep.t+'</span>';
-      var nameHtml = '<span class="dep-name" title="'+dep.n+'">'+dep.n+'</span>';
-      var guidHtml = '<span class="dep-guid">'+dep.g+'</span>';
+      var typeHtml = '<span class="dep-type-badge '+esc(dep.t)+'">'+esc(dep.t)+'</span>';
+      var nameHtml = '<span class="dep-name" title="'+esc(dep.n)+'">'+esc(dep.n)+'</span>';
+      var guidHtml = '<span class="dep-guid">'+esc(dep.g)+'</span>';
       var linkHtml = (D.C && D.C.u) ? tsLink(D.C.u, dep.g, dep.t) : "";
       item.innerHTML = typeHtml + nameHtml + guidHtml + linkHtml;
       depBody.appendChild(item);
@@ -1346,12 +1353,12 @@ function buildOverlapsTab(D){
 
       /* Model A */
       var tdA = el("td","");
-      tdA.innerHTML = '<a href="#model/'+o.a.g+'">'+o.a.n+'</a>';
+      tdA.innerHTML = '<a href="#model/'+o.a.g+'">'+esc(o.a.n)+'</a>';
       tr.appendChild(tdA);
 
       /* Model B */
       var tdB = el("td","");
-      tdB.innerHTML = '<a href="#model/'+o.b.g+'">'+o.b.n+'</a>';
+      tdB.innerHTML = '<a href="#model/'+o.b.g+'">'+esc(o.b.n)+'</a>';
       tr.appendChild(tdB);
 
       /* Jaccard */
@@ -1439,7 +1446,7 @@ function buildDuplicatesTab(D){
       var model = D.L[f.mi];
       var html = severityPill(f.s);
       if(model){
-        html += ' <a href="#model/'+model.g+'">'+model.n+'</a>';
+        html += ' <a href="#model/'+model.g+'">'+esc(model.n)+'</a>';
       }
       row.innerHTML = html;
       grp.appendChild(row);
@@ -1549,7 +1556,7 @@ function buildTableReuseTab(D){
 
       var tdMS = el("td","");
       var links = r.ms.map(function(m){
-        return '<a href="#model/'+m.g+'">'+m.n+'</a>';
+        return '<a href="#model/'+m.g+'">'+esc(m.n)+'</a>';
       });
       tdMS.innerHTML = links.join(", ");
       tr.appendChild(tdMS);
@@ -1862,7 +1869,7 @@ function buildSortableDepTable(rows, colDefs, defaultSort){
       colDefs.forEach(function(cd){
         var td = el("td","");
         if(cd.key === "name" && r.guid){
-          td.innerHTML = '<a href="#model/'+r.guid+'">'+r[cd.key]+'</a>';
+          td.innerHTML = '<a href="#model/'+r.guid+'">'+esc(r[cd.key])+'</a>';
         } else {
           td.textContent = r[cd.key];
           if(cd.key === "count"){ td.style.fontWeight = "600"; }
@@ -2020,7 +2027,7 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
     /* Name */
     var tdName = el("td","");
     if(model){
-      tdName.innerHTML = '<a href="#model/'+guid+'">'+name+'</a>';
+      tdName.innerHTML = '<a href="#model/'+guid+'">'+esc(name)+'</a>';
     } else {
       tdName.textContent = name;
     }
@@ -2239,7 +2246,7 @@ function buildCrossModel(D, initialFilters){
     var tdModel = el("td","col-model");
     var model = D.L[mi];
     if(model){
-      var mHtml = '<a class="model-link" href="#model/'+model.g+'" data-route="#model/'+model.g+'">'+model.n+'</a>';
+      var mHtml = '<a class="model-link" href="#model/'+model.g+'" data-route="#model/'+model.g+'">'+esc(model.n)+'</a>';
       if(D.C && D.C.u){
         mHtml += '<a class="ts-icon" href="'+D.C.u+'/#/data/tables/'+model.g+'" target="_blank" rel="noopener" title="Open in ThoughtSpot">↗</a>';
       }
@@ -2380,10 +2387,10 @@ function buildDashboard(){
   html += '<div class="dash-header">';
   if(D.C){
     if(D.C.u){
-      html += '<a class="cluster-url" href="'+D.C.u+'" target="_blank" rel="noopener">'+D.C.u+' <span class="ext">↗</span></a>';
+      html += '<a class="cluster-url" href="'+D.C.u+'" target="_blank" rel="noopener">'+esc(D.C.u)+' <span class="ext">↗</span></a>';
     }
-    if(D.C.p) html += '<span class="meta-item">Profile: <strong>'+D.C.p+'</strong></span>';
-    if(D.C.dt) html += '<span class="meta-item">Date: <strong>'+D.C.dt+'</strong></span>';
+    if(D.C.p) html += '<span class="meta-item">Profile: <strong>'+esc(D.C.p)+'</strong></span>';
+    if(D.C.dt) html += '<span class="meta-item">Date: <strong>'+esc(D.C.dt)+'</strong></span>';
     if(D.C.ar && D.C.ar.length > 0){
       html += '<div class="angles">';
       D.C.ar.forEach(function(code){
@@ -2513,11 +2520,11 @@ function buildHeatmap(){
 
   rows.forEach(function(r){
     html += '<tr>';
-    html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+r.n+'">'+r.n+'</a></td>';
+    html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
       html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+r.g+'" data-angle="'+a+
-              '" title="'+r.n+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0"></span></td>';
+              '" title="'+esc(r.n)+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0"></span></td>';
     });
     html += '</tr>';
   });

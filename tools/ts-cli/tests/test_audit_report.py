@@ -97,6 +97,19 @@ def test_render_report_no_corpus_graceful():
     assert "{{AUDIT_DATA}}" not in html
 
 
+def test_render_report_escapes_xss():
+    """Model names with HTML should be escaped in output."""
+    data = generate_test_data(model_count=1, findings_per_model=1)
+    data["findings"][0]["object_name"] = '<script>alert(1)</script>'
+    data["findings"][0]["detail"] = '<img src=x onerror=alert(1)>'
+    if data.get("corpus"):
+        data["corpus"]["models"][0]["name"] = '<script>alert(1)</script>'
+    html = render_report(data)
+    # The JSON payload should have < and > escaped
+    assert '<script>alert(1)</script>' not in html
+    assert '\\u003c' in html or '&lt;' in html
+
+
 def test_report_cli_from_file():
     data = generate_test_data(model_count=2, findings_per_model=3)
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
