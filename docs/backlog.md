@@ -1799,3 +1799,65 @@ Build `ts tableau build-liveboard` in ts-cli:
   `build-model` → **`build-liveboard`**)
 
 **Target:** 2026-12-31.
+
+---
+
+## BL-069 — Refactor tableau_translate.py into module-per-concern structure
+
+**Source:** codification sweep 2026-06-29 (angle #11b), architectural observation.
+**Affects:** `tools/ts-cli/ts_cli/tableau_translate.py`, `tools/ts-cli/ts_cli/model_builder.py`.
+**Status:** OPEN.
+
+### Problem
+
+`tableau_translate.py` is 2543 lines in a single module covering: dependency DAG building,
+parameter conflict detection, name clash resolution, pre-transforms (5), main translation
+pipeline, post-transforms (2), and YAML serialization. `model_builder.py` is 1025 lines
+covering TWB parsing, ref resolution, TML assembly, and phased import splitting.
+
+Both files work well but are hard to navigate and test in isolation. The `ts audit run`
+design (BL-065) uses a module-per-angle pattern that keeps each file 200-500 lines — the
+same structure would benefit the Tableau pipeline.
+
+### Approach
+
+Split into focused modules without changing external interfaces:
+- `tableau_dag.py` — dependency DAG building, topological sort, cycle detection
+- `tableau_transforms.py` — pre-transforms and post-transforms
+- `tableau_translate.py` — core `translate_single()` + `translate_formulas()` orchestrator (kept as entry point)
+- `tableau_parse.py` — TWB/TWBX XML parsing (from `model_builder.py`)
+- `model_builder.py` — TML assembly + phased import (remains, but slimmer)
+
+No functional changes — pure structural refactor. Existing tests continue to pass by
+importing from the same entry points.
+
+**Target:** 2026-12-31.
+
+---
+
+## BL-070 — Add file-size validator for ts-cli modules
+
+**Source:** architectural review 2026-07-01, repo-audit angle #4 (tools quality).
+**Affects:** `tools/validate/`, `tools/ts-cli/ts_cli/`.
+**Status:** OPEN.
+
+### Problem
+
+`tableau_translate.py` (2543 lines) and `model_builder.py` (1025 lines) are both
+monolithic modules that are hard to navigate, test in isolation, and review. There is
+no automated gate preventing new modules from growing to similar sizes. Angle #4 (tools
+quality) catches this manually but should be a validator per the two-bucket rule.
+
+### Approach
+
+Add `tools/validate/check_file_size.py`:
+- Scan `tools/ts-cli/ts_cli/**/*.py` for files exceeding a line threshold
+- Soft-warn at 500 lines, hard-fail at 1000 lines on new/modified files
+- Existing files above the threshold get a one-time allowlist entry with a
+  cross-reference to BL-069 (the refactor backlog item)
+- Wire into `scripts/pre-commit.sh` and `.github/workflows/validate.yml`
+
+Also expand repo-audit angle #4 description in `.claude/rules/repo-audit.md` to
+explicitly include module size / modularity as a check dimension.
+
+**Target:** 2026-09-30.
