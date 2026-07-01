@@ -674,8 +674,39 @@ If **done**: end the skill.
 
 ---
 
+## Step 3b — Generate HTML Report
+
+After Step 3 produces the JSON output, generate the unified HTML report:
+
+```bash
+ts audit report {json_file_or_stdin} --output ~/Dev/audit-runs/{profile}-{date}/report.html
+```
+
+Or piped directly from Step 3:
+
+```bash
+ts audit run \
+  --models "{guid1}" --models "{guid2}" \
+  --angles "{A,D,H,P,S}" \
+  --profile "{profile_name}" \
+  | ts audit report -o ~/Dev/audit-runs/{profile_name}-{date}/report.html
+```
+
+The report is a single self-contained HTML file with five interactive views:
+- **Dashboard** — severity heatmap across all models and angles
+- **Model Scorecard** — per-model findings with recommendations
+- **Cross-Model** — sortable table of all findings
+- **Object Map** — table reuse, model overlaps, dependencies (Sankey + bar charts)
+- **Cleanup** — orphan models, stale objects with checkbox selection
+
+Open the HTML file in the user's default browser after generation. The file is
+self-contained (no external dependencies) and can be shared directly via email or Slack.
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.1.0 | 2026-07-01 | Add `ts audit report` command: unified HTML report with Dashboard, Scorecard, Cross-Model, Object Map, Cleanup views. Delete superseded `efficiency_report.py`. |
 | 1.0.0 | 2026-06-18 | Initial release — five audit angles: AI Readiness (A), Data Modeling (D), Human Readiness (H), Performance (P), Security (S) |

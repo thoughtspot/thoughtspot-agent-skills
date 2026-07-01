@@ -6,9 +6,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-01
+- feat: add `ts audit report` command — unified HTML report
+- chore: bump ts-cli to v0.23.0
+- chore: delete superseded `efficiency_report.py`
 - feat: add `ts audit run` command — codifies all 51 audit checks (A1-A5, D1-D12, H1-H10, P1-P18, S1-S10) as deterministic Python
 - fix(audit): include report_template.html in wheel package-data
-- chore: bump ts-cli to v0.22.0
 
 ## 2026-06-28
 - feat: add Migration Pace (Fast/Complete) to ts-convert-from-tableau — Fast parks failed formulas; Complete enters bounded fix cycle; Step 12.5 resume prompt for post-report fixes
