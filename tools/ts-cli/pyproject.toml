@@ -20,3 +20,6 @@ ts = "ts_cli.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ts_cli*"]
+
+[tool.setuptools.package-data]
+"ts_cli" = ["audit/report_template.html"]
