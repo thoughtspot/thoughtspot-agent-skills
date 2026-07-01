@@ -505,6 +505,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .crossmodel-table .col-check{width:70px;font-family:var(--mono);font-size:10px;}
 .crossmodel-table .col-angle{width:110px;}
 .crossmodel-table .col-model{min-width:140px;}
+.crossmodel-table .col-type{width:80px;font-variant:small-caps;color:var(--muted);}
 .crossmodel-table .col-detail{min-width:200px;max-width:400px;}
 .crossmodel-table .model-link{color:var(--ink);font-weight:500;}
 .crossmodel-table .model-link:hover{color:var(--accent);text-decoration:underline;}
@@ -1141,6 +1142,7 @@ function buildCrossModel(D, initialFilters){
     {key:"ci", label:"Check",    cls:"col-check"},
     {key:"a",  label:"Angle",    cls:"col-angle"},
     {key:"mi", label:"Model",    cls:"col-model"},
+    {key:"ot", label:"Type",     cls:"col-type"},
     {key:"d",  label:"Detail",   cls:"col-detail"}
   ];
   var thEls = [];
@@ -1179,6 +1181,10 @@ function buildCrossModel(D, initialFilters){
         av = (D.L[a.mi] ? D.L[a.mi].n : "").toLowerCase();
         bv = (D.L[b.mi] ? D.L[b.mi].n : "").toLowerCase();
         cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+      } else if(sortCol === "ot"){
+        av = (a.ot || "").toLowerCase();
+        bv = (b.ot || "").toLowerCase();
+        cmp = av < bv ? -1 : (av > bv ? 1 : 0);
       } else if(sortCol === "d"){
         av = (a.d || "").toLowerCase();
         bv = (b.d || "").toLowerCase();
@@ -1206,10 +1212,12 @@ function buildCrossModel(D, initialFilters){
     var detail = (f.d || "").toLowerCase();
     var checkId = (f.ci || "").toLowerCase();
     var angle = (ANGLE_LABELS[f.a] || f.a || "").toLowerCase();
+    var objectType = (f.ot || "").toLowerCase();
     return modelName.indexOf(term) !== -1
         || detail.indexOf(term) !== -1
         || checkId.indexOf(term) !== -1
-        || angle.indexOf(term) !== -1;
+        || angle.indexOf(term) !== -1
+        || objectType.indexOf(term) !== -1;
   }
 
   /* ── Build a single data row ── */
@@ -1249,6 +1257,11 @@ function buildCrossModel(D, initialFilters){
       tdModel.textContent = "(model "+mi+")";
     }
     tr.appendChild(tdModel);
+
+    /* Type cell */
+    var tdType = el("td","col-type");
+    tdType.textContent = f.ot || "";
+    tr.appendChild(tdType);
 
     /* Detail cell */
     var tdDetail = el("td","col-detail detail-cell");
