@@ -50,12 +50,22 @@ def compact_payload(data: dict) -> dict:
         "ba": summary.get("by_angle", {}),
         "os": summary.get("objects_scanned", {}),
         "cr": summary.get("checks_run", 0),
+        "ac": summary.get("all_check_ids", []),
     }
+
+    check_meta = data.get("check_meta", {})
+    compact_check_meta = {}
+    for cid, meta in check_meta.items():
+        compact_check_meta[cid] = {
+            "d": meta.get("desc", ""),
+            "t": meta.get("thresholds", ""),
+        }
 
     result: dict = {
         "L": model_lookup,
         "F": compact_findings,
         "S": compact_summary,
+        "K": compact_check_meta,
     }
 
     if corpus:

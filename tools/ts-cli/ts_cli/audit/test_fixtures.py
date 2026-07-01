@@ -27,6 +27,25 @@ CHECK_CATALOG = [
     ("S3", "security", "Indexing enabled without RLS"),
 ]
 
+CHECK_META = {
+    "A1": {"desc": "Description coverage below threshold", "thresholds": "GREEN >= 80%, YELLOW >= 50%"},
+    "A2": {"desc": "Synonym coverage below threshold", "thresholds": "GREEN >= 50%, YELLOW >= 25%"},
+    "A3": {"desc": "No AI instructions configured", "thresholds": "HIGH if absent"},
+    "D1": {"desc": "Model complexity exceeds threshold", "thresholds": "Tables >15 RED, Columns >75 RED"},
+    "D2": {"desc": "Chasm trap detected in join path", "thresholds": "HIGH per occurrence"},
+    "D7": {"desc": "High model overlap detected", "thresholds": "Jaccard >= 0.5 with shared facts"},
+    "D8": {"desc": "Duplicate table objects found", "thresholds": "HIGH per duplicate group"},
+    "H3": {"desc": "Unnecessary hidden columns", "thresholds": "MEDIUM per column"},
+    "H4": {"desc": "Orphan model with no dependents", "thresholds": "MEDIUM per model"},
+    "H7": {"desc": "Answer queries table directly", "thresholds": "MEDIUM per answer"},
+    "H8": {"desc": "Formula promotion candidate", "thresholds": "HIGH if duplicated in 2+ answers"},
+    "P1": {"desc": "SQL View used as model source", "thresholds": "MEDIUM per view"},
+    "P5": {"desc": "Non-progressive join detected", "thresholds": "HIGH if >5 tables"},
+    "P16": {"desc": "Deeply nested if() calls", "thresholds": "INFO >3, LOW >5"},
+    "S1": {"desc": "PII column without RLS", "thresholds": "HIGH per column"},
+    "S3": {"desc": "Indexing enabled without RLS", "thresholds": "MEDIUM per column"},
+}
+
 MODEL_NAMES = [
     "Sales Model", "Revenue Model", "Customer Analytics", "Product Catalog",
     "Supply Chain", "HR Analytics", "Finance Model", "Marketing Insights",
@@ -128,7 +147,9 @@ def generate_test_data(
             "by_angle": by_angle,
             "objects_scanned": {"models": model_count, "tables": sum(m["table_count"] for m in models_meta)},
             "checks_run": len(active_checks),
+            "all_check_ids": sorted(CHECK_META.keys()),
         },
+        "check_meta": CHECK_META,
     }
 
     if include_corpus:

@@ -16,6 +16,7 @@ def test_compact_payload_has_required_keys():
     assert "L" in payload
     assert "F" in payload
     assert "S" in payload
+    assert "K" in payload
 
 
 def test_compact_payload_with_corpus():
@@ -108,6 +109,23 @@ def test_render_report_escapes_xss():
     # The JSON payload should have < and > escaped
     assert '<script>alert(1)</script>' not in html
     assert '\\u003c' in html or '&lt;' in html
+
+
+def test_compact_payload_includes_check_meta():
+    data = generate_test_data()
+    payload = compact_payload(data)
+    assert "K" in payload
+    assert "A1" in payload["K"]
+    assert "d" in payload["K"]["A1"]
+    assert "t" in payload["K"]["A1"]
+
+
+def test_compact_payload_includes_all_check_ids():
+    data = generate_test_data()
+    payload = compact_payload(data)
+    assert "ac" in payload["S"]
+    assert isinstance(payload["S"]["ac"], list)
+    assert len(payload["S"]["ac"]) > 0
 
 
 def test_report_cli_from_file():

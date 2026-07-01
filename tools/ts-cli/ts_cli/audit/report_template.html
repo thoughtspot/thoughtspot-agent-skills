@@ -489,11 +489,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .crossmodel-table{
   border-collapse:collapse;width:100%;min-width:600px;
 }
-.crossmodel-table thead{position:sticky;top:var(--topbar-h);z-index:10;}
+.crossmodel-table thead{position:sticky;top:var(--topbar-h);z-index:10;box-shadow:0 1px 3px rgba(0,0,0,.06);}
 .crossmodel-table th{
   font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
   color:var(--muted);padding:8px 10px;text-align:left;
-  background:var(--surface-2);border-bottom:2px solid var(--hair);
+  background:var(--surface);border-bottom:2px solid var(--hair);
   white-space:nowrap;cursor:pointer;user-select:none;
   transition:color .1s;
 }
@@ -530,8 +530,19 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .group-header .gh-id{
   font-family:var(--mono);color:var(--ink);margin-right:6px;
 }
+.group-header .gh-desc{
+  color:var(--ink);font-weight:500;font-size:12px;
+}
 .group-header .gh-count{
-  font-weight:500;color:var(--muted);
+  font-weight:500;color:var(--muted);margin-left:8px;
+}
+.group-header .gh-thresh{
+  font-size:10px;color:var(--muted);font-weight:400;
+  margin-left:8px;font-family:var(--mono);
+}
+.group-empty td{
+  text-align:center;color:var(--ok);font-size:11px;padding:6px 10px;
+  font-style:italic;
 }
 
 /* ── Object Map ── */
@@ -2135,6 +2146,15 @@ function buildCrossModel(D, initialFilters){
   groupLabel.appendChild(document.createTextNode(" Group by check ID"));
   toolbar.appendChild(groupLabel);
 
+  var showAllLabel = el("label","");
+  var showAllChk = document.createElement("input");
+  showAllChk.type = "checkbox";
+  showAllChk.id = "cm-show-all-checks";
+  showAllLabel.appendChild(showAllChk);
+  showAllLabel.appendChild(document.createTextNode(" Show all checks"));
+  showAllLabel.style.display = "none";
+  toolbar.appendChild(showAllLabel);
+
   var countEl = el("span","cm-count","");
   toolbar.appendChild(countEl);
   c.appendChild(toolbar);
@@ -2304,8 +2324,16 @@ function buildCrossModel(D, initialFilters){
 
     if(grouped){
       /* Group by check ID */
+      var allCheckIds = (D.S && D.S.ac) ? D.S.ac : [];
       var groups = {};
       var groupOrder = [];
+
+      if(showAllChk.checked){
+        allCheckIds.forEach(function(cid){
+          if(!groups[cid]){ groups[cid] = []; groupOrder.push(cid); }
+        });
+      }
+
       filtered.forEach(function(f){
         var key = f.ci || "(no check)";
         if(!groups[key]){ groups[key] = []; groupOrder.push(key); }
@@ -2314,22 +2342,37 @@ function buildCrossModel(D, initialFilters){
 
       groupOrder.forEach(function(key){
         var gFindings = groups[key];
+        var checkDesc = (D.K && D.K[key]) ? D.K[key].d : "";
+        var checkThresh = (D.K && D.K[key]) ? D.K[key].t : "";
         /* Group header row */
         var ghTr = document.createElement("tr");
         ghTr.className = "group-header";
         var ghTd = document.createElement("td");
         ghTd.colSpan = cols.length;
-        ghTd.innerHTML = '<span class="gh-id">'+key+'</span>'+
-                         '<span class="gh-count">'+gFindings.length+' finding'+(gFindings.length!==1?'s':'')+'</span>';
+        var ghHtml = '<span class="gh-id">'+esc(key)+'</span>';
+        if(checkDesc) ghHtml += '<span class="gh-desc">'+esc(checkDesc)+'</span>';
+        ghHtml += '<span class="gh-count">'+gFindings.length+' finding'+(gFindings.length!==1?'s':'')+'</span>';
+        if(checkThresh) ghHtml += '<span class="gh-thresh">'+esc(checkThresh)+'</span>';
+        ghTd.innerHTML = ghHtml;
         ghTr.appendChild(ghTd);
         tbody.appendChild(ghTr);
 
-        gFindings.forEach(function(f){
-          var tr = buildRow(f);
-          if(!activeSevs[f.s]) tr.style.display = "none";
-          else shownCount++;
-          tbody.appendChild(tr);
-        });
+        if(gFindings.length === 0){
+          var emptyTr = document.createElement("tr");
+          emptyTr.className = "group-empty";
+          var emptyTd = document.createElement("td");
+          emptyTd.colSpan = cols.length;
+          emptyTd.textContent = "No findings — all checks passed";
+          emptyTr.appendChild(emptyTd);
+          tbody.appendChild(emptyTr);
+        } else {
+          gFindings.forEach(function(f){
+            var tr = buildRow(f);
+            if(!activeSevs[f.s]) tr.style.display = "none";
+            else shownCount++;
+            tbody.appendChild(tr);
+          });
+        }
       });
     } else {
       filtered.forEach(function(f){
@@ -2364,8 +2407,13 @@ function buildCrossModel(D, initialFilters){
   /* ── Wire search input ── */
   searchInput.addEventListener("input", renderTable);
 
-  /* ── Wire group-by checkbox ── */
-  groupChk.addEventListener("change", renderTable);
+  /* ── Wire group-by and show-all checkboxes ── */
+  groupChk.addEventListener("change", function(){
+    showAllLabel.style.display = groupChk.checked ? "" : "none";
+    if(!groupChk.checked) showAllChk.checked = false;
+    renderTable();
+  });
+  showAllChk.addEventListener("change", renderTable);
 
   /* ── Wire severity filter ── */
   function applyCrossmodelSevFilter(){
