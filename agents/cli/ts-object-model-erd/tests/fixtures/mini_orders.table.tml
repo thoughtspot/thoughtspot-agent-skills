@@ -1,0 +1,17 @@
+guid: tbl-orders-001
+table:
+  name: ORDERS
+  columns:
+  - name: AMOUNT
+    properties:
+      column_type: MEASURE
+  - name: CUSTOMER_CODE
+    properties:
+      column_type: ATTRIBUTE
+  joins_with:
+  - name: ORDERS_to_CUSTOMER
+    destination:
+      name: CUSTOMER
+    'on': "[ORDERS::CUSTOMER_CODE] = [CUSTOMER::CUSTOMER_CODE]"
+    type: INNER
+    cardinality: MANY_TO_ONE

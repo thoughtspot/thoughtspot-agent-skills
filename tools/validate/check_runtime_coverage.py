@@ -47,6 +47,8 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "Complex search-query / formula manipulation not supported in stored-proc model",
     ("ts-object-model-coach", "coco-snowsight"):
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
+    ("ts-object-model-erd", "coco-snowsight"):
+        "TML parsing + HTML rendering require shell access; not supported in Snowsight stored-proc runtime",
     ("ts-profile-snowflake", "coco-snowsight"):
         "CoCo Snowsight runs inside Snowflake — no Snowflake profile needed",
     ("ts-profile-databricks", "coco-snowsight"):

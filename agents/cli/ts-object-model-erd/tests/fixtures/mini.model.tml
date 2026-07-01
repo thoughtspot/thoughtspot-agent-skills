@@ -1,0 +1,36 @@
+guid: model-guid-001
+model:
+  name: Mini Sales
+  description: Minimal fixture model for ERD parser tests.
+  model_tables:
+  - name: ORDERS
+    fqn: tbl-orders-001
+    joins:
+    - with: CUSTOMER
+      referencing_join: ORDERS_to_CUSTOMER
+    - with: REGION
+      referencing_join: ORDERS_to_REGION_local
+  - name: CUSTOMER
+    fqn: tbl-customer-001
+  formulas:
+  - id: formula_Revenue
+    name: Revenue
+    expr: sum ( [ORDERS::AMOUNT] )
+  columns:
+  - name: Amount
+    column_id: ORDERS::AMOUNT
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Revenue
+    formula_id: formula_Revenue
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Customer Name
+    column_id: CUSTOMER::NAME
+    properties:
+      column_type: ATTRIBUTE
+  properties:
+    is_bypass_rls: false
+    join_progressive: true
