@@ -25,10 +25,10 @@ WATERFALL, WHISKER_SCATTER
 - `TABLE` is not in the enum. For a tabular tile, **omit the `chart` block and set
   `display_mode: TABLE_MODE`** (the export then shows a default `chart.type` but renders as
   a table). `GRID_TABLE` / `PIVOT_TABLE` are the chart-engine table types.
-- `ADVANCED_*` are the **Muze charting library** (early access — see the dedicated section
-  below). They use a different encoding block (`custom_chart_config`, not `axis_configs`).
-  The Legacy (plain) names are the portable default; emit `ADVANCED_*` (Muze) only when
-  targeting a cluster with the Muze library enabled.
+- `ADVANCED_*` are the **Muze charting library** (phase 1 GA since 26.6.0.cl — see the
+  dedicated section below). They use a different encoding block (`custom_chart_config`,
+  not `axis_configs`). Legacy (plain) names remain the portable default for clusters that
+  haven't adopted Muze yet.
 - `CUSTOM_CHART` / `MUZE_STUDIO` are extension/custom-viz hooks — not general-purpose.
 - `GEO_EARTH_*` are the 3-D globe variants of the geo charts.
 
@@ -65,7 +65,7 @@ WATERFALL, WHISKER_SCATTER
 anchor column is geo-tagged in ThoughtSpot. `CANDLESTICK`/`WHISKER_SCATTER` import but only
 render meaningfully with OHLC / distribution-shaped inputs.
 
-## Muze charting library (`ADVANCED_*` types) — early access
+## Muze charting library (`ADVANCED_*` types) — phase 1 GA
 
 ThoughtSpot has two charting libraries:
 
@@ -76,8 +76,9 @@ ThoughtSpot has two charting libraries:
   error messages call these "advanced" / the Legacy ones "standard" — the **branded** library
   names are **Muze** and **Legacy**, but the literal `ADVANCED_*` enum values are unchanged.)_
 
-Muze is **early access** — enabled on the SE cluster (`se-thoughtspot`), not yet GA. _All
-findings below verified live on se-thoughtspot 2026-06-17._
+Muze reached **phase 1 GA** in ThoughtSpot Cloud 26.6.0.cl. The `newChartsLibrary` property
+on `SearchViewConfig` / `LiveboardViewConfig` controls enablement. _All findings below
+verified live on se-thoughtspot 2026-06-17._
 
 ### Scope — which types the Muze library covers
 
@@ -181,8 +182,8 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 ### Guidance for generators (Tableau skill, liveboard-builder)
 
 - **Default to Legacy charts, but PROMPT the user to choose** Legacy vs Muze before generating
-  chart TML. Legacy is the portable default (works on every cluster); Muze is early access (the
-  target cluster must have it enabled — e.g. SE).
+  chart TML. Legacy is the portable default (works on every cluster); Muze is phase 1 GA
+  (26.6.0.cl+) but may not be enabled on older clusters.
 - When the user picks **Muze**: emit `ADVANCED_*` + `custom_chart_config` for the
   cartesian/pivot intents (bar/column/line/area/stacked/combo/pivot), and **fall back to the
   Legacy type** for any intent with no Muze equivalent (pie, scatter/bubble, heatmap,

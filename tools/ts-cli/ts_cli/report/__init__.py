@@ -82,13 +82,12 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
         except Exception:
             alias_supported = False
 
-        # Monitor alerts: export TML for each Liveboard dependent.
-        for dep in dependents:
-            if dep.type != "LIVEBOARD":
-                continue
+        # Monitor alerts: batch-export TML for all Liveboard dependents.
+        lb_guids = [dep.guid for dep in dependents if dep.type == "LIVEBOARD"]
+        if lb_guids:
             try:
                 a_resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-                    "metadata": [{"identifier": dep.guid, "type": "LIVEBOARD"}],
+                    "metadata": [{"identifier": g, "type": "LIVEBOARD"} for g in lb_guids],
                     "export_associated": True,
                     "edoc_format": "YAML",
                 })

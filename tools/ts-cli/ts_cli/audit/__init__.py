@@ -4,6 +4,7 @@ from typing import Optional
 
 from ts_cli.audit import checks_ai, checks_data, checks_human, checks_perf, checks_security
 from ts_cli.audit.context import build_context
+from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
 
 ANGLE_MODULES = {
@@ -39,6 +40,11 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
 
     table_reuse = _build_table_reuse_from_ctx(models_out)
     model_overlaps = _build_overlaps_from_ctx(models_out)
+
+    erd_models = build_erd_for_audit(ctx)
+    erd_by_guid = {m["model"]["guid"]: m for m in erd_models}
+    for m in models_out:
+        m["erd"] = erd_by_guid.get(m["guid"])
 
     return {
         "cluster_url": cluster_url,
