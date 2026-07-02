@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-03
+- feat: ts-cli v0.26.0 — 14 Tableau function translations implemented (were silent pass-throughs); unmapped functions and unknown date units now fail loud at translate time; scalar MAX/MIN and IN(...) scan bugs fixed
+
 ## 2026-07-02
 - refactor: split Tableau pipeline into ts_cli/tableau/ package (BL-069); bump ts-cli to v0.25.4
 - fix: validator test fixtures no longer corrupt the real repo when pytest runs under pre-commit hook env (GIT_* scrub)
