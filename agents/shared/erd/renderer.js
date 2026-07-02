@@ -4,8 +4,8 @@ let MODEL = ERD.models[0] || {model:{name:"(no model)",guid:"",description:""},t
 
 const SEV_RANK={crit:3,warn:2,info:1};
 let tableById={}, findingsByTable={}, HOT_EDGES=new Set();
-let adj={}, radj={}, undir={};
-let securedTables=[], rlsAffected=new Set();
+let adj={}, undir={};
+let securedTables=[];
 let LS_KEY="", savedPos={}, NOTES_KEY="", notes={};
 let nodes=[], nodeById={}, edges=[];
 let layoutCache={};
@@ -26,7 +26,12 @@ let focusMode=null;   // "neighbourhood" | "tree" | "compare" | null
 let selected=null;
 
 function worstSev(id){let w=null;(findingsByTable[id]||[]).forEach(f=>{if(!w||SEV_RANK[f.sev]>SEV_RANK[w])w=f.sev;});return w;}
-function ancestors(id){const seen=new Set(),stack=[id];while(stack.length){const n=stack.pop();radj[n].forEach(p=>{if(!seen.has(p)){seen.add(p);stack.push(p);}});}return seen;}
+// Tables referenced (by name/alias) in an RLS rule's expression, excluding the rule's
+// own table. RLS is defined ON a table and may reference OTHER tables' columns; it does
+// NOT propagate along joins — so this is the only "reach" a rule has beyond its owner.
+const RLS_REF=/\[([^\]:]+)::/g;
+function rlsRefs(expr,ownerId){const s=new Set();let m;RLS_REF.lastIndex=0;
+  while((m=RLS_REF.exec(expr||"")))if(tableById[m[1]]&&m[1]!==ownerId)s.add(m[1]);return [...s];}
 function connectedComponent(id){const seen=new Set([id]),q=[id];while(q.length){const n=q.shift();(undir[n]||[]).forEach(m=>{if(!seen.has(m)){seen.add(m);q.push(m);}});}return seen;}
 function joinTree(id){const seen=new Set([id]),q=[id];while(q.length){const n=q.shift();(adj[n]||[]).forEach(m=>{if(!seen.has(m)){seen.add(m);q.push(m);}});}return seen;}
 
@@ -186,7 +191,7 @@ function tableMatchesFilter(t){
   if(activeFilters.has("sql_view")&&t.is_sql_view)return true;
   if(activeFilters.has("alias")&&t.alias_of)return true;
   if(activeFilters.has("rls")&&t.rls&&t.rls.length>0)return true;
-  if(activeFilters.has("rls_subgraph")&&((t.rls&&t.rls.length>0)||rlsAffected.has(t.id)))return true;
+  if(activeFilters.has("rls_subgraph")&&((t.rls&&t.rls.length>0)||t.in_rls_path))return true;
   return false;
 }
 function focusGroup(){
@@ -256,7 +261,7 @@ function originBadge(g,x,y,origin){const m=origin==="model";
 
 function renderEdges(){
   gEdges.innerHTML="";
-  const showF=tFind.checked,showR=activeFilters.has("rls")||activeFilters.has("rls_subgraph"),keep=focusGroup(),pe=pathEdges();
+  const showF=tFind.checked,keep=focusGroup(),pe=pathEdges();
   const orth=tOrth.checked&&(layoutName==="lr"||layoutName==="tb");
   const crow=notation==="crow";
   if(orth)computeLanes();
@@ -264,13 +269,11 @@ function renderEdges(){
     e.s.h=nodeHeight(e.s.t);e.t.h=nodeHeight(e.t.t);
     const G=edgeGeom(e,orth);
     const hot=showF&&HOT_EDGES.has(e.j.name);
-    const rlsEdge=showR&&securedTables.includes(e.j.to);
     const onPath=pe.has(e.j.name);
     const sel=selected&&selected.type==="edge"&&selected.id===e.j.name;
     const ghost=keep&&!(keep.has(e.j.from)&&keep.has(e.j.to));
     const annotated=!!notes[e.j.name];
     let stroke=annotated?"#D97706":"#9AA4B1",sw=annotated?2:1.6,dash="0",mk="url(#arrow)";
-    if(rlsEdge){stroke="#C2382E";sw=2.1;dash="5 3";mk="url(#arrow-rls)";}
     if(hot){stroke="#9AA4B1";sw=2;dash="6 4";mk="url(#arrow)";}
     if(onPath||sel){stroke="#1E6FA8";sw=3;dash="0";mk="url(#arrow-sel)";}
     const g=NS_el("g",{class:"edge-g"+(ghost?(hideOutOfFocus()?" gone":" ghost"):""),style:"cursor:pointer"},gEdges);
@@ -278,32 +281,32 @@ function renderEdges(){
     NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
       drawCard(g,G.sp,G.sdir,parts[0]==="MANY",stroke);drawCard(g,G.tp,G.tdir,parts[1]==="MANY",stroke);}
-    if(rlsEdge)NS_el("text",{x:G.mx,y:G.my+4,"text-anchor":"middle","font-size":12},g).textContent="🔒";
-    else originBadge(g,G.mx,G.my,e.j.origin||"table");
+    originBadge(g,G.mx,G.my,e.j.origin||"table");
     g.addEventListener("click",ev=>{ev.stopPropagation();selectEdge(e.j.name);});
   });
 }
 
 function renderNodes(){
   gNodes.innerHTML="";
-  const showF=tFind.checked,showR=activeFilters.has("rls")||activeFilters.has("rls_subgraph"),keep=focusGroup();
+  const showF=tFind.checked,keep=focusGroup();
   nodes.forEach(n=>{
     const t=n.t,isFact=t.kind==="fact";n.h=nodeHeight(t);
     const sev=showF?worstSev(t.id):null;
-    // Secured (has RLS rules) and in-RLS-path are inherent node states — always shown,
-    // matching the Help legend, like SQL View / Alias. `affected` (downstream inheritance)
-    // stays overlay-only: it's a what-if exploration, not in the base legend.
-    const secured=t.rls&&t.rls.length,affected=showR&&!(t.rls&&t.rls.length)&&rlsAffected.has(t.id);
+    // Two inherent RLS node states, always shown (like SQL View / Alias):
+    //   secured   = a rule is defined ON this table (red)
+    //   inRlsPath = this table is referenced in ANOTHER table's rule expression (amber)
+    // RLS does not propagate across join edges, so there is no join-inherited state.
+    const secured=t.rls&&t.rls.length;
     const inRlsPath=t.in_rls_path&&!secured;
     const inFocus=focusSet.includes(t.id);
     const ghost=keep&&!keep.has(t.id);
     const g=NS_el("g",{class:"node"+(ghost?(hideOutOfFocus()?" gone":" ghost"):""),transform:`translate(${n.x},${n.y})`},gNodes);
 
     let stroke=isFact?"#1E6FA8":"#C8CFD8",sw=isFact?1.6:1.2;
-    if(secured){stroke="#C2382E";sw=2.2;} else if(inRlsPath){stroke="#D97706";sw=2.2;} else if(affected){stroke="#E88E88";sw=1.6;}
+    if(secured){stroke="#C2382E";sw=2.2;} else if(inRlsPath){stroke="#D97706";sw=2.2;}
     if(sev==="crit"){stroke="#C2382E";sw=2.2;} else if(sev==="warn"){stroke="#B5730A";sw=2;}
     if(inFocus){stroke="#1E6FA8";sw=2.8;}
-    let fill=secured?"#FBE9E7":inRlsPath?"#FEF3C7":affected?"#FEF0EE":t.is_sql_view?"#F0FDFA":"#fff";
+    let fill=secured?"#FBE9E7":inRlsPath?"#FEF3C7":t.is_sql_view?"#F0FDFA":"#fff";
 
     NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill,stroke,"stroke-width":sw,style:"filter:drop-shadow(0 2px 5px rgba(20,27,38,.08))"},g);
     const hbg=secured?"#FBE9E7":isFact?"#EAF2F8":"#EEF0F3";
@@ -388,9 +391,9 @@ function findingCard(x){if(!x)return "";return `<div class="finding ${x.sev}" ta
   <div class="fhead"><span class="sev ${x.sev}">${x.sev==="crit"?"Critical":x.sev==="warn"?"Warning":"Info"}</span><span class="check">${esc(x.check)}</span></div>
   <div class="ftitle">${esc(x.title)}</div><div class="ftarget">${esc(x.where)}</div>
   <div class="fdetail">${esc(x.detail)}</div><div class="frec"><b>Fix.</b> ${esc(x.rec)}</div></div>`;}
-function ruleCard(r,affectedList){return `<div class="rule"><div class="rname">🔒 ${esc(r.name)}</div>
+function ruleCard(r,ownerId){const refs=rlsRefs(r.expr,ownerId);return `<div class="rule"><div class="rname">🔒 ${esc(r.name)}</div>
   <div class="rscope">${esc(r.scope)}</div><div class="expr">${esc(r.expr)}</div>
-  ${affectedList?`<div class="affected">Propagates through joins to <b>${affectedList.map(esc).join(", ")}</b>.</div>`:""}</div>`;}
+  ${refs.length?`<div class="affected">References <b>${refs.map(esc).join(", ")}</b>.</div>`:""}</div>`;}
 function wireFindings(){inspector.querySelectorAll(".finding").forEach(c=>{const act=()=>{c.classList.toggle("open");const t=c.dataset.target;if(tableById[t])selectTable(t,false);};
   c.addEventListener("click",act);c.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act();}});});}
 
@@ -434,7 +437,7 @@ function showOverview(){
   h+=`</details>`;
   if(securedTables.length){
     h+=`<details class="inspector-section"><summary class="section-label">Row-level security (${securedTables.length})</summary>`;
-    MODEL.tables.filter(t=>t.rls&&t.rls.length).forEach(t=>{const aff=[...ancestors(t.id)];h+=`<div style="font-size:11.5px;font-weight:600;margin-bottom:6px;font-family:var(--mono)">${esc(t.id)}</div>`+t.rls.map(r=>ruleCard(r,aff)).join("");});
+    MODEL.tables.filter(t=>t.rls&&t.rls.length).forEach(t=>{h+=`<div style="font-size:11.5px;font-weight:600;margin-bottom:6px;font-family:var(--mono)">${esc(t.id)}</div>`+t.rls.map(r=>ruleCard(r,t.id)).join("");});
     h+=`</details>`;}
   inspector.innerHTML=h;wireFindings();inspector.scrollTop=0;
 }
@@ -453,7 +456,7 @@ function showTable(id){
     formulas=allCols.filter(c=>!c.key&&c.role==="FORMULA"),attrs=allCols.filter(c=>!c.key&&c.role!=="MEASURE"&&c.role!=="FORMULA");
   let h=`<button class="backlink" id="back">← Overview</button><h2>${esc(t.id)}</h2>
     <div style="margin:2px 0 14px;display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${t.kind}">${t.kind==="fact"?"Fact table":"Dimension"}</span>
-    ${t.rls&&t.rls.length?'<span class="pill rls">🔒 Secured</span>':rlsAffected.has(id)?'<span class="pill rls">RLS inherited</span>':""}
+    ${t.rls&&t.rls.length?'<span class="pill rls">🔒 Secured</span>':""}
     ${t.is_sql_view?'<span class="pill" style="color:#0D9488;background:#F0FDFA;border-color:#99F6E4">SQL View</span>':""}
     ${t.alias_of?`<span class="pill" style="color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE">Alias of ${esc(t.alias_of)}</span>`:""}
     ${t.in_rls_path?'<span class="pill" style="color:#D97706;background:#FFFBEB;border-color:#FDE68A">In RLS path</span>':""}</div>`;
@@ -465,9 +468,7 @@ function showTable(id){
   h+=`</details>`;
   const fcols=allCols.filter(c=>c.role==="FORMULA"&&MODEL.formulas[c.name]);
   if(fcols.length){h+=`<details class="inspector-section"><summary class="section-label">Formula expressions (${fcols.length})</summary>`;fcols.forEach(c=>h+=`<div style="font-size:11.5px;font-weight:600;margin:0 0 5px">${esc(c.name)}</div><div class="expr">${esc(MODEL.formulas[c.name])}</div>`);h+=`</details>`;}
-  if(t.rls&&t.rls.length){h+=`<details class="inspector-section" open><summary class="section-label">RLS rules</summary>`;t.rls.forEach(r=>h+=ruleCard(r,[...ancestors(id)]));h+=`</details>`;}
-  else if(rlsAffected.has(id)){const src=securedTables.filter(s=>ancestors(s).has(id));
-    h+=`<div class="section-label">Inherited RLS</div><p class="sub">Queries on this table are constrained by RLS on <b style="color:var(--rls)">${src.map(esc).join(", ")}</b> via joins.</p>`;}
+  if(t.rls&&t.rls.length){h+=`<details class="inspector-section" open><summary class="section-label">RLS rules</summary>`;t.rls.forEach(r=>h+=ruleCard(r,id));h+=`</details>`;}
   h+=`<details class="inspector-section" open><summary class="section-label">Joins (${conns.length})</summary>`;
   conns.forEach(j=>{const other=j.from===id?j.to:j.from,dir=j.from===id?"→":"←";
     h+=`<div style="font-size:12px;font-family:var(--mono);padding:5px 0;border-bottom:1px solid var(--hair-2);cursor:pointer" data-jump="${esc(j.name)}">${dir} ${esc(other)}</div>`;});
@@ -493,7 +494,7 @@ function showCompare(){
   inspector.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>selectTable(b.dataset.rm,true));inspector.scrollTop=0;
 }
 function showEdge(name){const j=MODEL.joins.find(x=>x.name===name);if(!j){showOverview();return;}
-  const hot=HOT_EDGES.has(name),secured=securedTables.includes(j.to);
+  const hot=HOT_EDGES.has(name);
   const cardTxt={MANY_TO_ONE:"Many-to-one · N:1",ONE_TO_MANY:"One-to-many · 1:N",ONE_TO_ONE:"One-to-one · 1:1",MANY_TO_MANY:"Many-to-many · N:N"}[j.card]||j.card;
   const isModel=j.origin==="model";
   let h=`<button class="backlink" id="back">← Overview</button><h2>Join</h2>
@@ -511,21 +512,20 @@ function showEdge(name){const j=MODEL.joins.find(x=>x.name===name);if(!j){showOv
   if(j.on)h+=`<div class="section-label">ON clause</div><div class="expr">${esc(j.on)}</div>`;
   if(hot){const fo=MODEL.findings.find(f=>f.check==="D-FANOUT");
     h+=`<div class="section-label">Flagged</div>`+(fo?findingCard(fo):`<p class="sub">⚠︎ <b>Fan-out risk</b> — <span style="font-family:var(--mono)">${esc(j.to)}</span> is joined by two or more tables, so aggregating a measure across this join can multiply rows. Verify measures on the joined-from side aren't double-counted.</p>`);}
-  if(secured)h+=`<div class="section-label">Security</div><p class="sub">Target <b style="color:var(--rls)">${esc(j.to)}</b> has RLS — this join propagates the row filter to <b>${esc(j.from)}</b>.</p>`;
   h+=notesSection(name);
   inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};wireNotes(name);inspector.scrollTop=0;
 }
 
 function showRlsSubgraph(){
   let h=`<button class="backlink" id="back">← Overview</button><h2>Secured subgraph</h2>
-    <p class="sub">Only tables touched by row-level security stay vivid: the secured tables plus every fact that inherits their row filter through joins. Everything else is ghosted.</p>
+    <p class="sub">Only tables involved in row-level security stay vivid: the tables a rule is defined on, plus any table those rules reference. Everything else is ghosted.</p>
     <div class="section-label">Secured tables (${securedTables.length})</div>`;
-  MODEL.tables.filter(t=>t.rls&&t.rls.length).forEach(t=>{const aff=[...ancestors(t.id)];
-    h+=`<div style="font-size:11.5px;font-weight:600;margin-bottom:6px;font-family:var(--mono);cursor:pointer" data-go="${esc(t.id)}">🔒 ${esc(t.id)}</div>`+t.rls.map(r=>ruleCard(r,aff)).join("");});
-  const inh=[...rlsAffected];
-  h+=`<div class="section-label">Inherits RLS (${inh.length})</div>
-    <p class="sub">${inh.length?inh.map(x=>`<span class="chip">${esc(x)}</span>`).join(""):"None."}</p>
-    <p class="note">Turn this off to return to the full model. Use it to answer “if I secure this dimension, what else gets filtered?” at a glance.</p>`;
+  MODEL.tables.filter(t=>t.rls&&t.rls.length).forEach(t=>{
+    h+=`<div style="font-size:11.5px;font-weight:600;margin-bottom:6px;font-family:var(--mono);cursor:pointer" data-go="${esc(t.id)}">🔒 ${esc(t.id)}</div>`+t.rls.map(r=>ruleCard(r,t.id)).join("");});
+  const inPath=MODEL.tables.filter(t=>t.in_rls_path).map(t=>t.id);
+  h+=`<div class="section-label">In RLS path (${inPath.length})</div>
+    <p class="sub">${inPath.length?inPath.map(x=>`<span class="chip" data-go="${esc(x)}" style="cursor:pointer">${esc(x)}</span>`).join(""):"None — no rule references another table."}</p>
+    <p class="note">Tables referenced inside another table's RLS expression. Changes to their data affect that rule's row filtering.</p>`;
   inspector.innerHTML=h;$("back").onclick=()=>{activeFilters=new Set(["all"]);syncChips();renderAll();showOverview();};
   inspector.querySelectorAll("[data-go]").forEach(e=>e.onclick=()=>selectTable(e.dataset.go,false));inspector.scrollTop=0;
 }
@@ -601,13 +601,11 @@ function loadModel(m){
   dimTargets.forEach(did=>{const srcs=MODEL.joins.filter(j=>j.to===did&&MODEL.tables.find(t=>t.id===j.from&&t.kind==="fact"));
     if(srcs.length>1)srcs.forEach(j=>HOT_EDGES.add(j.name));});
 
-  adj={};radj={};undir={};
-  MODEL.tables.forEach(t=>{adj[t.id]=[];radj[t.id]=[];undir[t.id]=[];});
-  MODEL.joins.forEach(j=>{adj[j.from].push(j.to);radj[j.to].push(j.from);undir[j.from].push(j.to);undir[j.to].push(j.from);});
+  adj={};undir={};
+  MODEL.tables.forEach(t=>{adj[t.id]=[];undir[t.id]=[];});
+  MODEL.joins.forEach(j=>{adj[j.from].push(j.to);undir[j.from].push(j.to);undir[j.to].push(j.from);});
 
   securedTables=MODEL.tables.filter(t=>t.rls&&t.rls.length).map(t=>t.id);
-  rlsAffected=new Set();
-  securedTables.forEach(s=>ancestors(s).forEach(a=>rlsAffected.add(a)));
   const hasRls=securedTables.length>0;
   const hasSqlView=MODEL.tables.some(t=>t.is_sql_view);
   const hasAlias=MODEL.tables.some(t=>t.alias_of);

@@ -79,6 +79,89 @@ def step_verify_redact_rls(build_erd, out_path):
         raise RuntimeError("--redact-rls did not produce '(redacted)' in output")
 
 
+def step_verify_export_json_ingest(build_erd, out_path, dump_path):
+    """The `ts tml export` JSON dump must render directly — no manual split.
+
+    Emulates the CLI's raw stdout shape: a JSON list of {"edoc": "<tml string>"}.
+    """
+    dump = []
+    for tml in sorted(FIXTURES.glob("*.tml")):
+        dump.append({"edoc": tml.read_text(encoding="utf-8")})
+    with open(dump_path, "w", encoding="utf-8") as fh:
+        json.dump(dump, fh)
+    build_erd.build([dump_path], out_path, log=lambda *_: None)
+    html = open(out_path, encoding="utf-8").read()
+    if "Mini Sales" not in html or "__ERD_DATA__" not in html:
+        raise RuntimeError("export-JSON dump did not render the model")
+    if "MANY_TO_ONE" not in html:
+        raise RuntimeError("export-JSON dump lost join cardinality (table edocs not routed)")
+
+
+def step_verify_no_model_fails_loud(build_erd, out_path):
+    """Tables-only input must exit non-zero, never write a silent empty diagram."""
+    dump = [{"edoc": t.read_text(encoding="utf-8")}
+            for t in sorted(FIXTURES.glob("*.table.tml"))]
+    dump_path = out_path + ".tables_only.json"
+    with open(dump_path, "w", encoding="utf-8") as fh:
+        json.dump(dump, fh)
+    try:
+        build_erd.build([dump_path], out_path, log=lambda *_: None)
+    except SystemExit:
+        return  # expected
+    raise RuntimeError("tables-only source did not raise SystemExit")
+
+
+def step_verify_rls_is_reference_based(build_erd, out_path):
+    """RLS must be modelled as rule-owner + referenced tables, never join-propagated.
+
+    Guards against the regressed 'inherited via joins' model: the rendered HTML must
+    not carry any of the discredited propagation vocabulary.
+    """
+    build_erd.build([str(FIXTURES)], out_path, log=lambda *_: None)
+    html = open(out_path, encoding="utf-8").read()
+    banned = ["Propagates through joins", "Inherits RLS", "RLS inherited",
+              "via joins", "RLS edge", "rlsAffected"]
+    present = [b for b in banned if b in html]
+    if present:
+        raise RuntimeError("join-propagation RLS vocabulary still present: " + ", ".join(present))
+
+
+def step_verify_rls_reference_detection(build_erd_parser):
+    """A rule that references another table flags that table as in_rls_path;
+    a mere join-neighbour of a secured table is NOT flagged."""
+    model_tml = {
+        "guid": "g-rls",
+        "model": {
+            "name": "RLS ref test",
+            "model_tables": [{"name": "ORDERS"}, {"name": "EMP"}, {"name": "CUST"}],
+            "columns": [
+                {"name": "OID", "column_id": "ORDERS::OID"},
+                {"name": "EID", "column_id": "EMP::EID"},
+                {"name": "CID", "column_id": "CUST::CID"},
+            ],
+        },
+    }
+    # Rule on ORDERS references EMP; CUST merely joins to ORDERS.
+    tables = {
+        "ORDERS": {"guid": "t-ord", "table": {"name": "ORDERS", "rls_rules": [
+            {"name": "r", "expression": "[EMP::EID] = ts_groups_int"}]}},
+        "EMP": {"guid": "t-emp", "table": {"name": "EMP"}},
+        "CUST": {"guid": "t-cust", "table": {"name": "CUST", "joins_with": [
+            {"name": "CUST_ORDERS", "destination": {"name": "ORDERS"},
+             "on": "[CUST::CID] = [ORDERS::OID]", "cardinality": "MANY_TO_ONE"}]}},
+    }
+    parsed = build_erd_parser.parse_model(model_tml, tables, log=lambda *_: None)
+    by_id = {t["id"]: t for t in parsed["tables"]}
+    if not by_id["ORDERS"]["rls"]:
+        raise RuntimeError("ORDERS should be secured (rule defined on it)")
+    if not by_id["EMP"]["in_rls_path"]:
+        raise RuntimeError("EMP should be in_rls_path (referenced by ORDERS' rule)")
+    if by_id["CUST"]["in_rls_path"]:
+        raise RuntimeError("CUST must NOT be in_rls_path — a join neighbour is not RLS-affected")
+    if by_id["ORDERS"]["in_rls_path"]:
+        raise RuntimeError("ORDERS must NOT be in_rls_path — it owns the rule, not referenced by another")
+
+
 def step_verify_ai_analysis(build_erd, out_path, corpus_path):
     marker = "SMOKE-DOMAIN-Mini-Sales-analytics"
     corpus = {
@@ -128,6 +211,23 @@ def main() -> int:
             ok2, size = r.step("verify HTML content", step_verify_html_content, out_path)
             if ok2:
                 r.info(f"Output size: {size:,} bytes")
+
+        dump_out = os.path.join(td, "erd_from_dump.html")
+        dump_path = os.path.join(td, "export.json")
+        r.step("verify ts-tml-export JSON dump ingest",
+               step_verify_export_json_ingest, build_erd, dump_out, dump_path)
+
+        r.step("verify no-model source fails loud",
+               step_verify_no_model_fails_loud, build_erd,
+               os.path.join(td, "erd_empty.html"))
+
+        rls_path = os.path.join(td, "erd_rls.html")
+        r.step("verify RLS is reference-based (not join-propagated)",
+               step_verify_rls_is_reference_based, build_erd, rls_path)
+
+        import parser as erd_parser  # noqa: E402  (shared/erd is on sys.path)
+        r.step("verify RLS reference detection (parser)",
+               step_verify_rls_reference_detection, erd_parser)
 
         redact_path = os.path.join(td, "erd_redacted.html")
         r.step("verify --redact-rls", step_verify_redact_rls, build_erd, redact_path)

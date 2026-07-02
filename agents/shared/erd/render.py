@@ -112,7 +112,6 @@ _BODY = """<header>
   <div class="help-legend">
     <div style="width:30px;height:0;border-top:2px solid #9AA4B1"></div><span><b>Normal</b> — standard join (solid grey)</span>
     <div style="width:30px;height:0;border-top:2px dashed #9AA4B1"></div><span><b>Flagged</b> — fan-out: same dimension joined by 2+ facts (dashed grey)</span>
-    <div style="width:30px;height:0;border-top:2px dashed #C2382E"></div><span><b>RLS edge</b> — target table has row-level security (dashed red)</span>
     <div style="width:30px;height:0;border-top:3px solid #1E6FA8"></div><span><b>Selected / path</b> — active selection or traced join path (solid blue)</span>
     <div style="width:30px;height:0;border-top:2px solid #D97706"></div><span><b>Annotated</b> — join has a user note attached (solid amber)</span>
   </div>

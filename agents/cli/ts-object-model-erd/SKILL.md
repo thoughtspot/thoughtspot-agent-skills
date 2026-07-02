@@ -98,11 +98,19 @@ Ask: **(A) Local TML files or folder**, or **(B) Live ThoughtSpot instance**?
 ## Step 3 — Read or export TML
 
 - **Files path:** note the folder/paths provided in Step 1.
-- **Live path:** for each selected model, export with associated tables into a temp directory:
+- **Live path:** for each selected model, export it **with its associated tables** and
+  redirect the JSON straight to a file:
   ```bash
-  ts tml export "{model_guid}" --fqn --associated --profile "{profile}"
+  ts tml export "{model_guid}" --fqn --associated --profile "{profile}" > export.json
   ```
-  `--associated` pulls the Table TMLs needed for join cardinality, join origin, RLS rules, and join keys.
+  `--associated` pulls the Table TMLs needed for join cardinality, join origin, RLS rules,
+  and join keys.
+
+  `ts tml export` writes a **single JSON array** to stdout (one `{edoc}` object per exported
+  object). Feed that file directly to the builder in Step 5 — **do not** hand-split it into
+  per-object `.tml` files. `build_erd.py` ingests the export JSON as-is and routes each object
+  to model/table by its TML content. Multiple models: pass several GUIDs to one `ts tml export`
+  call, or pass several `export*.json` files to the builder.
 
 ---
 
@@ -139,16 +147,24 @@ the source model.
 
 ## Step 5 — Render
 
-Run:
+Run — pass the Step 3 `export.json` (or a directory / individual `.tml` files) directly:
 
 ```bash
-python3 agents/cli/ts-object-model-erd/build_erd.py <src-dir-or-files> --out model_erd.html
+python3 agents/cli/ts-object-model-erd/build_erd.py export.json --out model_erd.html
 ```
+
+`src` accepts, in any mix: a `ts tml export` JSON dump, individual `.tml`/`.yaml` files, or a
+directory of them. Model vs. table is decided by TML content, so no naming convention or split
+step is required.
 
 Add `--ai-analysis <corpus.json>` to inject the Step 4 corpus into the ERD's Model domain /
 Key objectives / Audience / Business questions / AI instructions sections.
 Add `--redact-rls` if the user wants to hide RLS expressions for external sharing.
 Add `--max-models N` to change the model cap.
+
+If the source contains **no model** (e.g. only table TMLs), the builder exits non-zero with a
+clear message rather than writing an empty diagram — re-export with `--associated` and confirm
+the model GUID.
 
 Report any degraded-fidelity or model-cap log lines to the user. Degraded fidelity means
 Table TMLs were missing for some joins — the ERD still renders structure, but cardinality,
@@ -186,6 +202,7 @@ HTML file; no ThoughtSpot login required to view.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-07-02 | **Ingest:** `build_erd.py` now ingests a `ts tml export` JSON dump directly (raw `{edoc}` list or `--parse` form) and routes each object to model/table by TML **content**, not filename — the SKILL.md Step 3 → 5 flow is now a clean pipe with no manual split (the previous flow silently rendered an empty diagram when export JSON was hand-split into wrongly-suffixed files). Builder now **exits non-zero with a clear message** when the source contains no model, instead of writing an empty HTML. Existing `.model.tml`/`.table.tml` files and directories still work unchanged. **RLS model corrected:** RLS is no longer modelled as propagating along join edges. A table is highlighted only when a rule is **defined on it** (secured, red) or when it is **referenced in another table's rule expression** (in RLS path, amber). Removed the incorrect "RLS inherited / constrained via joins" pills, tooltips, rule-card "propagates through joins" line, dashed-red "RLS edge", and the join-ancestor subgraph; rule cards now list the other tables a rule references. |
 | 1.2.0 | 2026-07-02 | New `--ai-analysis` flag injects an agent-synthesized business-context corpus (domain, objectives, audience, business questions, AI instructions) into the ERD (read-only; never written back). Column inspector now surfaces per-column AI context and synonyms. RLS legend parity: secured tables show the red border + 🔒 by default (no longer gated behind the RLS overlay) and the "In RLS path" fill matches the legend swatch. Focus: double-click (join subtree) and shift-click compare now hide out-of-scope tables instead of dimming them. Parser fix: handle the nested `rls_rules: {rules: […]}` TML shape (previously crashed) |
 | 1.1.1 | 2026-07-02 | Classifier: a table is a fact only when it has real (visible) measures — an outgoing join alone no longer makes a dimension a fact (e.g. a user/lookup table that joins onward); measureless pass-through tables are bridges. ERD viewer: clicking a flagged fan-out join no longer errors when no fan-out finding is attached (shows a generic fan-out explanation) |
 | 1.1.0 | 2026-07-02 | Layered layout clusters joined tables (Sugiyama median crossing-reduction); fix dimension/fact classifier (hidden and non-measure formula columns no longer promote a dimension to a fact); ERD parser + assembler moved to the shared `erd` library so the skill and the ts-audit ERD embed share one definition |

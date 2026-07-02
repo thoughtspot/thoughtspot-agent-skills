@@ -1,4 +1,15 @@
-"""CLI: discover Model + Table TMLs, parse, assemble, render an ERD HTML file."""
+"""CLI: discover Model + Table TMLs, parse, assemble, render an ERD HTML file.
+
+Sources may be, in any mix:
+  * a `ts tml export ... [--associated]` JSON dump — either the raw response
+    (a list of ``{"edoc": "<tml string>", ...}`` objects) or its ``--parse``
+    form (a list of already-parsed TML dicts). This is what the SKILL.md flow
+    produces, so the builder ingests it directly — no manual split step.
+  * individual ``.tml`` / ``.yaml`` files, or a directory of them.
+
+Model vs. table is decided by TML **content** (the ``model:`` / ``table:`` key),
+never by filename, so loosely-named dumps work too.
+"""
 import argparse
 import json
 import os
@@ -11,29 +22,73 @@ import parser as erd_parser  # noqa: E402
 import erd_data              # noqa: E402
 import render                # noqa: E402
 
+import yaml  # noqa: E402  (bundled with erd_parser's deps)
+
+_TML_EXTS = (".tml", ".yaml", ".yml")
+
+
+def _coerce_tml(obj):
+    """Return a parsed TML dict from a value that may be a dict or a TML string.
+
+    Accepts both the raw `ts tml export` shape (``{"edoc": "<tml>"}``) and the
+    ``--parse`` shape (``{"edoc": {...}}`` or a bare TML dict). Returns None for
+    anything that isn't a recognisable Model or Table TML.
+    """
+    if isinstance(obj, str):
+        try:
+            obj = yaml.safe_load(obj)
+        except yaml.YAMLError:
+            return None
+    if not isinstance(obj, dict):
+        return None
+    # `ts tml export` wraps each TML under `edoc` (string when raw, dict when --parse).
+    if "edoc" in obj and not ("model" in obj or "table" in obj):
+        return _coerce_tml(obj["edoc"])
+    if "model" in obj or "table" in obj:
+        return obj
+    return None
+
+
+def _load_source_file(path):
+    """Yield parsed TML dicts from one file (a JSON export dump or a single TML)."""
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = fh.read()
+    # Try JSON first — a `ts tml export` dump is a JSON list (or single object).
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = yaml.safe_load(raw)
+    items = data if isinstance(data, list) else [data]
+    for item in items:
+        tml = _coerce_tml(item)
+        if tml is not None:
+            yield tml
+
 
 def _discover(src_paths):
-    models, tables = [], []
+    """Collect (model_tmls, table_tmls) as parsed dicts from files/dirs/dumps."""
+    files = []
     for p in src_paths:
         if os.path.isdir(p):
-            for root, _dirs, files in os.walk(p):
-                for f in files:
-                    fp = os.path.join(root, f)
-                    if f.endswith(".model.tml"):
-                        models.append(fp)
-                    elif f.endswith(".table.tml"):
-                        tables.append(fp)
-        elif p.endswith(".model.tml"):
-            models.append(p)
-        elif p.endswith(".table.tml"):
-            tables.append(p)
+            for root, _dirs, names in os.walk(p):
+                for n in names:
+                    if n.endswith(_TML_EXTS) or n.endswith(".json"):
+                        files.append(os.path.join(root, n))
+        else:
+            files.append(p)
+    models, tables = [], []
+    for fp in files:
+        try:
+            for tml in _load_source_file(fp):
+                (models if "model" in tml else tables).append(tml)
+        except (OSError, yaml.YAMLError) as exc:
+            print("Skipping unreadable source %s: %s" % (fp, exc), file=sys.stderr)
     return models, tables
 
 
-def _table_index(table_paths):
+def _table_index(table_tmls):
     by_guid, by_name = {}, {}
-    for tp in table_paths:
-        t = erd_parser.load_tml(tp)
+    for t in table_tmls:
         guid = t.get("guid")
         name = t.get("table", {}).get("name")
         if guid:
@@ -64,11 +119,16 @@ def _apply_ai_analysis(parsed, ai_map, log=print):
 
 def build(src_paths, out_path, *, max_models=25, redact_rls=False,
           ai_analysis_path=None, log=print):
-    model_paths, table_paths = _discover(src_paths)
-    by_guid, by_name = _table_index(table_paths)
+    model_tmls, table_tmls = _discover(src_paths)
+    if not model_tmls:
+        raise SystemExit(
+            "No Model TML found in the given source(s). Expected a `ts tml export "
+            "--associated` JSON dump or .tml file(s) containing a `model:` block. "
+            "Found %d table TML(s) but 0 models — nothing to diagram." % len(table_tmls)
+        )
+    by_guid, by_name = _table_index(table_tmls)
     parsed = []
-    for mp in model_paths:
-        mtml = erd_parser.load_tml(mp)
+    for mtml in model_tmls:
         needed = {}
         for mt in mtml.get("model", {}).get("model_tables", []):
             t = by_guid.get(mt.get("fqn")) or by_name.get(mt.get("name"))
@@ -85,7 +145,9 @@ def build(src_paths, out_path, *, max_models=25, redact_rls=False,
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Render ThoughtSpot Model TML to an ERD HTML.")
-    ap.add_argument("src", nargs="+", help="TML files or directories")
+    ap.add_argument("src", nargs="+",
+                    help="`ts tml export` JSON dump(s), .tml/.yaml file(s), or a "
+                         "directory of them. Model vs. table is detected by content.")
     ap.add_argument("--out", default="model_erd.html")
     ap.add_argument("--max-models", type=int, default=25)
     ap.add_argument("--redact-rls", action="store_true")
