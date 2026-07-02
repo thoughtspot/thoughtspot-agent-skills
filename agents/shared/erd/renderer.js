@@ -22,6 +22,7 @@ const ROW_H=20,HEAD_H=30,PAD=10;
 let NODE_W=200;
 let colMode="keys", layoutName="organic", notation="arrow";
 let focusSet=[];
+let focusMode=null;   // "neighbourhood" | "tree" | "compare" | null
 let selected=null;
 
 function worstSev(id){let w=null;(findingsByTable[id]||[]).forEach(f=>{if(!w||SEV_RANK[f.sev]>SEV_RANK[w])w=f.sev;});return w;}
@@ -193,11 +194,22 @@ function focusGroup(){
     const k=new Set();MODEL.tables.forEach(t=>{if(tableMatchesFilter(t))k.add(t.id);});return k;}
   if(!focusSet.length)return null;
   const keep=new Set(focusSet);
-  focusSet.forEach(id=>(undir[id]||[]).forEach(n=>keep.add(n)));
+  if(focusMode==="tree"){
+    // double-click: exactly the join subtree (focusSet already is it) — no neighbours.
+  }else if(focusMode==="compare"){
+    // shift-click: keep the picked tables plus the tables on the path between them.
+    for(let i=0;i<focusSet.length-1;i++){shortestPath(focusSet[i],focusSet[i+1]).forEach(n=>keep.add(n));}
+  }else{
+    // single-click: the table's immediate neighbourhood.
+    focusSet.forEach(id=>(undir[id]||[]).forEach(n=>keep.add(n)));
+  }
   if(!activeFilters.has("all")){const filtered=new Set();MODEL.tables.forEach(t=>{if(tableMatchesFilter(t))filtered.add(t.id);});
     return new Set([...keep].filter(id=>filtered.has(id)));}
   return keep;
 }
+// In tree / compare focus, out-of-scope tables are hidden outright rather than dimmed.
+// Guard on an active selection so a stale mode never hides filter results.
+function hideOutOfFocus(){return focusSet.length>0&&(focusMode==="tree"||focusMode==="compare");}
 function shortestPath(a,b){
   const prev={},q=[a],seen=new Set([a]);
   while(q.length){const n=q.shift();if(n===b)break;(undir[n]||[]).forEach(m=>{if(!seen.has(m)){seen.add(m);prev[m]=n;q.push(m);}});}
@@ -261,7 +273,7 @@ function renderEdges(){
     if(rlsEdge){stroke="#C2382E";sw=2.1;dash="5 3";mk="url(#arrow-rls)";}
     if(hot){stroke="#9AA4B1";sw=2;dash="6 4";mk="url(#arrow)";}
     if(onPath||sel){stroke="#1E6FA8";sw=3;dash="0";mk="url(#arrow-sel)";}
-    const g=NS_el("g",{class:"edge-g"+(ghost?" ghost":""),style:"cursor:pointer"},gEdges);
+    const g=NS_el("g",{class:"edge-g"+(ghost?(hideOutOfFocus()?" gone":" ghost"):""),style:"cursor:pointer"},gEdges);
     NS_el("path",{class:"edge",fill:"none",d:G.d,stroke,"stroke-width":sw,"stroke-dasharray":dash,"marker-end":crow?"none":mk,"stroke-linejoin":"round"},g);
     NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
@@ -278,17 +290,20 @@ function renderNodes(){
   nodes.forEach(n=>{
     const t=n.t,isFact=t.kind==="fact";n.h=nodeHeight(t);
     const sev=showF?worstSev(t.id):null;
-    const secured=showR&&t.rls&&t.rls.length,affected=showR&&!(t.rls&&t.rls.length)&&rlsAffected.has(t.id);
+    // Secured (has RLS rules) and in-RLS-path are inherent node states — always shown,
+    // matching the Help legend, like SQL View / Alias. `affected` (downstream inheritance)
+    // stays overlay-only: it's a what-if exploration, not in the base legend.
+    const secured=t.rls&&t.rls.length,affected=showR&&!(t.rls&&t.rls.length)&&rlsAffected.has(t.id);
     const inRlsPath=t.in_rls_path&&!secured;
     const inFocus=focusSet.includes(t.id);
     const ghost=keep&&!keep.has(t.id);
-    const g=NS_el("g",{class:"node"+(ghost?" ghost":""),transform:`translate(${n.x},${n.y})`},gNodes);
+    const g=NS_el("g",{class:"node"+(ghost?(hideOutOfFocus()?" gone":" ghost"):""),transform:`translate(${n.x},${n.y})`},gNodes);
 
     let stroke=isFact?"#1E6FA8":"#C8CFD8",sw=isFact?1.6:1.2;
     if(secured){stroke="#C2382E";sw=2.2;} else if(inRlsPath){stroke="#D97706";sw=2.2;} else if(affected){stroke="#E88E88";sw=1.6;}
     if(sev==="crit"){stroke="#C2382E";sw=2.2;} else if(sev==="warn"){stroke="#B5730A";sw=2;}
     if(inFocus){stroke="#1E6FA8";sw=2.8;}
-    let fill=secured?"#FBE9E7":inRlsPath?"#FFFBEB":affected?"#FEF0EE":t.is_sql_view?"#F0FDFA":"#fff";
+    let fill=secured?"#FBE9E7":inRlsPath?"#FEF3C7":affected?"#FEF0EE":t.is_sql_view?"#F0FDFA":"#fff";
 
     NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill,stroke,"stroke-width":sw,style:"filter:drop-shadow(0 2px 5px rgba(20,27,38,.08))"},g);
     const hbg=secured?"#FBE9E7":isFact?"#EAF2F8":"#EEF0F3";
@@ -321,7 +336,7 @@ function renderNodes(){
 
     enableDrag(g,n);
     g.addEventListener("click",ev=>{ev.stopPropagation();selectTable(t.id,ev.shiftKey||ev.metaKey||ev.ctrlKey);});
-    g.addEventListener("dblclick",ev=>{ev.stopPropagation();const tree=joinTree(t.id);focusSet=[...tree];selected={type:"table",id:t.id};renderAll();showTable(t.id);});
+    g.addEventListener("dblclick",ev=>{ev.stopPropagation();const tree=joinTree(t.id);focusSet=[...tree];focusMode="tree";selected={type:"table",id:t.id};renderAll();showTable(t.id);});
   });
 }
 function renderAll(){renderEdges();renderNodes();}
@@ -341,13 +356,13 @@ svg.addEventListener("pointerdown",e=>{if(e.target.closest(".node")||e.target.cl
 svg.addEventListener("pointermove",e=>{if(!panning)return;view.x=e.clientX-panStart.x;view.y=e.clientY-panStart.y;applyView();});
 svg.addEventListener("pointerup",()=>{panning=false;svg.classList.remove("panning");});
 svg.addEventListener("pointercancel",()=>{panning=false;svg.classList.remove("panning");});
-svg.addEventListener("click",e=>{if(!e.target.closest(".node")&&!e.target.closest(".edge-g")){focusSet=[];selected=null;renderAll();showOverview();}});
+svg.addEventListener("click",e=>{if(!e.target.closest(".node")&&!e.target.closest(".edge-g")){focusSet=[];focusMode=null;selected=null;renderAll();showOverview();}});
 svg.addEventListener("wheel",e=>{e.preventDefault();const r=svg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   const wx=(mx-view.x)/view.k,wy=(my-view.y)/view.k,f=e.deltaY<0?1.12:1/1.12;
   view.k=Math.max(.25,Math.min(2.4,view.k*f));view.x=mx-wx*view.k;view.y=my-wy*view.k;applyView();},{passive:false});
 $("zoom-in").onclick=()=>{view.k=Math.min(2.4,view.k*1.18);applyView();};
 $("zoom-out").onclick=()=>{view.k=Math.max(.25,view.k/1.18);applyView();};
-$("zoom-fit").onclick=()=>{focusSet=[];renderAll();fit();};
+$("zoom-fit").onclick=()=>{focusSet=[];focusMode=null;renderAll();fit();};
 
 function enableDrag(g,n){let dragging=false,off=null,moved=false;
   g.addEventListener("pointerdown",e=>{dragging=true;moved=false;const w=screenToWorld(e.clientX,e.clientY);off={x:w.x-n.x,y:w.y-n.y};g.setPointerCapture(e.pointerId);g.style.cursor="grabbing";e.stopPropagation();});
@@ -358,8 +373,9 @@ function enableDrag(g,n){let dragging=false,off=null,moved=false;
 
 // ---- selection / inspector ----
 function selectTable(id,additive){
-  if(additive){const i=focusSet.indexOf(id);if(i>=0)focusSet.splice(i,1);else focusSet.push(id);}
-  else focusSet=[id];
+  if(additive){const i=focusSet.indexOf(id);if(i>=0)focusSet.splice(i,1);else focusSet.push(id);
+    focusMode=focusSet.length>1?"compare":"neighbourhood";}
+  else {focusSet=[id];focusMode="neighbourhood";}
   selected={type:"table",id};renderAll();
   if(focusSet.length>1)showCompare();else if(focusSet.length===1)showTable(focusSet[0]);else showOverview();
 }
@@ -423,7 +439,10 @@ function showOverview(){
   inspector.innerHTML=h;wireFindings();inspector.scrollTop=0;
 }
 function colRow(c){const[cls,label]=ROLE_TAG[c.role]||["a","attribute"];const meta=c.key?"join key":(c.agg?`${label} · ${c.agg}`:label);
-  return `<tr class="${c.key?"c-key":""}"><td class="c-name">${c.flag?`<span class="fdot ${c.flag}"></span>`:""}${esc(c.name)}</td>
+  const desc=c.desc?`<div class="c-desc">${esc(c.desc)}</div>`:"";
+  const ai=c.ai_context?`<div class="c-desc c-ai"><span class="ai-tag">AI</span>${esc(c.ai_context)}</div>`:"";
+  const syn=(c.synonyms&&c.synonyms.length)?`<div class="c-syn">${c.synonyms.map(s=>`<span class="syn">${esc(s)}</span>`).join("")}</div>`:"";
+  return `<tr class="${c.key?"c-key":""}"><td class="c-name">${c.flag?`<span class="fdot ${c.flag}"></span>`:""}${esc(c.name)}${desc}${ai}${syn}</td>
     <td class="c-type"><span class="tag ${c.key?"k":cls}">${esc(meta)}</span></td></tr>`;}
 function colGroup(label,cols,open){if(!cols.length)return "";
   return `<details class="col-group"${open?" open":""}><summary>${label} <span class="grp-count">${cols.length}</span></summary><table class="cols">${cols.map(colRow).join("")}</table></details>`;}

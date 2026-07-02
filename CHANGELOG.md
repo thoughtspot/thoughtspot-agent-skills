@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-02
+- feat: update ts-object-model-erd to v1.2.0 — `--ai-analysis` flag injects an agent-synthesized business-context corpus (domain/objectives/audience/questions/AI-instructions) into the ERD; column inspector surfaces per-column AI context + synonyms; RLS legend parity (secured tables show red border + lock by default); double-click/compare focus hides out-of-scope tables; parser handles the nested `rls_rules` TML shape
 - feat: add `check_module_health` validator — a cyclomatic-complexity ratchet (radon) that blocks new/worsening god-functions against a committed baseline; wired into pre-commit (staged) and CI (full). Adds an automated component to repo-audit Angle 4 (Tools quality)
 - docs: repo-audit rubric now names the code-health sweep tooling — `vulture` (dead code, Angle 1), `jscpd` (code duplication, Angle 11), and `agentlinter` as an optional local-only instruction-hygiene advisory (Angle 2); these run during the sweep, not as per-PR gates
 - chore: remove dead code — `agents/cli/ts-audit/analyzer.py` + `report.py` and their orphaned tests (4,722 lines), superseded by the codified engine in `tools/ts-cli/ts_cli/audit/*` (the audit skill runs via `ts audit`, not these files; one test already imported a since-deleted module). BL-069 raised to high priority; BL-070 marked partially done
