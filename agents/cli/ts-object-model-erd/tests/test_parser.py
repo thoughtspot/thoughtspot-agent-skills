@@ -187,6 +187,45 @@ def test_sql_view_detected():
     assert "SELECT" in t["sql_query"]
 
 
+def test_aliased_model_tables_are_distinct_nodes_and_joins_resolve():
+    """The same physical table joined multiple times is distinguished by an
+    `alias:` field on the model_table, and a join's `with:` references that
+    alias. Each alias must become its own node, and EVERY join endpoint must
+    resolve to a real node id — the viewer indexes adjacency by node id and
+    throws (`Cannot read properties of undefined`) on a dangling endpoint.
+    Regression for the GTM model (SFDC_OPPORTUNITY_1/_2/_3)."""
+    model = {"guid": "g", "model": {
+        "name": "M",
+        "model_tables": [
+            {"name": "FACT", "joins": [
+                {"with": "OPP_1", "referencing_join": "j1", "type": "RIGHT_OUTER"},
+                {"with": "OPP_2", "referencing_join": "j2", "type": "RIGHT_OUTER"},
+            ]},
+            {"name": "OPP"},                    # base (un-aliased) instance
+            {"name": "OPP", "alias": "OPP_1"},  # alias instance 1
+            {"name": "OPP", "alias": "OPP_2"},  # alias instance 2
+        ],
+        "columns": [
+            {"name": "Amt", "column_id": "FACT::amt",
+             "properties": {"column_type": "MEASURE"}},
+            {"name": "Stage", "column_id": "OPP_1::stage",
+             "properties": {"column_type": "ATTRIBUTE"}},
+        ],
+    }}
+    m = parser.parse_model(model, {})
+    ids = {t["id"] for t in m["tables"]}
+    assert {"FACT", "OPP", "OPP_1", "OPP_2"} <= ids
+    # No dangling join endpoints — this is what crashed the viewer.
+    for j in m["joins"]:
+        assert j["from"] in ids, f"join {j['name']} from {j['from']} dangling"
+        assert j["to"] in ids, f"join {j['name']} to {j['to']} dangling"
+    # An alias node carries the columns whose column_id is prefixed by the alias.
+    opp1 = next(t for t in m["tables"] if t["id"] == "OPP_1")
+    assert any(c["name"] == "Stage" for c in opp1["cols"])
+    # Alias nodes record their physical table even without a Table TML.
+    assert opp1["alias_of"] == "OPP"
+
+
 def test_alias_detected():
     table_tml = {
         "guid": "tbl-001",
