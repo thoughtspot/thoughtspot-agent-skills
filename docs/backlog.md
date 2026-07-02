@@ -1876,3 +1876,93 @@ Also expand repo-audit angle #4 description in `.claude/rules/repo-audit.md` to
 explicitly include module size / modularity as a check dimension.
 
 **Target:** 2026-09-30.
+
+---
+
+## BL-071 — Tableau user-function family → ThoughtSpot RLS variables
+
+**Source:** task-21 gap documentation, 2026-07-03 (following ts-cli v0.26.0 / #158's
+fail-loud validation for this function family).
+**Affects:** `agents/cli/ts-convert-from-tableau/`, `agents/shared/mappings/tableau/tableau-formula-translation.md`,
+`tools/ts-cli/`.
+**Status:** OPEN.
+
+### Problem
+
+Tableau's user-context function family — `USERNAME()`, `FULLNAME()`, `ISUSERNAME(s)`,
+`ISFULLNAME(s)`, `USERDOMAIN()` — has no CLI translation. As of ts-cli v0.26.0 (#158)
+these are rejected loud at translate time (coverage-matrix.md U7) instead of silently
+passing through broken syntax — a real improvement — but the underlying capability gap
+remains: workbooks using Tableau's built-in user identity for RLS or personalization have
+no automated migration path. This is the direct sibling of `ISMEMBEROF("group")` →
+`ts_groups = 'group'`, which already shipped (`tableau-formula-translation.md:1041`,
+coverage-matrix.md #108, reclassified 2026-06-28) for group membership. This item is
+about implementing the translation, not about the fail-loud behavior (already shipped).
+
+### Approach
+
+- `USERNAME()` → `ts_username` — direct system-variable reference (see the system
+  variable table in `thoughtspot-formula-patterns.md:627`)
+- `USERDOMAIN()` → likely `ts_email_domain` (`thoughtspot-formula-patterns.md:716`) —
+  needs live verification that its value shape matches Tableau's `USERDOMAIN()` semantics
+  (domain-only vs. full email address)
+- `FULLNAME()` → no direct ThoughtSpot system variable found in `thoughtspot-formula-patterns.md`
+  today; needs product research to confirm whether a display-name variable exists or
+  whether this stays untranslatable
+- `ISUSERNAME(s)` / `ISFULLNAME(s)` → composite comparisons once `USERNAME`/`FULLNAME`
+  are resolved (e.g. `ts_username = s`)
+- **Requires live verification** against a ThoughtSpot instance that `ts_username` (and
+  any `FULLNAME` candidate) resolves correctly inside a **Model formula context**, not
+  just answer-level search — follow the `references/open-items.md` pattern
+  (`.claude/rules/api-research.md`) before wiring a translation into `tableau_translate.py`
+- Once verified: remove the resolved functions from `_UNMAPPED_FUNCTIONS`, add the mapping
+  to `tableau-formula-translation.md`, and move the rows in coverage-matrix.md from
+  "Rejected at Translate Time" (U7) into "Mapped Constructs"
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-072 — Tableau hierarchies and value aliases (+ inverse-trig disposition)
+
+**Source:** task-21 gap documentation, 2026-07-03.
+**Affects:** `agents/cli/ts-convert-from-tableau/`, `agents/shared/mappings/tableau/`,
+`tools/ts-cli/`.
+**Status:** OPEN.
+
+### Problem
+
+Two TWB XML constructs are near-universal in production Tableau workbooks and have no
+ThoughtSpot TML equivalent today: `<drill-paths>` (hierarchies — a curated dimension
+drill order, e.g. Region → State → City) and `<aliases>` (dimension value display
+remapping, e.g. source value `"US"` displayed as `"United States"`). Both are currently
+omitted and logged (coverage-matrix.md L24/L25) with no automated workaround.
+
+Folded into this item as a smaller, related sub-item: `ACOS`/`ASIN`/`ATAN`/`COT`
+(coverage-matrix.md #32) are silent pass-throughs today — neither translated nor caught
+by the fail-loud validator. `ACOS`/`ASIN`/`ATAN` share the same radian/degree composite
+family as the already-shipped `SIN`/`COS`/`TAN` translation, so it is a small, largely
+independent fix worth bundling here rather than opening a third backlog item for it.
+
+### Approach
+
+- **Hierarchies:** parse `<drill-paths>` from the TWB. ThoughtSpot has no declared-hierarchy
+  TML construct, so investigate two non-exclusive directions: (a) **Model column ordering**
+  — arrange the referenced dimensions in the Model's `columns[]` in the hierarchy's order
+  as a soft signal for ThoughtSpot's own ad-hoc drill-down; (b) **AI-context emission** —
+  surface the hierarchy as a business-term / data-model-instruction hint (via
+  `ts-object-model-coach`'s schema) so Spotter understands the intended drill relationship
+  even without a hard TML construct
+- **Value aliases:** parse `<aliases>` from the TWB; translate to a `CASE`-style
+  `if/else if` formula mapping each source value to its display value, added as a derived
+  `ATTRIBUTE` column. Also investigate whether a lighter-weight column-level display-value
+  mapping exists in TML as an alternative to a formula
+- **Inverse trig (sub-item):** implement `ACOS`/`ASIN`/`ATAN` as a `* pi/180` composite —
+  same shape as the shipped `SIN`/`COS`/`TAN` handling. Give `COT` an explicit disposition:
+  either reject it at translate time (add to `_UNMAPPED_FUNCTIONS`, joining U1–U7) or emit
+  a `1/tan(...)` composite. Independent of the hierarchy/alias work and can ship first.
+- All three sub-items are parser/codegen work in the Tableau translation pipeline (module
+  home per BL-069's refactor), not skill-prompt changes — follow the codification pattern
+  (repo-audit angle #11) rather than adding LLM judgment steps
+
+**Target:** 2026-12-31.

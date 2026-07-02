@@ -7,6 +7,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-07-03
 - feat: ts-cli v0.26.0 — 14 Tableau function translations implemented (were silent pass-throughs); unmapped functions and unknown date units now fail loud at translate time; scalar MAX/MIN and IN(...) scan bugs fixed
+- docs: ts-convert-from-tableau doc/mapping drift refresh — SKILL.md command fixes, mapping-file alignment with v0.26.0 code, matrix/open-items verification pass, gap documentation + 2 new backlog items
 
 ## 2026-07-02
 - refactor: split Tableau pipeline into ts_cli/tableau/ package (BL-069); bump ts-cli to v0.25.4
