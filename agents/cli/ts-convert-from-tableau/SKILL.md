@@ -32,6 +32,7 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 | [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
 | [references/open-items.md](references/open-items.md) | Known validation quirks and workarounds |
+| [references/coverage-matrix.md](references/coverage-matrix.md) | Canonical mapped/unmapped construct matrix — cite in Audit mode (A4) and the migration report (Step 12) |
 | [references/liveboard-style-themes.md](references/liveboard-style-themes.md) | Step 10.5 curated themes — brand tokens + per-chart `viz_style` color palettes |
 
 ---
@@ -482,7 +483,9 @@ Audit: {workbook_name}
 **Migration coverage** includes everything except Untranslatable. All parameter types
 are auto-migratable: static params are created directly in the model TML; SQL-lookup
 params are populated by querying the warehouse at migration time. The formula reference
-`[Parameters].[Name]` is rewritten to `[Name]` in both cases.
+`[Parameters].[Name]` is rewritten to `[Name]` in both cases. Cite
+[`references/coverage-matrix.md`](references/coverage-matrix.md) as the canonical source
+when classifying a construct as mapped/unmapped or explaining a limitation.
 
 If any formulas are classified as Row-offset, list them:
 
@@ -1861,9 +1864,9 @@ references table not in datasource").
 
 **Inputs needed:**
 - `classification.json` — from the Step 3 TWB parse (formula name, caption, expression, datatype, role), **excluding orphan calcs**
-- `table_columns.json` — `{"TABLE_NAME": ["COL1", "COL2", ...]}` map from Step 5a table generation
+- `table_columns.json` — `{"COLUMN_NAME": "TABLE_NAME"}` map (column → owning table) from Step 5a table generation. The CLI uses this for `[COL]` → `[TABLE::COL]` scoping; a table-keyed shape silently disables all scoping.
 - `parameters.json` — from the Step 3 parameter extraction (internal name → caption mapping)
-- `--tables` — comma-separated list of tables in THIS model (for column scoping)
+- `--tables` — comma-separated list of tables in THIS model (used for a coverage warning; scoping itself comes from `--table-columns`)
 - `--calc-map` (optional) — `{"Calculation_NNN": "Display Caption"}` map from the TWB
   `<column>` elements, needed when formulas reference other calculated fields by internal ID
 
@@ -1898,22 +1901,26 @@ ts tableau translate-formulas \
 ```json
 {
   "translated": [
-    {"name": "Revenue Growth %", "expr": "...", "column_type": "MEASURE", "tier": "Native"}
+    {"name": "Revenue Growth %", "expr": "...", "column_type": "MEASURE", "level": 0}
   ],
   "skipped": [
-    {"name": "Complex Calc", "reason": "unresolved cross-reference: [Calculation_123]", "tier": "Native"}
+    {"name": "Complex Calc", "reason": "validation: unmapped Tableau function: SPLIT",
+     "level": 1, "original": "...", "attempted_expr": "..."},
+    {"name": "Circular A", "reason": "circular or unresolvable dependency", "level": -1, "original": "..."}
   ],
   "stats": {
     "total": 163, "translated": 107, "skipped": 56,
-    "cross_ref_stats": {"level_0": 85, "level_1": 18, "level_2_plus": 4, "circular": 0}
+    "levels": {"0": 85, "1": 18, "2": 4},
+    "param_conflicts": 2, "param_renames": 1, "name_clashes": 0,
+    "ifnull_stripped": 3, "agg_if_conversions": 5
   }
 }
 ```
 
 Use `translated` entries to populate `formulas[]` and paired `columns[]` in the model TML.
 Review `skipped` entries — some may be recoverable with a `--calc-map` or by manual
-inlining. The `stats.cross_ref_stats` shows dependency depth (matches the audit
-cross-reference depth table from Step A3/A4).
+inlining. `stats.levels` shows dependency depth (key = level, `-1` = circular); it maps
+to the audit cross-reference depth table from Step A3/A4.
 
 ### Parameter migration (Tableau → ThoughtSpot `parameters[]`)
 
@@ -2724,6 +2731,10 @@ model:
 On an in-place update of an existing model, preserve its current setting unless the user
 asks to change it. Default new models to enabled.
 
+---
+
+## Step 6 — Validate and import TMLs
+
 `ts tml import` reads a **JSON array of TML strings** from stdin — not a zip and not a
 single document. Build that array with tables first, then SQL views, then models (so a
 model's tables are validated alongside it):
@@ -2781,8 +2792,8 @@ For each cycle:
    are genuine `ERROR`s — the table won't bind. Fix the name or the column mapping.
 4. For any other **errors**, identify the affected TML file and the specific issue. Apply
    the fix from the error table in `tableau-tml-rules.md`.
-4. Rewrite the affected TML file and rebuild the JSON payload.
-5. Re-validate.
+5. Rewrite the affected TML file and rebuild the JSON payload.
+6. Re-validate.
 
 After 10 cycles with remaining errors, stop and report to the user:
 - Errors that persist after all retries
@@ -2972,8 +2983,7 @@ output, including any `| Project : ...` suffix** (e.g.
 `"cpg_merch_promotion_prod"`). The TWB parse (Step 3) reports the full name.
 
 ```bash
-ts tableau build-model \
-  --twb-file {workdir}/{workbook}.twb \
+ts tableau build-model {workdir}/{workbook}.twb \
   --existing-guid {model_guid} \
   --profile {profile_name} \
   --datasource "{datasource_name}" \
@@ -2990,7 +3000,7 @@ This command runs the full formula pipeline internally:
 5. Detects and fixes double aggregation (`sum([formula_X])` where X is already aggregated)
 6. Filters unresolvable references (sqlproxy, bare column refs, unconverted concat)
 7. Merges new formulas into the existing model (skips formulas already present)
-8. Imports with up to 10 retry cycles, dropping failing formulas on each retry
+8. Imports with up to 25 (CLI default, `--max-retries`) retry cycles, dropping failing formulas on each retry
 
 Parse the JSON output to report results to the user:
 
@@ -4040,7 +4050,9 @@ Root cause summary:
 |---|---|---|---|
 | 1 | {name} | `{expr}` | {specific to this formula — what the user can do} |
 
-Omit root cause categories with zero formulas.
+Omit root cause categories with zero formulas. Ground each root cause and potential
+resolution in [`references/coverage-matrix.md`](references/coverage-matrix.md) — it is
+the canonical mapped/unmapped construct reference.
 
 **⚠ Formulas needing review** — formulas that WERE migrated (✅ in the mapping table) but
 require user verification. The ThoughtSpot behaviour may differ from Tableau in specific
@@ -4118,6 +4130,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.20.1 | 2026-07-03 | Doc corrections: table-columns shape, build-model invocation, translate-formulas output schema, Step 6 heading, coverage-matrix references, retry count |
 | 1.20.0 | 2026-07-03 | LEFT/RIGHT/MID/UPPER/LOWER/STARTSWITH/ENDSWITH/SQUARE/SIGN/trig/PI/RADIANS/DEGREES/DATEPARSE now CLI-translated; unmapped functions and unknown date units rejected loudly at translate time; scalar MAX/MIN and IN(...) scan bugs fixed. Requires ts-cli v0.26.0 |
 | 1.19.1 | 2026-07-02 | Update code-structure reference to new ts_cli/tableau/ package (BL-069) |
 | 1.19.0 | 2026-06-28 | **Migration Pace — Fast vs Complete.** (1) New Step 1.5 pace choice: **F**ast (default) parks failed formulas and moves on; **C**omplete enters a bounded fix cycle (max 15 formulas, 3 attempts each) after `build-model`. (2) Step 7 Phase 2 now branches on pace — Fast reports parked count and proceeds; Complete enters export→fix→import loop for each dropped formula. (3) New ⏸ Parked formula status in Step 12 migration report — shows attempted expression, error, original Tableau, and potential fix. (4) New Step 12.5 resume prompt — after the report, offers Y/N/S to attempt fixes on parked formulas (same fix cycle, same caps). (5) `build-model` `--max-retries` flag (default 10, was hardcoded). (6) `formulas_dropped_on_import` enriched from `list[str]` to `list[dict]` with `name`, `expr`, `error`, `original_tableau` fields. Prerequisite: ts-cli v0.20.0. |
