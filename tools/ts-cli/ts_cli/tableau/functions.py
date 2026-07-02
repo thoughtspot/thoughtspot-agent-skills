@@ -124,7 +124,11 @@ def _apply_arg_handler(expr: str, fn: str, render) -> str:
             search_start = m.end()
             continue
         args, end_pos = extracted
-        replacement = render([a.strip() for a in args])
+        # Translate same-function calls nested inside the args first — the
+        # cursor skips past the replacement so they would never be revisited,
+        # and rescanning is unsafe because the UPPER/LOWER templates quote
+        # their own function name.
+        replacement = render([_apply_arg_handler(a.strip(), fn, render) for a in args])
         if replacement is None:
             search_start = m.end()
             continue

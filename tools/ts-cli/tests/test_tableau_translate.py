@@ -618,6 +618,17 @@ class TestMapFunctions:
         assert map_functions("IF LEFT([Code], 1) = 'A' THEN 1 END") == \
             "IF substr ( [Code] , 0 , 1 ) = 'A' THEN 1 END"
 
+    def test_self_nested_left(self):
+        assert map_functions("LEFT(LEFT([a], 5), 2)") == "substr ( substr ( [a] , 0 , 5 ) , 0 , 2 )"
+
+    def test_self_nested_right(self):
+        assert map_functions("RIGHT(RIGHT([x], 10), 5)") == \
+            "substr ( substr ( [x] , strlen ( [x] ) - 10 , 10 ) , strlen ( substr ( [x] , strlen ( [x] ) - 10 , 10 ) ) - 5 , 5 )"
+
+    def test_self_nested_upper(self):
+        assert map_functions("UPPER(UPPER([a]))") == \
+            'sql_string_op ( "UPPER({0})" , sql_string_op ( "UPPER({0})" , [a] ) )'
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
