@@ -100,10 +100,8 @@ aside .sub{font-size:11.5px;color:var(--muted);margin:0 0 14px;line-height:1.45}
 .inspector-section>summary::before{content:"▸";display:inline-block;width:14px;font-size:12px;color:var(--muted);transition:transform .15s}
 .inspector-section[open]>summary::before{transform:rotate(90deg)}
 .col-group{margin:0 0 2px;border:none}
-.col-group>summary{cursor:pointer;list-style:none;user-select:none;font-size:11px;font-weight:600;color:var(--ink);padding:4px 0;display:flex;align-items:center;gap:6px}
-.col-group>summary::-webkit-details-marker{display:none}
-.col-group>summary::before{content:"▸";display:inline-block;width:12px;font-size:11px;color:var(--muted);transition:transform .15s}
-.col-group[open]>summary::before{transform:rotate(90deg)}
+.col-group-h{font-size:11px;font-weight:600;color:var(--ink);padding:4px 0;display:flex;align-items:center;gap:6px}
+.col-group-h::before{content:"";display:inline-block;width:5px;height:5px;border-radius:1px;background:var(--muted)}
 .col-group .grp-count{font-size:9px;color:var(--muted);font-weight:500}
 table.cols{width:100%;border-collapse:collapse;font-size:12px}
 table.cols td{padding:6px 4px;border-bottom:1px solid var(--hair-2);vertical-align:top}

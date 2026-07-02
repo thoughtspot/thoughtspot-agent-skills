@@ -162,6 +162,17 @@ def step_verify_rls_reference_detection(build_erd_parser):
         raise RuntimeError("ORDERS must NOT be in_rls_path — it owns the rule, not referenced by another")
 
 
+def step_verify_columns_flat_not_nested():
+    """Column groups must be flat headed divs, never <details> nested inside the
+    Columns <details> — nested disclosure leaves the inner rows hidden in some
+    browsers (rendered fine in headless Chrome but not in the user's Chrome)."""
+    js = (REPO_ROOT / "agents" / "shared" / "erd" / "renderer.js").read_text(encoding="utf-8")
+    if '<details class="col-group"' in js:
+        raise RuntimeError("column groups still emit nested <details> — inner rows can stay hidden")
+    if 'class="col-group"' not in js:
+        raise RuntimeError("col-group markup missing from renderer")
+
+
 def step_verify_ai_analysis(build_erd, out_path, corpus_path):
     marker = "SMOKE-DOMAIN-Mini-Sales-analytics"
     corpus = {
@@ -228,6 +239,9 @@ def main() -> int:
         import parser as erd_parser  # noqa: E402  (shared/erd is on sys.path)
         r.step("verify RLS reference detection (parser)",
                step_verify_rls_reference_detection, erd_parser)
+
+        r.step("verify column groups are flat (not nested <details>)",
+               step_verify_columns_flat_not_nested)
 
         redact_path = os.path.join(td, "erd_redacted.html")
         r.step("verify --redact-rls", step_verify_redact_rls, build_erd, redact_path)

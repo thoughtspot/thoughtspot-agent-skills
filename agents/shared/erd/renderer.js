@@ -447,8 +447,11 @@ function colRow(c){const[cls,label]=ROLE_TAG[c.role]||["a","attribute"];const me
   const syn=(c.synonyms&&c.synonyms.length)?`<div class="c-syn">${c.synonyms.map(s=>`<span class="syn">${esc(s)}</span>`).join("")}</div>`:"";
   return `<tr class="${c.key?"c-key":""}"><td class="c-name">${c.flag?`<span class="fdot ${c.flag}"></span>`:""}${esc(c.name)}${desc}${ai}${syn}</td>
     <td class="c-type"><span class="tag ${c.key?"k":cls}">${esc(meta)}</span></td></tr>`;}
-function colGroup(label,cols,open){if(!cols.length)return "";
-  return `<details class="col-group"${open?" open":""}><summary>${label} <span class="grp-count">${cols.length}</span></summary><table class="cols">${cols.map(colRow).join("")}</table></details>`;}
+// Flat headed group — NOT a nested <details>. The parent "Columns" section is
+// already a <details>; nesting a second disclosure inside it renders inconsistently
+// across browsers (the inner rows can stay hidden), so column groups are always-open.
+function colGroup(label,cols){if(!cols.length)return "";
+  return `<div class="col-group"><div class="col-group-h">${label} <span class="grp-count">${cols.length}</span></div><table class="cols">${cols.map(colRow).join("")}</table></div>`;}
 function showTable(id){
   const t=tableById[id],conns=MODEL.joins.filter(j=>j.from===id||j.to===id),fs=findingsByTable[id]||[];
   const allCols=t.cols||[];
@@ -461,10 +464,10 @@ function showTable(id){
     ${t.alias_of?`<span class="pill" style="color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE">Alias of ${esc(t.alias_of)}</span>`:""}
     ${t.in_rls_path?'<span class="pill" style="color:#D97706;background:#FFFBEB;border-color:#FDE68A">In RLS path</span>':""}</div>`;
   h+=`<details class="inspector-section" open><summary class="section-label">Columns (${allCols.length})</summary>`;
-  h+=colGroup("Join keys",keys,true);
-  h+=colGroup("Measures",measures,true);
-  h+=colGroup("Attributes",attrs,true);
-  h+=colGroup("Formulas",formulas,false);
+  h+=colGroup("Join keys",keys);
+  h+=colGroup("Measures",measures);
+  h+=colGroup("Attributes",attrs);
+  h+=colGroup("Formulas",formulas);
   h+=`</details>`;
   const fcols=allCols.filter(c=>c.role==="FORMULA"&&MODEL.formulas[c.name]);
   if(fcols.length){h+=`<details class="inspector-section"><summary class="section-label">Formula expressions (${fcols.length})</summary>`;fcols.forEach(c=>h+=`<div style="font-size:11.5px;font-weight:600;margin:0 0 5px">${esc(c.name)}</div><div class="expr">${esc(MODEL.formulas[c.name])}</div>`);h+=`</details>`;}
