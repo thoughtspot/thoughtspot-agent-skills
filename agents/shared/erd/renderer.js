@@ -291,7 +291,7 @@ function renderEdges(){
 // title text clears WCAG AA (>=4.5:1) at overview scale — see renderer.css for the
 // title's type styling. An alias_of table has no distinct LOD fill; it takes its
 // kind's color, matching the card view where alias is a badge, not a fill.
-const LOD_FILL={fact:"#1B5E8C",dim:"#5B6472",sql_view:"#0F766E"};
+const LOD_FILL={fact:"#1B5E8C",dim:"#5B6472",sql_view:"#0B5A54"};
 function lodKind(t){return t.is_sql_view?"sql_view":t.kind==="fact"?"fact":"dim";}
 // LOD overview block: one solid-fill rect (state-aware border reused from the caller)
 // + a centered title, no header/badges/columns. Kept as its own helper so renderNodes'

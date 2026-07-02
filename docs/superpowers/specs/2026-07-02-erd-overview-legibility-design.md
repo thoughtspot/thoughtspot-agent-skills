@@ -107,7 +107,7 @@ At overview, fill carries the signal, so use saturated fills with white text. Th
 |---|---|---|
 | fact | `#1B5E8C` (deep blue) | ~5.2:1 ✓ |
 | dim | `#5B6472` (dark slate) | ~6.6:1 ✓ |
-| sql_view | `#0F766E` (dark teal) | ~5.3:1 ✓ |
+| sql_view | `#0B5A54` (deep teal) | ~8.1:1 ✓ (darkened post-CI so its lightness sits clearly below `dim`, not hue-only — helps deuteranopia) |
 
 Keep the family coherent with the detailed view (same hues, darker/saturated). State (secured/RLS/severity/focus) continues to show through the **border** color/width (unchanged logic), not the fill. `alias_of` isn't a distinct fill (it's a badge only in the card) — an alias node takes its kind's fill at LOD.
 
