@@ -47,6 +47,31 @@ def test_parse_model_basic():
     assert any(c["name"] == "Revenue" and c["role"] == "MEASURE" for c in fact["cols"])
 
 
+def test_hidden_non_measure_formula_does_not_make_dim_a_fact():
+    """A hidden attribute/boolean helper formula (RLS/parameter filter) must not
+    promote a pure dimension to a fact. Regression for DM_CUSTOMER."""
+    model = _model_tml(
+        tables=[{"name": "FACT_SALES", "fqn": "db.sch.FACT_SALES"},
+                {"name": "DIM_CUSTOMER", "fqn": "db.sch.DIM_CUSTOMER"}],
+        formulas=[{"id": "f_filter", "name": "filterModel",
+                   "expr": "if ( [code] = 'all' ) then true "
+                           "else [DIM_CUSTOMER::CODE] = [code]"}],
+        columns=[
+            {"name": "Revenue", "column_id": "FACT_SALES::revenue",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+            {"name": "Customer Name", "column_id": "DIM_CUSTOMER::name",
+             "properties": {"column_type": "ATTRIBUTE"}},
+            {"name": "filterModel", "formula_id": "f_filter",
+             "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}},
+        ],
+    )
+    result = parse_model(model, {})
+    cust = next(t for t in result["tables"] if t["id"] == "DIM_CUSTOMER")
+    assert cust["kind"] == "dim"
+    ff = next(c for c in cust["cols"] if c["name"] == "filterModel")
+    assert ff["hidden"] is True and ff["is_measure"] is False
+
+
 def test_parse_model_with_joins():
     model = _model_tml(
         tables=[

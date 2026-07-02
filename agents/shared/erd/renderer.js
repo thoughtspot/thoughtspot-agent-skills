@@ -130,12 +130,28 @@ function computeLayered(dir){
   const rank={};MODEL.tables.forEach(t=>rank[t.id]=0);
   for(let i=0;i<MODEL.tables.length;i++)MODEL.joins.forEach(j=>{if(rank[j.to]<rank[j.from]+1)rank[j.to]=rank[j.from]+1;});
   const byRank={};MODEL.tables.forEach(t=>{(byRank[rank[t.id]]=byRank[rank[t.id]]||[]).push(t.id);});
+  // Crossing reduction (Sugiyama median heuristic): order each rank so a table
+  // sits near the tables it joins to, clustering a fact's dimensions beside it.
+  const adj={};MODEL.tables.forEach(t=>adj[t.id]=[]);
+  MODEL.joins.forEach(j=>{if(adj[j.from]&&adj[j.to]){adj[j.from].push(j.to);adj[j.to].push(j.from);}});
+  const ranks=Object.keys(byRank).map(Number).sort((a,b)=>a-b);
+  const order={};ranks.forEach(r=>order[r]=byRank[r].slice());
+  const posIn=r=>{const p={};(order[r]||[]).forEach((id,i)=>p[id]=i);return p;};
+  const median=a=>{if(!a.length)return -1;a.sort((x,y)=>x-y);const n=a.length,h=n>>1;return n%2?a[h]:(a[h-1]+a[h])/2;};
+  for(let pass=0;pass<6;pass++){
+    const down=pass%2===0;
+    const seq=down?ranks.slice(1):ranks.slice(0,-1).reverse();
+    seq.forEach(r=>{const p=posIn(down?r-1:r+1),key={};
+      order[r].forEach((id,i)=>{const nb=adj[id].filter(n=>rank[n]===(down?r-1:r+1)).map(n=>p[n]).filter(x=>x>=0);
+        key[id]=nb.length?median(nb):i;});
+      order[r]=order[r].slice().sort((a,b)=>key[a]-key[b]);});
+  }
   const isLR=dir==="lr";
   const avgH=nodes.reduce((s,n)=>s+n.h,0)/nodes.length;
   const colGap=isLR?NODE_W+120:Math.max(avgH+60,180);
   const rowGap=isLR?Math.max(avgH+40,160):NODE_W+60;
   const m={};
-  Object.keys(byRank).forEach(r=>{const ids=byRank[r];const span=(ids.length-1)*rowGap;
+  ranks.forEach(r=>{const ids=order[r];const span=(ids.length-1)*rowGap;
     ids.forEach((id,i)=>{const along=r*colGap+120, across=i*rowGap-span/2+360;
       m[id]=isLR?{x:along,y:across}:{x:across,y:along};});});
   resolveOverlaps(m);

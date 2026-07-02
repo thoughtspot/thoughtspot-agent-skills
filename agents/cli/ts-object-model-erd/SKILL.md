@@ -151,4 +151,5 @@ HTML file; no ThoughtSpot login required to view.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-02 | Layered layout clusters joined tables (Sugiyama median crossing-reduction); fix dimension/fact classifier (hidden and non-measure formula columns no longer promote a dimension to a fact); ERD parser + assembler moved to the shared `erd` library so the skill and the ts-audit ERD embed share one definition |
 | 1.0.0 | 2026-07-01 | Initial release |
