@@ -66,11 +66,13 @@ _BODY = """<header>
       <button class="fchip" data-f="alias">Alias</button>
       <button class="fchip" data-f="rls">RLS</button>
       <button class="fchip" data-f="rls_subgraph">RLS subgraph</button>
+      <button class="fchip" data-f="notes">Notes</button>
     </div>
   </div>
   <div class="spacer"></div>
   <div class="ctl-group actions">
     <button class="minibtn" id="share-btn" title="Download self-contained HTML with positions and notes baked in">Share HTML</button>
+    <button class="minibtn" id="notes-review-btn" title="List every note in this model">Review notes</button>
     <button class="minibtn" id="clear-notes-btn" title="Remove all notes">Clear notes</button>
     <button class="minibtn" id="help-btn" title="Legend and keyboard shortcuts">? Help</button>
   </div>
@@ -143,7 +145,7 @@ _BODY = """<header>
   <div class="section-label">Reading the joins</div>
   <p class="sub">Each join carries a midpoint badge: <b style="background:#1E6FA8;color:#fff;border-radius:3px;padding:1px 5px;font-family:var(--mono)">M</b> = model-local (defined in this model only), <b style="background:#EDEFF2;color:#6B7480;border-radius:3px;padding:1px 5px;font-family:var(--mono)">T</b> = table-level (reusable, can ripple to other models). Switch <b>Notation</b> to <b>Crow's foot</b> to read cardinality instead of TS-style arrows. Click any join for its type, cardinality and definition.</p>
   <div class="section-label">Notes</div>
-  <p class="sub">Add notes to any table or join via the side panel. Notes persist in your browser and travel with <b>Share HTML</b> exports.</p>
+  <p class="sub">Add notes to any table or join via the side panel. Notes persist in your browser and travel with <b>Share HTML</b> exports. Use the <b>Notes</b> filter chip to highlight every noted object at any zoom level (it stays enabled as long as a note exists, including notes baked into a shared file). <b>Review notes</b> lists every note at once — table/join rows jump to that object, and each row can be deleted inline.</p>
   <div class="section-label">Share HTML</div>
   <p class="sub">Downloads a self-contained HTML file with your current layout positions and notes baked in. The recipient sees your view on first load.</p>
 </div>"""
