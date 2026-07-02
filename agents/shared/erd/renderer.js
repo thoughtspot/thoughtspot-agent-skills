@@ -345,32 +345,131 @@ function renderNodes(){
 function renderAll(){renderEdges();renderNodes();}
 
 // ---- pan / zoom ----
+// MIN_K is the single shared zoom floor: fit(), wheel-zoom and #zoom-out all clamp to
+// it, so a fresh fit (which can land below the old hardcoded 0.25) never snap-zooms on
+// the first wheel/button press.
+const MIN_K=0.12;
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 let view={x:0,y:0,k:1};
-const applyView=()=>vp.setAttribute("transform",`translate(${view.x},${view.y}) scale(${view.k})`);
+const applyView=()=>{vp.setAttribute("transform",`translate(${view.x},${view.y}) scale(${view.k})`);updateMinimapViewport();};
 function screenToWorld(cx,cy){const r=svg.getBoundingClientRect();return {x:(cx-r.left-view.x)/view.k,y:(cy-r.top-view.y)/view.k};}
-function fit(){let a=1e9,b=1e9,c=-1e9,d=-1e9;nodes.forEach(n=>{n.h=nodeHeight(n.t);a=Math.min(a,n.x);b=Math.min(b,n.y);c=Math.max(c,n.x+n.w);d=Math.max(d,n.y+n.h);});
-  const pad=70,r=svg.getBoundingClientRect(),w=c-a+pad*2,h=d-b+pad*2;
-  view.k=Math.min(r.width/w,r.height/h,1.35);view.x=(r.width-(c+a)*view.k)/2;view.y=(r.height-(d+b)*view.k)/2;applyView();}
+function nodesBBox(list){
+  if(!list||!list.length)return {x0:0,y0:0,x1:1,y1:1};
+  let a=1e9,b=1e9,c=-1e9,d=-1e9;
+  list.forEach(n=>{n.h=nodeHeight(n.t);a=Math.min(a,n.x);b=Math.min(b,n.y);c=Math.max(c,n.x+n.w);d=Math.max(d,n.y+n.h);});
+  return {x0:a,y0:b,x1:c,y1:d};
+}
+function fitNodes(subset){
+  const bb=nodesBBox(subset&&subset.length?subset:nodes);
+  const pad=70,r=svg.getBoundingClientRect(),w=bb.x1-bb.x0+pad*2,h=bb.y1-bb.y0+pad*2;
+  view.k=clamp(Math.min(r.width/w,r.height/h),MIN_K,1.35);
+  view.x=(r.width-(bb.x1+bb.x0)*view.k)/2;view.y=(r.height-(bb.y1+bb.y0)*view.k)/2;applyView();
+}
+function fit(){fitNodes(nodes);renderMinimap();}
+// #zoom-fit / keyboard "0": fit to the focused neighbourhood when something is focused
+// (keeps focus alive), otherwise fall back to the old clear-and-fit-everything behaviour.
+function fitOrFocus(){
+  if(!focusSet.length){focusSet=[];focusMode=null;renderAll();fit();return;}
+  const keep=focusGroup(),subset=nodes.filter(n=>keep&&keep.has(n.t.id));
+  fitNodes(subset);
+}
 function centerOn(n){const r=svg.getBoundingClientRect();view.x=r.width/2-(n.x+n.w/2)*view.k;view.y=r.height/2-(n.y+n.h/2)*view.k;applyView();}
 
-let panning=false,panStart=null;
+let panning=false,panStart=null,panFrom=null,panMoved=0,suppressClick=false;
 svg.addEventListener("pointerdown",e=>{if(e.target.closest(".node")||e.target.closest(".edge-g"))return;
-  panning=true;panStart={x:e.clientX-view.x,y:e.clientY-view.y};svg.classList.add("panning");svg.setPointerCapture(e.pointerId);});
-svg.addEventListener("pointermove",e=>{if(!panning)return;view.x=e.clientX-panStart.x;view.y=e.clientY-panStart.y;applyView();});
-svg.addEventListener("pointerup",()=>{panning=false;svg.classList.remove("panning");});
+  panning=true;panMoved=0;panFrom={x:e.clientX,y:e.clientY};
+  panStart={x:e.clientX-view.x,y:e.clientY-view.y};svg.classList.add("panning");svg.setPointerCapture(e.pointerId);});
+svg.addEventListener("pointermove",e=>{if(!panning)return;
+  panMoved=Math.max(panMoved,Math.hypot(e.clientX-panFrom.x,e.clientY-panFrom.y));
+  view.x=e.clientX-panStart.x;view.y=e.clientY-panStart.y;applyView();});
+svg.addEventListener("pointerup",()=>{panning=false;svg.classList.remove("panning");if(panMoved>4)suppressClick=true;});
 svg.addEventListener("pointercancel",()=>{panning=false;svg.classList.remove("panning");});
-svg.addEventListener("click",e=>{if(!e.target.closest(".node")&&!e.target.closest(".edge-g")){focusSet=[];focusMode=null;selected=null;renderAll();showOverview();}});
-svg.addEventListener("wheel",e=>{e.preventDefault();const r=svg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
-  const wx=(mx-view.x)/view.k,wy=(my-view.y)/view.k,f=e.deltaY<0?1.12:1/1.12;
-  view.k=Math.max(.25,Math.min(2.4,view.k*f));view.x=mx-wx*view.k;view.y=my-wy*view.k;applyView();},{passive:false});
-$("zoom-in").onclick=()=>{view.k=Math.min(2.4,view.k*1.18);applyView();};
-$("zoom-out").onclick=()=>{view.k=Math.max(.25,view.k/1.18);applyView();};
-$("zoom-fit").onclick=()=>{focusSet=[];focusMode=null;renderAll();fit();};
+// A pan-drag ends with a synthetic click; suppressClick (set above once movement passes
+// the threshold) eats that one click so a drag never wipes the user's focus/selection.
+svg.addEventListener("click",e=>{
+  if(suppressClick){suppressClick=false;return;}
+  if(!e.target.closest(".node")&&!e.target.closest(".edge-g")){focusSet=[];focusMode=null;selected=null;renderAll();showOverview();}});
+svg.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=svg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  if(e.ctrlKey||e.metaKey){ // trackpad pinch reports ctrlKey:true; ⌘/Ctrl+scroll is explicit zoom
+    const wx=(mx-view.x)/view.k,wy=(my-view.y)/view.k,f=e.deltaY<0?1.12:1/1.12;
+    view.k=clamp(view.k*f,MIN_K,2.4);view.x=mx-wx*view.k;view.y=my-wy*view.k;applyView();
+    return;
+  }
+  const mult=e.deltaMode===1?16:1; // line-mode wheel notches (deltaMode 1) pan a token amount otherwise
+  view.x-=e.deltaX*mult;view.y-=e.deltaY*mult;applyView();
+},{passive:false});
+$("zoom-in").onclick=()=>{view.k=clamp(view.k*1.18,MIN_K,2.4);applyView();};
+$("zoom-out").onclick=()=>{view.k=clamp(view.k/1.18,MIN_K,2.4);applyView();};
+$("zoom-fit").onclick=fitOrFocus;
+
+// ---- minimap ----
+// Fixed-size overview, bottom-right of the canvas. mmT (scale + world origin) is shared
+// by renderMinimap/updateMinimapViewport/minimapToWorld; it stays null until the first
+// renderMinimap() call, which updateMinimapViewport() must tolerate (see its guard) since
+// the very first applyView() — from the initial loadModel()->fit() — fires before that.
+const MM_W=180,MM_H=130,MM_PAD=6;
+let mmT=null;
+function mmFill(t){ // same kind->fill mapping renderNodes uses: fact vs. dim, sql_view distinct
+  if(t.is_sql_view)return "#F0FDFA";
+  return t.kind==="fact"?"#EAF2F8":"#EEF0F3";
+}
+function renderMinimap(){
+  const host=$("minimap-nodes");host.innerHTML="";
+  const bb=nodesBBox(nodes),w=Math.max(1,bb.x1-bb.x0),h=Math.max(1,bb.y1-bb.y0);
+  const scale=Math.min((MM_W-MM_PAD*2)/w,(MM_H-MM_PAD*2)/h);
+  mmT={scale,ox:bb.x0,oy:bb.y0};
+  nodes.forEach(n=>{
+    NS_el("rect",{x:MM_PAD+(n.x-bb.x0)*scale,y:MM_PAD+(n.y-bb.y0)*scale,
+      width:Math.max(1,n.w*scale),height:Math.max(1,n.h*scale),fill:mmFill(n.t)},host);
+  });
+  updateMinimapViewport();
+}
+function updateMinimapViewport(){
+  if(!mmT)return; // init-order guard — see note above
+  const r=svg.getBoundingClientRect();
+  const x0=(-view.x)/view.k,y0=(-view.y)/view.k,x1=(r.width-view.x)/view.k,y1=(r.height-view.y)/view.k;
+  const rv=$("minimap-view");
+  rv.setAttribute("x",MM_PAD+(x0-mmT.ox)*mmT.scale);rv.setAttribute("y",MM_PAD+(y0-mmT.oy)*mmT.scale);
+  rv.setAttribute("width",Math.max(0,(x1-x0)*mmT.scale));rv.setAttribute("height",Math.max(0,(y1-y0)*mmT.scale));
+}
+function minimapToWorld(clientX,clientY){
+  const r=$("minimap-svg").getBoundingClientRect();
+  return {x:mmT.ox+(clientX-r.left-MM_PAD)/mmT.scale,y:mmT.oy+(clientY-r.top-MM_PAD)/mmT.scale};
+}
+function navigateMinimap(clientX,clientY){
+  if(!mmT)return;
+  const w=minimapToWorld(clientX,clientY),r=svg.getBoundingClientRect();
+  view.x=r.width/2-w.x*view.k;view.y=r.height/2-w.y*view.k;applyView();
+}
+let mmDragging=false;
+const mmSvg=$("minimap-svg");
+mmSvg.addEventListener("pointerdown",e=>{e.stopPropagation();mmDragging=true;mmSvg.setPointerCapture(e.pointerId);navigateMinimap(e.clientX,e.clientY);});
+mmSvg.addEventListener("pointermove",e=>{if(!mmDragging)return;e.stopPropagation();navigateMinimap(e.clientX,e.clientY);});
+mmSvg.addEventListener("pointerup",e=>{mmDragging=false;e.stopPropagation();});
+mmSvg.addEventListener("pointercancel",()=>{mmDragging=false;});
+
+function setMinimapCollapsed(collapsed){
+  $("minimap").classList.toggle("collapsed",collapsed);
+  $("minimap-toggle").textContent=collapsed?"+":"–";
+  $("minimap-toggle").title=collapsed?"Show overview":"Hide overview";
+}
+const MM_LS_KEY="ts-erd-minimap";
+$("minimap-toggle").onclick=()=>{
+  const next=!$("minimap").classList.contains("collapsed");
+  setMinimapCollapsed(next);
+  try{localStorage.setItem(MM_LS_KEY,next?"1":"0");}catch(e){}
+};
+// Share-HTML safety: shareHTML() bakes in whatever .collapsed class is on the DOM at save
+// time, so a shared copy could open in a stale state. Sync from *this* viewer's own
+// localStorage on every load instead, regardless of the baked class.
+setMinimapCollapsed((()=>{try{return localStorage.getItem(MM_LS_KEY)==="1";}catch(e){return false;}})());
 
 function enableDrag(g,n){let dragging=false,off=null,moved=false;
   g.addEventListener("pointerdown",e=>{dragging=true;moved=false;const w=screenToWorld(e.clientX,e.clientY);off={x:w.x-n.x,y:w.y-n.y};g.setPointerCapture(e.pointerId);g.style.cursor="grabbing";e.stopPropagation();});
   g.addEventListener("pointermove",e=>{if(!dragging)return;moved=true;const w=screenToWorld(e.clientX,e.clientY);n.x=w.x-off.x;n.y=w.y-off.y;g.setAttribute("transform",`translate(${n.x},${n.y})`);renderEdges();});
-  g.addEventListener("pointerup",()=>{dragging=false;g.style.cursor="grab";if(moved)captureLayout();});
+  g.addEventListener("pointerup",()=>{dragging=false;g.style.cursor="grab";if(moved){captureLayout();renderMinimap();}});
   g.addEventListener("pointercancel",()=>{dragging=false;g.style.cursor="grab";});
 }
 
@@ -577,10 +676,16 @@ $("help-close").onclick=()=>$("help-drawer").classList.remove("open");
 $("share-btn").onclick=shareHTML;
 $("clear-notes-btn").onclick=clearAllNotes;
 
+const PAN_STEP=60;
+const ARROW_PAN={ArrowLeft:[1,0],ArrowRight:[-1,0],ArrowUp:[0,1],ArrowDown:[0,-1]};
 document.addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA"||e.target.tagName==="SELECT")return;
   if(e.key==="?"||e.key==="/"){e.preventDefault();if(e.key==="/"){$("finder").focus();}else toggleHelp();}
   if(e.key==="Escape")$("help-drawer").classList.remove("open");
+  if(ARROW_PAN[e.key]){e.preventDefault();const d=ARROW_PAN[e.key];view.x+=d[0]*PAN_STEP;view.y+=d[1]*PAN_STEP;applyView();}
+  else if(e.key==="+"||e.key==="="){e.preventDefault();$("zoom-in").click();}
+  else if(e.key==="-"){e.preventDefault();$("zoom-out").click();}
+  else if(e.key==="0"){e.preventDefault();$("zoom-fit").click();}
 });
 
 // ---- loadModel: rebuild all model-derived state ----
@@ -606,7 +711,12 @@ function loadModel(m){
 
   adj={};undir={};
   MODEL.tables.forEach(t=>{adj[t.id]=[];undir[t.id]=[];});
-  MODEL.joins.forEach(j=>{adj[j.from].push(j.to);undir[j.from].push(j.to);undir[j.to].push(j.from);});
+  // A join can reference a table id that never made it into MODEL.tables (e.g. a
+  // model_tables join `with:` a table that has no Table TML and isn't itself a
+  // model_tables entry — "degraded fidelity", already logged by the Python builder).
+  // Guard so a dangling endpoint skips instead of crashing adj[...]/undir[...].
+  MODEL.joins.forEach(j=>{if(!tableById[j.from]||!tableById[j.to])return;
+    adj[j.from].push(j.to);undir[j.from].push(j.to);undir[j.to].push(j.from);});
 
   securedTables=MODEL.tables.filter(t=>t.rls&&t.rls.length).map(t=>t.id);
   const hasRls=securedTables.length>0;
@@ -634,7 +744,9 @@ function loadModel(m){
   nodes=MODEL.tables.map((t,i)=>{const a=i/MODEL.tables.length*Math.PI*2;
     return {t,w:NODE_W,h:nodeHeight(t),x:480+Math.cos(a)*240+(rnd()-.5)*40,y:340+Math.sin(a)*200+(rnd()-.5)*40};});
   nodeById={};nodes.forEach(n=>nodeById[n.t.id]=n);
-  edges=MODEL.joins.map(j=>({j,s:nodeById[j.from],t:nodeById[j.to]}));
+  // Same dangling-endpoint guard as adj/undir above — a degraded-fidelity join has
+  // no node on one side, so it can't be drawn as an edge.
+  edges=MODEL.joins.filter(j=>nodeById[j.from]&&nodeById[j.to]).map(j=>({j,s:nodeById[j.from],t:nodeById[j.to]}));
 
   layoutCache={organic:computeOrganic()};
   focusSet=[];selected=null;activeFilters=new Set(["all"]);
@@ -655,7 +767,7 @@ function loadModel(m){
   updateSavedBadge();renderAll();fit();showOverview();
 }
 
-$("finder").addEventListener("change",e=>{const id=e.target.value.trim();if(tableById[id]){selectTable(id,false);centerOn(nodeById[id]);e.target.value="";}});
+$("finder").addEventListener("change",e=>{const id=e.target.value.trim();if(tableById[id]){selectTable(id,false);view.k=Math.max(view.k,0.9);centerOn(nodeById[id]);e.target.value="";}});
 
 // ---- model switcher ----
 function buildSwitcher(){

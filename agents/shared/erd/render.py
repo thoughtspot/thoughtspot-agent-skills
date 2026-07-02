@@ -92,7 +92,11 @@ _BODY = """<header>
       <button id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoom-fit" title="Fit to view" aria-label="Fit to view">⤢</button>
     </div>
-    <div class="hint" id="hint">Click a table to focus \xb7 Shift-click to compare \xb7 Double-click for connected component \xb7 drag to pan \xb7 scroll to zoom</div>
+    <div class="minimap" id="minimap" aria-hidden="true">
+      <button class="minimap-toggle" id="minimap-toggle" title="Hide overview">–</button>
+      <svg id="minimap-svg"><g id="minimap-nodes"></g><rect id="minimap-view"></rect></svg>
+    </div>
+    <div class="hint" id="hint">drag or scroll to pan \xb7 pinch / ⌘-scroll to zoom \xb7 arrows / 0 to move</div>
   </div>
   <aside id="inspector"></aside>
 </main>
@@ -127,7 +131,12 @@ _BODY = """<header>
   <div class="help-shortcut"><kbd>Click</kbd> edge — inspect join definition</div>
   <div class="help-shortcut"><kbd>Click</kbd> empty space — return to model overview</div>
   <div class="help-shortcut"><kbd>Drag</kbd> table — reposition (auto-saved)</div>
-  <div class="help-shortcut"><kbd>Scroll</kbd> — zoom in/out</div>
+  <div class="help-shortcut"><kbd>Drag</kbd> or <kbd>Scroll</kbd> empty canvas — pan the view</div>
+  <div class="help-shortcut"><kbd>Pinch</kbd> / <kbd>⌘/Ctrl</kbd>+Scroll — zoom in/out</div>
+  <div class="help-shortcut"><kbd>Arrow keys</kbd> — pan the view</div>
+  <div class="help-shortcut"><kbd>+</kbd> / <kbd>-</kbd> — zoom in/out</div>
+  <div class="help-shortcut"><kbd>0</kbd> — fit to view (or to the focused neighbourhood)</div>
+  <div class="help-shortcut"><kbd>Click</kbd> / drag minimap — jump to that area</div>
   <div class="help-shortcut"><kbd>/</kbd> — focus search box</div>
   <div class="help-shortcut"><kbd>?</kbd> — toggle this help panel</div>
   <div class="help-shortcut"><kbd>Esc</kbd> — close this panel</div>
