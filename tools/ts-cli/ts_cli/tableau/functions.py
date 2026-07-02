@@ -333,37 +333,51 @@ def _convert_dateadd(expr: str) -> str:
 def _convert_datepart(expr: str) -> str:
     _PAT = re.compile(r"\bDATEPART\s*\(", re.IGNORECASE)
     result = expr
+    search_start = 0
     safety = 0
     while safety < 20:
-        m = _PAT.search(result)
+        m = _PAT.search(result, search_start)
         if not m:
             break
         safety += 1
         extracted = _extract_function_args(result, m.end() - 1)
         if not extracted:
-            break
+            search_start = m.end()
+            continue
         args, end_pos = extracted
         if len(args) >= 2:
             unit = args[0].strip().strip("'\"").lower()
             date_expr = args[1].strip()
-            ts_func = _DATEPART_UNIT_MAP.get(unit, unit)
+            ts_func = _DATEPART_UNIT_MAP.get(unit)
+            if ts_func is None:
+                # Unknown unit — no ThoughtSpot extractor exists. Leave the
+                # original DATEPART(...) text in place rather than fabricate
+                # a nonexistent function name; validate_output flags any
+                # surviving DATEPART call as an unmapped function.
+                search_start = end_pos
+                continue
             replacement = f"{ts_func} ( {date_expr} )"
             result = result[:m.start()] + replacement + result[end_pos:]
+            search_start = m.start() + len(replacement)
+        else:
+            search_start = m.end()
     return result
 
 
 def _convert_datename(expr: str) -> str:
     _PAT = re.compile(r"\bDATENAME\s*\(", re.IGNORECASE)
     result = expr
+    search_start = 0
     safety = 0
     while safety < 20:
-        m = _PAT.search(result)
+        m = _PAT.search(result, search_start)
         if not m:
             break
         safety += 1
         extracted = _extract_function_args(result, m.end() - 1)
         if not extracted:
-            break
+            search_start = m.end()
+            continue
         args, end_pos = extracted
         if len(args) >= 2:
             unit = args[0].strip().strip("'\"").lower()
@@ -371,6 +385,14 @@ def _convert_datename(expr: str) -> str:
             if unit == "month":
                 replacement = f"month ( {date_expr} )"
             else:
-                replacement = f"{unit} ( {date_expr} )"
+                # Unknown unit — no ThoughtSpot extractor exists. Leave the
+                # original DATENAME(...) text in place rather than fabricate
+                # a nonexistent function name; validate_output flags any
+                # surviving DATENAME call as an unmapped function.
+                search_start = end_pos
+                continue
             result = result[:m.start()] + replacement + result[end_pos:]
+            search_start = m.start() + len(replacement)
+        else:
+            search_start = m.end()
     return result

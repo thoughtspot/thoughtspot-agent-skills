@@ -22,6 +22,20 @@ _FORBIDDEN_PATTERNS = [
     (re.compile(r"\bELSEIF\b", re.IGNORECASE), "'ELSEIF' (should be 'else if')"),
 ]
 
+# Tableau functions with no ThoughtSpot equivalent (or not yet implemented).
+# Formulas containing them are skipped with a reason instead of failing at
+# TML import, where the retry loop silently drops them.
+_UNMAPPED_FUNCTIONS = [
+    "SPLIT", "FINDNTH", "PROPER", "ASCII", "CHAR",
+    "REGEXP_MATCH", "REGEXP_EXTRACT", "REGEXP_EXTRACT_NTH", "REGEXP_REPLACE",
+    "MAKEDATE", "MAKETIME", "MAKEDATETIME", "ISDATE",
+    "USERNAME", "FULLNAME", "ISUSERNAME", "ISFULLNAME", "USERDOMAIN",
+    "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
+]
+_UNMAPPED_RE = [
+    (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _UNMAPPED_FUNCTIONS
+]
+
 
 def validate_output(expr: str) -> list[str]:
     """Check for forbidden patterns in a translated expression.
@@ -32,6 +46,9 @@ def validate_output(expr: str) -> list[str]:
     for pattern, desc in _FORBIDDEN_PATTERNS:
         if pattern.search(expr):
             errors.append(f"Contains {desc}")
+    for pattern, fn in _UNMAPPED_RE:
+        if pattern.search(expr):
+            errors.append(f"unmapped Tableau function: {fn}")
     return errors
 
 

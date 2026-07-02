@@ -695,6 +695,11 @@ class TestMapDateFunctions:
         result = map_date_functions("DATEDIFF('hour', [A], [B])")
         assert "diff_time ( [B] , [A] ) / 3600" in result
 
+    def test_datepart_unknown_unit_left_untranslated(self):
+        # 'minute' has no ThoughtSpot extractor — must NOT fabricate minute(...)
+        result = map_date_functions("DATEPART('minute', [TS])")
+        assert "minute (" not in result and "DATEPART" in result
+
 
 # ---------------------------------------------------------------------------
 # INT conversion
@@ -994,6 +999,18 @@ class TestValidateOutput:
     def test_unique_count_underscore(self):
         errors = validate_output("unique_count([X])")
         assert any("unique_count" in e for e in errors)
+
+    def test_unmapped_function_flagged(self):
+        errors = validate_output("SPLIT ( [Name] , '-' , 1 )")
+        assert any("SPLIT" in e for e in errors)
+
+    def test_username_flagged(self):
+        errors = validate_output("if ( USERNAME ( ) = 'x' ) then 1 else 0")
+        assert any("USERNAME" in e for e in errors)
+
+    def test_untranslated_datepart_flagged(self):
+        errors = validate_output("DATEPART ( 'minute' , [TS] )")
+        assert any("DATEPART" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
