@@ -3,7 +3,18 @@
 **Date:** 2026-07-02
 **Branch:** `feat/erd-large-model-nav` (based on `fix/erd-table-aliases`)
 **Skill:** `ts-object-model-erd` (shared library `agents/shared/erd/`)
-**Status:** Design approved in chat — ready for implementation by Fable.
+**Status:** Design approved in chat; revised per Fable spec-review (2026-07-02) —
+see review-correction notes inline. Ready for implementation by Sonnet.
+
+> **Review corrections applied (Fable, HEAD e69ae5d):** minimap moved to
+> bottom-**right** (`.ctrls` is top-right, `.hint` is bottom-left — bottom-right
+> is the free corner); a shared `MIN_K` constant replaces the hardcoded 0.25
+> zoom-out floor so the readable fit floor doesn't cause a zoom snap; minimap
+> rects reuse the existing node fill mapping (no invented "bridge" color);
+> minimap must be Share-HTML-safe (clear before draw, sync collapsed state from
+> localStorage at init); and the §7 probes note the module-scoped `focusSet` and
+> the `ctrlKey` WheelEvent dispatch. `svg{cursor:grab}` (A2) already exists —
+> verify only.
 
 ---
 
@@ -89,8 +100,10 @@ Replace the always-zoom `wheel` handler with:
 
 - **Zoom** when `e.ctrlKey || e.metaKey` — a Mac trackpad pinch reports
   `ctrlKey: true`; ⌘+scroll is the explicit keyboard-modified zoom. Keep the
-  existing cursor-anchored zoom math (zoom toward the pointer) and the
-  `[0.25, 2.4]` clamp.
+  existing cursor-anchored zoom math (zoom toward the pointer) and clamp to
+  `[MIN_K, 2.4]` — see C1 for `MIN_K` (a shared constant that replaces today's
+  hardcoded `0.25` floor here **and** in `#zoom-out`, so a fresh fit doesn't
+  snap-zoom on the first wheel/button press).
 - **Pan** otherwise — `view.x -= e.deltaX; view.y -= e.deltaY; applyView();`.
   Respect `deltaMode` loosely: treat line-mode (`deltaMode === 1`) by
   multiplying deltas by ~16 so a mouse-wheel notch pans a sensible distance.
@@ -98,16 +111,9 @@ Replace the always-zoom `wheel` handler with:
 
 ### A2. Discoverable drag cursor
 
-Ensure the canvas shows `cursor: grab`, and `grabbing` while panning. The
-`.panning` class is already toggled on `#svg` (renderer.js 358/360); add/verify
-the CSS in `renderer.css`:
-
-```css
-#svg { cursor: grab; }
-#svg.panning { cursor: grabbing; }
-```
-
-(Node hit-areas keep their own `grab`/`grabbing` from `enableDrag`; unaffected.)
+**Already implemented** — `#svg { cursor: grab }` and `#svg.panning { cursor:
+grabbing }` exist at renderer.css 69–70, and the `.panning` class is toggled on
+`#svg` (renderer.js 358/360). **Verify only; do not add duplicate rules.**
 
 ### A3. Drag never triggers the reset-click
 
@@ -134,8 +140,10 @@ read: `drag or scroll to pan · pinch / ⌘-scroll to zoom · arrows / 0 to move
 
 ## 4. Feature B — Minimap overview
 
-A small always-on map, bottom-left of the canvas (bottom-right is occupied by
-`.ctrls`), showing the whole model with a viewport rectangle.
+A small always-on map, **bottom-right** of the canvas, showing the whole model
+with a viewport rectangle. (Corner audit: `.ctrls` is top-right, `.hint` is
+bottom-left — bottom-right is the free corner. Do **not** use bottom-left; it
+would sit on the hint bar.)
 
 ### B1. DOM (render.py)
 
@@ -152,20 +160,29 @@ Fixed size ~180×130. `aria-hidden` because it is a redundant navigation aid.
 
 ### B2. Rendering (renderer.js, new `renderMinimap()` / `updateMinimapViewport()`)
 
-- **Node rects** (`renderMinimap`): compute the world bounding box over all
-  `nodes` (reuse the same min/max sweep as `fit()`), derive a single
+- **Node rects** (`renderMinimap`): **clear `#minimap-nodes` (`innerHTML=""`)
+  first** (same pattern as `renderNodes`; keeps Share-HTML copies from
+  double-rendering — see B4), compute the world bounding box over all `nodes`
+  (reuse the same min/max sweep as `fit()`), derive a single
   `scale = min(mmW/worldW, mmH/worldH)` with a few px padding, and draw one tiny
-  `<rect>` per node into `#minimap-nodes`, colored by `t.kind` (fact / dim /
-  bridge / sql_view) reusing existing palette values. Rebuild only when the set
-  of nodes or their positions change: call from `loadModel`, after a layout
-  change, after `fit`, and at the end of a node drag (`enableDrag` pointerup).
+  `<rect>` per node into `#minimap-nodes`. **Color each rect to match the fill
+  the main node gets** — reuse the *same* `kind`→fill mapping `renderNodes` uses
+  (today that's fact vs. dim, with `is_sql_view` styled distinctly); do **not**
+  invent a "bridge" color (`t.kind` in the renderer is effectively fact/dim —
+  treat anything non-fact as the dim fill). Rebuild only when the set of nodes or
+  their positions change: call from `loadModel`, after a layout change, after
+  `fit`, and at the end of a node drag (`enableDrag` pointerup).
 - **Viewport rect** (`updateMinimapViewport`): map the current visible
   world-rect (derived from `view` and `svg.getBoundingClientRect()`) through the
   same minimap transform and position `#minimap-view`. Call from `applyView()`
-  so it tracks every pan/zoom (cheap — one rect update).
+  so it tracks every pan/zoom (cheap — one rect update). **Init-order guard:**
+  `applyView()` runs during the initial `loadModel()`→`fit()` *before* the
+  minimap transform exists, so `updateMinimapViewport()` must no-op when the
+  shared transform is unset.
 
 Store the minimap transform (`scale`, offset, world origin) in a module var so
-both functions and the click/drag handler share it.
+both functions and the click/drag handler share it (unset until `renderMinimap`
+runs — hence the guard above).
 
 ### B3. Click / drag to navigate
 
@@ -180,11 +197,17 @@ pan handler.
 `#minimap-toggle` collapses the minimap to just the toggle button
 (`.minimap.collapsed` CSS). Persist the collapsed state in `localStorage`
 (key e.g. `ts-erd-minimap`) so it survives reloads. Default **expanded**.
+**Share-HTML safety:** `shareHTML()` (renderer.js ~557) serializes
+`document.documentElement.outerHTML`, so a shared copy bakes in whatever
+`.collapsed` class is on the DOM at save time. On init, **sync the collapsed
+state from `localStorage`** (apply/remove the class) regardless of the baked
+class, so shared copies open in the viewer's own preferred state rather than a
+stale one.
 
 ### B5. CSS (renderer.css)
 
-`.minimap` absolutely positioned bottom-left, translucent panel matching the
-existing `.ctrls` styling (border, radius, subtle shadow, `background` with
+`.minimap` absolutely positioned **bottom-right**, translucent panel matching
+the existing `.ctrls` styling (border, radius, subtle shadow, `background` with
 slight transparency). `#minimap-view` a 1.5px accent-colored stroke, no fill (or
 faint fill). `.minimap.collapsed svg { display:none }`.
 
@@ -194,11 +217,15 @@ faint fill). `.minimap.collapsed svg { display:none }`.
 
 ### C1. Fit floor
 
-In `fit()`, after computing the fit scale, clamp with a **floor** as well as the
-existing max: `view.k = clamp(fitScale, FIT_FLOOR, 1.35)` with
-`FIT_FLOOR = 0.12`. Keep centering on the layout's bounding-box center. Result:
-"fit" on GTM lands ≈0.12× (legible-ish, centered) instead of 0.047×; the minimap
-+ pan cover the overflow. Small models are unaffected (their fit scale is well
+Introduce a single module constant **`MIN_K = 0.12`** and use it as the shared
+zoom floor everywhere: in `fit()` clamp `view.k = clamp(fitScale, MIN_K, 1.35)`,
+and **replace the hardcoded `0.25` floor** in the `wheel` handler (renderer.js
+365) and `#zoom-out` (367) with `MIN_K`. This is the fix for the snap Fable
+flagged: without it, a fresh fit at 0.12 jumps to 0.25 on the first
+wheel/zoom-out because those paths still clamp at 0.25. Keep centering on the
+layout's bounding-box center. Result: "fit" on GTM lands ≈0.12× (legible-ish,
+centered) instead of 0.047×, and zooming out from there is smooth; the minimap +
+pan cover the overflow. Small models are unaffected (their fit scale is well
 above the floor).
 
 ### C2. Fit-to-focus
@@ -228,7 +255,7 @@ always brings it up legibly. Keep clearing the input after.
 | `agents/shared/erd/renderer.css` | A2 grab cursors; B5 minimap styles. |
 | `agents/shared/erd/render.py` | B1 minimap DOM; A4 updated `.hint` text + help-drawer shortcuts. |
 | `agents/cli/ts-object-model-erd/SKILL.md` | `## Changelog` entry (MINOR bump at PR time) + note new gestures/minimap in the "ERD features" list in Step 6. |
-| `tools/smoke-tests/smoke_ts_object_model_erd.py` | Extend if it asserts on rendered structure (check first; keep green). |
+| `tools/smoke-tests/smoke_ts_object_model_erd.py` | No change expected — it only asserts `col-group` markup exists (verified). Confirm it stays green; extend only if you change that markup. |
 
 **Module-health note:** keep any new functions under CAP=15 cyclomatic
 complexity (the pre-commit gate blocks regressions — this is why `parse_model`
@@ -245,19 +272,33 @@ For each change, rebuild an ERD and drive it in headless Chrome via puppeteer
 `transform` attribute and DOM state. Use the **GTM export** as the large-model
 fixture and the repo's `mini.model.tml` fixture as the small-model control.
 
+> **Fixtures.** `view` and `focusSet` are module-scoped — NOT on `window`; read
+> state via the DOM, not globals. The GTM export is **not in the repo**; it is a
+> local ThoughtSpot export the orchestrator will hand you the path to (a
+> `ts tml export --associated` JSON dump). Build with the symlinked CLI
+> (`python3 ~/.claude/skills/ts-object-model-erd/build_erd.py <export.json>
+> --out gtm.html`), which picks up your edits live. The small-model control
+> builds from `agents/cli/ts-object-model-erd/tests/fixtures/mini*.tml`.
+
 Concrete assertions (all must pass):
 
 1. **Renders** — GTM: `#nodes > g.node` count == table count (79), zero
    `pageerror` events (guards against a regression of the alias crash).
 2. **Scroll pans** — dispatch `wheel` with `deltaY` and **no** ctrl/meta →
    `#viewport` translate changes, scale unchanged.
-3. **Modifier zooms** — dispatch `wheel` with `ctrlKey:true` → scale changes.
+3. **Modifier zooms** — `page.mouse.wheel` **cannot** set `ctrlKey`; dispatch
+   via `page.evaluate` — `svg.dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,
+   deltaY:-120,clientX,clientY,bubbles:true,cancelable:true}))` (or hold
+   `keyboard.down('Control')`) → scale changes.
 4. **Drag pans without reset** — pointer drag on empty canvas moves the view
-   **and** a pre-existing `focusSet` survives (no reset-click).
+   **and** a pre-existing focus survives. `focusSet` isn't readable directly;
+   assert via the DOM proxy — non-focused nodes still carry the `.ghost`/`.gone`
+   class (renderer.js 279/303), i.e. focus wasn't reset.
 5. **Keyboard** — ArrowRight moves translate; `0` fits.
-6. **Fit floor** — after `#zoom-fit` on GTM, parsed scale ≥ 0.12.
-7. **Fit-to-focus** — with a table focused, `#zoom-fit` increases scale (zooms
-   into the neighbourhood) and does **not** clear `focusSet`.
+6. **Fit floor** — after `#zoom-fit` on GTM, parsed scale ≥ 0.12 (== `MIN_K`).
+7. **Fit-to-focus** — with a table focused (click a node), `#zoom-fit` increases
+   scale (zooms into the neighbourhood) and focus is **not** cleared (assert via
+   the same `.ghost`/`.gone` DOM proxy as step 4).
 8. **Search** — set finder value to a table id + dispatch `change` → view
    centers on it and scale ≥ 0.9.
 9. **Minimap** — `#minimap-nodes rect` count == table count; `#minimap-view`
