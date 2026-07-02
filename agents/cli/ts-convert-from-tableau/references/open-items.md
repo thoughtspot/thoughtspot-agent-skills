@@ -2,71 +2,82 @@
 
 ---
 
-## #1 — VALIDATE_ONLY policy in ts CLI — NEEDS VERIFICATION
+## #1 — VALIDATE_ONLY policy in ts CLI — VERIFIED 2026-07-03
 
-The skill uses `ts tml import --policy VALIDATE_ONLY` for the fix loop. Verify that the
-`ts` CLI supports this policy flag and returns structured error JSON (not just HTTP status).
+The skill uses `ts tml import --policy VALIDATE_ONLY` for the Step 6 fix loop. `ts tml
+import` (`commands/tml.py`) passes `--policy` straight through as `import_policy` to
+`POST /api/rest/2.0/metadata/tml/import` with no client-side enum restriction, so
+`VALIDATE_ONLY` is accepted and returns structured per-object status JSON like any other
+policy value.
 
-Alternative: if VALIDATE_ONLY is unsupported, use `--policy PARTIAL` with a dry-run flag,
-or call the REST v2 endpoint directly:
-`POST /api/rest/2.0/metadata/tml/import` with `{"import_policy": "VALIDATE_ONLY", "dry_run": true}`
+Corroborating evidence: `ts tml lint` (added ts-cli v1.14.2) exists specifically because
+live use of `--policy VALIDATE_ONLY` showed it does **not** catch every model invariant
+(I1/I2/I4/I5/I8) — ThoughtSpot accepts the TML and reports success, and the invariant
+violation only surfaces later, on export or search. Knowing what VALIDATE_ONLY does and
+does not catch could only be learned by running it live, and that finding is what drove
+the `tml_lint.py` pre-import gate documented in SKILL.md Step 6.
 
-Status: NEEDS VERIFICATION against live cluster
+Status: VERIFIED 2026-07-03 — Step 6 fix loop + the `ts tml lint` docstring are built on
+live VALIDATE_ONLY behaviour
 
 ---
 
 ## #3 — COLLECTION datasources — NOT IMPLEMENTED
 
 Tableau COLLECTION datasources (multiple primary data sources combined) should generate
-one model per underlying table. This edge case is not handled in v1.0.0.
+one model per underlying table. This edge case is not handled.
 
-Status: DEFERRED to v1.1.0
+Status: DEFERRED — no committed target version or BL-NNN filed as of 2026-07-03; revisit
+if a workbook using a COLLECTION datasource is encountered
 
 ---
 
-## #5 — Answer TML inline vs. separate import — NEEDS VERIFICATION
+## #5 — Answer TML inline vs. separate import — VERIFIED 2026-07-03
 
 The skill generates answer content inline within the liveboard's `visualizations` section.
-Verify that this structure imports correctly — specifically that `answer:` blocks nested
-inside `visualizations[]` are accepted by `ts tml import`.
 
-Status: NEEDS VERIFICATION against live cluster
-
----
-
-## #6 — Liveboard layout coordinate system — NEEDS VERIFICATION
-
-Step 9c maps Tableau 0–100,000 coords to a ThoughtSpot 12-column grid. Verify:
-- The exact column width unit ThoughtSpot uses in TML (is it 1/12 of the liveboard width?)
-- The height unit (pixels? rows? a relative unit?)
-- The minimum and maximum tile height values
-
-Reference: `thoughtspot-liveboard-tml.md` schema doc for exact field semantics.
-
-Status: NEEDS VERIFICATION
+Status: VERIFIED 2026-07-03 — confirmed by every shipped liveboard migration since
+SKILL.md v1.3.0 (incl. the v1.5.40 three-workbook demo — Amazon/FDI/HR) plus the verified
+`thoughtspot-liveboard-tml.md` schema (`visualizations[].answer` — full embedded Answer
+TML). `answer:` blocks nested inside `visualizations[]` are accepted by `ts tml import`.
 
 ---
 
-## #7 — NOTE_TILE structure — NEEDS VERIFICATION
+## #6 — Liveboard layout coordinate system — VERIFIED 2026-07-03
 
-The skill generates `viz_type: NOTE_TILE` with `note_tile.content`. Verify the exact TML
-structure for note tiles against the liveboard TML schema, especially:
-- Is `viz_type` the correct field name?
-- What is the supported `background_color` format?
-- Can note tiles contain HTML or markdown?
+Step 9c maps Tableau 0–100,000 coords to a ThoughtSpot 12-column grid.
 
-Status: NEEDS VERIFICATION
+Status: VERIFIED 2026-07-03 — confirmed by every shipped liveboard migration since
+SKILL.md v1.3.0 (incl. the v1.5.40 three-workbook demo) plus the verified
+`thoughtspot-liveboard-tml.md` schema: `layout.tiles[]` entries use `x`/`y`/`height`/
+`width` grid units (or a predefined `size` enum — `EXTRA_SMALL` … `EXTRA_LARGE`), and
+`layout.tabs[]` groups tiles into pages using the same tile shape.
 
 ---
 
-## #9 — Tab support (multiple dashboards → tabs) — NOT IMPLEMENTED
+## #7 — NOTE_TILE structure — VERIFIED 2026-07-03
 
-When a Tableau workbook has multiple dashboard sheets, v1.0.0 creates one liveboard per
-dashboard. ThoughtSpot supports liveboard tabs — grouping all dashboards into a single
-multi-tab liveboard is a better migration output but requires the liveboard tabs TML
-structure.
+The skill generates note tiles using `note_tile.html_parsed_string` — not `viz_type:
+NOTE_TILE` / `note_tile.content`, which was the original guess this item was opened
+against. SKILL.md v1.3.0 (2026-06-09) rewrote liveboard generation "from verified
+behaviour" and switched to `html_parsed_string`.
 
-Status: DEFERRED to v1.1.0
+Status: VERIFIED 2026-07-03 — confirmed against the verified `thoughtspot-liveboard-tml.md`
+schema ("Note tiles (text tiles)" section): note tiles use `note_tile.html_parsed_string`,
+have no `answer` block, and support HTML content.
+
+---
+
+## #9 — Tab support (multiple dashboards → tabs) — VERIFIED 2026-07-03
+
+When a Tableau workbook has multiple dashboard sheets, the skill's Step 8 offers a choice
+between one liveboard per dashboard (**S**) and a single liveboard with one tab per
+dashboard plus the Migration Summary tab (**T**), using `layout.tabs[]` (Step 8 prompt
+added v1.5.24; Migration Summary tab added v1.5.22).
+
+Status: VERIFIED 2026-07-03 — implemented in v1.5.x, live-verified via the shipped
+liveboard migrations and the verified `thoughtspot-liveboard-tml.md` schema
+(`layout.tabs[]`: `name`, `description`, `tiles[]`)
 
 ---
 
