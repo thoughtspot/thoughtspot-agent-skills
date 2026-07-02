@@ -276,15 +276,17 @@ def _convert_datetrunc(expr: str) -> str:
 def _convert_datediff(expr: str) -> str:
     _PAT = re.compile(r"\bDATEDIFF\s*\(", re.IGNORECASE)
     result = expr
+    search_start = 0
     safety = 0
     while safety < 20:
-        m = _PAT.search(result)
+        m = _PAT.search(result, search_start)
         if not m:
             break
         safety += 1
         extracted = _extract_function_args(result, m.end() - 1)
         if not extracted:
-            break
+            search_start = m.end()
+            continue
         args, end_pos = extracted
         if len(args) >= 3:
             unit = args[0].strip().strip("'\"").lower()
@@ -301,32 +303,52 @@ def _convert_datediff(expr: str) -> str:
             elif unit == "week":
                 replacement = f"diff_days ( {end_date} , {start_date} ) / 7"
             else:
-                replacement = f"diff_{unit}s ( {end_date} , {start_date} )"
+                # Unknown unit — no ThoughtSpot diff function exists. Leave
+                # the original DATEDIFF(...) text in place rather than
+                # fabricate a nonexistent function name; validate_output
+                # flags any surviving DATEDIFF call as unmapped.
+                search_start = end_pos
+                continue
             result = result[:m.start()] + replacement + result[end_pos:]
+            search_start = m.start() + len(replacement)
+        else:
+            search_start = m.end()
     return result
 
 
 def _convert_dateadd(expr: str) -> str:
     _PAT = re.compile(r"\bDATEADD\s*\(", re.IGNORECASE)
     result = expr
+    search_start = 0
     safety = 0
     while safety < 20:
-        m = _PAT.search(result)
+        m = _PAT.search(result, search_start)
         if not m:
             break
         safety += 1
         extracted = _extract_function_args(result, m.end() - 1)
         if not extracted:
-            break
+            search_start = m.end()
+            continue
         args, end_pos = extracted
         if len(args) >= 3:
             unit = args[0].strip().strip("'\"").lower()
             n = args[1].strip()
             date_expr = args[2].strip()
-            ts_func = _DATEADD_UNIT_MAP.get(unit, f"add_{unit}s")
+            ts_func = _DATEADD_UNIT_MAP.get(unit)
+            if ts_func is None:
+                # Unknown unit — no ThoughtSpot add function exists. Leave
+                # the original DATEADD(...) text in place rather than
+                # fabricate a nonexistent function name; validate_output
+                # flags any surviving DATEADD call as unmapped.
+                search_start = end_pos
+                continue
             # Note: arg order changes — TS takes (date, n)
             replacement = f"{ts_func} ( {date_expr} , {n} )"
             result = result[:m.start()] + replacement + result[end_pos:]
+            search_start = m.start() + len(replacement)
+        else:
+            search_start = m.end()
     return result
 
 

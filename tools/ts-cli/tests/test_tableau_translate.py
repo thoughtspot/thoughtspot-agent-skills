@@ -700,6 +700,14 @@ class TestMapDateFunctions:
         result = map_date_functions("DATEPART('minute', [TS])")
         assert "minute (" not in result and "DATEPART" in result
 
+    def test_datediff_unknown_unit_left_untranslated(self):
+        result = map_date_functions("DATEDIFF('fortnight', [A], [B])")
+        assert "diff_fortnights" not in result and "DATEDIFF" in result
+
+    def test_dateadd_unknown_unit_left_untranslated(self):
+        result = map_date_functions("DATEADD('fortnight', 2, [D])")
+        assert "add_fortnights" not in result and "DATEADD" in result
+
 
 # ---------------------------------------------------------------------------
 # INT conversion
@@ -1011,6 +1019,14 @@ class TestValidateOutput:
     def test_untranslated_datepart_flagged(self):
         errors = validate_output("DATEPART ( 'minute' , [TS] )")
         assert any("DATEPART" in e for e in errors)
+
+    def test_untranslated_datediff_flagged(self):
+        errors = validate_output("DATEDIFF ( 'fortnight' , [A] , [B] )")
+        assert any("DATEDIFF" in e for e in errors)
+
+    def test_untranslated_dateadd_flagged(self):
+        errors = validate_output("DATEADD ( 'fortnight' , 2 , [D] )")
+        assert any("DATEADD" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
