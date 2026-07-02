@@ -1778,7 +1778,7 @@ Build `ts tableau build-liveboard` in ts-cli:
 
 **Source:** codification sweep 2026-06-29 (angle #11b), architectural observation.
 **Affects:** `tools/ts-cli/ts_cli/tableau_translate.py`, `tools/ts-cli/ts_cli/model_builder.py`.
-**Status:** OPEN — **HIGH PRIORITY** (flagged 2026-07-02).
+**Status:** DONE (2026-07-02) — shipped on feat/tableau-module-split.
 **Priority rationale:** `check_module_health` (radon) confirms this file holds the repo's
 worst complexity — `ensure_else_clause` **F (47)**, `validate_pre_import` **E (32)**,
 `normalize_operator_spacing` **D (27)**, `translate_formulas` **D (25)**, `build_dependency_dag`
@@ -1811,6 +1811,16 @@ No functional changes — pure structural refactor. Existing tests continue to p
 importing from the same entry points.
 
 **Target:** 2026-12-31.
+
+### Follow-ups (from the finalization PR)
+
+- Confirmed-dead code candidates left in place per pure-move discipline:
+  `parsing._split_on_plus`, `cleanup._BINARY_OPS` (both zero callers repo-wide), plus
+  dead locals inside `conditionals.ensure_else_clause` — clean these when that function
+  is next touched.
+- Pre-existing `module_health` baseline drift `agents/shared/erd/parser.py::parse_model`
+  57→56 (radon recomputation) deliberately NOT committed in this PR — re-baseline
+  separately.
 
 ---
 

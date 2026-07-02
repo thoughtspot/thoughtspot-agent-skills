@@ -1,7 +1,7 @@
 """Tableau TWB → ThoughtSpot Model TML builder.
 
-Pure functions: TWB XML in, import-ready model TML out.
-No I/O beyond the initial XML parse — trivially unit-testable.
+Pure functions: parsed TWB data in, import-ready model TML out. No I/O — TWB/TWBX
+XML parsing lives in ts_cli/tableau/twb.py (re-exported here for back-compat).
 
 This module fills the gap between the formula translator (tableau_translate.py)
 and the TML importer. The translator handles per-formula syntax; this module

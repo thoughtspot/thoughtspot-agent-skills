@@ -956,7 +956,7 @@ ts tableau build-model "workbook.twbx" \
 1. Parse TWB XML — extract tables, columns, joins, calculated fields, parameters
 2. Build dependency levels from raw calculated fields (before reference resolution)
 3. Resolve all internal references (`[Calculation_NNN]` and copy-style `[Field (copy)_NNN]`)
-4. Translate formulas to ThoughtSpot syntax (via `tableau_translate.py`)
+4. Translate formulas to ThoughtSpot syntax (via `tableau_translate.py`, an orchestrator facade over the `ts_cli/tableau/` package — entry point unchanged)
 5. Resolve name collisions (formula/param clashes → rename; column/formula clashes → drop column)
 6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix
 7. Split into phased import files (phase 0 = base, then per dependency level)

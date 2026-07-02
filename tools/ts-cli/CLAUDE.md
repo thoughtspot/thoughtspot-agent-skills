@@ -10,8 +10,23 @@ ts_cli/
   cli.py              — Typer app entry point; registers command groups
   client.py           — ThoughtSpotClient REST wrapper; handles token caching and auth
   tml_lint.py         — Pre-import TML linter (pure functions, no I/O)
-  model_builder.py     — Tableau TWB → ThoughtSpot model TML builder (pure functions, no I/O beyond XML parse)
-  tableau_translate.py — Tableau → ThoughtSpot formula translation engine (pure functions, no I/O)
+  model_builder.py     — Tableau TML assembly + phased-import orchestration facade (pure functions, no I/O; TWB parsing lives in ts_cli/tableau/twb.py)
+  tableau_translate.py — Tableau → ThoughtSpot formula translation entry point + orchestrator facade over ts_cli/tableau/ (pure functions, no I/O)
+  tableau/
+    __init__.py         — package marker
+    parsing.py          — formula tokenization, CSQ column maps, calc-id maps
+    pre_transforms.py    — systematic pre-transforms applied before translation
+    conditionals.py      — IF/IIF/CASE WHEN/ELSE translation
+    functions.py         — Tableau→ThoughtSpot function + date-function mapping
+    strings_types.py     — string/type conversion functions (INT, string concat, etc.)
+    lod.py               — level-of-detail (LOD) expression translation
+    cleanup.py           — output-cleanup transforms (post-translation)
+    dag.py               — dependency DAG building, topological sort, cycle detection
+    params.py            — parameter renaming, sanitisation, conflict detection
+    naming.py            — name-clash detection and renaming
+    validate.py           — pre-import and post-translation validation
+    yaml_out.py           — TML YAML dump helpers
+    twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
@@ -41,7 +56,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.25.1**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.25.4**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
