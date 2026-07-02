@@ -39,7 +39,6 @@ CLI command implements this pipeline automatically.
 | 13c | **agg_if conversion** (BL-046 #2): `sum(if(cond) then expr [else 0/null])` → `sum_if(cond, expr)` — also count_if, average_if | Missing-else errors; more complex formula than needed |
 | 14 | **Mandatory else clause**: every remaining `if/then` MUST have an `else` (type-matched: `else 0` for measures, `else ''` for attributes) | "Unknown data type" or "Expecting a Numeric token" |
 | 14b | **`IN (...)` → `in { }`**: rewrite Tableau set-membership `IN (a, b, c)` to ThoughtSpot's curly-brace form; `NOT IN (...)` is left untouched (unsupported — flagged at validation, see below) | "Search did not find 'in ( ...'" — ThoughtSpot requires `in { a , b , c }` |
-| 14c | **Formula/column name-clash renames** (BL-046 #7 / BL-050 #9): batch-level, runs after a formula's translation passes validation — if its display name case-insensitively collides with a physical column name, rename it (`Formula {name}`) and rewrite any surviving cross-references to the renamed formula | Import fails, or the column and formula silently shadow each other |
 
 After all steps, **validate** (`validate_output`): reject any formula still containing
 `END`, `CASE`, `WHEN`, `unique_count` (underscore), `date_trunc`, `ELSEIF`, or
@@ -52,6 +51,12 @@ validation runs; a residual, un-rewritten `+` (e.g. a concat operand that is its
 function call — the operand grammar doesn't yet accept those) surfaces as an import error,
 not a validator rejection. Tracked in `docs/backlog.md` (BL-069 follow-ups, "String-concat
 operand grammar").
+
+Finally, **after** a formula passes validation, batch-level **formula/column name-clash
+renaming** (BL-046 #7 / BL-050 #9) runs: if the formula's display name case-insensitively
+collides with a physical column name, it is renamed (`Formula {name}`) and any surviving
+cross-references to renamed formulas are rewritten (`apply_name_clash_renames`). Skipping
+this causes import failures or a column and formula silently shadowing each other.
 
 ### CLI implementation status (v0.26.0)
 
@@ -1044,7 +1049,7 @@ model import. A missing formula produces a functional model with reduced coverag
 - `RANK()` → `rank()` (see Rank section)
 - `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined (⚑ flag for review if using `sql_*_aggregate_op` — PT1)
 - `RANK_MODIFIED`, `RANK_DENSE` → `sql_int_aggregate_op()` pass-through ⚑ flag for review (PT1)
-- Partitioned `RANK` → `sql_int_aggregate_op()` with `partition by` ⚑ flag for review (PT1)
+- Partitioned `RANK` → `group_aggregate`-wrapped `sql_int_aggregate_op()` with `partition by` (see Rank Functions section) ⚑ flag for review (PT1)
 - **Comma-separated list of values** (Tableau's `FIRST`/`LAST`/`LOOKUP`/`PREVIOUS_VALUE` CSV technique) →
   string aggregation, see below
 - `INDEX()` → `rank()` (Top-N filter intent) or `sql_int_aggregate_op("ROW_NUMBER() OVER (...)")` (display row number, answer-level, gated) — see Row-Offset Table Calculations section
