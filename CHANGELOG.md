@@ -6,6 +6,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-02
+- fix: audit cluster heatmap no longer rolls unattributable findings onto the first model in multi-model audits (was inflating that model's severity across angles)
+- fix: ERD fact/dimension classifier — an outgoing join alone no longer marks a table a fact; only real (visible) measures do, with measureless pass-through tables as bridges
+- fix: ERD viewer no longer errors when clicking a flagged fan-out join with no attached finding
+- chore: bump ts-cli to v0.25.3
 - refactor: ERD generation consolidated to a single definition in `agents/shared/erd` (parser + assembler moved out of the ts-object-model-erd skill); ts-audit ERD embed now consumes it instead of a duplicate parser
 - fix: ERD dimension/fact classifier — hidden and non-measure formula columns (e.g. RLS/parameter helper formulas) no longer promote a dimension to a fact
 - feat: ERD layered layout clusters joined tables via Sugiyama median crossing-reduction

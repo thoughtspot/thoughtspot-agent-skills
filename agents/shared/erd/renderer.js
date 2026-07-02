@@ -368,7 +368,7 @@ function selectEdge(name){selected={type:"edge",id:name};renderAll();showEdge(na
 const ROLE_TAG={MEASURE:["m","measure"],ATTR:["a","attribute"],FORMULA:["f","formula"]};
 const esc=s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
-function findingCard(x){return `<div class="finding ${x.sev}" tabindex="0" data-target="${x.target}">
+function findingCard(x){if(!x)return "";return `<div class="finding ${x.sev}" tabindex="0" data-target="${x.target}">
   <div class="fhead"><span class="sev ${x.sev}">${x.sev==="crit"?"Critical":x.sev==="warn"?"Warning":"Info"}</span><span class="check">${esc(x.check)}</span></div>
   <div class="ftitle">${esc(x.title)}</div><div class="ftarget">${esc(x.where)}</div>
   <div class="fdetail">${esc(x.detail)}</div><div class="frec"><b>Fix.</b> ${esc(x.rec)}</div></div>`;}
@@ -473,7 +473,8 @@ function showCompare(){
   inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};
   inspector.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>selectTable(b.dataset.rm,true));inspector.scrollTop=0;
 }
-function showEdge(name){const j=MODEL.joins.find(x=>x.name===name),hot=HOT_EDGES.has(name),secured=securedTables.includes(j.to);
+function showEdge(name){const j=MODEL.joins.find(x=>x.name===name);if(!j){showOverview();return;}
+  const hot=HOT_EDGES.has(name),secured=securedTables.includes(j.to);
   const cardTxt={MANY_TO_ONE:"Many-to-one · N:1",ONE_TO_MANY:"One-to-many · 1:N",ONE_TO_ONE:"One-to-one · 1:1",MANY_TO_MANY:"Many-to-many · N:N"}[j.card]||j.card;
   const isModel=j.origin==="model";
   let h=`<button class="backlink" id="back">← Overview</button><h2>Join</h2>
@@ -489,7 +490,8 @@ function showEdge(name){const j=MODEL.joins.find(x=>x.name===name),hot=HOT_EDGES
       :`<b>Table-level</b> — defined on the <span style="font-family:var(--mono)">${esc(j.from)}</span> table TML and <b>reusable across every model</b> that uses it. Changing or removing it can ripple to other models.`}</p>
     <div class="section-label">Reference</div><div class="expr">${esc(j.name)}</div>`;
   if(j.on)h+=`<div class="section-label">ON clause</div><div class="expr">${esc(j.on)}</div>`;
-  if(hot)h+=`<div class="section-label">Flagged</div>`+findingCard(MODEL.findings.find(f=>f.check==="D-FANOUT"));
+  if(hot){const fo=MODEL.findings.find(f=>f.check==="D-FANOUT");
+    h+=`<div class="section-label">Flagged</div>`+(fo?findingCard(fo):`<p class="sub">⚠︎ <b>Fan-out risk</b> — <span style="font-family:var(--mono)">${esc(j.to)}</span> is joined by two or more tables, so aggregating a measure across this join can multiply rows. Verify measures on the joined-from side aren't double-counted.</p>`);}
   if(secured)h+=`<div class="section-label">Security</div><p class="sub">Target <b style="color:var(--rls)">${esc(j.to)}</b> has RLS — this join propagates the row filter to <b>${esc(j.from)}</b>.</p>`;
   h+=notesSection(name);
   inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};wireNotes(name);inspector.scrollTop=0;

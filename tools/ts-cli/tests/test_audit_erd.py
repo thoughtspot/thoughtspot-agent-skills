@@ -72,6 +72,27 @@ def test_hidden_non_measure_formula_does_not_make_dim_a_fact():
     assert ff["hidden"] is True and ff["is_measure"] is False
 
 
+def test_dimension_with_outgoing_join_is_not_a_fact():
+    """A pure dimension that merely joins out to another table must not be a fact.
+    Regression for GTM Campaigns TS_USER (attributes + one outgoing join, no measures)."""
+    model = _model_tml(
+        tables=[
+            {"name": "TS_USER", "fqn": "db.TS_USER",
+             "joins": [{"with": "EVENT", "referencing_join": "j1"}]},
+            {"name": "EVENT", "fqn": "db.EVENT"},
+        ],
+        columns=[
+            {"name": "User Name", "column_id": "TS_USER::name",
+             "properties": {"column_type": "ATTRIBUTE"}},
+            {"name": "Amount", "column_id": "EVENT::amt",
+             "properties": {"column_type": "MEASURE"}},
+        ],
+    )
+    kinds = {t["id"]: t["kind"] for t in parse_model(model, {})["tables"]}
+    assert kinds["TS_USER"] == "dim"
+    assert kinds["EVENT"] == "fact"
+
+
 def test_parse_model_with_joins():
     model = _model_tml(
         tables=[

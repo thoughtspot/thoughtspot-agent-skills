@@ -2789,11 +2789,21 @@ function buildHeatmap(){
     var guid = m.g;
     if(modelGuids[guid]){
       if(!byGuid[guid]) byGuid[guid] = {mi: modelGuids[guid].mi, name: modelGuids[guid].name, guid: guid, byAngle: {}};
-    } else if(modelGuidList.length > 0){
+    } else if(modelGuidList.length === 1){
+      /* Single-model audit: child-object findings (tables/formulas/answers) roll
+         up to the one model. */
       guid = modelGuidList[0];
       if(!byGuid[guid]) byGuid[guid] = {mi: modelGuids[guid].mi, name: modelGuids[guid].name, guid: guid, byAngle: {}};
-    } else {
+    } else if(modelGuidList.length === 0){
       if(!byGuid[guid]) byGuid[guid] = {mi: f.mi, name: m.n, guid: guid, byAngle: {}};
+    } else {
+      /* Multi-model audit: a finding whose object_guid is not a model GUID
+         (cross-cutting formula/answer/table findings, or an empty guid) cannot be
+         attributed to a specific model. Do NOT roll it up onto the first model —
+         that inflated the first model's heatmap severity with findings it does not
+         own (e.g. GTM Campaigns showing HIGH Human from 81 cross-answer formula
+         findings). Skip it from the model heatmap; it still appears in Cross-Model. */
+      return;
     }
     if(!byGuid[guid].byAngle[f.a]) byGuid[guid].byAngle[f.a] = [];
     byGuid[guid].byAngle[f.a].push(f);

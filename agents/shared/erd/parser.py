@@ -125,11 +125,16 @@ def parse_model(model_tml, table_tmls, log=None):
     for name in table_names:
         cols = cols_by_table.get(name, [])
         has_measure = any(c["is_measure"] and not c["hidden"] for c in cols)
-        if has_measure or name in has_outgoing:
-            if name in is_target and name in has_outgoing and not has_measure:
-                kind = "bridge"
-            else:
-                kind = "fact"
+        # A table is a fact only when it carries real (visible) measures. Merely
+        # having an outgoing join does NOT make it a fact — in normalized/snowflake
+        # schemas dimensions join to other dimensions (e.g. person -> account,
+        # user -> engagement), so an outgoing FK is not evidence of a fact.
+        # A measureless table that both receives and emits a join is a pass-through
+        # (bridge); anything else with no measures is a dimension.
+        if has_measure:
+            kind = "fact"
+        elif name in is_target and name in has_outgoing:
+            kind = "bridge"
         else:
             kind = "dim"
         tables.append({"id": name, "kind": kind, "cols": cols, "rls": [],
