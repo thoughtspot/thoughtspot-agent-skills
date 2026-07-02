@@ -27,6 +27,7 @@ from ts_cli.tableau_translate import (
     detect_param_conflicts,
     dump_tml_yaml,
     ensure_else_clause,
+    fix_in_parentheses,
     map_date_functions,
     map_functions,
     map_parameter_names,
@@ -675,6 +676,28 @@ class TestConvertStringConcat:
         assert "+" not in result
         assert "then concat ( [A] , ' : ' , [B] )" in result
         assert "then concat ( [A] , ' : ' , [B] , ' : ' , [C] )" in result
+
+
+# ---------------------------------------------------------------------------
+# IN (...) -> in {...}
+# ---------------------------------------------------------------------------
+
+class TestFixInParentheses:
+    def test_basic_in(self):
+        assert fix_in_parentheses("[Region] IN ('East', 'West')") == "[Region] in { 'East', 'West' }"
+
+    def test_in_after_not_in_still_converted(self):
+        result = fix_in_parentheses("NOT [A] IN ('x') AND [B] IN ('y', 'z')")
+        assert "in { 'y', 'z' }" in result
+
+    def test_in_after_postfix_not_in_still_converted(self):
+        # Guard fires only on the postfix form: `[A] NOT IN (` — pre-fix this
+        # aborted the scan and left the second IN unconverted.
+        result = fix_in_parentheses("[A] NOT IN ('x') AND [B] IN ('y', 'z')")
+        assert "in { 'y', 'z' }" in result
+
+    def test_no_in_unchanged(self):
+        assert fix_in_parentheses("[A] + [B]") == "[A] + [B]"
 
 
 # ---------------------------------------------------------------------------

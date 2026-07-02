@@ -184,25 +184,28 @@ _IN_PAREN = re.compile(r"\bin\s*\(", re.IGNORECASE)
 def fix_in_parentheses(expr: str) -> str:
     """Replace IN (...) with in {...} — ThoughtSpot requires curly braces for set membership."""
     result = expr
+    search_start = 0
     safety = 0
     while safety < 20:
-        m = _IN_PAREN.search(result)
+        m = _IN_PAREN.search(result, search_start)
         if not m:
             break
+        safety += 1
         # Skip "not in (" — ThoughtSpot doesn't support NOT IN
         before = result[:m.start()].rstrip()
         if before.lower().endswith("not"):
-            safety += 1
-            # Move past this match to avoid infinite loop
-            result = result[:m.end()] + result[m.end():]
-            break
-        safety += 1
+            # Leave this occurrence alone but keep scanning past it —
+            # a later, unrelated IN (...) may still need conversion.
+            search_start = m.end()
+            continue
         paren_start = m.end() - 1
         extracted = _extract_function_args(result, paren_start)
         if not extracted:
-            break
+            search_start = m.end()
+            continue
         args, end_pos = extracted
         items = ", ".join(a.strip() for a in args)
         replacement = f"in {{ {items} }}"
         result = result[:m.start()] + replacement + result[end_pos:]
+        search_start = m.start() + len(replacement)
     return result
