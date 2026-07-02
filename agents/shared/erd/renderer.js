@@ -277,8 +277,8 @@ function renderEdges(){
     if(hot){stroke="#9AA4B1";sw=2;dash="6 4";mk="url(#arrow)";}
     if(onPath||sel){stroke="#1E6FA8";sw=3;dash="0";mk="url(#arrow-sel)";}
     const g=NS_el("g",{class:"edge-g"+(ghost?(hideOutOfFocus()?" gone":" ghost"):""),style:"cursor:pointer"},gEdges);
-    NS_el("path",{class:"edge",fill:"none",d:G.d,stroke,"stroke-width":sw,"stroke-dasharray":dash,"marker-end":crow?"none":mk,"stroke-linejoin":"round"},g);
-    NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none"},g);
+    NS_el("path",{class:"edge",fill:"none",d:G.d,stroke,"stroke-width":sw,"stroke-dasharray":dash,"marker-end":crow?"none":mk,"stroke-linejoin":"round","vector-effect":"non-scaling-stroke"},g);
+    NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none","vector-effect":"non-scaling-stroke"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
       drawCard(g,G.sp,G.sdir,parts[0]==="MANY",stroke);drawCard(g,G.tp,G.tdir,parts[1]==="MANY",stroke);}
     originBadge(g,G.mx,G.my,e.j.origin||"table");
@@ -286,9 +286,28 @@ function renderEdges(){
   });
 }
 
+// LOD (semantic-zoom) overview-block fill per table kind. Same hue family as the
+// detailed card (fact=blue, dim=slate, sql_view=teal) but darker/saturated so white
+// title text clears WCAG AA (>=4.5:1) at overview scale — see renderer.css for the
+// title's type styling. An alias_of table has no distinct LOD fill; it takes its
+// kind's color, matching the card view where alias is a badge, not a fill.
+const LOD_FILL={fact:"#1B5E8C",dim:"#5B6472",sql_view:"#0B5A54"};
+function lodKind(t){return t.is_sql_view?"sql_view":t.kind==="fact"?"fact":"dim";}
+// LOD overview block: one solid-fill rect (state-aware border reused from the caller)
+// + a centered title, no header/badges/columns. Kept as its own helper so renderNodes'
+// per-node branch doesn't inflate with block-drawing detail.
+function drawNodeBlock(g,n,t,stroke,sw){
+  NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill:LOD_FILL[lodKind(t)],stroke,"stroke-width":sw,
+    "vector-effect":"non-scaling-stroke",style:"filter:drop-shadow(0 2px 5px rgba(20,27,38,.08))"},g);
+  const maxCh=Math.max(3,Math.floor((n.w-24)/9));
+  const label=t.id.length>maxCh?t.id.slice(0,maxCh-1)+"…":t.id;
+  NS_el("text",{class:"node-block-title",x:n.w/2,y:n.h/2,"text-anchor":"middle","dominant-baseline":"central"},g).textContent=label;
+}
+
 function renderNodes(){
   gNodes.innerHTML="";
   const showF=tFind.checked,keep=focusGroup();
+  const isLod=lodActive();
   nodes.forEach(n=>{
     const t=n.t,isFact=t.kind==="fact";n.h=nodeHeight(t);
     const sev=showF?worstSev(t.id):null;
@@ -306,41 +325,47 @@ function renderNodes(){
     if(secured){stroke="#C2382E";sw=2.2;} else if(inRlsPath){stroke="#D97706";sw=2.2;}
     if(sev==="crit"){stroke="#C2382E";sw=2.2;} else if(sev==="warn"){stroke="#B5730A";sw=2;}
     if(inFocus){stroke="#1E6FA8";sw=2.8;}
-    let fill=secured?"#FBE9E7":inRlsPath?"#FEF3C7":t.is_sql_view?"#F0FDFA":"#fff";
 
-    NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill,stroke,"stroke-width":sw,style:"filter:drop-shadow(0 2px 5px rgba(20,27,38,.08))"},g);
-    const hbg=secured?"#FBE9E7":isFact?"#EAF2F8":"#EEF0F3";
-    NS_el("rect",{x:0,y:0,width:n.w,height:HEAD_H,rx:10,fill:hbg},g);
-    NS_el("rect",{x:0,y:HEAD_H-10,width:n.w,height:10,fill:hbg},g);
-    NS_el("line",{x1:0,y1:HEAD_H,x2:n.w,y2:HEAD_H,stroke:"#E2E6EC","stroke-width":1},g);
+    if(isLod){
+      drawNodeBlock(g,n,t,stroke,sw);
+    }else{
+      let fill=secured?"#FBE9E7":inRlsPath?"#FEF3C7":t.is_sql_view?"#F0FDFA":"#fff";
 
-    const nh=NS_el("text",{class:"nh",x:12,y:20,fill:"#161B26"},g);nh.textContent=t.id;
-    let bx=n.w-10;
-    if(secured){const sh=NS_el("text",{x:bx-2,y:20,"text-anchor":"end","font-size":13},g);sh.textContent="🔒";bx-=22;}
-    const bw=isFact?30:26;
-    NS_el("rect",{x:bx-bw,y:9,width:bw,height:14,rx:4,fill:isFact?"#1E6FA8":"#C8CFD8"},g);
-    const bd=NS_el("text",{class:"nbadge",x:bx-bw/2,y:19,"text-anchor":"middle",fill:isFact?"#fff":"#5A626E"},g);bd.textContent=isFact?"FACT":"DIM";
-    bx-=bw+4;
-    if(t.is_sql_view){const svw=18;NS_el("rect",{x:bx-svw,y:9,width:svw,height:14,rx:4,fill:"#0D9488"},g);
-      NS_el("text",{class:"nbadge",x:bx-svw/2,y:19,"text-anchor":"middle",fill:"#fff"},g).textContent="SV";bx-=svw+3;}
-    if(t.alias_of){const aw=14;NS_el("rect",{x:bx-aw,y:9,width:aw,height:14,rx:4,fill:"#7C3AED"},g);
-      NS_el("text",{class:"nbadge",x:bx-aw/2,y:19,"text-anchor":"middle",fill:"#fff"},g).textContent="A";bx-=aw+3;}
-    if(notes[t.id]){const nw=14;NS_el("rect",{x:bx-nw,y:9,width:nw,height:14,rx:4,fill:"#D97706"},g);
-      NS_el("text",{class:"nbadge",x:bx-nw/2,y:19.5,"text-anchor":"middle",fill:"#fff","font-size":10},g).textContent="✎";bx-=nw+3;}
+      NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill,stroke,"stroke-width":sw,"vector-effect":"non-scaling-stroke",style:"filter:drop-shadow(0 2px 5px rgba(20,27,38,.08))"},g);
+      const hbg=secured?"#FBE9E7":isFact?"#EAF2F8":"#EEF0F3";
+      NS_el("rect",{x:0,y:0,width:n.w,height:HEAD_H,rx:10,fill:hbg},g);
+      NS_el("rect",{x:0,y:HEAD_H-10,width:n.w,height:10,fill:hbg},g);
+      NS_el("line",{x1:0,y1:HEAD_H,x2:n.w,y2:HEAD_H,stroke:"#E2E6EC","stroke-width":1},g);
 
-    const cols=visibleCols(t);
-    cols.forEach((c,i)=>{const y=HEAD_H+i*ROW_H;
-      const cn=NS_el("text",{class:"col-name"+(c.key?" col-key":""),x:12,y:y+15,fill:c.key?"#8A93A0":"#2A3140"},g);
-      const maxCh=Math.floor((n.w-30)/7);const nm=c.name.length>maxCh?c.name.slice(0,maxCh-1)+"…":c.name;cn.textContent=(c.key?"🔑 ":"")+nm;
-      let badge=c.role==="MEASURE"?"#":c.role==="FORMULA"?"ƒ":c.key?"":"·";
-      let bc=c.role==="MEASURE"?"#2E8B62":c.role==="FORMULA"?"#1E6FA8":"#9AA4B1";
-      if(c.flag&&showF){badge="●";bc=c.flag==="crit"?"#C2382E":c.flag==="warn"?"#B5730A":"#1E6FA8";}
-      NS_el("text",{x:n.w-12,y:y+15,"text-anchor":"end","font-size":11,"font-family":"var(--mono)","font-weight":700,fill:bc},g).textContent=badge;});
+      const nh=NS_el("text",{class:"nh",x:12,y:20,fill:"#161B26"},g);nh.textContent=t.id;
+      let bx=n.w-10;
+      if(secured){const sh=NS_el("text",{x:bx-2,y:20,"text-anchor":"end","font-size":13},g);sh.textContent="🔒";bx-=22;}
+      const bw=isFact?30:26;
+      NS_el("rect",{x:bx-bw,y:9,width:bw,height:14,rx:4,fill:isFact?"#1E6FA8":"#C8CFD8"},g);
+      const bd=NS_el("text",{class:"nbadge",x:bx-bw/2,y:19,"text-anchor":"middle",fill:isFact?"#fff":"#5A626E"},g);bd.textContent=isFact?"FACT":"DIM";
+      bx-=bw+4;
+      if(t.is_sql_view){const svw=18;NS_el("rect",{x:bx-svw,y:9,width:svw,height:14,rx:4,fill:"#0D9488"},g);
+        NS_el("text",{class:"nbadge",x:bx-svw/2,y:19,"text-anchor":"middle",fill:"#fff"},g).textContent="SV";bx-=svw+3;}
+      if(t.alias_of){const aw=14;NS_el("rect",{x:bx-aw,y:9,width:aw,height:14,rx:4,fill:"#7C3AED"},g);
+        NS_el("text",{class:"nbadge",x:bx-aw/2,y:19,"text-anchor":"middle",fill:"#fff"},g).textContent="A";bx-=aw+3;}
+      if(notes[t.id]){const nw=14;NS_el("rect",{x:bx-nw,y:9,width:nw,height:14,rx:4,fill:"#D97706"},g);
+        NS_el("text",{class:"nbadge",x:bx-nw/2,y:19.5,"text-anchor":"middle",fill:"#fff","font-size":10},g).textContent="✎";bx-=nw+3;}
+
+      const cols=visibleCols(t);
+      cols.forEach((c,i)=>{const y=HEAD_H+i*ROW_H;
+        const cn=NS_el("text",{class:"col-name"+(c.key?" col-key":""),x:12,y:y+15,fill:c.key?"#8A93A0":"#2A3140"},g);
+        const maxCh=Math.floor((n.w-30)/7);const nm=c.name.length>maxCh?c.name.slice(0,maxCh-1)+"…":c.name;cn.textContent=(c.key?"🔑 ":"")+nm;
+        let badge=c.role==="MEASURE"?"#":c.role==="FORMULA"?"ƒ":c.key?"":"·";
+        let bc=c.role==="MEASURE"?"#2E8B62":c.role==="FORMULA"?"#1E6FA8":"#9AA4B1";
+        if(c.flag&&showF){badge="●";bc=c.flag==="crit"?"#C2382E":c.flag==="warn"?"#B5730A":"#1E6FA8";}
+        NS_el("text",{x:n.w-12,y:y+15,"text-anchor":"end","font-size":11,"font-family":"var(--mono)","font-weight":700,fill:bc},g).textContent=badge;});
+    }
 
     enableDrag(g,n);
     g.addEventListener("click",ev=>{ev.stopPropagation();selectTable(t.id,ev.shiftKey||ev.metaKey||ev.ctrlKey);});
     g.addEventListener("dblclick",ev=>{ev.stopPropagation();const tree=joinTree(t.id);focusSet=[...tree];focusMode="tree";selected={type:"table",id:t.id};renderAll();showTable(t.id);});
   });
+  lastLod=isLod;
 }
 function renderAll(){renderEdges();renderNodes();}
 
@@ -351,7 +376,18 @@ function renderAll(){renderEdges();renderNodes();}
 const MIN_K=0.12;
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 let view={x:0,y:0,k:1};
-const applyView=()=>{vp.setAttribute("transform",`translate(${view.x},${view.y}) scale(${view.k})`);updateMinimapViewport();};
+// Semantic zoom: below LOD_T, renderNodes() draws overview blocks instead of cards.
+// lastLod is set by renderNodes() itself each run, so applyView only needs to compare
+// and re-render on a threshold *crossing* — never on every zoom step, never on pan
+// (view.k is unchanged by pan, so lodActive() can't flip and this is a no-op read).
+const LOD_T=0.5;
+const lodActive=()=>view.k<LOD_T;
+let lastLod=false;
+const applyView=()=>{
+  vp.setAttribute("transform",`translate(${view.x},${view.y}) scale(${view.k})`);
+  updateMinimapViewport();
+  if(lodActive()!==lastLod)renderNodes();
+};
 function screenToWorld(cx,cy){const r=svg.getBoundingClientRect();return {x:(cx-r.left-view.x)/view.k,y:(cy-r.top-view.y)/view.k};}
 function nodesBBox(list){
   if(!list||!list.length)return {x0:0,y0:0,x1:1,y1:1};

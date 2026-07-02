@@ -1821,6 +1821,15 @@ importing from the same entry points.
 - Pre-existing `module_health` baseline drift `agents/shared/erd/parser.py::parse_model`
   57→56 (radon recomputation) deliberately NOT committed in this PR — re-baseline
   separately.
+- Loop-unification candidate: `tableau/dag.py` holds two deliberately-separate fixpoint
+  loops (`build_dependency_dag` matches only `[Calculation_\d+]`; `build_formula_levels`
+  matches ALL bracketed refs — see the `# NOTE:` at the top of `build_formula_levels`).
+  Unifying them is a behaviour-affecting change; evaluate alongside the
+  `build_model_cmd` decomposition follow-up.
+- Pre-existing annotation bug carried verbatim: `model_builder.py::filter_unresolvable_formulas`
+  return annotation says `tuple[list[str], list[dict]]` but the function returns
+  `(kept: list[dict], dropped: list[str])` — docstring is correct, annotation reversed.
+  Fix on next touch (PR 2 of the plan touches this area).
 
 ---
 
