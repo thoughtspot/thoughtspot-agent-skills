@@ -27,6 +27,7 @@ from ts_cli.tableau_translate import (
     detect_param_conflicts,
     dump_tml_yaml,
     ensure_else_clause,
+    fix_in_parentheses,
     map_date_functions,
     map_functions,
     map_parameter_names,
@@ -224,6 +225,18 @@ class TestConvertScalarMaxMin:
         )
         assert result.startswith("greatest ( ")
         assert result.endswith(" , 0 )")
+
+    def test_scalar_max_after_aggregate_max(self):
+        result = convert_scalar_max_min("MAX([Sales]) + MAX([a], [b])")
+        assert result == "MAX([Sales]) + greatest ( [a] , [b] )"
+
+    def test_scalar_min_after_aggregate_min(self):
+        result = convert_scalar_max_min("MIN([Sales]) / MIN([Cost], 1)")
+        assert result == "MIN([Sales]) / least ( [Cost] , 1 )"
+
+    def test_nested_scalar_inside_aggregate_args(self):
+        result = convert_scalar_max_min("MAX(MAX([a], [b]))")
+        assert result == "MAX(greatest ( [a] , [b] ))"
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +592,63 @@ class TestMapFunctions:
         assert "ifnull ( [X] , 0 )" in result
         assert "ifnull ( [Y] , 0 )" in result
 
+    def test_left(self):
+        assert map_functions("LEFT([Name], 3)") == "substr ( [Name] , 0 , 3 )"
+
+    def test_right(self):
+        assert map_functions("RIGHT([Name], 2)") == "substr ( [Name] , strlen ( [Name] ) - 2 , 2 )"
+
+    def test_mid(self):
+        assert map_functions("MID([Name], 2, 5)") == "substr ( [Name] , 2 - 1 , 5 )"
+
+    def test_upper(self):
+        assert map_functions("UPPER([Name])") == 'sql_string_op ( "UPPER({0})" , [Name] )'
+
+    def test_startswith(self):
+        assert map_functions("STARTSWITH([Name], 'A')") == "( strpos ( [Name] , 'A' ) = 1 )"
+
+    def test_endswith(self):
+        assert map_functions("ENDSWITH([Name], 'Z')") == \
+            "( substr ( [Name] , strlen ( [Name] ) - strlen ( 'Z' ) , strlen ( 'Z' ) ) = 'Z' )"
+
+    def test_square(self):
+        assert map_functions("SQUARE([X])") == "pow ( [X] , 2 )"
+
+    def test_left_nested_in_if(self):
+        assert map_functions("IF LEFT([Code], 1) = 'A' THEN 1 END") == \
+            "IF substr ( [Code] , 0 , 1 ) = 'A' THEN 1 END"
+
+    def test_self_nested_left(self):
+        assert map_functions("LEFT(LEFT([a], 5), 2)") == "substr ( substr ( [a] , 0 , 5 ) , 0 , 2 )"
+
+    def test_self_nested_right(self):
+        assert map_functions("RIGHT(RIGHT([x], 10), 5)") == \
+            "substr ( substr ( [x] , strlen ( [x] ) - 10 , 10 ) , strlen ( substr ( [x] , strlen ( [x] ) - 10 , 10 ) ) - 5 , 5 )"
+
+    def test_self_nested_upper(self):
+        assert map_functions("UPPER(UPPER([a]))") == \
+            'sql_string_op ( "UPPER({0})" , sql_string_op ( "UPPER({0})" , [a] ) )'
+
+    def test_sign(self):
+        assert map_functions("SIGN([X])") == \
+            "( if ( [X] > 0 ) then 1 else if ( [X] < 0 ) then -1 else 0 )"
+
+    def test_trig_converts_radians_to_degrees(self):
+        assert map_functions("SIN([X])") == "sin ( [X] * 180 / 3.14159265358979 )"
+
+    def test_pi(self):
+        assert map_functions("PI()") == "3.14159265358979"
+
+    def test_radians(self):
+        assert map_functions("RADIANS([D])") == "( [D] * 3.14159265358979 / 180 )"
+
+    def test_degrees(self):
+        assert map_functions("DEGREES([R])") == "( [R] * 180 / 3.14159265358979 )"
+
+    def test_dateparse_flips_args(self):
+        assert map_functions("DATEPARSE('yyyy-MM-dd', [DateStr])") == \
+            "to_date ( [DateStr] , 'yyyy-MM-dd' )"
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
@@ -625,6 +695,23 @@ class TestMapDateFunctions:
         result = map_date_functions("DATEDIFF('hour', [A], [B])")
         assert "diff_time ( [B] , [A] ) / 3600" in result
 
+    def test_datepart_unknown_unit_left_untranslated(self):
+        # 'minute' has no ThoughtSpot extractor — must NOT fabricate minute(...)
+        result = map_date_functions("DATEPART('minute', [TS])")
+        assert "minute (" not in result and "DATEPART" in result
+
+    def test_datediff_unknown_unit_left_untranslated(self):
+        result = map_date_functions("DATEDIFF('fortnight', [A], [B])")
+        assert "diff_fortnights" not in result and "DATEDIFF" in result
+
+    def test_dateadd_unknown_unit_left_untranslated(self):
+        result = map_date_functions("DATEADD('fortnight', 2, [D])")
+        assert "add_fortnights" not in result and "DATEADD" in result
+
+    def test_datetrunc_unknown_unit_left_untranslated(self):
+        result = map_date_functions("DATETRUNC('hour', [TS])")
+        assert "start_of_hour" not in result and "DATETRUNC" in result
+
 
 # ---------------------------------------------------------------------------
 # INT conversion
@@ -663,6 +750,28 @@ class TestConvertStringConcat:
         assert "+" not in result
         assert "then concat ( [A] , ' : ' , [B] )" in result
         assert "then concat ( [A] , ' : ' , [B] , ' : ' , [C] )" in result
+
+
+# ---------------------------------------------------------------------------
+# IN (...) -> in {...}
+# ---------------------------------------------------------------------------
+
+class TestFixInParentheses:
+    def test_basic_in(self):
+        assert fix_in_parentheses("[Region] IN ('East', 'West')") == "[Region] in { 'East', 'West' }"
+
+    def test_in_after_not_in_still_converted(self):
+        result = fix_in_parentheses("NOT [A] IN ('x') AND [B] IN ('y', 'z')")
+        assert "in { 'y', 'z' }" in result
+
+    def test_in_after_postfix_not_in_still_converted(self):
+        # Guard fires only on the postfix form: `[A] NOT IN (` — pre-fix this
+        # aborted the scan and left the second IN unconverted.
+        result = fix_in_parentheses("[A] NOT IN ('x') AND [B] IN ('y', 'z')")
+        assert "in { 'y', 'z' }" in result
+
+    def test_no_in_unchanged(self):
+        assert fix_in_parentheses("[A] + [B]") == "[A] + [B]"
 
 
 # ---------------------------------------------------------------------------
@@ -902,6 +1011,34 @@ class TestValidateOutput:
     def test_unique_count_underscore(self):
         errors = validate_output("unique_count([X])")
         assert any("unique_count" in e for e in errors)
+
+    def test_unmapped_function_flagged(self):
+        errors = validate_output("SPLIT ( [Name] , '-' , 1 )")
+        assert any("SPLIT" in e for e in errors)
+
+    def test_username_flagged(self):
+        errors = validate_output("if ( USERNAME ( ) = 'x' ) then 1 else 0")
+        assert any("USERNAME" in e for e in errors)
+
+    def test_untranslated_datepart_flagged(self):
+        errors = validate_output("DATEPART ( 'minute' , [TS] )")
+        assert any("DATEPART" in e for e in errors)
+
+    def test_untranslated_datediff_flagged(self):
+        errors = validate_output("DATEDIFF ( 'fortnight' , [A] , [B] )")
+        assert any("DATEDIFF" in e for e in errors)
+
+    def test_untranslated_dateadd_flagged(self):
+        errors = validate_output("DATEADD ( 'fortnight' , 2 , [D] )")
+        assert any("DATEADD" in e for e in errors)
+
+    def test_untranslated_datetrunc_flagged(self):
+        errors = validate_output("DATETRUNC ( 'hour' , [TS] )")
+        assert any("DATETRUNC" in e for e in errors)
+
+    def test_not_in_flagged(self):
+        errors = validate_output("if ( [A] NOT IN ('x') ) then 1 else 0")
+        assert any("NOT IN" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

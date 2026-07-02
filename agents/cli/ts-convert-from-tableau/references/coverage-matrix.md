@@ -34,30 +34,26 @@ Use this as the canonical limitations reference.
 | 16 | `IFNULL(a, b)`, `ZN(a)` | `ifnull ( a , b )` | |
 | 17 | `ISNULL(a)` | `isnull ( a )` | |
 | 18 | `CONTAINS`, `TRIM`, `REPLACE`, `FIND` | `contains`, `trim`, `replace`, `strpos` | |
-| 19 | `LEFT/MID/RIGHT/LEN` | `substr()` / `strlen()` | Index adjustment (Tableau is 1-based) |
-| 20 | `UPPER/LOWER` | `sql_string_op("UPPER/LOWER({0})")` | Pass-through |
-| 21 | `STARTSWITH/ENDSWITH` | `strpos(s,sub) = 1` / `substr` idiom | |
-| 22 | `PROPER/ASCII/CHAR` | `sql_string_op("INITCAP/ASCII/CHR({0})")` | Pass-through |
-| 23 | `SPLIT(s, delim, n)` | `substr`/`strpos` chain | Not verified |
-| 24 | `DATEDIFF` (all units) | `diff_days`/`diff_months`/`diff_years`/`diff_time` | Args reversed vs Tableau |
-| 25 | `DATETRUNC` | `start_of_month/quarter/week/year` | |
-| 26 | `DATEADD` | `add_days/add_months/add_years` | |
-| 27 | `DATEPART` (all units) | Per-unit functions | `month`→`month_number`, `quarter`→`quarter_number`, `week`→`week_number_of_year`, `dayofyear`→`day_number_of_year`, `weekday`→`day_of_week` |
-| 28 | `DATENAME('month', d)` | `month ( [date] )` | Returns name, not number |
-| 29 | `DATEPARSE(format, s)` | `to_date ( s , format )` | Args flipped vs Tableau |
+| 19 | `LEFT/MID/RIGHT/LEN` | `substr()` / `strlen()` | CLI-translated (v0.26.0); index adjustment (Tableau is 1-based) |
+| 20 | `UPPER/LOWER` | `sql_string_op("UPPER/LOWER({0})")` | CLI-translated (v0.26.0) |
+| 21 | `STARTSWITH/ENDSWITH` | `strpos(s,sub) = 1` / `substr` idiom | CLI-translated (v0.26.0) |
+| 24 | `DATEDIFF` (all units) | `diff_days`/`diff_months`/`diff_years`/`diff_time` | Args reversed vs Tableau. `day/month/year/hour/minute/week` supported; any other unit (e.g. `quarter`) rejected with reason at translate time (v0.26.0) |
+| 25 | `DATETRUNC` | `start_of_month/quarter/week/year`; `day` → `date()` | `hour`/`minute`/`second` (and any other unit not in the map) rejected with reason at translate time (v0.26.0) |
+| 26 | `DATEADD` | `add_days/add_months/add_years` | Only `day/month/year` supported; other units (e.g. `week`) rejected with reason at translate time (v0.26.0) |
+| 27 | `DATEPART` (all units) | Per-unit functions | `month`→`month_number`, `quarter`→`quarter_number`, `week`→`week_number_of_year`, `dayofyear`→`day_number_of_year`, `weekday`→`day_of_week`. Units outside this map rejected with reason at translate time (v0.26.0) |
+| 28 | `DATENAME('month', d)` | `month ( [date] )` | Returns name, not number. Only `month` supported — other units rejected with reason at translate time (v0.26.0) |
+| 29 | `DATEPARSE(format, s)` | `to_date ( s , format )` | CLI-translated (v0.26.0); args flipped vs Tableau |
 | 30 | `TODAY`/`NOW`/`DATE`/`YEAR`/`MONTH`/`DAY` | `today`/`now`/`date`/`year`/`month_number`/`day` | |
 | 31 | `ABS`/`ROUND`/`CEILING`/`FLOOR`/`SQRT`/`POWER`/`LOG`/`LN`/`EXP` | `abs`/`round`/`ceil`/`floor`/`sqrt`/`pow`/`log10`/`ln`/`exp` | |
-| 32 | `SIN/COS/TAN` (and inverse trig) | Radians-to-degrees conversion applied | |
-| 33 | `PI()/RADIANS()/DEGREES()` | Literal composites | No native equivalent |
+| 32 | `SIN/COS/TAN` | Radians-to-degrees conversion applied | CLI-translated (v0.26.0). Inverse trig (`ACOS`/`ASIN`/`ATAN`) is NOT implemented — passes through untranslated and is not caught by the fail-loud validator |
+| 33 | `PI()/RADIANS()/DEGREES()` | Literal composites | CLI-translated (v0.26.0); no native equivalent |
 | 34 | `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Partial; truncate-toward-zero |
 | 35 | `FLOAT(x)/STR(x)` | `to_double(x)/to_string(x)` | |
 | 36 | `DATETIME(expr)` cast | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` | Pass-through |
 | 37 | String concat (`+` on strings) | `concat ( a , b )` | TS `+` is numeric-only |
-| 38 | `SIGN(x)/SQUARE(x)` | `if/then` composite / `pow(x,2)` | |
+| 38 | `SIGN(x)/SQUARE(x)` | `if/then` composite / `pow(x,2)` | CLI-translated (v0.26.0) |
 | 39 | `MIN/MAX` (scalar, 2-arg) | `if ( a < b ) then a else b` / vice versa | |
 | 40 | Division by zero | `safe_divide()` or `if ( b = 0 ) then null else a/b` | |
-| 41 | `REGEXP_EXTRACT/MATCH/REPLACE` | `sql_string_op/sql_bool_op` | Pass-through; Snowflake REGEXP_*; Not verified |
-| 42 | `FINDNTH(s, sub, n)` | `sql_int_op("REGEXP_INSTR({0},{1},1,{2})")` | Pass-through; Not verified |
 | 108 | `ISMEMBEROF("group")` | `ts_groups = 'group'` | Multi-value list membership handled natively with `=` |
 
 ### Formula Translation — Aggregates
@@ -192,6 +188,23 @@ Use this as the canonical limitations reference.
 
 ## Unmapped Constructs (Limitations)
 
+### Rejected at Translate Time (ts-cli v0.26.0)
+
+These functions have no CLI implementation. `ts tableau translate-formulas` detects them
+(`validate.py::_UNMAPPED_FUNCTIONS`) and skips the formula with an `unmapped Tableau
+function: X` reason instead of emitting broken TML or silently passing the Tableau syntax
+through untranslated.
+
+| # | Tableau Function(s) | Notes |
+|---|---|---|
+| U1 | `SPLIT(s, delim, n)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U2 | `FINDNTH(s, sub, n)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U3 | `PROPER(s)` / `ASCII(s)` / `CHAR(n)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U4 | `REGEXP_MATCH(s, pat)` / `REGEXP_EXTRACT(s, pat)` / `REGEXP_EXTRACT_NTH(s, pat, n)` / `REGEXP_REPLACE(s, pat, r)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U5 | `MAKEDATE(y, m, d)` / `MAKETIME(h, m, s)` / `MAKEDATETIME(date, time)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U6 | `ISDATE(s)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U7 | `USERNAME()` / `FULLNAME()` / `ISUSERNAME(s)` / `ISFULLNAME(s)` / `USERDOMAIN()` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+
 ### HIGH — Functionality loss, no workaround
 
 | # | Tableau Construct | Reason | Workaround |
@@ -209,7 +222,7 @@ Use this as the canonical limitations reference.
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
 | L8 | Set actions (`<action>` on a set) | No interactive set membership changes in TS | Omit + log |
-| L9 | All SQL pass-through functions (RANK partitioned, DENSE_RANK, SIZE, REGEXP, UPPER/LOWER, PROPER, ASCII, CHAR) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review |
+| L9 | SQL pass-through functions the CLI emits (RANK partitioned, DENSE_RANK, SIZE, UPPER, LOWER) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review. `PROPER`/`ASCII`/`CHAR`/`REGEXP_*`/`FINDNTH` are a distinct case — the CLI does not emit a pass-through for them at all; see "Rejected at Translate Time" above |
 | L10 | Geospatial formulas (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) | No spatial data types or constructors | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
 | L11 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |
 | L12 | Liveboard layout coordinate system | Exact ThoughtSpot grid units not fully verified | Open-items #6 |
@@ -246,3 +259,7 @@ ThoughtSpot. This is only a limitation if an admin has explicitly turned it off 
 Admin > Search & SpotIQ. All pass-through formulas are flagged with `PT1` in the audit
 report for visibility. Native alternatives are used wherever possible — SQL pass-through
 is the last resort (see the translation priority order in `tableau-formula-translation.md`).
+`PROPER`/`ASCII`/`CHAR`/`REGEXP_*`/`FINDNTH` are documented in `tableau-formula-translation.md`
+as pass-through candidates but the CLI does not implement them (v0.26.0) — it rejects the
+formula with a reason instead of emitting the pass-through, so a manual `sql_string_op`/
+`sql_bool_op`/`sql_int_op` formula (per that reference) is required.

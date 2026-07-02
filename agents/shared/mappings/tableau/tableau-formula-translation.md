@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: tableau — 2026-07 (v0.26.0 CLI alignment) -->
 
 # Tableau → ThoughtSpot Formula Translation
 
@@ -38,6 +38,26 @@ CLI command implements this pipeline automatically.
 
 After all steps, **validate**: reject any formula still containing `END`, `CASE`, `WHEN`,
 `unique_count` (underscore), `date_trunc`, bare `+` on strings, or `ELSEIF`.
+
+### CLI implementation status (v0.26.0)
+
+As of ts-cli **v0.26.0**, the `ts tableau translate-formulas` command implements Step 10's
+function table directly (not just documents it) for: `LEFT`, `RIGHT`, `MID`, `UPPER`, `LOWER`,
+`STARTSWITH`, `ENDSWITH`, `SQUARE`, `SIGN`, `SIN`, `COS`, `TAN`, `PI`, `RADIANS`, `DEGREES`,
+and `DATEPARSE`. Before v0.26.0 these were silent pass-throughs — the Tableau syntax was left
+untranslated in the output with no error. Nested same-function calls inside these functions'
+arguments (e.g. `UPPER(LEFT(s, 3))`) are translated recursively.
+
+Functions with no CLI implementation are **rejected at translate time** instead of being
+passed through untranslated: `SPLIT`, `FINDNTH`, `PROPER`, `ASCII`, `CHAR`, `REGEXP_MATCH`,
+`REGEXP_EXTRACT`, `REGEXP_EXTRACT_NTH`, `REGEXP_REPLACE`, `MAKEDATE`, `MAKETIME`,
+`MAKEDATETIME`, `ISDATE`, `USERNAME`, `FULLNAME`, `ISUSERNAME`, `ISFULLNAME`, `USERDOMAIN`.
+The same fail-loud treatment applies to all five date converters (`DATEPART`, `DATENAME`,
+`DATETRUNC`, `DATEDIFF`, `DATEADD`) when the unit isn't in that function's unit map — the
+call is left in place rather than mapped to a fabricated ThoughtSpot function name (e.g.
+`minute()`, `diff_fortnights()`, `add_quarters()`, `start_of_hour()` do not exist). In every
+case, `validate_output` flags the surviving call as `unmapped Tableau function: X` and the
+formula is skipped with that reason instead of failing import with an opaque TML error.
 
 ### CLI command
 
