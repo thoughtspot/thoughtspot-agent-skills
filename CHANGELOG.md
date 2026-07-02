@@ -7,6 +7,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-07-02
 - feat: add `check_module_health` validator — a cyclomatic-complexity ratchet (radon) that blocks new/worsening god-functions against a committed baseline; wired into pre-commit (staged) and CI (full). Adds an automated component to repo-audit Angle 4 (Tools quality)
+- chore: remove dead code — `agents/cli/ts-audit/analyzer.py` + `report.py` and their orphaned tests (4,722 lines), superseded by the codified engine in `tools/ts-cli/ts_cli/audit/*` (the audit skill runs via `ts audit`, not these files; one test already imported a since-deleted module). BL-069 raised to high priority; BL-070 marked partially done
 - chore: remove dead import (`render_json`) in ts-cli metadata command (vulture)
 - fix: audit cluster heatmap no longer rolls unattributable findings onto the first model in multi-model audits (was inflating that model's severity across angles)
 - fix: ERD fact/dimension classifier — an outgoing join alone no longer marks a table a fact; only real (visible) measures do, with measureless pass-through tables as bridges

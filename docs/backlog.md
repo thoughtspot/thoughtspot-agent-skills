@@ -1438,7 +1438,7 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 ## BL-059 — ts-audit: set (cohort) usage analysis checks
 
 **Source:** Live testing on champ-staging (2026-06-26) — Dunder Mifflin Sales model (`0e4406c7-d978-4be7-abd7-c34e8f7da835`, 44 reusable cohorts)
-**Affects:** `agents/cli/ts-audit/analyzer.py` (new checks), `agents/cli/ts-audit/report.py` (report sections)
+**Affects:** `tools/ts-cli/ts_cli/audit/checks_data.py` (new checks), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
 **Status:** Open — research complete, implementation deferred
 **Related:** `agents/shared/schemas/thoughtspot-sets-tml.md` (set TML structure reference)
 
@@ -1778,7 +1778,14 @@ Build `ts tableau build-liveboard` in ts-cli:
 
 **Source:** codification sweep 2026-06-29 (angle #11b), architectural observation.
 **Affects:** `tools/ts-cli/ts_cli/tableau_translate.py`, `tools/ts-cli/ts_cli/model_builder.py`.
-**Status:** OPEN.
+**Status:** OPEN — **HIGH PRIORITY** (flagged 2026-07-02).
+**Priority rationale:** `check_module_health` (radon) confirms this file holds the repo's
+worst complexity — `ensure_else_clause` **F (47)**, `validate_pre_import` **E (32)**,
+`normalize_operator_spacing` **D (27)**, `translate_formulas` **D (25)**, `build_dependency_dag`
+**D (21)** — 5 of the repo's highest-complexity functions in one 2,543-line module. It is the
+single largest maintainability risk as contributor count grows, and the complexity ratchet now
+prevents it from getting *worse* but does not pay down the existing debt. Prioritise ahead of
+the 2026-12-31 target.
 
 ### Problem
 
@@ -1811,7 +1818,13 @@ importing from the same entry points.
 
 **Source:** architectural review 2026-07-01, repo-audit angle #4 (tools quality).
 **Affects:** `tools/validate/`, `tools/ts-cli/ts_cli/`.
-**Status:** OPEN.
+**Status:** PARTIALLY DONE (2026-07-02) — the *complexity* dimension is now gated by
+`check_module_health.py` (radon cyclomatic-complexity ratchet, wired into pre-commit + CI),
+and repo-audit angle #4 has been updated to reference it. **Remaining scope:** the *file-size*
+(line-count) dimension — a soft-warn at 500 lines / hard-fail at 1000 on new-or-modified
+`ts_cli` modules with a baseline allowlist. Complexity and size are complementary signals
+(a file can be long-but-simple or short-but-gnarly), so the line-count gate is still worth
+adding.
 
 ### Problem
 

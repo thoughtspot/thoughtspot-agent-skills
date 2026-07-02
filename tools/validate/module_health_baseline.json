@@ -1,11 +1,4 @@
 {
-  "agents/cli/ts-audit/analyzer.py::_check_fanout_mitigations": 16,
-  "agents/cli/ts-audit/analyzer.py::check_a5": 18,
-  "agents/cli/ts-audit/analyzer.py::check_d7": 20,
-  "agents/cli/ts-audit/analyzer.py::check_h8": 16,
-  "agents/cli/ts-audit/report.py::_render_check_summary": 17,
-  "agents/cli/ts-audit/report.py::_render_check_tables": 17,
-  "agents/cli/ts-audit/report.py::_render_model_cards": 22,
   "agents/cli/ts-dependency-manager/references/build_coverage.py::_format_summary": 17,
   "agents/shared/erd/parser.py::parse_model": 57,
   "tools/ts-cli/ts_cli/audit/__init__.py::_build_ai_analysis": 20,
