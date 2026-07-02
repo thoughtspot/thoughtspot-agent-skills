@@ -130,10 +130,19 @@ def test_stitch_table_join_sets_origin_and_cardinality():
     assert j["type"] == "INNER"
 
 
-def test_unmatched_join_stays_model_local():
-    m = parser.parse_model(_mini_model(), _mini_tables())
-    j = next(j for j in m["joins"] if j["name"] == "ORDERS_to_REGION_local")
-    assert j["origin"] == "model"
+def test_join_to_table_absent_from_model_is_dropped():
+    """A join whose `with:` target is not a table in the model (here REGION, which
+    the mini fixture references but never lists in model_tables) cannot occur in a
+    valid ThoughtSpot export. If malformed TML contains one, the parser drops it —
+    rather than emitting a join with a non-existent endpoint that the viewer would
+    have to defend against — and logs the drop. Regression for the GTM investigation
+    (the crash was actually aliased joins, not this; this guards genuinely broken TML)."""
+    msgs = []
+    m = parser.parse_model(_mini_model(), _mini_tables(), log=msgs.append)
+    names = {j["name"] for j in m["joins"]}
+    assert "ORDERS_to_REGION_local" not in names   # dropped (REGION not in model_tables)
+    assert "ORDERS_to_CUSTOMER" in names            # a real join is unaffected
+    assert any("ORDERS_to_REGION_local" in msg and "malformed" in msg for msg in msgs)
 
 
 def test_rls_extracted_from_table_tml():
@@ -185,6 +194,45 @@ def test_sql_view_detected():
     t = m["tables"][0]
     assert t["is_sql_view"] is True
     assert "SELECT" in t["sql_query"]
+
+
+def test_aliased_model_tables_are_distinct_nodes_and_joins_resolve():
+    """The same physical table joined multiple times is distinguished by an
+    `alias:` field on the model_table, and a join's `with:` references that
+    alias. Each alias must become its own node, and EVERY join endpoint must
+    resolve to a real node id — the viewer indexes adjacency by node id and
+    throws (`Cannot read properties of undefined`) on a dangling endpoint.
+    Regression for the GTM model (SFDC_OPPORTUNITY_1/_2/_3)."""
+    model = {"guid": "g", "model": {
+        "name": "M",
+        "model_tables": [
+            {"name": "FACT", "joins": [
+                {"with": "OPP_1", "referencing_join": "j1", "type": "RIGHT_OUTER"},
+                {"with": "OPP_2", "referencing_join": "j2", "type": "RIGHT_OUTER"},
+            ]},
+            {"name": "OPP"},                    # base (un-aliased) instance
+            {"name": "OPP", "alias": "OPP_1"},  # alias instance 1
+            {"name": "OPP", "alias": "OPP_2"},  # alias instance 2
+        ],
+        "columns": [
+            {"name": "Amt", "column_id": "FACT::amt",
+             "properties": {"column_type": "MEASURE"}},
+            {"name": "Stage", "column_id": "OPP_1::stage",
+             "properties": {"column_type": "ATTRIBUTE"}},
+        ],
+    }}
+    m = parser.parse_model(model, {})
+    ids = {t["id"] for t in m["tables"]}
+    assert {"FACT", "OPP", "OPP_1", "OPP_2"} <= ids
+    # No dangling join endpoints — this is what crashed the viewer.
+    for j in m["joins"]:
+        assert j["from"] in ids, f"join {j['name']} from {j['from']} dangling"
+        assert j["to"] in ids, f"join {j['name']} to {j['to']} dangling"
+    # An alias node carries the columns whose column_id is prefixed by the alias.
+    opp1 = next(t for t in m["tables"] if t["id"] == "OPP_1")
+    assert any(c["name"] == "Stage" for c in opp1["cols"])
+    # Alias nodes record their physical table even without a Table TML.
+    assert opp1["alias_of"] == "OPP"
 
 
 def test_alias_detected():
