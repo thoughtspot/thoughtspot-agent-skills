@@ -1036,6 +1036,10 @@ class TestValidateOutput:
         errors = validate_output("DATETRUNC ( 'hour' , [TS] )")
         assert any("DATETRUNC" in e for e in errors)
 
+    def test_not_in_flagged(self):
+        errors = validate_output("if ( [A] NOT IN ('x') ) then 1 else 0")
+        assert any("NOT IN" in e for e in errors)
+
 
 # ---------------------------------------------------------------------------
 # Parameter conflict detection

@@ -20,6 +20,7 @@ _FORBIDDEN_PATTERNS = [
     (re.compile(r"\bunique_count\b"), "'unique_count' (should be 'unique count')"),
     (re.compile(r"\bdate_trunc\b", re.IGNORECASE), "'date_trunc' (should be 'start_of_*')"),
     (re.compile(r"\bELSEIF\b", re.IGNORECASE), "'ELSEIF' (should be 'else if')"),
+    (re.compile(r"\bNOT\s+IN\s*\(", re.IGNORECASE), "'NOT IN (...)' (unsupported in ThoughtSpot — rewrite as negated conditions)"),
 ]
 
 # Tableau functions with no ThoughtSpot equivalent (or not yet implemented).
