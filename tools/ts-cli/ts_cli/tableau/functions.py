@@ -254,22 +254,34 @@ def map_date_functions(expr: str) -> str:
 def _convert_datetrunc(expr: str) -> str:
     _PAT = re.compile(r"\bDATETRUNC\s*\(", re.IGNORECASE)
     result = expr
+    search_start = 0
     safety = 0
     while safety < 20:
-        m = _PAT.search(result)
+        m = _PAT.search(result, search_start)
         if not m:
             break
         safety += 1
         extracted = _extract_function_args(result, m.end() - 1)
         if not extracted:
-            break
+            search_start = m.end()
+            continue
         args, end_pos = extracted
         if len(args) >= 2:
             unit = args[0].strip().strip("'\"").lower()
             date_expr = args[1].strip()
-            ts_func = _DATETRUNC_UNIT_MAP.get(unit, f"start_of_{unit}")
+            ts_func = _DATETRUNC_UNIT_MAP.get(unit)
+            if ts_func is None:
+                # Unknown unit — no ThoughtSpot start_of_* function exists.
+                # Leave the original DATETRUNC(...) text in place rather than
+                # fabricate a nonexistent function name; validate_output
+                # flags any surviving DATETRUNC call as unmapped.
+                search_start = end_pos
+                continue
             replacement = f"{ts_func} ( {date_expr} )"
             result = result[:m.start()] + replacement + result[end_pos:]
+            search_start = m.start() + len(replacement)
+        else:
+            search_start = m.end()
     return result
 
 

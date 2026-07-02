@@ -708,6 +708,10 @@ class TestMapDateFunctions:
         result = map_date_functions("DATEADD('fortnight', 2, [D])")
         assert "add_fortnights" not in result and "DATEADD" in result
 
+    def test_datetrunc_unknown_unit_left_untranslated(self):
+        result = map_date_functions("DATETRUNC('hour', [TS])")
+        assert "start_of_hour" not in result and "DATETRUNC" in result
+
 
 # ---------------------------------------------------------------------------
 # INT conversion
@@ -1027,6 +1031,10 @@ class TestValidateOutput:
     def test_untranslated_dateadd_flagged(self):
         errors = validate_output("DATEADD ( 'fortnight' , 2 , [D] )")
         assert any("DATEADD" in e for e in errors)
+
+    def test_untranslated_datetrunc_flagged(self):
+        errors = validate_output("DATETRUNC ( 'hour' , [TS] )")
+        assert any("DATETRUNC" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
