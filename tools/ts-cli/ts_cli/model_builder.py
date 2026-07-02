@@ -24,6 +24,11 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for back-compat
+    build_formula_levels,
+    resolve_all_internal_refs,
+)
+
 
 # ---------------------------------------------------------------------------
 # 1. Formula cross-reference prefix
@@ -484,99 +489,6 @@ def _tableau_type_to_ts(datatype: str) -> str:
         "datetime": "DATE_TIME",
     }
     return _map.get(datatype, "VARCHAR")
-
-
-# ---------------------------------------------------------------------------
-# Dependency level computation (must run BEFORE resolve_all_internal_refs)
-# ---------------------------------------------------------------------------
-
-def build_formula_levels(
-    calcs: list[dict],
-    calc_map: dict[str, str],
-) -> dict[str, int]:
-    """Build dependency levels from raw (pre-resolved) calculated fields.
-
-    Must be called BEFORE resolve_all_internal_refs — it relies on the
-    original [Calculation_NNN] and copy-style [Field (copy)_NNN] refs
-    still being present in the formula text.
-
-    Matches ALL bracketed refs against the calc_map to detect dependencies,
-    unlike build_dependency_dag which only matches [Calculation_\\d+].
-    """
-    all_captions = {c.get("caption", "") for c in calcs if c.get("caption")}
-
-    bracket_to_caption: dict[str, str] = {}
-    for key, caption in calc_map.items():
-        bracketed = f"[{key}]" if not key.startswith("[") else key
-        bracket_to_caption[bracketed] = caption
-
-    caption_deps: dict[str, set[str]] = {}
-    for c in calcs:
-        caption = c.get("caption", "")
-        formula = c.get("formula", "")
-        deps: set[str] = set()
-        for ref in re.findall(r"\[[^\]]+\]", formula):
-            dep_caption = bracket_to_caption.get(ref)
-            if dep_caption and dep_caption != caption and dep_caption in all_captions:
-                deps.add(dep_caption)
-        caption_deps[caption] = deps
-
-    levels: dict[str, int] = {}
-    changed = True
-    while changed:
-        changed = False
-        for caption, deps in caption_deps.items():
-            if caption in levels:
-                continue
-            if not deps:
-                levels[caption] = 0
-                changed = True
-            elif all(d in levels for d in deps):
-                max_dep = max(levels[d] for d in deps)
-                levels[caption] = max_dep + 1
-                changed = True
-
-    for caption in caption_deps:
-        if caption not in levels:
-            levels[caption] = 0
-
-    return levels
-
-
-# ---------------------------------------------------------------------------
-# Pre-translation: resolve ALL internal references to display names
-# ---------------------------------------------------------------------------
-
-def resolve_all_internal_refs(
-    calcs: list[dict],
-    calc_map: dict[str, str],
-) -> list[dict]:
-    """Replace ALL internal refs ([Calculation_NNN] and copy-style) with captions.
-
-    Tableau TWBs use two reference styles:
-      [Calculation_1234567890] — original calc field
-      [Field Name (copy)_1234567890] — copied from another datasource
-
-    The existing translate pipeline only resolves [Calculation_NNN].
-    This function resolves BOTH by substituting any bracketed reference
-    that matches a calc_map key with the corresponding caption.
-
-    Returns a new list of calcs with resolved formulas (caption field).
-    """
-    bracket_map = {}
-    for internal, caption in calc_map.items():
-        bracket_map[f"[{internal}]"] = f"[{caption}]"
-
-    resolved = []
-    for c in calcs:
-        formula = c.get("formula", "")
-        for internal_ref, caption_ref in bracket_map.items():
-            if internal_ref in formula:
-                formula = formula.replace(internal_ref, caption_ref)
-        entry = dict(c)
-        entry["formula"] = formula
-        resolved.append(entry)
-    return resolved
 
 
 # ---------------------------------------------------------------------------
