@@ -225,6 +225,18 @@ class TestConvertScalarMaxMin:
         assert result.startswith("greatest ( ")
         assert result.endswith(" , 0 )")
 
+    def test_scalar_max_after_aggregate_max(self):
+        result = convert_scalar_max_min("MAX([Sales]) + MAX([a], [b])")
+        assert result == "MAX([Sales]) + greatest ( [a] , [b] )"
+
+    def test_scalar_min_after_aggregate_min(self):
+        result = convert_scalar_max_min("MIN([Sales]) / MIN([Cost], 1)")
+        assert result == "MIN([Sales]) / least ( [Cost] , 1 )"
+
+    def test_nested_scalar_inside_aggregate_args(self):
+        result = convert_scalar_max_min("MAX(MAX([a], [b]))")
+        assert result == "MAX(greatest ( [a] , [b] ))"
+
 
 # ---------------------------------------------------------------------------
 # Pre-4. Date arithmetic (BL-054)

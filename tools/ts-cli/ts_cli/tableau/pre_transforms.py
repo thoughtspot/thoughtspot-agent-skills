@@ -158,16 +158,18 @@ def _convert_scalar_fn(expr: str, fn: str, ts_fn: str) -> str:
     _PAT = re.compile(rf"\b{fn}\s*\(", re.IGNORECASE)
 
     result = expr
+    search_start = 0
     safety = 0
     while safety < 50:
-        m = _PAT.search(result)
+        m = _PAT.search(result, search_start)
         if not m:
             break
         safety += 1
 
         extracted = _extract_function_args(result, m.end() - 1)
         if not extracted:
-            break
+            search_start = m.end()
+            continue
         args, end_pos = extracted
 
         if len(args) == 2:
@@ -175,8 +177,12 @@ def _convert_scalar_fn(expr: str, fn: str, ts_fn: str) -> str:
             b = args[1].strip()
             replacement = f"{ts_fn} ( {a} , {b} )"
             result = result[:m.start()] + replacement + result[end_pos:]
-        elif len(args) == 1:
-            break
+            # Rescan from the replacement start: args may contain nested calls
+            search_start = m.start()
+        else:
+            # Aggregate (1-arg) or 3+ args: skip past this match only, keep
+            # scanning — its args may still contain a scalar MAX/MIN
+            search_start = m.end()
 
     return result
 
