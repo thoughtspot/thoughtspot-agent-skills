@@ -103,3 +103,63 @@ def strip_csq_suffixes(formulas: list[dict]) -> int:
             f["expr"] = new_expr
             changed += 1
     return changed
+
+
+def collect_existing_model_context(existing_tml: dict) -> dict:
+    """Extract the name/id sets and lookups the merge flow needs from a model TML."""
+    model = existing_tml["model"]
+    model_tables = model.get("model_tables", [])
+    return {
+        "existing_ids": {f["id"] for f in model.get("formulas", [])},
+        "existing_cols": {
+            c.get("column_id", "").split("::")[-1]
+            for c in model.get("columns", [])
+            if "::" in c.get("column_id", "")
+        },
+        "formula_names": {f["name"] for f in model.get("formulas", [])},
+        "param_names": {p["name"] for p in model.get("parameters", [])},
+        "col_lookup": build_column_lookup(existing_tml),
+        "primary_table": model_tables[0]["name"] if model_tables else None,
+    }
+
+
+def prepare_formulas_for_merge(
+    cleaned_formulas: list[dict],
+    ctx: dict,
+) -> tuple[list[dict], int]:
+    """CSQ-strip, bare-ref fix, ``formula_`` prefix, and double-agg fix.
+
+    Mutates ``cleaned_formulas`` expressions in place (matching the original
+    inline behavior), then builds the ``{expr, id, name}`` dicts the merge
+    consumes. Returns ``(formula_dicts, bare_fixed_count)``.
+    """
+    strip_csq_suffixes(cleaned_formulas)
+
+    new_formula_names = {f["name"] for f in cleaned_formulas}
+    all_formula_names = ctx["formula_names"] | new_formula_names
+    param_names = ctx["param_names"]
+
+    bare_fixed = 0
+    # "is not None", not truthy — the original gated on model_tables being
+    # non-empty, so an empty-string table name must still run the loop
+    if ctx["primary_table"] is not None:
+        for f in cleaned_formulas:
+            before = f["expr"]
+            f["expr"] = fix_bare_refs(
+                f["expr"], all_formula_names, param_names,
+                ctx["col_lookup"], ctx["primary_table"],
+            )
+            if f["expr"] != before:
+                bare_fixed += 1
+
+    formula_exprs = {f["name"]: f["expr"] for f in cleaned_formulas}
+    formula_dicts = []
+    for f in cleaned_formulas:
+        expr = add_formula_prefix(f["expr"], all_formula_names, param_names)
+        expr = fix_double_aggregation(expr, formula_exprs)
+        formula_dicts.append({
+            "expr": expr,
+            "id": f"formula_{f['name']}",
+            "name": f["name"],
+        })
+    return formula_dicts, bare_fixed
