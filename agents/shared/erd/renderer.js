@@ -64,6 +64,9 @@ function syncNotesChip(){
 }
 function commitNotes(){ persistNotes(); syncNotesChip(); renderAll(); }
 function clearAllNotes(){if(!confirm("Remove all notes from this model?"))return;notes={};commitNotes();if(selected&&selected.type==="table")showTable(selected.id);else if(selected&&selected.type==="edge")showEdge(selected.id);else showOverview();}
+// `notes` is one map keyed by table id OR join name; if a table id ever equals a
+// join name the note is shared between them (both light up). Accepted limitation —
+// keys are distinct in practice; the review panel resolves table-first, deterministically.
 function notesSection(id){
   const val=notes[id]||"";
   return `<div class="section-label">Notes</div>
@@ -310,7 +313,10 @@ function renderEdges(){
     // Notes filter: a noted edge stays emphasized even if its endpoints fall outside
     // the highlighted subgraph (e.g. a note on a join between two otherwise-unrelated tables).
     const notesKeep=activeFilters.has("notes")&&annotated;
-    const g=NS_el("g",{class:"edge-g"+((ghost&&!notesKeep)?(hideOutOfFocus()?" gone":" ghost"):""),style:"cursor:pointer"},gEdges);
+    // notesKeep only un-dims (ghost) a noted edge; it must NOT un-hide (gone) it,
+    // or a noted edge would float vividly between two hidden nodes when the Notes
+    // filter is combined with a tree/compare focus.
+    const g=NS_el("g",{class:"edge-g"+(ghost?(hideOutOfFocus()?" gone":(notesKeep?"":" ghost")):""),style:"cursor:pointer"},gEdges);
     NS_el("path",{class:"edge",fill:"none",d:G.d,stroke,"stroke-width":sw,"stroke-dasharray":dash,"marker-end":crow?"none":mk,"stroke-linejoin":"round","vector-effect":"non-scaling-stroke"},g);
     NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none","vector-effect":"non-scaling-stroke"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
