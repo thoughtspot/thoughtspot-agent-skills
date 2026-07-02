@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-03
+- feat: update ts-object-model-erd to v1.6.0 — notes UX: save/delete give immediate feedback (shared `commitNotes()` exit, inspector re-renders after save/delete so Delete is reachable without a reload, self-dismissing "Saved ✓"/"Note deleted" confirmation); new **Notes** filter chip highlights every noted table (including at overview/LOD zoom) and keeps a noted join emphasized even without a noted endpoint, correctly enabling/disabling on model load (including Share-HTML baked notes) and never leaving the diagram ghosted after the last note is removed; new **Review notes** panel lists every note with a Table/Join/"not in model" tag (stale keys are delete-only, never clickable), click-to-jump moves the canvas, inline delete
+
 ## 2026-07-02
 - feat: update ts-object-model-erd to v1.5.0 — overview legibility (semantic zoom): node/edge strokes (incl. the edge hit-path) now use `vector-effect:non-scaling-stroke` so borders stay crisp at any zoom; below 0.5× zoom, tables render as bold color-coded overview blocks (solid saturated kind fill + state-aware border + centered title) instead of full column cards, restoring full detail above the threshold; no layout/position change
 - feat: update ts-object-model-erd to v1.4.0 — large-model navigation: scroll/trackpad pans (pinch/⌘-scroll zooms), pan-drag no longer resets focus, arrow/`+`/`-`/`0` keyboard nav, an always-on collapsible minimap with click/drag-to-navigate, a shared `MIN_K=0.12` fit floor (fit/wheel/zoom-out), fit-to-focus, and search-zooms-to-readable. Also fixes a latent crash when a join references a table with no Table TML and no `model_tables` entry

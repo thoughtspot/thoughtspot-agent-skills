@@ -49,17 +49,47 @@ function loadSaved(){try{return JSON.parse(localStorage.getItem(LS_KEY))||{};}ca
 function persistSaved(){try{localStorage.setItem(LS_KEY,JSON.stringify(savedPos));}catch(e){}}
 function loadNotes(){try{return JSON.parse(localStorage.getItem(NOTES_KEY))||{};}catch(e){return {};}}
 function persistNotes(){try{localStorage.setItem(NOTES_KEY,JSON.stringify(notes));}catch(e){}}
-function clearAllNotes(){if(!confirm("Remove all notes from this model?"))return;notes={};persistNotes();renderAll();if(selected&&selected.type==="table")showTable(selected.id);else if(selected&&selected.type==="edge")showEdge(selected.id);else showOverview();}
+// Shared mutation exit (§3.0): every note write — save, delete, per-row delete in the
+// review panel, clear-all — routes through here so the chip/filter state and the redraw
+// never drift from what's actually persisted.
+function syncNotesChip(){
+  const chip=document.querySelector('#filter-chips .fchip[data-f="notes"]');
+  const count=Object.keys(notes).length,any=count>0;
+  if(chip)chip.disabled=!any;
+  const btn=$("notes-review-btn");
+  if(btn)btn.textContent="Review notes"+(any?` (${count})`:"");
+  // B3: never leave the diagram ghosted behind a disabled chip
+  if(!any && activeFilters.has("notes")){activeFilters.delete("notes");if(!activeFilters.size)activeFilters.add("all");}
+  syncChips();
+}
+function commitNotes(){ persistNotes(); syncNotesChip(); renderAll(); }
+function clearAllNotes(){if(!confirm("Remove all notes from this model?"))return;notes={};commitNotes();if(selected&&selected.type==="table")showTable(selected.id);else if(selected&&selected.type==="edge")showEdge(selected.id);else showOverview();}
 function notesSection(id){
   const val=notes[id]||"";
   return `<div class="section-label">Notes</div>
     <textarea class="notes-area" id="note-input" placeholder="Add a note…">${esc(val)}</textarea>
     <div class="notes-btns"><button id="note-save">Save note</button>${val?'<button id="note-del">Delete</button>':''}</div>`;
 }
-function wireNotes(id){
+// Transient confirmation appended into the (freshly rendered) .notes-btns row. Self-
+// dismisses; the parentNode check makes the timeout harmless if a later render already
+// replaced inspector.innerHTML before it fires.
+function showNoteSaved(msg){
+  const btns=inspector.querySelector(".notes-btns");
+  if(!btns)return;
+  const el=document.createElement("span");
+  el.className="note-saved";el.textContent=msg;
+  btns.appendChild(el);
+  setTimeout(()=>{if(el.parentNode)el.parentNode.removeChild(el);},1500);
+}
+// wireNotes(id,isEdge): use the closure id/type, never `selected` — `selected.id` can
+// diverge from what's displayed (shift-click compare, or selected===null). Re-renders
+// THIS inspector after every save/delete (so Delete appears in-session) and preserves
+// scroll so the confirmation lands where the user can see it.
+function wireNotes(id,isEdge){
   const inp=$("note-input"),sv=$("note-save"),dl=$("note-del");
-  if(sv)sv.onclick=()=>{const v=inp.value.trim();if(v)notes[id]=v;else delete notes[id];persistNotes();renderAll();};
-  if(dl)dl.onclick=()=>{delete notes[id];persistNotes();renderAll();if(selected&&selected.type==="table")showTable(selected.id);else showEdge(selected.id);};
+  const refresh=msg=>{const top=inspector.scrollTop;commitNotes();isEdge?showEdge(id):showTable(id);inspector.scrollTop=top;showNoteSaved(msg);};
+  if(sv)sv.onclick=()=>{const v=inp.value.trim();if(v)notes[id]=v;else delete notes[id];refresh("Saved ✓");};
+  if(dl)dl.onclick=()=>{delete notes[id];refresh("Note deleted");};
 }
 const hasAll=m=>m&&MODEL.tables.every(t=>m[t.id]);
 function captureLayout(){const m={};nodes.forEach(n=>m[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});savedPos[layoutName]=m;persistSaved();updateSavedBadge();}
@@ -192,6 +222,7 @@ function tableMatchesFilter(t){
   if(activeFilters.has("alias")&&t.alias_of)return true;
   if(activeFilters.has("rls")&&t.rls&&t.rls.length>0)return true;
   if(activeFilters.has("rls_subgraph")&&((t.rls&&t.rls.length>0)||t.in_rls_path))return true;
+  if(activeFilters.has("notes")&&notes[t.id])return true;
   return false;
 }
 function focusGroup(){
@@ -276,7 +307,10 @@ function renderEdges(){
     let stroke=annotated?"#D97706":"#9AA4B1",sw=annotated?2:1.6,dash="0",mk="url(#arrow)";
     if(hot){stroke="#9AA4B1";sw=2;dash="6 4";mk="url(#arrow)";}
     if(onPath||sel){stroke="#1E6FA8";sw=3;dash="0";mk="url(#arrow-sel)";}
-    const g=NS_el("g",{class:"edge-g"+(ghost?(hideOutOfFocus()?" gone":" ghost"):""),style:"cursor:pointer"},gEdges);
+    // Notes filter: a noted edge stays emphasized even if its endpoints fall outside
+    // the highlighted subgraph (e.g. a note on a join between two otherwise-unrelated tables).
+    const notesKeep=activeFilters.has("notes")&&annotated;
+    const g=NS_el("g",{class:"edge-g"+((ghost&&!notesKeep)?(hideOutOfFocus()?" gone":" ghost"):""),style:"cursor:pointer"},gEdges);
     NS_el("path",{class:"edge",fill:"none",d:G.d,stroke,"stroke-width":sw,"stroke-dasharray":dash,"marker-end":crow?"none":mk,"stroke-linejoin":"round","vector-effect":"non-scaling-stroke"},g);
     NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none","vector-effect":"non-scaling-stroke"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
@@ -588,7 +622,8 @@ function colRow(c){const[cls,label]=ROLE_TAG[c.role]||["a","attribute"];const me
 function colGroup(label,cols){if(!cols.length)return "";
   return `<div class="col-group"><div class="col-group-h">${label} <span class="grp-count">${cols.length}</span></div><table class="cols">${cols.map(colRow).join("")}</table></div>`;}
 function showTable(id){
-  const t=tableById[id],conns=MODEL.joins.filter(j=>j.from===id||j.to===id),fs=findingsByTable[id]||[];
+  const t=tableById[id];if(!t){showOverview();return;} // defensive — mirrors showEdge's guard; no caller should ever hit this with a valid model
+  const conns=MODEL.joins.filter(j=>j.from===id||j.to===id),fs=findingsByTable[id]||[];
   const allCols=t.cols||[];
   const keys=allCols.filter(c=>c.key),measures=allCols.filter(c=>!c.key&&c.role==="MEASURE"),
     formulas=allCols.filter(c=>!c.key&&c.role==="FORMULA"),attrs=allCols.filter(c=>!c.key&&c.role!=="MEASURE"&&c.role!=="FORMULA");
@@ -619,7 +654,7 @@ function showTable(id){
   h+=notesSection(id);
   h+=`<p class="note">Tip: <b>Shift-click</b> another table to compare and trace the join path between them.</p>`;
   inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};
-  inspector.querySelectorAll("[data-jump]").forEach(e=>e.onclick=()=>selectEdge(e.dataset.jump));wireFindings();wireNotes(id);inspector.scrollTop=0;
+  inspector.querySelectorAll("[data-jump]").forEach(e=>e.onclick=()=>selectEdge(e.dataset.jump));wireFindings();wireNotes(id,false);inspector.scrollTop=0;
 }
 function showCompare(){
   let h=`<button class="backlink" id="back">← Overview</button><h2>Comparing ${focusSet.length} tables</h2>
@@ -651,7 +686,7 @@ function showEdge(name){const j=MODEL.joins.find(x=>x.name===name);if(!j){showOv
   if(hot){const fo=MODEL.findings.find(f=>f.check==="D-FANOUT");
     h+=`<div class="section-label">Flagged</div>`+(fo?findingCard(fo):`<p class="sub">⚠︎ <b>Fan-out risk</b> — <span style="font-family:var(--mono)">${esc(j.to)}</span> is joined by two or more tables, so aggregating a measure across this join can multiply rows. Verify measures on the joined-from side aren't double-counted.</p>`);}
   h+=notesSection(name);
-  inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};wireNotes(name);inspector.scrollTop=0;
+  inspector.innerHTML=h;$("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};wireNotes(name,true);inspector.scrollTop=0;
 }
 
 function showRlsSubgraph(){
@@ -666,6 +701,58 @@ function showRlsSubgraph(){
     <p class="note">Tables referenced inside another table's RLS expression. Changes to their data affect that rule's row filtering.</p>`;
   inspector.innerHTML=h;$("back").onclick=()=>{activeFilters=new Set(["all"]);syncChips();renderAll();showOverview();};
   inspector.querySelectorAll("[data-go]").forEach(e=>e.onclick=()=>selectTable(e.dataset.go,false));inspector.scrollTop=0;
+}
+
+// ---- notes review panel (Feature C) ----
+// Resolve a notes key to what it refers to today: a table, a join, or neither (a
+// "stale" key — its object was renamed/removed since the note was saved; keys persist
+// per model *name* in localStorage, independent of the live model definition).
+function noteRowMeta(key){
+  const t=tableById[key];
+  if(t)return {kind:"table",tag:"Table",tagClass:"f",label:t.id,clickable:true};
+  const j=MODEL.joins.find(x=>x.name===key);
+  if(j)return {kind:"edge",tag:"Join",tagClass:"a",label:j.name,clickable:true};
+  return {kind:"stale",tag:"not in model",tagClass:"stale",label:key,clickable:false};
+}
+// Row builder kept separate from showNotesReview so the latter stays a thin list
+// assembler (cc<15) — see spec §6 complexity note.
+function noteReviewRow(key){
+  const m=noteRowMeta(key);
+  const goAttr=m.clickable?` data-go="${esc(key)}"${m.kind==="edge"?' data-edge="1"':""}`:"";
+  return `<div class="note-row${m.clickable?"":" stale"}"${goAttr}>
+    <div class="note-row-h"><span class="tag ${m.tagClass}">${esc(m.tag)}</span>
+    <span class="note-row-name">${esc(m.label)}</span>
+    <button class="note-row-del" data-del="${esc(key)}" aria-label="Delete note">×</button></div>
+    <div class="note-row-text">${esc(notes[key])}</div></div>`;
+}
+// Center the canvas near an edge's midpoint (no single node to center() on) — used by
+// the review panel's jump-to-join, mirroring the table jump's centerOn(nodeById[id]).
+function centerOnEdge(name){
+  const e=edges.find(x=>x.j.name===name);if(!e)return;
+  const mx=(e.s.x+e.s.w/2+e.t.x+e.t.w/2)/2,my=(e.s.y+e.s.h/2+e.t.y+e.t.h/2)/2;
+  centerOn({x:mx,y:my,w:0,h:0});
+}
+function wireNotesReview(){
+  inspector.querySelectorAll(".note-row[data-go]").forEach(row=>row.addEventListener("click",e=>{
+    if(e.target.closest("[data-del]"))return;
+    const id=row.dataset.go;view.k=Math.max(view.k,0.9);
+    if(row.dataset.edge){selectEdge(id);centerOnEdge(id);}else{selectTable(id,false);centerOn(nodeById[id]);}
+  }));
+  inspector.querySelectorAll("[data-del]").forEach(btn=>btn.addEventListener("click",e=>{
+    e.stopPropagation();delete notes[btn.dataset.del];commitNotes();showNotesReview();
+  }));
+}
+function showNotesReview(){
+  const keys=Object.keys(notes);
+  let h=`<button class="backlink" id="back">← Overview</button><h2>Review notes</h2>
+    <p class="sub">Every note attached to a table or join in this model. Click a row to jump to it.</p>`;
+  h+=keys.length?`<div class="notes-review">${keys.map(noteReviewRow).join("")}</div>`
+    :`<p class="sub">No notes yet — add one from any table or join's inspector.</p>`;
+  inspector.innerHTML=h;
+  // showTable's back pattern (clear focusSet/selected -> showOverview), NOT
+  // showRlsSubgraph's (which resets activeFilters and would wipe an active filter).
+  $("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};
+  wireNotesReview();inspector.scrollTop=0;
 }
 
 // ---- controls wiring ----
@@ -710,6 +797,7 @@ function toggleHelp(){$("help-drawer").classList.toggle("open");}
 $("help-btn").onclick=toggleHelp;
 $("help-close").onclick=()=>$("help-drawer").classList.remove("open");
 $("share-btn").onclick=shareHTML;
+$("notes-review-btn").onclick=showNotesReview;
 $("clear-notes-btn").onclick=clearAllNotes;
 
 const PAN_STEP=60;
@@ -796,6 +884,10 @@ function loadModel(m){
   const init0=hasAll(savedPos.organic)?savedPos.organic:layoutCache.organic;
   nodes.forEach(n=>{n.x=init0[n.t.id].x;n.y=init0[n.t.id].y;});
   updateSavedBadge();renderAll();fit();showOverview();
+  // B1: must run AFTER notes=loadNotes() and the ERD_INITIAL_STATE baked-notes merge
+  // above — NOT folded into the generic chip-disable loop earlier in this function,
+  // which runs before notes exists and would compute the chip against stale data.
+  syncNotesChip();
 }
 
 $("finder").addEventListener("change",e=>{const id=e.target.value.trim();if(tableById[id]){selectTable(id,false);view.k=Math.max(view.k,0.9);centerOn(nodeById[id]);e.target.value="";}});

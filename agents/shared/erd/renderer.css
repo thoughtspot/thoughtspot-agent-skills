@@ -167,9 +167,25 @@ table.cols .c-syn .syn{font-family:-apple-system,system-ui,sans-serif;font-size:
 /* notes */
 .notes-area{width:100%;min-height:60px;font-family:var(--mono);font-size:11px;padding:8px;border:1px solid var(--hair);border-radius:7px;resize:vertical;background:var(--surface-2);color:var(--ink)}
 .notes-area:focus{outline:2px solid var(--accent);border-color:var(--accent)}
-.notes-btns{display:flex;gap:6px;margin-top:6px}
+.notes-btns{display:flex;gap:6px;margin-top:6px;align-items:center}
 .notes-btns button{font-family:var(--sans);font-size:11px;padding:4px 10px;border:1px solid var(--hair);border-radius:5px;background:var(--surface);cursor:pointer;color:var(--muted)}
 .notes-btns button:hover{border-color:var(--accent);color:var(--accent)}
+/* transient save/delete confirmation, appended after the buttons and self-removed via JS */
+.note-saved{font-size:11px;font-weight:600;color:var(--ok);animation:note-saved-fade 1.5s ease forwards}
+@keyframes note-saved-fade{0%,70%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.note-saved{animation:none}}
+
+/* notes review panel */
+.notes-review{margin-top:2px}
+.note-row{border:1px solid var(--hair);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:box-shadow .12s}
+.note-row:hover{box-shadow:0 2px 8px rgba(20,27,38,.07)}
+.note-row.stale{cursor:default;border-style:dashed;background:var(--surface-2)}
+.note-row-h{display:flex;align-items:center;gap:8px}
+.note-row-name{font-family:var(--mono);font-size:12px;font-weight:600;flex:1;overflow-wrap:anywhere}
+.note-row-del{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:2px}
+.note-row-del:hover{color:var(--crit)}
+.note-row-text{font-size:11.5px;color:#3C4453;line-height:1.5;margin-top:6px;white-space:pre-wrap;word-break:break-word}
+.tag.stale{color:var(--warn);background:var(--warn-soft)}
 
 /* help drawer */
 .help-drawer{position:fixed;right:0;top:0;bottom:0;width:380px;background:var(--surface);border-left:1px solid var(--hair);box-shadow:-4px 0 20px rgba(20,27,38,.08);overflow-y:auto;padding:20px;z-index:100;transform:translateX(100%);transition:transform .2s}
