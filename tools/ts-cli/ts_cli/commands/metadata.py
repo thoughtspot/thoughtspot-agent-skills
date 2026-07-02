@@ -316,7 +316,7 @@ def report(
       ts metadata report <guid> --profile P --format json --fast
     """
     from ts_cli.report import build_report, build_reports
-    from ts_cli.report.formatters import render_json, render_text, render_md
+    from ts_cli.report.formatters import render_text, render_md
     from ts_cli.report.resolver import SourceUnresolvedError, SourceAmbiguousError
 
     profile_name = resolve_profile(profile)
