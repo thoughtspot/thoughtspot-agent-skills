@@ -39,18 +39,35 @@ for new codification opportunities.
 
 | # | Angle | What it checks | Enforcement today |
 |---|---|---|---|
-| 1 | Legacy / dead files | Untracked build artifacts, orphaned dirs, stale references | `check_references` (broken links) + MANUAL |
+| 1 | Legacy / dead files | Untracked build artifacts, orphaned dirs, stale references, dead code | `check_references` (broken links) + `vulture` (dead-code report, sweep) + MANUAL |
 | 2 | README / SETUP accuracy | Skills table, symlink/stage steps match repo reality | `check_consistency` |
 | 3 | open-items truthfulness | No shipped-unverified assumptions hiding in open-items | `check_open_items` |
-| 4 | Tools quality | `tools/` code health, error handling, dead code | MANUAL |
+| 4 | Tools quality | `tools/` code health, error handling, dead code, function/module complexity | `check_module_health` (complexity ratchet — blocks new/worsening god-functions vs a baseline) + MANUAL (error handling, dead code) |
 | 5 | ts-cli gaps | Operations skills need but the CLI lacks; inline `requests` anti-pattern | MANUAL (+ `check_patterns`) |
 | 6 | Testing-framework value | Tests assert behaviour, not just presence; smoke tests are real | `check_smoke_tests` (presence) + MANUAL (value) |
 | 7 | PR-validation effectiveness | CI is not a strict subset of pre-commit; gates actually fire | MANUAL (meta) |
 | 8 | Cross-runtime skill drift | CLI / CoCo / Databricks mirrors in sync; parity matrix current | `check_mirror_sync`, `check_runtime_coverage`, `generate_parity --check`, `check_skill_naming` |
 | 9 | Conversion consistency | The conversion skills agree with each other against the invariants | `conversion-consistency-auditor` agent, `check_coverage_matrix`, `check_formula_catalog` |
 | 10 | Security | No secrets, no v1 endpoints, credential-handling rules honoured | `check_secrets`, `check_no_v1_endpoints` |
-| 11 | Codification | (a) Repeated skill logic that should become `ts` CLI / shared reference / validator; (b) *agentic → deterministic*: skill steps that are mechanical transformations (parsing, type mapping, TML emission, formula rewriting) currently executed by the LLM but codifiable as deterministic Python — yielding faster, cheaper, more reproducible results. The Tableau `translate-formulas` pipeline (ts-cli v0.17.0) is the reference pattern. | MANUAL |
+| 11 | Codification | (a) Repeated skill logic that should become `ts` CLI / shared reference / validator; (b) *agentic → deterministic*: skill steps that are mechanical transformations (parsing, type mapping, TML emission, formula rewriting) currently executed by the LLM but codifiable as deterministic Python — yielding faster, cheaper, more reproducible results. The Tableau `translate-formulas` pipeline (ts-cli v0.17.0) is the reference pattern. | `jscpd` (code-duplication report, sweep) + MANUAL |
 | 12 | Synthesis / advise | Prioritise findings, route each to a bucket | MANUAL (the sweep's final step) |
+
+#### Code-health tooling (the sweep runs these; not per-PR gates)
+
+Complexity is gated per-PR by `check_module_health` (deterministic, low false-positive).
+Dead code and duplication are **judgment-heavy and noisy per-commit** (dynamic usage reads
+as "dead"; sibling-skill SKILL.md prose reads as "duplicate"), so they are **run during the
+sweep** — an agent/reviewer interprets and filters the output — rather than blocking every PR:
+
+| Tool | Angle | Command | Read the output as |
+|---|---|---|---|
+| `radon` | 4 | `radon cc <paths> -n C -s` / `radon mi <paths> -s` | Complexity hotspots (gated by `check_module_health`; this is the descriptive view) |
+| `vulture` | 1 | `vulture tools/ts-cli/ts_cli agents --min-confidence 80` | Candidate dead code — verify each isn't dynamically referenced before removing |
+| `jscpd` | 11 | `npx jscpd tools/ts-cli/ts_cli agents --min-lines 25 --ignore "**/tests/**"` | Code duplication to codify — **ignore SKILL.md prose clones** (expected across sibling skills) |
+| `agentlinter` | 2 | `npx agentlinter --local .` | **Optional advisory** on CLAUDE.md / SKILL.md instruction hygiene (context bloat, dead refs, cross-file overlap). Run **local-only** — the default mode uploads. Filter false positives (it flags file-path refs as "missing sections" and deliberate hard rules as "no escape hatch"). Not a gate; a candidate to formalise if it proves reliable. |
+
+`radon`/`vulture` are Python dev deps (`pip install radon vulture`); `jscpd`/`agentlinter`
+run via `npx`. None are required to commit — they inform the sweep.
 
 ### External / dynamic — "are our assumptions still true as the products move?"
 

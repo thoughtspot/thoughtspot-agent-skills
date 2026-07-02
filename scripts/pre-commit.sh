@@ -42,6 +42,12 @@ run_check "reference paths"      "tools/validate/check_references.py --root $REP
 run_check "anti-patterns"        "tools/validate/check_patterns.py --root $REPO_ROOT --staged"
 run_check "version sync"         "tools/validate/check_version_sync.py --root $REPO_ROOT"
 
+# Complexity ratchet on staged Python (soft-skips if radon isn't installed locally;
+# enforced fully in CI). Blocks new/worsening god-functions; legacy is baselined.
+if echo "$STAGED" | grep -q '\.py$'; then
+  run_check "module health"      "tools/validate/check_module_health.py --root $REPO_ROOT --staged"
+fi
+
 # Only run YAML check if .md files are staged — checks staged files only, not full repo
 if echo "$STAGED" | grep -q '\.md$'; then
   run_check "YAML blocks"        "tools/validate/check_yaml.py --root $REPO_ROOT --staged"
