@@ -33,6 +33,28 @@ def test_parse_model_classifies_fact_and_dim():
     assert kinds["CUSTOMER"] == "dim"
 
 
+def test_hidden_non_measure_formula_does_not_make_dim_a_fact():
+    """A hidden boolean/attribute helper formula (e.g. an RLS/parameter filter)
+    must not promote a pure dimension to a fact. Regression for DM_CUSTOMER."""
+    model = _mini_model()
+    model["model"]["formulas"].append(
+        {"id": "formula_filter", "name": "filterModel",
+         "expr": "if ( [customerCode] = 'all' ) then true "
+                 "else [CUSTOMER::CODE] = [customerCode]"}
+    )
+    model["model"]["columns"].append(
+        {"name": "filterModel", "formula_id": "formula_filter",
+         "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}}
+    )
+    m = parser.parse_model(model, {})
+    customer = next(t for t in m["tables"] if t["id"] == "CUSTOMER")
+    assert customer["kind"] == "dim"
+    ff = next(c for c in customer["cols"] if c["name"] == "filterModel")
+    assert ff["hidden"] is True
+    assert ff["is_measure"] is False
+    assert ff["role"] == "FORMULA"  # display role preserved (ƒ badge)
+
+
 def test_parse_model_formula_bound_to_table():
     m = parser.parse_model(_mini_model(), {})
     orders = next(t for t in m["tables"] if t["id"] == "ORDERS")

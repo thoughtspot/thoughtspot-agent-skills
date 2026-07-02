@@ -6,6 +6,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-02
+- refactor: ERD generation consolidated to a single definition in `agents/shared/erd` (parser + assembler moved out of the ts-object-model-erd skill); ts-audit ERD embed now consumes it instead of a duplicate parser
+- fix: ERD dimension/fact classifier — hidden and non-measure formula columns (e.g. RLS/parameter helper formulas) no longer promote a dimension to a fact
+- feat: ERD layered layout clusters joined tables via Sugiyama median crossing-reduction
+- chore: bump ts-cli to v0.25.2
 - feat: ERD — AI domain summary, multi-select filter chips, RLS red colour scheme, grouped controls bar, join-tree double-click
 - chore: bump ts-cli to v0.25.1
 

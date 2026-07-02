@@ -87,29 +87,44 @@ def parse_model(model_tml, table_tmls, log=None):
             "src": src,
             "role": _column_role(props, is_formula),
             "agg": props.get("aggregation"),
+            "is_measure": props.get("column_type") == "MEASURE",
             "key": False,
-            "hidden": False,
+            "hidden": bool(props.get("is_hidden", False)),
             "flag": None,
         })
 
     joins = []
     for mt in model.get("model_tables", []):
         for j in mt.get("joins", []) or []:
-            joins.append({
-                "from": mt["name"],
-                "to": j.get("with", ""),
-                "name": j.get("referencing_join", ""),
-                "card": "UNKNOWN",
-                "origin": "model",
-                "type": "UNKNOWN",
-            })
+            ref_join = j.get("referencing_join", "")
+            inline_on = j.get("on") or ""
+            if ref_join:
+                joins.append({
+                    "from": mt["name"],
+                    "to": j.get("with", ""),
+                    "name": ref_join,
+                    "card": "UNKNOWN",
+                    "origin": "model",
+                    "type": "UNKNOWN",
+                    "on": "",
+                })
+            elif inline_on:
+                joins.append({
+                    "from": mt["name"],
+                    "to": j.get("with", ""),
+                    "name": f"{mt['name']}_{j.get('with', '')}",
+                    "card": j.get("cardinality", "UNKNOWN"),
+                    "origin": "model",
+                    "type": j.get("type", "UNKNOWN"),
+                    "on": inline_on,
+                })
 
     has_outgoing = {mt["name"] for mt in model.get("model_tables", []) if mt.get("joins")}
     is_target = {j["to"] for j in joins}
     tables = []
     for name in table_names:
         cols = cols_by_table.get(name, [])
-        has_measure = any(c["role"] in ("MEASURE", "FORMULA") for c in cols)
+        has_measure = any(c["is_measure"] and not c["hidden"] for c in cols)
         if has_measure or name in has_outgoing:
             if name in is_target and name in has_outgoing and not has_measure:
                 kind = "bridge"
@@ -128,9 +143,11 @@ def parse_model(model_tml, table_tmls, log=None):
     table_joins = _index_table_joins(table_tmls)
     for j in joins:
         if j["name"] in table_joins:
+            tj = table_joins[j["name"]]
             j["origin"] = "table"
-            j["card"] = table_joins[j["name"]]["card"]
-            j["type"] = table_joins[j["name"]]["type"]
+            j["card"] = tj["card"]
+            j["type"] = tj["type"]
+            j["on"] = tj.get("on", "")
 
     tables_by_id = {t["id"]: t for t in tables}
 
@@ -146,12 +163,17 @@ def parse_model(model_tml, table_tmls, log=None):
             if phys and phys != name:
                 tables_by_id[name]["alias_of"] = phys
 
-    for meta in table_joins.values():
-        for tbl, col in _keys_from_on(meta["on"]):
+    all_on_exprs = [meta["on"] for meta in table_joins.values()]
+    all_on_exprs.extend(j["on"] for j in joins if j.get("on"))
+    for on_expr in all_on_exprs:
+        for tbl, col in _keys_from_on(on_expr):
             t = tables_by_id.get(tbl)
             if not t:
                 continue
-            if not any(c["name"] == col for c in t["cols"]):
+            existing = next((c for c in t["cols"] if c["name"] == col), None)
+            if existing:
+                existing["key"] = True
+            else:
                 t["cols"].append({"name": col, "src": col, "role": "ATTR",
                                   "agg": None, "key": True, "hidden": True, "flag": None})
 
