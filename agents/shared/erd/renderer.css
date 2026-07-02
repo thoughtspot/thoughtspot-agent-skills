@@ -95,6 +95,9 @@ svg.panning{cursor:grabbing}
 .gone{display:none}
 .nh{font-weight:650;font-size:12.5px}
 .nbadge{font-size:8.5px;letter-spacing:.08em;font-weight:700}
+/* LOD (semantic-zoom) overview-block title: larger than the card title (.nh) so it
+   reads at overview scale; white for AA contrast against the saturated kind fills. */
+.node-block-title{font-weight:700;font-size:16px;fill:#fff}
 .col-name{font-size:11px;font-family:var(--mono)}
 .col-key{fill:#8A93A0}
 @media (prefers-reduced-motion:reduce){.node,.edge-g{transition:none}}
