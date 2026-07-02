@@ -56,13 +56,15 @@ Read-only — never modifies the source model.
   1.  Choose source ....................................... ask
   2.  (Live) Authenticate + select models ................ ask/auto
   3.  Read or export TML .................................. auto
-  4.  Render ERD .......................................... auto
-  5.  Open / share ........................................ done
+  4.  Synthesize AI-analysis corpus ...................... auto
+  5.  Render ERD .......................................... auto
+  6.  Open / share ........................................ done
 
 ### Options
 
 | Flag | Default | Effect |
 |---|---|---|
+| `--ai-analysis` | off | Inject a synthesized business-context corpus (domain, objectives, audience, questions, AI instructions) into the ERD |
 | `--redact-rls` | off | Replace RLS expressions with `(redacted)` for external sharing |
 | `--max-models` | 25 | Cap on models per ERD file |
 | `--out` | `model_erd.html` | Output path |
@@ -104,7 +106,38 @@ Ask: **(A) Local TML files or folder**, or **(B) Live ThoughtSpot instance**?
 
 ---
 
-## Step 4 — Render
+## Step 4 — Synthesize the AI-analysis corpus (optional but recommended)
+
+Models rarely define a business-context corpus (domain, objectives, audience, business
+questions). Synthesize one by **reasoning over the model definition** — table and column
+names, per-column `properties.ai_context`, `properties.synonyms`, measure aggregations,
+formula expressions, joins, and RLS. This is a judgment task for you (the agent); do not
+try to derive it with a heuristic script.
+
+Write the result to a sidecar JSON keyed by model **guid** (or name):
+
+```json
+{
+  "<model-guid>": {
+    "ai_analysis": {
+      "domain": "one-paragraph description of the business domain the model serves",
+      "objectives": ["what analysis it's built for", "..."],
+      "personas": ["who uses it", "..."],
+      "questions": ["representative business questions it answers", "..."]
+    },
+    "ai_instructions": ["semantic rules grounded in the model, e.g. 'Amount is the primary revenue measure'", "..."]
+  }
+}
+```
+
+Ground every entry in the actual model: cite real measures, note semi-additive or averaged
+aggregations, and lift genuine guidance out of `ai_context` (e.g. day-grain date handling).
+This step is **read-only** — the corpus enriches the ERD only and is never written back to
+the source model.
+
+---
+
+## Step 5 — Render
 
 Run:
 
@@ -112,6 +145,8 @@ Run:
 python3 agents/cli/ts-object-model-erd/build_erd.py <src-dir-or-files> --out model_erd.html
 ```
 
+Add `--ai-analysis <corpus.json>` to inject the Step 4 corpus into the ERD's Model domain /
+Key objectives / Audience / Business questions / AI instructions sections.
 Add `--redact-rls` if the user wants to hide RLS expressions for external sharing.
 Add `--max-models N` to change the model cap.
 
@@ -121,7 +156,7 @@ join type, join origin, RLS, and join keys are omitted for those joins.
 
 ---
 
-## Step 5 — Open / share
+## Step 6 — Open / share
 
 Open `model_erd.html` in a browser. The file is fully self-contained — share the single
 HTML file; no ThoughtSpot login required to view.
@@ -151,6 +186,7 @@ HTML file; no ThoughtSpot login required to view.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-07-02 | New `--ai-analysis` flag injects an agent-synthesized business-context corpus (domain, objectives, audience, business questions, AI instructions) into the ERD (read-only; never written back). Column inspector now surfaces per-column AI context and synonyms. RLS legend parity: secured tables show the red border + 🔒 by default (no longer gated behind the RLS overlay) and the "In RLS path" fill matches the legend swatch. Focus: double-click (join subtree) and shift-click compare now hide out-of-scope tables instead of dimming them. Parser fix: handle the nested `rls_rules: {rules: […]}` TML shape (previously crashed) |
 | 1.1.1 | 2026-07-02 | Classifier: a table is a fact only when it has real (visible) measures — an outgoing join alone no longer makes a dimension a fact (e.g. a user/lookup table that joins onward); measureless pass-through tables are bridges. ERD viewer: clicking a flagged fan-out join no longer errors when no fan-out finding is attached (shows a generic fan-out explanation) |
 | 1.1.0 | 2026-07-02 | Layered layout clusters joined tables (Sugiyama median crossing-reduction); fix dimension/fact classifier (hidden and non-measure formula columns no longer promote a dimension to a fact); ERD parser + assembler moved to the shared `erd` library so the skill and the ts-audit ERD embed share one definition |
 | 1.0.0 | 2026-07-01 | Initial release |

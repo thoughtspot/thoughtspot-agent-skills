@@ -14,6 +14,7 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -78,6 +79,29 @@ def step_verify_redact_rls(build_erd, out_path):
         raise RuntimeError("--redact-rls did not produce '(redacted)' in output")
 
 
+def step_verify_ai_analysis(build_erd, out_path, corpus_path):
+    marker = "SMOKE-DOMAIN-Mini-Sales-analytics"
+    corpus = {
+        "model-guid-001": {
+            "ai_analysis": {
+                "domain": marker,
+                "objectives": ["SMOKE-OBJECTIVE"],
+                "personas": ["SMOKE-PERSONA"],
+                "questions": ["SMOKE-QUESTION"],
+            },
+            "ai_instructions": ["SMOKE-INSTRUCTION"],
+        }
+    }
+    with open(corpus_path, "w", encoding="utf-8") as fh:
+        json.dump(corpus, fh)
+    build_erd.build([str(FIXTURES)], out_path, ai_analysis_path=corpus_path, log=lambda *_: None)
+    html = open(out_path, encoding="utf-8").read()
+    missing = [m for m in (marker, "SMOKE-OBJECTIVE", "SMOKE-QUESTION", "SMOKE-INSTRUCTION")
+               if m not in html]
+    if missing:
+        raise RuntimeError(f"--ai-analysis corpus not injected: {', '.join(missing)}")
+
+
 def main() -> int:
     print("smoke_ts_object_model_erd — offline (files) path")
     print()
@@ -107,6 +131,11 @@ def main() -> int:
 
         redact_path = os.path.join(td, "erd_redacted.html")
         r.step("verify --redact-rls", step_verify_redact_rls, build_erd, redact_path)
+
+        ai_path = os.path.join(td, "erd_ai.html")
+        corpus_path = os.path.join(td, "corpus.json")
+        r.step("verify --ai-analysis corpus injection",
+               step_verify_ai_analysis, build_erd, ai_path, corpus_path)
 
     return r.summary()
 

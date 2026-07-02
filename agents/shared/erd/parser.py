@@ -43,9 +43,43 @@ def _index_table_joins(table_tmls):
     return out
 
 
+def _column_entry(col, props, is_formula, src):
+    """Build the renderer-facing column dict, including AI-authored metadata.
+
+    Top-level `description`/`synonyms` are usually null; the real content lives
+    under `properties` (ai_context, synonyms), so fall back to those.
+    """
+    return {
+        "name": col.get("name", ""),
+        "src": src,
+        "role": _column_role(props, is_formula),
+        "agg": props.get("aggregation"),
+        "is_measure": props.get("column_type") == "MEASURE",
+        "key": False,
+        "hidden": bool(props.get("is_hidden", False)),
+        "flag": None,
+        "desc": col.get("description") or "",
+        "ai_context": props.get("ai_context") or "",
+        "synonyms": props.get("synonyms") or col.get("synonyms") or [],
+    }
+
+
+def _rls_rule_list(tdict):
+    """Normalise a table's rls_rules to a list of rule dicts.
+
+    Some builds nest the rule list under an object:
+        rls_rules: {rules: [...], table_paths: [...], tables: [...]}
+    while others emit a flat list of rule dicts.
+    """
+    raw = tdict.get("table", {}).get("rls_rules") or []
+    if isinstance(raw, dict):
+        raw = raw.get("rules") or []
+    return [r for r in raw if isinstance(r, dict)]
+
+
 def _rls_for_table(tdict):
     rules = []
-    for r in (tdict.get("table", {}).get("rls_rules") or []):
+    for r in _rls_rule_list(tdict):
         rules.append({
             "name": r.get("name", "RLS rule"),
             "expr": r.get("expression") or r.get("expr") or "",
@@ -82,16 +116,7 @@ def parse_model(model_tml, table_tmls, log=None):
             src = col.get("column_id", "")
         if owner not in cols_by_table:
             continue
-        cols_by_table[owner].append({
-            "name": col.get("name", ""),
-            "src": src,
-            "role": _column_role(props, is_formula),
-            "agg": props.get("aggregation"),
-            "is_measure": props.get("column_type") == "MEASURE",
-            "key": False,
-            "hidden": bool(props.get("is_hidden", False)),
-            "flag": None,
-        })
+        cols_by_table[owner].append(_column_entry(col, props, is_formula, src))
 
     joins = []
     for mt in model.get("model_tables", []):
@@ -184,7 +209,7 @@ def parse_model(model_tml, table_tmls, log=None):
 
     rls_referenced = set()
     for tname, tdict in table_tmls.items():
-        for rule in (tdict.get("table", {}).get("rls_rules") or []):
+        for rule in _rls_rule_list(tdict):
             expr = rule.get("expression") or rule.get("expr") or ""
             for ref_table in _COLREF.findall(expr):
                 if ref_table != tname:
