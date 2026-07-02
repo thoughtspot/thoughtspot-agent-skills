@@ -127,8 +127,18 @@ def _build_columns(model, table_ids, formulas):
     return cols_by_table
 
 
-def _build_joins(model_tables):
-    joins = []
+def _build_joins(model_tables, node_ids):
+    """Build model-local joins, keeping only those whose endpoints are both real
+    nodes. A join's ``with:`` target absent from ``model_tables`` cannot occur in
+    a valid ThoughtSpot export — the model editor won't create a join to a table
+    that isn't in the model, and TML import validates join targets — so this only
+    guards malformed/hand-edited TML. Such a join is dropped (and reported via the
+    returned ``dropped`` names) rather than emitted with a non-existent endpoint,
+    which would otherwise reach the viewer as an unresolvable join.
+
+    Returns ``(joins, dropped_names)``.
+    """
+    joins, dropped = [], []
     for mt in model_tables:
         frm = _table_node_id(mt)
         for j in mt.get("joins", []) or []:
@@ -136,15 +146,21 @@ def _build_joins(model_tables):
             ref_join = j.get("referencing_join", "")
             inline_on = j.get("on") or ""
             if ref_join:
-                joins.append({"from": frm, "to": to, "name": ref_join,
-                              "card": "UNKNOWN", "origin": "model",
-                              "type": "UNKNOWN", "on": ""})
+                rec = {"from": frm, "to": to, "name": ref_join,
+                       "card": "UNKNOWN", "origin": "model",
+                       "type": "UNKNOWN", "on": ""}
             elif inline_on:
-                joins.append({"from": frm, "to": to, "name": f"{frm}_{to}",
-                              "card": j.get("cardinality", "UNKNOWN"),
-                              "origin": "model", "type": j.get("type", "UNKNOWN"),
-                              "on": inline_on})
-    return joins
+                rec = {"from": frm, "to": to, "name": f"{frm}_{to}",
+                       "card": j.get("cardinality", "UNKNOWN"),
+                       "origin": "model", "type": j.get("type", "UNKNOWN"),
+                       "on": inline_on}
+            else:
+                continue
+            if to in node_ids and frm in node_ids:
+                joins.append(rec)
+            else:
+                dropped.append(rec["name"])
+    return joins, dropped
 
 
 def _table_kind(cols, tid, is_target, has_outgoing):
@@ -220,6 +236,13 @@ def _mark_rls_path(tables, table_tmls):
         t["in_rls_path"] = t["id"] in rls_referenced
 
 
+def _log_dropped_joins(dropped, log):
+    if log and dropped:
+        log("Dropped %d join(s) whose target table is not in the model — this "
+            "cannot occur in a valid ThoughtSpot export and indicates malformed "
+            "TML: %s" % (len(dropped), ", ".join(sorted(dropped))))
+
+
 def _log_degraded_fidelity(joins, table_joins, log):
     if not log:
         return
@@ -246,7 +269,8 @@ def parse_model(model_tml, table_tmls, log=None):
 
     formulas = _build_formulas(model)
     cols_by_table = _build_columns(model, table_ids, formulas)
-    joins = _build_joins(model_tables)
+    joins, dropped_joins = _build_joins(model_tables, set(table_ids))
+    _log_dropped_joins(dropped_joins, log)
 
     has_outgoing = {_table_node_id(mt) for mt in model_tables if mt.get("joins")}
     is_target = {j["to"] for j in joins}

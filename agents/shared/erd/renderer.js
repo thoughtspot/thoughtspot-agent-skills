@@ -711,12 +711,9 @@ function loadModel(m){
 
   adj={};undir={};
   MODEL.tables.forEach(t=>{adj[t.id]=[];undir[t.id]=[];});
-  // A join can reference a table id that never made it into MODEL.tables (e.g. a
-  // model_tables join `with:` a table that has no Table TML and isn't itself a
-  // model_tables entry — "degraded fidelity", already logged by the Python builder).
-  // Guard so a dangling endpoint skips instead of crashing adj[...]/undir[...].
-  MODEL.joins.forEach(j=>{if(!tableById[j.from]||!tableById[j.to])return;
-    adj[j.from].push(j.to);undir[j.from].push(j.to);undir[j.to].push(j.from);});
+  // Every join endpoint is a real table node — the Python builder drops any join
+  // whose target isn't in the model (see parser._build_joins).
+  MODEL.joins.forEach(j=>{adj[j.from].push(j.to);undir[j.from].push(j.to);undir[j.to].push(j.from);});
 
   securedTables=MODEL.tables.filter(t=>t.rls&&t.rls.length).map(t=>t.id);
   const hasRls=securedTables.length>0;
@@ -744,9 +741,7 @@ function loadModel(m){
   nodes=MODEL.tables.map((t,i)=>{const a=i/MODEL.tables.length*Math.PI*2;
     return {t,w:NODE_W,h:nodeHeight(t),x:480+Math.cos(a)*240+(rnd()-.5)*40,y:340+Math.sin(a)*200+(rnd()-.5)*40};});
   nodeById={};nodes.forEach(n=>nodeById[n.t.id]=n);
-  // Same dangling-endpoint guard as adj/undir above — a degraded-fidelity join has
-  // no node on one side, so it can't be drawn as an edge.
-  edges=MODEL.joins.filter(j=>nodeById[j.from]&&nodeById[j.to]).map(j=>({j,s:nodeById[j.from],t:nodeById[j.to]}));
+  edges=MODEL.joins.map(j=>({j,s:nodeById[j.from],t:nodeById[j.to]}));
 
   layoutCache={organic:computeOrganic()};
   focusSet=[];selected=null;activeFilters=new Set(["all"]);

@@ -130,10 +130,19 @@ def test_stitch_table_join_sets_origin_and_cardinality():
     assert j["type"] == "INNER"
 
 
-def test_unmatched_join_stays_model_local():
-    m = parser.parse_model(_mini_model(), _mini_tables())
-    j = next(j for j in m["joins"] if j["name"] == "ORDERS_to_REGION_local")
-    assert j["origin"] == "model"
+def test_join_to_table_absent_from_model_is_dropped():
+    """A join whose `with:` target is not a table in the model (here REGION, which
+    the mini fixture references but never lists in model_tables) cannot occur in a
+    valid ThoughtSpot export. If malformed TML contains one, the parser drops it —
+    rather than emitting a join with a non-existent endpoint that the viewer would
+    have to defend against — and logs the drop. Regression for the GTM investigation
+    (the crash was actually aliased joins, not this; this guards genuinely broken TML)."""
+    msgs = []
+    m = parser.parse_model(_mini_model(), _mini_tables(), log=msgs.append)
+    names = {j["name"] for j in m["joins"]}
+    assert "ORDERS_to_REGION_local" not in names   # dropped (REGION not in model_tables)
+    assert "ORDERS_to_CUSTOMER" in names            # a real join is unaffected
+    assert any("ORDERS_to_REGION_local" in msg and "malformed" in msg for msg in msgs)
 
 
 def test_rls_extracted_from_table_tml():
