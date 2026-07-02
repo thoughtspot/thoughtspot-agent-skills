@@ -68,6 +68,7 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         (r"\bSQRT\s*\(", "sqrt ( "),
         (r"\bEXP\s*\(", "exp ( "),
         (r"\bSQUARE\s*\(", "_SQUARE_HANDLER"),
+        (r"\bPI\s*\(\s*\)", "3.14159265358979"),
 
         # Type conversion
         (r"\bFLOAT\s*\(", "to_double ( "),
@@ -148,6 +149,15 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
         f"( substr ( {a[0]} , strlen ( {a[0]} ) - strlen ( {a[1]} ) , strlen ( {a[1]} ) ) = {a[1]} )"
         if len(a) == 2 else None)),
     ("SQUARE", lambda a: f"pow ( {a[0]} , 2 )" if len(a) == 1 else None),
+    ("SIGN", lambda a: (
+        f"( if ( {a[0]} > 0 ) then 1 else if ( {a[0]} < 0 ) then -1 else 0 )"
+        if len(a) == 1 else None)),
+    ("SIN", lambda a: f"sin ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+    ("COS", lambda a: f"cos ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+    ("TAN", lambda a: f"tan ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+    ("RADIANS", lambda a: f"( {a[0]} * 3.14159265358979 / 180 )" if len(a) == 1 else None),
+    ("DEGREES", lambda a: f"( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+    ("DATEPARSE", lambda a: f"to_date ( {a[1]} , {a[0]} )" if len(a) == 2 else None),
 ]
 
 

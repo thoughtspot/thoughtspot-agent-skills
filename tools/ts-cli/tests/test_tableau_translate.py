@@ -629,6 +629,26 @@ class TestMapFunctions:
         assert map_functions("UPPER(UPPER([a]))") == \
             'sql_string_op ( "UPPER({0})" , sql_string_op ( "UPPER({0})" , [a] ) )'
 
+    def test_sign(self):
+        assert map_functions("SIGN([X])") == \
+            "( if ( [X] > 0 ) then 1 else if ( [X] < 0 ) then -1 else 0 )"
+
+    def test_trig_converts_radians_to_degrees(self):
+        assert map_functions("SIN([X])") == "sin ( [X] * 180 / 3.14159265358979 )"
+
+    def test_pi(self):
+        assert map_functions("PI()") == "3.14159265358979"
+
+    def test_radians(self):
+        assert map_functions("RADIANS([D])") == "( [D] * 3.14159265358979 / 180 )"
+
+    def test_degrees(self):
+        assert map_functions("DEGREES([R])") == "( [R] * 180 / 3.14159265358979 )"
+
+    def test_dateparse_flips_args(self):
+        assert map_functions("DATEPARSE('yyyy-MM-dd', [DateStr])") == \
+            "to_date ( [DateStr] , 'yyyy-MM-dd' )"
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
