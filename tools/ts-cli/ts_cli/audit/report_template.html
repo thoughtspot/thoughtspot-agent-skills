@@ -585,6 +585,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 
 .om-subtab{display:none;}
 .om-subtab.active{display:block;}
+.inner-tabs{display:flex;gap:3px;margin-bottom:14px;padding:4px;background:var(--ground);border-radius:6px;border:1px solid var(--hair-2);}
+.inner-tabs button{padding:5px 12px;border-radius:5px;font-size:11px;font-weight:600;color:var(--muted);transition:all .12s;}
+.inner-tabs button:hover{background:var(--surface);color:var(--ink);}
+.inner-tabs button.active{background:var(--surface);color:var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.06);}
+.inner-pane{display:none;}
+.inner-pane.active{display:block;}
 
 .om-section{
   background:var(--surface);border:1px solid var(--hair);border-radius:8px;
@@ -1127,9 +1133,31 @@ function buildScorecard(D, guid, filterAngle){
 
     var aiBody = el("div","ai-panel-body");
 
+    if(cm.ai.do){
+      var doSec = el("div","ai-sub");
+      doSec.innerHTML = '<h4>Model Domain</h4>';
+      var doP = document.createElement("p");
+      doP.textContent = cm.ai.do;
+      doSec.appendChild(doP);
+      aiBody.appendChild(doSec);
+    }
+
+    if(cm.ai.ob && cm.ai.ob.length > 0){
+      var obSec = el("div","ai-sub");
+      obSec.innerHTML = '<h4>Key Objectives</h4>';
+      var obUl = document.createElement("ul");
+      cm.ai.ob.forEach(function(o){
+        var li = document.createElement("li");
+        li.textContent = o;
+        obUl.appendChild(li);
+      });
+      obSec.appendChild(obUl);
+      aiBody.appendChild(obSec);
+    }
+
     if(cm.ai.pe && cm.ai.pe.length > 0){
       var perSec = el("div","ai-sub");
-      perSec.innerHTML = '<h4>Target Personas</h4>';
+      perSec.innerHTML = '<h4>Audience</h4>';
       var perUl = document.createElement("ul");
       cm.ai.pe.forEach(function(p){
         var li = document.createElement("li");
@@ -1151,15 +1179,6 @@ function buildScorecard(D, guid, filterAngle){
       });
       qSec.appendChild(qUl);
       aiBody.appendChild(qSec);
-    }
-
-    if(cm.ai.st){
-      var stSec = el("div","ai-sub");
-      stSec.innerHTML = '<h4>Model Structure</h4>';
-      var stP = document.createElement("p");
-      stP.textContent = cm.ai.st;
-      stSec.appendChild(stP);
-      aiBody.appendChild(stSec);
     }
 
     aiPanel.appendChild(aiBody);
@@ -1261,20 +1280,6 @@ function buildScorecard(D, guid, filterAngle){
     c.appendChild(section);
   });
 
-  /* ── ERD placeholder ── */
-  var erdContainer = el("div","erd-container");
-  erdContainer.id = "erd-"+guid;
-  if(cm && cm.ed && D.E){
-    erdContainer.innerHTML = '<div style="font-size:20px;">⬡</div>'+
-      '<div class="erd-msg">ERD Diagram</div>'+
-      '<div class="erd-sub">Click "ERD Diagram" button above to open interactive ERD in a new tab</div>';
-  } else {
-    erdContainer.innerHTML = '<div style="font-size:20px;">⬡</div>'+
-      '<div class="erd-msg">ERD Diagram</div>'+
-      '<div class="erd-sub">ERD data not available — use /ts-object-model-erd for standalone rendering</div>';
-  }
-  c.appendChild(erdContainer);
-
   /* ── Dependents panel ── */
   var depsPanel = document.createElement("details");
   depsPanel.className = "dependents-panel";
@@ -1319,6 +1324,7 @@ function buildScorecard(D, guid, filterAngle){
         return;
       }
       var erdData = cm.ed;
+      if(cm.ai){erdData.model.ai_analysis={domain:cm.ai.do||"",objectives:cm.ai.ob||[],personas:cm.ai.pe||[],questions:cm.ai.qu||[]};}
       var bundle = {models:[erdData],index:[{
         name:erdData.model.name,guid:erdData.model.guid,
         tables:erdData.tables.length,joins:erdData.joins.length,
@@ -1601,15 +1607,36 @@ function buildTableReuseTab(D){
     return;
   }
 
+  /* Inner sub-tabs */
+  var innerTabs = el("div","inner-tabs");
+  var innerDefs = [{id:"sankey",label:"Connections"},{id:"detail",label:"Shared Tables ("+reuse.length+")"}];
+  innerDefs.forEach(function(td,i){
+    var btn = el("button","",td.label);
+    if(i===0) btn.classList.add("active");
+    btn.addEventListener("click",function(){
+      innerTabs.querySelectorAll("button").forEach(function(b){b.classList.remove("active");});
+      btn.classList.add("active");
+      sec.querySelectorAll(".inner-pane").forEach(function(p){p.classList.remove("active");});
+      document.getElementById("tr-"+td.id).classList.add("active");
+    });
+    innerTabs.appendChild(btn);
+  });
+  sec.appendChild(innerTabs);
+
   /* Sankey diagram */
+  var sankeyPane = el("div","inner-pane active");
+  sankeyPane.id = "tr-sankey";
   var sankeyWrap = el("div","om-section");
   sankeyWrap.innerHTML = '<h3>Table-to-Model Connections</h3>';
   var sankeyContainer = el("div","sankey-container");
   buildSankeySVG(sankeyContainer, reuse);
   sankeyWrap.appendChild(sankeyContainer);
-  sec.appendChild(sankeyWrap);
+  sankeyPane.appendChild(sankeyWrap);
+  sec.appendChild(sankeyPane);
 
   /* Detail table */
+  var detailPane = el("div","inner-pane");
+  detailPane.id = "tr-detail";
   var tableWrap = el("div","om-section");
   tableWrap.innerHTML = '<h3>Shared Tables ('+reuse.length+')</h3>';
 
@@ -1649,7 +1676,8 @@ function buildTableReuseTab(D){
   tbl.appendChild(tbody);
   tblContainer.appendChild(tbl);
   tableWrap.appendChild(tblContainer);
-  sec.appendChild(tableWrap);
+  detailPane.appendChild(tableWrap);
+  sec.appendChild(detailPane);
 
   function renderReuseTable(){
     var sorted = reuse.slice().sort(function(a,b){
@@ -1789,6 +1817,9 @@ function buildSankeySVG(container, reuse){
   });
 
   /* Draw connections */
+  var allPaths = [];
+  var pathsByTable = {};
+  var pathsByModel = {};
   reuse.forEach(function(r){
     var ti = tableSet[r.f];
     var leftY = leftPositions[ti];
@@ -1806,8 +1837,30 @@ function buildSankeySVG(container, reuse){
       path.setAttribute("stroke","var(--accent)");
       path.setAttribute("stroke-width","2");
       path.setAttribute("stroke-opacity","0.25");
+      path.style.transition = "stroke-opacity 0.2s";
       svg.appendChild(path);
+      allPaths.push(path);
+      (pathsByTable[r.f]=pathsByTable[r.f]||[]).push(path);
+      (pathsByModel[m.g]=pathsByModel[m.g]||[]).push(path);
     });
+  });
+
+  /* Click-to-highlight: click a node to highlight its connections */
+  var highlighted = null;
+  function highlightPaths(key, byMap){
+    if(highlighted===key){highlighted=null;allPaths.forEach(function(p){p.setAttribute("stroke-opacity","0.25");p.setAttribute("stroke-width","2");});return;}
+    highlighted=key;
+    allPaths.forEach(function(p){p.setAttribute("stroke-opacity","0.06");p.setAttribute("stroke-width","1.5");});
+    (byMap[key]||[]).forEach(function(p){p.setAttribute("stroke-opacity","0.85");p.setAttribute("stroke-width","3");});
+  }
+  svg.querySelectorAll("rect").forEach(function(rect,i){
+    rect.style.cursor="pointer";
+    if(i<leftCount){
+      rect.addEventListener("click",function(){highlightPaths(tables[i].f,pathsByTable);});
+    } else {
+      var mi=i-leftCount;
+      rect.addEventListener("click",function(){highlightPaths(models[mi].g,pathsByModel);});
+    }
   });
 
   container.appendChild(svg);
@@ -1826,7 +1879,26 @@ function buildDependenciesTab(D){
     return;
   }
 
+  /* Inner sub-tabs */
+  var sharedTables = reuse.filter(function(r){ return r.ms.length > 1; });
+  var dInnerTabs = el("div","inner-tabs");
+  var dInnerDefs = [{id:"tpm",label:"Tables per Model"},{id:"mpt",label:"Models per Table ("+sharedTables.length+")"}];
+  dInnerDefs.forEach(function(td,i){
+    var btn = el("button","",td.label);
+    if(i===0) btn.classList.add("active");
+    btn.addEventListener("click",function(){
+      dInnerTabs.querySelectorAll("button").forEach(function(b){b.classList.remove("active");});
+      btn.classList.add("active");
+      sec.querySelectorAll(".inner-pane").forEach(function(p){p.classList.remove("active");});
+      document.getElementById("dep-"+td.id).classList.add("active");
+    });
+    dInnerTabs.appendChild(btn);
+  });
+  sec.appendChild(dInnerTabs);
+
   /* ── Tables-per-model bar chart ── */
+  var tpmPane = el("div","inner-pane active");
+  tpmPane.id = "dep-tpm";
   if(corpusModels.length > 0){
     var tpmWrap = el("div","om-section");
     tpmWrap.innerHTML = '<h3>Tables per Model</h3>';
@@ -1855,11 +1927,13 @@ function buildDependenciesTab(D){
     );
     tpmTableContainer.appendChild(tpmTable);
     tpmWrap.appendChild(tpmTableContainer);
-    sec.appendChild(tpmWrap);
+    tpmPane.appendChild(tpmWrap);
   }
+  sec.appendChild(tpmPane);
 
   /* ── Models-per-table bar chart ── */
-  var sharedTables = reuse.filter(function(r){ return r.ms.length > 1; });
+  var mptPane = el("div","inner-pane");
+  mptPane.id = "dep-mpt";
   if(sharedTables.length > 0){
     var mptWrap = el("div","om-section");
     mptWrap.innerHTML = '<h3>Models per Table (shared tables only)</h3>';
@@ -1886,8 +1960,9 @@ function buildDependenciesTab(D){
     );
     mptTableContainer.appendChild(mptTable);
     mptWrap.appendChild(mptTableContainer);
-    sec.appendChild(mptWrap);
+    mptPane.appendChild(mptWrap);
   }
+  sec.appendChild(mptPane);
 }
 
 /* ── Bar chart SVG builder ── */
@@ -1897,60 +1972,72 @@ function buildBarChart(container, items, fillColor){
   /* Sort by value descending */
   items = items.slice().sort(function(a,b){ return b.value - a.value; });
 
+  var MAX_BARS = 20;
+  var totalItems = items.length;
+  var visible = items.slice(0, MAX_BARS);
+
   var barH = 22;
   var barGap = 4;
   var labelW = 160;
   var valueW = 40;
   var chartW = 600;
   var barAreaW = chartW - labelW - valueW;
-  var totalH = items.length * (barH + barGap) + 10;
   var maxVal = Math.max.apply(null, items.map(function(d){ return d.value; })) || 1;
 
-  var svg = document.createElementNS(NS,"svg");
-  svg.setAttribute("viewBox","0 0 "+chartW+" "+totalH);
-  svg.setAttribute("width","100%");
-  svg.style.maxWidth = chartW+"px";
-  svg.style.minHeight = Math.min(totalH, 500)+"px";
+  function renderBars(show){
+    container.innerHTML = "";
+    var totalH = show.length * (barH + barGap) + 10;
+    var svg = document.createElementNS(NS,"svg");
+    svg.setAttribute("viewBox","0 0 "+chartW+" "+totalH);
+    svg.setAttribute("width","100%");
+    svg.style.maxWidth = chartW+"px";
+    svg.style.minHeight = Math.min(totalH, 600)+"px";
 
-  items.forEach(function(item,i){
-    var y = 5 + i * (barH + barGap);
-    var barW = Math.max(2, (item.value / maxVal) * barAreaW);
+    show.forEach(function(item,i){
+      var y = 5 + i * (barH + barGap);
+      var barW = Math.max(2, (item.value / maxVal) * barAreaW);
 
-    /* Label */
-    var text = document.createElementNS(NS,"text");
-    text.setAttribute("x",labelW - 8);
-    text.setAttribute("y",y + barH/2 + 4);
-    text.setAttribute("font-size","11");
-    text.setAttribute("fill","var(--ink)");
-    text.setAttribute("font-family","var(--sans)");
-    text.setAttribute("text-anchor","end");
-    text.textContent = item.label.length > 22 ? item.label.substring(0,20)+"..." : item.label;
-    svg.appendChild(text);
+      var text = document.createElementNS(NS,"text");
+      text.setAttribute("x",labelW - 8);
+      text.setAttribute("y",y + barH/2 + 4);
+      text.setAttribute("font-size","11");
+      text.setAttribute("fill","var(--ink)");
+      text.setAttribute("font-family","var(--sans)");
+      text.setAttribute("text-anchor","end");
+      text.textContent = item.label.length > 22 ? item.label.substring(0,20)+"..." : item.label;
+      svg.appendChild(text);
 
-    /* Bar */
-    var rect = document.createElementNS(NS,"rect");
-    rect.setAttribute("x",labelW);
-    rect.setAttribute("y",y);
-    rect.setAttribute("width",barW);
-    rect.setAttribute("height",barH);
-    rect.setAttribute("rx","3");
-    rect.setAttribute("fill",fillColor);
-    rect.setAttribute("fill-opacity","0.75");
-    svg.appendChild(rect);
+      var rect = document.createElementNS(NS,"rect");
+      rect.setAttribute("x",labelW);
+      rect.setAttribute("y",y);
+      rect.setAttribute("width",barW);
+      rect.setAttribute("height",barH);
+      rect.setAttribute("rx","3");
+      rect.setAttribute("fill",fillColor);
+      rect.setAttribute("fill-opacity","0.75");
+      svg.appendChild(rect);
 
-    /* Value label */
-    var val = document.createElementNS(NS,"text");
-    val.setAttribute("x",labelW + barW + 6);
-    val.setAttribute("y",y + barH/2 + 4);
-    val.setAttribute("font-size","11");
-    val.setAttribute("fill","var(--muted)");
-    val.setAttribute("font-family","var(--mono)");
-    val.setAttribute("font-weight","600");
-    val.textContent = item.value;
-    svg.appendChild(val);
-  });
+      var val = document.createElementNS(NS,"text");
+      val.setAttribute("x",labelW + barW + 6);
+      val.setAttribute("y",y + barH/2 + 4);
+      val.setAttribute("font-size","11");
+      val.setAttribute("fill","var(--muted)");
+      val.setAttribute("font-family","var(--mono)");
+      val.setAttribute("font-weight","600");
+      val.textContent = item.value;
+      svg.appendChild(val);
+    });
+    container.appendChild(svg);
 
-  container.appendChild(svg);
+    if(totalItems > MAX_BARS && show.length <= MAX_BARS){
+      var btn = el("button","show-all-btn","Show all "+totalItems+" items");
+      btn.style.cssText = "margin:8px 0;padding:6px 16px;border:1px solid var(--hair);border-radius:6px;background:var(--bg-card);cursor:pointer;font-size:12px;color:var(--accent);";
+      btn.addEventListener("click",function(){ renderBars(items); });
+      container.appendChild(btn);
+    }
+  }
+
+  renderBars(visible);
 }
 
 /* ── Sortable dependency detail table ── */
@@ -2116,6 +2203,8 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
   /* Table */
   var tblWrap = el("div","","");
   tblWrap.style.overflowX = "auto";
+  var MAX_VISIBLE = 20;
+  var showAll = items.length <= MAX_VISIBLE;
   var tbl = el("table","cleanup-table");
 
   var thead = document.createElement("thead");
@@ -2132,10 +2221,12 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
   tbl.appendChild(thead);
 
   var tbody = document.createElement("tbody");
-  items.forEach(function(f){
+  items.forEach(function(f, idx){
     var tr = document.createElement("tr");
     tr.setAttribute("data-severity",f.s);
     if(!activeSevs[f.s]) tr.style.display = "none";
+    if(!showAll && idx >= MAX_VISIBLE) tr.style.display = "none";
+    if(!showAll && idx >= MAX_VISIBLE) tr.classList.add("cleanup-overflow");
 
     var model = D.L[f.mi];
     var name = model ? model.n : "";
@@ -2193,6 +2284,21 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
   tbl.appendChild(tbody);
   tblWrap.appendChild(tbl);
   sec.appendChild(tblWrap);
+
+  if(!showAll){
+    var showBtn = el("button","show-all-btn","Show all "+items.length+" items");
+    showBtn.style.cssText = "margin:8px 0 4px;padding:6px 16px;border:1px solid var(--hair);border-radius:6px;background:var(--bg-card);cursor:pointer;font-size:12px;color:var(--accent);";
+    showBtn.addEventListener("click",function(){
+      $$(".cleanup-overflow",sec).forEach(function(tr){
+        tr.classList.remove("cleanup-overflow");
+        var sev = tr.getAttribute("data-severity");
+        tr.style.display = activeSevs[sev] ? "" : "none";
+      });
+      showBtn.remove();
+    });
+    sec.appendChild(showBtn);
+  }
+
   container.appendChild(sec);
 }
 
@@ -2666,28 +2772,43 @@ function buildHeatmap(){
   D.F.forEach(function(f){ anglesPresent[f.a] = true; });
   var angleKeys = Object.keys(ANGLE_LABELS).filter(function(a){ return anglesPresent[a]; });
 
-  /* Group findings by model index */
-  var byModel = {};
+  /* Build model GUID set from corpus — heatmap only shows model rows */
+  var modelGuids = {};
+  if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m) modelGuids[m.g] = {mi: cm.mi, name: m.n}; });
+
+  /* Group findings by model GUID — non-model findings (answers, tables, formulas)
+     are rolled up under their parent model via matching GUID, or shown under the
+     first model if no match (single-model audits) */
+  var byGuid = {};
+  var modelGuidList = Object.keys(modelGuids);
   D.F.forEach(function(f){
-    if(!byModel[f.mi]) byModel[f.mi] = {};
-    if(!byModel[f.mi][f.a]) byModel[f.mi][f.a] = [];
-    byModel[f.mi][f.a].push(f);
+    var m = D.L[f.mi];
+    if(!m) return;
+    var guid = m.g;
+    if(modelGuids[guid]){
+      if(!byGuid[guid]) byGuid[guid] = {mi: modelGuids[guid].mi, name: modelGuids[guid].name, guid: guid, byAngle: {}};
+    } else if(modelGuidList.length > 0){
+      guid = modelGuidList[0];
+      if(!byGuid[guid]) byGuid[guid] = {mi: modelGuids[guid].mi, name: modelGuids[guid].name, guid: guid, byAngle: {}};
+    } else {
+      if(!byGuid[guid]) byGuid[guid] = {mi: f.mi, name: m.n, guid: guid, byAngle: {}};
+    }
+    if(!byGuid[guid].byAngle[f.a]) byGuid[guid].byAngle[f.a] = [];
+    byGuid[guid].byAngle[f.a].push(f);
   });
 
   /* Build rows: [{mi, name, guid, worstOverall, cells:{angle:severity}}] */
   var rows = [];
-  Object.keys(byModel).forEach(function(mi){
-    mi = parseInt(mi);
-    var m = D.L[mi];
-    if(!m) return;
+  Object.keys(byGuid).forEach(function(guid){
+    var entry = byGuid[guid];
     var cells = {};
     var allFindings = [];
     angleKeys.forEach(function(a){
-      var ff = byModel[mi][a] || [];
+      var ff = entry.byAngle[a] || [];
       cells[a] = ff.length > 0 ? worstSev(ff) : "NONE";
       allFindings = allFindings.concat(ff);
     });
-    rows.push({mi:mi, n:m.n, g:m.g, worst: worstSev(allFindings), cells:cells});
+    rows.push({mi:entry.mi, n:entry.name, g:guid, worst: worstSev(allFindings), cells:cells});
   });
 
   /* Sort by worst severity descending (critical first) */

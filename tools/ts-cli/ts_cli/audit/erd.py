@@ -103,14 +103,28 @@ def parse_model(model_tml: dict, table_tmls: dict) -> dict:
     joins = []
     for mt in model.get("model_tables", []):
         for j in mt.get("joins", []) or []:
-            joins.append({
-                "from": mt["name"],
-                "to": j.get("with", ""),
-                "name": j.get("referencing_join", ""),
-                "card": "UNKNOWN",
-                "origin": "model",
-                "type": "UNKNOWN",
-            })
+            ref_join = j.get("referencing_join", "")
+            inline_on = j.get("on") or ""
+            if ref_join:
+                joins.append({
+                    "from": mt["name"],
+                    "to": j.get("with", ""),
+                    "name": ref_join,
+                    "card": "UNKNOWN",
+                    "origin": "model",
+                    "type": "UNKNOWN",
+                    "on": "",
+                })
+            elif inline_on:
+                joins.append({
+                    "from": mt["name"],
+                    "to": j.get("with", ""),
+                    "name": f"{mt['name']}_{j.get('with', '')}",
+                    "card": j.get("cardinality", "UNKNOWN"),
+                    "origin": "model",
+                    "type": j.get("type", "UNKNOWN"),
+                    "on": inline_on,
+                })
 
     has_outgoing = {mt["name"] for mt in model.get("model_tables", []) if mt.get("joins")}
     is_target = {j["to"] for j in joins}
@@ -134,9 +148,11 @@ def parse_model(model_tml: dict, table_tmls: dict) -> dict:
     table_joins = _index_table_joins(table_tmls)
     for j in joins:
         if j["name"] in table_joins:
+            tj = table_joins[j["name"]]
             j["origin"] = "table"
-            j["card"] = table_joins[j["name"]]["card"]
-            j["type"] = table_joins[j["name"]]["type"]
+            j["card"] = tj["card"]
+            j["type"] = tj["type"]
+            j["on"] = tj.get("on", "")
 
     tables_by_id = {t["id"]: t for t in tables}
 
@@ -152,12 +168,17 @@ def parse_model(model_tml: dict, table_tmls: dict) -> dict:
             if phys and phys != name:
                 tables_by_id[name]["alias_of"] = phys
 
-    for meta in table_joins.values():
-        for tbl, col in _keys_from_on(meta["on"]):
+    all_on_exprs = [meta["on"] for meta in table_joins.values()]
+    all_on_exprs.extend(j["on"] for j in joins if j.get("on"))
+    for on_expr in all_on_exprs:
+        for tbl, col in _keys_from_on(on_expr):
             t = tables_by_id.get(tbl)
             if not t:
                 continue
-            if not any(c["name"] == col for c in t["cols"]):
+            existing = next((c for c in t["cols"] if c["name"] == col), None)
+            if existing:
+                existing["key"] = True
+            else:
                 t["cols"].append({
                     "name": col, "src": col, "role": "ATTR",
                     "agg": None, "key": True, "hidden": True, "flag": None,
@@ -203,5 +224,13 @@ def build_erd_for_audit(ctx: Any) -> list:
                         break
             if t:
                 needed[name] = t
-        results.append(parse_model(model_tml, needed))
+        erd = parse_model(model_tml, needed)
+        guid = erd["model"]["guid"]
+        ai_data = ctx.ai_instructions.get(guid, {})
+        instructions = []
+        for info in (ai_data.get("nl_instructions_info") or []):
+            instructions.extend(info.get("instructions") or [])
+        if instructions:
+            erd["model"]["ai_instructions"] = instructions
+        results.append(erd)
     return results

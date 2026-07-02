@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-02
+- feat: ERD — AI domain summary, multi-select filter chips, RLS red colour scheme, grouped controls bar, join-tree double-click
+- chore: bump ts-cli to v0.25.1
+
 ## 2026-07-01
 - feat: wire ts-object-model-erd into ts-audit report — ERD button opens interactive diagram per model
 - feat: ts-cli performance — `requests.Session` pooling, BFS frontier batching, Liveboard export batching

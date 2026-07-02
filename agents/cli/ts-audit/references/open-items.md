@@ -208,6 +208,43 @@ usage analysis?
 
 ---
 
+### #14 — Large cluster timeout on full metadata scan — VERIFIED 2026-07-01
+
+On champ-staging (91 GTM models, ~1855+ total objects), the original `build_context`
+metadata scan (`metadata/search` with `{"type": "LOGICAL_TABLE"}` and no identifier
+filter) timed out at 60s. The scan was paginating through ALL logical tables in the
+cluster — unnecessary when auditing a scoped set of models.
+
+**Fix applied:** Scoped the metadata search to only the model GUIDs + their associated
+table GUIDs (extracted from the TML export). Batched in groups of 50. Also bumped
+timeout to 300s on TML export and dependents calls for large model counts.
+
+**SKILL.md review needed:** The skill doesn't mention performance considerations for
+large clusters. Should document:
+- Expected timing for 50+ model audits
+- The scoped vs full-cluster metadata scan tradeoff (D8 duplicate detection is
+  limited to tables referenced by audited models, not cluster-wide)
+- Timeout behaviour and how to handle staging clusters with thousands of objects
+
+---
+
+### #15 — Bulk dependents fetch truncation — FIXED 2026-07-01
+
+The `build_context` dependents fetch sent all model+table GUIDs (282 for champ-staging)
+in a single `metadata/search` request with `include_dependent_objects: True`. At scale,
+the API response appears to truncate dependent objects for some items silently — GTM
+Partners (confirmed to have 2 LIVEBOARD dependents via individual
+`ts metadata dependents` call) returned zero dependents in the bulk response.
+
+**Fix applied:** Batched dependents queries in groups of 25 GUIDs instead of one bulk
+request. This matches the pattern used by the scoped metadata scan (batched at 50) and
+reduces the chance of response truncation.
+
+**Impact:** H4 (orphan model detection) produced false positives when the bulk response
+omitted dependent objects. Needs re-verification on next audit run.
+
+---
+
 ## Phase 3 — Visualization Layer (future)
 
 ### #13 — Liveboard viz fingerprinting — UNVERIFIED

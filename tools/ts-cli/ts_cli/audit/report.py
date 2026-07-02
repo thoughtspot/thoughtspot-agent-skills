@@ -34,11 +34,6 @@ def compact_payload(data: dict) -> dict:
 
     model_lookup: list = []
     model_index: dict = {}
-    for f in findings:
-        key = (f.get("object_name", ""), f.get("object_guid", ""))
-        if key not in model_index:
-            model_index[key] = len(model_lookup)
-            model_lookup.append({"n": key[0], "g": key[1]})
 
     if corpus:
         for m in corpus.get("models", []):
@@ -46,6 +41,12 @@ def compact_payload(data: dict) -> dict:
             if key not in model_index:
                 model_index[key] = len(model_lookup)
                 model_lookup.append({"n": key[0], "g": key[1]})
+
+    for f in findings:
+        key = (f.get("object_name", ""), f.get("object_guid", ""))
+        if key not in model_index:
+            model_index[key] = len(model_lookup)
+            model_lookup.append({"n": key[0], "g": key[1]})
 
     compact_findings = []
     for f in findings:
@@ -104,9 +105,10 @@ def compact_payload(data: dict) -> dict:
             ai = m.get("ai_analysis")
             if ai:
                 cm["ai"] = {
+                    "do": ai.get("domain", ""),
+                    "ob": ai.get("objectives", []),
                     "pe": ai.get("personas", []),
                     "qu": ai.get("questions", []),
-                    "st": ai.get("structure", ""),
                 }
             erd = m.get("erd")
             if erd:

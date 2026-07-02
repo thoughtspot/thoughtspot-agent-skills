@@ -398,6 +398,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.3.0 | 2026-07-02 | ERD: AI domain summary, multi-select filter chips, RLS red colour scheme, grouped controls bar, join-tree double-click, layered layout fixes |
 | 2.2.0 | 2026-07-01 | Report UI: accessible heatmap labels, clickable breadcrumbs/KPIs, severity filters on Dashboard, check metadata in Cross-Model groups, show-all-checks toggle, model description + AI analysis panel |
 | 2.1.0 | 2026-07-01 | Add `ts audit report` command: unified HTML report with Dashboard, Scorecard, Cross-Model, Object Map, Cleanup views. Delete superseded `efficiency_report.py`. |
 | 1.0.0 | 2026-06-18 | Initial release — five audit angles: AI Readiness (A), Data Modeling (D), Human Readiness (H), Performance (P), Security (S) |

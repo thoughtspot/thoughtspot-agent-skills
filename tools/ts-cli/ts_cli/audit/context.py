@@ -70,10 +70,12 @@ def build_context(
         "export_fqn": True,
         "export_associated": True,
         "formattype": "YAML",
-    })
+    }, timeout=300)
     for item in resp.json():
         edoc = item.get("edoc", "")
         parsed = parse_edoc(edoc, "YAML")
+        if not parsed:
+            continue
         tml_type = detect_tml_type(parsed)
         if tml_type == "model":
             models.append(parsed)
@@ -83,25 +85,21 @@ def build_context(
                   (parsed.get("table", {}).get("db_table") or "")
             tables[fqn] = parsed
 
-    _log("Searching metadata inventory...")
+    table_guids_from_tml = [t.get("guid") for t in tables.values() if t.get("guid")]
+    scoped_guids = list(set(model_guids + table_guids_from_tml))
+    _log(f"Searching metadata for {len(scoped_guids)} scoped object(s)...")
     metadata_results = []
-    offset = 0
-    while True:
+    batch_size = 50
+    for i in range(0, len(scoped_guids), batch_size):
+        batch = scoped_guids[i:i + batch_size]
         resp = client.post("/api/rest/2.0/metadata/search", json={
-            "metadata": [{"type": "LOGICAL_TABLE"}],
-            "record_size": 200,
-            "record_offset": offset,
+            "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in batch],
             "include_headers": True,
             "include_hidden_objects": True,
-        })
+        }, timeout=300)
         data = resp.json()
         page = data if isinstance(data, list) else data.get("metadata", [])
-        if not page:
-            break
         metadata_results.extend(page)
-        if len(page) < 200:
-            break
-        offset += 200
 
     _log("Fetching dependents...")
     all_guids = model_guids.copy()
@@ -116,23 +114,26 @@ def build_context(
             unique_guids.append(g)
 
     if unique_guids:
-        resp = client.post("/api/rest/2.0/metadata/search", json={
-            "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in unique_guids],
-            "include_dependent_objects": True,
-            "dependent_object_version": "V2",
-        })
         from ts_cli.commands.metadata import _normalize_dependents_response
-        dep_rows = _normalize_dependents_response(resp.json())
-        for row in dep_rows:
-            src = row["source_guid"]
-            dependents.setdefault(src, []).append(row)
+        dep_batch = 25
+        for i in range(0, len(unique_guids), dep_batch):
+            batch = unique_guids[i:i + dep_batch]
+            resp = client.post("/api/rest/2.0/metadata/search", json={
+                "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in batch],
+                "include_dependent_objects": True,
+                "dependent_object_version": "V2",
+            }, timeout=300)
+            dep_rows = _normalize_dependents_response(resp.json())
+            for row in dep_rows:
+                src = row["source_guid"]
+                dependents.setdefault(src, []).append(row)
 
     if "A" in angles:
         _log("Fetching AI instructions...")
         for guid in model_guids:
             try:
                 resp = client.post("/api/rest/2.0/ai/instructions/get", json={
-                    "metadata_identifier": guid,
+                    "data_source_identifier": guid,
                 })
                 ai_instructions[guid] = resp.json()
             except Exception:
@@ -147,16 +148,22 @@ def build_context(
         if answer_guids:
             _log(f"Exporting {len(answer_guids)} answer TML(s)...")
             guid_list = list(answer_guids)
-            resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-                "metadata": [{"identifier": g} for g in guid_list],
-                "export_fqn": True,
-                "formattype": "YAML",
-            })
-            for item in resp.json():
-                edoc = item.get("edoc", "")
-                parsed = parse_edoc(edoc, "YAML")
-                if detect_tml_type(parsed) == "answer":
-                    answers.append(parsed)
+            ans_batch = 50
+            for i in range(0, len(guid_list), ans_batch):
+                batch = guid_list[i:i + ans_batch]
+                resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+                    "metadata": [{"identifier": g} for g in batch],
+                    "export_fqn": True,
+                    "formattype": "YAML",
+                }, timeout=300, raise_for_status=False)
+                if not resp.ok:
+                    _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
+                    continue
+                for item in resp.json():
+                    edoc = item.get("edoc", "")
+                    parsed = parse_edoc(edoc, "YAML")
+                    if parsed and detect_tml_type(parsed) == "answer":
+                        answers.append(parsed)
 
     _log(f"Context ready: {len(models)} model(s), {len(tables)} table(s), "
          f"{len(answers)} answer(s)")

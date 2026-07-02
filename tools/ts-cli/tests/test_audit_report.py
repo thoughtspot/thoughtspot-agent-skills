@@ -125,11 +125,12 @@ def test_compact_payload_includes_ai_analysis():
     payload = compact_payload(data)
     first_model = payload["C"]["m"][0]
     assert "ai" in first_model
+    assert "do" in first_model["ai"]
+    assert "ob" in first_model["ai"]
     assert "pe" in first_model["ai"]
     assert "qu" in first_model["ai"]
-    assert "st" in first_model["ai"]
+    assert first_model["ai"]["do"]
     assert len(first_model["ai"]["pe"]) >= 1
-    assert len(first_model["ai"]["qu"]) >= 1
 
 
 def test_compact_payload_includes_check_meta():
