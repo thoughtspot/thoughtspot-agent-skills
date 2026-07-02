@@ -1895,9 +1895,12 @@ these are rejected loud at translate time (coverage-matrix.md U7) instead of sil
 passing through broken syntax — a real improvement — but the underlying capability gap
 remains: workbooks using Tableau's built-in user identity for RLS or personalization have
 no automated migration path. This is the direct sibling of `ISMEMBEROF("group")` →
-`ts_groups = 'group'`, which already shipped (`tableau-formula-translation.md:1041`,
-coverage-matrix.md #108, reclassified 2026-06-28) for group membership. This item is
-about implementing the translation, not about the fail-loud behavior (already shipped).
+`ts_groups = 'group'` (`tableau-formula-translation.md:1041`, coverage-matrix.md #108,
+reclassified 2026-06-28) for group membership — shipped as a **documented skill-level
+mapping only**: no CLI translation exists yet, and the CLI passes `ISMEMBEROF(...)`
+through untranslated and un-rejected (it is not in `_UNMAPPED_FUNCTIONS`); implementing
+one is part of this item's scope. This item is about implementing the translations, not
+about the fail-loud behavior (already shipped for the U7 functions).
 
 ### Approach
 

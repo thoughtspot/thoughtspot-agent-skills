@@ -54,9 +54,9 @@ Use this as the canonical limitations reference.
 | 36 | `DATETIME(expr)` cast | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` | Pass-through |
 | 37 | String concat (`+` on strings) | `concat ( a , b )` | TS `+` is numeric-only |
 | 38 | `SIGN(x)/SQUARE(x)` | `if/then` composite / `pow(x,2)` | CLI-translated (v0.26.0) |
-| 39 | `MIN/MAX` (scalar, 2-arg) | `least ( a , b )` / `greatest ( a , b )` | CLI-translated (v0.26.0); 2-arg form only — 1-arg is the aggregate `min()`/`max()` |
+| 39 | `MIN/MAX` (scalar, 2-arg) | `least ( a , b )` / `greatest ( a , b )` | CLI-translated (since v0.17.0; scan-abort bug fixed v0.26.0); 2-arg form only — 1-arg is the aggregate `min()`/`max()` |
 | 40 | Division by zero | `safe_divide()` or `if ( b = 0 ) then null else a/b` | |
-| 108 | `ISMEMBEROF("group")` | `ts_groups = 'group'` | Multi-value list membership handled natively with `=` |
+| 108 | `ISMEMBEROF("group")` | `ts_groups = 'group'` | Multi-value list membership handled natively with `=`. Documented skill-level mapping only — the CLI does NOT translate it as of v0.26.0: `ISMEMBEROF(...)` passes through untranslated and is not caught by the fail-loud validator (not in `_UNMAPPED_FUNCTIONS`), the same silent-gap class as the inverse trig note on #32. CLI implementation tracked in BL-071 |
 
 ### Formula Translation — Aggregates
 
