@@ -22,7 +22,7 @@
   "tools/ts-cli/ts_cli/tableau/parsing.py::_find_last_top_level_else": 17,
   "tools/ts-cli/ts_cli/tableau/parsing.py::_find_top_level_colon": 18,
   "tools/ts-cli/ts_cli/tableau/parsing.py::_split_args": 16,
+  "tools/ts-cli/ts_cli/tableau/validate.py::validate_pre_import": 32,
   "tools/ts-cli/ts_cli/tableau_translate.py::translate_formulas": 25,
-  "tools/ts-cli/ts_cli/tableau_translate.py::validate_pre_import": 32,
   "tools/ts-cli/ts_cli/tml_lint.py::lint_tml": 34
 }

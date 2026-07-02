@@ -20,7 +20,6 @@ Post-pipeline transforms (runs after the main pipeline on each formula):
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from ts_cli.tableau.parsing import (  # noqa: F401 — re-exported for back-compat
     _extract_function_args,
@@ -96,278 +95,25 @@ from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for back-compat
     build_dependency_dag,
     resolve_cross_references,
 )
-
-
-# ---------------------------------------------------------------------------
-# 2. Parameter handling
-# ---------------------------------------------------------------------------
-
-def strip_parameter_prefix(expr: str) -> str:
-    """[Parameters].[X] → [X]"""
-    return re.sub(
-        r"\[Parameters\]\.\[([^\]]+)\]",
-        r"[\1]",
-        expr,
-        flags=re.IGNORECASE,
-    )
-
-
-def map_parameter_names(
-    expr: str,
-    param_map: dict[str, str],
-) -> str:
-    """Replace internal parameter names with display captions.
-
-    param_map: {"Parameter 3 1": "Metric"} — internal name → caption.
-    """
-    for internal, caption in param_map.items():
-        expr = expr.replace(f"[{internal}]", f"[{caption}]")
-    return expr
-
-
-# ---------------------------------------------------------------------------
-# 15. Validation
-# ---------------------------------------------------------------------------
-
-_FORBIDDEN_PATTERNS = [
-    (re.compile(r"(?<!\[)\bEND\b(?!\])", re.IGNORECASE), "bare 'END' keyword"),
-    (re.compile(r"(?<!\[)\bCASE\b(?!\])", re.IGNORECASE), "bare 'CASE' keyword"),
-    (re.compile(r"(?<!\[)\bWHEN\b(?!\])", re.IGNORECASE), "bare 'WHEN' keyword"),
-    (re.compile(r"\bunique_count\b"), "'unique_count' (should be 'unique count')"),
-    (re.compile(r"\bdate_trunc\b", re.IGNORECASE), "'date_trunc' (should be 'start_of_*')"),
-    (re.compile(r"\bELSEIF\b", re.IGNORECASE), "'ELSEIF' (should be 'else if')"),
-]
-
-
-def validate_output(expr: str) -> list[str]:
-    """Check for forbidden patterns in a translated expression.
-
-    Returns a list of validation error strings. Empty = clean.
-    """
-    errors: list[str] = []
-    for pattern, desc in _FORBIDDEN_PATTERNS:
-        if pattern.search(expr):
-            errors.append(f"Contains {desc}")
-    return errors
-
-
-def validate_pre_import(
-    translated: list[dict],
-    column_names: set[str] | None = None,
-    formula_names: set[str] | None = None,
-) -> list[dict]:
-    """Pre-import structural validation to catch issues before ThoughtSpot import.
-
-    Checks each translated formula for common patterns that cause import failures.
-    Returns a list of {name, warnings: [str]} for formulas with issues.
-    """
-    column_names = column_names or set()
-    formula_names = formula_names or set()
-    col_upper = {c.upper() for c in column_names}
-    formula_upper = {f.upper() for f in formula_names}
-    all_names_upper = col_upper | formula_upper
-
-    issues: list[dict] = []
-
-    for entry in translated:
-        name = entry.get("name", "")
-        expr = entry.get("expr", "")
-        warnings: list[str] = []
-
-        # Check for unbalanced parentheses
-        depth = 0
-        for c in expr:
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-            if depth < 0:
-                break
-        if depth != 0:
-            warnings.append(f"Unbalanced parentheses (depth={depth})")
-
-        # Check for unbalanced brackets
-        b_depth = 0
-        for c in expr:
-            if c == "[":
-                b_depth += 1
-            elif c == "]":
-                b_depth -= 1
-        if b_depth != 0:
-            warnings.append(f"Unbalanced brackets (depth={b_depth})")
-
-        # if/then/else structural validation (BL-046 #5)
-        # Strip [col refs] and 'strings' to avoid false matches
-        expr_stripped = re.sub(r'\[[^\]]*\]', '', expr)
-        expr_stripped = re.sub(r"'[^']*'", '', expr_stripped)
-        lower_s = expr_stripped.lower()
-
-        # Use negative lookbehind to exclude *_if functions (sum_if, count_if, etc.)
-        if_count = len(re.findall(r'(?<![a-zA-Z_])\bif\b', lower_s))
-        then_count = len(re.findall(r'(?<![a-zA-Z_])\bthen\b', lower_s))
-        else_count = len(re.findall(r'(?<![a-zA-Z_])\belse\b', lower_s))
-
-        if if_count > 0:
-            if then_count < if_count:
-                warnings.append(f"if without matching then ({if_count} if, {then_count} then)")
-            if else_count < if_count:
-                warnings.append(f"if/then without else ({if_count} if, {else_count} else)")
-        if else_count > if_count:
-            warnings.append(f"Orphaned else clause ({else_count} else, {if_count} if)")
-
-        # Check for unresolved Custom SQL Query references
-        if "Custom SQL Query" in expr:
-            warnings.append("Unresolved Custom SQL Query alias")
-
-        # Check for nested group_aggregate (ThoughtSpot limitation)
-        ga_positions = [m.start() for m in re.finditer(r'\bgroup_aggregate\s*\(', expr)]
-        if len(ga_positions) >= 2:
-            warnings.append(
-                "Nested group_aggregate — ThoughtSpot does not support "
-                "group_aggregate inside another group_aggregate. "
-                "Decompose into separate formulas."
-            )
-
-        # Check for bare Tableau aggregate keywords
-        if re.search(r"\bCOUNTD\b", expr):
-            warnings.append("Unrewritten COUNTD (should be 'unique count')")
-
-        # IN with parentheses instead of curly braces
-        if re.search(r'\bin\s*\(', expr, re.IGNORECASE):
-            if not re.search(r'\bnot\s+in\s*\(', expr, re.IGNORECASE):
-                warnings.append("IN uses parentheses — ThoughtSpot requires curly braces: in {a, b, c}")
-
-        # Non-existent ThoughtSpot functions
-        if re.search(r'\badd_quarters\s*\(', expr, re.IGNORECASE):
-            warnings.append("add_quarters() does not exist — use add_months(expr, N*3)")
-        if re.search(r'\badd_years\s*\(', expr, re.IGNORECASE):
-            warnings.append("add_years() does not exist — use add_months(expr, N*12)")
-
-        # Bare date literal not wrapped in to_date()
-        bare_date = re.search(r"'(\d{4}-\d{2}-\d{2})'", expr)
-        if bare_date:
-            before = expr[:bare_date.start()]
-            if not before.rstrip().lower().endswith("to_date("):
-                warnings.append(
-                    f"Bare date literal '{bare_date.group(1)}' — "
-                    "wrap in to_date('YYYY-MM-DD', 'yyyy-MM-dd')"
-                )
-
-        # max(boolean_expr)=false pattern — ThoughtSpot can't aggregate a boolean
-        if re.search(r'\bmax\s*\([^)]*=[^)]*\)\s*=\s*false', expr, re.IGNORECASE):
-            warnings.append(
-                "max([col]='value')=false pattern — rewrite as "
-                "count_if([col] != 'value') = 0 or similar"
-            )
-
-        # Name clash with existing column
-        if name.upper() in col_upper:
-            warnings.append(f"Formula name '{name}' clashes with column name")
-
-        if warnings:
-            issues.append({"name": name, "warnings": warnings})
-
-    return issues
-
-
-# ---------------------------------------------------------------------------
-# 16. Parameter name conflict detection
-# ---------------------------------------------------------------------------
-
-def detect_param_conflicts(
-    formulas: list[dict],
-    parameters: list[dict],
-) -> dict[str, str]:
-    """Detect formula names that collide with parameter names.
-
-    Returns: { formula_caption: "conflict_reason" }
-    """
-    param_names = set()
-    for p in parameters:
-        caption = p.get("caption", p.get("name", ""))
-        if caption:
-            param_names.add(caption)
-
-    conflicts: dict[str, str] = {}
-    for f in formulas:
-        caption = f.get("caption", "")
-        if caption in param_names:
-            raw = f.get("formula", "").strip()
-            # Check if it's a pass-through (just returns the parameter)
-            stripped = strip_parameter_prefix(raw)
-            if stripped.strip() == f"[{caption}]" or stripped.strip() == caption:
-                conflicts[caption] = "pass-through — omit formula, use parameter directly"
-            else:
-                conflicts[caption] = "name collision — rename formula"
-
-    return conflicts
-
-
-# ---------------------------------------------------------------------------
-# 19. Parameter name sanitisation (BL-050 #6)
-# ---------------------------------------------------------------------------
-
-_PARAM_UNSAFE = re.compile(r"[/\\:*?\"<>|]")
-
-def sanitise_parameter_name(name: str) -> str:
-    """Remove characters not allowed in ThoughtSpot parameter names."""
-    return _PARAM_UNSAFE.sub(" ", name).strip()
-
-
-def sanitise_parameter_refs(
-    expr: str,
-    param_renames: dict[str, str],
-) -> str:
-    """Rewrite formula references to use sanitised parameter names.
-
-    param_renames: {"Platform/Placement": "Platform Placement", ...}
-    """
-    for old_name, new_name in param_renames.items():
-        expr = expr.replace(f"[{old_name}]", f"[{new_name}]")
-    return expr
-
-
-def build_param_renames(parameters: list[dict]) -> dict[str, str]:
-    """Detect parameters needing sanitisation and build a rename map.
-
-    Returns: { original_name: sanitised_name } for names that changed.
-    """
-    renames: dict[str, str] = {}
-    for p in parameters:
-        caption = p.get("caption", p.get("name", ""))
-        if caption and _PARAM_UNSAFE.search(caption):
-            renames[caption] = sanitise_parameter_name(caption)
-    return renames
-
-
-# ---------------------------------------------------------------------------
-# 20. Column/formula name clash detection (BL-046 #7 / BL-050 #9)
-# ---------------------------------------------------------------------------
-
-def detect_name_clashes(
-    formula_names: set[str],
-    column_names: set[str],
-) -> dict[str, str]:
-    """Detect case-insensitive collisions between formula and column names.
-
-    Returns: { formula_name: suggested_rename }
-    """
-    col_upper = {c.upper(): c for c in column_names}
-    clashes: dict[str, str] = {}
-    for fname in formula_names:
-        if fname.upper() in col_upper:
-            clashes[fname] = f"Formula {fname}"
-    return clashes
-
-
-def apply_name_clash_renames(expr: str, name_clashes: dict[str, str]) -> str:
-    """Update ``[formula_X]`` references in *expr* when X was renamed by name-clash detection."""
-    for original, renamed in name_clashes.items():
-        old_ref = f"[formula_{original}]"
-        new_ref = f"[formula_{renamed}]"
-        if old_ref in expr:
-            expr = expr.replace(old_ref, new_ref)
-    return expr
+from ts_cli.tableau.params import (  # noqa: F401
+    _PARAM_UNSAFE,
+    build_param_renames,
+    detect_param_conflicts,
+    map_parameter_names,
+    sanitise_parameter_name,
+    sanitise_parameter_refs,
+    strip_parameter_prefix,
+)
+from ts_cli.tableau.naming import (  # noqa: F401 — re-exported for back-compat
+    apply_name_clash_renames,
+    detect_name_clashes,
+)
+from ts_cli.tableau.validate import (  # noqa: F401
+    _FORBIDDEN_PATTERNS,
+    validate_output,
+    validate_pre_import,
+)
+from ts_cli.tableau.yaml_out import dump_tml_yaml  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -646,50 +392,3 @@ def translate_formulas(
             "agg_if_conversions": transform_counts.get("agg_if_converted", 0),
         },
     }
-
-
-# ---------------------------------------------------------------------------
-# TML YAML serialization — proper quoting for formula expressions
-# ---------------------------------------------------------------------------
-
-def dump_tml_yaml(data: dict) -> str:
-    """Serialize a TML dict to YAML with proper quoting for formula expressions.
-
-    Handles two problems that plain yaml.dump gets wrong for TML:
-    1. Formula expressions contain : [] {} # which YAML misinterprets
-    2. Long expressions get line-wrapped, producing invalid multi-line TML
-
-    Values matching TML-sensitive patterns are double-quoted automatically.
-    """
-    import yaml
-
-    class _QuotedStr(str):
-        pass
-
-    def _quoted_representer(dumper: yaml.Dumper, val: str) -> yaml.ScalarNode:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", val, style='"')
-
-    _NEEDS_QUOTING = re.compile(r"[\[\]{}:#>|&*!%@`]|^\s|^'|^\"")
-
-    def _quote_values(obj: Any) -> Any:
-        if isinstance(obj, dict):
-            return {_quote_values(k): _quote_values(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_quote_values(v) for v in obj]
-        if isinstance(obj, str) and _NEEDS_QUOTING.search(obj):
-            return _QuotedStr(obj)
-        return obj
-
-    class _TmlDumper(yaml.Dumper):
-        pass
-
-    _TmlDumper.add_representer(_QuotedStr, _quoted_representer)
-
-    quoted_data = _quote_values(data)
-    return yaml.dump(
-        quoted_data,
-        Dumper=_TmlDumper,
-        default_flow_style=False,
-        allow_unicode=True,
-        width=100000,
-    )
