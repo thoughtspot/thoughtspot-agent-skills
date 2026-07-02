@@ -51,11 +51,18 @@ Key existing code (post #154, on the base branch):
 
 Add `vector-effect: non-scaling-stroke` to:
 - the node **body** rect (renderer.js:311), and
-- the **edge** path stroke (renderer.js:280 — the visible path; the transparent 16px hit-path at :281 doesn't need it).
+- the **edge** visible path stroke (renderer.js:280), **and** the transparent
+  16px **hit-path** (renderer.js:281). The hit-path gets it too so edges stay
+  clickable at overview zoom (at 0.12× a 16-world-unit hit target is ~2px
+  without it — barely hittable); this upholds the §B3 interaction-parity claim.
 
 Effect: a 1.6px border / edge stays ~1.6px on screen at 0.12× and at 2.4×. This is the single highest-leverage change and benefits both LOD blocks and detailed cards. Pure attribute addition; no JS logic.
 
 Do **not** add it to the header separator line (:315) or column-internal strokes — those live inside a card that only shows above the LOD threshold, where normal scaling is fine.
+
+**Known limitations (accept; don't report as bugs):**
+- **Arrowheads/crow's-feet still shrink.** SVG `marker-end` markers (renderer.js:280) and the drawn crow's-foot/arrow ticks (~:255–257) are *not* affected by `vector-effect`, so at 0.12× the edge lines are crisp but the arrowheads are tiny. Acceptable — LOD is about block/line legibility, and direction is secondary at overview.
+- **Focus/secured/RLS borders no longer thicken with zoom-in.** The focus border (`sw=2.8`) currently renders ~6.7px at 2.4×; with non-scaling stroke it stays 2.8px at all zooms. This is a minor, intentional consistency change on the detail side, not a regression.
 
 ---
 
@@ -68,11 +75,18 @@ Add a module constant `LOD_T = 0.5` (tunable). Define `lodActive()` → `view.k 
 - **LOD block** when `lodActive()` is true.
 - **Detailed card** (current code) otherwise.
 
-Re-render only when the threshold is **crossed** (not on every zoom step, and never on pan — `view.k` doesn't change on pan). In `applyView()`, after writing the transform, compare `lodActive()` to a stored `lastLod`; if it changed, set `lastLod` and call `renderNodes()`. `renderEdges()` doesn't need re-rendering (edges look the same both sides of the threshold; only their stroke crispness matters, handled by A). Guard the very first call (`lastLod` unset) so `loadModel`'s initial `fit()`→`applyView()` doesn't double-render — `renderNodes()` initializes `lastLod` itself.
+Re-render only when the threshold is **crossed** (not on every zoom step, and never on pan — `view.k` doesn't change on pan; the per-`pointermove` `lastLod` compare is one boolean and no-ops). In `applyView()`, after writing the transform, compare `lodActive()` to a stored `lastLod`; if it changed, set `lastLod` and call `renderNodes()`. `renderEdges()` doesn't need re-rendering (edges look the same both sides of the threshold; only their stroke crispness matters, handled by A). `renderNodes()` sets `lastLod` itself each time it runs, so the state is always consistent with what's drawn.
+
+**On a large model there IS one legitimate double-render at load, and that's correct:** `loadModel` runs `renderAll()` at the initial `view.k=1` (detail cards, `lastLod=false`), then `fit()` drops k to 0.12, `applyView()` sees the crossing, and re-renders once as LOD blocks. This is unavoidable given the load order and happens exactly once. (Optional optimization — reorder `loadModel`/`tweenTo` to call `fit()` *before* `renderAll()`; `nodesBBox` computes `n.h` itself so fit doesn't need a prior render. Not required.) Small models that fit above `LOD_T` never cross, so they render once. No recursion: `renderNodes` never mutates `view`/calls `applyView`/`fit`, so `applyView`→`renderNodes` is terminal.
 
 Cost: one `renderNodes()` per threshold crossing (rare) — negligible.
 
 ### B2. LOD block appearance
+**Both branches must still set `n.h = nodeHeight(t)`** (currently at the top of
+the per-node loop, ~renderer.js:293) — `renderEdges` (:269), `nodesBBox` (:359),
+and the minimap all read `n.h`, so it can't be folded into the detail branch
+only. Keep it computed before the LOD/detail fork.
+
 Within the node `<g>` (same `transform`, same `n.w × n.h` box), draw:
 - **One body rect** `n.w × n.h`, `rx:10`, **solid saturated kind fill** (see §5), `vector-effect:non-scaling-stroke`, border = the **state-aware `stroke`/`sw`** already computed (so secured=red, in-RLS-path=amber, severity, and focus=thick-blue borders still communicate state at overview). Keep the existing drop-shadow.
 - **Title text only** — the table id, in white (or the palette's on-fill text color), centered horizontally, vertically centered in the box, with a **larger font** than the card title so it's legible as you approach the threshold. Truncate with an ellipsis to `n.w` (reuse the existing truncation approach used for the card title if there is one; otherwise clip).
@@ -87,15 +101,17 @@ Because the `<g>`, classes, transform, and handlers are unchanged, all existing 
 
 ## 5. Feature C — overview palette
 
-At overview, fill carries the signal, so use saturated fills with white text, validated for contrast against the ground and for white-text legibility. **Consult the `dataviz` skill** for the exact values / contrast ratios rather than eyeballing. Starting point (Sonnet to confirm/adjust via dataviz):
+At overview, fill carries the signal, so use saturated fills with white text. The fills **must meet WCAG AA for white text (≥4.5:1)** — the obvious mid-tones fail (white on `#8A93A0` slate ≈ 3.0:1, on `#0D9488` teal ≈ 3.5:1, and `#1E6FA8` is borderline ≈ 4.4:1), so darken them. **Consult the `dataviz` skill** to lock the final values and verify contrast. AA-targeted starting point (Sonnet to confirm/adjust via dataviz — these are chosen to pass, unlike the first-draft mid-tones):
 
-| kind | LOD fill | text |
+| kind | LOD fill | white-text contrast |
 |---|---|---|
-| fact | `#1E6FA8` (accent blue) | `#fff` |
-| dim | `#8A93A0` (slate) | `#fff` |
-| sql_view | `#0D9488` (teal) | `#fff` |
+| fact | `#1B5E8C` (deep blue) | ~5.2:1 ✓ |
+| dim | `#5B6472` (dark slate) | ~6.6:1 ✓ |
+| sql_view | `#0F766E` (dark teal) | ~5.3:1 ✓ |
 
-Keep the family coherent with the detailed view (same hues, saturated). State (secured/RLS/severity/focus) continues to show through the **border** color/width (unchanged logic), not the fill. `alias_of` isn't a distinct fill (it's a badge only in the card) — an alias node takes its kind's fill at LOD.
+Keep the family coherent with the detailed view (same hues, darker/saturated). State (secured/RLS/severity/focus) continues to show through the **border** color/width (unchanged logic), not the fill. `alias_of` isn't a distinct fill (it's a badge only in the card) — an alias node takes its kind's fill at LOD.
+
+**Accepted UX trade-off:** at LOD there are no badges, so an annotated table's ✎ marker isn't shown at overview (secured state still shows via the red border; notes have no border signal). Consistent with "title only."
 
 ---
 
@@ -119,7 +135,7 @@ Build the GTM export (`/private/tmp/claude-501/-Users-damianwaldron-Dev/45ed40f8
 2. **Non-scaling stroke present** — node body rect and edge path carry `vector-effect="non-scaling-stroke"`.
 3. **LOD active at fit** — after `#zoom-fit` (k=0.12 < 0.5), a node `<g>` contains **no** column rows / header separator (LOD block: ≤ ~2 shapes + 1 title text). Capture a screenshot for eyeball.
 4. **Detail restored on zoom-in** — zoom to k ≥ 0.5 (dispatch ctrl-wheels or set via buttons), a node `<g>` again contains column rows + header. Confirms threshold re-render fires.
-5. **One re-render per crossing** — crossing the threshold triggers exactly one `renderNodes` (spy by counting, or assert node DOM identity changes once); panning at fixed zoom does **not** re-render.
+5. **One re-render per crossing** — **start counting only after initial load settles** (the load sequence legitimately renders nodes twice on a large model: once detailed at k=1, then once as LOD blocks after `fit()` — see §4 B1). After that: crossing the threshold triggers exactly one `renderNodes`; panning at fixed zoom does **not** re-render.
 6. **State borders survive at LOD** — a focused node (click) still shows the thick focus border; if the model has RLS/severity, those border colors persist in the block.
 7. **Interaction parity at LOD** — at fit zoom, click-to-focus updates the inspector; drag moves the node; minimap still tracks.
 8. **Contrast** — spot-check (or compute) that each LOD fill vs ground and white-text vs fill meet WCAG AA (via dataviz guidance).
