@@ -592,6 +592,32 @@ class TestMapFunctions:
         assert "ifnull ( [X] , 0 )" in result
         assert "ifnull ( [Y] , 0 )" in result
 
+    def test_left(self):
+        assert map_functions("LEFT([Name], 3)") == "substr ( [Name] , 0 , 3 )"
+
+    def test_right(self):
+        assert map_functions("RIGHT([Name], 2)") == "substr ( [Name] , strlen ( [Name] ) - 2 , 2 )"
+
+    def test_mid(self):
+        assert map_functions("MID([Name], 2, 5)") == "substr ( [Name] , 2 - 1 , 5 )"
+
+    def test_upper(self):
+        assert map_functions("UPPER([Name])") == 'sql_string_op ( "UPPER({0})" , [Name] )'
+
+    def test_startswith(self):
+        assert map_functions("STARTSWITH([Name], 'A')") == "( strpos ( [Name] , 'A' ) = 1 )"
+
+    def test_endswith(self):
+        assert map_functions("ENDSWITH([Name], 'Z')") == \
+            "( substr ( [Name] , strlen ( [Name] ) - strlen ( 'Z' ) , strlen ( 'Z' ) ) = 'Z' )"
+
+    def test_square(self):
+        assert map_functions("SQUARE([X])") == "pow ( [X] , 2 )"
+
+    def test_left_nested_in_if(self):
+        assert map_functions("IF LEFT([Code], 1) = 'A' THEN 1 END") == \
+            "IF substr ( [Code] , 0 , 1 ) = 'A' THEN 1 END"
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping

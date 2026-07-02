@@ -55,6 +55,7 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         (r"\bUPPER\s*\(", "_UPPER_HANDLER"),
         (r"\bLOWER\s*\(", "_LOWER_HANDLER"),
         (r"\bSTARTSWITH\s*\(", "_STARTSWITH_HANDLER"),
+        (r"\bENDSWITH\s*\(", "_ENDSWITH_HANDLER"),
 
         # Math
         (r"\bABS\s*\(", "abs ( "),
@@ -101,7 +102,49 @@ def map_functions(expr: str) -> str:
     # ZN(x) → ifnull ( x , 0 )
     result = _convert_zn(result)
 
+    for fn, render in _ARG_HANDLERS:
+        result = _apply_arg_handler(result, fn, render)
+
     return result
+
+
+def _apply_arg_handler(expr: str, fn: str, render) -> str:
+    """Rewrite fn(args...) calls using render([stripped_args]) → replacement or None to skip."""
+    pat = re.compile(rf"\b{fn}\s*\(", re.IGNORECASE)
+    result = expr
+    search_start = 0
+    safety = 0
+    while safety < 50:
+        m = pat.search(result, search_start)
+        if not m:
+            break
+        safety += 1
+        extracted = _extract_function_args(result, m.end() - 1)
+        if not extracted:
+            search_start = m.end()
+            continue
+        args, end_pos = extracted
+        replacement = render([a.strip() for a in args])
+        if replacement is None:
+            search_start = m.end()
+            continue
+        result = result[:m.start()] + replacement + result[end_pos:]
+        search_start = m.start() + len(replacement)
+    return result
+
+
+_ARG_HANDLERS: list[tuple[str, Any]] = [
+    ("LEFT", lambda a: f"substr ( {a[0]} , 0 , {a[1]} )" if len(a) == 2 else None),
+    ("RIGHT", lambda a: f"substr ( {a[0]} , strlen ( {a[0]} ) - {a[1]} , {a[1]} )" if len(a) == 2 else None),
+    ("MID", lambda a: f"substr ( {a[0]} , {a[1]} - 1 , {a[2]} )" if len(a) == 3 else None),
+    ("UPPER", lambda a: f'sql_string_op ( "UPPER({{0}})" , {a[0]} )' if len(a) == 1 else None),
+    ("LOWER", lambda a: f'sql_string_op ( "LOWER({{0}})" , {a[0]} )' if len(a) == 1 else None),
+    ("STARTSWITH", lambda a: f"( strpos ( {a[0]} , {a[1]} ) = 1 )" if len(a) == 2 else None),
+    ("ENDSWITH", lambda a: (
+        f"( substr ( {a[0]} , strlen ( {a[0]} ) - strlen ( {a[1]} ) , strlen ( {a[1]} ) ) = {a[1]} )"
+        if len(a) == 2 else None)),
+    ("SQUARE", lambda a: f"pow ( {a[0]} , 2 )" if len(a) == 1 else None),
+]
 
 
 def _convert_zn(expr: str) -> str:
