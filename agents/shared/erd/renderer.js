@@ -376,7 +376,7 @@ function fitOrFocus(){
 function centerOn(n){const r=svg.getBoundingClientRect();view.x=r.width/2-(n.x+n.w/2)*view.k;view.y=r.height/2-(n.y+n.h/2)*view.k;applyView();}
 
 let panning=false,panStart=null,panFrom=null,panMoved=0,suppressClick=false;
-svg.addEventListener("pointerdown",e=>{if(e.target.closest(".node")||e.target.closest(".edge-g"))return;
+svg.addEventListener("pointerdown",e=>{suppressClick=false;if(e.target.closest(".node")||e.target.closest(".edge-g"))return;
   panning=true;panMoved=0;panFrom={x:e.clientX,y:e.clientY};
   panStart={x:e.clientX-view.x,y:e.clientY-view.y};svg.classList.add("panning");svg.setPointerCapture(e.pointerId);});
 svg.addEventListener("pointermove",e=>{if(!panning)return;

@@ -92,9 +92,9 @@ _BODY = """<header>
       <button id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoom-fit" title="Fit to view" aria-label="Fit to view">⤢</button>
     </div>
-    <div class="minimap" id="minimap" aria-hidden="true">
+    <div class="minimap" id="minimap">
       <button class="minimap-toggle" id="minimap-toggle" title="Hide overview">–</button>
-      <svg id="minimap-svg"><g id="minimap-nodes"></g><rect id="minimap-view"></rect></svg>
+      <svg id="minimap-svg" aria-hidden="true"><g id="minimap-nodes"></g><rect id="minimap-view"></rect></svg>
     </div>
     <div class="hint" id="hint">drag or scroll to pan \xb7 pinch / ⌘-scroll to zoom \xb7 arrows / 0 to move</div>
   </div>
