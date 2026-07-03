@@ -713,6 +713,49 @@ these are structured query errors, not transport failures.
 
 ---
 
+### `ts spotql classify-columns`
+
+Classify ThoughtSpot columns/formula expressions as attribute vs. measure vs.
+aggregate-formula-measure — the decision that drives `SUM`-vs-`AGG` in SpotQL and the
+MEASURE/ATTRIBUTE + aggregation inference when promoting Answer formulas to a Model.
+Codifies BL-087: this was previously two DIFFERENT, drifted keyword lists duplicated
+between `ts-object-model-spotql-query` and `ts-object-answer-promote`; both skills now
+call through this one command.
+
+Two mutually-exclusive input modes:
+
+| Mode | Flag | What it does | ThoughtSpot connection |
+|---|---|---|---|
+| Model | `--model <guid>` | Exports the Model's TML and classifies every `model.columns[]` entry | Yes — uses `--profile` |
+| Expressions | `--exprs-file <path>` (or stdin) | Classifies a bare JSON array of `{"name", "expr"}` objects not yet attached to a Model column (e.g. Answer formulas being promoted) | No |
+
+```bash
+ts spotql classify-columns --model <model-guid> --profile <name>
+ts spotql classify-columns --exprs-file formulas_to_add.json
+echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql classify-columns
+```
+
+**Output (JSON to stdout):**
+
+- `--model` mode → array of `{name, column_type, kind, needs_agg, aggregation}` — one
+  entry per `model.columns[]` entry. `kind` is `"attribute"`, `"raw_measure"`, or
+  `"aggregate_measure"`. `kind == "aggregate_measure"` (equivalently `needs_agg: true`)
+  means SpotQL must wrap the column in `AGG(...)` — never a real aggregate, or
+  ThoughtSpot rejects the query with `NESTED_AGGREGATE_NOT_SUPPORTED`. `"raw_measure"`
+  means a real aggregate (`aggregation` names which — `SUM`/`AVG`/…). `"attribute"`
+  means group by it.
+- `--exprs-file`/stdin mode → array of `{name, column_type, aggregation, is_aggregate}` —
+  `column_type` is `MEASURE` iff the expression contains a call to an aggregate function
+  (`sum`, `count`, `group_aggregate`, `last_value`, …), else `ATTRIBUTE`; `aggregation` is
+  `SUM` for every MEASURE (ThoughtSpot ignores the `aggregation` property on formula
+  columns at query time — the expr is self-contained), `null` for an ATTRIBUTE.
+
+Diagnostic counts go to stderr. The canonical aggregate-function list lives in
+`ts_cli.spotql_ops.AGGREGATE_FUNCS` — a single source of truth, not duplicated in either
+skill's SKILL.md.
+
+---
+
 ### `ts orgs search`
 
 List/search orgs (auto-paginated by default).

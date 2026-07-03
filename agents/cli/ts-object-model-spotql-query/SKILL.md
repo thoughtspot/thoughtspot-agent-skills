@@ -68,7 +68,8 @@ The one requirement is below: the Model must be backed by an external cloud data
 ## Prerequisites
 
 - A ThoughtSpot profile — run `/ts-profile-thoughtspot` if none exists.
-- The `ts` CLI (`pip install -e tools/ts-cli`), version **0.13.0+** (provides `ts spotql`).
+- The `ts` CLI (`pip install -e tools/ts-cli`), version **0.31.0+** (provides `ts spotql`,
+  including `ts spotql classify-columns` for Step 2).
 - The target Model is backed by an **external cloud data warehouse** (see the note above).
 
 All ThoughtSpot calls go through the `ts` CLI, which handles auth, token caching, and the
@@ -134,17 +135,28 @@ For a Model it is rooted at `model:` with these parts:
   **`formula_id`** that matches a `formulas[].id`; that formula's **`expr`** is where the
   aggregation logic lives.
 
-**Classify every column** — this drives the `SUM`-vs-`AGG` decision in Step 3:
+**Classify every column** — this drives the `SUM`-vs-`AGG` decision in Step 3. Don't
+eyeball the TML for this: run
 
-| Column | How to tell | In SpotQL |
-|---|---|---|
-| **Attribute** | `properties.column_type: ATTRIBUTE` | group by it |
-| **Raw measure** | `properties.column_type: MEASURE`, **no** aggregating formula (a plain `column_id`, or a `formula_id` whose `expr` has no aggregate) | `SUM`/`AVG`/`MIN`/`MAX` |
-| **Aggregate-formula measure** | `properties.column_type: MEASURE` **and** its `formulas[].expr` contains an aggregate — `sum`, `count`, `group_aggregate`, `last_value`, `first_value`, … | **`AGG(...)`** — never `SUM` (errors `NESTED_AGGREGATE_NOT_SUPPORTED`) |
+```bash
+source ~/.zshenv && ts spotql classify-columns --model {model_guid} --profile "{profile}"
+```
 
-See `spotql-rules.md` § Aggregation for the full rule and the "compile-it-to-check" probe if
-a column is ambiguous. If TML export is FORBIDDEN, you lack access to that Model — pick
-another or ask the user.
+This calls the same aggregate-function detector `ts-object-answer-promote` uses (BL-087 —
+one canonical keyword list, not two drifted copies), applied to every `model.columns[]`
+entry. It returns a JSON array of `{name, column_type, kind, needs_agg, aggregation}`:
+
+| `kind` | Meaning | How it was detected | In SpotQL |
+|---|---|---|---|
+| `attribute` | `properties.column_type: ATTRIBUTE` | — | group by it |
+| `raw_measure` | `properties.column_type: MEASURE`, **no** aggregating formula (a plain `column_id`, or a `formula_id` whose `expr` has no aggregate) | `needs_agg: false` | `SUM`/`AVG`/`MIN`/`MAX` (`aggregation` field names which) |
+| `aggregate_measure` | `properties.column_type: MEASURE` **and** its `formulas[].expr` contains an aggregate | `needs_agg: true` | **`AGG(...)`** — never `SUM` (errors `NESTED_AGGREGATE_NOT_SUPPORTED`) |
+
+Match each column you plan to use in Step 3 against its `kind`/`needs_agg` in this output —
+do not re-derive the classification by reading the TML expr yourself. See
+`spotql-rules.md` § Aggregation for the full rule and the "compile-it-to-check" probe if
+a column is still ambiguous after classification. If TML export is FORBIDDEN, you lack
+access to that Model — pick another or ask the user.
 
 ### Step 3 — Write the SpotQL
 
@@ -229,6 +241,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-07-03 | Column classification now delegates to `ts spotql classify-columns` (BL-087); single canonical aggregate-function list. Prereq ts-cli v0.31.0. |
 | 1.2.0 | 2026-06-25 | Add `references/architecture.md` — the "why SpotQL" value proposition and architecture vs raw DB SQL (LLM SQL never executed; RLS/CLS, Model joins/filters, governed metrics/LOD/semi-additive, custom calendars, multi-fact chasm/fan-trap resolution; hybrid token/SpotQL NL flow with a unified verification layer across both transformers — co-existence + parity, not replacement). New capability bullet + References row linking it. |
 | 1.1.1 | 2026-06-25 | Correct compilation attribution: ThoughtSpot (not the skill/agent) compiles SpotQL to warehouse SQL, deterministically; clarify in the intro and capability summary. |
 | 1.1.0 | 2026-06-25 | Add `references/integration.md` (raw SpotQL API for non-CLI consumers); Step 6 emits paste-ready request bodies; fix Step 2 TML parsing (`properties.column_type`, `formulas[]` via `formula_id`) with deterministic raw-vs-aggregate-formula classification; add capability summary; Step 1 accepts Model GUID/URL with search as fallback. |

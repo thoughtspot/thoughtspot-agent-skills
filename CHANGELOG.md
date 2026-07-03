@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-03
+- chore: bump ts-cli to v0.31.0 (ts spotql classify-columns — BL-087)
 - chore: bump ts-cli to v0.30.0 (ts snowflake diff + lint-ddl — BL-063 quick wins)
 - chore: bump ts-cli to v0.29.0 (ts tableau build-model --table-name-map)
 - docs: full repo audit 2026-07-03 — report + same-day routing (PRs #168-#176, BL-073..BL-087), agentic→deterministic codification review

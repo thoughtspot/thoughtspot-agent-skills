@@ -35,7 +35,8 @@ Ask one question at a time. Wait for each answer before proceeding.
 ## Prerequisites
 
 - ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
-- `ts` CLI installed: `pip install -e tools/ts-cli`
+- `ts` CLI installed: `pip install -e tools/ts-cli`, version **0.31.0+** (provides
+  `ts spotql classify-columns`, used in Step 10)
 - Python package: `pyyaml` (`pip install pyyaml`)
 - ThoughtSpot user must have **MODIFY** or **FULL** access on the target Model
 
@@ -692,34 +693,40 @@ for f in formulas_to_add:
 ```
 
 **Infer `column_type` and `aggregation`.** Answer formula entries do not carry these
-fields — they live on the Model column. Infer from the expression:
+fields — they live on the Model column. Delegate the aggregate-function detection to
+`ts spotql classify-columns` (BL-087) instead of re-implementing the keyword list here —
+it's the same canonical function list `ts-object-model-spotql-query` uses for its
+SUM-vs-`AGG` decision, so the two skills can't drift apart again. Pipe
+`formulas_to_add` in as a JSON array of `{name, expr}` on stdin:
 
 ```python
-import re
+import json, subprocess
 
-AGGREGATE_FUNCS = re.compile(
-    r'\b(sum|count|count_distinct|unique\s+count|average|min|max|median|stddev|'
-    r'variance|sum_if|unique_count_if|cumulative_\w+|moving_\w+|group_aggregate|'
-    r'group_\w+|rank|rank_percentile|last_value|first_value)\s*\(',
-    re.IGNORECASE,
+exprs_payload = json.dumps(
+    [{"name": f["name"], "expr": f["expr"]} for f in formulas_to_add]
 )
 
-def infer_column_type(expr):
-    """Return MEASURE if any aggregate function found, else ATTRIBUTE."""
-    return "MEASURE" if AGGREGATE_FUNCS.search(expr) else "ATTRIBUTE"
-
-def infer_aggregation(expr, column_type):
-    """Return aggregation for MEASURE formula columns.
-    ThoughtSpot ignores the aggregation value on formula columns at query time —
-    the formula expr is self-contained. SUM is the convention for all MEASURE formulas."""
-    if column_type != "MEASURE":
-        return None
-    return "SUM"
+result = subprocess.run(
+    ["bash", "-c", "source ~/.zshenv && ts spotql classify-columns"],
+    input=exprs_payload,
+    capture_output=True, text=True,
+)
+classified = json.loads(result.stdout)   # [{"name", "column_type", "aggregation", "is_aggregate"}, ...]
+classified_by_name = {c["name"]: c for c in classified}
 
 for f in formulas_to_add:
-    f["_column_type"] = infer_column_type(f["expr"])
-    f["_aggregation"] = infer_aggregation(f["expr"], f["_column_type"])
+    c = classified_by_name[f["name"]]
+    f["_column_type"] = c["column_type"]
+    f["_aggregation"] = c["aggregation"]
 ```
+
+`column_type` is `MEASURE` iff the expression contains a call to an aggregate function
+(`sum`, `count`, `group_aggregate`, `last_value`, `first_value`, … — the full canonical
+list lives in `ts_cli.spotql_ops.AGGREGATE_FUNCS`, not duplicated here); `aggregation` is
+`SUM` for every MEASURE formula (ThoughtSpot ignores the `aggregation` property on
+formula columns at query time — the expr is self-contained; `SUM` is the convention for
+all MEASURE formulas) and `None` for an ATTRIBUTE. A `--exprs-file <path>` flag is also
+available if you'd rather write the array to a temp file than pipe it via stdin.
 
 **Build `columns[]` entries:**
 
@@ -922,6 +929,7 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-07-03 | MEASURE/ATTRIBUTE + aggregation inference delegates to `ts spotql classify-columns` (BL-087), replacing the drifted inline keyword list. Prereq ts-cli v0.31.0. |
 | 1.2.2 | 2026-07-03 | Soften phantom `/ts-object-model-builder` recommendation in Step 5 and Error Handling to "no skill for this yet — migrate in the ThoughtSpot UI" (audit finding 1.1 — that skill was never shipped). |
 | 1.2.1 | 2026-06-19 | Resolve open items 4 & 5 as deferred scope — embedded-Liveboard Answers and set/cohort promotion are out of current scope (formulas + parameters only), tracked in BL-039; neither is a shipped-unverified path. Correct the Liveboard-TML reference note (no fallback path exists in Step 2). |
 | 1.2.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |

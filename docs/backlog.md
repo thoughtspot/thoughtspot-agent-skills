@@ -1595,7 +1595,10 @@ expression ends with `)` after `else`, but rare enough to be acceptable as a war
 
 **Source:** Architectural comparison of conversion skill implementations (2026-06-28)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, tools/ts-cli
-**Status:** Open — assess feasibility before scheduling
+**Status:** PARTIALLY DONE — the two quick wins (`ts snowflake diff` + `ts snowflake
+lint-ddl`) shipped 2026-07-03 (ts-cli v0.30.0; see the Scope extension section below).
+Phases 1a-4, `build-sv`, and the shared lint+import procedure remain OPEN — assess
+feasibility before scheduling those.
 **Related:** BL-032 (Databricks parser support), BL-014 (Databricks coverage review)
 
 ### Problem
@@ -2268,7 +2271,10 @@ sync-env`. Also adopt `ts profiles list --json` in the 4 skills that hand-parse
 
 **Source:** 2026-07-03 codification review rows 1/15/23.
 **Affects:** ts-convert-from-tableau, `tools/ts-cli/`.
-**Status:** OPEN. Highest benefit÷effort in the review — the code already exists.
+**Status:** PART 1 DONE (ts-cli v0.29.0) — generate-mode wiring (item 1 below) and the
+`--table-name-map` flag shipped. Part 2 (`ts tableau parse --json` + TWB-parse
+codification, item 2 below) remains OPEN. Highest benefit÷effort in the review — the
+code already exists.
 
 1. **Generate mode (S–M):** Step 5b hand-assembles the Phase-1 base-model TML although
    `model_builder.py:build_model_tml()` (:113) + `split_for_phased_import()` (:484) already
@@ -2308,7 +2314,9 @@ step the Critical TML invariants exist to protect). Candidates: `ts model mine-l
 
 **Source:** 2026-07-03 codification review row 24.
 **Affects:** ts-object-model-spotql-query, ts-object-answer-promote, `tools/ts-cli/`.
-**Status:** OPEN.
+**Status:** DONE 2026-07-03 (ts-cli v0.31.0) — `ts spotql classify-columns` shipped
+(`ts_cli/spotql_ops.py` + `commands/spotql.py`); both skills adopt it (spotql-query
+v1.3.0, answer-promote v1.3.0).
 
 Column classification is duplicated between the two skills with DIFFERENT keyword lists
 (spotql SKILL.md ~:137-146 vs promote ~:700-722) — live drift, and exactly the ts-cli.md

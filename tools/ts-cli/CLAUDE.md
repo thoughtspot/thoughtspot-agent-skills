@@ -13,6 +13,7 @@ ts_cli/
   model_builder.py     — Tableau TML assembly + phased-import orchestration facade (pure functions, no I/O; TWB parsing lives in ts_cli/tableau/twb.py)
   tableau_translate.py — Tableau → ThoughtSpot formula translation entry point + orchestrator facade over ts_cli/tableau/ (pure functions, no I/O)
   snowflake_ops.py     — Semantic View diff (normalise_expr/exprs_differ/compute_change_set) + DDL lint (lint_sv_ddl) behind `ts snowflake` (pure functions, no I/O)
+  spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/classify_model_columns) behind `ts spotql classify-columns` (pure functions, no I/O)
   tableau/
     __init__.py         — package marker
     parsing.py          — formula tokenization, CSQ column maps, calc-id maps
@@ -39,6 +40,7 @@ ts_cli/
     tables.py     — ts tables create
     tableau.py    — ts tableau (signin, datasources, download, translate-formulas, build-model)
     snowflake.py  — ts snowflake (diff, lint-ddl)
+    spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     audit.py      — ts audit run / report
   audit/
     __init__.py       — run_audit() entry point, angle module registry
@@ -60,7 +62,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.30.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.31.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
