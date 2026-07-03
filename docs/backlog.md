@@ -1043,6 +1043,15 @@ underpins a large translation block but is marked **Experimental** in current do
 1. Extend the `from-databricks` parser for `materialization:` and the `fields:`/`dimensions:` alias.
 2. Condense the v0.1 section to "legacy — may be encountered"; confirm the parser still reads it.
 3. Re-verify the `window:` `range`/`offset`/`semiadditive` shape against the current build before relying on the rolling/semi-additive translations.
+   **Update 2026-07-03 (external sweep, finding 13.7):** scope extended — the current
+   YAML reference documents `range` with five values (`current | cumulative | trailing |
+   leading | all`) plus an `inclusive|exclusive` anchor-row modifier (default `exclusive`).
+   `leading`/`all` are now recognised in the schema and mapping docs but their ThoughtSpot
+   translations are marked PENDING LIVE VERIFICATION (candidates: `moving_sum([m], 0, N, [date])`
+   for `leading`, partition-wide `group_aggregate(...)` for `all` — neither shipped). The
+   live re-verify in this step must also confirm/refute the `trailing N day` ↔
+   `moving_sum([m], N, 0, [date])` equivalence against the documented `exclusive` anchor
+   default, which postdates when that equivalence was first recorded.
 
 **Target:** 2026-09-30.
 

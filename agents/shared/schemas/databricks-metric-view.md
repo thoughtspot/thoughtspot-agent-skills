@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-06 (verified against GA Metric Views docs) -->
+<!-- currency: databricks — 2026-07 (external sweep: source forms widened to 4, using: joins, 5-value window range + anchor modifier, agg() synonym confirmed; see BL-032) -->
 
 # Databricks Metric View Schema
 
@@ -62,6 +62,34 @@ DROP VIEW {catalog}.{schema}.{view_name}
 
 ---
 
+## Source Forms (verified 2026-07)
+
+`source:` — whether at the top level or on a `joins[]` entry — accepts **four**
+forms, not just a table FQN:
+
+| Form | Example | Notes |
+|---|---|---|
+| Table FQN | `source: catalog.schema.table_name` | Most common — a physical table or view |
+| Parenthesized SQL | `source: (SELECT ... FROM ...)` | Inline subquery, wrapped in parens |
+| Bare SQL query | `source: SELECT ... FROM ...` | Inline subquery, **no parens** — the current YAML reference documents this form written directly, starting with `SELECT` or `WITH` |
+| Another metric view | `source: catalog.schema.another_metric_view` | MV-on-MV — chains one metric view as the source of another |
+
+**Detecting a SQL source (either form):** strip leading whitespace and check whether
+the value starts with `(SELECT`, `(WITH`, `SELECT `, or `WITH ` (case-insensitive).
+Do not assume parentheses are present — a bare SQL source silently mis-detected as a
+table FQN produces a Table TML whose measure columns cannot be queried as plain
+columns (`METRIC_VIEW_MISSING_MEASURE_FUNCTION`).
+
+**Detecting an MV-on-MV source:** a plain FQN cannot be distinguished from a
+physical table by string shape alone — query
+`system.information_schema.tables WHERE table_type = 'METRIC_VIEW'` for the
+referenced FQN before assuming it is a physical table. See
+[ts-from-databricks-rules.md](../mappings/ts-databricks/ts-from-databricks-rules.md)
+for the from-direction handling of both forms (chained MVs are currently a fail-loud
+case, not a supported flattening).
+
+---
+
 ## Version 0.1 — Single Source (legacy)
 
 > **Legacy spec version (note added 2026-06-17).** The current GA YAML reference documents
@@ -80,7 +108,8 @@ Column metadata is limited to `name`, `expr`, and `window` — no `display_name`
 ```yaml
 version: 0.1                        # Required. "0.1" for single-source.
 
-source: catalog.schema.table_name   # Required. Fully qualified source table name.
+source: catalog.schema.table_name   # Required. Table FQN, SQL query (parenthesized or
+                                    # bare), or another metric view — see Source Forms above.
 
 filter: <sql_boolean_expression>    # Optional. Global WHERE clause applied to all queries.
                                     # Uses column names from the source table directly.
@@ -192,7 +221,9 @@ version: 1.1                        # Required. "1.1" for rich metadata.
 comment: >-                         # Optional. View-level description.
   Human-readable description of the Metric View.
 
-source: catalog.schema.table_name   # Single-source mode — same as v0.1.
+source: catalog.schema.table_name   # Single-source mode — same as v0.1. Also accepts a SQL
+                                    # query (parenthesized or bare) or another metric view —
+                                    # see Source Forms above.
 
 filter: <sql_boolean_expression>    # Optional. Global WHERE clause.
 
@@ -225,22 +256,30 @@ version: 1.1
 comment: >-
   Multi-source Metric View description.
 
-source: catalog.schema.fact_table   # Required. The primary fact table.
+source: catalog.schema.fact_table   # Required. The primary fact table — table FQN, SQL
+                                    # query, or another metric view (see Source Forms above).
 
 joins:                              # Optional. Dimension table joins.
   - name: <alias>                   # Required. Alias used in expr references.
-    source: <catalog.schema.dim>    # Required. Fully qualified dimension table.
-    "on": source.<fk> = <alias>.<pk>  # Required. Join condition.
+    source: <catalog.schema.dim>    # Required. Fully qualified dimension table (or SQL
+                                    # query — see Source Forms above).
+    "on": source.<fk> = <alias>.<pk>  # Required IF `using` is not specified. Join condition
+                                    # (SQL boolean expression).
+    using: [<col1>, <col2>]         # Required IF `on` is not specified. Array of column
+                                    # names present in BOTH the parent (source or parent
+                                    # join alias) and the joined table. `on` and `using`
+                                    # are mutually exclusive — exactly one must be present.
     rely:                           # Optional. Cardinality hint (pre-18.1 syntax).
       at_most_one_match: true       # Declares many-to-one relationship.
     cardinality: many_to_one        # Optional (Runtime 18.1+). Alternative to rely: block.
                                     # Values: many_to_one, one_to_many.
                                     # Equivalent: cardinality: many_to_one ↔ rely: { at_most_one_match: true }.
                                     # When both are present, cardinality: takes precedence.
+                                    # Default when NEITHER rely: nor cardinality: is present: many_to_one.
     joins:                          # Optional. NESTED sub-joins under this join.
       - name: <sub_alias>
         source: <catalog.schema.sub_dim>
-        "on": <alias>.<fk> = <sub_alias>.<pk>
+        "on": <alias>.<fk> = <sub_alias>.<pk>   # or `using: [<col>]` — same on/using rule applies
         rely:
           at_most_one_match: true
 
@@ -267,7 +306,7 @@ measures:
         places: <int>
     window:
       - order: <dimension_name>
-        range: <current|cumulative>
+        range: <current|cumulative|trailing <N> <unit>|leading <N> <unit>|all> [inclusive|exclusive]
         semiadditive: <last|first>  # REQUIRED when window is present.
         offset: <-N period>         # Optional. Period offset for comparisons (e.g., "-1 month").
 ```
@@ -316,9 +355,22 @@ row. Two equivalent syntaxes exist:
 When both `rely:` and `cardinality:` are present on the same join, `cardinality:`
 takes precedence. Parsers must check `cardinality:` first, falling back to `rely:`.
 
+**Default cardinality (verified 2026-07):** when a join specifies **neither**
+`rely:` nor `cardinality:`, the spec's default is `many_to_one`.
+
 **Sibling-level references do NOT work.** A join's `on` clause cannot reference
 another join at the same level — only `source` or the parent join alias. Nesting
 is the mechanism for multi-hop relationships.
+
+**Join condition: `on` vs `using` (verified 2026-07).** A join specifies exactly
+one of:
+- `"on": <sql_boolean_expression>` — arbitrary join condition (dot-path column refs)
+- `using: [<col1>, <col2>, ...]` — shorthand for columns present under the **same
+  name** in both the parent (`source` or the parent join's alias) and the joined
+  table; equivalent to AND-ing an equality per column, e.g.
+  `using: [ORDER_ID]` ≡ `"on": source.ORDER_ID = orders.ORDER_ID`.
+
+`on` and `using` are mutually exclusive (XOR) — a join must have one, not both.
 
 ### Format Field (verified 2026-05-26)
 
@@ -390,6 +442,17 @@ measures:
 |---|---|
 | `current` | Current period only |
 | `cumulative` | Running total from start to current period |
+| `trailing <N> <unit>` | Rolling look-back window of `<N> <unit>` (e.g. `trailing 7 day`) ending at the anchor row |
+| `leading <N> <unit>` (verified 2026-07 — spec only) | Rolling look-ahead window of `<N> <unit>` starting at the anchor row. **ThoughtSpot translation pending live verification** — see [ts-databricks-formula-translation.md](../mappings/ts-databricks/ts-databricks-formula-translation.md) and BL-032. |
+| `all` (verified 2026-07 — spec only) | The entire partition, unbounded in both directions. **ThoughtSpot translation pending live verification** — see BL-032. |
+
+**Anchor-row modifier (verified 2026-07):** `trailing` and `leading` ranges accept
+an optional `inclusive|exclusive` modifier (e.g. `trailing 7 day exclusive`)
+controlling whether the anchor (current) row is included in the window.
+**Default: `exclusive`** (Runtime 18.1 + YAML 1.1; DBSQL 2026.10 preview, release
+note 2026-03-26). The `trailing N day` ↔ `moving_sum([m], N, 0, [date])`
+equivalence documented in this repo predates the exclusive-default confirmation
+and needs re-verification against a live instance — tracked in BL-032.
 
 `offset` uses `<-N period>` syntax where period is `month`, `year`, `day`, etc.
 Cross-measure references can then compute growth rates:
@@ -448,7 +511,11 @@ Valid `semiadditive` values: `last`, `first`.
 
 ### Querying Metric Views
 
-Measures must be wrapped in the `MEASURE()` function when querying:
+Measures must be wrapped in the `MEASURE()` function when querying. `agg()` is a
+documented synonym for `MEASURE()` in this query context (DBSQL release note
+2026-04-30) — query-side only; there is no verified evidence it is accepted inside
+a metric view's YAML `expr` for cross-measure references, so this repo's
+translation tables continue to emit `MEASURE()`:
 
 ```sql
 SELECT product_name, MEASURE(quantity), MEASURE(amount)
@@ -456,7 +523,8 @@ FROM agent_skills.dunder_mifflin.dunder_mifflin_sales_mv
 GROUP BY product_name
 ```
 
-Without `MEASURE()`, the query fails with `METRIC_VIEW_MISSING_MEASURE_FUNCTION`.
+Without `MEASURE()` (or its `agg()` synonym), the query fails with
+`METRIC_VIEW_MISSING_MEASURE_FUNCTION`.
 
 ### Differences from v0.1
 

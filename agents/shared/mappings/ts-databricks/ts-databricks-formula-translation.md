@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: databricks — 2026-07 (external sweep: window range now 5 values — leading/all added, pending live verification; inclusive|exclusive anchor modifier documented; see BL-032) -->
 
 # Formula Translation Reference — Databricks
 
@@ -293,6 +293,36 @@ rows per day or gaps, the results may differ.
 |---|---|
 | `moving_sum([m], 7, 0, [d])` | `expr: SUM(m)` + `window: [{order: date_dim, range: trailing 7 day, semiadditive: last}]` |
 | `moving_average([m], 30, 0, [d])` | `expr: AVG(m)` + `window: [{order: date_dim, range: trailing 30 day, semiadditive: last}]` |
+
+#### Leading Window (`range: leading N unit`) — PENDING LIVE VERIFICATION (2026-07)
+
+The current YAML reference documents `range` with **five** values —
+`current | cumulative | trailing <N> <unit> | leading <N> <unit> | all` — plus an
+`inclusive|exclusive` anchor-row modifier (default `exclusive`). `leading` is the
+look-ahead counterpart to `trailing`. No live round-trip has verified the
+ThoughtSpot equivalent; do not ship this translation without one.
+
+| Databricks MV YAML | Candidate ThoughtSpot formula | Status |
+|---|---|---|
+| `window: [{order: date_dim, range: leading 7 day, semiadditive: last}]` | `moving_sum ( [m] , 0 , 7 , [date] )` (look_ahead=7, window_size=0) | PENDING — see BL-032 |
+
+#### All-Partition Window (`range: all`) — PENDING LIVE VERIFICATION (2026-07)
+
+`range: all` spans the entire partition, unbounded in both directions — not a
+bounded rolling window like `trailing`/`leading`. No documented ThoughtSpot
+equivalent has been verified; a partition-wide `group_aggregate(...)` (the same
+LOD mechanism as `AGG() OVER (PARTITION BY ...)` — see the LOD section below) is
+the leading candidate but is untested against this specific construct. Log as
+Unmapped Report until verified — see BL-032.
+
+#### Anchor-Row Modifier (`inclusive` | `exclusive`) — PENDING RE-VERIFICATION (2026-07)
+
+`trailing`/`leading` ranges accept an `inclusive|exclusive` modifier controlling
+whether the anchor (current) row is included in the window. **Documented default:
+`exclusive`** (Runtime 18.1 + YAML 1.1; DBSQL 2026.10 preview, release note
+2026-03-26). The `trailing N day` ↔ `moving_sum([m], N, 0, [date])` equivalence
+in the tables above was recorded before this default was confirmed and needs
+re-verification against a live instance — tracked in BL-032.
 
 ### Rank Functions
 

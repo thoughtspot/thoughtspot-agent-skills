@@ -43,7 +43,7 @@ Two scenarios are supported:
 
 | Databricks Metric View YAML | ThoughtSpot Model |
 |---|---|
-| `source:` (fully qualified table name) | Single Table TML — `db_table`, `db`, `schema` decomposed from the FQN |
+| `source:` (table FQN, SQL query, or another metric view — 4 forms, see schema) | Table FQN → Single Table TML (`db_table`, `db`, `schema` decomposed from the FQN); SQL query → see `source:` as SELECT subquery row below; another metric view → **fail loud** (MV-on-MV chaining is not supported) |
 | Top-level `comment:` (v1.1) | Model `description` |
 | `dimensions[].expr` (direct column reference) | `columns[]` with `column_type: ATTRIBUTE` |
 | `dimensions[].expr` (computed expression) | `formulas[]` entry with translated expression + `columns[]` with `formula_id` reference |
@@ -63,16 +63,21 @@ Two scenarios are supported:
 | `measures[].window` + `offset: -3 month` (quarter) | `sum_if ( diff_quarters ( [date] , today ( ) ) = -1 , [m] )` |
 | `measures[].window`, `order:` truncated year | `sum_if ( diff_years ( [date] , today ( ) ) = 0 , [m] )` |
 | `measures[].window` + `offset: -1 year` (year grain) | `sum_if ( diff_years ( [date] , today ( ) ) = -1 , [m] )` |
-| `measures[].window` with `range: trailing N day` | `moving_sum([m], N, 0, [date])` — rolling window |
+| `measures[].window` with `range: trailing N day` | `moving_sum([m], N, 0, [date])` — rolling look-back window |
 | `measures[].window` with `range: cumulative` | `cumulative_sum([m], [date])` |
+| `measures[].window` with `range: leading N day` | **PENDING LIVE VERIFICATION** — rolling look-ahead window; candidate `moving_sum([m], 0, N, [date])`. Flag for manual review — see BL-032. |
+| `measures[].window` with `range: all` | **PENDING LIVE VERIFICATION** — unbounded partition window; no verified equivalent. Flag for manual review — see BL-032. |
+| `measures[].window` with `inclusive`/`exclusive` anchor modifier | **PENDING RE-VERIFICATION** — default is `exclusive`; the `trailing`↔`moving_sum` equivalence above predates this confirmation — see BL-032. |
 | `measures[].expr` with `FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` conditional aggregate (e.g., `sum_if`, `unique_count_if`) |
 | `COUNT(*)` | Formula: `count ( 1 )` |
 | `fields[]` (GA alias for `dimensions[]`) | Same mapping as `dimensions[]` above — `fields:` is checked first, `dimensions:` is the fallback |
 | Growth % (MoM, QoQ, YoY) | Inline `sum_if` expressions for both periods — cross-formula refs not supported during TML import |
 | `joins:` (nested hierarchy) | One Table TML per source; model `joins[]` from parent→child hierarchy |
+| `joins[]."on"` or `joins[].using` (exactly one present) | `on` → join expression as-is; `using: [COL, ...]` → `[A::COL] = [B::COL]` (AND-joined for multiple columns) |
 | `filter:` (any) | Boolean formula column `[MV Filter]` — users apply `[MV Filter] = true`. Always create, never description-only. |
 | Subquery in `expr` | **Untranslatable** — log in Unmapped Report |
-| `source:` as SELECT subquery | Prompt user: (D) create Databricks VIEW, (T) create ThoughtSpot SQL View, (M) map to existing, (S) skip |
+| `source:` as SELECT subquery (parenthesized `(SELECT ...)` or bare `SELECT ...`/`WITH ...`) | Prompt user: (D) create Databricks VIEW, (T) create ThoughtSpot SQL View, (M) map to existing, (S) skip |
+| `source:` as another metric view (MV-on-MV) | **Fail loud** — not supported; ask the user to convert the upstream MV first or flatten the chain in Databricks |
 | `version:` | Drives parsing path (v0.1 vs v1.1) — not stored in ThoughtSpot |
 
 **Key structural rules:**
@@ -316,10 +321,15 @@ mv_filter = mv_yaml.get("filter", "")
 
 **Subquery source detection (before version routing):**
 
-Check if `source` is a SELECT subquery rather than a table FQN:
+`source:` accepts four forms — table FQN, parenthesized SQL, bare SQL, or another
+metric view (see [Source Forms](../../shared/schemas/databricks-metric-view.md)).
+Check for a SQL query in **either** the parenthesized or bare form — do not assume
+parentheses are present:
 
 ```python
-is_subquery = source_fqn.strip().lower().startswith(("select ", "with "))
+_stripped = source_fqn.strip()
+is_subquery = _stripped.lower().startswith(("(select", "(with")) or \
+              _stripped.lower().startswith(("select ", "with "))
 ```
 
 If `is_subquery` is true, the MV source cannot be mapped directly to a ThoughtSpot
@@ -383,6 +393,30 @@ for a complete worked example.
 
 ---
 
+**MV-on-MV detection (when `is_subquery` is false):** an FQN-shaped `source:`
+cannot be assumed to be a physical table — it may be another metric view. Query:
+
+```sql
+SELECT table_type FROM system.information_schema.tables
+WHERE table_catalog = '{src_catalog}' AND table_schema = '{src_schema}'
+  AND table_name = '{src_table}'
+```
+
+If `table_type = 'METRIC_VIEW'`, **fail loud** — do not build a Table TML against it.
+Report to the user:
+
+```
+The Metric View's source ('{source_fqn}') is itself a Metric View, not a physical
+table. Chained (MV-on-MV) sources are not supported by this skill yet. Convert
+'{source_fqn}' on its own first, or flatten the source chain in Databricks before
+retrying.
+```
+
+Log the MV to the Unmapped Report and stop processing it. This same check applies
+to `joins[].source` values.
+
+---
+
 **Version routing:**
 - `version: 0.1` → single-source parsing path (basic column metadata only)
 - `version: 1.1` → rich metadata + optional multi-source with joins (verified 2026-05-26)
@@ -427,13 +461,22 @@ def walk_joins(join_list, parent_alias="source"):
     for j in join_list:
         alias = j["name"]
         source_fqn = j["source"]
-        on_clause = j["on"]
+        # A join has exactly one of "on" or "using" — never assume "on" is present.
+        if "on" in j:
+            on_clause = j["on"]
+        else:
+            shared_cols = j["using"]                        # array of shared column names
+            on_clause = " AND ".join(
+                f"{parent_alias}.{col} = {alias}.{col}" for col in shared_cols
+            )
         cardinality_field = j.get("cardinality", "")       # Runtime 18.1+: "many_to_one" or "one_to_many"
         rely = j.get("rely", {})
         if cardinality_field:
             many_to_one = cardinality_field == "many_to_one"
-        else:
+        elif rely:
             many_to_one = rely.get("at_most_one_match", False)
+        else:
+            many_to_one = True   # spec default when neither rely: nor cardinality: is present
         tables.append({
             "alias": alias,
             "source": source_fqn,
@@ -507,6 +550,11 @@ changes the semantic meaning of the measure. Follow the decision tree in
 | `range: cumulative`, `order: date_dim` | `cumulative_sum ( expr , [TABLE::date_col] )` |
 | `range: current`, `order:` raw date, `semiadditive: last` | `last_value ( sum ( [m] ) , query_groups ( ) , { [TABLE::date_col] } )` |
 | `range: current`, `order:` truncated period | `sum_if ( diff_months/quarters/years ( [TABLE::date_col] , today ( ) ) = N , [m] )` |
+| `range: leading N day` / `range: all` | **PENDING LIVE VERIFICATION** — recognised but not yet translated; flag for manual review rather than guessing (see BL-032) |
+
+`range` also accepts an `inclusive|exclusive` anchor-row modifier (default `exclusive`,
+**PENDING RE-VERIFICATION** against the `trailing`↔`moving_sum` equivalence above — see
+BL-032).
 
 For `moving_sum` / `moving_average`, the inner `expr` is translated **without** the outer
 aggregate wrapper — `SUM(a * b)` with `range: trailing 7 day` becomes
@@ -1317,6 +1365,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.4 | 2026-07-03 | Product-currency fixes (audit 2026-07-03, findings 13.5/13.6/13.7): widen `source:` detection to catch the bare (unparenthesized) SQL form, not just `(SELECT ...)`; add MV-on-MV fail-loud detection for `source:`/`joins[].source`; fix the join-walk snippet to handle `using: [COL, ...]` (previously assumed every join had `"on"`, which would `KeyError`) and the spec's `many_to_one` default when neither `rely:` nor `cardinality:` is present; recognise (but flag PENDING LIVE VERIFICATION) the `range: leading`/`range: all` window values and the `inclusive`/`exclusive` anchor modifier. |
 | 1.5.3 | 2026-06-17 | Connection step: add explicit **"no suitable connection → stop & instruct"** guidance — a connection only sees catalogs its credentials are granted; if none fits, table creation fails with *"Database does not exist in connection"*. Creating a Databricks connection is out of scope (PAT/OAuth, not key-pair — no `ts connections create` path; tracked as BL-036): direct the user to the ThoughtSpot UI, then resume and select it. Don't trial-and-error connections. (Sibling to the Snowflake/Tableau create-connection change.) |
 | 1.5.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
 | 1.5.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 8A connection-scoped search path.** The 8A "C — within a connection" path now explicitly presents the Step 8B N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Mirrors the same fix in ts-convert-from-tableau and ts-convert-from-snowflake-sv. |
