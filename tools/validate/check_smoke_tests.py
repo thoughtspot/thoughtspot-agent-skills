@@ -13,8 +13,10 @@ Skills on the allowlist (interactive / setup / out-of-scope for live testing)
 are skipped:
   - ts-profile-thoughtspot, ts-profile-snowflake — credential setup; no API
     mutations to verify automatically without test credentials
-  - ts-object-answer-promote — legacy gap; smoke test should be added in a
-    follow-up PR. Remove from the allowlist when the smoke test lands.
+  - ts-object-answer-promote, ts-convert-from-tableau — dated backlog items
+    (BL-076, filed 2026-07-03, target 2026-09-30 — audit finding 6.3: these two
+    exemptions previously had no dated backlog reference, a two-bucket-rule
+    violation). Remove from the allowlist when the smoke test lands.
 
 Reverse direction: every tools/smoke-tests/smoke_*.py file must resolve back to either
 an existing skill directory (by the naming convention above) or a NAME_ALIASES target.
@@ -43,8 +45,8 @@ ALLOWLIST = {
     "ts-profile-snowflake",     # interactive credential setup
     "ts-profile-databricks",    # interactive credential setup
     "ts-profile-tableau",       # interactive credential setup — no API mutation flow to test
-    "ts-object-answer-promote", # legacy gap; backfill in a follow-up PR
-    "ts-convert-from-tableau",  # requires .twb fixture file; smoke test deferred until a sample workbook is available
+    "ts-object-answer-promote", # legacy gap; BL-076 (filed 2026-07-03, target 2026-09-30)
+    "ts-convert-from-tableau",  # requires .twb fixture file; BL-076 (filed 2026-07-03, target 2026-09-30)
 }
 
 # Skills whose smoke test uses an abbreviated filename rather than the default convention.

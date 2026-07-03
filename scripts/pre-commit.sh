@@ -182,6 +182,35 @@ if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validat
   run_check "no inline tml assembly" "tools/validate/check_skill_cli_usage.py --root $REPO_ROOT"
 fi
 
+# No inline requests/urllib — Claude skills use the `ts` CLI, never direct
+# requests/urllib calls to a ThoughtSpot endpoint (.claude/rules/ts-cli.md; audit
+# finding 5.2). Runs when a CLI/Claude SKILL.md or the validator changes.
+if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*/SKILL\.md|tools/validate/check_no_inline_requests\.py)'; then
+  run_check "no inline requests" "tools/validate/check_no_inline_requests.py --root $REPO_ROOT"
+fi
+
+# Pagination convention — ts-cli.md promises auto-pagination on every search-style
+# command; guard against a new hard-capped record_size literal slipping back in
+# (audit finding 14.2). Runs when ts_cli Python source or the validator changes.
+if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_pagination_convention\.py)'; then
+  run_check "pagination convention" "tools/validate/check_pagination_convention.py --root $REPO_ROOT"
+fi
+
+# Slash-command references — every /ts-<skill> mention in agents/ docs must resolve
+# to a real skill directory, or be an explicitly justified planned-skill allowlist
+# entry (audit finding 1.1). Runs when any doc under agents/ or the validator changes.
+if echo "$STAGED" | grep -qE '(^agents/.*\.md$|tools/validate/check_slash_command_refs\.py)'; then
+  run_check "slash-command refs" "tools/validate/check_slash_command_refs.py --root $REPO_ROOT"
+fi
+
+# SKILL.md flag cross-check — every `ts <group> <command> --<flag>` a SKILL.md
+# instructs must be a real registered option (audit finding 11.1b). Runs when a
+# SKILL.md, a ts_cli command module, or the validator changes — a flag rename in
+# ts_cli with no matching doc update is exactly the bug class this closes.
+if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*/SKILL\.md|^tools/ts-cli/ts_cli/commands/.*\.py$|tools/validate/check_skill_flag_usage\.py)'; then
+  run_check "flag cross-check" "tools/validate/check_skill_flag_usage.py --root $REPO_ROOT"
+fi
+
 # Currency anchors — SOFT nudge here (prints missing + stale anchors, never blocks the
 # commit) when a shared mapping OR schema file is edited. Presence is hard-gated in CI
 # (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.

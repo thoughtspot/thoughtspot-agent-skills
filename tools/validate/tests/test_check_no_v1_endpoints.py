@@ -63,3 +63,53 @@ def test_validate_dir_is_excluded(tmp_path):
     from pathlib import Path
     assert nv._is_excluded(Path("tools/validate/check_no_v1_endpoints.py"))
     assert not nv._is_excluded(Path("tools/ts-cli/ts_cli/client.py"))
+
+
+# --- Deprecated-v2 endpoint denylist (2026-07 audit finding 13.1) ----------------
+
+
+def test_flags_bare_deprecated_batch_endpoint(tmp_path):
+    src = (
+        'def f(c):\n'
+        '    return c.post("/api/rest/2.0/template/variables/update-values")\n'
+    )
+    hits = _scan_src(tmp_path, src)
+    assert len(hits) == 1
+    assert hits[0][0] == 2
+
+
+def test_does_not_flag_per_identifier_form(tmp_path):
+    # The current, correct form — a real identifier segment between "variables/"
+    # and "update-values". Must NOT match the bare-batch-path denylist entry.
+    src = (
+        'def f(c, identifier):\n'
+        '    return c.post(f"/api/rest/2.0/template/variables/{identifier}/update-values")\n'
+    )
+    assert _scan_src(tmp_path, src) == []
+
+
+def test_does_not_flag_fstring_quote_variant(tmp_path):
+    # The real ts_cli shape: f"/api/rest/2.0/template/variables/{quote(variable, safe='')}/update-values"
+    src = (
+        "from urllib.parse import quote\n"
+        "def f(c, variable):\n"
+        "    return c.post(\n"
+        "        f\"/api/rest/2.0/template/variables/{quote(variable, safe='')}/update-values\"\n"
+        "    )\n"
+    )
+    assert _scan_src(tmp_path, src) == []
+
+
+def test_deprecated_v2_docstring_mention_is_ignored(tmp_path):
+    src = (
+        "def f():\n"
+        '    """Replaces the deprecated batch\n'
+        "    POST /api/rest/2.0/template/variables/update-values endpoint.\n"
+        '    """\n'
+        "    return 1\n"
+    )
+    assert _scan_src(tmp_path, src) == []
+
+
+def test_deprecated_v2_fast_path_short_circuits(tmp_path):
+    assert _scan_src(tmp_path, "x = 1\n") == []

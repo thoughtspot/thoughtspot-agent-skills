@@ -58,6 +58,13 @@ jobs:
           python3 tools/validate/check_no_v1_endpoints.py --root .
           python3 tools/validate/check_no_inline_tml_gate.py --root .
           python3 tools/validate/check_skill_cli_usage.py --root .
+          # 2026-07-03 audit-harvest validators (see .claude/rules/repo-audit.md).
+          python3 tools/validate/check_no_inline_requests.py --root .
+          python3 tools/validate/check_pagination_convention.py --root .
+          python3 tools/validate/check_slash_command_refs.py --root .
+          # Needs ts_cli's own typer command tree (installed above) to cross-check
+          # SKILL.md `--flag` references against the real, registered CLI options.
+          python3 tools/validate/check_skill_flag_usage.py --root .
           # Presence gate: every shared mapping/schema must carry a currency anchor
           # (staleness is soft and never fails — only missing/malformed anchors do).
           python3 tools/validate/check_mapping_currency.py --root . --check
