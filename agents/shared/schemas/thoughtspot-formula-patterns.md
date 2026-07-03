@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl) -->
 
 # ThoughtSpot Formula Patterns — Reference
 
@@ -641,8 +641,12 @@ Values can be set at three levels (most specific wins):
 - **User level** — overrides org default for a specific user
 - **Model level** — overrides org default for a specific Model
 
-Values are assigned via the Update Variable Values REST API or passed as
-security entitlements in JWT tokens (ABAC pattern).
+Values are assigned via the per-identifier endpoint
+`POST /api/rest/2.0/template/variables/{identifier}/update-values` (the batch
+`/template/variables/update-values` form is deprecated as of 26.4.0.cl) or passed as
+security entitlements in JWT tokens (ABAC pattern). 26.4.0.cl also added variable
+rename (`POST /template/variables/{identifier}/update`) and bulk delete
+(`POST /template/variables/delete`).
 
 Common formula variables: `region_var`, `department_var`, `country_var`.
 Manage `ts_user_timezone` via `/ts-variable-timezone`.

@@ -59,14 +59,6 @@ hyperd.log
 # Per-machine smoke test configuration (model names, connection details, etc.)
 tools/smoke-tests/smoke-config.local.json
 
-# Skills pending testing — not yet published to remote
-agents/claude/ts-convert-to-databricks-mv/
-agents/claude/ts-object-model-builder/
-tools/smoke-tests/smoke_ts_model_builder.py
-
-# Databricks shared content — not yet published to remote
-agents/shared/worked-examples/unity-catalog/
-
 # Databricks bundle — shared/ is copied from agents/shared/ at deploy time
 agents/databricks/shared/
 

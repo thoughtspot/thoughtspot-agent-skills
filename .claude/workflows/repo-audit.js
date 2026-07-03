@@ -10,7 +10,10 @@ export const meta = {
 
 // ── config (repo-specific — mirrors the angle/platform tables in repo-audit.md) ──
 
-const scope = (args && args.scope) === 'full' ? 'full' : 'external'
+// args may arrive as an object ({scope:"full"}) or a JSON-ish string depending on the
+// caller — accept both (verified 2026-07-03: an object arg reached the script as a string
+// and silently fell back to 'external').
+const scope = (typeof args === 'string' ? args.includes('full') : args && args.scope === 'full') ? 'full' : 'external'
 
 // Angle 13 — one specialist lens per platform. Each reads the real mapping/schema
 // files + their currency anchor, researches the product's CURRENT state, and reports

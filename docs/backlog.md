@@ -1126,8 +1126,12 @@ Two assertions can't actually fail: `ts-dependency-manager`'s round-trip step tr
 import as success** (the round-trip assertion is vacuous), and the `to-databricks` DDL "validation"
 asserts substrings on a string the test itself just built (tautological). Plus
 `smoke_ts-metadata-report.py` is orphaned (never run by any harness, leaving `ts metadata report`
-unexercised), the `smoke-tests/README.md` Scripts table is stale (lists 3 of 11), and the
-business-days recipe smoke header references an old skill name.
+unexercised — **RESOLVED 2026-07-03:** deleted in PR #172, which also added a reverse orphan
+check to `check_smoke_tests.py`), the `smoke-tests/README.md` Scripts table is stale (lists 3
+of 11), and the business-days recipe smoke header references an old skill name. Also
+(2026-07-03 audit 1.6): `smoke_sv_minimal.yaml` / `smoke_sv_test.yaml` are referenced by
+nothing and pin "as of 2026-04" environment facts — document them in smoke-tests/README.md
+or delete them as part of this item.
 
 ### Approach
 
@@ -1648,6 +1652,23 @@ commands, mirroring the Tableau pattern:
 Assess whether the translation rules are stable enough to codify. If the mapping docs
 are still actively evolving (new constructs being added frequently), the LLM-driven
 approach has an advantage: updating a markdown file is faster than updating code + tests.
+
+### Scope extension — 2026-07-03 (full audit 11.3 + codification review)
+
+Folded into this item rather than opened separately:
+
+- **Quick wins that can ship ahead of the phases** (codification review 2026-07-03 rows
+  3–4): extract the Mode-C diff helpers (`_normalise_expr`/`_exprs_differ` — currently
+  copy-pasted as literal Python in BOTH Snowflake SKILL.mds, to:~1018 / from:~242) as
+  `ts snowflake diff`, and codify the to-direction's 17-item manual DDL checklist as
+  `ts snowflake lint-ddl` (the from-direction already gates on `ts tml lint`; the
+  to-direction self-checks its own just-written DDL).
+- **`ts snowflake build-sv`** (TS → SV DDL emission — PK clauses, alias-collision wrapper
+  views, metric ordering) as the mirror of phase 1c.
+- **Shared lint+import procedure** (audit 11.3): the ~200-line pre-import lint gate +
+  Step 11 import procedure is near-verbatim across from-snowflake-sv (:1579-1660) and
+  from-databricks-mv (:1117-1200). Phase 4 must extract this to a shared reference (or
+  absorb it into the build-model commands) rather than leaving the duplication.
 Once the mapping surface stabilises, extraction becomes higher-value.
 
 **Target:** Assess feasibility by 2026-09-30. Schedule extraction only if mapping churn
@@ -2021,3 +2042,268 @@ independent fix worth bundling here rather than opening a third backlog item for
   (repo-audit angle #11) rather than adding LLM judgment steps
 
 **Target:** 2026-12-31.
+
+---
+
+## BL-073 — ts-audit / ts-cli round-trip batching (perf angle 14)
+
+**Source:** 2026-07-03 full audit, findings 14.1 / 14.3 / 14.4.
+**Affects:** `tools/ts-cli/ts_cli/audit/context.py`, `commands/tables.py`.
+**Status:** OPEN.
+
+### Problem
+
+1. **14.1:** `build_context` exports ALL model TMLs (with `export_associated=True`) in ONE
+   unbatched call (`audit/context.py:67-73`, 300s timeout) while the same function batches
+   search at 50 and dependents at 15 — cluster-wide audits funnel the heaviest call into a
+   single request (timeout / oversized-payload risk).
+2. **14.3:** `ts tables create` costs up to 2N round-trips (per-table singleton import +
+   per-table GUID search, `tables.py:132-161`); the import API accepts a list with PARTIAL
+   + per-object statuses. Keep individual re-drive on JDBC errors.
+3. **14.4:** the audit AI-instructions fetch is N+1 AND records a failed fetch as `{}`,
+   so errors read as "missing AI instructions" in A-angle findings — record failures in a
+   context warnings list (batch only if the spec allows; verify via MCP first).
+
+### Approach
+
+Batch the model export like the answer export (50 per batch, per-batch failure tolerance);
+first-pass batched import for tables create with individual retry on error; warnings list
+for AI-instructions fetch failures.
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-074 — Propagate prompt-batching relaxation to remaining interactive skills
+
+**Source:** 2026-07-03 full audit, finding 14.5.
+**Affects:** ts-audit, ts-dependency-manager, ts-object-answer-promote, ts-object-model-coach,
+ts-object-model-erd, ts-profile-tableau, both ts-recipe-* skills.
+**Status:** OPEN.
+
+ts-convert-from-tableau 1.13.0 relaxed "Ask one question at a time" to dependent/independent
+wording (independent questions may be batched); the strict wording remains verbatim in the
+8 skills above, serialising independent prompts. Apply the same boilerplate update (PATCH
+bump each).
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-075 — Dependency currency residuals: lock file + Python 3.14 cap
+
+**Source:** 2026-07-03 full audit, findings 16.2 (residual) / 16.3. The `typer<1` cap and
+`dev` extra shipped in PR #173.
+**Affects:** `tools/ts-cli/pyproject.toml`, install docs.
+**Status:** OPEN.
+
+Decide whether to check in a `uv.lock` (reproducible installs; every `uv tool install
+--force` currently re-resolves fresh), and test on Python 3.14 then raise or document the
+`requires-python "<3.14"` cap (3.14 has been stable since Oct 2025).
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-076 — Smoke-test backfills: ts-object-answer-promote + ts-convert-from-tableau
+
+**Source:** 2026-07-03 full audit, finding 6.3 — both `check_smoke_tests.py` ALLOWLIST
+exemptions were undated two-bucket violations (comments now reference this item).
+**Affects:** `tools/smoke-tests/`, `tools/validate/check_smoke_tests.py` ALLOWLIST.
+**Status:** OPEN.
+
+ts-convert-from-tableau is the largest conversion skill (1,709 lines of translation unit
+tests) with zero end-to-end TWB→TML→import smoke and no .twb fixture tracked — add a small
+fixture workbook + end-to-end smoke. ts-object-answer-promote needs its deferred smoke
+backfilled. Remove both ALLOWLIST entries when the smokes land.
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-077 — Known-bad fixture self-tests for the remaining validators
+
+**Source:** 2026-07-03 full audit, finding 6.5.
+**Affects:** `tools/validate/tests/`.
+**Status:** OPEN.
+
+~13 pre-commit validators have no self-tests, including the constants/regex-driven ones
+most prone to vacuous-pass rot (`check_runtime_coverage` EXPECTED_DIVERGENCES,
+`check_skill_naming` FAMILY_PATTERNS) — the class that produced the C8/F5 drift bugs.
+One known-bad fixture test per validator (`test_known_bad_fixtures.py` pattern; the
+validators added in PR #176 ship with theirs).
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-078 — check_open_items: scoped hard mode in CI
+
+**Source:** 2026-07-03 full audit, finding 7.2.
+**Affects:** `tools/validate/check_open_items.py`, `.github/workflows/validate.yml`.
+**Status:** OPEN.
+
+`check_open_items` runs `--warn` in both pre-commit and CI — warn mode never exits nonzero,
+so angle 3 (open-items truthfulness) has no blocking gate anywhere. Add a scoped hard mode
+in CI: fail only on open-items entries added/modified in the PR diff (analogous to the
+changelog gate's `--base`).
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-079 — Recipe codification: UDF SQL as files + `ts snowflake exec`
+
+**Source:** 2026-07-03 full audit finding 11.2 + codification review rows 14/22.
+**Affects:** both ts-recipe-formula-* skills, `tools/ts-cli/`.
+**Status:** OPEN. **Blocks:** should land before the next ts-recipe-* skill (BL-037 plans six).
+
+The recipes' UDF SQL — the entire point of the skills — exists only as markdown fences the
+LLM transcribes into Python strings each run (a `-1` vs `-2` DATEDIFF slip is syntactically
+valid and silently wrong), and the ~40-line Snowflake connect/execute block is cloned
+between both skills and has already drifted from `load.py:_connect_python()` (key-path
+handling). Move the SQL to `references/*.sql` templates and add `ts snowflake exec -f
+<file.sql> --sf-profile <name> [--var k=v]` reusing the load.py connector; point both
+recipes (and their smoke tests, deduped in PR #174) at it.
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-080 — `ts metadata permissions` + answer-promote permission pre-flight
+
+**Source:** 2026-07-03 full audit, finding 5.3.
+**Affects:** `tools/ts-cli/`, ts-object-answer-promote.
+**Status:** OPEN.
+
+answer-promote's deferred permission pre-flight (open-item #2 recorded a 500 on
+`/security/metadata/fetch`) is closable: dependency-manager's references row 12 already
+verified `/security/metadata/fetch-permissions` works — the knowledge never crossed skills.
+Confirm the spec via `get-rest-api-reference(apiName:"fetchPermissionsOnMetadata")`, add
+`ts metadata permissions`, wire the pre-flight, and update open-item #2.
+
+**Target:** 2026-09-30.
+
+---
+
+## BL-081 — `ts data search` for ts-audit Phase 2 (usage-based checks)
+
+**Source:** 2026-07-03 full audit, finding 5.4 (the capability gap had no dated item —
+two-bucket violation; the stale OI numbering was fixed in PR #168).
+**Affects:** `tools/ts-cli/`, ts-audit.
+**Status:** OPEN.
+
+ts-audit Phase 2 (dead-column detection, unused-object identification, low-usage flagging)
+requires querying the TS: BI Server system model — a `ts data search` command (open items
+#9–#12 in ts-audit's references). Spec via MCP first, then live-verify.
+
+**Target:** 2026-10-31.
+
+---
+
+## BL-082 — Drop the `source ~/.zshenv &&` prefix repo-wide (after Linux keyring verify)
+
+**Source:** 2026-07-03 full audit, finding 11.5.
+**Affects:** 15 SKILL.md files (~130 occurrences), `agents/cli/CLAUDE.md`.
+**Status:** OPEN — blocked on a Linux verification.
+
+`client.py` already falls back to the OS credential store via keyring (a hard dep), making
+the prefix redundant on macOS/Windows. Verify the Linux/no-secretstorage-backend path
+degrades with a clear error, then drop the prefix repo-wide and document the requirement
+once in `agents/cli/CLAUDE.md`.
+
+**Target:** 2026-10-31.
+
+---
+
+## BL-083 — Codify ts-dependency-manager backup / mutation / verify / rollback
+
+**Source:** 2026-07-03 codification review rows 11–13 (angle 11).
+**Affects:** ts-dependency-manager, `tools/ts-cli/ts_cli/report/` (or a new `dependency/` module).
+**Status:** OPEN. Safety-critical.
+
+~900 of the SKILL.md's 2,174 lines are inline pseudocode for the skill's headline safety
+promises: TML backup manifest (Step 7), the remove/repoint mutation engine across 5 object
+types (Step 9, with known gaps in open-items #2/#13), import/verify/drift orchestration
+(including the live-tested "TS misreports import status" edge case, currently prose-only),
+and full rollback (Step 11) — all re-derived by the LLM each run. Codify as
+`ts dependency backup --out-dir D --manifest`, `ts dependency apply-change`,
+`ts dependency rollback --backup-dir D`, with unit tests for each mutation type. The walk +
+impact report (Steps 4–5) are already deterministic via `ts metadata report` — this
+completes the skill's migration.
+
+**Target:** 2026-10-31.
+
+---
+
+## BL-084 — `ts profiles add/update/remove`: codify the profile substrate
+
+**Source:** 2026-07-03 codification review row 18.
+**Affects:** all four ts-profile-* skills, `tools/ts-cli/ts_cli/commands/profiles.py`.
+**Status:** OPEN.
+
+Slug/env-var derivation, keychain command templating, profile-JSON CRUD, and `~/.zshenv`
+upsert are freehand LLM work duplicated across the four profile skills, with one
+demonstrated drift bug (ts-profile-tableau's slug rule lost "collapse multiples, strip
+ends" vs its three siblings). The interactive credential flow stays agentic per
+security.md — the credential VALUE never passes through the CLI conversation; the substrate
+(everything except the secret) becomes `ts profiles add/update/remove` + `ts profiles
+sync-env`. Also adopt `ts profiles list --json` in the 4 skills that hand-parse
+`~/.claude/*-profiles.json`.
+
+**Target:** 2026-10-31.
+
+---
+
+## BL-085 — Tableau: wire build-model generate mode + codify TWB parse
+
+**Source:** 2026-07-03 codification review rows 1/15/23.
+**Affects:** ts-convert-from-tableau, `tools/ts-cli/`.
+**Status:** OPEN. Highest benefit÷effort in the review — the code already exists.
+
+1. **Generate mode (S–M):** Step 5b hand-assembles the Phase-1 base-model TML although
+   `model_builder.py:build_model_tml()` (:113) + `split_for_phased_import()` (:484) already
+   implement exactly this — the skill just never calls the non-`--existing-guid` path.
+   Wire it (+ a `--table-name-map` flag).
+2. **TWB parse (M):** Steps 3b–3g (blend graph, table-calc addressing, orphan calcs) are
+   manual XML reads that produce translate-formulas' own inputs — expose `ts tableau parse
+   {twb} --json` on the existing `parse_twb()` and port 3e/3f/3g.
+3. Dashboard layout grid math → fold into BL-068's scope (already live-verified,
+   open-items #6).
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-086 — model-coach: codify the deterministic substrate under the judgment layer
+
+**Source:** 2026-07-03 codification review rows 16/17/19/20.
+**Affects:** ts-object-model-coach, `tools/ts-cli/`.
+**Status:** OPEN.
+
+The coaching judgment (what synonym/instruction to write) stays agentic; the arithmetic
+feeding it should not be re-executed as inline Python each run: prose mining (regex NP
+extraction + Jaccard-stem scoring with hard thresholds — prose-mining-rules.md:43-116),
+the cross-model corpus scan (TTL cache + parallel export, documented to scale to 1,000
+models), synonym-conflict validation (complete working Python at SKILL.md ~:788-834),
+candidate scoring, and the Step 8b/8c TML patch/merge + enum/char-limit validation (the
+step the Critical TML invariants exist to protect). Candidates: `ts model mine-language`,
+`ts model validate-synonyms`, `ts model patch-model` (or `ts tml patch-model`),
+`ts model cross-consistency-scan`.
+
+**Target:** 2026-11-30.
+
+---
+
+## BL-087 — Shared `ts spotql classify-columns` (dedupe divergent keyword lists)
+
+**Source:** 2026-07-03 codification review row 24.
+**Affects:** ts-object-model-spotql-query, ts-object-answer-promote, `tools/ts-cli/`.
+**Status:** OPEN.
+
+Column classification is duplicated between the two skills with DIFFERENT keyword lists
+(spotql SKILL.md ~:137-146 vs promote ~:700-722) — live drift, and exactly the ts-cli.md
+"two skills duplicate the same logic" trigger. One `ts spotql classify-columns --model
+{guid}` command; both skills adopt it.
+
+**Target:** 2026-09-30.
