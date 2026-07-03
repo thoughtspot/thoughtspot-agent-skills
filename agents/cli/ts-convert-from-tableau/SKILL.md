@@ -261,7 +261,7 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Partial / Unmapped (sets)** | Tableau set construct with no current ThoughtSpot equivalent — logged as deferred, never mis-translated | **set controls** (`level-members` only, no fixed members) → no set object, surface as a liveboard filter; **set actions** (`<action>`) → no equivalent |
 | **Row-offset (native)** | Table calc with recoverable intent → native TS function | `INDEX() <= N` (Top-N filter → `rank()` + query set); `INDEX()` display → `rank()`; `LOOKUP(-N)` → `moving_sum(N,-N)`; `LOOKUP(+N)` → `moving_sum(-N,N)`; `LOOKUP(agg, FIRST())` → `first_value()`; `LOOKUP(agg, LAST())` → `last_value()`; bare `FIRST()`/`LAST()` standalone → omit + log (returns offset, not value) — **all native mappings use native TS functions, work with all column types** |
 | **Row-offset (pass-through)** | `SIZE()` only → answer-level `sql_int_aggregate_op("COUNT(*) OVER()")` | `SIZE()` — only row-offset that still requires SQL pass-through ⚑ flag PT1 |
-| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` **when addressing is ambiguous** (CellInPane, multi-dim Table, or no shelf sort); `PREVIOUS_VALUE` (true recursion — not the string-aggregation technique); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy) |
+| **Untranslatable** | No ThoughtSpot equivalent — will be omitted | `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` **when addressing is ambiguous** (CellInPane, multi-dim Table, or no shelf sort); `PREVIOUS_VALUE` (true recursion — not the string-aggregation technique); true **k-means clustering** (the analytics-engine "Clusters" calc — **not** `categorical-bin`); **geospatial** — full 13-function set (`MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`, `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`, `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE`) — decompose `MAKEPOINT` lat/lon args to individual attribute columns, omit the spatial formula (see `tableau-formula-translation.md` Geospatial Policy); **embedded-RLS user attributes** (`USERATTRIBUTE`, `USERATTRIBUTEINCLUDES`) — rejected at translate time, see BL-071 |
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
@@ -278,6 +278,9 @@ WINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(
 RANK(_UNIQUE|_MODIFIED|_DENSE|_PERCENTILE)?\s*\(
 TOTAL\s*\(
 MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
+INTERSECTS\s*\(  LENGTH\s*\(     SHAPETYPE\s*\(  OUTLINE\s*\(
+DIFFERENCE\s*\(  INTERSECTION\s*\(  SYMDIFFERENCE\s*\(  VALIDATE\s*\(
+USERATTRIBUTE\s*\(  USERATTRIBUTEINCLUDES\s*\(
 ```
 
 Detection of `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` routes through the **tiered decision
@@ -2084,12 +2087,17 @@ Formula translation rules: use `tableau-formula-translation.md`.
   aggregation** (`sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [col] )`,
   answer-level, ⚑ flag for review per PT1) or a plain table of the values. The feeder/`Last` scaffolding
   calcs collapse into the one LISTAGG formula. See `tableau-formula-translation.md` "String aggregation".
-- **Geospatial formulas** (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`): omit the
-  spatial formula entirely. For `MAKEPOINT(lat, lon)`, ensure the underlying latitude and
-  longitude columns are migrated as individual `ATTRIBUTE` columns — they are useful for
-  filtering and display even without a map visualization. For `DISTANCE`/`BUFFER`/`AREA`,
+- **Geospatial formulas** — full 13-function set (`MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`,
+  `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`, `DIFFERENCE`, `INTERSECTION`,
+  `SYMDIFFERENCE`, `VALIDATE`): omit the spatial formula entirely. For `MAKEPOINT(lat, lon)`,
+  ensure the underlying latitude and longitude columns are migrated as individual `ATTRIBUTE`
+  columns — they are useful for filtering and display even without a map visualization. For
+  `DISTANCE`/`BUFFER`/`AREA`/`LENGTH`/`INTERSECTS`/`DIFFERENCE`/`INTERSECTION`/`SYMDIFFERENCE`,
   flag more prominently (the spatial computation is lost, not just the wrapper). See
   `tableau-formula-translation.md` "Geospatial Policy". Log each omission.
+- **Embedded-RLS user attributes** (`USERATTRIBUTE`, `USERATTRIBUTEINCLUDES`): rejected at
+  translate time — no CLI translation yet. See `tableau-formula-translation.md` "Untranslatable
+  Patterns" and BL-071 for the ABAC `ts_var()` translation candidate.
 - **Row-offset table calculations** (`INDEX`, `LOOKUP`, `FIRST`, `LAST`, `SIZE` —
   standalone, NOT as `WINDOW_*`/`RUNNING_*` offset args). Apply the tiered decision tree
   from `tableau-formula-translation.md` "Row-Offset Table Calculations":
@@ -4130,6 +4138,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.20.3 | 2026-07-03 | Full 13-function Tableau spatial set (was 5 documented, 0 enforced) + USERATTRIBUTE/USERATTRIBUTEINCLUDES now rejected loudly at translate time (was silent pass-through / undocumented). Requires ts-cli v0.28.1 |
 | 1.20.2 | 2026-07-03 | ACOS/ASIN/ATAN/COT now rejected loudly at translate time (was silent pass-through). Requires ts-cli v0.26.5 |
 | 1.20.1 | 2026-07-03 | Doc refresh: output schema + flag fixes, mapping-file greatest/least + pipeline-table alignment, matrix/open-items verification pass (5 stale items closed, incl. tabs #9), gap documentation (hierarchies, aliases, actions, fiscal year, inverse trig) |
 | 1.20.0 | 2026-07-03 | LEFT/RIGHT/MID/UPPER/LOWER/STARTSWITH/ENDSWITH/SQUARE/SIGN/trig/PI/RADIANS/DEGREES/DATEPARSE now CLI-translated; unmapped functions and unknown date units rejected loudly at translate time; scalar MAX/MIN and IN(...) scan bugs fixed. Requires ts-cli v0.26.0 |

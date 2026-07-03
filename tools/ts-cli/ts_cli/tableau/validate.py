@@ -33,6 +33,17 @@ _UNMAPPED_FUNCTIONS = [
     "USERNAME", "FULLNAME", "ISUSERNAME", "ISFULLNAME", "USERDOMAIN",
     "ACOS", "ASIN", "ATAN", "COT",  # inverse trig + COT — translations tracked in BL-072 (needs live degree/radian check)
     "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
+    # Spatial — full 13-function Tableau set (help.tableau.com Spatial Functions,
+    # verified 2026-07-03). No ThoughtSpot spatial data type or constructors exist.
+    # See "Geospatial Policy" in tableau-formula-translation.md.
+    "MAKEPOINT", "MAKELINE", "DISTANCE", "BUFFER", "AREA",
+    "INTERSECTS", "LENGTH", "SHAPETYPE", "OUTLINE",
+    "DIFFERENCE", "INTERSECTION", "SYMDIFFERENCE", "VALIDATE",
+    # Embedded-RLS user-attribute family — sibling of USERNAME/FULLNAME/etc above.
+    # ABAC ts_var() referencing a formula variable is a plausible native translation
+    # (same JWT user-attribute mechanism as the ISMEMBEROF→ts_groups reclassification
+    # of 2026-06-28) but needs live verification before wiring in. Tracked in BL-071.
+    "USERATTRIBUTE", "USERATTRIBUTEINCLUDES",
 ]
 _UNMAPPED_RE = [
     (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _UNMAPPED_FUNCTIONS

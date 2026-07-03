@@ -1903,10 +1903,12 @@ explicitly include module size / modularity as a check dimension.
 
 ---
 
-## BL-071 — Tableau user-function family → ThoughtSpot RLS variables
+## BL-071 — Tableau user-function + user-attribute family → ThoughtSpot RLS variables
 
 **Source:** task-21 gap documentation, 2026-07-03 (following ts-cli v0.26.0 / #158's
-fail-loud validation for this function family).
+fail-loud validation for this function family). Extended 2026-07-03 (audit finding 13.9,
+v0.28.1) to add `USERATTRIBUTE()`/`USERATTRIBUTEINCLUDES()` — the same class of gap,
+folded into this item rather than a duplicate backlog entry.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `agents/shared/mappings/tableau/tableau-formula-translation.md`,
 `tools/ts-cli/`.
 **Status:** OPEN.
@@ -1926,6 +1928,13 @@ through untranslated and un-rejected (it is not in `_UNMAPPED_FUNCTIONS`); imple
 one is part of this item's scope. This item is about implementing the translations, not
 about the fail-loud behavior (already shipped for the U7 functions).
 
+`USERATTRIBUTE(attr)` / `USERATTRIBUTEINCLUDES(attr, val)` — Tableau's embedded-RLS
+custom-attribute functions (read a named attribute passed in from the row-level-security
+system, distinct from the built-in identity functions above) — were undocumented and
+unhandled entirely until v0.28.1, which added both to `_UNMAPPED_FUNCTIONS`
+(coverage-matrix.md U9) for fail-loud rejection. Same underlying gap as U7: no CLI
+translation exists yet.
+
 ### Approach
 
 - `USERNAME()` → `ts_username` — direct system-variable reference (see the system
@@ -1938,13 +1947,28 @@ about the fail-loud behavior (already shipped for the U7 functions).
   whether this stays untranslatable
 - `ISUSERNAME(s)` / `ISFULLNAME(s)` → composite comparisons once `USERNAME`/`FULLNAME`
   are resolved (e.g. `ts_username = s`)
+- `USERATTRIBUTE(attr)` → **ABAC `ts_var(attr_var)`** referencing an admin-created formula
+  variable is the plausible native translation — same JWT user-attribute mechanism as
+  `ISMEMBEROF`→`ts_groups`. **Caveat not present for the U7 functions:** per
+  `thoughtspot-formula-patterns.md` ("Syntax: Model / Answer Formulas"), `ts_var()` in the
+  **formula editor today only supports `ts_user_timezone`** — arbitrary formula variables
+  are not yet accepted in Model/Answer formulas, only in **RLS rules** on Table objects
+  (`thoughtspot-formula-patterns.md` "Syntax: RLS Rules"). So a Tableau calc using
+  `USERATTRIBUTE()` inside a *formula* may have no faithful Model-level translation until
+  that formula-editor gap closes; the translation is more likely to land as guidance to
+  move the logic into an RLS rule (`attr = ts_var(attr_var)`) than as an inline formula
+  rewrite. Confirm current formula-editor support before committing to either path.
+- `USERATTRIBUTEINCLUDES(attr, val)` → composite once `USERATTRIBUTE` is resolved (e.g.
+  `val in ts_var(attr_var)` for a list-valued attribute, RLS context)
 - **Requires live verification** against a ThoughtSpot instance that `ts_username` (and
   any `FULLNAME` candidate) resolves correctly inside a **Model formula context**, not
   just answer-level search — follow the `references/open-items.md` pattern
-  (`.claude/rules/api-research.md`) before wiring a translation into `tableau_translate.py`
+  (`.claude/rules/api-research.md`) before wiring a translation into `tableau_translate.py`.
+  For `USERATTRIBUTE`/`USERATTRIBUTEINCLUDES`, also verify whether `ts_var()` formula-editor
+  support has expanded beyond `ts_user_timezone` before assuming a Model-formula path exists.
 - Once verified: remove the resolved functions from `_UNMAPPED_FUNCTIONS`, add the mapping
   to `tableau-formula-translation.md`, and move the rows in coverage-matrix.md from
-  "Rejected at Translate Time" (U7) into "Mapped Constructs"
+  "Rejected at Translate Time" (U7 / U9) into "Mapped Constructs"
 
 **Target:** 2026-09-30.
 

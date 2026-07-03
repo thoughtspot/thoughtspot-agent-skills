@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: tableau — 2026-07 (external sweep: all TWB facts hold; corrected custom-SQL relation attribute to type="text") -->
 
 # Tableau → ThoughtSpot TML Generation Rules
 
@@ -341,9 +341,9 @@ reduced coverage, which the user can then address manually.
 
 ## SQL View TML Rules (Custom SQL Datasources)
 
-When a Tableau `<relation>` has `type="custom-sql"`, the SQL text is the datasource's
-query — it does NOT map to a physical table. Generate a `sql_view:` TML instead of a
-`table:` TML.
+When a Tableau `<relation>` has `type="text"` (the custom-SQL indicator in TWB XML), the
+SQL text is the datasource's query — it does NOT map to a physical table. Generate a
+`sql_view:` TML instead of a `table:` TML.
 
 ### When to generate a SQL View
 

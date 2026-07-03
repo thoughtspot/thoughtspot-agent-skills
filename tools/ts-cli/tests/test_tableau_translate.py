@@ -1038,6 +1038,26 @@ class TestValidateOutput:
             assert errors, f"{fn} should be rejected as unmapped"
             assert any(fn in e for e in errors)
 
+    def test_spatial_functions_rejected(self):
+        # Full 13-function Tableau spatial set (audit 13.8) — none has a
+        # ThoughtSpot equivalent; all must be rejected loud, not pass through.
+        for fn in (
+            "MAKEPOINT", "MAKELINE", "DISTANCE", "BUFFER", "AREA",
+            "INTERSECTS", "LENGTH", "SHAPETYPE", "OUTLINE",
+            "DIFFERENCE", "INTERSECTION", "SYMDIFFERENCE", "VALIDATE",
+        ):
+            errors = validate_output(f"{fn} ( [X] )")
+            assert errors, f"{fn} should be rejected as unmapped"
+            assert any(fn in e for e in errors)
+
+    def test_userattribute_functions_rejected(self):
+        # Embedded-RLS user-attribute family (audit 13.9) — sibling of
+        # USERNAME/FULLNAME/etc, tracked for a future ts_var() translation in BL-071.
+        for fn in ("USERATTRIBUTE", "USERATTRIBUTEINCLUDES"):
+            errors = validate_output(f"{fn} ( 'region' )")
+            assert errors, f"{fn} should be rejected as unmapped"
+            assert any(fn in e for e in errors)
+
     def test_untranslated_datetrunc_flagged(self):
         errors = validate_output("DATETRUNC ( 'hour' , [TS] )")
         assert any("DATETRUNC" in e for e in errors)

@@ -244,6 +244,87 @@ def snow_file(snow_cmd: str, cli_connection: str, sql_file: str) -> None:
         )
 
 
+def check_sf_cli_method(profile: dict) -> tuple[str, str]:
+    """
+    Verify a loaded Snowflake profile uses method: cli — required by smoke tests
+    that shell out to `snow sql` (the recipe UDF-deploy smokes, in particular).
+    Returns (snow_cmd, cli_connection).
+    """
+    method = profile.get("method", "")
+    if method != "cli":
+        raise RuntimeError(
+            f"Profile method is '{method}' — smoke tests require method: cli. "
+            "Create a CLI-method Snowflake profile via /ts-profile-snowflake."
+        )
+    cli_conn = profile.get("cli_connection")
+    if not cli_conn:
+        raise RuntimeError("Profile has no 'cli_connection' field.")
+    return get_snow_cmd(profile), cli_conn
+
+
+def create_udf(snow_cmd: str, cli_connection: str, ddl: str) -> None:
+    """
+    Deploy a single scalar UDF via `snow sql -f`. Writes the DDL to a temp file
+    so multiline function bodies survive shell quoting — required by the
+    ts-recipe-formula-*-snowflake smoke tests (business-days, hms-display, and
+    any future recipe UDF).
+    """
+    import tempfile
+    tmp = Path(tempfile.mktemp(suffix=".sql"))
+    tmp.write_text(ddl)
+    try:
+        result = subprocess.run(
+            [snow_cmd, "sql", "-c", cli_connection, "-f", str(tmp)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def query_scalar(snow_cmd: str, cli_connection: str, sql: str) -> Any:
+    """Run a SQL query via the Snowflake CLI and return the first column of the first row."""
+    rows = snow_json(snow_cmd, cli_connection, sql)
+    if not rows:
+        raise RuntimeError(f"Query returned no rows: {sql}")
+    return list(rows[0].values())[0]
+
+
+def drop_udfs(snow_cmd: str, cli_connection: str, signatures: list[str]) -> None:
+    """
+    Best-effort `DROP FUNCTION IF EXISTS` for each fully-qualified signature
+    (e.g. `DB.SCHEMA.my_udf(TIMESTAMP, TIMESTAMP)`). Failures are swallowed —
+    this is cleanup, not a test assertion.
+    """
+    for sig in signatures:
+        try:
+            snow_exec(snow_cmd, cli_connection, f"DROP FUNCTION IF EXISTS {sig}")
+        except Exception:
+            pass  # best-effort cleanup
+
+
+def recipe_arg_parser(description: str):
+    """
+    Build the argparse.ArgumentParser shared by every ts-recipe-formula-*-snowflake
+    smoke test: --sf-profile/--sf-target-db/--sf-target-schema (required),
+    --ts-profile (accepted but ignored — runner compatibility), --no-cleanup.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--sf-profile", required=True,
+                        help="Snowflake CLI profile name from ~/.claude/snowflake-profiles.json")
+    parser.add_argument("--sf-target-db", required=True,
+                        help="Snowflake database to create UDFs in")
+    parser.add_argument("--sf-target-schema", required=True,
+                        help="Snowflake schema to create UDFs in")
+    parser.add_argument("--ts-profile", default=None,
+                        help="Ignored — accepted for runner compatibility")
+    parser.add_argument("--no-cleanup", action="store_true",
+                        help="Skip the DROP FUNCTION cleanup step")
+    return parser
+
+
 def sf_connect_python(profile: dict) -> Any:
     """
     Return a snowflake.connector connection for a 'python' method profile.
@@ -326,11 +407,38 @@ def get_dbx_warehouse_id(profile: dict) -> str:
     return path.rstrip("/").split("/")[-1]
 
 
+# Databricks statement-execution states (Statement Execution API). Any state
+# not in this terminal set (i.e. PENDING, RUNNING) must keep polling — treating
+# only PENDING as "keep polling" let a RUNNING initial response return early
+# with empty results, and treating only SUCCEEDED/FAILED as "stop polling" let
+# CANCELED/CLOSED burn the full timeout before erroring (audit 4.8, recurrence
+# of a prior-audit finding).
+_DBX_TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELED", "CLOSED"}
+
+
+def _raise_if_unsuccessful(data: dict) -> None:
+    """Raise if a terminal statement-execution state indicates non-success."""
+    status = data.get("status", {})
+    state = status.get("state")
+    if state == "FAILED":
+        err = status.get("error", {}).get("message", "unknown error")
+        raise RuntimeError(f"SQL statement failed: {err}")
+    if state in ("CANCELED", "CLOSED"):
+        raise RuntimeError(f"SQL statement ended in state {state} without succeeding")
+
+
 def databricks_sql(dbx_profile_name: str, statement: str) -> dict:
     """
     Execute a SQL statement via the Databricks SQL Statement Execution API.
     Returns the full response dict. Raises RuntimeError on CLI failure.
-    Polls for completion if the initial response is PENDING.
+
+    Polls while the statement is in a non-terminal state (PENDING, RUNNING) —
+    the synchronous POST can return before the statement finishes even within
+    its wait_timeout window. Stops as soon as a terminal state (SUCCEEDED,
+    FAILED, CANCELED, CLOSED) is observed instead of only recognizing PENDING
+    on entry (which let a RUNNING initial response return early with empty
+    results) and only recognizing SUCCEEDED/FAILED while polling (which let
+    CANCELED/CLOSED burn the full timeout before erroring).
     """
     profile = load_dbx_profile(dbx_profile_name)
     wh_id = get_dbx_warehouse_id(profile)
@@ -353,13 +461,9 @@ def databricks_sql(dbx_profile_name: str, statement: str) -> dict:
         )
 
     data = json.loads(result.stdout)
-    status = data.get("status", {})
+    state = data.get("status", {}).get("state")
 
-    if status.get("state") == "FAILED":
-        err = status.get("error", {}).get("message", "unknown error")
-        raise RuntimeError(f"SQL statement failed: {err}")
-
-    if status.get("state") == "PENDING":
+    if state not in _DBX_TERMINAL_STATES:
         import time
         stmt_id = data.get("statement_id")
         for _ in range(12):
@@ -374,14 +478,12 @@ def databricks_sql(dbx_profile_name: str, statement: str) -> dict:
                 raise RuntimeError(f"Poll failed:\n{poll.stderr.strip()}")
             data = json.loads(poll.stdout)
             state = data.get("status", {}).get("state")
-            if state == "SUCCEEDED":
+            if state in _DBX_TERMINAL_STATES:
                 break
-            if state == "FAILED":
-                err = data["status"].get("error", {}).get("message", "unknown")
-                raise RuntimeError(f"SQL statement failed: {err}")
         else:
             raise RuntimeError("SQL statement timed out after 60s")
 
+    _raise_if_unsuccessful(data)
     return data
 
 

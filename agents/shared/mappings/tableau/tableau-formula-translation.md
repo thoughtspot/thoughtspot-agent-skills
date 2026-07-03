@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.26.0 CLI alignment) -->
+<!-- currency: tableau — 2026-07 (v0.28.1 spatial + user-attribute fail-loud) -->
 
 # Tableau → ThoughtSpot Formula Translation
 
@@ -77,6 +77,16 @@ call is left in place rather than mapped to a fabricated ThoughtSpot function na
 `minute()`, `diff_fortnights()`, `add_quarters()`, `start_of_hour()` do not exist). In every
 case, `validate_output` flags the surviving call as `unmapped Tableau function: X` and the
 formula is skipped with that reason instead of failing import with an opaque TML error.
+
+As of ts-cli **v0.28.1**, the full 13-function Tableau spatial set (`MAKEPOINT`, `MAKELINE`,
+`DISTANCE`, `BUFFER`, `AREA`, `INTERSECTS`, `LENGTH`, `SHAPETYPE`, `OUTLINE`, `DIFFERENCE`,
+`INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE` — see "Geospatial Policy" below) and the
+embedded-RLS user-attribute family (`USERATTRIBUTE`, `USERATTRIBUTEINCLUDES`) are also
+rejected at translate time. Previously only the classic 5 spatial functions were documented
+here as untranslatable and none of the 13 was actually enforced in `_UNMAPPED_FUNCTIONS` —
+the other 8 silently passed through untranslated and failed import opaquely. `USERATTRIBUTE`/
+`USERATTRIBUTEINCLUDES` were not handled anywhere before v0.28.1. See BL-071 for the
+ABAC `ts_var()` translation candidate for the user-attribute family.
 
 ### CLI command
 
@@ -1036,6 +1046,16 @@ model import. A missing formula produces a functional model with reduced coverag
 | `DISTANCE(point1, point2, unit)` | Geospatial distance — no ThoughtSpot equivalent. Omit + log. |
 | `BUFFER(geom, distance, unit)` | Geospatial buffer — no ThoughtSpot equivalent. Omit + log. |
 | `AREA(geom, unit)` | Geospatial area — no ThoughtSpot equivalent. Omit + log. |
+| `INTERSECTS(geom1, geom2)` | Geospatial overlap test (boolean) — no ThoughtSpot equivalent. Omit + log. |
+| `LENGTH(geom, unit)` | Geospatial line length — no ThoughtSpot equivalent. Distinct from the string function `LEN(s)` (see Function Mapping table), which IS translatable → `strlen(s)`. Omit + log. |
+| `SHAPETYPE(geom)` | Geospatial geometry-type introspection (returns Point/LineString/Polygon/etc.) — no ThoughtSpot equivalent. Omit + log. |
+| `OUTLINE(geom)` | Geospatial polygon → linestring constructor — no ThoughtSpot equivalent. Omit + log. |
+| `DIFFERENCE(geom1, geom2)` | Geospatial set difference — no ThoughtSpot equivalent. Omit + log. |
+| `INTERSECTION(geom1, geom2)` | Geospatial set intersection — no ThoughtSpot equivalent. Omit + log. |
+| `SYMDIFFERENCE(geom1, geom2)` | Geospatial symmetric difference — no ThoughtSpot equivalent. Omit + log. |
+| `VALIDATE(geom)` | Geospatial geometry validation (boolean) — no ThoughtSpot equivalent. Omit + log. |
+| `USERATTRIBUTE(attr)` | Embedded-RLS custom user attribute — no CLI translation yet. **Plausible native translation:** ABAC `ts_var(attr_var)` referencing an admin-created formula variable (same JWT user-attribute mechanism as `ISMEMBEROF`→`ts_groups`, reclassified 2026-06-28) — needs live verification against a Model formula/RLS context before wiring in. See BL-071. |
+| `USERATTRIBUTEINCLUDES(attr, val)` | Embedded-RLS multi-value attribute membership test — same disposition as `USERATTRIBUTE` above. See BL-071. |
 
 **Formerly untranslatable, now mapped:**
 - `ISMEMBEROF("group")` → `ts_groups = 'group'` — multi-value list membership handled natively with `=` (reclassified 2026-06-28)
@@ -1084,30 +1104,38 @@ sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [Ca
 
 ## Geospatial Policy
 
-Tableau geospatial functions (`MAKEPOINT`, `MAKELINE`, `DISTANCE`, `BUFFER`, `AREA`) construct
-spatial objects from lat/lon columns. ThoughtSpot has no spatial data type or point/line constructors.
+Tableau's spatial function set is **13 functions** (help.tableau.com Spatial Functions,
+verified 2026-07-03): `MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE` (construct spatial
+objects); `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE` (derive information from
+spatial objects); `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE` (set operations
+on spatial objects). ThoughtSpot has no spatial data type, constructors, or set operations —
+all 13 are untranslatable.
 
 **Policy — detect, decompose, log (never silent):**
 
-1. **Detect** `MAKEPOINT(`, `MAKELINE(`, `DISTANCE(`, `BUFFER(`, `AREA(` in calculated fields
-   (use the same `FUNCTION\s*\(` pattern as other untranslatable functions).
+1. **Detect** all 13 function calls in calculated fields (use the same `FUNCTION\s*\(`
+   pattern as other untranslatable functions — see the classifier patterns below).
 2. **Decompose `MAKEPOINT(lat, lon)`:** if the two arguments resolve to physical columns (latitude
    and longitude), ensure those columns are migrated as individual `ATTRIBUTE` columns on the model.
    They are useful as filter and display dimensions even without a map visualization. Omit the
    `MAKEPOINT` wrapper formula.
 3. **Omit the geospatial formula** from the model TML — do not generate a stub or placeholder.
 4. **Log** each omission:
-   `"Geospatial: '<calc name>' uses MAKEPOINT/MAKELINE/DISTANCE — no ThoughtSpot equivalent. Underlying lat/lon columns migrated as individual attributes. Omitted the spatial formula."`
+   `"Geospatial: '<calc name>' uses <function> — no ThoughtSpot equivalent. Underlying lat/lon columns migrated as individual attributes where applicable. Omitted the spatial formula."`
 5. **Surface in the audit report** under a dedicated "Geospatial" row (see Tier table note below).
 
 **Calcs that ONLY wrap `MAKEPOINT`** (e.g. `MAKEPOINT([Latitude], [Longitude])`) are pure spatial
-constructors — their underlying columns carry all the analytical value. Calcs that use `DISTANCE`
-or `BUFFER` lose the spatial computation entirely; flag these more prominently:
-`"Geospatial: '<calc name>' computes DISTANCE/BUFFER — spatial calculation lost; lat/lon columns available for filtering but distance metric needs manual recreation."`
+constructors — their underlying columns carry all the analytical value. Calcs that use `DISTANCE`,
+`BUFFER`, `AREA`, `LENGTH`, `INTERSECTS`, `DIFFERENCE`, `INTERSECTION`, or `SYMDIFFERENCE` lose the
+spatial computation entirely; flag these more prominently:
+`"Geospatial: '<calc name>' computes <function> — spatial calculation lost; lat/lon columns available for filtering but the computation needs manual recreation."`
 
-**Classifier detection patterns** (add to the existing regex list):
+**Classifier detection patterns** (add to the existing regex list — all 13, live-checked
+against `_UNMAPPED_FUNCTIONS` in `tools/ts-cli/ts_cli/tableau/validate.py`):
 ```
 MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
+INTERSECTS\s*\(  LENGTH\s*\(     SHAPETYPE\s*\(  OUTLINE\s*\(
+DIFFERENCE\s*\(  INTERSECTION\s*\(  SYMDIFFERENCE\s*\(  VALIDATE\s*\(
 ```
 
 ---
