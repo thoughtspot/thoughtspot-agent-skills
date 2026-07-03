@@ -419,7 +419,7 @@ def filter_unresolvable_formulas(
     model_column_names: set[str],
     formula_names: set[str],
     parameter_names: set[str],
-) -> tuple[list[str], list[dict]]:
+) -> tuple[list[dict], list[str]]:
     """Drop new formulas with references that won't resolve in ThoughtSpot.
 
     Checks for:

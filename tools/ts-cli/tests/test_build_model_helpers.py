@@ -134,6 +134,7 @@ def test_prepare_formulas_prefixes_and_shapes_dicts():
     assert dicts == [
         {"expr": "[formula_Margin] * 2", "id": "formula_New Calc", "name": "New Calc"}
     ]
+    assert bare_fixed == 0
 
 
 def test_prepare_formulas_collapses_double_aggregation():
@@ -212,6 +213,11 @@ def test_extract_imported_guid_reads_header():
 def test_extract_imported_guid_missing_gives_none():
     assert extract_imported_guid([{"response": {}}]) is None
     assert extract_imported_guid([{"response": {"object": [{"header": {}}]}}]) is None
+
+
+def test_extract_imported_guid_empty_string_gives_none():
+    ir = [{"response": {"object": [{"header": {"id_guid": ""}}]}}]
+    assert extract_imported_guid(ir) is None
 
 
 # --- apply_prefix_and_double_agg ---

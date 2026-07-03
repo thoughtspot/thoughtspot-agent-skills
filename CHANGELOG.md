@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-03
+- chore: bump ts-cli to v0.26.2 — BL-069 follow-ups: dead-code removal, filter_unresolvable_formulas annotation fix, module-health baseline re-key
 - chore: bump ts-cli to v0.26.1 — decompose build_model_cmd into ts_cli/tableau/build_model.py + flow functions (BL-069 follow-up)
 - feat: update ts-object-model-erd to v1.6.0 — notes UX: save/delete give immediate feedback (shared `commitNotes()` exit, inspector re-renders after save/delete so Delete is reachable without a reload, self-dismissing "Saved ✓"/"Note deleted" confirmation); new **Notes** filter chip highlights every noted table (including at overview/LOD zoom) and keeps a noted join emphasized even without a noted endpoint, correctly enabling/disabling on model load (including Share-HTML baked notes) and never leaving the diagram ghosted after the last note is removed; new **Review notes** panel lists every note with a Table/Join/"not in model" tag (stale keys are delete-only, never clickable), click-to-jump moves the canvas, inline delete
 - feat: ts-cli v0.26.0 — 14 Tableau function translations implemented (were silent pass-throughs); unmapped functions and unknown date units now fail loud at translate time; scalar MAX/MIN and IN(...) scan bugs fixed

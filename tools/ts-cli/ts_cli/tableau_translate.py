@@ -28,7 +28,6 @@ from ts_cli.tableau.parsing import (  # noqa: F401 — re-exported for back-comp
     _find_matching_end,
     _find_top_level_colon,
     _split_args,
-    _split_on_plus,
 )
 from ts_cli.tableau.pre_transforms import (  # noqa: F401
     _NO_KEYWORD_LOD_AGG_MAP,
@@ -85,7 +84,6 @@ from ts_cli.tableau.lod import (  # noqa: F401
     convert_total,
 )
 from ts_cli.tableau.cleanup import (  # noqa: F401
-    _BINARY_OPS,
     complete_rank_args,
     normalize_operator_spacing,
     strip_ifnull_zero,

@@ -15,10 +15,6 @@ from ts_cli.tableau.parsing import _extract_function_args
 # 17. Operator spacing (BL-046 #4 / BL-050 #6)
 # ---------------------------------------------------------------------------
 
-_BINARY_OPS = re.compile(
-    r"(?<=[^\s=!<>])([+\-*/=]|!=|>=|<=|<>|<(?!=)|>(?!=))(?=[^\s=])",
-)
-
 def normalize_operator_spacing(expr: str) -> str:
     """Ensure spaces around binary operators.
 

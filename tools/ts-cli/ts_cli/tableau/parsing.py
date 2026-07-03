@@ -129,47 +129,6 @@ def _extract_function_args(expr: str, start_pos: int) -> tuple[list[str], int] |
     return (args, pos)
 
 
-def _split_on_plus(expr: str) -> list[str]:
-    """Split expression on top-level + operators (not inside parens/brackets/strings)."""
-    parts: list[str] = []
-    depth = 0
-    bracket_depth = 0
-    in_string = False
-    current: list[str] = []
-
-    for i, ch in enumerate(expr):
-        if in_string:
-            current.append(ch)
-            if ch == "'":
-                in_string = False
-            continue
-
-        if ch == "'":
-            in_string = True
-            current.append(ch)
-        elif ch == "(":
-            depth += 1
-            current.append(ch)
-        elif ch == ")":
-            depth -= 1
-            current.append(ch)
-        elif ch == "[":
-            bracket_depth += 1
-            current.append(ch)
-        elif ch == "]":
-            bracket_depth -= 1
-            current.append(ch)
-        elif ch == "+" and depth == 0 and bracket_depth == 0:
-            parts.append("".join(current))
-            current = []
-        else:
-            current.append(ch)
-
-    if current:
-        parts.append("".join(current))
-    return parts
-
-
 def _find_matching_brace(expr: str, open_pos: int) -> int:
     """Find the closing } that matches the { at open_pos, respecting nesting.
 
