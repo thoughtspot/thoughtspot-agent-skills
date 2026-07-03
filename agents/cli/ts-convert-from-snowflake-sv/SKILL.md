@@ -234,74 +234,67 @@ existing_formulas = {
 
 ---
 
-### Step C3: Compute the change set
+### Step C3: Compute the change set (`ts snowflake diff`)
+
+The column-level comparison (expression normalisation, new/removed/modified
+detection) is now computed by **`ts snowflake diff`** (ts-cli v0.30.0+) — a
+parser-based check, same rationale as the `ts tml lint` pre-import gate. Join-graph
+comparison stays a separate, skill-local step (below) since it needs the model's
+join shape, not just column text — `ts snowflake diff` only compares columns.
+
+**IMPORTANT:** translate each SV formula expression through the formula translation
+reference FIRST (Step 9 resolution) before writing the "new" map below, THEN this
+compares TS-formula-to-TS-formula. Comparing raw SQL to TS formula text flags every
+formula column as modified.
+
+Build the two column maps and write them to temp JSON files:
 
 ```python
-import re
+import json
 
-def _normalise_expr(expr: str) -> str:
-    """Normalise for comparison only — never use the output as actual SQL."""
-    refs, i = {}, 0
-    def _stash(m):
-        nonlocal i
-        key = f"__REF{i}__"; refs[key] = m.group(0); i += 1; return key
-    # Stash bracket/brace refs so they survive lowercasing
-    out = re.sub(r'\[[^\]]+\]|\{[^}]+\}', _stash, expr)
-    out = re.sub(r'\s+', ' ', out.strip()).lower()
-    for key, val in refs.items():
-        out = out.replace(key, val)
-    return out
+current_cols = {}
+for col_name, ts_col in existing.items():
+    entry = {
+        "description": ts_col.get("description", ""),
+        "synonyms": ts_col.get("synonyms", []),
+    }
+    if ts_col.get("formula_id"):
+        entry["expr"] = existing_formulas.get(ts_col["formula_id"], "")
+    current_cols[col_name] = entry
 
-def _exprs_differ(a: str, b: str) -> bool:
-    return _normalise_expr(a) != _normalise_expr(b)
+new_cols = {}
+for col_name, sv_col in sv_parse["columns"].items():
+    entry = {
+        "description": sv_col.get("description", ""),
+        "synonyms": sv_col.get("synonyms", []),
+    }
+    if col_name in sv_formulas:
+        entry["expr"] = translate_sv_to_ts(sv_formulas[col_name])  # Step 9 resolution
+    new_cols[col_name] = entry
 
-sv_cols    = set(sv_parse["columns"].keys())   # keyed by column display name
-model_cols = set(existing.keys())
+with open("/tmp/ts_sv_diff_model.json", "w") as f:
+    json.dump(current_cols, f)
+with open("/tmp/ts_sv_diff_sv.json", "w") as f:
+    json.dump(new_cols, f)
+```
 
-change_set = {
-    "new_columns":           list(sv_cols - model_cols),
-    "removed_columns":       list(model_cols - sv_cols),   # flag only
-    "modified_descriptions": [],
-    "modified_synonyms":     [],
-    "modified_expressions":  [],
-    "join_changes":          [],
-}
+```bash
+ts snowflake diff --current /tmp/ts_sv_diff_model.json --new /tmp/ts_sv_diff_sv.json \
+  --ignore-empty-new-description
+rm -f /tmp/ts_sv_diff_*.json
+```
 
-for col_name in sv_cols & model_cols:
-    sv_col = sv_parse["columns"][col_name]
-    ts_col = existing[col_name]
+`--ignore-empty-new-description` reproduces this skill's description-comparison
+rule: only flag a description change when the SV supplies a non-empty new value —
+a blank SV description means "no opinion," not "clear the ThoughtSpot description."
 
-    if sv_col.get("description") and sv_col["description"] != ts_col["description"]:
-        change_set["modified_descriptions"].append({
-            "column": col_name,
-            "current": ts_col["description"],
-            "new":     sv_col["description"],
-        })
+Parse the printed `change_set` JSON from stdout — `new_columns`, `removed_columns`
+(flag only), `modified_descriptions`, `modified_synonyms` (each with `added`/
+`removed`), `modified_expressions` — then add the join comparison, which is not
+part of `ts snowflake diff`'s output:
 
-    sv_syns = set(sv_col.get("synonyms", []))
-    ts_syns = set(ts_col["synonyms"])
-    if sv_syns != ts_syns:
-        change_set["modified_synonyms"].append({
-            "column":   col_name,
-            "current":  sorted(ts_syns),
-            "new":      sorted(sv_syns),
-            "added":    sorted(sv_syns - ts_syns),
-            "removed":  sorted(ts_syns - sv_syns),
-        })
-
-    if col_name in sv_formulas and ts_col["formula_id"]:
-        # IMPORTANT: translate the SV expression through the formula translation
-        # reference FIRST (Step 9 resolution), THEN compare TS-formula-to-TS-formula.
-        # Comparing raw SQL to TS formula text flags every column as modified.
-        sv_expr_translated = translate_sv_to_ts(sv_formulas[col_name])  # Step 9
-        ts_expr = existing_formulas.get(ts_col["formula_id"], "")
-        if _exprs_differ(sv_expr_translated, ts_expr):
-            change_set["modified_expressions"].append({
-                "column":  col_name,
-                "current": ts_expr,
-                "new":     sv_expr,
-            })
-
+```python
+change_set["join_changes"] = []
 # Join changes: compare sv_parse["relationships"] vs model join graph
 # Flag any relationship not present in the existing model (name or endpoint differs)
 ```
@@ -1831,6 +1824,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.13.0 | 2026-07-03 | Step C3 change-set computation delegates to `ts snowflake diff` (BL-063 quick win). Prereq ts-cli v0.30.0. |
 | 1.12.0 | 2026-06-17 | Step 6B connection step now offers **E — use existing / C — create a new connection** (Snowflake, key-pair auth via `ts connections create`) instead of only selecting an existing one. Adds the "Database does not exist in connection → role can't see it → create one" guidance and a credential-handling guardrail (private key by file path only; never pasted into chat; password/OAuth → UI + E path). Mirrors the connection-step change in ts-convert-from-tableau; ts-convert-from-databricks-mv gets the explicit stop-and-instruct fallback. |
 | 1.11.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
 | 1.11.1 | 2026-06-16 | **Extend the N/F/L connection prompt into the Step 6A connection-scoped search path.** The 6A "C — within a connection" path now explicitly presents the Step 6B N (name it) / F (filter by substring) / L (list all) prompt to identify the connection — it must NOT run `ts connections list` and dump every connection by default. Mirrors the same fix in ts-convert-from-tableau and ts-convert-from-databricks-mv. |

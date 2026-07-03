@@ -999,52 +999,49 @@ Parse the existing SV DDL (fetched in Step 3C) using the same logic as
 [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md)
 to extract its current column set, expressions, and descriptions.
 
-#### Compute the change set
+#### Compute the change set (`ts snowflake diff`)
+
+The comparison itself (SQL-expression normalisation, new/removed/modified
+detection) is now computed by **`ts snowflake diff`** (ts-cli v0.30.0+) — a
+parser-based check, same rationale as the `ts tml lint` pre-import gate. Write
+both column maps to temp JSON files shaped `{"expr": ..., "description": ...}`
+per column (synonyms aren't tracked on the to-side, so omit that key):
 
 ```python
-import re
+import json
 
-def _normalise_expr(expr: str) -> str:
-    """Normalise for comparison only — never use the output as actual DDL."""
-    refs, i = {}, 0
-    def _stash(m):
-        nonlocal i
-        key = f"__REF{i}__"; refs[key] = m.group(0); i += 1; return key
-    # Stash quoted identifiers so they survive lowercasing
-    out = re.sub(r'"[^"]*"', _stash, expr)
-    out = re.sub(r'\s+', ' ', out.strip()).lower()
-    for key, val in refs.items():
-        out = out.replace(key, val)
-    return out
+def _cols_for_diff(cols: dict) -> dict:
+    return {
+        name: {"expr": data["expr"], "description": data.get("description", "")}
+        for name, data in cols.items()
+    }
 
-def _exprs_differ(a: str, b: str) -> bool:
-    return _normalise_expr(a) != _normalise_expr(b)
-
-new_cols      = set(generated_sv["columns"])
-existing_cols = set(existing_sv_parse["columns"])
-
-change_set = {
-    "new_columns":           list(new_cols - existing_cols),
-    "removed_columns":       list(existing_cols - new_cols),   # user confirms each
-    "modified_expressions":  [],
-    "modified_descriptions": [],
-}
-
-for col in new_cols & existing_cols:
-    if _exprs_differ(generated_sv["columns"][col]["expr"],
-                     existing_sv_parse["columns"][col]["expr"]):
-        change_set["modified_expressions"].append({
-            "column":  col,
-            "current": existing_sv_parse["columns"][col]["expr"],
-            "new":     generated_sv["columns"][col]["expr"],
-        })
-    new_desc = generated_sv["columns"][col].get("description", "")
-    old_desc = existing_sv_parse["columns"][col].get("description", "")
-    if new_desc != old_desc:
-        change_set["modified_descriptions"].append({
-            "column": col, "current": old_desc, "new": new_desc,
-        })
+with open("/tmp/ts_sv_diff_existing.json", "w") as f:
+    json.dump(_cols_for_diff(existing_sv_parse["columns"]), f)
+with open("/tmp/ts_sv_diff_generated.json", "w") as f:
+    json.dump(_cols_for_diff(generated_sv["columns"]), f)
 ```
+
+```bash
+ts snowflake diff --current /tmp/ts_sv_diff_existing.json --new /tmp/ts_sv_diff_generated.json
+rm -f /tmp/ts_sv_diff_*.json
+```
+
+Parse the printed `change_set` JSON from stdout:
+
+```json
+{
+  "new_columns":           ["..."],
+  "removed_columns":       ["..."],
+  "modified_expressions":  [{"column": "...", "current": "...", "new": "..."}],
+  "modified_descriptions": [{"column": "...", "current": "...", "new": "..."}],
+  "modified_synonyms":     []
+}
+```
+
+`modified_synonyms` will always be empty here since neither side supplies synonym
+data — ignore that key. `removed_columns` still needs per-column user confirmation
+(below); everything else is display-only input to the next section.
 
 #### Present the diff and collect decisions
 
@@ -1177,23 +1174,48 @@ If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-ddl-fi
 ### Step 11: Validate
 
 Run all checks from [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md).
-Report all failures together before retrying. Key checks:
 
-- [ ] Every table referenced in `relationships()`, `dimensions()`, or `metrics()` appears in `tables()`
+**Automated — `ts snowflake lint-ddl`:**
+
+Six of this step's checks are deterministic structural checks with no semantic
+judgment involved — **`ts snowflake lint-ddl`** (ts-cli v0.30.0+) codifies them
+(BL-063 codification quick win), same rationale as the `ts tml lint` pre-import gate:
+
+```bash
+ts snowflake lint-ddl {file.sql}
+```
+
+Exit code is non-zero if any `error`-severity finding is present. Fix every
+finding and re-lint before proceeding — do not create the view from a DDL that
+fails this gate.
+
+| Covered by `ts snowflake lint-ddl` | `check` slug |
+|---|---|
+| Every table referenced in `relationships()`, `dimensions()`, or `metrics()` appears in `tables()` | `undeclared-table` |
+| Dimension/metric aliases are globally unique across the entire view (no two tables share an alias name) | `duplicate-alias` |
+| Metrics that reference other metric aliases appear **after** those aliases in the `metrics()` clause | `metric-forward-reference` |
+| Valid Snowflake identifiers for view name and all aliases: `^[A-Za-z_][A-Za-z0-9_]*$` | `identifier-format` |
+| No `-- TODO` / `CAST(NULL AS TEXT)` placeholders anywhere in the DDL | `untranslatable-placeholder` |
+| `comment=` value likely has an unescaped embedded single quote (warning — moderate-confidence heuristic) | `unescaped-comment-quote` |
+
+**Still manual — semantic judgment, not codified:**
+
+These require understanding aggregation intent, join cardinality, or a
+reserved-word list broad enough to risk false positives on legitimate column
+names — `ts snowflake lint-ddl` deliberately does not attempt them. Report all
+failures together before retrying:
+
 - [ ] Every table that is a relationship right-side has `primary key (COL)` in its `tables()` entry
 - [ ] Every FK column used in a relationship left-side appears as a dimension alias in its table
-- [ ] Dimension aliases are globally unique across the entire view (no two tables share an alias name)
 - [ ] Metric expressions reference **metric aliases** for derived/ratio metrics — not nested `SUM()` calls: `DIV0(tbl.amount, tbl.quantity)` not `DIV0(SUM(tbl.LINE_TOTAL), SUM(tbl.QUANTITY))`
-- [ ] Metrics that reference other metric aliases appear **after** those aliases in the `metrics()` clause
 - [ ] LOD/window metrics (`group_sum` → `SUM(...) OVER (PARTITION BY ...)`): the windowed aggregate references a **defined base metric alias**, not a raw column — `SUM(tbl.total_quantity) OVER (...)` not `SUM(tbl.QUANTITY) OVER (...)` (the raw-column form is rejected with error 010256). PARTITION BY may use a dimension on a joined coarser entity; no denormalization needed
 - [ ] `non additive by` metrics: modifier is `{TABLE}.{COL} {asc|desc} nulls last`, expression is `SUM(...)`, the TABLE is a joined date dimension
 - [ ] Formula dimension expressions use `table_lower.ALIAS` references, not physical column names if those differ
 - [ ] Reserved SQL words used as column names are double-quoted in expressions: `table."date"`, `table."schema"`
 - [ ] CA extension JSON: every alias defined in `dimensions()` and `metrics()` appears in the correct category (`dimensions`, `time_dimensions`, or `metrics`) under its table; date columns go in `time_dimensions`
 - [ ] CA extension JSON: every relationship name defined in `relationships()` appears in the `relationships[]` array
-- [ ] Valid Snowflake identifiers for view name and all aliases: `^[A-Za-z_][A-Za-z0-9_]*$`
-- [ ] No untranslatable formula placeholders anywhere in the DDL (`-- TODO`, `CAST(NULL AS TEXT)`, `NULL AS`)
-- [ ] `comment=` value is a single-quoted SQL string — escape any embedded single quotes by doubling them
+- [ ] No `NULL AS` placeholder anywhere in the DDL — not covered by the automated `untranslatable-placeholder` check (too prone to false-positives on legitimate `COALESCE(x, NULL) AS y`-style expressions to automate reliably)
+- [ ] `comment=` value is a single-quoted SQL string — escape any embedded single quotes by doubling them (the automated check above is a moderate-confidence heuristic, not a guarantee — re-check by eye on anything it doesn't flag)
 
 ---
 
@@ -1425,6 +1447,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-07-03 | Step 9.5C diff + Step 11 mechanical DDL checks now delegate to `ts snowflake diff` / `ts snowflake lint-ddl` (BL-063 quick wins); semantic checks remain manual. Prereq ts-cli v0.30.0. |
 | 1.2.4 | 2026-07-03 | Replace the inline macOS-only Keychain token-refresh procedure with a pointer to `/ts-profile-thoughtspot` (U3 — Refresh Credential), the canonical cross-platform procedure (audit finding 11.4). |
 | 1.2.3 | 2026-06-13 | Fix INFORMATION_SCHEMA case comparison (F12); add join-type drop reporting table to T-RULES. |
 | 1.2.2 | 2026-06-02 | Add Step 11 checklist rule: LOD/window metrics must window over a defined base metric alias (not a raw column — rejected with error 010256); PARTITION BY may use a joined coarser dimension, no denormalization |

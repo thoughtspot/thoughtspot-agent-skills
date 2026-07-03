@@ -1172,3 +1172,101 @@ ts load snowflake --source ./csvs/ --profile Production \
 | `--rows` | `100` | Rows to generate (with `--generate-sample`) |
 
 **Output:** JSON with `database`, `schema`, `profile`, and `tables[]` array containing `table_name`, `status`, `rows_loaded`, `columns`, `source_file`.
+
+### `ts snowflake diff`
+
+Diff two Semantic-View-adjacent column maps and print a change set. Codifies the
+Mode-C diff helper that both `ts-convert-to-snowflake-sv` and
+`ts-convert-from-snowflake-sv` previously duplicated as inline Python (BL-063
+codification quick win). No Snowflake or ThoughtSpot connection needed — pure local
+comparison.
+
+```bash
+ts snowflake diff --current existing_sv_cols.json --new generated_sv_cols.json
+```
+
+`--current`/`--new` are JSON files shaped:
+
+```json
+{
+  "COLUMN_NAME": {
+    "expr": "SQL or ThoughtSpot formula text",
+    "description": "optional",
+    "synonyms": ["optional", "list"]
+  }
+}
+```
+
+`expr` is compared with a stash-then-normalise algorithm (`normalise_expr` /
+`exprs_differ` in `ts_cli/snowflake_ops.py`) that survives whitespace/case
+differences while preserving double-quoted SQL identifiers and ThoughtSpot
+`[bracket]`/`{brace}` references verbatim — the same function works whether both
+sides are SQL (to-side) or already-translated ThoughtSpot formula text (from-side).
+Any SV-SQL-to-ThoughtSpot-formula translation must happen in the skill **before**
+the column maps are written to these files — this command only compares whatever
+expression text it is given, it never translates.
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--current` | — | Path to a JSON file describing the CURRENT column map (required) |
+| `--new` | — | Path to a JSON file describing the NEW column map (required) |
+| `--ignore-empty-new-description` | `false` | Only flag a description change when the NEW description is non-empty (from-side behaviour). Default flags any difference, including the new description going blank (to-side behaviour) |
+
+**Output:** the change_set JSON to stdout —
+`{new_columns, removed_columns, modified_expressions, modified_descriptions, modified_synonyms}`.
+`modified_synonyms` is only populated for a column when BOTH sides supply a
+`"synonyms"` key — a column map that never tracks synonyms naturally produces an
+empty list. Diagnostic counts go to stderr.
+
+```bash
+ts snowflake diff --current model_cols.json --new sv_cols_translated.json \
+  --ignore-empty-new-description
+```
+
+---
+
+### `ts snowflake lint-ddl`
+
+Lint a `CREATE SEMANTIC VIEW` DDL string for the deterministic subset of the
+`ts-convert-to-snowflake-sv` Step 11 checklist — the structural checks with no
+semantic judgment involved. No Snowflake or ThoughtSpot connection needed; pure
+local structural check (parses `tables()`/`relationships()`/`dimensions()`/`metrics()`
+via balanced-parenthesis scanning).
+
+```bash
+ts snowflake lint-ddl generated_sv.sql
+cat generated_sv.sql | ts snowflake lint-ddl
+```
+
+Checks (see `agents/cli/ts-convert-to-snowflake-sv/SKILL.md` Step 11 for the full
+15-item checklist — everything not in this table is intentionally left as a manual
+review step, since it requires semantic judgment or a reserved-word list broad
+enough to risk false positives):
+
+| Check | Severity | What it catches |
+|---|---|---|
+| `identifier-format` | error | View name or a dimension/metric/table alias doesn't match `^[A-Za-z_][A-Za-z0-9_]*$` |
+| `duplicate-alias` | error | The same dimension/metric alias declared more than once (aliases must be globally unique across the view) |
+| `undeclared-table` | error | A table referenced in `relationships()`, `dimensions()`, or `metrics()` isn't declared in `tables()` |
+| `metric-forward-reference` | error | A metric expression references another metric alias that isn't defined *earlier* in the `metrics()` clause |
+| `untranslatable-placeholder` | error | Leftover `-- TODO` or `CAST(NULL AS TEXT)` placeholder text |
+| `unescaped-comment-quote` | warning | A `comment='...'` value that looks like it has an unescaped embedded apostrophe (moderate-confidence heuristic) |
+
+**Options:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `FILE` | stdin | Path to a `.sql` file containing the DDL. Reads stdin if omitted |
+
+**Output:** a JSON array of findings to stdout —
+`[{"severity": "error"|"warning", "check": "<slug>", "message": str, "detail": str}, ...]`.
+A human-readable summary goes to stderr.
+
+**Exit code** is `1` if any `error`-severity finding is present, else `0` — so it
+composes with `&&` to gate on a clean lint before creating the view:
+
+```bash
+ts snowflake lint-ddl generated_sv.sql && echo "clean, proceeding"
+```
