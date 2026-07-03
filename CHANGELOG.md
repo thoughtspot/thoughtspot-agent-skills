@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-03
+- chore: bump ts-cli to v0.26.4 — move TableauClient to ts_cli/tableau/client.py; check_file_size allowlist now empty
 - fix: ts-cli v0.26.3 — ts-load-source-data synthetic data: a numeric column (INTEGER/FLOAT) whose name merely contains "name"/"customer" no longer gets random person-name strings (type mismatch); it now falls through to the numeric generator. Adds a regression test
 - chore: bump ts-cli to v0.26.2 — BL-069 follow-ups: dead-code removal, filter_unresolvable_formulas annotation fix, module-health baseline re-key
 - chore: bump ts-cli to v0.26.1 — decompose build_model_cmd into ts_cli/tableau/build_model.py + flow functions (BL-069 follow-up)

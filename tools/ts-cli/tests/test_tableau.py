@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ts_cli.commands.tableau import (
+from ts_cli.tableau.client import (
     _slugify_tableau,
     load_tableau_profiles,
     TABLEAU_PROFILES_PATH,
@@ -38,14 +38,14 @@ class TestLoadTableauProfiles:
              "site_content_url": "mysite", "auth": "password",
              "username": "user@test.com", "password_env": "TAB_PW_DEV"},
         ]))
-        with patch("ts_cli.commands.tableau.TABLEAU_PROFILES_PATH", profiles_file):
+        with patch("ts_cli.tableau.client.TABLEAU_PROFILES_PATH", profiles_file):
             result = load_tableau_profiles()
         assert len(result) == 1
         assert result[0]["name"] == "Dev"
 
     def test_load_missing_file(self, tmp_path):
         missing = tmp_path / "nonexistent.json"
-        with patch("ts_cli.commands.tableau.TABLEAU_PROFILES_PATH", missing):
+        with patch("ts_cli.tableau.client.TABLEAU_PROFILES_PATH", missing):
             result = load_tableau_profiles()
         assert result == []
 
@@ -61,7 +61,7 @@ class TestTableauClientSignin:
             "password_env": "TABLEAU_PASSWORD_DEV",
         }
         client = TableauClient(profile)
-        with patch("ts_cli.commands.tableau.requests.post") as mock_post:
+        with patch("ts_cli.tableau.client.requests.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.raise_for_status = MagicMock()
@@ -97,7 +97,7 @@ class TestTableauClientSignin:
         }
         client = TableauClient(profile)
 
-        with patch("ts_cli.commands.tableau.requests.post") as mock_post:
+        with patch("ts_cli.tableau.client.requests.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.raise_for_status = MagicMock()
@@ -130,7 +130,7 @@ class TestTableauClientSignin:
         }
         client = TableauClient(profile)
 
-        with patch("ts_cli.commands.tableau.requests.post") as mock_post:
+        with patch("ts_cli.tableau.client.requests.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 401
             mock_post.return_value = mock_resp
@@ -163,9 +163,9 @@ class TestTableauClientRetry:
         ok_resp.ok = True
         ok_resp.json.return_value = {"result": "ok"}
 
-        with patch("ts_cli.commands.tableau.requests.request",
+        with patch("ts_cli.tableau.client.requests.request",
                     side_effect=[fail_resp, ok_resp]):
-            with patch("ts_cli.commands.tableau.time.sleep"):
+            with patch("ts_cli.tableau.client.time.sleep"):
                 resp = client.request("GET", "/api/test")
 
         assert resp.status_code == 200
@@ -189,7 +189,7 @@ class TestTableauClientRetry:
         resp_403.json.return_value = {"error": {"summary": "Forbidden"}}
         resp_403.text = "Forbidden"
 
-        with patch("ts_cli.commands.tableau.requests.request", return_value=resp_403):
+        with patch("ts_cli.tableau.client.requests.request", return_value=resp_403):
             with pytest.raises(SystemExit):
                 client.request("GET", "/api/test")
 

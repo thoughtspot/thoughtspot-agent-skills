@@ -28,6 +28,7 @@ ts_cli/
     yaml_out.py           — TML YAML dump helpers
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
     build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
+    client.py             — TableauClient (HTTP) + profile resolution; the package's one I/O module
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
