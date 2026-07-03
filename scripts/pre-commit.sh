@@ -48,6 +48,12 @@ if echo "$STAGED" | grep -q '\.py$'; then
   run_check "module health"      "tools/validate/check_module_health.py --root $REPO_ROOT --staged"
 fi
 
+# Line-count gate on staged ts_cli modules (BL-070) — warn >500, fail >1000.
+# Complements the complexity ratchet: long-but-simple files slip past radon.
+if echo "$STAGED" | grep -q '^tools/ts-cli/ts_cli/.*\.py$'; then
+  run_check "file size"          "tools/validate/check_file_size.py --root $REPO_ROOT --staged"
+fi
+
 # Only run YAML check if .md files are staged — checks staged files only, not full repo
 if echo "$STAGED" | grep -q '\.md$'; then
   run_check "YAML blocks"        "tools/validate/check_yaml.py --root $REPO_ROOT --staged"

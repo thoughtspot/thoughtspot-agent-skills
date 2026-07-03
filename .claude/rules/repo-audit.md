@@ -42,7 +42,7 @@ for new codification opportunities.
 | 1 | Legacy / dead files | Untracked build artifacts, orphaned dirs, stale references, dead code | `check_references` (broken links) + `vulture` (dead-code report, sweep) + MANUAL |
 | 2 | README / SETUP accuracy | Skills table, symlink/stage steps match repo reality | `check_consistency` |
 | 3 | open-items truthfulness | No shipped-unverified assumptions hiding in open-items | `check_open_items` |
-| 4 | Tools quality | `tools/` code health, error handling, dead code, function/module complexity | `check_module_health` (complexity ratchet — blocks new/worsening god-functions vs a baseline) + MANUAL (error handling, dead code) |
+| 4 | Tools quality | `tools/` code health, error handling, dead code, function/module complexity | `check_module_health` (complexity ratchet — blocks new/worsening god-functions vs a baseline) + `check_file_size` (line-count gate on ts_cli modules — warn 500 / fail 1000) + MANUAL (error handling, dead code) |
 | 5 | ts-cli gaps | Operations skills need but the CLI lacks; inline `requests` anti-pattern | MANUAL (+ `check_patterns`) |
 | 6 | Testing-framework value | Tests assert behaviour, not just presence; smoke tests are real | `check_smoke_tests` (presence) + MANUAL (value) |
 | 7 | PR-validation effectiveness | CI is not a strict subset of pre-commit; gates actually fire | MANUAL (meta) |

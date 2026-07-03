@@ -1848,13 +1848,11 @@ importing from the same entry points.
 
 **Source:** architectural review 2026-07-01, repo-audit angle #4 (tools quality).
 **Affects:** `tools/validate/`, `tools/ts-cli/ts_cli/`.
-**Status:** PARTIALLY DONE (2026-07-02) — the *complexity* dimension is now gated by
-`check_module_health.py` (radon cyclomatic-complexity ratchet, wired into pre-commit + CI),
-and repo-audit angle #4 has been updated to reference it. **Remaining scope:** the *file-size*
-(line-count) dimension — a soft-warn at 500 lines / hard-fail at 1000 on new-or-modified
-`ts_cli` modules with a baseline allowlist. Complexity and size are complementary signals
-(a file can be long-but-simple or short-but-gnarly), so the line-count gate is still worth
-adding.
+**Status:** DONE (2026-07-03) — complexity dimension shipped 2026-07-02 as
+`check_module_health.py`; file-size dimension shipped as `check_file_size.py`
+(soft-warn 500 / hard-fail 1000; one seeded allowlist entry —
+`commands/tableau.py`, whose complexity the BL-069 decomposition already
+gated), wired into pre-commit + CI.
 
 ### Problem
 
