@@ -28,6 +28,8 @@ class TestBuildDependentsPayload:
             "metadata": [{"identifier": "abc-123", "type": "LOGICAL_TABLE"}],
             "include_dependent_objects": True,
             "dependent_object_version": "V2",
+            "record_size": -1,
+            "record_offset": 0,
         }
 
     def test_multiple_guids_one_payload(self):

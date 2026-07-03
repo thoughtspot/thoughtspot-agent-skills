@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-03
+- fix: ts-audit v2.4.0 — 3 report bugs: scorecard GUID-matching, false orphans from pagination + associated export
+- chore: bump ts-cli to v0.26.6
 - chore: bump ts-cli to v0.26.5 — ACOS/ASIN/ATAN/COT rejected loudly at translate time (BL-072 partial)
 - chore: bump ts-cli to v0.26.4 — move TableauClient to ts_cli/tableau/client.py; check_file_size allowlist now empty
 - fix: ts-cli v0.26.3 — ts-load-source-data synthetic data: a numeric column (INTEGER/FLOAT) whose name merely contains "name"/"customer" no longer gets random person-name strings (type mismatch); it now falls through to the numeric generator. Adds a regression test

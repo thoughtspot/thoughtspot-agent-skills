@@ -401,6 +401,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .sev-pill.sev-low{background:#eff6ff;color:var(--sev-low);}
 .sev-pill.sev-info{background:var(--ground);color:var(--sev-info);}
 
+.child-obj-label{
+  font-size:10px;color:var(--muted);font-family:var(--mono);
+  background:var(--ground);padding:2px 6px;border-radius:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;
+}
+
 .finding-card .detail-text{
   font-size:12px;color:var(--ink);margin-bottom:6px;line-height:1.4;
 }
@@ -1188,22 +1194,17 @@ function buildScorecard(D, guid, filterAngle){
   /* ── Angle sections ── */
   var angles = (D.C && D.C.ar && D.C.ar.length > 0) ? D.C.ar : ["A","D","H","P","S"];
 
-  /* Find model index for this guid */
-  var modelIdx = -1;
-  for(var li=0;li<D.L.length;li++){
-    if(D.L[li].g === guid){ modelIdx = li; break; }
-  }
-
-  /* Group findings by angle code */
+  /* Group findings by angle code — match by GUID, not by lookup index,
+     because child-object findings (columns, joins, tables, formulas) share
+     the model's GUID but have distinct lookup indices. */
   var findingsByAngle = {};
   if(D.F){
     D.F.forEach(function(f){
-      /* Map full angle name to code */
+      var m = D.L[f.mi];
+      if(!m || m.g !== guid) return;
       var code = ANGLE_CODES[f.a] || f.a;
-      if(f.mi === modelIdx){
-        if(!findingsByAngle[code]) findingsByAngle[code] = [];
-        findingsByAngle[code].push(f);
-      }
+      if(!findingsByAngle[code]) findingsByAngle[code] = [];
+      findingsByAngle[code].push(f);
     });
   }
 
@@ -1241,10 +1242,14 @@ function buildScorecard(D, guid, filterAngle){
         card.setAttribute("data-severity",f.s);
         if(!activeSevs[f.s]) card.classList.add("hidden-by-filter");
 
-        /* Card top: check badge + sev pill */
+        /* Card top: check badge + sev pill + child-object label */
         var topHtml = '<div class="card-top">';
         topHtml += '<span class="check-badge">'+f.ci+'</span>';
         topHtml += severityPill(f.s);
+        var fLookup = D.L[f.mi];
+        if(f.ot && f.ot !== "model" && fLookup && fLookup.n){
+          topHtml += '<span class="child-obj-label" title="'+esc(f.ot)+': '+esc(fLookup.n)+'">'+esc(f.ot)+': '+esc(fLookup.n)+'</span>';
+        }
         topHtml += '</div>';
 
         /* Detail text */

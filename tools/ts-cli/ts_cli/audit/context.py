@@ -85,8 +85,9 @@ def build_context(
                   (parsed.get("table", {}).get("db_table") or "")
             tables[fqn] = parsed
 
+    model_guids_from_tml = [m.get("guid") for m in models if m.get("guid")]
     table_guids_from_tml = [t.get("guid") for t in tables.values() if t.get("guid")]
-    scoped_guids = list(set(model_guids + table_guids_from_tml))
+    scoped_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml))
     _log(f"Searching metadata for {len(scoped_guids)} scoped object(s)...")
     metadata_results = []
     batch_size = 50
@@ -96,33 +97,28 @@ def build_context(
             "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in batch],
             "include_headers": True,
             "include_hidden_objects": True,
+            "record_size": -1,
+            "record_offset": 0,
         }, timeout=300)
         data = resp.json()
         page = data if isinstance(data, list) else data.get("metadata", [])
         metadata_results.extend(page)
 
     _log("Fetching dependents...")
-    all_guids = model_guids.copy()
-    for t in tables.values():
-        if t.get("guid"):
-            all_guids.append(t["guid"])
-    seen = set()
-    unique_guids = []
-    for g in all_guids:
-        if g not in seen:
-            seen.add(g)
-            unique_guids.append(g)
+    from ts_cli.commands.metadata import (
+        _build_dependents_payload, _normalize_dependents_response,
+    )
+    all_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml))
 
-    if unique_guids:
-        from ts_cli.commands.metadata import _normalize_dependents_response
-        dep_batch = 25
-        for i in range(0, len(unique_guids), dep_batch):
-            batch = unique_guids[i:i + dep_batch]
-            resp = client.post("/api/rest/2.0/metadata/search", json={
-                "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in batch],
-                "include_dependent_objects": True,
-                "dependent_object_version": "V2",
-            }, timeout=300)
+    if all_guids:
+        dep_batch = 15
+        for i in range(0, len(all_guids), dep_batch):
+            batch = all_guids[i:i + dep_batch]
+            resp = client.post(
+                "/api/rest/2.0/metadata/search",
+                json=_build_dependents_payload(batch, "LOGICAL_TABLE"),
+                timeout=300,
+            )
             dep_rows = _normalize_dependents_response(resp.json())
             for row in dep_rows:
                 src = row["source_guid"]

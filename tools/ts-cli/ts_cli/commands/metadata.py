@@ -194,6 +194,8 @@ def _build_dependents_payload(guids: List[str], type_str: str) -> dict:
         "metadata":                  [{"identifier": g, "type": type_str} for g in guids],
         "include_dependent_objects": True,
         "dependent_object_version":  "V2",
+        "record_size":               -1,
+        "record_offset":             0,
     }
 
 
