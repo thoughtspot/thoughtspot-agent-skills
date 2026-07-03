@@ -6,9 +6,13 @@ follow-up decomposition. If one fails, the extraction changed behavior —
 fix the extraction, not the test.
 """
 from ts_cli.tableau.build_model import (
+    apply_prefix_and_double_agg,
     collect_existing_model_context,
+    extract_imported_guid,
     fix_sqlproxy_scoping,
+    parse_import_error,
     prepare_formulas_for_merge,
+    remove_formula,
     strip_csq_suffixes,
 )
 
@@ -161,3 +165,62 @@ def test_prepare_formulas_strips_csq_suffixes_first():
     cleaned = [{"name": "Calc", "expr": "[Revenue (Custom SQL Query)] * 1"}]
     dicts, _ = prepare_formulas_for_merge(cleaned, ctx)
     assert "(Custom SQL Query)" not in dicts[0]["expr"]
+
+
+# --- parse_import_error ---
+
+def test_parse_import_error_extracts_name_and_detail():
+    msg = "Model create failed. Formula: Profit Margin, Error: Invalid token near ')'"
+    assert parse_import_error(msg) == ("Profit Margin", "Invalid token near ')'")
+
+
+def test_parse_import_error_unmatched_returns_none():
+    assert parse_import_error("Something else went wrong") is None
+
+
+def test_parse_import_error_truncates_detail_to_120():
+    msg = "Formula: X, Error: " + "e" * 300
+    _, detail = parse_import_error(msg)
+    assert len(detail) == 120
+
+
+# --- remove_formula ---
+
+def test_remove_formula_drops_formula_and_its_columns():
+    merged = _model_tml(
+        columns=[
+            {"name": "Bad", "formula_id": "formula_Bad"},
+            {"name": "Amount", "column_id": "SALES::AMOUNT"},
+        ],
+        formulas=[
+            {"id": "formula_Bad", "name": "Bad"},
+            {"id": "formula_Good", "name": "Good"},
+        ],
+    )
+    remove_formula(merged, "Bad")
+    assert [f["id"] for f in merged["model"]["formulas"]] == ["formula_Good"]
+    assert [c["name"] for c in merged["model"]["columns"]] == ["Amount"]
+
+
+# --- extract_imported_guid ---
+
+def test_extract_imported_guid_reads_header():
+    ir = [{"response": {"object": [{"header": {"id_guid": "abc-123"}}]}}]
+    assert extract_imported_guid(ir) == "abc-123"
+
+
+def test_extract_imported_guid_missing_gives_none():
+    assert extract_imported_guid([{"response": {}}]) is None
+    assert extract_imported_guid([{"response": {"object": [{"header": {}}]}}]) is None
+
+
+# --- apply_prefix_and_double_agg ---
+
+def test_apply_prefix_and_double_agg_mutates_in_place():
+    formulas = [
+        {"name": "Total", "expr": "sum([Sales])"},
+        {"name": "UsesTotal", "expr": "sum([Total])"},
+    ]
+    apply_prefix_and_double_agg(formulas, {"Total", "UsesTotal"}, set())
+    assert formulas[0]["expr"] == "sum([Sales])"
+    assert formulas[1]["expr"] == "[formula_Total]"

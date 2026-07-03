@@ -163,3 +163,55 @@ def prepare_formulas_for_merge(
             "name": f["name"],
         })
     return formula_dicts, bare_fixed
+
+
+_IMPORT_ERR = re.compile(r"Formula:\s*([^,]+),\s*Error:")
+
+
+def parse_import_error(msg: str) -> tuple[str, str] | None:
+    """Parse a ThoughtSpot import error into ``(formula_name, detail)``.
+
+    Returns None when the message doesn't name a failing formula (caller
+    should stop retrying and surface the raw message).
+    """
+    m = _IMPORT_ERR.search(msg)
+    if not m:
+        return None
+    bad_name = m.group(1).strip()
+    err_detail = msg.split("Error:", 1)[-1].strip()[:120] if "Error:" in msg else ""
+    return bad_name, err_detail
+
+
+def remove_formula(merged: dict, formula_name: str) -> None:
+    """Drop a formula and its derived columns from a model TML, in place."""
+    fid = f"formula_{formula_name}"
+    merged["model"]["formulas"] = [
+        f for f in merged["model"]["formulas"] if f.get("id") != fid
+    ]
+    merged["model"]["columns"] = [
+        c for c in merged["model"]["columns"] if c.get("formula_id") != fid
+    ]
+
+
+def extract_imported_guid(import_result: list) -> str | None:
+    """Pull the created/updated object GUID out of a tml import response."""
+    obj_list = import_result[0].get("response", {}).get("object", [])
+    if obj_list:
+        return obj_list[0].get("header", {}).get("id_guid") or None
+    return None
+
+
+def apply_prefix_and_double_agg(
+    cleaned_formulas: list[dict],
+    formula_names: set[str],
+    param_names: set[str],
+) -> None:
+    """Generate-flow formula rewrite: ``formula_`` prefix + double-agg fix, in place.
+
+    ``formula_exprs`` is snapshotted before the loop (pre-mutation values) —
+    this matches the original inline behavior exactly.
+    """
+    formula_exprs = {f["name"]: f["expr"] for f in cleaned_formulas}
+    for f in cleaned_formulas:
+        f["expr"] = add_formula_prefix(f["expr"], formula_names, param_names)
+        f["expr"] = fix_double_aggregation(f["expr"], formula_exprs)
