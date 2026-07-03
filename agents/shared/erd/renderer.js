@@ -15,7 +15,9 @@ const $=id=>document.getElementById(id);
 const svg=$("svg"),vp=$("viewport"),gEdges=$("edges"),gNodes=$("nodes"),inspector=$("inspector");
 const tFind=$("findings-toggle"),colSel=$("col-mode");
 const tOrth=$("orth-toggle");
+const groupSel=$("group-mode");
 let activeFilters=new Set(["all"]);
+let GROUP_MODE="none",groupCache={},groupHighlight=null;
 
 const reduce=matchMedia("(prefers-reduced-motion:reduce)").matches;
 const ROW_H=20,HEAD_H=30,PAD=10;
@@ -45,6 +47,186 @@ function nodeHeight(t){const n=visibleCols(t).length;return HEAD_H+(n?n*ROW_H+PA
 
 let _seed=20260627; const rnd=()=>{_seed=(_seed*1664525+1013904223)>>>0;return _seed/4294967296;};
 
+// ---- GROUPING (subject-area "Group by") ----
+// Three pure strategies (tables/joins -> {tableId:groupId}), swappable at runtime.
+// Display (stripe + LOD tint + legend) is shared and strategy-agnostic — see renderNodes,
+// drawNodeBlock and renderLegend. computeGroups() memoizes per (model,mode) in groupCache,
+// cleared on loadModel.
+
+// 3a. Name prefix — uppercase + tokenize on "_"; skip a leading modifier token only when
+// a next token exists, so a single-token name still resolves to itself.
+const PREFIX_MODIFIERS=new Set(["W","DIM","VW","VIEW","STG","TMP","FACT","AGG"]);
+function _leadingToken(id,skipModifier){
+  const parts=id.toUpperCase().split("_");
+  if(parts.length===1)return parts[0];
+  if(skipModifier&&PREFIX_MODIFIERS.has(parts[0])&&parts.length>1)return parts[1];
+  return parts[0];
+}
+const _titleCase=tok=>tok.length?tok[0]+tok.slice(1).toLowerCase():tok;
+function _prefixGroupsRaw(skipModifier){
+  const byToken={};
+  MODEL.tables.forEach(t=>{const tok=_leadingToken(t.id,skipModifier);(byToken[tok]=byToken[tok]||[]).push(t.id);});
+  const byId={},groups=[],other=[];
+  Object.keys(byToken).forEach(tok=>{
+    const ids=byToken[tok];
+    if(ids.length<2)other.push(...ids); // singleton -> Other
+    else{ids.forEach(id=>byId[id]=tok);groups.push({id:tok,label:_titleCase(tok),count:ids.length});}
+  });
+  if(other.length){other.forEach(id=>byId[id]="Other");groups.push({id:"Other",label:"Other",count:other.length,isOther:true});}
+  return {byId,groups,otherCount:other.length};
+}
+// C1 degenerate-case guard: if skipping the modifier folds >50% of tables into Other
+// (e.g. an all-DIM_* model), retry without the skip and keep whichever has fewer Other.
+function groupByPrefix(){
+  const skip=_prefixGroupsRaw(true);
+  if(skip.otherCount/MODEL.tables.length>0.5){
+    const noSkip=_prefixGroupsRaw(false);
+    return noSkip.otherCount<skip.otherCount?{byId:noSkip.byId,groups:noSkip.groups}:{byId:skip.byId,groups:skip.groups};
+  }
+  return {byId:skip.byId,groups:skip.groups};
+}
+
+// 3b. Graph cluster — stabilized label propagation over de-duplicated undirected joins.
+// undir[] holds one entry per JOIN, so two joins between the same pair double-count a
+// vote unless deduped first.
+function _dedupNeighbours(id){return [...new Set(undir[id]||[])];}
+// One deterministic Louvain-style local-move pass over the undirected join graph.
+// Plain label propagation fails on hub-centric models like GTM: a "lowest-id" tie-break
+// floods everything into one community, while a "keep current on tie" rule never bootstraps
+// (all-singleton first pass = all ties = no moves). Modularity gain does both — it bootstraps
+// (a node joins a neighbour community when that raises modularity) and resists total collapse
+// (once a community's total degree grows, further merges lower modularity). Deterministic:
+// fixed sorted node order, no Math.random, lexicographic community tie-break.
+//   gain(C) ∝ e_in(v,C) − sigTot[C]·k_v / m2   (m2 = sum of degrees = 2|E|)
+function _louvainPass(active,comm,neigh,k,sigTot,m2){
+  let moved=false;
+  active.forEach(v=>{
+    const cv=comm[v];
+    sigTot[cv]-=k[v];                                   // pull v out of its community
+    const kin={};                                       // edges from v into each neighbour community
+    neigh[v].forEach(u=>{if(u!==v)kin[comm[u]]=(kin[comm[u]]||0)+1;});
+    let best=cv,bestGain=(kin[cv]||0)-sigTot[cv]*k[v]/m2;
+    Object.keys(kin).sort().forEach(c=>{
+      const gain=kin[c]-sigTot[c]*k[v]/m2;
+      if(gain>bestGain||(gain===bestGain&&c<best)){bestGain=gain;best=c;}
+    });
+    sigTot[best]=(sigTot[best]||0)+k[v];                // place v (possibly back in cv)
+    if(best!==cv){comm[v]=best;moved=true;}
+  });
+  return moved;
+}
+function groupByCluster(){
+  const ids=MODEL.tables.map(t=>t.id).sort();
+  const neigh={};ids.forEach(id=>neigh[id]=_dedupNeighbours(id));
+  const degree=id=>neigh[id].length;
+  const isolated=ids.filter(id=>degree(id)===0),active=ids.filter(id=>degree(id)>0);
+  const k={},comm={},sigTot={};
+  active.forEach(id=>{k[id]=degree(id);comm[id]=id;sigTot[id]=k[id];});
+  const m2=active.reduce((s,id)=>s+k[id],0)||1;         // 2|E| over the active subgraph
+  for(let pass=0;pass<20&&_louvainPass(active,comm,neigh,k,sigTot,m2);pass++); // deterministic, converges
+  const membersByLabel={};
+  active.forEach(id=>{(membersByLabel[comm[id]]=membersByLabel[comm[id]]||[]).push(id);});
+  const byId={},groups=[];
+  Object.keys(membersByLabel).sort().forEach(lbl=>{
+    const members=membersByLabel[lbl];
+    let rep=members[0];
+    members.forEach(m=>{if(degree(m)>degree(rep)||(degree(m)===degree(rep)&&m<rep))rep=m;});
+    members.forEach(m=>byId[m]=rep);
+    groups.push({id:rep,label:rep,count:members.length});
+  });
+  if(isolated.length){isolated.forEach(id=>byId[id]="Ungrouped");groups.push({id:"Ungrouped",label:"Ungrouped",count:isolated.length,isOther:true});}
+  return {byId,groups};
+}
+
+// 3c. Fact neighbourhood — multi-source relaxation from every fact over the de-duped
+// undirected graph, tracking (dist,factId) per node. Level-synchronous (not a plain FIFO
+// BFS) so that when two facts reach the same node at the same new distance in the same
+// round, the lexicographically-smallest factId wins deterministically — a FIFO queue would
+// instead let join-declaration order decide.
+function _multiSourceRelax(sourceIds){
+  const dist={},owner={};
+  sourceIds.forEach(f=>{dist[f]=0;owner[f]=f;});
+  let frontier=sourceIds.slice();
+  while(frontier.length){
+    const candidates={};
+    frontier.forEach(u=>{
+      const nd=dist[u]+1;
+      _dedupNeighbours(u).forEach(v=>{(candidates[v]=candidates[v]||[]).push({nd,factId:owner[u]});});
+    });
+    const next=[];
+    Object.keys(candidates).forEach(v=>{
+      let best=candidates[v][0];
+      candidates[v].forEach(c=>{if(c.nd<best.nd||(c.nd===best.nd&&c.factId<best.factId))best=c;});
+      const cur=dist[v];
+      if(cur===undefined||best.nd<cur||(best.nd===cur&&best.factId<owner[v])){dist[v]=best.nd;owner[v]=best.factId;next.push(v);}
+    });
+    frontier=next;
+  }
+  return owner;
+}
+function groupByFact(){
+  const facts=MODEL.tables.filter(t=>t.kind==="fact").map(t=>t.id);
+  const owner=_multiSourceRelax(facts);
+  const byId={},counts={};facts.forEach(f=>counts[f]=0);
+  MODEL.tables.forEach(t=>{const f=owner[t.id];if(f!==undefined){byId[t.id]=f;counts[f]++;}});
+  const unreachable=MODEL.tables.filter(t=>owner[t.id]===undefined).map(t=>t.id);
+  const groups=facts.map(f=>({id:f,label:f,count:counts[f]})); // facts with no reachable dims stay singleton groups
+  if(unreachable.length){unreachable.forEach(id=>byId[id]="Other");groups.push({id:"Other",label:"Other",count:unreachable.length,isOther:true});}
+  return {byId,groups};
+}
+
+// §5 palette (dataviz skill, validated 2026-07-02): 8-hue fixed categorical order, each
+// with a light "stripe" accent + a dark LOD-fill variant of the same hue. All 9 dark
+// variants (incl. grey/Other) clear >=4.5:1 white-text contrast, so the LOD title always
+// stays plain white — no per-group luminance switch needed. Light-mode worst adjacent CVD
+// dE 24.2; dark-mode worst adjacent dE 10.3 (floor band — legal because every group also
+// carries a text label on the LOD block + legend row, so identity is never color-alone).
+const GROUP_PALETTE=[
+  {stripe:"#2a78d6",dark:"#235695"}, // blue
+  {stripe:"#1baf7a",dark:"#19855f"}, // aqua
+  {stripe:"#eda100",dark:"#976b0c"}, // yellow
+  {stripe:"#008300",dark:"#138613"}, // green
+  {stripe:"#4a3aa7",dark:"#3d3088"}, // violet
+  {stripe:"#e34948",dark:"#952323"}, // red
+  {stripe:"#e87ba4",dark:"#91274f"}, // magenta
+  {stripe:"#eb6834",dark:"#9e3f1a"}, // orange
+];
+const GROUP_OTHER_COLOR={stripe:"#9AA4B1",dark:"#5B6472"};
+// Cap = the fixed hue count (never cycled, per dataviz's categorical rule) — a 9th real
+// group is never a generated hue, it folds into Other/grey instead.
+const GROUP_CAP=GROUP_PALETTE.length;
+function _sortGroupsForColor(groups){return groups.slice().sort((a,b)=>(b.count-a.count)||(a.label<b.label?-1:a.label>b.label?1:0));}
+// Colors are assigned AFTER grouping (C6: ordered count-desc/label, so fold membership +
+// legend order stay reproducible), and overflow beyond GROUP_CAP folds into Other here —
+// independent of any Other/Ungrouped bucket a strategy already produced.
+function _assignGroupColors(byId,rawGroups){
+  const preOther=rawGroups.find(g=>g.isOther);
+  let real=_sortGroupsForColor(rawGroups.filter(g=>!g.isOther));
+  let foldedGroups=0,foldedTables=0;
+  if(real.length>GROUP_CAP){
+    const overflow=real.slice(GROUP_CAP);
+    real=real.slice(0,GROUP_CAP);
+    overflow.forEach(g=>{
+      foldedGroups++;foldedTables+=g.count;
+      Object.keys(byId).forEach(id=>{if(byId[id]===g.id)byId[id]=preOther?preOther.id:"Other";});
+    });
+  }
+  real.forEach((g,i)=>{g.color=GROUP_PALETTE[i].stripe;g.colorDark=GROUP_PALETTE[i].dark;});
+  let other=preOther;
+  if(foldedTables){other=other||{id:"Other",label:"Other",count:0,isOther:true};other.count+=foldedTables;other.foldedGroups=foldedGroups;}
+  if(other){other.color=GROUP_OTHER_COLOR.stripe;other.colorDark=GROUP_OTHER_COLOR.dark;}
+  return {byId,groups:other?real.concat([other]):real};
+}
+function computeGroups(mode){
+  if(groupCache[mode])return groupCache[mode];
+  const raw=mode==="prefix"?groupByPrefix():mode==="cluster"?groupByCluster():mode==="fact"?groupByFact():{byId:{},groups:[]};
+  const result=_assignGroupColors(raw.byId,raw.groups);
+  result.rawCount=raw.groups.length; // true strategy-native group count (pre-cap) — legend header uses this
+  groupCache[mode]=result;
+  return result;
+}
+function clearGroupHighlight(){groupHighlight=null;syncGroupLegendActive();}
+
 function loadSaved(){try{return JSON.parse(localStorage.getItem(LS_KEY))||{};}catch(e){return {};}}
 function persistSaved(){try{localStorage.setItem(LS_KEY,JSON.stringify(savedPos));}catch(e){}}
 function loadNotes(){try{return JSON.parse(localStorage.getItem(NOTES_KEY))||{};}catch(e){return {};}}
@@ -63,7 +245,14 @@ function syncNotesChip(){
   syncChips();
 }
 function commitNotes(){ persistNotes(); syncNotesChip(); renderAll(); }
-function clearAllNotes(){if(!confirm("Remove all notes from this model?"))return;notes={};commitNotes();if(selected&&selected.type==="table")showTable(selected.id);else if(selected&&selected.type==="edge")showEdge(selected.id);else showOverview();}
+// The notes-review panel never sets `selected` (it's a list view, not a table/edge
+// selection), so routing by `selected` alone landed back on a stale table/edge view or
+// the overview when Clear was pressed from inside Review notes. Detect that view directly.
+function clearAllNotes(){if(!confirm("Remove all notes from this model?"))return;notes={};commitNotes();
+  if(inspector.querySelector(".notes-review"))showNotesReview();
+  else if(selected&&selected.type==="table")showTable(selected.id);
+  else if(selected&&selected.type==="edge")showEdge(selected.id);
+  else showOverview();}
 // `notes` is one map keyed by table id OR join name; if a table id ever equals a
 // join name the note is shared between them (both light up). Accepted limitation —
 // keys are distinct in practice; the review panel resolves table-first, deterministically.
@@ -293,9 +482,21 @@ function originBadge(g,x,y,origin){const m=origin==="model";
   NS_el("rect",{x:x-7,y:y-7,width:14,height:14,rx:4,fill:m?"#1E6FA8":"#EDEFF2",stroke:m?"#1E6FA8":"#C8CFD8","stroke-width":1},g);
   NS_el("text",{x,y:y+3.4,"text-anchor":"middle","font-size":9,"font-weight":700,fill:m?"#fff":"#6B7480"},g).textContent=m?"M":"T";}
 
+// Group-by display helpers (shared across renderNodes/renderEdges/renderLegend).
+function activeGroups(){return GROUP_MODE==="none"?null:computeGroups(GROUP_MODE);}
+// The legend click-to-highlight overlay (B3): a SEPARATE overlay from focusGroup()'s
+// `keep`, kept apart so it can only ever dim (ghost), never hide (gone) — see the
+// ghost/gone split in renderNodes/renderEdges below.
+function groupHighlightKeep(grp){
+  if(!grp||!groupHighlight)return null;
+  const s=new Set();Object.keys(grp.byId).forEach(id=>{if(grp.byId[id]===groupHighlight)s.add(id);});
+  return s;
+}
+
 function renderEdges(){
   gEdges.innerHTML="";
   const showF=tFind.checked,keep=focusGroup(),pe=pathEdges();
+  const gKeep=groupHighlightKeep(activeGroups());
   const orth=tOrth.checked&&(layoutName==="lr"||layoutName==="tb");
   const crow=notation==="crow";
   if(orth)computeLanes();
@@ -305,7 +506,11 @@ function renderEdges(){
     const hot=showF&&HOT_EDGES.has(e.j.name);
     const onPath=pe.has(e.j.name);
     const sel=selected&&selected.type==="edge"&&selected.id===e.j.name;
-    const ghost=keep&&!(keep.has(e.j.from)&&keep.has(e.j.to));
+    const focusGhost=keep&&!(keep.has(e.j.from)&&keep.has(e.j.to));
+    // A group-highlight ghost only fires when NEITHER endpoint is in the highlighted
+    // group, so a group's own boundary edges to other groups stay visible.
+    const grpGhost=gKeep&&!(gKeep.has(e.j.from)||gKeep.has(e.j.to));
+    const ghost=focusGhost||grpGhost;
     const annotated=!!notes[e.j.name];
     let stroke=annotated?"#D97706":"#9AA4B1",sw=annotated?2:1.6,dash="0",mk="url(#arrow)";
     if(hot){stroke="#9AA4B1";sw=2;dash="6 4";mk="url(#arrow)";}
@@ -315,8 +520,10 @@ function renderEdges(){
     const notesKeep=activeFilters.has("notes")&&annotated;
     // notesKeep only un-dims (ghost) a noted edge; it must NOT un-hide (gone) it,
     // or a noted edge would float vividly between two hidden nodes when the Notes
-    // filter is combined with a tree/compare focus.
-    const g=NS_el("g",{class:"edge-g"+(ghost?(hideOutOfFocus()?" gone":(notesKeep?"":" ghost")):""),style:"cursor:pointer"},gEdges);
+    // filter is combined with a tree/compare focus. hideOutOfFocus() may only promote
+    // to "gone" for the FOCUS reason (focusGhost) — a group highlight never hides.
+    const goneNow=hideOutOfFocus()&&focusGhost;
+    const g=NS_el("g",{class:"edge-g"+(ghost?(goneNow?" gone":(notesKeep?"":" ghost")):""),style:"cursor:pointer"},gEdges);
     NS_el("path",{class:"edge",fill:"none",d:G.d,stroke,"stroke-width":sw,"stroke-dasharray":dash,"marker-end":crow?"none":mk,"stroke-linejoin":"round","vector-effect":"non-scaling-stroke"},g);
     NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none","vector-effect":"non-scaling-stroke"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
@@ -335,19 +542,31 @@ const LOD_FILL={fact:"#1B5E8C",dim:"#5B6472",sql_view:"#0B5A54"};
 function lodKind(t){return t.is_sql_view?"sql_view":t.kind==="fact"?"fact":"dim";}
 // LOD overview block: one solid-fill rect (state-aware border reused from the caller)
 // + a centered title, no header/badges/columns. Kept as its own helper so renderNodes'
-// per-node branch doesn't inflate with block-drawing detail.
-function drawNodeBlock(g,n,t,stroke,sw){
-  NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill:LOD_FILL[lodKind(t)],stroke,"stroke-width":sw,
+// per-node branch doesn't inflate with block-drawing detail. groupInfo (C3), when
+// grouping is active, swaps the kind fill for the group's dark LOD variant — every
+// variant clears >=4.5:1 white-text contrast, so the title color never needs to change.
+function drawNodeBlock(g,n,t,stroke,sw,groupInfo){
+  const fill=groupInfo?groupInfo.colorDark:LOD_FILL[lodKind(t)];
+  NS_el("rect",{x:0,y:0,width:n.w,height:n.h,rx:10,fill,stroke,"stroke-width":sw,
     "vector-effect":"non-scaling-stroke",style:"filter:drop-shadow(0 2px 5px rgba(20,27,38,.08))"},g);
   const maxCh=Math.max(3,Math.floor((n.w-24)/9));
   const label=t.id.length>maxCh?t.id.slice(0,maxCh-1)+"…":t.id;
   NS_el("text",{class:"node-block-title",x:n.w/2,y:n.h/2,"text-anchor":"middle","dominant-baseline":"central"},g).textContent=label;
+}
+// C4: group accent stripe on a detail (card) node — a thin rounded rect along the left
+// edge, inset from the body-rect border so it never overpaints the state-aware border or
+// the rx:10 corner. Called AFTER the header rects are drawn (see renderNodes) so it isn't
+// covered by the header fill.
+function drawGroupStripe(g,n,color){
+  NS_el("rect",{x:1.5,y:3,width:5,height:n.h-6,rx:2.5,fill:color},g);
 }
 
 function renderNodes(){
   gNodes.innerHTML="";
   const showF=tFind.checked,keep=focusGroup();
   const isLod=lodActive();
+  const grp=activeGroups(),gKeep=groupHighlightKeep(grp);
+  const groupById=grp?Object.fromEntries(grp.groups.map(g=>[g.id,g])):null;
   nodes.forEach(n=>{
     const t=n.t,isFact=t.kind==="fact";n.h=nodeHeight(t);
     const sev=showF?worstSev(t.id):null;
@@ -358,16 +577,22 @@ function renderNodes(){
     const secured=t.rls&&t.rls.length;
     const inRlsPath=t.in_rls_path&&!secured;
     const inFocus=focusSet.includes(t.id);
-    const ghost=keep&&!keep.has(t.id);
-    const g=NS_el("g",{class:"node"+(ghost?(hideOutOfFocus()?" gone":" ghost"):""),transform:`translate(${n.x},${n.y})`},gNodes);
+    const focusGhost=keep&&!keep.has(t.id);
+    const grpGhost=gKeep&&!gKeep.has(t.id);
+    const ghost=focusGhost||grpGhost;
+    // B3: hideOutOfFocus() may only promote to "gone" for the FOCUS reason — a group
+    // highlight can only ever dim (ghost), never hide, even mid tree/compare focus.
+    const goneNow=hideOutOfFocus()&&focusGhost;
+    const g=NS_el("g",{class:"node"+(ghost?(goneNow?" gone":" ghost"):""),transform:`translate(${n.x},${n.y})`},gNodes);
 
     let stroke=isFact?"#1E6FA8":"#C8CFD8",sw=isFact?1.6:1.2;
     if(secured){stroke="#C2382E";sw=2.2;} else if(inRlsPath){stroke="#D97706";sw=2.2;}
     if(sev==="crit"){stroke="#C2382E";sw=2.2;} else if(sev==="warn"){stroke="#B5730A";sw=2;}
     if(inFocus){stroke="#1E6FA8";sw=2.8;}
+    const gInfo=groupById?groupById[grp.byId[t.id]]:null;
 
     if(isLod){
-      drawNodeBlock(g,n,t,stroke,sw);
+      drawNodeBlock(g,n,t,stroke,sw,gInfo);
     }else{
       let fill=secured?"#FBE9E7":inRlsPath?"#FEF3C7":t.is_sql_view?"#F0FDFA":"#fff";
 
@@ -376,6 +601,9 @@ function renderNodes(){
       NS_el("rect",{x:0,y:0,width:n.w,height:HEAD_H,rx:10,fill:hbg},g);
       NS_el("rect",{x:0,y:HEAD_H-10,width:n.w,height:10,fill:hbg},g);
       NS_el("line",{x1:0,y1:HEAD_H,x2:n.w,y2:HEAD_H,stroke:"#E2E6EC","stroke-width":1},g);
+      // C4: drawn AFTER the header rects above so grouping composes with — never covers —
+      // the fact/dim header fill; inset from the body border so it never touches it either.
+      if(gInfo)drawGroupStripe(g,n,gInfo.color);
 
       const nh=NS_el("text",{class:"nh",x:12,y:20,fill:"#161B26"},g);nh.textContent=t.id;
       let bx=n.w-10;
@@ -464,7 +692,7 @@ svg.addEventListener("pointercancel",()=>{panning=false;svg.classList.remove("pa
 // the threshold) eats that one click so a drag never wipes the user's focus/selection.
 svg.addEventListener("click",e=>{
   if(suppressClick){suppressClick=false;return;}
-  if(!e.target.closest(".node")&&!e.target.closest(".edge-g")){focusSet=[];focusMode=null;selected=null;renderAll();showOverview();}});
+  if(!e.target.closest(".node")&&!e.target.closest(".edge-g")){focusSet=[];focusMode=null;selected=null;clearGroupHighlight();renderAll();showOverview();}});
 svg.addEventListener("wheel",e=>{
   e.preventDefault();
   const r=svg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
@@ -560,9 +788,11 @@ function selectTable(id,additive){
 function selectEdge(name){selected={type:"edge",id:name};renderAll();showEdge(name);}
 
 const ROLE_TAG={MEASURE:["m","measure"],ATTR:["a","attribute"],FORMULA:["f","formula"]};
-const esc=s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+// Every embedment is read back via `dataset` (the browser decodes entities before that
+// access), so quote-escaping here is safe attribute-injection hardening, not a behavior change.
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
-function findingCard(x){if(!x)return "";return `<div class="finding ${x.sev}" tabindex="0" data-target="${x.target}">
+function findingCard(x){if(!x)return "";return `<div class="finding ${x.sev}" tabindex="0" data-target="${esc(x.target)}">
   <div class="fhead"><span class="sev ${x.sev}">${x.sev==="crit"?"Critical":x.sev==="warn"?"Warning":"Info"}</span><span class="check">${esc(x.check)}</span></div>
   <div class="ftitle">${esc(x.title)}</div><div class="ftarget">${esc(x.where)}</div>
   <div class="fdetail">${esc(x.detail)}</div><div class="frec"><b>Fix.</b> ${esc(x.rec)}</div></div>`;}
@@ -777,9 +1007,45 @@ document.querySelectorAll("#filter-chips .fchip").forEach(c=>c.addEventListener(
   if(f==="all"){activeFilters=new Set(["all"]);}
   else{activeFilters.delete("all");if(activeFilters.has(f))activeFilters.delete(f);else activeFilters.add(f);
     if(!activeFilters.size)activeFilters.add("all");}
-  syncChips();focusSet=[];selected=null;renderAll();
+  syncChips();focusSet=[];selected=null;clearGroupHighlight();renderAll();
   if(activeFilters.has("rls_subgraph"))showRlsSubgraph();else showOverview();
 }));
+
+// ---- Group by (subject-area grouping) ----
+groupSel.onchange=()=>{GROUP_MODE=groupSel.value;clearGroupHighlight();renderAll();renderLegend();};
+const GROUP_MODE_LABEL={prefix:"Name prefix",cluster:"Graph cluster",fact:"Fact neighbourhood"};
+// Row builder kept separate from renderLegend so the latter stays a thin assembler
+// (cc<15) — same precedent as noteReviewRow/showNotesReview.
+function legendRow(g){
+  return `<div class="grp-row${g.id===groupHighlight?" on":""}" data-gid="${esc(g.id)}">
+    <span class="grp-swatch" style="background:${g.color}"></span>
+    <span class="grp-label">${esc(g.label)}</span>
+    <span class="grp-count">${g.count}</span></div>`;
+}
+function syncGroupLegendActive(){
+  document.querySelectorAll("#grp-legend .grp-row").forEach(r=>r.classList.toggle("on",r.dataset.gid===groupHighlight));
+}
+function wireLegendRows(){
+  document.querySelectorAll("#grp-legend .grp-row").forEach(row=>row.addEventListener("click",()=>{
+    groupHighlight=groupHighlight===row.dataset.gid?null:row.dataset.gid;
+    syncGroupLegendActive();renderAll();
+  }));
+}
+// Populates #grp-legend: mode header + total group count (rawCount — true strategy
+// count, so fact-mode fragmentation stays visible even though the row list itself is
+// capped) + an optional "N folded into Other" note + one row per displayed group.
+// Clears + hides at None (loadModel and groupSel.onchange both route through here).
+function renderLegend(){
+  const host=$("grp-legend");
+  if(GROUP_MODE==="none"){host.innerHTML="";host.hidden=true;return;}
+  const grp=computeGroups(GROUP_MODE);
+  const other=grp.groups.find(g=>g.isOther&&g.foldedGroups);
+  let h=`<div class="grp-legend-h"><span>${esc(GROUP_MODE_LABEL[GROUP_MODE]||GROUP_MODE)}</span><span class="grp-legend-count">${grp.rawCount} group${grp.rawCount===1?"":"s"}</span></div>`;
+  if(other)h+=`<div class="grp-legend-note">${other.foldedGroups} folded into ${esc(other.label)}</div>`;
+  h+=grp.groups.map(legendRow).join("");
+  host.innerHTML=h;host.hidden=false;
+  wireLegendRows();syncGroupLegendActive();
+}
 
 // ---- share HTML ----
 function shareHTML(){
@@ -876,6 +1142,9 @@ function loadModel(m){
   layoutCache={organic:computeOrganic()};
   focusSet=[];selected=null;activeFilters=new Set(["all"]);
   syncChips();
+  // §4/§7.8 reset: grouping is never persisted across a model load — a stale computed
+  // grouping or a stale select value would both be wrong for the newly-loaded model.
+  GROUP_MODE="none";groupSel.value="none";groupCache={};clearGroupHighlight();renderLegend();
 
   const dl=$("tablelist");dl.innerHTML="";
   MODEL.tables.forEach(t=>{const o=document.createElement("option");o.value=t.id;dl.appendChild(o);});

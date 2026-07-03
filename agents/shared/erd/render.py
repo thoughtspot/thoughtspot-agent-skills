@@ -52,6 +52,15 @@ _BODY = """<header>
     <label class="toggle"><input type="checkbox" id="findings-toggle" checked> Findings</label>
   </div>
   <div class="ctl-group">
+    <span class="group-label">Group by</span>
+    <select id="group-mode" title="Color tables by subject area — non-destructive, no layout change">
+      <option value="none" selected>None</option>
+      <option value="prefix">Name prefix</option>
+      <option value="cluster">Graph cluster</option>
+      <option value="fact">Fact neighbourhood</option>
+    </select>
+  </div>
+  <div class="ctl-group">
     <span class="group-label">Search</span>
     <input id="finder" list="tablelist" placeholder="table name…" autocomplete="off">
     <datalist id="tablelist"></datalist>
@@ -99,6 +108,7 @@ _BODY = """<header>
       <svg id="minimap-svg" aria-hidden="true"><g id="minimap-nodes"></g><rect id="minimap-view"></rect></svg>
     </div>
     <div class="hint" id="hint">drag or scroll to pan \xb7 pinch / ⌘-scroll to zoom \xb7 arrows / 0 to move</div>
+    <div class="grp-legend" id="grp-legend" hidden></div>
   </div>
   <aside id="inspector"></aside>
 </main>
@@ -146,6 +156,8 @@ _BODY = """<header>
   <p class="sub">Each join carries a midpoint badge: <b style="background:#1E6FA8;color:#fff;border-radius:3px;padding:1px 5px;font-family:var(--mono)">M</b> = model-local (defined in this model only), <b style="background:#EDEFF2;color:#6B7480;border-radius:3px;padding:1px 5px;font-family:var(--mono)">T</b> = table-level (reusable, can ripple to other models). Switch <b>Notation</b> to <b>Crow's foot</b> to read cardinality instead of TS-style arrows. Click any join for its type, cardinality and definition.</p>
   <div class="section-label">Notes</div>
   <p class="sub">Add notes to any table or join via the side panel. Notes persist in your browser and travel with <b>Share HTML</b> exports. Use the <b>Notes</b> filter chip to highlight every noted object at any zoom level (it stays enabled as long as a note exists, including notes baked into a shared file). <b>Review notes</b> lists every note at once — table/join rows jump to that object, and each row can be deleted inline.</p>
+  <div class="section-label">Group by</div>
+  <p class="sub"><b>Group by</b> colors tables into subject areas — a non-destructive overlay, never a layout change. <b>Name prefix</b> tokenizes each table id (e.g. <code>W_SFDC_ACCOUNT</code> → <b>Sfdc</b>). <b>Graph cluster</b> detects communities from the join graph — a hub-centric model may legitimately collapse to very few groups. <b>Fact neighbourhood</b> assigns every table to its nearest fact table by join distance — a model with many facts fragments into many groups. Each mode shows its own legend (swatch + label + count) top-left; click a legend row to dim everything outside that group (it only ever dims, never hides); click again — or switch mode, load a model, or click an empty area of the canvas — to clear the highlight. Switching modes or loading a model always resets to <b>None</b>.</p>
   <div class="section-label">Share HTML</div>
   <p class="sub">Downloads a self-contained HTML file with your current layout positions and notes baked in. The recipient sees your view on first load.</p>
 </div>"""
