@@ -1780,8 +1780,7 @@ Build `ts tableau build-liveboard` in ts-cli:
 **Affects:** `tools/ts-cli/ts_cli/tableau_translate.py`, `tools/ts-cli/ts_cli/model_builder.py`.
 **Status:** DONE (2026-07-02) — shipped on feat/tableau-module-split.
 **Follow-ups sweep:** completed 2026-07-03 — remaining open items: ensure_else_clause dead
-locals (next touch), quote-blindness, string-concat operand grammar (both dated 2026-07-03),
-and the commands/tableau.py module-size split (allowlisted in check_file_size, PR #162).
+locals (next touch), quote-blindness, string-concat operand grammar (both dated 2026-07-03).
 **Priority rationale:** `check_module_health` (radon) confirms this file holds the repo's
 worst complexity — `ensure_else_clause` **F (47)**, `validate_pre_import` **E (32)**,
 `normalize_operator_spacing` **D (27)**, `translate_formulas` **D (25)**, `build_dependency_dag`
@@ -1856,6 +1855,8 @@ importing from the same entry points.
   remains 1069 lines (TableauClient ~437 lines + six commands) and is carried by the
   one seeded `check_file_size.py` ALLOWLIST entry. Split candidate: move
   `TableauClient` to `ts_cli/tableau/client.py`; remove the allowlist entry when done.
+  — **DONE 2026-07-03** (v0.26.4): TableauClient moved to ts_cli/tableau/client.py;
+  allowlist entry removed.
 
 ---
 

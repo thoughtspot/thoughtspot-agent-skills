@@ -27,12 +27,8 @@ SCAN_ROOT = "tools/ts-cli/ts_cli"
 # An allowlisted file skips the hard-fail (it still soft-warns). Every entry
 # needs a backlog cross-reference; remove the entry when the file is split.
 ALLOWLIST: dict[str, str] = {
-    # 1069 lines: TableauClient (~437) + six commands. The BL-069 build_model_cmd
-    # decomposition (PR #161) fixed its complexity (cc 95 -> 13) but helper
-    # signatures/docstrings kept the line count above HARD_FAIL. Split candidate:
-    # move TableauClient to ts_cli/tableau/client.py (BL-069 follow-ups).
-    "tools/ts-cli/ts_cli/commands/tableau.py":
-        "BL-069 follow-ups — TableauClient + commands; complexity already gated",
+    # (empty — the TableauClient split retired the last entry. Add entries
+    #  only with a BL-NNN cross-reference.)
 }
 
 
