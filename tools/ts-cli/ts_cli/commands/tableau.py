@@ -621,6 +621,307 @@ def translate_formulas_cmd(
     print(json.dumps(result["stats"]))
 
 
+def _export_model_tml(existing_guid: str, profile: str) -> dict:
+    """Export an existing model's TML via the ts CLI (subprocess I/O)."""
+    import subprocess
+
+    typer.echo(f"\n  Exporting existing model {existing_guid}...", err=True)
+    export_proc = subprocess.run(
+        ["ts", "tml", "export", existing_guid, "--profile", profile, "--parse"],
+        capture_output=True, text=True,
+    )
+    if export_proc.returncode != 0:
+        typer.echo(f"  Export failed: {export_proc.stderr[:200]}", err=True)
+        raise SystemExit(1)
+    existing_tml = json.loads(export_proc.stdout)[0]["tml"]
+    typer.echo(
+        f"  Existing model: {len(existing_tml['model'].get('formulas', []))} formulas",
+        err=True,
+    )
+    return existing_tml
+
+
+def _translate_and_validate(
+    ds: dict,
+    resolved_calcs: list[dict],
+    scoped_columns: dict,
+    parsed: dict,
+) -> tuple[list, list, list]:
+    """Translate a datasource's calculated fields and run pre-import validation.
+
+    Returns (translated, skipped, validation_issues); echoes progress to stderr.
+    """
+    from ts_cli.tableau_translate import translate_formulas, validate_pre_import
+
+    translate_result = translate_formulas(
+        formulas=resolved_calcs,
+        scoped_columns=scoped_columns,
+        param_map=parsed["param_map"],
+        parameters=parsed["parameters"],
+        calc_id_map=ds["calc_map"],
+    )
+
+    translated = translate_result["translated"]
+    skipped = translate_result["skipped"]
+    typer.echo(
+        f"  Translated: {len(translated)}/{len(ds['calculated_fields'])} formulas",
+        err=True,
+    )
+    if skipped:
+        typer.echo(f"  Skipped: {len(skipped)}", err=True)
+        for s in skipped[:5]:
+            typer.echo(f"    - {s['name']}: {s['reason'][:80]}", err=True)
+
+    # Pre-import validation (catches issues before ThoughtSpot rejects them)
+    col_names = {c["name"] for c in ds["columns"]}
+    formula_name_set = {f["name"] for f in translated}
+    validation_issues = validate_pre_import(translated, col_names, formula_name_set)
+    if validation_issues:
+        typer.echo(f"  Validation warnings: {len(validation_issues)}", err=True)
+        for vi in validation_issues[:10]:
+            for w in vi["warnings"]:
+                typer.echo(f"    ! {vi['name']}: {w}", err=True)
+
+    return translated, skipped, validation_issues
+
+
+def _import_with_retry(
+    merged: dict,
+    ds: dict,
+    existing_guid: str,
+    profile: str,
+    max_retries: int,
+    result: dict,
+) -> None:
+    """Import merged TML, dropping failing formulas and retrying (subprocess I/O).
+
+    Mutates ``merged`` (formulas dropped on error), ``merged["_merge_stats"]``,
+    and ``result`` (import_status / updated_model_guid / dropped list).
+    """
+    import subprocess
+
+    from ts_cli.tableau.build_model import (
+        extract_imported_guid,
+        parse_import_error,
+        remove_formula,
+    )
+
+    stats = merged["_merge_stats"]
+    expr_by_fid = {f["id"]: f.get("expr", "") for f in merged["model"]["formulas"]}
+    original_by_name = {
+        c.get("caption", c.get("name", "")): c.get("formula", "")
+        for c in ds.get("calculated_fields", [])
+    }
+    dropped_on_import: list[dict] = []
+    for _attempt in range(max_retries):
+        import_tml = {k: v for k, v in merged.items() if not k.startswith("_")}
+        tml_str = json.dumps(import_tml)
+        import_proc = subprocess.run(
+            ["ts", "tml", "import", "--profile", profile, "--policy", "ALL_OR_NONE"],
+            input=json.dumps([tml_str]),
+            capture_output=True, text=True,
+        )
+        if import_proc.returncode != 0:
+            typer.echo(f"  Import failed: {import_proc.stderr[:200]}", err=True)
+            raise SystemExit(1)
+        import_result = json.loads(import_proc.stdout)
+        status = import_result[0]["response"]["status"]["status_code"]
+        if status == "OK":
+            result["import_status"] = status
+            result["updated_model_guid"] = (
+                extract_imported_guid(import_result) or existing_guid
+            )
+            typer.echo(f"  Import: OK", err=True)
+            break
+        msg = import_result[0]["response"]["status"].get("error_message", "")
+        parsed_err = parse_import_error(msg)
+        if parsed_err is None:
+            result["import_status"] = status
+            result["import_error"] = msg
+            typer.echo(f"  Import: {status} — {msg[:200]}", err=True)
+            break
+        bad_name, err_detail = parsed_err
+        typer.echo(f"  Import error on '{bad_name}': {err_detail} — dropping", err=True)
+        dropped_on_import.append({
+            "name": bad_name,
+            "expr": expr_by_fid.get(f"formula_{bad_name}", ""),
+            "error": err_detail,
+            "original_tableau": original_by_name.get(bad_name, ""),
+        })
+        remove_formula(merged, bad_name)
+        stats["added"] -= 1
+        if stats["added"] <= 0:
+            typer.echo("  All new formulas dropped — nothing to import", err=True)
+            result["import_status"] = "SKIPPED"
+            break
+    else:
+        result["import_status"] = "ERROR"
+        result["import_error"] = "Max retry attempts exceeded"
+    if dropped_on_import:
+        result["formulas_dropped_on_import"] = dropped_on_import
+        result["formulas_added"] = stats["added"]
+
+
+def _merge_flow(
+    ds: dict,
+    name: str,
+    existing_guid: str,
+    existing_tml: dict,
+    cleaned_formulas: list[dict],
+    translated: list,
+    skipped: list,
+    validation_issues: list,
+    profile: str,
+    dry_run: bool,
+    max_retries: int,
+) -> dict:
+    """Merge translated formulas into an existing model and import it."""
+    from ts_cli.model_builder import (
+        filter_unresolvable_formulas,
+        merge_formulas_into_model,
+    )
+    from ts_cli.tableau.build_model import (
+        collect_existing_model_context,
+        prepare_formulas_for_merge,
+    )
+
+    ctx = collect_existing_model_context(existing_tml)
+    formula_dicts, bare_fixed = prepare_formulas_for_merge(cleaned_formulas, ctx)
+    if bare_fixed:
+        typer.echo(f"  Fixed bare refs in {bare_fixed} formulas", err=True)
+
+    kept, dropped_names = filter_unresolvable_formulas(
+        formula_dicts, ctx["existing_ids"], ctx["existing_cols"],
+        ctx["formula_names"], ctx["param_names"],
+    )
+    typer.echo(
+        f"  Filter: {len(kept)} kept, {len(dropped_names)} dropped",
+        err=True,
+    )
+    if dropped_names:
+        for dn in dropped_names[:10]:
+            typer.echo(f"    - {dn}", err=True)
+
+    merged = merge_formulas_into_model(existing_tml, kept)
+    stats = merged["_merge_stats"]
+    typer.echo(
+        f"  Merge: added={stats['added']}, skipped={stats['skipped_existing']}",
+        err=True,
+    )
+    if stats.get("added_names"):
+        for an in stats["added_names"]:
+            typer.echo(f"    + {an}", err=True)
+
+    result = {
+        "datasource": ds["name"],
+        "model_name": name,
+        "existing_guid": existing_guid,
+        "formulas_translated": len(translated),
+        "formulas_skipped": len(skipped),
+        "formulas_filtered": len(dropped_names),
+        "formulas_added": stats["added"],
+        "formulas_skipped_existing": stats["skipped_existing"],
+    }
+    if validation_issues:
+        result["validation_warnings"] = validation_issues
+
+    if not dry_run and stats["added"] > 0:
+        _import_with_retry(merged, ds, existing_guid, profile, max_retries, result)
+    elif dry_run:
+        typer.echo("  Dry run — skipping import", err=True)
+    else:
+        typer.echo("  No new formulas to add — skipping import", err=True)
+    return result
+
+
+def _generate_flow(
+    ds: dict,
+    name: str,
+    slug: str,
+    connection_name: str,
+    parsed: dict,
+    cleaned_cols: list,
+    cleaned_formulas: list[dict],
+    translated: list,
+    skipped: list,
+    rename_map: dict,
+    raw_levels: dict,
+    validation_issues: list,
+    out_path: Path,
+    dry_run: bool,
+) -> dict:
+    """Build phased model TML files from scratch and write them to disk."""
+    from ts_cli.model_builder import build_model_tml, split_for_phased_import
+    from ts_cli.tableau.build_model import apply_prefix_and_double_agg
+    from ts_cli.tableau_translate import dump_tml_yaml
+
+    gen_formula_names = {f["name"] for f in cleaned_formulas}
+    gen_param_names = {p["name"] for p in parsed["parameters"]}
+    apply_prefix_and_double_agg(cleaned_formulas, gen_formula_names, gen_param_names)
+
+    model_tml = build_model_tml(
+        model_name=name,
+        connection_name=connection_name,
+        tables=ds["tables"],
+        columns=cleaned_cols,
+        joins=ds["joins"],
+        parameters=parsed["parameters"],
+        translated_formulas=cleaned_formulas,
+        formula_rename_map=rename_map,
+    )
+
+    levels = {}
+    for f in cleaned_formulas:
+        fname = f["name"]
+        levels[fname] = raw_levels.get(fname, 0)
+    phases = split_for_phased_import(model_tml, levels)
+
+    typer.echo(f"  Phases: {len(phases)} (phase 0 = base, then per dependency level)", err=True)
+    for i, phase in enumerate(phases):
+        fc = len(phase["model"].get("formulas", []))
+        typer.echo(f"    Phase {i}: {fc} formulas", err=True)
+
+    result = {
+        "datasource": ds["name"],
+        "model_name": name,
+        "tables": len(ds["tables"]),
+        "columns": len(cleaned_cols),
+        "formulas_translated": len(translated),
+        "formulas_skipped": len(skipped),
+        "formulas_total": len(ds["calculated_fields"]),
+        "parameters": len(parsed["parameters"]),
+        "name_renames": rename_map,
+        "phases": len(phases),
+    }
+    if validation_issues:
+        result["validation_warnings"] = validation_issues
+
+    if not dry_run:
+        for i, phase in enumerate(phases):
+            fname = f"{slug}.phase{i}.model.tml"
+            fpath = out_path / fname
+            yaml_str = dump_tml_yaml(phase)
+            fpath.write_text(yaml_str)
+            typer.echo(f"  Wrote: {fpath}", err=True)
+            result[f"phase_{i}_file"] = str(fpath)
+
+    return result
+
+
+def _validate_build_options(
+    existing_guid: Optional[str],
+    profile: Optional[str],
+    connection_name: str,
+) -> None:
+    """Validate build-model option combinations; exits with code 1 on error."""
+    if existing_guid and not profile:
+        typer.echo("--profile is required when using --existing-guid", err=True)
+        raise SystemExit(1)
+    if not existing_guid and not connection_name:
+        typer.echo("--connection is required when not using --existing-guid", err=True)
+        raise SystemExit(1)
+
+
 @app.command("build-model")
 def build_model_cmd(
     twb_file: str = typer.Argument(..., help="Path to .twb or .twbx file"),
@@ -652,21 +953,14 @@ def build_model_cmd(
     into it (skipping existing), filters unresolvable references, and
     imports the merged model.
     """
-    if existing_guid and not profile:
-        typer.echo("--profile is required when using --existing-guid", err=True)
-        raise SystemExit(1)
-    if not existing_guid and not connection_name:
-        typer.echo("--connection is required when not using --existing-guid", err=True)
-        raise SystemExit(1)
+    _validate_build_options(existing_guid, profile, connection_name)
     from ts_cli.model_builder import (
         build_formula_levels,
-        build_model_tml,
         parse_twb,
         resolve_all_internal_refs,
         resolve_name_collisions,
-        split_for_phased_import,
     )
-    from ts_cli.tableau_translate import translate_formulas, dump_tml_yaml
+    from ts_cli.tableau.build_model import fix_sqlproxy_scoping
 
     twb_path = Path(twb_file)
     if not twb_path.exists():
@@ -713,69 +1007,12 @@ def build_model_cmd(
         # fix sqlproxy→actual-table mapping before translation
         existing_tml = None
         if existing_guid:
-            import subprocess as _sp
-            typer.echo(f"\n  Exporting existing model {existing_guid}...", err=True)
-            export_proc = _sp.run(
-                ["ts", "tml", "export", existing_guid, "--profile", profile, "--parse"],
-                capture_output=True, text=True,
+            existing_tml = _export_model_tml(existing_guid, profile)
+            scoped_columns, scoping_msg = fix_sqlproxy_scoping(
+                scoped_columns, existing_tml,
             )
-            if export_proc.returncode != 0:
-                typer.echo(f"  Export failed: {export_proc.stderr[:200]}", err=True)
-                raise SystemExit(1)
-            existing_tml = json.loads(export_proc.stdout)[0]["tml"]
-            typer.echo(
-                f"  Existing model: {len(existing_tml['model'].get('formulas', []))} formulas",
-                err=True,
-            )
-
-            # Fix sqlproxy scoping: derive column→table from existing model
-            model_tables = existing_tml["model"].get("model_tables", [])
-            has_sqlproxy = any(t == "sqlproxy" for t in scoped_columns.values())
-            if has_sqlproxy:
-                if len(model_tables) == 1:
-                    # Single-table model: force ALL columns to the one table
-                    single_table = model_tables[0]["name"]
-                    fixed_scoped: dict[str, str] = {}
-                    for col_key in scoped_columns:
-                        base = re.sub(r"\s*\(Custom SQL Query\d*\)\s*$", "", col_key)
-                        fixed_scoped[col_key] = single_table
-                        if base != col_key:
-                            fixed_scoped[base] = single_table
-                    for col in existing_tml["model"]["columns"]:
-                        cid = col.get("column_id", "")
-                        if "::" in cid:
-                            _, cname = cid.split("::", 1)
-                            if cname not in {k.upper() for k in fixed_scoped}:
-                                fixed_scoped[cname] = single_table
-                    typer.echo(
-                        f"  Single-table model: forced all columns → {single_table}",
-                        err=True,
-                    )
-                    scoped_columns = fixed_scoped
-                else:
-                    col_to_table: dict[str, str] = {}
-                    for col in existing_tml["model"]["columns"]:
-                        col_id = col.get("column_id", "")
-                        if "::" in col_id:
-                            tbl, cname = col_id.split("::", 1)
-                            col_to_table[cname.upper()] = tbl
-                    fixed_scoped = {}
-                    for col_key, tbl in scoped_columns.items():
-                        base = re.sub(r"\s*\(Custom SQL Query\d*\)\s*$", "", col_key)
-                        lookup = base.upper()
-                        actual_tbl = col_to_table.get(lookup, tbl) if tbl == "sqlproxy" else tbl
-                        fixed_scoped[col_key] = actual_tbl
-                        if base != col_key and lookup in col_to_table and base not in fixed_scoped:
-                            fixed_scoped[base] = col_to_table[lookup]
-                    for cname, tbl in col_to_table.items():
-                        if cname not in {k.upper() for k in fixed_scoped}:
-                            fixed_scoped[cname] = tbl
-                    remapped = sum(
-                        1 for k in fixed_scoped
-                        if k in scoped_columns and fixed_scoped[k] != scoped_columns[k]
-                    )
-                    typer.echo(f"  Remapped {remapped}/{len(scoped_columns)} sqlproxy columns", err=True)
-                    scoped_columns = fixed_scoped
+            if scoping_msg:
+                typer.echo(f"  {scoping_msg}", err=True)
 
         # Build dependency levels from raw calcs (before resolution strips refs)
         raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])
@@ -785,35 +1022,9 @@ def build_model_cmd(
             ds["calculated_fields"], ds["calc_map"],
         )
 
-        translate_result = translate_formulas(
-            formulas=resolved_calcs,
-            scoped_columns=scoped_columns,
-            param_map=parsed["param_map"],
-            parameters=parsed["parameters"],
-            calc_id_map=ds["calc_map"],
+        translated, skipped, validation_issues = _translate_and_validate(
+            ds, resolved_calcs, scoped_columns, parsed,
         )
-
-        translated = translate_result["translated"]
-        skipped = translate_result["skipped"]
-        typer.echo(
-            f"  Translated: {len(translated)}/{len(ds['calculated_fields'])} formulas",
-            err=True,
-        )
-        if skipped:
-            typer.echo(f"  Skipped: {len(skipped)}", err=True)
-            for s in skipped[:5]:
-                typer.echo(f"    - {s['name']}: {s['reason'][:80]}", err=True)
-
-        # Pre-import validation (catches issues before ThoughtSpot rejects them)
-        from ts_cli.tableau_translate import validate_pre_import
-        col_names = {c["name"] for c in ds["columns"]}
-        formula_name_set = {f["name"] for f in translated}
-        validation_issues = validate_pre_import(translated, col_names, formula_name_set)
-        if validation_issues:
-            typer.echo(f"  Validation warnings: {len(validation_issues)}", err=True)
-            for vi in validation_issues[:10]:
-                for w in vi["warnings"]:
-                    typer.echo(f"    ! {vi['name']}: {w}", err=True)
 
         # Step 3: Resolve name collisions
         cleaned_cols, cleaned_formulas, rename_map = resolve_name_collisions(
@@ -823,242 +1034,36 @@ def build_model_cmd(
             typer.echo(f"  Renamed: {rename_map}", err=True)
 
         if existing_guid:
-            # --- Merge-into-existing flow ---
-            from ts_cli.model_builder import (
-                add_formula_prefix,
-                fix_double_aggregation,
-                fix_bare_refs,
-                build_column_lookup,
-                filter_unresolvable_formulas,
-                merge_formulas_into_model,
+            result = _merge_flow(
+                ds=ds,
+                name=name,
+                existing_guid=existing_guid,
+                existing_tml=existing_tml,
+                cleaned_formulas=cleaned_formulas,
+                translated=translated,
+                skipped=skipped,
+                validation_issues=validation_issues,
+                profile=profile,
+                dry_run=dry_run,
+                max_retries=max_retries,
             )
-            import subprocess
-
-            # Strip CSQ suffixes from scoped column references
-            _CSQ_IN_REF = re.compile(
-                r"\[([^\]]+?)\s+\(\s*Custom SQL Query\d*\)\]"
-            )
-            for f in cleaned_formulas:
-                f["expr"] = _CSQ_IN_REF.sub(r"[\1]", f["expr"])
-
-            existing_ids = {f["id"] for f in existing_tml["model"].get("formulas", [])}
-            existing_cols = {
-                c.get("column_id", "").split("::")[-1]
-                for c in existing_tml["model"].get("columns", [])
-                if "::" in c.get("column_id", "")
-            }
-            formula_names = {f["name"] for f in existing_tml["model"].get("formulas", [])}
-            new_formula_names = {f["name"] for f in cleaned_formulas}
-            all_formula_names = formula_names | new_formula_names
-            param_names = {
-                p["name"] for p in existing_tml["model"].get("parameters", [])
-            }
-
-            # Post-translation: fix bare column/formula refs
-            col_lookup = build_column_lookup(existing_tml)
-            model_tables = existing_tml["model"].get("model_tables", [])
-            if model_tables:
-                primary_table = model_tables[0]["name"]
-                bare_fixed = 0
-                for f in cleaned_formulas:
-                    before = f["expr"]
-                    f["expr"] = fix_bare_refs(
-                        f["expr"], all_formula_names, param_names,
-                        col_lookup, primary_table,
-                    )
-                    if f["expr"] != before:
-                        bare_fixed += 1
-                if bare_fixed:
-                    typer.echo(f"  Fixed bare refs in {bare_fixed} formulas", err=True)
-
-            formula_exprs = {f["name"]: f["expr"] for f in cleaned_formulas}
-            formula_dicts = []
-            for f in cleaned_formulas:
-                expr = add_formula_prefix(f["expr"], all_formula_names, param_names)
-                expr = fix_double_aggregation(expr, formula_exprs)
-                formula_dicts.append({
-                    "expr": expr,
-                    "id": f"formula_{f['name']}",
-                    "name": f["name"],
-                })
-            kept, dropped_names = filter_unresolvable_formulas(
-                formula_dicts, existing_ids, existing_cols, formula_names, param_names
-            )
-            typer.echo(
-                f"  Filter: {len(kept)} kept, {len(dropped_names)} dropped",
-                err=True,
-            )
-            if dropped_names:
-                for dn in dropped_names[:10]:
-                    typer.echo(f"    - {dn}", err=True)
-
-            merged = merge_formulas_into_model(existing_tml, kept)
-            stats = merged["_merge_stats"]
-            typer.echo(
-                f"  Merge: added={stats['added']}, skipped={stats['skipped_existing']}",
-                err=True,
-            )
-            if stats.get("added_names"):
-                for an in stats["added_names"]:
-                    typer.echo(f"    + {an}", err=True)
-
-            result = {
-                "datasource": ds_name,
-                "model_name": name,
-                "existing_guid": existing_guid,
-                "formulas_translated": len(translated),
-                "formulas_skipped": len(skipped),
-                "formulas_filtered": len(dropped_names),
-                "formulas_added": stats["added"],
-                "formulas_skipped_existing": stats["skipped_existing"],
-            }
-            if validation_issues:
-                result["validation_warnings"] = validation_issues
-
-            if not dry_run and stats["added"] > 0:
-                expr_by_fid = {
-                    f["id"]: f.get("expr", "")
-                    for f in merged["model"]["formulas"]
-                }
-                original_by_name = {
-                    c.get("caption", c.get("name", "")): c.get("formula", "")
-                    for c in ds.get("calculated_fields", [])
-                }
-                dropped_on_import: list[dict] = []
-                for _attempt in range(max_retries):
-                    import_tml = {
-                        k: v for k, v in merged.items() if not k.startswith("_")
-                    }
-                    tml_str = json.dumps(import_tml)
-                    import_proc = subprocess.run(
-                        [
-                            "ts", "tml", "import",
-                            "--profile", profile,
-                            "--policy", "ALL_OR_NONE",
-                        ],
-                        input=json.dumps([tml_str]),
-                        capture_output=True, text=True,
-                    )
-                    if import_proc.returncode != 0:
-                        typer.echo(f"  Import failed: {import_proc.stderr[:200]}", err=True)
-                        raise SystemExit(1)
-                    import_result = json.loads(import_proc.stdout)
-                    status = import_result[0]["response"]["status"]["status_code"]
-                    if status == "OK":
-                        result["import_status"] = status
-                        obj_list = import_result[0].get("response", {}).get("object", [])
-                        if obj_list:
-                            returned_guid = obj_list[0].get("header", {}).get("id_guid")
-                            if returned_guid:
-                                result["updated_model_guid"] = returned_guid
-                        if "updated_model_guid" not in result:
-                            result["updated_model_guid"] = existing_guid
-                        typer.echo(f"  Import: OK", err=True)
-                        break
-                    msg = import_result[0]["response"]["status"].get("error_message", "")
-                    # Parse failing formula name from error
-                    err_match = re.search(r"Formula:\s*([^,]+),\s*Error:", msg)
-                    if not err_match:
-                        result["import_status"] = status
-                        result["import_error"] = msg
-                        typer.echo(f"  Import: {status} — {msg[:200]}", err=True)
-                        break
-                    bad_name = err_match.group(1).strip()
-                    err_detail = msg.split("Error:", 1)[-1].strip()[:120] if "Error:" in msg else ""
-                    typer.echo(f"  Import error on '{bad_name}': {err_detail} — dropping", err=True)
-                    fid = f"formula_{bad_name}"
-                    dropped_on_import.append({
-                        "name": bad_name,
-                        "expr": expr_by_fid.get(fid, ""),
-                        "error": err_detail,
-                        "original_tableau": original_by_name.get(bad_name, ""),
-                    })
-                    merged["model"]["formulas"] = [
-                        f for f in merged["model"]["formulas"]
-                        if f.get("id") != fid
-                    ]
-                    merged["model"]["columns"] = [
-                        c for c in merged["model"]["columns"]
-                        if c.get("formula_id") != fid
-                    ]
-                    stats["added"] -= 1
-                    if stats["added"] <= 0:
-                        typer.echo("  All new formulas dropped — nothing to import", err=True)
-                        result["import_status"] = "SKIPPED"
-                        break
-                else:
-                    result["import_status"] = "ERROR"
-                    result["import_error"] = "Max retry attempts exceeded"
-                if dropped_on_import:
-                    result["formulas_dropped_on_import"] = dropped_on_import
-                    result["formulas_added"] = stats["added"]
-            elif dry_run:
-                typer.echo("  Dry run — skipping import", err=True)
-            else:
-                typer.echo("  No new formulas to add — skipping import", err=True)
-
-            all_results.append(result)
         else:
-            # --- Generate-files flow (original) ---
-            from ts_cli.model_builder import (
-                add_formula_prefix,
-                fix_double_aggregation,
-            )
-            gen_formula_names = {f["name"] for f in cleaned_formulas}
-            gen_param_names = {p["name"] for p in parsed["parameters"]}
-            gen_formula_exprs = {f["name"]: f["expr"] for f in cleaned_formulas}
-            for f in cleaned_formulas:
-                f["expr"] = add_formula_prefix(
-                    f["expr"], gen_formula_names, gen_param_names,
-                )
-                f["expr"] = fix_double_aggregation(f["expr"], gen_formula_exprs)
-
-            model_tml = build_model_tml(
-                model_name=name,
+            result = _generate_flow(
+                ds=ds,
+                name=name,
+                slug=slug,
                 connection_name=connection_name,
-                tables=ds["tables"],
-                columns=cleaned_cols,
-                joins=ds["joins"],
-                parameters=parsed["parameters"],
-                translated_formulas=cleaned_formulas,
-                formula_rename_map=rename_map,
+                parsed=parsed,
+                cleaned_cols=cleaned_cols,
+                cleaned_formulas=cleaned_formulas,
+                translated=translated,
+                skipped=skipped,
+                rename_map=rename_map,
+                raw_levels=raw_levels,
+                validation_issues=validation_issues,
+                out_path=out_path,
+                dry_run=dry_run,
             )
-
-            levels = {}
-            for f in cleaned_formulas:
-                fname = f["name"]
-                levels[fname] = raw_levels.get(fname, 0)
-            phases = split_for_phased_import(model_tml, levels)
-
-            typer.echo(f"  Phases: {len(phases)} (phase 0 = base, then per dependency level)", err=True)
-            for i, phase in enumerate(phases):
-                fc = len(phase["model"].get("formulas", []))
-                typer.echo(f"    Phase {i}: {fc} formulas", err=True)
-
-            result = {
-                "datasource": ds_name,
-                "model_name": name,
-                "tables": len(ds["tables"]),
-                "columns": len(cleaned_cols),
-                "formulas_translated": len(translated),
-                "formulas_skipped": len(skipped),
-                "formulas_total": len(ds["calculated_fields"]),
-                "parameters": len(parsed["parameters"]),
-                "name_renames": rename_map,
-                "phases": len(phases),
-            }
-            if validation_issues:
-                result["validation_warnings"] = validation_issues
-
-            if not dry_run:
-                for i, phase in enumerate(phases):
-                    fname = f"{slug}.phase{i}.model.tml"
-                    fpath = out_path / fname
-                    yaml_str = dump_tml_yaml(phase)
-                    fpath.write_text(yaml_str)
-                    typer.echo(f"  Wrote: {fpath}", err=True)
-                    result[f"phase_{i}_file"] = str(fpath)
-
-            all_results.append(result)
+        all_results.append(result)
 
     print(json.dumps(all_results, indent=2))
