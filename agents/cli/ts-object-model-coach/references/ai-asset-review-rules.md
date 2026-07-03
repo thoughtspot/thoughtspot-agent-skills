@@ -308,7 +308,7 @@ the per-surface markdown review files (`ai_context.md`, `synonyms.md`, etc.).
 ## What this review never does
 
 - **Never deletes existing content** without explicit user accept
-- **Never modifies physical table TML** (`columns[].description` on tables) — out of scope; handled by `/ts-object-model-builder`
+- **Never modifies physical table TML** (`columns[].description` on tables) — out of scope for this skill; no ThoughtSpot skill for this exists yet (planned as `ts-object-model-builder`)
 - **Never proposes ai_context for hidden columns** (`is_hidden: true`) — Spotter doesn't index them
 - **Never proposes synonyms for hidden columns** — same reason
 - **Never combines multiple existing entries** into one — keeps merges explicit
