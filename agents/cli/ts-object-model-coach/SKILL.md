@@ -117,8 +117,9 @@ source ~/.zshenv && ts metadata search \
 Mark each result `[MODEL]` or `[WORKSHEET]` using `metadata_header.contentUpgradeId` /
 `worksheetVersion` (same logic as
 [ts-object-answer-promote Step 5](../ts-object-answer-promote/SKILL.md)).
-This skill targets **Models only** — recommend `/ts-object-model-builder` to upgrade
-legacy Worksheets and stop.
+This skill targets **Models only** — if a Worksheet is selected, tell the user it must
+be upgraded to a Model first (no ThoughtSpot skill for this exists yet — a
+`ts-object-model-builder` skill is planned but not shipped) and stop.
 
 **Display format.** Show results as a markdown table with columns
 `# | Name | Owner | GUID | Modified`. The Owner column is the
@@ -276,8 +277,8 @@ Three sub-steps — run all that apply.
 
 ### 3a. Dependent Liveboards/Answers via verified v2 API
 
-The CLI `ts metadata search` does not yet expose `--include-dependent-objects`. Use the
-verified API contract documented in this skill's
+Dependent Liveboards/Answers are not a flag on `ts metadata search` — use
+`ts metadata dependents`, the verified API contract documented in this skill's
 [open-items.md](references/open-items.md) #1 (independently verified for the
 ts-dependency-manager skill on the `wip/ts-dependency-manager` branch) — fast (~2s),
 VERIFIED on Cloud:
@@ -1577,7 +1578,7 @@ Spotter will use the applied coaching on the next index refresh.
 | Symptom | Action |
 |---|---|
 | `ts auth whoami` returns 401 | Token expired — `/ts-profile-thoughtspot` to refresh |
-| Selected data source is a Worksheet | Recommend `/ts-object-model-builder` to upgrade first; stop |
+| Selected data source is a Worksheet | Tell user it must be upgraded to a Model first (no skill for this yet); stop |
 | No dependent Liveboards/Answers found in Step 3a | Reduce reference question target; rely on schema + prose only |
 | Snowflake mining returns empty / SAGE-only | Log and proceed; demo accounts often have no analyst SQL |
 | Snowflake `ACCOUNT_USAGE` returns 0 rows for any DM_ table | Verify role has `IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE` |
@@ -1605,6 +1606,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.3.1 | 2026-07-03 | Audit fixes: soften phantom `/ts-object-model-builder` recommendations (Step 1 and Error Handling) to "no skill for this yet — planned"; remove stale "CLI does not yet expose `--include-dependent-objects`" framing in Step 3a (it never did — `ts metadata dependents` is the command used). Same phantom-skill fix applied to `references/ai-asset-review-rules.md`. |
 | 2.3.0 | 2026-05-19 | **`column_metadata` + `hierarchies` categories added to `model_instructions`.** Two new structured categories for agent disambiguation: `column_metadata` (cardinality tier, sample values, usage hint, value format per dimension column — requires Snowflake profile) and `hierarchies` (ordered drill-path declarations from coarse to fine grain). Allowed-key list updated (5 → 7 categories). Budget-trim order updated: `output_formatting` → `samples` → `value_format` → `note:/reason:` → `aggregation_defaults`; mandatory tier now includes `hierarchies`. Step 5 adds scope menu option 8; Step 6.5 adds generation algorithms (PII-gated cardinality queries, functional dependency validation for hierarchies, date-dim auto-detection); Step 7 adds `column_metadata.md` review file (Block 9 in review-explainers); Step 8b adds deploy-time validation for new enums/refs. Smoke test updated with structural validation steps for both categories. |
 | 2.2.0 | 2026-05-11 | Migrate all direct urllib API calls to ts CLI: Step 2b feedback fetch now uses `ts tml export --type FEEDBACK --parse` (requires ts-cli v0.5.0); Step 3a dependents now use `ts metadata dependents --raw`; Step 9c smoke-test count now uses `ts metadata dependents` (flat output). Introduce `existing_entries` variable in Step 2b for consistent use in Steps 8a, 8c, 9c (replaces `existing_feedback_entries`). |
 | 2.1.1 | 2026-04-29 | Document the **3000-char hard limit** on the Settings → Coach Spotter → Instructions field (verified during a Dunder Mifflin coaching run on se-thoughtspot). `references/model-instructions-schema.md` Safeguard #3 adds the validation rule plus the budget-trim order (drop `output_formatting` first, then trim `note:` / `reason:` text, then collapse `aggregation_defaults`; never drop the mandatory tier of `schema_assumptions` / `exclusion_rules` / `time_defaults`). Step 6.5 Validation block points at the safeguard; Step 8e gate now displays `{N_instr_bytes}/3000 chars` so the user sees their headroom before pasting. Cursor mirror v1.1.1 syncs the same. |

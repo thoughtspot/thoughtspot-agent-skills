@@ -263,20 +263,9 @@ source ~/.zshenv && ts auth whoami --profile {profile_name}
 The CLI handles token caching, Keychain access, and expiry automatically.
 No temp files or manual token management needed in this skill.
 
-If `ts auth whoami` returns 401, the token is expired. Ask the user to refresh it:
-
-```
-Your ThoughtSpot token has expired. To refresh:
-  1. Log into ThoughtSpot in your browser
-  2. Go to Develop → REST Playground 2.0 → Authentication → Get Current User Token
-  3. Click Try it out → Execute, then copy the token value
-  4. Run in your terminal:
-       security delete-generic-password -s "thoughtspot-{slug}" -a "{username}"
-       security add-generic-password -s "thoughtspot-{slug}" -a "{username}" -w "YOUR_TOKEN"
-  5. Let me know when done.
-```
-
-Then clear the stale cache and retry:
+If `ts auth whoami` returns 401, the token is expired. Direct the user to
+`/ts-profile-thoughtspot` (U3 — Refresh Credential) — that section is the canonical,
+cross-platform refresh procedure. Then clear the stale cache and retry:
 
 ```bash
 source ~/.zshenv && ts auth logout --profile {profile_name}
@@ -1170,4 +1159,5 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-07-03 | Replace the inline macOS-only Keychain token-refresh procedure with a pointer to `/ts-profile-thoughtspot` (U3 — Refresh Credential), the canonical cross-platform procedure (audit finding 11.4). |
 | 1.0.0 | 2026-05-22 | Initial release — single conversion mode (Mode A) |
