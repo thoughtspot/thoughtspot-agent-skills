@@ -1041,7 +1041,7 @@ function renderLegend(){
   const grp=computeGroups(GROUP_MODE);
   const other=grp.groups.find(g=>g.isOther&&g.foldedGroups);
   let h=`<div class="grp-legend-h"><span>${esc(GROUP_MODE_LABEL[GROUP_MODE]||GROUP_MODE)}</span><span class="grp-legend-count">${grp.rawCount} group${grp.rawCount===1?"":"s"}</span></div>`;
-  if(other)h+=`<div class="grp-legend-note">${other.foldedGroups} folded into Other</div>`;
+  if(other)h+=`<div class="grp-legend-note">${other.foldedGroups} folded into ${esc(other.label)}</div>`;
   h+=grp.groups.map(legendRow).join("");
   host.innerHTML=h;host.hidden=false;
   wireLegendRows();syncGroupLegendActive();
