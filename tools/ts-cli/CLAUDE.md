@@ -27,6 +27,7 @@ ts_cli/
     validate.py           — pre-import and post-translation validation
     yaml_out.py           — TML YAML dump helpers
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
+    build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
@@ -34,7 +35,7 @@ ts_cli/
     tml.py        — ts tml export / import / lint
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
-    tableau.py    — ts tableau (signin, datasources, download, translate-formulas)
+    tableau.py    — ts tableau (signin, datasources, download, translate-formulas, build-model)
     audit.py      — ts audit run / report
   audit/
     __init__.py       — run_audit() entry point, angle module registry
