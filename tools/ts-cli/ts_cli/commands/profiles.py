@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 
 from ts_cli.client import PROFILES_PATH, load_profiles
-from ts_cli.commands.tableau import load_tableau_profiles, TABLEAU_PROFILES_PATH
+from ts_cli.tableau.client import load_tableau_profiles, TABLEAU_PROFILES_PATH
 
 app = typer.Typer(help="Profile management commands.")
 
