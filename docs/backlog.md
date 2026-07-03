@@ -1868,7 +1868,8 @@ importing from the same entry points.
 `check_module_health.py`; file-size dimension shipped as `check_file_size.py`
 (soft-warn 500 / hard-fail 1000; one seeded allowlist entry —
 `commands/tableau.py`, whose complexity the BL-069 decomposition already
-gated), wired into pre-commit + CI.
+gated (entry since retired by the TableauClient split, v0.26.4)), wired into
+pre-commit + CI.
 
 ### Problem
 
@@ -1978,6 +1979,10 @@ independent fix worth bundling here rather than opening a third backlog item for
   same shape as the shipped `SIN`/`COS`/`TAN` handling. Give `COT` an explicit disposition:
   either reject it at translate time (add to `_UNMAPPED_FUNCTIONS`, joining U1–U7) or emit
   a `1/tan(...)` composite. Independent of the hierarchy/alias work and can ship first.
+  **Update 2026-07-03:** fail-loud shipped in ts-cli v0.26.5 (all four in
+  `_UNMAPPED_FUNCTIONS`, coverage-matrix U8). Remaining scope: the translations
+  themselves — `* pi/180` composites pending live verification that ThoughtSpot
+  inverse trig returns degrees, and the `1/tan(...)` composite decision for `COT`.
 - All three sub-items are parser/codegen work in the Tableau translation pipeline (module
   home per BL-069's refactor), not skill-prompt changes — follow the codification pattern
   (repo-audit angle #11) rather than adding LLM judgment steps

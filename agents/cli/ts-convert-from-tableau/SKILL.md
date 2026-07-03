@@ -4130,6 +4130,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.20.2 | 2026-07-03 | ACOS/ASIN/ATAN/COT now rejected loudly at translate time (was silent pass-through). Requires ts-cli v0.26.5 |
 | 1.20.1 | 2026-07-03 | Doc refresh: output schema + flag fixes, mapping-file greatest/least + pipeline-table alignment, matrix/open-items verification pass (5 stale items closed, incl. tabs #9), gap documentation (hierarchies, aliases, actions, fiscal year, inverse trig) |
 | 1.20.0 | 2026-07-03 | LEFT/RIGHT/MID/UPPER/LOWER/STARTSWITH/ENDSWITH/SQUARE/SIGN/trig/PI/RADIANS/DEGREES/DATEPARSE now CLI-translated; unmapped functions and unknown date units rejected loudly at translate time; scalar MAX/MIN and IN(...) scan bugs fixed. Requires ts-cli v0.26.0 |
 | 1.19.1 | 2026-07-02 | Update code-structure reference to new ts_cli/tableau/ package (BL-069) |

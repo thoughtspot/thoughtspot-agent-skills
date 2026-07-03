@@ -47,7 +47,7 @@ Use this as the canonical limitations reference.
 | 29 | `DATEPARSE(format, s)` | `to_date ( s , format )` | CLI-translated (v0.26.0); args flipped vs Tableau |
 | 30 | `TODAY`/`NOW`/`DATE`/`YEAR`/`MONTH`/`DAY` | `today`/`now`/`date`/`year`/`month_number`/`day` | |
 | 31 | `ABS`/`ROUND`/`CEILING`/`FLOOR`/`SQRT`/`POWER`/`LOG`/`LN`/`EXP` | `abs`/`round`/`ceil`/`floor`/`sqrt`/`pow`/`log10`/`ln`/`exp` | |
-| 32 | `SIN/COS/TAN` | Radians-to-degrees conversion applied | CLI-translated (v0.26.0). Inverse trig (`ACOS`/`ASIN`/`ATAN`) and `COT` are NOT implemented as of v0.26.0 — all four pass through untranslated and are not caught by the fail-loud validator (a silent gap distinct from the `_UNMAPPED_FUNCTIONS` reject-at-translate-time list below). `ACOS`/`ASIN`/`ATAN` are translatable in principle: ThoughtSpot's inverse trig functions return degrees where Tableau's return radians, so a `* pi/180` composite applies — the same conversion family as the shipped SIN/COS/TAN handling. `COT` has no direct ThoughtSpot function and would need a `1/tan(...)` composite. Tracked in BL-072 |
+| 32 | `SIN/COS/TAN` | Radians-to-degrees conversion applied | CLI-translated (v0.26.0). Inverse trig (`ACOS`/`ASIN`/`ATAN`) and `COT` are rejected loudly at translate time as of ts-cli v0.26.5 (see U8). `ACOS`/`ASIN`/`ATAN` are translatable in principle: ThoughtSpot's inverse trig functions return degrees where Tableau's return radians, so a `* pi/180` composite applies — the same conversion family as the shipped SIN/COS/TAN handling. `COT` has no direct ThoughtSpot function and would need a `1/tan(...)` composite. Tracked in BL-072 |
 | 33 | `PI()/RADIANS()/DEGREES()` | Literal composites | CLI-translated (v0.26.0); no native equivalent |
 | 34 | `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Partial; truncate-toward-zero |
 | 35 | `FLOAT(x)/STR(x)` | `to_double(x)/to_string(x)` | |
@@ -191,7 +191,7 @@ Use this as the canonical limitations reference.
 
 ## Unmapped Constructs (Limitations)
 
-### Rejected at Translate Time (ts-cli v0.26.0)
+### Rejected at Translate Time (ts-cli v0.26.0; U8 added v0.26.5)
 
 These functions have no CLI implementation. `ts tableau translate-formulas` detects them
 (`validate.py::_UNMAPPED_FUNCTIONS`) and skips the formula with an `unmapped Tableau
@@ -207,6 +207,7 @@ through untranslated.
 | U5 | `MAKEDATE(y, m, d)` / `MAKETIME(h, m, s)` / `MAKEDATETIME(date, time)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U6 | `ISDATE(s)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U7 | `USERNAME()` / `FULLNAME()` / `ISUSERNAME(s)` / `ISFULLNAME(s)` / `USERDOMAIN()` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U8 | `ACOS(x)` / `ASIN(x)` / `ATAN(x)` / `COT(x)` | Rejected with reason at translate time (ts-cli v0.26.5) — `* pi/180` composites / `1/tan()` tracked in BL-072, pending live degree-vs-radian verification |
 
 ### HIGH — Functionality loss, no workaround
 
