@@ -263,7 +263,7 @@ def _pick_generator(col_name: str, col_type: str, rng):
             return f"user_{rng.randint(1, 9999)}@example.com"
         return gen_email
 
-    if any(w in lower for w in ("name", "customer")):
+    if any(w in lower for w in ("name", "customer")) and "INTEGER" not in col_type and "FLOAT" not in col_type:
         def gen_name():
             return f"{rng.choice(_FIRST_NAMES)} {rng.choice(_LAST_NAMES)}"
         return gen_name

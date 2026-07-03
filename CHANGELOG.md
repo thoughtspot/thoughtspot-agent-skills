@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-03
+- fix: ts-cli v0.26.3 — ts-load-source-data synthetic data: a numeric column (INTEGER/FLOAT) whose name merely contains "name"/"customer" no longer gets random person-name strings (type mismatch); it now falls through to the numeric generator. Adds a regression test
 - chore: bump ts-cli to v0.26.2 — BL-069 follow-ups: dead-code removal, filter_unresolvable_formulas annotation fix, module-health baseline re-key
 - chore: bump ts-cli to v0.26.1 — decompose build_model_cmd into ts_cli/tableau/build_model.py + flow functions (BL-069 follow-up)
 - feat: update ts-object-model-erd to v1.7.0 — subject-area grouping: a **Group by** selector colors tables into subject areas via three selectable strategies (Name prefix; Graph cluster via deterministic Louvain-style modularity — ~20 communities on the 79-table GTM export; Fact neighbourhood via nearest-fact `(dist,factId)` relaxation). Non-destructive shared display — accent stripe per node, dark AA-contrast tint on overview/LOD blocks, and a legend with ghost-only single-group highlight; layout, fact/dim fill, and RLS/focus borders untouched. Also hardens `esc()` to escape quotes (+ fixes an unescaped `findingCard` data-target) and refreshes the Review-notes panel after Clear notes

@@ -7,7 +7,7 @@
   "tools/ts-cli/ts_cli/audit/context.py::build_context": 37,
   "tools/ts-cli/ts_cli/audit/report.py::compact_payload": 20,
   "tools/ts-cli/ts_cli/commands/load.py::_infer_type": 20,
-  "tools/ts-cli/ts_cli/commands/load.py::_pick_generator": 27,
+  "tools/ts-cli/ts_cli/commands/load.py::_pick_generator": 29,
   "tools/ts-cli/ts_cli/commands/tableau.py::translate_formulas_cmd": 19,
   "tools/ts-cli/ts_cli/model_builder.py::filter_unresolvable_formulas": 18,
   "tools/ts-cli/ts_cli/model_builder.py::split_for_phased_import": 20,

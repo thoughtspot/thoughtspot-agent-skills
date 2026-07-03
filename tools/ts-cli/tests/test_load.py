@@ -195,6 +195,24 @@ class TestGenerateCsv:
         for line in lines[1:]:
             assert len(line) > 0
 
+    def test_numeric_column_with_name_keyword_not_stringified(self, tmp_path):
+        """A numeric column whose name merely contains 'name'/'customer' must get
+        numeric synthetic data, not random person-name strings — the name/customer
+        generator only applies to non-INTEGER/FLOAT columns."""
+        import re
+        from ts_cli.commands.load import generate_csv
+        schema = self._make_schema([
+            {"name": "customer_metric", "db_column_name": "CUSTOMER_METRIC", "inferred_type": "INTEGER"},
+            {"name": "name_score", "db_column_name": "NAME_SCORE", "inferred_type": "FLOAT"},
+        ])
+        path = generate_csv(schema, rows=5, output_dir=tmp_path)
+        lines = path.read_text().strip().split("\n")
+        assert lines[0] == "CUSTOMER_METRIC,NAME_SCORE"
+        for line in lines[1:]:
+            intval, floatval = line.split(",")
+            assert re.fullmatch(r"\d+", intval), f"INTEGER column got non-numeric {intval!r}"
+            assert re.fullmatch(r"\d+\.\d{2}", floatval), f"FLOAT column got non-numeric {floatval!r}"
+
     def test_date_column(self, tmp_path):
         import re
         from ts_cli.commands.load import generate_csv
