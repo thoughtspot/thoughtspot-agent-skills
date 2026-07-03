@@ -483,6 +483,31 @@ def _generate_flow(
     return result
 
 
+def _load_table_name_map(
+    table_name_map: Optional[str],
+    existing_guid: Optional[str],
+) -> dict[str, str]:
+    """Load the --table-name-map JSON file, if provided; exits on a bad path.
+
+    GENERATE-mode-only option — echoes a heads-up to stderr (but does not
+    error) when combined with --existing-guid, since merge mode ignores it.
+    """
+    if not table_name_map:
+        return {}
+    tnm_path = Path(table_name_map)
+    if not tnm_path.exists():
+        typer.echo(f"Table name map file not found: {table_name_map}", err=True)
+        raise SystemExit(1)
+    name_map: dict[str, str] = json.loads(tnm_path.read_text())
+    if existing_guid:
+        typer.echo(
+            "--table-name-map is ignored with --existing-guid "
+            "(merge mode resolves tables from the existing model)",
+            err=True,
+        )
+    return name_map
+
+
 def _validate_build_options(
     existing_guid: Optional[str],
     profile: Optional[str],
@@ -516,6 +541,13 @@ def build_model_cmd(
                                   help="Report only — don't write files or import"),
     max_retries: int = typer.Option(25, "--max-retries",
                                      help="Maximum formula-drop retry cycles (default 25)"),
+    table_name_map: Optional[str] = typer.Option(
+        None, "--table-name-map",
+        help="GENERATE mode only (no --existing-guid). JSON file mapping TWB "
+             "physical table name -> ThoughtSpot table TML name, for when they "
+             "differ (warehouse-normalized names, sqlproxy/published-datasource "
+             "scoping). Ignored when --existing-guid is set.",
+    ),
 ) -> None:
     """Parse a Tableau workbook and build import-ready ThoughtSpot model TML.
 
@@ -535,12 +567,14 @@ def build_model_cmd(
         resolve_all_internal_refs,
         resolve_name_collisions,
     )
-    from ts_cli.tableau.build_model import fix_sqlproxy_scoping
+    from ts_cli.tableau.build_model import apply_table_name_map, fix_sqlproxy_scoping
 
     twb_path = Path(twb_file)
     if not twb_path.exists():
         typer.echo(f"File not found: {twb_file}", err=True)
         raise SystemExit(1)
+
+    name_map = _load_table_name_map(table_name_map, existing_guid)
 
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -588,6 +622,9 @@ def build_model_cmd(
             )
             if scoping_msg:
                 typer.echo(f"  {scoping_msg}", err=True)
+        elif name_map:
+            ds, scoped_columns = apply_table_name_map(ds, scoped_columns, name_map)
+            typer.echo(f"  Applied table name map ({len(name_map)} entries)", err=True)
 
         # Build dependency levels from raw calcs (before resolution strips refs)
         raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])

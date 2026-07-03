@@ -1004,6 +1004,7 @@ ts tableau build-model "workbook.twbx" \
 | `--model-name`, `-m` | no | Model name (default: derived from datasource name) |
 | `--datasource`, `-d` | no | Filter to a single datasource |
 | `--dry-run` | no | Report stats only — don't write files |
+| `--table-name-map` | no | GENERATE mode only (no `--existing-guid`). Path to a JSON file mapping TWB physical table name → ThoughtSpot table TML `name`, for when they differ (warehouse-normalized names, sqlproxy/published-datasource scoping). Ignored (with a stderr note) when `--existing-guid` is set. |
 
 **Pipeline steps:**
 
@@ -1046,6 +1047,31 @@ formulas before import via `filter_unresolvable_formulas()`.
 **Bare-reference resolution:** after sqlproxy remapping, a post-pass (`fix_bare_refs`)
 table-qualifies bare `[Column]` references and prefixes `[FormulaName]` cross-references
 with `formula_` to match ThoughtSpot's naming convention.
+
+**Table name remapping (GENERATE mode only):** when generating a model from scratch
+(no `--existing-guid`), there is no existing model to introspect for the real table
+names — unlike the merge-flow sqlproxy remapping above. If the ThoughtSpot table was
+created under a different name than the TWB relation (warehouse-normalized names, or a
+published-datasource TWB where the relation is literally named `sqlproxy`), pass
+`--table-name-map` with a JSON file `{"twb_table_name": "THOUGHTSPOT_TABLE_NAME"}`:
+
+```bash
+ts tableau build-model "workbook.twbx" \
+  --connection "MY_CONNECTION" \
+  --output-dir ./output \
+  --datasource "DS Name" \
+  --table-name-map ./table-name-map.json
+```
+
+```json
+{"sqlproxy": "ORDERS_FACT_TS"}
+```
+
+The mapped name replaces the TWB table name everywhere it feeds the generated model
+TML: `model.tables[].name` and `.fqn`, `model_tables[].name` and join `with`/`on`
+endpoints, `columns[].column_id` table prefixes, and any `[TABLE::COL]` refs formula
+translation embeds via column scoping. Tables absent from the map pass through
+unchanged. Implemented by `apply_table_name_map()` in `ts_cli/tableau/build_model.py`.
 
 **Output:** One set of phased TML files per datasource:
 

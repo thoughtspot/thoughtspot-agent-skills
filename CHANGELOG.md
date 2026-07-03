@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-03
+- chore: bump ts-cli to v0.29.0 (ts tableau build-model --table-name-map)
 - docs: full repo audit 2026-07-03 — report + same-day routing (PRs #168-#176, BL-073..BL-087), agentic→deterministic codification review
 - feat: add 5 audit-harvest validators — `check_no_inline_requests` (SKILL.md code fences must not instruct `requests`/`urllib` calls, finding 5.2), a `DEPRECATED_V2_ENDPOINTS` denylist in `check_no_v1_endpoints` (bare batch `/template/variables/update-values` path, finding 13.1), `check_pagination_convention` (AST-scoped guard against a hard-capped `record_size` literal with no pagination loop, finding 14.2), `check_slash_command_refs` (every `/ts-<skill>` mention in agents/ docs must resolve to a real skill directory, finding 1.1), and `check_skill_flag_usage` (cross-checks every `ts <group> <command> --<flag>` a SKILL.md documents against the real typer command tree, finding 11.1b). Wired into pre-commit + CI; dated the two `check_smoke_tests` ALLOWLIST exemptions with BL-076 (finding 6.3)
 - chore: bump ts-cli to v0.28.0 — per-identifier variables endpoint, full auto-pagination, dependent matched-columns field, dev extra

@@ -1202,7 +1202,8 @@ adds physical table resolution and join definitions, not the formulas.
 ### Prerequisites
 
 - Tableau profile configured via `/ts-profile-tableau` (optional — skill degrades gracefully)
-- `ts` CLI v0.20.0+ (includes `ts tableau build-model` with `--max-retries` and enriched error reporting)
+- `ts` CLI v0.29.0+ (includes `ts tableau build-model` with `--max-retries`, enriched error
+  reporting, GENERATE mode phased output, and `--table-name-map`)
 
 ---
 
@@ -1634,17 +1635,59 @@ Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{TABLE_NAME}.tabl
 > **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (LB only — model already
 > exists) and **scope 5** (Tables only — no model generated).
 
+> **Prerequisite:** the generate-mode path below requires `ts` CLI v0.29.0+
+> (`ts tableau build-model --table-name-map`). See Prerequisites above.
+
 Before generating model TML, read `agents/shared/schemas/thoughtspot-model-tml.md` for the
 correct structure. Key: use `model_tables` (not `tables`) for table references; `guid:` goes
 at the document root (not nested inside `model:`); every formula needs a paired `columns[]`
 entry with matching `formula_id`.
 
-Generate one `.model.tml` per datasource the workbook **actually uses** — don't blindly
-merge independent datasources, but also don't materialize an unused model for every
-datasource. **Blend-aware model grouping** (requires `blend_graph` from Step 3e):
+Generate one model per datasource the workbook **actually uses** — don't blindly merge
+independent datasources, but also don't materialize an unused model for every datasource.
+How that model TML is produced depends on whether the datasource participates in a blend:
+
+**Single-datasource models (the common case — no blend) — GENERATE mode.** When a
+datasource has no entry in `blend_graph` (from Step 3e), build its base model TML with
+`ts tableau build-model` in GENERATE mode (no `--existing-guid`) instead of hand-assembling
+it:
+
+```bash
+ts tableau build-model {workdir}/{workbook}.twb \
+  --connection "{connection_name}" \
+  --datasource "{datasource_name}" \
+  --output-dir {output_dir} \
+  [--table-name-map {workdir}/table_name_map.json]
+```
+
+This runs the same TWB-parse → translate → assemble pipeline described below and writes
+**phased** model TML files: `{slug}.phase0.model.tml` (base — `model_tables`, physical
+`columns`, `joins`, `parameters`; **no formulas**), then `{slug}.phase1.model.tml`,
+`{slug}.phase2.model.tml`, … (one phase per formula dependency level). **This step (5b)
+only needs `*.phase0.model.tml`** — that file is the Phase-1 base model built in Step 7.
+The `.phase1+` files are not consumed anywhere in this skill's import flow: formulas are
+added independently in Step 7 Phase 2, via a separate `build-model --existing-guid` call
+that re-derives them from the TWB against the live, already-imported model.
+
+`--table-name-map` (optional): a JSON file `{"twb_table_name": "thoughtspot_table_name"}`.
+Supply it **only** when the ThoughtSpot table's TML `name` (from Step 5a) differs from the
+TWB relation name — warehouse-normalized names, or a published-datasource TWB where the
+relation is literally named `sqlproxy`. Omit the flag when the names already match; the
+default (no map) behavior is unchanged.
+
+Still apply the **Model TML hard rules**, MEASURE/ATTRIBUTE classification guidance, and
+Template below when **reviewing** the generated `*.phase0.model.tml` — they describe the
+required shape regardless of how the file was produced.
+
+**Blend-merged models (multiple datasources spanning one connected component) — hand
+assembly.** GENERATE mode builds one model per single datasource — it cannot produce the
+merged, multi-datasource model a blend relationship requires (inline cross-datasource
+joins, column-conflict renaming across datasources). **Blend-aware model grouping**
+(requires `blend_graph` from Step 3e):
 
 When `blend_graph` is non-empty, datasources connected by blend relationships produce a
-**single merged model** instead of separate models. The merge procedure:
+**single merged model** instead of separate models, assembled by hand as described in this
+section. The merge procedure:
 
 1. **Build connected components** from `blend_graph`. Each connected component (a primary
    datasource and all its direct or transitive secondaries) becomes one model. Use the
@@ -1738,7 +1781,8 @@ When `blend_graph` is non-empty, datasources connected by blend relationships pr
    Otherwise default to `MANY_TO_ONE`. Surface the choice in the review checkpoint (Step 7)
    so the user can override.
 
-5. **Datasources not in any blend** continue to produce one model per datasource as before.
+5. **Datasources not in any blend** are not part of this hand-assembly procedure at all —
+   they use the GENERATE-mode path above.
 
 6. **Column name conflicts:** when merging, if two datasources define columns with the same
    display name but different semantics, disambiguate by prefixing with the datasource
@@ -1797,7 +1841,8 @@ See `../../shared/schemas/ts-model-conversion-invariants.md` for full detail.
 >   column name to `[TABLE::COL]`, not only the bracketed ones, or the formula fails with
 >   *"Search did not find …"*.
 
-**Template:**
+**Template** (hand-assembly shape — used directly for blend-merged models; also the
+structural reference for reviewing GENERATE-mode output above):
 
 ```yaml
 model:
@@ -2745,13 +2790,27 @@ asks to change it. Default new models to enabled.
 
 `ts tml import` reads a **JSON array of TML strings** from stdin — not a zip and not a
 single document. Build that array with tables first, then SQL views, then models (so a
-model's tables are validated alongside it):
+model's tables are validated alongside it). **Base model selection:** GENERATE mode (Step
+5b) writes phased files `{slug}.phase0.model.tml`, `{slug}.phase1.model.tml`, … — this
+pre-import validation only wants the base (`*.phase0.model.tml`); the `.phase1+` files
+are consumed nowhere in this skill. Blend-merged models (hand-assembled in Step 5b) keep
+their plain `{DatasourceName}.model.tml` naming (no "phase" in the filename) and pass
+through unaffected:
 
 ```bash
 cd /tmp/ts_tableau_mig/output/{workbook_name}
 python3 - > /tmp/ts_tableau_mig/{workbook_name}_payload.json <<'PY'
-import json, glob
-order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + sorted(glob.glob("*.model.tml")) + sorted(glob.glob("*.cohort.tml"))
+import json, glob, re
+
+# Keep bare *.model.tml (hand-assembled, blend-merged) and *.phase0.model.tml
+# (GENERATE-mode base); drop *.phase1.model.tml+ (unused by this skill).
+phase_re = re.compile(r"\.phase(\d+)\.model\.tml$")
+def is_base_model(f):
+    m = phase_re.search(f)
+    return m is None or m.group(1) == "0"
+
+model_files = [f for f in sorted(glob.glob("*.model.tml")) if is_base_model(f)]
+order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + model_files + sorted(glob.glob("*.cohort.tml"))
 print(json.dumps([open(f).read() for f in order]))
 PY
 ```
@@ -2908,15 +2967,29 @@ Import in two phases so formula errors never block the base model. See
 
 Build the model TML with `model_tables[]`, physical `columns[]`, `joins[]`, and
 `parameters[]` only. **No `formulas[]` section and no formula `columns[]` entries.**
-This is guaranteed to succeed if the table TMLs bind correctly to the connection.
+This is guaranteed to succeed if the table TMLs bind correctly to the connection. For a
+GENERATE-mode model (Step 5b), this is exactly the `*.phase0.model.tml` file — it already
+has no formulas. For a blend-merged model, it's the hand-assembled `.model.tml` file.
 
-Build the Phase 1 payload (tables + sql_views + base model + cohorts):
+Build the Phase 1 payload (tables + sql_views + base model + cohorts). Select **only**
+`*.phase0.model.tml` from GENERATE-mode output — the `.phase1+` files are cumulative
+formula layers not used by this skill (Phase 2 below re-derives formulas independently).
+Blend-merged `.model.tml` files (no "phase" in the name) pass through unaffected:
 
 ```bash
 cd /tmp/ts_tableau_mig/output/{workbook_name}
 python3 - > /tmp/ts_tableau_mig/{workbook_name}_phase1.json <<'PY'
-import json, glob
-order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + sorted(glob.glob("*.model.tml")) + sorted(glob.glob("*.cohort.tml"))
+import json, glob, re
+
+# Keep bare *.model.tml (hand-assembled, blend-merged) and *.phase0.model.tml
+# (GENERATE-mode base); drop *.phase1.model.tml+ (unused by this skill).
+phase_re = re.compile(r"\.phase(\d+)\.model\.tml$")
+def is_base_model(f):
+    m = phase_re.search(f)
+    return m is None or m.group(1) == "0"
+
+model_files = [f for f in sorted(glob.glob("*.model.tml")) if is_base_model(f)]
+order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + model_files + sorted(glob.glob("*.cohort.tml"))
 print(json.dumps([open(f).read() for f in order]))
 PY
 ```
@@ -4138,6 +4211,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.21.0 | 2026-07-03 | Wire `ts tableau build-model` generate mode into Phase-1 base-model step (BL-085 p1); add `--table-name-map` flag; blend-merge path unchanged. Prereq ts-cli v0.29.0 |
 | 1.20.3 | 2026-07-03 | Full 13-function Tableau spatial set (was 5 documented, 0 enforced) + USERATTRIBUTE/USERATTRIBUTEINCLUDES now rejected loudly at translate time (was silent pass-through / undocumented). Requires ts-cli v0.28.1 |
 | 1.20.2 | 2026-07-03 | ACOS/ASIN/ATAN/COT now rejected loudly at translate time (was silent pass-through). Requires ts-cli v0.26.5 |
 | 1.20.1 | 2026-07-03 | Doc refresh: output schema + flag fixes, mapping-file greatest/least + pipeline-table alignment, matrix/open-items verification pass (5 stale items closed, incl. tabs #9), gap documentation (hierarchies, aliases, actions, fiscal year, inverse trig) |

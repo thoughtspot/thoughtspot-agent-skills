@@ -5,8 +5,10 @@ verbatim from build_model_cmd (commands/tableau.py) during the BL-069
 follow-up decomposition. If one fails, the extraction changed behavior —
 fix the extraction, not the test.
 """
+from ts_cli.model_builder import build_model_tml
 from ts_cli.tableau.build_model import (
     apply_prefix_and_double_agg,
+    apply_table_name_map,
     collect_existing_model_context,
     extract_imported_guid,
     fix_sqlproxy_scoping,
@@ -91,6 +93,166 @@ def test_strip_csq_suffixes_rewrites_in_place_and_counts():
     assert formulas[0]["expr"] == "[Revenue] + [X]"
     assert formulas[1]["expr"] == "[X] * 2"
     assert changed == 1
+
+
+# --- apply_table_name_map (BL-085 part 1: --table-name-map) ---
+
+def _ds(tables, joins=(), columns=(), col_table_map=None):
+    return {
+        "name": "DS",
+        "tables": list(tables),
+        "joins": list(joins),
+        "columns": list(columns),
+        "calculated_fields": [],
+        "calc_map": {},
+        "col_table_map": col_table_map or {},
+    }
+
+
+def test_table_name_map_noop_when_map_empty():
+    ds = _ds(tables=[{"name": "foo", "db_table": "raw.foo"}])
+    scoped = {"COL1": "foo"}
+    new_ds, new_scoped = apply_table_name_map(ds, scoped, {})
+    assert new_ds is ds
+    assert new_scoped is scoped
+
+
+def test_table_name_map_renames_table_name_and_db_table():
+    ds = _ds(tables=[{"name": "foo", "db_table": "raw.foo"}])
+    new_ds, _ = apply_table_name_map(ds, {}, {"foo": "FOO_TS"})
+    assert new_ds["tables"][0]["name"] == "FOO_TS"
+    assert new_ds["tables"][0]["db_table"] == "FOO_TS"
+    # original untouched (pure function, no mutation)
+    assert ds["tables"][0]["name"] == "foo"
+
+
+def test_table_name_map_leaves_unmapped_table_unchanged():
+    ds = _ds(tables=[
+        {"name": "foo", "db_table": "raw.foo"},
+        {"name": "bar", "db_table": "raw.bar"},
+    ])
+    new_ds, _ = apply_table_name_map(ds, {}, {"foo": "FOO_TS"})
+    assert new_ds["tables"][0]["name"] == "FOO_TS"
+    assert new_ds["tables"][1]["name"] == "bar"
+    assert new_ds["tables"][1]["db_table"] == "raw.bar"
+
+
+def test_table_name_map_renames_join_endpoints():
+    ds = _ds(
+        tables=[{"name": "foo", "db_table": "foo"}, {"name": "bar", "db_table": "bar"}],
+        joins=[{"type": "INNER", "left_table": "foo", "right_table": "bar",
+                 "keys": [{"left": "ID", "right": "FOO_ID"}]}],
+    )
+    new_ds, _ = apply_table_name_map(ds, {}, {"foo": "FOO_TS"})
+    assert new_ds["joins"][0]["left_table"] == "FOO_TS"
+    assert new_ds["joins"][0]["right_table"] == "bar"  # unmapped side untouched
+
+
+def test_table_name_map_remaps_scoped_columns_values():
+    ds = _ds(tables=[{"name": "foo", "db_table": "foo"}])
+    scoped = {"COL1": "foo", "COL2": "bar"}
+    _, new_scoped = apply_table_name_map(ds, scoped, {"foo": "FOO_TS"})
+    assert new_scoped["COL1"] == "FOO_TS"
+    assert new_scoped["COL2"] == "bar"  # unmapped table untouched
+
+
+def test_table_name_map_remaps_column_table_key_when_present():
+    ds = _ds(
+        tables=[{"name": "foo", "db_table": "foo"}],
+        columns=[{"name": "Sales", "db_column_name": "SALES", "table": "foo"}],
+    )
+    new_ds, _ = apply_table_name_map(ds, {}, {"foo": "FOO_TS"})
+    assert new_ds["columns"][0]["table"] == "FOO_TS"
+
+
+def test_table_name_map_column_without_table_key_untouched():
+    ds = _ds(
+        tables=[{"name": "foo", "db_table": "foo"}],
+        columns=[{"name": "Sales", "db_column_name": "SALES"}],
+    )
+    new_ds, _ = apply_table_name_map(ds, {}, {"foo": "FOO_TS"})
+    assert "table" not in new_ds["columns"][0]
+
+
+def test_table_name_map_feeds_build_model_tml_end_to_end():
+    """The mapped name must show up in model_tables, fqn, column_id, and joins."""
+    ds = _ds(
+        tables=[
+            {"name": "foo", "db_table": "foo"},
+            {"name": "bar", "db_table": "bar"},
+        ],
+        joins=[{"type": "INNER", "left_table": "foo", "right_table": "bar",
+                 "keys": [{"left": "BAR_ID", "right": "ID"}]}],
+        columns=[
+            {"name": "Sales", "db_column_name": "SALES", "column_type": "MEASURE",
+             "data_type": "DOUBLE", "table": "foo"},
+            {"name": "Region", "db_column_name": "REGION", "column_type": "ATTRIBUTE",
+             "data_type": "VARCHAR", "table": "bar"},
+        ],
+    )
+    new_ds, _ = apply_table_name_map(ds, {}, {"foo": "FOO_TS"})
+
+    model = build_model_tml(
+        model_name="Test",
+        connection_name="CONN",
+        tables=new_ds["tables"],
+        columns=new_ds["columns"],
+        joins=new_ds["joins"],
+        parameters=[],
+        translated_formulas=[],
+    )
+
+    table_names = {t["name"] for t in model["model"]["tables"]}
+    assert table_names == {"FOO_TS", "bar"}
+
+    foo_table = next(t for t in model["model"]["tables"] if t["name"] == "FOO_TS")
+    assert foo_table["fqn"] == "[CONN].[FOO_TS]"
+
+    sales_col = next(c for c in model["model"]["columns"] if c["name"] == "Sales")
+    assert sales_col["column_id"] == "FOO_TS::SALES"
+
+    foo_model_table = next(t for t in model["model"]["model_tables"] if t["name"] == "FOO_TS")
+    assert foo_model_table["joins"][0]["with"] == "bar"
+    assert "FOO_TS::BAR_ID" in foo_model_table["joins"][0]["on"]
+
+
+def test_without_table_name_map_build_model_tml_output_unchanged():
+    """Golden/no-op: generate-flow output with no map matches pre-existing behavior."""
+    ds = _ds(
+        tables=[{"name": "foo", "db_table": "raw.foo"}],
+        joins=[],
+        columns=[
+            {"name": "Sales", "db_column_name": "SALES", "column_type": "MEASURE",
+             "data_type": "DOUBLE", "table": "foo"},
+        ],
+    )
+    scoped = {"Sales": "foo"}
+
+    # No map supplied — build_model_cmd never calls apply_table_name_map at all,
+    # so calling it explicitly with {} must reproduce identical output.
+    mapped_ds, mapped_scoped = apply_table_name_map(ds, scoped, {})
+    assert mapped_ds is ds
+    assert mapped_scoped is scoped
+
+    model_from_noop = build_model_tml(
+        model_name="Test",
+        connection_name="CONN",
+        tables=mapped_ds["tables"],
+        columns=mapped_ds["columns"],
+        joins=mapped_ds["joins"],
+        parameters=[],
+        translated_formulas=[],
+    )
+    model_baseline = build_model_tml(
+        model_name="Test",
+        connection_name="CONN",
+        tables=ds["tables"],
+        columns=ds["columns"],
+        joins=ds["joins"],
+        parameters=[],
+        translated_formulas=[],
+    )
+    assert model_from_noop == model_baseline
 
 
 # --- collect_existing_model_context ---

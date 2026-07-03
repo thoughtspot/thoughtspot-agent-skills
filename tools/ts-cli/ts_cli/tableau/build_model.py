@@ -91,6 +91,78 @@ def _remap_multi_table(
     return fixed_scoped, f"Remapped {remapped}/{len(scoped_columns)} sqlproxy columns"
 
 
+def apply_table_name_map(
+    ds: dict,
+    scoped_columns: dict[str, str],
+    name_map: dict[str, str],
+) -> tuple[dict, dict[str, str]]:
+    """Remap TWB physical table names to actual ThoughtSpot table TML names.
+
+    GENERATE-mode-only helper (``ts tableau build-model`` without
+    ``--existing-guid``). Used when the ThoughtSpot table was created under a
+    different name than the TWB relation name — warehouse-normalized names,
+    or ``sqlproxy``/published-datasource scoping where the TWB never recorded
+    the real physical table name.
+
+    Renames, everywhere a TWB table name feeds the generated model TML:
+      - ``ds["tables"][].name`` and ``.db_table`` (both become the mapped
+        name — see ``build_model_tml``'s ``model.tables[].fqn`` construction,
+        which reads ``t.get("db_table", t["name"])``)
+      - ``ds["joins"][].left_table`` / ``.right_table``
+      - ``ds["columns"][].table``, when present (defensive — the TWB parser
+        does not currently populate this key, but ``build_model_tml`` honors
+        it for ``column_id`` prefixing when it is)
+      - the table values in ``scoped_columns`` (column name → table name),
+        so formula translation's ``scope_columns()`` embeds
+        ``[MAPPED_NAME::COL]`` refs rather than the stale TWB name
+
+    Returns a new ``(ds, scoped_columns)`` pair — inputs are not mutated.
+    Table names absent from ``name_map`` pass through unchanged. When
+    ``name_map`` is empty, returns the inputs unchanged (no-op).
+    """
+    if not name_map:
+        return ds, scoped_columns
+
+    def _remap(table_name: str) -> str:
+        return name_map.get(table_name, table_name)
+
+    new_tables = []
+    for t in ds.get("tables", []):
+        mapped = name_map.get(t["name"])
+        if mapped is None:
+            new_tables.append(t)
+            continue
+        nt = dict(t)
+        nt["name"] = mapped
+        nt["db_table"] = mapped
+        new_tables.append(nt)
+
+    new_joins = []
+    for j in ds.get("joins", []):
+        nj = dict(j)
+        nj["left_table"] = _remap(j.get("left_table", ""))
+        nj["right_table"] = _remap(j.get("right_table", ""))
+        new_joins.append(nj)
+
+    new_columns = []
+    for c in ds.get("columns", []):
+        if c.get("table") in name_map:
+            nc = dict(c)
+            nc["table"] = name_map[c["table"]]
+            new_columns.append(nc)
+        else:
+            new_columns.append(c)
+
+    new_scoped = {col: _remap(tbl) for col, tbl in scoped_columns.items()}
+
+    new_ds = dict(ds)
+    new_ds["tables"] = new_tables
+    new_ds["joins"] = new_joins
+    new_ds["columns"] = new_columns
+
+    return new_ds, new_scoped
+
+
 def strip_csq_suffixes(formulas: list[dict]) -> int:
     """Strip `` (Custom SQL QueryN)`` suffixes from bracketed refs, in place.
 
