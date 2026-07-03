@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import typer
 
@@ -20,9 +21,11 @@ def search(
                                                 help="Variable name or ID (omit for all variables)"),
     profile: Optional[str] = _profile_option,
 ) -> None:
-    """Search template variables and their current assignments.
+    """Search template variables and their current assignments (auto-paginated).
 
-    Output: JSON array from POST /api/rest/2.0/template/variables/search.
+    Output: JSON array from POST /api/rest/2.0/template/variables/search — the
+    full result set across all pages (same pattern as `ts connections list`),
+    not capped at one page.
     Each element has id, name, variable_type, and a values[] array of assignments.
     Each assignment has: value, org_identifier, principal_type, principal_identifier.
 
@@ -34,15 +37,68 @@ def search(
       ts variables search ts_user_timezone --profile production
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-    payload: dict = {
-        "record_offset": 0,
-        "record_size": 50,
-        "response_content": "METADATA_AND_VALUES",
+    page_size = 50
+    all_results: List[dict] = []
+    offset = 0
+    while True:
+        payload: dict = {
+            "record_offset": offset,
+            "record_size": page_size,
+            "response_content": "METADATA_AND_VALUES",
+        }
+        if identifier:
+            payload["variable_details"] = [{"identifier": identifier}]
+        resp = client.post("/api/rest/2.0/template/variables/search", json=payload)
+        page = resp.json()
+        if not isinstance(page, list) or not page:
+            break
+        all_results.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+    print(json.dumps(all_results))
+
+
+def _build_variable_assignments(value: str, org: List[str], user: List[str]) -> List[Dict[str, Any]]:
+    """Build the ``variable_assignment[]`` entries shared by set_value and remove_value.
+
+    One entry per (org[, user]) scope; all share the same assigned value. This is
+    the org x user scope-expansion logic that used to be duplicated verbatim
+    between the two commands (2026-07 audit finding 6.4) — both now call this.
+    """
+    assignments: List[Dict[str, Any]] = []
+    for org_name in org:
+        if user:
+            for username in user:
+                assignments.append({
+                    "assigned_values": [value],
+                    "org_identifier": org_name,
+                    "principal_type": "USER",
+                    "principal_identifier": username,
+                })
+        else:
+            assignments.append({
+                "assigned_values": [value],
+                "org_identifier": org_name,
+            })
+    return assignments
+
+
+def _build_variable_update_payload(
+    value: str, org: List[str], user: List[str], *, operation: str,
+) -> Dict[str, Any]:
+    """Build the request body for POST .../template/variables/{identifier}/update-values.
+
+    Verified via ``get-rest-api-reference(apiName="putVariableValues")``: ``operation``
+    is top-level and each ``variable_assignment[]`` entry carries its own scope
+    (``org_identifier`` / ``principal_type`` / ``principal_identifier``) plus
+    ``assigned_values``. The variable identifier itself goes in the URL path, not
+    the body — see ``set_value`` / ``remove_value``.
+    """
+    return {
+        "operation": operation,
+        "variable_assignment": _build_variable_assignments(value, org, user),
     }
-    if identifier:
-        payload["variable_details"] = [{"identifier": identifier}]
-    resp = client.post("/api/rest/2.0/template/variables/search", json=payload)
-    print(json.dumps(resp.json()))
 
 
 @app.command("set")
@@ -61,6 +117,14 @@ def set_value(
     Repeat --org and/or --user to apply across multiple orgs and users in one API call.
     Each (org, user) pair becomes one scope entry; all share the same variable value.
 
+    Uses POST /api/rest/2.0/template/variables/{identifier}/update-values — the
+    identifier (name or GUID) goes directly in the URL path, one variable per call.
+    This replaces the deprecated batch endpoint
+    POST /api/rest/2.0/template/variables/update-values, removed per the
+    26.4.0.cl deprecation notice (`putVariableValues` is the documented
+    replacement for `updateVariableValues`; 2026-07 audit finding 13.1). Semantics
+    (REPLACE/ADD/REMOVE/RESET) are unchanged.
+
     Output: empty on success (HTTP 204). Raises on error.
 
     Examples:
@@ -72,26 +136,10 @@ def set_value(
       ts variables set ts_user_timezone Asia/Kolkata --org Primary --user a@x.com --user b@x.com
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-    scopes = []
-    for org_name in org:
-        if user:
-            for username in user:
-                scopes.append({
-                    "org_identifier": org_name,
-                    "principal_type": "USER",
-                    "principal_identifier": username,
-                })
-        else:
-            scopes.append({"org_identifier": org_name})
-
-    client.post("/api/rest/2.0/template/variables/update-values", json={
-        "variable_assignment": [{
-            "variable_identifier": variable,
-            "variable_values": [value],
-            "operation": "REPLACE",
-        }],
-        "variable_value_scope": scopes,
-    })
+    client.post(
+        f"/api/rest/2.0/template/variables/{quote(variable, safe='')}/update-values",
+        json=_build_variable_update_payload(value, org, user, operation="REPLACE"),
+    )
 
 
 @app.command("remove")
@@ -110,6 +158,9 @@ def remove_value(
     Use `ts variables search` first to confirm the current value if unsure.
     Repeat --org and/or --user to remove across multiple orgs and users in one API call.
 
+    Uses POST /api/rest/2.0/template/variables/{identifier}/update-values — see
+    the `ts variables set` docstring for the per-identifier endpoint migration note.
+
     Output: empty on success (HTTP 204). Raises on error.
 
     Examples:
@@ -121,23 +172,7 @@ def remove_value(
       ts variables remove ts_user_timezone Asia/Kolkata --org Primary --user a@x.com --user b@x.com
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-    scopes = []
-    for org_name in org:
-        if user:
-            for username in user:
-                scopes.append({
-                    "org_identifier": org_name,
-                    "principal_type": "USER",
-                    "principal_identifier": username,
-                })
-        else:
-            scopes.append({"org_identifier": org_name})
-
-    client.post("/api/rest/2.0/template/variables/update-values", json={
-        "variable_assignment": [{
-            "variable_identifier": variable,
-            "variable_values": [value],
-            "operation": "REMOVE",
-        }],
-        "variable_value_scope": scopes,
-    })
+    client.post(
+        f"/api/rest/2.0/template/variables/{quote(variable, safe='')}/update-values",
+        json=_build_variable_update_payload(value, org, user, operation="REMOVE"),
+    )

@@ -51,13 +51,23 @@ def search(
                                         help="Include hidden objects"),
     include_incomplete: bool = typer.Option(False, "--include-incomplete",
                                             help="Include incomplete objects"),
-    limit: int = typer.Option(50, "--limit", "-l", help="Max results per page"),
-    offset: int = typer.Option(0, "--offset", help="Pagination offset"),
-    all_pages: bool = typer.Option(False, "--all", help="Fetch all pages automatically"),
+    limit: Optional[int] = typer.Option(
+        None, "--limit", "-l",
+        help="Max results for a SINGLE page starting at --offset (legacy behavior). "
+             "Omit to auto-paginate internally and return the full result set — "
+             "this is now the default (2026-07 audit finding 14.2)."),
+    offset: int = typer.Option(0, "--offset", help="Pagination offset (only meaningful together with --limit)"),
+    all_pages: bool = typer.Option(
+        False, "--all",
+        help="Deprecated, now a no-op — auto-pagination to the full result set is "
+             "the default whenever --limit is omitted. Kept only so existing callers "
+             "don't break."),
 ) -> None:
-    """Search ThoughtSpot metadata objects.
+    """Search ThoughtSpot metadata objects (auto-paginated by default).
 
-    Output: JSON array from POST /api/rest/2.0/metadata/search.
+    Output: JSON array from POST /api/rest/2.0/metadata/search — the full result
+    set across all pages unless --limit is given, in which case only that one
+    page (starting at --offset) is returned.
 
     LOGICAL_TABLE covers tables, worksheets, and models. Use --subtype WORKSHEET
     to restrict to worksheets and models only.
@@ -69,11 +79,11 @@ def search(
       ts metadata search --subtype WORKSHEET --name "%BIRD%"
       ts metadata search --subtype WORKSHEET --name "%sales%"
       ts metadata search --guid abc-123-def
-      ts metadata search --type LIVEBOARD --all
+      ts metadata search --type LIVEBOARD --limit 10   # single page only (legacy)
     """
     client = ThoughtSpotClient(resolve_profile(profile))
 
-    def _build_payload(offset_val: int) -> dict:
+    def _build_payload(offset_val: int, size: int) -> dict:
         meta_filter: dict = {"type": type}
         if subtype:
             meta_filter["subtypes"] = list(subtype)
@@ -84,7 +94,7 @@ def search(
 
         payload: dict = {
             "metadata": [meta_filter],
-            "record_size": limit,
+            "record_size": size,
             "record_offset": offset_val,
             "include_headers": True,
             "include_hidden_objects": include_hidden,
@@ -94,24 +104,29 @@ def search(
             payload["tag_identifiers"] = list(tag)
         return payload
 
-    if not all_pages:
-        resp = client.post("/api/rest/2.0/metadata/search", json=_build_payload(offset))
+    if limit is not None:
+        # Explicit --limit: preserve legacy single-page behavior. --all is a
+        # no-op here — an explicit limit always wins.
+        resp = client.post("/api/rest/2.0/metadata/search", json=_build_payload(offset, limit))
         print(json.dumps(resp.json()))
         return
 
-    # Auto-paginate: collect all results
+    # Default: auto-paginate and collect the full result set. --all_pages is
+    # accepted but unused — this branch now runs whenever --limit is omitted,
+    # whether or not the caller also passed --all.
+    page_size = 50
     all_results: List[dict] = []
     current_offset = offset
     while True:
-        resp = client.post("/api/rest/2.0/metadata/search", json=_build_payload(current_offset))
+        resp = client.post("/api/rest/2.0/metadata/search", json=_build_payload(current_offset, page_size))
         data = resp.json()
         page = data if isinstance(data, list) else data.get("metadata", [])
         if not page:
             break
         all_results.extend(page)
-        if len(page) < limit:
+        if len(page) < page_size:
             break
-        current_offset += limit
+        current_offset += page_size
 
     print(json.dumps(all_results))
 
@@ -388,6 +403,7 @@ def _dict_to_report(d: dict):
             subtype=de.get("subtype"), via=de.get("via", "v2_dependents"),
             hops=de.get("hops", 1), owner=owner, modified_at=de.get("modified_at"),
             risk=RiskTag(tag=de["risk"]["tag"], reason=de["risk"]["reason"]),
+            matched_columns=de.get("matched_columns", []),
         ))
     coverage = [CoverageEntry(**c) for c in d.get("coverage", [])]
     cls = d["classification"]

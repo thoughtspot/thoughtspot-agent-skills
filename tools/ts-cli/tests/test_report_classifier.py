@@ -100,3 +100,59 @@ class TestAggregateClassification:
         ))
         assert agg.aggregate.tag == "STOP"
         assert agg.recommendation == "BLOCKED_RESOLVE_RLS_FIRST"
+
+
+# ---------------------------------------------------------------------------
+# build_matched_columns_map — 2026-07 audit fix for the dep-manager
+# column-scope filter bug (Step 4's "Filtering by scope" table used to key
+# on risk.reason text, which never names a column).
+# ---------------------------------------------------------------------------
+
+from ts_cli.report.classifier import build_matched_columns_map
+
+
+class TestBuildMatchedColumnsMap:
+    def test_empty_hit_lists_yield_empty_map(self):
+        assert build_matched_columns_map([], [], []) == {}
+
+    def test_single_hit_maps_guid_to_column(self):
+        hits = [{"object_guid": "ws-1", "column": "ZIPCODE"}]
+        assert build_matched_columns_map(hits) == {"ws-1": ["ZIPCODE"]}
+
+    def test_multiple_hit_lists_merge_by_guid(self):
+        join_hits = [{"object_guid": "ws-1", "column": "ZIPCODE"}]
+        ai_hits = [{"object_guid": "ws-1", "column": "REGION"}]
+        result = build_matched_columns_map(join_hits, ai_hits)
+        assert result == {"ws-1": ["REGION", "ZIPCODE"]}  # sorted
+
+    def test_same_column_matched_twice_is_deduped(self):
+        join_hits = [{"object_guid": "ws-1", "column": "ZIPCODE"}]
+        ai_hits = [{"object_guid": "ws-1", "column": "ZIPCODE"}]
+        result = build_matched_columns_map(join_hits, ai_hits)
+        assert result == {"ws-1": ["ZIPCODE"]}
+
+    def test_different_guids_get_separate_entries(self):
+        hits = [
+            {"object_guid": "ws-1", "column": "ZIPCODE"},
+            {"object_guid": "lb-1", "column": "ZIPCODE"},
+        ]
+        result = build_matched_columns_map(hits)
+        assert result == {"ws-1": ["ZIPCODE"], "lb-1": ["ZIPCODE"]}
+
+    def test_hit_missing_object_guid_is_skipped(self):
+        """Defensive: an RLS hit on the source table itself (not a dependent) or
+        a doc whose header carried no GUID must not crash or pollute the map."""
+        hits = [{"column": "ZIPCODE"}, {"object_guid": None, "column": "ZIPCODE"}]
+        assert build_matched_columns_map(hits) == {}
+
+    def test_hit_missing_column_is_skipped(self):
+        hits = [{"object_guid": "ws-1"}]
+        assert build_matched_columns_map(hits) == {}
+
+    def test_result_values_are_sorted_lists(self):
+        hits = [
+            {"object_guid": "ws-1", "column": "ZIPCODE"},
+            {"object_guid": "ws-1", "column": "AMOUNT"},
+        ]
+        result = build_matched_columns_map(hits)
+        assert result["ws-1"] == ["AMOUNT", "ZIPCODE"]

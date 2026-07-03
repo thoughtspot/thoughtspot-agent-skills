@@ -5,7 +5,7 @@ Pure functions; consume walker/tml_probes outputs and produce RiskTag values.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 from .schema import DependentEntry, RiskTag
 
@@ -95,3 +95,34 @@ def aggregate_classification(inp: AggregateInputs) -> AggregateResult:
         aggregate=RiskTag(tag=max_tag.tag, reason=max_tag.reason),
         recommendation=_TAG_TO_RECOMMENDATION[max_tag.tag],
     )
+
+
+def build_matched_columns_map(*hit_lists: List[dict]) -> Dict[str, List[str]]:
+    """Map an object's GUID to the sorted column names the deep TML probes matched for it.
+
+    2026-07 audit fix (dependency-manager column-scope filter bug): every
+    ``reason`` string produced by ``classify_dependent`` above is a fixed literal
+    that never names a column, so a filter like "keep dependents whose
+    ``risk.reason`` references the column name" (ts-dependency-manager SKILL.md
+    Step 4) can never match. This function gives callers a field that actually
+    carries the matched column name(s).
+
+    Each hit list is one of the probe families from ``ts_cli.report.tml_probes``
+    (rls/join/ai/alias hits) or the Monitor-alerts probe — all tagged by the
+    caller (``ts_cli.report.build_report``) with an ``object_guid`` key holding
+    the GUID of the TML document the hit was found in (the dependent that
+    referenced the column), alongside the ``column`` key every probe function
+    already returns. Hits missing either key are skipped defensively (e.g. an
+    RLS hit against the source table itself, which is not a "dependent").
+
+    Pure function — no I/O — so it is fully unit-testable without a live probe.
+    """
+    mapping: Dict[str, set] = {}
+    for hits in hit_lists:
+        for hit in hits:
+            guid = hit.get("object_guid")
+            column = hit.get("column")
+            if not guid or not column:
+                continue
+            mapping.setdefault(guid, set()).add(column)
+    return {guid: sorted(cols) for guid, cols in mapping.items()}

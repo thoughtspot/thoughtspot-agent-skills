@@ -40,6 +40,8 @@ def render_text(report: Report) -> str:
             owner = d.owner.display_name if d.owner else "?"
             lines.append(f"  [{d.risk.tag:<6}] {d.type:<14} {d.name}  (guid: {d.guid}, owner: {owner})")
             lines.append(f"           reason: {d.risk.reason}")
+            if d.matched_columns:
+                lines.append(f"           matched columns: {', '.join(d.matched_columns)}")
     lines.append("")
 
     lines.append("Coverage:")
@@ -85,11 +87,14 @@ def render_md(report: Report) -> str:
         lines.append("_(none)_")
     else:
         lines.append("")
-        lines.append("| Risk | Type | Name | GUID | Owner | Reason |")
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("| Risk | Type | Name | GUID | Owner | Matched Columns | Reason |")
+        lines.append("|---|---|---|---|---|---|---|")
         for d in report.dependents:
             owner = d.owner.display_name if d.owner else "—"
-            lines.append(f"| {d.risk.tag} | {d.type} | {d.name} | `{d.guid}` | {owner} | {d.risk.reason} |")
+            cols = ", ".join(d.matched_columns) if d.matched_columns else "—"
+            lines.append(
+                f"| {d.risk.tag} | {d.type} | {d.name} | `{d.guid}` | {owner} | {cols} | {d.risk.reason} |"
+            )
     lines.append("")
 
     lines.append("## Coverage")

@@ -14,11 +14,26 @@ from .schema import (
 )
 from .resolver import resolve_source, SourceUnresolvedError, SourceAmbiguousError
 from .walker import walk_dependents_recursive, row_to_entry
-from .classifier import aggregate_classification, AggregateInputs
+from .classifier import aggregate_classification, AggregateInputs, build_matched_columns_map
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _tag_hits(hits: List[dict], object_guid: Optional[str]) -> List[dict]:
+    """Attach the owning TML document's GUID to each probe hit.
+
+    The per-identifier `putVariableValues`-style doc-header GUID (confirmed by the
+    exportMetadataTML spec: "including the GUID of each object within the headers")
+    lets `build_matched_columns_map` attribute a hit back to the specific dependent
+    that referenced the column, instead of only an aggregate count. Mutates and
+    returns `hits` in place — safe because each hit list is freshly built by the
+    tml_probes call immediately before this is applied.
+    """
+    for hit in hits:
+        hit["object_guid"] = object_guid
+    return hits
 
 
 def _probe_reason(checked: bool, deep_active: bool) -> Optional[str]:
@@ -225,15 +240,21 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
                 if not edoc_str:
                     continue
                 parsed = yaml.safe_load(edoc_str) or {}
-                info_type = ((doc.get("info") or {}).get("type") or "").upper()
-                filename = ((doc.get("info") or {}).get("filename") or "").lower()
+                info = doc.get("info") or {}
+                info_type = (info.get("type") or "").upper()
+                filename = (info.get("filename") or "").lower()
+                doc_guid = info.get("id")
                 if "COLUMN_ALIAS" in info_type or "alias" in filename:
-                    alias_hits.extend(tml_probes.find_alias_column_uses(parsed, target_cols))
+                    alias_hits.extend(_tag_hits(
+                        tml_probes.find_alias_column_uses(parsed, target_cols), doc_guid))
                 if info_type in ("TABLE", "LOGICAL_TABLE"):
-                    rls_hits.extend(tml_probes.find_rls_column_uses(parsed, target_cols))
+                    rls_hits.extend(_tag_hits(
+                        tml_probes.find_rls_column_uses(parsed, target_cols), doc_guid))
                 if info_type in ("MODEL", "LOGICAL_MODEL", "WORKSHEET"):
-                    join_hits.extend(tml_probes.find_join_column_uses(parsed, target_cols))
-                    ai_hits.extend(tml_probes.find_ai_surface_uses(parsed, target_cols))
+                    join_hits.extend(_tag_hits(
+                        tml_probes.find_join_column_uses(parsed, target_cols), doc_guid))
+                    ai_hits.extend(_tag_hits(
+                        tml_probes.find_ai_surface_uses(parsed, target_cols), doc_guid))
         except Exception as exc:
             primary_probe_ok = False
             primary_probe_error = str(exc)
@@ -250,7 +271,9 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
                 for doc in (a_resp.json() or []):
                     parsed = yaml.safe_load((doc.get("edoc") or "")) or {}
                     if "monitor_alert" in parsed:
-                        alert_hits.extend(tml_probes.find_alert_column_uses(parsed, target_cols))
+                        doc_guid = (doc.get("info") or {}).get("id")
+                        alert_hits.extend(_tag_hits(
+                            tml_probes.find_alert_column_uses(parsed, target_cols), doc_guid))
             except Exception as exc:
                 monitor_probe_ok = False
                 monitor_probe_error = str(exc)
@@ -268,6 +291,15 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
         primary_probe_error=primary_probe_error,
         monitor_probe_error=monitor_probe_error,
     )
+
+    # Attribute deep-probe hits back to the specific dependent that referenced the
+    # column (see build_matched_columns_map docstring) — fixes the scope-filter bug
+    # where ts-dependency-manager's Step 4 tried to match on risk.reason text.
+    matched_columns_map = build_matched_columns_map(
+        rls_hits, alert_hits, join_hits, ai_hits, alias_hits,
+    )
+    for dep in dependents:
+        dep.matched_columns = matched_columns_map.get(dep.guid, [])
 
     agg = aggregate_classification(AggregateInputs(
         per_dependent_tags=[d.risk for d in dependents],

@@ -24,6 +24,7 @@ import json
 import re
 import time
 from typing import Optional
+from urllib.parse import quote
 
 import requests
 import yaml
@@ -1308,13 +1309,17 @@ class ThoughtSpotClient:
     ) -> dict:
         """Set a template variable value for one or more orgs (and optionally users).
 
-        POST /api/rest/2.0/template/variables/update-values with
-        ``operation=REPLACE``.
+        POST /api/rest/2.0/template/variables/{identifier}/update-values with
+        ``operation=REPLACE``. Replaces the deprecated batch endpoint
+        POST /api/rest/2.0/template/variables/update-values, removed per the
+        26.4.0.cl deprecation notice (``putVariableValues`` is the documented
+        replacement for ``updateVariableValues``; 2026-07 audit finding 13.1).
 
         Parameters
         ----------
         variable:
-            Identifier (name or GUID) of the variable to set.
+            Identifier (name or GUID) of the variable to set. Goes directly in
+            the URL path — the per-identifier endpoint accepts either form.
         value:
             The value to assign.
         orgs:
@@ -1329,15 +1334,11 @@ class ThoughtSpotClient:
         dict
             API response body, or empty dict if no JSON body returned.
         """
-        scopes = self._build_variable_scopes(orgs=orgs, users=users)
-        body: dict = {
-            "variable_identifier": variable,
-            "operation": "REPLACE",
-            "variable_values": [
-                {"value": value, "scopes": scopes},
-            ],
-        }
-        resp = self.post("/api/rest/2.0/template/variables/update-values", json=body)
+        body = self._build_variable_update_body(value, orgs=orgs, users=users, operation="REPLACE")
+        resp = self.post(
+            f"/api/rest/2.0/template/variables/{quote(variable, safe='')}/update-values",
+            json=body,
+        )
         try:
             return resp.json()
         except Exception:
@@ -1353,8 +1354,8 @@ class ThoughtSpotClient:
     ) -> dict:
         """Remove a template variable value for one or more orgs (and optionally users).
 
-        POST /api/rest/2.0/template/variables/update-values with
-        ``operation=REMOVE``.
+        POST /api/rest/2.0/template/variables/{identifier}/update-values with
+        ``operation=REMOVE``. See ``variables_set`` for the endpoint migration note.
 
         Parameters
         ----------
@@ -1373,46 +1374,70 @@ class ThoughtSpotClient:
         dict
             API response body, or empty dict if no JSON body returned.
         """
-        scopes = self._build_variable_scopes(orgs=orgs, users=users)
-        body: dict = {
-            "variable_identifier": variable,
-            "operation": "REMOVE",
-            "variable_values": [
-                {"value": value, "scopes": scopes},
-            ],
-        }
-        resp = self.post("/api/rest/2.0/template/variables/update-values", json=body)
+        body = self._build_variable_update_body(value, orgs=orgs, users=users, operation="REMOVE")
+        resp = self.post(
+            f"/api/rest/2.0/template/variables/{quote(variable, safe='')}/update-values",
+            json=body,
+        )
         try:
             return resp.json()
         except Exception:
             return {}
 
     @staticmethod
-    def _build_variable_scopes(*, orgs: list, users: Optional[list]) -> list:
-        """Build the scopes list for a variable update-values request.
+    def _build_variable_assignments(*, orgs: list, users: Optional[list], value: str) -> list:
+        """Build the ``variable_assignment[]`` entries for the per-identifier
+        update-values endpoint.
 
         Parameters
         ----------
         orgs:
             List of org identifiers.
         users:
-            Optional list of user identifiers.  When provided, one scope entry
-            is created per (org, user) pair.  When omitted, one org-level entry
-            is created per org.
+            Optional list of user identifiers.  When provided, one assignment
+            entry is created per (org, user) pair.  When omitted, one
+            org-level entry is created per org.
+        value:
+            The value shared by every assignment entry.
 
         Returns
         -------
         list[dict]
-            Scopes list for the ``variable_values[].scopes`` field.
+            Entries for the ``variable_assignment`` field, each carrying its
+            own scope (``org_identifier`` / ``principal_type`` /
+            ``principal_identifier``) plus ``assigned_values``. Verified via
+            ``get-rest-api-reference(apiName="putVariableValues")``.
         """
-        scopes: list = []
+        assignments: list = []
         for org in orgs:
             if users:
                 for user in users:
-                    scopes.append({"org_identifier": org, "user_identifier": user})
+                    assignments.append({
+                        "assigned_values": [value],
+                        "org_identifier": org,
+                        "principal_type": "USER",
+                        "principal_identifier": user,
+                    })
             else:
-                scopes.append({"org_identifier": org})
-        return scopes
+                assignments.append({
+                    "assigned_values": [value],
+                    "org_identifier": org,
+                })
+        return assignments
+
+    @classmethod
+    def _build_variable_update_body(
+        cls, value: str, *, orgs: list, users: Optional[list], operation: str,
+    ) -> dict:
+        """Build the request body for POST .../template/variables/{identifier}/update-values.
+
+        ``operation`` is top-level; the variable identifier itself goes in the
+        URL path, not the body — see ``variables_set`` / ``variables_remove``.
+        """
+        return {
+            "operation": operation,
+            "variable_assignment": cls._build_variable_assignments(orgs=orgs, users=users, value=value),
+        }
 
     # ------------------------------------------------------------------
     # Properties

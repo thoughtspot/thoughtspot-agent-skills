@@ -92,7 +92,9 @@ For source = **TABLE**:
 3. For each Model found, recurse: v2 dependents on the Model — collect Answers, Liveboards, Sets, Feedback (transitive consumers via the Model)
 4. For each Set found, query its own dependents (`type: LOGICAL_COLUMN`) for the Answers/Liveboards consuming it
 5. For each Liveboard, export `--associated` to retrieve attached `monitor_alert` docs
-6. Filter all of the above by whether the affected COLUMN is actually referenced (TML scan)
+6. Filter all of the above by whether the affected COLUMN is actually referenced (TML scan) —
+   surfaced on each dependent as `matched_columns[]` in the `ts metadata report` JSON
+   (2026-07: SKILL.md Step 4's scope filter keys off this field, not `risk.reason` text)
 7. Skipped on this build: CSR (#9) and column_alias (#10) — flag in the impact report's "Not Checked" section
 
 For source = **MODEL**:

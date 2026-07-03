@@ -65,6 +65,13 @@ class DependentEntry:
     owner: Optional[Owner]
     modified_at: Optional[str]
     risk: RiskTag
+    # Column name(s) the deep TML probes (RLS/join/alias/AI-surface/alert) actually
+    # matched for THIS dependent, populated by classifier.build_matched_columns_map.
+    # Fixes the 2026-07 audit finding that ts-dependency-manager's Step 4 scope
+    # filter instructed matching on `risk.reason` text, which never names a column
+    # (classifier.py's reasons are fixed literals) — callers should filter on this
+    # field instead.
+    matched_columns: List[str] = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -77,6 +84,7 @@ class DependentEntry:
             "owner": self.owner.to_dict() if self.owner else None,
             "modified_at": self.modified_at,
             "risk": self.risk.to_dict(),
+            "matched_columns": list(self.matched_columns),
         }
 
 

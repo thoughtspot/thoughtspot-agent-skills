@@ -1274,6 +1274,12 @@ class TestVariablesSearch:
 # ===========================================================================
 
 class TestVariablesSetRemove:
+    """Covers the 2026-07 migration to the per-identifier update-values endpoint
+    (audit finding 13.1) — the deprecated batch endpoint's body shape
+    (variable_identifier / variable_values[].scopes) is gone; the identifier now
+    goes in the URL path and each variable_assignment[] entry carries its own
+    scope (org_identifier / principal_type / principal_identifier)."""
+
     def _ok_resp(self, body=None):
         r = MagicMock()
         r.status_code = 200
@@ -1283,38 +1289,43 @@ class TestVariablesSetRemove:
         return r
 
     def test_variables_set_sends_replace_operation(self, profile_secrets):
-        """variables_set sends operation=REPLACE."""
+        """variables_set sends operation=REPLACE, identifier in the URL path."""
         mock_dbutils, _ = profile_secrets
         client, _ = _make_client(mock_dbutils)
         with patch("requests.request", return_value=self._ok_resp()) as mock_req:
             client.variables_set("timezone", "America/Chicago", orgs=["org-1"])
         body = mock_req.call_args[1]["json"]
         assert body["operation"] == "REPLACE"
-        assert body["variable_identifier"] == "timezone"
+        assert "variable_identifier" not in body
+        url = mock_req.call_args[0][1]
+        assert url.endswith("/api/rest/2.0/template/variables/timezone/update-values")
 
     def test_variables_remove_sends_remove_operation(self, profile_secrets):
-        """variables_remove sends operation=REMOVE."""
+        """variables_remove sends operation=REMOVE, identifier in the URL path."""
         mock_dbutils, _ = profile_secrets
         client, _ = _make_client(mock_dbutils)
         with patch("requests.request", return_value=self._ok_resp()) as mock_req:
             client.variables_remove("timezone", "America/Chicago", orgs=["org-1"])
         body = mock_req.call_args[1]["json"]
         assert body["operation"] == "REMOVE"
+        url = mock_req.call_args[0][1]
+        assert url.endswith("/api/rest/2.0/template/variables/timezone/update-values")
 
     def test_org_level_scope_when_no_users(self, profile_secrets):
-        """variables_set builds org-level scopes when users is not provided."""
+        """variables_set builds org-level assignment entries when users is not provided."""
         mock_dbutils, _ = profile_secrets
         client, _ = _make_client(mock_dbutils)
         with patch("requests.request", return_value=self._ok_resp()) as mock_req:
             client.variables_set("timezone", "UTC", orgs=["org-1", "org-2"])
         body = mock_req.call_args[1]["json"]
-        scopes = body["variable_values"][0]["scopes"]
-        assert len(scopes) == 2
-        assert all("org_identifier" in s for s in scopes)
-        assert all("user_identifier" not in s for s in scopes)
+        assignments = body["variable_assignment"]
+        assert len(assignments) == 2
+        assert all(a["assigned_values"] == ["UTC"] for a in assignments)
+        assert all("org_identifier" in a for a in assignments)
+        assert all("principal_identifier" not in a for a in assignments)
 
     def test_per_user_scopes_when_users_provided(self, profile_secrets):
-        """variables_set builds per-user scopes when users list is provided."""
+        """variables_set builds one assignment entry per (org, user) pair."""
         mock_dbutils, _ = profile_secrets
         client, _ = _make_client(mock_dbutils)
         with patch("requests.request", return_value=self._ok_resp()) as mock_req:
@@ -1324,10 +1335,20 @@ class TestVariablesSetRemove:
                 users=["user-a", "user-b"],
             )
         body = mock_req.call_args[1]["json"]
-        scopes = body["variable_values"][0]["scopes"]
-        assert len(scopes) == 2  # 1 org × 2 users
-        user_ids = {s["user_identifier"] for s in scopes}
+        assignments = body["variable_assignment"]
+        assert len(assignments) == 2  # 1 org × 2 users
+        assert all(a["principal_type"] == "USER" for a in assignments)
+        user_ids = {a["principal_identifier"] for a in assignments}
         assert user_ids == {"user-a", "user-b"}
+
+    def test_identifier_is_url_quoted(self, profile_secrets):
+        """A variable name with spaces/special chars must be URL-encoded in the path."""
+        mock_dbutils, _ = profile_secrets
+        client, _ = _make_client(mock_dbutils)
+        with patch("requests.request", return_value=self._ok_resp()) as mock_req:
+            client.variables_set("my timezone", "UTC", orgs=["org-1"])
+        url = mock_req.call_args[0][1]
+        assert "/template/variables/my%20timezone/update-values" in url
 
 
 # ===========================================================================

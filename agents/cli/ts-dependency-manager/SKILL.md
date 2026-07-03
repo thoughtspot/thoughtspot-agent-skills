@@ -445,7 +445,7 @@ ts metadata report <source-guid> --profile {profile_name} --format json --depth 
 Then parse the JSON. Key fields:
 
 - `source` — `{ "input", "guid", "type", "name", "parent" }`
-- `dependents[]` — flat list, each with `guid / name / type / hops / owner / modified_at / risk{tag,reason}`
+- `dependents[]` — flat list, each with `guid / name / type / hops / owner / modified_at / risk{tag,reason} / matched_columns[]`
 - `coverage[]` — `[{ "type", "checked", "found", "reason?" }, ...]`
 - `classification` — `{ "per_dependent", "aggregate{tag,reason}", "recommendation" }`
 
@@ -453,11 +453,26 @@ Where the skill needs to filter by audit-scope (specific columns vs whole-object
 
 ### Filtering by scope
 
+`matched_columns[]` is the column name(s) the deep TML probes (RLS/join/alias/AI-surface/
+alert) actually matched for that specific dependent — populated by
+`ts_cli.report.classifier.build_matched_columns_map`. Filter on this field, not
+`risk.reason`: every `reason` string is a fixed literal (e.g. "referenced in a join
+condition") that never names a column, so a text match against it can never succeed
+(2026-07 audit finding — dependency-manager column-scope filter bug).
+
 | Scope | Filter applied after parse |
 |---|---|
-| Specific column(s) | Keep dependents whose `risk.reason` references the column name; drop others. |
-| Column set | As above, but check membership against the set's columns. |
+| Specific column(s) | Keep dependents whose `matched_columns` contains the column name; drop others. |
+| Column set | As above, but check `matched_columns` for membership against the set's columns. |
 | Whole object | Keep all dependents. |
+
+Note: `matched_columns` is only populated when the report was walked with a
+column-scoped source (`ts metadata report {table}.{COLUMN}` or a column GUID) — deep
+probes activate only for `LOGICAL_COLUMN` sources (see Step 4's `ts metadata report`
+command). For a Column(s) or Column-set scope, run one `ts metadata report` per target
+column (or pass all of them as separate arguments to get the `{"reports": [...]}`
+multi-source form) rather than a single whole-object report, so each dependent's
+`matched_columns` is actually populated for the column(s) in scope.
 
 ---
 
@@ -583,9 +598,8 @@ If **D** or **M**, show this warning block before continuing:
 
   Deleting a ThoughtSpot object is permanent. The skill will:
     • Take a TML backup before any delete (Step 7 — non-negotiable, always runs)
-    • Call POST /api/rest/2.0/metadata/delete (with explicit type) for each object marked
-      for delete in Step 9. Note: the ts CLI's `metadata delete` command is currently broken
-      — it reports success without actually deleting — so the skill calls v2 directly
+    • Call `ts metadata delete <guid> --type <type>` for each object marked for
+      delete in Step 9 (verified 2026-05-11 to genuinely delete — see Step 9a)
     • Offer rollback by re-importing the backup at Step 11
 
   Important rollback caveats:
@@ -877,7 +891,7 @@ Skipped ({K} not selected):
 
 Backup: {backup_dir}
 Order:  deletes first → updates → source
-Policy: ALL_OR_NONE per object update; v2 /metadata/delete (with explicit type) for deletions
+Policy: ALL_OR_NONE per object update; `ts metadata delete` (with explicit type) for deletions
 
 IMPORTANT: This will modify {F + 1} and DELETE {D} live ThoughtSpot objects.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2170,5 +2184,6 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-07-03 | **Step 4 scope filter now uses `matched_columns[]`.** `ts metadata report`'s dependents now carry a `matched_columns` field (populated by `ts_cli.report.classifier.build_matched_columns_map` from the deep RLS/join/alias/AI-surface/alert probes) — the Step 4 "Filtering by scope" table was filtering on `risk.reason` text, which is always a fixed literal and never names a column, so the filter could never match (2026-07 audit finding). **Step 6b / delete policy line corrected** — both no longer claim `ts metadata delete` "is currently broken" and call raw v2; they now name `ts metadata delete` directly, matching Step 9a (verified 2026-05-11) and removing a stale instruction that could have led an executor to hand-roll a `requests` call. |
 | 1.1.0 | 2026-06-09 | **Repoint: obj_id-based references with fqn fallback.** Step 9 now detects `obj_id` support via `export_options` flags and prefers obj_id-based model_table references over fqn to avoid VERSION_CONFLICT (error 14009) on some TS builds (open-item #23). New `repoint_model()` function handles model_tables obj_id/name/joins/column_id/formula swaps. `repoint_answer()` and `repoint_view()` also support obj_id-first matching. **Backup location prompt** — Step 7 now asks the user where to save backups (current directory, /tmp, or custom path) instead of hardcoding /tmp. Requires ts-cli v0.8.0 (`--include-obj-id`, `--include-obj-id-ref`, `--no-guid` flags). |
 | 1.0.0 | 2026-04-27 | Initial release. Three modes: **Audit** (read-only blast-radius report), **Remove** (drop one or more columns and clean up dependents), **Repoint** (redirect Answers/Liveboards to a different Model/View/Table with column-gap detection). Step 4 dep walk uses the v2 metadata/search dependents API (`ts metadata dependents`) with **alias propagation** — per-Model/View aliases for the target column are extracted at scan time so Answers/Liveboards/Sets that reference renamed columns (e.g. `ZIPCODE` → `Customer Zipcode`) are caught. **STOP-condition** handling for inaccessible dependents (v2 `hasInaccessibleDependents` flag), source-table RLS rules, model-level join conditions referencing the column (open-items.md #4), model-level filters (#12), and chart-axis conflicts. Step 5 impact report drives the Scan Coverage block from the canonical `references/dependency-types.md` status table via `references/build_coverage.py`. Steps 7 / 8 require typed "DELETE" / "ACCEPT INCOMPLETE IMPACT" confirmations and take a TML backup before any change is applied. Step 9 wraps every import with **post-import verification** (`import_and_verify`) — re-exports the TML and confirms the change actually applied, since TS sometimes returns status_code=ERROR while applying the change anyway (open-item #15). **Object-version drift detection** captures `metadata_header.modified` at scan time and aborts the per-object change (or the entire run, if the source drifted) when the timestamp moves between scan and apply. Step 11 supports rollback for both updates and deletes. RENAME mode is intentionally not supported on this build — see the rationale at the top of SKILL.md. |

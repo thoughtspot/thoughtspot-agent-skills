@@ -108,7 +108,7 @@ Token cache cleared for profile 'champ-staging'.
 
 ### `ts metadata search`
 
-Search ThoughtSpot metadata objects.
+Search ThoughtSpot metadata objects (auto-paginated by default).
 
 ```bash
 ts metadata search [OPTIONS]
@@ -126,14 +126,14 @@ ts metadata search [OPTIONS]
 | `--tag` | (none) | Filter by tag name or GUID (repeatable) |
 | `--include-hidden` | false | Include hidden objects |
 | `--include-incomplete` | false | Include incomplete objects |
-| `--limit`, `-l` | 50 | Max results per page |
-| `--offset` | 0 | Pagination offset |
-| `--all` | false | Fetch all pages automatically |
+| `--limit`, `-l` | (none — auto-paginate) | When set, returns a single page of at most this many results starting at `--offset` (legacy behavior). Omit to fetch the full result set. |
+| `--offset` | 0 | Pagination offset (only meaningful together with `--limit`) |
+| `--all` | false | Deprecated no-op — auto-pagination to the full result set is now the default whenever `--limit` is omitted. Kept only so existing callers don't break. |
 
 **Examples:**
 
 ```bash
-# All tables/worksheets/models (default type = LOGICAL_TABLE)
+# All tables/worksheets/models (default type = LOGICAL_TABLE), full result set
 ts metadata search
 
 # Worksheets and models only
@@ -142,14 +142,18 @@ ts metadata search --subtype WORKSHEET
 # Search by name
 ts metadata search --subtype WORKSHEET --name "%sales%"
 
-# Search liveboards, all pages
+# Search liveboards, full result set (--all is accepted but no longer needed)
 ts metadata search --type LIVEBOARD --all
 
 # Find by GUID
 ts metadata search --guid e61c7c4c-68a4-4174-b393-a0104ae3bd00
+
+# Single page only (legacy behavior)
+ts metadata search --type LIVEBOARD --limit 10
 ```
 
-**Output:** JSON array from `POST /api/rest/2.0/metadata/search`
+**Output:** JSON array from `POST /api/rest/2.0/metadata/search` — the full result set
+unless `--limit` is given.
 
 ```json
 [
@@ -711,41 +715,52 @@ these are structured query errors, not transport failures.
 
 ### `ts orgs search`
 
-List/search orgs.
+List/search orgs (auto-paginated by default).
 
 ```bash
-ts orgs search --profile <name> [--status ACTIVE] [--name "%pattern%"] [--limit 200]
+ts orgs search --profile <name> [--status ACTIVE] [--name "%pattern%"] [--limit <n>]
 ```
+
+Omit `--limit` to fetch the full result set (default). Pass `--limit` for the legacy
+single-page behavior (starting at offset 0).
 
 ---
 
 ### `ts users search`
 
-List/search users (by name or email).
+List/search users (by name or email; auto-paginated by default).
 
 ```bash
-ts users search --profile <name> [--name "%pattern%"] [--org <org> ...] [--status ACTIVE] [--limit 20]
+ts users search --profile <name> [--name "%pattern%"] [--org <org> ...] [--status ACTIVE] [--limit <n>]
 ```
+
+Omit `--limit` to fetch the full result set (default). Pass `--limit` for the legacy
+single-page behavior.
 
 ---
 
 ### `ts users groups`
 
-List/search user groups.
+List/search user groups (auto-paginated by default).
 
 ```bash
-ts users groups --profile <name> [--name "%pattern%"] [--org <org> ...] [--include-users] [--limit 20]
+ts users groups --profile <name> [--name "%pattern%"] [--org <org> ...] [--include-users] [--limit <n>]
 ```
+
+Omit `--limit` to fetch the full result set (default). Pass `--limit` for the legacy
+single-page behavior.
 
 ---
 
 ### `ts variables search`
 
-Show template variables and their assigned values (e.g. `ts_user_timezone`).
+Show template variables and their assigned values (e.g. `ts_user_timezone`; auto-paginated).
 
 ```bash
 ts variables search [<variable>] --profile <name>      # omit <variable> for all
 ```
+
+Always returns the full result set across all pages (same pattern as `ts connections list`).
 
 ---
 
@@ -758,6 +773,11 @@ ts variables set <variable> <value> --profile <name> --org <org> [--org ...] [--
 # e.g. ts variables set ts_user_timezone "Australia/Sydney" --profile prod --org Primary
 ```
 
+Uses the per-identifier endpoint `POST /api/rest/2.0/template/variables/{identifier}/update-values`
+(`<variable>` — name or GUID — goes directly in the URL path). This replaced the deprecated
+batch endpoint `POST /api/rest/2.0/template/variables/update-values` (2026-07 audit finding
+13.1) — semantics (REPLACE/ADD/REMOVE/RESET) are unchanged.
+
 ---
 
 ### `ts variables remove`
@@ -767,6 +787,8 @@ Remove a variable value at org and/or user scope (value must match the current a
 ```bash
 ts variables remove <variable> <value> --profile <name> --org <org> [--org ...] [--user <username> ...]
 ```
+
+Uses the same per-identifier endpoint as `ts variables set` (see above).
 
 ---
 
