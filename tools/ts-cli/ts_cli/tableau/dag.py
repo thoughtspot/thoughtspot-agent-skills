@@ -162,7 +162,9 @@ def build_calc_id_map(formulas: list[dict]) -> dict[str, str]:
 # Dependency level computation (must run BEFORE resolve_all_internal_refs)
 # ---------------------------------------------------------------------------
 
-# NOTE: near-duplicate of build_dependency_dag — see BL-069 follow-up
+# NOTE: near-duplicate of build_dependency_dag — evaluated 2026-07-03, kept
+# separate deliberately (different ref universe, unresolvable handling, and
+# return shape). See docs/backlog.md BL-069 follow-ups for the full rationale.
 def build_formula_levels(
     calcs: list[dict],
     calc_map: dict[str, str],

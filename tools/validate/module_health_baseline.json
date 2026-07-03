@@ -1,6 +1,5 @@
 {
   "agents/cli/ts-dependency-manager/references/build_coverage.py::_format_summary": 17,
-  "agents/shared/erd/parser.py::parse_model": 57,
   "tools/ts-cli/ts_cli/audit/__init__.py::_build_ai_analysis": 20,
   "tools/ts-cli/ts_cli/audit/checks_ai.py::check_a5": 21,
   "tools/ts-cli/ts_cli/audit/checks_human.py::check_h3": 24,
