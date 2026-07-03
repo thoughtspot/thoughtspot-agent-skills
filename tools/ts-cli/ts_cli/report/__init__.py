@@ -6,7 +6,7 @@ build_reports([refs])    → multi-source wrapper {"reports": [...]}
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional, Tuple
 
 from ts_cli.client import ThoughtSpotClient, resolve_profile
 from .schema import (
@@ -19,6 +19,156 @@ from .classifier import aggregate_classification, AggregateInputs
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _probe_reason(checked: bool, deep_active: bool) -> Optional[str]:
+    """Reason string for a deep-probe-derived coverage row that isn't checked.
+
+    Two distinct causes collapse into one row-level flag (`checked=False`) but need
+    different explanations: the probe never ran at all for non-column sources
+    (`deep_active=False`), vs. the probe ran but raised (`deep_active=True` — the
+    detail then lives in the report's `warnings` list, not repeated per-row).
+    """
+    if checked:
+        return None
+    if not deep_active:
+        return "deep probes only populate for column sources in v1"
+    return "TML probe failed — see warnings"
+
+
+def _dependent_type_counts(dependents: list) -> dict:
+    """Count dependents by type once, for the static (always-checked) coverage rows."""
+    counts: dict = {}
+    for d in dependents:
+        counts[d.type] = counts.get(d.type, 0) + 1
+    return counts
+
+
+def _static_coverage_rows(dependents: list) -> List[CoverageEntry]:
+    """Coverage rows with no probe dependency — always checked=True."""
+    counts = _dependent_type_counts(dependents)
+    return [
+        CoverageEntry(type="Models / Views / Tables", checked=True, found=counts.get("LOGICAL_TABLE", 0)),
+        CoverageEntry(type="Answers", checked=True, found=counts.get("ANSWER", 0)),
+        CoverageEntry(type="Liveboards", checked=True, found=counts.get("LIVEBOARD", 0)),
+        CoverageEntry(type="Sets / Cohorts", checked=True, found=counts.get("SET", 0)),
+        CoverageEntry(type="Spotter feedback", checked=True, found=counts.get("FEEDBACK", 0)),
+    ]
+
+
+def _deep_probe_coverage_rows(
+    *,
+    rls_hits: list,
+    alert_hits: list,
+    alias_hits: list,
+    join_hits: list,
+    ai_hits: list,
+    deep_active: bool,
+    primary_probe_ok: bool,
+    monitor_probe_ok: bool,
+) -> List[CoverageEntry]:
+    """Coverage rows fed by the two deep-probe families.
+
+    RLS rules / Joins / Spotter AI surface area / Column alias TML all come from the
+    "primary" TML export/parse; Monitor alerts comes from the separate Liveboard TML
+    export. A row is only checked=True when BOTH deep_active (the probe applies to
+    this source type) AND its backing probe's success flag are true.
+    """
+    primary_checked = deep_active and primary_probe_ok
+    alerts_checked = deep_active and monitor_probe_ok
+    return [
+        CoverageEntry(type="RLS rules", checked=primary_checked, found=len(rls_hits),
+                      reason=_probe_reason(primary_checked, deep_active)),
+        CoverageEntry(type="Monitor alerts", checked=alerts_checked, found=len(alert_hits),
+                      reason=_probe_reason(alerts_checked, deep_active)),
+        CoverageEntry(type="Column alias TML", checked=primary_checked, found=len(alias_hits),
+                      reason=_probe_reason(primary_checked, deep_active)),
+        CoverageEntry(type="Joins", checked=primary_checked, found=len(join_hits),
+                      reason=_probe_reason(primary_checked, deep_active)),
+        CoverageEntry(type="Spotter AI surface area", checked=primary_checked, found=len(ai_hits),
+                      reason=_probe_reason(primary_checked, deep_active)),
+    ]
+
+
+def _probe_failure_warnings(
+    *,
+    deep_active: bool,
+    primary_probe_ok: bool,
+    monitor_probe_ok: bool,
+    primary_probe_error: Optional[str],
+    monitor_probe_error: Optional[str],
+) -> List[str]:
+    """Human-readable warnings for each deep-probe family that raised.
+
+    This is the fix for the "probe failure reads as verified absence" defect: a deep
+    probe exception must not leave its coverage row(s) silently reporting
+    `checked=True, found=0` (which ts-dependency-manager reads as "verified: no
+    RLS/alert usage" and uses to green-light destructive removals).
+    """
+    warnings: List[str] = []
+    if deep_active and not primary_probe_ok:
+        detail = f": {primary_probe_error}" if primary_probe_error else ""
+        warnings.append(
+            f"TML probe failed{detail}. Coverage rows for RLS rules, Joins, "
+            "Spotter AI surface area, and Column alias TML are UNVERIFIED "
+            "(checked=False) — found=0 does NOT mean no usage was found, it means "
+            "the probe could not run."
+        )
+    if deep_active and not monitor_probe_ok:
+        detail = f": {monitor_probe_error}" if monitor_probe_error else ""
+        warnings.append(
+            f"Monitor-alert TML probe failed{detail}. The 'Monitor alerts' coverage "
+            "row is UNVERIFIED (checked=False) — found=0 does NOT mean no alerts "
+            "were found, it means the probe could not run."
+        )
+    return warnings
+
+
+def build_coverage(
+    dependents: list,
+    *,
+    rls_hits: list,
+    alert_hits: list,
+    alias_hits: list,
+    join_hits: list,
+    ai_hits: list,
+    deep_active: bool,
+    primary_probe_ok: bool,
+    monitor_probe_ok: bool,
+    primary_probe_error: Optional[str] = None,
+    monitor_probe_error: Optional[str] = None,
+) -> Tuple[List[CoverageEntry], List[str]]:
+    """Build coverage rows + warnings from probe results and per-probe success flags.
+
+    Pure function — no I/O, no network. See _deep_probe_coverage_rows and
+    _probe_failure_warnings for the two probe families (primary TML export vs. the
+    separate Monitor-alerts Liveboard export) and how a failure of either propagates.
+    """
+    warnings = _probe_failure_warnings(
+        deep_active=deep_active,
+        primary_probe_ok=primary_probe_ok,
+        monitor_probe_ok=monitor_probe_ok,
+        primary_probe_error=primary_probe_error,
+        monitor_probe_error=monitor_probe_error,
+    )
+
+    coverage = _static_coverage_rows(dependents)
+    coverage.extend(_deep_probe_coverage_rows(
+        rls_hits=rls_hits,
+        alert_hits=alert_hits,
+        alias_hits=alias_hits,
+        join_hits=join_hits,
+        ai_hits=ai_hits,
+        deep_active=deep_active,
+        primary_probe_ok=primary_probe_ok,
+        monitor_probe_ok=monitor_probe_ok,
+    ))
+    coverage.append(CoverageEntry(type="Column-level sharing (ACLs)", checked=False, found=0,
+                                   informational=True, reason="not implemented in v1"))
+    coverage.append(CoverageEntry(type="CSR (column_security_rules)", checked=False, found=0,
+                                   reason="deferred — cluster feature gate (open-item #9)"))
+
+    return coverage, warnings
 
 
 def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_depth: int = 3) -> dict:
@@ -40,7 +190,12 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
     alert_hits: list = []
     join_hits: list = []
     ai_hits: list = []
-    alias_supported = True
+
+    # Per-probe success — a failed probe must not read as "verified: no usage found".
+    primary_probe_ok = True
+    primary_probe_error: Optional[str] = None
+    monitor_probe_ok = True
+    monitor_probe_error: Optional[str] = None
 
     # Deep probes filter by column name; for table/model sources there is no
     # single target column, so all probe functions return zero hits.  Track
@@ -79,8 +234,9 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
                 if info_type in ("MODEL", "LOGICAL_MODEL", "WORKSHEET"):
                     join_hits.extend(tml_probes.find_join_column_uses(parsed, target_cols))
                     ai_hits.extend(tml_probes.find_ai_surface_uses(parsed, target_cols))
-        except Exception:
-            alias_supported = False
+        except Exception as exc:
+            primary_probe_ok = False
+            primary_probe_error = str(exc)
 
         # Monitor alerts: batch-export TML for all Liveboard dependents.
         lb_guids = [dep.guid for dep in dependents if dep.type == "LIVEBOARD"]
@@ -95,45 +251,23 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
                     parsed = yaml.safe_load((doc.get("edoc") or "")) or {}
                     if "monitor_alert" in parsed:
                         alert_hits.extend(tml_probes.find_alert_column_uses(parsed, target_cols))
-            except Exception:
-                pass
+            except Exception as exc:
+                monitor_probe_ok = False
+                monitor_probe_error = str(exc)
 
-    coverage = [
-        CoverageEntry(type="Models / Views / Tables", checked=True,
-                      found=sum(1 for d in dependents if d.type == "LOGICAL_TABLE")),
-        CoverageEntry(type="Answers", checked=True,
-                      found=sum(1 for d in dependents if d.type == "ANSWER")),
-        CoverageEntry(type="Liveboards", checked=True,
-                      found=sum(1 for d in dependents if d.type == "LIVEBOARD")),
-        CoverageEntry(type="Sets / Cohorts", checked=True,
-                      found=sum(1 for d in dependents if d.type == "SET")),
-        CoverageEntry(type="Spotter feedback", checked=True,
-                      found=sum(1 for d in dependents if d.type == "FEEDBACK")),
-        CoverageEntry(type="RLS rules", checked=deep_active, found=len(rls_hits),
-                      reason=(None if deep_active
-                              else "deep probes only populate for column sources in v1")),
-        CoverageEntry(type="Monitor alerts", checked=deep_active, found=len(alert_hits),
-                      reason=(None if deep_active
-                              else "deep probes only populate for column sources in v1")),
-        CoverageEntry(
-            type="Column alias TML",
-            checked=deep_active and alias_supported,
-            found=len(alias_hits),
-            reason=(None if (deep_active and alias_supported)
-                    else ("requires --with-deep + cluster build 10.13.0+" if deep_active
-                          else "deep probes only populate for column sources in v1")),
-        ),
-        CoverageEntry(type="Joins", checked=deep_active, found=len(join_hits),
-                      reason=(None if deep_active
-                              else "deep probes only populate for column sources in v1")),
-        CoverageEntry(type="Spotter AI surface area", checked=deep_active, found=len(ai_hits),
-                      reason=(None if deep_active
-                              else "deep probes only populate for column sources in v1")),
-        CoverageEntry(type="Column-level sharing (ACLs)", checked=False, found=0,
-                      informational=True, reason="not implemented in v1"),
-        CoverageEntry(type="CSR (column_security_rules)", checked=False, found=0,
-                      reason="deferred — cluster feature gate (open-item #9)"),
-    ]
+    coverage, probe_warnings = build_coverage(
+        dependents,
+        rls_hits=rls_hits,
+        alert_hits=alert_hits,
+        alias_hits=alias_hits,
+        join_hits=join_hits,
+        ai_hits=ai_hits,
+        deep_active=deep_active,
+        primary_probe_ok=primary_probe_ok,
+        monitor_probe_ok=monitor_probe_ok,
+        primary_probe_error=primary_probe_error,
+        monitor_probe_error=monitor_probe_error,
+    )
 
     agg = aggregate_classification(AggregateInputs(
         per_dependent_tags=[d.risk for d in dependents],
@@ -153,7 +287,7 @@ def build_report(source_ref: str, *, profile: str, with_deep: bool = True, max_d
         dependents=dependents,
         coverage=coverage,
         classification=classification,
-        warnings=[],
+        warnings=probe_warnings,
     )
     return report.to_dict()
 

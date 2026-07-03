@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: databricks — 2026-07 (external sweep: confirmed accurate — fields:/dimensions: synonym, window Experimental status, materialization Public Preview, offset 18.1 gate, no SHOW METRIC VIEWS all still hold; no content changes needed) -->
 
 # ThoughtSpot ↔ Databricks Metric View Property Coverage
 

@@ -41,8 +41,12 @@ Semantic View YAML format, and creates it via `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_
 | `description` (column / table / model) | `description` (or `comment='...'` in DDL form) |
 | `ai_context` | `description` — merged with `[TS AI Context]` prefix |
 
-**Key structural rule:** `dimensions`, `time_dimensions`, and `metrics` are nested
-under each `tables[]` entry — they are **not** top-level keys in the semantic view.
+**Key structural rule:** `dimensions`, `time_dimensions`, and per-table `metrics` are
+nested under each `tables[]` entry — they are **not** top-level keys in the semantic
+view. The one exception is root-level `metrics:`, valid only for **derived metrics**
+that combine metrics across multiple tables (this skill does not currently emit
+derived metrics) — see snowflake-schema.md's "Key Structural Rules" and "Derived
+Metrics" sections.
 
 **Key keyword:** Use `metrics`, not `measures`. `measures` is not a valid key and
 will cause a parse error.
@@ -1118,7 +1122,7 @@ If the user selects **FILE**, skip to [Step 12-FILE](#step-12-file-output-yaml-f
 Run all checks from [../../shared/schemas/snowflake-schema.md](../../shared/schemas/snowflake-schema.md).
 Report all failures together before retrying. Key checks:
 
-- [ ] `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries — NOT top-level
+- [ ] `dimensions`, `time_dimensions`, and per-table `metrics` are nested under `tables[]` entries; root-level `metrics:` is valid ONLY for cross-table derived metrics (not currently emitted by this skill) — see snowflake-schema.md
 - [ ] Keyword is `metrics` not `measures` anywhere in the YAML
 - [ ] Field names unique globally across all tables' dimensions, time_dimensions, metrics
 - [ ] All `expr` table prefixes match a `name` in `tables[]`
@@ -1470,6 +1474,7 @@ Apply Steps 11b–12b (checkpoint + verify) from the standard workflow unchanged
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.2 | 2026-07-03 | Snowflake currency corrections: soften the "metrics are never top-level" rule to note the root-level derived-metrics exception (Key Structural Rule #1 in snowflake-schema.md). |
 | 1.2.1 | 2026-06-13 | Add LOD/window metric alias rule (error 010256) to Step 11 checklist; sync to CLI v1.2.2. |
 | 1.2.0 | 2026-05-05 | Add A/B/C mode menu (Step 1.5) and Mode C workflow (update existing Snowflake Semantic View from changed Model) using GET_DDL + CREATE OR REPLACE. |
 | 1.1.0 | 2026-04-28 | Document `first_value` ↔ `desc nulls last` mapping and `properties.synonyms` placement (vs top-level which TS drops). |

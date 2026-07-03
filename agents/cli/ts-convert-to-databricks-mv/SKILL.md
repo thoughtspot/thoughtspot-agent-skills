@@ -51,6 +51,7 @@ Metric View YAML format, and creates it via `CREATE OR REPLACE VIEW ... WITH MET
 | Period filter — current year (`sum_if(diff_years(...)=0,[m])`) | `measures[]` with `window: [{order: year_dim, semiadditive: last, range: current}]` |
 | Period filter — prior year (`sum_if(diff_years(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 year}]` |
 | Rolling window (`moving_sum(m, 7, 0, d)`) | `measures[]` with `window: [{order: date_dim, range: trailing 7 day, semiadditive: last}]` |
+| Rolling window, non-zero look-ahead (`moving_sum(m, W, L, d)` with `L > 0`) | **PENDING LIVE VERIFICATION** — candidate `range: leading N unit`; not yet emitted (see BL-032) |
 | Cumulative (`cumulative_sum(m, d)`) | `measures[]` with `window: [{..., range: cumulative}]` |
 | Conditional aggregate (`sum_if(cond, x)`) | `measures[]` — `expr: SUM(x) FILTER (WHERE cond)` |
 | Conditional aggregate (`unique_count_if(cond, x)`) | `measures[]` — `expr: COUNT(DISTINCT x) FILTER (WHERE cond)` |
@@ -263,20 +264,9 @@ source ~/.zshenv && ts auth whoami --profile {profile_name}
 The CLI handles token caching, Keychain access, and expiry automatically.
 No temp files or manual token management needed in this skill.
 
-If `ts auth whoami` returns 401, the token is expired. Ask the user to refresh it:
-
-```
-Your ThoughtSpot token has expired. To refresh:
-  1. Log into ThoughtSpot in your browser
-  2. Go to Develop → REST Playground 2.0 → Authentication → Get Current User Token
-  3. Click Try it out → Execute, then copy the token value
-  4. Run in your terminal:
-       security delete-generic-password -s "thoughtspot-{slug}" -a "{username}"
-       security add-generic-password -s "thoughtspot-{slug}" -a "{username}" -w "YOUR_TOKEN"
-  5. Let me know when done.
-```
-
-Then clear the stale cache and retry:
+If `ts auth whoami` returns 401, the token is expired. Direct the user to
+`/ts-profile-thoughtspot` (U3 — Refresh Credential) — that section is the canonical,
+cross-platform refresh procedure. Then clear the stale cache and retry:
 
 ```bash
 source ~/.zshenv && ts auth logout --profile {profile_name}
@@ -1170,4 +1160,6 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.2 | 2026-07-03 | Product-currency fix (audit 2026-07-03, finding 13.7): flag ThoughtSpot `moving_sum`/`moving_average` with a non-zero look-ahead argument as PENDING LIVE VERIFICATION (candidate `range: leading N unit` emission) instead of silently falling through the `range: trailing N day` mapping. |
+| 1.0.1 | 2026-07-03 | Replace the inline macOS-only Keychain token-refresh procedure with a pointer to `/ts-profile-thoughtspot` (U3 — Refresh Credential), the canonical cross-platform procedure (audit finding 11.4). |
 | 1.0.0 | 2026-05-22 | Initial release — single conversion mode (Mode A) |

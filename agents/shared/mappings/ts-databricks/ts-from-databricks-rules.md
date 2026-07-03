@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: databricks — 2026-07 (external sweep: widened source-form detection — bare SQL + MV-on-MV fail-loud, using: join translation, leading/all window ranges flagged pending verification; see BL-032) -->
 
 # Reverse Mapping Rules Reference
 
@@ -31,7 +31,9 @@ Parse the result set (columns: `col_name`, `data_type`, `comment`, `metadata`):
 
 The `View Text` value is a YAML string. Parse it to extract:
 - `version` — determines v0.1 (single-source) vs v1.1 (multi-source) path
-- `source` — fully qualified source table name (v0.1)
+- `source` — table FQN, SQL query (parenthesized or bare), or another metric view — see
+  [Source Forms](../../schemas/databricks-metric-view.md#source-forms-verified-2026-07)
+  and the detection rules below (do not assume `source` is always a table FQN)
 - `entities` — list of source tables with aliases (v1.1)
 - `fields` or `dimensions` — list of dimension definitions (`fields:` is the GA-canonical key; `dimensions:` is accepted for backward compat — check `fields` first)
 - `measures` — list of measure definitions
@@ -43,14 +45,32 @@ The `View Text` value is a YAML string. Parse it to extract:
 
 ### Source Table
 
-`source: catalog.schema.table_name` identifies the single source table.
+`source: catalog.schema.table_name` identifies the single source table — but `source:`
+(and `joins[].source`) can take **four forms**; classify before assuming it is a plain
+table FQN (see [Source Forms](../../schemas/databricks-metric-view.md) in the schema
+reference):
 
-1. Extract `catalog`, `schema`, and `table_name` from the FQN
-2. Fetch the table's columns: `DESCRIBE TABLE {source}`
-3. Build a column map: `{column_name: data_type}` for reference during classification
+**Detection order:**
+1. Strip leading/trailing whitespace from the `source:` value.
+2. **SQL query (parenthesized or bare):** does it start with `(SELECT`, `(WITH`,
+   `SELECT `, or `WITH ` (case-insensitive)? → go to "`source:` as SELECT subquery" below.
+   Do not require parentheses — the current YAML reference documents the bare form
+   (`source: SELECT ... FROM ...`, no parens) as valid, and treating a bare SQL source
+   as a table FQN silently produces a Table TML whose measure columns are unqueryable
+   (`METRIC_VIEW_MISSING_MEASURE_FUNCTION`).
+3. **Metric view (MV-on-MV):** otherwise, it looks like an FQN — but an FQN cannot be
+   assumed to be a physical table. Query
+   `system.information_schema.tables WHERE table_type = 'METRIC_VIEW' AND table_catalog = '{catalog}' AND table_schema = '{schema}' AND table_name = '{name}'`
+   for the referenced FQN. If it matches → go to "`source:` as another Metric View
+   (MV-on-MV)" below.
+4. **Table FQN:** otherwise, proceed as a physical table:
+   1. Extract `catalog`, `schema`, and `table_name` from the FQN
+   2. Fetch the table's columns: `DESCRIBE TABLE {source}`
+   3. Build a column map: `{column_name: data_type}` for reference during classification
 
-**`source:` as SELECT subquery:** Some MVs use `source: (SELECT ... FROM ...)` instead
-of a table FQN. Present the subquery to the user and offer:
+**`source:` as SELECT subquery:** Some MVs use a SQL query as `source:` — either
+parenthesized (`source: (SELECT ... FROM ...)`) or bare/unparenthesized
+(`source: SELECT ... FROM ...`). Present the subquery to the user and offer:
 
 ```
 The Metric View source is a SELECT subquery, not a table reference:
@@ -67,6 +87,23 @@ How should this be handled?
 - **T (ThoughtSpot SQL View):** Create a `sql_view` TML with the subquery as `sql_query`, referencing the Databricks connection. The model then references this sql_view instead of a physical table.
 - **M (Map to existing):** Ask for the fully-qualified Unity Catalog object name. Use as the source table.
 - **S (Skip):** Cancel the conversion.
+
+**`source:` as another Metric View (MV-on-MV):** If `source:` (or a `joins[].source`)
+resolves to a Metric View rather than a physical table or SQL query, **fail loud** —
+do not silently treat it as a table FQN. This repo has no verified pattern for
+flattening a chained Metric View into a single ThoughtSpot Model (the upstream MV's
+own dimensions/measures would need to be resolved and merged first, which is a
+judgment call, not a mechanical transform). Stop and report:
+
+```
+The Metric View's source ('{fqn}') is itself a Metric View, not a physical table
+or SQL query. Chained (MV-on-MV) sources are not yet supported by this skill —
+converting '{fqn}' directly first, or flattening the source chain in Databricks,
+are the two ways to proceed. Which would you like to do?
+```
+
+Do not proceed with a Table TML built directly against the upstream MV's name —
+its measure columns require `MEASURE()`/`agg()` to query and are not plain columns.
 
 ### v1.1 Column Metadata → ThoughtSpot Properties
 
@@ -163,6 +200,10 @@ Does the measure have a `window:` section?
         range: cumulative      → cumulative_sum
         range: current + raw date order   → last_value (semi-additive)
         range: current + truncated period → sum_if (period filter)
+        range: leading N day   → PENDING LIVE VERIFICATION (see BL-032) — do not
+                                   guess; flag for manual review
+        range: all              → PENDING LIVE VERIFICATION (see BL-032) — do not
+                                   guess; flag for manual review
         
         For moving_sum/moving_average: strip the outer AGG wrapper from expr
         and translate the inner expression only. SUM(a * b) + trailing 7 day
@@ -429,8 +470,54 @@ model_tables:
 | `rely: { at_most_one_match: true }` | `MANY_TO_ONE` |
 | `cardinality: many_to_one` (Runtime 18.1+) | `MANY_TO_ONE` |
 | `cardinality: one_to_many` (Runtime 18.1+) | `ONE_TO_MANY` |
+| Neither `rely:` nor `cardinality:` present | `MANY_TO_ONE` (spec default) |
 
 When both `rely:` and `cardinality:` are present, `cardinality:` takes precedence.
+
+### `using:` Joins — Shared-Column Shorthand (verified 2026-07)
+
+A join may specify `using: [COL1, COL2, ...]` instead of `"on":` — an array of
+column names present under the **same name** in both the parent (`source` for
+top-level joins, or the parent join's alias for nested joins) and the joined
+table. A join has exactly one of `on:` or `using:` — check for `using:` first if
+`"on":` is absent; do not assume every join has an `on:` clause.
+
+```yaml
+# MV using: join
+joins:
+  - name: orders
+    source: catalog.dm_order
+    using: [ORDER_ID]
+```
+
+Translate `using: [COL]` to the same ThoughtSpot join expression form as `on:`,
+equating the column in both tables:
+
+```yaml
+model_tables:
+  - id: FACT_TABLE
+    name: FACT_TABLE
+    joins:
+      - name: fact_to_orders
+        with: DM_ORDER
+        on: "[FACT_TABLE::ORDER_ID] = [DM_ORDER::ORDER_ID]"
+        type: INNER
+        cardinality: MANY_TO_ONE
+```
+
+For multiple shared columns, AND-join each pair:
+
+```yaml
+# MV: using: [ORDER_ID, REGION_ID]
+# → ThoughtSpot:
+on: "[FACT_TABLE::ORDER_ID] = [DM_ORDER::ORDER_ID] AND [FACT_TABLE::REGION_ID] = [DM_ORDER::REGION_ID]"
+```
+
+Since the column name is identical on both sides of a `using:` join, skip the
+dot-path parsing used for `"on":` expressions (see Column References below) —
+the shared name IS both the parent-side and joined-side physical column name.
+Cardinality (`rely:`/`cardinality:`/default) applies identically regardless of
+whether the join used `on:` or `using:`.
 
 ### Column References in v1.1
 
@@ -466,12 +553,32 @@ Does the window have `range: current`?
                 → last_value ( sum ( [m] ) , query_groups ( ) , { [date] } )
           NO  → Period filter (flow/additive metric)
                 → sum_if ( diff_months/quarters/years ( [date] , today ( ) ) = N , [m] )
-  NO  → Is `range: trailing N day`?
-          YES → Rolling window
+  NO  → Is `range: trailing <N> <unit>`?
+          YES → Rolling look-back window
                 → moving_sum ( [m] , N , 0 , [date] )
   NO  → Is `range: cumulative`?
           YES → cumulative_sum ( [m] , [date] )
+  NO  → Is `range: leading <N> <unit>`? (RECOGNISED, translation PENDING LIVE
+        VERIFICATION — see BL-032)
+          YES → Rolling look-ahead window. Candidate: `moving_sum ( [m] , 0 , N , [date] )`
+                (look_ahead=N, window_size=0) — do NOT ship this without a live
+                round-trip. Flag for manual review / log in Unmapped Report.
+  NO  → Is `range: all`? (RECOGNISED, translation PENDING LIVE VERIFICATION —
+        see BL-032)
+          YES → Unbounded window across the entire partition. No verified
+                ThoughtSpot equivalent — a partition-wide `group_aggregate(...)`
+                (LOD-style) is the leading candidate but is untested against
+                this construct. Flag for manual review / log in Unmapped Report.
 ```
+
+**Anchor-row modifier (`inclusive` | `exclusive`) — PENDING RE-VERIFICATION:**
+`trailing`/`leading` ranges accept an optional `inclusive|exclusive` modifier
+controlling whether the anchor (current) row is included in the window. The
+documented default is `exclusive`. The `trailing N day` ↔
+`moving_sum([m], N, 0, [date])` equivalence in this table was recorded before this
+default was confirmed and needs re-verification against a live instance — see
+BL-032. If an MV explicitly sets `inclusive`, do not assume the mapping above is
+exact until reverified.
 
 **How to identify the `order:` dimension type:**
 - Look up the dimension's `expr` in the MV YAML
@@ -561,6 +668,27 @@ If the measure uses `AVG` instead of `SUM`, use `moving_average` instead of `mov
 | MV window pattern | ThoughtSpot equivalent |
 |---|---|
 | `range: cumulative` | `cumulative_sum ( [m] , [date] )` |
+
+#### Leading Window (`range: leading N unit`) — PENDING LIVE VERIFICATION
+
+`range: leading <N> <unit>` is the look-ahead counterpart to `trailing` (both
+documented in the current YAML reference). No live round-trip has verified the
+ThoughtSpot equivalent. Do not ship a translation without one — log these
+measures in the Unmapped Report and flag for manual review.
+
+| MV window pattern | Candidate ThoughtSpot formula | Status |
+|---|---|---|
+| `range: leading 7 day`, `order: date_dim` | `moving_sum ( [m] , 0 , 7 , [TABLE::date_col] )` (look_ahead=7, window_size=0) | PENDING — see BL-032 |
+
+#### All-Partition Window (`range: all`) — PENDING LIVE VERIFICATION
+
+`range: all` spans the entire partition, unbounded in both directions — not a
+bounded rolling window. No verified ThoughtSpot equivalent exists yet;
+partition-wide `group_aggregate(...)` (the same LOD mechanism used for
+`AGG() OVER (PARTITION BY ...)` dimensions — see
+[ts-databricks-formula-translation.md](ts-databricks-formula-translation.md#level-of-detail-lod-functions-verified-2026-05-25))
+is the leading candidate but is untested against this specific construct. Log
+in the Unmapped Report until verified — see BL-032.
 
 ### Merging Multiple MVs into a Single ThoughtSpot Model
 

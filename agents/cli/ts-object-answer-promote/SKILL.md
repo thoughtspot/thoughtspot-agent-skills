@@ -417,8 +417,8 @@ is a legacy Worksheet (not upgraded), inform the user:
 
 ```
 "{name}" is a legacy Worksheet. This skill promotes formulas to Models only.
-Consider migrating the Worksheet to a Model first using /ts-object-model-builder,
-then re-run this skill.
+Migrate the Worksheet to a Model first (in the ThoughtSpot UI — no skill for
+this exists yet), then re-run this skill.
 ```
 
 Save `{model_guid}` and `{model_name}`.
@@ -896,7 +896,7 @@ To verify, open the Model URL above and check the Columns section for the new fo
 |---|---|
 | `ts auth whoami` returns 401 | Token expired — follow the refresh steps in `/ts-profile-thoughtspot` |
 | Answer TML has no `formulas[]` | Answer may not have custom formulas — see Step 3 |
-| Data source is a Worksheet | Worksheets are legacy — inform user, suggest `/ts-object-model-builder` to migrate first |
+| Data source is a Worksheet | Worksheets are legacy — inform user to migrate it to a Model in the ThoughtSpot UI first (no skill for this yet) |
 | Import returns 403 / UNAUTHORIZED | User lacks edit access on the Model — see Step 6 |
 | Import: `FORMULA is not a valid aggregation type` | `aggregation:` is in a `formulas[]` entry — move it to the matching `columns[]` entry |
 | Import: `duplicate column name` | A promoted formula name conflicts with an existing column — rename or skip it in Step 8 |
@@ -922,6 +922,7 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.2 | 2026-07-03 | Soften phantom `/ts-object-model-builder` recommendation in Step 5 and Error Handling to "no skill for this yet — migrate in the ThoughtSpot UI" (audit finding 1.1 — that skill was never shipped). |
 | 1.2.1 | 2026-06-19 | Resolve open items 4 & 5 as deferred scope — embedded-Liveboard Answers and set/cohort promotion are out of current scope (formulas + parameters only), tracked in BL-039; neither is a shipped-unverified path. Correct the Liveboard-TML reference note (no fallback path exists in Step 2). |
 | 1.2.0 | 2026-04-24 | Add Step 0 session plan with confirmation gate |
 | 1.1.0 | 2026-04-22 | Add parameter promotion (option P in Step 4, duplicate detection, merging) |

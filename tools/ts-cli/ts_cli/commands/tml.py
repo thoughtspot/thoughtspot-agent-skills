@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 import typer
@@ -15,6 +16,23 @@ app = typer.Typer(help="TML export and import commands.")
 
 _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
                                help="Profile name (default: first profile or TS_PROFILE env var)")
+
+_file_option = typer.Option(
+    [], "--file",
+    help=(
+        "Path to a raw TML file to read (repeatable: --file a.tml --file b.tml). "
+        "Reads the file's raw text directly — no JSON-array wrapper needed. "
+        "Mutually exclusive with piped stdin content."
+    ),
+)
+_dir_option = typer.Option(
+    None, "--dir",
+    help=(
+        "Read every .tml/.yaml/.yml/.json file in this directory (non-recursive), "
+        "in sorted-name order, after any --file entries. "
+        "Mutually exclusive with piped stdin content."
+    ),
+)
 
 # Non-printable characters that cause YAML parse errors in ThoughtSpot edoc output.
 # Keeps: tab (09), LF (0A), CR (0D), printable ASCII (20-7E), NEL (85),
@@ -31,6 +49,102 @@ _TML_TYPE_KEYS = frozenset({
 def strip_nonprintable(text: str) -> str:
     """Remove non-printable characters from a TML edoc string before parsing."""
     return _NONPRINTABLE_RE.sub("", text)
+
+
+# Extensions considered by --dir when scanning for TML files (case-insensitive).
+_TML_DIR_EXTENSIONS = (".tml", ".yaml", ".yml", ".json")
+
+
+def collect_tml_paths(files: List[str], directory: Optional[str]) -> List[str]:
+    """Resolve --file / --dir CLI options into an ordered list of file paths.
+
+    --file entries are used verbatim, in the order given. A --dir entry is expanded
+    to every file directly inside that directory (non-recursive) whose extension is
+    one of _TML_DIR_EXTENSIONS, sorted by name for determinism, and appended after
+    the explicit --file entries.
+
+    Only touches the filesystem to list directory contents — never reads file
+    bodies (that's read_tml_texts). Raises SystemExit with a clear message on a
+    missing/invalid --dir, or when --dir matches no files.
+    """
+    paths: List[str] = list(files)
+    if directory:
+        dir_path = Path(directory)
+        if not dir_path.is_dir():
+            raise SystemExit(f"--dir path does not exist or is not a directory: {directory}")
+        matched = sorted(
+            p for p in dir_path.iterdir()
+            if p.is_file() and p.suffix.lower() in _TML_DIR_EXTENSIONS
+        )
+        if not matched:
+            raise SystemExit(
+                f"--dir matched no .tml/.yaml/.yml/.json files: {directory}"
+            )
+        paths.extend(str(p) for p in matched)
+    return paths
+
+
+def read_tml_texts(paths: List[str]) -> List[str]:
+    """Read raw TML text from each path, in order. Raises SystemExit on a missing file."""
+    texts: List[str] = []
+    for raw in paths:
+        p = Path(raw)
+        if not p.is_file():
+            raise SystemExit(f"--file path does not exist or is not a file: {raw}")
+        texts.append(p.read_text())
+    return texts
+
+
+def load_tmls_from_args(files: List[str], directory: Optional[str]) -> List[str]:
+    """Full --file/--dir pipeline: CLI options -> ordered list of raw TML strings."""
+    return read_tml_texts(collect_tml_paths(files, directory))
+
+
+def _stdin_has_piped_content() -> bool:
+    """True if stdin was redirected (piped or from a file) AND actually carries content.
+
+    Consumes stdin when it returns True — callers only invoke this on the --file/--dir
+    path, where the original JSON-array stdin read never happens, so nothing is lost.
+    Skips reading entirely when stdin is a TTY (interactive terminal, nothing piped) so
+    an interactive invocation of --file/--dir never blocks waiting on input.
+    """
+    if sys.stdin.isatty():
+        return False
+    return bool(sys.stdin.read().strip())
+
+
+def load_input_tmls(files: List[str], directory: Optional[str]) -> List[str]:
+    """Resolve the TML input source for `ts tml import` / `ts tml lint`.
+
+    --file/--dir take precedence when given (load_tmls_from_args on the resolved
+    paths). Otherwise, falls back to the original interface: a JSON array of TML
+    strings (or a single JSON string) read from stdin — unchanged from prior
+    versions.
+
+    Combining --file/--dir with piped stdin content is rejected as ambiguous: pick
+    one input mode.
+    """
+    using_file_args = bool(files) or bool(directory)
+    if using_file_args:
+        if _stdin_has_piped_content():
+            raise SystemExit(
+                "Ambiguous input: both --file/--dir and piped stdin content were given.\n"
+                "Use exactly one input mode — stdin (JSON array of TML strings) or "
+                "--file/--dir (raw TML file paths) — not both."
+            )
+        return load_tmls_from_args(files, directory)
+
+    try:
+        payload = json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Invalid JSON on stdin: {e}")
+
+    if isinstance(payload, str):
+        return [payload]
+    elif isinstance(payload, list):
+        return payload
+    else:
+        raise SystemExit("stdin must be a JSON string or array of TML strings.")
 
 
 def detect_tml_type(parsed: dict) -> str:
@@ -203,10 +317,20 @@ def import_tml(
             "create a duplicate with a new GUID instead of updating the original."
         ),
     ),
+    file: List[str] = _file_option,
+    directory: Optional[str] = _dir_option,
 ) -> None:
-    """Import TML objects. Reads a JSON array of TML strings from stdin.
+    """Import TML objects.
 
-    Each element in the array should be a TML string (YAML or JSON).
+    Two input modes (mutually exclusive):
+
+    \b
+    1. --file/--dir: reads raw TML text directly from one or more files.
+       --file is repeatable; --dir imports every .tml/.yaml/.yml/.json file
+       in a directory (non-recursive).
+    2. stdin (default when neither --file nor --dir is given): a JSON array
+       of TML strings (or a single JSON string).
+
     Use PARTIAL policy for tables (tolerates partial failures) and
     ALL_OR_NONE for models (either the whole model works or nothing is created).
 
@@ -220,24 +344,20 @@ def import_tml(
     Examples:
 
     \b
-      # Update an existing model (default behaviour)
+      # Update an existing model from a file (default behaviour)
+      ts tml import --file model.tml --policy ALL_OR_NONE
+
+      # Import every TML file in a directory
+      ts tml import --dir ./tml_out --policy PARTIAL
+
+      # Create a brand-new object from a file with no GUID
+      ts tml import --file model.tml --policy ALL_OR_NONE --create-new
+
+      # Original stdin interface (unchanged)
       python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('model.tml').read_text()]))" \\
         | ts tml import --policy ALL_OR_NONE
-
-      # Create a brand-new object from TML with no GUID
-      echo '["model:\\n  name: ..."]' | ts tml import --policy ALL_OR_NONE --create-new
     """
-    try:
-        payload = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        raise SystemExit(f"Invalid JSON on stdin: {e}")
-
-    if isinstance(payload, str):
-        tmls = [payload]
-    elif isinstance(payload, list):
-        tmls = payload
-    else:
-        raise SystemExit("stdin must be a JSON string or array of TML strings.")
+    tmls = load_input_tmls(file, directory)
 
     client = ThoughtSpotClient(resolve_profile(profile))
     resp = client.post(
@@ -290,29 +410,26 @@ def import_tml(
 
 
 @app.command("lint")
-def lint_tml_cmd() -> None:
+def lint_tml_cmd(
+    file: List[str] = _file_option,
+    directory: Optional[str] = _dir_option,
+) -> None:
     """Lint TML for the model invariants VALIDATE_ONLY does not catch (I1/I2/I4/I5/I8 + guid).
 
-    Reads the SAME stdin format as `ts tml import` — a JSON array of TML strings (or a
-    single string). No ThoughtSpot connection needed; pure local structural check. Run it
-    before import to fail loud on issues the server accepts silently.
+    Reads the SAME input as `ts tml import` — either --file/--dir (raw TML file paths)
+    or, when neither is given, a JSON array of TML strings (or a single string) from
+    stdin. No ThoughtSpot connection needed; pure local structural check. Run it before
+    import to fail loud on issues the server accepts silently.
 
     Output: JSON {"clean": bool, "results": [{index, type, name, findings: [...]}]}.
     Exit code 1 if any document has findings, else 0.
 
+    \b
+      ts tml lint --file model.tml
+      ts tml lint --dir ./tml_out
       cat payload.json | ts tml lint
     """
-    try:
-        payload = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        raise SystemExit(f"Invalid JSON on stdin: {e}")
-
-    if isinstance(payload, str):
-        tmls = [payload]
-    elif isinstance(payload, list):
-        tmls = payload
-    else:
-        raise SystemExit("stdin must be a JSON string or array of TML strings.")
+    tmls = load_input_tmls(file, directory)
 
     from ts_cli.tml_lint import lint_tml
 

@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (variables GA, schema block expanded) -->
+<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions) -->
 
 # Snowflake Semantic View YAML Schema
 
@@ -13,6 +13,20 @@ Step 11 (Validate) to verify the generated YAML is structurally correct.
 name: string                      # Required. Valid Snowflake identifier. No spaces.
                                   # Pattern: ^[A-Za-z_][A-Za-z0-9_]*$
 description: string               # Optional. Human-facing description.
+custom_instructions: string        # Optional. Freeform instruction text passed to Cortex
+                                  # Analyst for all modules (DDL: CUSTOM_INSTRUCTIONS
+                                  # '<text>'). NOT an ON/OFF toggle — a free-text string.
+module_custom_instructions:        # Optional. Per-module override of custom_instructions.
+  sql_generation: string           # Optional. Guidance for SQL generation
+                                  # (DDL: AI_SQL_GENERATION '<text>').
+  question_categorization: string  # Optional. Guidance for question categorization
+                                  # (DDL: AI_QUESTION_CATEGORIZATION '<text>').
+tags:                              # Optional. GA 2026-05-05. Fully-qualified tag name →
+                                  # tag value. Also valid at table, dimension, fact, and
+                                  # metric levels (see those blocks below). Verify with a
+                                  # live SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML round-trip
+                                  # before the converter emits this (BL-031).
+  <db>.<schema>.<tag_name>: value  # Repeatable. Not yet confirmed for time_dimensions.
 
 tables:                           # Required. At least one entry.
 - name: string                    # Alias used in expr fields and relationships.
@@ -25,6 +39,10 @@ tables:                           # Required. At least one entry.
   primary_key:                    # Required on tables that appear as right_table
     columns:                      # in any relationship. List of physical column names.
     - string
+
+  tags:                            # Optional. GA 2026-05-05. Same fully-qualified
+                                  # tag name → value form as the root-level `tags:` above.
+    <db>.<schema>.<tag_name>: value
 
   dimensions:                     # Optional. Nested under the owning table.
   - name: string                  # Unique across ALL dimensions, time_dimensions,
@@ -42,6 +60,9 @@ tables:                           # Required. At least one entry.
     labels:                       # Optional. e.g. [filter] — marks dimension as a filter.
     - string
     cortex_search_service: string # Optional. Links dimension to a Cortex Search service.
+    tags:                          # Optional. GA 2026-05-05. Same fully-qualified
+                                  # tag name → value form as the root-level `tags:`.
+      <db>.<schema>.<tag_name>: value
 
   time_dimensions:                # Optional. Nested under the owning table.
   - name: string                  # Unique across all dimensions, time_dimensions, metrics.
@@ -67,8 +88,11 @@ tables:                           # Required. At least one entry.
     access_modifier: string       # Optional. "private_access" | "public_access"
     labels:                       # Optional.
     - string
-    # tags:                       # TODO: verify — listed in advanced constructs table but
-    #   - string                  # exact YAML syntax not yet confirmed via live round-trip.
+    tags:                          # Optional. GA 2026-05-05. Same fully-qualified
+                                  # tag name → value form as the root-level `tags:`.
+                                  # A live SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML round-trip
+                                  # is still prudent before the converter emits this (BL-031).
+      <db>.<schema>.<tag_name>: value
 
   metrics:                        # Optional. Nested under the owning table.
                                   # NOTE: The keyword is "metrics", NOT "measures".
@@ -87,6 +111,22 @@ tables:                           # Required. At least one entry.
     - string
     using_relationships:          # Optional. Relationship path for cross-table metrics.
     - string
+    tags:                          # Optional. GA 2026-05-05. Same fully-qualified
+                                  # tag name → value form as the root-level `tags:`.
+      <db>.<schema>.<tag_name>: value
+
+  filters:                        # Optional. Standalone named boolean filters for Cortex
+                                  # Analyst — NOT the same as `labels: [filter]` on a
+                                  # dimension/fact (which just tags an existing column).
+                                  # AI-optional: Cortex Analyst decides whether to apply
+                                  # the filter, unlike a ThoughtSpot model-level filter
+                                  # which is always applied. See ts-snowflake-properties.md
+                                  # "Model-Level Filters" for the migration mapping.
+  - name: string                  # Unique across all dimensions/time_dimensions/metrics/filters.
+    synonyms:
+    - string
+    description: string
+    expr: string                  # Boolean SQL expression, e.g. table_alias.STATUS = 'ACTIVE'
 
 relationships:                    # Optional. Defined at the top level (not under tables).
 - name: string                    # Unique relationship name.
@@ -122,10 +162,14 @@ variables:                        # Optional. GA June 2026. Top-level session/bi
 | `range between` | `... range between X and Y` | ✅ now — `relationship_columns[].type` (`asof` / `range`) + `right_range` | Range and ASOF joins supported via type and right_range keys |
 | filter labels | `labels = (filter)` | ✅ now — `labels: [filter]` | Marks a dimension/fact as a filter |
 | `with cortex search service` | on dimensions | ✅ now — `cortex_search_service:` | Links a dimension to a Cortex Search service |
-| `ai_sql_generation` | `ai_sql_generation = 'ON'\|'OFF'` | ✅ now — `ai_sql_generation` | Top-level key; Cortex Analyst SQL generation toggle |
-| `ai_question_categorization` | `ai_question_categorization = 'ON'\|'OFF'` | ✅ now — `ai_question_categorization` | Top-level key; Cortex Analyst question categorization toggle |
+| `CUSTOM_INSTRUCTIONS` | `CUSTOM_INSTRUCTIONS = '<free-text instructions>'` | ✅ now — top-level `custom_instructions` | **Free-text instruction string, NOT an ON/OFF toggle.** Corrected 2026-07: `ai_sql_generation` / `ai_question_categorization` do **not** exist as YAML key names — see the two rows below. |
+| `AI_SQL_GENERATION` | `AI_SQL_GENERATION = '<free-text instructions>'` | ✅ now — `module_custom_instructions.sql_generation` | Free-text instruction string (Jan 12 2026 "custom instructions" release), scoped to SQL generation only |
+| `AI_QUESTION_CATEGORIZATION` | `AI_QUESTION_CATEGORIZATION = '<free-text instructions>'` | ✅ now — `module_custom_instructions.question_categorization` | Free-text instruction string, scoped to question categorization only |
 | `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | ✅ now — `verified_queries[]` | Top-level array; verified queries (→ NLS Feedback TML on the TS side) |
 | `using <relationship>` | on metrics | ✅ — `using_relationships` | Relationship path for cross-table metrics |
+| root-level derived `METRICS` | `METRICS ( alias.NAME as EXPR, ... )` with `table_alias` omitted from the metric name | ✅ now — root-level `metrics:` | Combines per-table metrics **across multiple logical tables** via `using_relationships`; this is the one exception to Key Structural Rule #1 — see "Derived Metrics" below. Not yet emitted by the to-snowflake-sv converter (BL-031). |
+| named standalone `filters` | *(DDL clause not yet verified)* | ✅ now — per-table `filters:` | Standalone boolean filter (name/synonyms/description/expr) used by Cortex Analyst; AI-optional, not always-applied like a ThoughtSpot model-level filter — see ts-snowflake-properties.md "Model-Level Filters" |
+| `tags` (object tagging) | `WITH TAG (fully.qualified.tag = 'value', ...)` | ✅ now — `tags:` at root/table/dimension/fact/metric levels | GA 2026-05-05. Fully-qualified tag name + value. Verify with a live round-trip before the converter emits it (BL-031). |
 
 ### What is NOT supported in YAML
 
@@ -146,8 +190,13 @@ The following fields are **not** part of the YAML schema. Including them causes 
 
 ## Key Structural Rules
 
-1. **Table-scoped fields:** `dimensions`, `time_dimensions`, and `metrics` are nested
-   **under each `tables[]` entry**, not at the top level of the semantic view.
+1. **Table-scoped fields:** `dimensions`, `time_dimensions`, and per-table `metrics`
+   are nested **under each `tables[]` entry**, not at the top level of the semantic
+   view. The one exception is **root-level `metrics:`**, used for **derived metrics**
+   that combine metrics across multiple logical tables (DDL equivalent: a `METRICS`
+   entry with the `table_alias` omitted from the metric name) — see "Derived Metrics"
+   below. A metric scoped to a single table's own columns still belongs in that
+   table's `metrics:` list, not at the root.
 
 2. **`metrics` not `measures`:** The correct keyword is `metrics`. Using `measures`
    causes a parse error.
@@ -164,8 +213,34 @@ The following fields are **not** part of the YAML schema. Including them causes 
 5. **`relationships[]` is top-level**, not nested under tables.
 
 6. **`name` uniqueness** applies globally: no two entries across all
-   `dimensions`, `time_dimensions`, and `metrics` in the entire semantic view
-   may share a `name`.
+   `dimensions`, `time_dimensions`, `metrics` (table-scoped or root-level derived),
+   and `filters` in the entire semantic view may share a `name`.
+
+---
+
+## Derived Metrics (root-level `metrics:`)
+
+A semantic view may declare a **root-level** `metrics:` block — the one legitimate
+exception to Key Structural Rule #1. Root-level metrics combine per-table metrics
+**across multiple logical tables** via `using_relationships`; the DDL equivalent is
+a `METRICS` entry with the `table_alias` omitted from the metric name.
+
+```yaml
+metrics:                              # Root level — cross-table derived metrics only.
+- name: gross_margin_pct
+  synonyms:
+  - "Gross Margin %"
+  description: "Gross margin as a percentage of revenue, spanning two fact tables."
+  expr: (fact_sales.revenue - fact_cost.total_cost) / NULLIF(fact_sales.revenue, 0)
+  using_relationships:
+  - fact_sales_to_fact_cost
+```
+
+Use root-level `metrics:` only when the expression genuinely spans more than one
+table's metrics. A metric scoped to a single table's own columns still belongs in
+that table's `metrics:` list — the normal case under Rule #1. This is newly-possible
+for the to-snowflake-sv direction (e.g. cross-fact ratio formulas could emit as a
+clean derived metric); the converter does not yet emit these (**BL-031**).
 
 ---
 
@@ -232,9 +307,9 @@ Run all checks before calling `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
 
 | Rule | Check |
 |---|---|
-| Unique field names | No two entries across all `dimensions`, `time_dimensions`, `metrics` share a `name` |
+| Unique field names | No two entries across all `dimensions`, `time_dimensions`, `metrics` (table-scoped or root-level derived), and `filters` share a `name` |
 | Valid identifiers | `name` (view + all fields) matches `^[A-Za-z_][A-Za-z0-9_]*$` |
-| Table-scoped fields | `dimensions`, `time_dimensions`, `metrics` are nested under `tables[]` entries, NOT top-level |
+| Table-scoped fields | `dimensions`, `time_dimensions`, and per-table `metrics` are nested under `tables[]` entries; root-level `metrics:` is valid ONLY for cross-table derived metrics (see "Derived Metrics") |
 | Keyword: `metrics` | No `measures` key anywhere in the YAML |
 | Table refs in `expr` | Every `table_alias.column` prefix matches a `name` in `tables[]` |
 | Table refs in relationships | Every `left_table` and `right_table` matches a `name` in `tables[]` |
