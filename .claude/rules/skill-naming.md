@@ -24,7 +24,7 @@ extend the rule with a new one.
 
 | # | Family | Pattern | Semantic | Members |
 |---|---|---|---|---|
-| 1 | `ts-object-*` | `ts-object-{type}-{verb}` | Single-object scoped operation. Third token is the **object type** (model, answer, liveboard, etc.); fourth is the **verb** (promote, builder, coach, etc.). | `ts-object-answer-promote`, `ts-object-model-builder`, `ts-object-model-coach` |
+| 1 | `ts-object-*` | `ts-object-{type}-{verb}` | Single-object scoped operation. Third token is the **object type** (model, answer, liveboard, etc.); fourth is the **verb** (promote, builder, coach, etc.). | `ts-object-answer-promote`, `ts-object-model-coach`, `ts-object-model-builder` *(planned)* |
 | 2 | `ts-profile-*` | `ts-profile-{platform}` | Credential setup for a specific platform. Second token is the platform name. | `ts-profile-thoughtspot`, `ts-profile-snowflake` |
 | 3 | `ts-convert-*` | `ts-convert-{direction}-{format}` | Cross-platform schema conversion. Third token is `to` or `from`; fourth is the target/source format. | `ts-convert-to-snowflake-sv`, `ts-convert-from-snowflake-sv`, `ts-convert-from-tableau` |
 | 4 | `ts-dependency-*` | `ts-dependency-{verb}` | Cross-object dependency-graph operation (walk, rewrite, cleanup). | `ts-dependency-manager` |
@@ -47,8 +47,8 @@ Work top-down through these questions. Stop at the first match.
 The verb describes the operation; the type is the object kind. If the
 "verb" you want to use is actually a noun (`builder`, `coach`), that's
 acceptable when the noun reads naturally as an action — `builder` = "the
-builder skill", `coach` = "coach this Model". Both shipped examples
-(`ts-object-model-builder`, `ts-object-model-coach`) use noun-shaped verbs.
+builder skill", `coach` = "coach this Model". The shipped `ts-object-model-coach`
+and the planned `ts-object-model-builder` both use noun-shaped verbs.
 
 ### 2. Does the skill set up credentials for a platform?
 

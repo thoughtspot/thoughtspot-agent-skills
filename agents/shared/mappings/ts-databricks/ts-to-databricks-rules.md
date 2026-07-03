@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: databricks — 2026-07 (external sweep: window range now 5 values — non-zero look-ahead / range: leading emission flagged pending verification; see BL-032) -->
 
 # Mapping Rules Reference
 
@@ -361,6 +361,14 @@ ThoughtSpot `moving_sum(m, N, 0, d)` maps to `window` with `range: trailing N da
 
 The `order:` dimension should be a date-granularity dimension (daily). The N value
 maps directly to the trailing day count.
+
+**Non-zero look-ahead (`moving_sum([m], W, L, [d])` with `L > 0`) — PENDING LIVE
+VERIFICATION.** The current YAML reference also documents a `range: leading <N> <unit>`
+form (look-ahead window) and an `inclusive|exclusive` anchor-row modifier (default
+`exclusive`) on both `trailing` and `leading`. This skill currently only emits
+`range: trailing N day` (assumes `look_ahead=0`); a ThoughtSpot `moving_sum` with a
+non-zero look-ahead argument has no verified `range: leading` emission yet — flag for
+manual review rather than guessing. See BL-032.
 
 ---
 

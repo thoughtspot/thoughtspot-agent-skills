@@ -71,7 +71,7 @@ both the migrator and the builder emit liveboards the same way (see §8).
 ## 4. Naming & family
 
 **`ts-object-liveboard-builder`** — family 1 `ts-object-{type}-{verb}` (type=`liveboard`,
-verb=`builder`), exactly parallel to the shipped `ts-object-model-builder` and
+verb=`builder`), exactly parallel to the planned `ts-object-model-builder` and the shipped
 `ts-object-model-coach`. No new family needed.
 
 The model-enrichment capability (propose/create new measures) is delivered as a **stage**

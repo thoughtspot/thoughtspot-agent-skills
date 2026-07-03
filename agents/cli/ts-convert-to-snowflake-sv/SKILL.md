@@ -212,20 +212,9 @@ source ~/.zshenv && ts auth whoami --profile {profile_name}
 The CLI handles token caching, Keychain access, and expiry automatically.
 No temp files or manual token management needed in this skill.
 
-If `ts auth whoami` returns 401, the token is expired. Ask the user to refresh it:
-
-```
-Your ThoughtSpot token has expired. To refresh:
-  1. Log into ThoughtSpot in your browser
-  2. Go to Develop → REST Playground 2.0 → Authentication → Get Current User Token
-  3. Click Try it out → Execute, then copy the token value
-  4. Run in your terminal:
-       security delete-generic-password -s "thoughtspot-{slug}" -a "{username}"
-       security add-generic-password -s "thoughtspot-{slug}" -a "{username}" -w "YOUR_TOKEN"
-  5. Let me know when done.
-```
-
-Then clear the stale cache and retry:
+If `ts auth whoami` returns 401, the token is expired. Direct the user to
+`/ts-profile-thoughtspot` (U3 — Refresh Credential) — that section is the canonical,
+cross-platform refresh procedure. Then clear the stale cache and retry:
 
 ```bash
 source ~/.zshenv && ts auth logout --profile {profile_name}
@@ -1436,6 +1425,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.4 | 2026-07-03 | Replace the inline macOS-only Keychain token-refresh procedure with a pointer to `/ts-profile-thoughtspot` (U3 — Refresh Credential), the canonical cross-platform procedure (audit finding 11.4). |
 | 1.2.3 | 2026-06-13 | Fix INFORMATION_SCHEMA case comparison (F12); add join-type drop reporting table to T-RULES. |
 | 1.2.2 | 2026-06-02 | Add Step 11 checklist rule: LOD/window metrics must window over a defined base metric alias (not a raw column — rejected with error 010256); PARTITION BY may use a joined coarser dimension, no denormalization |
 | 1.2.1 | 2026-05-11 | Add `source ~/.zshenv &&` prefix to bare `ts auth logout` in the error-recovery bash block |

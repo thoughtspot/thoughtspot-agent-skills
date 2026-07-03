@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: snowflake — 2026-07 (fiscal-calendar functions: custom_instructions mitigation documented) -->
 
 # Formula Translation Reference — Snowflake
 
@@ -207,9 +207,9 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
 | `year ( [date] )` → `YEAR(date)` | `YEAR(date)` → `year ( [date] )` |
-| `year ( [date] , fiscal )` → **Untranslatable** — fiscal calendar has no Snowflake SV equivalent | — |
+| `year ( [date] , fiscal )` → **Untranslatable at expr level** — see `custom_instructions` mitigation below | — |
 | `quarter_number ( [date] )` → `QUARTER(date)` | `QUARTER(date)` → `quarter_number ( [date] )` |
-| `quarter_number ( [date] , fiscal )` → **Untranslatable** — fiscal calendar | — |
+| `quarter_number ( [date] , fiscal )` → **Untranslatable at expr level** — see `custom_instructions` mitigation below | — |
 | `month ( [date] )` → `MONTH(date)` | `MONTH(date)` → `month ( [date] )` |
 | `day ( [date] )` → `DAY(date)` | `DAY(date)` → `day ( [date] )` |
 | `hour_of_day ( [date] )` → `HOUR(date)` | `HOUR(date)` → `hour_of_day ( [date] )` |
@@ -229,7 +229,26 @@ Note: `DATEDIFF` argument order is reversed — ThoughtSpot uses `(end, start)`,
 Snowflake uses `(part, start, end)`. `DATEADD` argument order also differs —
 ThoughtSpot uses `(date, n)`, Snowflake uses `(part, n, date)`.
 
-**Fiscal calendar functions** (`year([date], fiscal)`, `quarter_number([date], fiscal)`) are **untranslatable** to Snowflake Semantic Views — there is no fiscal calendar parameter in Snowflake SV expressions. Log as untranslatable and omit.
+**Fiscal calendar functions** (`year([date], fiscal)`, `quarter_number([date], fiscal)`)
+remain **untranslatable at the expression level** — there is no fiscal calendar parameter
+in Snowflake SV `expr` syntax. The column's `expr` is still omitted from the YAML.
+
+**Mitigation (do this instead of a bare OMIT):** log the formula in the Unmapped Report
+*and* surface a suggested `custom_instructions` (or `module_custom_instructions.sql_generation`)
+snippet so Cortex Analyst can approximate fiscal-year grouping at the SQL-generation layer.
+This is the spec's own example use case for `custom_instructions` — see
+[snowflake-schema.md](../../schemas/snowflake-schema.md):
+
+```yaml
+custom_instructions: >
+  Always use fiscal year (April-March) for date grouping unless the user
+  explicitly asks for calendar year.
+```
+
+This is a Cortex-Analyst-level mitigation, not an expression-level translation — it
+changes how Cortex Analyst reasons about date grouping in natural-language queries, but
+does not restore a fiscal `expr` for the omitted column. Adjust the month boundary in
+the snippet to match the model's actual fiscal calendar before emitting it.
 
 ---
 
