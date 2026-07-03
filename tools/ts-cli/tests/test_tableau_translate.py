@@ -1032,6 +1032,12 @@ class TestValidateOutput:
         errors = validate_output("DATEADD ( 'fortnight' , 2 , [D] )")
         assert any("DATEADD" in e for e in errors)
 
+    def test_inverse_trig_and_cot_rejected(self):
+        for fn in ("ACOS", "ASIN", "ATAN", "COT"):
+            errors = validate_output(f"{fn} ( [X] )")
+            assert errors, f"{fn} should be rejected as unmapped"
+            assert any(fn in e for e in errors)
+
     def test_untranslated_datetrunc_flagged(self):
         errors = validate_output("DATETRUNC ( 'hour' , [TS] )")
         assert any("DATETRUNC" in e for e in errors)

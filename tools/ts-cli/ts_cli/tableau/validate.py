@@ -31,6 +31,7 @@ _UNMAPPED_FUNCTIONS = [
     "REGEXP_MATCH", "REGEXP_EXTRACT", "REGEXP_EXTRACT_NTH", "REGEXP_REPLACE",
     "MAKEDATE", "MAKETIME", "MAKEDATETIME", "ISDATE",
     "USERNAME", "FULLNAME", "ISUSERNAME", "ISFULLNAME", "USERDOMAIN",
+    "ACOS", "ASIN", "ATAN", "COT",  # inverse trig + COT — translations tracked in BL-072 (needs live degree/radian check)
     "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
 ]
 _UNMAPPED_RE = [
