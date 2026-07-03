@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (parameters updated: Snowflake variables now GA) -->
+<!-- currency: snowflake — 2026-07 (parameters: variables GA; model-level filters downgraded to Partial via named SV filters) -->
 
 # ThoughtSpot → Snowflake Property Coverage
 
@@ -321,10 +321,25 @@ Default time grain (DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY). Snowflake
 
 ### Model-Level Filters (`filters[]`)
 
-**Status: Hard blocker**
+**Status: Partial — named filter emitted, always-applied semantics not preserved**
 
-Default query filters applied to all queries. Options for users:
-- Snowflake row access policy on the underlying table
+Snowflake Semantic Views now define a per-table `filters:` field (`name`, `synonyms`,
+`description`, `expr`) — a standalone boolean filter expression that Cortex Analyst's
+semantic SQL compiler can apply when it decides a natural-language question calls for
+it. See [snowflake-schema.md](../../schemas/snowflake-schema.md) for the YAML shape.
+
+**The semantic gap:** a ThoughtSpot model-level filter is **always applied** to every
+query against the model. A Snowflake named `filters:` entry is **AI-optional** — Cortex
+Analyst chooses whether to invoke it per question. This is a partial mapping, not a 1:1
+translation.
+
+**Migration:** emit the ThoughtSpot filter as a named `filters:` entry on the owning
+table. Then add an Unmapped Report row flagging the always-applied gap (see format
+below) so the reviewer can decide whether a Snowflake row access policy is still needed
+to enforce the filter unconditionally. Options for users who need always-applied
+enforcement:
+- Snowflake row access policy on the underlying table (still the only way to force
+  unconditional enforcement)
 - Wrap the physical table in a view with the filter built in
 - Document and enforce in the BI tool
 
@@ -411,10 +426,10 @@ section that has no entries for the current model.
 |---|---|
 | {name} | {bucket} |
 
-#### Model-Level Filters (not migrated)
-| Column | Operator | Value |
-|---|---|---|
-| {col} | {op} | {val} |
+#### Model-Level Filters (emitted as named `filters:` — AI-optional, not always-applied)
+| Column | Operator | Value | Emitted As |
+|---|---|---|---|
+| {col} | {op} | {val} | `filters.{name}` — note: Cortex Analyst applies this filter only when it judges the question relevant; it is not enforced on every query the way the ThoughtSpot original was |
 
 #### SQL Views Resolved Automatically
 | sql_view Name | sql_query | Resolved To |
@@ -458,3 +473,4 @@ section that has no entries for the current model.
 | Complex SQL views | Add SQL dialect translation for ThoughtSpot-specific syntax to improve portability of complex `sql_query` strings to Snowflake. |
 | Parameters | Snowflake variables are now GA. Build automated mapping from ThoughtSpot `parameters[]` to Snowflake session/bind variables — requires handling list configs, range constraints, and default values. Until then, parameters are logged in the Unmapped Report with Snowflake variables as the recommended manual re-implementation path. |
 | Window / LOD / semi-additive functions | A companion skill could assist interactively with window function rewrites, CTE generation, and semi-additive view creation. |
+| Model-level filters | Standalone `filters:` entries are AI-optional in Cortex Analyst, unlike the always-applied ThoughtSpot original. Automate emission (done) but also surface a prompt at the Step 10 checkpoint asking whether a Snowflake row access policy is additionally required for unconditional enforcement. |
