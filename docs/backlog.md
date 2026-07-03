@@ -1663,6 +1663,15 @@ Folded into this item rather than opened separately:
   `ts snowflake diff`, and codify the to-direction's 17-item manual DDL checklist as
   `ts snowflake lint-ddl` (the from-direction already gates on `ts tml lint`; the
   to-direction self-checks its own just-written DDL).
+  **DONE 2026-07-03 (ts-cli v0.30.0):** both shipped as `ts snowflake diff` and
+  `ts snowflake lint-ddl` (`tools/ts-cli/ts_cli/snowflake_ops.py` + `commands/snowflake.py`).
+  `lint-ddl` covers 6 deterministic checklist items (identifier format, duplicate
+  alias, undeclared table, metric-forward-reference, untranslatable placeholder,
+  unescaped comment quote); the remaining items need aggregation/join-cardinality
+  judgment or a reserved-word list broad enough to risk false positives, and stay
+  manual — see Step 11 in `agents/cli/ts-convert-to-snowflake-sv/SKILL.md`. Both
+  Snowflake SKILL.mds wired up (to: v1.3.0, from: v1.13.0). The remaining phases
+  (1a-4, `build-sv`, shared lint+import procedure) are still open.
 - **`ts snowflake build-sv`** (TS → SV DDL emission — PK clauses, alias-collision wrapper
   views, metric ordering) as the mirror of phase 1c.
 - **Shared lint+import procedure** (audit 11.3): the ~200-line pre-import lint gate +
