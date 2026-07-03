@@ -48,6 +48,7 @@ REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-audit":                                   ["--model-guid"],
     "ts-dependency-manager":                    ["--model-guid"],
     "ts-object-model-coach":                    ["--model-guid"],
+    "ts-object-model-spotql-query":              ["--model-guid", "--spotql"],
     "ts-convert-to-snowflake-sv":               ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-convert-from-snowflake-sv":             ["--sf-profile", "--sv-fqn"],
     "ts-convert-to-databricks-mv":              ["--dbx-profile", "--model-guid"],
@@ -137,8 +138,14 @@ def run(skills: list[str]) -> int:
         # Per-skill profile overrides the default
         skill_profile = skill_cfg.get("ts_profile", profile)
 
-        # Check all required extras are covered
-        missing = [a for a in extra_required if a not in extra_args]
+        # Check all required extras are covered. `extra_args` entries may use either
+        # "--flag value" (two list items) or "--flag=value" (one item) — match on
+        # exact membership OR the "--flag=" prefix so the latter form isn't falsely
+        # reported as missing (a silent SKIP the smoke suite would never surface).
+        missing = [
+            a for a in extra_required
+            if not any(arg == a or arg.startswith(a + "=") for arg in extra_args)
+        ]
         if missing:
             print(f"{label:<{col}} {SKIP}  (needs {', '.join(missing)} — "
                   f"add to tools/smoke-tests/smoke-config.local.json)")

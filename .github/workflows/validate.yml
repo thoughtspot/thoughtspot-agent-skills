@@ -20,8 +20,15 @@ jobs:
 
       - name: Install test/runtime deps
         run: |
-          pip install pytest pyyaml radon
+          pip install pytest pyyaml radon pip-audit
           pip install -e tools/ts-cli
+
+      - name: Dependency vulnerability scan (pip-audit)
+        # Audits the environment just installed above (ts-cli + its runtime deps:
+        # requests, PyYAML, keyring, typer) against the PyPI/OSV advisory database.
+        # Fails the job on any known vulnerability (angle 16.1 — nothing previously
+        # prevented a vulnerable resolution from landing silently).
+        run: pip-audit
 
       - name: Run validators (full-repo mode)
         run: |
@@ -69,4 +76,15 @@ jobs:
             --base "origin/${{ github.base_ref }}"
 
       - name: Run unit + validator tests
-        run: pytest tools/ts-cli/tests/ tools/validate/tests/ -q
+        # Three separate invocations: agents/cli/ts-object-model-erd/tests and
+        # agents/databricks/tests are each their own bare "tests" package
+        # (tests/__init__.py, no distinguishing parent package) — same as
+        # tools/ts-cli/tests. Combining same-named "tests" packages in one pytest
+        # invocation collides on conftest module registration
+        # (ImportPathMismatchError / "Plugin already registered under a different
+        # name"). tools/validate/tests has no __init__.py, so it can safely share
+        # an invocation with tools/ts-cli/tests.
+        run: |
+          pytest tools/ts-cli/tests/ tools/validate/tests/ -q
+          pytest agents/cli/ts-object-model-erd/tests/ -q
+          pytest agents/databricks/tests/ -q

@@ -23,11 +23,36 @@ echo ""
 
 FAILED=0
 
+# ── Python interpreter resolution ───────────────────────────────────────────
+# ts-cli's own floor is Python >=3.10 (tools/ts-cli/pyproject.toml), but some
+# machines only expose an EOL system `python3` (e.g. macOS ships 3.9.6). Prefer
+# the newest 3.10+ interpreter on PATH that actually has this repo's tooling
+# installed — pytest below is a hard requirement with no graceful fallback, so
+# picking a bare interpreter with nothing installed would turn every check into
+# a false FAIL. Fall back to plain `python3` with a warning rather than
+# hard-failing the commit over interpreter selection itself.
+PYTHON_BIN=""
+for _candidate in python3.12 python3.11 python3.10; do
+  if command -v "$_candidate" >/dev/null 2>&1 && "$_candidate" -c "import pytest" >/dev/null 2>&1; then
+    PYTHON_BIN="$_candidate"
+    break
+  fi
+done
+unset _candidate
+
+if [ -z "$PYTHON_BIN" ]; then
+  PYTHON_BIN="python3"
+  echo "Warning: no python3.10+ interpreter with pytest installed found on PATH"
+  echo "  (checked python3.12, python3.11, python3.10). Falling back to '$PYTHON_BIN'"
+  echo "  ($($PYTHON_BIN --version 2>&1)) — ts-cli requires Python >=3.10."
+  echo ""
+fi
+
 run_check() {
   local label="$1"
   local cmd="$2"
   printf "  %-30s " "$label"
-  if output=$(python3 $cmd 2>&1); then
+  if output=$("$PYTHON_BIN" $cmd 2>&1); then
     echo "PASS"
   else
     echo "FAIL"
@@ -87,7 +112,7 @@ fi
 # Step 1: interactively suggest a changelog entry if one is missing (TTY only)
 # Step 2: validate that every staged skill has a changelog entry
 if echo "$STAGED" | grep -q 'SKILL\.md'; then
-  python3 tools/validate/suggest_skill_version.py --root $REPO_ROOT
+  "$PYTHON_BIN" tools/validate/suggest_skill_version.py --root $REPO_ROOT
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
@@ -162,13 +187,13 @@ fi
 # (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.
 # (.claude/rules/repo-audit.md, angle 13.)
 if echo "$STAGED" | grep -qE '^agents/shared/(mappings|schemas)/.*\.md$|^agents/cli/ts-object-model-spotql-query/references/limitations\.md$'; then
-  python3 tools/validate/check_mapping_currency.py --root "$REPO_ROOT" --staged || true
+  "$PYTHON_BIN" tools/validate/check_mapping_currency.py --root "$REPO_ROOT" --staged || true
 fi
 
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
 if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
-  python3 tools/validate/suggest_dependency_types.py --root $REPO_ROOT
+  "$PYTHON_BIN" tools/validate/suggest_dependency_types.py --root $REPO_ROOT
 fi
 
 # Repo changelog — for significant staged changes (new skills, ts-cli bumps, new shared
@@ -176,23 +201,50 @@ fi
 #   1. interactively suggest + auto-insert an entry (TTY only)
 #   2. GATE — fail the commit if no same-day CHANGELOG.md entry exists. Runs in non-TTY too
 #      (CI / agent-driven commits), so the entry can't be silently skipped.
-python3 tools/validate/suggest_repo_changelog.py --root $REPO_ROOT
+"$PYTHON_BIN" tools/validate/suggest_repo_changelog.py --root $REPO_ROOT
 run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root $REPO_ROOT --check"
 
 # Audit freshness — SOFT nudge (never blocks, silent unless due) when an external
 # sweep or a full audit is due by time or by accumulated work (.claude/rules/repo-audit.md).
-python3 tools/validate/check_audit_freshness.py --root "$REPO_ROOT" || true
+"$PYTHON_BIN" tools/validate/check_audit_freshness.py --root "$REPO_ROOT" || true
 
-# Only run unit tests if Python source files are staged
-if echo "$STAGED" | grep -q '\.py$'; then
-  printf "  %-30s " "unit tests"
-  if python3 -m pytest tools/ts-cli/tests/ tools/validate/tests/ -q --tb=short 2>&1 | tail -1 | grep -q "passed"; then
+# Only run unit tests if Python source files are staged.
+#
+# Three separate pytest invocations, not one combined command: ts-object-model-erd/tests
+# and agents/databricks/tests are each their own bare "tests" package (tests/__init__.py
+# with no distinguishing parent package) — same as tools/ts-cli/tests. pytest's conftest
+# module registration collides (ImportPathMismatchError / "Plugin already registered
+# under a different name") if two same-named "tests" packages are collected in a single
+# invocation. tools/validate/tests has no __init__.py, so it can safely share an
+# invocation with tools/ts-cli/tests.
+#
+# Exit code is checked directly — NOT grepped from the summary line. A failing run's
+# "3 failed, 898 passed" text still contains the word "passed", which previously made
+# this gate false-PASS on real failures.
+#
+# PYTHONPATH is pinned to this checkout's own tools/ts-cli so tests import THIS repo's
+# ts_cli, not a stale editable-install copy pointing at a different checkout — matters
+# when running from a git worktree, where `pip install -e` typically points back at the
+# original clone.
+export PYTHONPATH="$REPO_ROOT/tools/ts-cli${PYTHONPATH:+:$PYTHONPATH}"
+
+run_pytest() {
+  local label="$1"
+  shift
+  printf "  %-30s " "$label"
+  if output=$("$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
     echo "PASS"
   else
     echo "FAIL"
-    python3 -m pytest tools/ts-cli/tests/ tools/validate/tests/ -q --tb=short 2>&1 | sed 's/^/    /'
+    echo "$output" | sed 's/^/    /'
     FAILED=$((FAILED + 1))
   fi
+}
+
+if echo "$STAGED" | grep -q '\.py$'; then
+  run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/
+  run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
+  run_pytest "unit tests (databricks)"  agents/databricks/tests/
 fi
 
 echo ""

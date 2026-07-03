@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-check_smoke_tests.py — verify every Claude skill has a smoke test.
+check_smoke_tests.py — verify every Claude skill has a smoke test, and vice versa.
 
-Rule: every directory under agents/cli/ or agents/claude/ that contains a tracked
-SKILL.md must have a corresponding tools/smoke-tests/smoke_<skill_name>.py file
+Forward direction: every directory under agents/cli/ or agents/claude/ that contains a
+tracked SKILL.md must have a corresponding tools/smoke-tests/smoke_<skill_name>.py file
 (also tracked), unless the skill is on the allowlist.
 
 The skill name is normalised: hyphens → underscores. A few skills use an abbreviated
@@ -15,6 +15,13 @@ are skipped:
     mutations to verify automatically without test credentials
   - ts-object-answer-promote — legacy gap; smoke test should be added in a
     follow-up PR. Remove from the allowlist when the smoke test lands.
+
+Reverse direction: every tools/smoke-tests/smoke_*.py file must resolve back to either
+an existing skill directory (by the naming convention above) or a NAME_ALIASES target.
+A smoke file that resolves to neither is orphaned — it provides no real coverage and
+tends to accumulate hardcoded instance/GUID assumptions that silently rot (audit 6.2:
+smoke_ts-metadata-report.py mapped to no skill, hardcoded one dev instance + GUID, and
+was never run by any harness).
 
 Usage:
     python tools/validate/check_smoke_tests.py
@@ -90,6 +97,51 @@ def _candidate_smoke_paths(skill_name: str) -> list[str]:
     return [f"tools/smoke-tests/smoke_{base}.py"]
 
 
+def _find_orphan_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
+    """Return failure messages for tracked smoke_*.py files that resolve to no skill.
+
+    The reverse of the main per-skill loop below: instead of asking "does this skill
+    have a smoke test", ask "does this smoke test belong to a skill". A file that is
+    neither a NAME_ALIASES target nor named after a tracked skill directory (by the
+    smoke_<skill_with_underscores>.py convention) is orphaned.
+    """
+    smoke_dir = repo_root / "tools" / "smoke-tests"
+    if not smoke_dir.is_dir():
+        return []
+
+    alias_targets = set(NAME_ALIASES.values())
+
+    known_skills: set[str] = set()
+    for runtime in ("cli", "claude"):
+        runtime_dir = repo_root / "agents" / runtime
+        if not runtime_dir.is_dir():
+            continue
+        for skill_dir in runtime_dir.iterdir():
+            if skill_dir.is_dir() and f"agents/{runtime}/{skill_dir.name}/SKILL.md" in tracked:
+                known_skills.add(skill_dir.name)
+
+    orphans: list[str] = []
+    for py_file in sorted(smoke_dir.glob("smoke_*.py")):
+        rel = f"tools/smoke-tests/{py_file.name}"
+        if rel not in tracked:
+            continue  # untracked local scratch file — not our concern
+        if rel in alias_targets:
+            continue
+
+        candidate_skill = py_file.stem[len("smoke_"):].replace("_", "-")
+        if candidate_skill in known_skills:
+            continue
+
+        orphans.append(
+            f"FAIL  {rel}  →  resolves to no tracked skill "
+            f"(expected a skill named {candidate_skill!r}) and is not a "
+            f"NAME_ALIASES target. Delete it, fold its assertions into an "
+            f"existing skill's smoke test, or add a NAME_ALIASES entry."
+        )
+
+    return orphans
+
+
 def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[str]]:
     """Return (failures, info_messages)."""
     failures: list[str] = []
@@ -130,6 +182,8 @@ def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[s
                     f"Expected one of: {', '.join(candidates)}"
                 )
 
+    failures.extend(_find_orphan_smoke_tests(repo_root, tracked))
+
     return failures, info
 
 
@@ -151,7 +205,8 @@ def main() -> int:
         for f in failures:
             print(f)
         print()
-        print(f"{len(failures)} skill(s) missing a smoke test.")
+        print(f"{len(failures)} problem(s): skills missing a smoke test, and/or "
+              f"smoke tests resolving to no skill (orphaned).")
         print()
         print("To fix:")
         print("  1. Create tools/smoke-tests/smoke_<skill_name>.py")

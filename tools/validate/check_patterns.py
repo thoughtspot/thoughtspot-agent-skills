@@ -4,11 +4,14 @@ check_patterns.py — detect known anti-patterns in .md and .py files.
 
 Run after any rule or code change to catch regressions before committing.
 
-Patterns detected:
-  1. fqn: adjacent to connection: in TML examples (should be name: only)
-  2. aggregation: inside formulas[] blocks (belongs in columns[] only)
+Patterns detected (each implemented directly in main() below — some need
+context-aware, stateful parsing that a flat per-line regex can't reproduce
+without false positives, so there is no separate declarative registry):
+  1. fqn: inside a connection: block in TML examples (should be name: only)
+  2. aggregation: inside a formulas[] block (belongs in columns[] only)
   3. connection_fqn in Python files (should be connection_name)
   4. %% in Python help strings (should be % — Typer doubles %)
+  5. Direct `requests.*` calls in Claude SKILL.md files (should use the `ts` CLI)
 
 Usage:
     python tools/validate/check_patterns.py
@@ -20,44 +23,6 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple
-
-
-class Pattern(NamedTuple):
-    name: str
-    regex: re.Pattern
-    glob: str          # file glob to search
-    message: str       # human-readable description of what's wrong
-
-
-PATTERNS: list[Pattern] = [
-    Pattern(
-        name="connection-fqn-in-tml",
-        # Looks for fqn: appearing within a few lines after connection:
-        # We check line-by-line and track context
-        regex=re.compile(r'^\s+fqn:\s+'),
-        glob="**/*.md",
-        message="fqn: found — connection blocks in table TML must use name: only, not fqn:",
-    ),
-    Pattern(
-        name="aggregation-in-formulas",
-        regex=re.compile(r'^\s+aggregation:\s+'),
-        glob="**/*.md",
-        message="aggregation: found — this field belongs in columns[] entries, never in formulas[] entries",
-    ),
-    Pattern(
-        name="connection-fqn-in-python",
-        regex=re.compile(r'connection_fqn'),
-        glob="**/*.py",
-        message="connection_fqn found — use connection_name (string display name, not GUID)",
-    ),
-    Pattern(
-        name="double-percent-in-help",
-        regex=re.compile(r'help\s*=\s*["\'].*%%'),
-        glob="**/*.py",
-        message="%% in help string — use % (Typer escapes % automatically; %% shows literally as %% to users)",
-    ),
-]
 
 
 def check_connection_fqn_in_tml(file_path: Path) -> list[tuple[int, str]]:
