@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-03
+- fix: ts-cli v0.27.0 — impact-report deep probes (RLS/Monitor/Joins/Spotter AI surface/Column alias rows) no longer report `checked=True, found=0` when the backing TML export raises; a failed probe now flips the affected row(s) to `checked=False` and surfaces a warning in the report (audit 4.1). `ThoughtSpotClient.request()` now clears the cached token and retries once on a 401 instead of treating a rotated/revoked token as valid for up to 23h (audit 4.2). `ts tml import`/`ts tml lint` gain `--file` (repeatable) and `--dir` (non-recursive) raw-TML-file input, alongside the existing stdin JSON-array interface — makes the `ts tml import --file <path>` command already documented in ts-convert-from-snowflake-sv/ts-convert-from-databricks-mv SKILL.md actually work (audit 11.1)
 - fix: ts-audit v2.4.0 — 3 report bugs: scorecard GUID-matching, false orphans from pagination + associated export
 - chore: bump ts-cli to v0.26.6
 - chore: bump ts-cli to v0.26.5 — ACOS/ASIN/ATAN/COT rejected loudly at translate time (BL-072 partial)

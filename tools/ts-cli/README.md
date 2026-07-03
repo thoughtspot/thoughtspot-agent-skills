@@ -384,13 +384,28 @@ For example, `--fqn --associated` on a model with 3 tables returns 4 objects tot
 
 ### `ts tml import`
 
-Import TML objects. Reads a JSON array of TML strings from stdin.
+Import TML objects. Two input modes — mutually exclusive:
+
+1. **`--file`/`--dir`** — reads raw TML text directly from one or more files.
+   `--file` is repeatable; `--dir` imports every `.tml`/`.yaml`/`.yml`/`.json`
+   file in a directory (non-recursive), in sorted-name order, after any
+   explicit `--file` entries.
+2. **stdin** (default when neither `--file` nor `--dir` is given) — a JSON
+   array of TML strings (or a single JSON string). Unchanged from prior
+   versions.
 
 ```bash
-# Import tables (PARTIAL — best-effort, tolerates partial failures)
-echo '["table:\n  name: ..."]' | ts tml import --policy PARTIAL
+# Import a model from a file (ALL_OR_NONE — atomic, all succeed or nothing is created)
+ts tml import --file model.tml --policy ALL_OR_NONE --profile champ-staging
 
-# Import a model (ALL_OR_NONE — atomic, all succeed or nothing is created)
+# Import multiple files
+ts tml import --file table1.tml --file table2.tml --policy PARTIAL
+
+# Import every TML file in a directory
+ts tml import --dir ./tml_out --policy PARTIAL
+
+# Original stdin interface (unchanged)
+echo '["table:\n  name: ..."]' | ts tml import --policy PARTIAL
 cat tmls.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
 ```
 
@@ -401,12 +416,16 @@ cat tmls.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
 | `--profile`, `-p` | first profile | Profile to use |
 | `--policy` | `PARTIAL` | Import policy, passed through to the API: `PARTIAL`, `ALL_OR_NONE`, `PARTIAL_OBJECT`, or `VALIDATE_ONLY` (dry-run server-side validation) |
 | `--create-new / --no-create-new` | `--no-create-new` | Create new objects. Default updates existing objects only; pass `--create-new` for brand-new TML with no existing GUID |
+| `--file` | none | Path to a raw TML file (repeatable). Mutually exclusive with piped stdin content |
+| `--dir` | none | Import every `.tml`/`.yaml`/`.yml`/`.json` file in this directory (non-recursive). Mutually exclusive with piped stdin content |
 
-**Input (stdin):** JSON array of TML strings, e.g.:
+**Input:** either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON array of TML strings, e.g.:
 
 ```json
 ["table:\n  name: MY_TABLE\n  db: MY_DB\n  ..."]
 ```
+
+Combining `--file`/`--dir` with piped stdin content is rejected as an ambiguous invocation — pick one input mode.
 
 **Output:** JSON from `POST /api/rest/2.0/metadata/tml/import` containing
 per-object status and GUIDs of created/updated objects.
@@ -433,14 +452,27 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
 
 ```bash
-# Lint the same payload you would import
+# Lint a single file
+ts tml lint --file model.tml
+
+# Lint every TML file in a directory
+ts tml lint --dir ./tml_out
+
+# Lint the same payload you would import (original stdin interface)
 cat tmls.json | ts tml lint
 
 # Gate an import on a clean lint
-cat tmls.json | ts tml lint && cat tmls.json | ts tml import --policy ALL_OR_NONE
+ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_NONE
 ```
 
-**Input (stdin):** JSON string or array of TML strings — the same shape `ts tml import` reads.
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--file` | none | Path to a raw TML file (repeatable). Mutually exclusive with piped stdin content |
+| `--dir` | none | Lint every `.tml`/`.yaml`/`.yml`/`.json` file in this directory (non-recursive). Mutually exclusive with piped stdin content |
+
+**Input:** the SAME input as `ts tml import` — either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON string or array of TML strings.
 
 **Output:** JSON `{"clean": bool, "results": [{index, type, name, findings: [...]}]}`.
 **Exit code** is `1` if any document has findings, else `0` — so it composes with `&&`.

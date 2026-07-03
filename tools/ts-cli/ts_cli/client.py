@@ -14,6 +14,13 @@ import requests
 
 PROFILES_PATH = Path.home() / ".claude" / "thoughtspot-profiles.json"
 
+# The token-exchange endpoint itself must never trigger the 401-retry path below —
+# a 401 from auth/token/full is a credential failure, not a stale-cache symptom, and
+# _authenticate() already raises a clear SystemExit for that case. This constant only
+# matters if some future caller ever routes that endpoint through request() instead of
+# calling self._session.post() directly (as _authenticate() does today).
+_AUTH_TOKEN_PATH = "/api/rest/2.0/auth/token/full"
+
 
 def format_http_error(method: str, url: str, resp: "requests.Response") -> str:
     """Build a single-line, secret-free diagnostic for a non-2xx response.
@@ -310,16 +317,36 @@ class ThoughtSpotClient:
         raise_for_status: bool = True,
         **kwargs: Any,
     ) -> requests.Response:
-        headers = kwargs.pop("headers", {})
-        headers.update(self._auth_headers())
+        extra_headers = kwargs.pop("headers", {})
+        timeout = kwargs.pop("timeout", 60)
         url = f"{self._base_url}{path}"
-        resp = self._session.request(
-            method,
-            url,
-            headers=headers,
-            timeout=kwargs.pop("timeout", 60),
-            **kwargs,
-        )
+        allow_401_retry = path != _AUTH_TOKEN_PATH
+
+        retried_401 = False
+        while True:
+            headers = dict(extra_headers)
+            headers.update(self._auth_headers())
+            resp = self._session.request(method, url, headers=headers, timeout=timeout, **kwargs)
+
+            if resp.status_code == 401 and allow_401_retry and not retried_401:
+                # A cached token_env token has no server-verified expiry and is
+                # otherwise treated valid for ~23h (_read_cached_token) — a 401 here
+                # means the token was actually rotated/revoked server-side, not
+                # merely due for a routine refresh. Clear the stale cache; the next
+                # loop pass's _auth_headers() -> get_token() call forces one fresh
+                # authentication. retried_401 bounds this to exactly one retry — if
+                # the fresh token still 401s, fall through and report that failure.
+                print(
+                    f"ThoughtSpot API 401 on {method} {url} — clearing cached token "
+                    "and re-authenticating...",
+                    file=sys.stderr,
+                )
+                self.clear_token_cache()
+                self._token = None
+                retried_401 = True
+                continue
+            break
+
         if raise_for_status and not resp.ok:
             # Central, traceback-free failure path: one diagnostic line on stderr,
             # exit 1. Callers that need the raw status in a 2xx body (e.g. tables
