@@ -287,3 +287,101 @@ def apply_prefix_and_double_agg(
     for f in cleaned_formulas:
         f["expr"] = add_formula_prefix(f["expr"], formula_names, param_names)
         f["expr"] = fix_double_aggregation(f["expr"], formula_exprs)
+
+
+# ---------------------------------------------------------------------------
+# Data-blend graph → join plan (A4-A6)
+# ---------------------------------------------------------------------------
+
+def build_blend_components(blend_graph: dict) -> list[dict]:
+    """Group blended datasources into connected components via BFS.
+
+    ``blend_graph`` is keyed by source datasource caption (see
+    ``extract_blends``): ``{caption: [{"target_ds": caption, ...}]}``.
+    Within each component, the ``primary`` is a node that appears as a
+    source but never as a target (the root of the blend); if no such node
+    exists (e.g. a cycle), falls back to the first member found.
+
+    Returns ``[{"primary": caption, "members": [caption, ...]}]``.
+    """
+    adjacency: dict = {}
+    for src, targets in blend_graph.items():
+        for t in targets:
+            adjacency.setdefault(src, set()).add(t["target_ds"])
+            adjacency.setdefault(t["target_ds"], set()).add(src)
+    all_targets = {t["target_ds"] for edges in blend_graph.values() for t in edges}
+    visited: set = set()
+    groups: list = []
+    for ds_id in adjacency:
+        if ds_id in visited:
+            continue
+        comp: list = []
+        queue = [ds_id]
+        while queue:
+            node = queue.pop(0)
+            if node in visited:
+                continue
+            visited.add(node)
+            comp.append(node)
+            queue.extend(adjacency.get(node, set()) - visited)
+        roots = [d for d in comp if d in blend_graph and d not in all_targets]
+        groups.append({"primary": roots[0] if roots else comp[0], "members": comp})
+    return groups
+
+
+def map_ds_to_tables(datasources: list[dict]) -> dict:
+    """Map each datasource caption to its primary (first) table name.
+
+    ``datasources`` is the ``parse_twb`` output: keyed by caption in each
+    entry's ``name`` field, with the primary table at ``tables[0]["name"]``.
+    A datasource with no tables maps to ``None``.
+    """
+    out: dict = {}
+    for ds in datasources:
+        tables = ds.get("tables") or []
+        out[ds["name"]] = tables[0]["name"] if tables else None
+    return out
+
+
+def derive_blend_joins(component: dict, blend_graph: dict, ds_to_table: dict) -> list[dict]:
+    """Derive model-table joins for every blend edge inside a component.
+
+    Iterates ALL edges among ``component["members"]`` (not just edges from
+    the primary), so star topologies (one primary, multiple secondaries)
+    and transitive chains both produce a join per edge. Edges whose source
+    or target datasource has no mapped table (``ds_to_table``) are skipped.
+
+    Returns ``[{"with", "table", "on", "type": "LEFT_OUTER",
+    "cardinality": "MANY_TO_ONE"}]``.
+    """
+    joins: list = []
+    for member in component["members"]:
+        for tinfo in blend_graph.get(member, []):
+            src_t = ds_to_table.get(member)
+            tgt_t = ds_to_table.get(tinfo["target_ds"])
+            if not src_t or not tgt_t:
+                continue
+            on = " and ".join(
+                f"[{src_t}::{cm['source_col']}] = [{tgt_t}::{cm['target_col']}]"
+                for cm in tinfo["column_mappings"]
+            )
+            joins.append({"with": src_t, "table": tgt_t, "on": on,
+                          "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"})
+    return joins
+
+
+def build_blend_plan(blend_graph: dict, datasources: list[dict]) -> dict:
+    """Assemble the full blend plan: components, table map, and joins.
+
+    Returns ``{"components", "ds_table_map", "joins"}``. An empty
+    ``blend_graph`` (no blends in the workbook) short-circuits to an
+    all-empty plan.
+    """
+    if not blend_graph:
+        return {"components": [], "ds_table_map": {}, "joins": []}
+    ds_to_table = map_ds_to_tables(datasources)
+    components = build_blend_components(blend_graph)
+    joins: list = []
+    for c in components:
+        joins.extend(derive_blend_joins(c, blend_graph, ds_to_table))
+    return {"components": components, "ds_table_map": ds_to_table, "joins": joins}

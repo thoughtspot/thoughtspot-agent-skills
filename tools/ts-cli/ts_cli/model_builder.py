@@ -553,3 +553,23 @@ def split_for_phased_import(
         phases.append(phase)
 
     return phases
+
+
+# ---------------------------------------------------------------------------
+# Re-exports
+# ---------------------------------------------------------------------------
+#
+# ts_cli.tableau.build_model imports add_formula_prefix / build_column_lookup /
+# fix_bare_refs / fix_double_aggregation from THIS module at its own import
+# time, so a plain top-level `from ts_cli.tableau.build_model import
+# build_blend_plan` here creates a genuine two-way circular import (whichever
+# module starts loading first hits the other one mid-initialization, before
+# the needed name is defined). A PEP 562 module `__getattr__` defers the
+# cross-import until first attribute access, by which point both modules
+# have finished loading regardless of which one was imported first.
+
+def __getattr__(name: str):
+    if name == "build_blend_plan":
+        from ts_cli.tableau.build_model import build_blend_plan
+        return build_blend_plan
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
