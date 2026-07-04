@@ -448,3 +448,32 @@ def _tableau_type_to_ts(datatype: str) -> str:
         "datetime": "DATE_TIME",
     }
     return _map.get(datatype, "VARCHAR")
+
+
+def detect_orphan_calcs(datasource: dict) -> list[str]:
+    """Return captions of calcs that reference a table not in this datasource
+    (direct), plus calcs that transitively depend on a direct orphan."""
+    ds_tables = {t["name"].upper() for t in datasource.get("tables", [])}
+    calc_map = datasource.get("calc_map", {})
+    calcs = datasource.get("calculated_fields", [])
+    orphans: set[str] = set()
+
+    for calc in calcs:
+        for ref in re.findall(r"\[([^\]]+)::", calc.get("formula", "")):
+            if ref.upper() not in ds_tables:
+                orphans.add(calc["caption"])
+                break
+
+    changed = True
+    while changed:
+        changed = False
+        for calc in calcs:
+            if calc["caption"] in orphans:
+                continue
+            for internal in re.findall(r"\[Calculation_\d+\]", calc.get("formula", "")):
+                ref_caption = calc_map.get(internal) or calc_map.get(internal.strip("[]"))
+                if ref_caption in orphans:
+                    orphans.add(calc["caption"])
+                    changed = True
+                    break
+    return sorted(orphans)

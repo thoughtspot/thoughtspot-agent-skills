@@ -1,7 +1,11 @@
 # tools/ts-cli/tests/test_twb_extractors.py
 from __future__ import annotations
 import xml.etree.ElementTree as ET
-from ts_cli.tableau.twb import extract_blends, extract_table_calc_addressing
+from ts_cli.tableau.twb import (
+    extract_blends,
+    extract_table_calc_addressing,
+    detect_orphan_calcs,
+)
 
 BLEND_XML = """
 <workbook>
@@ -68,3 +72,21 @@ def test_extract_table_calc_addressing_none():
     root = ET.fromstring("<workbook><worksheet name='S'/></workbook>")
     addr = extract_table_calc_addressing(root)
     assert addr == {"column_level": {}, "ws_overrides": {"S": {}}}
+
+
+def test_detect_orphan_calcs_direct_and_transitive():
+    ds = {
+        "tables": [{"name": "ORDERS", "db_table": "db.s.ORDERS"}],
+        "calc_map": {"Calculation_9": "Ghost Sum", "[Calculation_9]": "Ghost Sum"},
+        "calculated_fields": [
+            {"caption": "Ghost Sum", "formula": "SUM([MISSING::Amount])"},   # direct orphan
+            {"caption": "Depends", "formula": "[Calculation_9] * 2"},         # transitive orphan
+            {"caption": "Fine", "formula": "SUM([ORDERS::Amount])"},          # ok
+        ],
+    }
+    assert detect_orphan_calcs(ds) == ["Depends", "Ghost Sum"]
+
+def test_detect_orphan_calcs_none():
+    ds = {"tables": [{"name": "ORDERS"}], "calc_map": {},
+          "calculated_fields": [{"caption": "Fine", "formula": "SUM([ORDERS::A])"}]}
+    assert detect_orphan_calcs(ds) == []
