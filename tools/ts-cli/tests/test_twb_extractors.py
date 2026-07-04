@@ -1,7 +1,7 @@
 # tools/ts-cli/tests/test_twb_extractors.py
 from __future__ import annotations
 import xml.etree.ElementTree as ET
-from ts_cli.tableau.twb import extract_blends
+from ts_cli.tableau.twb import extract_blends, extract_table_calc_addressing
 
 BLEND_XML = """
 <workbook>
@@ -34,3 +34,37 @@ def test_extract_blends_keys_by_caption_and_resolves_columns():
 def test_extract_blends_absent_returns_empty():
     root = ET.fromstring("<workbook></workbook>")
     assert extract_blends(root) == {}
+
+
+TC_XML = """
+<workbook>
+  <datasource>
+    <column name='[Calculation_1]'>
+      <calculation class='tableau'>
+        <table-calc ordering-type='Rows' type='PctTotal'>
+          <address><value>2</value></address>
+        </table-calc>
+      </calculation>
+    </column>
+  </datasource>
+  <worksheet name='Sheet 1'>
+    <column-instance column='[Calculation_1]'>
+      <table-calc ordering-type='Columns'/>
+    </column-instance>
+  </worksheet>
+</workbook>
+"""
+
+def test_extract_table_calc_addressing_column_and_ws():
+    root = ET.fromstring(TC_XML)
+    addr = extract_table_calc_addressing(root)
+    col = addr["column_level"]["[Calculation_1]"]
+    assert col["ordering_type"] == "Rows"
+    assert col["quick_calc_type"] == "PctTotal"
+    assert col["address_offset"] == 2
+    assert addr["ws_overrides"]["Sheet 1"]["[Calculation_1]"]["ordering_type"] == "Columns"
+
+def test_extract_table_calc_addressing_none():
+    root = ET.fromstring("<workbook><worksheet name='S'/></workbook>")
+    addr = extract_table_calc_addressing(root)
+    assert addr == {"column_level": {}, "ws_overrides": {"S": {}}}

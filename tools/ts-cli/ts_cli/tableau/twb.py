@@ -237,6 +237,48 @@ def extract_blends(root: ET.Element) -> dict:
     return graph
 
 
+def _read_table_calc(tc: ET.Element) -> dict:
+    entry = {
+        "ordering_type": tc.get("ordering-type", "Rows"),
+        "ordering_field": tc.get("ordering-field"),
+        "order_fields": [o.get("field") for o in tc.findall("order")],
+        "quick_calc_type": tc.get("type"),
+        "address_offset": None,
+    }
+    addr = tc.find("address/value")
+    if addr is not None and addr.text:
+        entry["address_offset"] = int(addr.text)
+    return entry
+
+
+def extract_table_calc_addressing(root: ET.Element) -> dict:
+    """Extract column-level and worksheet-override table-calc addressing.
+
+    ws_overrides take precedence over column_level for a given worksheet.
+    """
+    column_level: dict = {}
+    for column in root.findall(".//datasource//column"):
+        calc = column.find("calculation[@class='tableau']")
+        if calc is None:
+            continue
+        tc = calc.find("table-calc")
+        if tc is None:
+            continue
+        column_level[column.get("name")] = _read_table_calc(tc)
+
+    ws_overrides: dict = {}
+    for ws in root.findall(".//worksheet"):
+        ws_name = ws.get("name")
+        ws_overrides[ws_name] = {}
+        for ci in ws.findall(".//column-instance"):
+            tc = ci.find("table-calc")
+            if tc is None:
+                continue
+            ws_overrides[ws_name][ci.get("column")] = _read_table_calc(tc)
+
+    return {"column_level": column_level, "ws_overrides": ws_overrides}
+
+
 def _strip_brackets(s: str) -> str:
     return s.replace("[", "").replace("]", "")
 
