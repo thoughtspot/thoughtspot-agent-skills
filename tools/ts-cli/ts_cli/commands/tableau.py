@@ -514,6 +514,7 @@ def _merge_flow(
     profile: str,
     dry_run: bool,
     max_retries: int,
+    column_name_map: Optional[dict] = None,
 ) -> dict:
     """Merge translated formulas into an existing model and import it."""
     from ts_cli.model_builder import (
@@ -524,6 +525,16 @@ def _merge_flow(
         collect_existing_model_context,
         prepare_formulas_for_merge,
     )
+    from ts_cli.tableau.reconcile import rewrite_formula_refs
+
+    if column_name_map:
+        n_rewritten = rewrite_formula_refs(cleaned_formulas, column_name_map)
+        if n_rewritten:
+            typer.echo(
+                f"  Applied column-name map to {n_rewritten} formulas "
+                f"({len(column_name_map)} mappings)",
+                err=True,
+            )
 
     ctx = collect_existing_model_context(existing_tml)
     formula_dicts, bare_fixed = prepare_formulas_for_merge(cleaned_formulas, ctx)
@@ -814,6 +825,7 @@ def _process_datasource(
             profile=profile,
             dry_run=dry_run,
             max_retries=max_retries,
+            column_name_map=col_name_map,
         )
 
     result = _generate_flow(
