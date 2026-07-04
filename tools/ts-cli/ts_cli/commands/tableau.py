@@ -536,8 +536,17 @@ def _generate_flow(
 
     # Tier-1: strip Custom-SQL suffixes, drop junk, dedupe, and set the table so
     # column_id qualifies (single-table sqlproxy models otherwise emit bare ids).
-    _table_name = ds["tables"][0]["name"] if ds.get("tables") else ""
-    cleaned_cols = clean_columns(cleaned_cols, _table_name)
+    # Only stamp a table onto every column in the single-table case — for
+    # multi-table datasources, columns belong to different tables and
+    # stamping tables[0] on all of them would mis-qualify columns that
+    # actually belong to other tables (worse than the pre-existing bare
+    # column_id, which _build_model_columns's own single_table guard leaves
+    # alone). Multi-table sources have no Custom-SQL suffixes/junk anyway —
+    # that only comes from single-table sqlproxy sources — so leaving
+    # cleaned_cols untouched here is safe.
+    if len(ds.get("tables", [])) == 1:
+        _table_name = ds["tables"][0]["name"]
+        cleaned_cols = clean_columns(cleaned_cols, _table_name)
     for f in cleaned_formulas:
         f["expr"] = strip_suffix_in_expr(f["expr"])
 

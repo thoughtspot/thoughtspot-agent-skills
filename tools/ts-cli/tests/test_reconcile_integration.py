@@ -24,3 +24,16 @@ def test_multi_table_qualification_unchanged():
         joins=[], parameters=[], translated_formulas=[],
     )
     assert tml["model"]["columns"][0]["column_id"] == "A::X"
+
+
+def test_multi_table_unset_column_stays_bare():
+    # multi-table datasource, column with NO "table" key -> must NOT be
+    # qualified against tables[0] ("A"); bare column_id is the correct,
+    # safe behaviour when the table can't be determined.
+    tml = build_model_tml(
+        model_name="M", connection_name="C",
+        tables=[{"name": "A"}, {"name": "B"}],
+        columns=[{"name": "X", "db_column_name": "X", "column_type": "ATTRIBUTE"}],
+        joins=[], parameters=[], translated_formulas=[],
+    )
+    assert tml["model"]["columns"][0]["column_id"] == "X"
