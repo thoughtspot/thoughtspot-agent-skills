@@ -57,3 +57,29 @@ def test_apply_reconciliation_maps_keeps_drops_and_cascades():
     assert {f["name"] for f in kept_formulas} == {"F_ok"}             # F_dropme cascaded out
     assert "ORDER_ID" in report["columns"]
     assert "F_dropme" in report["formulas"]
+
+
+def test_apply_reconciliation_rewrites_renamed_refs():
+    cols = [
+        {"name": "DISCOUNT_RED_DOLLAR", "db_column_name": "DISCOUNT_RED_DOLLAR", "table": "vw", "column_type": "MEASURE"},
+    ]
+    formulas = [
+        {"name": "F_discount", "expr": "sum ( [vw::DISCOUNT_RED_DOLLAR] )", "column_type": "MEASURE"},
+    ]
+    target = {"DM_DISCOUNT_RED_DOLLAR"}
+    kept_cols, kept_formulas, report = apply_reconciliation(
+        cols, formulas, target, {"DISCOUNT_RED_DOLLAR": "DM_DISCOUNT_RED_DOLLAR"})
+    assert {c["db_column_name"] for c in kept_cols} == {"DM_DISCOUNT_RED_DOLLAR"}
+    assert kept_formulas[0]["name"] == "F_discount"
+    assert kept_formulas[0]["expr"] == "sum ( [vw::DM_DISCOUNT_RED_DOLLAR] )"   # rewritten, not dropped
+    assert report["formulas"] == []
+
+
+def test_suggest_rejects_exact_half_jaccard():
+    assert suggest_column_mappings(["TOTAL_TAX_AMOUNT"], {"TOTAL_FEE_AMOUNT"}) == []
+
+
+def test_suggest_tie_is_deterministic():
+    first = suggest_column_mappings(["AMOUNT"], {"DM_AMOUNT", "ZZ_AMOUNT"})
+    second = suggest_column_mappings(["AMOUNT"], {"DM_AMOUNT", "ZZ_AMOUNT"})
+    assert first == second

@@ -46,7 +46,7 @@ def _tokens(s: str) -> set[str]:
 
 
 def suggest_column_mappings(absent: list[str], target: set[str]) -> list[dict]:
-    targets = list(target)
+    targets = sorted(target)
     out: list[dict] = []
     for a in absent:
         au = a.upper()
@@ -62,7 +62,7 @@ def suggest_column_mappings(absent: list[str], target: set[str]) -> list[dict]:
                 score = len(ta & tt) / len(ta | tt) if (ta | tt) else 0.0
             if score > best_score:
                 best, best_score = t, score
-        if best is not None and best_score >= 0.5:
+        if best is not None and best_score > 0.5:
             out.append({"from": a, "to": best, "confidence": round(best_score, 2)})
     return out
 
@@ -72,6 +72,7 @@ def apply_reconciliation(columns: list[dict], formulas: list[dict],
     kept_cols: list[dict] = []
     dropped_cols: list[str] = []
     dropped_col_names: set[str] = set()
+    renamed: dict[str, str] = {}
     for c in columns:
         orig = c.get("db_column_name")
         mapped = name_map.get(orig, orig)
@@ -80,6 +81,8 @@ def apply_reconciliation(columns: list[dict], formulas: list[dict],
             nc["db_column_name"] = mapped
             nc["name"] = mapped if c.get("name") == orig else c.get("name")
             kept_cols.append(nc)
+            if mapped != orig:
+                renamed[orig] = mapped
         else:
             dropped_cols.append(orig)
             dropped_col_names.add(orig)
@@ -92,6 +95,14 @@ def apply_reconciliation(columns: list[dict], formulas: list[dict],
                for dc in dropped_col_names):
             dropped_formulas.append(f["name"])
         else:
-            kept_formulas.append(f)
+            if renamed:
+                for old, new in renamed.items():
+                    expr = re.sub(r"::" + re.escape(old) + r"\b", lambda _m, new=new: "::" + new, expr)
+                    expr = expr.replace("[" + old + "]", "[" + new + "]")
+                nf = dict(f)
+                nf["expr"] = expr
+                kept_formulas.append(nf)
+            else:
+                kept_formulas.append(f)
 
     return kept_cols, kept_formulas, {"columns": dropped_cols, "formulas": dropped_formulas}
