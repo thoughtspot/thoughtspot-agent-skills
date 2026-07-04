@@ -2669,10 +2669,14 @@ should see exactly how every calculated field was translated, and what (if anyth
 will **not** migrate, *before* committing — not discover omissions only in the Step 12
 report afterward. Source each formula's `tier`/`level`/`complexity` from the same
 `ts tableau classify-formulas` output Step A3 uses — never re-derive tiers by hand.
-If this workbook was already audited, reuse that run's `classification.json`.
-Otherwise generate it now, reusing the `classification.json` already built for Step
-5b's `translate-formulas` call as input (a bare list — the classifier accepts either
-shape) and writing tiers to a separate file:
+Step 7 reviews **one model (one datasource) at a time**, so:
+- **Reusing the Step A3 audit run** (`{workbook_name}_classification.json`): that file is
+  **per datasource** — read the `datasources[]` entry whose `name` matches the datasource
+  you're importing, and use *its* `formulas[]`/`tier_counts` (not the top-level workbook
+  totals).
+- **Generating it now** from the `classification.json` already built for Step 5b's
+  `translate-formulas` call (a **bare list** for this one datasource — the classifier
+  accepts either shape) yields a flat `{formulas, tier_counts, translate_stats}`:
 
 ```bash
 ts tableau classify-formulas --input {workdir}/classification.json --output {workdir}/classification_tiers.json
