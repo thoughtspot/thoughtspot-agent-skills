@@ -942,9 +942,10 @@ Each CSV in `data_files` includes a `validation` object:
 ### `ts tableau parse`
 
 Parse a `.twb`/`.twbx` file into structured JSON — tables, columns, joins,
-calculated fields, parameters, the data-blend graph, table-calc addressing, and
-per-datasource orphan-calc detection. This is the Step 3 entry point for the
-`ts-convert-from-tableau` skill: read this JSON instead of hand-parsing the TWB XML.
+calculated fields, parameters, the data-blend graph, a derived blend model-grouping
+plan, table-calc addressing, and per-datasource orphan-calc detection. This is the
+Step 3 entry point for the `ts-convert-from-tableau` skill: read this JSON instead
+of hand-parsing the TWB XML.
 
 ```bash
 ts tableau parse "workbook.twbx" --output parsed.json
@@ -971,6 +972,12 @@ ts tableau parse "workbook.twbx" --output parsed.json
   "parameters": [...],
   "param_map": {...},
   "blends": {"source_ds_caption": [{"target_ds": "...", "column_mappings": [...]}]},
+  "blend_plan": {
+    "components": [{"primary": "...", "members": ["...", "..."]}],
+    "ds_table_map": {"datasource_caption": "TABLE_NAME"},
+    "joins": [{"with": "...", "table": "...", "on": "...", "type": "LEFT_OUTER",
+               "cardinality": "MANY_TO_ONE"}]
+  },
   "table_calc_addressing": {"column_level": {...}, "ws_overrides": {...}}
 }
 ```
@@ -980,7 +987,13 @@ their own datasource, direct + transitive), `blends` (the data-blend graph keyed
 datasource caption), and `table_calc_addressing` (column-level + worksheet-override
 `<table-calc>` sort context) are computed by the pure extractors in
 `ts_cli/tableau/twb.py` (`detect_orphan_calcs`, `extract_blends`,
-`extract_table_calc_addressing`). Stdout is silent; a one-line summary goes to stderr.
+`extract_table_calc_addressing`). `blend_plan` is derived from `blends` +
+`datasources` by `build_blend_plan` (`ts_cli/tableau/build_model.py`) — connected
+components, a datasource→table map, and the flattened join list for every blend
+edge, ready for SKILL.md Step 5b to consume directly instead of re-deriving them by
+hand. An all-empty shape (`{"components": [], "ds_table_map": {}, "joins": []}`) is
+emitted when the workbook has no blends. Stdout is silent; a one-line summary goes
+to stderr.
 
 ---
 

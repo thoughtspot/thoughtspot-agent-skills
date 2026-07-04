@@ -33,3 +33,7 @@ def test_derive_joins_over_all_edges():
 
 def test_build_blend_plan_empty_graph():
     assert build_blend_plan({}, DS) == {"components": [], "ds_table_map": {}, "joins": []}
+
+def test_facade_reexport_resolves_to_same_callable():
+    from ts_cli.model_builder import build_blend_plan as facade_build_blend_plan
+    assert facade_build_blend_plan is build_blend_plan

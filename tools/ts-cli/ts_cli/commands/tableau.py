@@ -115,6 +115,7 @@ def parse_cmd(
     same way ``parse_twb`` does.
     """
     from ts_cli.model_builder import (
+        build_blend_plan,
         detect_orphan_calcs,
         extract_blends,
         extract_table_calc_addressing,
@@ -132,6 +133,7 @@ def parse_cmd(
     parsed["table_calc_addressing"] = extract_table_calc_addressing(root)
     for ds in parsed["datasources"]:
         ds["orphan_calcs"] = detect_orphan_calcs(ds)
+    parsed["blend_plan"] = build_blend_plan(parsed["blends"], parsed["datasources"])
 
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     Path(output_file).write_text(json.dumps(parsed, indent=2))

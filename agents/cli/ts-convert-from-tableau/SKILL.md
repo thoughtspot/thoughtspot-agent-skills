@@ -1538,108 +1538,50 @@ required shape regardless of how the file was produced.
 assembly.** GENERATE mode builds one model per single datasource — it cannot produce the
 merged, multi-datasource model a blend relationship requires (inline cross-datasource
 joins, column-conflict renaming across datasources). **Blend-aware model grouping**
-(requires `blend_graph` from Step 3e):
+(requires `blend_plan` from Step 3e):
 
-When `blend_graph` is non-empty, datasources connected by blend relationships produce a
-**single merged model** instead of separate models, assembled by hand as described in this
-section. The merge procedure:
+`ts tableau parse` emits a `blend_plan`: `components` (each `{primary, members}`),
+`ds_table_map` (datasource caption → ThoughtSpot table name), and `joins`
+(`{with, table, on, type, cardinality}`). Use these directly — one model per
+component, joins as given. The cardinality is a `MANY_TO_ONE` default; confirm it
+in the Step 7 review. (TML file assembly from `blend_plan` is still done here per
+the template below — see the deferred follow-up to codify emission.) When
+`blend_plan["components"]` is non-empty, datasources connected by blend relationships
+produce a **single merged model** instead of separate models, assembled by hand as
+described below.
 
-1. **Build connected components** from `blend_graph`. Each connected component (a primary
-   datasource and all its direct or transitive secondaries) becomes one model. Use the
-   primary datasource's display name as the model name.
+The merge procedure:
 
-   ```python
-   # Build undirected adjacency from blend_graph for connected-component discovery
-   adjacency = {}
-   for src, targets in blend_graph.items():
-       for t in targets:
-           adjacency.setdefault(src, set()).add(t['target_ds'])
-           adjacency.setdefault(t['target_ds'], set()).add(src)
-
-   visited = set()
-   model_groups = []  # each group: {'primary': ds_id, 'members': [ds_id, ...]}
-
-   for ds_id in adjacency:
-       if ds_id in visited:
-           continue
-       # BFS to find connected component
-       component = []
-       queue = [ds_id]
-       while queue:
-           node = queue.pop(0)
-           if node in visited:
-               continue
-           visited.add(node)
-           component.append(node)
-           queue.extend(adjacency.get(node, set()) - visited)
-
-       # Primary = a datasource that appears as `source` but NEVER as any `target`
-       all_targets = {t['target_ds'] for edges in blend_graph.values() for t in edges}
-       roots = [d for d in component if d in blend_graph and d not in all_targets]
-       primary = roots[0] if roots else component[0]
-       model_groups.append({'primary': primary, 'members': component})
-   ```
-
-2. **Build the datasource → table mapping.** Each Tableau datasource has a primary physical
-   table (the first `<relation>` element or the relation named in the `<datasource>` caption).
-   Map each datasource's federated ID to its ThoughtSpot Table TML `name` from Step 5a. Also
-   map each federated ID to its Tableau `caption` attribute (the display name shown in Tableau).
-
-   ```python
-   ds_id_to_table = {}    # federated.xxx → ThoughtSpot table name (from Step 5a)
-   ds_id_to_caption = {}  # federated.xxx → Tableau datasource display name
-   for ds_id, ds_info in datasources.items():
-       ds_id_to_table[ds_id] = ds_info['primary_table_name']   # TS table name
-       ds_id_to_caption[ds_id] = ds_info['caption']             # Tableau caption
-   ```
+1. **One model per component.** For each entry in `blend_plan["components"]`, generate a
+   single model TML named after that entry's `primary` datasource's display name,
+   containing:
+   - All `model_tables[]` entries from every member datasource (tables + SQL views),
+     resolved via `blend_plan["ds_table_map"]`
+   - All `columns[]` from every member datasource (with `column_id` prefixed by the
+     correct table name: `TABLE_NAME::col_name`)
+   - All `formulas[]` from every member datasource
+   - The joins from `blend_plan["joins"]` whose `table` belongs to this component
+     (see next step)
 
    For multi-table datasources (internal joins within one datasource), the blend link
    column determines which table is the join anchor. Resolve the link column from Step 3e
    to its owning table via the column-to-table mapping already built in Step 3b.
 
-3. **For each model group**, generate a single model TML that contains:
-   - All `model_tables[]` entries from every member datasource (tables + SQL views)
-   - All `columns[]` from every member datasource (with `column_id` prefixed by the
-     correct table name: `TABLE_NAME::col_name`)
-   - All `formulas[]` from every member datasource
-   - **Inline joins** derived from `blend_graph` column mappings (see below)
+2. **Apply the blend joins as given.** `blend_plan["joins"]` already covers every blend
+   edge across every component — star topologies (one primary, multiple secondaries) and
+   transitive chains alike, not just edges from the primary. Append each join
+   (`{with, table, on, type, cardinality}`) to the `model_tables[]` entry named by the
+   join's `table`, in the shape the Template below shows.
 
-4. **Generate blend joins** — iterate ALL edges in the connected component, not just
-   the primary's. This handles star topologies (A→B, A→C) and transitive blends (A→B, B→C):
+   **Cardinality heuristic:** `blend_plan` always emits `MANY_TO_ONE`. If the secondary
+   datasource has no dimension-only columns (all columns are measures or aggregated), it
+   is likely a fact table → override to `MANY_TO_MANY`. Surface the choice in the review
+   checkpoint (Step 7) so the user can confirm or override.
 
-   ```python
-   for member_ds in model_group['members']:
-       for target_info in blend_graph.get(member_ds, []):
-           target_ds = target_info['target_ds']
-           col_maps = target_info['column_mappings']
-
-           src_table = ds_id_to_table[member_ds]
-           tgt_table = ds_id_to_table[target_ds]
-
-           on_parts = []
-           for cm in col_maps:
-               on_parts.append(f"[{src_table}::{cm['source_col']}] = [{tgt_table}::{cm['target_col']}]")
-           on_clause = " and ".join(on_parts)
-
-           # Append join to the TARGET table's model_tables entry (secondary joins to source)
-           target_model_table = model_tables_by_name[tgt_table]
-           target_model_table.setdefault('joins', []).append({
-               'with': src_table,
-               'on': on_clause,
-               'type': 'LEFT_OUTER',
-               'cardinality': 'MANY_TO_ONE',
-           })
-   ```
-
-   **Cardinality heuristic:** if the secondary datasource has no dimension-only columns
-   (all columns are measures or aggregated), it is likely a fact table → use `MANY_TO_MANY`.
-   Otherwise default to `MANY_TO_ONE`. Surface the choice in the review checkpoint (Step 7)
-   so the user can override.
-
-5. **Datasources not in any blend** are not part of this hand-assembly procedure at all —
+3. **Datasources not in any blend** are not part of this hand-assembly procedure at all —
    they use the GENERATE-mode path above.
 
-6. **Column name conflicts:** when merging, if two datasources define columns with the same
+4. **Column name conflicts:** when merging, if two datasources define columns with the same
    display name but different semantics, disambiguate by prefixing with the datasource
    display name (e.g. `Orders Revenue` vs `Targets Revenue`). Log every rename.
 
