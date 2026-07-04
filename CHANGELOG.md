@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-04
+- fix: ts tableau build-model --existing-guid now applies --column-name-map (ts-cli v0.34.0, ts-convert-from-tableau v1.24.0)
 - feat: bump ts-cli to v0.33.0 — build-model column-schema reconciliation (sqlproxy suffix/junk/qualify + --reconcile-table)
 - fix: bump ts-cli to v0.32.1 — classify-formulas classifies per datasource (was flattening multi-datasource workbooks and deduping shared calc names; live-test finding)
 - chore: bump ts-cli to v0.32.0
