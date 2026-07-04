@@ -361,17 +361,9 @@ def _fetch_target_columns(guid: str, profile: str) -> set[str]:
 
 
 def _load_column_name_map(column_name_map: Optional[str]) -> dict[str, str]:
-    """Load and validate the --column-name-map JSON file; exits on a bad path
-    or a chained mapping.
-
-    apply_reconciliation rewrites renamed-column formula refs by applying
-    name_map pairs sequentially on a mutating expression string. A chain
-    (A -> B, B -> C) would corrupt that rewrite (A would end up rewritten to
-    C via B, or vice versa depending on dict order) since the first
-    substitution's output becomes the second substitution's input.
-    suggest_column_mappings never produces a chain (from = absent-from-target,
-    to = in-target, so the two sets are disjoint by construction) but this
-    file is user-supplied, so validate it explicitly rather than trust it.
+    """Load and validate the --column-name-map JSON file; exits on a bad
+    path, a chained mapping, or a convergent mapping. See
+    reconcile.validate_name_map for why both shapes are rejected.
     """
     if not column_name_map:
         return {}
@@ -380,15 +372,11 @@ def _load_column_name_map(column_name_map: Optional[str]) -> dict[str, str]:
         typer.echo(f"Column name map file not found: {column_name_map}", err=True)
         raise SystemExit(1)
     name_map: dict[str, str] = json.loads(cnm_path.read_text())
-    chained = set(name_map.keys()) & set(name_map.values())
-    if chained:
-        typer.echo(
-            "reconcile: --column-name-map contains a rename chain — "
-            f"{sorted(chained)} appear as both a source and a target. "
-            "Chained renames would corrupt formula rewriting; split them "
-            "into independent mappings.",
-            err=True,
-        )
+    from ts_cli.tableau.reconcile import validate_name_map
+
+    error = validate_name_map(name_map)
+    if error:
+        typer.echo(error, err=True)
         raise SystemExit(1)
     return name_map
 
@@ -609,7 +597,7 @@ def _generate_flow(
     """Build phased model TML files from scratch and write them to disk."""
     from ts_cli.model_builder import build_model_tml, split_for_phased_import
     from ts_cli.tableau.build_model import apply_prefix_and_double_agg
-    from ts_cli.tableau.reconcile import clean_columns, strip_suffix_in_expr
+    from ts_cli.tableau.reconcile import clean_columns, drop_junk_formulas, strip_suffix_in_expr
     from ts_cli.tableau_translate import dump_tml_yaml
 
     # Tier-1: strip Custom-SQL suffixes, drop junk, dedupe, and set the table so
@@ -627,6 +615,10 @@ def _generate_flow(
         cleaned_cols = clean_columns(cleaned_cols, _table_name)
     for f in cleaned_formulas:
         f["expr"] = strip_suffix_in_expr(f["expr"])
+
+    # Tier-1 (cont.): drop formulas referencing a now-dropped junk column —
+    # must run unconditionally, not just under --reconcile-table.
+    cleaned_formulas, _junk_dropped = drop_junk_formulas(cleaned_formulas)
 
     # Tier-2: reconcile emitted columns against a real target table's schema
     # (consultant/stand-in-view case, where the .twb's column names don't
@@ -688,6 +680,8 @@ def _generate_flow(
     }
     if validation_issues:
         result["validation_warnings"] = validation_issues
+    if _junk_dropped:
+        result["junk_formulas_dropped"] = _junk_dropped
     if result_reconcile_dropped is not None:
         result["reconcile_dropped"] = result_reconcile_dropped
 

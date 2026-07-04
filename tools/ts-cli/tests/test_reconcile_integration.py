@@ -75,6 +75,17 @@ def test_load_column_name_map_rejects_chain(tmp_path):
         _load_column_name_map(str(p))
 
 
+def test_load_column_name_map_rejects_convergent(tmp_path):
+    # A -> X, B -> X: two different source columns mapping to the same
+    # target would collide into a single column_id in the emitted model TML
+    # — the same failure mode a rename chain causes, just via convergence
+    # instead of chaining. Must be rejected up front.
+    p = tmp_path / "map.json"
+    p.write_text(json.dumps({"A": "X", "B": "X"}))
+    with pytest.raises(SystemExit):
+        _load_column_name_map(str(p))
+
+
 def test_load_column_name_map_accepts_disjoint_map(tmp_path):
     p = tmp_path / "map.json"
     p.write_text(json.dumps({"DISCOUNT_RED_DOLLAR": "DM_DISCOUNT_RED_DOLLAR"}))

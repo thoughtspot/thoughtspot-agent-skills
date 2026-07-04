@@ -67,9 +67,60 @@ def suggest_column_mappings(absent: list[str], target: set[str]) -> list[dict]:
     return out
 
 
+def validate_name_map(name_map: dict[str, str]) -> str | None:
+    """Validate a --column-name-map for a rename chain or convergent targets.
+    Returns an error message if invalid, None if OK.
+
+    apply_reconciliation rewrites renamed-column formula refs by applying
+    name_map pairs sequentially on a mutating expression string:
+    - A chain (A -> B, B -> C) would corrupt that rewrite (A ends up
+      rewritten to C via B, or vice versa depending on dict order), since
+      the first substitution's output becomes the second's input.
+    - A convergent map (A -> X, B -> X) would collide two source columns
+      into one column_id in the emitted model TML ("column_id values are
+      incorrect" on import). apply_reconciliation's post-condition dedupe
+      is defense-in-depth for this; failing fast here is a clearer error.
+
+    suggest_column_mappings never produces either shape by construction, but
+    this file is user-supplied, so validate it explicitly rather than trust it.
+    """
+    chained = set(name_map.keys()) & set(name_map.values())
+    if chained:
+        return (
+            "reconcile: --column-name-map contains a rename chain — "
+            f"{sorted(chained)} appear as both a source and a target. "
+            "Chained renames would corrupt formula rewriting; split them "
+            "into independent mappings."
+        )
+    targets = list(name_map.values())
+    convergent = {t for t in targets if targets.count(t) > 1}
+    if convergent:
+        return (
+            "reconcile: --column-name-map maps multiple columns to the same "
+            f"target: {sorted(convergent)} — map at most one source column "
+            "to each target."
+        )
+    return None
+
+
+def drop_junk_formulas(formulas: list[dict]) -> tuple[list[dict], list[str]]:
+    """Drop any formula whose expr references a __tableau_internal_object_id__
+    junk column (Tier-1 companion to clean_columns, which drops the junk
+    COLUMNS but leaves formulas referencing them dangling)."""
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for f in formulas:
+        if _JUNK in f.get("expr", ""):
+            dropped.append(f["name"])
+        else:
+            kept.append(f)
+    return kept, dropped
+
+
 def apply_reconciliation(columns: list[dict], formulas: list[dict],
                          target_cols: set[str], name_map: dict[str, str]) -> tuple[list[dict], list[dict], dict]:
     kept_cols: list[dict] = []
+    kept_origs: list[str] = []  # pre-mapping db_column_name, parallel to kept_cols
     dropped_cols: list[str] = []
     dropped_col_names: set[str] = set()
     renamed: dict[str, str] = {}
@@ -81,11 +132,34 @@ def apply_reconciliation(columns: list[dict], formulas: list[dict],
             nc["db_column_name"] = mapped
             nc["name"] = mapped if c.get("name") == orig else c.get("name")
             kept_cols.append(nc)
+            kept_origs.append(orig)
             if mapped != orig:
                 renamed[orig] = mapped
         else:
             dropped_cols.append(orig)
             dropped_col_names.add(orig)
+
+    # Post-condition dedupe: two different source columns can converge on the
+    # same final db_column_name — either via name_map (two renames landing on
+    # one target) or because a renamed column collides with an already-present
+    # unmapped column. Either way, two kept columns sharing a db_column_name
+    # would emit two columns with the same column_id, which ThoughtSpot's
+    # import rejects. Keep the first occurrence; move later duplicates to the
+    # dropped report (by their pre-mapping name, matching the convention used
+    # for ordinary reconcile-drops above) and cascade-drop any formula that
+    # referenced them via that pre-mapping name — formulas at this point still
+    # reference original names; the `renamed` rewrite happens below.
+    seen_final: set[str] = set()
+    deduped_cols: list[dict] = []
+    for nc, orig in zip(kept_cols, kept_origs):
+        final = nc["db_column_name"]
+        if final in seen_final:
+            dropped_cols.append(orig)
+            dropped_col_names.add(orig)
+        else:
+            seen_final.add(final)
+            deduped_cols.append(nc)
+    kept_cols = deduped_cols
 
     kept_formulas: list[dict] = []
     dropped_formulas: list[str] = []

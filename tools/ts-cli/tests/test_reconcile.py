@@ -83,3 +83,39 @@ def test_suggest_tie_is_deterministic():
     first = suggest_column_mappings(["AMOUNT"], {"DM_AMOUNT", "ZZ_AMOUNT"})
     second = suggest_column_mappings(["AMOUNT"], {"DM_AMOUNT", "ZZ_AMOUNT"})
     assert first == second
+
+
+def test_apply_reconciliation_dedupes_convergent_target():
+    # col A maps to X (via name_map), col B is already named X (unmapped) —
+    # both converge on the same final db_column_name. Without a post-condition
+    # dedupe this would emit two columns sharing one column_id ("vw::X"),
+    # which ThoughtSpot's import rejects.
+    cols = [
+        {"name": "A", "db_column_name": "A", "table": "vw", "column_type": "MEASURE"},
+        {"name": "X", "db_column_name": "X", "table": "vw", "column_type": "MEASURE"},
+    ]
+    formulas = [
+        {"name": "F_uses_A", "expr": "sum ( [vw::A] )", "column_type": "MEASURE"},
+        {"name": "F_uses_X", "expr": "sum ( [vw::X] )", "column_type": "MEASURE"},
+    ]
+    target = {"X"}
+    kept_cols, kept_formulas, report = apply_reconciliation(
+        cols, formulas, target, {"A": "X"})
+
+    assert [c["db_column_name"] for c in kept_cols] == ["X"]   # only ONE X kept
+    assert report["columns"] == ["X"]                          # the duplicate (orig "X" column) dropped
+    assert {f["name"] for f in kept_formulas} == {"F_uses_A"}  # rewritten A->X ref survives
+    assert kept_formulas[0]["expr"] == "sum ( [vw::X] )"
+    assert "F_uses_X" in report["formulas"]                    # cascaded out: referenced the dropped duplicate
+
+
+from ts_cli.tableau.reconcile import drop_junk_formulas
+
+def test_drop_junk_formulas():
+    formulas = [
+        {"name": "F_junk", "expr": "sum ( [vw::__tableau_internal_object_id__].[_12CAA8] )", "column_type": "MEASURE"},
+        {"name": "F_clean", "expr": "sum ( [vw::CAMPAIGN_ID] )", "column_type": "MEASURE"},
+    ]
+    kept, dropped = drop_junk_formulas(formulas)
+    assert [f["name"] for f in kept] == ["F_clean"]
+    assert dropped == ["F_junk"]
