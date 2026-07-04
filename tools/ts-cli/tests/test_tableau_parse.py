@@ -49,6 +49,18 @@ def test_parse_writes_augmented_json(tmp_path):
     assert data["table_calc_addressing"] == {"column_level": {}, "ws_overrides": {}}
 
 
+def test_parse_creates_missing_output_parent_dir(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(TWB)
+    out = tmp_path / "sub" / "deeper" / "parsed.json"
+    assert not out.parent.exists()
+
+    result = runner.invoke(app, ["tableau", "parse", str(twb), "--output", str(out)])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert out.exists()
+
+
 def test_parse_missing_file_exits_nonzero(tmp_path):
     result = runner.invoke(
         app,

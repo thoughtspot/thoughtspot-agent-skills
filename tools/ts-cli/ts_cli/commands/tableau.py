@@ -133,6 +133,7 @@ def parse_cmd(
     for ds in parsed["datasources"]:
         ds["orphan_calcs"] = detect_orphan_calcs(ds)
 
+    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     Path(output_file).write_text(json.dumps(parsed, indent=2))
 
     typer.echo(
@@ -287,6 +288,7 @@ def classify_formulas_cmd(
 
     result = classify_formulas(formulas, orphan_calcs=orphans)
 
+    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     Path(output_file).write_text(json.dumps(result, indent=2))
 
     typer.echo(
