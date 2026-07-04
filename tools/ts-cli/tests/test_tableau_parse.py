@@ -16,7 +16,10 @@ from typer.testing import CliRunner
 
 from ts_cli.cli import app
 
-runner = CliRunner(mix_stderr=False)
+try:
+    runner = CliRunner(mix_stderr=False)
+except TypeError:  # Click >= 8.2 removed mix_stderr (stderr is separated by default)
+    runner = CliRunner()
 
 TWB = """<?xml version='1.0'?>
 <workbook>
