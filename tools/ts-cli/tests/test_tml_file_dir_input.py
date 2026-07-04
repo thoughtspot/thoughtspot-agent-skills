@@ -12,10 +12,10 @@ unknown-option error. This adds --file (repeatable) and --dir (non-recursive dir
 scan) to both `ts tml import` and `ts tml lint`, reading raw TML text per file, while
 keeping the original stdin JSON-array interface unchanged when neither is given.
 
-Covers the pure path-assembly functions (collect_tml_paths, read_tml_texts,
-load_tmls_from_args), the combined load_input_tmls() decision function (including the
-stdin/--file ambiguity guard), and CLI-level wiring via CliRunner with a mocked
-ThoughtSpotClient — no live connection anywhere.
+Covers the pure path-assembly functions (collect_tml_paths, read_tml_texts), the
+combined load_input_tmls() decision function (including the stdin/--file ambiguity
+guard), and CLI-level wiring via CliRunner with a mocked ThoughtSpotClient — no live
+connection anywhere.
 """
 from __future__ import annotations
 
@@ -32,7 +32,6 @@ from ts_cli.cli import app
 from ts_cli.commands.tml import (
     collect_tml_paths,
     read_tml_texts,
-    load_tmls_from_args,
     load_input_tmls,
     order_and_filter_tml_paths,
 )
@@ -134,17 +133,6 @@ class TestReadTmlTexts:
 
     def test_empty_list_returns_empty(self):
         assert read_tml_texts([]) == []
-
-
-class TestLoadTmlsFromArgs:
-    def test_full_pipeline_file_and_dir(self, tmp_path):
-        explicit = tmp_path / "explicit.tml"
-        explicit.write_text("table:\n  name: Explicit\n")
-        dir_path = tmp_path / "batch"
-        dir_path.mkdir()
-        (dir_path / "one.tml").write_text("table:\n  name: One\n")
-        texts = load_tmls_from_args([str(explicit)], str(dir_path))
-        assert texts == ["table:\n  name: Explicit\n", "table:\n  name: One\n"]
 
 
 # ---------------------------------------------------------------------------

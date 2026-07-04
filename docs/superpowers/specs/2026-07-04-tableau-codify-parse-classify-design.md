@@ -107,6 +107,11 @@ JSON; Step 7 review reuses the same tiers.
 (translatable tiers ⇒ translated; untranslatable tier ⇒ skipped). A divergence is
 a failing test, not a silent audit lie.
 
+**Orphan carve-out:** orphan calcs (Step 3g) are excluded from the `translate-formulas`
+verdict entirely and always tiered `orphan`, matching migrate's own exclusion of
+orphans from `translate-formulas`/`build-model` — so a syntactically-valid orphan
+never gets counted as translatable by audit while migrate silently drops it.
+
 ### Component 3 — blend graph helpers, computation only (A4–A6)
 
 Pure functions in `build_model.py`:

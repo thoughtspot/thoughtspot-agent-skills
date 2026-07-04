@@ -2,6 +2,14 @@
 
 The translatable/skipped verdict is delegated to translate_formulas() so audit
 and migrate CANNOT diverge. This module only *labels* each formula with a tier.
+
+Orphan carve-out: formulas named in `orphan_calcs` are excluded from the
+translate_formulas() call entirely — mirroring migrate's Step 3g exclusion — and
+are always tiered "orphan", never consulted against the translate verdict. A
+syntactically valid orphan calc (e.g. it references a table missing from this
+datasource, not a translation-unsupported construct) would otherwise show up in
+translate's `translated[]` and make classify disagree with what migrate actually
+does with it.
 """
 from __future__ import annotations
 import re
@@ -64,15 +72,31 @@ def _complexity(expr: str) -> int:
 
 
 def classify_formulas(formulas: list[dict], orphan_calcs=None, **translate_kwargs) -> dict:
+    """Classify each formula into a tier.
+
+    The translatable/skipped verdict for non-orphan formulas is delegated to
+    translate_formulas() so audit and migrate cannot diverge. Formulas named in
+    `orphan_calcs` are carved out: they are excluded from the translate_formulas()
+    call (matching migrate's Step 3g exclusion of orphans from `translate-formulas`/
+    `build-model`), so `translated`/`skipped`/`translate_stats` never include them,
+    and they are always tiered "orphan" directly — never consulted against the
+    translate verdict. With no `orphan_calcs`, behaviour is unchanged from before
+    this carve-out.
+    """
     orphan_calcs = set(orphan_calcs or ())
-    result = translate_formulas(formulas, **translate_kwargs)
+
+    def _name(f: dict) -> str:
+        return f.get("caption") or f.get("name")
+
+    non_orphan_formulas = [f for f in formulas if _name(f) not in orphan_calcs]
+    result = translate_formulas(non_orphan_formulas, **translate_kwargs)
     translated = {t["name"]: t for t in result["translated"]}
     skipped = {s["name"]: s for s in result["skipped"]}
 
     classified = []
     counts: dict = {}
     for f in formulas:
-        name = f.get("caption") or f.get("name")
+        name = _name(f)
         expr = f.get("formula", "")
         if name in orphan_calcs:
             tier, reason, level = "orphan", "references table not in datasource", -1

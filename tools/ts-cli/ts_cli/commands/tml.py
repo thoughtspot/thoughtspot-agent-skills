@@ -169,11 +169,6 @@ def read_tml_texts(paths: List[str]) -> List[str]:
     return texts
 
 
-def load_tmls_from_args(files: List[str], directory: Optional[str]) -> List[str]:
-    """Full --file/--dir pipeline: CLI options -> ordered list of raw TML strings."""
-    return read_tml_texts(collect_tml_paths(files, directory))
-
-
 def _stdin_has_piped_content() -> bool:
     """True if stdin was redirected (piped or from a file) AND actually carries content.
 
