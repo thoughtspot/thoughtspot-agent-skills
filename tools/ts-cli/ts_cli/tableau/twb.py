@@ -191,6 +191,52 @@ def parse_twb(twb_path: str | Path) -> dict:
     }
 
 
+def extract_blends(root: ET.Element) -> dict:
+    """Build the data-blend graph, keyed by datasource caption.
+
+    Returns {source_caption: [{"target_ds": caption, "column_mappings":
+    [{"source_col", "target_col"}]}]}. Federated IDs in the relationship XML are
+    resolved to captions so the graph joins to parse_twb's datasources.
+    """
+    ds_rels = root.find(".//datasource-relationships")
+    if ds_rels is None:
+        return {}
+
+    fed_to_caption = {
+        ds.get("name"): ds.get("caption", ds.get("name", ""))
+        for ds in root.findall(".//datasource")
+        if ds.get("name")
+    }
+
+    dep_map: dict = {}
+    for dep in ds_rels.findall("datasource-dependencies"):
+        ds_id = dep.get("datasource")
+        instance_to_col = {}
+        for ci in dep.findall("column-instance"):
+            instance_to_col[ci.get("name")] = ci.get("column")
+        dep_map[ds_id] = instance_to_col
+
+    graph: dict = {}
+    for rel in ds_rels.findall("datasource-relationship"):
+        source_ds = rel.get("source")
+        target_ds = rel.get("target")
+        col_maps = []
+        for m in rel.findall("column-mapping/map"):
+            src_key = m.get("key", "")
+            tgt_key = m.get("value", "")
+            src_inst = "[" + src_key.split("].[")[1] if "].[" in src_key else src_key
+            tgt_inst = "[" + tgt_key.split("].[")[1] if "].[" in tgt_key else tgt_key
+            src_col = dep_map.get(source_ds, {}).get(src_inst, src_inst).strip("[]")
+            tgt_col = dep_map.get(target_ds, {}).get(tgt_inst, tgt_inst).strip("[]")
+            col_maps.append({"source_col": src_col, "target_col": tgt_col})
+        src_caption = fed_to_caption.get(source_ds, source_ds)
+        tgt_caption = fed_to_caption.get(target_ds, target_ds)
+        graph.setdefault(src_caption, []).append(
+            {"target_ds": tgt_caption, "column_mappings": col_maps}
+        )
+    return graph
+
+
 def _strip_brackets(s: str) -> str:
     return s.replace("[", "").replace("]", "")
 
