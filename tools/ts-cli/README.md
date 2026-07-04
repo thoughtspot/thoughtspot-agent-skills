@@ -408,6 +408,10 @@ ts tml import --file table1.tml --file table2.tml --policy PARTIAL
 # Import every TML file in a directory
 ts tml import --dir ./tml_out --policy PARTIAL
 
+# Tableau-order directory import, base model only, then filtered by pattern
+ts tml import --dir ./tml_out --order tableau --model-phase base --policy ALL_OR_NONE
+ts tml import --dir ./tml_out --pattern '*.liveboard.tml' --policy PARTIAL --create-new
+
 # Original stdin interface (unchanged)
 echo '["table:\n  name: ..."]' | ts tml import --policy PARTIAL
 cat tmls.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
@@ -422,6 +426,11 @@ cat tmls.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
 | `--create-new / --no-create-new` | `--no-create-new` | Create new objects. Default updates existing objects only; pass `--create-new` for brand-new TML with no existing GUID |
 | `--file` | none | Path to a raw TML file (repeatable). Mutually exclusive with piped stdin content |
 | `--dir` | none | Import every `.tml`/`.yaml`/`.yml`/`.json` file in this directory (non-recursive). Mutually exclusive with piped stdin content |
+| `--order` | `name` | File order for `--dir` (and `--file`) input: `name` (sorted-name order, unchanged) or `tableau` (type order table → sql_view → model → cohort → liveboard, by filename suffix; ties broken by name) |
+| `--model-phase` | `all` | `all` (unchanged) or `base` — drops phased model files `*.phaseN.model.tml` for N ≥ 1, keeping bare `*.model.tml` and `*.phase0.model.tml` |
+| `--pattern` | none | Glob(s) to filter `--dir` matches (repeatable), e.g. `--pattern '*.liveboard.tml'`. Only restricts files picked up by `--dir` — has no effect on explicit `--file` entries |
+
+`--order`/`--model-phase`/`--pattern` apply only to the `--file`/`--dir` input mode — they have no effect on the stdin JSON-array interface.
 
 **Input:** either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON array of TML strings, e.g.:
 
@@ -462,6 +471,9 @@ ts tml lint --file model.tml
 # Lint every TML file in a directory
 ts tml lint --dir ./tml_out
 
+# Tableau-order directory lint, base model only
+ts tml lint --dir ./tml_out --order tableau --model-phase base
+
 # Lint the same payload you would import (original stdin interface)
 cat tmls.json | ts tml lint
 
@@ -475,6 +487,11 @@ ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_N
 |---|---|---|
 | `--file` | none | Path to a raw TML file (repeatable). Mutually exclusive with piped stdin content |
 | `--dir` | none | Lint every `.tml`/`.yaml`/`.yml`/`.json` file in this directory (non-recursive). Mutually exclusive with piped stdin content |
+| `--order` | `name` | Same as `ts tml import --order`: `name` (default) or `tableau` (table → sql_view → model → cohort → liveboard) |
+| `--model-phase` | `all` | Same as `ts tml import --model-phase`: `all` (default) or `base` (drop `*.phaseN.model.tml` for N ≥ 1) |
+| `--pattern` | none | Same as `ts tml import --pattern`: glob(s) to filter `--dir` matches (repeatable) |
+
+`--order`/`--model-phase`/`--pattern` apply only to the `--file`/`--dir` input mode, matching `ts tml import`.
 
 **Input:** the SAME input as `ts tml import` — either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON string or array of TML strings.
 

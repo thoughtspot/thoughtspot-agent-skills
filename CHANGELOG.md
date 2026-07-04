@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-04
+- chore: bump ts-cli to v0.32.0
+- feat: ts tableau parse + classify-formulas commands (Tableau audit/migrate convergence)
+
 ## 2026-07-03
 - chore: bump ts-cli to v0.31.0 (ts spotql classify-columns — BL-087)
 - chore: bump ts-cli to v0.30.0 (ts snowflake diff + lint-ddl — BL-063 quick wins)
