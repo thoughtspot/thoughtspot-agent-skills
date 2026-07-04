@@ -1,6 +1,7 @@
 """ts tml — export and import ThoughtSpot Markup Language objects."""
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import sys
@@ -55,13 +56,22 @@ def strip_nonprintable(text: str) -> str:
 _TML_DIR_EXTENSIONS = (".tml", ".yaml", ".yml", ".json")
 
 
-def collect_tml_paths(files: List[str], directory: Optional[str]) -> List[str]:
+def collect_tml_paths(
+    files: List[str],
+    directory: Optional[str],
+    patterns: Optional[List[str]] = None,
+) -> List[str]:
     """Resolve --file / --dir CLI options into an ordered list of file paths.
 
     --file entries are used verbatim, in the order given. A --dir entry is expanded
     to every file directly inside that directory (non-recursive) whose extension is
     one of _TML_DIR_EXTENSIONS, sorted by name for determinism, and appended after
     the explicit --file entries.
+
+    `patterns`, when given, is a list of fnmatch glob patterns (e.g. "*.liveboard.tml")
+    that further restricts the --dir matches to filenames matching at least one
+    pattern. Default `None` preserves the original behaviour (no filtering) —
+    existing callers are unaffected.
 
     Only touches the filesystem to list directory contents — never reads file
     bodies (that's read_tml_texts). Raises SystemExit with a clear message on a
@@ -75,6 +85,7 @@ def collect_tml_paths(files: List[str], directory: Optional[str]) -> List[str]:
         matched = sorted(
             p for p in dir_path.iterdir()
             if p.is_file() and p.suffix.lower() in _TML_DIR_EXTENSIONS
+            and (patterns is None or any(fnmatch.fnmatch(p.name, pat) for pat in patterns))
         )
         if not matched:
             raise SystemExit(
@@ -82,6 +93,69 @@ def collect_tml_paths(files: List[str], directory: Optional[str]) -> List[str]:
             )
         paths.extend(str(p) for p in matched)
     return paths
+
+
+# Tableau-import TML type ordering: table -> sql_view -> model -> cohort -> liveboard.
+# Matched by filename suffix (case-insensitive); anything unrecognised sorts last.
+_TYPE_SUFFIX_RANK = (
+    (".table.tml", 0), (".sql_view.tml", 1), (".model.tml", 2),
+    (".cohort.tml", 3), (".liveboard.tml", 4),
+)
+
+# Matches phased model filenames like "x.phase1.model.tml". Group 1 is the phase
+# number; phase 0 (or no phase suffix at all) counts as the "base" model.
+_PHASE_RE = re.compile(r"\.phase(\d+)\.model\.tml$", re.IGNORECASE)
+
+
+def _tml_type_rank(path: str) -> int:
+    """Return the tableau-order sort rank for a TML path based on its filename suffix.
+
+    Unrecognised suffixes (not table/sql_view/model/cohort/liveboard) rank last (5).
+    """
+    low = path.lower()
+    for suffix, rank in _TYPE_SUFFIX_RANK:
+        if low.endswith(suffix):
+            return rank
+    return 5
+
+
+def _is_base_model(path: str) -> bool:
+    """True if `path` is a base model TML: no `.phaseN.model.tml` suffix, or phase 0.
+
+    `x.model.tml` and `x.phase0.model.tml` are both base models. `x.phase1.model.tml`,
+    `x.phase2.model.tml`, etc. are not.
+    """
+    m = _PHASE_RE.search(path)
+    return m is None or m.group(1) == "0"
+
+
+def order_and_filter_tml_paths(
+    paths: List[str],
+    order: str = "name",
+    model_phase: str = "all",
+) -> List[str]:
+    """Reorder and/or filter an already-resolved list of TML paths.
+
+    `order="tableau"` sorts by TML type (table -> sql_view -> model -> cohort ->
+    liveboard, via _tml_type_rank), then by path name for determinism within a type.
+    `order="name"` (default) leaves the input order untouched.
+
+    `model_phase="base"` drops phased model files `*.phaseN.model.tml` for N >= 1,
+    keeping bare `*.model.tml` and `*.phase0.model.tml` (see _is_base_model).
+    `model_phase="all"` (default) leaves every path in place.
+
+    Both parameters default to no-ops — calling with no arguments beyond `paths`
+    returns `paths` unchanged (as a new list). Pure function: no filesystem access.
+    """
+    result = list(paths)
+    if model_phase == "base":
+        result = [
+            p for p in result
+            if not (p.lower().endswith(".model.tml") and not _is_base_model(p))
+        ]
+    if order == "tableau":
+        result = sorted(result, key=lambda p: (_tml_type_rank(p), p))
+    return result
 
 
 def read_tml_texts(paths: List[str]) -> List[str]:
