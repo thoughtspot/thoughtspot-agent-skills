@@ -917,9 +917,9 @@ def build_model_cmd(
     ),
     column_name_map: Optional[str] = typer.Option(
         None, "--column-name-map",
-        help="JSON file mapping datasource column -> target column name "
-             "(from the confirmed reconcile plan). Used with --reconcile-table "
-             "in apply mode.",
+        help="JSON file mapping datasource column -> target column name (from "
+             "the confirmed reconcile plan). Applies in GENERATE mode "
+             "(--reconcile-table) and MERGE mode (--existing-guid).",
     ),
 ) -> None:
     """Parse a Tableau workbook and build import-ready ThoughtSpot model TML.
@@ -940,6 +940,7 @@ def build_model_cmd(
     and exits without writing TML; without it, --column-name-map (from the
     confirmed plan) is applied and columns/formulas that still can't be
     reconciled are dropped and reported in the result's "reconcile_dropped".
+    --column-name-map also applies in MERGE mode (--existing-guid).
     """
     _validate_build_options(existing_guid, profile, connection_name, reconcile_table, reconcile_plan)
     from ts_cli.model_builder import parse_twb
