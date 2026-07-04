@@ -138,4 +138,7 @@ def test_classify_formulas_from_parsed_json(tmp_path):
     result = runner.invoke(app, ["tableau", "classify-formulas", "--input", str(pj), "--output", str(out)])
     assert result.exit_code == 0, result.stdout + result.stderr
     data = json.loads(out.read_text())
-    assert data["formulas"][0]["tier"] == "native"
+    # Parsed-workbook input classifies per datasource (each is its own model).
+    assert data["datasources"][0]["name"] == "Orders"
+    assert data["datasources"][0]["formulas"][0]["tier"] == "native"
+    assert data["tier_counts"]["native"] == 1

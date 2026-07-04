@@ -255,11 +255,19 @@ cannot over- or under-promise coverage:
 ts tableau classify-formulas --input /tmp/ts_tableau_mig/{workbook_name}_parsed.json --output /tmp/ts_tableau_mig/audit/{workbook_name}_classification.json
 ```
 
-Each entry in `classification.json`'s `formulas[]` has `tier`, `reason`, `level`, and
-`complexity`. Translatable tiers: `native`, `lod`, `cumulative`, `moving`,
-`pass_through`, `row_offset_native`, `parameter_ref`. Untranslatable tiers:
-`untranslatable`, `row_offset_ambiguous`, `geospatial`, `circular`, `orphan`,
-`parameter_query`. `tier_counts` gives per-tier totals for Step A4.
+**The classifier works per datasource** — each datasource becomes its own model in
+migration, and the same calc *name* can carry a *different* expression in each
+datasource, so it must be tiered against its own. For a parsed-workbook input the
+output is `{ "datasources": [ {"name", "formulas", "tier_counts", "translate_stats"}, … ],
+"tier_counts": <sum across datasources> }`. Each `formulas[]` entry has `tier`, `reason`,
+`level`, and `complexity`. Report **per datasource** (Step A4's per-datasource breakdown)
+and use the top-level `tier_counts` for the workbook total. (Pass `--datasource "<name>"`
+to limit to one; a bare-list input — e.g. Step 5b's `translate-formulas` file — instead
+yields a flat `{formulas, tier_counts, translate_stats}`.)
+
+Translatable tiers: `native`, `lod`, `cumulative`, `moving`, `pass_through`,
+`row_offset_native`, `parameter_ref`. Untranslatable tiers: `untranslatable`,
+`row_offset_ambiguous`, `geospatial`, `circular`, `orphan`, `parameter_query`.
 
 The table below maps those tiers to the human-readable categories used in the report —
 kept as reference/documentation now, not as executed classification logic:
@@ -286,9 +294,12 @@ For each TWB file, produce a coverage report. If multiple files were audited, al
 produce a combined summary at the end.
 
 **Source the numbers from `classification.json` (Step A3's `ts tableau classify-formulas`
-output) — do not hand-tally tiers.** The per-tier counts below come from `tier_counts`;
-the per-formula rows (Row-offset detail, Excluded Formulas, "Needing Review") come from
-each entry's `tier`/`level`/`complexity`/`reason` fields in `formulas[]`.
+output) — do not hand-tally tiers.** The output is **per datasource**: iterate
+`classification.json`'s `datasources[]` for the per-datasource breakdown (each carries its
+own `formulas[]`, `tier_counts`, and `translate_stats` — where `total == translated +
+skipped` for that model), and use the top-level `tier_counts` for the workbook total. The
+per-formula rows (Row-offset detail, Excluded Formulas, "Needing Review") come from each
+`datasources[].formulas[]` entry's `tier`/`level`/`complexity`/`reason` fields.
 
 **Per-file report:**
 
@@ -3977,6 +3988,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.22.1 | 2026-07-04 | **Fix: audit classifies per datasource, not flattened (live-test finding).** `ts tableau classify-formulas` on a multi-datasource workbook previously flattened all datasources' calcs into one `translate-formulas` call, which deduped by name — mis-tiering a calc *name* shared across datasources whose *expression* differs (e.g. SUM vs COUNTD) and misreporting coverage (per-datasource totals didn't reconcile). Now classifies per datasource (each → its own model); output is `{datasources:[{name,formulas,tier_counts,translate_stats}], tier_counts:<summed>}`, each datasource's `translate_stats` reconciles. Steps A3/A4 read per-datasource. Prereq ts-cli v0.32.1. |
 | 1.22.0 | 2026-07-04 | **Codify highest-value/risk inline logic (Components A/D).** New `ts tableau parse` (blend graph, table-calc addressing, orphan calcs) replaces inline Python in Steps 3/3e/3f/3g. New `ts tableau classify-formulas` shares the migrate translation verdict, fixing the audit-vs-migrate divergence (Steps A3/A4/7). Blend graph computation moved to tested helpers (`build_blend_plan`), consumed via parse output (Step 5b Python removed). `ts tml import/lint` gain `--order tableau` / `--model-phase base` / `--pattern`, replacing the inline payload-builder heredocs in Steps 6/7/11; the anti-drift validator now guards those too. Prereq ts-cli v0.32.0. TML-template emission and spec-table relocation deferred. |
 | 1.21.0 | 2026-07-03 | Wire `ts tableau build-model` generate mode into Phase-1 base-model step (BL-085 p1); add `--table-name-map` flag; blend-merge path unchanged. Prereq ts-cli v0.29.0 |
 | 1.20.3 | 2026-07-03 | Full 13-function Tableau spatial set (was 5 documented, 0 enforced) + USERATTRIBUTE/USERATTRIBUTEINCLUDES now rejected loudly at translate time (was silent pass-through / undocumented). Requires ts-cli v0.28.1 |

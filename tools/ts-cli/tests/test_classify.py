@@ -1,12 +1,58 @@
 # tools/ts-cli/tests/test_classify.py
 from __future__ import annotations
-from ts_cli.tableau.classify import classify_formulas, TRANSLATABLE_TIERS
+from ts_cli.tableau.classify import (
+    classify_formulas,
+    classify_workbook,
+    TRANSLATABLE_TIERS,
+)
 from ts_cli.tableau_translate import translate_formulas
 
 
 def _mk(caption, formula):
     return {"caption": caption, "name": caption, "formula": formula,
             "role": "measure", "datatype": "real", "datasource": "t"}
+
+
+def test_classify_workbook_is_per_datasource_not_flattened():
+    """Regression for the CPG live-test bug: two datasources sharing a calc NAME
+    whose EXPRESSION differs must each be tiered against their OWN expression, and
+    each datasource's totals must reconcile (no cross-datasource name dedup)."""
+    parsed = {
+        "datasources": [
+            {"name": "prod", "calculated_fields": [
+                _mk("Shared", "SUM([REVENUE])"),          # translatable here
+                _mk("OnlyProd", "SUM([X])"),
+            ], "orphan_calcs": []},
+            {"name": "tentpole", "calculated_fields": [
+                _mk("Shared", "SPLIT([Name], ' ', 1)"),    # unmapped -> untranslatable here
+            ], "orphan_calcs": []},
+        ],
+    }
+    out = classify_workbook(parsed)
+    by_ds = {d["name"]: d for d in out["datasources"]}
+    prod_tiers = {f["name"]: f["tier"] for f in by_ds["prod"]["formulas"]}
+    tent_tiers = {f["name"]: f["tier"] for f in by_ds["tentpole"]["formulas"]}
+    # Same name, different expression -> different tier per datasource (NOT deduped)
+    assert prod_tiers["Shared"] == "native"
+    assert tent_tiers["Shared"] == "untranslatable"
+    # Each datasource's translate_stats reconciles: total == translated + skipped
+    for d in out["datasources"]:
+        s = d["translate_stats"]
+        assert s["total"] == s["translated"] + s["skipped"], d["name"]
+    # Workbook aggregate sums per-datasource instance counts (both "Shared" rows counted)
+    assert sum(out["tier_counts"].values()) == 3
+
+
+def test_classify_workbook_datasource_filter():
+    parsed = {
+        "datasources": [
+            {"name": "prod", "calculated_fields": [_mk("A", "SUM([X])")], "orphan_calcs": []},
+            {"name": "tentpole", "calculated_fields": [_mk("B", "SUM([Y])")], "orphan_calcs": []},
+        ],
+    }
+    out = classify_workbook(parsed, datasource="prod")
+    assert [d["name"] for d in out["datasources"]] == ["prod"]
+    assert out["datasources"][0]["formulas"][0]["name"] == "A"
 
 
 def test_tiers_assigned_by_family():

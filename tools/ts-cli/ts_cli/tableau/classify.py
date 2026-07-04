@@ -115,3 +115,42 @@ def classify_formulas(formulas: list[dict], orphan_calcs=None, **translate_kwarg
 
     return {"formulas": classified, "tier_counts": counts,
             "translate_stats": result["stats"]}
+
+
+def classify_workbook(parsed: dict, datasource: str | None = None) -> dict:
+    """Classify a parsed-workbook dict PER DATASOURCE.
+
+    Migration builds one model per datasource, so a calc must be classified
+    against its own datasource's expression — NOT flattened across the whole
+    workbook. Flattening lets translate_formulas() dedupe by name, which (a)
+    mis-tiers a shared calc name whose expression differs between datasources
+    (e.g. SUM in one, COUNTD in another) and (b) makes workbook totals
+    misreport coverage (translated+skipped no longer sums to total).
+
+    Returns::
+
+        {"datasources": [{"name", "formulas", "tier_counts", "translate_stats"}, ...],
+         "tier_counts": <sum of per-datasource tier_counts>}
+
+    The top-level `tier_counts` sums per-datasource instance counts — a name
+    shared by two datasources is counted once per datasource, matching the two
+    models migration produces. Pass `datasource` to limit to one datasource.
+    """
+    out_datasources = []
+    summed: dict = {}
+    for ds in parsed.get("datasources", []):
+        if datasource and ds.get("name") != datasource:
+            continue
+        r = classify_formulas(
+            ds.get("calculated_fields", []),
+            orphan_calcs=set(ds.get("orphan_calcs", [])),
+        )
+        out_datasources.append({
+            "name": ds.get("name"),
+            "formulas": r["formulas"],
+            "tier_counts": r["tier_counts"],
+            "translate_stats": r["translate_stats"],
+        })
+        for tier, n in r["tier_counts"].items():
+            summed[tier] = summed.get(tier, 0) + n
+    return {"datasources": out_datasources, "tier_counts": summed}

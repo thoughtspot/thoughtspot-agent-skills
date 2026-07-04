@@ -44,6 +44,9 @@ def test_parse_then_classify_pipeline(tmp_path):
     )
     assert r2.exit_code == 0, r2.stdout + r2.stderr
 
-    tiers = {f["name"]: f["tier"] for f in json.loads(cls.read_text())["formulas"]}
+    # classify-formulas emits per-datasource results for a parsed-workbook input.
+    data = json.loads(cls.read_text())
+    tiers = {f["name"]: f["tier"]
+             for ds in data["datasources"] for f in ds["formulas"]}
     assert tiers["Total Amount"] == "native"
     assert tiers["Geo"] == "geospatial"

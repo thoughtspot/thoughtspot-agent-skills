@@ -268,7 +268,7 @@ def classify_formulas_cmd(
     classify_formulas), so audit-mode tier counts and migrate-mode translation
     results can never diverge.
     """
-    from ts_cli.tableau.classify import classify_formulas
+    from ts_cli.tableau.classify import classify_formulas, classify_workbook
 
     input_path = Path(input_file)
     if not input_path.exists():
@@ -277,26 +277,24 @@ def classify_formulas_cmd(
 
     data = json.loads(input_path.read_text())
 
-    formulas: list = []
-    orphans: set = set()
     if isinstance(data, dict) and "datasources" in data:
-        for ds in data["datasources"]:
-            if datasource and ds.get("name") != datasource:
-                continue
-            formulas.extend(ds.get("calculated_fields", []))
-            orphans.update(ds.get("orphan_calcs", []))
+        # Parsed-workbook input: classify PER DATASOURCE (each is its own model),
+        # so a calc name shared across datasources is tiered against its own
+        # expression and per-datasource totals reconcile. See classify_workbook.
+        result = classify_workbook(data, datasource=datasource)
+        n_formulas = sum(len(d["formulas"]) for d in result["datasources"])
+        n_ds = len(result["datasources"])
+        summary = f"Classified {n_formulas} formula(s) across {n_ds} datasource(s)"
     else:
-        formulas = data  # bare list
-
-    result = classify_formulas(formulas, orphan_calcs=orphans)
+        # Bare list (e.g. Step 5b's translate-formulas input, already one datasource).
+        result = classify_formulas(data)
+        n_formulas = len(result["formulas"])
+        summary = f"Classified {n_formulas} formula(s)"
 
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     Path(output_file).write_text(json.dumps(result, indent=2))
 
-    typer.echo(
-        f"Classified {len(result['formulas'])} formula(s) -> {output_file}",
-        err=True,
-    )
+    typer.echo(f"{summary} -> {output_file}", err=True)
 
     print(json.dumps(result["tier_counts"]))
 

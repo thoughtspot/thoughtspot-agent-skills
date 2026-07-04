@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-04
+- fix: bump ts-cli to v0.32.1 — classify-formulas classifies per datasource (was flattening multi-datasource workbooks and deduping shared calc names; live-test finding)
 - chore: bump ts-cli to v0.32.0
 - feat: ts tableau parse + classify-formulas commands (Tableau audit/migrate convergence)
 

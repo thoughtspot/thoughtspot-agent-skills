@@ -1119,21 +1119,32 @@ ts tableau classify-formulas --input parsed.json --output classification.json --
 | `--output`, `-o` | yes | Output path for the classification JSON |
 | `--datasource`, `-d` | no | Limit to one datasource name (only applies when `--input` is a `parsed.json`) |
 
-**Input:** when given a `parsed.json` (a dict with a `datasources` key), flattens each
-datasource's `calculated_fields` and collects `orphan_calcs` before classifying. When given
-a bare JSON list, classifies it directly.
+**Input:** when given a `parsed.json` (a dict with a `datasources` key), classifies **per
+datasource** — each datasource becomes its own model in migration, and a calc *name* shared
+across datasources can carry a *different* expression, so it is tiered against its own (no
+cross-datasource name dedup). When given a bare JSON list, classifies it directly.
 
-**Output:**
+**Output** — per-datasource for a `parsed.json` input:
 
 ```json
 {
-  "formulas": [
-    {"name": "Revenue Growth %", "tier": "native", "reason": "", "level": 0, "complexity": 3}
+  "datasources": [
+    {
+      "name": "Orders",
+      "formulas": [
+        {"name": "Revenue Growth %", "tier": "native", "reason": "", "level": 0, "complexity": 3}
+      ],
+      "tier_counts": {"native": 42, "lod": 5, "untranslatable": 2},
+      "translate_stats": {"total": 49, "translated": 47, "skipped": 2, "levels": {"0": 47}}
+    }
   ],
-  "tier_counts": {"native": 42, "lod": 5, "untranslatable": 2},
-  "translate_stats": {"total": 49, "translated": 47, "skipped": 2, "levels": {"0": 47}}
+  "tier_counts": {"native": 42, "lod": 5, "untranslatable": 2}
 }
 ```
+
+Each datasource's `translate_stats` reconciles (`total == translated + skipped`); the
+top-level `tier_counts` sums per-datasource counts (a shared name is counted once per
+model). A **bare-list** input instead yields a flat `{formulas, tier_counts, translate_stats}`.
 
 Translatable tiers: `native`, `lod`, `cumulative`, `moving`, `pass_through`,
 `row_offset_native`, `parameter_ref`. Untranslatable tiers: `untranslatable`,
