@@ -29,6 +29,7 @@ ts_cli/
     validate.py           — pre-import and post-translation validation
     yaml_out.py           — TML YAML dump helpers
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
+    classify.py            — formula tier classification behind `ts tableau classify-formulas` (classify_formulas/TRANSLATABLE_TIERS/UNTRANSLATABLE_TIERS; delegates the translatable verdict to tableau_translate.py so audit and migrate agree)
     build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
     client.py             — TableauClient (HTTP) + profile resolution; the package's one I/O module
   commands/
@@ -38,7 +39,7 @@ ts_cli/
     tml.py        — ts tml export / import / lint
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
-    tableau.py    — ts tableau (signin, datasources, download, parse, translate-formulas, build-model)
+    tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model)
     snowflake.py  — ts snowflake (diff, lint-ddl)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     audit.py      — ts audit run / report

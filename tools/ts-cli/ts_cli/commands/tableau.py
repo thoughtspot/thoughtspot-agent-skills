@@ -250,6 +250,53 @@ def translate_formulas_cmd(
     print(json.dumps(result["stats"]))
 
 
+@app.command("classify-formulas")
+def classify_formulas_cmd(
+    input_file: str = typer.Option(..., "--input", "-i",
+                                    help="parsed.json (from `ts tableau parse`) or a JSON list of calc-field dicts"),
+    output_file: str = typer.Option(..., "--output", "-o",
+                                     help="Output classification JSON path"),
+    datasource: Optional[str] = typer.Option(None, "--datasource", "-d",
+                                              help="Limit to one datasource name"),
+) -> None:
+    """Classify calculated fields into translation tiers.
+
+    The translatable verdict is delegated to the translate pipeline (via
+    classify_formulas), so audit-mode tier counts and migrate-mode translation
+    results can never diverge.
+    """
+    from ts_cli.tableau.classify import classify_formulas
+
+    input_path = Path(input_file)
+    if not input_path.exists():
+        typer.echo(f"Input file not found: {input_file}", err=True)
+        raise SystemExit(1)
+
+    data = json.loads(input_path.read_text())
+
+    formulas: list = []
+    orphans: set = set()
+    if isinstance(data, dict) and "datasources" in data:
+        for ds in data["datasources"]:
+            if datasource and ds.get("name") != datasource:
+                continue
+            formulas.extend(ds.get("calculated_fields", []))
+            orphans.update(ds.get("orphan_calcs", []))
+    else:
+        formulas = data  # bare list
+
+    result = classify_formulas(formulas, orphan_calcs=orphans)
+
+    Path(output_file).write_text(json.dumps(result, indent=2))
+
+    typer.echo(
+        f"Classified {len(result['formulas'])} formula(s) -> {output_file}",
+        err=True,
+    )
+
+    print(json.dumps(result["tier_counts"]))
+
+
 def _export_model_tml(existing_guid: str, profile: str) -> dict:
     """Export an existing model's TML via the ts CLI (subprocess I/O)."""
     import subprocess

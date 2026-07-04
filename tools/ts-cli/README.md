@@ -1067,6 +1067,51 @@ Stdout prints the stats summary JSON; the full result goes to `--output`.
 
 ---
 
+### `ts tableau classify-formulas`
+
+Classify Tableau calculated fields into translation tiers for the `ts-convert-from-tableau`
+audit mode. The translatable/untranslatable verdict is delegated internally to
+`translate_formulas` (the same pipeline `ts tableau translate-formulas` runs), so audit-mode
+tier counts and migrate-mode translation results can never diverge — a formula tagged
+translatable is guaranteed to appear in a `translate-formulas` run's `translated[]`, and vice
+versa.
+
+```bash
+ts tableau classify-formulas --input parsed.json --output classification.json
+ts tableau classify-formulas --input parsed.json --output classification.json --datasource "Orders"
+```
+
+**Options:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `--input`, `-i` | yes | `parsed.json` from `ts tableau parse`, or a bare JSON list of calc-field dicts |
+| `--output`, `-o` | yes | Output path for the classification JSON |
+| `--datasource`, `-d` | no | Limit to one datasource name (only applies when `--input` is a `parsed.json`) |
+
+**Input:** when given a `parsed.json` (a dict with a `datasources` key), flattens each
+datasource's `calculated_fields` and collects `orphan_calcs` before classifying. When given
+a bare JSON list, classifies it directly.
+
+**Output:**
+
+```json
+{
+  "formulas": [
+    {"name": "Revenue Growth %", "tier": "native", "reason": "", "level": 0, "complexity": 3}
+  ],
+  "tier_counts": {"native": 42, "lod": 5, "untranslatable": 2},
+  "translate_stats": {"total": 49, "translated": 47, "skipped": 2, "levels": {"0": 47}}
+}
+```
+
+Translatable tiers: `native`, `lod`, `cumulative`, `moving`, `pass_through`,
+`row_offset_native`, `parameter_ref`. Untranslatable tiers: `untranslatable`,
+`row_offset_ambiguous`, `geospatial`, `circular`, `orphan`, `parameter_query`. Stdout prints
+the `tier_counts` summary JSON; the full result goes to `--output`.
+
+---
+
 ### `ts tableau build-model`
 
 Parse a Tableau workbook and build import-ready ThoughtSpot model TML. Combines

@@ -1,6 +1,7 @@
 # tools/ts-cli/tests/test_classify.py
 from __future__ import annotations
 from ts_cli.tableau.classify import classify_formulas, TRANSLATABLE_TIERS
+from ts_cli.tableau_translate import translate_formulas
 
 
 def _mk(caption, formula):
@@ -33,3 +34,20 @@ def test_orphan_tier_overrides():
 def test_complexity_score_present():
     out = classify_formulas([_mk("Rev", "SUM([REVENUE])")])
     assert isinstance(out["formulas"][0]["complexity"], int)
+
+
+def test_classify_agrees_with_translate_verdict():
+    formulas = [
+        _mk("Native", "SUM([REVENUE])"),
+        _mk("Lod", "{FIXED [R] : SUM([S])}"),
+        _mk("Geo", "MAKEPOINT([lat],[lon])"),
+        _mk("Split", "SPLIT([Name], ' ', 1)"),          # unmapped -> skipped
+    ]
+    c = classify_formulas(formulas)
+    t = translate_formulas(formulas)
+    translated = {x["name"] for x in t["translated"]}
+    for row in c["formulas"]:
+        if row["tier"] in TRANSLATABLE_TIERS:
+            assert row["name"] in translated, f"{row['name']} labeled translatable but translate skipped it"
+        else:
+            assert row["name"] not in translated, f"{row['name']} labeled untranslatable but translate produced it"

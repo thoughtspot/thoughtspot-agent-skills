@@ -248,8 +248,21 @@ resolves.
 > [`../../shared/mappings/tableau/tableau-formula-translation.md`](../../shared/mappings/tableau/tableau-formula-translation.md)
 > and check its full function table and pass-through section. Do not decide from syntax alone.**
 
-For each calculated field extracted in Step A2, classify it into one of these tiers
-based on the patterns in `tableau-formula-translation.md`:
+Run the classifier — it shares the migrate-mode translation verdict, so the audit
+cannot over- or under-promise coverage:
+
+```bash
+ts tableau classify-formulas --input /tmp/ts_tableau_mig/{workbook_name}_parsed.json --output /tmp/ts_tableau_mig/audit/{workbook_name}_classification.json
+```
+
+Each entry in `classification.json`'s `formulas[]` has `tier`, `reason`, `level`, and
+`complexity`. Translatable tiers: `native`, `lod`, `cumulative`, `moving`,
+`pass_through`, `row_offset_native`, `parameter_ref`. Untranslatable tiers:
+`untranslatable`, `row_offset_ambiguous`, `geospatial`, `circular`, `orphan`,
+`parameter_query`. `tier_counts` gives per-tier totals for Step A4.
+
+The table below maps those tiers to the human-readable categories used in the report —
+kept as reference/documentation now, not as executed classification logic:
 
 | Tier | Description | Examples |
 |---|---|---|
@@ -265,67 +278,17 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
-### Classifier implementation notes
-
-**Function detection — require parentheses.** Match `FUNCTION_NAME(` (with optional
-whitespace before the paren), not bare word boundaries. Bare `\bSIZE\b` false-positives
-on dimension values like `'Size'` or column names like `[Size]`. Correct patterns:
-
-```
-LOOKUP\s*\(   INDEX\s*\(   SIZE\s*\(   FIRST\s*\(   LAST\s*\(   PREVIOUS_VALUE\s*\(   RAWSQL_
-RUNNING_(SUM|AVG|MAX|MIN|COUNT)\s*\(
-WINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(
-RANK(_UNIQUE|_MODIFIED|_DENSE|_PERCENTILE)?\s*\(
-TOTAL\s*\(
-MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
-INTERSECTS\s*\(  LENGTH\s*\(     SHAPETYPE\s*\(  OUTLINE\s*\(
-DIFFERENCE\s*\(  INTERSECTION\s*\(  SYMDIFFERENCE\s*\(  VALIDATE\s*\(
-USERATTRIBUTE\s*\(  USERATTRIBUTEINCLUDES\s*\(
-```
-
-Detection of `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` routes through the **tiered decision
-tree** (see Row-Offset Table Calculations in `tableau-formula-translation.md`): these
-functions are detected by the same regexes above, then classified by intent and addressing
-recoverability — they are no longer unconditionally untranslatable.
-
-**`FIRST()`/`LAST()` precedence.** These appear in three contexts — match in this order:
-1. **As `WINDOW_*`/`RUNNING_*` offset args** (e.g. `WINDOW_SUM(SUM([x]), FIRST(), 0)`) →
-   part of the moving/cumulative mapping (not standalone). Match `RUNNING_*`/`WINDOW_*` first.
-2. **As part of the string-aggregation CSV technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE
-   building a delimited string) → translate intent to `LISTAGG` (see String aggregation section).
-3. **Inside `LOOKUP()`** (e.g. `LOOKUP(SUM([Sales]), FIRST())`) → the composed pattern
-   means "get value at first/last row" → `first_value` / `last_value` (tiers 5a/5b).
-4. **Standalone** (e.g. `LAST()==0`, `FIRST()+1`, or bare `FIRST()` on a shelf) →
-   Tableau `FIRST()`/`LAST()` return row *offsets*, not values. No direct TS equivalent.
-   If used for row numbering (`FIRST()+1`), approximate with `rank()` (tier 6b).
-   Otherwise omit + log (tiers 6a/6c).
-
-**Parameter references.** Detect `[Parameters].[...]` pattern — this is Tableau's
-cross-datasource parameter reference syntax. These formulas use translatable syntax
-(IF/CASE/WHEN). Cross-reference the parameter name against the parameter definitions
-extracted in Step A2/3:
-- If the parameter has static `<member>` list values or a `<range>` → **Parameter ref
-  (auto)** — the parameter will be auto-created in the model TML, formula translates
-  with a simple `[Parameters].[Name]` → `[Name]` prefix strip
-- If the parameter has no static values (SQL-lookup populated) → **Parameter ref
-  (query)** — auto-migratable at migration time (requires warehouse connection to
-  populate list values), but flagged separately in audit mode since no connection
-  is available
-
-**LOD first.** Check `{FIXED|INCLUDE|EXCLUDE}` before other tiers — LOD expressions
-may also contain functions like SUM that would match Native.
-
-For each formula, also check:
-- Does it reference other calculated fields? (cross-reference depth)
-- Does it use functions from the untranslatable list?
-- Does it mix translatable and untranslatable patterns?
-
 ---
 
 ## Step A4 — Migration Coverage Report (Audit Mode)
 
 For each TWB file, produce a coverage report. If multiple files were audited, also
 produce a combined summary at the end.
+
+**Source the numbers from `classification.json` (Step A3's `ts tableau classify-formulas`
+output) — do not hand-tally tiers.** The per-tier counts below come from `tier_counts`;
+the per-formula rows (Row-offset detail, Excluded Formulas, "Needing Review") come from
+each entry's `tier`/`level`/`complexity`/`reason` fields in `formulas[]`.
 
 **Per-file report:**
 
@@ -742,7 +705,7 @@ The JSON contains `datasources[]` (each with `tables`, `columns`, `joins`,
 `param_map`, `blends`, and `table_calc_addressing`. All subsequent steps read
 these fields instead of re-deriving them.
 
-Read `{twb_path}` in full. The TWB is XML. Extract the following elements:
+The parse output (from the `ts tableau parse` call above) contains the following, extracted from the TWB's XML structure:
 
 ### 3a. Workbook name
 
@@ -2770,7 +2733,16 @@ Before importing, show the user a review summary — the same convention the
 `ts-convert-from-snowflake-sv` and `ts-convert-from-databricks-mv` skills use. The user
 should see exactly how every calculated field was translated, and what (if anything)
 will **not** migrate, *before* committing — not discover omissions only in the Step 12
-report afterward. Reuse the formula tier classification from Step A3/Step 5b.
+report afterward. Source each formula's `tier`/`level`/`complexity` from the same
+`ts tableau classify-formulas` output Step A3 uses — never re-derive tiers by hand.
+If this workbook was already audited, reuse that run's `classification.json`.
+Otherwise generate it now, reusing the `classification.json` already built for Step
+5b's `translate-formulas` call as input (a bare list — the classifier accepts either
+shape) and writing tiers to a separate file:
+
+```bash
+ts tableau classify-formulas --input {workdir}/classification.json --output {workdir}/classification_tiers.json
+```
 
 ```
 Ready to import to {base_url}:

@@ -67,3 +67,22 @@ def test_parse_summary_line_written_to_stderr(tmp_path):
     assert result.exit_code == 0
     assert "Parsed 1 datasource(s)" in result.stderr
     assert result.stdout == ""
+
+
+def test_classify_formulas_from_parsed_json(tmp_path):
+    parsed = {
+        "datasources": [{
+            "name": "Orders",
+            "calculated_fields": [
+                {"caption": "Rev", "name": "Rev", "formula": "SUM([REVENUE])",
+                 "role": "measure", "datatype": "real", "datasource": "Orders"}],
+            "orphan_calcs": [],
+        }],
+        "parameters": [], "param_map": {},
+    }
+    pj = tmp_path / "parsed.json"; pj.write_text(json.dumps(parsed))
+    out = tmp_path / "classification.json"
+    result = runner.invoke(app, ["tableau", "classify-formulas", "--input", str(pj), "--output", str(out)])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    data = json.loads(out.read_text())
+    assert data["formulas"][0]["tier"] == "native"
