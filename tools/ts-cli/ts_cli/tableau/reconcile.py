@@ -39,3 +39,59 @@ def clean_columns(columns: list[dict], table_name: str) -> list[dict]:
         nc["table"] = table_name
         out.append(nc)
     return out
+
+
+def _tokens(s: str) -> set[str]:
+    return {t for t in s.upper().replace("-", "_").split("_") if t}
+
+
+def suggest_column_mappings(absent: list[str], target: set[str]) -> list[dict]:
+    targets = list(target)
+    out: list[dict] = []
+    for a in absent:
+        au = a.upper()
+        best, best_score = None, 0.0
+        for t in targets:
+            tu = t.upper()
+            if au == tu:
+                score = 1.0
+            elif tu == "DM_" + au or au == "DM_" + tu or tu.endswith("_" + au) or au.endswith("_" + tu):
+                score = 0.9
+            else:
+                ta, tt = _tokens(a), _tokens(t)
+                score = len(ta & tt) / len(ta | tt) if (ta | tt) else 0.0
+            if score > best_score:
+                best, best_score = t, score
+        if best is not None and best_score >= 0.5:
+            out.append({"from": a, "to": best, "confidence": round(best_score, 2)})
+    return out
+
+
+def apply_reconciliation(columns: list[dict], formulas: list[dict],
+                         target_cols: set[str], name_map: dict[str, str]) -> tuple[list[dict], list[dict], dict]:
+    kept_cols: list[dict] = []
+    dropped_cols: list[str] = []
+    dropped_col_names: set[str] = set()
+    for c in columns:
+        orig = c.get("db_column_name")
+        mapped = name_map.get(orig, orig)
+        if mapped in target_cols:
+            nc = dict(c)
+            nc["db_column_name"] = mapped
+            nc["name"] = mapped if c.get("name") == orig else c.get("name")
+            kept_cols.append(nc)
+        else:
+            dropped_cols.append(orig)
+            dropped_col_names.add(orig)
+
+    kept_formulas: list[dict] = []
+    dropped_formulas: list[str] = []
+    for f in formulas:
+        expr = f.get("expr", "")
+        if any(re.search(r"::" + re.escape(dc) + r"\b", expr) or ("[" + dc + "]") in expr
+               for dc in dropped_col_names):
+            dropped_formulas.append(f["name"])
+        else:
+            kept_formulas.append(f)
+
+    return kept_cols, kept_formulas, {"columns": dropped_cols, "formulas": dropped_formulas}

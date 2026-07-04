@@ -28,3 +28,32 @@ def test_clean_columns_qualifies_dedupes_drops():
     assert names == ["CUSTOMER_ID", "SALES"]          # junk dropped, dup collapsed, suffix stripped
     assert all(c["table"] == "vw_dim_promo" for c in out)  # now qualifies
     assert out[0]["name"] == "CUSTOMER_ID"
+
+
+from ts_cli.tableau.reconcile import suggest_column_mappings, apply_reconciliation
+
+def test_suggest_mappings_dm_prefix_and_no_match():
+    target = {"DM_DISCOUNT_RED_DOLLAR", "ORDER_NUM", "SALES", "CAMPAIGN_ID"}
+    s = suggest_column_mappings(["DISCOUNT_RED_DOLLAR", "ORDER_ID"], target)
+    by = {m["from"]: m["to"] for m in s}
+    assert by.get("DISCOUNT_RED_DOLLAR") == "DM_DISCOUNT_RED_DOLLAR"   # DM_ prefix suggested
+    assert "ORDER_ID" not in by                                        # ORDER_NUM too weak → no suggestion (drop)
+
+def test_apply_reconciliation_maps_keeps_drops_and_cascades():
+    cols = [
+        {"name": "CAMPAIGN_ID", "db_column_name": "CAMPAIGN_ID", "table": "vw", "column_type": "ATTRIBUTE"},
+        {"name": "DISCOUNT_RED_DOLLAR", "db_column_name": "DISCOUNT_RED_DOLLAR", "table": "vw", "column_type": "MEASURE"},
+        {"name": "ORDER_ID", "db_column_name": "ORDER_ID", "table": "vw", "column_type": "ATTRIBUTE"},
+    ]
+    formulas = [
+        {"name": "F_ok", "expr": "sum ( [vw::CAMPAIGN_ID] )", "column_type": "MEASURE"},
+        {"name": "F_dropme", "expr": "count ( [vw::ORDER_ID] )", "column_type": "MEASURE"},
+    ]
+    target = {"CAMPAIGN_ID", "DM_DISCOUNT_RED_DOLLAR"}   # ORDER_ID absent; DISCOUNT_RED_DOLLAR only via map
+    kept_cols, kept_formulas, report = apply_reconciliation(
+        cols, formulas, target, {"DISCOUNT_RED_DOLLAR": "DM_DISCOUNT_RED_DOLLAR"})
+    kept_names = {c["db_column_name"] for c in kept_cols}
+    assert kept_names == {"CAMPAIGN_ID", "DM_DISCOUNT_RED_DOLLAR"}     # mapped kept, ORDER_ID dropped
+    assert {f["name"] for f in kept_formulas} == {"F_ok"}             # F_dropme cascaded out
+    assert "ORDER_ID" in report["columns"]
+    assert "F_dropme" in report["formulas"]
