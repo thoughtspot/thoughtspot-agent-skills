@@ -26,6 +26,7 @@ ts_cli/
     dag.py               — dependency DAG building, topological sort, cycle detection
     params.py            — parameter renaming, sanitisation, conflict detection
     naming.py            — name-clash detection and renaming
+    reconcile.py           — column cleanup + schema reconciliation for build-model (suffix strip, qualify, suggest/apply name maps)
     validate.py           — pre-import and post-translation validation
     yaml_out.py           — TML YAML dump helpers
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
@@ -63,7 +64,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.32.1**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.33.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

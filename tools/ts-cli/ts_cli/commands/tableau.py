@@ -319,6 +319,68 @@ def _export_model_tml(existing_guid: str, profile: str) -> dict:
     return existing_tml
 
 
+def _reconcile_plan(cleaned_cols: list[dict], target_cols: set[str]) -> dict:
+    """Pure planning helper for --reconcile-plan: partition emitted columns by
+    whether the target table already has them, and suggest renames for the rest.
+    """
+    from ts_cli.tableau.reconcile import suggest_column_mappings
+
+    present = [c["db_column_name"] for c in cleaned_cols if c["db_column_name"] in target_cols]
+    absent = [c["db_column_name"] for c in cleaned_cols if c["db_column_name"] not in target_cols]
+    suggestions = suggest_column_mappings(absent, target_cols)
+    mapped_from = {s["from"] for s in suggestions}
+    return {
+        "target_columns": len(target_cols),
+        "matched": present,
+        "suggested_mappings": suggestions,
+        "unmatched_drop": [a for a in absent if a not in mapped_from],
+    }
+
+
+def _fetch_target_columns(guid: str, profile: str) -> set[str]:
+    """Export an existing table object and return its logical column names
+    (consultant/stand-in-view reconcile case: --reconcile-table).
+
+    Matches the subprocess + --parse pattern already used by
+    _export_model_tml: without --parse, `ts tml export` returns a raw YAML
+    edoc string, which is not directly JSON-parseable; --parse returns a
+    pre-parsed TML dict under the "tml" key.
+    """
+    import subprocess
+
+    proc = subprocess.run(
+        ["ts", "tml", "export", guid, "--profile", profile, "--parse"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        typer.echo(f"reconcile: failed to export target table {guid}: {proc.stderr[:200]}", err=True)
+        raise SystemExit(1)
+    tml = json.loads(proc.stdout)[0]["tml"]
+    tbl = tml.get("table", {})
+    return {c["name"] for c in tbl.get("columns", [])}
+
+
+def _load_column_name_map(column_name_map: Optional[str]) -> dict[str, str]:
+    """Load and validate the --column-name-map JSON file; exits on a bad
+    path, a chained mapping, or a convergent mapping. See
+    reconcile.validate_name_map for why both shapes are rejected.
+    """
+    if not column_name_map:
+        return {}
+    cnm_path = Path(column_name_map)
+    if not cnm_path.exists():
+        typer.echo(f"Column name map file not found: {column_name_map}", err=True)
+        raise SystemExit(1)
+    name_map: dict[str, str] = json.loads(cnm_path.read_text())
+    from ts_cli.tableau.reconcile import validate_name_map
+
+    error = validate_name_map(name_map)
+    if error:
+        typer.echo(error, err=True)
+        raise SystemExit(1)
+    return name_map
+
+
 def _translate_and_validate(
     ds: dict,
     resolved_calcs: list[dict],
@@ -527,11 +589,56 @@ def _generate_flow(
     validation_issues: list,
     out_path: Path,
     dry_run: bool,
+    reconcile_table: Optional[str] = None,
+    reconcile_plan_mode: bool = False,
+    column_name_map: Optional[dict] = None,
+    profile: Optional[str] = None,
 ) -> dict:
     """Build phased model TML files from scratch and write them to disk."""
     from ts_cli.model_builder import build_model_tml, split_for_phased_import
     from ts_cli.tableau.build_model import apply_prefix_and_double_agg
+    from ts_cli.tableau.reconcile import clean_columns, drop_junk_formulas, strip_suffix_in_expr
     from ts_cli.tableau_translate import dump_tml_yaml
+
+    # Tier-1: strip Custom-SQL suffixes, drop junk, dedupe, and set the table so
+    # column_id qualifies (single-table sqlproxy models otherwise emit bare ids).
+    # Only stamp a table onto every column in the single-table case — for
+    # multi-table datasources, columns belong to different tables and
+    # stamping tables[0] on all of them would mis-qualify columns that
+    # actually belong to other tables (worse than the pre-existing bare
+    # column_id, which _build_model_columns's own single_table guard leaves
+    # alone). Multi-table sources have no Custom-SQL suffixes/junk anyway —
+    # that only comes from single-table sqlproxy sources — so leaving
+    # cleaned_cols untouched here is safe.
+    if len(ds.get("tables", [])) == 1:
+        _table_name = ds["tables"][0]["name"]
+        cleaned_cols = clean_columns(cleaned_cols, _table_name)
+    for f in cleaned_formulas:
+        f["expr"] = strip_suffix_in_expr(f["expr"])
+
+    # Tier-1 (cont.): drop formulas referencing a now-dropped junk column —
+    # must run unconditionally, not just under --reconcile-table.
+    cleaned_formulas, _junk_dropped = drop_junk_formulas(cleaned_formulas)
+
+    # Tier-2: reconcile emitted columns against a real target table's schema
+    # (consultant/stand-in-view case, where the .twb's column names don't
+    # match the ThoughtSpot table that will actually back this model).
+    result_reconcile_dropped: Optional[dict] = None
+    if reconcile_table:
+        target_cols = _fetch_target_columns(reconcile_table, profile)
+        if reconcile_plan_mode:
+            print(json.dumps(_reconcile_plan(cleaned_cols, target_cols), indent=2))
+            return {"reconcile_plan": True}
+        from ts_cli.tableau.reconcile import apply_reconciliation
+
+        cleaned_cols, cleaned_formulas, result_reconcile_dropped = apply_reconciliation(
+            cleaned_cols, cleaned_formulas, target_cols, column_name_map or {},
+        )
+        typer.echo(
+            f"  Reconcile: {len(result_reconcile_dropped['columns'])} column(s) dropped, "
+            f"{len(result_reconcile_dropped['formulas'])} formula(s) dropped",
+            err=True,
+        )
 
     gen_formula_names = {f["name"] for f in cleaned_formulas}
     gen_param_names = {p["name"] for p in parsed["parameters"]}
@@ -573,6 +680,10 @@ def _generate_flow(
     }
     if validation_issues:
         result["validation_warnings"] = validation_issues
+    if _junk_dropped:
+        result["junk_formulas_dropped"] = _junk_dropped
+    if result_reconcile_dropped is not None:
+        result["reconcile_dropped"] = result_reconcile_dropped
 
     if not dry_run:
         for i, phase in enumerate(phases):
@@ -611,10 +722,135 @@ def _load_table_name_map(
     return name_map
 
 
+def _process_datasource(
+    ds: dict,
+    model_name: Optional[str],
+    connection_name: str,
+    parsed: dict,
+    name_map: dict,
+    col_name_map: dict,
+    existing_guid: Optional[str],
+    profile: Optional[str],
+    dry_run: bool,
+    max_retries: int,
+    out_path: Path,
+    reconcile_table: Optional[str],
+    reconcile_plan_mode: bool,
+) -> Optional[dict]:
+    """Run the full per-datasource pipeline (translate, merge-or-generate) for
+    one TWB datasource. Returns None to signal --reconcile-plan already
+    printed its JSON and the caller should stop without further output.
+    """
+    from ts_cli.model_builder import (
+        build_formula_levels,
+        resolve_all_internal_refs,
+        resolve_name_collisions,
+    )
+    from ts_cli.tableau.build_model import apply_table_name_map, fix_sqlproxy_scoping
+
+    ds_name = ds["name"]
+    name = model_name or ds_name.replace(" ", "_")
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+    typer.echo(f"\n{'='*60}", err=True)
+    typer.echo(f"Datasource: {ds_name}", err=True)
+    typer.echo(f"  Tables: {len(ds['tables'])}", err=True)
+    typer.echo(f"  Columns: {len(ds['columns'])}", err=True)
+    typer.echo(f"  Calculated fields: {len(ds['calculated_fields'])}", err=True)
+    typer.echo(f"  Parameters: {len(parsed['parameters'])}", err=True)
+
+    # Step 2: Resolve internal references + translate formulas
+    scoped_columns = ds.get("col_table_map", {})
+
+    # When merging into an existing model, export it early so we can
+    # fix sqlproxy→actual-table mapping before translation
+    existing_tml = None
+    if existing_guid:
+        existing_tml = _export_model_tml(existing_guid, profile)
+        scoped_columns, scoping_msg = fix_sqlproxy_scoping(
+            scoped_columns, existing_tml,
+        )
+        if scoping_msg:
+            typer.echo(f"  {scoping_msg}", err=True)
+        if reconcile_table:
+            typer.echo(
+                "  --reconcile-table is ignored with --existing-guid "
+                "(merge mode already resolves columns against the existing model)",
+                err=True,
+            )
+    elif name_map:
+        ds, scoped_columns = apply_table_name_map(ds, scoped_columns, name_map)
+        typer.echo(f"  Applied table name map ({len(name_map)} entries)", err=True)
+
+    # Build dependency levels from raw calcs (before resolution strips refs)
+    raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])
+
+    # Pre-process: resolve copy-style and Calculation_ refs to display names
+    resolved_calcs = resolve_all_internal_refs(
+        ds["calculated_fields"], ds["calc_map"],
+    )
+
+    translated, skipped, validation_issues = _translate_and_validate(
+        ds, resolved_calcs, scoped_columns, parsed,
+    )
+
+    # Step 3: Resolve name collisions
+    cleaned_cols, cleaned_formulas, rename_map = resolve_name_collisions(
+        ds["columns"], translated, parsed["parameters"],
+    )
+    if rename_map:
+        typer.echo(f"  Renamed: {rename_map}", err=True)
+
+    if existing_guid:
+        return _merge_flow(
+            ds=ds,
+            name=name,
+            existing_guid=existing_guid,
+            existing_tml=existing_tml,
+            cleaned_formulas=cleaned_formulas,
+            translated=translated,
+            skipped=skipped,
+            validation_issues=validation_issues,
+            profile=profile,
+            dry_run=dry_run,
+            max_retries=max_retries,
+        )
+
+    result = _generate_flow(
+        ds=ds,
+        name=name,
+        slug=slug,
+        connection_name=connection_name,
+        parsed=parsed,
+        cleaned_cols=cleaned_cols,
+        cleaned_formulas=cleaned_formulas,
+        translated=translated,
+        skipped=skipped,
+        rename_map=rename_map,
+        raw_levels=raw_levels,
+        validation_issues=validation_issues,
+        out_path=out_path,
+        dry_run=dry_run,
+        reconcile_table=reconcile_table,
+        reconcile_plan_mode=reconcile_plan_mode,
+        column_name_map=col_name_map,
+        profile=profile,
+    )
+    if result.get("reconcile_plan"):
+        # _generate_flow already printed the plan JSON to stdout — signal
+        # the caller to stop without printing the all_results wrapper below
+        # (which would emit a second, invalid-to-concatenate JSON blob) and
+        # without writing any phased TML.
+        return None
+    return result
+
+
 def _validate_build_options(
     existing_guid: Optional[str],
     profile: Optional[str],
     connection_name: str,
+    reconcile_table: Optional[str] = None,
+    reconcile_plan: bool = False,
 ) -> None:
     """Validate build-model option combinations; exits with code 1 on error."""
     if existing_guid and not profile:
@@ -622,6 +858,12 @@ def _validate_build_options(
         raise SystemExit(1)
     if not existing_guid and not connection_name:
         typer.echo("--connection is required when not using --existing-guid", err=True)
+        raise SystemExit(1)
+    if reconcile_table and not profile:
+        typer.echo("--profile is required when using --reconcile-table", err=True)
+        raise SystemExit(1)
+    if reconcile_plan and not reconcile_table:
+        typer.echo("--reconcile-plan requires --reconcile-table", err=True)
         raise SystemExit(1)
 
 
@@ -651,6 +893,22 @@ def build_model_cmd(
              "differ (warehouse-normalized names, sqlproxy/published-datasource "
              "scoping). Ignored when --existing-guid is set.",
     ),
+    reconcile_table: Optional[str] = typer.Option(
+        None, "--reconcile-table",
+        help="GUID of an existing ThoughtSpot table to reconcile emitted "
+             "columns against (consultant/stand-in-view case). Requires --profile.",
+    ),
+    reconcile_plan: bool = typer.Option(
+        False, "--reconcile-plan",
+        help="With --reconcile-table: print the reconcile plan (suggested "
+             "mappings + drops) as JSON and exit without writing TML.",
+    ),
+    column_name_map: Optional[str] = typer.Option(
+        None, "--column-name-map",
+        help="JSON file mapping datasource column -> target column name "
+             "(from the confirmed reconcile plan). Used with --reconcile-table "
+             "in apply mode.",
+    ),
 ) -> None:
     """Parse a Tableau workbook and build import-ready ThoughtSpot model TML.
 
@@ -662,15 +920,17 @@ def build_model_cmd(
     With --existing-guid: exports the existing model, merges new formulas
     into it (skipping existing), filters unresolvable references, and
     imports the merged model.
+
+    With --reconcile-table: after Tier-1 cleanup, reconciles emitted columns
+    against an existing ThoughtSpot table's real schema (GENERATE mode only —
+    ignored with --existing-guid, which already resolves columns against the
+    live model). --reconcile-plan prints the suggested mappings/drops as JSON
+    and exits without writing TML; without it, --column-name-map (from the
+    confirmed plan) is applied and columns/formulas that still can't be
+    reconciled are dropped and reported in the result's "reconcile_dropped".
     """
-    _validate_build_options(existing_guid, profile, connection_name)
-    from ts_cli.model_builder import (
-        build_formula_levels,
-        parse_twb,
-        resolve_all_internal_refs,
-        resolve_name_collisions,
-    )
-    from ts_cli.tableau.build_model import apply_table_name_map, fix_sqlproxy_scoping
+    _validate_build_options(existing_guid, profile, connection_name, reconcile_table, reconcile_plan)
+    from ts_cli.model_builder import parse_twb
 
     twb_path = Path(twb_file)
     if not twb_path.exists():
@@ -678,6 +938,7 @@ def build_model_cmd(
         raise SystemExit(1)
 
     name_map = _load_table_name_map(table_name_map, existing_guid)
+    col_name_map = _load_column_name_map(column_name_map)
 
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -701,84 +962,25 @@ def build_model_cmd(
 
     all_results = []
     for ds in datasources:
-        ds_name = ds["name"]
-        name = model_name or ds_name.replace(" ", "_")
-        slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-
-        typer.echo(f"\n{'='*60}", err=True)
-        typer.echo(f"Datasource: {ds_name}", err=True)
-        typer.echo(f"  Tables: {len(ds['tables'])}", err=True)
-        typer.echo(f"  Columns: {len(ds['columns'])}", err=True)
-        typer.echo(f"  Calculated fields: {len(ds['calculated_fields'])}", err=True)
-        typer.echo(f"  Parameters: {len(parsed['parameters'])}", err=True)
-
-        # Step 2: Resolve internal references + translate formulas
-        scoped_columns = ds.get("col_table_map", {})
-
-        # When merging into an existing model, export it early so we can
-        # fix sqlproxy→actual-table mapping before translation
-        existing_tml = None
-        if existing_guid:
-            existing_tml = _export_model_tml(existing_guid, profile)
-            scoped_columns, scoping_msg = fix_sqlproxy_scoping(
-                scoped_columns, existing_tml,
-            )
-            if scoping_msg:
-                typer.echo(f"  {scoping_msg}", err=True)
-        elif name_map:
-            ds, scoped_columns = apply_table_name_map(ds, scoped_columns, name_map)
-            typer.echo(f"  Applied table name map ({len(name_map)} entries)", err=True)
-
-        # Build dependency levels from raw calcs (before resolution strips refs)
-        raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])
-
-        # Pre-process: resolve copy-style and Calculation_ refs to display names
-        resolved_calcs = resolve_all_internal_refs(
-            ds["calculated_fields"], ds["calc_map"],
+        result = _process_datasource(
+            ds=ds,
+            model_name=model_name,
+            connection_name=connection_name,
+            parsed=parsed,
+            name_map=name_map,
+            col_name_map=col_name_map,
+            existing_guid=existing_guid,
+            profile=profile,
+            dry_run=dry_run,
+            max_retries=max_retries,
+            out_path=out_path,
+            reconcile_table=reconcile_table,
+            reconcile_plan_mode=reconcile_plan,
         )
-
-        translated, skipped, validation_issues = _translate_and_validate(
-            ds, resolved_calcs, scoped_columns, parsed,
-        )
-
-        # Step 3: Resolve name collisions
-        cleaned_cols, cleaned_formulas, rename_map = resolve_name_collisions(
-            ds["columns"], translated, parsed["parameters"],
-        )
-        if rename_map:
-            typer.echo(f"  Renamed: {rename_map}", err=True)
-
-        if existing_guid:
-            result = _merge_flow(
-                ds=ds,
-                name=name,
-                existing_guid=existing_guid,
-                existing_tml=existing_tml,
-                cleaned_formulas=cleaned_formulas,
-                translated=translated,
-                skipped=skipped,
-                validation_issues=validation_issues,
-                profile=profile,
-                dry_run=dry_run,
-                max_retries=max_retries,
-            )
-        else:
-            result = _generate_flow(
-                ds=ds,
-                name=name,
-                slug=slug,
-                connection_name=connection_name,
-                parsed=parsed,
-                cleaned_cols=cleaned_cols,
-                cleaned_formulas=cleaned_formulas,
-                translated=translated,
-                skipped=skipped,
-                rename_map=rename_map,
-                raw_levels=raw_levels,
-                validation_issues=validation_issues,
-                out_path=out_path,
-                dry_run=dry_run,
-            )
+        if result is None:
+            # --reconcile-plan already printed its JSON — stop without
+            # printing the all_results wrapper or writing any TML.
+            return
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))

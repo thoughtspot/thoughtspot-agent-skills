@@ -1541,6 +1541,42 @@ TWB relation name — warehouse-normalized names, or a published-datasource TWB 
 relation is literally named `sqlproxy`. Omit the flag when the names already match; the
 default (no map) behavior is unchanged.
 
+**Published/sqlproxy datasources bound to an existing table/view — reconcile columns.**
+When the datasource is published (`sqlproxy`) and binds to a pre-existing ThoughtSpot
+table/view (the consultant/stand-in case), the emitted columns carry Tableau's
+`(Custom SQL Query N)` suffixes and may diverge from the view's real names. Reconcile:
+
+1. **Plan** — get suggested mappings + drops (no write). `--reconcile-table` requires
+   `--profile` (the CLI hard-exits with "--profile is required when using
+   --reconcile-table" otherwise):
+   ```bash
+   ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+     --datasource "{datasource_name}" --output-dir {output_dir} \
+     --table-name-map {workdir}/table_name_map.json --reconcile-table {table_guid} \
+     --reconcile-plan --profile {profile_name}
+   ```
+2. **Confirm with the user** — present the Plan JSON's `suggested_mappings` (each
+   `{from, to, confidence}`) and `unmatched_drop` (columns with no confident match,
+   which will be dropped). The Plan has no formula field — formulas that reference a
+   dropped column are only known after Apply, surfaced in the result's
+   `reconcile_dropped.formulas` (and the Step 12 report), so don't present formula
+   impact at this stage. The user confirms/edits each mapping. Write the confirmed
+   mappings as a flat `{"<from>": "<to>"}` JSON object (from `suggested_mappings`'
+   from/to, dropping confidence) to `{workdir}/column_name_map.json` — **keep it in
+   `{workdir}`, NOT `{output_dir}`**: Step 6/7 import with `ts tml import --dir {output_dir}`
+   scans `.json` files, so a map file left in the output dir is wrongly ingested as TML.
+3. **Apply** — re-run with the confirmed map (writes phased TMLs that bind):
+   ```bash
+   ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+     --datasource "{datasource_name}" --output-dir {output_dir} \
+     --table-name-map {workdir}/table_name_map.json --reconcile-table {table_guid} \
+     --column-name-map {workdir}/column_name_map.json --profile {profile_name}
+   ```
+
+Column-id qualification and suffix/junk stripping are automatic (Tier-1) for every run.
+Dropped columns + their formulas appear in the result JSON's `reconcile_dropped` and the
+Step 12 report.
+
 Still apply the **Model TML hard rules**, MEASURE/ATTRIBUTE classification guidance, and
 Template below when **reviewing** the generated `*.phase0.model.tml` — they describe the
 required shape regardless of how the file was produced.
@@ -3992,6 +4028,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.23.0 | 2026-07-04 | **build-model column-schema reconciliation for published/sqlproxy datasources.** Tier-1 (always-on): strip `(Custom SQL Query N)` suffixes, drop `__tableau_internal` junk, qualify `column_id` as `table::col` (fixes "column_id incorrect" on existing-table binds), dedupe. Tier-2 (opt-in `--reconcile-table {guid}`): reconcile emitted columns against a target table's real schema — `--reconcile-plan` emits suggested name mappings + drops; skill confirms with the user; `--column-name-map` applies (drops unmapped-absent columns + dependent formulas). Live-verified 2026-07-04 against `vw_dim_promo` on se-thoughtspot (tentpole datasource): reconcile-plan → confirm (rejected a false `UPDATED_AT`→`MAX_UPDATED_AT` suggestion) → apply → base model `VALIDATE_ONLY = OK` (the pre-fix "column_id incorrect" failure is resolved). Prereq ts-cli v0.33.0. |
 | 1.22.1 | 2026-07-04 | **Fix: audit classifies per datasource, not flattened (live-test finding).** `ts tableau classify-formulas` on a multi-datasource workbook previously flattened all datasources' calcs into one `translate-formulas` call, which deduped by name — mis-tiering a calc *name* shared across datasources whose *expression* differs (e.g. SUM vs COUNTD) and misreporting coverage (per-datasource totals didn't reconcile). Now classifies per datasource (each → its own model); output is `{datasources:[{name,formulas,tier_counts,translate_stats}], tier_counts:<summed>}`, each datasource's `translate_stats` reconciles. Steps A3/A4 read per-datasource. Prereq ts-cli v0.32.1. |
 | 1.22.0 | 2026-07-04 | **Codify highest-value/risk inline logic (Components A/D).** New `ts tableau parse` (blend graph, table-calc addressing, orphan calcs) replaces inline Python in Steps 3/3e/3f/3g. New `ts tableau classify-formulas` shares the migrate translation verdict, fixing the audit-vs-migrate divergence (Steps A3/A4/7). Blend graph computation moved to tested helpers (`build_blend_plan`), consumed via parse output (Step 5b Python removed). `ts tml import/lint` gain `--order tableau` / `--model-phase base` / `--pattern`, replacing the inline payload-builder heredocs in Steps 6/7/11; the anti-drift validator now guards those too. Prereq ts-cli v0.32.0. TML-template emission and spec-table relocation deferred. |
 | 1.21.0 | 2026-07-03 | Wire `ts tableau build-model` generate mode into Phase-1 base-model step (BL-085 p1); add `--table-name-map` flag; blend-merge path unchanged. Prereq ts-cli v0.29.0 |
