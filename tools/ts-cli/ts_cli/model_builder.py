@@ -31,7 +31,10 @@ from ts_cli.tableau.twb import (  # noqa: F401 — re-exported for back-compat
     _extract_tables,
     _normalize_date_params,
     build_param_name_map,
+    detect_orphan_calcs,
+    extract_blends,
     extract_parameters,
+    extract_table_calc_addressing,
     parse_twb,
 )
 

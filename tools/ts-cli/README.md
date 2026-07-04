@@ -939,6 +939,51 @@ Each CSV in `data_files` includes a `validation` object:
 
 ---
 
+### `ts tableau parse`
+
+Parse a `.twb`/`.twbx` file into structured JSON — tables, columns, joins,
+calculated fields, parameters, the data-blend graph, table-calc addressing, and
+per-datasource orphan-calc detection. This is the Step 3 entry point for the
+`ts-convert-from-tableau` skill: read this JSON instead of hand-parsing the TWB XML.
+
+```bash
+ts tableau parse "workbook.twbx" --output parsed.json
+```
+
+**Options:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `twb_file` (arg) | yes | Path to `.twb` or `.twbx` file |
+| `--output`, `-o` | yes | Output path for the parsed JSON |
+
+**Output file:**
+
+```json
+{
+  "datasources": [
+    {
+      "name": "...", "tables": [...], "columns": [...], "joins": [...],
+      "calculated_fields": [...], "calc_map": {...}, "col_table_map": {...},
+      "orphan_calcs": ["Caption1", "..."]
+    }
+  ],
+  "parameters": [...],
+  "param_map": {...},
+  "blends": {"source_ds_caption": [{"target_ds": "...", "column_mappings": [...]}]},
+  "table_calc_addressing": {"column_level": {...}, "ws_overrides": {...}}
+}
+```
+
+`orphan_calcs` (captions of calculated fields that reference a table missing from
+their own datasource, direct + transitive), `blends` (the data-blend graph keyed by
+datasource caption), and `table_calc_addressing` (column-level + worksheet-override
+`<table-calc>` sort context) are computed by the pure extractors in
+`ts_cli/tableau/twb.py` (`detect_orphan_calcs`, `extract_blends`,
+`extract_table_calc_addressing`). Stdout is silent; a one-line summary goes to stderr.
+
+---
+
 ### `ts tableau translate-formulas`
 
 Translate Tableau calculated fields to ThoughtSpot formula syntax. Reads the

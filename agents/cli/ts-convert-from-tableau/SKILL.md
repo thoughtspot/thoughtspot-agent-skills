@@ -731,6 +731,17 @@ Save the resolved `.twb` path as `{twb_path}`.
 
 ## Step 3 — Parse TWB XML
 
+Run the parser and read its JSON — do NOT hand-parse the XML:
+
+```bash
+ts tableau parse "{twb_path}" --output /tmp/ts_tableau_mig/{workbook_name}_parsed.json
+```
+
+The JSON contains `datasources[]` (each with `tables`, `columns`, `joins`,
+`calculated_fields`, `calc_map`, `col_table_map`, `orphan_calcs`), `parameters`,
+`param_map`, `blends`, and `table_calc_addressing`. All subsequent steps read
+these fields instead of re-deriving them.
+
 Read `{twb_path}` in full. The TWB is XML. Extract the following elements:
 
 ### 3a. Workbook name
@@ -873,53 +884,10 @@ If absent, no blending is used — skip this step.
 
 **Build the blend graph:**
 
-```python
-blend_graph = {}  # {source_ds_name: [{target_ds_name, column_mappings}]}
-
-ds_rels = root.find('.//datasource-relationships')
-if ds_rels is not None:
-    # Build a map of datasource-dependencies: ds_id → {column_instance_name → base_column_name}
-    dep_map = {}
-    for dep in ds_rels.findall('datasource-dependencies'):
-        ds_id = dep.get('datasource')
-        instance_to_col = {}
-        for col_inst in dep.findall('column-instance'):
-            instance_to_col[col_inst.get('name')] = col_inst.get('column')
-        dep_map[ds_id] = instance_to_col
-
-    # Parse each datasource-relationship (pairwise blend link)
-    for rel in ds_rels.findall('datasource-relationship'):
-        source_ds = rel.get('source')   # primary datasource
-        target_ds = rel.get('target')   # secondary datasource
-        col_maps = []
-        for m in rel.findall('column-mapping/map'):
-            # key format: [federated.xxx].[instance_name]
-            # Extract the instance_name portion after the datasource prefix
-            src_key = m.get('key')
-            tgt_key = m.get('value')
-
-            # Parse instance name from fully-qualified reference
-            src_inst = src_key.split('].[')[1].rstrip(']') if '].[' in src_key else src_key
-            tgt_inst = tgt_key.split('].[')[1].rstrip(']') if '].[' in tgt_key else tgt_key
-
-            # Resolve to base column names via dep_map
-            src_col = dep_map.get(source_ds, {}).get(src_inst, src_inst)
-            tgt_col = dep_map.get(target_ds, {}).get(tgt_inst, tgt_inst)
-
-            # Strip brackets from column names: [Category] → Category
-            src_col = src_col.strip('[]')
-            tgt_col = tgt_col.strip('[]')
-
-            col_maps.append({'source_col': src_col, 'target_col': tgt_col})
-
-        blend_graph.setdefault(source_ds, []).append({
-            'target_ds': target_ds,
-            'column_mappings': col_maps,
-        })
-```
-
-Store `blend_graph` alongside the per-datasource extraction results from Step 3b.
-The graph keys are datasource `name` attributes (the `federated.xxx` IDs from the XML).
+The parse-JSON `blends` field (Step 3) is this graph — `{source_ds_caption:
+[{target_ds, column_mappings}]}`, with federated IDs already resolved to
+datasource captions (matching each datasource's `name` from Step 3b). Treat
+`blend_graph` in the rest of this document as shorthand for that field.
 
 **What to log:**
 - Number of blend relationships found
@@ -957,72 +925,21 @@ merging happens in Step 5b.
 ## Step 3f — Table-calc addressing extraction
 
 For every datasource, scan `<column>` elements that have a `<calculation class='tableau'>`
-child containing a `<table-calc>` element. Build a **column-level addressing map**:
+child containing a `<table-calc>` element. This is the **column-level addressing map** —
+read it from the parse-JSON `table_calc_addressing.column_level` field (Step 3): keyed by
+calc internal ID (e.g. `[Calculation_953355781789577216]`), each entry has
+`ordering_type` (`Rows` | `Columns` | `Table` | `CellInPane` | `Field`), `ordering_field`,
+`order_fields` (list), `quick_calc_type` (`PctTotal` | `PctDiff` | `Difference` |
+`PctRank` | `None`), and `address_offset` (int or `None`).
 
-```python
-# table_calc_addressing[calc_internal_id] = {
-#     'ordering_type': 'Rows' | 'Columns' | 'Table' | 'CellInPane' | 'Field',
-#     'ordering_field': '<field_name>' or None,
-#     'order_fields': ['<field1>', '<field2>'] or [],    # from <order field='...'> children
-#     'quick_calc_type': 'PctTotal' | 'PctDiff' | 'Difference' | 'PctRank' | None,
-#     'address_offset': int or None,                      # from <address><value>N</value>
-# }
-table_calc_addressing = {}
-
-for column in datasource.findall('.//column'):
-    calc = column.find('calculation[@class="tableau"]')
-    if calc is None:
-        continue
-    tc = calc.find('table-calc')
-    if tc is None:
-        continue
-    calc_id = column.get('name')  # e.g. '[Calculation_953355781789577216]'
-    entry = {
-        'ordering_type': tc.get('ordering-type', 'Rows'),
-        'ordering_field': tc.get('ordering-field'),
-        'order_fields': [o.get('field') for o in tc.findall('order')],
-        'quick_calc_type': tc.get('type'),
-        'address_offset': None,
-    }
-    addr = tc.find('address/value')
-    if addr is not None and addr.text:
-        entry['address_offset'] = int(addr.text)
-    table_calc_addressing[calc_id] = entry
-```
-
-Then, for each `<worksheet>`, scan its `<column-instance>` elements for `<table-calc>`
-children. These are **view-level overrides** — they take precedence over the column-level
-definition for that worksheet:
-
-```python
-# ws_table_calc_overrides[worksheet_name][calc_internal_id] = { same shape as above }
-ws_table_calc_overrides = {}
-
-for worksheet in root.findall('.//worksheet'):
-    ws_name = worksheet.get('name')
-    ws_table_calc_overrides[ws_name] = {}
-    for ci in worksheet.findall('.//column-instance'):
-        tc = ci.find('table-calc')
-        if tc is None:
-            continue
-        # column-instance 'column' attr references the calc's internal ID
-        calc_id = ci.get('column')
-        entry = {
-            'ordering_type': tc.get('ordering-type', 'Rows'),
-            'ordering_field': tc.get('ordering-field'),
-            'order_fields': [o.get('field') for o in tc.findall('order')],
-            'quick_calc_type': tc.get('type'),
-            'address_offset': None,
-        }
-        addr = tc.find('address/value')
-        if addr is not None and addr.text:
-            entry['address_offset'] = int(addr.text)
-        ws_table_calc_overrides[ws_name][calc_id] = entry
-```
+Each `<worksheet>`'s `<column-instance>` elements can carry their own `<table-calc>` —
+these are **view-level overrides** that take precedence over the column-level definition
+for that worksheet. Read them from `table_calc_addressing.ws_overrides` (same entry shape,
+keyed by worksheet name then calc ID).
 
 **Resolution order** when translating a table-calc formula used on worksheet W:
-1. Check `ws_table_calc_overrides[W][calc_id]` — view-level override
-2. Fall back to `table_calc_addressing[calc_id]` — column-level definition
+1. Check `table_calc_addressing.ws_overrides[W][calc_id]` — view-level override
+2. Fall back to `table_calc_addressing.column_level[calc_id]` — column-level definition
 3. If neither exists, treat as `ordering_type='Rows'` (Tableau default)
 
 ---
@@ -1034,34 +951,9 @@ clones), it inherits **all calculated fields** from the original — including o
 reference tables no longer present in the copy. These orphan calcs are non-functional in
 Tableau and will fail at ThoughtSpot import.
 
-After Step 3b extraction, for each datasource:
-
-```python
-ds_tables = {t['name'].upper() for t in datasource['physical_tables']}
-orphan_calcs = set()
-
-# Direct orphans: reference a table not in this datasource
-for calc in datasource['calculated_fields']:
-    for ref in re.findall(r'\[([^\]]+)::', calc['expr']):
-        if ref.upper() not in ds_tables:
-            orphan_calcs.add(calc['name'])
-            break
-
-# Transitive orphans: depend on a direct orphan
-changed = True
-while changed:
-    changed = False
-    for calc in datasource['calculated_fields']:
-        if calc['name'] in orphan_calcs:
-            continue
-        for ref_name in calc.get('formula_refs', []):
-            if ref_name in orphan_calcs:
-                orphan_calcs.add(calc['name'])
-                changed = True
-                break
-```
-
-Store `orphan_calcs` per datasource alongside the extraction results.
+Each datasource's `orphan_calcs` (parse-JSON field, Step 3) is this list — captions of
+calcs that directly reference a table missing from the datasource, plus calcs that
+transitively depend on a direct orphan.
 
 **What to log** (if any orphans found):
 > ⚠ Datasource `{name}`: {N} orphan calc(s) reference missing tables: {table1, table2, …}

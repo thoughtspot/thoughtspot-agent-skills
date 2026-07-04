@@ -38,7 +38,7 @@ ts_cli/
     tml.py        — ts tml export / import / lint
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
-    tableau.py    — ts tableau (signin, datasources, download, translate-formulas, build-model)
+    tableau.py    — ts tableau (signin, datasources, download, parse, translate-formulas, build-model)
     snowflake.py  — ts snowflake (diff, lint-ddl)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     audit.py      — ts audit run / report
