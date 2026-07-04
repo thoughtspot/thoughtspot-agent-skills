@@ -191,6 +191,94 @@ def parse_twb(twb_path: str | Path) -> dict:
     }
 
 
+def extract_blends(root: ET.Element) -> dict:
+    """Build the data-blend graph, keyed by datasource caption.
+
+    Returns {source_caption: [{"target_ds": caption, "column_mappings":
+    [{"source_col", "target_col"}]}]}. Federated IDs in the relationship XML are
+    resolved to captions so the graph joins to parse_twb's datasources.
+    """
+    ds_rels = root.find(".//datasource-relationships")
+    if ds_rels is None:
+        return {}
+
+    fed_to_caption = {
+        ds.get("name"): ds.get("caption", ds.get("name", ""))
+        for ds in root.findall(".//datasource")
+        if ds.get("name")
+    }
+
+    dep_map: dict = {}
+    for dep in ds_rels.findall("datasource-dependencies"):
+        ds_id = dep.get("datasource")
+        instance_to_col = {}
+        for ci in dep.findall("column-instance"):
+            instance_to_col[ci.get("name")] = ci.get("column")
+        dep_map[ds_id] = instance_to_col
+
+    graph: dict = {}
+    for rel in ds_rels.findall("datasource-relationship"):
+        source_ds = rel.get("source")
+        target_ds = rel.get("target")
+        col_maps = []
+        for m in rel.findall("column-mapping/map"):
+            src_key = m.get("key", "")
+            tgt_key = m.get("value", "")
+            src_inst = "[" + src_key.split("].[")[1] if "].[" in src_key else src_key
+            tgt_inst = "[" + tgt_key.split("].[")[1] if "].[" in tgt_key else tgt_key
+            src_col = dep_map.get(source_ds, {}).get(src_inst, src_inst).strip("[]")
+            tgt_col = dep_map.get(target_ds, {}).get(tgt_inst, tgt_inst).strip("[]")
+            col_maps.append({"source_col": src_col, "target_col": tgt_col})
+        src_caption = fed_to_caption.get(source_ds, source_ds)
+        tgt_caption = fed_to_caption.get(target_ds, target_ds)
+        graph.setdefault(src_caption, []).append(
+            {"target_ds": tgt_caption, "column_mappings": col_maps}
+        )
+    return graph
+
+
+def _read_table_calc(tc: ET.Element) -> dict:
+    entry = {
+        "ordering_type": tc.get("ordering-type", "Rows"),
+        "ordering_field": tc.get("ordering-field"),
+        "order_fields": [o.get("field") for o in tc.findall("order")],
+        "quick_calc_type": tc.get("type"),
+        "address_offset": None,
+    }
+    addr = tc.find("address/value")
+    if addr is not None and addr.text:
+        entry["address_offset"] = int(addr.text)
+    return entry
+
+
+def extract_table_calc_addressing(root: ET.Element) -> dict:
+    """Extract column-level and worksheet-override table-calc addressing.
+
+    ws_overrides take precedence over column_level for a given worksheet.
+    """
+    column_level: dict = {}
+    for column in root.findall(".//datasource//column"):
+        calc = column.find("calculation[@class='tableau']")
+        if calc is None:
+            continue
+        tc = calc.find("table-calc")
+        if tc is None:
+            continue
+        column_level[column.get("name")] = _read_table_calc(tc)
+
+    ws_overrides: dict = {}
+    for ws in root.findall(".//worksheet"):
+        ws_name = ws.get("name")
+        ws_overrides[ws_name] = {}
+        for ci in ws.findall(".//column-instance"):
+            tc = ci.find("table-calc")
+            if tc is None:
+                continue
+            ws_overrides[ws_name][ci.get("column")] = _read_table_calc(tc)
+
+    return {"column_level": column_level, "ws_overrides": ws_overrides}
+
+
 def _strip_brackets(s: str) -> str:
     return s.replace("[", "").replace("]", "")
 
@@ -360,3 +448,32 @@ def _tableau_type_to_ts(datatype: str) -> str:
         "datetime": "DATE_TIME",
     }
     return _map.get(datatype, "VARCHAR")
+
+
+def detect_orphan_calcs(datasource: dict) -> list[str]:
+    """Return captions of calcs that reference a table not in this datasource
+    (direct), plus calcs that transitively depend on a direct orphan."""
+    ds_tables = {t["name"].upper() for t in datasource.get("tables", [])}
+    calc_map = datasource.get("calc_map", {})
+    calcs = datasource.get("calculated_fields", [])
+    orphans: set[str] = set()
+
+    for calc in calcs:
+        for ref in re.findall(r"\[([^\]]+)::", calc.get("formula", "")):
+            if ref.upper() not in ds_tables:
+                orphans.add(calc["caption"])
+                break
+
+    changed = True
+    while changed:
+        changed = False
+        for calc in calcs:
+            if calc["caption"] in orphans:
+                continue
+            for internal in re.findall(r"\[Calculation_\d+\]", calc.get("formula", "")):
+                ref_caption = calc_map.get(internal) or calc_map.get(internal.strip("[]"))
+                if ref_caption in orphans:
+                    orphans.add(calc["caption"])
+                    changed = True
+                    break
+    return sorted(orphans)

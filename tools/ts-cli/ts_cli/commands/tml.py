@@ -1,6 +1,7 @@
 """ts tml — export and import ThoughtSpot Markup Language objects."""
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import sys
@@ -55,13 +56,22 @@ def strip_nonprintable(text: str) -> str:
 _TML_DIR_EXTENSIONS = (".tml", ".yaml", ".yml", ".json")
 
 
-def collect_tml_paths(files: List[str], directory: Optional[str]) -> List[str]:
+def collect_tml_paths(
+    files: List[str],
+    directory: Optional[str],
+    patterns: Optional[List[str]] = None,
+) -> List[str]:
     """Resolve --file / --dir CLI options into an ordered list of file paths.
 
     --file entries are used verbatim, in the order given. A --dir entry is expanded
     to every file directly inside that directory (non-recursive) whose extension is
     one of _TML_DIR_EXTENSIONS, sorted by name for determinism, and appended after
     the explicit --file entries.
+
+    `patterns`, when given, is a list of fnmatch glob patterns (e.g. "*.liveboard.tml")
+    that further restricts the --dir matches to filenames matching at least one
+    pattern. Default `None` preserves the original behaviour (no filtering) —
+    existing callers are unaffected.
 
     Only touches the filesystem to list directory contents — never reads file
     bodies (that's read_tml_texts). Raises SystemExit with a clear message on a
@@ -75,6 +85,7 @@ def collect_tml_paths(files: List[str], directory: Optional[str]) -> List[str]:
         matched = sorted(
             p for p in dir_path.iterdir()
             if p.is_file() and p.suffix.lower() in _TML_DIR_EXTENSIONS
+            and (patterns is None or any(fnmatch.fnmatch(p.name, pat) for pat in patterns))
         )
         if not matched:
             raise SystemExit(
@@ -82,6 +93,69 @@ def collect_tml_paths(files: List[str], directory: Optional[str]) -> List[str]:
             )
         paths.extend(str(p) for p in matched)
     return paths
+
+
+# Tableau-import TML type ordering: table -> sql_view -> model -> cohort -> liveboard.
+# Matched by filename suffix (case-insensitive); anything unrecognised sorts last.
+_TYPE_SUFFIX_RANK = (
+    (".table.tml", 0), (".sql_view.tml", 1), (".model.tml", 2),
+    (".cohort.tml", 3), (".liveboard.tml", 4),
+)
+
+# Matches phased model filenames like "x.phase1.model.tml". Group 1 is the phase
+# number; phase 0 (or no phase suffix at all) counts as the "base" model.
+_PHASE_RE = re.compile(r"\.phase(\d+)\.model\.tml$", re.IGNORECASE)
+
+
+def _tml_type_rank(path: str) -> int:
+    """Return the tableau-order sort rank for a TML path based on its filename suffix.
+
+    Unrecognised suffixes (not table/sql_view/model/cohort/liveboard) rank last (5).
+    """
+    low = path.lower()
+    for suffix, rank in _TYPE_SUFFIX_RANK:
+        if low.endswith(suffix):
+            return rank
+    return 5
+
+
+def _is_base_model(path: str) -> bool:
+    """True if `path` is a base model TML: no `.phaseN.model.tml` suffix, or phase 0.
+
+    `x.model.tml` and `x.phase0.model.tml` are both base models. `x.phase1.model.tml`,
+    `x.phase2.model.tml`, etc. are not.
+    """
+    m = _PHASE_RE.search(path)
+    return m is None or m.group(1) == "0"
+
+
+def order_and_filter_tml_paths(
+    paths: List[str],
+    order: str = "name",
+    model_phase: str = "all",
+) -> List[str]:
+    """Reorder and/or filter an already-resolved list of TML paths.
+
+    `order="tableau"` sorts by TML type (table -> sql_view -> model -> cohort ->
+    liveboard, via _tml_type_rank), then by path name for determinism within a type.
+    `order="name"` (default) leaves the input order untouched.
+
+    `model_phase="base"` drops phased model files `*.phaseN.model.tml` for N >= 1,
+    keeping bare `*.model.tml` and `*.phase0.model.tml` (see _is_base_model).
+    `model_phase="all"` (default) leaves every path in place.
+
+    Both parameters default to no-ops — calling with no arguments beyond `paths`
+    returns `paths` unchanged (as a new list). Pure function: no filesystem access.
+    """
+    result = list(paths)
+    if model_phase == "base":
+        result = [
+            p for p in result
+            if not (p.lower().endswith(".model.tml") and not _is_base_model(p))
+        ]
+    if order == "tableau":
+        result = sorted(result, key=lambda p: (_tml_type_rank(p), p))
+    return result
 
 
 def read_tml_texts(paths: List[str]) -> List[str]:
@@ -93,11 +167,6 @@ def read_tml_texts(paths: List[str]) -> List[str]:
             raise SystemExit(f"--file path does not exist or is not a file: {raw}")
         texts.append(p.read_text())
     return texts
-
-
-def load_tmls_from_args(files: List[str], directory: Optional[str]) -> List[str]:
-    """Full --file/--dir pipeline: CLI options -> ordered list of raw TML strings."""
-    return read_tml_texts(collect_tml_paths(files, directory))
 
 
 def _stdin_has_piped_content() -> bool:
@@ -113,13 +182,21 @@ def _stdin_has_piped_content() -> bool:
     return bool(sys.stdin.read().strip())
 
 
-def load_input_tmls(files: List[str], directory: Optional[str]) -> List[str]:
+def load_input_tmls(
+    files: List[str],
+    directory: Optional[str],
+    patterns: Optional[List[str]] = None,
+    order: str = "name",
+    model_phase: str = "all",
+) -> List[str]:
     """Resolve the TML input source for `ts tml import` / `ts tml lint`.
 
-    --file/--dir take precedence when given (load_tmls_from_args on the resolved
-    paths). Otherwise, falls back to the original interface: a JSON array of TML
-    strings (or a single JSON string) read from stdin — unchanged from prior
-    versions.
+    --file/--dir take precedence when given: paths are resolved via
+    `collect_tml_paths` (applying `patterns` to --dir matches), then reordered/
+    filtered via `order_and_filter_tml_paths` (`order`, `model_phase`), then read.
+    Otherwise, falls back to the original interface: a JSON array of TML strings
+    (or a single JSON string) read from stdin — unchanged from prior versions.
+    `patterns`/`order`/`model_phase` have no effect on the stdin path.
 
     Combining --file/--dir with piped stdin content is rejected as ambiguous: pick
     one input mode.
@@ -132,7 +209,9 @@ def load_input_tmls(files: List[str], directory: Optional[str]) -> List[str]:
                 "Use exactly one input mode — stdin (JSON array of TML strings) or "
                 "--file/--dir (raw TML file paths) — not both."
             )
-        return load_tmls_from_args(files, directory)
+        paths = collect_tml_paths(files, directory, patterns=patterns)
+        paths = order_and_filter_tml_paths(paths, order=order, model_phase=model_phase)
+        return read_tml_texts(paths)
 
     try:
         payload = json.load(sys.stdin)
@@ -319,6 +398,18 @@ def import_tml(
     ),
     file: List[str] = _file_option,
     directory: Optional[str] = _dir_option,
+    order: str = typer.Option(
+        "name", "--order",
+        help="File order: name (default) or tableau (table→sql_view→model→cohort→liveboard)",
+    ),
+    model_phase: str = typer.Option(
+        "all", "--model-phase",
+        help="all (default) or base (drop *.phaseN.model.tml for N>=1)",
+    ),
+    pattern: List[str] = typer.Option(
+        [], "--pattern",
+        help="Glob(s) to filter --dir files, e.g. --pattern '*.liveboard.tml'",
+    ),
 ) -> None:
     """Import TML objects.
 
@@ -327,7 +418,8 @@ def import_tml(
     \b
     1. --file/--dir: reads raw TML text directly from one or more files.
        --file is repeatable; --dir imports every .tml/.yaml/.yml/.json file
-       in a directory (non-recursive).
+       in a directory (non-recursive). --order/--model-phase/--pattern only
+       apply to this mode.
     2. stdin (default when neither --file nor --dir is given): a JSON array
        of TML strings (or a single JSON string).
 
@@ -353,11 +445,15 @@ def import_tml(
       # Create a brand-new object from a file with no GUID
       ts tml import --file model.tml --policy ALL_OR_NONE --create-new
 
+      # Tableau-order directory import, base model only, then filtered by pattern
+      ts tml import --dir ./tml_out --order tableau --model-phase base --policy ALL_OR_NONE
+      ts tml import --dir ./tml_out --pattern '*.liveboard.tml' --policy PARTIAL --create-new
+
       # Original stdin interface (unchanged)
       python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('model.tml').read_text()]))" \\
         | ts tml import --policy ALL_OR_NONE
     """
-    tmls = load_input_tmls(file, directory)
+    tmls = load_input_tmls(file, directory, patterns=(pattern or None), order=order, model_phase=model_phase)
 
     client = ThoughtSpotClient(resolve_profile(profile))
     resp = client.post(
@@ -413,13 +509,26 @@ def import_tml(
 def lint_tml_cmd(
     file: List[str] = _file_option,
     directory: Optional[str] = _dir_option,
+    order: str = typer.Option(
+        "name", "--order",
+        help="File order: name (default) or tableau (table→sql_view→model→cohort→liveboard)",
+    ),
+    model_phase: str = typer.Option(
+        "all", "--model-phase",
+        help="all (default) or base (drop *.phaseN.model.tml for N>=1)",
+    ),
+    pattern: List[str] = typer.Option(
+        [], "--pattern",
+        help="Glob(s) to filter --dir files, e.g. --pattern '*.liveboard.tml'",
+    ),
 ) -> None:
     """Lint TML for the model invariants VALIDATE_ONLY does not catch (I1/I2/I4/I5/I8 + guid).
 
-    Reads the SAME input as `ts tml import` — either --file/--dir (raw TML file paths)
-    or, when neither is given, a JSON array of TML strings (or a single string) from
-    stdin. No ThoughtSpot connection needed; pure local structural check. Run it before
-    import to fail loud on issues the server accepts silently.
+    Reads the SAME input as `ts tml import` — either --file/--dir (raw TML file paths,
+    with --order/--model-phase/--pattern applying only to this mode) or, when neither is
+    given, a JSON array of TML strings (or a single string) from stdin. No ThoughtSpot
+    connection needed; pure local structural check. Run it before import to fail loud on
+    issues the server accepts silently.
 
     Output: JSON {"clean": bool, "results": [{index, type, name, findings: [...]}]}.
     Exit code 1 if any document has findings, else 0.
@@ -427,9 +536,10 @@ def lint_tml_cmd(
     \b
       ts tml lint --file model.tml
       ts tml lint --dir ./tml_out
+      ts tml lint --dir ./tml_out --order tableau --model-phase base
       cat payload.json | ts tml lint
     """
-    tmls = load_input_tmls(file, directory)
+    tmls = load_input_tmls(file, directory, patterns=(pattern or None), order=order, model_phase=model_phase)
 
     from ts_cli.tml_lint import lint_tml
 

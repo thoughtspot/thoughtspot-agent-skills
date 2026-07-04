@@ -248,8 +248,21 @@ resolves.
 > [`../../shared/mappings/tableau/tableau-formula-translation.md`](../../shared/mappings/tableau/tableau-formula-translation.md)
 > and check its full function table and pass-through section. Do not decide from syntax alone.**
 
-For each calculated field extracted in Step A2, classify it into one of these tiers
-based on the patterns in `tableau-formula-translation.md`:
+Run the classifier — it shares the migrate-mode translation verdict, so the audit
+cannot over- or under-promise coverage:
+
+```bash
+ts tableau classify-formulas --input /tmp/ts_tableau_mig/{workbook_name}_parsed.json --output /tmp/ts_tableau_mig/audit/{workbook_name}_classification.json
+```
+
+Each entry in `classification.json`'s `formulas[]` has `tier`, `reason`, `level`, and
+`complexity`. Translatable tiers: `native`, `lod`, `cumulative`, `moving`,
+`pass_through`, `row_offset_native`, `parameter_ref`. Untranslatable tiers:
+`untranslatable`, `row_offset_ambiguous`, `geospatial`, `circular`, `orphan`,
+`parameter_query`. `tier_counts` gives per-tier totals for Step A4.
+
+The table below maps those tiers to the human-readable categories used in the report —
+kept as reference/documentation now, not as executed classification logic:
 
 | Tier | Description | Examples |
 |---|---|---|
@@ -265,67 +278,17 @@ based on the patterns in `tableau-formula-translation.md`:
 | **Parameter ref (auto)** | References a Tableau parameter with static list/range — parameter auto-created in model | `[Parameters].[Currency]` where Currency has `<member>` values |
 | **Parameter ref (query)** | References a Tableau parameter with SQL-lookup list — queryable at migration time | SQL-populated parameter lists (needs connection) |
 
-### Classifier implementation notes
-
-**Function detection — require parentheses.** Match `FUNCTION_NAME(` (with optional
-whitespace before the paren), not bare word boundaries. Bare `\bSIZE\b` false-positives
-on dimension values like `'Size'` or column names like `[Size]`. Correct patterns:
-
-```
-LOOKUP\s*\(   INDEX\s*\(   SIZE\s*\(   FIRST\s*\(   LAST\s*\(   PREVIOUS_VALUE\s*\(   RAWSQL_
-RUNNING_(SUM|AVG|MAX|MIN|COUNT)\s*\(
-WINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(
-RANK(_UNIQUE|_MODIFIED|_DENSE|_PERCENTILE)?\s*\(
-TOTAL\s*\(
-MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
-INTERSECTS\s*\(  LENGTH\s*\(     SHAPETYPE\s*\(  OUTLINE\s*\(
-DIFFERENCE\s*\(  INTERSECTION\s*\(  SYMDIFFERENCE\s*\(  VALIDATE\s*\(
-USERATTRIBUTE\s*\(  USERATTRIBUTEINCLUDES\s*\(
-```
-
-Detection of `INDEX`/`LOOKUP`/`FIRST`/`LAST`/`SIZE` routes through the **tiered decision
-tree** (see Row-Offset Table Calculations in `tableau-formula-translation.md`): these
-functions are detected by the same regexes above, then classified by intent and addressing
-recoverability — they are no longer unconditionally untranslatable.
-
-**`FIRST()`/`LAST()` precedence.** These appear in three contexts — match in this order:
-1. **As `WINDOW_*`/`RUNNING_*` offset args** (e.g. `WINDOW_SUM(SUM([x]), FIRST(), 0)`) →
-   part of the moving/cumulative mapping (not standalone). Match `RUNNING_*`/`WINDOW_*` first.
-2. **As part of the string-aggregation CSV technique** (FIRST/LAST/LOOKUP/PREVIOUS_VALUE
-   building a delimited string) → translate intent to `LISTAGG` (see String aggregation section).
-3. **Inside `LOOKUP()`** (e.g. `LOOKUP(SUM([Sales]), FIRST())`) → the composed pattern
-   means "get value at first/last row" → `first_value` / `last_value` (tiers 5a/5b).
-4. **Standalone** (e.g. `LAST()==0`, `FIRST()+1`, or bare `FIRST()` on a shelf) →
-   Tableau `FIRST()`/`LAST()` return row *offsets*, not values. No direct TS equivalent.
-   If used for row numbering (`FIRST()+1`), approximate with `rank()` (tier 6b).
-   Otherwise omit + log (tiers 6a/6c).
-
-**Parameter references.** Detect `[Parameters].[...]` pattern — this is Tableau's
-cross-datasource parameter reference syntax. These formulas use translatable syntax
-(IF/CASE/WHEN). Cross-reference the parameter name against the parameter definitions
-extracted in Step A2/3:
-- If the parameter has static `<member>` list values or a `<range>` → **Parameter ref
-  (auto)** — the parameter will be auto-created in the model TML, formula translates
-  with a simple `[Parameters].[Name]` → `[Name]` prefix strip
-- If the parameter has no static values (SQL-lookup populated) → **Parameter ref
-  (query)** — auto-migratable at migration time (requires warehouse connection to
-  populate list values), but flagged separately in audit mode since no connection
-  is available
-
-**LOD first.** Check `{FIXED|INCLUDE|EXCLUDE}` before other tiers — LOD expressions
-may also contain functions like SUM that would match Native.
-
-For each formula, also check:
-- Does it reference other calculated fields? (cross-reference depth)
-- Does it use functions from the untranslatable list?
-- Does it mix translatable and untranslatable patterns?
-
 ---
 
 ## Step A4 — Migration Coverage Report (Audit Mode)
 
 For each TWB file, produce a coverage report. If multiple files were audited, also
 produce a combined summary at the end.
+
+**Source the numbers from `classification.json` (Step A3's `ts tableau classify-formulas`
+output) — do not hand-tally tiers.** The per-tier counts below come from `tier_counts`;
+the per-formula rows (Row-offset detail, Excluded Formulas, "Needing Review") come from
+each entry's `tier`/`level`/`complexity`/`reason` fields in `formulas[]`.
 
 **Per-file report:**
 
@@ -731,7 +694,18 @@ Save the resolved `.twb` path as `{twb_path}`.
 
 ## Step 3 — Parse TWB XML
 
-Read `{twb_path}` in full. The TWB is XML. Extract the following elements:
+Run the parser and read its JSON — do NOT hand-parse the XML:
+
+```bash
+ts tableau parse "{twb_path}" --output /tmp/ts_tableau_mig/{workbook_name}_parsed.json
+```
+
+The JSON contains `datasources[]` (each with `tables`, `columns`, `joins`,
+`calculated_fields`, `calc_map`, `col_table_map`, `orphan_calcs`), `parameters`,
+`param_map`, `blends`, and `table_calc_addressing`. All subsequent steps read
+these fields instead of re-deriving them.
+
+The parse output (from the `ts tableau parse` call above) contains the following, extracted from the TWB's XML structure:
 
 ### 3a. Workbook name
 
@@ -873,53 +847,10 @@ If absent, no blending is used — skip this step.
 
 **Build the blend graph:**
 
-```python
-blend_graph = {}  # {source_ds_name: [{target_ds_name, column_mappings}]}
-
-ds_rels = root.find('.//datasource-relationships')
-if ds_rels is not None:
-    # Build a map of datasource-dependencies: ds_id → {column_instance_name → base_column_name}
-    dep_map = {}
-    for dep in ds_rels.findall('datasource-dependencies'):
-        ds_id = dep.get('datasource')
-        instance_to_col = {}
-        for col_inst in dep.findall('column-instance'):
-            instance_to_col[col_inst.get('name')] = col_inst.get('column')
-        dep_map[ds_id] = instance_to_col
-
-    # Parse each datasource-relationship (pairwise blend link)
-    for rel in ds_rels.findall('datasource-relationship'):
-        source_ds = rel.get('source')   # primary datasource
-        target_ds = rel.get('target')   # secondary datasource
-        col_maps = []
-        for m in rel.findall('column-mapping/map'):
-            # key format: [federated.xxx].[instance_name]
-            # Extract the instance_name portion after the datasource prefix
-            src_key = m.get('key')
-            tgt_key = m.get('value')
-
-            # Parse instance name from fully-qualified reference
-            src_inst = src_key.split('].[')[1].rstrip(']') if '].[' in src_key else src_key
-            tgt_inst = tgt_key.split('].[')[1].rstrip(']') if '].[' in tgt_key else tgt_key
-
-            # Resolve to base column names via dep_map
-            src_col = dep_map.get(source_ds, {}).get(src_inst, src_inst)
-            tgt_col = dep_map.get(target_ds, {}).get(tgt_inst, tgt_inst)
-
-            # Strip brackets from column names: [Category] → Category
-            src_col = src_col.strip('[]')
-            tgt_col = tgt_col.strip('[]')
-
-            col_maps.append({'source_col': src_col, 'target_col': tgt_col})
-
-        blend_graph.setdefault(source_ds, []).append({
-            'target_ds': target_ds,
-            'column_mappings': col_maps,
-        })
-```
-
-Store `blend_graph` alongside the per-datasource extraction results from Step 3b.
-The graph keys are datasource `name` attributes (the `federated.xxx` IDs from the XML).
+The parse-JSON `blends` field (Step 3) is this graph — `{source_ds_caption:
+[{target_ds, column_mappings}]}`, with federated IDs already resolved to
+datasource captions (matching each datasource's `name` from Step 3b). Treat
+`blend_graph` in the rest of this document as shorthand for that field.
 
 **What to log:**
 - Number of blend relationships found
@@ -957,72 +888,21 @@ merging happens in Step 5b.
 ## Step 3f — Table-calc addressing extraction
 
 For every datasource, scan `<column>` elements that have a `<calculation class='tableau'>`
-child containing a `<table-calc>` element. Build a **column-level addressing map**:
+child containing a `<table-calc>` element. This is the **column-level addressing map** —
+read it from the parse-JSON `table_calc_addressing.column_level` field (Step 3): keyed by
+calc internal ID (e.g. `[Calculation_953355781789577216]`), each entry has
+`ordering_type` (`Rows` | `Columns` | `Table` | `CellInPane` | `Field`), `ordering_field`,
+`order_fields` (list), `quick_calc_type` (`PctTotal` | `PctDiff` | `Difference` |
+`PctRank` | `None`), and `address_offset` (int or `None`).
 
-```python
-# table_calc_addressing[calc_internal_id] = {
-#     'ordering_type': 'Rows' | 'Columns' | 'Table' | 'CellInPane' | 'Field',
-#     'ordering_field': '<field_name>' or None,
-#     'order_fields': ['<field1>', '<field2>'] or [],    # from <order field='...'> children
-#     'quick_calc_type': 'PctTotal' | 'PctDiff' | 'Difference' | 'PctRank' | None,
-#     'address_offset': int or None,                      # from <address><value>N</value>
-# }
-table_calc_addressing = {}
-
-for column in datasource.findall('.//column'):
-    calc = column.find('calculation[@class="tableau"]')
-    if calc is None:
-        continue
-    tc = calc.find('table-calc')
-    if tc is None:
-        continue
-    calc_id = column.get('name')  # e.g. '[Calculation_953355781789577216]'
-    entry = {
-        'ordering_type': tc.get('ordering-type', 'Rows'),
-        'ordering_field': tc.get('ordering-field'),
-        'order_fields': [o.get('field') for o in tc.findall('order')],
-        'quick_calc_type': tc.get('type'),
-        'address_offset': None,
-    }
-    addr = tc.find('address/value')
-    if addr is not None and addr.text:
-        entry['address_offset'] = int(addr.text)
-    table_calc_addressing[calc_id] = entry
-```
-
-Then, for each `<worksheet>`, scan its `<column-instance>` elements for `<table-calc>`
-children. These are **view-level overrides** — they take precedence over the column-level
-definition for that worksheet:
-
-```python
-# ws_table_calc_overrides[worksheet_name][calc_internal_id] = { same shape as above }
-ws_table_calc_overrides = {}
-
-for worksheet in root.findall('.//worksheet'):
-    ws_name = worksheet.get('name')
-    ws_table_calc_overrides[ws_name] = {}
-    for ci in worksheet.findall('.//column-instance'):
-        tc = ci.find('table-calc')
-        if tc is None:
-            continue
-        # column-instance 'column' attr references the calc's internal ID
-        calc_id = ci.get('column')
-        entry = {
-            'ordering_type': tc.get('ordering-type', 'Rows'),
-            'ordering_field': tc.get('ordering-field'),
-            'order_fields': [o.get('field') for o in tc.findall('order')],
-            'quick_calc_type': tc.get('type'),
-            'address_offset': None,
-        }
-        addr = tc.find('address/value')
-        if addr is not None and addr.text:
-            entry['address_offset'] = int(addr.text)
-        ws_table_calc_overrides[ws_name][calc_id] = entry
-```
+Each `<worksheet>`'s `<column-instance>` elements can carry their own `<table-calc>` —
+these are **view-level overrides** that take precedence over the column-level definition
+for that worksheet. Read them from `table_calc_addressing.ws_overrides` (same entry shape,
+keyed by worksheet name then calc ID).
 
 **Resolution order** when translating a table-calc formula used on worksheet W:
-1. Check `ws_table_calc_overrides[W][calc_id]` — view-level override
-2. Fall back to `table_calc_addressing[calc_id]` — column-level definition
+1. Check `table_calc_addressing.ws_overrides[W][calc_id]` — view-level override
+2. Fall back to `table_calc_addressing.column_level[calc_id]` — column-level definition
 3. If neither exists, treat as `ordering_type='Rows'` (Tableau default)
 
 ---
@@ -1034,34 +914,9 @@ clones), it inherits **all calculated fields** from the original — including o
 reference tables no longer present in the copy. These orphan calcs are non-functional in
 Tableau and will fail at ThoughtSpot import.
 
-After Step 3b extraction, for each datasource:
-
-```python
-ds_tables = {t['name'].upper() for t in datasource['physical_tables']}
-orphan_calcs = set()
-
-# Direct orphans: reference a table not in this datasource
-for calc in datasource['calculated_fields']:
-    for ref in re.findall(r'\[([^\]]+)::', calc['expr']):
-        if ref.upper() not in ds_tables:
-            orphan_calcs.add(calc['name'])
-            break
-
-# Transitive orphans: depend on a direct orphan
-changed = True
-while changed:
-    changed = False
-    for calc in datasource['calculated_fields']:
-        if calc['name'] in orphan_calcs:
-            continue
-        for ref_name in calc.get('formula_refs', []):
-            if ref_name in orphan_calcs:
-                orphan_calcs.add(calc['name'])
-                changed = True
-                break
-```
-
-Store `orphan_calcs` per datasource alongside the extraction results.
+Each datasource's `orphan_calcs` (parse-JSON field, Step 3) is this list — captions of
+calcs that directly reference a table missing from the datasource, plus calcs that
+transitively depend on a direct orphan.
 
 **What to log** (if any orphans found):
 > ⚠ Datasource `{name}`: {N} orphan calc(s) reference missing tables: {table1, table2, …}
@@ -1683,108 +1538,50 @@ required shape regardless of how the file was produced.
 assembly.** GENERATE mode builds one model per single datasource — it cannot produce the
 merged, multi-datasource model a blend relationship requires (inline cross-datasource
 joins, column-conflict renaming across datasources). **Blend-aware model grouping**
-(requires `blend_graph` from Step 3e):
+(requires `blend_plan` from Step 3e):
 
-When `blend_graph` is non-empty, datasources connected by blend relationships produce a
-**single merged model** instead of separate models, assembled by hand as described in this
-section. The merge procedure:
+`ts tableau parse` emits a `blend_plan`: `components` (each `{primary, members}`),
+`ds_table_map` (datasource caption → ThoughtSpot table name), and `joins`
+(`{with, table, on, type, cardinality}`). Use these directly — one model per
+component, joins as given. The cardinality is a `MANY_TO_ONE` default; confirm it
+in the Step 7 review. (TML file assembly from `blend_plan` is still done here per
+the template below — see the deferred follow-up to codify emission.) When
+`blend_plan["components"]` is non-empty, datasources connected by blend relationships
+produce a **single merged model** instead of separate models, assembled by hand as
+described below.
 
-1. **Build connected components** from `blend_graph`. Each connected component (a primary
-   datasource and all its direct or transitive secondaries) becomes one model. Use the
-   primary datasource's display name as the model name.
+The merge procedure:
 
-   ```python
-   # Build undirected adjacency from blend_graph for connected-component discovery
-   adjacency = {}
-   for src, targets in blend_graph.items():
-       for t in targets:
-           adjacency.setdefault(src, set()).add(t['target_ds'])
-           adjacency.setdefault(t['target_ds'], set()).add(src)
-
-   visited = set()
-   model_groups = []  # each group: {'primary': ds_id, 'members': [ds_id, ...]}
-
-   for ds_id in adjacency:
-       if ds_id in visited:
-           continue
-       # BFS to find connected component
-       component = []
-       queue = [ds_id]
-       while queue:
-           node = queue.pop(0)
-           if node in visited:
-               continue
-           visited.add(node)
-           component.append(node)
-           queue.extend(adjacency.get(node, set()) - visited)
-
-       # Primary = a datasource that appears as `source` but NEVER as any `target`
-       all_targets = {t['target_ds'] for edges in blend_graph.values() for t in edges}
-       roots = [d for d in component if d in blend_graph and d not in all_targets]
-       primary = roots[0] if roots else component[0]
-       model_groups.append({'primary': primary, 'members': component})
-   ```
-
-2. **Build the datasource → table mapping.** Each Tableau datasource has a primary physical
-   table (the first `<relation>` element or the relation named in the `<datasource>` caption).
-   Map each datasource's federated ID to its ThoughtSpot Table TML `name` from Step 5a. Also
-   map each federated ID to its Tableau `caption` attribute (the display name shown in Tableau).
-
-   ```python
-   ds_id_to_table = {}    # federated.xxx → ThoughtSpot table name (from Step 5a)
-   ds_id_to_caption = {}  # federated.xxx → Tableau datasource display name
-   for ds_id, ds_info in datasources.items():
-       ds_id_to_table[ds_id] = ds_info['primary_table_name']   # TS table name
-       ds_id_to_caption[ds_id] = ds_info['caption']             # Tableau caption
-   ```
+1. **One model per component.** For each entry in `blend_plan["components"]`, generate a
+   single model TML named after that entry's `primary` datasource's display name,
+   containing:
+   - All `model_tables[]` entries from every member datasource (tables + SQL views),
+     resolved via `blend_plan["ds_table_map"]`
+   - All `columns[]` from every member datasource (with `column_id` prefixed by the
+     correct table name: `TABLE_NAME::col_name`)
+   - All `formulas[]` from every member datasource
+   - The joins from `blend_plan["joins"]` whose `table` belongs to this component
+     (see next step)
 
    For multi-table datasources (internal joins within one datasource), the blend link
    column determines which table is the join anchor. Resolve the link column from Step 3e
    to its owning table via the column-to-table mapping already built in Step 3b.
 
-3. **For each model group**, generate a single model TML that contains:
-   - All `model_tables[]` entries from every member datasource (tables + SQL views)
-   - All `columns[]` from every member datasource (with `column_id` prefixed by the
-     correct table name: `TABLE_NAME::col_name`)
-   - All `formulas[]` from every member datasource
-   - **Inline joins** derived from `blend_graph` column mappings (see below)
+2. **Apply the blend joins as given.** `blend_plan["joins"]` already covers every blend
+   edge across every component — star topologies (one primary, multiple secondaries) and
+   transitive chains alike, not just edges from the primary. Append each join
+   (`{with, table, on, type, cardinality}`) to the `model_tables[]` entry named by the
+   join's `table`, in the shape the Template below shows.
 
-4. **Generate blend joins** — iterate ALL edges in the connected component, not just
-   the primary's. This handles star topologies (A→B, A→C) and transitive blends (A→B, B→C):
+   **Cardinality heuristic:** `blend_plan` always emits `MANY_TO_ONE`. If the secondary
+   datasource has no dimension-only columns (all columns are measures or aggregated), it
+   is likely a fact table → override to `MANY_TO_MANY`. Surface the choice in the review
+   checkpoint (Step 7) so the user can confirm or override.
 
-   ```python
-   for member_ds in model_group['members']:
-       for target_info in blend_graph.get(member_ds, []):
-           target_ds = target_info['target_ds']
-           col_maps = target_info['column_mappings']
-
-           src_table = ds_id_to_table[member_ds]
-           tgt_table = ds_id_to_table[target_ds]
-
-           on_parts = []
-           for cm in col_maps:
-               on_parts.append(f"[{src_table}::{cm['source_col']}] = [{tgt_table}::{cm['target_col']}]")
-           on_clause = " and ".join(on_parts)
-
-           # Append join to the TARGET table's model_tables entry (secondary joins to source)
-           target_model_table = model_tables_by_name[tgt_table]
-           target_model_table.setdefault('joins', []).append({
-               'with': src_table,
-               'on': on_clause,
-               'type': 'LEFT_OUTER',
-               'cardinality': 'MANY_TO_ONE',
-           })
-   ```
-
-   **Cardinality heuristic:** if the secondary datasource has no dimension-only columns
-   (all columns are measures or aggregated), it is likely a fact table → use `MANY_TO_MANY`.
-   Otherwise default to `MANY_TO_ONE`. Surface the choice in the review checkpoint (Step 7)
-   so the user can override.
-
-5. **Datasources not in any blend** are not part of this hand-assembly procedure at all —
+3. **Datasources not in any blend** are not part of this hand-assembly procedure at all —
    they use the GENERATE-mode path above.
 
-6. **Column name conflicts:** when merging, if two datasources define columns with the same
+4. **Column name conflicts:** when merging, if two datasources define columns with the same
    display name but different semantics, disambiguate by prefixing with the datasource
    display name (e.g. `Orders Revenue` vs `Targets Revenue`). Log every rename.
 
@@ -2788,36 +2585,17 @@ asks to change it. Default new models to enabled.
 
 ## Step 6 — Validate and import TMLs
 
-`ts tml import` reads a **JSON array of TML strings** from stdin — not a zip and not a
-single document. Build that array with tables first, then SQL views, then models (so a
-model's tables are validated alongside it). **Base model selection:** GENERATE mode (Step
-5b) writes phased files `{slug}.phase0.model.tml`, `{slug}.phase1.model.tml`, … — this
-pre-import validation only wants the base (`*.phase0.model.tml`); the `.phase1+` files
-are consumed nowhere in this skill. Blend-merged models (hand-assembled in Step 5b) keep
-their plain `{DatasourceName}.model.tml` naming (no "phase" in the filename) and pass
-through unaffected:
-
-```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name}
-python3 - > /tmp/ts_tableau_mig/{workbook_name}_payload.json <<'PY'
-import json, glob, re
-
-# Keep bare *.model.tml (hand-assembled, blend-merged) and *.phase0.model.tml
-# (GENERATE-mode base); drop *.phase1.model.tml+ (unused by this skill).
-phase_re = re.compile(r"\.phase(\d+)\.model\.tml$")
-def is_base_model(f):
-    m = phase_re.search(f)
-    return m is None or m.group(1) == "0"
-
-model_files = [f for f in sorted(glob.glob("*.model.tml")) if is_base_model(f)]
-order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + model_files + sorted(glob.glob("*.cohort.tml"))
-print(json.dumps([open(f).read() for f in order]))
-PY
-```
+`ts tml import`/`ts tml lint` read a directory of TML files directly via `--dir`, ordered
+tables first, then SQL views, then models (so a model's tables are validated alongside
+it), via `--order tableau`. **Base model selection:** GENERATE mode (Step 5b) writes
+phased files `{slug}.phase0.model.tml`, `{slug}.phase1.model.tml`, … — this pre-import
+validation only wants the base, so pass `--model-phase base` to drop every
+`*.phase1.model.tml`+ file (unused by this skill) while keeping bare `*.model.tml`
+(hand-assembled, blend-merged) and `*.phase0.model.tml` (GENERATE-mode base):
 
 #### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
 
-Before running `ts tml import`, lint the generated **Model** TML with **`ts tml lint`** — a
+Before running `ts tml import`, lint the generated TMLs with **`ts tml lint`** — a
 parser-based check of the hard invariants in
 [`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md)
 that `--policy VALIDATE_ONLY` does **not** catch (ThoughtSpot accepts the TML and then
@@ -2829,11 +2607,11 @@ behaves wrong, or rejects it on import):
 - **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
 - **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 
-`ts tml lint` reads the same stdin shape as `ts tml import` and exits non-zero on any
-finding, so it gates the import (replace `<file>`):
+`ts tml lint` reads the same `--dir`/`--order`/`--model-phase` input as `ts tml import`
+and exits non-zero on any finding, so it gates the import:
 
 ```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('<file>').read_text()]))" | ts tml lint
+ts tml lint --dir /tmp/ts_tableau_mig/output/{workbook_name} --order tableau --model-phase base
 ```
 
 Do not import until it reports `"clean": true`. Fix any finding and re-lint.
@@ -2841,8 +2619,8 @@ Do not import until it reports `"clean": true`. Fix any finding and re-lint.
 Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisting:
 
 ```bash
-cat /tmp/ts_tableau_mig/{workbook_name}_payload.json \
-  | ts tml import --policy VALIDATE_ONLY --profile {profile_name}
+ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
+  --order tableau --model-phase base --policy VALIDATE_ONLY --profile {profile_name}
 ```
 
 For each cycle:
@@ -2859,7 +2637,7 @@ For each cycle:
    are genuine `ERROR`s — the table won't bind. Fix the name or the column mapping.
 4. For any other **errors**, identify the affected TML file and the specific issue. Apply
    the fix from the error table in `tableau-tml-rules.md`.
-5. Rewrite the affected TML file and rebuild the JSON payload.
+5. Rewrite the affected TML file in place.
 6. Re-validate.
 
 After 10 cycles with remaining errors, stop and report to the user:
@@ -2878,7 +2656,16 @@ Before importing, show the user a review summary — the same convention the
 `ts-convert-from-snowflake-sv` and `ts-convert-from-databricks-mv` skills use. The user
 should see exactly how every calculated field was translated, and what (if anything)
 will **not** migrate, *before* committing — not discover omissions only in the Step 12
-report afterward. Reuse the formula tier classification from Step A3/Step 5b.
+report afterward. Source each formula's `tier`/`level`/`complexity` from the same
+`ts tableau classify-formulas` output Step A3 uses — never re-derive tiers by hand.
+If this workbook was already audited, reuse that run's `classification.json`.
+Otherwise generate it now, reusing the `classification.json` already built for Step
+5b's `translate-formulas` call as input (a bare list — the classifier accepts either
+shape) and writing tiers to a separate file:
+
+```bash
+ts tableau classify-formulas --input {workdir}/classification.json --output {workdir}/classification_tiers.json
+```
 
 ```
 Ready to import to {base_url}:
@@ -2971,28 +2758,11 @@ This is guaranteed to succeed if the table TMLs bind correctly to the connection
 GENERATE-mode model (Step 5b), this is exactly the `*.phase0.model.tml` file — it already
 has no formulas. For a blend-merged model, it's the hand-assembled `.model.tml` file.
 
-Build the Phase 1 payload (tables + sql_views + base model + cohorts). Select **only**
-`*.phase0.model.tml` from GENERATE-mode output — the `.phase1+` files are cumulative
-formula layers not used by this skill (Phase 2 below re-derives formulas independently).
-Blend-merged `.model.tml` files (no "phase" in the name) pass through unaffected:
-
-```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name}
-python3 - > /tmp/ts_tableau_mig/{workbook_name}_phase1.json <<'PY'
-import json, glob, re
-
-# Keep bare *.model.tml (hand-assembled, blend-merged) and *.phase0.model.tml
-# (GENERATE-mode base); drop *.phase1.model.tml+ (unused by this skill).
-phase_re = re.compile(r"\.phase(\d+)\.model\.tml$")
-def is_base_model(f):
-    m = phase_re.search(f)
-    return m is None or m.group(1) == "0"
-
-model_files = [f for f in sorted(glob.glob("*.model.tml")) if is_base_model(f)]
-order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + model_files + sorted(glob.glob("*.cohort.tml"))
-print(json.dumps([open(f).read() for f in order]))
-PY
-```
+The Phase 1 payload is tables + sql_views + base model + cohorts, in that order —
+`--order tableau --model-phase base` selects **only** `*.phase0.model.tml` from
+GENERATE-mode output (the `.phase1+` files are cumulative formula layers not used by
+this skill; Phase 2 below re-derives formulas independently) and passes blend-merged
+`.model.tml` files (no "phase" in the name) through unaffected.
 
 **Before importing, check for duplicates** — if Phase 1 has already been imported (e.g.
 from a retry or previous attempt), search for existing models by name before importing.
@@ -3002,8 +2772,8 @@ GUID and import with `--no-create-new` to update in place.
 Import with `--create-new`:
 
 ```bash
-cat /tmp/ts_tableau_mig/{workbook_name}_phase1.json \
-  | ts tml import --policy ALL_OR_NONE --create-new --profile {profile_name}
+ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
+  --order tableau --model-phase base --policy ALL_OR_NONE --create-new --profile {profile_name}
 ```
 
 Parse the response. Extract the GUID for each imported object. **Capture the model GUID
@@ -3942,18 +3712,14 @@ Ready to import {N} liveboard(s) to {base_url}:
 
 Ask: "Import now? (yes/no)"
 
-On confirmation, build the JSON array of liveboard TML strings and import. Use
-`--policy PARTIAL` so successfully imported liveboards are kept even if some fail, and
-`--create-new` since these are new objects:
+On confirmation, import every liveboard TML in the output directory. Use `--pattern
+'*.liveboard.tml'` to select only liveboard files, `--policy PARTIAL` so successfully
+imported liveboards are kept even if some fail, and `--create-new` since these are new
+objects:
 
 ```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name}
-python3 - > /tmp/ts_tableau_mig/{workbook_name}_lb_payload.json <<'PY'
-import json, glob
-print(json.dumps([open(f).read() for f in sorted(glob.glob("*.liveboard.tml"))]))
-PY
-cat /tmp/ts_tableau_mig/{workbook_name}_lb_payload.json \
-  | ts tml import --policy PARTIAL --create-new --profile {profile_name}
+ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
+  --pattern '*.liveboard.tml' --policy PARTIAL --create-new --profile {profile_name}
 ```
 
 Parse the response for import errors. Show any failures with detail.
@@ -4211,6 +3977,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.22.0 | 2026-07-04 | **Codify highest-value/risk inline logic (Components A/D).** New `ts tableau parse` (blend graph, table-calc addressing, orphan calcs) replaces inline Python in Steps 3/3e/3f/3g. New `ts tableau classify-formulas` shares the migrate translation verdict, fixing the audit-vs-migrate divergence (Steps A3/A4/7). Blend graph computation moved to tested helpers (`build_blend_plan`), consumed via parse output (Step 5b Python removed). `ts tml import/lint` gain `--order tableau` / `--model-phase base` / `--pattern`, replacing the inline payload-builder heredocs in Steps 6/7/11; the anti-drift validator now guards those too. Prereq ts-cli v0.32.0. TML-template emission and spec-table relocation deferred. |
 | 1.21.0 | 2026-07-03 | Wire `ts tableau build-model` generate mode into Phase-1 base-model step (BL-085 p1); add `--table-name-map` flag; blend-merge path unchanged. Prereq ts-cli v0.29.0 |
 | 1.20.3 | 2026-07-03 | Full 13-function Tableau spatial set (was 5 documented, 0 enforced) + USERATTRIBUTE/USERATTRIBUTEINCLUDES now rejected loudly at translate time (was silent pass-through / undocumented). Requires ts-cli v0.28.1 |
 | 1.20.2 | 2026-07-03 | ACOS/ASIN/ATAN/COT now rejected loudly at translate time (was silent pass-through). Requires ts-cli v0.26.5 |

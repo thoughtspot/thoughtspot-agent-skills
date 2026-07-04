@@ -408,6 +408,10 @@ ts tml import --file table1.tml --file table2.tml --policy PARTIAL
 # Import every TML file in a directory
 ts tml import --dir ./tml_out --policy PARTIAL
 
+# Tableau-order directory import, base model only, then filtered by pattern
+ts tml import --dir ./tml_out --order tableau --model-phase base --policy ALL_OR_NONE
+ts tml import --dir ./tml_out --pattern '*.liveboard.tml' --policy PARTIAL --create-new
+
 # Original stdin interface (unchanged)
 echo '["table:\n  name: ..."]' | ts tml import --policy PARTIAL
 cat tmls.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
@@ -422,6 +426,11 @@ cat tmls.json | ts tml import --policy ALL_OR_NONE --profile champ-staging
 | `--create-new / --no-create-new` | `--no-create-new` | Create new objects. Default updates existing objects only; pass `--create-new` for brand-new TML with no existing GUID |
 | `--file` | none | Path to a raw TML file (repeatable). Mutually exclusive with piped stdin content |
 | `--dir` | none | Import every `.tml`/`.yaml`/`.yml`/`.json` file in this directory (non-recursive). Mutually exclusive with piped stdin content |
+| `--order` | `name` | File order for `--dir` (and `--file`) input: `name` (sorted-name order, unchanged) or `tableau` (type order table → sql_view → model → cohort → liveboard, by filename suffix; ties broken by name) |
+| `--model-phase` | `all` | `all` (unchanged) or `base` — drops phased model files `*.phaseN.model.tml` for N ≥ 1, keeping bare `*.model.tml` and `*.phase0.model.tml` |
+| `--pattern` | none | Glob(s) to filter `--dir` matches (repeatable), e.g. `--pattern '*.liveboard.tml'`. Only restricts files picked up by `--dir` — has no effect on explicit `--file` entries |
+
+`--order`/`--model-phase`/`--pattern` apply only to the `--file`/`--dir` input mode — they have no effect on the stdin JSON-array interface.
 
 **Input:** either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON array of TML strings, e.g.:
 
@@ -462,6 +471,9 @@ ts tml lint --file model.tml
 # Lint every TML file in a directory
 ts tml lint --dir ./tml_out
 
+# Tableau-order directory lint, base model only
+ts tml lint --dir ./tml_out --order tableau --model-phase base
+
 # Lint the same payload you would import (original stdin interface)
 cat tmls.json | ts tml lint
 
@@ -475,6 +487,11 @@ ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_N
 |---|---|---|
 | `--file` | none | Path to a raw TML file (repeatable). Mutually exclusive with piped stdin content |
 | `--dir` | none | Lint every `.tml`/`.yaml`/`.yml`/`.json` file in this directory (non-recursive). Mutually exclusive with piped stdin content |
+| `--order` | `name` | Same as `ts tml import --order`: `name` (default) or `tableau` (table → sql_view → model → cohort → liveboard) |
+| `--model-phase` | `all` | Same as `ts tml import --model-phase`: `all` (default) or `base` (drop `*.phaseN.model.tml` for N ≥ 1) |
+| `--pattern` | none | Same as `ts tml import --pattern`: glob(s) to filter `--dir` matches (repeatable) |
+
+`--order`/`--model-phase`/`--pattern` apply only to the `--file`/`--dir` input mode, matching `ts tml import`.
 
 **Input:** the SAME input as `ts tml import` — either `--file`/`--dir` (raw TML text per file) or, when neither is given, stdin as a JSON string or array of TML strings.
 
@@ -939,6 +956,64 @@ Each CSV in `data_files` includes a `validation` object:
 
 ---
 
+### `ts tableau parse`
+
+Parse a `.twb`/`.twbx` file into structured JSON — tables, columns, joins,
+calculated fields, parameters, the data-blend graph, a derived blend model-grouping
+plan, table-calc addressing, and per-datasource orphan-calc detection. This is the
+Step 3 entry point for the `ts-convert-from-tableau` skill: read this JSON instead
+of hand-parsing the TWB XML.
+
+```bash
+ts tableau parse "workbook.twbx" --output parsed.json
+```
+
+**Options:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `twb_file` (arg) | yes | Path to `.twb` or `.twbx` file |
+| `--output`, `-o` | yes | Output path for the parsed JSON |
+
+**Output file:**
+
+```json
+{
+  "datasources": [
+    {
+      "name": "...", "tables": [...], "columns": [...], "joins": [...],
+      "calculated_fields": [...], "calc_map": {...}, "col_table_map": {...},
+      "orphan_calcs": ["Caption1", "..."]
+    }
+  ],
+  "parameters": [...],
+  "param_map": {...},
+  "blends": {"source_ds_caption": [{"target_ds": "...", "column_mappings": [...]}]},
+  "blend_plan": {
+    "components": [{"primary": "...", "members": ["...", "..."]}],
+    "ds_table_map": {"datasource_caption": "TABLE_NAME"},
+    "joins": [{"with": "...", "table": "...", "on": "...", "type": "LEFT_OUTER",
+               "cardinality": "MANY_TO_ONE"}]
+  },
+  "table_calc_addressing": {"column_level": {...}, "ws_overrides": {...}}
+}
+```
+
+`orphan_calcs` (captions of calculated fields that reference a table missing from
+their own datasource, direct + transitive), `blends` (the data-blend graph keyed by
+datasource caption), and `table_calc_addressing` (column-level + worksheet-override
+`<table-calc>` sort context) are computed by the pure extractors in
+`ts_cli/tableau/twb.py` (`detect_orphan_calcs`, `extract_blends`,
+`extract_table_calc_addressing`). `blend_plan` is derived from `blends` +
+`datasources` by `build_blend_plan` (`ts_cli/tableau/build_model.py`) — connected
+components, a datasource→table map, and the flattened join list for every blend
+edge, ready for SKILL.md Step 5b to consume directly instead of re-deriving them by
+hand. An all-empty shape (`{"components": [], "ds_table_map": {}, "joins": []}`) is
+emitted when the workbook has no blends. Stdout is silent; a one-line summary goes
+to stderr.
+
+---
+
 ### `ts tableau translate-formulas`
 
 Translate Tableau calculated fields to ThoughtSpot formula syntax. Reads the
@@ -1019,6 +1094,51 @@ Main pipeline:
 14. Mandatory else clause (type-matched)
 
 Stdout prints the stats summary JSON; the full result goes to `--output`.
+
+---
+
+### `ts tableau classify-formulas`
+
+Classify Tableau calculated fields into translation tiers for the `ts-convert-from-tableau`
+audit mode. The translatable/untranslatable verdict is delegated internally to
+`translate_formulas` (the same pipeline `ts tableau translate-formulas` runs), so audit-mode
+tier counts and migrate-mode translation results can never diverge — a formula tagged
+translatable is guaranteed to appear in a `translate-formulas` run's `translated[]`, and vice
+versa.
+
+```bash
+ts tableau classify-formulas --input parsed.json --output classification.json
+ts tableau classify-formulas --input parsed.json --output classification.json --datasource "Orders"
+```
+
+**Options:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `--input`, `-i` | yes | `parsed.json` from `ts tableau parse`, or a bare JSON list of calc-field dicts |
+| `--output`, `-o` | yes | Output path for the classification JSON |
+| `--datasource`, `-d` | no | Limit to one datasource name (only applies when `--input` is a `parsed.json`) |
+
+**Input:** when given a `parsed.json` (a dict with a `datasources` key), flattens each
+datasource's `calculated_fields` and collects `orphan_calcs` before classifying. When given
+a bare JSON list, classifies it directly.
+
+**Output:**
+
+```json
+{
+  "formulas": [
+    {"name": "Revenue Growth %", "tier": "native", "reason": "", "level": 0, "complexity": 3}
+  ],
+  "tier_counts": {"native": 42, "lod": 5, "untranslatable": 2},
+  "translate_stats": {"total": 49, "translated": 47, "skipped": 2, "levels": {"0": 47}}
+}
+```
+
+Translatable tiers: `native`, `lod`, `cumulative`, `moving`, `pass_through`,
+`row_offset_native`, `parameter_ref`. Untranslatable tiers: `untranslatable`,
+`row_offset_ambiguous`, `geospatial`, `circular`, `orphan`, `parameter_query`. Stdout prints
+the `tier_counts` summary JSON; the full result goes to `--output`.
 
 ---
 

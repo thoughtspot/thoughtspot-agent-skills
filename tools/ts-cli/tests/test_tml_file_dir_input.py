@@ -12,10 +12,10 @@ unknown-option error. This adds --file (repeatable) and --dir (non-recursive dir
 scan) to both `ts tml import` and `ts tml lint`, reading raw TML text per file, while
 keeping the original stdin JSON-array interface unchanged when neither is given.
 
-Covers the pure path-assembly functions (collect_tml_paths, read_tml_texts,
-load_tmls_from_args), the combined load_input_tmls() decision function (including the
-stdin/--file ambiguity guard), and CLI-level wiring via CliRunner with a mocked
-ThoughtSpotClient — no live connection anywhere.
+Covers the pure path-assembly functions (collect_tml_paths, read_tml_texts), the
+combined load_input_tmls() decision function (including the stdin/--file ambiguity
+guard), and CLI-level wiring via CliRunner with a mocked ThoughtSpotClient — no live
+connection anywhere.
 """
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ from ts_cli.cli import app
 from ts_cli.commands.tml import (
     collect_tml_paths,
     read_tml_texts,
-    load_tmls_from_args,
     load_input_tmls,
+    order_and_filter_tml_paths,
 )
 
 try:
@@ -133,17 +133,6 @@ class TestReadTmlTexts:
 
     def test_empty_list_returns_empty(self):
         assert read_tml_texts([]) == []
-
-
-class TestLoadTmlsFromArgs:
-    def test_full_pipeline_file_and_dir(self, tmp_path):
-        explicit = tmp_path / "explicit.tml"
-        explicit.write_text("table:\n  name: Explicit\n")
-        dir_path = tmp_path / "batch"
-        dir_path.mkdir()
-        (dir_path / "one.tml").write_text("table:\n  name: One\n")
-        texts = load_tmls_from_args([str(explicit)], str(dir_path))
-        assert texts == ["table:\n  name: Explicit\n", "table:\n  name: One\n"]
 
 
 # ---------------------------------------------------------------------------
@@ -322,3 +311,65 @@ class TestLintCliFileOption:
     def test_lint_missing_dir_exits_nonzero(self, tmp_path):
         result = runner.invoke(app, ["tml", "lint", "--dir", str(tmp_path / "nope")])
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# order_and_filter_tml_paths + collect_tml_paths(patterns=...) (Task 9:
+# TML ordering + phase-filter helpers, ts-convert-from-tableau codification)
+# ---------------------------------------------------------------------------
+
+class TestOrderAndFilterTmlPaths:
+    def test_order_tableau_orders_by_type(self):
+        paths = ["z.cohort.tml", "a.model.tml", "m.table.tml", "s.sql_view.tml", "b.liveboard.tml"]
+        out = order_and_filter_tml_paths(paths, order="tableau")
+        assert out == ["m.table.tml", "s.sql_view.tml", "a.model.tml", "z.cohort.tml", "b.liveboard.tml"]
+
+    def test_model_phase_base_drops_phase1_plus(self):
+        paths = ["x.phase0.model.tml", "x.phase1.model.tml", "x.phase2.model.tml", "y.model.tml"]
+        out = order_and_filter_tml_paths(paths, model_phase="base")
+        assert sorted(out) == ["x.phase0.model.tml", "y.model.tml"]
+
+    def test_defaults_are_a_noop(self):
+        paths = ["z.cohort.tml", "a.model.tml", "m.table.tml"]
+        assert order_and_filter_tml_paths(paths) == paths
+
+
+class TestCollectTmlPathsPatterns:
+    def test_collect_patterns_filters(self, tmp_path):
+        (tmp_path / "a.liveboard.tml").write_text("x")
+        (tmp_path / "b.model.tml").write_text("x")
+        got = collect_tml_paths([], str(tmp_path), patterns=["*.liveboard.tml"])
+        assert [p.rsplit("/", 1)[-1] for p in got] == ["a.liveboard.tml"]
+
+    def test_collect_patterns_none_preserves_existing_behaviour(self, tmp_path):
+        (tmp_path / "a.tml").write_text("x")
+        (tmp_path / "b.tml").write_text("x")
+        got = collect_tml_paths([], str(tmp_path))
+        assert [Path(p).name for p in got] == ["a.tml", "b.tml"]
+
+
+# ---------------------------------------------------------------------------
+# CLI-level wiring: --order/--model-phase/--pattern on `ts tml import`/`lint`
+# (Task 10: threading order_and_filter_tml_paths/collect_tml_paths(patterns=)
+# through the --file/--dir branch of load_input_tmls)
+# ---------------------------------------------------------------------------
+
+@patch("ts_cli.commands.tml.ThoughtSpotClient")
+@patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+def test_import_dir_tableau_order_and_base_phase(mock_resolve, mock_client_cls, tmp_path):
+    (tmp_path / "m.table.tml").write_text("table:\n  name: T\n")
+    (tmp_path / "d.phase0.model.tml").write_text("model:\n  name: M0\n")
+    (tmp_path / "d.phase1.model.tml").write_text("model:\n  name: M1\n")
+    mock_client = MagicMock()
+    mock_client.post.return_value.json.return_value = [
+        {"response": {"status": {"status_code": "OK"}, "object": [{"header": {"id_guid": "g"}}]}}]
+    mock_client_cls.return_value = mock_client
+    result = runner.invoke(app, ["tml", "import", "--dir", str(tmp_path),
+                                 "--order", "tableau", "--model-phase", "base",
+                                 "--policy", "ALL_OR_NONE"])
+    assert result.exit_code == 0, _all_output(result)
+    body = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1]["json"]
+    tmls = body["metadata_tmls"]
+    assert "name: M1" not in "".join(tmls)          # phase1 dropped
+    assert tmls[0].startswith("table:")              # table ordered first
+    assert any("name: M0" in t for t in tmls)        # phase0 kept

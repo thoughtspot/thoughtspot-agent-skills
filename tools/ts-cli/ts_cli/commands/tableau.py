@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import re
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -86,6 +88,61 @@ def download(
     client = TableauClient(p)
     result = client.download_datasource(datasource_id, Path(output_dir))
     print(json.dumps(result, indent=2))
+
+
+def _twb_root(twb_file: str) -> ET.Element:
+    """Load the root XML element from a .twb or .twbx path (zip-aware)."""
+    p = Path(twb_file)
+    if p.suffix.lower() == ".twbx":
+        with zipfile.ZipFile(p) as z:
+            name = next(n for n in z.namelist() if n.endswith(".twb"))
+            return ET.parse(z.open(name)).getroot()
+    return ET.parse(str(p)).getroot()
+
+
+@app.command("parse")
+def parse_cmd(
+    twb_file: str = typer.Argument(..., help="Path to .twb or .twbx file"),
+    output_file: str = typer.Option(..., "--output", "-o",
+                                     help="Output parsed JSON path"),
+) -> None:
+    """Parse a TWB into structured JSON for SKILL.md Step 3 to consume.
+
+    Composes the existing tables/columns/joins/calcs parser with the blend
+    graph, table-calc addressing, and per-datasource orphan-calc detection
+    extractors, so downstream steps read fields from this JSON instead of
+    re-deriving them by hand-parsing the TWB XML. Handles .twbx (zip) the
+    same way ``parse_twb`` does.
+    """
+    from ts_cli.model_builder import (
+        build_blend_plan,
+        detect_orphan_calcs,
+        extract_blends,
+        extract_table_calc_addressing,
+        parse_twb,
+    )
+
+    twb_path = Path(twb_file)
+    if not twb_path.exists():
+        typer.echo(f"File not found: {twb_file}", err=True)
+        raise SystemExit(1)
+
+    parsed = parse_twb(twb_path)
+    root = _twb_root(twb_file)
+    parsed["blends"] = extract_blends(root)
+    parsed["table_calc_addressing"] = extract_table_calc_addressing(root)
+    for ds in parsed["datasources"]:
+        ds["orphan_calcs"] = detect_orphan_calcs(ds)
+    parsed["blend_plan"] = build_blend_plan(parsed["blends"], parsed["datasources"])
+
+    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(output_file).write_text(json.dumps(parsed, indent=2))
+
+    typer.echo(
+        f"Parsed {len(parsed['datasources'])} datasource(s), "
+        f"{len(parsed['blends'])} blend edge-set(s) -> {output_file}",
+        err=True,
+    )
 
 
 @app.command("translate-formulas")
@@ -194,6 +251,54 @@ def translate_formulas_cmd(
     )
 
     print(json.dumps(result["stats"]))
+
+
+@app.command("classify-formulas")
+def classify_formulas_cmd(
+    input_file: str = typer.Option(..., "--input", "-i",
+                                    help="parsed.json (from `ts tableau parse`) or a JSON list of calc-field dicts"),
+    output_file: str = typer.Option(..., "--output", "-o",
+                                     help="Output classification JSON path"),
+    datasource: Optional[str] = typer.Option(None, "--datasource", "-d",
+                                              help="Limit to one datasource name"),
+) -> None:
+    """Classify calculated fields into translation tiers.
+
+    The translatable verdict is delegated to the translate pipeline (via
+    classify_formulas), so audit-mode tier counts and migrate-mode translation
+    results can never diverge.
+    """
+    from ts_cli.tableau.classify import classify_formulas
+
+    input_path = Path(input_file)
+    if not input_path.exists():
+        typer.echo(f"Input file not found: {input_file}", err=True)
+        raise SystemExit(1)
+
+    data = json.loads(input_path.read_text())
+
+    formulas: list = []
+    orphans: set = set()
+    if isinstance(data, dict) and "datasources" in data:
+        for ds in data["datasources"]:
+            if datasource and ds.get("name") != datasource:
+                continue
+            formulas.extend(ds.get("calculated_fields", []))
+            orphans.update(ds.get("orphan_calcs", []))
+    else:
+        formulas = data  # bare list
+
+    result = classify_formulas(formulas, orphan_calcs=orphans)
+
+    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(output_file).write_text(json.dumps(result, indent=2))
+
+    typer.echo(
+        f"Classified {len(result['formulas'])} formula(s) -> {output_file}",
+        err=True,
+    )
+
+    print(json.dumps(result["tier_counts"]))
 
 
 def _export_model_tml(existing_guid: str, profile: str) -> dict:
