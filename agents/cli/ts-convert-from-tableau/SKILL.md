@@ -1562,13 +1562,15 @@ table/view (the consultant/stand-in case), the emitted columns carry Tableau's
    `reconcile_dropped.formulas` (and the Step 12 report), so don't present formula
    impact at this stage. The user confirms/edits each mapping. Write the confirmed
    mappings as a flat `{"<from>": "<to>"}` JSON object (from `suggested_mappings`'
-   from/to, dropping confidence) to `{output_dir}/column_name_map.json`.
+   from/to, dropping confidence) to `{workdir}/column_name_map.json` — **keep it in
+   `{workdir}`, NOT `{output_dir}`**: Step 6/7 import with `ts tml import --dir {output_dir}`
+   scans `.json` files, so a map file left in the output dir is wrongly ingested as TML.
 3. **Apply** — re-run with the confirmed map (writes phased TMLs that bind):
    ```bash
    ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
      --datasource "{datasource_name}" --output-dir {output_dir} \
      --table-name-map {workdir}/table_name_map.json --reconcile-table {table_guid} \
-     --column-name-map {output_dir}/column_name_map.json --profile {profile_name}
+     --column-name-map {workdir}/column_name_map.json --profile {profile_name}
    ```
 
 Column-id qualification and suffix/junk stripping are automatic (Tier-1) for every run.
