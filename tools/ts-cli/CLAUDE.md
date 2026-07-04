@@ -26,6 +26,7 @@ ts_cli/
     dag.py               — dependency DAG building, topological sort, cycle detection
     params.py            — parameter renaming, sanitisation, conflict detection
     naming.py            — name-clash detection and renaming
+    reconcile.py           — column cleanup + schema reconciliation for build-model (suffix strip, qualify, suggest/apply name maps)
     validate.py           — pre-import and post-translation validation
     yaml_out.py           — TML YAML dump helpers
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)

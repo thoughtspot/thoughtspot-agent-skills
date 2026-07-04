@@ -1541,6 +1541,30 @@ TWB relation name — warehouse-normalized names, or a published-datasource TWB 
 relation is literally named `sqlproxy`. Omit the flag when the names already match; the
 default (no map) behavior is unchanged.
 
+**Published/sqlproxy datasources bound to an existing table/view — reconcile columns.**
+When the datasource is published (`sqlproxy`) and binds to a pre-existing ThoughtSpot
+table/view (the consultant/stand-in case), the emitted columns carry Tableau's
+`(Custom SQL Query N)` suffixes and may diverge from the view's real names. Reconcile:
+
+1. **Plan** — get suggested mappings + drops (no write):
+   ```bash
+   ts tableau build-model {twb} --connection "{conn}" --datasource "{ds}" \
+     --output-dir {out} --table-name-map {map} --reconcile-table {table_guid} --reconcile-plan
+   ```
+2. **Confirm with the user** — present `suggested_mappings` (with confidence),
+   `unmatched_drop`, and the formulas that will drop. The user confirms/edits each
+   mapping. Write the confirmed map to `{out}/column_name_map.json`.
+3. **Apply** — re-run with the confirmed map (writes phased TMLs that bind):
+   ```bash
+   ts tableau build-model {twb} --connection "{conn}" --datasource "{ds}" \
+     --output-dir {out} --table-name-map {map} --reconcile-table {table_guid} \
+     --column-name-map {out}/column_name_map.json
+   ```
+
+Column-id qualification and suffix/junk stripping are automatic (Tier-1) for every run.
+Dropped columns + their formulas appear in the result JSON's `reconcile_dropped` and the
+Step 12 report.
+
 Still apply the **Model TML hard rules**, MEASURE/ATTRIBUTE classification guidance, and
 Template below when **reviewing** the generated `*.phase0.model.tml` — they describe the
 required shape regardless of how the file was produced.
