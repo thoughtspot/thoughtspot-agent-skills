@@ -2585,36 +2585,17 @@ asks to change it. Default new models to enabled.
 
 ## Step 6 — Validate and import TMLs
 
-`ts tml import` reads a **JSON array of TML strings** from stdin — not a zip and not a
-single document. Build that array with tables first, then SQL views, then models (so a
-model's tables are validated alongside it). **Base model selection:** GENERATE mode (Step
-5b) writes phased files `{slug}.phase0.model.tml`, `{slug}.phase1.model.tml`, … — this
-pre-import validation only wants the base (`*.phase0.model.tml`); the `.phase1+` files
-are consumed nowhere in this skill. Blend-merged models (hand-assembled in Step 5b) keep
-their plain `{DatasourceName}.model.tml` naming (no "phase" in the filename) and pass
-through unaffected:
-
-```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name}
-python3 - > /tmp/ts_tableau_mig/{workbook_name}_payload.json <<'PY'
-import json, glob, re
-
-# Keep bare *.model.tml (hand-assembled, blend-merged) and *.phase0.model.tml
-# (GENERATE-mode base); drop *.phase1.model.tml+ (unused by this skill).
-phase_re = re.compile(r"\.phase(\d+)\.model\.tml$")
-def is_base_model(f):
-    m = phase_re.search(f)
-    return m is None or m.group(1) == "0"
-
-model_files = [f for f in sorted(glob.glob("*.model.tml")) if is_base_model(f)]
-order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + model_files + sorted(glob.glob("*.cohort.tml"))
-print(json.dumps([open(f).read() for f in order]))
-PY
-```
+`ts tml import`/`ts tml lint` read a directory of TML files directly via `--dir`, ordered
+tables first, then SQL views, then models (so a model's tables are validated alongside
+it), via `--order tableau`. **Base model selection:** GENERATE mode (Step 5b) writes
+phased files `{slug}.phase0.model.tml`, `{slug}.phase1.model.tml`, … — this pre-import
+validation only wants the base, so pass `--model-phase base` to drop every
+`*.phase1.model.tml`+ file (unused by this skill) while keeping bare `*.model.tml`
+(hand-assembled, blend-merged) and `*.phase0.model.tml` (GENERATE-mode base):
 
 #### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
 
-Before running `ts tml import`, lint the generated **Model** TML with **`ts tml lint`** — a
+Before running `ts tml import`, lint the generated TMLs with **`ts tml lint`** — a
 parser-based check of the hard invariants in
 [`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md)
 that `--policy VALIDATE_ONLY` does **not** catch (ThoughtSpot accepts the TML and then
@@ -2626,11 +2607,11 @@ behaves wrong, or rejects it on import):
 - **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
 - **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 
-`ts tml lint` reads the same stdin shape as `ts tml import` and exits non-zero on any
-finding, so it gates the import (replace `<file>`):
+`ts tml lint` reads the same `--dir`/`--order`/`--model-phase` input as `ts tml import`
+and exits non-zero on any finding, so it gates the import:
 
 ```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('<file>').read_text()]))" | ts tml lint
+ts tml lint --dir /tmp/ts_tableau_mig/output/{workbook_name} --order tableau --model-phase base
 ```
 
 Do not import until it reports `"clean": true`. Fix any finding and re-lint.
@@ -2638,8 +2619,8 @@ Do not import until it reports `"clean": true`. Fix any finding and re-lint.
 Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisting:
 
 ```bash
-cat /tmp/ts_tableau_mig/{workbook_name}_payload.json \
-  | ts tml import --policy VALIDATE_ONLY --profile {profile_name}
+ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
+  --order tableau --model-phase base --policy VALIDATE_ONLY --profile {profile_name}
 ```
 
 For each cycle:
@@ -2656,7 +2637,7 @@ For each cycle:
    are genuine `ERROR`s — the table won't bind. Fix the name or the column mapping.
 4. For any other **errors**, identify the affected TML file and the specific issue. Apply
    the fix from the error table in `tableau-tml-rules.md`.
-5. Rewrite the affected TML file and rebuild the JSON payload.
+5. Rewrite the affected TML file in place.
 6. Re-validate.
 
 After 10 cycles with remaining errors, stop and report to the user:
@@ -2777,28 +2758,11 @@ This is guaranteed to succeed if the table TMLs bind correctly to the connection
 GENERATE-mode model (Step 5b), this is exactly the `*.phase0.model.tml` file — it already
 has no formulas. For a blend-merged model, it's the hand-assembled `.model.tml` file.
 
-Build the Phase 1 payload (tables + sql_views + base model + cohorts). Select **only**
-`*.phase0.model.tml` from GENERATE-mode output — the `.phase1+` files are cumulative
-formula layers not used by this skill (Phase 2 below re-derives formulas independently).
-Blend-merged `.model.tml` files (no "phase" in the name) pass through unaffected:
-
-```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name}
-python3 - > /tmp/ts_tableau_mig/{workbook_name}_phase1.json <<'PY'
-import json, glob, re
-
-# Keep bare *.model.tml (hand-assembled, blend-merged) and *.phase0.model.tml
-# (GENERATE-mode base); drop *.phase1.model.tml+ (unused by this skill).
-phase_re = re.compile(r"\.phase(\d+)\.model\.tml$")
-def is_base_model(f):
-    m = phase_re.search(f)
-    return m is None or m.group(1) == "0"
-
-model_files = [f for f in sorted(glob.glob("*.model.tml")) if is_base_model(f)]
-order = sorted(glob.glob("*.table.tml")) + sorted(glob.glob("*.sql_view.tml")) + model_files + sorted(glob.glob("*.cohort.tml"))
-print(json.dumps([open(f).read() for f in order]))
-PY
-```
+The Phase 1 payload is tables + sql_views + base model + cohorts, in that order —
+`--order tableau --model-phase base` selects **only** `*.phase0.model.tml` from
+GENERATE-mode output (the `.phase1+` files are cumulative formula layers not used by
+this skill; Phase 2 below re-derives formulas independently) and passes blend-merged
+`.model.tml` files (no "phase" in the name) through unaffected.
 
 **Before importing, check for duplicates** — if Phase 1 has already been imported (e.g.
 from a retry or previous attempt), search for existing models by name before importing.
@@ -2808,8 +2772,8 @@ GUID and import with `--no-create-new` to update in place.
 Import with `--create-new`:
 
 ```bash
-cat /tmp/ts_tableau_mig/{workbook_name}_phase1.json \
-  | ts tml import --policy ALL_OR_NONE --create-new --profile {profile_name}
+ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
+  --order tableau --model-phase base --policy ALL_OR_NONE --create-new --profile {profile_name}
 ```
 
 Parse the response. Extract the GUID for each imported object. **Capture the model GUID
@@ -3748,18 +3712,14 @@ Ready to import {N} liveboard(s) to {base_url}:
 
 Ask: "Import now? (yes/no)"
 
-On confirmation, build the JSON array of liveboard TML strings and import. Use
-`--policy PARTIAL` so successfully imported liveboards are kept even if some fail, and
-`--create-new` since these are new objects:
+On confirmation, import every liveboard TML in the output directory. Use `--pattern
+'*.liveboard.tml'` to select only liveboard files, `--policy PARTIAL` so successfully
+imported liveboards are kept even if some fail, and `--create-new` since these are new
+objects:
 
 ```bash
-cd /tmp/ts_tableau_mig/output/{workbook_name}
-python3 - > /tmp/ts_tableau_mig/{workbook_name}_lb_payload.json <<'PY'
-import json, glob
-print(json.dumps([open(f).read() for f in sorted(glob.glob("*.liveboard.tml"))]))
-PY
-cat /tmp/ts_tableau_mig/{workbook_name}_lb_payload.json \
-  | ts tml import --policy PARTIAL --create-new --profile {profile_name}
+ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
+  --pattern '*.liveboard.tml' --policy PARTIAL --create-new --profile {profile_name}
 ```
 
 Parse the response for import errors. Show any failures with detail.

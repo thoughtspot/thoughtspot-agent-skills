@@ -14,6 +14,12 @@ Rule: no `agents/cli/ts-convert-*/SKILL.md` may contain an inline Python heredoc
 (`python3 -` or `python3 <<`) that assembles TML formula blocks for import. The
 legitimate replacement calls `ts tableau build-model`.
 
+Also guards the sibling drift this enabled (Task 10, Phase 4): SKILL.md steps
+hand-assembling a `ts tml import`/`ts tml lint` payload with
+`json.dumps([open(f).read() for f in ...])` instead of `--dir`/`--order`/
+`--model-phase`/`--pattern`. The legitimate replacement is the directory-based
+`ts tml import --dir ... --order tableau --model-phase base` form.
+
 Exit codes:
   0 — no inline Python TML assembly in any CLI convert skill
   1 — at least one inline assembly pattern found
@@ -28,11 +34,18 @@ import re
 import sys
 from pathlib import Path
 
-# Inline Python heredoc that builds TML formulas for import.
-# Matches `python3 -` or `python3 <<` near formula assembly context.
+# Inline Python heredoc that builds TML formulas (or a payload) for import.
+# Matches `python3 <<MARKER` anywhere on the line — including the common
+# `python3 - > out.json <<'PY'` shape (stdin-script flag + output redirect
+# before the heredoc marker), not just a bare `python3 <<` immediately —
+# or a lone `python3 -` at end of line with no other content.
 # Excludes read-wrappers (python3 -c "import json,pathlib;print(...)").
-HEREDOC_RE = re.compile(r"python3\s+(<<|(?:-\s*$))", re.MULTILINE)
+HEREDOC_RE = re.compile(r"python3\b.*<<|python3\s+-\s*$", re.MULTILINE)
 FORMULA_ASSEMBLY_RE = re.compile(r"formulas?\s*[\[\]:{}]|formula_id|\"formulas\"")
+# Inline Python heredoc that assembles a TML import payload by reading files
+# directly (`json.dumps([open(f)...`) — the pattern `ts tml import --dir` /
+# `--order` / `--model-phase` / `--pattern` replace (Task 10).
+PAYLOAD_ASSEMBLY_RE = re.compile(r"json\.dumps\(\s*\[\s*open\(")
 READ_WRAPPER_RE = re.compile(r'python3\s+-c\s+"import\s+(json|pathlib)')
 
 CONVERT_GLOB = "agents/cli/ts-convert-*/SKILL.md"
@@ -48,7 +61,7 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
     for i, ln in enumerate(lines):
         if HEREDOC_RE.search(ln) and not READ_WRAPPER_RE.search(ln):
             window = "\n".join(lines[max(0, i - 3):i + 15])
-            if FORMULA_ASSEMBLY_RE.search(window):
+            if FORMULA_ASSEMBLY_RE.search(window) or PAYLOAD_ASSEMBLY_RE.search(window):
                 hits.append((i + 1, ln.strip()[:80]))
     return hits
 

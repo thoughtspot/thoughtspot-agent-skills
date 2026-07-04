@@ -358,3 +358,30 @@ class TestCollectTmlPathsPatterns:
         (tmp_path / "b.tml").write_text("x")
         got = collect_tml_paths([], str(tmp_path))
         assert [Path(p).name for p in got] == ["a.tml", "b.tml"]
+
+
+# ---------------------------------------------------------------------------
+# CLI-level wiring: --order/--model-phase/--pattern on `ts tml import`/`lint`
+# (Task 10: threading order_and_filter_tml_paths/collect_tml_paths(patterns=)
+# through the --file/--dir branch of load_input_tmls)
+# ---------------------------------------------------------------------------
+
+@patch("ts_cli.commands.tml.ThoughtSpotClient")
+@patch("ts_cli.commands.tml.resolve_profile", return_value="test")
+def test_import_dir_tableau_order_and_base_phase(mock_resolve, mock_client_cls, tmp_path):
+    (tmp_path / "m.table.tml").write_text("table:\n  name: T\n")
+    (tmp_path / "d.phase0.model.tml").write_text("model:\n  name: M0\n")
+    (tmp_path / "d.phase1.model.tml").write_text("model:\n  name: M1\n")
+    mock_client = MagicMock()
+    mock_client.post.return_value.json.return_value = [
+        {"response": {"status": {"status_code": "OK"}, "object": [{"header": {"id_guid": "g"}}]}}]
+    mock_client_cls.return_value = mock_client
+    result = runner.invoke(app, ["tml", "import", "--dir", str(tmp_path),
+                                 "--order", "tableau", "--model-phase", "base",
+                                 "--policy", "ALL_OR_NONE"])
+    assert result.exit_code == 0, _all_output(result)
+    body = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1]["json"]
+    tmls = body["metadata_tmls"]
+    assert "name: M1" not in "".join(tmls)          # phase1 dropped
+    assert tmls[0].startswith("table:")              # table ordered first
+    assert any("name: M0" in t for t in tmls)        # phase0 kept
