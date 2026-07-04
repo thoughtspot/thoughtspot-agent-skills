@@ -2324,3 +2324,28 @@ Column classification is duplicated between the two skills with DIFFERENT keywor
 {guid}` command; both skills adopt it.
 
 **Target:** 2026-09-30.
+
+---
+
+## BL-088 — Audit mode doesn't classify Tableau Sets
+
+**Source:** 2026-07-04 live audit of `CPG+Merch Promotion Performance.twbx`.
+**Affects:** ts-convert-from-tableau (Audit mode, Steps A2–A4), `tools/ts-cli/` (`ts tableau parse` / `classify-formulas`).
+**Status:** OPEN.
+
+The audit-mode coverage report (Step A4) has a **Tableau Sets** section, and migrate mode
+(Step 5b) has extensive set→cohort translation (static/Top-N/condition/computed sets). But
+`ts tableau parse` and `ts tableau classify-formulas` only extract and classify **calculated
+fields and parameters** — they do **not** emit top-level `<group>` set data. So an audit of a
+workbook that uses sets silently omits them: the A4 "Tableau Sets" row can't be populated from
+the CLI, and the coverage % reflects only calc fields. This is the audit analogue of the
+audit/migrate divergence BL-fixed for formulas (#181) — the audit under-reports scope for
+set-heavy workbooks.
+
+**Approach:** extend `ts tableau parse` to extract top-level `<group>` sets (caption,
+groupfilter tree, anchor, static-vs-Top-N-vs-condition-vs-computed classification per the
+Step 5b taxonomy), and surface a `sets` block + per-set tier in `classify-formulas` output so
+Step A4 can report a real Sets breakdown. Reuse the migrate-mode set-detection logic rather
+than duplicating it (same "two paths, one detector" principle as the formula classifier).
+
+**Target:** 2026-09-30.
