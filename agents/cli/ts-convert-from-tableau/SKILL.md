@@ -1546,19 +1546,29 @@ When the datasource is published (`sqlproxy`) and binds to a pre-existing Though
 table/view (the consultant/stand-in case), the emitted columns carry Tableau's
 `(Custom SQL Query N)` suffixes and may diverge from the view's real names. Reconcile:
 
-1. **Plan** — get suggested mappings + drops (no write):
+1. **Plan** — get suggested mappings + drops (no write). `--reconcile-table` requires
+   `--profile` (the CLI hard-exits with "--profile is required when using
+   --reconcile-table" otherwise):
    ```bash
-   ts tableau build-model {twb} --connection "{conn}" --datasource "{ds}" \
-     --output-dir {out} --table-name-map {map} --reconcile-table {table_guid} --reconcile-plan
+   ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+     --datasource "{datasource_name}" --output-dir {output_dir} \
+     --table-name-map {workdir}/table_name_map.json --reconcile-table {table_guid} \
+     --reconcile-plan --profile {profile_name}
    ```
-2. **Confirm with the user** — present `suggested_mappings` (with confidence),
-   `unmatched_drop`, and the formulas that will drop. The user confirms/edits each
-   mapping. Write the confirmed map to `{out}/column_name_map.json`.
+2. **Confirm with the user** — present the Plan JSON's `suggested_mappings` (each
+   `{from, to, confidence}`) and `unmatched_drop` (columns with no confident match,
+   which will be dropped). The Plan has no formula field — formulas that reference a
+   dropped column are only known after Apply, surfaced in the result's
+   `reconcile_dropped.formulas` (and the Step 12 report), so don't present formula
+   impact at this stage. The user confirms/edits each mapping. Write the confirmed
+   mappings as a flat `{"<from>": "<to>"}` JSON object (from `suggested_mappings`'
+   from/to, dropping confidence) to `{output_dir}/column_name_map.json`.
 3. **Apply** — re-run with the confirmed map (writes phased TMLs that bind):
    ```bash
-   ts tableau build-model {twb} --connection "{conn}" --datasource "{ds}" \
-     --output-dir {out} --table-name-map {map} --reconcile-table {table_guid} \
-     --column-name-map {out}/column_name_map.json
+   ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+     --datasource "{datasource_name}" --output-dir {output_dir} \
+     --table-name-map {workdir}/table_name_map.json --reconcile-table {table_guid} \
+     --column-name-map {output_dir}/column_name_map.json --profile {profile_name}
    ```
 
 Column-id qualification and suffix/junk stripping are automatic (Tier-1) for every run.
