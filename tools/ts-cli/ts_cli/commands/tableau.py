@@ -531,7 +531,15 @@ def _generate_flow(
     """Build phased model TML files from scratch and write them to disk."""
     from ts_cli.model_builder import build_model_tml, split_for_phased_import
     from ts_cli.tableau.build_model import apply_prefix_and_double_agg
+    from ts_cli.tableau.reconcile import clean_columns, strip_suffix_in_expr
     from ts_cli.tableau_translate import dump_tml_yaml
+
+    # Tier-1: strip Custom-SQL suffixes, drop junk, dedupe, and set the table so
+    # column_id qualifies (single-table sqlproxy models otherwise emit bare ids).
+    _table_name = ds["tables"][0]["name"] if ds.get("tables") else ""
+    cleaned_cols = clean_columns(cleaned_cols, _table_name)
+    for f in cleaned_formulas:
+        f["expr"] = strip_suffix_in_expr(f["expr"])
 
     gen_formula_names = {f["name"] for f in cleaned_formulas}
     gen_param_names = {p["name"] for p in parsed["parameters"]}

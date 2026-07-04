@@ -229,9 +229,10 @@ def _build_model_columns(
     formula columns (with formula_id).
     """
     model_cols = []
+    single_table = tables[0]["name"] if len(tables) == 1 else None
 
     for c in physical_columns:
-        table = c.get("table", "")
+        table = c.get("table") or single_table or ""
         col_name = c.get("db_column_name", c["name"])
         entry: dict[str, Any] = {
             "name": c["name"],
