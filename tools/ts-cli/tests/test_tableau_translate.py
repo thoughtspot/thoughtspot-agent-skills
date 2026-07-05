@@ -536,6 +536,18 @@ class TestConvertIfThen:
         )
         assert result == upper
 
+    def test_nested_if_with_mixed_case_end(self):
+        # Real Tableau: outer uppercase END, inner blocks lowercase `end`.
+        # The block-delimiter must match END/end case-insensitively or the
+        # inner IF is never found (regression: Start/End Date).
+        result = convert_if_then(
+            "IF [L]='c' THEN IF [X] < 12 then [A] else [B] end "
+            "ELSE IF [Y] < 12 then [C] else [D] end END"
+        )
+        assert "IF" not in result  # no unconverted uppercase IF survives
+        assert "if ( [X] < 12 ) then [A]" in result
+        assert "if ( [Y] < 12 ) then [C]" in result
+
     def test_nested_if_in_condition(self):
         """Nested IF blocks inside an outer IF condition are converted correctly."""
         expr = (

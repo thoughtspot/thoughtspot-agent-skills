@@ -177,9 +177,14 @@ def _convert_if_content(content: str) -> str:
     return result
 
 
-# Innermost IF...END: an IF whose body contains no nested uppercase IF.
+# Innermost IF...END block. `IF` and `END` match case-insensitively (Tableau
+# is case-insensitive and authors freely mix `IF…end`, `if…END`, etc.), but the
+# inner `(?!\bIF\b)` guard stays case-SENSITIVE (uppercase only): it must not
+# trip on an already-converted lowercase `if (…)` block sitting in the body,
+# which would break the inside-out ordering. Converted blocks have no END, so a
+# case-insensitive delimiter still only matches genuine source IF…END blocks.
 _INNER_IF_END = re.compile(
-    r"\bIF\b((?:(?!\bIF\b).)*?)\bEND\b", re.DOTALL
+    r"(?i:\bIF\b)((?:(?!\bIF\b).)*?)(?i:\bEND\b)", re.DOTALL
 )
 
 
@@ -231,9 +236,9 @@ def convert_if_then(expr: str) -> str:
     result = re.sub(r"\bELSEIF\b", "else if", result, flags=re.IGNORECASE)
 
     # Lowercase remaining standalone keywords
-    result = re.sub(r"\bTHEN\b", "then", result)
-    result = re.sub(r"\bELSE\b", "else", result)
-    result = re.sub(r"(?<!\[)\bEND\b(?!\])", "", result)
+    result = re.sub(r"\bTHEN\b", "then", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bELSE\b", "else", result, flags=re.IGNORECASE)
+    result = re.sub(r"(?<!\[)\bEND\b(?!\])", "", result, flags=re.IGNORECASE)
 
     # Restore bracketed references
     def _restore(m: re.Match) -> str:
