@@ -511,57 +511,70 @@ def filter_unresolvable_formulas(
 
     Returns (kept, dropped_names).
     """
-    import re
-    kept: list[dict] = []
-    dropped: list[str] = []
     col_upper = {c.upper() for c in model_column_names}
     formula_upper = {n.upper() for n in formula_names}
     param_upper = {n.upper() for n in parameter_names}
 
+    kept: list[dict] = []
+    dropped: list[str] = []
     for f in formulas:
         if f.get("id") in existing_formula_ids:
             kept.append(f)
             continue
-        expr = f.get("expr", "")
-        if "sqlproxy::" in expr.lower():
+        if _formula_is_unresolvable(
+            f.get("expr", ""), col_upper, formula_names, parameter_names,
+            formula_upper, param_upper,
+        ):
             dropped.append(f.get("name", f.get("id", "?")))
-            continue
-        if "custom sql query" in expr.lower():
-            dropped.append(f.get("name", f.get("id", "?")))
-            continue
-        # + between string literal and ref (unconverted string concat)
-        if re.search(r"'\s*\+\s*\[", expr) or re.search(r"\]\s*\+\s*'", expr):
-            dropped.append(f.get("name", f.get("id", "?")))
-            continue
-        # References — strip string literals first to avoid false positives
-        # from brackets inside strings like concat('[', ...)
-        expr_no_strings = re.sub(r"'[^']*'", "", expr)
-        has_bad_ref = False
-        for ref in re.findall(r"\[([^\]]+)\]", expr_no_strings):
-            if ref.startswith("formula_"):
-                continue  # cross-formula ref — validated in the cascade pass
-            if "::" in ref:
-                # qualified physical-column ref — the column must exist in the
-                # model, else it fails at import ("Search did not find …").
-                col = ref.split("::", 1)[1]
-                if col.upper() not in col_upper:
-                    has_bad_ref = True
-                    break
-                continue
-            if ref in parameter_names or ref in formula_names:
-                continue
-            if ref.upper() in param_upper or ref.upper() in formula_upper:
-                continue
-            has_bad_ref = True
-            break
-        if has_bad_ref:
-            dropped.append(f.get("name", f.get("id", "?")))
-            continue
-        kept.append(f)
+        else:
+            kept.append(f)
 
-    # Transitive cascade: drop any kept formula that references [formula_X]
-    # where X was itself dropped above. Only dropped formulas trigger this —
-    # a ref to a pre-existing model formula (not in our new set) is fine.
+    return _cascade_drop_dependents(kept, dropped)
+
+
+def _formula_is_unresolvable(
+    expr: str,
+    col_upper: set[str],
+    formula_names: set[str],
+    parameter_names: set[str],
+    formula_upper: set[str],
+    param_upper: set[str],
+) -> bool:
+    """True if a formula expr has a reference that won't resolve at import."""
+    import re
+    low = expr.lower()
+    if "sqlproxy::" in low or "custom sql query" in low:
+        return True
+    # + between a string literal and a ref (unconverted string concat)
+    if re.search(r"'\s*\+\s*\[", expr) or re.search(r"\]\s*\+\s*'", expr):
+        return True
+    # Strip string literals first so a '[' inside a literal isn't read as a ref.
+    expr_no_strings = re.sub(r"'[^']*'", "", expr)
+    for ref in re.findall(r"\[([^\]]+)\]", expr_no_strings):
+        if ref.startswith("formula_"):
+            continue  # cross-formula ref — validated in the cascade pass
+        if "::" in ref:
+            # qualified column ref — column must exist in the model
+            if ref.split("::", 1)[1].upper() not in col_upper:
+                return True
+            continue
+        if ref in parameter_names or ref in formula_names:
+            continue
+        if ref.upper() in param_upper or ref.upper() in formula_upper:
+            continue
+        return True  # bare, unknown ref
+    return False
+
+
+def _cascade_drop_dependents(
+    kept: list[dict], dropped: list[str]
+) -> tuple[list[dict], list[str]]:
+    """Drop any kept formula referencing [formula_X] where X was dropped.
+
+    Iterates to a fixpoint. Only dropped formulas trigger this — a ref to a
+    pre-existing model formula (not in our new set) is fine.
+    """
+    import re
     dropped_set = set(dropped)
     changed = True
     while changed:
@@ -577,7 +590,6 @@ def filter_unresolvable_formulas(
             else:
                 survivors.append(f)
         kept = survivors
-
     return kept, dropped
 
 

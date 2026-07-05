@@ -425,6 +425,47 @@ def _translate_and_validate(
     return translated, skipped, validation_issues
 
 
+def _collect_cascade_victims(
+    merged: dict, bad_name: str, err_detail: str
+) -> tuple[list[str], dict[str, str]]:
+    """Return the failed formula plus the transitive closure of formulas that
+    reference it, with a drop reason for each (breadth-first to a fixpoint)."""
+    to_drop = [bad_name]
+    reasons = {bad_name: err_detail}
+    seen = {bad_name}
+    i = 0
+    while i < len(to_drop):
+        victim = to_drop[i]
+        i += 1
+        token = f"[formula_{victim}]"
+        for fm in merged["model"].get("formulas", []):
+            dep = fm["name"]
+            if dep not in seen and token in fm.get("expr", ""):
+                seen.add(dep)
+                to_drop.append(dep)
+                reasons[dep] = f"depends on dropped formula '{victim}'"
+    return to_drop, reasons
+
+
+def _migrate_missing_parameters(
+    existing_tml: dict, parameters: Optional[list]
+) -> list[str]:
+    """Add TWB parameters not already on the model. Returns names added.
+
+    Parameters must exist on the model BEFORE formula import — a formula that
+    references a parameter the model doesn't have is unresolvable and gets
+    dropped. Mutates ``existing_tml`` in place.
+    """
+    if not parameters:
+        return []
+    model = existing_tml.setdefault("model", {})
+    existing_params = model.setdefault("parameters", [])
+    have = {p.get("name") for p in existing_params}
+    added = [p for p in parameters if p.get("name") not in have]
+    existing_params.extend(added)
+    return [p["name"] for p in added]
+
+
 def _import_with_retry(
     merged: dict,
     ds: dict,
@@ -485,22 +526,7 @@ def _import_with_retry(
         # Drop the failing formula, then cascade-drop any formula that
         # references it — in THIS cycle — so a failed root (e.g. a date-window
         # formula) doesn't cost one import round-trip per downstream dependent.
-        to_drop = [bad_name]
-        reasons = {bad_name: err_detail}
-        seen_drop = {bad_name}
-        i = 0
-        while i < len(to_drop):
-            victim = to_drop[i]
-            i += 1
-            token = f"[formula_{victim}]"
-            for fm in merged["model"].get("formulas", []):
-                dep = fm["name"]
-                if dep in seen_drop:
-                    continue
-                if token in fm.get("expr", ""):
-                    seen_drop.add(dep)
-                    to_drop.append(dep)
-                    reasons[dep] = f"depends on dropped formula '{victim}'"
+        to_drop, reasons = _collect_cascade_victims(merged, bad_name, err_detail)
         for victim in to_drop:
             dropped_on_import.append({
                 "name": victim,
@@ -553,22 +579,13 @@ def _merge_flow(
     )
     from ts_cli.tableau.reconcile import rewrite_formula_refs
 
-    # Parameters must exist on the model BEFORE formula import — a formula that
-    # references a parameter the model doesn't have is unresolvable and gets
-    # dropped. Add any TWB parameters missing from the existing model so those
-    # formulas survive (and the parameters persist on import).
-    if parameters:
-        model = existing_tml.setdefault("model", {})
-        existing_params = model.setdefault("parameters", [])
-        have = {p.get("name") for p in existing_params}
-        added_params = [p for p in parameters if p.get("name") not in have]
-        if added_params:
-            existing_params.extend(added_params)
-            typer.echo(
-                f"  Added {len(added_params)} parameter(s) to model: "
-                f"{', '.join(p['name'] for p in added_params)}",
-                err=True,
-            )
+    added_params = _migrate_missing_parameters(existing_tml, parameters)
+    if added_params:
+        typer.echo(
+            f"  Added {len(added_params)} parameter(s) to model: "
+            f"{', '.join(added_params)}",
+            err=True,
+        )
 
     if column_name_map:
         n_rewritten = rewrite_formula_refs(cleaned_formulas, column_name_map)

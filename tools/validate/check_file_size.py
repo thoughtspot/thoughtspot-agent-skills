@@ -27,8 +27,10 @@ SCAN_ROOT = "tools/ts-cli/ts_cli"
 # An allowlisted file skips the hard-fail (it still soft-warns). Every entry
 # needs a backlog cross-reference; remove the entry when the file is split.
 ALLOWLIST: dict[str, str] = {
-    # (empty — the TableauClient split retired the last entry. Add entries
-    #  only with a BL-NNN cross-reference.)
+    # ts tableau command module grew past 1000 lines with the multi-table
+    # build-model fixes (v0.35–0.36). Split into per-flow submodules tracked
+    # in BL-089 (M10); allowlisted until then.
+    "tools/ts-cli/ts_cli/commands/tableau.py": "BL-089",
 }
 
 
