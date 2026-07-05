@@ -521,6 +521,21 @@ class TestConvertIfThen:
         result = convert_if_then("[Sales] + [Revenue]")
         assert result == "[Sales] + [Revenue]"
 
+    def test_nested_if_with_lowercase_inner_then(self):
+        # Tableau is case-insensitive; a source-authored nested IF may use
+        # lowercase then/else. The inner condition must still get its if(...)
+        # wrapper (regression: it was silently dropped, breaking Start/End Date).
+        result = convert_if_then(
+            "IF [L]='campaign' THEN IF [X] < 12 then [A] else [B] END ELSE [C] END"
+        )
+        assert "if ( [L]='campaign' ) then" in result
+        assert "if ( [X] < 12 ) then [A]" in result
+        # matches the all-uppercase-authored form exactly
+        upper = convert_if_then(
+            "IF [L]='campaign' THEN IF [X] < 12 THEN [A] ELSE [B] END ELSE [C] END"
+        )
+        assert result == upper
+
     def test_nested_if_in_condition(self):
         """Nested IF blocks inside an outer IF condition are converted correctly."""
         expr = (

@@ -141,8 +141,13 @@ def _convert_if_content(content: str) -> str:
     result = re.sub(r"\bELSEIF\b", "else if", result, flags=re.IGNORECASE)
 
     # Leading condition → if ( cond ) then.
-    # Case-sensitive THEN: already-lowercased inner blocks won't match.
-    m = re.match(r"(.+?)\s+\bTHEN\b", result, flags=re.DOTALL)
+    # Case-INSENSITIVE THEN: Tableau is case-insensitive, so a source-authored
+    # inner IF may use lowercase `then` — it still needs its condition wrapped.
+    # Re-processing an already-converted block is not a risk here: the caller's
+    # _INNER_IF_END regex only feeds this function uppercase `IF…END` blocks,
+    # and the `startswith("(")` guard below prevents double-wrapping a cond
+    # that is already parenthesised.
+    m = re.match(r"(.+?)\s+\bTHEN\b", result, flags=re.DOTALL | re.IGNORECASE)
     if m:
         cond = m.group(1).strip()
         if cond.startswith("(") and cond.endswith(")"):
@@ -162,7 +167,7 @@ def _convert_if_content(content: str) -> str:
         r"\belse\s+if\b\s+(.+?)\s+\bTHEN\b",
         _wrap_else_if,
         result,
-        flags=re.DOTALL,
+        flags=re.DOTALL | re.IGNORECASE,
     )
 
     # Lowercase remaining uppercase keywords
