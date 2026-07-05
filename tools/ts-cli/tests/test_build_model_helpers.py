@@ -5,7 +5,7 @@ verbatim from build_model_cmd (commands/tableau.py) during the BL-069
 follow-up decomposition. If one fails, the extraction changed behavior —
 fix the extraction, not the test.
 """
-from ts_cli.model_builder import build_model_tml
+from ts_cli.model_builder import build_model_tml, filter_unresolvable_formulas
 from ts_cli.tableau.build_model import (
     apply_prefix_and_double_agg,
     apply_table_name_map,
@@ -17,6 +17,7 @@ from ts_cli.tableau.build_model import (
     remove_formula,
     strip_csq_suffixes,
 )
+from ts_cli.tableau.reconcile import rewrite_formula_refs
 
 
 def _model_tml(tables=("SALES",), columns=(), formulas=(), parameters=()):
@@ -392,3 +393,40 @@ def test_apply_prefix_and_double_agg_mutates_in_place():
     apply_prefix_and_double_agg(formulas, {"Total", "UsesTotal"}, set())
     assert formulas[0]["expr"] == "sum([Sales])"
     assert formulas[1]["expr"] == "[formula_Total]"
+
+
+# --- rewrite_formula_refs + prepare_formulas_for_merge + filter_unresolvable_formulas ---
+
+def test_renamed_ref_dropped_without_map_kept_with_map():
+    # Existing model has the RENAMED column (DM_ prefix) bound to table `vw`.
+    tml = _model_tml(
+        tables=("vw",),
+        columns=[{"name": "Disc", "column_id": "vw::DM_DISCOUNT_RED_DOLLAR"}],
+    )
+    ctx = collect_existing_model_context(tml)
+    name_map = {"DISCOUNT_RED_DOLLAR": "DM_DISCOUNT_RED_DOLLAR"}
+    # Formula re-derived from the TWB still references the SOURCE name.
+    source = [{"name": "Total Disc", "expr": "sum ( [DISCOUNT_RED_DOLLAR] )"}]
+
+    # WITHOUT the map: bare [DISCOUNT_RED_DOLLAR] is unknown to the existing
+    # model's column lookup, stays bare, and the filter drops it.
+    no_map = [dict(f) for f in source]
+    dicts0, _ = prepare_formulas_for_merge(no_map, ctx)
+    kept0, dropped0 = filter_unresolvable_formulas(
+        dicts0, ctx["existing_ids"], ctx["existing_cols"],
+        ctx["formula_names"], ctx["param_names"],
+    )
+    assert [f["name"] for f in kept0] == []
+    assert "Total Disc" in dropped0
+
+    # WITH the map: rewrite → [DM_DISCOUNT_RED_DOLLAR] → qualifies to
+    # [vw::DM_DISCOUNT_RED_DOLLAR] → survives the filter.
+    with_map = [dict(f) for f in source]
+    assert rewrite_formula_refs(with_map, name_map) == 1
+    dicts1, _ = prepare_formulas_for_merge(with_map, ctx)
+    kept1, dropped1 = filter_unresolvable_formulas(
+        dicts1, ctx["existing_ids"], ctx["existing_cols"],
+        ctx["formula_names"], ctx["param_names"],
+    )
+    assert [f["name"] for f in kept1] == ["Total Disc"]
+    assert dropped1 == []

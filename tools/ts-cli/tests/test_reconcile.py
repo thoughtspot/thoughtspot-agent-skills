@@ -119,3 +119,44 @@ def test_drop_junk_formulas():
     kept, dropped = drop_junk_formulas(formulas)
     assert [f["name"] for f in kept] == ["F_clean"]
     assert dropped == ["F_junk"]
+
+
+from ts_cli.tableau.reconcile import rewrite_expr_refs, rewrite_formula_refs
+
+
+def test_rewrite_expr_refs_bare_and_qualified():
+    m = {"DISCOUNT_RED_DOLLAR": "DM_DISCOUNT_RED_DOLLAR"}
+    assert rewrite_expr_refs("sum ( [DISCOUNT_RED_DOLLAR] )", m) == "sum ( [DM_DISCOUNT_RED_DOLLAR] )"
+    assert rewrite_expr_refs("sum ( [vw::DISCOUNT_RED_DOLLAR] )", m) == "sum ( [vw::DM_DISCOUNT_RED_DOLLAR] )"
+
+
+def test_rewrite_expr_refs_whole_token_only():
+    # a longer column sharing the prefix must be untouched (bare and qualified)
+    m = {"DISCOUNT_RED_DOLLAR": "DM_DISCOUNT_RED_DOLLAR"}
+    assert rewrite_expr_refs("sum ( [DISCOUNT_RED_DOLLAR_PCT] )", m) == "sum ( [DISCOUNT_RED_DOLLAR_PCT] )"
+    assert rewrite_expr_refs("sum ( [vw::DISCOUNT_RED_DOLLAR_PCT] )", m) == "sum ( [vw::DISCOUNT_RED_DOLLAR_PCT] )"
+
+
+def test_rewrite_expr_refs_empty_map_and_idempotent():
+    assert rewrite_expr_refs("sum ( [X] )", {}) == "sum ( [X] )"
+    m = {"A": "B"}
+    once = rewrite_expr_refs("[A] + [vw::A]", m)
+    assert once == "[B] + [vw::B]"
+    assert rewrite_expr_refs(once, m) == once  # idempotent — no A refs remain
+
+
+def test_rewrite_formula_refs_mutates_in_place_and_counts():
+    formulas = [
+        {"name": "F1", "expr": "sum ( [DISCOUNT_RED_DOLLAR] )"},
+        {"name": "F2", "expr": "sum ( [CAMPAIGN_ID] )"},
+    ]
+    n = rewrite_formula_refs(formulas, {"DISCOUNT_RED_DOLLAR": "DM_DISCOUNT_RED_DOLLAR"})
+    assert n == 1
+    assert formulas[0]["expr"] == "sum ( [DM_DISCOUNT_RED_DOLLAR] )"
+    assert formulas[1]["expr"] == "sum ( [CAMPAIGN_ID] )"  # unchanged
+
+
+def test_rewrite_formula_refs_empty_map_noop():
+    formulas = [{"name": "F1", "expr": "sum ( [X] )"}]
+    assert rewrite_formula_refs(formulas, {}) == 0
+    assert formulas[0]["expr"] == "sum ( [X] )"

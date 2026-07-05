@@ -117,6 +117,41 @@ def drop_junk_formulas(formulas: list[dict]) -> tuple[list[dict], list[str]]:
     return kept, dropped
 
 
+def rewrite_expr_refs(expr: str, name_map: dict[str, str]) -> str:
+    """Rewrite bracketed column refs in a formula expression by ``name_map``.
+
+    Rewrites ``[old]`` -> ``[new]`` and ``[table::old]`` -> ``[table::new]``.
+    Whole-token only: a mapping for ``DISCOUNT_RED_DOLLAR`` never touches
+    ``DISCOUNT_RED_DOLLAR_PCT`` (the ``[...]`` match is on the full bracket
+    content; the ``::`` match is word-bounded). Idempotent — applying an
+    already-rewritten expression is a no-op because no ``old`` refs remain.
+    Assumes ``name_map`` has no chained keys (validated by
+    ``validate_name_map`` at load time).
+    """
+    for old, new in name_map.items():
+        expr = re.sub(r"::" + re.escape(old) + r"\b", lambda _m, new=new: "::" + new, expr)
+        expr = expr.replace("[" + old + "]", "[" + new + "]")
+    return expr
+
+
+def rewrite_formula_refs(formulas: list[dict], name_map: dict[str, str]) -> int:
+    """Apply ``name_map`` to each formula's ``expr`` in place.
+
+    Returns the number of formulas whose expression changed. Empty map is a
+    no-op (returns 0).
+    """
+    if not name_map:
+        return 0
+    changed = 0
+    for f in formulas:
+        before = f.get("expr", "")
+        after = rewrite_expr_refs(before, name_map)
+        if after != before:
+            f["expr"] = after
+            changed += 1
+    return changed
+
+
 def apply_reconciliation(columns: list[dict], formulas: list[dict],
                          target_cols: set[str], name_map: dict[str, str]) -> tuple[list[dict], list[dict], dict]:
     kept_cols: list[dict] = []
@@ -170,11 +205,8 @@ def apply_reconciliation(columns: list[dict], formulas: list[dict],
             dropped_formulas.append(f["name"])
         else:
             if renamed:
-                for old, new in renamed.items():
-                    expr = re.sub(r"::" + re.escape(old) + r"\b", lambda _m, new=new: "::" + new, expr)
-                    expr = expr.replace("[" + old + "]", "[" + new + "]")
                 nf = dict(f)
-                nf["expr"] = expr
+                nf["expr"] = rewrite_expr_refs(expr, renamed)
                 kept_formulas.append(nf)
             else:
                 kept_formulas.append(f)

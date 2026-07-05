@@ -1181,7 +1181,7 @@ ts tableau build-model "workbook.twbx" \
 | `--table-name-map` | no | GENERATE mode only (no `--existing-guid`). Path to a JSON file mapping TWB physical table name → ThoughtSpot table TML `name`, for when they differ (warehouse-normalized names, sqlproxy/published-datasource scoping). Ignored (with a stderr note) when `--existing-guid` is set. |
 | `--reconcile-table` | no | GUID of an existing ThoughtSpot table to reconcile emitted columns against (consultant/stand-in-view case). Requires `--profile`. |
 | `--reconcile-plan` | no | With `--reconcile-table`: print the reconcile plan (suggested mappings + drops) as JSON and exit without writing TML. |
-| `--column-name-map` | no | JSON file mapping datasource column → target column name (from the confirmed reconcile plan). Used with `--reconcile-table` in apply mode. |
+| `--column-name-map` | no | JSON file mapping datasource column → target column name (from the confirmed reconcile plan). Applies in GENERATE mode (with `--reconcile-table`, apply mode) and in MERGE mode (`--existing-guid`), where it rewrites re-derived formula refs so renamed columns resolve against the existing model. |
 
 Column-id qualification and suffix/junk stripping (Tier-1 cleanup) run automatically on
 every `build-model` call — the three flags above only add opt-in Tier-2 reconciliation
