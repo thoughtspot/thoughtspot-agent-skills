@@ -2363,13 +2363,13 @@ import retry).
    several Custom SQL Queries (bound to multiple ThoughtSpot tables) requires a hand-built
    base model TML before `build-model --existing-guid`. `build-model` generate mode should
    emit a multi-table base from a table-set + join-key spec so no hand assembly is needed.
-1b. **(M6b) Nested-IF + `datediff('hour')` date-window translation.** `Start Date`/`End Date`
-   (`IF [LEVEL]='campaign' THEN IF datediff('hour', a, DATE(a)+1) < 12 THEN dateadd(...) …`)
-   fail: the inner uppercase `IF` inside a `THEN` branch isn't converted, and the
-   `datediff('hour', …)` midnight-adjustment has no clean ThoughtSpot equivalent. Deferred
-   from the 2026-07-05 M6 work (M6a boolean-aggregation + M7 string-concat shipped; this
-   nested-conditional + hour-diff case is deeper and regression-prone). Blocks the
-   `Promo Period`/`ISR`/`IRR` cascade (~10 prod formulas).
+1b. **(M6b) Nested-IF date-window translation — RESOLVED at translation level 2026-07-05
+   (commit 3f04b59).** Root cause was `_convert_if_content` matching `THEN` case-sensitively,
+   so a source-authored nested `IF … then …` (lowercase inner) never got its `if(...)`
+   wrapper. Now case-insensitive. `Start Date`/`End Date` and the `Promo Period`/`ISR`/`IRR`
+   cascade (~10 prod formulas) now translate and validate; `datediff('hour',…)` →
+   `diff_time(…)/3600` was already handled. **Remaining:** verify the `diff_time` argument
+   order / sign against data — folded into BL-091.
 1c. **Export resilience.** `build-model --existing-guid` / `ts tml export` hard-fail with a
    `JSONDecodeError` traceback when the instance returns a 504 gateway-timeout HTML page
    (observed on se-thoughtspot 2026-07-05). Add retry-with-backoff + a clean error on
