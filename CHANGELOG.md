@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-05
+- docs: update ts-convert-from-tableau to v1.25.0 — multi-query→multi-table model guidance + liveboard parameter rule (BL-090)
 - fix(tableau): match IF/END case-insensitively so mixed-case nested IF (outer `END`, inner lowercase `end`) fully converts — closes the last Start/End Date import failures (bumps ts-cli to v0.36.1). Follow-up to #185, which squash-merged before this commit.
 - fix(tableau): formula translation — boolean aggregation `MAX/MIN(<cmp>)` → `agg(if <cmp> then 1 else 0)` (M6a), and scope columns inside string-literal-adjacent concat so `'[' + STR([id])` labels resolve (M7); bump ts-cli to v0.36.0
 - chore: bump ts-cli to v0.35.0

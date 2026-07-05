@@ -1581,6 +1581,47 @@ Still apply the **Model TML hard rules**, MEASURE/ATTRIBUTE classification guida
 Template below when **reviewing** the generated `*.phase0.model.tml` — they describe the
 required shape regardless of how the file was produced.
 
+**Multi-query datasources (one datasource that JOINS several Custom SQL Queries) — hand
+assembly onto multiple tables.** A published/`sqlproxy` datasource often joins several
+Custom SQL Queries server-side. GENERATE mode and a single-view `--reconcile-table` bind it
+to **one** ThoughtSpot table — and every formula referencing a column from the *other*
+queries is then silently filtered as **"Unresolved Custom SQL Query alias"** while the base
+model still imports and *looks* clean. Detect this and build a **multi-table model** instead.
+
+> **Detection.** Formulas reference `(Custom SQL Query N)`-suffixed columns spanning more than
+> one query, **and** the single-view reconcile leaves a large share of formulas filtered with
+> "Unresolved Custom SQL Query alias". If you see that pattern, the datasource is multi-table.
+
+Procedure (live-verified 2026-07-05, CPG Merch migration):
+1. **Find the tables that cover the referenced columns.** Collect every physical column the
+   datasource's formulas reference (strip the `(Custom SQL Query N)` suffix). Search the
+   connection (`ts metadata search --name …`) for the tables that expose them; a greedy
+   set-cover over candidate tables gives the minimal table set. Confirm the set + the shared
+   **join key** with the user (never silently add joins — Step 3.6).
+2. **Hand-build the base model TML** (`*.phase0.model.tml`): the chosen tables in
+   `model_tables[]`, joined on the shared key (anchor table first), and **all** their physical
+   `columns[]` as `TABLE::col`. **(M16)** Table exports come back all-`ATTRIBUTE` — classify
+   the numeric metrics as `MEASURE` (name heuristic: `*_SALES`, `UNITS`, `CLICKS`, counts, etc.)
+   or KPIs/axes render empty. De-dupe display names across tables (suffix the non-anchor copy).
+3. **Import the base**, then add formulas with `ts tableau build-model --existing-guid {guid}`.
+   The merge flow (ts-cli ≥ 0.35.0) resolves each bare column to its **real owning table**
+   (not the anchor), validates qualified `[TABLE::COL]` refs against the model, cascade-drops
+   dependents deterministically, and **auto-migrates the TWB parameters onto the model** before
+   formula import — so no separate parameter step and no runaway `--max-retries`.
+
+> **(M15) Absent columns are a data gap, not a translation failure.** If a referenced column
+> exists in **no** available table (e.g. forecast/CI columns like `REVENUE_FORECAST`,
+> `SALES_CI_*`, `ACTIVATION_COST`), the formulas that use it cannot migrate until that data is
+> loaded into a warehouse table the connection exposes. Surface these explicitly (which
+> columns, which formulas) in the Step 7 review and the Step 12 report — don't let them vanish
+> into the filtered count.
+
+> **(M14) Collision-renamed formulas.** When a formula's name collides with a column or
+> parameter (e.g. formula `Sales` vs column `SALES`, or formula `Metric` vs parameter
+> `Metric`), `build-model` renames the formula (`Formula Sales`, `Metric Selection`, …).
+> Downstream liveboard tiles (Step 10) must reference the **renamed** form, and any
+> coverage/gap diff must account for renames or it over-counts "missing".
+
 **Blend-merged models (multiple datasources spanning one connected component) — hand
 assembly.** GENERATE mode builds one model per single datasource — it cannot produce the
 merged, multi-datasource model a blend relationship requires (inline cross-datasource
@@ -2902,15 +2943,28 @@ filtered out. Omit the flag when Step 5b needed no map (names already matched).
 
 This command runs the full formula pipeline internally:
 1. Re-parses the TWB to extract calculated fields and parameters
-2. Translates all formulas through the 14-transform pipeline
-3. Runs `validate_pre_import()` — reports warnings for IN-with-parens, non-existent
+2. **Migrates missing parameters onto the model first** (ts-cli ≥ 0.35.0) — a formula that
+   references a parameter the model lacks is unresolvable, so any TWB parameter not already on
+   the model is added before formula import. No separate parameter step is needed.
+3. Translates all formulas through the transform pipeline
+4. Runs `validate_pre_import()` — reports warnings for IN-with-parens, non-existent
    functions (`add_quarters`/`add_years`), bare date literals, unbalanced parens/brackets,
    missing else clauses, and other structural issues
-4. Applies `formula_` prefix for cross-references (resolves the I9 invariant)
-5. Detects and fixes double aggregation (`sum([formula_X])` where X is already aggregated)
-6. Filters unresolvable references (sqlproxy, bare column refs, unconverted concat)
-7. Merges new formulas into the existing model (skips formulas already present)
-8. Imports with up to 25 (CLI default, `--max-retries`) retry cycles, dropping failing formulas on each retry
+5. Applies `formula_` prefix for cross-references (resolves the I9 invariant)
+6. Detects and fixes double aggregation (`sum([formula_X])` where X is already aggregated)
+7. **Filters unresolvable references deterministically** (ts-cli ≥ 0.35.0): `sqlproxy::`,
+   `Custom SQL Query`, bare column refs, unconverted concat, **qualified `[TABLE::COL]` refs
+   whose column is absent from the model**, and the **transitive cross-formula cascade**
+   (drop a formula whose referenced formula was dropped) — all caught pre-import, no import
+   round-trips
+8. Table-qualifies each bare column ref to its **real owning table** (multi-table models),
+   not the anchor
+9. Merges new formulas into the existing model (skips formulas already present)
+10. Imports with up to **10** (CLI default, `--max-retries`) retry cycles, cascade-dropping a
+    failing formula's dependents in the same cycle. Because the deterministic classes above
+    are caught pre-import, the retry budget is only for genuine server-side rejections — a
+    large multi-table model no longer needs a high `--max-retries` (previously exceeding the
+    cap rolled the whole ALL_OR_NONE batch back to zero)
 
 Parse the JSON output to report results to the user:
 
@@ -3600,11 +3654,25 @@ For placeholder/partial vizzes, also note what's missing and that it needs revie
 
 ### 10f. Surface referenced parameters in the liveboard header
 
-**This step is MANDATORY when the model has parameters — do not skip it.** If parameter
-creation failed in Step 5b, fix the parameter first (check `range_config` string values,
-cross-formula inlining) before proceeding. A Tableau dashboard with a parameter control
-zone expects the parameter to be surfaced on the liveboard; omitting it silently loses
-interactivity.
+> **A parameter chip is only valuable when a formula that CONSUMES the parameter is on the
+> board (live-verified 2026-07-05).** ThoughtSpot **drops any unreferenced parameter** on
+> import ("Dropping unreferenced parameters … ordered chips … will be dropped") — so adding a
+> chip for a param no tile uses is not just pointless, it fails. Map Tableau parameters by how
+> they're used:
+> - **A model formula consumes the param as a value** (a bin size, a threshold, a dynamic
+>   selector a tile displays) → add the chip (below). The chip will stick because the tile
+>   references it.
+> - **Filter-type param** (e.g. `Category Tier`, `Engagement Type` — used only inside an
+>   `if [Param]=… then …` filter/category formula) → the idiomatic ThoughtSpot form is a
+>   **liveboard filter** on the underlying column (`filters[]` in
+>   `thoughtspot-liveboard-tml.md`), *not* a parameter chip.
+> - **Display-toggle param** (e.g. `Metric`, `Top 10` that drove Tableau **sheet-swapping** —
+>   show the Sales sheet vs the Units sheet) → **no ThoughtSpot equivalent.** Build explicit
+>   per-metric tiles, or omit. Do **not** try to force a chip with a raw `[Param]`-selector
+>   tile — such a tile isn't a valid query and gets dropped.
+
+If parameter creation failed in Step 5b, fix the parameter first (check `range_config` string
+values, cross-formula inlining) before proceeding.
 
 If any viz on the liveboard **references a model parameter** (directly, or via a formula/bin
 it uses — e.g. an `Age (bin)` driven by an `Age Groups` parameter), the parameter can be
@@ -4036,6 +4104,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.25.0 | 2026-07-05 | **Multi-query datasource → multi-table model guidance + liveboard parameter rule (BL-090).** Step 5b: new "Multi-query datasources" subsection — a published/sqlproxy datasource that joins several Custom SQL Queries must become a **multi-table model** (a single-view reconcile silently filters the other queries' formulas as "Unresolved Custom SQL Query alias"); documents detection, greedy table-set cover + shared-key join confirmation, hand-built base → `build-model --existing-guid` (which now auto-migrates parameters, validates qualified columns, cascade-drops, and table-qualifies bare refs to the real owning table), plus **(M14)** collision-renamed formulas, **(M15)** absent-column data-gap surfacing, **(M16)** measure classification on all-ATTRIBUTE table exports. Step 7 Phase-2 pipeline list updated: parameter auto-migration, deterministic qualified-column + cross-formula-cascade filtering, `--max-retries` default 25→10. Step 10f: parameter chips only stick when a param-consuming formula tile is on the board (ThoughtSpot drops unreferenced params) — filter-type params → liveboard filters; display-toggle params (sheet-swap) → per-metric tiles or omit. Live-verified in the CPG Merch migration (tentpole 119/119, prod 137/163). Prereq ts-cli v0.36.1. |
 | 1.24.0 | 2026-07-04 | Phase 2 (`build-model --existing-guid`) honors `--column-name-map`, recovering formulas on reconcile-renamed columns |
 | 1.23.0 | 2026-07-04 | **build-model column-schema reconciliation for published/sqlproxy datasources.** Tier-1 (always-on): strip `(Custom SQL Query N)` suffixes, drop `__tableau_internal` junk, qualify `column_id` as `table::col` (fixes "column_id incorrect" on existing-table binds), dedupe. Tier-2 (opt-in `--reconcile-table {guid}`): reconcile emitted columns against a target table's real schema — `--reconcile-plan` emits suggested name mappings + drops; skill confirms with the user; `--column-name-map` applies (drops unmapped-absent columns + dependent formulas). Live-verified 2026-07-04 against `vw_dim_promo` on se-thoughtspot (tentpole datasource): reconcile-plan → confirm (rejected a false `UPDATED_AT`→`MAX_UPDATED_AT` suggestion) → apply → base model `VALIDATE_ONLY = OK` (the pre-fix "column_id incorrect" failure is resolved). Prereq ts-cli v0.33.0. |
 | 1.22.1 | 2026-07-04 | **Fix: audit classifies per datasource, not flattened (live-test finding).** `ts tableau classify-formulas` on a multi-datasource workbook previously flattened all datasources' calcs into one `translate-formulas` call, which deduped by name — mis-tiering a calc *name* shared across datasources whose *expression* differs (e.g. SUM vs COUNTD) and misreporting coverage (per-datasource totals didn't reconcile). Now classifies per datasource (each → its own model); output is `{datasources:[{name,formulas,tier_counts,translate_stats}], tier_counts:<summed>}`, each datasource's `translate_stats` reconciles. Steps A3/A4 read per-datasource. Prereq ts-cli v0.32.1. |
