@@ -2349,3 +2349,82 @@ Step A4 can report a real Sets breakdown. Reuse the migrate-mode set-detection l
 than duplicating it (same "two paths, one detector" principle as the formula classifier).
 
 **Target:** 2026-09-30.
+
+## BL-089 — Tableau multi-table build-model: generate-mode support + PR-prep cleanup
+
+**Source:** 2026-07-05 live CPG migration (multi-query datasources needed hand-built multi-table bases).
+**Affects:** `tools/ts-cli/` (`ts tableau build-model`, `commands/tableau.py`, `model_builder.py`).
+**Status:** OPEN. Follow-ups to the multi-table fixes shipped in v0.35.0 on branch
+`feat/tableau-multitable-bare-refs` (M1–M5: table-aware `fix_bare_refs`, qualified-column +
+cross-formula-cascade filtering, parameter auto-migration in the merge flow, cascade-aware
+import retry).
+
+1. **(M8) Multi-table base generation in generate mode.** Today a datasource that joins
+   several Custom SQL Queries (bound to multiple ThoughtSpot tables) requires a hand-built
+   base model TML before `build-model --existing-guid`. `build-model` generate mode should
+   emit a multi-table base from a table-set + join-key spec so no hand assembly is needed.
+1b. **(M6b) Nested-IF + `datediff('hour')` date-window translation.** `Start Date`/`End Date`
+   (`IF [LEVEL]='campaign' THEN IF datediff('hour', a, DATE(a)+1) < 12 THEN dateadd(...) …`)
+   fail: the inner uppercase `IF` inside a `THEN` branch isn't converted, and the
+   `datediff('hour', …)` midnight-adjustment has no clean ThoughtSpot equivalent. Deferred
+   from the 2026-07-05 M6 work (M6a boolean-aggregation + M7 string-concat shipped; this
+   nested-conditional + hour-diff case is deeper and regression-prone). Blocks the
+   `Promo Period`/`ISR`/`IRR` cascade (~10 prod formulas).
+1c. **Export resilience.** `build-model --existing-guid` / `ts tml export` hard-fail with a
+   `JSONDecodeError` traceback when the instance returns a 504 gateway-timeout HTML page
+   (observed on se-thoughtspot 2026-07-05). Add retry-with-backoff + a clean error on
+   non-JSON export responses.
+2. **(M9) Complexity cleanup** — `_import_with_retry` (cc≈19), `_merge_flow` (cc≈18), and
+   `filter_unresolvable_formulas` (cc≈23) exceed the CAP=15 module-health gate; extract helpers.
+3. **(M10) File size** — `commands/tableau.py` is >1000 lines (fails `check_file_size`);
+   split by concern or add an allowlist entry cross-referencing this item.
+4. **(M11)** Open the PR once M9/M10 clear (version 0.35.0 + CHANGELOG already done).
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-090 — ts-convert-from-tableau: document multi-table / multi-query migration
+
+**Source:** 2026-07-05 live CPG migration.
+**Affects:** `agents/cli/ts-convert-from-tableau/SKILL.md`.
+**Status:** OPEN.
+
+Harden the skill for the next multi-query datasource so the migration path is discoverable
+without re-deriving it live:
+
+1. **(M12)** Detect the multi-query pattern (formulas referencing `(Custom SQL Query N)`
+   columns spanning queries) → recommend a **multi-table model**, not a single-view
+   reconcile; document the hand-build-base → `build-model --existing-guid` pattern (Step 5b / 3.5).
+2. **(M13)** Parameter-migration substep for the `--existing-guid` path + `--max-retries`
+   guidance (Step 7). (build-model now auto-migrates params; the skill should say so.)
+3. **(M14)** Collision-rename note — a formula whose name clashes with a column/parameter is
+   renamed (`Formula Sales`, `Metric Selection`); liveboard tiles must reference the renamed
+   form, and coverage diffs must account for renames or they over-count "missing" (Step 7/10).
+4. **(M15)** Absent-column / data-availability surfacing — flag columns present in no table
+   (e.g. forecast/CI) and their dependent formulas rather than letting them silently filter
+   (Step 5b / report).
+5. **(M16)** Base-model measure-classification reminder — table exports come back all-ATTRIBUTE
+   (Step 5b).
+
+**Target:** 2026-08-31.
+
+---
+
+## BL-091 — Tableau: verify multi-table model grain semantics against data
+
+**Source:** 2026-07-05 live CPG migration (schema-only build; no data verification).
+**Affects:** ts-convert-from-tableau, generated multi-table models.
+**Status:** OPEN.
+
+A hand-built multi-table model joins fact tables at different grains (chasm/fan-out). Formulas
+imported structurally but may not return Tableau-equivalent **numbers**. Concrete open case:
+the CPG **tentpole** category pre/LY formulas (`CPG Category Sales Pre/LY`) reference a
+`PERIOD_TYPE` that `tentpole_promotion_master` does not have — they were qualified cross-table
+to `tentpole_product_metrics.PERIOD_TYPE`, changing the grain. Needs a data-level check
+(compare a few aggregates against Tableau) once warehouse access is available. This is the
+migrate-mode analogue of audit angle #15 (conversion fidelity, parked).
+
+**Target:** when data access is available.
+
+---

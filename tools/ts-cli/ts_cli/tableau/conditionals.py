@@ -18,6 +18,42 @@ from ts_cli.tableau.parsing import (
 
 
 # ---------------------------------------------------------------------------
+# Boolean aggregation: MAX/MIN/SUM(<comparison>) → agg(if <cmp> then 1 else 0)
+# ---------------------------------------------------------------------------
+
+# agg ( [col] <op> 'literal'|number ) — a bare comparison as the sole arg.
+_BOOL_AGG = re.compile(
+    r"\b(max|min|sum)\s*\(\s*"
+    r"(\[[^\]]+\]\s*(?:<=|>=|<>|!=|=|<|>)\s*(?:'[^']*'|-?\d[\d.]*))"
+    r"\s*\)",
+    re.IGNORECASE,
+)
+
+
+def convert_boolean_aggregate(expr: str) -> str:
+    """Rewrite Tableau boolean aggregation to valid ThoughtSpot syntax.
+
+    Tableau allows ``MAX([x]='v')`` — aggregating a boolean comparison (true if
+    any row matches). ThoughtSpot rejects a bare comparison inside ``max()``.
+    Rewrite the inner comparison to a 0/1 indicator:
+
+        MAX([LEVEL]='brand')          → max ( if ( [LEVEL]='brand' ) then 1 else 0 )
+        { FIXED [id]: MAX([x]='y') }  → group_aggregate ( max ( if ( [x]='y' ) then 1 else 0 ) , … )
+
+    When any conversion fires, a trailing boolean test on the aggregate result
+    (``… ) = false`` / ``= true``) is normalised to the numeric ``= 0`` / ``= 1``
+    (the aggregate now returns 0/1, so ``= false`` would be invalid).
+    """
+    new_expr, n = _BOOL_AGG.subn(
+        lambda m: f"{m.group(1)} ( if ( {m.group(2)} ) then 1 else 0 )", expr,
+    )
+    if n:
+        new_expr = re.sub(r"\)\s*=\s*false\b", ") = 0", new_expr, flags=re.IGNORECASE)
+        new_expr = re.sub(r"\)\s*=\s*true\b", ") = 1", new_expr, flags=re.IGNORECASE)
+    return new_expr
+
+
+# ---------------------------------------------------------------------------
 # 3. CASE/WHEN → if/else if
 # ---------------------------------------------------------------------------
 

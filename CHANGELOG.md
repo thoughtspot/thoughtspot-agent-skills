@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-05
+- fix(tableau): formula translation — boolean aggregation `MAX/MIN(<cmp>)` → `agg(if <cmp> then 1 else 0)` (M6a), and scope columns inside string-literal-adjacent concat so `'[' + STR([id])` labels resolve (M7); bump ts-cli to v0.36.0
 - chore: bump ts-cli to v0.35.0
 - fix(tableau): resolve multi-table formula failures deterministically in build-model — table-aware bare-ref qualification, qualified-column + cross-formula-cascade filtering, parameter auto-migration in the --existing-guid merge flow, and cascade-aware import retry (default --max-retries 25→10)
 

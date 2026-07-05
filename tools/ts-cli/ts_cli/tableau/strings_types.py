@@ -171,7 +171,14 @@ def scope_columns(
             return f"[{table}::{ref}]"
         return m.group(0)
 
-    return _COL_REF.sub(_replace_col, expr)
+    # Mask single-quoted string literals so a '[' inside a literal (e.g. a
+    # concat label like '[' + ...) doesn't let the column-ref regex latch onto
+    # the literal's bracket and swallow the real [COL] ref that follows.
+    # Odd-indexed split segments are the literals; scope only the even ones.
+    parts = re.split(r"('[^']*')", expr)
+    for i in range(0, len(parts), 2):
+        parts[i] = _COL_REF.sub(_replace_col, parts[i])
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------

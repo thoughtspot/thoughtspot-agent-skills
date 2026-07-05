@@ -14,6 +14,7 @@ from ts_cli.tableau_translate import (
     build_param_renames,
     complete_rank_args,
     convert_agg_if,
+    convert_boolean_aggregate,
     convert_case_when,
     convert_if_then,
     convert_iif,
@@ -832,6 +833,44 @@ class TestScopeColumns:
             {"booked_gbp": "agg_partner_delivery_daily"},
         )
         assert "[agg_partner_delivery_daily::booked_gbp]" in result
+
+    def test_bracket_inside_string_literal_not_consumed(self):
+        # A '[' inside a string literal must not let the col-ref regex swallow
+        # the real [COL] ref that follows (concat-label pattern).
+        result = scope_columns(
+            "concat ( '[' , to_string ( [CAMPAIGN_ID] ) , '] ' , [CAMPAIGN_NAME] )",
+            {"CAMPAIGN_ID": "PROMO", "CAMPAIGN_NAME": "PROMO"},
+        )
+        assert "[PROMO::CAMPAIGN_ID]" in result
+        assert "[PROMO::CAMPAIGN_NAME]" in result
+        assert "'['" in result  # literal preserved, not scoped
+
+
+class TestConvertBooleanAggregate:
+    def test_max_of_comparison_wrapped(self):
+        out = convert_boolean_aggregate("max ( [LEVEL]='totalsales' ) = false")
+        assert out == "max ( if ( [LEVEL]='totalsales' ) then 1 else 0 ) = 0"
+
+    def test_true_maps_to_one(self):
+        out = convert_boolean_aggregate("max ( [LEVEL]='brand' ) = true")
+        assert out == "max ( if ( [LEVEL]='brand' ) then 1 else 0 ) = 1"
+
+    def test_inside_group_aggregate(self):
+        out = convert_boolean_aggregate(
+            "group_aggregate ( max ( [X::LEVEL]='brand' ) , { [X::ID] } , {} ) = false"
+        )
+        assert "if ( [X::LEVEL]='brand' ) then 1 else 0" in out
+        assert out.endswith("{} ) = 0")
+
+    def test_plain_aggregate_untouched(self):
+        # No bare comparison inside the aggregate → unchanged.
+        expr = "max ( [X::SALES] )"
+        assert convert_boolean_aggregate(expr) == expr
+
+    def test_no_false_rewrite_without_bool_agg(self):
+        # = false left alone when no boolean-aggregate conversion fired.
+        expr = "[X::FLAG] = false"
+        assert convert_boolean_aggregate(expr) == expr
 
 
 # ---------------------------------------------------------------------------

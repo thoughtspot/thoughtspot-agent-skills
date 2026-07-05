@@ -45,6 +45,7 @@ from ts_cli.tableau.conditionals import (  # noqa: F401
     _convert_if_content,
     _parse_if_else_for_agg,
     convert_agg_if,
+    convert_boolean_aggregate,
     convert_case_when,
     convert_if_then,
     convert_iif,
@@ -182,6 +183,9 @@ def translate_single(
 
     # 10. Date function mapping
     expr = map_date_functions(expr)
+
+    # 10d. Boolean aggregation: MAX/MIN/SUM(<comparison>) → agg(if <cmp> then 1 else 0)
+    expr = convert_boolean_aggregate(expr)
 
     # 11. String concatenation
     expr = convert_string_concat(expr, role)
