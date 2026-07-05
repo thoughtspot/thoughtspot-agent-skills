@@ -2368,8 +2368,9 @@ import retry).
    so a source-authored nested `IF … then …` (lowercase inner) never got its `if(...)`
    wrapper. Now case-insensitive. `Start Date`/`End Date` and the `Promo Period`/`ISR`/`IRR`
    cascade (~10 prod formulas) now translate and validate; `datediff('hour',…)` →
-   `diff_time(…)/3600` was already handled. **Remaining:** verify the `diff_time` argument
-   order / sign against data — folded into BL-091.
+   `diff_time(b,a)/3600` is correct per the documented arg-order convention
+   (`tableau-formula-translation.md:147` — TS `diff_*` takes `(end, start)`), so no
+   arg-order/sign check is needed. Fully resolved at translation level.
 1c. **Export resilience.** `build-model --existing-guid` / `ts tml export` hard-fail with a
    `JSONDecodeError` traceback when the instance returns a 504 gateway-timeout HTML page
    (observed on se-thoughtspot 2026-07-05). Add retry-with-backoff + a clean error on
