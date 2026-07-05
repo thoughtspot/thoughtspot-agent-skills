@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-05
+- chore: bump ts-cli to v0.35.0
+- fix(tableau): resolve multi-table formula failures deterministically in build-model — table-aware bare-ref qualification, qualified-column + cross-formula-cascade filtering, parameter auto-migration in the --existing-guid merge flow, and cascade-aware import retry (default --max-retries 25→10)
+
 ## 2026-07-04
 - fix: ts tableau build-model --existing-guid now applies --column-name-map (ts-cli v0.34.0, ts-convert-from-tableau v1.24.0)
 - feat: bump ts-cli to v0.33.0 — build-model column-schema reconciliation (sqlproxy suffix/junk/qualify + --reconcile-table)

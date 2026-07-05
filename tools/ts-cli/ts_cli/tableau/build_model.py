@@ -10,6 +10,7 @@ import re
 
 from ts_cli.model_builder import (
     add_formula_prefix,
+    build_col_table_map,
     build_column_lookup,
     fix_bare_refs,
     fix_double_aggregation,
@@ -191,6 +192,10 @@ def collect_existing_model_context(existing_tml: dict) -> dict:
         "formula_names": {f["name"] for f in model.get("formulas", [])},
         "param_names": {p["name"] for p in model.get("parameters", [])},
         "col_lookup": build_column_lookup(existing_tml),
+        "col_table_map": build_col_table_map(
+            existing_tml,
+            model_tables[0]["name"] if model_tables else None,
+        ),
         "primary_table": model_tables[0]["name"] if model_tables else None,
     }
 
@@ -220,6 +225,7 @@ def prepare_formulas_for_merge(
             f["expr"] = fix_bare_refs(
                 f["expr"], all_formula_names, param_names,
                 ctx["col_lookup"], ctx["primary_table"],
+                ctx.get("col_table_map"),
             )
             if f["expr"] != before:
                 bare_fixed += 1

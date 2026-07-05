@@ -482,14 +482,39 @@ def _import_with_retry(
             break
         bad_name, err_detail = parsed_err
         typer.echo(f"  Import error on '{bad_name}': {err_detail} — dropping", err=True)
-        dropped_on_import.append({
-            "name": bad_name,
-            "expr": expr_by_fid.get(f"formula_{bad_name}", ""),
-            "error": err_detail,
-            "original_tableau": original_by_name.get(bad_name, ""),
-        })
-        remove_formula(merged, bad_name)
-        stats["added"] -= 1
+        # Drop the failing formula, then cascade-drop any formula that
+        # references it — in THIS cycle — so a failed root (e.g. a date-window
+        # formula) doesn't cost one import round-trip per downstream dependent.
+        to_drop = [bad_name]
+        reasons = {bad_name: err_detail}
+        seen_drop = {bad_name}
+        i = 0
+        while i < len(to_drop):
+            victim = to_drop[i]
+            i += 1
+            token = f"[formula_{victim}]"
+            for fm in merged["model"].get("formulas", []):
+                dep = fm["name"]
+                if dep in seen_drop:
+                    continue
+                if token in fm.get("expr", ""):
+                    seen_drop.add(dep)
+                    to_drop.append(dep)
+                    reasons[dep] = f"depends on dropped formula '{victim}'"
+        for victim in to_drop:
+            dropped_on_import.append({
+                "name": victim,
+                "expr": expr_by_fid.get(f"formula_{victim}", ""),
+                "error": reasons[victim],
+                "original_tableau": original_by_name.get(victim, ""),
+            })
+            remove_formula(merged, victim)
+            stats["added"] -= 1
+        if len(to_drop) > 1:
+            typer.echo(
+                f"    ↳ cascade-dropped {len(to_drop) - 1} dependent formula(s)",
+                err=True,
+            )
         if stats["added"] <= 0:
             typer.echo("  All new formulas dropped — nothing to import", err=True)
             result["import_status"] = "SKIPPED"
@@ -515,6 +540,7 @@ def _merge_flow(
     dry_run: bool,
     max_retries: int,
     column_name_map: Optional[dict] = None,
+    parameters: Optional[list] = None,
 ) -> dict:
     """Merge translated formulas into an existing model and import it."""
     from ts_cli.model_builder import (
@@ -526,6 +552,23 @@ def _merge_flow(
         prepare_formulas_for_merge,
     )
     from ts_cli.tableau.reconcile import rewrite_formula_refs
+
+    # Parameters must exist on the model BEFORE formula import — a formula that
+    # references a parameter the model doesn't have is unresolvable and gets
+    # dropped. Add any TWB parameters missing from the existing model so those
+    # formulas survive (and the parameters persist on import).
+    if parameters:
+        model = existing_tml.setdefault("model", {})
+        existing_params = model.setdefault("parameters", [])
+        have = {p.get("name") for p in existing_params}
+        added_params = [p for p in parameters if p.get("name") not in have]
+        if added_params:
+            existing_params.extend(added_params)
+            typer.echo(
+                f"  Added {len(added_params)} parameter(s) to model: "
+                f"{', '.join(p['name'] for p in added_params)}",
+                err=True,
+            )
 
     if column_name_map:
         n_rewritten = rewrite_formula_refs(cleaned_formulas, column_name_map)
@@ -826,6 +869,7 @@ def _process_datasource(
             dry_run=dry_run,
             max_retries=max_retries,
             column_name_map=col_name_map,
+            parameters=parsed.get("parameters"),
         )
 
     result = _generate_flow(
@@ -896,8 +940,11 @@ def build_model_cmd(
                                             help="ThoughtSpot profile (required with --existing-guid)"),
     dry_run: bool = typer.Option(False, "--dry-run",
                                   help="Report only — don't write files or import"),
-    max_retries: int = typer.Option(25, "--max-retries",
-                                     help="Maximum formula-drop retry cycles (default 25)"),
+    max_retries: int = typer.Option(10, "--max-retries",
+                                     help="Maximum formula-drop retry cycles (default 10). "
+                                          "Deterministic failures (missing columns/params, "
+                                          "cross-formula cascades) are caught pre-import; this "
+                                          "budget is for genuine server-side rejections."),
     table_name_map: Optional[str] = typer.Option(
         None, "--table-name-map",
         help="GENERATE mode only (no --existing-guid). JSON file mapping TWB "

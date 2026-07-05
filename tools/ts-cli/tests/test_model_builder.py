@@ -9,6 +9,7 @@ from ts_cli.model_builder import (
     _extract_joins,
     _extract_tables,
     add_formula_prefix,
+    build_col_table_map,
     build_column_lookup,
     build_formula_levels,
     build_model_tml,
@@ -620,9 +621,47 @@ class TestFilterUnresolvable:
                 "expr": "concat ( '[' , to_string ( [TABLE::ID]) , '] ' , [TABLE::NAME] )",
             },
         ]
-        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        common = dict(self._COMMON)
+        common["model_column_names"] = {"ORDERS", "SALES", "CAMPAIGN_ID", "ID", "NAME"}
+        kept, dropped = filter_unresolvable_formulas(formulas, **common)
         assert len(kept) == 1
         assert len(dropped) == 0
+
+    def test_drops_qualified_ref_to_missing_column(self):
+        # [T::REVENUE_FORECAST] is qualified but the column exists in no table
+        # → must be caught here, not left to fail at import.
+        formulas = [
+            {"id": "f7", "name": "Forecast",
+             "expr": "sum ( [PROMO::REVENUE_FORECAST] )"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert kept == []
+        assert dropped == ["Forecast"]
+
+    def test_keeps_qualified_ref_to_present_column(self):
+        formulas = [
+            {"id": "f8", "name": "Total", "expr": "sum ( [PROMO::SALES] )"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert len(kept) == 1
+        assert dropped == []
+
+    def test_cascade_drops_dependents_of_dropped_formula(self):
+        # Root references a missing column → dropped; dependents that reference
+        # [formula_Root] must cascade-drop in the same pass, not at import.
+        formulas = [
+            {"id": "formula_Root", "name": "Root",
+             "expr": "sum ( [PROMO::REVENUE_FORECAST] )"},
+            {"id": "formula_Mid", "name": "Mid",
+             "expr": "[formula_Root] / sum ( [PROMO::SALES] )"},
+            {"id": "formula_Leaf", "name": "Leaf",
+             "expr": "[formula_Mid] * 100"},
+            {"id": "formula_Clean", "name": "Clean",
+             "expr": "sum ( [PROMO::ORDERS] )"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **self._COMMON)
+        assert [f["name"] for f in kept] == ["Clean"]
+        assert set(dropped) == {"Root", "Mid", "Leaf"}
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +813,7 @@ class TestBuildModelCmdSignature:
         sig = inspect.signature(build_model_cmd)
         param = sig.parameters.get("max_retries")
         assert param is not None, "--max-retries parameter missing from build_model_cmd"
-        assert param.default.default == 25
+        assert param.default.default == 10
 
     def test_max_retries_is_int_type(self):
         """--max-retries should be typed as int."""
@@ -948,3 +987,105 @@ class TestBuildColumnLookup:
             }
         }
         assert build_column_lookup(tml) == {}
+
+
+# ===================================================================
+# Multi-table bare-ref qualification (build_col_table_map + fix_bare_refs)
+# ===================================================================
+
+# A 3-table model like the tentpole rebuild: an anchor promotion-master plus
+# a product-metrics table and a customer-orders table. Several columns are
+# unique to one table (PERIOD_TYPE, SALES, LEVEL, CPG_SALES); PROMOTION_ID and
+# CUSTOMER_TYPE are shared join/attribute columns.
+_MULTI_MODEL = {
+    "model": {
+        "columns": [
+            {"name": "CPG_SALES", "column_id": "tentpole_promotion_master::CPG_SALES"},
+            {"name": "PROMOTION_ID", "column_id": "tentpole_promotion_master::PROMOTION_ID"},
+            {"name": "PERIOD_TYPE", "column_id": "tentpole_product_metrics::PERIOD_TYPE"},
+            {"name": "SALES", "column_id": "tentpole_product_metrics::SALES"},
+            {"name": "LEVEL", "column_id": "tentpole_product_metrics::LEVEL"},
+            {"name": "PROMOTION_ID (product_metrics)",
+             "column_id": "tentpole_product_metrics::PROMOTION_ID"},
+            {"name": "CUSTOMER_ID", "column_id": "tentpole_product_metrics::CUSTOMER_ID"},
+            {"name": "CUSTOMER_COHORT", "column_id": "tentpole_customer_orders::CUSTOMER_COHORT"},
+            {"name": "PROMOTION_ID (customer_orders)",
+             "column_id": "tentpole_customer_orders::PROMOTION_ID"},
+            {"name": "CUSTOMER_ID (customer_orders)",
+             "column_id": "tentpole_customer_orders::CUSTOMER_ID"},
+        ]
+    }
+}
+
+_ANCHOR = "tentpole_promotion_master"
+
+
+class TestBuildColTableMap:
+    def test_unique_columns_mapped_to_their_table(self):
+        m = build_col_table_map(_MULTI_MODEL, _ANCHOR)
+        assert m["PERIOD_TYPE"] == "tentpole_product_metrics::PERIOD_TYPE"
+        assert m["SALES"] == "tentpole_product_metrics::SALES"
+        assert m["LEVEL"] == "tentpole_product_metrics::LEVEL"
+        assert m["CPG_SALES"] == "tentpole_promotion_master::CPG_SALES"
+        assert m["CUSTOMER_COHORT"] == "tentpole_customer_orders::CUSTOMER_COHORT"
+
+    def test_shared_column_prefers_anchor(self):
+        # PROMOTION_ID lives in all three tables; anchor owns it → anchor wins
+        m = build_col_table_map(_MULTI_MODEL, _ANCHOR)
+        assert m["PROMOTION_ID"] == "tentpole_promotion_master::PROMOTION_ID"
+
+    def test_shared_column_absent_from_anchor_picks_an_owner(self):
+        # CUSTOMER_ID is in product_metrics + customer_orders but NOT the anchor
+        # → must pick a table that owns it (first in model order), never the anchor
+        m = build_col_table_map(_MULTI_MODEL, _ANCHOR)
+        assert m["CUSTOMER_ID"] == "tentpole_product_metrics::CUSTOMER_ID"
+        assert not m["CUSTOMER_ID"].startswith(_ANCHOR + "::")
+
+    def test_display_name_alias_indexed(self):
+        m = build_col_table_map(_MULTI_MODEL, _ANCHOR)
+        # display name of a unique column resolves too
+        assert m.get("PERIOD_TYPE") == "tentpole_product_metrics::PERIOD_TYPE"
+
+
+class TestFixBareRefsMultiTable:
+    def test_bare_ref_qualified_to_owning_table_not_anchor(self):
+        ctm = build_col_table_map(_MULTI_MODEL, _ANCHOR)
+        lookup = build_column_lookup(_MULTI_MODEL)
+        # PERIOD_TYPE lives in product_metrics; anchor is promotion_master.
+        expr = "if ( [PERIOD_TYPE]='promo' ) then [CPG_SALES] else 0"
+        out = fix_bare_refs(
+            expr, set(), set(), lookup, "tentpole_promotion_master", ctm,
+        )
+        assert "[tentpole_product_metrics::PERIOD_TYPE]" in out
+        assert "[tentpole_promotion_master::CPG_SALES]" in out
+        # the bug: PERIOD_TYPE must NOT be qualified to the anchor
+        assert "tentpole_promotion_master::PERIOD_TYPE" not in out
+
+    def test_shared_column_on_anchor_uses_anchor(self):
+        ctm = build_col_table_map(_MULTI_MODEL, _ANCHOR)
+        lookup = build_column_lookup(_MULTI_MODEL)
+        out = fix_bare_refs(
+            "[PROMOTION_ID]", set(), set(), lookup,
+            "tentpole_promotion_master", ctm,
+        )
+        assert out == "[tentpole_promotion_master::PROMOTION_ID]"
+
+    def test_shared_column_absent_from_anchor_qualified_to_owner(self):
+        # CUSTOMER_ID shared by two joined tables, not on the anchor →
+        # must resolve to an owner, not the (column-less) anchor.
+        ctm = build_col_table_map(_MULTI_MODEL, _ANCHOR)
+        lookup = build_column_lookup(_MULTI_MODEL)
+        out = fix_bare_refs(
+            "unique count ( [CUSTOMER_ID] )", set(), set(), lookup,
+            "tentpole_promotion_master", ctm,
+        )
+        assert "[tentpole_product_metrics::CUSTOMER_ID]" in out
+        assert "tentpole_promotion_master::CUSTOMER_ID" not in out
+
+    def test_no_map_preserves_single_table_behaviour(self):
+        # backward-compat: without a col_table_map, everything → anchor
+        lookup = build_column_lookup(_MULTI_MODEL)
+        out = fix_bare_refs(
+            "[PERIOD_TYPE]", set(), set(), lookup, "tentpole_promotion_master",
+        )
+        assert out == "[tentpole_promotion_master::PERIOD_TYPE]"
