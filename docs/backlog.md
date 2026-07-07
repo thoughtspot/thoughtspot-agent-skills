@@ -2359,10 +2359,14 @@ than duplicating it (same "two paths, one detector" principle as the formula cla
 cross-formula-cascade filtering, parameter auto-migration in the merge flow, cascade-aware
 import retry).
 
-1. **(M8) Multi-table base generation in generate mode.** Today a datasource that joins
-   several Custom SQL Queries (bound to multiple ThoughtSpot tables) requires a hand-built
-   base model TML before `build-model --existing-guid`. `build-model` generate mode should
-   emit a multi-table base from a table-set + join-key spec so no hand assembly is needed.
+1. **(M8) Parse the published datasource's `.tds`/`.tdsx` — RESOLVED 2026-07-08 (ts-cli
+   v0.38.0).** The physical tables + joins of a multi-query published datasource live in its
+   `.tds`, not the `.twb` (and the field API returns columns only, not joins). `ts tableau
+   parse` and `build-model` now accept a `.tds`/`.tdsx` (root *is* `<datasource>`, handled by
+   `datasource_elements`/`load_xml_root`), so GENERATE mode builds the multi-table model
+   automatically — no hand-assembly. Get the `.tds` via `ts tableau download {id}` or a
+   user-supplied file. (Originally scoped as "emit a multi-table base from a manual table-set
+   spec"; reframed to `.tds` parsing, which is the real source of the join structure.)
 1b. **(M6b) Nested-IF date-window translation — RESOLVED at translation level 2026-07-05
    (commit 3f04b59).** Root cause was `_convert_if_content` matching `THEN` case-sensitively,
    so a source-authored nested `IF … then …` (lowercase inner) never got its `if(...)`

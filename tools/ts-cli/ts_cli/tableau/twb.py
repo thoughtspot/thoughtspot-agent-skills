@@ -1,5 +1,15 @@
 """TWB/TWBX XML parsing: parameter extraction, and table/column/join/
 calculated-field discovery from Tableau datasources.
+
+Accepts four Tableau file shapes:
+  - ``.twb``  — workbook XML (root ``<workbook>``, datasources are descendants)
+  - ``.twbx`` — zipped workbook (contains a ``.twb``)
+  - ``.tds``  — a published/standalone datasource (root IS ``<datasource>``)
+  - ``.tdsx`` — zipped datasource (contains a ``.tds``)
+
+The ``.tds``/``.tdsx`` shapes matter for published (``sqlproxy``) datasources: the
+workbook hides their physical tables + joins, which live only in the datasource's
+``.tds``. See ``datasource_elements`` for the root-shape handling.
 """
 from __future__ import annotations
 
@@ -8,6 +18,37 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from typing import Any
+
+
+def load_xml_root(path: str | Path) -> ET.Element:
+    """Load the XML root from a ``.twb``/``.twbx``/``.tds``/``.tdsx`` (zip-aware).
+
+    For the zipped forms, extract the inner document: ``.twbx`` → ``.twb``,
+    ``.tdsx`` → ``.tds`` (falling back to whichever of the two is present).
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix in (".twbx", ".tdsx"):
+        inner = suffix[:-1]  # ".twbx" → ".twb", ".tdsx" → ".tds"
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            name = next((n for n in names if n.endswith(inner)), None)
+            if name is None:  # tolerate a .twb packaged as .tdsx or vice versa
+                name = next(n for n in names if n.endswith((".twb", ".tds")))
+            return ET.parse(z.open(name)).getroot()
+    return ET.parse(str(path)).getroot()
+
+
+def datasource_elements(root: ET.Element) -> list[ET.Element]:
+    """Return the datasource elements for either root shape.
+
+    A ``.twb``/``.twbx`` root is ``<workbook>`` with descendant ``<datasource>``
+    elements; a standalone ``.tds``/``.tdsx`` root **is** the ``<datasource>``
+    itself (``.//datasource`` would not match it).
+    """
+    if root.tag == "datasource":
+        return [root]
+    return root.findall(".//datasource")
 
 
 # ---------------------------------------------------------------------------
@@ -142,13 +183,7 @@ def parse_twb(twb_path: str | Path) -> dict:
       parameters: list of parameter dicts
       param_map: internal param name → caption map
     """
-    path = Path(twb_path)
-    if path.suffix.lower() == ".twbx":
-        with zipfile.ZipFile(path) as z:
-            twb_name = next(n for n in z.namelist() if n.endswith(".twb"))
-            root = ET.parse(z.open(twb_name)).getroot()
-    else:
-        root = ET.parse(str(path)).getroot()
+    root = load_xml_root(twb_path)
 
     parameters = extract_parameters(root)
     param_map = build_param_name_map(root)
@@ -157,7 +192,7 @@ def parse_twb(twb_path: str | Path) -> dict:
     datasources = []
     seen_ds = set()
 
-    for ds in root.findall(".//datasource"):
+    for ds in datasource_elements(root):
         ds_name = ds.get("caption", ds.get("name", ""))
         if ds_name == "Parameters":
             continue

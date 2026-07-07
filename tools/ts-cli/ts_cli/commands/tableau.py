@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import re
 import xml.etree.ElementTree as ET
-import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -91,18 +90,14 @@ def download(
 
 
 def _twb_root(twb_file: str) -> ET.Element:
-    """Load the root XML element from a .twb or .twbx path (zip-aware)."""
-    p = Path(twb_file)
-    if p.suffix.lower() == ".twbx":
-        with zipfile.ZipFile(p) as z:
-            name = next(n for n in z.namelist() if n.endswith(".twb"))
-            return ET.parse(z.open(name)).getroot()
-    return ET.parse(str(p)).getroot()
+    """Load the root XML element from a .twb/.twbx/.tds/.tdsx path (zip-aware)."""
+    from ts_cli.tableau.twb import load_xml_root
+    return load_xml_root(twb_file)
 
 
 @app.command("parse")
 def parse_cmd(
-    twb_file: str = typer.Argument(..., help="Path to .twb or .twbx file"),
+    twb_file: str = typer.Argument(..., help="Path to a .twb/.twbx workbook or .tds/.tdsx published-datasource file"),
     output_file: str = typer.Option(..., "--output", "-o",
                                      help="Output parsed JSON path"),
 ) -> None:
@@ -975,7 +970,7 @@ def _validate_build_options(
 
 @app.command("build-model")
 def build_model_cmd(
-    twb_file: str = typer.Argument(..., help="Path to .twb or .twbx file"),
+    twb_file: str = typer.Argument(..., help="Path to a .twb/.twbx workbook or .tds/.tdsx published-datasource file"),
     connection_name: str = typer.Option("", "--connection", "-c",
                                          help="ThoughtSpot connection name (required unless --existing-guid)"),
     output_dir: str = typer.Option(".", "--output-dir", "-o",

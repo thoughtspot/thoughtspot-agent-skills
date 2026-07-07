@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-08
+- feat: ts-cli v0.38.0 — `ts tableau parse`/`build-model` accept a published-datasource `.tds`/`.tdsx` (physical tables/joins/columns/calcs), so multi-query datasources build multi-table models via GENERATE mode without hand-assembly (BL-089 M8)
+- docs: update ts-convert-from-tableau to v1.27.0 — `.tds`/`.tdsx` parse path + Step 3.5 correction (field API returns columns not joins)
+
 ## 2026-07-06
 - feat(tableau): `build-model` now converts Custom SQL relations (`<relation type='text'>`) into **SQL View TML** and references them by name in the model — previously Custom-SQL-only datasources were dropped. Includes physical/SQL-View column dedup and formula resolvability against SQL View columns. Verified end-to-end live (parse → emit → import → query). Bumps ts-cli to v0.37.0 (ts-convert-from-tableau v1.26.0)
 

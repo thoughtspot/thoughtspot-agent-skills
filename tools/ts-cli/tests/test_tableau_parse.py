@@ -142,3 +142,68 @@ def test_classify_formulas_from_parsed_json(tmp_path):
     assert data["datasources"][0]["name"] == "Orders"
     assert data["datasources"][0]["formulas"][0]["tier"] == "native"
     assert data["tier_counts"]["native"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Published-datasource files: .tds (root IS <datasource>) and .tdsx (zip).
+# A published/sqlproxy datasource hides its physical tables + joins from the
+# .twb; they live in the datasource's .tds. parse must accept it.
+# ---------------------------------------------------------------------------
+
+TDS = """<?xml version='1.0'?>
+<datasource formatted-name='tentpole_prod' caption='Tentpole Prod'>
+  <connection class='federated'>
+    <relation join='inner' type='join'>
+      <clause type='join'>
+        <expression op='[PROMOTION_ID]'/>
+        <expression op='[PROMOTION_ID (product)]'/>
+      </clause>
+      <relation name='promotion_master' type='table' table='[db].[s].[promotion_master]'/>
+      <relation name='product_metrics' type='table' table='[db].[s].[product_metrics]'/>
+    </relation>
+  </connection>
+  <column name='[CPG_SALES]' datatype='real' role='measure' caption='CPG Sales'/>
+  <column name='[Calculation_1]' caption='Promo Sales' datatype='real'>
+    <calculation class='tableau' formula='SUM([CPG_SALES])'/>
+  </column>
+</datasource>
+"""
+
+
+def _assert_tds_parsed(data):
+    assert len(data["datasources"]) == 1, data["datasources"]
+    ds = data["datasources"][0]
+    assert ds["name"] == "Tentpole Prod"
+    assert {t["name"] for t in ds["tables"]} == {"promotion_master", "product_metrics"}
+    assert len(ds["joins"]) == 1
+    assert "Promo Sales" in {c.get("caption", c.get("name")) for c in ds["calculated_fields"]}
+
+
+def test_parse_tds_file(tmp_path):
+    tds = tmp_path / "tentpole.tds"
+    tds.write_text(TDS)
+    out = tmp_path / "parsed.json"
+    result = runner.invoke(app, ["tableau", "parse", str(tds), "--output", str(out)])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    _assert_tds_parsed(json.loads(out.read_text()))
+
+
+def test_parse_tdsx_file(tmp_path):
+    import zipfile
+    tdsx = tmp_path / "tentpole.tdsx"
+    with zipfile.ZipFile(tdsx, "w") as z:
+        z.writestr("tentpole.tds", TDS)
+    out = tmp_path / "parsed.json"
+    result = runner.invoke(app, ["tableau", "parse", str(tdsx), "--output", str(out)])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    _assert_tds_parsed(json.loads(out.read_text()))
+
+
+def test_datasource_elements_helper():
+    import xml.etree.ElementTree as ET
+    from ts_cli.tableau.twb import datasource_elements
+    wb = ET.fromstring("<workbook><datasource name='a'/><datasource name='b'/></workbook>")
+    assert len(datasource_elements(wb)) == 2
+    tds = ET.fromstring("<datasource name='a'/>")
+    got = datasource_elements(tds)
+    assert len(got) == 1 and got[0] is tds

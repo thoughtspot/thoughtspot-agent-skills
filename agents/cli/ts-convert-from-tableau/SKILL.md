@@ -966,12 +966,27 @@ of API access — they are `<column>` elements directly under the `<datasource>`
 - **Metadata records** (local-name, remote-name, local-type, parent) — often complete enough
   for column mapping
 
-**What the TWB does NOT contain** (only available via the Tableau API):
+**What the TWB does NOT contain** (it lives only in the published datasource's `.tds`):
 - The **physical table structure** (table names, joins, db/schema/table paths)
 - The **connection details** (database, schema) that link to the warehouse
 
-This means **formula extraction and translation work without API access** — the Tableau API
-adds physical table resolution and join definitions, not the formulas.
+This means **formula extraction and translation work without the physical model** — the
+`.tds` adds physical table resolution and join definitions, not the formulas.
+
+> **Where the physical model actually is — and how to get it.** The join/table structure is
+> **not** returned by the field API. `ts tableau datasource --fields` (VizQL `read-metadata`)
+> returns **columns/calcs only**, not tables or joins. The full physical model (tables, joins,
+> custom SQL) lives in the published datasource's **`.tds`**. Two ways to obtain and parse it:
+> - **Download it** (needs Tableau access): `ts tableau download {datasource_id}` fetches the
+>   `.tdsx`; the `.tds` inside carries the model.
+> - **Be supplied it**: the user provides the `.tds`/`.tdsx` alongside the `.twb`.
+>
+> Then **`ts tableau parse` accepts a `.tds`/`.tdsx` directly** (ts-cli ≥ 0.38.0) — its root
+> *is* the `<datasource>`, and parse extracts its tables/joins/columns/calcs just like a
+> workbook datasource. Feed that to `build-model` GENERATE mode and it builds the multi-table
+> model automatically — **no hand-assembly** (see Step 5b "Multi-query datasources"). Without
+> the `.tds` (only the `.twb`, no Tableau access), fall back to the hand-built multi-table base
+> in Step 5b.
 
 ### Flow
 
@@ -1592,7 +1607,15 @@ model still imports and *looks* clean. Detect this and build a **multi-table mod
 > one query, **and** the single-view reconcile leaves a large share of formulas filtered with
 > "Unresolved Custom SQL Query alias". If you see that pattern, the datasource is multi-table.
 
-Procedure (live-verified 2026-07-05, CPG Merch migration):
+> **Preferred path — parse the published datasource's `.tds` (ts-cli ≥ 0.38.0).** The physical
+> tables + joins live in the datasource's `.tds` (see Step 3.5). If you can get it — download it
+> (`ts tableau download {id}` → the `.tds` inside the `.tdsx`) or have the user supply the
+> `.tds`/`.tdsx` — then **`ts tableau parse {file}.tds`** extracts the real tables/joins/columns/
+> calcs, and `ts tableau build-model {file}.tds … ` (GENERATE mode) builds the multi-table model
+> **automatically, no hand-assembly**. Use the hand-assembly procedure below only when the `.tds`
+> is unavailable (you have just the `.twb` and no Tableau access — the consultant/remote case).
+
+Procedure when the `.tds` is unavailable — hand-assembly (live-verified 2026-07-05, CPG Merch migration):
 1. **Find the tables that cover the referenced columns.** Collect every physical column the
    datasource's formulas reference (strip the `(Custom SQL Query N)` suffix). Search the
    connection (`ts metadata search --name …`) for the tables that expose them; a greedy
@@ -4111,6 +4134,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.27.0 | 2026-07-08 | **Parse published-datasource `.tds`/`.tdsx` for the physical model (BL-089 M8).** `ts tableau parse` and `ts tableau build-model` now accept a `.tds`/`.tdsx` (root *is* `<datasource>`) — extracting its real tables/joins/columns/calcs — so a multi-query published datasource builds a multi-table model **automatically via GENERATE mode, no hand-assembly**. Get the `.tds` via `ts tableau download {id}` (the `.tds` inside the `.tdsx`) or a user-supplied file. Step 3.5 corrected: the field API (VizQL `read-metadata`) returns **columns/calcs only, not tables/joins** — the physical model lives in the `.tds`. Step 5b "Multi-query datasources" now leads with the `.tds` path; hand-assembly is the fallback for when only the `.twb` is available. Prereq ts-cli v0.38.0. |
 | 1.26.0 | 2026-07-06 | **Custom SQL → SQL View is now automated in `build-model`** (Step 5a/5c), realizing what the skill documented since 1.1.0. `ts tableau build-model` extracts `<relation type='text'>` Custom SQL (SQL + columns from `metadata-record` `parent-name`/`remote-name`, decoding `<<`/`>>`/`==`), emits a `.sql_view.tml` per relation, and references it by name in `model_tables[]` (no GUID at emit time). Physical/SQL-View column dedup prevents duplicate-name import failures; formula resolvability no longer blanket-drops qualified `[SQL View::col]` refs. Verified end-to-end live on ps-internal (parse → emit → import → searchdata returns correct numbers) and against real workbooks (single-CTE + Tableau's 6-query ts_users). Known follow-ons: drop the extract table when its Custom SQL becomes a view; substitute/flag Tableau params embedded in SQL. Prereq ts-cli v0.37.0. |
 | 1.25.0 | 2026-07-05 | **Multi-query datasource → multi-table model guidance + liveboard parameter rule (BL-090).** Step 5b: new "Multi-query datasources" subsection — a published/sqlproxy datasource that joins several Custom SQL Queries must become a **multi-table model** (a single-view reconcile silently filters the other queries' formulas as "Unresolved Custom SQL Query alias"); documents detection, greedy table-set cover + shared-key join confirmation, hand-built base → `build-model --existing-guid` (which now auto-migrates parameters, validates qualified columns, cascade-drops, and table-qualifies bare refs to the real owning table), plus **(M14)** collision-renamed formulas, **(M15)** absent-column data-gap surfacing, **(M16)** measure classification on all-ATTRIBUTE table exports. Step 7 Phase-2 pipeline list updated: parameter auto-migration, deterministic qualified-column + cross-formula-cascade filtering, `--max-retries` default 25→10. Step 10f: parameter chips only stick when a param-consuming formula tile is on the board (ThoughtSpot drops unreferenced params) — filter-type params → liveboard filters; display-toggle params (sheet-swap) → per-metric tiles or omit. Live-verified in the CPG Merch migration (tentpole 119/119, prod 137/163). Prereq ts-cli v0.36.1. |
 | 1.24.0 | 2026-07-04 | Phase 2 (`build-model --existing-guid`) honors `--column-name-map`, recovering formulas on reconcile-renamed columns |
