@@ -774,90 +774,44 @@ TML BACKUP — about to run
   confident the change is correct.
 ```
 
-Replace the placeholders with the actual path (computed below) and counts before printing.
-Then begin the export loop.
+### Run the backup — `ts dependency backup`
 
-Export and save the current TML for every object that will be modified or deleted. Do this
-even if the user selected "None" in Step 6 (the source still changes).
+Build a plan JSON (source object + every dependent in `objects_to_fix` and
+`objects_to_delete`) and pass it to `ts dependency backup`. The command exports each
+object's TML the same way `ts tml export --parse` does, writes one file per object
+plus a `manifest.json`, and returns the manifest. It **collects all exports first and
+writes nothing if any export fails** — so a partial backup directory can never be
+mistaken for a complete one (backup failure is fatal for both fix- and delete-targets:
+the skill guarantees rollback, and rollback needs the backup).
 
 ```python
-import os, json, datetime
+import os, json, subprocess
 
-timestamp   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-backup_base = custom_backup_path or "/tmp"
-backup_dir  = os.path.join(backup_base, f"ts_dep_backup_{timestamp}")
-os.makedirs(backup_dir, exist_ok=True)
-
-# Source + everything we touch (fix + delete) — non-negotiable: always back up before Step 9
-all_to_backup = (
-    [{"guid": source_guid, "name": source_name, "type": source_type, "intent": "FIX_SOURCE"}]
-    + [{**d, "intent": "FIX"}    for d in objects_to_fix]
-    + [{**d, "intent": "DELETE"} for d in objects_to_delete]
-)
-
-# Announce the backup destination BEFORE exporting so the user can see where files will land.
-print(f"TML backup will be written to: {backup_dir}/")
-print(f"  {len(all_to_backup)} object(s) will be exported "
-      f"(1 source + {len(objects_to_fix)} fix + {len(objects_to_delete)} delete)")
-
-manifest = {
-    "created":       timestamp,
-    "profile":       profile_name,
-    "base_url":      base_url,
-    "operation":     operation,
-    "source_object": {"guid": source_guid, "name": source_name, "type": source_type},
-    "fix_count":     len(objects_to_fix),
-    "delete_count":  len(objects_to_delete),
-    "objects":       [],
+plan = {
+    "operation": operation,                              # "REMOVE" | "REPOINT"
+    "source": {"guid": source_guid, "type": source_type, "name": source_name},
+    "fix":    [{"guid": d["guid"], "type": d["type"], "name": d["name"]} for d in objects_to_fix],
+    "delete": [{"guid": d["guid"], "type": d["type"], "name": d["name"]} for d in objects_to_delete],
+    "out_dir": custom_backup_path or "/tmp",             # from the location prompt above
 }
 
-print(f"Backing up {len(all_to_backup)} object(s) to {backup_dir}...")
-
-for obj in all_to_backup:
-    result = subprocess.run(
-        ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {obj['guid']} "
-         f"--profile '{profile_name}' --fqn --parse"],
-        capture_output=True, text=True,
+result = subprocess.run(
+    ["bash", "-c", f"source ~/.zshenv && ts dependency backup --profile '{profile_name}'"],
+    input=json.dumps(plan), capture_output=True, text=True,
+)
+if result.returncode != 0:
+    raise SystemExit(
+        "Backup failed — no changes have been applied and no backup files were written. "
+        f"Investigate the export error (token, permissions, object validity) and re-run.\n{result.stderr}"
     )
-    if result.returncode != 0:
-        # Backup failure on a delete-target is fatal — TML is the only restore source.
-        # Backup failure on a fix-target is also treated as fatal: the skill guarantees
-        # rollback, and rollback requires the backup. Abort and surface to the user.
-        print(f"  ✗ Backup FAILED for '{obj['name']}' ({obj['guid']}) — intent={obj.get('intent')}")
-        raise SystemExit(
-            "Backup failed for at least one object. No changes have been applied. "
-            "Investigate the export error (token, permissions, object validity) and re-run."
-        )
 
-    for item in json.loads(result.stdout):
-        safe_name   = obj["name"].replace("/", "_").replace("\\", "_")[:60]
-        backup_file = os.path.join(backup_dir,
-                                   f"{item['type']}_{item['guid']}_{safe_name}.json")
-        with open(backup_file, "w") as f:
-            json.dump(item, f, indent=2)
-        manifest["objects"].append({
-            "guid":        item["guid"],
-            "name":        obj["name"],
-            "type":        item["type"],
-            "intent":      obj.get("intent", "FIX"),
-            "backup_file": backup_file,
-        })
-
-with open(os.path.join(backup_dir, "manifest.json"), "w") as f:
-    json.dump(manifest, f, indent=2)
-
-print(f"  Backed up {len(manifest['objects'])} file(s) — manifest at {backup_dir}/manifest.json")
+manifest    = json.loads(result.stdout)
+backup_dir  = os.path.dirname(manifest["objects"][0]["backup_file"])
+print(f"TML backup saved to: {backup_dir}")
+print(f"  {len(manifest['objects'])} object(s) backed up. Keep this path handy — it is required for rollback.")
 ```
 
 Save `{backup_dir}` for use in Steps 10 and 11.
-
-Tell the user:
-
-```
-TML backup saved to: {backup_dir}
-  {N} object(s) backed up. Keep this path handy — it is required for rollback.
-```
 
 ---
 
@@ -2074,70 +2028,40 @@ acknowledgment before proceeding:
   Continue? (Y / N):
 ```
 
-**Rollback implementation:**
+**Rollback — `ts dependency rollback`:**
+
+Map the menu choice to the command flags and run it against `{backup_dir}`. The command
+reads the manifest, restores objects in dependency-safe order (dependents before source),
+re-imports DELETE-intent objects as NEW objects (new GUIDs, `guid:` stripped), and updates
+every other object in place at its original GUID.
 
 ```python
-import json
+import subprocess, json
 
-def rollback_objects(backup_dir, guids_to_rollback, profile_name):
-    manifest_path = os.path.join(backup_dir, "manifest.json")
-    with open(manifest_path) as f:
-        manifest = json.load(f)
+# Map the Step 11 menu choice to rollback flags:
+#   A → (no --only)      restore everything (updates AND deletes)
+#   U → --only updates   in-place updates only
+#   D → --only deletes   re-import deleted objects only
+#   S → --guid <g> per selected object (repeatable)
+flags = ""
+if   choice == "U": flags = "--only updates"
+elif choice == "D": flags = "--only deletes"
+elif choice == "S": flags = " ".join(f"--guid {g}" for g in selected_rollback_guids)
 
-    restore_policy = {
-        "table":    "PARTIAL",
-        "model":    "ALL_OR_NONE",
-        "answer":   "ALL_OR_NONE",
-        "liveboard": "ALL_OR_NONE",
-    }
-
-    rollback_results = {"succeeded": [], "failed": [], "new_guids": {}}
-
-    # Restore dependents before source (reverse dependency order)
-    entries = [e for e in manifest["objects"] if e["guid"] in guids_to_rollback]
-    entries.sort(key=lambda e: 0 if e["type"] == "table" else 1)
-
-    for entry in reversed(entries):
-        with open(entry["backup_file"]) as f:
-            backup_item = json.load(f)
-
-        policy = restore_policy.get(backup_item["type"], "ALL_OR_NONE")
-        was_deleted = entry.get("intent") == "DELETE"
-
-        if was_deleted:
-            # Re-import as NEW object — strip guid from TML so TS assigns a new one
-            tml_dict = dict(backup_item["tml"])
-            tml_dict.pop("guid", None)
-            # Use create-new policy: object no longer exists at original GUID
-            resp = import_tml(tml_dict, None, profile_name, policy=policy, create_new=True)
-        else:
-            resp = import_tml(backup_item["tml"], entry["guid"], profile_name, policy=policy)
-
-        ok, err = import_status(resp)
-
-        if ok:
-            new_guid = (resp.get("object", [{}])[0]
-                            .get("response", {}).get("header", {}).get("id_guid"))
-            label = entry["name"] + (f" (new GUID: {new_guid})" if was_deleted and new_guid else "")
-            rollback_results["succeeded"].append(label)
-            if was_deleted and new_guid:
-                rollback_results["new_guids"][entry["guid"]] = new_guid
-            print(f"  ✓ Rolled back: {label}")
-        else:
-            rollback_results["failed"].append({"name": entry["name"], "error": err})
-            print(f"  ✗ Rollback failed: {entry['name']} — {err}")
-
-    return rollback_results
+result = subprocess.run(
+    ["bash", "-c",
+     f"source ~/.zshenv && ts dependency rollback --backup-dir '{backup_dir}' "
+     f"{flags} --profile '{profile_name}'"],
+    capture_output=True, text=True,
+)
+rollback_results = (json.loads(result.stdout) if result.stdout.strip()
+                    else {"succeeded": [], "failed": [], "new_guids": {}})
 ```
 
-Note: `import_tml` here is assumed to support a `create_new=True` flag that removes
-`--no-create-new` from the underlying `ts tml import` call when restoring a deleted object.
-Update the helper in §9b accordingly: when `create_new=True`, drop the `--no-create-new` flag.
-
-Show rollback results. If any deletes were restored, surface the GUID mapping table
-(`old_guid → new_guid`) so the user can update any external references manually.
-
-If any rollbacks failed, tell the user the backup file path for manual restoration.
+Show rollback results. If `new_guids` is non-empty, surface the `old_guid → new_guid`
+mapping table so the user can manually reattach any external references (restored deletes
+always receive new GUIDs). If any entries are in `failed`, give the user the backup file
+path (from the manifest) for manual restoration via the ThoughtSpot UI TML editor.
 
 ---
 
@@ -2184,6 +2108,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.0 | 2026-07-08 | **Step 7 backup and Step 11 rollback now call codified CLI commands** (BL-083 PR1). Step 7's inline export loop is replaced by `ts dependency backup` (builds a plan JSON → exports source + fix/delete dependents → writes per-object files + `manifest.json`; collects all exports first and writes nothing on any failure). Step 11's inline `rollback_objects` is replaced by `ts dependency rollback --backup-dir` (restores dependents-before-source; re-imports DELETE-intent objects as new GUIDs). The pure REMOVE/REPOINT TML transforms are now available as `ts dependency mutate` (extracted to `ts_cli/dependency/mutate.py` with full unit tests; fixes two latent bugs — an always-empty formula-name scrub set, and an Answer duplicate-`guid:` YAML break). Requires ts-cli v0.39.0. Step 9's drift/import/verify/delete orchestration stays inline pending the `ts dependency apply-change` follow-up (BL-083 PR2). |
 | 1.2.0 | 2026-07-03 | **Step 4 scope filter now uses `matched_columns[]`.** `ts metadata report`'s dependents now carry a `matched_columns` field (populated by `ts_cli.report.classifier.build_matched_columns_map` from the deep RLS/join/alias/AI-surface/alert probes) — the Step 4 "Filtering by scope" table was filtering on `risk.reason` text, which is always a fixed literal and never names a column, so the filter could never match (2026-07 audit finding). **Step 6b / delete policy line corrected** — both no longer claim `ts metadata delete` "is currently broken" and call raw v2; they now name `ts metadata delete` directly, matching Step 9a (verified 2026-05-11) and removing a stale instruction that could have led an executor to hand-roll a `requests` call. |
 | 1.1.0 | 2026-06-09 | **Repoint: obj_id-based references with fqn fallback.** Step 9 now detects `obj_id` support via `export_options` flags and prefers obj_id-based model_table references over fqn to avoid VERSION_CONFLICT (error 14009) on some TS builds (open-item #23). New `repoint_model()` function handles model_tables obj_id/name/joins/column_id/formula swaps. `repoint_answer()` and `repoint_view()` also support obj_id-first matching. **Backup location prompt** — Step 7 now asks the user where to save backups (current directory, /tmp, or custom path) instead of hardcoding /tmp. Requires ts-cli v0.8.0 (`--include-obj-id`, `--include-obj-id-ref`, `--no-guid` flags). |
 | 1.0.0 | 2026-04-27 | Initial release. Three modes: **Audit** (read-only blast-radius report), **Remove** (drop one or more columns and clean up dependents), **Repoint** (redirect Answers/Liveboards to a different Model/View/Table with column-gap detection). Step 4 dep walk uses the v2 metadata/search dependents API (`ts metadata dependents`) with **alias propagation** — per-Model/View aliases for the target column are extracted at scan time so Answers/Liveboards/Sets that reference renamed columns (e.g. `ZIPCODE` → `Customer Zipcode`) are caught. **STOP-condition** handling for inaccessible dependents (v2 `hasInaccessibleDependents` flag), source-table RLS rules, model-level join conditions referencing the column (open-items.md #4), model-level filters (#12), and chart-axis conflicts. Step 5 impact report drives the Scan Coverage block from the canonical `references/dependency-types.md` status table via `references/build_coverage.py`. Steps 7 / 8 require typed "DELETE" / "ACCEPT INCOMPLETE IMPACT" confirmations and take a TML backup before any change is applied. Step 9 wraps every import with **post-import verification** (`import_and_verify`) — re-exports the TML and confirms the change actually applied, since TS sometimes returns status_code=ERROR while applying the change anyway (open-item #15). **Object-version drift detection** captures `metadata_header.modified` at scan time and aborts the per-object change (or the entire run, if the source drifted) when the timestamp moves between scan and apply. Step 11 supports rollback for both updates and deletes. RENAME mode is intentionally not supported on this build — see the rationale at the top of SKILL.md. |

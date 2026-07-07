@@ -2231,20 +2231,35 @@ once in `agents/cli/CLAUDE.md`.
 ## BL-083 — Codify ts-dependency-manager backup / mutation / verify / rollback
 
 **Source:** 2026-07-03 codification review rows 11–13 (angle 11).
-**Affects:** ts-dependency-manager, `tools/ts-cli/ts_cli/report/` (or a new `dependency/` module).
-**Status:** OPEN. Safety-critical.
+**Affects:** ts-dependency-manager, `tools/ts-cli/ts_cli/dependency/` module.
+**Status:** PR1 SHIPPED (2026-07-08, ts-cli v0.39.0). PR2 OPEN. Safety-critical.
 
-~900 of the SKILL.md's 2,174 lines are inline pseudocode for the skill's headline safety
+~900 of the SKILL.md's lines are inline pseudocode for the skill's headline safety
 promises: TML backup manifest (Step 7), the remove/repoint mutation engine across 5 object
 types (Step 9, with known gaps in open-items #2/#13), import/verify/drift orchestration
 (including the live-tested "TS misreports import status" edge case, currently prose-only),
-and full rollback (Step 11) — all re-derived by the LLM each run. Codify as
-`ts dependency backup --out-dir D --manifest`, `ts dependency apply-change`,
-`ts dependency rollback --backup-dir D`, with unit tests for each mutation type. The walk +
-impact report (Steps 4–5) are already deterministic via `ts metadata report` — this
-completes the skill's migration.
+and full rollback (Step 11) — all re-derived by the LLM each run. The walk +
+impact report (Steps 4–5) are already deterministic via `ts metadata report`.
 
-**Target:** 2026-10-31.
+**PR1 (shipped, non-destructive substrate):** new `ts_cli/dependency/` module —
+`mutate.py` (pure REMOVE/REPOINT TML transforms, extracted from Step 9, 2 latent bugs
+fixed), `backup.py` (manifest/ordering helpers), `commands/dependency.py` exposing
+`ts dependency mutate | backup | rollback`. 127 unit tests; the old
+`tests/test_dependency_helpers.py` (which duplicated the inline functions) is replaced by
+the real module. SKILL.md Step 7 → `ts dependency backup`, Step 11 → `ts dependency
+rollback`.
+
+**PR2 (open, destructive orchestrator — gated on live testing against se-thoughtspot):**
+`ts dependency apply-change` — the Step 9 drift-check → mutate (wire in `ts dependency
+mutate`) → import+verify → delete-ordering loop. This is where open-items #2/#13/#15/#16
+(chart `client_state_v2` stale refs, misleading error text, import-ordering delay) bite,
+plus the missing chart-axis-role detection: `dep["action"]/REMOVE_CHART` is consumed by
+Step 6/9 but is NOT emitted by `ts metadata report` today — PR2 must add chart-role
+classification to `ts_cli/report/classifier.py` (or the report walker) for the liveboard
+CONVERT_TO_TABLE-vs-REMOVE decision to be deterministic. Mandatory live verification
+before shipping (destructive remove/repoint).
+
+**Target:** PR2 by 2026-10-31.
 
 ---
 

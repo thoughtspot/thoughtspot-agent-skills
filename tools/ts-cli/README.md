@@ -500,6 +500,105 @@ ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_N
 
 ---
 
+### `ts dependency mutate` / `backup` / `rollback`
+
+BL-083 PR1: codifies the `ts-dependency-manager` skill's safety-critical
+REMOVE/REPOINT mutation engine (Step 9), TML backup (Step 7), and rollback (Step 11)
+out of inline SKILL.md pseudocode into deterministic, tested Python. Pure transform
+logic lives in `ts_cli/dependency/mutate.py` (`apply_remove`/`apply_repoint` +
+`remove_columns_from_*`/`repoint_*` helpers) and `ts_cli/dependency/backup.py`
+(filename/ordering/manifest helpers); this command group is the I/O shell.
+
+#### `ts dependency mutate`
+
+PURE transform — no network. Applies a REMOVE or REPOINT mutation to one parsed TML
+document.
+
+```bash
+ts dependency mutate --operation remove --file answer.json --remove-columns "Revenue,Cost"
+
+ts tml export abc-123 --fqn --parse | jq '.[0]' \
+  | ts dependency mutate --operation repoint \
+      --source-guid abc-123 --target-guid def-456 --target-name "New Model" \
+      --column-gap "Legacy Col"
+```
+
+**Input:** one TML doc from `--file` or stdin — either a bare TML body (`{"answer":
+{...}}`, `{"model": {...}}`, ...) or a `ts tml export --parse` item
+(`{"type": ..., "guid": ..., "tml": {...}, "info": {...}}`, auto-unwrapped).
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--operation` | — | `remove` or `repoint` (required) |
+| `--file` | stdin | Path to a JSON TML doc |
+| `--remove-columns` | — | Comma-separated column names (required for `remove`) |
+| `--source-guid` | — | Source object GUID (fqn match / liveboard viz scoping) |
+| `--target-guid` | — | Target object GUID (required for `repoint`) |
+| `--target-name` | — | Target object display name (required for `repoint`) |
+| `--column-gap` | — | Comma-separated columns present on the source but absent on the target — stripped from the repointed object same as `remove` |
+| `--source-obj-id` / `--target-obj-id` | — | obj_id references, preferred over guid/fqn matching when present (avoids VERSION_CONFLICT / error 14009) |
+| `--viz-decision` | — | Repeatable `viz_id=convert\|remove` — per-visualization decision for a liveboard `remove` where the viz's chart uses the removed column. Default for any viz not listed: `convert` |
+
+**Output:** the mutated TML doc as JSON to stdout; brief diagnostics to stderr. The
+result still needs to be serialized to YAML and imported via `ts tml import` — that
+wiring is the calling skill's job.
+
+#### `ts dependency backup`
+
+Back up TML for a source object and its fix/delete dependents before a mutation run
+(SKILL.md Step 7). Reads a plan JSON on stdin:
+
+```bash
+echo '{
+  "operation": "REMOVE",
+  "source": {"guid": "abc-123", "type": "MODEL", "name": "Orders Model"},
+  "fix":    [{"guid": "def-456", "type": "ANSWER", "name": "Revenue by Region"}],
+  "delete": [{"guid": "ghi-789", "type": "LIVEBOARD", "name": "Old LB"}],
+  "out_dir": "/tmp"
+}' | ts dependency backup --profile prod
+```
+
+Exports every object's TML the same way `ts tml export --parse` does. **All exports
+are collected in memory first** — files are written only if every export succeeds.
+If ANY export fails, the command aborts non-zero with a clear message and writes
+NOTHING (no partial backup directory).
+
+**Output:** the `manifest.json` contents as JSON to stdout (also written to
+`{out_dir}/ts_dep_backup_<timestamp>/manifest.json`, alongside one
+`{type}_{guid}_{name}.json` file per backed-up object). Backup dir path + counts go
+to stderr.
+
+#### `ts dependency rollback`
+
+Restore from a `ts dependency backup` directory (SKILL.md Step 11).
+
+```bash
+ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --profile prod
+ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --only deletes
+```
+
+Restores entries in dependency-safe order (dependents before source). An entry with
+`intent == "DELETE"` is re-imported with `create_new=True` and its `guid:` stripped
+(the object no longer exists at that GUID, so ThoughtSpot assigns a new one); every
+other entry is updated in place at its original GUID.
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--backup-dir` | — | Backup directory containing `manifest.json` (required) |
+| `--guid` | all | Restrict rollback to these GUID(s) (repeatable) |
+| `--only` | `all` | `updates` \| `deletes` \| `all` |
+
+**Output:** `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid}}`
+to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
+delete — other objects that referenced the ORIGINAL guid remain broken and need
+manual reattachment. Per-object progress goes to stderr.
+
+---
+
 ### `ts connections list`
 
 List all available data connections. Results are auto-paginated — all connections

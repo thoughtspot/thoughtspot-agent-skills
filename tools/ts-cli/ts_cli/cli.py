@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import audit, auth, connections, load, metadata, orgs, profiles, snowflake, spotql, tables, tableau, tml, users, variables
+from ts_cli.commands import audit, auth, connections, dependency, load, metadata, orgs, profiles, snowflake, spotql, tables, tableau, tml, users, variables
 
 app = typer.Typer(
     name="ts",
@@ -14,6 +14,7 @@ app = typer.Typer(
 app.add_typer(audit.app, name="audit")
 app.add_typer(auth.app, name="auth")
 app.add_typer(connections.app, name="connections")
+app.add_typer(dependency.app, name="dependency")
 app.add_typer(metadata.app, name="metadata")
 app.add_typer(orgs.app, name="orgs")
 app.add_typer(tables.app, name="tables")

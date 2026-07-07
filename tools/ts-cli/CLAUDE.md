@@ -14,6 +14,10 @@ ts_cli/
   tableau_translate.py — Tableau → ThoughtSpot formula translation entry point + orchestrator facade over ts_cli/tableau/ (pure functions, no I/O)
   snowflake_ops.py     — Semantic View diff (normalise_expr/exprs_differ/compute_change_set) + DDL lint (lint_sv_ddl) behind `ts snowflake` (pure functions, no I/O)
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/classify_model_columns) behind `ts spotql classify-columns` (pure functions, no I/O)
+  dependency/
+    __init__.py          — re-exports mutate.py + backup.py public entry points
+    mutate.py             — REMOVE/REPOINT TML dict transforms (apply_remove/apply_repoint dispatchers + remove_columns_from_*/repoint_* helpers) behind `ts dependency mutate` (pure functions, no I/O; BL-083)
+    backup.py             — backup filename/delete-order/v2-type-map/restore-policy/rollback-order/manifest helpers behind `ts dependency backup`/`rollback` (pure functions, no I/O; BL-083)
   tableau/
     __init__.py         — package marker
     parsing.py          — formula tokenization, CSQ column maps, calc-id maps
@@ -43,6 +47,7 @@ ts_cli/
     tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model)
     snowflake.py  — ts snowflake (diff, lint-ddl)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
+    dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     audit.py      — ts audit run / report
   audit/
     __init__.py       — run_audit() entry point, angle module registry
@@ -64,7 +69,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.34.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.39.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
