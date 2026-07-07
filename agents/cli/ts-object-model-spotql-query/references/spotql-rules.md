@@ -93,8 +93,17 @@ expression.
 - **No `SELECT *`** — enumerate columns. Inside a CTE it is hard-rejected.
 - **No subqueries anywhere** — no `FROM (SELECT …)`, no `WHERE col IN (SELECT …)`, no
   `WHERE EXISTS (…)`, no scalar subselects. Use named CTEs and JOINs instead.
-- **No set operations** — `UNION` / `UNION ALL` / `EXCEPT` / `INTERSECT` silently drop the
-  second branch. If the question needs them, it can't be answered in one SpotQL statement.
+- **Set operations** — `UNION ALL`, `UNION`, `EXCEPT`, `EXCEPT ALL`, `INTERSECT`,
+  `INTERSECT ALL` **work at the top level** of the query ([SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049),
+  verified 2026-07-07). Each branch must have the same number of columns with compatible
+  types. Operator precedence follows the SQL standard (INTERSECT binds tighter than
+  UNION/EXCEPT). Parentheses for explicit grouping are supported.
+  **Caveats (still broken):**
+  - **No `ORDER BY` on the combined result** — silently dropped from generated SQL.
+  - **No `LIMIT` on the combined result** — misplaced into the first branch only.
+  - **No set operations inside a CTE** — hard error (`QUERY_GEN_ERROR`); by design.
+  If you need ordered or limited results from a set operation, it cannot be done in SpotQL
+  today. See `limitations.md` for details.
 - **No self-join of a CTE** (`[SELF_JOIN]`) and **no non-equi `JOIN … ON`** (only `=`
   allowed; use `CROSS JOIN` + `WHERE` for ranges).
 - **No recursive CTEs** (`WITH RECURSIVE`), **no table functions** (`FLATTEN`, `UNNEST`,
@@ -129,8 +138,9 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
 
 ## When you can't answer it
 
-If the question needs something SpotQL can't express (set operations, non-`MEDIAN`
-percentiles, per-group `STDDEV`/`VAR`, subqueries, offset->1 `LAG`/`LEAD`, true rolling
-N-period frames, a column the Model doesn't have, or a non-CDW Model), don't force a wrong
-query. State plainly what's not supported and why. The full, current list (with what's been
-*fixed* — e.g. `NTILE` and literal arithmetic now work) is in `limitations.md`.
+If the question needs something SpotQL can't express (ordered/limited set operation results,
+non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`, subqueries, offset->1 `LAG`/`LEAD`,
+true rolling N-period frames, a column the Model doesn't have, or a non-CDW Model), don't
+force a wrong query. State plainly what's not supported and why. The full, current list
+(with what's been *fixed* — e.g. set operations, `NTILE` and literal arithmetic now work)
+is in `limitations.md`.

@@ -100,6 +100,6 @@ Cast only `VARCHAR`/`TEXT` → numeric/date. Already-numeric (`DOUBLE`, `INT64`,
 
 `DATE_TRUNC`, `NOW()`, `CURRENT_DATE`, `AGE`, `INTERVAL` arithmetic · `SELECT *` ·
 `COUNT(*)` / `COUNT(1)` · `WITH RECURSIVE` · subqueries (`FROM (SELECT …)`, `IN (SELECT …)`,
-`EXISTS`) · `UNION`/`EXCEPT`/`INTERSECT` · non-equi `JOIN … ON` · CTE self-join ·
+`EXISTS`) · non-equi `JOIN … ON` · CTE self-join ·
 `LENGTH()` · `GROUP BY 1` · `col NOT IN (…)` · arithmetic between an aggregate and a
 numeric literal (returns zeros).

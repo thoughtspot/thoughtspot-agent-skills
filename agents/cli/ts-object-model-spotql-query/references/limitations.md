@@ -1,6 +1,6 @@
 # SpotQL limitations — what doesn't work
 
-<!-- currency: spotql — 2026-06 (champ-staging; epics SCAL-306544 / SCAL-316371) -->
+<!-- currency: spotql — 2026-07 (nebula-spotQL 172.32.51.72; epics SCAL-306544 / SCAL-316371 / SCAL-313049) -->
 
 What SpotQL can't do, and what fails *silently* (wrong numbers, no error).
 **SpotQL behaviour is build-specific and moving fast** — treat this as a
@@ -14,8 +14,8 @@ dated snapshot, not gospel. When in doubt, probe with `ts spotql generate-sql` /
 - **[SCAL-316371](https://thoughtspot.atlassian.net/browse/SCAL-316371)** — *[BACKLOG]
   SpotQL Feature Evaluations*. All **Open**: the canonical **known-unsupported** backlog.
 
-Last reconciled: epics + live probe on **champ-staging (`champagne-master-aws`),
-2026-06-25**. "✓ live" = I ran it; "ticket" = status taken from the Jira epic, not re-probed.
+Last reconciled: epics + live probe on **nebula-spotQL (`172.32.51.72:8443`),
+2026-07-07**. "✓ live" = I ran it; "ticket" = status taken from the Jira epic, not re-probed.
 
 > **generate-sql SUCCESS ≠ usable.** Some constructs compile (generate-sql SUCCESS) but
 > fail at execution or silently return wrong data. For anything risky, check `fetch-data`.
@@ -34,17 +34,18 @@ Last reconciled: epics + live probe on **champ-staging (`champagne-master-aws`),
 | `ROLLUP` / `CUBE` / `GROUPING SETS` | rejected | [SCAL-319339](https://thoughtspot.atlassian.net/browse/SCAL-319339) |
 | Many scalar functions: `INITCAP`, `REGEXP_SUBSTR`, `REGEXP_REPLACE`, `TO_VARCHAR`, bitwise (`BIT_*`), constant-only (`EXP`/`ACOS`/`LOG(b,x)`/`CHR`/`SPACE`/`CURRENT_DATE`/`TO_DATE`), `DAY_OF_YEAR`, `TRUNC(date,part)`, `CONCAT_WS`/`OVERLAY`/array fns | rejected / `NO_BASE_TABLES` | [SCAL-319333–319343](https://thoughtspot.atlassian.net/browse/SCAL-316371) |
 | Variant / semi-structured / JSON (`ARRAY_CONTAINS`, `ARRAY_SIZE`, lateral flatten) | unsupported | [SCAL-316392–316396](https://thoughtspot.atlassian.net/browse/SCAL-316371), [SCAL-318984](https://thoughtspot.atlassian.net/browse/SCAL-318984) |
+| Set operation (`UNION ALL` / `EXCEPT` / etc.) **inside a user-defined CTE** | `QUERY_GEN_ERROR` (GroupAggregateOptimizationTransformer) | ✓ live · by design |
 
 **Workarounds:** per-group `STDDEV`/percentile → aggregate in a CTE, take the stat in a
-scalar outer SELECT (`patterns.md` § Statistics); `MEDIAN` works scalar. "A or B" → `WHERE
-(A) OR (B)`, not a UNION/subquery. Date math → the SpotQL UDFs (`udf-reference.md`), not
-`TRUNC`/`TO_DATE`/`CURRENT_DATE`.
+scalar outer SELECT (`patterns.md` § Statistics); `MEDIAN` works scalar. Date math → the
+SpotQL UDFs (`udf-reference.md`), not `TRUNC`/`TO_DATE`/`CURRENT_DATE`.
 
 ## ⚠️ Silent wrong-answer — avoid (no error, wrong data — the dangerous ones)
 
 | Construct | What actually happens | Ref |
 |---|---|---|
-| `UNION` / `UNION ALL` / `EXCEPT` / `INTERSECT` | only the **first** branch returns; rest silently dropped | ✓ live (asked 2 rows, got 1) |
+| `ORDER BY` on a set-operator result (`… UNION ALL … ORDER BY col`) | silently dropped from generated SQL — results return in arbitrary order | ✓ live 2026-07-07 |
+| `LIMIT` on a set-operator result (`… UNION ALL … LIMIT N`) | misplaced into first branch CTE only — combined result returns more than N rows | ✓ live 2026-07-07 |
 | `QUALIFY …` | clause silently dropped → you get **all** rows, not the filtered set | [SCAL-319330](https://thoughtspot.atlassian.net/browse/SCAL-319330) |
 | `FILTER (WHERE …)` on an aggregate | silently dropped → aggregate ignores the filter | [SCAL-319332](https://thoughtspot.atlassian.net/browse/SCAL-319332) |
 | `TO_NUMBER(x)` | silently dropped (no-op) | [SCAL-319336](https://thoughtspot.atlassian.net/browse/SCAL-319336) |
@@ -61,6 +62,16 @@ scalar outer SELECT (`patterns.md` § Statistics); `MEDIAN` works scalar. "A or 
 | `Failed to transform QuerySpec: null` on some queries | In Triage | [SCAL-318834](https://thoughtspot.atlassian.net/browse/SCAL-318834) |
 | Query with **only** a framed windowing function fails | In Triage | [SCAL-319898](https://thoughtspot.atlassian.net/browse/SCAL-319898) |
 | Doubly-complex queries error at `ComplexQueryTransformer` | In Triage | [SCAL-320205](https://thoughtspot.atlassian.net/browse/SCAL-320205) |
+
+## ✅ Fixed — previously broken, now working
+
+| Construct | Previously | Fixed by | Verified |
+|---|---|---|---|
+| `UNION ALL` / `UNION` / `EXCEPT` / `EXCEPT ALL` / `INTERSECT` / `INTERSECT ALL` at top level | second branch silently dropped | [SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049) | ✓ live 2026-07-07 (nebula-spotQL) — 2-branch, 3-branch, 5-branch, chained, mixed, with aggregates, window functions, HAVING, multiple measures, arithmetic expressions |
+
+**Remaining caveats for set operations:** ORDER BY and LIMIT on the combined result are
+silently mishandled (see ⚠️ table above). Set operations inside CTEs are rejected by design
+(see ❌ table above). The set operation must be at the **top level** of the query.
 
 ## Not bugs — feature requests on the backlog
 
