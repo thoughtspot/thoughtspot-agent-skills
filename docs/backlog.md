@@ -2369,8 +2369,9 @@ than duplicating it (same "two paths, one detector" principle as the formula cla
 
 **Source:** 2026-07-05 live CPG migration (multi-query datasources needed hand-built multi-table bases).
 **Affects:** `tools/ts-cli/` (`ts tableau build-model`, `commands/tableau.py`, `model_builder.py`).
-**Status:** OPEN. Follow-ups to the multi-table fixes shipped in v0.35.0 on branch
-`feat/tableau-multitable-bare-refs` (M1–M5: table-aware `fix_bare_refs`, qualified-column +
+**Status:** DONE 2026-07-08 — all sub-items resolved (M1–M5 in v0.35.0/#185; M6b in #186;
+M9/M10/M11 in #185; M8 in v0.38.0/#191; export resilience 1c in v0.40.0). Follow-ups to the
+multi-table fixes shipped in v0.35.0 (M1–M5: table-aware `fix_bare_refs`, qualified-column +
 cross-formula-cascade filtering, parameter auto-migration in the merge flow, cascade-aware
 import retry).
 
@@ -2390,10 +2391,12 @@ import retry).
    `diff_time(b,a)/3600` is correct per the documented arg-order convention
    (`tableau-formula-translation.md:147` — TS `diff_*` takes `(end, start)`), so no
    arg-order/sign check is needed. Fully resolved at translation level.
-1c. **Export resilience.** `build-model --existing-guid` / `ts tml export` hard-fail with a
-   `JSONDecodeError` traceback when the instance returns a 504 gateway-timeout HTML page
-   (observed on se-thoughtspot 2026-07-05). Add retry-with-backoff + a clean error on
-   non-JSON export responses.
+1c. **Export resilience — RESOLVED 2026-07-08 (ts-cli v0.40.0).** `ThoughtSpotClient.request()`
+   now retries transient gateway faults (502/503/504) and connection/timeout errors with
+   exponential backoff (3 retries: 0.5s/1s/2s), then fails cleanly via the existing
+   `format_http_error` → `SystemExit` path — never a raw `JSONDecodeError` traceback. 500 is
+   deliberately not retried (application error). Central to `request()`, so every `ts` call
+   (incl. `ts tml export` / `build-model --existing-guid`) benefits.
 2. **(M9) Complexity cleanup** — `_import_with_retry` (cc≈19), `_merge_flow` (cc≈18), and
    `filter_unresolvable_formulas` (cc≈23) exceed the CAP=15 module-health gate; extract helpers.
 3. **(M10) File size** — `commands/tableau.py` is >1000 lines (fails `check_file_size`);

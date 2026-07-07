@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-08
+- feat: ts-cli v0.40.0 — `ThoughtSpotClient.request()` retries transient gateway faults (502/503/504) + connection/timeout errors with exponential backoff, then fails cleanly (no `JSONDecodeError` traceback on a 504 HTML page). Closes BL-089 1c (export resilience) → BL-089 fully done
 - feat: ts-cli v0.38.0 — `ts tableau parse`/`build-model` accept a published-datasource `.tds`/`.tdsx` (physical tables/joins/columns/calcs), so multi-query datasources build multi-table models via GENERATE mode without hand-assembly (BL-089 M8)
 - docs: update ts-convert-from-tableau to v1.27.0 — `.tds`/`.tdsx` parse path + Step 3.5 correction (field API returns columns not joins)
 - feat: add ts dependency backup / mutate / rollback (ts-cli v0.39.0, BL-083 PR1 substrate — codifies ts-dependency-manager backup/rollback + pure REMOVE/REPOINT transforms)

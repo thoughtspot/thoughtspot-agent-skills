@@ -21,6 +21,15 @@ PROFILES_PATH = Path.home() / ".claude" / "thoughtspot-profiles.json"
 # calling self._session.post() directly (as _authenticate() does today).
 _AUTH_TOKEN_PATH = "/api/rest/2.0/auth/token/full"
 
+# Transient gateway/network faults worth retrying with backoff (BL-089 1c).
+# A flaky instance returning 502/503/504 (or a dropped connection) otherwise
+# hard-fails every call — and a 504 HTML page reaching a caller's .json() gives
+# a raw JSONDecodeError traceback. 500 is deliberately excluded: it's an
+# application error, and retrying it would mask real failures.
+_RETRY_STATUSES = frozenset({502, 503, 504})
+_RETRY_MAX = 3          # retries after the initial attempt (4 attempts total)
+_RETRY_BACKOFF_S = 0.5  # base backoff, doubled each retry: 0.5s, 1s, 2s
+
 
 def format_http_error(method: str, url: str, resp: "requests.Response") -> str:
     """Build a single-line, secret-free diagnostic for a non-2xx response.
@@ -323,10 +332,45 @@ class ThoughtSpotClient:
         allow_401_retry = path != _AUTH_TOKEN_PATH
 
         retried_401 = False
+        transient_attempts = 0
         while True:
             headers = dict(extra_headers)
             headers.update(self._auth_headers())
-            resp = self._session.request(method, url, headers=headers, timeout=timeout, **kwargs)
+            try:
+                resp = self._session.request(method, url, headers=headers, timeout=timeout, **kwargs)
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout,
+                    requests.exceptions.ChunkedEncodingError) as exc:
+                # Dropped connection / read timeout — transient. Retry with
+                # backoff, then fail cleanly (no traceback) if it persists.
+                if transient_attempts < _RETRY_MAX:
+                    transient_attempts += 1
+                    print(
+                        f"ThoughtSpot API network error on {method} {url} "
+                        f"({type(exc).__name__}) — retry {transient_attempts}/{_RETRY_MAX}...",
+                        file=sys.stderr,
+                    )
+                    time.sleep(_RETRY_BACKOFF_S * (2 ** (transient_attempts - 1)))
+                    continue
+                print(
+                    f"ThoughtSpot API network error on {method} {url} after "
+                    f"{_RETRY_MAX} retries: {exc}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+
+            if resp.status_code in _RETRY_STATUSES and transient_attempts < _RETRY_MAX:
+                # Transient gateway fault (502/503/504) — retry with backoff.
+                # Prevents a flaky instance from hard-failing the call (and a
+                # 504 HTML body from reaching a caller's .json() as a traceback).
+                transient_attempts += 1
+                print(
+                    f"ThoughtSpot API {resp.status_code} on {method} {url} "
+                    f"(transient) — retry {transient_attempts}/{_RETRY_MAX}...",
+                    file=sys.stderr,
+                )
+                time.sleep(_RETRY_BACKOFF_S * (2 ** (transient_attempts - 1)))
+                continue
 
             if resp.status_code == 401 and allow_401_retry and not retried_401:
                 # A cached token_env token has no server-verified expiry and is
