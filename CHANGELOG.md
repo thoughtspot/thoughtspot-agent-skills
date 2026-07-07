@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-06
+- feat(tableau): `build-model` now converts Custom SQL relations (`<relation type='text'>`) into **SQL View TML** and references them by name in the model — previously Custom-SQL-only datasources were dropped. Includes physical/SQL-View column dedup and formula resolvability against SQL View columns. Verified end-to-end live (parse → emit → import → query). Bumps ts-cli to v0.37.0 (ts-convert-from-tableau v1.26.0)
+
 ## 2026-07-05
 - docs: update ts-convert-from-tableau to v1.25.0 — multi-query→multi-table model guidance + liveboard parameter rule (BL-090)
 - fix(tableau): match IF/END case-insensitively so mixed-case nested IF (outer `END`, inner lowercase `end`) fully converts — closes the last Start/End Date import failures (bumps ts-cli to v0.36.1). Follow-up to #185, which squash-merged before this commit.

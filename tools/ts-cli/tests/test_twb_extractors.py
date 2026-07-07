@@ -5,6 +5,7 @@ from ts_cli.tableau.twb import (
     extract_blends,
     extract_table_calc_addressing,
     detect_orphan_calcs,
+    _extract_sql_views,
 )
 
 BLEND_XML = """
@@ -90,3 +91,50 @@ def test_detect_orphan_calcs_none():
     ds = {"tables": [{"name": "ORDERS"}], "calc_map": {},
           "calculated_fields": [{"caption": "Fine", "formula": "SUM([ORDERS::A])"}]}
     assert detect_orphan_calcs(ds) == []
+
+
+SQLVIEW_XML = """
+<workbook><datasources>
+  <datasource caption='Orders CSQ'>
+    <connection>
+      <relation name='Custom SQL Query' type='text'>SELECT id, region, sales FROM db.sch.orders WHERE amt >> 0 AND flag == 1</relation>
+      <metadata-records>
+        <metadata-record class='column'><remote-name>id</remote-name><local-name>[id]</local-name><local-type>integer</local-type><parent-name>[Custom SQL Query]</parent-name></metadata-record>
+        <metadata-record class='column'><remote-name>region</remote-name><local-name>[region]</local-name><local-type>string</local-type><parent-name>[Custom SQL Query]</parent-name></metadata-record>
+        <metadata-record class='column'><remote-name>sales</remote-name><local-name>[sales]</local-name><local-type>real</local-type><parent-name>[Custom SQL Query]</parent-name></metadata-record>
+      </metadata-records>
+    </connection>
+    <column name='[sales]' caption='Sales' datatype='real' role='measure'/>
+    <column name='[region]' caption='Region' datatype='string' role='dimension'/>
+    <column name='[calc_1]' caption='Calc'><calculation class='tableau' formula='[sales]*2'/></column>
+  </datasource>
+</datasources></workbook>
+"""
+
+
+def test_extract_sql_views_custom_sql_relation():
+    root = ET.fromstring(SQLVIEW_XML)
+    ds = root.find(".//datasource")
+    views = _extract_sql_views(ds)
+    assert len(views) == 1
+    v = views[0]
+    assert v["name"] == "Custom SQL Query"
+    # XML-encoding artifacts decoded: >> -> >, == -> =
+    assert v["sql_query"] == "SELECT id, region, sales FROM db.sch.orders WHERE amt > 0 AND flag = 1"
+    cols = {c["sql_output_column"]: c for c in v["columns"]}
+    assert set(cols) == {"id", "region", "sales"}
+    # role enrichment from <column> elements
+    assert cols["sales"]["column_type"] == "MEASURE"
+    assert cols["region"]["column_type"] == "ATTRIBUTE"
+    assert cols["region"]["name"] == "Region"
+    # data types mapped from local-type
+    assert cols["id"]["data_type"] == "INT64"
+    assert cols["sales"]["data_type"] == "DOUBLE"
+
+
+def test_extract_sql_views_none_when_no_text_relation():
+    root = ET.fromstring("<workbook><datasources><datasource caption='X'>"
+                         "<relation name='t' type='table' table='[db].[t]'/>"
+                         "</datasource></datasources></workbook>")
+    ds = root.find(".//datasource")
+    assert _extract_sql_views(ds) == []

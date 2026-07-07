@@ -2429,3 +2429,52 @@ migrate-mode analogue of audit angle #15 (conversion fidelity, parked).
 **Target:** when data access is available.
 
 ---
+
+## BL-092 — Tableau: drop the extract table when its Custom SQL is emitted as a SQL View
+
+**Source:** 2026-07-06 PR #188 (Custom SQL → SQL View), validated against `markledwich2/Recfluence` seussrecs.twb.
+**Affects:** ts-convert-from-tableau, `build-model` (twb.py / model_builder.py).
+**Status:** OPEN.
+
+An extract-backed Custom SQL datasource carries BOTH a Tableau `Extract` table (fqn like
+`[conn].[Extract.Extract]`, a `.hyper` that cannot bind in the warehouse) AND the source
+`<relation type='text'>`. `build-model` emits both; column dedup keeps `model.columns` unique
+(the SQL View wins), but the orphan `Extract` entry is still emitted in the model's physical
+`tables:`/`model_tables:`. For a live-connection migration the SQL View is the real source, so
+the extract table should be dropped. Not a blocker for live-connection reports (no extract).
+
+**Target:** next `build-model` iteration, or when an extract-backed workbook must migrate.
+
+---
+
+## BL-093 — Tableau: substitute or flag Tableau parameters embedded in Custom SQL
+
+**Source:** 2026-07-06 PR #188, seussrecs.twb (`WHERE rec_date >= <[Parameters].[Parameter 1]>`).
+**Affects:** ts-convert-from-tableau, `build-model` (`_extract_sql_views` / SQL View emission).
+**Status:** OPEN.
+
+Tableau lets a Custom SQL body reference a workbook parameter inline as `<[Parameters].[Name]>`.
+That token is not valid warehouse SQL, so the emitted `sql_view.sql_query` will fail at import
+until it is resolved. Options: substitute the parameter's default value into the SQL, or emit a
+NEEDS-REVIEW flag pointing at the token. Currently the SQL is passed through verbatim.
+
+**Target:** next `build-model` iteration.
+
+---
+
+## BL-094 — Tableau: capture joins BETWEEN SQL Views (multi-query Custom SQL datasources)
+
+**Source:** 2026-07-06 PR #188, validated against `tableau/community-tableau-server-insights` ts_users.twb (6 joined Custom SQL Queries).
+**Affects:** ts-convert-from-tableau, `build-model` (`_extract_joins` / model join wiring).
+**Status:** OPEN.
+
+`_extract_joins` reads only `relation[@type='table']` children, so a datasource that JOINS
+several Custom SQL Queries (each now a SQL View) loses the joins between them — the model gets
+the SQL Views as unconnected `model_tables[]` with no `joins`. Needs join extraction over
+`type='text'` relation children plus cardinality inference (deterministic only via a data probe;
+CTE-grain heuristic otherwise). This is the multi-query analogue of the single-view case shipped
+in #188 and overlaps the deferred "logical-relationship → join cardinality" gap.
+
+**Target:** next multi-query build-model work; needed for FedEx VEDR (2 joined Custom SQL sources).
+
+---

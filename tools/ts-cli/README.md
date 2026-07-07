@@ -1189,13 +1189,13 @@ against a real target schema.
 
 **Pipeline steps:**
 
-1. Parse TWB XML — extract tables, columns, joins, calculated fields, parameters
+1. Parse TWB XML — extract tables, columns, joins, calculated fields, parameters, **and Custom SQL relations** (`<relation type='text'>`)
 2. Build dependency levels from raw calculated fields (before reference resolution)
 3. Resolve all internal references (`[Calculation_NNN]` and copy-style `[Field (copy)_NNN]`)
 4. Translate formulas to ThoughtSpot syntax (via `tableau_translate.py`, an orchestrator facade over the `ts_cli/tableau/` package — entry point unchanged)
 5. Resolve name collisions (formula/param clashes → rename; column/formula clashes → drop column)
-6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix
-7. Split into phased import files (phase 0 = base, then per dependency level)
+6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix; **emit a `.sql_view.tml` per Custom SQL relation and reference it by name in `model_tables[]`** (physical/SQL-View column dedup applied)
+7. Split into phased import files — **SQL Views first** (they must exist before the model), then phase 0 = base, then per dependency level
 
 **Merge mode** (`--existing-guid`): merge translated formulas into an already-imported
 model. This is the Phase 2 flow used by the Tableau migration skill:

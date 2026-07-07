@@ -2598,8 +2598,15 @@ cohort:
 
 ### 5c. SQL View TML — one per custom SQL relation
 
+**As of ts-cli v0.37.0, `ts tableau build-model` emits these automatically** — one
+`{model}.{ViewName}.sql_view.tml` per Custom SQL relation, ordered before the model
+files so the SQL View exists first (the model references it by name in `model_tables[]`;
+no GUID needed). You no longer hand-write them in the normal flow. The template below
+is the reference for the generated shape and for hand-authoring edge cases (e.g. a
+Tableau parameter embedded in the SQL, `<[Parameters].[…]>`, which needs substitution).
+
 For each custom SQL relation identified in Step 3b (those with `source_type: "custom-sql"`),
-generate a `.sql_view.tml` file. Follow the rules in `tableau-tml-rules.md` "SQL View
+a `.sql_view.tml` file is generated. Follow the rules in `tableau-tml-rules.md` "SQL View
 TML Rules" and the full schema in `thoughtspot-sql-view-tml.md`.
 
 **Template:**
@@ -4104,6 +4111,7 @@ shrinks or disappears.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.26.0 | 2026-07-06 | **Custom SQL → SQL View is now automated in `build-model`** (Step 5a/5c), realizing what the skill documented since 1.1.0. `ts tableau build-model` extracts `<relation type='text'>` Custom SQL (SQL + columns from `metadata-record` `parent-name`/`remote-name`, decoding `<<`/`>>`/`==`), emits a `.sql_view.tml` per relation, and references it by name in `model_tables[]` (no GUID at emit time). Physical/SQL-View column dedup prevents duplicate-name import failures; formula resolvability no longer blanket-drops qualified `[SQL View::col]` refs. Verified end-to-end live on ps-internal (parse → emit → import → searchdata returns correct numbers) and against real workbooks (single-CTE + Tableau's 6-query ts_users). Known follow-ons: drop the extract table when its Custom SQL becomes a view; substitute/flag Tableau params embedded in SQL. Prereq ts-cli v0.37.0. |
 | 1.25.0 | 2026-07-05 | **Multi-query datasource → multi-table model guidance + liveboard parameter rule (BL-090).** Step 5b: new "Multi-query datasources" subsection — a published/sqlproxy datasource that joins several Custom SQL Queries must become a **multi-table model** (a single-view reconcile silently filters the other queries' formulas as "Unresolved Custom SQL Query alias"); documents detection, greedy table-set cover + shared-key join confirmation, hand-built base → `build-model --existing-guid` (which now auto-migrates parameters, validates qualified columns, cascade-drops, and table-qualifies bare refs to the real owning table), plus **(M14)** collision-renamed formulas, **(M15)** absent-column data-gap surfacing, **(M16)** measure classification on all-ATTRIBUTE table exports. Step 7 Phase-2 pipeline list updated: parameter auto-migration, deterministic qualified-column + cross-formula-cascade filtering, `--max-retries` default 25→10. Step 10f: parameter chips only stick when a param-consuming formula tile is on the board (ThoughtSpot drops unreferenced params) — filter-type params → liveboard filters; display-toggle params (sheet-swap) → per-metric tiles or omit. Live-verified in the CPG Merch migration (tentpole 119/119, prod 137/163). Prereq ts-cli v0.36.1. |
 | 1.24.0 | 2026-07-04 | Phase 2 (`build-model --existing-guid`) honors `--column-name-map`, recovering formulas on reconcile-renamed columns |
 | 1.23.0 | 2026-07-04 | **build-model column-schema reconciliation for published/sqlproxy datasources.** Tier-1 (always-on): strip `(Custom SQL Query N)` suffixes, drop `__tableau_internal` junk, qualify `column_id` as `table::col` (fixes "column_id incorrect" on existing-table binds), dedupe. Tier-2 (opt-in `--reconcile-table {guid}`): reconcile emitted columns against a target table's real schema — `--reconcile-plan` emits suggested name mappings + drops; skill confirms with the user; `--column-name-map` applies (drops unmapped-absent columns + dependent formulas). Live-verified 2026-07-04 against `vw_dim_promo` on se-thoughtspot (tentpole datasource): reconcile-plan → confirm (rejected a false `UPDATED_AT`→`MAX_UPDATED_AT` suggestion) → apply → base model `VALIDATE_ONLY = OK` (the pre-fix "column_id incorrect" failure is resolved). Prereq ts-cli v0.33.0. |

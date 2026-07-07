@@ -13,6 +13,7 @@ from ts_cli.model_builder import (
     build_column_lookup,
     build_formula_levels,
     build_model_tml,
+    build_sql_view_tml,
     expr_is_aggregated,
     extract_parameters,
     filter_unresolvable_formulas,
@@ -606,6 +607,31 @@ class TestFilterUnresolvable:
         assert len(kept) == 0
         assert dropped == ["Bad"]
 
+    def test_keeps_qualified_sql_view_ref(self):
+        """A [SQL View::col] ref resolves when the SQL View column is in the model."""
+        common = dict(
+            existing_formula_ids=set(),
+            model_column_names={"REC_DATE", "VIEWS", "IMPRESSIONS"},
+            formula_names=set(),
+            parameter_names=set(),
+        )
+        formulas = [
+            {"id": "f7", "name": "View Rate", "expr": "sum ( [Custom SQL Query::VIEWS] )"},
+        ]
+        kept, dropped = filter_unresolvable_formulas(formulas, **common)
+        assert len(kept) == 1
+        assert dropped == []
+
+    def test_drops_qualified_sql_view_ref_when_col_absent(self):
+        """A [SQL View::col] ref to a column NOT in the model is still dropped."""
+        common = dict(
+            existing_formula_ids=set(), model_column_names={"VIEWS"},
+            formula_names=set(), parameter_names=set(),
+        )
+        formulas = [{"id": "f8", "name": "Bad", "expr": "[Custom SQL Query::MISSING]"}]
+        kept, dropped = filter_unresolvable_formulas(formulas, **common)
+        assert dropped == ["Bad"]
+
     def test_keeps_existing_formula_ids(self):
         formulas = [
             {"id": "formula_Existing", "name": "Existing", "expr": "[sqlproxy::BAD]"},
@@ -1089,3 +1115,107 @@ class TestFixBareRefsMultiTable:
             "[PERIOD_TYPE]", set(), set(), lookup, "tentpole_promotion_master",
         )
         assert out == "[tentpole_promotion_master::PERIOD_TYPE]"
+
+
+# ── SQL View emission (Custom SQL relations) ──────────────────────────────
+
+def test_build_sql_view_tml_basic():
+    tml = build_sql_view_tml(
+        name="Orders CSQ",
+        connection_name="MY_CONN",
+        sql_query="SELECT id, region, sales FROM db.sch.orders WHERE amt > 0",
+        columns=[
+            {"name": "Id", "sql_output_column": "id", "data_type": "INT64", "column_type": "ATTRIBUTE"},
+            {"name": "Region", "sql_output_column": "region", "data_type": "VARCHAR", "column_type": "ATTRIBUTE"},
+            {"name": "Sales", "sql_output_column": "sales", "data_type": "DOUBLE", "column_type": "MEASURE"},
+        ],
+    )
+    sv = tml["sql_view"]
+    assert sv["name"] == "Orders CSQ"
+    # connection referenced by name (invariant I6), never GUID
+    assert sv["connection"] == {"name": "MY_CONN"}
+    assert sv["sql_query"] == "SELECT id, region, sales FROM db.sch.orders WHERE amt > 0"
+    cols = {c["sql_output_column"]: c for c in sv["sql_view_columns"]}
+    assert set(cols) == {"id", "region", "sales"}
+    assert cols["id"]["data_type"] == "INT64"
+    assert cols["region"]["properties"]["column_type"] == "ATTRIBUTE"
+    # MEASURE columns carry an aggregation; ATTRIBUTE columns do not
+    assert cols["sales"]["properties"]["column_type"] == "MEASURE"
+    assert cols["sales"]["properties"]["aggregation"] == "SUM"
+    assert "aggregation" not in cols["region"]["properties"]
+
+
+def test_build_sql_view_tml_no_columns():
+    tml = build_sql_view_tml(name="Empty", connection_name="C", sql_query="SELECT 1", columns=[])
+    assert tml["sql_view"]["sql_view_columns"] == []
+    assert tml["sql_view"]["connection"]["name"] == "C"
+
+
+def test_build_model_tml_references_sql_views():
+    sql_views = [{
+        "name": "Orders CSQ",
+        "sql_query": "SELECT id, sales FROM t",
+        "columns": [
+            {"name": "Id", "sql_output_column": "id", "column_type": "ATTRIBUTE", "data_type": "INT64"},
+            {"name": "Sales", "sql_output_column": "sales", "column_type": "MEASURE", "data_type": "DOUBLE"},
+        ],
+    }]
+    model = build_model_tml(
+        model_name="M",
+        connection_name="CONN",
+        tables=[],
+        columns=[],
+        joins=[],
+        parameters=[],
+        translated_formulas=[],
+        sql_views=sql_views,
+    )["model"]
+    # SQL View appears in model_tables by name, with its columns
+    mt = {t["name"]: t for t in model["model_tables"]}
+    assert "Orders CSQ" in mt
+    assert {c["name"] for c in mt["Orders CSQ"]["columns"]} == {"Id", "Sales"}
+    # ...and in model.columns with a SQLViewName::col column_id
+    cols = {c["name"]: c for c in model["columns"]}
+    assert cols["Sales"]["column_id"] == "Orders CSQ::Sales"
+    assert cols["Sales"]["properties"]["column_type"] == "MEASURE"
+    assert cols["Sales"]["properties"]["aggregation"] == "SUM"
+    # ...but NOT in the connection-qualified physical tables: list
+    assert all(t["name"] != "Orders CSQ" for t in model["tables"])
+
+
+def test_build_model_tml_no_sql_views_unchanged():
+    model = build_model_tml(
+        model_name="M", connection_name="C",
+        tables=[{"name": "T1", "db_table": "T1"}],
+        columns=[], joins=[], parameters=[], translated_formulas=[],
+    )["model"]
+    assert [t["name"] for t in model["model_tables"]] == ["T1"]
+
+
+def test_build_model_tml_sql_view_columns_not_duplicated_by_physical():
+    """A physical <column> that a SQL View also provides must not be emitted twice."""
+    sql_views = [{
+        "name": "CSQ",
+        "sql_query": "SELECT region, sales FROM t",
+        "columns": [
+            {"name": "Region", "sql_output_column": "region", "column_type": "ATTRIBUTE", "data_type": "VARCHAR"},
+            {"name": "Sales", "sql_output_column": "sales", "column_type": "MEASURE", "data_type": "DOUBLE"},
+        ],
+    }]
+    # datasource <column> elements duplicate the SQL View outputs (extract-backed case)
+    physical_cols = [
+        {"name": "Region", "db_column_name": "region", "column_type": "ATTRIBUTE"},
+        {"name": "Sales", "db_column_name": "sales", "column_type": "MEASURE"},
+    ]
+    model = build_model_tml(
+        model_name="M", connection_name="C",
+        tables=[], columns=physical_cols, joins=[], parameters=[],
+        translated_formulas=[], sql_views=sql_views,
+    )["model"]
+    # each name appears exactly once, owned by the SQL View (SQLView::col id)
+    names = [c["name"] for c in model["columns"]]
+    assert names.count("Region") == 1
+    assert names.count("Sales") == 1
+    by_name = {c["name"]: c for c in model["columns"]}
+    assert by_name["Region"]["column_id"] == "CSQ::Region"
+    assert by_name["Sales"]["column_id"] == "CSQ::Sales"

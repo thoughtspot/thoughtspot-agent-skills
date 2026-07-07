@@ -165,7 +165,8 @@ def parse_twb(twb_path: str | Path) -> dict:
             continue
 
         tables = _extract_tables(ds)
-        if not tables:
+        sql_views = _extract_sql_views(ds)
+        if not tables and not sql_views:
             continue
         seen_ds.add(ds_name)
 
@@ -177,6 +178,7 @@ def parse_twb(twb_path: str | Path) -> dict:
         datasources.append({
             "name": ds_name,
             "tables": tables,
+            "sql_views": sql_views,
             "columns": columns,
             "joins": joins,
             "calculated_fields": calcs,
@@ -309,6 +311,87 @@ def _extract_tables(ds: ET.Element) -> list[dict]:
             entry["alias_of"] = physical_name
         tables.append(entry)
     return tables
+
+
+# XML-encoding artifacts Tableau writes into Custom SQL text bodies.
+_SQL_XML_ARTIFACTS = (("<<", "<"), (">>", ">"), ("==", "="))
+
+
+def _decode_sql_artifacts(sql: str) -> str:
+    """Undo the XML-encoding artifacts Tableau writes into Custom SQL text bodies
+    (``<<``→``<``, ``>>``→``>``, ``==``→``=``). These encodings never nest, so one
+    left-to-right pass per artifact is sufficient (order-independent)."""
+    for artifact, repl in _SQL_XML_ARTIFACTS:
+        sql = sql.replace(artifact, repl)
+    return sql
+
+
+def _sql_view_column_meta(ds: ET.Element) -> dict[str, dict]:
+    """caption/role by logical (local) name, from non-calculated ``<column>`` elements."""
+    meta: dict[str, dict] = {}
+    for col in ds.findall("./column"):
+        if col.find("calculation") is not None:
+            continue
+        local = col.get("name", "").strip("[]")
+        if local:
+            meta[local] = {
+                "caption": col.get("caption", local),
+                "role": col.get("role", "dimension"),
+            }
+    return meta
+
+
+def _sql_view_columns_by_parent(ds: ET.Element) -> dict[str, list]:
+    """Group ``<metadata-record class='column'>`` output columns by parent relation name,
+    in ONE pass over the datasource (avoids re-scanning metadata records per relation).
+    Keyed by the bracketed relation name, e.g. ``[Custom SQL Query]``."""
+    col_meta = _sql_view_column_meta(ds)
+    by_parent: dict[str, list] = {}
+    for mr in ds.findall(".//metadata-record[@class='column']"):
+        parent = mr.findtext("parent-name") or ""
+        remote = (mr.findtext("remote-name") or "").strip()
+        if not parent or not remote:
+            continue
+        cols = by_parent.setdefault(parent, [])
+        if any(c["sql_output_column"] == remote for c in cols):
+            continue
+        local = (mr.findtext("local-name") or "").strip("[]")
+        meta = col_meta.get(local, {})
+        role = meta.get("role", "dimension")
+        cols.append({
+            "name": meta.get("caption", local or remote),
+            "sql_output_column": remote,
+            "column_type": "MEASURE" if role == "measure" else "ATTRIBUTE",
+            "data_type": _tableau_type_to_ts((mr.findtext("local-type") or "string").strip()),
+        })
+    return by_parent
+
+
+def _extract_sql_views(ds: ET.Element) -> list[dict]:
+    """Extract Custom SQL relations (``<relation type='text'>``) as SQL View specs.
+
+    Tableau stores a Custom SQL query as a ``type='text'`` relation whose element text
+    is the raw SQL; its output columns live in ``<metadata-record class='column'>``
+    entries whose ``parent-name`` matches the relation name. Returns one dict per
+    relation: ``{"name", "sql_query", "columns": [{"name", "sql_output_column",
+    "column_type", "data_type"}]}``. Column ``column_type`` (MEASURE/ATTRIBUTE) is
+    enriched from the datasource ``<column>`` elements' ``role``.
+    """
+    cols_by_parent = _sql_view_columns_by_parent(ds)
+    views = []
+    seen_names: set[str] = set()
+    for rel in ds.findall(".//relation[@type='text']"):
+        name = rel.get("name", "")
+        sql_query = _decode_sql_artifacts(rel.text or "").strip()
+        if not name or not sql_query or name in seen_names:
+            continue
+        seen_names.add(name)
+        views.append({
+            "name": name,
+            "sql_query": sql_query,
+            "columns": cols_by_parent.get(f"[{name}]", []),
+        })
+    return views
 
 
 def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:

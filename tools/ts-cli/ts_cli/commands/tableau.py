@@ -645,6 +645,31 @@ def _merge_flow(
     return result
 
 
+def _write_sql_view_files(sql_views: list, connection_name: str, out_path, slug: str) -> list:
+    """Write one ``{slug}.{ViewName}.sql_view.tml`` per Custom SQL relation; return paths.
+
+    SQL Views are written separately from the model phases and must be imported before
+    the model (which references them by name).
+    """
+    from ts_cli.model_builder import build_sql_view_tml
+    from ts_cli.tableau_translate import dump_tml_yaml
+
+    paths = []
+    for sv in sql_views:
+        sv_tml = build_sql_view_tml(
+            name=sv["name"],
+            connection_name=connection_name,
+            sql_query=sv["sql_query"],
+            columns=sv.get("columns", []),
+        )
+        sv_slug = re.sub(r"[^0-9A-Za-z._-]+", "_", sv["name"]).strip("_") or "custom_sql"
+        sv_path = out_path / f"{slug}.{sv_slug}.sql_view.tml"
+        sv_path.write_text(dump_tml_yaml(sv_tml))
+        typer.echo(f"  Wrote SQL View: {sv_path}", err=True)
+        paths.append(str(sv_path))
+    return paths
+
+
 def _generate_flow(
     ds: dict,
     name: str,
@@ -715,6 +740,8 @@ def _generate_flow(
     gen_param_names = {p["name"] for p in parsed["parameters"]}
     apply_prefix_and_double_agg(cleaned_formulas, gen_formula_names, gen_param_names)
 
+    sql_views = ds.get("sql_views", [])
+
     model_tml = build_model_tml(
         model_name=name,
         connection_name=connection_name,
@@ -724,6 +751,7 @@ def _generate_flow(
         parameters=parsed["parameters"],
         translated_formulas=cleaned_formulas,
         formula_rename_map=rename_map,
+        sql_views=sql_views,
     )
 
     levels = {}
@@ -747,6 +775,7 @@ def _generate_flow(
         "formulas_total": len(ds["calculated_fields"]),
         "parameters": len(parsed["parameters"]),
         "name_renames": rename_map,
+        "sql_views": len(sql_views),
         "phases": len(phases),
     }
     if validation_issues:
@@ -757,6 +786,10 @@ def _generate_flow(
         result["reconcile_dropped"] = result_reconcile_dropped
 
     if not dry_run:
+        # SQL Views first — they must exist before the model that references them.
+        # (empty list when the datasource has no Custom SQL relations)
+        result["sql_view_files"] = _write_sql_view_files(sql_views, connection_name, out_path, slug)
+
         for i, phase in enumerate(phases):
             fname = f"{slug}.phase{i}.model.tml"
             fpath = out_path / fname
