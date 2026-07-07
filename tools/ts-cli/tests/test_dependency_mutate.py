@@ -360,6 +360,62 @@ class TestRemoveColumnsFromModelSection:
         result = remove_columns_from_model_section(section, ["Revenue"])
         assert result["model_tables"][0]["joins_with"] == [{"name": "stray"}]
 
+    # --- BL-083 PR2 / open-items #24: aliased base-column removal by column_id + expr.
+    # Mirrors the live DM_CATEGORY case: the model exposes base column CATEGORY_NAME as
+    # an aliased column and references it by column_id in measure formulas.
+    def _aliased_model(self):
+        return {
+            "columns": [
+                {"name": "Product Category", "column_id": "DM_CATEGORY::CATEGORY_NAME"},
+                {"name": "Category Quantity", "column_id": "f1", "formula_id": "f1"},
+                {"name": "Sub Category", "column_id": "DM_CATEGORY::SUB_CATEGORY_NAME"},
+                {"name": "Category ID", "column_id": "DM_CATEGORY::CATEGORY_ID"},
+            ],
+            "formulas": [
+                {"id": "f1", "name": "Category Quantity",
+                 "expr": "group_sum ( [DM_ORDER::QTY] , [DM_CATEGORY::CATEGORY_NAME] )"},
+                {"id": "f2", "name": "Unrelated", "expr": "sum ( [DM_ORDER::QTY] )"},
+            ],
+        }
+
+    def test_removes_aliased_column_by_column_id(self):
+        result = remove_columns_from_model_section(self._aliased_model(), ["CATEGORY_NAME"])
+        names = [c["name"] for c in result["columns"]]
+        assert "Product Category" not in names           # matched via column_id, not name
+
+    def test_removes_formula_referencing_column_by_expr_and_cascades_to_its_column(self):
+        result = remove_columns_from_model_section(self._aliased_model(), ["CATEGORY_NAME"])
+        formula_ids = [f["id"] for f in result["formulas"]]
+        names = [c["name"] for c in result["columns"]]
+        assert "f1" not in formula_ids                   # expr referenced CATEGORY_NAME
+        assert "Category Quantity" not in names          # cascaded — its formula is gone
+        assert "f2" in formula_ids                        # unrelated formula survives
+
+    def test_word_boundary_does_not_over_match_similar_columns(self):
+        result = remove_columns_from_model_section(self._aliased_model(), ["CATEGORY_NAME"])
+        names = [c["name"] for c in result["columns"]]
+        assert "Sub Category" in names                    # SUB_CATEGORY_NAME must survive
+        assert "Category ID" in names                     # CATEGORY_ID must survive
+
+    def test_no_category_name_token_remains_after_removal(self):
+        import json as _json
+        result = remove_columns_from_model_section(self._aliased_model(), ["CATEGORY_NAME"])
+        body = _json.dumps(result)
+        assert "::CATEGORY_NAME" not in body and "[DM_CATEGORY::CATEGORY_NAME]" not in body
+
+    def test_filter_with_table_qualified_column_is_removed(self):
+        section = {
+            "columns": [],
+            "filters": [
+                {"column": ["DM_CATEGORY::CATEGORY_NAME"]},
+                {"column": ["DM_CATEGORY::CATEGORY_ID"]},
+            ],
+        }
+        result = remove_columns_from_model_section(section, ["CATEGORY_NAME"])
+        remaining = [f["column"] for f in result["filters"]]
+        assert ["DM_CATEGORY::CATEGORY_NAME"] not in remaining
+        assert ["DM_CATEGORY::CATEGORY_ID"] in remaining
+
 
 # ---------------------------------------------------------------------------
 # remove_columns_from_table_section

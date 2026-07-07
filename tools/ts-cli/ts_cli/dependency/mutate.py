@@ -286,40 +286,92 @@ def remove_columns_from_view(view_dict: TmlSection, cols_to_remove: List[str]) -
 # fix_model() ~1882 (dependent Model removal). Both call sites are identical logic.
 # ---------------------------------------------------------------------------
 
+def _references_column(text: Optional[str], cols_to_remove: Iterable[str]) -> bool:
+    """True if `text` references any of `cols_to_remove` as a whole token.
+
+    Uses a word-boundary match (no alphanumeric/underscore on either side) so a
+    reference to the base column name inside a qualified `TABLE::COLUMN` id or a
+    `[TABLE::COLUMN]` formula token is caught, WITHOUT false-matching a longer name
+    that merely contains it (e.g. removing `CATEGORY_NAME` must not match
+    `SUB_CATEGORY_NAME` or `DM_CATEGORY::CATEGORY_NAME_FULL`).
+
+    This is why the model helper below can strip a base-table column from a dependent
+    Model even when the Model exposes it under a friendly alias — the column entry has
+    `name: "Product Category"` but `column_id: "DM_CATEGORY::CATEGORY_NAME"`, and the
+    Model's measure formulas reference `[DM_CATEGORY::CATEGORY_NAME]` in their expr.
+    Matching on `name` alone (the pre-BL-083-PR2 behaviour) missed both — found live
+    on se-thoughtspot, open-items #24.
+    """
+    if not text:
+        return False
+    return any(
+        re.search(r"(?<![A-Za-z0-9_])" + re.escape(col) + r"(?![A-Za-z0-9_])", text)
+        for col in cols_to_remove
+    )
+
+
+def _model_column_targeted(col: TmlSection, cols_to_remove: Iterable[str]) -> bool:
+    """A model column is targeted for removal if its `name` is in `cols_to_remove` OR
+    its `column_id` references one of them as a whole token — so an aliased exposure of
+    a base column (`name: "Product Category"`, `column_id: "DM_CATEGORY::CATEGORY_NAME"`)
+    is caught; matching `name` alone missed it (open-items #24)."""
+    return (col.get("name") in cols_to_remove
+            or _references_column(col.get("column_id", ""), cols_to_remove))
+
+
+def _model_removed_formula_ids(section: TmlSection, cols_to_remove: List[str]) -> set:
+    """Formula ids to drop from a model section: those backing a targeted column (its
+    `formula_id`), plus those whose `expr` references a removed column."""
+    from_columns = {
+        c.get("formula_id") for c in section.get("columns", [])
+        if _model_column_targeted(c, cols_to_remove) and c.get("formula_id")
+    }
+    return {
+        f.get("id") for f in section.get("formulas", [])
+        if f.get("id") in from_columns or _references_column(f.get("expr", ""), cols_to_remove)
+    }
+
+
 def remove_columns_from_model_section(section: TmlSection, cols_to_remove: List[str]) -> TmlSection:
     """Strip columns from a Model/Worksheet TML section (the `model:`/`worksheet:` body).
 
-    Mutates `section` in place and returns it. Handles: columns[] (and their
-    formulas[], matched by formula_id), model_tables[].joins referencing the removed
-    column in the `on` clause (required — TS rejects an import with an orphaned join
-    condition, open-items.md #4), and model-level filters[] whose `column` list
-    contains a removed column (required — TS rejects with error_code 14518 "Invalid
-    filter column", open-items.md #12).
+    Mutates `section` in place and returns it. A column is targeted (see
+    `_model_column_targeted`) by `name` OR `column_id` whole-token match, so an aliased
+    exposure of a base column is caught (matching `name` alone missed it, open-items #24).
+    Handles:
+
+    - columns[]: removes targeted columns.
+    - formulas[]: removes a formula backing a removed column OR whose `expr` references a
+      removed column (`_model_removed_formula_ids`); then cascades once — any column
+      backed by a now-removed formula is dropped too (an orphaned measure column would
+      otherwise reference a missing formula).
+    - model_tables[].joins whose `on` clause references a removed column (required — TS
+      rejects an import with an orphaned join condition, open-items.md #4).
+    - model-level filters[] whose `column` list references a removed column (required —
+      TS rejects with error_code 14518 "Invalid filter column", open-items.md #12).
 
     Note: `model_tables` entries use `joins` (both the Scenario A referencing form and
     the Scenario B inline form) — `joins_with` only exists at the table/view level,
     never on `model_tables`, so only `joins` is checked here.
     """
     m = section
+    removed_formula_ids = _model_removed_formula_ids(m, cols_to_remove)
 
-    formula_ids_to_remove = {
-        c.get("formula_id") for c in m.get("columns", [])
-        if c.get("name") in cols_to_remove and c.get("formula_id")
-    }
-    m["columns"] = [c for c in m.get("columns", []) if c.get("name") not in cols_to_remove]
-    m["formulas"] = [f for f in m.get("formulas", []) if f.get("id") not in formula_ids_to_remove]
-
+    m["formulas"] = [f for f in m.get("formulas", []) if f.get("id") not in removed_formula_ids]
+    m["columns"] = [
+        c for c in m.get("columns", [])
+        if not _model_column_targeted(c, cols_to_remove)
+        and c.get("formula_id") not in removed_formula_ids
+    ]
     for tbl in m.get("model_tables", []):
         tbl["joins"] = [
             j for j in tbl.get("joins", [])
-            if not any(c in j.get("on", "") for c in cols_to_remove)
+            if not _references_column(j.get("on", ""), cols_to_remove)
         ]
-
     m["filters"] = [
         f for f in m.get("filters", [])
-        if not any(c in cols_to_remove for c in f.get("column", []))
+        if not any(_references_column(c, cols_to_remove) for c in f.get("column", []))
     ]
-
     return m
 
 

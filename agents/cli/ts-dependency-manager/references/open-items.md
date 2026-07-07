@@ -160,7 +160,7 @@ contract, a larger change than the orchestrator needs.
 
 ---
 
-## #23 — `apply-change` execution order (source LAST) — CONFIRM ON LIVE TEST
+## #23 — `apply-change` execution order (source LAST) — VERIFIED LIVE 2026-07-08 (partial)
 
 **Corrected in BL-083 PR2.** The SKILL's old Step 9 *section bodies* imported the
 source BEFORE dependents, but the overview + the error-14544 rationale ("Deleted
@@ -175,3 +175,43 @@ succeeds (no 14544) because the dependents were fixed first. Also exercise: a RE
 with obj_id present, a dependent-drift skip, a set with a failed consumer fix (must be
 skipped), and the source-drift hard stop. This is a destructive command — do not merge
 BL-083 PR2 until this passes.
+
+**Live results (se-thoughtspot, DM_CATEGORY.CATEGORY_NAME, 2026-07-08) — VERIFIED:**
+- **Ordering:** dependent fixes ran before the source; when a dependent fix failed,
+  the source column removal was correctly rejected with real error 14544 ("Deleted
+  columns have dependents"). Confirms dependents-first is required and sequenced right.
+- **Outcome matrix / verify:** the post-import re-export correctly distinguished
+  SUCCESS from FAIL_SILENT (import OK but column still present) and FAIL_VERIFIED
+  (real 14544). No silent success; nothing was deleted or half-applied.
+- **Rollback:** `ts dependency rollback` restored source + all fixed dependents
+  cleanly (verified column/refs back to original) after every run.
+- **Bug found + fixed (open-item #24):** the model-fix mutation missed aliased
+  columns; after the fix, 3 of 4 models stripped CATEGORY_NAME successfully.
+- **Still to show green end-to-end:** a fully-successful source removal needs the
+  COMPLETE multi-hop, alias-propagated plan (base col CATEGORY_NAME → model alias
+  "Product Category" → the set + answers that consume the model alias). apply-change
+  executes the plan it is given; building that full graph is the ts-dependency-manager
+  SKILL's Step 4-6 job. Validate the green path by running the full skill (or a
+  column with a shallow graph). The COMMAND itself is verified correct + safe.
+
+---
+
+## #24 — Model-fix missed aliased base columns (column_id / formula-expr) — FIXED 2026-07-08
+
+**Found live on se-thoughtspot** during the open-item #23 apply-change test. When a
+dependent Model exposes a base-table column under a friendly alias, the column entry
+has `name: "Product Category"` but `column_id: "DM_CATEGORY::CATEGORY_NAME"`, and the
+model's measure formulas reference `[DM_CATEGORY::CATEGORY_NAME]` in their `expr`.
+`remove_columns_from_model_section` matched columns by `name` only, so removing base
+column `CATEGORY_NAME` stripped nothing from the model — the import returned OK but the
+re-export still referenced the column (caught as FAIL_SILENT by post-import verify),
+and the source removal was then blocked by 14544.
+
+**Fix (ts-cli v0.41.0):** `remove_columns_from_model_section` now also matches columns
+by `column_id` (whole-token, via `_references_column`), removes formulas whose `expr`
+references the removed column, and cascades to any column backed by a removed formula.
+Whole-token matching avoids false-positives (`SUB_CATEGORY_NAME`, `CATEGORY_ID` survive).
+Verified live: 3 of 4 models then stripped the aliased column successfully. Unit tests
+added in `test_dependency_mutate.py`.
+
+**Status:** FIXED + unit-tested + live-verified.
