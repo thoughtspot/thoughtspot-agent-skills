@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import audit, auth, connections, dependency, load, metadata, orgs, profiles, snowflake, spotql, tables, tableau, tml, users, variables
+from ts_cli.commands import audit, auth, connections, dependency, dependency_apply, load, metadata, orgs, profiles, snowflake, spotql, tables, tableau, tml, users, variables  # noqa: F401 — dependency_apply registers `apply-change` on dependency.app at import
 
 app = typer.Typer(
     name="ts",

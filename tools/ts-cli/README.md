@@ -500,14 +500,17 @@ ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_N
 
 ---
 
-### `ts dependency mutate` / `backup` / `rollback`
+### `ts dependency mutate` / `backup` / `rollback` / `apply-change`
 
-BL-083 PR1: codifies the `ts-dependency-manager` skill's safety-critical
-REMOVE/REPOINT mutation engine (Step 9), TML backup (Step 7), and rollback (Step 11)
-out of inline SKILL.md pseudocode into deterministic, tested Python. Pure transform
-logic lives in `ts_cli/dependency/mutate.py` (`apply_remove`/`apply_repoint` +
-`remove_columns_from_*`/`repoint_*` helpers) and `ts_cli/dependency/backup.py`
-(filename/ordering/manifest helpers); this command group is the I/O shell.
+BL-083: codifies the `ts-dependency-manager` skill's safety-critical REMOVE/REPOINT
+engine — TML backup (Step 7), the mutation transforms (Step 9), rollback (Step 11),
+and the destructive drift→delete→fix→source→set orchestrator (Step 9,
+`apply-change`) — out of inline SKILL.md pseudocode into deterministic, tested Python.
+Pure logic lives in `ts_cli/dependency/mutate.py` (`apply_remove`/`apply_repoint` +
+`remove_columns_from_*`/`repoint_*`), `ts_cli/dependency/backup.py`
+(filename/ordering/manifest), and `ts_cli/dependency/apply.py`
+(drift/obj_id/outcome-matrix/verify/ordering/set-guard/chart-role decisions); this
+command group is the I/O shell.
 
 #### `ts dependency mutate`
 
@@ -596,6 +599,47 @@ other entry is updated in place at its original GUID.
 to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
 delete — other objects that referenced the ORIGINAL guid remain broken and need
 manual reattachment. Per-object progress goes to stderr.
+
+#### `ts dependency apply-change`
+
+The destructive orchestrator (SKILL.md Step 9). Reads a plan JSON on stdin and runs
+the whole change end-to-end: **deletes → dependent fixes → source → set deletes**,
+with a per-object drift check, obj_id-first repointing, and post-import verification
+(open-item #15: TS can return `ERROR` while the change actually applied). A prior
+`ts dependency backup` is **required** — pass its directory as `backup_dir`.
+
+```bash
+echo '{
+  "operation": "REMOVE",
+  "backup_dir": "/tmp/ts_dep_backup_20260708_120000",
+  "source": {"guid": "abc-123", "type": "MODEL", "name": "Orders Model", "modified_at": 1714123456000},
+  "columns_to_remove": ["Legacy Region"],
+  "fix":    [{"guid": "def-456", "type": "ANSWER", "name": "Rev by Region", "modified_at": 1714100000000}],
+  "delete": [{"guid": "ghi-789", "type": "ANSWER", "name": "Old Answer", "modified_at": 1714000000000}],
+  "sets":   []
+}' | ts dependency apply-change --profile prod
+```
+
+**Execution order — source LAST.** TS error 14544 ("Deleted columns have dependents")
+rejects the source column removal while any dependent still references it, so
+dependents are fixed first and the source last (SKILL.md overview). This corrects the
+order the SKILL's Step 9 *section bodies* previously used (source-first).
+
+**Per-object drift check.** Each object's `metadata_header.modified` is re-queried and
+compared to the plan's `modified_at` snapshot; a moved (or unqueryable) object is
+skipped — except the **source**, whose drift is a hard stop that aborts the whole run
+(exit 1) before anything is changed.
+
+**Plan fields:** `operation` (`REMOVE`/`REPOINT`), `backup_dir` (required),
+`source`, `columns_to_remove` (REMOVE), `target`+`column_gap`+`source_obj_id`
+(REPOINT), `fix[]` (each may carry `action`=`REMOVE_CHART`, per-viz `viz_decisions`,
+or inline `tml` — required for FEEDBACK, which can't be exported standalone), `delete[]`,
+`sets[]` (deleted only if every consumer fix succeeded).
+
+**Output:** a results JSON to stdout
+(`{"operation","source","succeeded","failed","deleted","skipped"}` — the data behind
+the Step 10 Change Report). Per-object progress goes to stderr. Exits non-zero only on
+source drift.
 
 ---
 

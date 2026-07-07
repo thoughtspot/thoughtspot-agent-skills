@@ -370,3 +370,332 @@ class TestRollbackCommand:
         results = json.loads(result.stdout)
         assert len(results["failed"]) == 3
         assert results["succeeded"] == []
+
+
+# ---------------------------------------------------------------------------
+# ts dependency apply-change (BL-083 PR2) — the destructive orchestrator.
+#
+# A configurable fake ThoughtSpotClient dispatches by endpoint so the full
+# drift → delete → dependent-fix → source → set-delete loop is exercised without
+# a live instance. Mutation correctness itself is covered by test_dependency_mutate
+# / test_dependency_apply; these tests assert ORCHESTRATION: ordering, drift skips,
+# the import/verify outcome matrix, and the set-delete consumer guard.
+# ---------------------------------------------------------------------------
+
+import yaml as _yaml
+
+
+class _FakeResp:
+    def __init__(self, *, ok=True, status_code=200, json_data=None, text=""):
+        self.ok = ok
+        self.status_code = status_code
+        self._json = json_data
+        self.text = text
+
+    def json(self):
+        if self._json is None:
+            raise ValueError("no json body")
+        return self._json
+
+
+def _export_resp(tml_body):
+    return _FakeResp(json_data=[{"edoc": _yaml.safe_dump(tml_body),
+                                 "info": {"id": "g", "type": "MODEL"}}])
+
+
+def _search_resp(modified):
+    return _FakeResp(json_data=[{"metadata_header": {"modified": modified}}])
+
+
+class _FakeClient:
+    """Dispatch by endpoint. `exports` maps guid -> a TML body dict, OR a list of
+    bodies popped left-to-right (first for the mutate-fetch, next for the verify
+    re-export). `modifieds` maps guid -> the `modified` int returned by search
+    (drift check); a guid absent from `modifieds` is reported as 'not found'."""
+    base_url = "https://x"
+
+    def __init__(self, *, exports, modifieds, import_ok=True, import_err=None,
+                 delete_ok=True):
+        self.exports = exports
+        self.modifieds = modifieds
+        self.import_ok = import_ok
+        self.import_err = import_err
+        self.delete_ok = delete_ok
+        self.calls = []
+
+    def _pop_export(self, guid):
+        body = self.exports[guid]
+        if isinstance(body, list):
+            return body.pop(0) if len(body) > 1 else body[0]
+        return body
+
+    def post(self, path, json=None, **kwargs):
+        self.calls.append((path, json))
+        if path.endswith("/metadata/search"):
+            guid = json["metadata"][0]["identifier"]
+            if guid not in self.modifieds:
+                return _FakeResp(json_data=[])
+            return _search_resp(self.modifieds[guid])
+        if path.endswith("/metadata/tml/export"):
+            guid = json["metadata"][0]["identifier"]
+            return _export_resp(self._pop_export(guid))
+        if path.endswith("/metadata/tml/import"):
+            status = ({"status_code": "OK"} if self.import_ok
+                      else {"status_code": "ERROR", "error_message": self.import_err or "boom"})
+            return _FakeResp(json_data=[{"response": {"status": status, "object": []}}])
+        if path.endswith("/metadata/delete"):
+            return _FakeResp(ok=self.delete_ok, status_code=200 if self.delete_ok else 500,
+                             text="delete error")
+        return _FakeResp(json_data={})
+
+
+def _run_apply(plan, client):
+    with patch("ts_cli.commands.dependency_apply.ThoughtSpotClient", return_value=client), \
+         patch("ts_cli.commands.dependency_apply.resolve_profile", return_value="test"):
+        return runner.invoke(
+            app, ["dependency", "apply-change", "--profile", "test"],
+            input=json.dumps(plan),
+        )
+
+
+class TestApplyChangeCommand:
+    def _remove_plan(self, **over):
+        plan = {
+            "operation": "REMOVE",
+            "backup_dir": "/tmp/ts_dep_backup_x",
+            "source": {"guid": "src", "type": "MODEL", "name": "Orders Model", "modified_at": 100},
+            "columns_to_remove": ["Legacy"],
+            "fix": [{"guid": "a1", "type": "ANSWER", "name": "Rev by Region", "modified_at": 200}],
+            "delete": [{"guid": "d1", "type": "ANSWER", "name": "Old Answer", "modified_at": 300}],
+            "sets": [],
+        }
+        plan.update(over)
+        return plan
+
+    def test_remove_happy_path_order_and_results(self):
+        client = _FakeClient(
+            exports={
+                "src": {"model": {"columns": [{"name": "Keep"}]}},
+                "a1": {"answer": {"answer_columns": [{"name": "Keep"}]}},
+            },
+            modifieds={"src": 100, "a1": 200, "d1": 300},
+        )
+        result = _run_apply(self._remove_plan(), client)
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        assert [d["guid"] for d in out["deleted"]] == ["d1"]
+        succeeded_guids = [r["guid"] for r in out["succeeded"]]
+        assert "a1" in succeeded_guids and "src" in succeeded_guids
+        assert out["failed"] == [] and out["skipped"] == []
+        # Dependents fixed BEFORE the source (error 14544 ordering).
+        import_calls = [c for c in client.calls if c[0].endswith("/metadata/tml/import")]
+        assert "guid: a1" in import_calls[0][1]["metadata_tmls"][0]
+        assert "guid: src" in import_calls[1][1]["metadata_tmls"][0]
+
+    def test_source_drift_aborts_entire_run(self):
+        client = _FakeClient(
+            exports={"src": {"model": {"columns": []}}},
+            modifieds={"src": 999},  # != snapshot 100 -> drift
+        )
+        result = _run_apply(self._remove_plan(), client)
+        assert result.exit_code == 1, _all_output(result)
+        out = json.loads(result.stdout)
+        assert out["aborted"] is True
+        # Nothing was deleted or imported.
+        assert not any(c[0].endswith("/metadata/tml/import") for c in client.calls)
+        assert not any(c[0].endswith("/metadata/delete") for c in client.calls)
+
+    def test_dependent_drift_is_skipped_source_still_applied(self):
+        client = _FakeClient(
+            exports={
+                "src": {"model": {"columns": [{"name": "Keep"}]}},
+                "a1": {"answer": {"answer_columns": [{"name": "Keep"}]}},
+            },
+            modifieds={"src": 100, "a1": 201, "d1": 300},  # a1 drifted
+        )
+        result = _run_apply(self._remove_plan(), client)
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        assert [s["guid"] for s in out["skipped"]] == ["a1"]
+        assert "src" in [r["guid"] for r in out["succeeded"]]
+
+    def test_error_but_verified_is_success_with_warning(self):
+        client = _FakeClient(
+            exports={
+                "src": {"model": {"columns": [{"name": "Keep"}]}},
+                "a1": {"answer": {"answer_columns": [{"name": "Keep"}]}},
+            },
+            modifieds={"src": 100, "a1": 200, "d1": 300},
+            import_ok=False, import_err="Invalid YAML/JSON syntax in file",
+        )
+        result = _run_apply(self._remove_plan(), client)
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        outcomes = {r["guid"]: r["outcome"] for r in out["succeeded"]}
+        assert outcomes["a1"] == "SUCCESS_WITH_WARNING"
+        assert outcomes["src"] == "SUCCESS_WITH_WARNING"
+        assert out["failed"] == []
+
+    def test_set_delete_skipped_when_consumer_fix_fails(self):
+        # a1's export keeps "Legacy" on both fetch and verify -> FAIL_SILENT (import
+        # ok, change not verified). The set consumed by a1 must then be skipped.
+        client = _FakeClient(
+            exports={
+                "src": {"model": {"columns": [{"name": "Keep"}]}},
+                "a1": {"answer": {"answer_columns": [{"name": "Legacy"}]}},
+            },
+            modifieds={"src": 100, "a1": 200},
+        )
+        plan = self._remove_plan(
+            delete=[],
+            sets=[{"guid": "set1", "name": "Region Cohort", "action": "DELETE_SAFE",
+                   "in_use_by": ["a1"]}],
+        )
+        result = _run_apply(plan, client)
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        assert "a1" in [r["guid"] for r in out["failed"]]
+        skipped = [s for s in out["skipped"] if s["guid"] == "set1"]
+        assert skipped and "consumer" in skipped[0]["reason"].lower()
+        # The set was never actually deleted.
+        assert not any(c[0].endswith("/metadata/delete")
+                       and c[1]["metadata"][0]["identifier"] == "set1"
+                       for c in client.calls)
+
+    def test_set_deleted_when_all_consumer_fixes_succeed(self):
+        client = _FakeClient(
+            exports={
+                "src": {"model": {"columns": [{"name": "Keep"}]}},
+                "a1": {"answer": {"answer_columns": [{"name": "Keep"}]}},
+            },
+            modifieds={"src": 100, "a1": 200},
+        )
+        plan = self._remove_plan(
+            delete=[],
+            sets=[{"guid": "set1", "name": "Region Cohort", "action": "DELETE_SAFE",
+                   "in_use_by": ["a1"]}],
+        )
+        result = _run_apply(plan, client)
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        assert "set1" in [d["guid"] for d in out["deleted"]]
+
+    def test_delete_verified_by_post_query_when_api_errors(self):
+        # delete API returns non-ok, but a re-query shows the object is gone -> deleted.
+        client = _FakeClient(
+            exports={"src": {"model": {"columns": [{"name": "Keep"}]}}},
+            modifieds={"src": 100, "d1": 300},  # d1 present for drift check...
+            delete_ok=False,
+        )
+        # After the delete "fails", the post-query for d1 must show it gone. Simulate by
+        # removing d1 from modifieds via a wrapper that drops it after the delete call.
+        orig_post = client.post
+
+        def post_dropping_d1(path, json=None, **kwargs):
+            resp = orig_post(path, json=json, **kwargs)
+            if path.endswith("/metadata/delete") and json["metadata"][0]["identifier"] == "d1":
+                client.modifieds.pop("d1", None)
+            return resp
+
+        client.post = post_dropping_d1
+        result = _run_apply(self._remove_plan(fix=[]), client)
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        assert "d1" in [d["guid"] for d in out["deleted"]]
+
+    def test_repoint_uses_obj_id_when_available(self):
+        target_guid = "tgtguid1abcdef"
+        target_obj_id = "New Orders-tgtguid1"  # derive_target_obj_id("New Orders", guid)
+        client = _FakeClient(
+            exports={
+                # src exported 3x: obj_id probe, source mutate-fetch, source verify.
+                # The verify body must show the repointed obj_id so source verifies.
+                "src": [
+                    {"model": {"model_tables": [{"name": "Orders", "obj_id": "Orders-srcobj"}]}},
+                    {"model": {"model_tables": [{"name": "Orders", "obj_id": "Orders-srcobj"}]}},
+                    {"model": {"model_tables": [{"name": "Orders", "obj_id": target_obj_id}]}},
+                ],
+                # a1 references the source via obj_id; verify re-export shows the target.
+                "a1": [
+                    {"answer": {"tables": [{"obj_id": "Orders-srcobj", "fqn": "src"}]}},
+                    {"answer": {"tables": [{"obj_id": target_obj_id}]}},
+                ],
+            },
+            modifieds={"src": 100, "a1": 200},
+        )
+        plan = {
+            "operation": "REPOINT",
+            "backup_dir": "/tmp/ts_dep_backup_x",
+            "source": {"guid": "src", "type": "MODEL", "name": "Orders Model", "modified_at": 100},
+            "target": {"guid": target_guid, "name": "New Orders"},
+            "column_gap": [],
+            "fix": [{"guid": "a1", "type": "ANSWER", "name": "Rev", "modified_at": 200}],
+            "delete": [], "sets": [],
+        }
+        result = _run_apply(plan, client)
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        assert "a1" in [r["guid"] for r in out["succeeded"]]
+        assert "src" in [r["guid"] for r in out["succeeded"]]
+        # obj_id-based repoint actually rewrote a1's table to the target obj_id.
+        a1_import = next(c for c in client.calls
+                         if c[0].endswith("/metadata/tml/import")
+                         and "guid: a1" in c[1]["metadata_tmls"][0])
+        assert target_obj_id in a1_import[1]["metadata_tmls"][0]
+
+    def test_requires_backup_dir(self):
+        plan = self._remove_plan()
+        del plan["backup_dir"]
+        client = _FakeClient(exports={}, modifieds={})
+        result = _run_apply(plan, client)
+        assert result.exit_code != 0
+        assert "backup_dir" in _all_output(result)
+
+    def test_remove_requires_columns(self):
+        plan = self._remove_plan(columns_to_remove=[])
+        client = _FakeClient(exports={}, modifieds={})
+        result = _run_apply(plan, client)
+        assert result.exit_code != 0
+        assert "columns_to_remove" in _all_output(result)
+
+    def test_repoint_requires_target(self):
+        plan = {
+            "operation": "REPOINT",
+            "backup_dir": "/tmp/x",
+            "source": {"guid": "src", "type": "MODEL", "name": "M", "modified_at": 1},
+            "fix": [], "delete": [], "sets": [],
+        }
+        client = _FakeClient(exports={}, modifieds={})
+        result = _run_apply(plan, client)
+        assert result.exit_code != 0
+        assert "target" in _all_output(result).lower()
+
+    def test_invalid_operation_rejected(self):
+        client = _FakeClient(exports={}, modifieds={})
+        result = _run_apply({"operation": "RENAME", "backup_dir": "/tmp/x",
+                             "source": {"guid": "s"}}, client)
+        assert result.exit_code != 0
+
+    def test_feedback_inline_tml_is_used_not_exported(self):
+        # A FEEDBACK fix entry carries inline tml (open-item #18: can't export standalone).
+        client = _FakeClient(
+            exports={
+                "src": {"model": {"columns": [{"name": "Keep"}]}},
+                # verify re-export of the feedback object (by guid) returns clean.
+                "fb1": {"nls_feedback": {"feedback": []}},
+            },
+            modifieds={"src": 100, "fb1": 200},
+        )
+        plan = self._remove_plan(
+            delete=[],
+            fix=[{"guid": "fb1", "type": "FEEDBACK", "name": "Spotter FB", "modified_at": 200,
+                  "tml": {"nls_feedback": {"feedback": [{"q": "revenue by Legacy"}]}}}],
+        )
+        result = _run_apply(plan, client)
+        assert result.exit_code == 0, _all_output(result)
+        # No export call was made to fetch fb1 for mutation (inline tml used); the only
+        # export for fb1 is the verify re-export.
+        fb_exports = [c for c in client.calls
+                      if c[0].endswith("/metadata/tml/export")
+                      and c[1]["metadata"][0]["identifier"] == "fb1"]
+        assert len(fb_exports) == 1  # verify only

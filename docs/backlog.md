@@ -2232,7 +2232,9 @@ once in `agents/cli/CLAUDE.md`.
 
 **Source:** 2026-07-03 codification review rows 11–13 (angle 11).
 **Affects:** ts-dependency-manager, `tools/ts-cli/ts_cli/dependency/` module.
-**Status:** PR1 SHIPPED (2026-07-08, ts-cli v0.39.0). PR2 OPEN. Safety-critical.
+**Status:** PR1 SHIPPED (2026-07-08, ts-cli v0.39.0). PR2 CODE COMPLETE — draft PR
+(ts-cli v0.41.0, skill v1.4.0); **gated on mandatory live test** against se-thoughtspot
+before merge (open-item #23). Safety-critical.
 
 ~900 of the SKILL.md's lines are inline pseudocode for the skill's headline safety
 promises: TML backup manifest (Step 7), the remove/repoint mutation engine across 5 object
@@ -2249,17 +2251,24 @@ fixed), `backup.py` (manifest/ordering helpers), `commands/dependency.py` exposi
 the real module. SKILL.md Step 7 → `ts dependency backup`, Step 11 → `ts dependency
 rollback`.
 
-**PR2 (open, destructive orchestrator — gated on live testing against se-thoughtspot):**
-`ts dependency apply-change` — the Step 9 drift-check → mutate (wire in `ts dependency
-mutate`) → import+verify → delete-ordering loop. This is where open-items #2/#13/#15/#16
-(chart `client_state_v2` stale refs, misleading error text, import-ordering delay) bite,
-plus the missing chart-axis-role detection: `dep["action"]/REMOVE_CHART` is consumed by
-Step 6/9 but is NOT emitted by `ts metadata report` today — PR2 must add chart-role
-classification to `ts_cli/report/classifier.py` (or the report walker) for the liveboard
-CONVERT_TO_TABLE-vs-REMOVE decision to be deterministic. Mandatory live verification
-before shipping (destructive remove/repoint).
+**PR2 (code complete, draft PR — gated on live testing against se-thoughtspot):**
+`ts dependency apply-change` — the Step 9 drift-check → delete → dependent-fix →
+source → set-delete loop, wiring `apply_remove`/`apply_repoint` (mutate.py) and the new
+deterministic decision helpers in `ts_cli/dependency/apply.py` (drift, obj_id derivation,
+the import/verify outcome matrix, post-import verification, 9c ordering, the set-delete
+consumer guard). SKILL.md Step 9 dropped from ~1,060 lines of inline pseudocode to a
+plan-JSON build + one command call. **Latent-bug fix:** corrected the execution order to
+**source LAST** (deletes → dependents → source → sets) — the old section bodies ran
+source-first, which error 14544 rejects while a dependent still references the column.
+**Chart-axis-role decision** (`dep["action"]/REMOVE_CHART`) codified as a self-contained
+pure function (`apply.chart_role_for_answer`/`classify_liveboard_viz_roles`) consumed by
+apply-change (default CONVERT_TO_TABLE, plan-overridable) — surfacing it in `ts metadata
+report` for Step 6 is deferred to **open-item #22** (build_report doesn't wire
+per-dependent chart classification today, so it's a larger schema-contract change).
+Open-items #2/#13/#15/#16 still bite here. **Mandatory live verification of the corrected
+ordering + drift/obj_id/set-guard paths before merge — open-item #23.**
 
-**Target:** PR2 by 2026-10-31.
+**Target:** PR2 live-tested + merged by 2026-10-31.
 
 ---
 

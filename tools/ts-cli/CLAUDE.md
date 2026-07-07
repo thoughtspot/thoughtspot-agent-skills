@@ -18,6 +18,7 @@ ts_cli/
     __init__.py          — re-exports mutate.py + backup.py public entry points
     mutate.py             — REMOVE/REPOINT TML dict transforms (apply_remove/apply_repoint dispatchers + remove_columns_from_*/repoint_* helpers) behind `ts dependency mutate` (pure functions, no I/O; BL-083)
     backup.py             — backup filename/delete-order/v2-type-map/restore-policy/rollback-order/manifest helpers behind `ts dependency backup`/`rollback` (pure functions, no I/O; BL-083)
+    apply.py              — drift/obj_id/import-outcome-matrix/verify-body/9c-ordering/set-delete-guard/chart-role decision helpers behind `ts dependency apply-change` (pure functions, no I/O; BL-083 PR2)
   tableau/
     __init__.py         — package marker
     parsing.py          — formula tokenization, CSQ column maps, calc-id maps
@@ -48,6 +49,7 @@ ts_cli/
     snowflake.py  — ts snowflake (diff, lint-ddl)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
+    dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
   audit/
     __init__.py       — run_audit() entry point, angle module registry
@@ -69,7 +71,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.39.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.41.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

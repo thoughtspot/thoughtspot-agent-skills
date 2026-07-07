@@ -599,7 +599,7 @@ If **D** or **M**, show this warning block before continuing:
   Deleting a ThoughtSpot object is permanent. The skill will:
     • Take a TML backup before any delete (Step 7 — non-negotiable, always runs)
     • Call `ts metadata delete <guid> --type <type>` for each object marked for
-      delete in Step 9 (verified 2026-05-11 to genuinely delete — see Step 9a)
+      delete in Step 9 (verified 2026-05-11 to genuinely delete)
     • Offer rollback by re-importing the backup at Step 11
 
   Important rollback caveats:
@@ -677,7 +677,7 @@ entirely for objects in `objects_to_delete` — the whole object is being remove
 decisions are irrelevant.
 
 **Two valid choices per viz/answer — SKIP is not offered.** Skipping would leave the column
-referenced in that object, which causes ThoughtSpot to reject the source change at Step 9b
+referenced in that object, which causes ThoughtSpot to reject the source change (applied last in Step 9)
 with error 14544 ("Deleted columns have dependents") naming the skipped object. The user
 must pick a real fix or delete the whole object via Step 6b.
 
@@ -732,9 +732,9 @@ source itself, even if no dependents were selected. The source change (column re
 renamed, or repointed) is itself a change and is always backed up.
 
 Scope of the backup:
-- **Source object** (always — the column-modifying change happens here at Step 9b)
-- Every dependent in `objects_to_fix` (column references stripped at Step 9c)
-- Every dependent in `objects_to_delete` (object removed at Step 9a)
+- **Source object** (always — the column-modifying change to the source happens in Step 9)
+- Every dependent in `objects_to_fix` (column references stripped in Step 9)
+- Every dependent in `objects_to_delete` (object removed in Step 9)
 - A `manifest.json` index linking each backup file to its GUID, name, type, and intent
 
 If any backup export fails, abort the run and ask the user how to proceed — never skip,
@@ -878,1064 +878,142 @@ confirmation step.
 
 ## Step 9 — Apply Changes
 
-Apply changes in this order:
+The entire destructive change is executed by one codified command —
+**`ts dependency apply-change`** (ts-cli ≥ 0.41.0, BL-083 PR2). It reads a plan JSON
+on stdin and orchestrates the whole flow deterministically: drift check → deletes →
+dependent fixes → source → set deletes, with obj_id-first repointing and post-import
+verification. Do **not** re-implement this loop inline — the command encodes edge-case
+fixes (the error-14544 ordering, open-item #15 verify-despite-ERROR, obj_id
+VERSION_CONFLICT avoidance, the set-delete consumer guard) that a hand-rolled script
+will miss. If the command misbehaves, fix `ts_cli/dependency/` and re-run.
 
-1. **9a — Deletes** (`objects_to_delete`) — runs first; leaf-most types first (Liveboards,
-   Answers), then Models/Views in reverse-dependency order. Removes the objects the user
-   explicitly asked to delete before any updates so the dependency graph reflects the final
-   intent.
-2. **9b — Fixes on dependents** (`objects_to_fix`) — strip column references from each
-   remaining dependent. Order: Liveboards/Answers first (no recursion); Sets next; Views;
-   Models last (so a Model's dependent Views/Answers/Sets reflect the fix before the Model
-   itself is rewritten).
-3. **9c — Source** — modify the source object (column removed / renamed / repointed). Runs
-   LAST because TS error 14544 will reject the source change while ANY visible dependent
-   still references the column. Source must be the final step.
-4. **9d — Reusable Sets** — only used for sets where action is `DELETE` and `9b` didn't already
-   handle them; for FIX-mode sets, the body update happens in `9b` alongside other dependents.
+**Order — source LAST.** apply-change applies changes as:
 
-Each import is atomic (ALL_OR_NONE per object). A failure on one item does not roll back
-previously successful operations — track all results in a single `results` dict for the
-Step 10 Change Report.
+1. **Deletes** (`delete[]`) — leaf-most types first (Liveboards, Answers), then
+   Models/Views. Removes what the user explicitly asked to delete.
+2. **Dependent fixes** (`fix[]`) — strip column references (REMOVE) or repoint
+   (REPOINT) from each remaining dependent. Terminal types first (Answers/Liveboards),
+   then Sets, Views, Feedback, Models last.
+3. **Source** — modify the source object. Runs **LAST**: TS error 14544 ("Deleted
+   columns have dependents") rejects the source column removal while ANY dependent
+   still references the column.
+4. **Reusable Sets** (`sets[]`) — delete sets that operated on the removed column,
+   but only if every consumer fix succeeded (deleting a Set whose consumer fix failed
+   would dangle that consumer).
 
-### Drift check helper (Fix #3, 2026-04-26)
+> This corrects the order the earlier inline Step 9 used (source-first). See the
+> command's module docstring and open-items #23.
 
-Before applying any change to a specific object, re-query its `metadata_header.modified`
-and compare against the value snapshotted in Step 4 (`modified_at_scan[guid]`). If the
-timestamp moved, someone else edited the object between scan and apply — the dep walk's
-analysis (chart roles, alias chain, removed-column references) is now stale. Skip the
-import and report DRIFT_DETECTED.
+Each import is atomic (ALL_OR_NONE per object); a failure on one item does not roll
+back others — every outcome is tracked in the results JSON for the Step 10 report.
 
-```python
-def check_drift(guid, type_str, profile_name, snapshot):
-    """Returns (has_drift: bool, current_modified: int, error: Optional[str]).
+### Build the plan JSON
 
-    `snapshot` is the int from `modified_at_scan[guid]`. If we cannot re-query
-    (network failure, deleted object), return has_drift=True with the error so
-    the caller skips the import — better to fail safe than to clobber.
-    """
-    r = subprocess.run(
-        ["bash", "-c",
-         f"source ~/.zshenv && ts metadata get {guid} --type {type_str} --profile '{profile_name}'"],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0 or not r.stdout.strip():
-        return True, 0, (r.stderr.strip() or "metadata get returned no output")
-    try:
-        meta = json.loads(r.stdout)
-    except json.JSONDecodeError as e:
-        return True, 0, f"JSON decode error: {e}"
-    current = int((meta.get("metadata_header") or {}).get("modified", 0))
-    if not snapshot:
-        # No snapshot to compare against — be conservative and allow the import.
-        # Source-not-found cases will surface naturally as the import proceeds.
-        return False, current, None
-    return (current != snapshot), current, None
+Assemble the plan from the Step 4 scan + Step 6 selection. `modified_at` is the
+`metadata_header.modified` snapshotted per object in Step 4 (`modified_at_scan[guid]`)
+— apply-change uses it for the drift check. `backup_dir` is the directory Step 7
+created (required — rollback safety).
 
-
-def v2_type_for(skill_type):
-    """Map skill type label to v2 metadata type."""
-    return {
-        "ANSWER": "ANSWER", "LIVEBOARD": "LIVEBOARD",
-        "SET": "LOGICAL_COLUMN", "COHORT": "LOGICAL_COLUMN",
-    }.get(skill_type.upper(), "LOGICAL_TABLE")
-
-
-def assert_no_drift_or_skip(guid, skill_type, profile_name, snapshot, results,
-                            phase, name=None):
-    """Returns True if safe to proceed; False if drift detected (caller must skip).
-    Logs the skip into `results['skipped']` with reason DRIFT_DETECTED."""
-    has_drift, current, err = check_drift(guid, v2_type_for(skill_type), profile_name, snapshot)
-    if has_drift:
-        reason = (f"DRIFT_DETECTED — modified at scan was {snapshot}, "
-                  f"now {current}" + (f"; query error: {err}" if err else ""))
-        results.setdefault("skipped", []).append({
-            "guid": guid, "name": name or guid, "type": skill_type,
-            "phase": phase, "reason": reason,
-        })
-        print(f"  ⚠ Skip {skill_type} {name or guid} — {reason}")
-        return False
-    return True
-```
-
-**Detect obj_id support (REPOINT only).** Before any modifications, probe whether the
-instance supports obj_id references by exporting the source with the obj_id flags.
-When obj_id is available, the repoint helpers use it instead of fqn — avoiding
-VERSION_CONFLICT (error 14009) on builds that track content versions via obj_id.
-
-```python
-source_obj_id = None
-target_obj_id = None
-
-if operation == "REPOINT":
-    probe = subprocess.run(
-        ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {source_guid} "
-         f"--profile '{profile_name}' --include-obj-id --include-obj-id-ref "
-         f"--no-guid --parse"],
-        capture_output=True, text=True,
-    )
-    if probe.returncode == 0:
-        probe_items = json.loads(probe.stdout)
-        probe_tml = probe_items[0]["tml"] if probe_items else {}
-        probe_section = probe_tml.get("model") or probe_tml.get("worksheet") or probe_tml.get("table", {})
-        for tbl in probe_section.get("model_tables", probe_section.get("tables", [])):
-            if tbl.get("obj_id"):
-                source_obj_id = tbl.get("obj_id")
-                break
-        if not source_obj_id and probe_tml.get("obj_id"):
-            source_obj_id = probe_tml["obj_id"]
-
-    if source_obj_id:
-        # Derive target obj_id: {target_name}-{first 8 chars of target_guid}
-        target_obj_id = f"{target_name}-{target_guid[:8]}"
-        print(f"  obj_id detected — using obj_id-based repoint (avoids VERSION_CONFLICT)")
-        print(f"    source: {source_obj_id}")
-        print(f"    target: {target_obj_id}")
-    else:
-        print(f"  obj_id not available — using fqn-based repoint")
-```
-
-**Source drift is a hard stop.** If the source object has drifted between Step 4 and
-Step 9, abort the entire run before touching any dependent — the Step 6 plan was
-computed against the old source, and applying it could remove columns that were
-re-purposed in the meantime.
-
-```python
-# Run this BEFORE 9a/9b/9c
-if not assert_no_drift_or_skip(source_guid, source_type, profile_name,
-                               modified_at_scan.get(source_guid, 0),
-                               results, phase="drift_pre_check",
-                               name=source_name):
-    raise SystemExit(
-        "Source object has drifted since Step 4 — aborting the entire run. "
-        "No changes applied. Re-run /ts-dependency-manager from Step 1 to "
-        "rebuild the impact plan against the current source state."
-    )
-```
-
-For dependent objects, drift detection skips that one object and continues with
-the rest. The user sees DRIFT_DETECTED entries in the Change Report and can re-run
-the skill on the affected dependents.
-
-### 9a — Delete objects marked for deletion
-
-Skip this section entirely if `objects_to_delete` is empty.
-
-**Verified 2026-05-11 on se-thoughtspot:** `ts metadata delete <guid> --type <type>`
-genuinely deletes objects. The CLI passes `type` in the v2 request body and the API
-performs the deletion (confirmed by post-delete `ts metadata get` returning "No … object
-found"). See open-items.md #17 for the history of the earlier CLI bug (now fixed).
-
-```python
-results = {"succeeded": [], "failed": [], "deleted": [], "skipped": []}
-
-# Delete order: terminal types first, then non-terminal (Sets, Models/Views, source last)
-# Sets are intentionally placed before Models/Views — a Set's parent Model still needs to
-# exist so the Set's TML can be backed up earlier in Step 7. Sets delete cleanly even
-# while their Model is still present, since the cascade is one-directional.
-delete_order = {
-    "LIVEBOARD": 0, "ANSWER": 1,
-    "SET": 2, "COHORT": 2,
-    "VIEW": 3,
-    "MODEL": 4, "WORKSHEET": 4,
-    "TABLE": 5,
+```json
+{
+  "operation": "REMOVE",
+  "backup_dir": "{backup_dir}",
+  "source": {"guid": "{source_guid}", "type": "{source_type}", "name": "{source_name}",
+             "modified_at": {source_modified_at}},
+  "columns_to_remove": ["Legacy Region", "Old Segment"],
+  "fix": [
+    {"guid": "...", "type": "ANSWER",    "name": "...", "modified_at": ...},
+    {"guid": "...", "type": "LIVEBOARD", "name": "...", "modified_at": ...,
+     "viz_decisions": {"viz-id-1": "convert", "viz-id-2": "remove"}},
+    {"guid": "...", "type": "MODEL",     "name": "...", "modified_at": ...}
+  ],
+  "delete": [
+    {"guid": "...", "type": "ANSWER", "name": "...", "modified_at": ...}
+  ],
+  "sets": [
+    {"guid": "...", "name": "...", "action": "DELETE_SAFE", "in_use_by": ["consumer-guid", ...]}
+  ]
 }
-sorted_deletes = sorted(objects_to_delete, key=lambda d: delete_order.get(d["type"].upper(), 9))
+```
 
-# v2 type values expected by --type flag
-v2_type_map = {
-    "ANSWER":    "ANSWER",
-    "LIVEBOARD": "LIVEBOARD",
-    "MODEL":     "LOGICAL_TABLE",
-    "WORKSHEET": "LOGICAL_TABLE",
-    "VIEW":      "LOGICAL_TABLE",
-    "TABLE":     "LOGICAL_TABLE",
-    "SET":       "LOGICAL_COLUMN",
-    "COHORT":    "LOGICAL_COLUMN",
+For **REPOINT**, replace `columns_to_remove` with the target and (optional) gap:
+
+```json
+{
+  "operation": "REPOINT",
+  "backup_dir": "{backup_dir}",
+  "source": {"guid": "{source_guid}", "type": "{source_type}", "name": "{source_name}",
+             "modified_at": {source_modified_at}},
+  "target": {"guid": "{target_guid}", "name": "{target_name}"},
+  "column_gap": ["Column present on source but absent on target"],
+  "fix":  [ ... ],
+  "delete": [],
+  "sets": []
 }
-
-for dep in sorted_deletes:
-    v2_type = v2_type_map.get(dep["type"].upper())
-    if not v2_type:
-        results["failed"].append({**dep, "error": f"no v2 type mapping for {dep['type']}",
-                                  "phase": "delete"})
-        continue
-
-    # Drift check before deleting (Fix #3). If the object has been modified since
-    # Step 4, the user's selection at Step 6 may have been based on stale state —
-    # skip the delete and let the user re-scan.
-    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
-                                   modified_at_scan.get(dep["guid"], 0),
-                                   results, phase="delete", name=dep["name"]):
-        continue
-
-    print(f"  Deleting {dep['type']}: {dep['name']} ({dep['guid']})...")
-    r = subprocess.run(
-        ["bash", "-c",
-         f"source ~/.zshenv && ts metadata delete {dep['guid']} --type {v2_type} "
-         f"--profile '{profile_name}'"],
-        capture_output=True, text=True,
-    )
-
-    if r.returncode == 0:
-        print(f"  ✓ Deleted: {dep['name']}")
-        results["deleted"].append(dep)
-    else:
-        # Verify by re-querying — if the object is gone, treat as success
-        check = subprocess.run(
-            ["bash", "-c",
-             f"source ~/.zshenv && ts metadata get {dep['guid']} --type {v2_type} "
-             f"--profile '{profile_name}'"],
-            capture_output=True, text=True,
-        )
-        if check.returncode != 0 or not check.stdout.strip():
-            print(f"  ✓ Deleted: {dep['name']}  (verified by post-query)")
-            results["deleted"].append(dep)
-        else:
-            err = f"CLI exit {r.returncode}: {r.stderr[:200]}"
-            print(f"  ✗ Delete failed: {dep['name']} — {err}")
-            results["failed"].append({**dep, "error": err, "phase": "delete"})
 ```
 
-If a delete fails (permissions, dependent of an inaccessible object, etc.), continue with the
-remaining deletes — the user will see the failures in the Change Report and can decide whether
-to retry or roll back.
+Plan field notes:
 
-### 9b — Modify and import the source object
+- **`fix[].action`** — set to `"REMOVE_CHART"` for a standalone Answer whose removed
+  column sits on a chart x/y axis; apply-change converts it to TABLE_MODE before
+  stripping. If omitted, apply-change auto-detects the chart role (`chart_role_for_answer`).
+- **`fix[].viz_decisions`** — per-liveboard-viz map `{viz_id: "convert" | "remove"}`
+  from the Step 6c decisions. Any viz not listed defaults to `convert` (CONVERT_TO_TABLE),
+  which is always safe. Use `classify_liveboard_viz_roles` output from Step 6 to know
+  which vizzes use the column on x/y and therefore need a decision surfaced.
+- **`fix[].tml`** — optional inline TML body. Required only for `FEEDBACK` objects,
+  which cannot be exported standalone (open-item #18) — pass the model's
+  `nls_feedback` doc from the Step 4 `--associated` export. For every other type,
+  omit it and apply-change exports the object fresh (after the drift check confirms it
+  is unchanged since Step 4).
+- **`source.source_obj_id`** (REPOINT, optional) — apply-change auto-probes the source
+  for obj_id support; provide it only to skip the probe.
 
-Read [references/open-items.md](references/open-items.md) #2 before modifying Answer or
-Liveboard TML — some fields use opaque column IDs that differ from display names.
+### Run apply-change
 
-**Helper: serialize TML dict to YAML and import**
-
-```python
-import copy, yaml, re, json, subprocess
-
-def _str_representer(dumper, data):
-    if '\n' in data or ('{' in data and '}' in data):
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='>')
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-
-yaml.add_representer(str, _str_representer)
-
-def import_tml(tml_dict, guid, profile_name, policy="ALL_OR_NONE", create_new=False):
-    """
-    Import a TML dict.
-
-    create_new=False (default) — update an existing object at `guid`. Adds `--no-create-new`
-        so an unknown GUID errors out instead of silently creating a duplicate.
-    create_new=True  — used by Step 11 rollback after a delete: the original GUID no longer
-        exists, so we want TS to assign a new one. Strips `guid:` from the YAML and drops
-        the `--no-create-new` flag.
-    """
-    tml_yaml = yaml.dump(tml_dict, allow_unicode=True, default_flow_style=False)
-    if create_new:
-        tml_yaml = re.sub(r"^guid:\s*\S+\s*\n", "", tml_yaml, count=1, flags=re.MULTILINE)
-    elif not tml_yaml.strip().startswith("guid:"):
-        tml_yaml = f"guid: {guid}\n" + tml_yaml
-    payload = json.dumps([tml_yaml])
-    cmd = (f"source ~/.zshenv && ts tml import "
-           f"--profile '{profile_name}' --policy {policy}")
-    if not create_new:
-        cmd += " --no-create-new"
-    result = subprocess.run(["bash", "-c", cmd], input=payload, capture_output=True, text=True)
-    return json.loads(result.stdout) if result.stdout.strip() else {}
-
-def import_status(resp):
-    """Extract (ok: bool, error_msg: str) from an import response.
-
-    NOTE: do not trust this in isolation. TS sometimes returns status_code=ERROR
-    while still applying the change (open-item #15 + 2026-04-27 smoke test on
-    TEST_DEPENDENCY_MANAGEMENT). Always pair with `verify_change_applied()`
-    before reporting a per-object outcome.
-    """
-    try:
-        status = resp["object"][0]["response"]["status"]
-        ok     = status.get("status_code") == "OK"
-        return ok, status.get("error_message", "Unknown error")
-    except (KeyError, IndexError):
-        return False, str(resp)
-
-
-def verify_change_applied(guid, skill_type, profile_name, *,
-                          operation, columns_to_remove=None,
-                          target_guid=None, column_gap=None,
-                          target_obj_id=None):
-    """Re-export the object's TML and confirm the expected change was applied.
-
-    Returns (verified_applied: bool, detail: str). The skill calls this AFTER
-    every Step 9 import (regardless of import_status) and decides what to do
-    based on the matrix:
-
-      api=OK + verified=True    → SUCCESS
-      api=OK + verified=False   → FAIL (silent rejection — rare)
-      api=ERROR + verified=True → SUCCESS_WITH_WARNING (open-item #15: TS
-                                  applied the change despite returning ERROR;
-                                  log the warning, treat as succeeded, continue)
-      api=ERROR + verified=False → FAIL (genuine rejection — current behaviour)
-
-    Why this matters: smoke-test 2026-04-27 had TS return error_message
-    "Invalid YAML/JSON syntax in file" while applying the rename. Without
-    post-import verification the skill thought the import failed and aborted —
-    leaving source and dependents out of sync.
-
-    Per-operation verification:
-      REMOVE  — none of the columns_to_remove may appear in the exported TML
-      REPOINT — target_guid or target_obj_id must appear in the exported TML;
-                columns in column_gap (if any) must be absent
-    """
-    cmd = (f"source ~/.zshenv && ts tml export {guid} "
-           f"--profile '{profile_name}' --fqn "
-           f"--include-obj-id --include-obj-id-ref --parse")
-    r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-    if r.returncode != 0 or not r.stdout.strip():
-        return False, f"verification re-export failed: {r.stderr[:200]}"
-    try:
-        items = json.loads(r.stdout)
-        if not items:
-            return False, "verification re-export returned no items"
-        body = json.dumps(items[0]["tml"])
-    except (json.JSONDecodeError, KeyError) as e:
-        return False, f"verification parse error: {e}"
-
-    if operation == "REMOVE":
-        cols = list(columns_to_remove or [])
-        # Check both the bracketed token form ("[col]") and TABLE::col form
-        leftover = [
-            c for c in cols
-            if (f'"{c}"' in body) or (f"[{c}]" in body) or (f"::{c}" in body)
-        ]
-        if leftover:
-            return False, f"REMOVE not applied — still references: {leftover}"
-        return True, f"REMOVE verified — none of {cols} appear in TML"
-
-    if operation == "REPOINT":
-        # Verify target is referenced — check both fqn and obj_id
-        target_found = False
-        if target_guid and target_guid in body:
-            target_found = True
-        if target_obj_id and target_obj_id in body:
-            target_found = True
-        if not target_found and (target_guid or target_obj_id):
-            ref = target_obj_id or target_guid[:8]
-            return False, f"REPOINT not applied — target {ref} not in TML"
-        if column_gap:
-            still_present = [c for c in column_gap if (f"[{c}]" in body) or (f"::{c}" in body)]
-            if still_present:
-                return False, f"REPOINT partial — gap columns still present: {still_present}"
-        return True, "REPOINT verified — target referenced; gap columns absent"
-
-    # Unknown operation: treat as not-verifiable (return True so we don't block)
-    return True, f"verification skipped for operation={operation}"
-
-
-def import_and_verify(tml_dict, guid, skill_type, profile_name,
-                      operation, results, phase, name=None,
-                      columns_to_remove=None, target_guid=None, column_gap=None,
-                      target_obj_id=None):
-    """Single entry point that wraps import_tml + import_status + verify_change_applied
-    and writes the right entry to `results`. Use this at every Step 9 call site.
-
-    Returns one of: "SUCCESS", "SUCCESS_WITH_WARNING", "FAIL_VERIFIED",
-    "FAIL_SILENT" (api=OK but change didn't apply).
-    """
-    resp = import_tml(tml_dict, guid, profile_name)
-    api_ok, api_err = import_status(resp)
-    verified, verify_detail = verify_change_applied(
-        guid, skill_type, profile_name,
-        operation=operation,
-        columns_to_remove=columns_to_remove,
-        target_guid=target_guid, column_gap=column_gap,
-        target_obj_id=target_obj_id,
-    )
-
-    label = name or guid
-    record = {"guid": guid, "name": label, "type": skill_type, "phase": phase,
-              "api_status": "OK" if api_ok else "ERROR",
-              "api_error": None if api_ok else api_err,
-              "verified": verified, "verify_detail": verify_detail}
-
-    if api_ok and verified:
-        results["succeeded"].append(record)
-        return "SUCCESS"
-    if (not api_ok) and verified:
-        # TS lied — change was applied despite the error. Log + treat as success.
-        record["warning"] = ("api returned ERROR but verification confirms the "
-                             "change applied (open-item #15)")
-        results["succeeded"].append(record)
-        print(f"  ⚠ {skill_type} {label} — api=ERROR, verified=True. "
-              f"Treating as success per open-item #15. err={api_err[:120]}")
-        return "SUCCESS_WITH_WARNING"
-    if api_ok and (not verified):
-        record["error"] = f"api=OK but change not applied — {verify_detail}"
-        results["failed"].append(record)
-        print(f"  ✗ {skill_type} {label} — silent rejection. {verify_detail}")
-        return "FAIL_SILENT"
-    # Both ERROR and not verified — true failure
-    record["error"] = f"{api_err}  ({verify_detail})"
-    results["failed"].append(record)
-    return "FAIL_VERIFIED"
+```bash
+source ~/.zshenv
+echo "$PLAN_JSON" | ts dependency apply-change --profile "{profile_name}"
 ```
 
-**REMOVE — source is a Model or Worksheet:**
+**Source-drift hard stop.** If the source object drifted since Step 4, apply-change
+aborts the ENTIRE run before touching anything (exit code 1, `"aborted": true` in the
+output) — the Step 6 plan was computed against the old source and applying it could
+remove columns that were re-purposed. Re-run the skill from Step 1 to rebuild the plan.
 
-Join conditions that reference removed columns MUST also be updated — ThoughtSpot
-will reject the import otherwise (see open-items.md #4). Use `source_affected_joins`
-identified in Step 4 to know which joins to remove.
+**Dependent drift** skips only that object (recorded under `skipped` with reason
+`DRIFT_DETECTED`); the rest of the run proceeds.
 
-```python
-updated_source = copy.deepcopy(source_export_item["tml"])
-section = updated_source.get("model") or updated_source.get("worksheet")
+### Read the results
 
-# Collect formula IDs of any formula columns being removed
-formula_ids_to_remove = {
-    col.get("formula_id")
-    for col in section.get("columns", [])
-    if col.get("name") in columns_to_remove and col.get("formula_id")
+apply-change prints a results JSON to stdout — this is the data for the Step 10 Change
+Report. Per-object progress goes to stderr.
+
+```json
+{
+  "operation": "REMOVE",
+  "source": {"guid": "...", "name": "...", "type": "..."},
+  "backup_dir": "...",
+  "succeeded": [{"guid": "...", "name": "...", "type": "...", "phase": "fix|source",
+                 "outcome": "SUCCESS|SUCCESS_WITH_WARNING", ...}],
+  "failed":    [{"guid": "...", "name": "...", "phase": "...", "outcome": "FAIL_SILENT|FAIL_VERIFIED",
+                 "error": "..."}],
+  "deleted":   [{"guid": "...", "name": "...", "type": "..."}],
+  "skipped":   [{"guid": "...", "name": "...", "reason": "DRIFT_DETECTED ..." | "set consumer ..."}]
 }
-
-section["columns"] = [
-    c for c in section.get("columns", [])
-    if c.get("name") not in columns_to_remove
-]
-section["formulas"] = [
-    f for f in section.get("formulas", [])
-    if f.get("id") not in formula_ids_to_remove
-]
-
-# Remove join conditions that reference the removed column(s)
-# (must be done — cannot save a model with an orphaned join condition)
-# model_tables uses `joins` (Scenario A referencing + Scenario B inline);
-# `joins_with` only exists at the table/view level, never on model_tables.
-for tbl in section.get("model_tables", []):
-    tbl["joins"] = [
-        j for j in tbl.get("joins", [])
-        if not any(col in j.get("on", "") for col in columns_to_remove)
-    ]
-
-# Remove model-level filters that reference the removed column(s)
-# Required by open-items.md #12 — TS rejects the import with error_code 14518
-# ("Invalid filter column") if a filter still references a deleted column.
-section["filters"] = [
-    f for f in section.get("filters", [])
-    if not any(c in columns_to_remove for c in f.get("column", []))
-]
 ```
 
-**REMOVE — source is a connection Table:**
-
-```python
-updated_source = copy.deepcopy(source_export_item["tml"])
-table_section  = updated_source.get("table", {})
-table_section["columns"] = [
-    c for c in table_section.get("columns", [])
-    if c.get("name") not in columns_to_remove
-]
-```
-
-Import the source object — but only after the source-drift hard-stop check above
-has passed. The pre-check uses `assert_no_drift_or_skip` and aborts the entire run
-on drift; if we get here, the source is still at the timestamp we scanned.
-
-```python
-print(f"  Updating source: {source_name}...")
-outcome = import_and_verify(
-    updated_source, source_guid, source_type, profile_name,
-    operation=operation, results=results, phase="source",
-    name=source_name,
-    columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
-    target_guid=target_guid if operation == "REPOINT" else None,
-    column_gap=column_gap if operation == "REPOINT" else None,
-    target_obj_id=target_obj_id if operation == "REPOINT" else None,
-)
-if outcome in ("FAIL_VERIFIED", "FAIL_SILENT"):
-    print(f"  ✗ Source update failed ({outcome}). "
-          f"No dependent objects will be updated. Backup is at {backup_dir}.")
-    return
-# SUCCESS or SUCCESS_WITH_WARNING — proceed to dependents
-print(f"  ✓ {source_name} ({outcome})")
-```
-
-### 9c — Modify and import dependent objects
-
-**Search query helpers — mandatory for Answers and Views:**
-
-ThoughtSpot rejects the import of any object where `search_query` references a column
-that no longer exists. These sanitizers are not optional (see open-items.md #3).
-
-```python
-import re
-
-def sanitize_search_query(query_str, cols_to_remove):
-    """Strip [col_name] tokens from a ThoughtSpot search_query string."""
-    if not query_str:
-        return query_str
-    for col in cols_to_remove:
-        query_str = re.sub(r'\s*\[' + re.escape(col) + r'\]\s*', ' ', query_str)
-    return query_str.strip()
-
-def rename_in_search_query(query_str, old_name, new_name):
-    """Rename a [col_name] token in a ThoughtSpot search_query string."""
-    if not query_str:
-        return query_str
-    return re.sub(r'\[' + re.escape(old_name) + r'\]', f'[{new_name}]', query_str)
-```
-
-**For REMOVE — strip a column from an Answer or Liveboard viz:**
-
-```python
-def convert_answer_to_table(answer_dict):
-    """
-    Switch an answer to TABLE_MODE so it remains valid after a chart-axis column is stripped.
-    Sets `display_mode = "TABLE_MODE"`. Used for REMOVE_CHART → CONVERT_TO_TABLE fixes.
-    Skipping the conversion is not an option for column-removal cleanup: TS will reject the
-    source change at error 14544 if the column is still referenced anywhere.
-    """
-    answer_dict["display_mode"] = "TABLE_MODE"
-    return answer_dict
-
-def remove_columns_from_answer(answer_dict, cols_to_remove):
-    """Remove column references from an answer dict (the answer: section, not full TML)."""
-    a = answer_dict
-
-    # search_query — MUST be sanitized or ThoughtSpot will reject the import (open-items.md #3)
-    if a.get("search_query"):
-        a["search_query"] = sanitize_search_query(a["search_query"], cols_to_remove)
-
-    # answer_columns[]
-    a["answer_columns"] = [
-        c for c in a.get("answer_columns", [])
-        if c.get("name") not in cols_to_remove
-    ]
-
-    # table view: ordered_column_ids and table_columns
-    tbl = a.get("table", {})
-    if tbl.get("ordered_column_ids"):
-        tbl["ordered_column_ids"] = [
-            c for c in tbl["ordered_column_ids"] if c not in cols_to_remove
-        ]
-    tbl["table_columns"] = [
-        c for c in tbl.get("table_columns", [])
-        if c.get("column_id") not in cols_to_remove
-    ]
-
-    # chart view: chart_columns and axis_configs
-    # Only strip color/size/shape bindings — x/y axis removal requires removing the
-    # entire chart visualization. classify_chart_role() identifies those as REMOVE_CHART
-    # and they are handled separately in Step 6 decisions and the liveboard loop below.
-    chart = a.get("chart", {})
-    chart["chart_columns"] = [
-        c for c in chart.get("chart_columns", [])
-        if c.get("column_id") not in cols_to_remove
-    ]
-    for axis in chart.get("axis_configs", []):
-        for key in ("color", "size", "shape"):  # x/y excluded — see REMOVE_CHART path
-            if key in axis and isinstance(axis[key], list):
-                axis[key] = [v for v in axis[key] if v not in cols_to_remove]
-
-    # formulas that reference the removed column
-    formula_ids_to_remove = {
-        f["id"] for f in a.get("formulas", [])
-        if any(col in f.get("expr", "") for col in cols_to_remove)
-    }
-    if formula_ids_to_remove:
-        a["formulas"]       = [f for f in a.get("formulas", [])
-                                if f["id"] not in formula_ids_to_remove]
-        a["answer_columns"] = [c for c in a.get("answer_columns", [])
-                                if c.get("formula_id") not in formula_ids_to_remove
-                                and c.get("name") not in
-                                    {f["name"] for f in a.get("formulas", [])
-                                     if f["id"] in formula_ids_to_remove}]
-
-    # answer-level cohorts (sets) whose anchor_column_id is being removed
-    # The set's display name also appears in answer_columns[] and may be in search_query
-    set_names_to_remove = {
-        c["name"] for c in a.get("cohorts", [])
-        if c.get("config", {}).get("anchor_column_id") in cols_to_remove
-    }
-    if set_names_to_remove:
-        a["cohorts"] = [
-            c for c in a.get("cohorts", [])
-            if c["name"] not in set_names_to_remove
-        ]
-        a["answer_columns"] = [
-            c for c in a.get("answer_columns", [])
-            if c.get("name") not in set_names_to_remove
-        ]
-        if a.get("search_query"):
-            a["search_query"] = sanitize_search_query(
-                a["search_query"], list(set_names_to_remove)
-            )
-
-    return a
-```
-
-**For REPOINT — change the data source reference and remove gap columns:**
-
-The repoint helpers use **obj_id-first matching with fqn fallback**. When the TML was
-exported with `--include-obj-id --include-obj-id-ref`, obj_id fields are present and the
-helpers match on those. This avoids VERSION_CONFLICT (error 14009) on builds that track
-content versions via obj_id. When obj_id is absent (older builds), the helpers fall back
-to fqn matching.
-
-```python
-def repoint_answer(answer_dict, source_guid, target_guid, target_name, column_gap,
-                   *, source_obj_id=None, target_obj_id=None):
-    a = answer_dict
-
-    for tbl in a.get("tables", []):
-        matched = False
-        if source_obj_id and tbl.get("obj_id") == source_obj_id:
-            matched = True
-        elif tbl.get("fqn") == source_guid:
-            matched = True
-
-        if matched:
-            if target_obj_id:
-                tbl["obj_id"] = target_obj_id
-                tbl.pop("fqn", None)
-            else:
-                tbl["fqn"] = target_guid
-                tbl.pop("obj_id", None)
-            tbl["name"] = target_name
-            tbl["id"]   = target_name
-
-    if column_gap:
-        a = remove_columns_from_answer(a, column_gap)
-
-    return a
-```
-
-```python
-def repoint_view(view_dict, source_guid, target_guid, target_name, column_gap,
-                 *, source_obj_id=None, target_obj_id=None):
-    """Update a View TML body to point at target_guid instead of source_guid.
-
-    Prefers obj_id matching when available (avoids VERSION_CONFLICT / error 14009).
-    Falls back to fqn when obj_id is absent.
-    """
-    v = view_dict
-    old_name = None
-
-    for tbl in v.get("tables", []):
-        matched = False
-        if source_obj_id and tbl.get("obj_id") == source_obj_id:
-            matched = True
-        elif tbl.get("fqn") == source_guid:
-            matched = True
-
-        if matched:
-            old_name = tbl.get("name")
-            if tbl.get("id") == old_name:
-                tbl["id"] = target_name
-            if target_obj_id:
-                tbl["obj_id"] = target_obj_id
-                tbl.pop("fqn", None)
-            else:
-                tbl["fqn"] = target_guid
-                tbl.pop("obj_id", None)
-            tbl["name"] = target_name
-
-    if old_name and old_name != target_name:
-        for tp in v.get("table_paths", []):
-            if tp.get("table") == old_name:
-                tp["table"] = target_name
-        for j in v.get("joins", []):
-            if j.get("source") == old_name:
-                j["source"] = target_name
-            if j.get("destination") == old_name:
-                j["destination"] = target_name
-
-    if column_gap:
-        v = remove_columns_from_view(v, column_gap)
-
-    return v
-```
-
-```python
-def repoint_model(model_dict, source_name, target_name, column_gap,
-                  *, source_obj_id=None, target_obj_id=None,
-                  source_guid=None, target_guid=None):
-    """Repoint a Model's model_tables entry from source to target.
-
-    Updates model_tables obj_id/fqn/name, joins with/on clauses,
-    column_id prefixes, formula expressions, and description.
-    Prefers obj_id when available; falls back to fqn.
-    """
-    m = model_dict
-
-    for tbl in m.get("model_tables", []):
-        matched = False
-        if source_obj_id and tbl.get("obj_id") == source_obj_id:
-            matched = True
-        elif source_guid and tbl.get("fqn") == source_guid:
-            matched = True
-        elif tbl.get("name") == source_name:
-            matched = True
-
-        if matched:
-            tbl["name"] = target_name
-            if target_obj_id:
-                tbl["obj_id"] = target_obj_id
-                tbl.pop("fqn", None)
-            elif target_guid:
-                tbl["fqn"] = target_guid
-                tbl.pop("obj_id", None)
-
-        for join_key in ("joins", "joins_with"):
-            for j in tbl.get(join_key, []):
-                if j.get("with") == source_name:
-                    j["with"] = target_name
-                on_clause = j.get("on", "")
-                if f"[{source_name}::" in on_clause:
-                    j["on"] = on_clause.replace(
-                        f"[{source_name}::", f"[{target_name}::")
-
-    for col in m.get("columns", []):
-        cid = col.get("column_id", "")
-        if cid.startswith(f"{source_name}::"):
-            col["column_id"] = cid.replace(
-                f"{source_name}::", f"{target_name}::", 1)
-
-    for formula in m.get("formulas", []):
-        expr = formula.get("expr", "")
-        if f"[{source_name}::" in expr:
-            formula["expr"] = expr.replace(
-                f"[{source_name}::", f"[{target_name}::")
-
-    desc = m.get("description", "")
-    if source_name in desc:
-        m["description"] = desc.replace(source_name, target_name)
-
-    if column_gap:
-        m = fix_model(m, column_gap)
-
-    return m
-```
-
-**Apply to Answers:**
-
-```python
-for dep in [d for d in objects_to_fix if d["type"] == "ANSWER"]:
-    # Drift check — skip this Answer if it's been edited since the Step-4 scan
-    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
-                                   modified_at_scan.get(dep["guid"], 0),
-                                   results, phase="fix", name=dep["name"]):
-        continue
-
-    updated = copy.deepcopy(dep["tml"])
-    answer  = updated.get("answer", {})
-
-    if operation == "REMOVE":
-        # Standalone Answers with action == "REMOVE_CHART" are auto-converted to TABLE_MODE
-        # before stripping the column. This preserves the Answer (no longer "manual only").
-        if dep.get("action") == "REMOVE_CHART":
-            answer = convert_answer_to_table(answer)
-        answer = remove_columns_from_answer(answer, columns_to_remove)
-    elif operation == "REPOINT":
-        answer = repoint_answer(answer, source_guid, target_guid, target_name, column_gap,
-                                source_obj_id=source_obj_id, target_obj_id=target_obj_id)
-
-    updated["answer"] = answer
-    import_and_verify(
-        updated, dep["guid"], dep["type"], profile_name,
-        operation=operation, results=results, phase="fix", name=dep["name"],
-        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
-        target_guid=target_guid if operation == "REPOINT" else None,
-        column_gap=column_gap if operation == "REPOINT" else None,
-        target_obj_id=target_obj_id if operation == "REPOINT" else None,
-    )
-```
-
-**Apply to Liveboards:**
-
-Liveboards embed full answer definitions in `visualizations[].answer`. Apply the same
-helper functions to each visualization's answer section that references `{source_guid}`.
-Check against `[../../shared/schemas/thoughtspot-liveboard-tml.md]` for the exact
-field layout before modifying.
-
-```python
-for dep in [d for d in objects_to_fix if d["type"] == "LIVEBOARD"]:
-    # Drift check (Fix #3)
-    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
-                                   modified_at_scan.get(dep["guid"], 0),
-                                   results, phase="fix", name=dep["name"]):
-        continue
-
-    updated   = copy.deepcopy(dep["tml"])
-    liveboard = updated.get("liveboard", {})
-
-    # Collect vizzes the user chose to remove entirely (REMOVE_CHART + "A" decision)
-    vizes_to_remove = set()
-
-    for viz in liveboard.get("visualizations", []):
-        viz_id = viz.get("id", "")
-        answer = viz.get("answer", {})
-        tables = answer.get("tables", [])
-        if not any(t.get("fqn") == source_guid for t in tables):
-            continue  # this viz doesn't use the source — skip
-
-        if operation == "REMOVE":
-            viz_action = dep.get("viz_actions", {}).get(viz_id, "REMOVE_COLUMN")
-            if viz_action == "REMOVE_CHART":
-                # Two valid decisions: CONVERT_TO_TABLE (default) or REMOVE.
-                # SKIP is not offered — leaving the column referenced causes TS to reject
-                # the source change at error 14544.
-                decision = dep.get("viz_remove_decisions", {}).get(viz_id, "CONVERT_TO_TABLE")
-                if decision == "REMOVE":
-                    vizes_to_remove.add(viz_id)
-                    continue
-                # CONVERT_TO_TABLE: switch this viz's display_mode and strip the column
-                answer = convert_answer_to_table(answer)
-            answer = remove_columns_from_answer(answer, columns_to_remove)
-        elif operation == "REPOINT":
-            answer = repoint_answer(answer, source_guid, target_guid, target_name, column_gap)
-
-        viz["answer"] = answer
-
-    # Remove entire chart visualizations the user chose to delete
-    if vizes_to_remove:
-        liveboard["visualizations"] = [
-            v for v in liveboard.get("visualizations", [])
-            if v.get("id") not in vizes_to_remove
-        ]
-
-    # Liveboard-level filter updates (REMOVE only)
-    if operation == "REMOVE":
-        # Remove filter entries for removed columns (Rule 1)
-        # A filter whose column list is fully emptied is dropped entirely
-        updated_filters = []
-        for filt in liveboard.get("filters", []):
-            new_cols = [c for c in filt.get("column", []) if c not in columns_to_remove]
-            if new_cols:
-                filt["column"] = new_cols
-                updated_filters.append(filt)
-        liveboard["filters"] = updated_filters
-
-    import_and_verify(
-        updated, dep["guid"], dep["type"], profile_name,
-        operation=operation, results=results, phase="fix", name=dep["name"],
-        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
-        target_guid=target_guid if operation == "REPOINT" else None,
-        column_gap=column_gap if operation == "REPOINT" else None,
-        target_obj_id=target_obj_id if operation == "REPOINT" else None,
-    )
-```
-
-**Apply to Views:**
-
-Views have `view_columns[]`, `formulas[]`, `joins[]`, and `search_query` — all need
-updating when a referenced column is removed or renamed. See
-[../../shared/schemas/thoughtspot-view-tml.md](../../shared/schemas/thoughtspot-view-tml.md)
-for the full field layout.
-
-```python
-def remove_columns_from_view(view_dict, cols_to_remove):
-    """Remove column references from a View TML dict (the view: section)."""
-    v = view_dict
-
-    # search_query — MUST be sanitized (same rule as Answers — open-items.md #3)
-    if v.get("search_query"):
-        v["search_query"] = sanitize_search_query(v["search_query"], cols_to_remove)
-
-    # view_columns[] — remove entries whose column_id references the removed column
-    v["view_columns"] = [
-        c for c in v.get("view_columns", [])
-        if not any(col in c.get("column_id", "") for col in cols_to_remove)
-        and c.get("name") not in cols_to_remove
-    ]
-
-    # formulas[] — remove formulas whose expr references the removed column
-    formula_ids_to_remove = {
-        f["id"] for f in v.get("formulas", [])
-        if any(col in f.get("expr", "") for col in cols_to_remove)
-    }
-    if formula_ids_to_remove:
-        v["formulas"]     = [f for f in v.get("formulas", []) if f["id"] not in formula_ids_to_remove]
-        v["view_columns"] = [c for c in v.get("view_columns", []) if c.get("column_id") not in formula_ids_to_remove]
-
-    # joins[] — remove join conditions that reference the column in the ON expression
-    v["joins"] = [
-        j for j in v.get("joins", [])
-        if not any(col in j.get("on", "") for col in cols_to_remove)
-    ]
-
-    return v
-```
-
-Apply to Views in the update loop:
-
-```python
-for dep in [d for d in objects_to_fix if d["type"] == "VIEW"]:
-    # Drift check (Fix #3)
-    if not assert_no_drift_or_skip(dep["guid"], dep["type"], profile_name,
-                                   modified_at_scan.get(dep["guid"], 0),
-                                   results, phase="fix", name=dep["name"]):
-        continue
-
-    updated = copy.deepcopy(dep["tml"])
-    view    = updated.get("view", {})
-
-    if   operation == "REMOVE":  view = remove_columns_from_view(view, columns_to_remove)
-    elif operation == "REPOINT": view = repoint_view(view, source_guid, target_guid, target_name, column_gap,
-                                                       source_obj_id=source_obj_id, target_obj_id=target_obj_id)
-
-    updated["view"] = view
-    import_and_verify(
-        updated, dep["guid"], dep["type"], profile_name,
-        operation=operation, results=results, phase="fix", name=dep["name"],
-        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
-        target_guid=target_guid if operation == "REPOINT" else None,
-        column_gap=column_gap if operation == "REPOINT" else None,
-        target_obj_id=target_obj_id if operation == "REPOINT" else None,
-    )
-```
-
-**Apply to Feedback:**
-
-Feedback items share the Model's GUID. Export the updated Model's `--associated` TML
-to get the current feedback state, then strip stale entries:
-
-```python
-for dep in [d for d in objects_to_fix if d["type"] == "FEEDBACK"]:
-    # Drift check (Fix #3) — feedback shares the Model GUID, so we re-check
-    # the Model's timestamp; a moved Model invalidates the feedback we exported
-    if not assert_no_drift_or_skip(dep["guid"], "MODEL", profile_name,
-                                   modified_at_scan.get(dep["guid"], 0),
-                                   results, phase="fix", name=dep["name"]):
-        continue
-
-    updated   = copy.deepcopy(dep["tml"])
-    feedback  = updated.get("nls_feedback", {})
-    target    = columns_to_remove
-
-    entries = feedback.get("feedback", [])
-    if operation == "REMOVE":
-        entries = [
-            e for e in entries
-            if not any(col in json.dumps(e) for col in target)
-        ]
-    feedback["feedback"] = entries
-    updated["nls_feedback"] = feedback
-    import_and_verify(
-        updated, dep["guid"], "MODEL", profile_name,
-        operation=operation, results=results, phase="fix", name=dep["name"],
-        columns_to_remove=columns_to_remove if operation == "REMOVE" else None,
-    )
-```
-
-**Apply to dependent Models:**
-
-Dependent Models may join on the renamed/removed column. Apply the same removal/rename
-logic as Step 9b (source) — including **join condition removal AND model-level filter
-removal** — to each dependent Model's TML. Both are required to avoid TS rejection
-(open-items.md #4 and #12).
-
-```python
-def fix_model(m, cols_to_remove):
-    """Strip a column from a model TML body. Returns the same dict mutated."""
-    # Strip from columns[]
-    formula_ids_to_remove = {
-        c.get("formula_id") for c in m.get("columns", [])
-        if c.get("name") in cols_to_remove and c.get("formula_id")
-    }
-    m["columns"] = [c for c in m.get("columns", []) if c.get("name") not in cols_to_remove]
-    m["formulas"] = [f for f in m.get("formulas", []) if f.get("id") not in formula_ids_to_remove]
-
-    # Strip join conditions referencing the column (open-items.md #4)
-    # model_tables uses `joins` (Scenario A referencing + Scenario B inline);
-    # `joins_with` only exists at the table/view level, never on model_tables.
-    for tbl in m.get("model_tables", []):
-        tbl["joins"] = [
-            j for j in tbl.get("joins", [])
-            if not any(c in j.get("on", "") for c in cols_to_remove)
-        ]
-
-    # Strip model-level filters referencing the column (open-items.md #12)
-    # TS rejects the import with error_code 14518 if a filter references a missing column.
-    m["filters"] = [
-        f for f in m.get("filters", [])
-        if not any(c in cols_to_remove for c in f.get("column", []))
-    ]
-
-    return m
-```
-
-**Track all results:**
-
-```python
-results = {"succeeded": [], "failed": [], "skipped": []}
-# Add source to succeeded (already confirmed above)
-results["succeeded"].append({"name": source_name, "type": source_type, "guid": source_guid})
-
-for dep in objects_to_fix:
-    # ... apply change, call import_tml, call import_status ...
-    if ok:
-        results["succeeded"].append(dep)
-    else:
-        results["failed"].append({**dep, "error": err})
-        print(f"  ✗ {dep['name']} — {err}")
-```
-
-### 9d — Process reusable Sets
-
-After all dependent objects have been updated, process the `affected_sets` list.
-
-Read [references/open-items.md](references/open-items.md) #11 before implementing the
-delete step — the `ts metadata delete` command for Sets is unverified.
-
-**For REMOVE — delete sets that operated on the removed column:**
-
-Sets with `action == "DELETE_SAFE"` have no consumers and can be deleted immediately.
-Sets with `action == "DELETE_AFTER_DEPENDENTS"` had consumers that should have been
-updated in 9c — but only delete the Set if every consumer fix actually succeeded.
-Deleting a Set whose consumer fixes failed leaves the consumers pointing at a missing
-Set GUID (silent breakage). Skip the Set delete in that case and surface in the
-Change Report so the user can investigate.
-
-```python
-# Index 9c results by guid for O(1) lookup
-fix_results_by_guid = {r.get("guid"): r for r in results["succeeded"]
-                       if r.get("phase") in ("fix", None)}
-fix_failed_guids = {r["guid"] for r in results["failed"]
-                    if r.get("phase") in ("fix", None) and r.get("guid")}
-
-for s in affected_sets:
-    if s["action"] not in ("DELETE_SAFE", "DELETE_AFTER_DEPENDENTS"):
-        continue
-
-    # GUARD (Fix #2, 2026-04-26): if any consumer fix failed in 9c, do NOT delete the
-    # Set. Deleting it would silently break the failed consumer (now points at a
-    # missing GUID with no chance for the skill to detect or restore).
-    consumer_guids = set(s.get("in_use_by", []))
-    failed_consumers = consumer_guids & fix_failed_guids
-    if failed_consumers:
-        msg = (f"skipped — {len(failed_consumers)} consumer fix(es) failed in 9c; "
-               f"deleting the Set would dangle those consumers. "
-               f"Failed consumer GUIDs: {sorted(failed_consumers)}")
-        print(f"  ⚠ Skip delete '{s['name']}' ({s['guid']}): {msg}")
-        results["skipped"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
-                                   "phase": "set_delete", "reason": msg})
-        continue
-
-    print(f"  Deleting set '{s['name']}' ({s['guid']})...")
-    result = subprocess.run(
-        ["bash", "-c",
-         f"source ~/.zshenv && ts metadata delete {s['guid']} "
-         f"--profile '{profile_name}'"],
-        capture_output=True, text=True,
-    )
-    if result.returncode == 0:
-        print(f"  ✓ Deleted set: {s['name']}")
-        results["succeeded"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
-                                     "phase": "set_delete", "action": "deleted"})
-    else:
-        err = result.stderr.strip() or result.stdout.strip()
-        print(f"  ✗ Failed to delete set '{s['name']}': {err}")
-        results["failed"].append({"name": s["name"], "type": "SET", "guid": s["guid"],
-                                  "phase": "set_delete", "error": err})
-```
+Outcome meanings (from the import/verify matrix — open-item #15):
+
+| `outcome` | Meaning |
+|---|---|
+| `SUCCESS` | API returned OK and re-export verified the change applied |
+| `SUCCESS_WITH_WARNING` | API returned ERROR but the change actually applied — TS misreported (open-item #15). Treated as success. |
+| `FAIL_SILENT` | API returned OK but the change did NOT apply — silent rejection |
+| `FAIL_VERIFIED` | API returned ERROR and the change did not apply — genuine failure |
+
+Carry `succeeded` / `failed` / `deleted` / `skipped` straight into the Step 10 Change
+Report.
 
 ---
 
@@ -2074,8 +1152,8 @@ path (from the manifest) for manual restoration via the ThoughtSpot UI TML edito
 | Import: `column_id not found` in dependent | Column reference format may differ from display name — see open-items.md #2 |
 | Import: `search_query` validation error | The `search_query` still references a removed column — `sanitize_search_query()` may have missed a token. Check for bracket-format variants like `[TABLE::col]` and strip manually |
 | Import: join condition references removed column | `source_affected_joins` detection in Step 4 may have missed a join — check `model_tables[].joins_with[].on` for the column name and remove the join entry manually |
-| Liveboard import fails after REMOVE_CHART decision | Viz ID in `viz_remove_decisions` may not match `visualizations[].id` — print `dep["viz_actions"]` keys and compare to `viz.get("id")` in the liveboard TML |
-| Import: model already exists with same name | `guid:` may be missing or mis-placed — check the YAML serialization in `import_tml()` |
+| Liveboard import fails after REMOVE_CHART decision | A viz ID in the plan's `viz_decisions` may not match `visualizations[].id` — export the liveboard TML and compare the `viz_decisions` keys to each `visualizations[].id` |
+| Import: model already exists with same name | The source export's `guid:` line may be missing — re-run `ts tml export {guid}` and confirm the top-level `guid:` is present before retrying |
 | Import creates a new object instead of updating | `--no-create-new` flag missing — add it; delete the duplicate via `ts metadata delete` |
 | Dependency scan returns 0 results unexpectedly | Batch export may have timed out — reduce `batch_size` to 5 and re-run Step 4 |
 | View TML import fails after column removal | `view_columns[].column_id` may use `TABLE_PATH::col` format — check that column path ID prefix is retained in the update |
@@ -2108,6 +1186,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.0 | 2026-07-08 | **Step 9 apply is now the codified `ts dependency apply-change` command** (BL-083 PR2). The ~1,060 lines of inline drift/delete/mutate/import/verify/set-delete pseudocode are replaced by a single plan-JSON-driven command; Step 9 now builds the plan and reads back a results JSON. Deterministic decisions (drift, obj_id derivation, the import/verify outcome matrix, post-import verification, 9c ordering, the set-delete consumer guard, and REMOVE_CHART-vs-REMOVE_COLUMN chart-axis-role classification) are extracted to tested `ts_cli/dependency/apply.py`. **Latent-bug fix:** the corrected execution order is deletes → dependents → source → sets (source LAST) — the old section bodies ran source-first, which error 14544 (“Deleted columns have dependents”) would reject whenever a dependent still referenced the column. Chart-role surfacing in `ts metadata report` (open-item #22) and the mandatory live test of the corrected ordering (open-item #23) are follow-ups. Requires ts-cli v0.41.0. |
 | 1.3.0 | 2026-07-08 | **Step 7 backup and Step 11 rollback now call codified CLI commands** (BL-083 PR1). Step 7's inline export loop is replaced by `ts dependency backup` (builds a plan JSON → exports source + fix/delete dependents → writes per-object files + `manifest.json`; collects all exports first and writes nothing on any failure). Step 11's inline `rollback_objects` is replaced by `ts dependency rollback --backup-dir` (restores dependents-before-source; re-imports DELETE-intent objects as new GUIDs). The pure REMOVE/REPOINT TML transforms are now available as `ts dependency mutate` (extracted to `ts_cli/dependency/mutate.py` with full unit tests; fixes two latent bugs — an always-empty formula-name scrub set, and an Answer duplicate-`guid:` YAML break). Requires ts-cli v0.39.0. Step 9's drift/import/verify/delete orchestration stays inline pending the `ts dependency apply-change` follow-up (BL-083 PR2). |
 | 1.2.0 | 2026-07-03 | **Step 4 scope filter now uses `matched_columns[]`.** `ts metadata report`'s dependents now carry a `matched_columns` field (populated by `ts_cli.report.classifier.build_matched_columns_map` from the deep RLS/join/alias/AI-surface/alert probes) — the Step 4 "Filtering by scope" table was filtering on `risk.reason` text, which is always a fixed literal and never names a column, so the filter could never match (2026-07 audit finding). **Step 6b / delete policy line corrected** — both no longer claim `ts metadata delete` "is currently broken" and call raw v2; they now name `ts metadata delete` directly, matching Step 9a (verified 2026-05-11) and removing a stale instruction that could have led an executor to hand-roll a `requests` call. |
 | 1.1.0 | 2026-06-09 | **Repoint: obj_id-based references with fqn fallback.** Step 9 now detects `obj_id` support via `export_options` flags and prefers obj_id-based model_table references over fqn to avoid VERSION_CONFLICT (error 14009) on some TS builds (open-item #23). New `repoint_model()` function handles model_tables obj_id/name/joins/column_id/formula swaps. `repoint_answer()` and `repoint_view()` also support obj_id-first matching. **Backup location prompt** — Step 7 now asks the user where to save backups (current directory, /tmp, or custom path) instead of hardcoding /tmp. Requires ts-cli v0.8.0 (`--include-obj-id`, `--include-obj-id-ref`, `--no-guid` flags). |

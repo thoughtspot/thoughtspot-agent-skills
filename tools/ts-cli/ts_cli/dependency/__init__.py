@@ -18,6 +18,20 @@ from ts_cli.dependency.backup import (
     rollback_order,
     rollback_sort_key,
 )
+from ts_cli.dependency.apply import (
+    chart_role_for_answer,
+    classify_liveboard_viz_roles,
+    derive_target_obj_id,
+    fix_sort_key,
+    import_outcome,
+    is_drift,
+    is_success_outcome,
+    set_delete_decision,
+    sort_fixes,
+    v2_type_for,
+    verify_remove_applied,
+    verify_repoint_applied,
+)
 from ts_cli.dependency.mutate import (
     apply_remove,
     apply_repoint,
@@ -43,6 +57,19 @@ __all__ = [
     "restore_policy_for",
     "rollback_order",
     "rollback_sort_key",
+    # apply.py
+    "chart_role_for_answer",
+    "classify_liveboard_viz_roles",
+    "derive_target_obj_id",
+    "fix_sort_key",
+    "import_outcome",
+    "is_drift",
+    "is_success_outcome",
+    "set_delete_decision",
+    "sort_fixes",
+    "v2_type_for",
+    "verify_remove_applied",
+    "verify_repoint_applied",
     # mutate.py
     "apply_remove",
     "apply_repoint",

@@ -29,7 +29,7 @@ from ts_cli.dependency.backup import (
 )
 from ts_cli.dependency.mutate import apply_remove, apply_repoint
 
-app = typer.Typer(help="ThoughtSpot dependency backup / mutate / rollback (BL-083).")
+app = typer.Typer(help="ThoughtSpot dependency backup / mutate / rollback / apply-change (BL-083).")
 
 _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
                                help="Profile name (default: first profile or TS_PROFILE env var)")
