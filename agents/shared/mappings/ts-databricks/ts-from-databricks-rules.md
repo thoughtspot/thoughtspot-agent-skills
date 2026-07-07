@@ -717,6 +717,14 @@ Map Databricks types from `DESCRIBE TABLE` output to ThoughtSpot types:
 | `timestamp`, `timestamp_ntz` | `DATETIME` |
 | `binary`, `array`, `map`, `struct` | **Omit** — not supported in TS |
 
+> **Casing convention for Databricks connections.** Unity Catalog uses **lowercase**
+> identifiers for catalog, schema, and table names (`agent_skills.dunder_mifflin.dm_inventory`)
+> but column names preserve the original DDL casing (often **uppercase**: `FILLED_INVENTORY`).
+> When creating Table TMLs via `ts tables create`, use lowercase for `db`, `schema`, and
+> `db_table`, and match column casing from `DESCRIBE TABLE` output exactly. ThoughtSpot
+> validates both against the connection's JDBC metadata — mismatched case causes
+> "does not exist in connection" errors.
+
 ---
 
 ## Formula Translation

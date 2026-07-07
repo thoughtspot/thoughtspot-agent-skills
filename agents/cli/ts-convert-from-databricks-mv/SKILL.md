@@ -819,6 +819,11 @@ Where `tables-spec.json` is a JSON array built from the column data. See
 `ts tables create --help` for the spec format. This command handles JDBC retry and
 GUID resolution automatically, and outputs `{name: guid}`.
 
+> **Both `db` and `schema` must be non-empty** in every table spec entry. ThoughtSpot
+> requires the fully qualified three-part path (`catalog.schema.table`) even if the
+> connection has a default catalog configured. Passing an empty `db` or `schema` causes
+> "Fully qualified table mapping missing".
+
 Record the created GUID for use in the model TML.
 
 ---

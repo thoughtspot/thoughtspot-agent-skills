@@ -764,6 +764,9 @@ For Scenario B / inline joins:
 - The `joins[]` array lives on the FROM table's `model_tables` entry.
 - Each entry has `with`, `on`, `type`, `cardinality` (no `referencing_join`).
 - `with` points to the TO table's `id`.
+- **`on` uses ThoughtSpot formula syntax** (`[TABLE_NAME::COLUMN_NAME] = [TABLE_NAME::COLUMN_NAME]`),
+  NOT SQL-style double-quoted identifiers (`"TABLE"."COL"`). The TML lexer rejects `"` as
+  an invalid character in this context.
 
 ---
 

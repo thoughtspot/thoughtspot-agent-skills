@@ -60,6 +60,22 @@ formulas:
 Inline strings with `{ }` cause a YAML mapping error — ThoughtSpot interprets `{` as
 the start of an inline map. Always use `>-` when curly braces appear in the expression.
 
+**Single quotes inside formulas do NOT need escaping in YAML double-quoted strings:**
+
+```yaml
+# CORRECT — single quotes are valid inside double-quoted YAML:
+  expr: "concat ( [T::LAST_NAME] , ', ' , [T::FIRST_NAME] )"
+```
+
+```text
+# WRONG — backslash-quote is not a valid YAML escape (causes parse error):
+  expr: "concat ( [T::LAST_NAME] , \', \' , [T::FIRST_NAME] )"
+```
+
+Only `\\`, `\"`, `\n`, `\t`, and Unicode escapes (`\uXXXX`) are valid inside YAML
+double-quoted strings. If a formula contains both single quotes and curly braces, use
+`>-` (which needs no escaping at all).
+
 ---
 
 ## Aggregate Functions
