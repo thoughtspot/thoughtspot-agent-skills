@@ -160,7 +160,7 @@ contract, a larger change than the orchestrator needs.
 
 ---
 
-## #23 — `apply-change` execution order (source LAST) — VERIFIED LIVE 2026-07-08 (partial)
+## #23 — `apply-change` execution order (source LAST) — VERIFIED LIVE 2026-07-08
 
 **Corrected in BL-083 PR2.** The SKILL's old Step 9 *section bodies* imported the
 source BEFORE dependents, but the overview + the error-14544 rationale ("Deleted
@@ -187,12 +187,12 @@ BL-083 PR2 until this passes.
   cleanly (verified column/refs back to original) after every run.
 - **Bug found + fixed (open-item #24):** the model-fix mutation missed aliased
   columns; after the fix, 3 of 4 models stripped CATEGORY_NAME successfully.
-- **Still to show green end-to-end:** a fully-successful source removal needs the
-  COMPLETE multi-hop, alias-propagated plan (base col CATEGORY_NAME → model alias
-  "Product Category" → the set + answers that consume the model alias). apply-change
-  executes the plan it is given; building that full graph is the ts-dependency-manager
-  SKILL's Step 4-6 job. Validate the green path by running the full skill (or a
-  column with a shallow graph). The COMMAND itself is verified correct + safe.
+- **Green end-to-end CONFIRMED** on a clean column (DM_PRODUCT.PRODUCT_DESCRIPTION,
+  4 model fixes + source, no cohort/set): all 4 dependent fixes SUCCESS, then the
+  source table column removal SUCCESS (no 14544), column verified gone from table and
+  models; `ts dependency rollback` then restored all 5 objects. (CATEGORY_NAME's own
+  removal needs a non-cleanly-reversible set delete — a cohort is anchored on it — so
+  the green demo used the fix-only PRODUCT_DESCRIPTION graph instead.)
 
 ---
 
@@ -213,5 +213,26 @@ references the removed column, and cascades to any column backed by a removed fo
 Whole-token matching avoids false-positives (`SUB_CATEGORY_NAME`, `CATEGORY_ID` survive).
 Verified live: 3 of 4 models then stripped the aliased column successfully. Unit tests
 added in `test_dependency_mutate.py`.
+
+**Status:** FIXED + unit-tested + live-verified.
+
+---
+
+## #25 — Rollback restored dependents before source (one-pass failure) — FIXED 2026-07-08
+
+**Found live on se-thoughtspot** during the #23 green-path test. `rollback_order`
+restored dependents BEFORE the source (tables last), but a REMOVE rollback must restore
+the source's removed column FIRST — re-importing a Model whose `column_id` is
+`DM_PRODUCT::PRODUCT_DESCRIPTION` fails ("Unable to create model column(s) …
+DM_PRODUCT::PRODUCT_DESCRIPTION") while the source table has not yet been restored. On
+the live run the 4 model restores failed on pass 1 (table restored last); a SECOND
+rollback run completed them (table then present). Silent-ish: exit 0 with per-object
+failures in the results JSON.
+
+**Fix (ts-cli v0.41.0):** `rollback_order` now restores ROOT-first — sorted by
+`DELETE_ORDER` rank DESCENDING (Table → Model/Worksheet → View → Set → Answer →
+Liveboard), the reverse of the leaf-first delete/apply order, stable within a tier.
+Re-verified live: the same cycle now rolls back all 5 objects in ONE pass (source table
+first, then the 4 models), 0 failures. Tests updated in `test_dependency_backup.py`.
 
 **Status:** FIXED + unit-tested + live-verified.

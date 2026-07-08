@@ -81,23 +81,32 @@ def restore_policy_for(tml_type: str) -> str:
 
 
 def rollback_sort_key(entry: Dict[str, Any]) -> int:
-    """Sort key used to build rollback order: table entries sort first (0), every
-    other type sorts after (1). Matches SKILL.md ~2098:
-    `entries.sort(key=lambda e: 0 if e["type"] == "table" else 1)`.
+    """Restore-order key: the object's `DELETE_ORDER` rank (case-insensitive).
+
+    Rollback restores ROOT-first (the reverse of the leaf-first delete/apply order), so
+    entries are sorted by this key DESCENDING in `rollback_order`. A connection Table
+    (rank 5) therefore restores before the Models that reference it (4), before Views
+    (3), Sets (2), Answers (1), and Liveboards (0). Unknown types get -1 (restore last).
     """
-    return 0 if entry.get("type") == "table" else 1
+    return DELETE_ORDER.get(str(entry.get("type", "")).upper(), -1)
 
 
 def rollback_order(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Return `entries` in restore order: dependents before source.
+    """Return `entries` in restore order: source/roots BEFORE their dependents.
 
-    Matches SKILL.md ~2098-2100 exactly — sort ascending by `rollback_sort_key`
-    (tables first, everything else after) and then iterate in REVERSE. Since a
-    connection Table is the typical REPOINT/REMOVE source and everything else is a
-    dependent, this restores dependents (key=1, sorted first in the reversed list)
-    before the source table (key=0, restored last). Does not mutate `entries`.
+    This is the reverse of the leaf-first delete/apply order. A dependent can only be
+    re-imported once the object it references exists again — restoring a Model whose
+    `column_id` is `DM_PRODUCT::PRODUCT_DESCRIPTION` requires the DM_PRODUCT table to
+    already carry that column. Sorts by `rollback_sort_key` DESCENDING (tables first);
+    stable within a tier so equal-rank entries keep manifest order. Does not mutate
+    `entries`.
+
+    Fixes the live-found rollback bug (open-items #25): the previous order restored
+    dependents before the source table, so a column-removal rollback failed on the
+    first pass with "Unable to create model column(s) … <table>::<col>" and only
+    completed after a second run (once the table had been restored last).
     """
-    return list(reversed(sorted(entries, key=rollback_sort_key)))
+    return sorted(entries, key=rollback_sort_key, reverse=True)
 
 
 # ---------------------------------------------------------------------------

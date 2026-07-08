@@ -135,28 +135,30 @@ class TestRestorePolicyFor:
 # ---------------------------------------------------------------------------
 
 class TestRollbackOrder:
-    def test_sort_key_table_is_zero(self):
-        assert rollback_sort_key({"type": "table"}) == 0
-
-    def test_sort_key_non_table_is_one(self):
-        assert rollback_sort_key({"type": "model"}) == 1
+    def test_sort_key_is_delete_order_rank(self):
+        # Root-first restore: rank == DELETE_ORDER, sorted descending in rollback_order.
+        assert rollback_sort_key({"type": "table"}) == 5
+        assert rollback_sort_key({"type": "model"}) == 4
         assert rollback_sort_key({"type": "answer"}) == 1
+        assert rollback_sort_key({"type": "liveboard"}) == 0
+        assert rollback_sort_key({"type": "mystery"}) == -1  # unknown restores last
 
-    def test_dependents_restored_before_table_source(self):
+    def test_source_table_restored_before_dependents(self):
         entries = [
-            {"type": "table", "name": "source_table"},
-            {"type": "model", "name": "dependent_model"},
             {"type": "answer", "name": "dependent_answer"},
+            {"type": "model", "name": "dependent_model"},
+            {"type": "table", "name": "source_table"},
         ]
-        ordered = rollback_order(entries)
-        # Table (the source) must be LAST.
-        assert ordered[-1]["name"] == "source_table"
-        assert {e["name"] for e in ordered[:-1]} == {"dependent_model", "dependent_answer"}
+        ordered = [e["name"] for e in rollback_order(entries)]
+        # Root-first: table before model before answer (a dependent can only be
+        # restored once the object it references exists again — open-items #25).
+        assert ordered[0] == "source_table"
+        assert ordered.index("dependent_model") < ordered.index("dependent_answer")
 
-    def test_all_tables_reversed(self):
+    def test_stable_within_a_tier(self):
         entries = [{"type": "table", "name": "a"}, {"type": "table", "name": "b"}]
         ordered = rollback_order(entries)
-        assert [e["name"] for e in ordered] == ["b", "a"]
+        assert [e["name"] for e in ordered] == ["a", "b"]  # manifest order preserved
 
     def test_does_not_mutate_input(self):
         entries = [{"type": "table", "name": "a"}, {"type": "model", "name": "b"}]

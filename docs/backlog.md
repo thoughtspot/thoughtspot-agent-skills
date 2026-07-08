@@ -2232,9 +2232,10 @@ once in `agents/cli/CLAUDE.md`.
 
 **Source:** 2026-07-03 codification review rows 11–13 (angle 11).
 **Affects:** ts-dependency-manager, `tools/ts-cli/ts_cli/dependency/` module.
-**Status:** PR1 SHIPPED (2026-07-08, ts-cli v0.39.0). PR2 CODE COMPLETE — draft PR
-(ts-cli v0.41.0, skill v1.4.0); **gated on mandatory live test** against se-thoughtspot
-before merge (open-item #23). Safety-critical.
+**Status:** PR1 SHIPPED (2026-07-08, ts-cli v0.39.0). PR2 CODE COMPLETE + LIVE-VERIFIED
+on se-thoughtspot — draft PR (ts-cli v0.41.0, skill v1.4.0). Live test confirmed the
+green end-to-end (dependent-fix → source-remove → rollback) and found+fixed two bugs
+(open-items #24 aliased-column strip, #25 root-first rollback order). Safety-critical.
 
 ~900 of the SKILL.md's lines are inline pseudocode for the skill's headline safety
 promises: TML backup manifest (Step 7), the remove/repoint mutation engine across 5 object
