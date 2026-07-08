@@ -47,6 +47,8 @@ SpotQL UDFs (`udf-reference.md`), not `TRUNC`/`TO_DATE`/`CURRENT_DATE`.
 |---|---|---|
 | `ORDER BY` on a set-operator result (`… UNION ALL … ORDER BY col`) | silently dropped from generated SQL — results return in arbitrary order | ✓ live 2026-07-07 |
 | `LIMIT` on a set-operator result (`… UNION ALL … LIMIT N`) | misplaced into first branch CTE only — combined result returns more than N rows | ✓ live 2026-07-07 |
+| Aggregate condition in `WHERE` (e.g. `WHERE SUM(x) > 0`) | invalid SQL, but silently reinterpreted as `HAVING` — filters post-aggregation, no error. Write `HAVING` explicitly; don't rely on the lenient parse | ✓ live 2026-07-07 |
+| Set-operation branches with **mismatched column types** at the same ordinal (e.g. VARCHAR vs DOUBLE) | compiles (`generate-sql` SUCCESS) but fails at `fetch-data` with `QUERY_EXECUTION_FAILED` (e.g. *Numeric value 'United States' is not recognized*) — not caught at compile time | ✓ live 2026-07-07 |
 | `QUALIFY …` | clause silently dropped → you get **all** rows, not the filtered set | [SCAL-319330](https://thoughtspot.atlassian.net/browse/SCAL-319330) |
 | `FILTER (WHERE …)` on an aggregate | silently dropped → aggregate ignores the filter | [SCAL-319332](https://thoughtspot.atlassian.net/browse/SCAL-319332) |
 | `TO_NUMBER(x)` | silently dropped (no-op) | [SCAL-319336](https://thoughtspot.atlassian.net/browse/SCAL-319336) |

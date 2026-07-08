@@ -97,7 +97,9 @@ expression.
   `INTERSECT ALL` **work at the top level** of the query ([SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049),
   verified 2026-07-07), and **inside a user-defined CTE when no branch contains an
   aggregate measure** (verified 2026-07-08). Each branch must have the same number of
-  columns with compatible types. Operator precedence follows the SQL standard (INTERSECT
+  columns with compatible types — but type compatibility is **not checked at compile
+  time**: a mismatch (e.g. VARCHAR vs DOUBLE at the same position) passes `generate-sql`
+  and fails at `fetch-data`. Operator precedence follows the SQL standard (INTERSECT
   binds tighter than UNION/EXCEPT). Parentheses for explicit grouping are supported.
   **Caveats (still broken):**
   - **No `ORDER BY` on the combined result** — silently dropped from generated SQL.
@@ -142,6 +144,9 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
   `sample_values`, copy a literal verbatim; if not, use `ILIKE`.
 - Null checks: `IS NULL` / `IS NOT NULL`, never `= NULL`.
 - Filter early — put `WHERE` inside CTEs rather than wrapping the final SELECT.
+- **Aggregate conditions go in `HAVING`, never `WHERE`.** An aggregate in `WHERE`
+  (e.g. `WHERE SUM(x) > 0`) does not error — it is silently reinterpreted as `HAVING`
+  (verified live 2026-07-07). Write the intended clause explicitly.
 
 ## When you can't answer it
 
