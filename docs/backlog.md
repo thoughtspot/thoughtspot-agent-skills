@@ -2232,10 +2232,12 @@ once in `agents/cli/CLAUDE.md`.
 
 **Source:** 2026-07-03 codification review rows 11–13 (angle 11).
 **Affects:** ts-dependency-manager, `tools/ts-cli/ts_cli/dependency/` module.
-**Status:** PR1 SHIPPED (2026-07-08, ts-cli v0.39.0). PR2 CODE COMPLETE + LIVE-VERIFIED
-on se-thoughtspot — draft PR (ts-cli v0.41.0, skill v1.4.0). Live test confirmed the
-green end-to-end (dependent-fix → source-remove → rollback) and found+fixed two bugs
-(open-items #24 aliased-column strip, #25 root-first rollback order). Safety-critical.
+**Status:** ✅ DONE — PR1 (#192, 2026-07-08, ts-cli v0.39.0) + PR2 (#194, 2026-07-08,
+ts-cli v0.41.0, skill v1.4.0) both merged to main. PR2 was live-verified on
+se-thoughtspot (open-item #23): green end-to-end (dependent-fix → source-remove →
+one-pass rollback), and the live run found+fixed two bugs (open-items #24 aliased-column
+strip via column_id/expr, #25 root-first rollback order). Only follow-up left is
+open-item #22 (surface chart-axis-role in `ts metadata report` for Step 6).
 
 ~900 of the SKILL.md's lines are inline pseudocode for the skill's headline safety
 promises: TML backup manifest (Step 7), the remove/repoint mutation engine across 5 object
@@ -2252,7 +2254,7 @@ fixed), `backup.py` (manifest/ordering helpers), `commands/dependency.py` exposi
 the real module. SKILL.md Step 7 → `ts dependency backup`, Step 11 → `ts dependency
 rollback`.
 
-**PR2 (code complete, draft PR — gated on live testing against se-thoughtspot):**
+**PR2 (SHIPPED — #194, live-verified on se-thoughtspot):**
 `ts dependency apply-change` — the Step 9 drift-check → delete → dependent-fix →
 source → set-delete loop, wiring `apply_remove`/`apply_repoint` (mutate.py) and the new
 deterministic decision helpers in `ts_cli/dependency/apply.py` (drift, obj_id derivation,
@@ -2266,10 +2268,10 @@ pure function (`apply.chart_role_for_answer`/`classify_liveboard_viz_roles`) con
 apply-change (default CONVERT_TO_TABLE, plan-overridable) — surfacing it in `ts metadata
 report` for Step 6 is deferred to **open-item #22** (build_report doesn't wire
 per-dependent chart classification today, so it's a larger schema-contract change).
-Open-items #2/#13/#15/#16 still bite here. **Mandatory live verification of the corrected
-ordering + drift/obj_id/set-guard paths before merge — open-item #23.**
+Open-items #2/#13/#15/#16 still bite here. Live verification of the corrected ordering +
+drift/obj_id/set-guard paths — **done, open-item #23 VERIFIED**.
 
-**Target:** PR2 live-tested + merged by 2026-10-31.
+**Target:** ✅ Delivered 2026-07-08 (both PRs merged, live-verified).
 
 ---
 
