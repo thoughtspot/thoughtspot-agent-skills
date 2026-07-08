@@ -41,14 +41,22 @@ here once created:
   6 rows sanity-confirmed (expected 6) — 2 categories × 3 months, resolved relative to
   `CURRENT_DATE()` at execution time (2026-07-08) to `txn_date` = 2026-05-15 / 2026-06-15 /
   2026-07-15 (i.e. "current month" = July 2026 for this run).
-- ThoughtSpot-side objects (Task 5, 2026-07-08): **none created.** 0 of 2 planned Tables
-  (`PR1_ROLLING_FIXTURE`, `PR1_PERIOD_FIXTURE`) and 0 of 2 planned Models
-  (`PR1_Rolling_Window_Fixture`, `PR1_Period_Window_Fixture`) exist — table registration on
-  the `dl-databricks` connection failed before any `ts tml import` was attempted. See
-  `### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) — BLOCKED` below for the full diagnostic.
-  No GUIDs to record; Task 9 has nothing to delete on the ThoughtSpot side for this PR
-  (Databricks-side `rolling_fixture`/`period_fixture`/`rolling_mv`/`period_mv` from Tasks 3–4
-  are unaffected and still need Task 9 cleanup as originally planned).
+- ThoughtSpot-side objects (Task 5): first attempt 2026-07-08 was **blocked** at table
+  registration (see the historical BLOCKED subsections below, retained as diagnostic record);
+  resolved 2026-07-09 when the user created a dedicated scratch connection **`DBX_DAMIAN`**
+  (`b9e709c6-b951-4b50-a816-b450e6aee278`, OAUTH_WITH_SERVICE_PRINCIPAL, host
+  `dbc-3472b2da-8a4e.cloud.databricks.com`, warehouse `c6ed539a60038b93` — same
+  workspace + warehouse as Tasks 3–4 — exposing catalog `agent_skills`). Objects created
+  2026-07-09, recorded here **for Task 9's cleanup** (`ts metadata delete` targets):
+  - Table `PR1_ROLLING_FIXTURE` — `362a3f19-65df-41ac-ad27-432e7c66df10`
+  - Table `PR1_PERIOD_FIXTURE` — `34141c51-59f9-4025-93a2-fe8d1dcb8c1d`
+  - Model `PR1_Rolling_Window_Fixture` — `f7a0a352-40cf-4e68-ad7c-561f8664e5dc`
+  - Model `PR1_Period_Window_Fixture` — `ae534e9e-6e67-41cb-9930-7a581d79cefe`
+
+  (The `DBX_DAMIAN` connection itself is user-created scratch infrastructure — Task 9 should
+  ask the user whether to remove it after the four objects above are deleted. Databricks-side
+  `rolling_fixture`/`period_fixture`/`rolling_mv`/`period_mv` from Tasks 3–4 still need Task 9
+  cleanup as originally planned.)
 
 ## Live results convention (Tasks 4–5 append)
 
@@ -64,13 +72,13 @@ the `Claim` or `Source` columns.
 
 | ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
 |---|---|---|---|---|---|
-| C1 | `range: trailing N day` (no modifier) → `moving_sum([m], N, 0, [date])` | `ts-from-databricks-rules.md:652-654`, `ts-databricks-formula-translation.md:280-282`, `ts-databricks-properties.md:97`; live-verified 2026-05-28 in `worked-examples/databricks/ts-from-databricks.md` (revenue_7d_rolling) **before** the `exclusive`-default was confirmed | Live DBX + TS number-match | See `### C1 — live results` below (Query A1, 24 rows) — day_index=6 matches the hand-computed exclusive-window arithmetic exactly | **PENDING (2026-07-08)** — TS-side number-match blocked before any query ran; see `### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) — BLOCKED` below |
+| C1 | `range: trailing N day` (no modifier) → `moving_sum([m], N, 0, [date])` | `ts-from-databricks-rules.md:652-654`, `ts-databricks-formula-translation.md:280-282`, `ts-databricks-properties.md:97`; live-verified 2026-05-28 in `worked-examples/databricks/ts-from-databricks.md` (revenue_7d_rolling) **before** the `exclusive`-default was confirmed | Live DBX + TS number-match | See `### C1 — live results` below (Query A1, 24 rows) — day_index=6 matches the hand-computed exclusive-window arithmetic exactly. TS side: `### C1/C3 — TS-side number-match (Task 5)` below | **CORRECTED (live TS 2026-07-09)** — `moving_sum([m], N, 0, [date])` spans **N+1 rows (N preceding + anchor)** and reproduces DBX `trailing N day inclusive`, NOT the exclusive default. Fixes (both matched all 24 rows incl. boundary NULLs/partials): default/`exclusive` → `moving_sum([m], N, -1, [date])`; `inclusive` → `moving_sum([m], N-1, 0, [date])` |
 | C2 | Anchor default is `exclusive` for `trailing`/`leading` | `databricks-metric-view.md:452`, `ts-from-databricks-rules.md:574-581`, `ts-databricks-formula-translation.md:318-325` — all three say the same `moving_sum` equivalence in C1 "predates" this confirmation and "needs re-verification" | Live DBX (compare `trailing N day` vs. `trailing N day exclusive` vs. `trailing N day inclusive` on the same data) | See `### C2 — live results` below — `trailing3_default` == `trailing3_exclusive` and `leading3_default` == `leading3_exclusive` at all 24 rows, including matched boundary NULLs | **CONFIRMED** (live 2026-07-08, DBX-only — decidable without TS) |
-| C3 | `range: leading N day` → candidate `moving_sum([m], 0, N, [date])` | `ts-from-databricks-rules.md:672-681`, `ts-databricks-formula-translation.md:297-307`, `databricks-metric-view.md:446` — all marked PENDING LIVE VERIFICATION | Live DBX + TS number-match | See `### C3 — live results` below — leading3_inclusive/exclusive match hand-computed values exactly at day_index=6 | **PENDING (2026-07-08)** — TS-side number-match blocked before any query ran; see `### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) — BLOCKED` below |
-| C4 | `range: all` → candidate partition-wide `group_aggregate(...)` | `ts-from-databricks-rules.md:683-691`, `ts-databricks-formula-translation.md:309-316`, `databricks-metric-view.md:447` — all marked PENDING LIVE VERIFICATION | Live DBX + TS number-match | See `### C4 — live results` below — `all_amount`=780 (X) / 12780 (Y) at every row, confirmed **per-category**, not table-wide (would be 13560); Query A2 cross-check matches exactly | **PENDING (2026-07-08)** — TS-side number-match blocked before any query ran; see `### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) — BLOCKED` below |
-| C5 | `range: cumulative` → `cumulative_sum([m], [date])` | `ts-from-databricks-rules.md:666-670`, `ts-databricks-formula-translation.md:467-472`, `ts-databricks-properties.md:98` — not flagged PENDING but **never exercised in any worked example** | Live DBX + TS number-match | See `### C5 — live results` below — cumulative_amount matches hand-computed running total (210 / 6210) at day_index=6 | **PENDING (2026-07-08)** — TS-side number-match blocked before any query ran; see `### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) — BLOCKED` below |
-| C6 | `range: current` + `offset: -N <unit>` (period filter) → `sum_if(diff_months/quarters/years([date], today())=N, [m])` | `ts-from-databricks-rules.md:620-631`, `ts-databricks-formula-translation.md:429-465`; live-verified 2026-05-25 in `worked-examples/databricks/ts-to-databricks.md` (Monthly/Prior Month Revenue) **but only ever queried at a single point in time, not across a multi-month trend** — see the wall-clock-vs-row-relative ambiguity below | Live DBX (3-hypothesis discriminator, Task 4 Query B1) + TS number-match | See `### B1 — full result set` and `### C6 — live results` below — Query B1 output matches hypothesis (c) row-relative exactly, refuting (a) and (b) | **WRONG (DBX-confirmed, live 2026-07-08)** — the documented mapping is wall-clock `today()`-based; actual Databricks behavior is row-relative to each output row's period. Correction (the replacement formula) is Task 6's job — not written here. TS-side correction-candidate test (`moving_sum([m],1,-1,[date])`) additionally **PENDING (2026-07-08)** — blocked, see `### C6/C6a — TS-side attempt (Task 5) — BLOCKED` below. |
-| C7 | `range: current`, `order:` raw date, `semiadditive: last/first` (true semi-additive) → `last_value`/`first_value(sum([m]), query_groups(), {[date]})` | `ts-from-databricks-rules.md:589-609`; `last` live-verified 2026-05-25 (`ts-to-databricks.md` Inventory Balance); **`first` never exercised in any worked example** | Live DBX + TS number-match (re-confirm `last`, newly confirm `first`) | See `### C7 — live results` below — Query A2: X→last=12/first=1, Y→last=112/first=101; matches hand-computed expectation exactly; first live exercise of `semiadditive: first` | **PENDING (2026-07-08)** — TS-side number-match blocked before any query ran; see `### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) — BLOCKED` below |
+| C3 | `range: leading N day` → candidate `moving_sum([m], 0, N, [date])` | `ts-from-databricks-rules.md:672-681`, `ts-databricks-formula-translation.md:297-307`, `databricks-metric-view.md:446` — all marked PENDING LIVE VERIFICATION | Live DBX + TS number-match | See `### C3 — live results` below — leading3_inclusive/exclusive match hand-computed values exactly at day_index=6. TS side: `### C1/C3 — TS-side number-match (Task 5)` below | **CORRECTED (live TS 2026-07-09)** — `moving_sum([m], 0, N, [date])` spans **N+1 rows (anchor + N following)** and matches neither DBX form (d6 X: 300 vs. excl 240 / incl 210). Fixes (both matched all 24 rows incl. boundary NULLs/partials): default/`exclusive` → `moving_sum([m], -1, N, [date])`; `inclusive` → `moving_sum([m], 0, N-1, [date])` |
+| C4 | `range: all` → candidate partition-wide `group_aggregate(...)` | `ts-from-databricks-rules.md:683-691`, `ts-databricks-formula-translation.md:309-316`, `databricks-metric-view.md:447` — all marked PENDING LIVE VERIFICATION | Live DBX + TS number-match | See `### C4 — live results` below — `all_amount`=780 (X) / 12780 (Y) at every row, confirmed **per-category**, not table-wide (would be 13560); Query A2 cross-check matches exactly. TS side: `### C4/C5/C7 — TS-side number-match (Task 5)` below | **CONFIRMED (live TS 2026-07-09)** — `group_aggregate(sum([m]), {[cat]}, query_filters())` returns 780 (X) / 12780 (Y) at every row-grain row AND at category grain, matching DBX exactly. (Note for Task 6: the fixture formula hard-codes the partition dim; the general emission rule for deriving the partition set from the MV query grain is a docs question, not a number question.) |
+| C5 | `range: cumulative` → `cumulative_sum([m], [date])` | `ts-from-databricks-rules.md:666-670`, `ts-databricks-formula-translation.md:467-472`, `ts-databricks-properties.md:98` — not flagged PENDING but **never exercised in any worked example** | Live DBX + TS number-match | See `### C5 — live results` below — cumulative_amount matches hand-computed running total (210 / 6210) at day_index=6. TS side: `### C4/C5/C7 — TS-side number-match (Task 5)` below | **CONFIRMED (live TS 2026-07-09)** — `cumulative_sum([m], [date])` matches DBX `cumulative_amount` at **all 24 rows** (X d6=210, d12=780; Y d6=6210, d12=12780) |
+| C6 | `range: current` + `offset: -N <unit>` (period filter) → `sum_if(diff_months/quarters/years([date], today())=N, [m])` | `ts-from-databricks-rules.md:620-631`, `ts-databricks-formula-translation.md:429-465`; live-verified 2026-05-25 in `worked-examples/databricks/ts-to-databricks.md` (Monthly/Prior Month Revenue) **but only ever queried at a single point in time, not across a multi-month trend** — see the wall-clock-vs-row-relative ambiguity below | Live DBX (3-hypothesis discriminator, Task 4 Query B1) + TS number-match | See `### B1 — full result set` and `### C6 — live results` below — Query B1 output matches hypothesis (c) row-relative exactly, refuting (a) and (b). TS side: `### C6/C6a — TS-side number-match (Task 5)` below | **CORRECTED (live TS 2026-07-09)** — the documented wall-clock `sum_if(diff_months([date], today())=N, [m])` mapping produces hypothesis-(b) output (X: 0/0/300 current, 0/200/0 prior) and FAILS to reproduce DBX's row-relative actual. The fix: `offset: -N` → **`moving_sum([m], N, -N, [date])`** (LAG(N) idiom; verified for N=1: NULL/100/200 (X), NULL/1100/1200 (Y) — exact match to DBX `prior_month_amount` incl. the out-of-range NULL); `range: current` with no offset → plain `sum([m])` at query grain (100/200/300 matches DBX `current_month_amount`). **Caveat (goes into the Task 6 doc rewrite): valid only with exactly one row per period in the order column** — general use needs a period-grain pre-aggregation. |
+| C7 | `range: current`, `order:` raw date, `semiadditive: last/first` (true semi-additive) → `last_value`/`first_value(sum([m]), query_groups(), {[date]})` | `ts-from-databricks-rules.md:589-609`; `last` live-verified 2026-05-25 (`ts-to-databricks.md` Inventory Balance); **`first` never exercised in any worked example** | Live DBX + TS number-match (re-confirm `last`, newly confirm `first`) | See `### C7 — live results` below — Query A2: X→last=12/first=1, Y→last=112/first=101; matches hand-computed expectation exactly; first live exercise of `semiadditive: first`. TS side: `### C4/C5/C7 — TS-side number-match (Task 5)` below | **CONFIRMED (live TS 2026-07-09)** — `last_value(sum([m]), query_groups(), {[date]})` / `first_value(...)` at category grain return X→12/1, Y→112/101 — exact match to DBX Query A2 for both `last` and (first-ever live exercise) `first` |
 | C8 | Offset at quarter/year grain (`-3 month`→quarter offset -1, `-1 year`→month offset -12) | `ts-from-databricks-rules.md:616-630`, `ts-databricks-formula-translation.md:433-438` — documented as symmetric extrapolations of C6, **never live-tested** (only `-1 month` was exercised in the worked example) | Documentation-only cross-check (Task 6) — not re-tested live; same underlying mechanism as C6, budget does not cover every grain | — | Deferred — inherits C6's verdict |
 | C9 | `materialization:` block | Undocumented anywhere except the one-line mention at `databricks-metric-view.md:99` and the anchor text in `ts-databricks-properties.md:1` ("materialization Public Preview") | Docs research only (Task 1) — no live SQL needed unless Task 1 finds it changes parseable shape | — | — |
 
@@ -283,9 +291,17 @@ the repo (previously only `last` was exercised, in `ts-to-databricks.md` Invento
 confirms `first` parses and collapses correctly at category grain, same as `last`. TS-side
 mapping confirmation (`first_value`) is Task 5's job — no Verdict recorded here.
 
-### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) — BLOCKED
+### C1, C3, C4, C5, C7 — TS-side attempt (Task 5, 2026-07-08) — BLOCKED (resolved 2026-07-09 via dedicated connection DBX_DAMIAN)
 
-Task 5 ran live against ThoughtSpot profile `se-thoughtspot` on 2026-07-08 to build the
+> **Historical record.** The blocker below was resolved on 2026-07-09: the user created a
+> dedicated scratch connection `DBX_DAMIAN` exposing `agent_skills`, sidestepping the
+> `add-tables` 500 entirely (no connection-update call needed). The diagnostic is retained
+> because the `updateConnectionV2` 500 and the missing-`authenticationType` gap in
+> `ts_cli/commands/connections.py::add_tables()` still need a backlog entry (Task 8). The
+> actual TS-side results are in `### C1/C3 — TS-side number-match (Task 5)` and
+> `### C4/C5/C7 — TS-side number-match (Task 5)` below.
+
+Task 5 first ran live against ThoughtSpot profile `se-thoughtspot` on 2026-07-08 to build the
 `PR1_Rolling_Window_Fixture` Model and number-match the candidate `moving_sum` /
 `group_aggregate` / `cumulative_sum` / `last_value`/`first_value` formulas against the Query
 A1/A2 actuals above. **The attempt stopped at table registration (brief Step 2) — no Model
@@ -431,9 +447,12 @@ under C6). This closes the ambiguity C6a flagged during plan research: Databrick
 current [+ offset]` is a per-row, period-relative shift, not a wall-clock-`today()` filter.
 TS-side comparison (Task 5) and the doc correction itself (Task 6) remain open.
 
-### C6/C6a — TS-side attempt (Task 5) — BLOCKED
+### C6/C6a — TS-side attempt (Task 5, 2026-07-08) — BLOCKED (resolved 2026-07-09 via dedicated connection DBX_DAMIAN)
 
-Task 5 planned to build the `PR1_Period_Window_Fixture` Model with the two wallclock
+> **Historical record** — same resolution as the C1/C3/C4/C5/C7 BLOCKED section above. The
+> actual TS-side C6/C6a results are in `### C6/C6a — TS-side number-match (Task 5)` below.
+
+Task 5 initially planned to build the `PR1_Period_Window_Fixture` Model with the two wallclock
 `sum_if(diff_months(...)=N, ...)` candidates plus, per the brief's decision tree (Databricks
 resolved to hypothesis (c) row-relative, so the wallclock candidates were expected to FAIL),
 the row-relative correction candidate `moving_sum([PR1_PERIOD_FIXTURE::amount], 1, -1,
@@ -447,17 +466,169 @@ payload shape or which connection is targeted. See that section for the full dia
 `get-rest-api-reference(apiName: "updateConnection")`, and the corrected-payload retry that
 still 500'd against two independently-healthy connections).
 
-**Consequence for C6/C6a:** the DBX-side verdicts already recorded above (C6: **WRONG**, the
-documented wall-clock mapping does not match Databricks' actual row-relative behavior; C6a:
-**RESOLVED — row-relative**) are unaffected — both were decided entirely from the Databricks
-side per Task 4, with no ThoughtSpot comparison needed. What remains **PENDING (2026-07-08,
-reason: live ThoughtSpot connection-registration blocker, see above)** is specifically the
-TS-side half of Task 5's job: confirming that `moving_sum([m], 1, -1, [date])` reproduces the
-row-relative shape (and its one-row-per-period caveat, per
-`thoughtspot-formula-patterns.md:314`'s `LAG(1)` idiom) on live ThoughtSpot data. Task 6 should
-not write a **CORRECTED** verdict with this formula as the fix until that live TS-side
-confirmation actually runs — treat `moving_sum([m], 1, -1, [date])` as an untested candidate
-carried forward, not a verified correction.
+**Consequence for C6/C6a (as assessed on 2026-07-08):** the DBX-side verdicts already recorded
+above (C6: **WRONG**, C6a: **RESOLVED — row-relative**) were unaffected — both were decided
+entirely from the Databricks side per Task 4. What remained PENDING at the time was the
+TS-side half: confirming that `moving_sum([m], 1, -1, [date])` reproduces the row-relative
+shape. **That confirmation ran on 2026-07-09 and passed** — see `### C6/C6a — TS-side
+number-match (Task 5)` below; the C6 verdict is now CORRECTED with the verified fix.
+
+---
+
+## TS-side number-match results (Task 5, live 2026-07-09)
+
+All queries below ran live on 2026-07-09 against `se-thoughtspot`, connection `DBX_DAMIAN`,
+models `PR1_Rolling_Window_Fixture` (`f7a0a352-40cf-4e68-ad7c-561f8664e5dc`) and
+`PR1_Period_Window_Fixture` (`ae534e9e-6e67-41cb-9930-7a581d79cefe`), against the same
+Databricks fixture tables Tasks 3–4 used (`agent_skills.ts_dbx_substrate_pr1.*`).
+
+**Execution-path note (affects how the queries were run, not the numbers):** the SpotQL
+endpoints (`/callosum/v1/v2/data/spotql/generate-sql` / `fetch-data`) return a bare,
+empty-body **HTTP 500 for any payload on this se-thoughtspot build** — including an empty
+request body, which a live handler would reject as a structured 400 — so `ts spotql
+fetch-data` was unusable (its output normalises to `status: UNKNOWN`). `ts spotql
+classify-columns --model` works fine (it classifies from exported TML; no server SpotQL
+dependency) and confirmed the expected AGG-wrapping classification for every formula column.
+Data was fetched via the stable v2 **`POST /api/rest/2.0/searchdata`** endpoint (spec
+confirmed via `get-rest-api-reference(apiName: "searchData")`) with search-token queries,
+through a scratchpad script that reuses `ts_cli.client.ThoughtSpotClient` for auth — the
+documented open-items-style exception in `.claude/rules/ts-cli.md`, since ts-cli has no
+`searchdata` command yet. Two search-token findings worth keeping: date bucketing must be
+forced with `[Txn Date].'daily'` (bare `[Txn Date]` auto-buckets monthly; the unquoted
+`.daily` form is rejected), and the query grain must include **only** `Cat` + the date —
+adding `Day Index` would enter the window partition (ThoughtSpot partitions window formulas
+by all query dims except the ORDER-BY attrs) and collapse every window to a single row.
+
+**Import iterations (rolling model):** 2 content iterations + 1 planned in-place update.
+(1) First import failed with `Mixing aggregated (moving_sum(...)) and non aggregated (amount)
+tokens are not supported` on the `Trail N=3/4 minus current` candidates — fixed by wrapping
+the bare column: `... - sum([PR1_ROLLING_FIXTURE::amount])`. (2) Second import succeeded.
+(3) After the first result set showed the offset semantics (below), the model was updated
+in place (guid at document root) to add three direct-window correction candidates. The period
+model imported first-try. Unrelated tooling note: `ts tml import --file` **hangs forever when
+run with an open non-TTY stdin** (e.g. a background shell) — `_stdin_has_piped_content()` in
+`tools/ts-cli/ts_cli/commands/tml.py:182` blocks on `sys.stdin.read()`; workaround is
+`< /dev/null`, candidate ts-cli fix for the Task 8 backlog entry.
+
+### C1/C3 — TS-side number-match (Task 5)
+
+Search query: `[Cat] [Txn Date].'daily' [Amount] [Trail N=2] [Trail N=3] [Trail N=4]
+[Trail N=3 minus current] [Trail N=4 minus current] [Lead (0,3)] [Lead (0,4)] [Lead (-2,3)]
+[Lead (-3,3)] [Cumulative] [All (LOD candidate)]` — 24 rows returned; then a second pass with
+the three direct-window candidates added. Full X-category TS result (Y is the identical
+pattern with the +1000 base, matching DBX):
+
+| Txn Date | Amount | Trail N=2 | Trail N=3 | Trail N=4 | Trail N=3 minus cur | Trail N=4 minus cur | Lead (0,3) | Lead (0,4) | Lead (-2,3) | Lead (-3,3) | Trail excl (3,-1) | Lead excl (-1,3) | Lead incl (0,2) | Cumulative | All (LOD) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 06-01 | 10 | 10 | 10 | 10 | 0 | 0 | 100 | 150 | 70 | 40 | NULL | 90 | 60 | 10 | 780 |
+| 06-02 | 20 | 30 | 30 | 30 | 10 | 10 | 140 | 200 | 90 | 50 | 10 | 120 | 90 | 30 | 780 |
+| 06-03 | 30 | 60 | 60 | 60 | 30 | 30 | 180 | 250 | 110 | 60 | 30 | 150 | 120 | 60 | 780 |
+| 06-04 | 40 | 90 | 100 | 100 | 60 | 60 | 220 | 300 | 130 | 70 | 60 | 180 | 150 | 100 | 780 |
+| 06-05 | 50 | 120 | 140 | 150 | 90 | 100 | 260 | 350 | 150 | 80 | 90 | 210 | 180 | 150 | 780 |
+| 06-06 | 60 | 150 | 180 | 200 | 120 | 140 | 300 | 400 | 170 | 90 | 120 | 240 | 210 | 210 | 780 |
+| 06-07 | 70 | 180 | 220 | 250 | 150 | 180 | 340 | 450 | 190 | 100 | 150 | 270 | 240 | 280 | 780 |
+| 06-08 | 80 | 210 | 260 | 300 | 180 | 220 | 380 | 500 | 210 | 110 | 180 | 300 | 270 | 360 | 780 |
+| 06-09 | 90 | 240 | 300 | 350 | 210 | 260 | 420 | 420 | 230 | 120 | 210 | 330 | 300 | 450 | 780 |
+| 06-10 | 100 | 270 | 340 | 400 | 240 | 300 | 330 | 330 | 120 | NULL | 240 | 230 | 330 | 550 | 780 |
+| 06-11 | 110 | 300 | 380 | 450 | 270 | 340 | 230 | 230 | NULL | NULL | 270 | 120 | 230 | 660 | 780 |
+| 06-12 | 120 | 330 | 420 | 500 | 300 | 380 | 120 | 120 | NULL | NULL | 300 | NULL | 120 | 780 | 780 |
+
+**Candidate PASS/FAIL vs. the DBX Query A1 targets** (trailing3 default/excl = 120, incl =
+150; leading3 default/excl = 240, incl = 210 at day 6 X; full-column comparison across all
+24 rows):
+
+| TS candidate | Day-6 X value | Matches DBX column | Full 24-row match incl. boundaries |
+|---|---|---|---|
+| `Trail N=2` = `moving_sum(m, 2, 0, d)` | 150 | `trailing3_inclusive` | **PASS — all 24 rows** (d1=10, never NULL — same as DBX inclusive) |
+| `Trail N=3` = `moving_sum(m, 3, 0, d)` | 180 | — (spans 4 rows: d3..d6) | FAIL — matches nothing; closest: inclusive (150, off by +30) |
+| `Trail N=4` = `moving_sum(m, 4, 0, d)` | 200 | — (spans 5 rows) | FAIL |
+| `Trail N=3 minus current` | 120 | `trailing3_default/exclusive` **except boundary** | PARTIAL — matches interior + partial-window rows but returns **0, not NULL** at d1 (DBX: NULL). Superseded by the direct form below |
+| `Trail N=4 minus current` | 140 | — | FAIL |
+| **`Trail excl (3,-1)` = `moving_sum(m, 3, -1, d)`** | **120** | **`trailing3_default` = `trailing3_exclusive`** | **PASS — all 24 rows**, incl. NULL at d1 and partial sums at d2 (10) / d3 (30) |
+| `Lead (0,3)` = `moving_sum(m, 0, 3, d)` | 300 | — (spans 4 rows: d6..d9) | FAIL — closest: exclusive (240, off by +60) |
+| `Lead (0,4)` = `moving_sum(m, 0, 4, d)` | 400 | — | FAIL |
+| `Lead (-2,3)` = `moving_sum(m, -2, 3, d)` | 170 | — (rows +2..+3 only) | FAIL |
+| `Lead (-3,3)` = `moving_sum(m, -3, 3, d)` | 90 | — (single row +3, LEAD(3)) | FAIL |
+| **`Lead excl (-1,3)` = `moving_sum(m, -1, 3, d)`** | **240** | **`leading3_default` = `leading3_exclusive`** | **PASS — all 24 rows**, incl. NULL at d12 and partial sums at d11 (120) / d10 (230) |
+| **`Lead incl (0,2)` = `moving_sum(m, 0, 2, d)`** | **210** | **`leading3_inclusive`** | **PASS — all 24 rows** (d12=120, never NULL — same as DBX inclusive) |
+
+**Semantics settled by this grid:** ThoughtSpot's `moving_sum(m, start, end, d)` window
+**always includes the anchor row when the [start, end] offset range covers offset 0** — so
+`(N, 0)` spans N+1 rows (N preceding + anchor), which is DBX **inclusive** semantics for a
+window of N+1... i.e. `moving_sum(m, N, 0, d)` ≡ `trailing (N+1) day inclusive`, NOT
+`trailing N day` (default/exclusive). This resolves the C1-flagged ambiguity between
+`thoughtspot-formula-patterns.md:326-334`'s offset table and
+`ts-databricks-formula-translation.md`'s "N preceding + current" phrasing: **both were
+right about TS behaviour; the repo's DBX mapping was wrong** because DBX's default is
+exclusive-of-anchor. The corrected general mappings (all verified at every row of the
+fixture, both categories, including boundary NULL/partial behaviour, which also matches
+DBX's partial-window rule exactly):
+
+| DBX Metric View range | Corrected TS formula |
+|---|---|
+| `trailing N day` (default) / `trailing N day exclusive` | `moving_sum([m], N, -1, [date])` |
+| `trailing N day inclusive` | `moving_sum([m], N-1, 0, [date])` |
+| `leading N day` (default) / `leading N day exclusive` | `moving_sum([m], -1, N, [date])` |
+| `leading N day inclusive` | `moving_sum([m], 0, N-1, [date])` |
+
+### C4/C5/C7 — TS-side number-match (Task 5)
+
+`Cumulative` (`cumulative_sum([m], [date])`) and `All (LOD candidate)`
+(`group_aggregate(sum([m]), {[cat]}, query_filters())`) are in the 24-row table above:
+`Cumulative` matches DBX `cumulative_amount` at **every row** (X: 10/30/60/100/150/210/280/
+360/450/550/660/780; Y: +1000 pattern to 12780) — **C5 CONFIRMED**. `All (LOD)` = 780 for
+every X row / 12780 for every Y row, per-category exactly as DBX — **C4 CONFIRMED** at row
+grain.
+
+Category-grain query (mirror of DBX Query A2): `[Cat] [Balance Last] [Balance First]
+[All (LOD candidate)]`:
+
+| Cat | Balance Last | Balance First | All (LOD) |
+|---|---|---|---|
+| X | 12 | 1 | 780 |
+| Y | 112 | 101 | 12780 |
+
+Exact match to DBX Query A2 (X: 12/1/780, Y: 112/101/12780) — **C7 CONFIRMED** for both
+`semiadditive: last` → `last_value(sum([m]), query_groups(), {[date]})` and
+`semiadditive: first` → `first_value(...)`; and the C4 grain cross-check matches (780/12780
+at category grain = the same values as every row-grain row, mirroring DBX's grain-stable
+behaviour).
+
+### C6/C6a — TS-side number-match (Task 5)
+
+Search query (period model): `[Cat] [Txn Date].'monthly' [Amount] [Current Month (wallclock
+candidate)] [Prior Month (wallclock candidate)] [Prior Month (row-relative candidate)]` —
+6 rows:
+
+| Cat | Month | Amount | Current Month (wallclock) | Prior Month (wallclock) | Prior Month (row-relative) |
+|---|---|---|---|---|---|
+| X | 2026-05 | 100 | 0 | 0 | NULL |
+| X | 2026-06 | 200 | 0 | 200 | 100 |
+| X | 2026-07 | 300 | 300 | 0 | 200 |
+| Y | 2026-05 | 1100 | 0 | 0 | NULL |
+| Y | 2026-06 | 1200 | 0 | 1200 | 1100 |
+| Y | 2026-07 | 1300 | 1300 | 0 | 1200 |
+
+Comparison against DBX Query B1's actual (`current_month_amount` = 100/200/300,
+`prior_month_amount` = NULL/100/200 for X; +1000 for Y):
+
+- `sum_if(diff_months([date], today())=0, [m])` → 0/0/300 — the hypothesis-(b) wall-clock
+  shape, exactly as the brief's decision tree predicted. **FAIL** vs. DBX actual.
+- `sum_if(diff_months([date], today())=-1, [m])` → 0/200/0 — hypothesis (b). **FAIL.**
+- **`moving_sum([m], 1, -1, [date])`** → NULL/100/200 (X), NULL/1100/1200 (Y) — **exact
+  match** to DBX `prior_month_amount`, **including the NULL (not 0) at the out-of-range
+  first row** (mirroring the Task 1 docs finding and the DBX actual).
+- The plain `Amount` measure at this grain (100/200/300) matches DBX `current_month_amount`
+  exactly — i.e. `range: current` with **no** offset is simply the per-period aggregate.
+
+**C6 verdict: CORRECTED** with `moving_sum([m], N, -N, [date])` for `offset: -N <unit>`
+(verified at N=1) and plain `sum([m])` for offset-less `range: current`. **Caveat carried
+into the Task 6 doc rewrite:** the `moving_sum` LAG idiom shifts by *rows*, not periods —
+it is only correct when the query returns exactly one row per period in the order column
+(true for this fixture, per `thoughtspot-formula-patterns.md:314`'s LAG(1) idiom notes);
+the general emission needs a period-grain pre-aggregation or an explicit statement of this
+precondition. **C6a: TS-side comparison complete** — the row-relative reading is confirmed
+reproducible on the ThoughtSpot side; the ambiguity is fully closed on both platforms.
 
 ---
 
@@ -465,7 +636,7 @@ carried forward, not a verified correction.
 
 | ID | Claim | Why suspect | Verification method |
 |---|---|---|---|
-| C6a | The existing C6 translation assumes Databricks' `range: current [+ offset]` is anchored to **wall-clock `today()`** (matching what `sum_if(..., today())` computes). An equally plausible reading — and the one that would make "monthly revenue" chart sensibly across a historical trend rather than going flat/zero outside the current wall-clock month — is that Databricks' `range: current` + `offset` is a **row-relative shift** (like `LAG`/`LEAD` relative to each output row's own `order:` period), independent of wall-clock date. These two readings (plus a third: wall-clock-anchored but only nonzero on the matching row, which is what `sum_if(...,today())` literally computes) produce different result *shapes* when queried across multiple periods — the worked example only ever queried a single snapshot, so it could not have distinguished them. | Live DBX Query B1 (Task 4) — 3-hypothesis table already designed; TS-side comparison (Task 5) — Actual (live): see `### C6a — live results` below — hypothesis (c) row-relative confirmed, resolving the ambiguity. Verdict (DBX-only, live 2026-07-08): **RESOLVED — row-relative**; wall-clock hypotheses (a) and (b) both refuted. TS-side comparison (Task 5): **PENDING (2026-07-08)** — blocked before the row-relative `moving_sum` correction candidate could be tested; see `### C6/C6a — TS-side attempt (Task 5) — BLOCKED` below. Doc correction (Task 6) still pending. |
+| C6a | The existing C6 translation assumes Databricks' `range: current [+ offset]` is anchored to **wall-clock `today()`** (matching what `sum_if(..., today())` computes). An equally plausible reading — and the one that would make "monthly revenue" chart sensibly across a historical trend rather than going flat/zero outside the current wall-clock month — is that Databricks' `range: current` + `offset` is a **row-relative shift** (like `LAG`/`LEAD` relative to each output row's own `order:` period), independent of wall-clock date. These two readings (plus a third: wall-clock-anchored but only nonzero on the matching row, which is what `sum_if(...,today())` literally computes) produce different result *shapes* when queried across multiple periods — the worked example only ever queried a single snapshot, so it could not have distinguished them. | Live DBX Query B1 (Task 4) — 3-hypothesis table already designed; TS-side comparison (Task 5) — Actual (live): see `### C6a — live results` below — hypothesis (c) row-relative confirmed, resolving the ambiguity. Verdict (DBX-only, live 2026-07-08): **RESOLVED — row-relative**; wall-clock hypotheses (a) and (b) both refuted. TS-side comparison (Task 5, live 2026-07-09): **CONFIRMED** — the wallclock `sum_if` candidates reproduce hypothesis (b) (not the DBX actual), and the row-relative `moving_sum([m], 1, -1, [date])` candidate reproduces DBX's actual exactly (see `### C6/C6a — TS-side number-match (Task 5)` below). Doc correction (Task 6) still pending. |
 
 ### Docs-research notes (Task 1)
 
