@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (external sweep: widened source-form detection — bare SQL + MV-on-MV fail-loud, using: join translation, leading/all window ranges flagged pending verification; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: MV→TS window translations live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading anchor args corrected (C1/C3), leading/all/cumulative/semi-additive confirmed (C3/C4/C5/C7), period-filter offset corrected from wall-clock sum_if to row-relative moving_sum LAG idiom (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032) -->
 
 # Reverse Mapping Rules Reference
 

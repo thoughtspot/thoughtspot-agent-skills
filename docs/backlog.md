@@ -1053,6 +1053,27 @@ underpins a large translation block but is marked **Experimental** in current do
    `moving_sum([m], N, 0, [date])` equivalence against the documented `exclusive` anchor
    default, which postdates when that equivalence was first recorded.
 
+   **Update 2026-07-09 (PR1 live verification):** `trailing N day` (default/exclusive) —
+   CORRECTED (was `moving_sum([m], N, 0, [date])`, which actually reproduces `trailing
+   (N+1) day inclusive`; now `moving_sum([m], N, -1, [date])`). `inclusive|exclusive`
+   anchor default — CONFIRMED `exclusive`. `leading N day` (default/exclusive) —
+   CORRECTED (was PENDING candidate `moving_sum([m], 0, N, [date])`, which matches
+   neither DBX form; now `moving_sum([m], -1, N, [date])`). `range: all` (partition-wide
+   `group_aggregate(...)`) — CONFIRMED. `range: cumulative` (`cumulative_sum(...)`) —
+   CONFIRMED. `semiadditive: last`/`first` (`last_value`/`first_value`) — CONFIRMED.
+   `range: current` + `offset: -N <unit>` — CORRECTED (was wall-clock
+   `sum_if(diff_months/quarters/years([date], today())=N, [m])`; live testing showed
+   the mechanism is row-relative, not wall-clock — now `moving_sum([m], N, -N, [date])`,
+   a LAG(N) idiom valid only with exactly one row per period; quarter/year grains and
+   N>1 are Deferred (C8), extrapolated from the verified month-grain N=1 case, not
+   separately live-tested). Full evidence:
+   `docs/audit/2026-07-08-dbx-window-claim-matrix.md`. Remaining BL-032 scope:
+   `materialization:`/`fields:` **parser** support (PR2, not a docs gap) and C8's
+   quarter/year grain re-verification if ever needed. Window `range`/`offset`/
+   `semiadditive`/anchor-modifier semantics are now fully resolved — the parser can
+   implement all 5 range values directly in PR2, no `pending_verification` skip path
+   needed for `leading`/`all`.
+
 **Target:** 2026-09-30.
 
 ---
@@ -1685,6 +1706,17 @@ Once the mapping surface stabilises, extraction becomes higher-value.
 
 **Target:** Assess feasibility by 2026-09-30. Schedule extraction only if mapping churn
 has slowed and the quality gap is confirmed via smoke-test comparison.
+
+**Update 2026-07-09 (PR1 feasibility-gate check):** per the design spec's Risks table
+("if PR1 finds more high-severity drift than BL-064 already catalogued, stop and
+re-raise feasibility before PR 2"), PR1's live window-semantics deep-analysis
+(`docs/audit/2026-07-08-dbx-window-claim-matrix.md`) found 2 corrected mappings beyond
+BL-064's catalogue — C1 (`trailing N day` anchor args) and C6 (`range: current` +
+`offset` mechanism, wall-clock → row-relative). This is real drift, but both are now
+resolved and locked with live citations against a Databricks fixture + ThoughtSpot
+number-match; nothing is left PENDING or unresolved. **Stop-condition NOT triggered** —
+this is in line with (not beyond) the churn BL-064 already catalogued. PR2
+(`ts databricks parse-mv`/`translate-formulas`) may proceed.
 
 ---
 
@@ -2535,3 +2567,43 @@ Two distinct findings:
    assuming the CLI fix alone resolves it; incident GUIDs are in the claim matrix.
 
 **Target:** fix (1) opportunistically with the next ts-cli connections work or by 2026-08-31; (2) re-check when (1) ships.
+
+---
+
+## BL-096 — se-thoughtspot build: SpotQL `generate-sql`/`fetch-data` endpoints return an empty-body 500
+
+**Source:** 2026-07-09 BL-063 PR1 Task 5 live TS-side number-match run against se-thoughtspot (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, "TS-side number-match results (Task 5, live 2026-07-09)" execution-path note).
+**Affects:** `ts-object-model-spotql-query` skill; `ts spotql fetch-data` (and any command depending on it).
+**Status:** OPEN.
+
+The SpotQL endpoints (`/callosum/v1/v2/data/spotql/generate-sql` / `fetch-data`) return
+a bare, empty-body HTTP 500 for any payload on this se-thoughtspot build — including an
+empty request body, which a live handler would reject as a structured 400 — so `ts
+spotql fetch-data` was unusable (its output normalises to `status: UNKNOWN`). Task 5
+worked around this by fetching data via the stable v2 `POST /api/rest/2.0/searchdata`
+endpoint instead (spec confirmed via `get-rest-api-reference(apiName: "searchData")`),
+through a scratch script reusing `ts_cli.client.ThoughtSpotClient` for auth — the
+documented open-items-style exception in `.claude/rules/ts-cli.md`, since ts-cli has no
+`searchdata` command yet. `ts spotql classify-columns --model` is unaffected (it
+classifies from exported TML, with no server-side SpotQL dependency).
+
+**Target:** re-verify on the next se-thoughtspot build; if the 500 persists, add a
+`searchdata`-based fallback to ts-cli's SpotQL commands. No date set — revisit next
+time SpotQL commands are exercised live.
+
+---
+
+## BL-097 — ts-cli: `_stdin_has_piped_content()` hangs forever on an open non-TTY stdin
+
+**Source:** 2026-07-09 BL-063 PR1 Task 5 live run against se-thoughtspot — `ts tml import --file` invoked from a script context (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, "TS-side number-match results (Task 5, live 2026-07-09)" import-iterations note).
+**Affects:** `tools/ts-cli/ts_cli/commands/tml.py:182` (`_stdin_has_piped_content()`); any skill or script invoking `ts tml import`/`ts tml lint` from a non-interactive shell with an open stdin.
+**Status:** OPEN.
+
+`_stdin_has_piped_content()` blocks on `sys.stdin.read()` whenever stdin is open but
+not a TTY and nothing has actually been piped in (e.g. a background shell context) — it
+hangs forever instead of falling through to the `--file`/`--dir` path. The workaround
+used during Task 5 was `< /dev/null`. Fix: only read stdin when `select`/`poll` reports
+data ready, or stdin is explicitly closed/piped — never an unconditional blocking read;
+add a unit test covering the non-TTY-no-data case.
+
+**Target:** fix opportunistically with the next ts-cli tml-command work or by 2026-08-31.

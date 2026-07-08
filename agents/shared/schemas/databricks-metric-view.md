@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (external sweep: source forms widened to 4, using: joins, 5-value window range + anchor modifier, agg() synonym confirmed; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032) -->
 
 # Databricks Metric View Schema
 

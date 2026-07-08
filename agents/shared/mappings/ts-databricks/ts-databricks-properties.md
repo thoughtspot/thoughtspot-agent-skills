@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (external sweep: confirmed accurate — fields:/dimensions: synonym, window Experimental status, materialization Public Preview, offset 18.1 gate, no SHOW METRIC VIEWS all still hold; no content changes needed) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: property-coverage window rows corrected to live-verified forms (C1/C3/C6/C6a) and materialization: added as a documented (metadata-only) property (C9); fields:/dimensions: synonym and offset 18.1 gate re-checked, still hold; see BL-032) -->
 
 # ThoughtSpot ↔ Databricks Metric View Property Coverage
 

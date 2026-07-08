@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (external sweep: window range now 5 values — leading/all added, pending live verification; inclusive|exclusive anchor modifier documented; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: all 5 range values + inclusive|exclusive anchor modifier live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading moving_sum args corrected (C1/C3), exclusive default confirmed (C2), all/cumulative/semi-additive confirmed (C4/C5/C7), period-filter offset corrected to row-relative (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032) -->
 
 # Formula Translation Reference — Databricks
 
