@@ -108,6 +108,7 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 | [`ts-convert-to-databricks-mv`](agents/cli/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | — |
 | [`ts-convert-from-databricks-mv`](agents/cli/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | — |
 | [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) |
+| [`ts-convert-from-looker`](agents/cli/ts-convert-from-looker/SKILL.md) | Convert a Looker semantic model (LookML project) into ThoughtSpot — parses model + view .lkml files, generates Table TML and Model TML per explore, validates invariants, and imports. Optionally converts LookML dashboards to ThoughtSpot Liveboards. | [coverage](agents/cli/ts-convert-from-looker/references/coverage-matrix.md) |
 
 **ThoughtSpot Objects** — author and manage ThoughtSpot Models
 
