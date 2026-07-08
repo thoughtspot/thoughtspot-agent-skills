@@ -42,17 +42,20 @@ Metric View YAML format, and creates it via `CREATE OR REPLACE VIEW ... WITH MET
 | Formula column — translatable MEASURE | `measures[]` — expression translated to Databricks SQL aggregation |
 | Formula column — translatable ATTRIBUTE | `dimensions[]` — expression translated to Databricks SQL |
 | Formula column — LOD (`group_aggregate`) | `dimensions[]` — `expr: AGG() OVER (PARTITION BY ...)` |
-| Semi-additive (`last_value(sum(m), query_groups(), {d})`) | `measures[]` with `window: [{order: raw_date_dim, semiadditive: last, range: current}]` — snapshot metrics |
-| Period filter — current month (`sum_if(diff_months(...)=0,[m])`) | `measures[]` with `window: [{order: month_dim, semiadditive: last, range: current}]` — flow metrics |
-| Period filter — prior month (`sum_if(diff_months(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 month}]` |
-| Period filter — same month last year (`sum_if(diff_months(...)=-12,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 year}]` |
+| Semi-additive (`last_value(sum(m), query_groups(), {d})`) | `measures[]` with `window: [{order: raw_date_dim, semiadditive: last, range: current}]` — snapshot metrics. **Live-verified 2026-07-09**, matrix C7 |
+| Period filter — current month (`sum([m])` at query grain, or `sum_if(diff_months(...)=0,[m])`) | `measures[]` with `window: [{order: month_dim, semiadditive: last, range: current}]` — flow metrics. **Live-verified 2026-07-09**, matrix C6/C6a |
+| Period filter — prior month (`moving_sum([m], 1, -1, [date])` row-relative LAG idiom, or `sum_if(diff_months(...)=-1,[m])` wall-clock) | `measures[]` with `window: [{..., range: current, offset: -1 month}]` — **lossy approximation**: Databricks `offset` is row-relative (LAG-style shift per output row's own period), not wall-clock — exact only for a single-current-period snapshot query, not a multi-period trend. **Live-verified 2026-07-09 at month grain N=1**, matrix C6/C6a |
+| Period filter — same month last year (`sum_if(diff_months(...)=-12,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 year}]` — same lossy-approximation caveat; **Deferred (C8)**, extrapolated from the verified month-grain mechanism, not separately live-tested |
 | Period filter — current quarter (`sum_if(diff_quarters(...)=0,[m])`) | `measures[]` with `window: [{order: quarter_dim, semiadditive: last, range: current}]` |
-| Period filter — prior quarter (`sum_if(diff_quarters(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -3 month}]` |
+| Period filter — prior quarter (`sum_if(diff_quarters(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -3 month}]` — same caveat; **Deferred (C8)** |
 | Period filter — current year (`sum_if(diff_years(...)=0,[m])`) | `measures[]` with `window: [{order: year_dim, semiadditive: last, range: current}]` |
-| Period filter — prior year (`sum_if(diff_years(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 year}]` |
-| Rolling window (`moving_sum(m, 7, 0, d)`) | `measures[]` with `window: [{order: date_dim, range: trailing 7 day, semiadditive: last}]` |
-| Rolling window, non-zero look-ahead (`moving_sum(m, W, L, d)` with `L > 0`) | **PENDING LIVE VERIFICATION** — candidate `range: leading N unit`; not yet emitted (see BL-032) |
-| Cumulative (`cumulative_sum(m, d)`) | `measures[]` with `window: [{..., range: cumulative}]` |
+| Period filter — prior year (`sum_if(diff_years(...)=-1,[m])`) | `measures[]` with `window: [{..., range: current, offset: -1 year}]` — same caveat; **Deferred (C8)** |
+| Rolling window, trailing default/exclusive (`moving_sum([m], N, -1, [d])`) | `measures[]` with `window: [{order: date_dim, range: trailing N day, semiadditive: last}]`. **Live-verified 2026-07-09**, matrix C1/C2 |
+| Rolling window, trailing inclusive (`moving_sum([m], N-1, 0, [d])`, spans N rows incl. anchor) | `measures[]` with `window: [{order: date_dim, range: trailing N day inclusive, semiadditive: last}]`. **Live-verified 2026-07-09**, matrix C1 |
+| Rolling window, leading default/exclusive (`moving_sum([m], -1, N, [d])`) | `measures[]` with `window: [{order: date_dim, range: leading N day, semiadditive: last}]`. **Live-verified 2026-07-09**, matrix C3 |
+| Rolling window, leading inclusive (`moving_sum([m], 0, N-1, [d])`, spans N rows incl. anchor) | `measures[]` with `window: [{order: date_dim, range: leading N day inclusive, semiadditive: last}]`. **Live-verified 2026-07-09**, matrix C3 |
+| Rolling window, any other `(start, end)` pair (e.g. `moving_sum([m], -2, 3, [d])`) | **Unmapped — route to manual review / Unmapped Properties Report.** No Databricks `range:` reproduces a detached window; do not classify by sign alone (matrix C1/C3 TS-side grid) |
+| Cumulative (`cumulative_sum(m, d)`) | `measures[]` with `window: [{..., range: cumulative}]`. **Live-verified 2026-07-09**, matrix C5 |
 | Conditional aggregate (`sum_if(cond, x)`) | `measures[]` — `expr: SUM(x) FILTER (WHERE cond)` |
 | Conditional aggregate (`unique_count_if(cond, x)`) | `measures[]` — `expr: COUNT(DISTINCT x) FILTER (WHERE cond)` |
 | Conditional aggregate (all `*_if` variants) | `measures[]` — `expr: AGG(x) FILTER (WHERE cond)` |
@@ -657,10 +660,20 @@ dimension determines which:
 Is the formula last_value() or first_value()?
   YES → Semi-additive (snapshot metric)
         order: raw date dimension
-  NO  → Is it sum_if(diff_months/quarters/years(...))?
+        range: current — Live-verified 2026-07-09, matrix C7
+  NO  → Is it sum(m), or moving_sum(m, N, -N, d) at a period grain?
           YES → Period filter (flow/additive metric)
                 order: truncated period dimension
+                no offset (plain sum) or offset: -N <unit> (moving_sum LAG idiom)
+                — Live-verified 2026-07-09, matrix C6/C6a
 ```
+
+A ThoughtSpot `sum_if(diff_months/quarters/years([date], today())=N, [m])`
+wall-clock filter also routes here as the **source** formula being converted —
+but see the lossy-approximation caveat below the `offset` examples: Databricks
+`window: [{range: current, offset: ...}]` is row-relative, not wall-clock, so it
+only reproduces the wall-clock formula's output for a single-current-period
+snapshot query, not a multi-period trend (matrix C6/C6a, corrected 2026-07-09).
 
 **Semi-additive (snapshot metrics) → `order:` raw date:**
 
@@ -716,7 +729,21 @@ measures:
 ```
 
 Quarter grain uses `diff_quarters` → `offset: -3 month`; year grain uses
-`diff_years` → `offset: -1 year` / `-2 year`.
+`diff_years` → `offset: -1 year` / `-2 year`. **Deferred (C8):** the quarter/year
+rows are extrapolated from the month-grain mechanism verified below, not
+separately live-tested.
+
+**Live-verified 2026-07-09 at month grain, N=1** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C6, C6a). The corrected
+finding: Databricks `window: [{range: current, offset: -N <unit>}]` is a
+**row-relative** shift (a `LAG(N)`-style offset relative to each output row's own
+period), **not** anchored to wall-clock `today()`. This makes it a **lossy
+approximation** of a ThoughtSpot `sum_if(diff_months/quarters/years([date],
+today())=N, [m])` formula — exact only when the MV is queried for a single
+current-period snapshot, not a multi-period trend. Flag this caveat at the Step
+10 checkpoint whenever converting a period-filter measure. The pre-2026-07-09
+version of this section presented the mapping as an unqualified equivalence —
+it is not.
 
 **Growth % formulas** inline `sum_if` for both periods directly, so no cross-formula
 references are needed in the MV — express as a ratio of two `MEASURE()` references.
@@ -1160,6 +1187,7 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.3 | 2026-07-09 | Correct window translation tables to live-verified forms (claim matrix C1/C3/C6); see docs/audit/2026-07-08-dbx-window-claim-matrix.md. Fixes the Concept Mapping table (rolling window rows: `moving_sum(m,7,0,d)` was wrong — resolves to `trailing (N+1) day inclusive`, not `trailing N day`; the `leading N unit` PENDING row is now resolved to `moving_sum([m], -1, N, [d])`/inclusive `moving_sum([m], 0, N-1, [d])`, both live-verified) and the Step 7 period-filter decision tree/examples (adds the row-relative-vs-wall-clock lossy-approximation caveat for `offset`, corrected by matrix C6/C6a; quarter/year rows marked Deferred per C8). |
 | 1.0.2 | 2026-07-03 | Product-currency fix (audit 2026-07-03, finding 13.7): flag ThoughtSpot `moving_sum`/`moving_average` with a non-zero look-ahead argument as PENDING LIVE VERIFICATION (candidate `range: leading N unit` emission) instead of silently falling through the `range: trailing N day` mapping. |
 | 1.0.1 | 2026-07-03 | Replace the inline macOS-only Keychain token-refresh procedure with a pointer to `/ts-profile-thoughtspot` (U3 — Refresh Credential), the canonical cross-platform procedure (audit finding 11.4). |
 | 1.0.0 | 2026-05-22 | Initial release — single conversion mode (Mode A) |
