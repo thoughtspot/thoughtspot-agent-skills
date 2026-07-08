@@ -15,7 +15,8 @@ dated snapshot, not gospel. When in doubt, probe with `ts spotql generate-sql` /
   SpotQL Feature Evaluations*. All **Open**: the canonical **known-unsupported** backlog.
 
 Last reconciled: epics + live probe on **nebula-spotQL (`172.32.51.72:8443`),
-2026-07-07**. "✓ live" = I ran it; "ticket" = status taken from the Jira epic, not re-probed.
+2026-07-07** (CTE set-operation rows re-probed 2026-07-08). "✓ live" = I ran it;
+"ticket" = status taken from the Jira epic, not re-probed.
 
 > **generate-sql SUCCESS ≠ usable.** Some constructs compile (generate-sql SUCCESS) but
 > fail at execution or silently return wrong data. For anything risky, check `fetch-data`.
@@ -34,7 +35,7 @@ Last reconciled: epics + live probe on **nebula-spotQL (`172.32.51.72:8443`),
 | `ROLLUP` / `CUBE` / `GROUPING SETS` | rejected | [SCAL-319339](https://thoughtspot.atlassian.net/browse/SCAL-319339) |
 | Many scalar functions: `INITCAP`, `REGEXP_SUBSTR`, `REGEXP_REPLACE`, `TO_VARCHAR`, bitwise (`BIT_*`), constant-only (`EXP`/`ACOS`/`LOG(b,x)`/`CHR`/`SPACE`/`CURRENT_DATE`/`TO_DATE`), `DAY_OF_YEAR`, `TRUNC(date,part)`, `CONCAT_WS`/`OVERLAY`/array fns | rejected / `NO_BASE_TABLES` | [SCAL-319333–319343](https://thoughtspot.atlassian.net/browse/SCAL-316371) |
 | Variant / semi-structured / JSON (`ARRAY_CONTAINS`, `ARRAY_SIZE`, lateral flatten) | unsupported | [SCAL-316392–316396](https://thoughtspot.atlassian.net/browse/SCAL-316371), [SCAL-318984](https://thoughtspot.atlassian.net/browse/SCAL-318984) |
-| Set operation (`UNION ALL` / `EXCEPT` / etc.) **inside a user-defined CTE** | `QUERY_GEN_ERROR` (GroupAggregateOptimizationTransformer) | ✓ live · by design |
+| Set operation inside a user-defined CTE **with an aggregated branch** (`SUM(col) … GROUP BY` in any branch) — non-aggregated / attribute-only branches **work**, see ✅ table | `QUERY_GEN_ERROR` (GroupAggregateOptimizationTransformer), however the outer query consumes the CTE (raw, `AGG()`, or re-aggregated; re-aggregating with `SUM()` + GROUP BY instead hits `10000: Failed to transform QuerySpec: null` — likely [SCAL-318834](https://thoughtspot.atlassian.net/browse/SCAL-318834)) | ✓ live 2026-07-08 |
 
 **Workarounds:** per-group `STDDEV`/percentile → aggregate in a CTE, take the stat in a
 scalar outer SELECT (`patterns.md` § Statistics); `MEDIAN` works scalar. Date math → the
@@ -68,10 +69,11 @@ SpotQL UDFs (`udf-reference.md`), not `TRUNC`/`TO_DATE`/`CURRENT_DATE`.
 | Construct | Previously | Fixed by | Verified |
 |---|---|---|---|
 | `UNION ALL` / `UNION` / `EXCEPT` / `EXCEPT ALL` / `INTERSECT` / `INTERSECT ALL` at top level | second branch silently dropped | [SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049) | ✓ live 2026-07-07 (nebula-spotQL) — 2-branch, 3-branch, 5-branch, chained, mixed, with aggregates, window functions, HAVING, multiple measures, arithmetic expressions |
+| Set operation **inside a user-defined CTE**, branches without aggregates | previously documented as wholly unsupported — that was too broad | engineering-confirmed; retested after SCAL-313049 | ✓ live 2026-07-08 (nebula-spotQL) — raw-column branches and attribute-only GROUP BY branches both compile (UNION wrapped in its own CTE in generated SQL) and execute; square-bracket identifiers (`[Col]`) also accepted |
 
 **Remaining caveats for set operations:** ORDER BY and LIMIT on the combined result are
-silently mishandled (see ⚠️ table above). Set operations inside CTEs are rejected by design
-(see ❌ table above). The set operation must be at the **top level** of the query.
+silently mishandled (see ⚠️ table above). Inside a CTE, set operations work only when no
+branch contains an aggregate measure — aggregated branches are rejected (see ❌ table above).
 
 ## Not bugs — feature requests on the backlog
 
