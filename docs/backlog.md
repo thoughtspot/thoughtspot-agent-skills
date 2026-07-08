@@ -1719,10 +1719,10 @@ docs and the current product state.
 7. `custom_instructions`/`module_custom_instructions` YAML fields not documented
 8. `unique_keys` shown with wrong YAML structure in properties file
 9. Complete Schema block missing ~15 now-supported YAML fields
-10. Three new Databricks window range types undocumented (`leading`, `all`, inclusive/exclusive)
-11. Phantom `entities:`/`db_connection:` syntax in ts-to-databricks-rules.md
-12. `safe_divide` "No DIV0" comment is wrong; comparison table still says "Preview required"
-13. `materialization:` block not documented
+10. Three new Databricks window range types undocumented (`leading`, `all`, inclusive/exclusive) — **FIXED** (PR1, 2026-07-09). leading/all/inclusive-exclusive now documented in databricks-metric-view.md + both mapping files with live-verification citations — see the PR1 window-claim matrix.
+11. Phantom `entities:`/`db_connection:` syntax in ts-to-databricks-rules.md — **RESOLVED — verified absent 2026-07-09.** No entities:/db_connection: syntax found in ts-to-databricks-rules.md or ts-databricks-properties.md as of this check; likely fixed silently in an earlier PR (#136/#137 touched adjacent Databricks fixes). No action taken.
+12. `safe_divide` "No DIV0" comment is wrong; comparison table still says "Preview required" — **Partially fixed** — "Preview required" claim confirmed already corrected (verified 2026-07-09). The safe_divide/try_divide comment fix remains open (does not intersect PR1's window/materialization/fields scope) — deferred to the existing medium-severity target 2026-09-30.
+13. `materialization:` block not documented — **FIXED** (PR1, 2026-07-09). Materialization block documented in databricks-metric-view.md (new section) and ts-databricks-properties.md — see Task 1 docs-research findings.
 
 ### ThoughtSpot medium-severity (separate, lower urgency)
 
