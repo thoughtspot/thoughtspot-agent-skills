@@ -101,9 +101,9 @@ fields, what is partially migrated, and what cannot be migrated at all.
 | `rely: { at_most_one_match }` | **Metadata only** | Cardinality hint; TS uses `cardinality: MANY_TO_ONE` in joins |
 | `format:` (currency/percentage) | **Partial** | `currency_type` maps; percentage formatting has no TS equivalent |
 | `window[].range: current` (no offset) | **Mapped** | `range: current` → `sum(m)` at the query grain (month/quarter/year) — **corrected 2026-07-09** (was `sum_if(diff_months(...)=0, [m])`; row-relative, not wall-clock) — Live-verified, matrix C6 |
-| `window[].range: current` + `offset: -1 month` | **Mapped** | → `moving_sum(m, 1, -1, d)` — **corrected 2026-07-09** (was `sum_if(diff_months(...)=-1, [m])`) — Live-verified, matrix C6 |
-| `window[].range: current` + `offset: -1 year` (month grain) | **Mapped** | → `moving_sum(m, 12, -12, d)` — **corrected 2026-07-09** (was `sum_if(diff_months(...)=-12, [m])`) — Deferred (C8), not separately live-tested |
-| `window[].range: current` + `offset: -1 year` (quarter grain) | **Mapped** | → `moving_sum(m, 4, -4, d)` — **corrected 2026-07-09** (was `sum_if(diff_quarters(...)=-4, [m])`) — Deferred (C8), not separately live-tested |
+| `window[].range: current` + `offset: -1 month` | **Mapped** | → `moving_sum(m, 1, -1, d)` — **corrected 2026-07-09** (was `sum_if(diff_months(...)=-1, [m])`) — Live-verified, matrix C6; one-row-per-period caveat applies (see the TS→MV table above) |
+| `window[].range: current` + `offset: -1 year` (month grain) | **Mapped** | → `moving_sum(m, 12, -12, d)` — **corrected 2026-07-09** (was `sum_if(diff_months(...)=-12, [m])`) — Deferred (C8), not separately live-tested; one-row-per-period caveat applies |
+| `window[].range: current` + `offset: -1 year` (quarter grain) | **Mapped** | → `moving_sum(m, 4, -4, d)` — **corrected 2026-07-09** (was `sum_if(diff_quarters(...)=-4, [m])`) — Deferred (C8), not separately live-tested; one-row-per-period caveat applies |
 | `window[].range: trailing N day` (default/exclusive) | **Mapped** | → `moving_sum([m], N, -1, [date])` — **corrected 2026-07-09** (was `moving_sum([m], N, 0, [date])`, which reproduces `trailing (N+1) day inclusive`, not `trailing N day`) — Live-verified, matrix C1/C2 |
 | `window[].range: trailing N day inclusive` | **Mapped** | → `moving_sum([m], N-1, 0, [date])` — Live-verified 2026-07-09, matrix C1 |
 | `window[].range: leading N day` (default/exclusive) | **Mapped** | → `moving_sum([m], -1, N, [date])` — Live-verified 2026-07-09, matrix C3 |
@@ -161,4 +161,4 @@ When generating a conversion report, list unmapped properties in this format:
 | Global filter | Not a concept | `filter:` |
 | CA extension | `with extension (CA='...')` | Not applicable |
 | Currency formatting | Not a concept | `format: { type: currency, currency_code: ... }` |
-| Period comparisons | Not a concept | `window[].range: current` + `offset` → `moving_sum(m, N, -N, d)` (row-relative LAG idiom) / `range: cumulative` → `cumulative_sum` |
+| Period comparisons | Not a concept | `window[].range: current` + `offset` → `moving_sum(m, N, -N, d)` (row-relative LAG idiom; one-row-per-period caveat applies) / `range: cumulative` → `cumulative_sum` |

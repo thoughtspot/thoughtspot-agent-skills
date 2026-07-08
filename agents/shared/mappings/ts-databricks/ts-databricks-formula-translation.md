@@ -498,10 +498,10 @@ multiple rows per period) needs a period-grain pre-aggregation first.
 | ThoughtSpot | Databricks MV YAML | Notes |
 |---|---|---|
 | `sum(m)` at month/quarter/year grain | `expr: SUM(m)` + `window: [{order: month_dim, range: current, semiadditive: last}]` | Current period, no offset |
-| `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 month}]` | Previous month (LAG(1)) |
-| `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: quarter_dim, semiadditive: last, range: current, offset: -3 month}]` | Previous quarter (LAG(1) at quarter grain) |
-| `moving_sum([m], 12, -12, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 year}]` | Same month last year (LAG(12)) |
-| `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: year_dim, semiadditive: last, range: current, offset: -1 year}]` | Previous year (LAG(1) at year grain) |
+| `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 month}]` | Previous month (LAG(1)) — Live-verified 2026-07-09 |
+| `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: quarter_dim, semiadditive: last, range: current, offset: -3 month}]` | Previous quarter (LAG(1) at quarter grain) — Deferred (C8), not separately live-tested |
+| `moving_sum([m], 12, -12, [date])` | `expr: SUM(m)` + `window: [{order: month_dim, semiadditive: last, range: current, offset: -1 year}]` | Same month last year (LAG(12)) — Deferred (C8), not separately live-tested at N=12 |
+| `moving_sum([m], 1, -1, [date])` | `expr: SUM(m)` + `window: [{order: year_dim, semiadditive: last, range: current, offset: -1 year}]` | Previous year (LAG(1) at year grain) — Deferred (C8), not separately live-tested |
 
 **Growth % formulas (MoM, YoY)** inline both period expressions directly — no
 cross-formula references needed:
@@ -666,7 +666,7 @@ the `=` is left orphaned and the formula breaks.
 **`moving_sum` / `moving_average` — no nested aggregates:** ThoughtSpot window functions
 (`moving_sum`, `moving_average`, `cumulative_sum`) already aggregate internally. Do NOT
 wrap `sum()` or `average()` inside them. Strip the outer aggregate and pass the raw
-column expression: `moving_sum([col], N, 0, [date])`, not `moving_sum(sum([col]), N, 0, [date])`.
+column expression: `moving_sum([col], N, -1, [date])`, not `moving_sum(sum([col]), N, -1, [date])`.
 
 **`count(distinct col)` — use `unique count`:** ThoughtSpot does not support `count(distinct ...)`.
 Always express a distinct count as a **`formulas[]` entry** with `unique count ( [col] )` (with a

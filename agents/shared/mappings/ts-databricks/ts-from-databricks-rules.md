@@ -850,7 +850,7 @@ Common patterns:
 - **Date literals:** A bare `'2024-05-01'` is parsed as subtraction. Wrap in `to_date('2024-05-01', 'yyyy-MM-dd')` — hyphens are fine inside `to_date()`, no reformatting needed.
 - **Operator ordering:** When tokenising operators, match `<=` and `>=` before `<` and `>`.
 - **`moving_sum` / `moving_average`:** These aggregate internally — do NOT wrap `sum()` inside.
-  Strip the outer aggregate: `moving_sum([col], N, 0, [date])`.
+  Strip the outer aggregate: `moving_sum([col], N, -1, [date])`.
 
 ---
 

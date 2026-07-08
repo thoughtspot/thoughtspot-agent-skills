@@ -371,8 +371,10 @@ periods — no cross-formula references:
 / sum_if(diff_months([date], today()) = -1, [m]) * 100
 ```
 
-**Live-verified 2026-07-09** — see
-`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C6, C6a).
+**Live-verified 2026-07-09 at month grain, N=1** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C6, C6a). The quarter/year-grain
+and N>1 rows above are Deferred (C8) extrapolations of the same verified mechanism,
+not separately live-tested.
 
 ---
 
@@ -395,14 +397,24 @@ for the `start`/`end` opposite-sign convention.
 | `moving_sum([m], -1, 7, [d])` (default/exclusive, 7-day leading) | `window: [{order: date_dim, range: leading 7 day, semiadditive: last}]` |
 | `moving_sum([m], 0, 6, [d])` (anchor-inclusive leading, 7 rows total) | `window: [{order: date_dim, range: leading 7 day inclusive, semiadditive: last}]` |
 
-The `order:` dimension should be a date-granularity dimension (daily). Given a TS
-`moving_sum([m], start, end, [d])`: if `start > 0` and `end < 0`, it's a trailing
-window (`range: trailing {start} day`, inclusive only if `end == 0`); if
-`start < 0` and `end > 0`, it's a leading window (`range: leading {end} day`,
-inclusive only if `start == 0`). `moving_sum([m], N, 0, [d])` (anchor included on
-the trailing side) → `range: trailing (N+1) day inclusive`; `moving_sum([m], 0, N,
-[d])` (anchor included on the leading side) → `range: leading (N+1) day
-inclusive` — adjust N accordingly when translating either direction.
+The `order:` dimension should be a date-granularity dimension (daily). Reverse-map
+a TS `moving_sum([m], start, end, [d])` **strictly** — only the four live-verified
+(start, end) shapes have a Databricks `range:` equivalent:
+
+| (start, end) shape | Databricks `range:` |
+|---|---|
+| `start = N > 0`, `end = -1` | `trailing N day` (default/exclusive) |
+| `start = N ≥ 0`, `end = 0` | `trailing (N+1) day inclusive` (window spans N+1 rows) |
+| `start = -1`, `end = N > 0` | `leading N day` (default/exclusive) |
+| `start = 0`, `end = N ≥ 0` | `leading (N+1) day inclusive` (window spans N+1 rows) |
+
+**ANY other (start, end) pair is unmapped — route to manual review / the Unmapped
+Report rather than guessing.** The Task-5 live grid explicitly tested detached
+windows such as `moving_sum([m], -2, 3, [d])` and `moving_sum([m], -3, 3, [d])`
+and recorded **FAIL — matches nothing** against every Databricks `range:` form
+(see the candidate PASS/FAIL table under `### C1/C3 — TS-side number-match` in
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md`); do not classify them as
+`leading`/`trailing` by sign alone.
 
 **Live-verified 2026-07-09** — see
 `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1, C2, C3). Boundary

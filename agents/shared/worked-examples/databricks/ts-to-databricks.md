@@ -1042,6 +1042,9 @@ GROUP BY product_category, product_name
 ORDER BY contribution DESC
 
 -- Sales: period-over-period (MoM)
+-- Caveat (2026-07-09): this multi-month query returns ROW-RELATIVE values
+-- (each row's prior_month is its own previous period), which diverges from
+-- the wall-clock intent of the source TS formula — see the Formula 5 caveat.
 SELECT order_month,
   MEASURE(monthly_revenue) AS current_month,
   MEASURE(prior_month_revenue) AS prior_month,
