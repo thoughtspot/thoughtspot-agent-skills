@@ -2512,3 +2512,26 @@ in #188 and overlaps the deferred "logical-relationship → join cardinality" ga
 **Target:** next multi-query build-model work; needed for FedEx VEDR (2 joined Custom SQL sources).
 
 ---
+
+## BL-095 — ts-cli: `connections add-tables` omits required `authenticationType`; instance `updateConnectionV2` 500s
+
+**Source:** 2026-07-08 BL-063 PR1 Task 5 live run against se-thoughtspot (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, Task-5 BLOCKED subsections, incl. incident GUIDs for a support ticket).
+**Affects:** `tools/ts-cli/ts_cli/commands/connections.py::add_tables()`; any skill relying on `ts connections add-tables`.
+**Status:** OPEN.
+
+Two distinct findings:
+
+1. **ts-cli bug (fix in ts-cli):** `add_tables()` never sends `authenticationType` on
+   `POST /api/rest/2.0/connections/{id}/update`. Confirmed via
+   `get-rest-api-reference(apiName: "updateConnection")`: for any connection whose
+   `authentication_type` ≠ SERVICE_ACCOUNT the field is required, otherwise the backend
+   silently treats the payload as SERVICE_ACCOUNT. Fix: read the target connection's auth
+   type and include it in the update payload; unit-test the payload shape.
+2. **Probable build defect (verify on a newer build / support ticket):** even with a
+   corrected payload, `updateConnectionV2` returned a uniform generic 500
+   (`code: 10000`, `debug: "[null]"`) across 4 payload variants and 2 independently
+   healthy connections (PAT and SERVICE_ACCOUNT) on the se-thoughtspot build of
+   2026-07-08. Re-verify after the fix in (1) lands and on a newer cloud build before
+   assuming the CLI fix alone resolves it; incident GUIDs are in the claim matrix.
+
+**Target:** fix (1) opportunistically with the next ts-cli connections work or by 2026-08-31; (2) re-check when (1) ships.
