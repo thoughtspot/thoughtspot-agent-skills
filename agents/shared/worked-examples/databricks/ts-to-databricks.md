@@ -404,6 +404,18 @@ references and `ANY_VALUE()` for dimension-from-measure references.
 sum_if ( diff_months ( [DM_DATE_DIM::DATE_VALUE] , today ( ) ) = 0 , [DM_ORDER_DETAIL::LINE_TOTAL] )
 ```
 
+> **Corrected 2026-07-09 — approximation caveat (matrix C6, `docs/audit/2026-07-08-dbx-window-claim-matrix.md`).**
+> Live testing established that Databricks `window: [{range: current, offset: ...}]`
+> is **row-relative** (a `LAG`-style shift relative to each output row's own period),
+> not anchored to wall-clock `today()` like the source TS formula above. The
+> translation below is the closest available Databricks construct, but it is a
+> **lossy approximation**: it is exact only when the query returns a single row for
+> the current period (the single-snapshot pattern this example was verified
+> against on 2026-05-25); querying `monthly_revenue`/`prior_month_revenue` across a
+> multi-month trend would diverge from the wall-clock source formula's intent. Flag
+> this caveat when converting a wall-clock `sum_if(diff_months(...), today())`
+> formula for a model that will be queried as a trend, not a single KPI snapshot.
+
 Translation:
 - Pattern: `sum_if(diff_months([date], today()) = 0, [m])` → period-filter window
 - The `order:` dimension must reference a **truncated month** dimension (not raw date)
@@ -443,6 +455,8 @@ Translation:
   ```
 
 Translatable — add as `measures[]` with `window: [{range: current, offset: -1 month}]`.
+**Caveat (2026-07-09):** this DBX construct is row-relative, not wall-clock — see
+the note under Formula 5 above.
 
 ---
 
@@ -1151,7 +1165,11 @@ flattened view is created.
    to `window: [{order: order_month, semiadditive: last, range: current}]` where
    `order_month` is a computed dimension with `DATE_TRUNC('MONTH', ...)`. The prior
    month adds `offset: -1 month`. Growth % is derived via `MEASURE()` references
-   to both period measures.
+   to both period measures. **Caveat added 2026-07-09** (matrix C6,
+   `docs/audit/2026-07-08-dbx-window-claim-matrix.md`): Databricks' `range:
+   current`/`offset` is row-relative, not wall-clock like the source TS formula —
+   this translation is exact only for a single-current-period snapshot query, not
+   a multi-period trend. See Formula 5 above for the full caveat.
 
 8. **Conditional aggregates: `*_if` → `FILTER (WHERE ...)`.** ThoughtSpot's
    `unique_count_if(cond, x)` maps to `COUNT(DISTINCT x) FILTER (WHERE cond)`.

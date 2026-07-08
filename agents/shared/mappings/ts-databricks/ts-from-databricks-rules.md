@@ -196,18 +196,29 @@ Does the measure have a `window:` section?
         Translation below). The expr and window are translated together into
         a single ThoughtSpot formula. Flag with ⚠ WINDOW in review checkpoint.
         
-        range: trailing N day  → moving_sum / moving_average
-        range: cumulative      → cumulative_sum
-        range: current + raw date order   → last_value (semi-additive)
-        range: current + truncated period → sum_if (period filter)
-        range: leading N day   → PENDING LIVE VERIFICATION (see BL-032) — do not
-                                   guess; flag for manual review
-        range: all              → PENDING LIVE VERIFICATION (see BL-032) — do not
-                                   guess; flag for manual review
+        range: trailing N day  → moving_sum / moving_average (default/exclusive:
+                                   start=N, end=-1; inclusive: start=N-1, end=0 —
+                                   see Rolling Window below; Live-verified 2026-07-09)
+        range: leading N day   → moving_sum / moving_average (default/exclusive:
+                                   start=-1, end=N; inclusive: start=0, end=N-1 —
+                                   see Leading Window below; Live-verified 2026-07-09)
+        range: cumulative      → cumulative_sum (Live-verified 2026-07-09)
+        range: current + raw date order        → last_value/first_value (semi-additive;
+                                                   Live-verified 2026-07-09)
+        range: current + truncated period, no offset → plain sum(m) at the query grain
+                                                   (Live-verified 2026-07-09 — see Period
+                                                   Filter below; this is row-relative, NOT
+                                                   a wall-clock filter)
+        range: current + truncated period, offset: -N <unit> → moving_sum(m, N, -N, date)
+                                                   (LAG idiom; Live-verified 2026-07-09 —
+                                                   one-row-per-period caveat, see Period
+                                                   Filter below)
+        range: all              → group_aggregate(sum(m), {partition dims}, query_filters())
+                                   (Live-verified 2026-07-09 — see All-Partition Window below)
         
         For moving_sum/moving_average: strip the outer AGG wrapper from expr
         and translate the inner expression only. SUM(a * b) + trailing 7 day
-        → moving_sum ( [a] * [b] , 7 , 0 , [date] )
+        (default/exclusive) → moving_sum ( [a] * [b] , 7 , -1 , [date] )
         
   NO  → Continue with expr-only classification below.
 
@@ -333,10 +344,16 @@ last_value ( sum ( [FILLED_INVENTORY] ) , query_groups ( ) , { [balance_date] } 
       range: current
 ```
 
-Maps to ThoughtSpot `sum_if` formula:
+Maps to a plain `sum` at the query grain (**corrected 2026-07-09** — see the
+Period Filter subsection of the "Window with Range/Offset" section below;
+`range: current` with no `offset` is row-relative, not a wall-clock filter):
 ```
-sum_if ( diff_months ( [ORDER_DATE] , today ( ) ) = 0 , [LINE_TOTAL] )
+sum ( [LINE_TOTAL] )
 ```
+
+With an offset (e.g. `offset: -1 month`), this becomes the row-relative
+`moving_sum` `LAG` idiom instead — see the Period Filter subsection below for
+the full mapping and its one-row-per-period caveat.
 
 ### Filter → Boolean Formula Column (always)
 
@@ -550,35 +567,44 @@ type of measure and the `order:` dimension. Use this classification:
 Does the window have `range: current`?
   YES → Is `order:` a raw date dimension (not a truncated period)?
           YES → True semi-additive (snapshot metric)
-                → last_value ( sum ( [m] ) , query_groups ( ) , { [date] } )
-          NO  → Period filter (flow/additive metric)
-                → sum_if ( diff_months/quarters/years ( [date] , today ( ) ) = N , [m] )
+                → last_value ( sum ( [m] ) , query_groups ( ) , { [date] } )   [semiadditive: last]
+                → first_value ( sum ( [m] ) , query_groups ( ) , { [date] } )  [semiadditive: first]
+          NO  → Period filter (flow/additive metric) — row-relative, not wall-clock
+                → no offset: plain sum ( [m] ) at the query grain
+                → offset: -N <unit>: moving_sum ( [m] , N , -N , [date] )   (LAG idiom;
+                  caveat: exactly one row per period in the `order:` dimension)
   NO  → Is `range: trailing <N> <unit>`?
           YES → Rolling look-back window
-                → moving_sum ( [m] , N , 0 , [date] )
+                → default / exclusive: moving_sum ( [m] , N , -1 , [date] )
+                → inclusive:           moving_sum ( [m] , N-1 , 0 , [date] )
   NO  → Is `range: cumulative`?
           YES → cumulative_sum ( [m] , [date] )
-  NO  → Is `range: leading <N> <unit>`? (RECOGNISED, translation PENDING LIVE
-        VERIFICATION — see BL-032)
-          YES → Rolling look-ahead window. Candidate: `moving_sum ( [m] , 0 , N , [date] )`
-                (look_ahead=N, window_size=0) — do NOT ship this without a live
-                round-trip. Flag for manual review / log in Unmapped Report.
-  NO  → Is `range: all`? (RECOGNISED, translation PENDING LIVE VERIFICATION —
-        see BL-032)
-          YES → Unbounded window across the entire partition. No verified
-                ThoughtSpot equivalent — a partition-wide `group_aggregate(...)`
-                (LOD-style) is the leading candidate but is untested against
-                this construct. Flag for manual review / log in Unmapped Report.
+  NO  → Is `range: leading <N> <unit>`?
+          YES → Rolling look-ahead window
+                → default / exclusive: moving_sum ( [m] , -1 , N , [date] )
+                → inclusive:           moving_sum ( [m] , 0 , N-1 , [date] )
+  NO  → Is `range: all`?
+          YES → Unbounded window across the entire partition, scoped per query
+                partition → group_aggregate ( sum ( [m] ) , { partition dims } , query_filters ( ) )
 ```
 
-**Anchor-row modifier (`inclusive` | `exclusive`) — PENDING RE-VERIFICATION:**
-`trailing`/`leading` ranges accept an optional `inclusive|exclusive` modifier
-controlling whether the anchor (current) row is included in the window. The
-documented default is `exclusive`. The `trailing N day` ↔
-`moving_sum([m], N, 0, [date])` equivalence in this table was recorded before this
-default was confirmed and needs re-verification against a live instance — see
-BL-032. If an MV explicitly sets `inclusive`, do not assume the mapping above is
-exact until reverified.
+**All formulas above are Live-verified 2026-07-09** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1–C7). Full derivation and
+day_index-level number matches are in the Rolling Window / Leading Window /
+Period Filter / All-Partition subsections below.
+
+**Anchor-row modifier (`inclusive` | `exclusive`) — Live-verified 2026-07-09 (matrix
+C1/C2/C3):** `trailing`/`leading` ranges accept an optional `inclusive|exclusive`
+modifier controlling whether the anchor (current) row is included in the window.
+The modifier applies **only** to `trailing`/`leading` — `current`, `cumulative`, and
+`all` do not accept it. **Default: `exclusive`**, confirmed live 2026-07-08
+(`trailing N day` == `trailing N day exclusive` at all 24 fixture rows).
+
+The `trailing N day` ↔ `moving_sum([m], N, 0, [date])` equivalence recorded in this
+repo before 2026-07-09 is **wrong**: `moving_sum([m], N, 0, [date])` always includes
+the anchor row (spans N+1 rows), so it reproduces `trailing (N+1) day inclusive`, not
+`trailing N day` (default/exclusive). See the Rolling Window and Leading Window
+subsections below for the corrected mappings.
 
 **How to identify the `order:` dimension type:**
 - Look up the dimension's `expr` in the MV YAML
@@ -608,38 +634,69 @@ Example:
 ```
 → `last_value ( sum ( [FILLED_INVENTORY] ) , query_groups ( ) , { [balance_date] } )`
 
+**Live-verified 2026-07-09** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C7). `last` was reconfirmed and
+`first` was exercised live for the first time in this repo; both matched DBX exactly
+at category grain.
+
 #### Period Filter (`order:` is truncated period dimension)
 
-Flow/additive metrics (revenue, quantity) where `range: current` means "filter to the
-current period" and `offset` shifts the period anchor.
+Flow/additive metrics (revenue, quantity) with `range: current` + a truncated
+period `order:` dimension.
 
-**Offset conversion:** divide the offset value by the period size to get the period
-count. `-1 month` at month grain = -1. `-3 month` at quarter grain = -1 quarter.
-`-1 year` at month grain = -12 months.
+**Corrected 2026-07-09 — row-relative, not wall-clock (matrix C6/C6a).** The
+mapping previously documented here (`sum_if(diff_months([date], today())=N, [m])`)
+is **wrong**: live testing (`docs/audit/2026-07-08-dbx-window-claim-matrix.md`,
+Query B1, 3-hypothesis discriminator) proved `range: current` + `offset` is
+evaluated **relative to each output row's own period**, not anchored to wall-clock
+`today()`. Querying `prior_month_revenue` across a multi-month trend returns a
+`LAG`-style shift for every row, not a fixed-calendar-month filter — the old
+mapping only coincidentally matched a single current-period snapshot query and
+fails for any query spanning more than one period.
+
+**Offset conversion (unchanged from before the correction):** divide the offset
+value by the `order:` dimension's own period size to get a period count N — `-1
+month` at month grain = 1. `-3 month` at quarter grain = 1 quarter. `-1 year` at
+month grain = 12 months. That N then drives the row-relative `moving_sum` idiom
+below (valid under the one-row-per-period caveat).
+
+**Corrected mapping:**
 
 | MV window pattern | ThoughtSpot equivalent |
 |---|---|
-| `range: current`, `order: month_dim` | `sum_if ( diff_months ( [date] , today ( ) ) = 0 , [m] )` |
-| `range: current`, `order: month_dim`, `offset: -1 month` | `sum_if ( diff_months ( [date] , today ( ) ) = -1 , [m] )` |
-| `range: current`, `order: month_dim`, `offset: -1 year` | `sum_if ( diff_months ( [date] , today ( ) ) = -12 , [m] )` |
-| `range: current`, `order: quarter_dim` | `sum_if ( diff_quarters ( [date] , today ( ) ) = 0 , [m] )` |
-| `range: current`, `order: quarter_dim`, `offset: -3 month` | `sum_if ( diff_quarters ( [date] , today ( ) ) = -1 , [m] )` |
-| `range: current`, `order: quarter_dim`, `offset: -6 month` | `sum_if ( diff_quarters ( [date] , today ( ) ) = -2 , [m] )` |
-| `range: current`, `order: year_dim` | `sum_if ( diff_years ( [date] , today ( ) ) = 0 , [m] )` |
-| `range: current`, `order: year_dim`, `offset: -1 year` | `sum_if ( diff_years ( [date] , today ( ) ) = -1 , [m] )` |
-| `range: current`, `order: year_dim`, `offset: -2 year` | `sum_if ( diff_years ( [date] , today ( ) ) = -2 , [m] )` |
-| `MEASURE(a) - MEASURE(b)` (period comparison) | Inline `sum_if` expressions — cross-formula refs not supported during TML import |
+| `range: current`, no `offset` (any grain: month/quarter/year) | `sum ( [m] )` at the query grain — plain aggregate, no filter needed |
+| `range: current`, `order: month_dim`, `offset: -1 month` | `moving_sum ( [m] , 1 , -1 , [date] )` — **Live-verified 2026-07-09** |
+| `range: current`, `order: month_dim`, `offset: -1 year` | `moving_sum ( [m] , 12 , -12 , [date] )` — Deferred (C8), same idiom extrapolated to N=12, not separately live-tested |
+| `range: current`, `order: quarter_dim`, `offset: -3 month` | `moving_sum ( [m] , 1 , -1 , [date] )` — Deferred (C8), not separately live-tested at quarter grain |
+| `range: current`, `order: quarter_dim`, `offset: -6 month` | `moving_sum ( [m] , 2 , -2 , [date] )` — Deferred (C8), not separately live-tested at quarter grain |
+| `range: current`, `order: year_dim`, `offset: -1 year` | `moving_sum ( [m] , 1 , -1 , [date] )` — Deferred (C8), not separately live-tested at year grain |
+| `range: current`, `order: year_dim`, `offset: -2 year` | `moving_sum ( [m] , 2 , -2 , [date] )` — Deferred (C8), not separately live-tested at year grain |
+| `MEASURE(a) - MEASURE(b)` (period comparison, e.g. MoM/YoY growth %) | Inline both `moving_sum`/`sum` expressions — cross-formula refs not supported during TML import |
 
-**`[date]` in the `sum_if` formulas above** is the physical date column (e.g.,
-`[dm_order::ORDER_DATE]`), not the truncated dimension formula. `diff_months` /
-`diff_quarters` / `diff_years` handle the grain internally.
+**`[date]` in the `moving_sum` formulas above** is the physical date column (e.g.,
+`[dm_order::ORDER_DATE]`), not the truncated dimension formula — same rule as the
+Rolling Window section below.
 
-**Growth % formulas** (MoM, QoQ, YoY) inline the `sum_if` expressions for both
-periods and compute the ratio directly — no cross-formula references needed:
+**Caveat (carries forward to C8's quarter/year-grain extrapolations below): this
+mapping is only exact when the query returns exactly one row per period** in the
+`order:` dimension — `moving_sum`'s row-based offset only equals a period-based
+offset under that precondition. General use (a query with gaps or multiple rows
+per period) needs a period-grain pre-aggregation first; flag for manual review if
+the query grain can't guarantee one row per period.
+
+**Live-verified 2026-07-09** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C6, C6a). Verified for N=1
+(`moving_sum([m], 1, -1, [date])` matched DBX `prior_month_revenue` exactly,
+including the out-of-range `NULL` at the earliest row); N=12 (`-1 year` at month
+grain) is the documented extrapolation of the same verified idiom, not separately
+live-tested (see C8 below).
+
+**Growth % formulas** (MoM, QoQ, YoY) inline both period expressions and compute
+the ratio directly — no cross-formula references needed:
 ```
-( sum_if ( diff_months ( [date] , today ( ) ) = 0 , [m] )
-- sum_if ( diff_months ( [date] , today ( ) ) = -1 , [m] ) )
-/ sum_if ( diff_months ( [date] , today ( ) ) = -1 , [m] ) * 100
+( sum ( [m] )
+- moving_sum ( [m] , 1 , -1 , [date] ) )
+/ moving_sum ( [m] , 1 , -1 , [date] ) * 100
 ```
 
 #### Rolling Window (`range: trailing N day`)
@@ -647,11 +704,19 @@ periods and compute the ratio directly — no cross-formula references needed:
 Date-based rolling windows. ThoughtSpot's `moving_sum` / `moving_average` operate
 on row counts, so this assumes one row per day (daily grain).
 
+**Corrected 2026-07-09 (matrix C1/C2).** `moving_sum([m], N, 0, [date])` always
+includes the anchor row — it spans **N+1 rows** (N preceding + anchor) — so it
+reproduces `trailing (N+1) day inclusive`, not `trailing N day` (default/exclusive).
+The mapping below is the corrected form, verified against every row of a 24-row
+fixture (2 categories × 12 days) including boundary partial-window/NULL rows — e.g.
+at an interior row with 5 buffer days on both sides, `trailing3_default` (exclusive)
+matched the hand-computed exclusive-window sum of the 3 preceding rows exactly,
+not the inclusive-of-anchor sum.
+
 | MV window pattern | ThoughtSpot equivalent |
 |---|---|
-| `range: trailing 7 day`, `order: date_dim` | `moving_sum ( [m] , 7 , 0 , [TABLE::date_col] )` |
-| `range: trailing 30 day`, `order: date_dim` | `moving_sum ( [m] , 30 , 0 , [TABLE::date_col] )` |
-| `range: trailing N day`, `order: date_dim` | `moving_sum ( [m] , N , 0 , [TABLE::date_col] )` |
+| `range: trailing N day` (default) / `trailing N day exclusive`, `order: date_dim` | `moving_sum ( [m] , N , -1 , [TABLE::date_col] )` |
+| `range: trailing N day inclusive`, `order: date_dim` | `moving_sum ( [m] , N-1 , 0 , [TABLE::date_col] )` |
 
 **`[m]` is the inner expression only** — strip the outer aggregate wrapper from `expr`.
 `SUM(a * b)` → `[TABLE::a] * [TABLE::b]`.
@@ -663,32 +728,64 @@ Look up the `order:` dimension's `expr` to find the underlying physical column.
 
 If the measure uses `AVG` instead of `SUM`, use `moving_average` instead of `moving_sum`.
 
+**Boundary behavior (Live-verified 2026-07-09):** Databricks returns a partial sum
+when 1..N-1 rows are available in the trailing direction, and `NULL` only when zero
+rows are available — never an error, never a silent 0. ThoughtSpot's `moving_sum`
+matches this exactly.
+
+**Live-verified 2026-07-09** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1, C2).
+
 #### Cumulative
 
 | MV window pattern | ThoughtSpot equivalent |
 |---|---|
 | `range: cumulative` | `cumulative_sum ( [m] , [date] )` |
 
-#### Leading Window (`range: leading N unit`) — PENDING LIVE VERIFICATION
+**Live-verified 2026-07-09** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C5): matched DBX's running
+total at every row of the fixture.
 
-`range: leading <N> <unit>` is the look-ahead counterpart to `trailing` (both
-documented in the current YAML reference). No live round-trip has verified the
-ThoughtSpot equivalent. Do not ship a translation without one — log these
-measures in the Unmapped Report and flag for manual review.
+#### Leading Window (`range: leading N unit`)
 
-| MV window pattern | Candidate ThoughtSpot formula | Status |
-|---|---|---|
-| `range: leading 7 day`, `order: date_dim` | `moving_sum ( [m] , 0 , 7 , [TABLE::date_col] )` (look_ahead=7, window_size=0) | PENDING — see BL-032 |
+`range: leading <N> <unit>` is the look-ahead counterpart to `trailing`.
 
-#### All-Partition Window (`range: all`) — PENDING LIVE VERIFICATION
+**Corrected 2026-07-09 (matrix C3).** The mapping previously candidated here
+(`moving_sum([m], 0, N, [date])`) is **wrong** — it always includes the anchor
+row (spans N+1 rows: anchor + N following) and matches neither the `exclusive`
+nor `inclusive` DBX form. The corrected mapping below is verified against every
+row of the fixture, including boundary partial-window/NULL rows.
+
+| MV window pattern | ThoughtSpot equivalent |
+|---|---|
+| `range: leading N day` (default) / `leading N day exclusive`, `order: date_dim` | `moving_sum ( [m] , -1 , N , [TABLE::date_col] )` |
+| `range: leading N day inclusive`, `order: date_dim` | `moving_sum ( [m] , 0 , N-1 , [TABLE::date_col] )` |
+
+**Live-verified 2026-07-09** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C3).
+
+#### All-Partition Window (`range: all`)
 
 `range: all` spans the entire partition, unbounded in both directions — not a
-bounded rolling window. No verified ThoughtSpot equivalent exists yet;
-partition-wide `group_aggregate(...)` (the same LOD mechanism used for
+bounded rolling window. Confirmed **scoped per query partition** (e.g. per
+category), not table-wide.
+
+| MV window pattern | ThoughtSpot equivalent |
+|---|---|
+| `range: all`, partitioned by one or more dimensions | `group_aggregate ( sum ( [m] ) , { [partition_dim1], [partition_dim2], ... } , query_filters ( ) )` |
+
+The partition set is the same LOD mechanism used for
 `AGG() OVER (PARTITION BY ...)` dimensions — see
-[ts-databricks-formula-translation.md](ts-databricks-formula-translation.md#level-of-detail-lod-functions-verified-2026-05-25))
-is the leading candidate but is untested against this specific construct. Log
-in the Unmapped Report until verified — see BL-032.
+[ts-databricks-formula-translation.md](ts-databricks-formula-translation.md#level-of-detail-lod-functions-verified-2026-05-25).
+Column type is **ATTRIBUTE**, per the standard LOD convention (`range: all` results
+are query-independent, like other `group_aggregate` results). Deriving the exact
+partition-dimension set from a specific MV's query grain is a per-MV judgment call,
+not a fixed rule — inspect how the MV's `all_amount`-style measure is queried
+(GROUP BY columns) to determine the intended partition.
+
+**Live-verified 2026-07-09** — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C4): matched DBX exactly at
+both row grain and category grain.
 
 ### Merging Multiple MVs into a Single ThoughtSpot Model
 

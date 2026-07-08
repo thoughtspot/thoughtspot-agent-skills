@@ -10,6 +10,13 @@ column with model-level filter enforcement.
 
 Verified against live ThoughtSpot and Databricks instances on 2026-05-28.
 
+> **Corrected 2026-07-09** — `revenue_7d_rolling`'s formula below was updated. The
+> original `moving_sum([m], 7, 0, [date])` reproduced Databricks' `trailing 8 day
+> inclusive` semantics, not the `trailing 7 day` (default/exclusive) the source MV
+> actually declares. See "Measure 5" below and
+> `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1/C2) for the corrected
+> mapping and the old/new formula text.
+
 ---
 
 ## Source — Metric View YAML (v1.1)
@@ -312,10 +319,23 @@ window:
     semiadditive: last
 ```
 
-ThoughtSpot formula:
+ThoughtSpot formula (**corrected 2026-07-09** — see below):
 ```
-moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , 0 , [TRANSACTIONS::transaction_date] )
+moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )
 ```
+
+> **Corrected 2026-07-09.** The original translation recorded here (verified
+> 2026-05-28) was
+> `moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , 0 , [TRANSACTIONS::transaction_date] )`.
+> Live testing on 2026-07-09
+> (`docs/audit/2026-07-08-dbx-window-claim-matrix.md`, C1/C2) established that
+> `moving_sum([m], N, 0, [date])` always includes the anchor row — it spans N+1
+> rows — so the old formula actually reproduces `trailing 8 day inclusive`, not
+> the source MV's `trailing 7 day` (default/exclusive, per Databricks' confirmed
+> `exclusive` default). The corrected form above (`start=7, end=-1`) spans exactly
+> 7 rows ending one row before the anchor, matching `trailing 7 day` exactly —
+> including boundary behavior (partial sums near the start of the series, `NULL`
+> only when zero preceding rows exist).
 
 Key translation rules:
 - The outer `SUM` is stripped — `moving_sum` applies its own aggregation internally.
@@ -325,14 +345,16 @@ Key translation rules:
   fail with "Search did not find" errors.
 - The `order:` dimension `transaction_date` has `expr: transaction_date` — a direct
   column reference — so the physical column is `transaction_date`.
-- Arguments: `moving_sum(measure_expr, window_size, look_ahead, sort_column)`.
-  `window_size` = 7, `look_ahead` = 0 (no forward-looking rows).
+- Arguments: `moving_sum(measure_expr, start, end, sort_column)` — see
+  [thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#moving-functions)
+  for the `start`/`end` opposite-sign convention. `start` = 7, `end` = -1: 7 rows
+  ending one row before the anchor (the `trailing 7 day` default/exclusive form).
 
 | Property | Value |
 |---|---|
 | Column name | `7-Day Rolling Revenue` (from `display_name`) |
 | Formula id | `formula_7-Day Rolling Revenue` |
-| Formula expr | `moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , 0 , [TRANSACTIONS::transaction_date] )` |
+| Formula expr | `moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )` |
 | `column_type` | `MEASURE` |
 | `aggregation` | `SUM` |
 | `description` | `Trailing 7-day rolling sum of gross revenue.` |
@@ -491,7 +513,7 @@ model:
     expr: "sum_if ( [TRANSACTIONS::unit_price] > 100 , [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] )"
   - id: "formula_7-Day Rolling Revenue"
     name: "7-Day Rolling Revenue"
-    expr: "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , 0 , [TRANSACTIONS::transaction_date] )"
+    expr: "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )"
   - id: formula_Return Rate
     name: "Return Rate"
     expr: "sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )"
@@ -631,9 +653,15 @@ model:
    expression is the second.
 
 9. **Rolling windows strip the outer aggregate.** `SUM(a * b)` with
-   `window: [{range: trailing 7 day}]` becomes `moving_sum ( [a] * [b] , 7 , 0 , [date] )`.
+   `window: [{range: trailing 7 day}]` becomes `moving_sum ( [a] * [b] , 7 , -1 , [date] )`.
    The outer `SUM` is removed because `moving_sum` aggregates internally. The sort
    argument must be the physical date column (`[TABLE::col]`), not a formula reference.
+   **Corrected 2026-07-09** — the original write-up of this pattern used
+   `moving_sum([a] * [b], 7, 0, [date])`, which live testing showed reproduces
+   `trailing 8 day inclusive`, not `trailing 7 day` (default/exclusive). `end=-1`
+   (not `end=0`) is required to exclude the anchor row for the default/exclusive
+   form — see
+   `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1/C2) and "Measure 5" above.
 
 10. **`CASE WHEN ... END` translates to `if (..., val, val)`; `COUNT(*)` becomes
     `count ( 1 )`.** ThoughtSpot has no `COUNT(*)` syntax. `CAST(... AS DOUBLE)` is
