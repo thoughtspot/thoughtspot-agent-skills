@@ -411,6 +411,12 @@ PRs 2/3 ship on unit tests alone, mirroring how `ts tableau parse`/
 `smoke_ts_from_databricks.py` (updated in PR 4) is the live-verification entry
 point per `.claude/rules/branching.md`'s merge criteria.
 
+**Live-test environments (confirmed available):** Databricks via the
+`Production` profile (`databricks` CLI alias `ts-production`, default catalog
+`hive_metastore`) for PR 1's window experiments and PR 4's end-to-end run;
+ThoughtSpot via the `se-thoughtspot` profile for the TS-side number-match and
+model import. Destructive/import steps still pause for user authorization.
+
 ---
 
 ## Constraints & validators
