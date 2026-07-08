@@ -261,8 +261,8 @@ Databricks SQL equivalents.
 
 | ThoughtSpot | Databricks SQL | Notes |
 |---|---|---|
-| `moving_sum(measure, window)` | `SUM(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {window-1} PRECEDING AND CURRENT ROW)` | |
-| `moving_average(measure, window)` | `AVG(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {window-1} PRECEDING AND CURRENT ROW)` | |
+| `moving_sum(measure, s, e, sort_col)` | `SUM(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {s} PRECEDING AND {e < 0 ? ABS(e) PRECEDING : e FOLLOWING})` | 4-arg signature, not 2-arg — window spans `[-s, +e]` rows around the current row (opposite-sign convention on `e`; see Rolling Window Functions below). Live-verified 2026-07-09 — `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1/C3) |
+| `moving_average(measure, s, e, sort_col)` | `AVG(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {s} PRECEDING AND {e < 0 ? ABS(e) PRECEDING : e FOLLOWING})` | Same signature and frame rule as `moving_sum` above |
 | `moving_max(measure, window)` | `MAX(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {window-1} PRECEDING AND CURRENT ROW)` | |
 | `moving_min(measure, window)` | `MIN(measure) OVER (ORDER BY {sort_col} ROWS BETWEEN {window-1} PRECEDING AND CURRENT ROW)` | |
 

@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (external sweep: window range now 5 values — non-zero look-ahead / range: leading emission flagged pending verification; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: TS→MV window emission tables corrected to live-verified forms (C1/C3/C6/C6a), leading PENDING resolved, strict (start,end) reverse-map added; see BL-032 + docs/audit/2026-07-08-dbx-window-claim-matrix.md) -->
 
 # Mapping Rules Reference
 
