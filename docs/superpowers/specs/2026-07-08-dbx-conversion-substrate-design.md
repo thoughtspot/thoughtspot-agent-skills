@@ -299,11 +299,34 @@ Before parser code is written, PR 1 updates mapping/schema docs to the
 - Re-verify `fields:`/`dimensions:` precedence has no stale references left in
   `ts-databricks-properties.md` or the formula-translation doc (BL-064 #2 is
   marked FIXED but PR 1 re-checks).
-- Live-verify `leading N day`/`all` window-range translations and the
-  `inclusive|exclusive` anchor-default equivalence — currently PENDING in
-  `databricks-metric-view.md:68-70`, the formula-translation doc, and
-  `ts-from-databricks-rules.md`. A confirmed result lets Command 2 codify it
-  directly instead of the `pending_verification` skip path.
+- **Deep analysis of metric definitions — window semantics (user-flagged).**
+  The existing window mappings (the decision tree in
+  `ts-from-databricks-rules.md`, the window rows in the formula-translation
+  doc, and the window examples in
+  `agents/shared/worked-examples/databricks/`) are of **uncertain
+  correctness** and must be re-derived, not just re-read:
+  1. Build the full semantic map of the MV measure `window:` spec from
+     current Databricks docs: `order`, all five `range` values
+     (`current|cumulative|trailing N unit|leading N unit|all`), `offset`,
+     `semiadditive`, and the `inclusive|exclusive` anchor modifier —
+     including default behaviors the docs leave implicit.
+  2. **Verify empirically, not by spec-reading**: execute window-measure MVs
+     against a live Databricks workspace with small known fixture data and
+     record the actual result sets per `range`/`offset`/anchor combination.
+  3. For every recorded ThoughtSpot translation
+     (`moving_sum`/`cumulative_sum`/`last_value`/`sum_if(diff_*)` patterns),
+     run the TS-side equivalent against matching data and confirm the
+     **numbers match** — a windows-scoped slice of the parked
+     conversion-fidelity angle (repo-audit angle 15). Any mismatch corrects
+     the mapping doc + worked example before any code encodes it.
+  4. Findings land in the authoritative docs (`databricks-metric-view.md`
+     window section + `ts-from-databricks-rules.md` decision tree); if the
+     analysis outgrows those sections, a dedicated
+     `agents/shared/mappings/ts-databricks/window-semantics.md` is
+     acceptable — settle in implementation planning.
+  A confirmed result for `leading`/`all` lets Command 2 codify those ranges
+  directly instead of the `pending_verification` skip path (currently PENDING
+  in `databricks-metric-view.md:68-70` and both mapping docs).
 - BL-064 medium items 5–13: fix whichever intersect `materialization`, window
   ranges, or `fields:` (must-fix); defer the rest to a follow-up BL-064 PR if
   unrelated to this parser.
@@ -320,10 +343,15 @@ docs, avoiding a rename pass later.
 Off `wip/dbx-substrate` (or `feat/*` branches cut from it), each independently
 reviewable and mergeable. Normal branching protocol — no direct merge to `main`.
 
-**PR 1 — Currency check + mapping/schema fixes + anchor bumps.** Docs only, no
-`ts-cli` code. *Acceptance:* BL-032 PENDING items resolved (with a live-test
-citation) or re-flagged with today's date; `materialization:` documented; all
-four Databricks currency anchors bumped; `check_mapping_currency.py` clean.
+**PR 1 — Currency check + window deep-analysis + mapping/schema fixes +
+anchor bumps.** Docs only, no `ts-cli` code — but includes live Databricks
+and ThoughtSpot verification runs (window semantics, step 2/3 of the
+currency pre-step). *Acceptance:* BL-032 PENDING items resolved (with a
+live-test citation) or re-flagged with today's date; `materialization:`
+documented; **every window mapping and window worked-example either carries a
+live-verified citation (Databricks result set + matching TS result) or is
+corrected**; all four Databricks currency anchors bumped;
+`check_mapping_currency.py` clean.
 
 **PR 2 — `ts databricks parse-mv`.** New `ts_cli/databricks/__init__.py`,
 `mv_parse.py`, `commands/databricks.py` (parse-mv only), registered in
@@ -339,9 +367,10 @@ tests green; MINOR version bump.
 flowchart. Tests: `test_databricks_translate.py`, one class per transform
 (mirrors `test_tableau_translate.py`). *Acceptance:* every formula in the four
 `agents/shared/worked-examples/databricks/ts-from-databricks*.md` examples
-translates to the exact TS text already recorded as verified there
-(regression against known-good output); `leading`/`all` skip with
-`pending_verification: true` unless PR 1 resolved them; MINOR bump.
+translates to the exact TS text recorded there **as re-verified/corrected by
+PR 1's window deep-analysis** — the golden fixtures are the post-PR-1
+versions, never the possibly-wrong pre-analysis ones; `leading`/`all` skip
+with `pending_verification: true` unless PR 1 resolved them; MINOR bump.
 
 **PR 4 — `ts databricks build-model` + SKILL.md rewiring.**
 `ts_cli/databricks/build_model.py` + subcommand. Rewire SKILL.md Steps 5, 6,
@@ -422,6 +451,7 @@ point per `.claude/rules/branching.md`'s merge criteria.
 | PR 4 live verification depends on the Dunder Mifflin/e-commerce fixture workspace matching the worked examples | Same fixtures the shipped worked examples already depend on — drift there is a pre-existing problem, not one this PR introduces. |
 | Genie multi-module vendoring (PR 5) has no exact existing precedent (only single-notebook `ts_client.py`) | Scoped to PR 5 only; doesn't block PRs 1–4. Flagged as an open question, not pre-decided. |
 | `leading`/`all` ranges and the `inclusive`/`exclusive` default stay unverified past PR 1 | `translate-formulas` marks them `skipped`/`pending_verification` rather than guessing — same behavior as today's SKILL.md, enforced in code. |
+| Existing window mappings/worked examples may be **wrong**, and PR 3 uses them as golden fixtures (user-flagged) | PR 1's window deep-analysis re-derives semantics empirically (live Databricks result sets + TS-side number-match) and corrects docs/examples before any code encodes them; PR 3 pins against the post-PR-1 versions only. |
 
 ---
 
