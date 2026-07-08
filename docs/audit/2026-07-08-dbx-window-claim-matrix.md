@@ -58,6 +58,23 @@ here once created:
   `rolling_fixture`/`period_fixture`/`rolling_mv`/`period_mv` from Tasks 3–4 still need Task 9
   cleanup as originally planned.)
 
+### Cleanup (Task 9, 2026-07-09)
+
+- **Databricks:** `DROP SCHEMA IF EXISTS agent_skills.ts_dbx_substrate_pr1 CASCADE` executed via
+  `databricks api post /api/2.0/sql/statements --profile ts-production` (warehouse
+  `c6ed539a60038b93`) — `status.state: SUCCEEDED`. Confirmed with
+  `SHOW SCHEMAS IN agent_skills LIKE 'ts_dbx_substrate_pr1'` → `total_row_count: 0`. This
+  removes `rolling_fixture`, `period_fixture`, `rolling_mv`, and `period_mv` in one statement.
+- **ThoughtSpot:** `ts metadata delete f7a0a352-40cf-4e68-ad7c-561f8664e5dc
+  ae534e9e-6e67-41cb-9930-7a581d79cefe 362a3f19-65df-41ac-ad27-432e7c66df10
+  34141c51-59f9-4025-93a2-fe8d1dcb8c1d --profile se-thoughtspot` (models before tables) →
+  `{"deleted": [all 4 guids]}`. Confirmed with
+  `ts metadata search --profile se-thoughtspot --name "PR1_%"` → `[]`.
+- **`DBX_DAMIAN` connection:** left in place, untouched, per instruction (useful for PR 4's
+  live e2e later) — confirmed still present via
+  `ts metadata search --profile se-thoughtspot --name "DBX_DAMIAN" --type CONNECTION`
+  (`isDeleted: false`).
+
 ## Live results convention (Tasks 4–5 append)
 
 Tasks 4 and 5 append the actual observed result sets **under the claim table**, one subsection
@@ -703,3 +720,5 @@ at 1.0.2 describing the PENDING flag). This is a separate skill with its own
 version/changelog outside Task 6's scope — flagging here for a follow-up PR
 (candidate `BL-NNN`) rather than fixing unilaterally, since correcting it also
 requires a version bump per `.claude/rules/versioning.md`.
+
+**Update 2026-07-09:** fixed in this same PR (commit a2bb05d, skill v1.0.3) — no follow-up needed.
