@@ -187,6 +187,7 @@ _MEASURE_REF_RE = re.compile(r"\bMEASURE\s*\(\s*(`[^`]+`|[A-Za-z_]\w*)\s*\)",
                              re.IGNORECASE)
 _ANY_VALUE_RE = re.compile(r"\bANY_VALUE\s*\(\s*(`[^`]+`|[A-Za-z_]\w*)\s*\)",
                            re.IGNORECASE)
+_WINDOW_EXTRAS_RE = re.compile(r"\b(ORDER\s+BY|ROWS|RANGE|GROUPS)\b", re.IGNORECASE)
 
 
 def _split_top_level(s: str, sep: str = ",") -> list[str]:
@@ -225,10 +226,20 @@ def classify_dimension_expr(expr: str) -> dict:
         return {"kind": "unsupported", "reason": "subquery in dimension expr"}
     m = _LOD_RE.match(e)
     if m:
+        inner_expr = m.group(2).strip()
+        partition_tail = m.group(3)
+        # Reject shapes _LOD_RE over-matches: running/frame windows
+        # (ORDER BY / ROWS / RANGE / GROUPS in the OVER clause), argless
+        # ranking functions, and expressions spanning multiple windows.
+        if (not inner_expr or _OVER_RE.search(inner_expr)
+                or _WINDOW_EXTRAS_RE.search(partition_tail)):
+            return {"kind": "unsupported",
+                    "reason": "window function without the recognized "
+                              "AGG(...) OVER (PARTITION BY ...) LOD shape"}
         return {"kind": "lod_window",
                 "inner_agg": m.group(1).upper(),
-                "inner_expr": m.group(2).strip(),
-                "partition_by": _split_top_level(m.group(3))}
+                "inner_expr": inner_expr,
+                "partition_by": _split_top_level(partition_tail)}
     if _OVER_RE.search(e):
         return {"kind": "unsupported",
                 "reason": "window function without the recognized "

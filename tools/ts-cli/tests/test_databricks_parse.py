@@ -282,6 +282,24 @@ class TestClassifyDimension:
         cls = classify_dimension_expr("ROW_NUMBER() OVER (ORDER BY d)")
         assert cls["kind"] == "unsupported"
 
+    def test_partition_with_order_by_is_unsupported(self):
+        cls = classify_dimension_expr("SUM(x) OVER (PARTITION BY a ORDER BY d)")
+        assert cls["kind"] == "unsupported"
+
+    def test_partition_with_frame_clause_is_unsupported(self):
+        cls = classify_dimension_expr(
+            "SUM(x) OVER (PARTITION BY a ROWS BETWEEN 3 PRECEDING AND CURRENT ROW)")
+        assert cls["kind"] == "unsupported"
+
+    def test_ranking_function_with_partition_is_unsupported(self):
+        cls = classify_dimension_expr("ROW_NUMBER() OVER (PARTITION BY a)")
+        assert cls["kind"] == "unsupported"
+
+    def test_multi_window_expression_is_unsupported(self):
+        cls = classify_dimension_expr(
+            "SUM(a) OVER (PARTITION BY b) + SUM(c) OVER (PARTITION BY d)")
+        assert cls["kind"] == "unsupported"
+
     def test_subquery_is_unsupported(self):
         cls = classify_dimension_expr("(SELECT MAX(d) FROM t)")
         assert cls["kind"] == "unsupported"
