@@ -95,13 +95,19 @@ expression.
   `WHERE EXISTS (…)`, no scalar subselects. Use named CTEs and JOINs instead.
 - **Set operations** — `UNION ALL`, `UNION`, `EXCEPT`, `EXCEPT ALL`, `INTERSECT`,
   `INTERSECT ALL` **work at the top level** of the query ([SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049),
-  verified 2026-07-07). Each branch must have the same number of columns with compatible
-  types. Operator precedence follows the SQL standard (INTERSECT binds tighter than
-  UNION/EXCEPT). Parentheses for explicit grouping are supported.
+  verified 2026-07-07), and **inside a user-defined CTE when no branch contains an
+  aggregate measure** (verified 2026-07-08). Each branch must have the same number of
+  columns with compatible types — but type compatibility is **not checked at compile
+  time**: a mismatch (e.g. VARCHAR vs DOUBLE at the same position) passes `generate-sql`
+  and fails at `fetch-data`. Operator precedence follows the SQL standard (INTERSECT
+  binds tighter than UNION/EXCEPT). Parentheses for explicit grouping are supported.
   **Caveats (still broken):**
   - **No `ORDER BY` on the combined result** — silently dropped from generated SQL.
   - **No `LIMIT` on the combined result** — misplaced into the first branch only.
-  - **No set operations inside a CTE** — hard error (`QUERY_GEN_ERROR`); by design.
+  - **No aggregated branches in a set operation inside a CTE** — a branch with
+    `SUM(col) … GROUP BY` fails with `QUERY_GEN_ERROR`
+    (GroupAggregateOptimizationTransformer) no matter how the outer query consumes the
+    CTE. Attribute-only `GROUP BY` branches and raw-column branches are fine.
   If you need ordered or limited results from a set operation, it cannot be done in SpotQL
   today. See `limitations.md` for details.
 - **No self-join of a CTE** (`[SELF_JOIN]`) and **no non-equi `JOIN … ON`** (only `=`
@@ -120,6 +126,9 @@ expression.
   two or more model-derived CTEs in the main SELECT, and a CTE selecting `FROM` an earlier
   CTE (chained CTEs), **both work on current builds** (were broken on older ones — see
   `limitations.md`).
+- **Set operations inside a CTE work when the branches carry no aggregate measure**
+  (raw columns, or attribute-only `GROUP BY`) — verified 2026-07-08. A branch with
+  `SUM(col) … GROUP BY` is rejected; see the set-operations caveats above.
 - `SELECT` may appear only at the start of a CTE definition or the main query.
 - Still rejected: **self-joining** a CTE (`SELF_JOIN`) and **non-equi** `JOIN … ON`
   (only `=` allowed) — see `limitations.md`.
@@ -135,6 +144,9 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
   `sample_values`, copy a literal verbatim; if not, use `ILIKE`.
 - Null checks: `IS NULL` / `IS NOT NULL`, never `= NULL`.
 - Filter early — put `WHERE` inside CTEs rather than wrapping the final SELECT.
+- **Aggregate conditions go in `HAVING`, never `WHERE`.** An aggregate in `WHERE`
+  (e.g. `WHERE SUM(x) > 0`) does not error — it is silently reinterpreted as `HAVING`
+  (verified live 2026-07-07). Write the intended clause explicitly.
 
 ## When you can't answer it
 
