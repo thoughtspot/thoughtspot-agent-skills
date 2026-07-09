@@ -228,3 +228,24 @@ class TestTranslateMeasure:
             TABLES)
         assert out["ts_expr"] == "__MVREF_0__ / __MVREF_1__"
         assert out["inlined_refs"] == ["quantity", "category_quantity"]
+
+
+class TestPrepareCrossMeasureSurfaces:
+    def test_ref_text_inside_literal_not_substituted(self):
+        from ts_cli.databricks.mv_translate import _prepare_cross_measure
+        sql, refs = _prepare_cross_measure("MEASURE(a) + 'MEASURE(fake)'")
+        assert refs == ["a"]
+        assert sql == "__MVREF_0__ + 'MEASURE(fake)'"
+
+    def test_ref_inside_comment_not_substituted(self):
+        from ts_cli.databricks.mv_translate import _prepare_cross_measure
+        sql, refs = _prepare_cross_measure("MEASURE(a) /* MEASURE(dead) */ + 1")
+        assert refs == ["a"]
+        assert "__MVREF_1__" not in sql
+
+    def test_conditional_with_trailing_comment(self):
+        out = translate_measure(
+            _measure("m", "SUM(x) FILTER (WHERE y > 1) -- note",
+                     "conditional"), TABLES)
+        assert out["ts_expr"] == ("sum_if ( [TRANSACTIONS::y] > 1 , "
+                                  "[TRANSACTIONS::x] )")

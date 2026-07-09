@@ -15,7 +15,11 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-from ts_cli.databricks.mv_expr import mask_string_literals, split_dot_path
+from ts_cli.databricks.mv_expr import (
+    mask_string_literals,
+    split_dot_path,
+    strip_sql_comments,
+)
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 
 
@@ -179,7 +183,7 @@ def _translate_simple(measure: dict, tables: dict) -> dict:
 
 
 def _translate_conditional(measure: dict, resolver) -> str:
-    e = measure["expr"].strip()
+    e = strip_sql_comments(measure["expr"])
     m = _FILTER_SPLIT_RE.match(mask_string_literals(e))
     if not m:
         raise UntranslatableError(
@@ -207,11 +211,20 @@ def _translate_conditional(measure: dict, resolver) -> str:
 
 
 def _prepare_cross_measure(expr: str) -> tuple[str, list[str]]:
-    """Replace MEASURE(x)/ANY_VALUE(y) with __MVREF_n__ placeholders."""
+    """Replace MEASURE(x)/ANY_VALUE(y) with __MVREF_n__ placeholders.
+
+    Scans the same surface parse-mv's extract_cross_refs scans
+    (comment-stripped, string-literals masked) so the placeholder list
+    always agrees with the parsed cross_refs/lod_refs."""
+    e = strip_sql_comments(expr)
+    masked = mask_string_literals(e)
     refs: list[str] = []
-
-    def repl(m: re.Match) -> str:
-        refs.append(m.group(2).strip("`"))
-        return f"__MVREF_{len(refs) - 1}__"
-
-    return _MEASURE_SUB_RE.sub(repl, expr), refs
+    out: list[str] = []
+    last = 0
+    for m in _MEASURE_SUB_RE.finditer(masked):
+        refs.append(e[m.start(2):m.end(2)].strip("`"))
+        out.append(e[last:m.start()])
+        out.append(f"__MVREF_{len(refs) - 1}__")
+        last = m.end()
+    out.append(e[last:])
+    return "".join(out), refs
