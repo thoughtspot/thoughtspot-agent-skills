@@ -414,11 +414,23 @@ def _unsupported_entry(kind: str, name, detail: str) -> dict:
     return {"kind": kind, "name": name, "detail": detail}
 
 
+def _bad_synonyms(entry: dict, kind: str, name, unsupported: list) -> bool:
+    """True (and records an unsupported entry) when synonyms is a non-list."""
+    syn = entry.get("synonyms")
+    if syn is None or isinstance(syn, list):
+        return False
+    unsupported.append(_unsupported_entry(
+        kind, str(name), f"{kind} '{name}': synonyms must be a list, got {syn!r}"))
+    return True
+
+
 def _parse_dimension(d: dict, unsupported: list) -> dict | None:
     name, expr = d.get("name"), d.get("expr")
     if not name or expr is None:
         unsupported.append(_unsupported_entry(
             "dimension", name, f"dimension entry requires name and expr: {d!r}"))
+        return None
+    if _bad_synonyms(d, "dimension", name, unsupported):
         return None
     expr = str(expr)
     cls = classify_dimension_expr(expr)
@@ -440,6 +452,8 @@ def _parse_measure(m: dict, unsupported: list, warnings: list) -> dict | None:
     if not name or expr is None:
         unsupported.append(_unsupported_entry(
             "measure", name, f"measure entry requires name and expr: {m!r}"))
+        return None
+    if _bad_synonyms(m, "measure", name, unsupported):
         return None
     expr = str(expr)
     cls = classify_measure_expr(expr)
@@ -501,6 +515,11 @@ def _resolve_dimensions(doc: dict, unsupported: list) -> list[dict]:
             "combination, refusing to guess precedence"))
         return []
     dims_raw = doc.get("fields", doc.get("dimensions")) or []
+    if not isinstance(dims_raw, list):
+        unsupported.append(_unsupported_entry(
+            "dimensions", None,
+            f"dimensions/fields must be a list, got {type(dims_raw).__name__}"))
+        dims_raw = []
     dims: list[dict] = []
     for d in dims_raw:
         entry = _parse_dimension(d if isinstance(d, dict) else {}, unsupported)
@@ -510,8 +529,14 @@ def _resolve_dimensions(doc: dict, unsupported: list) -> list[dict]:
 
 
 def _resolve_measures(doc: dict, unsupported: list, warnings: list) -> list[dict]:
+    measures_raw = doc.get("measures") or []
+    if not isinstance(measures_raw, list):
+        unsupported.append(_unsupported_entry(
+            "measures", None,
+            f"measures must be a list, got {type(measures_raw).__name__}"))
+        measures_raw = []
     measures: list[dict] = []
-    for m in doc.get("measures") or []:
+    for m in measures_raw:
         entry = _parse_measure(m if isinstance(m, dict) else {},
                                unsupported, warnings)
         if entry:
@@ -561,7 +586,13 @@ def parse_metric_view(yaml_text: str) -> dict:
 
     _check_unknown_top_keys(doc, unsupported)
     result["source"] = _resolve_source(doc, unsupported)
-    result["joins"] = parse_joins(doc.get("joins"), "source", unsupported)
+    joins_val = doc.get("joins")
+    if joins_val is not None and not isinstance(joins_val, list):
+        unsupported.append(_unsupported_entry(
+            "joins", None,
+            f"joins must be a list, got {type(joins_val).__name__}"))
+        joins_val = None
+    result["joins"] = parse_joins(joins_val, "source", unsupported)
     result["dimensions"] = _resolve_dimensions(doc, unsupported)
     result["measures"] = _resolve_measures(doc, unsupported, warnings)
 

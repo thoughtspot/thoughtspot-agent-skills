@@ -913,3 +913,27 @@ class TestParseMetricViewFailLoud:
             "source: SELECT a, b FROM t\nmeasures:\n  - {name: m, expr: SUM(a)}\n")
         assert r["unsupported"] == []
         assert r["source"]["kind"] == "sql_query"
+
+
+class TestParseMetricViewScalarGuards:
+    def test_scalar_dimensions_no_raise(self):
+        r = parse_metric_view("source: c.s.t\ndimensions: 5\n")
+        assert any(u["kind"] == "dimensions" for u in r["unsupported"])
+        assert r["dimensions"] == []
+
+    def test_string_measures_no_per_char_garbage(self):
+        r = parse_metric_view("source: c.s.t\nmeasures: fast\n")
+        assert [u["kind"] for u in r["unsupported"]].count("measures") == 1
+        assert r["measures"] == []
+
+    def test_scalar_joins_no_raise(self):
+        r = parse_metric_view("source: c.s.t\njoins: 5\n")
+        assert any(u["kind"] == "joins" for u in r["unsupported"])
+        assert r["joins"] == []
+
+    def test_scalar_synonyms_excludes_entry(self):
+        r = parse_metric_view(
+            "source: c.s.t\ndimensions:\n  - {name: d, expr: col, synonyms: fast}\n")
+        assert r["dimensions"] == []
+        assert any(u["kind"] == "dimension" and "synonyms" in u["detail"]
+                   for u in r["unsupported"])
