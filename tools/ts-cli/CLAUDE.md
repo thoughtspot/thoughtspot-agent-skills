@@ -38,6 +38,9 @@ ts_cli/
     classify.py            — formula tier classification behind `ts tableau classify-formulas` (classify_formulas/TRANSLATABLE_TIERS/UNTRANSLATABLE_TIERS; delegates the translatable verdict to tableau_translate.py so audit and migrate agree)
     build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
     client.py             — TableauClient (HTTP) + profile resolution; the package's one I/O module
+  databricks/
+    __init__.py         — package marker (stdlib + PyYAML only — Genie-vendorable, no HTTP/auth deps)
+    mv_parse.py         — Metric View YAML -> structured dict behind `ts databricks parse-mv` (pure functions, no I/O; BL-063 PR2)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
@@ -51,6 +54,7 @@ ts_cli/
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
+    databricks.py — ts databricks (parse-mv) — BL-063 PR2
   audit/
     __init__.py       — run_audit() entry point, angle module registry
     context.py        — AuditContext dataclass + build_context()
@@ -71,7 +75,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.41.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.42.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
