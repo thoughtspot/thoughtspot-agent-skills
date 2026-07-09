@@ -40,7 +40,9 @@ ts_cli/
     client.py             — TableauClient (HTTP) + profile resolution; the package's one I/O module
   databricks/
     __init__.py         — package marker (stdlib + PyYAML only — Genie-vendorable, no HTTP/auth deps)
-    mv_parse.py         — Metric View YAML -> structured dict behind `ts databricks parse-mv` (pure functions, no I/O; BL-063 PR2)
+    mv_parse.py         — Metric View YAML -> structured dict behind `ts databricks parse-mv`: source classification, joins walk, top-level assembly; re-exports the mv_expr/mv_window API (pure functions, no I/O; BL-063 PR2)
+    mv_expr.py          — dimension/measure SQL expression classification (pure functions, no I/O)
+    mv_window.py        — window-spec parsing: 5 range values, offset, BL-098 density flag (pure functions, no I/O)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
