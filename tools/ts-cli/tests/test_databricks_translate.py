@@ -14,6 +14,7 @@ from ts_cli.databricks.mv_translate import (
     translate_dimension,
     translate_filter,
     translate_measure,
+    translate_metric_view,
     translate_window_measure,
 )
 
@@ -469,3 +470,111 @@ class TestWindowMeasures:
                              _window("order_month", "current"),
                              cross_refs=["a", "b"]),
                 DIMS, TABLES)
+
+
+def _parsed(dimensions=(), measures=(), filter_sql=None):
+    return {"version": "1.1", "comment": None,
+            "source": {"kind": "table_fqn", "raw": "c.s.t", "parts": ["c", "s", "t"],
+                       "needs_live_check": True},
+            "joins": [], "dimensions": list(dimensions),
+            "measures": list(measures), "filter": filter_sql,
+            "materialization": None, "warnings": [], "unsupported": []}
+
+
+class TestOrchestrator:
+    def test_cross_measure_inlines_column_ref(self):
+        measures = [
+            _measure("quantity", "SUM(QUANTITY)", "simple",
+                     agg_function="SUM", physical_ref="QUANTITY"),
+            _measure("ratio", "MEASURE(quantity) / ANY_VALUE(category_quantity)",
+                     "complex_cross_measure", cross_refs=["quantity"],
+                     lod_refs=["category_quantity"]),
+        ]
+        dims = [_dim("category_quantity",
+                     "SUM(QUANTITY) OVER (PARTITION BY CAT)", "lod_window",
+                     inner_agg="SUM", inner_expr="QUANTITY",
+                     partition_by=["CAT"])]
+        out = translate_metric_view(_parsed(dims, measures), TABLES)
+        ratio = next(e for e in out["translated"] if e["name"] == "ratio")
+        assert ratio["ts_expr"] == (
+            "( sum ( [TRANSACTIONS::QUANTITY] ) ) / "
+            "( group_aggregate ( sum ( [TRANSACTIONS::QUANTITY] ) , "
+            "{ [TRANSACTIONS::CAT] } , query_filters ( ) ) )")
+        assert out["dependency_dag"] == {"ratio": ["quantity", "category_quantity"]}
+
+    def test_chained_refs_inline_transitively(self):
+        measures = [
+            _measure("a", "SUM(x)", "simple", agg_function="SUM",
+                     physical_ref="x"),
+            _measure("b", "MEASURE(a) * 2", "complex_cross_measure",
+                     cross_refs=["a"]),
+            _measure("c", "MEASURE(b) + 1", "complex_cross_measure",
+                     cross_refs=["b"]),
+        ]
+        out = translate_metric_view(_parsed((), measures), TABLES)
+        c = next(e for e in out["translated"] if e["name"] == "c")
+        assert c["ts_expr"] == "( ( sum ( [TRANSACTIONS::x] ) ) * 2 ) + 1"
+
+    def test_cycle_skips_all_members(self):
+        measures = [
+            _measure("a", "MEASURE(b) + 1", "complex_cross_measure",
+                     cross_refs=["b"]),
+            _measure("b", "MEASURE(a) + 1", "complex_cross_measure",
+                     cross_refs=["a"]),
+        ]
+        out = translate_metric_view(_parsed((), measures), TABLES)
+        assert {s["name"] for s in out["skipped"]} == {"a", "b"}
+        assert all("circular" in s["reason"] for s in out["skipped"])
+
+    def test_ref_to_skipped_measure_skips_referrer(self):
+        measures = [
+            _measure("bad", "MEDIAN(x)", "simple", agg_function="MEDIAN",
+                     physical_ref="x"),
+            _measure("dep", "MEASURE(bad) * 2", "complex_cross_measure",
+                     cross_refs=["bad"]),
+        ]
+        out = translate_metric_view(_parsed((), measures), TABLES)
+        dep = next(s for s in out["skipped"] if s["name"] == "dep")
+        assert "bad" in dep["reason"]
+
+    def test_unknown_ref_skips(self):
+        measures = [_measure("dep", "MEASURE(ghost) * 2",
+                             "complex_cross_measure", cross_refs=["ghost"])]
+        out = translate_metric_view(_parsed((), measures), TABLES)
+        assert "ghost" in out["skipped"][0]["reason"]
+
+    def test_filter_translated_and_counted(self):
+        out = translate_metric_view(
+            _parsed((), (), filter_sql="status != 'cancelled'"), TABLES)
+        assert out["filter"]["ts_expr"] == "[TRANSACTIONS::status] != 'cancelled'"
+        assert out["stats"] == {"total": 1, "translated": 1, "skipped": 0}
+
+    def test_untranslatable_filter_is_skipped_role_filter(self):
+        out = translate_metric_view(
+            _parsed((), (), filter_sql="s LIKE 'a%'"), TABLES)
+        assert out["filter"] is None
+        assert out["skipped"][0]["role"] == "filter"
+
+    def test_window_measures_listed_even_when_skipped(self):
+        measures = [
+            _win_measure("all_amount", "SUM(x)", "simple",
+                         _window("transaction_date", "all"),
+                         physical_ref="x", agg_function="SUM"),
+        ]
+        out = translate_metric_view(_parsed(DIMS, measures), TABLES)
+        assert out["window_measures"] == ["all_amount"]
+        assert out["skipped"][0]["name"] == "all_amount"
+
+    def test_stats_and_shapes(self):
+        out = translate_metric_view(
+            _parsed([_dim("d", "d", "direct")],
+                    [_measure("m", "SUM(x)", "simple", agg_function="SUM",
+                              physical_ref="x")],
+                    filter_sql="x > 0"), TABLES)
+        assert out["stats"] == {"total": 3, "translated": 3, "skipped": 0}
+        assert set(out) == {"translated", "skipped", "filter",
+                            "dependency_dag", "window_measures", "stats"}
+
+    def test_tables_map_validated(self):
+        with pytest.raises(ValueError, match="source"):
+            translate_metric_view(_parsed(), {"orders": "DM_ORDER"})

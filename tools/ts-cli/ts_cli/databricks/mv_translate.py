@@ -437,3 +437,141 @@ def _prepare_cross_measure(expr: str) -> tuple[str, list[str]]:
         last = m.end()
     out.append(e[last:])
     return "".join(out), refs
+
+
+_PLACEHOLDER_RE = re.compile(r"__MVREF_(\d+)__")
+
+
+def translate_metric_view(parsed: dict, tables: dict) -> dict:
+    """Translate a parse-mv result. Content failures -> skipped[]; only a
+    malformed tables map raises (ValueError -> command exit 1)."""
+    _validate_tables(tables)
+    translated: list[dict] = []
+    skipped: list[dict] = []
+    by_name: dict[str, dict] = {}       # name -> translated entry
+    skip_names: set[str] = set()
+    dag: dict[str, list[str]] = {}
+    window_measures: list[str] = []
+
+    for dim in parsed["dimensions"]:
+        _translate_item(lambda: translate_dimension(dim, tables),
+                        dim["name"], "dimension",
+                        translated, skipped, by_name, skip_names)
+
+    deferred: list[dict] = []
+    for m in parsed["measures"]:
+        refs = list(m["cross_refs"]) + list(m["lod_refs"])
+        if refs:
+            dag[m["name"]] = refs
+            deferred.append(m)
+            continue
+        fn = ((lambda m=m: translate_window_measure(m, parsed["dimensions"], tables))
+              if m.get("window") else (lambda m=m: translate_measure(m, tables)))
+        if m.get("window"):
+            window_measures.append(m["name"])
+        _translate_item(fn, m["name"], "measure",
+                        translated, skipped, by_name, skip_names)
+
+    _translate_cross_measures(deferred, parsed, tables, translated, skipped,
+                              by_name, skip_names, window_measures)
+
+    filter_out = None
+    total = len(parsed["dimensions"]) + len(parsed["measures"])
+    if parsed["filter"] is not None:
+        total += 1
+        try:
+            filter_out = translate_filter(parsed["filter"], tables)
+        except UntranslatableError as exc:
+            skipped.append({"name": "MV Filter", "role": "filter",
+                            "reason": str(exc)})
+    n_skipped = len(skipped)
+    return {"translated": translated, "skipped": skipped,
+            "filter": filter_out, "dependency_dag": dag,
+            "window_measures": window_measures,
+            "stats": {"total": total, "translated": total - n_skipped,
+                      "skipped": n_skipped}}
+
+
+def _validate_tables(tables: dict) -> None:
+    if not isinstance(tables, dict) or "source" not in tables:
+        raise ValueError(
+            "--tables map must be a JSON object with a 'source' key "
+            "(alias path -> ThoughtSpot table name)")
+    for k, v in tables.items():
+        if not isinstance(k, str) or not isinstance(v, str) or not v.strip():
+            raise ValueError(
+                f"--tables entries must map string alias paths to non-empty "
+                f"table names (bad entry: {k!r}: {v!r})")
+
+
+def _translate_item(fn, name, role, translated, skipped, by_name,
+                    skip_names) -> None:
+    try:
+        entry = fn()
+    except UntranslatableError as exc:
+        skipped.append({"name": name, "role": role, "reason": str(exc)})
+        skip_names.add(name)
+        return
+    translated.append(entry)
+    by_name[name] = entry
+
+
+def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
+                              by_name, skip_names, window_measures) -> None:
+    """Kahn topo-sort the MEASURE()/ANY_VALUE() referrers, inline in order."""
+    names = {m["name"] for m in deferred}
+    waiting = {m["name"]: m for m in deferred}
+    indegree = {m["name"]: sum(1 for r in (m["cross_refs"] + m["lod_refs"])
+                               if r in names)
+                for m in deferred}
+    queue = [n for n, d in indegree.items() if d == 0]
+    order: list[str] = []
+    while queue:
+        n = queue.pop(0)
+        order.append(n)
+        for other in deferred:
+            if n in (other["cross_refs"] + other["lod_refs"]):
+                indegree[other["name"]] -= 1
+                if indegree[other["name"]] == 0:
+                    queue.append(other["name"])
+    for m_name in order:
+        m = waiting[m_name]
+        if m.get("window"):
+            window_measures.append(m_name)
+        _translate_item(
+            lambda m=m: _inline_and_translate(m, parsed, tables, by_name,
+                                              skip_names),
+            m_name, "measure", translated, skipped, by_name, skip_names)
+    for m_name in names - set(order):  # cycle members
+        skipped.append({"name": m_name, "role": "measure",
+                        "reason": "circular MEASURE() reference "
+                                  f"(cycle involves: {sorted(names - set(order))})"})
+        skip_names.add(m_name)
+
+
+def _inline_and_translate(m, parsed, tables, by_name, skip_names) -> dict:
+    if m.get("window"):
+        return translate_window_measure(m, parsed["dimensions"], tables)
+    entry = translate_measure(m, tables)
+    refs = entry["inlined_refs"]
+
+    def substitute(match: re.Match) -> str:
+        ref = refs[int(match.group(1))]
+        if ref in skip_names or ref not in by_name:
+            raise UntranslatableError(
+                f"references '{ref}', which was skipped or does not exist")
+        return f"( {_inline_text(by_name[ref])} )"
+
+    entry["ts_expr"] = _PLACEHOLDER_RE.sub(substitute, entry["ts_expr"])
+    return entry
+
+
+def _inline_text(ref_entry: dict) -> str:
+    if ref_entry["output_kind"] == "formula":
+        return ref_entry["ts_expr"]
+    # column-kind simple measure: synthesize its aggregate expression
+    lower = {"AVERAGE": "average", "STD_DEVIATION": "stddev"}.get(
+        ref_entry["aggregation"], ref_entry["aggregation"].lower())
+    if ref_entry["aggregation"] == "COUNT":
+        return f"count ( [{ref_entry['table']}::{ref_entry['column']}] )"
+    return f"{lower} ( [{ref_entry['table']}::{ref_entry['column']}] )"
