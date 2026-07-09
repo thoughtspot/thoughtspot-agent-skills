@@ -36,6 +36,20 @@ namespace (A/B/C/D-prefixed, not C-prefixed) to avoid collision.
   baseline + query-time filter, UNION ALL), (9) Query D (`window_nofilter_mv` baseline +
   date-range filter, UNION ALL), (10) `CREATE VIEW ratio_mv`, (11) Query B (`ratio_mv`
   fine/coarse/total, UNION ALL).
+- **Cleanup (Task 7, 2026-07-09) — confirmed complete:**
+  - Databricks: `DROP SCHEMA IF EXISTS agent_skills.ts_dbx_substrate_pr15 CASCADE` executed via
+    `databricks api post /api/2.0/sql/statements` (profile `ts-production`, warehouse
+    `c6ed539a60038b93`) — `status.state: SUCCEEDED`. Confirmed via `SHOW SCHEMAS IN agent_skills
+    LIKE 'ts_dbx_substrate_pr15'`: pre-drop returned 1 row (`ts_dbx_substrate_pr15`), post-drop
+    returned `total_row_count: 0`.
+  - ThoughtSpot: `ts metadata delete 0fc5abc8-3205-40dd-b938-3215dc140aca
+    a7730c30-1d9e-4c93-a762-98743eb0554b 2eea915d-5837-4ee9-b660-6c08fafe198b
+    72d0759c-9952-4948-97df-032aafb12abc --profile se-thoughtspot` (both models before both
+    tables) — response `{"deleted": [...all 4 GUIDs...]}`. Confirmed via `ts metadata search
+    --profile se-thoughtspot --name "PR15_%"` → `[]`.
+  - `DBX_DAMIAN` connection (`b9e709c6-b951-4b50-a816-b450e6aee278`) confirmed still present
+    (`ts connections get` returned connection metadata, not a 404) — **not** deleted, per the
+    brief (shared scratch infrastructure for future PR-1-class work).
 
 ## A — LOD dimensions × filters
 
