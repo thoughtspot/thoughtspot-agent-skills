@@ -20,6 +20,7 @@ _RANGE_RE = re.compile(
 _OFFSET_RE = re.compile(r"^(-\d+)\s+([a-z]+)$")
 _WINDOW_KEYS = {"order", "range", "semiadditive", "offset"}
 _SEMIADDITIVE_VALUES = {"last", "first"}
+_VALID_UNITS = {"day", "week", "month", "quarter", "year"}
 
 
 def parse_range(raw) -> dict | None:
@@ -27,7 +28,9 @@ def parse_range(raw) -> dict | None:
 
     Fixed types (current|cumulative|all) reject the inclusive/exclusive
     modifier; trailing/leading default to exclusive when it is omitted
-    (live-verified C2, 2026-07-08).
+    (live-verified C2, 2026-07-08). n == 0 and units outside _VALID_UNITS
+    are rejected — a zero-length or unrecognized-unit window has no
+    meaningful ThoughtSpot translation.
     """
     s = str(raw).strip().lower()
     if s in _RANGE_FIXED:
@@ -35,16 +38,25 @@ def parse_range(raw) -> dict | None:
     m = _RANGE_RE.match(s)
     if not m:
         return None
-    return {"type": m.group(1), "n": int(m.group(2)), "unit": m.group(3),
+    n = int(m.group(2))
+    if n == 0 or m.group(3) not in _VALID_UNITS:
+        return None
+    return {"type": m.group(1), "n": n, "unit": m.group(3),
             "anchor": m.group(4) or "exclusive"}
 
 
 def parse_offset(raw) -> dict | None:
-    """Parse a window `offset:` value ('-N unit') into {n, unit}."""
+    """Parse a window `offset:` value ('-N unit') into {n, unit}.
+
+    n == 0 and units outside _VALID_UNITS are rejected (see parse_range).
+    """
     m = _OFFSET_RE.match(str(raw).strip().lower())
     if not m:
         return None
-    return {"n": int(m.group(1)), "unit": m.group(2)}
+    n = int(m.group(1))
+    if n == 0 or m.group(2) not in _VALID_UNITS:
+        return None
+    return {"n": n, "unit": m.group(2)}
 
 
 def parse_window(window_val, measure_name: str) -> tuple[dict | None, list[str]]:

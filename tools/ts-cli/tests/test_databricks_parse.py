@@ -1007,6 +1007,40 @@ class TestParseMetricViewScalarGuards:
                    for u in r["unsupported"])
 
 
+class TestContractGating:
+    def test_source_mixed_backtick_bare_segment_validated(self):
+        # bare middle segment 'bad name' must be rejected even though
+        # another segment is backticked (old code skipped ALL validation
+        # when any backtick was present)
+        assert classify_source("`cat`.bad name.tbl") is None
+
+    def test_source_sql_detected_with_newline(self):
+        out = classify_source("select\n1 as x from t")
+        assert out["kind"] == "sql_query"
+
+    def test_source_selector_prefix_word_bound(self):
+        # 'selection.schema.tbl' must NOT classify as SQL
+        out = classify_source("selection.schema.tbl")
+        assert out["kind"] == "table_fqn"
+
+    def test_lod_ordered_aggregate_rejected(self):
+        out = classify_dimension_expr(
+            "ARRAY_AGG(x ORDER BY y) OVER (PARTITION BY cat)")
+        assert out["kind"] == "unsupported"
+
+    def test_range_unknown_unit_rejected(self):
+        assert parse_range("trailing 2 fortnight") is None
+
+    def test_range_zero_n_rejected(self):
+        assert parse_range("trailing 0 day") is None
+
+    def test_offset_zero_rejected(self):
+        assert parse_offset("-0 month") is None
+
+    def test_offset_unknown_unit_rejected(self):
+        assert parse_offset("-1 sprint") is None
+
+
 import json
 
 from typer.testing import CliRunner

@@ -170,8 +170,12 @@ def classify_dimension_expr(expr: str) -> dict:
         masked_tail = masked[m.start(3):m.end(3)]
         # Reject shapes _LOD_RE over-matches: running/frame windows
         # (ORDER BY / ROWS / RANGE / GROUPS in the OVER clause), argless
-        # ranking functions, and expressions spanning multiple windows.
+        # ranking functions, expressions spanning multiple windows, and
+        # ordered-set aggregates (ORDER BY inside the AGG(...) argument
+        # list itself, e.g. ARRAY_AGG(x ORDER BY y) OVER (...)) — these
+        # have no group_aggregate analogue on ThoughtSpot.
         if (not inner_expr or _OVER_RE.search(masked_inner)
+                or _WINDOW_EXTRAS_RE.search(masked_inner)
                 or _WINDOW_EXTRAS_RE.search(masked_tail)):
             return {"kind": "unsupported",
                     "reason": "window function without the recognized "
