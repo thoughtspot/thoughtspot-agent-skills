@@ -1074,6 +1074,29 @@ underpins a large translation block but is marked **Experimental** in current do
    implement all 5 range values directly in PR2, no `pending_verification` skip path
    needed for `leading`/`all`.
 
+   **Update 2026-07-09 (PR1.5 semantic deep-dive):** LOD dimension × filter
+   interaction — CONFIRMED filter-aware on ThoughtSpot under both filter kinds
+   (query-level pin and model-level `filters:`), with a cross-platform DIVERGENCE
+   caveat: the equivalence holds for a Databricks MV's own global `filter:` block
+   only, not for a consumer's ad hoc query-time `WHERE` on an unfiltered MV (A1/A2).
+   Cross-measure ratio × grain — CONFIRMED ratio-of-sums cross-platform at every
+   grain tested (fine/coarse/total), no sum-of-ratios or average-of-ratios
+   divergence (B1). Global filter × window ordering — CONFIRMED filter-before-window
+   cross-platform; split verdict, frame semantics DIVERGENCE (C1, same root cause as
+   E1 below). Semi-additive × date-range filter — CONFIRMED last/first-in-filtered-
+   range cross-platform, including the single-surviving-row edge case (D1).
+   Trailing-frame rows-vs-dates (E1, gapped-data probe of PR1's C1/C3) — DIVERGENCE:
+   Databricks `trailing`/`leading N day` frames are date-interval framed; ThoughtSpot
+   `moving_sum` is row-positional; the two produce different numbers on sparse/gapped
+   data. PR1's C1/C3 CONFIRMED verdicts were density-conditional (dense daily fixture
+   only) — this is now caveated in every trailing/leading mapping site. Filed
+   BL-098 for the E1/C1-frame divergence's follow-up action items (PR2 density-check
+   warning flag, PR3 sparse-data-risk annotation). Full evidence:
+   `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`. This closes the remaining
+   discriminating-experiment gap the spec's PR 1.5 paragraph flagged — all four
+   dimension/metric semantic constructs now carry a live-verified verdict before
+   PR 3 (`translate-formulas`) encodes them in code.
+
 **Target:** 2026-09-30.
 
 ---
@@ -2607,3 +2630,43 @@ data ready, or stdin is explicitly closed/piped — never an unconditional block
 add a unit test covering the non-TTY-no-data case.
 
 **Target:** fix opportunistically with the next ts-cli tml-command work or by 2026-08-31.
+
+---
+
+## BL-098 — Databricks trailing/leading window translation: date-interval vs row-positional frame semantics diverge on sparse data (E1/C1)
+
+**Source:** 2026-07-09 BL-063 PR1.5 semantic deep-dive, claim IDs E1 (Trailing-window frame
+semantics) and the frame-semantics half of C1's split verdict (Global `filter:` × window
+ordering). Full evidence: `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`.
+**Affects:** `ts-convert-from-databricks-mv` and `ts-convert-to-databricks-mv` skills (both
+directions' `trailing`/`leading` `range:` mapping); the planned BL-063 PR2
+(`ts databricks parse-mv`) and PR3 (`ts databricks translate-formulas`) substrate.
+**Status:** OPEN.
+
+Databricks `trailing N day`/`leading N day` window frames are date-interval framed — the
+frame boundary is a calendar-date interval intersected with surviving rows. ThoughtSpot's
+`moving_sum`/`moving_average` (the documented translation target) is row-positional — it
+counts N preceding/following surviving *rows*, not calendar days. On dense, gapless daily
+data the two framings are indistinguishable, which is why PR 1's C1/C3 CONFIRMED verdicts
+(obtained on a dense fixture) did not catch this. On sparse/gapped data — a category with
+missing days, or any filter that removes rows unevenly — the two platforms compute
+different trailing/leading sums: live-verified on cat Z's gapped fixture, days 5/8, DBX
+20/50 vs. TS 30/80. No `moving_sum` argument shape reconciles the two; this is a genuine
+platform divergence, not a formula bug, and it is now caveated at every trailing/leading
+mapping site (both directions, both SKILL.md files, the schema doc, all three mapping
+files, and `ts-databricks-properties.md`).
+
+### Approach
+
+1. PR2 (`ts databricks parse-mv`) should emit a density-check warning flag on any measure
+   using a `trailing`/`leading`/`window` `range:` — flagging when the parsed MV's source
+   table cannot be confirmed dense at the query grain (no date gaps).
+2. PR3 (`ts databricks translate-formulas`) must mark every trailing/leading translation
+   with a sparse-data-risk caveat in its output (a `pending_verification`-style annotation)
+   rather than asserting equivalence unconditionally.
+3. A future live probe should test DENSE non-day units (e.g. month grain) to confirm the
+   date-interval/row-positional distinction — and its practical impact — generalizes beyond
+   daily grain.
+
+**Target:** resolve as part of BL-063 PR2/PR3 scope (tied to those PRs' delivery, no fixed
+calendar date).
