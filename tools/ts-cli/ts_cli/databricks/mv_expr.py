@@ -25,6 +25,28 @@ def strip_sql_comments(expr: str) -> str:
     return _BLOCK_COMMENT_RE.sub(" ", _LINE_COMMENT_RE.sub("", expr)).strip()
 
 
+def split_dot_path(s: str) -> list[str]:
+    """Split a dotted identifier on '.', respecting backtick-quoted segments.
+
+    Segments are returned WITHOUT their backticks. A quoted segment that
+    itself contains a '.' cannot be normalized to a plain dot-path — callers
+    must reject it (classify_measure_expr does, as unsupported).
+    """
+    parts: list[str] = []
+    buf: list[str] = []
+    in_backtick = False
+    for ch in s:
+        if ch == "`":
+            in_backtick = not in_backtick
+        elif ch == "." and not in_backtick:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    return parts
+
+
 _IDENT = r"(?:`[^`]+`|[A-Za-z_][\w$]*)"
 _DOT_PATH = rf"{_IDENT}(?:\.{_IDENT})*"
 _DIRECT_RE = re.compile(rf"^{_DOT_PATH}$")
@@ -139,7 +161,13 @@ def classify_measure_expr(expr: str) -> dict:
             out["expr_kind"] = "simple"
             out["agg_function"] = agg
             out["distinct"] = distinct
-        out["physical_ref"] = col
+        segments = split_dot_path(col)
+        if any("." in seg for seg in segments):
+            out["expr_kind"] = "unsupported"
+            out["reason"] = ("dot inside a backtick-quoted identifier — "
+                             "cannot normalize to a plain dot-path")
+            return out
+        out["physical_ref"] = ".".join(segments)
         return out
     out["expr_kind"] = "complex"
     return out

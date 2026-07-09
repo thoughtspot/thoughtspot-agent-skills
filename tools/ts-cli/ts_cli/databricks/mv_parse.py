@@ -22,6 +22,7 @@ from ts_cli.databricks.mv_expr import (  # noqa: F401 — re-exported API
     classify_dimension_expr,
     classify_measure_expr,
     extract_cross_refs,
+    split_dot_path,
     strip_sql_comments,
 )
 from ts_cli.databricks.mv_window import (  # noqa: F401 — re-exported API
@@ -29,24 +30,6 @@ from ts_cli.databricks.mv_window import (  # noqa: F401 — re-exported API
     parse_range,
     parse_window,
 )
-
-
-def _split_fqn(s: str) -> list[str]:
-    """Split a dotted identifier on '.', respecting backtick-quoted segments."""
-    parts: list[str] = []
-    buf: list[str] = []
-    in_backtick = False
-    for ch in s:
-        if ch == "`":
-            in_backtick = not in_backtick
-        elif ch == "." and not in_backtick:
-            parts.append("".join(buf))
-            buf = []
-        else:
-            buf.append(ch)
-    parts.append("".join(buf))
-    return parts
-
 
 _IDENT_SEGMENT_RE = re.compile(r"^[A-Za-z_][\w$]*$")
 
@@ -67,10 +50,10 @@ def classify_source(raw: str) -> dict | None:
     if low.startswith(("(select", "(with")) or low.startswith(("select ", "with ")):
         return {"kind": "sql_query", "raw": stripped,
                 "parenthesized": stripped.startswith("(")}
-    parts = _split_fqn(stripped)
+    parts = split_dot_path(stripped)
     for part in parts:
-        # A backtick-quoted segment (now unquoted by _split_fqn) may hold any
-        # non-empty text; a bare segment must be a plain identifier.
+        # A backtick-quoted segment (now unquoted by split_dot_path) may hold
+        # any non-empty text; a bare segment must be a plain identifier.
         bare = part if "`" not in stripped else None
         if not part:
             return None

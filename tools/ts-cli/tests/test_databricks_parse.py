@@ -36,6 +36,19 @@ class TestStripSqlComments:
         assert strip_sql_comments("a - b") == "a - b"
 
 
+class TestSplitDotPath:
+    def test_plain_path(self):
+        from ts_cli.databricks.mv_expr import split_dot_path
+        assert split_dot_path("orders.customers.COL") == ["orders", "customers", "COL"]
+
+    def test_backticked_segment(self):
+        from ts_cli.databricks.mv_expr import split_dot_path
+        assert split_dot_path("`my table`.COL") == ["my table", "COL"]
+
+    def test_reexported_from_mv_parse(self):
+        from ts_cli.databricks.mv_parse import split_dot_path  # noqa: F401
+
+
 class TestClassifySource:
     def test_table_fqn(self):
         src = classify_source("catalog.schema.fact_table")
@@ -377,6 +390,16 @@ class TestClassifyMeasure:
         cls = classify_measure_expr("SUM(DISTINCT amount)")
         assert cls["expr_kind"] == "simple"
         assert cls["distinct"] is True
+
+    def test_physical_ref_backticks_normalized(self):
+        out = classify_measure_expr("SUM(`source`.`LINE_TOTAL`)")
+        assert out["expr_kind"] == "simple"
+        assert out["physical_ref"] == "source.LINE_TOTAL"
+
+    def test_backticked_segment_with_dot_unsupported(self):
+        out = classify_measure_expr("SUM(`weird.col`)")
+        assert out["expr_kind"] == "unsupported"
+        assert "dot inside a backtick-quoted identifier" in out["reason"]
 
 
 class TestParseJoins:
