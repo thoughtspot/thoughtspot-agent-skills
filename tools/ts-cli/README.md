@@ -1594,3 +1594,32 @@ composes with `&&` to gate on a clean lint before creating the view:
 ```bash
 ts snowflake lint-ddl generated_sv.sql && echo "clean, proceeding"
 ```
+
+### `ts databricks parse-mv`
+
+Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured
+JSON for the `ts-convert-from-databricks-mv` skill. Offline — the YAML is
+fetched beforehand via the external `databricks` CLI (`DESCRIBE TABLE
+EXTENDED`, `View Text` row).
+
+```bash
+ts databricks parse-mv mv.yaml --output parsed.json
+cat mv.yaml | ts databricks parse-mv - --output parsed.json
+```
+
+Covers: version routing (`0.1`/`1.1` normalized to one shape), source-form
+classification (table FQN / parenthesized SQL / bare SQL — FQNs carry
+`needs_live_check: true` because MV-on-MV cannot be ruled out offline),
+`fields:`/`dimensions:` alias, dimension classification
+(direct/computed/LOD-window), measure classification (simple / COUNT
+DISTINCT / COUNT(*) / conditional FILTER / cross-measure / complex /
+windowed with all five `range` values + `inclusive|exclusive` anchor +
+`offset`), nested `joins:` walk (`on`/`using` XOR, `cardinality:`/`rely:`
+precedence), `materialization:` pass-through, global `filter:`.
+
+Exit codes: `0` = parsed clean (warnings, if any, on stderr); `1` = one or
+more `unsupported[]` constructs (listed on stderr; JSON still written), or
+the input file is missing or unreadable (no JSON written).
+Every `trailing`/`leading` window measure gets `density_check_required:
+true` plus a stderr WARNING — Databricks date-interval frames vs
+ThoughtSpot row-positional `moving_sum` diverge on gapped data (BL-098).
