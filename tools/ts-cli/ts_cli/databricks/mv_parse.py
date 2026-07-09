@@ -113,8 +113,9 @@ def _join_on_using(j: dict, alias: str, parent_alias: str):
     YAML 1.1 resolves an unquoted `on:` key to boolean True — accept both
     `"on"` and `True` as the key. `using:` must be a list (a null/scalar
     value is a problem, not a crash or per-character garbage); `on:` must
-    be a real expression (null/boolean values are problems, not literal
-    "None"/"True" clauses).
+    be a non-empty SQL boolean-expression string (null, bool, numeric, or
+    blank/whitespace-only values are problems, not literal "None"/"True"
+    clauses or a silently accepted empty on-clause).
     """
     has_on = "on" in j or True in j
     has_using = "using" in j
@@ -128,7 +129,7 @@ def _join_on_using(j: dict, alias: str, parent_alias: str):
         on = " AND ".join(f"{parent_alias}.{c} = {alias}.{c}" for c in using)
         return on, using
     on_val = j.get("on", j.get(True))
-    if on_val is None or isinstance(on_val, bool):
+    if not isinstance(on_val, str) or not on_val.strip():
         return (f"join '{alias}': 'on' must be a SQL boolean expression, "
                 f"got {on_val!r}")
     return str(on_val), None

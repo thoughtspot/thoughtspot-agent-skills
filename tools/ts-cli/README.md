@@ -1618,7 +1618,8 @@ windowed with all five `range` values + `inclusive|exclusive` anchor +
 precedence), `materialization:` pass-through, global `filter:`.
 
 Exit codes: `0` = parsed clean (warnings, if any, on stderr); `1` = one or
-more `unsupported[]` constructs (listed on stderr; JSON still written).
+more `unsupported[]` constructs (listed on stderr; JSON still written), or
+the input file is missing or unreadable (no JSON written).
 Every `trailing`/`leading` window measure gets `density_check_required:
 true` plus a stderr WARNING — Databricks date-interval frames vs
 ThoughtSpot row-positional `moving_sum` diverge on gapped data (BL-098).

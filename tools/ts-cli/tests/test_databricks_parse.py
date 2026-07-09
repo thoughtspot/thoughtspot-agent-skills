@@ -215,6 +215,13 @@ class TestParseWindow:
         assert win is None
         assert any("frame" in p for p in problems)
 
+    def test_non_string_window_key_no_raise(self):
+        # YAML 1.1 resolves an unquoted `no:` key to boolean False.
+        w = [{"order": "d", "range": "current", "semiadditive": "last", False: "z"}]
+        win, problems = parse_window(w, "m")
+        assert win is None
+        assert any("unknown window key" in p for p in problems)
+
 
 class TestExtractCrossRefs:
     def test_measure_and_any_value(self):
@@ -494,6 +501,13 @@ class TestParseJoins:
 
     def test_on_null_is_problem_not_literal_none(self):
         joins = [{"name": "d", "source": "c.s.t", "on": None}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert out == []
+        assert unsupported and "boolean expression" in unsupported[0]["detail"]
+
+    def test_on_empty_string_is_problem(self):
+        joins = [{"name": "d", "source": "c.s.t", "on": ""}]
         unsupported = []
         out = parse_joins(joins, unsupported=unsupported)
         assert out == []

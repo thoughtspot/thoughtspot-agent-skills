@@ -62,7 +62,7 @@ def parse_window(window_val, measure_name: str) -> tuple[dict | None, list[str]]
         return None, [f"measure '{measure_name}': window must be a "
                       f"single-entry list of mappings"]
     w = window_val[0]
-    unknown = sorted(set(w) - _WINDOW_KEYS)
+    unknown = sorted(str(k) for k in set(w) - _WINDOW_KEYS)
     if unknown:
         problems.append(f"measure '{measure_name}': unknown window key(s): "
                         f"{', '.join(unknown)}")
