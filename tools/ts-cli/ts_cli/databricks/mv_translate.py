@@ -12,9 +12,10 @@ port split_for_phased_import/build_formula_levels (spec §Background).
 """
 from __future__ import annotations
 
+import re
 from typing import Callable
 
-from ts_cli.databricks.mv_expr import split_dot_path
+from ts_cli.databricks.mv_expr import mask_string_literals, split_dot_path
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 
 
@@ -108,3 +109,109 @@ def translate_filter(filter_sql: str, tables: dict) -> dict:
     """Translate the MV global filter: to the MV Filter boolean formula."""
     ts = translate_sql_expr(filter_sql, make_resolver(tables))
     return {"name": "MV Filter", "column_type": "ATTRIBUTE", "ts_expr": ts}
+
+
+_COLUMN_AGG = {"SUM": "SUM", "AVG": "AVERAGE", "MIN": "MIN", "MAX": "MAX",
+               "COUNT": "COUNT", "STDDEV": "STD_DEVIATION",
+               "VARIANCE": "VARIANCE"}
+_AGG_IF = {"SUM": "sum_if", "COUNT": "count_if", "AVG": "average_if",
+           "MIN": "min_if", "MAX": "max_if", "STDDEV": "stddev_if",
+           "VARIANCE": "variance_if"}
+_FILTER_SPLIT_RE = re.compile(
+    r"^(?P<agg>[A-Za-z_]\w*)\s*\(\s*(?P<distinct>DISTINCT\s+)?(?P<inner>.*)\)"
+    r"\s*FILTER\s*\(\s*WHERE\s+(?P<cond>.*)\)\s*$",
+    re.IGNORECASE | re.DOTALL)
+_MEASURE_SUB_RE = re.compile(
+    r"\b(MEASURE|ANY_VALUE)\s*\(\s*(`[^`]+`|[A-Za-z_]\w*)\s*\)", re.IGNORECASE)
+
+
+def translate_measure(measure: dict, tables: dict) -> dict:
+    """Translate one parsed non-window measure. Raises to skip.
+
+    complex_cross_measure output is INTERMEDIATE: __MVREF_n__ placeholders
+    remain until the orchestrator (translate_metric_view) inlines them in
+    dependency order."""
+    kind = measure["expr_kind"]
+    resolver = make_resolver(tables)
+    if kind == "simple":
+        return _translate_simple(measure, tables)
+    if kind == "count_distinct":
+        table, column = resolve_parts(tables, measure["physical_ref"])
+        return _formula_measure(measure,
+                                f"unique count ( [{table}::{column}] )")
+    if kind == "count_star":
+        return _formula_measure(measure, "count ( 1 )")
+    if kind == "conditional":
+        return _formula_measure(measure,
+                                _translate_conditional(measure, resolver))
+    if kind == "complex":
+        return _formula_measure(measure,
+                                translate_sql_expr(measure["expr"], resolver))
+    if kind == "complex_cross_measure":
+        sql, refs = _prepare_cross_measure(measure["expr"])
+        return _formula_measure(measure, translate_sql_expr(sql, resolver),
+                                inlined_refs=refs)
+    raise UntranslatableError(f"unknown measure expr_kind {kind!r}")
+
+
+def _formula_measure(measure: dict, ts_expr: str, *,
+                     inlined_refs: list[str] | None = None,
+                     annotations: list[dict] | None = None) -> dict:
+    return _entry(measure["name"], "measure", "formula", "MEASURE", measure,
+                  ts_expr=ts_expr, aggregation="SUM",
+                  inlined_refs=inlined_refs, annotations=annotations)
+
+
+def _translate_simple(measure: dict, tables: dict) -> dict:
+    if measure["distinct"]:
+        raise UntranslatableError(
+            f"{measure['agg_function']}(DISTINCT …) has no ThoughtSpot "
+            f"mapping (only COUNT(DISTINCT col) -> unique count)")
+    aggregation = _COLUMN_AGG.get(measure["agg_function"])
+    if aggregation is None:
+        # Not a TML column aggregation — try the full formula path (which
+        # fail-louds on an unmapped function, naming it).
+        ts = translate_sql_expr(measure["expr"], make_resolver(tables))
+        return _formula_measure(measure, ts)
+    table, column = resolve_parts(tables, measure["physical_ref"])
+    return _entry(measure["name"], "measure", "column", "MEASURE", measure,
+                  table=table, column=column, aggregation=aggregation)
+
+
+def _translate_conditional(measure: dict, resolver) -> str:
+    e = measure["expr"].strip()
+    m = _FILTER_SPLIT_RE.match(mask_string_literals(e))
+    if not m:
+        raise UntranslatableError(
+            "FILTER (WHERE …) shape not recognized — expected "
+            "AGG(expr) FILTER (WHERE cond)")
+    agg = e[m.start("agg"):m.end("agg")].upper()
+    distinct = bool(m.group("distinct"))
+    inner = translate_sql_expr(e[m.start("inner"):m.end("inner")], resolver)
+    cond = translate_sql_expr(e[m.start("cond"):m.end("cond")], resolver)
+    if agg == "COUNT" and distinct:
+        return f"unique_count_if ( {cond} , {inner} )"
+    if distinct:
+        raise UntranslatableError(
+            f"{agg}(DISTINCT …) FILTER (WHERE …) has no ThoughtSpot mapping")
+    fn = _AGG_IF.get(agg)
+    if fn is not None:
+        return f"{fn} ( {cond} , {inner} )"
+    # Every doc-mapped aggregate has a native *_if form, so the doc's
+    # agg(if(cond, x, null)) fallback is unreachable today — fail loud
+    # instead of shipping a dead branch; add the fallback when a mapped
+    # aggregate without a *_if actually appears.
+    raise UntranslatableError(
+        f"aggregate '{agg}' under FILTER (WHERE …) has no native *_if "
+        f"function mapping (ts-databricks-formula-translation.md)")
+
+
+def _prepare_cross_measure(expr: str) -> tuple[str, list[str]]:
+    """Replace MEASURE(x)/ANY_VALUE(y) with __MVREF_n__ placeholders."""
+    refs: list[str] = []
+
+    def repl(m: re.Match) -> str:
+        refs.append(m.group(2).strip("`"))
+        return f"__MVREF_{len(refs) - 1}__"
+
+    return _MEASURE_SUB_RE.sub(repl, expr), refs

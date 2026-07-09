@@ -13,6 +13,7 @@ from ts_cli.databricks.mv_translate import (
     resolve_parts,
     translate_dimension,
     translate_filter,
+    translate_measure,
 )
 
 TABLES = {"source": "TRANSACTIONS", "orders": "DM_ORDER",
@@ -23,6 +24,16 @@ def _dim(name, expr, kind, **kw):
     base = {"name": name, "expr": expr, "kind": kind, "display_name": None,
             "comment": None, "synonyms": [], "inner_agg": None,
             "inner_expr": None, "partition_by": []}
+    base.update(kw)
+    return base
+
+
+def _measure(name, expr, expr_kind, **kw):
+    base = {"name": name, "expr": expr, "kind": kw.pop("kind", expr_kind),
+            "expr_kind": expr_kind, "agg_function": None, "physical_ref": None,
+            "distinct": False, "cross_refs": [], "lod_refs": [],
+            "display_name": None, "comment": None, "synonyms": [],
+            "format": None, "window": None}
     base.update(kw)
     return base
 
@@ -108,3 +119,112 @@ class TestTranslateFilter:
             "[TRANSACTIONS::is_return] = false and "
             "( [TRANSACTIONS::transaction_status] = 'Completed' or "
             "[TRANSACTIONS::transaction_status] = 'Shipped' )")
+
+
+class TestTranslateMeasure:
+    def test_simple_sum_is_column(self):
+        out = translate_measure(
+            _measure("revenue", "SUM(LINE_TOTAL)", "simple",
+                     agg_function="SUM", physical_ref="LINE_TOTAL"), TABLES)
+        assert out["output_kind"] == "column"
+        assert (out["table"], out["column"]) == ("TRANSACTIONS", "LINE_TOTAL")
+        assert out["aggregation"] == "SUM"
+        assert out["column_type"] == "MEASURE"
+
+    def test_simple_avg_maps_average(self):
+        out = translate_measure(
+            _measure("t", "AVG(tenure)", "simple", agg_function="AVG",
+                     physical_ref="tenure"), TABLES)
+        assert out["aggregation"] == "AVERAGE"
+
+    def test_simple_stddev_maps_std_deviation(self):
+        out = translate_measure(
+            _measure("s", "STDDEV(x)", "simple", agg_function="STDDEV",
+                     physical_ref="x"), TABLES)
+        assert out["aggregation"] == "STD_DEVIATION"
+
+    def test_simple_unknown_agg_falls_back_to_formula_path(self):
+        with pytest.raises(UntranslatableError, match="MEDIAN"):
+            translate_measure(
+                _measure("m", "MEDIAN(x)", "simple", agg_function="MEDIAN",
+                         physical_ref="x"), TABLES)
+
+    def test_simple_distinct_raises(self):
+        with pytest.raises(UntranslatableError, match="DISTINCT"):
+            translate_measure(
+                _measure("m", "SUM(DISTINCT x)", "simple", agg_function="SUM",
+                         physical_ref="x", distinct=True), TABLES)
+
+    def test_count_distinct_formula(self):
+        out = translate_measure(
+            _measure("unique_customers", "COUNT(DISTINCT customer_id)",
+                     "count_distinct", physical_ref="customer_id"), TABLES)
+        assert out["output_kind"] == "formula"
+        assert out["ts_expr"] == "unique count ( [TRANSACTIONS::customer_id] )"
+        assert out["aggregation"] == "SUM"
+
+    def test_count_star_formula(self):
+        out = translate_measure(
+            _measure("total_orders", "COUNT(*)", "count_star"), TABLES)
+        assert out["ts_expr"] == "count ( 1 )"
+        assert out["aggregation"] == "SUM"
+
+    def test_conditional_sum_if_golden(self):
+        # ts-from-databricks.md Measure 4
+        out = translate_measure(
+            _measure("high_value_revenue",
+                     "SUM(unit_price * quantity) FILTER (WHERE unit_price > 100)",
+                     "conditional"), TABLES)
+        assert out["ts_expr"] == ("sum_if ( [TRANSACTIONS::unit_price] > 100 , "
+                                  "[TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] )")
+
+    def test_conditional_count_distinct(self):
+        out = translate_measure(
+            _measure("m", "COUNT(DISTINCT customer_id) FILTER (WHERE NOT is_return)",
+                     "conditional"), TABLES)
+        assert out["ts_expr"] == ("unique_count_if ( [TRANSACTIONS::is_return] = false , "
+                                  "[TRANSACTIONS::customer_id] )")
+
+    def test_conditional_unmapped_agg_fails_loud(self):
+        # All eight doc-mapped aggregates have native *_if forms, so an
+        # unmapped aggregate under FILTER (WHERE …) fails loud (no dead
+        # fallback branch — see _translate_conditional comment):
+        with pytest.raises(UntranslatableError, match="FILTER"):
+            translate_measure(
+                _measure("m", "MEDIAN(x) FILTER (WHERE y > 1)", "conditional"),
+                TABLES)
+
+    def test_conditional_nested_parens_inner(self):
+        out = translate_measure(
+            _measure("m", "SUM(COALESCE(a, b)) FILTER (WHERE c > 1)",
+                     "conditional"), TABLES)
+        assert out["ts_expr"] == (
+            "sum_if ( [TRANSACTIONS::c] > 1 , "
+            "if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else [TRANSACTIONS::b] )")
+
+    def test_complex_ratio_golden(self):
+        # ts-from-databricks.md Measure 3
+        out = translate_measure(
+            _measure("avg_order_value",
+                     "SUM(unit_price * quantity) / COUNT(DISTINCT transaction_id)",
+                     "complex"), TABLES)
+        assert out["ts_expr"] == ("sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] ) "
+                                  "/ unique count ( [TRANSACTIONS::transaction_id] )")
+
+    def test_complex_case_cast_golden(self):
+        # ts-from-databricks.md Measure 6
+        out = translate_measure(
+            _measure("return_rate",
+                     "CAST(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)",
+                     "complex"), TABLES)
+        assert out["ts_expr"] == ("sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) "
+                                  "/ count ( 1 )")
+
+    def test_cross_measure_placeholders_prepared(self):
+        out = translate_measure(
+            _measure("ratio", "MEASURE(quantity) / ANY_VALUE(category_quantity)",
+                     "complex_cross_measure",
+                     cross_refs=["quantity"], lod_refs=["category_quantity"]),
+            TABLES)
+        assert out["ts_expr"] == "__MVREF_0__ / __MVREF_1__"
+        assert out["inlined_refs"] == ["quantity", "category_quantity"]
