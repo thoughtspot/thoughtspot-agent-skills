@@ -24,6 +24,11 @@ namespace (A/B/C/D-prefixed, not C-prefixed) to avoid collision.
   - `ratio_mv` — covers Battery B
 - ThoughtSpot connection: `DBX_DAMIAN` (`b9e709c6-b951-4b50-a816-b450e6aee278`) — reused, not
   recreated (Task 4's job to use it)
+- ThoughtSpot objects (Task 4, created 2026-07-09 — all four are scratch; Task 7 cleans up):
+  - Table `PR15_WINDOW_FIXTURE` — `2eea915d-5837-4ee9-b660-6c08fafe198b`
+  - Table `PR15_RATIO_FIXTURE` — `72d0759c-9952-4948-97df-032aafb12abc`
+  - Model `PR15_Window_Fixture` — `0fc5abc8-3205-40dd-b938-3215dc140aca`
+  - Model `PR15_Ratio_Fixture` — `a7730c30-1d9e-4c93-a762-98743eb0554b`
 - Statement ledger (11 of the ≤12 budget, all `SUCCEEDED`, none re-run): (1) `CREATE SCHEMA`,
   (2) `CREATE TABLE window_fixture`, (3) `CREATE TABLE ratio_fixture`, (4) sanity-check
   `SELECT COUNT(*)`, (5) `CREATE VIEW window_filtered_mv`, (6) `CREATE VIEW
@@ -36,32 +41,32 @@ namespace (A/B/C/D-prefixed, not C-prefixed) to avoid collision.
 
 | ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
 |---|---|---|---|---|---|
-| A1 | `SUM(x) OVER (PARTITION BY dim)` → `group_aggregate(sum(x), {dim}, query_filters())`; the third argument is claimed to make the LOD "respect user-applied filters" | `ts-from-databricks-rules.md:159-176` (esp. line 176), `ts-databricks-formula-translation.md:381-413` (esp. 409-411), `ts-to-databricks-rules.md:244-257`; worked example `ts-to-databricks.md` Formula 3 "Category Quantity" (line ~366) — **verified 2026-05-25 with NO filter ever applied to the query or the MV** | Live DBX (3-condition discriminator: no filter / MV global `filter:` / query-time `WHERE`) + TS number-match (query-level pin vs. model-level filter) | See `### A1 — live results` below — condition-dependent: no-filter=360/8360 (both cats), MV global `filter:`=160/4160 (matches a2), query-time `WHERE`=360/8360 (matches a1, i.e. unaffected) | — (needs Task 4) |
-| A2 | (sub-probe of A1) Whether an MV's own global `filter:` and an ad hoc query-time `WHERE` on the same unfiltered MV produce the *same* LOD value | None — never asked in any existing doc; surfaced during this plan's research | Live DBX only (compare `window_filtered_mv` output to `window_nofilter_mv WHERE ...` output) | See `### A2 — live results` below — MV filter gives 160/4160, query-time WHERE on the same underlying rows gives 360/8360 | **DIFFERENT (live DBX-only, 2026-07-09)** — an MV's baked-in global `filter:` is filter-aware for a partition-window LOD dimension; an ad hoc query-time `WHERE` on an MV with no global filter is filter-blind for that same dimension (it still removes rows from output, but does not change the window's computed value) |
+| A1 | `SUM(x) OVER (PARTITION BY dim)` → `group_aggregate(sum(x), {dim}, query_filters())`; the third argument is claimed to make the LOD "respect user-applied filters" | `ts-from-databricks-rules.md:159-176` (esp. line 176), `ts-databricks-formula-translation.md:381-413` (esp. 409-411), `ts-to-databricks-rules.md:244-257`; worked example `ts-to-databricks.md` Formula 3 "Category Quantity" (line ~366) — **verified 2026-05-25 with NO filter ever applied to the query or the MV** | Live DBX (3-condition discriminator: no filter / MV global `filter:` / query-time `WHERE`) + TS number-match (query-level pin vs. model-level filter) | See `### A1 — live results` and `### A1 — TS-side` below — DBX condition-dependent: no-filter=360/8360 (X/Y; Z=160 in every condition), MV global `filter:`=160/4160 (matches a2), query-time `WHERE`=360/8360 (matches a1, i.e. unaffected). TS: baseline=360/8360; query-level pin=160/4160; model-level `filters:`=160/4160 — filter-aware under **both** TS filter kinds | **CONFIRMED (TS-side, live 2026-07-09) + DIVERGENCE caveat (cross-platform)** — the doc claim holds on TS: `query_filters()` makes the LOD respect user-applied filters, under both a query-level pin and a model-level `filters:` block (TS has no filter-blind condition). Cross-platform, that matches DBX's MV-global-`filter:` condition (160/4160) only; DBX's ad hoc query-time `WHERE` is filter-blind (360/8360) and **no `query_filters()`-based TS formula reproduces it** — Task 5 must caveat that the mapping's equivalence holds for the MV-`filter:` condition, not for consumers replicating a DBX query-time `WHERE` |
+| A2 | (sub-probe of A1) Whether an MV's own global `filter:` and an ad hoc query-time `WHERE` on the same unfiltered MV produce the *same* LOD value | None — never asked in any existing doc; surfaced during this plan's research | Live DBX only (compare `window_filtered_mv` output to `window_nofilter_mv WHERE ...` output) | See `### A2 — live results` below — MV filter gives 160/4160, query-time WHERE on the same underlying rows gives 360/8360 | **DIFFERENT (live DBX, 2026-07-09)** — an MV's baked-in global `filter:` is filter-aware for a partition-window LOD dimension; an ad hoc query-time `WHERE` on an MV with no global filter is filter-blind for that same dimension (it still removes rows from output, but does not change the window's computed value). **TS-side (live 2026-07-09): the same two-filter-kind probe on ThoughtSpot shows NO difference** — a query-level pin and a model-level `filters:` block both yield 160/4160 for the `query_filters()` LOD (see `### A1 — TS-side`); DBX's filter-kind sensitivity has no TS analogue |
 
 ## B — Cross-measure ratio inlining × grain
 
 | ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
 |---|---|---|---|---|---|
-| B1 | `MEASURE(a) / MEASURE(b)` inlines to `[a] / [b]` and is claimed (implicitly, by having no grain caveat anywhere) to compute ratio-of-sums correctly at **any** query grain | `ts-from-databricks-rules.md:270-282`, `ts-databricks-formula-translation.md:415-434` (esp. 426, 434) and the quick-lookup row at line 649-651, `ts-to-databricks-rules.md:267-269,281`; worked examples `ts-from-databricks.md` (`avg_order_value`, `return_rate`) and `ts-to-databricks.md` (`category_contribution_ratio`, verification query at line ~1035-1042) — **every one of these was queried at exactly one grain, never compared across grains** | Live DBX (fine / coarse / total grain, one fixture designed so ratio-of-sums ≠ any naive alternative) + TS number-match (`safe_divide(sum(a), sum(b))`, which is definitionally grain-correct — TS side is the control, not the hypothesis under test) | See `### B1 — live results` below — fine/coarse/total all match ratio-of-sums exactly (fine: 10/1/100/10; coarse: 1.818.../18.18...; total: 10) | **CONFIRMED (live DBX-only, 2026-07-09)** — `MEASURE(a) / MEASURE(b)` computes true ratio-of-sums at every grain tested; no sum-of-ratios or average-of-ratios divergence found |
+| B1 | `MEASURE(a) / MEASURE(b)` inlines to `[a] / [b]` and is claimed (implicitly, by having no grain caveat anywhere) to compute ratio-of-sums correctly at **any** query grain | `ts-from-databricks-rules.md:270-282`, `ts-databricks-formula-translation.md:415-434` (esp. 426, 434) and the quick-lookup row at line 649-651, `ts-to-databricks-rules.md:267-269,281`; worked examples `ts-from-databricks.md` (`avg_order_value`, `return_rate`) and `ts-to-databricks.md` (`category_contribution_ratio`, verification query at line ~1035-1042) — **every one of these was queried at exactly one grain, never compared across grains** | Live DBX (fine / coarse / total grain, one fixture designed so ratio-of-sums ≠ any naive alternative) + TS number-match (`safe_divide(sum(a), sum(b))`, which is definitionally grain-correct — TS side is the control, not the hypothesis under test) | See `### B1 — live results` and `### B1 — TS-side` below — DBX fine/coarse/total all match ratio-of-sums exactly (fine: 10/1/100/10; coarse: 1.818.../18.18...; total: 10); TS `safe_divide(sum(rev), sum(qty))` returns the identical values at all three grains | **CONFIRMED (cross-platform, live 2026-07-09)** — DBX `MEASURE(a) / MEASURE(b)` and TS `safe_divide(sum(a), sum(b))` both compute true ratio-of-sums at every grain tested (fine/coarse/total), with identical values; no sum-of-ratios or average-of-ratios divergence found on either platform |
 
 ## C — Global `filter:` × window ordering
 
 | ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
 |---|---|---|---|---|---|
-| C1 | A Metric View's `filter:` is a "Global WHERE clause applied to all queries" (schema doc) and is independently claimed to combine safely with any measure, including windowed ones; the shipped worked example `ts-from-databricks.md` **already combines** `filter: status != 'cancelled'` (line 34) with a `revenue_7d_rolling` trailing-7-day window measure (lines 83-86) in the SAME MV, but the two were never queried together to see whether the filter removes rows before or after the window sums them | `databricks-metric-view.md` schema (`filter:` field description, lines 115/229/287, comparison table line 768), `ts-from-databricks-rules.md:358-385` ("Filter → Boolean Formula Column (always)"), `ts-to-databricks-rules.md:179-233`; worked example `ts-from-databricks.md` lines 34, 83-86, 316-319 | Live DBX (one MV, both a filter and a window, alternating included/excluded rows so trailing-3 sums diverge sharply between "filter-before-window" and "filter-after-window") + TS number-match (does a ThoughtSpot model-level `filters:` block filter before or after `moving_sum` computes?) | See `### C1 — live results` below — matches hypothesis (c1-dates) exactly at both cat X and Y, diverging sharply from (c1-rows) and (c2) | DBX hypothesis identity: **(c1-dates) — filter-before-window, DATE-INTERVAL frame** (live DBX-only, 2026-07-09); TS-side model-`filters:`-vs-`moving_sum`-ordering comparison — (needs Task 4) |
+| C1 | A Metric View's `filter:` is a "Global WHERE clause applied to all queries" (schema doc) and is independently claimed to combine safely with any measure, including windowed ones; the shipped worked example `ts-from-databricks.md` **already combines** `filter: status != 'cancelled'` (line 34) with a `revenue_7d_rolling` trailing-7-day window measure (lines 83-86) in the SAME MV, but the two were never queried together to see whether the filter removes rows before or after the window sums them | `databricks-metric-view.md` schema (`filter:` field description, lines 115/229/287, comparison table line 768), `ts-from-databricks-rules.md:358-385` ("Filter → Boolean Formula Column (always)"), `ts-to-databricks-rules.md:179-233`; worked example `ts-from-databricks.md` lines 34, 83-86, 316-319 | Live DBX (one MV, both a filter and a window, alternating included/excluded rows so trailing-3 sums diverge sharply between "filter-before-window" and "filter-after-window") + TS number-match (does a ThoughtSpot model-level `filters:` block filter before or after `moving_sum` computes?) | See `### C1 — live results` and `### C1 — TS-side` below — DBX matches hypothesis (c1-dates) exactly at both cat X and Y, diverging sharply from (c1-rows) and (c2); TS under an equivalent model-level `filters:` block matches **(c1-rows)** exactly (X: NULL/10/40/90; Y: NULL/1010/2040/3090) | DBX hypothesis identity: **(c1-dates) — filter-before-window, DATE-INTERVAL frame** (live DBX, 2026-07-09); TS identity (live 2026-07-09): **(c1-rows) — filter-before-window, ROW-positional frame**. Split verdict: filter ordering **CONFIRMED (cross-platform)** — both platforms filter before the window computes (a TS model-level `filters:` block behaves like DBX's MV global `filter:` in ordering terms); frame semantics **DIVERGENCE (documented caveat)** — TS `moving_sum` counts surviving *rows*, DBX `trailing N day` spans a *date interval*, so the two platforms produce different numbers on filtered (gapped-survivor) data. Same root cause as E1 — a platform divergence to caveat in Task 5, not a formula bug |
 
 ## D — Semi-additive × date-range filters
 
 | ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
 |---|---|---|---|---|---|
-| D1 | `last_value`/`first_value` (`range: current`, `semiadditive: last`/`first`, raw-date `order:`) collapse to "the last/first observation" per group — PR 1's C7 confirmed this **at the full, unfiltered date range only** (Query A2, `rolling_mv`, no `filter:` present at all); never tested with a query that narrows the date range before the collapse happens | `ts-from-databricks-rules.md:313-334` and `:561-641` (`#### True Semi-Additive`), `ts-databricks-formula-translation.md:438-478`, `ts-to-databricks-rules.md:291-361`; PR 1's C7 in `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (CONFIRMED, but at full-range only); `thoughtspot-formula-patterns.md:408-432` (Semi-Additive Functions — platform-agnostic TS reference, same untested gap) | Live DBX (query-time date-range `WHERE` narrower than the full fixture range, both ends) + TS number-match (`last_value`/`first_value` under an equivalent query-level date-range filter) | See `### D1 — live results` below — matches hypothesis (d1) exactly at both cat X and Y | — (needs Task 4) |
+| D1 | `last_value`/`first_value` (`range: current`, `semiadditive: last`/`first`, raw-date `order:`) collapse to "the last/first observation" per group — PR 1's C7 confirmed this **at the full, unfiltered date range only** (Query A2, `rolling_mv`, no `filter:` present at all); never tested with a query that narrows the date range before the collapse happens | `ts-from-databricks-rules.md:313-334` and `:561-641` (`#### True Semi-Additive`), `ts-databricks-formula-translation.md:438-478`, `ts-to-databricks-rules.md:291-361`; PR 1's C7 in `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (CONFIRMED, but at full-range only); `thoughtspot-formula-patterns.md:408-432` (Semi-Additive Functions — platform-agnostic TS reference, same untested gap) | Live DBX (query-time date-range `WHERE` narrower than the full fixture range, both ends) + TS number-match (`last_value`/`first_value` under an equivalent query-level date-range filter) | See `### D1 — live results` and `### D1 — TS-side` below — DBX matches hypothesis (d1) exactly at both cat X and Y; TS under an equivalent query-level date-range pin returns the identical values (X 6/3, Y 106/103, Z 5/5) | DBX hypothesis identity: **(d1) — last/first-in-filtered-range** (live DBX, 2026-07-09); TS identity (live 2026-07-09): **(d1)** as well. **CONFIRMED (cross-platform)** — `last_value`/`first_value` under a query-level date-range pin collapses to the last/first observation *within the filtered range* on both platforms, identical values at X/Y and at the single-surviving-row Z edge case |
 
 ## E — Trailing-window frame semantics (rows vs. dates)
 
 | ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
 |---|---|---|---|---|---|
-| E1 | DBX `trailing N day` frame semantics: **row-positional vs. date-interval**. PR 1's C1 CONFIRMED verdict (`moving_sum([m], N, -1, [date])` ≡ `trailing N day` default/exclusive) was obtained on **dense daily data only** (one row per day, no gaps), where the two framings are indistinguishable — the CONFIRMED verdict is density-conditional, the same non-discriminating-verification failure mode this PR closes. TS `moving_sum` is documented **row-positional** (`ts-from-databricks-rules.md:702-713` — "based on row counts, so this assumes one row per day (daily grain)"); if DBX's frame is a date interval, every PR-1-corrected trailing/leading mapping silently breaks on sparse data. | PR 1 matrix C1 (`docs/audit/2026-07-08-dbx-window-claim-matrix.md`); `ts-from-databricks-rules.md:702-713` row-counts note | Live DBX (gapped cat `Z` rides Battery C's existing query — Z has no excluded rows, isolating rows-vs-dates from the filter question) + TS number-match (Z-probe on `PR15_Window_Fixture`, row-positional expectation) | See `### E1 — live results` below — Z's gapped trailing-window matches the DATE-INTERVAL column exactly, diverging from ROW-positional at days 5/8 | DBX rows-vs-dates identity: **RESOLVED — DATE-INTERVAL** (live DBX-only, 2026-07-09) — confirms PR 1's C1/C3 CONFIRMED verdicts were density-conditional; density caveat needed in the mapping docs (Task 5). TS-side Z-probe comparison — (needs Task 4) |
+| E1 | DBX `trailing N day` frame semantics: **row-positional vs. date-interval**. PR 1's C1 CONFIRMED verdict (`moving_sum([m], N, -1, [date])` ≡ `trailing N day` default/exclusive) was obtained on **dense daily data only** (one row per day, no gaps), where the two framings are indistinguishable — the CONFIRMED verdict is density-conditional, the same non-discriminating-verification failure mode this PR closes. TS `moving_sum` is documented **row-positional** (`ts-from-databricks-rules.md:702-713` — "based on row counts, so this assumes one row per day (daily grain)"); if DBX's frame is a date interval, every PR-1-corrected trailing/leading mapping silently breaks on sparse data. | PR 1 matrix C1 (`docs/audit/2026-07-08-dbx-window-claim-matrix.md`); `ts-from-databricks-rules.md:702-713` row-counts note | Live DBX (gapped cat `Z` rides Battery C's existing query — Z has no excluded rows, isolating rows-vs-dates from the filter question) + TS number-match (Z-probe on `PR15_Window_Fixture`, row-positional expectation) | See `### E1 — live results` and `### E1 — TS-side` below — DBX: Z's gapped trailing-window matches the DATE-INTERVAL column exactly (NULL/10/20/50), diverging from ROW-positional at days 5/8; TS Z-probe: matches the ROW-positional column exactly (NULL/10/30/80), diverging from DBX at the same two days | DBX rows-vs-dates identity: **RESOLVED — DATE-INTERVAL** (live DBX, 2026-07-09); TS Z-probe (live 2026-07-09): `moving_sum` is **ROW-positional**, exactly as documented. **DIVERGENCE (cross-platform, documented caveat)** — on gapped data DBX `trailing N day` (date-interval) and TS `moving_sum(m, N, -1, d)` (row-positional) produce different numbers (Z days 5/8: DBX 20/50 vs TS 30/80); PR 1's C1/C3 CONFIRMED verdicts were density-conditional. Density caveat required in the mapping docs (Task 5) — a potential translation-fidelity blocker on sparse data (Task 5/6 to decide phrasing/mitigation) |
 
 ## Live results convention
 
@@ -149,13 +154,15 @@ prediction that Z is a no-op for Battery A (its rows are never `excluded`).
 baked-in global `filter:` participates in whatever the window/LOD dimension computes over
 (filter-aware, hypothesis a2), while an ad hoc query-time `WHERE` clause applied on top of an
 MV with no global filter does **not** change the window's own value — it still removes rows
-from the output (12 of 20 rows in Query A/C; 6 of the theoretical rows in the filtered A/A2
-scenario) but the `SUM(amount) OVER (PARTITION BY cat)` dimension itself was already computed
+from the output (in both filtered scenarios only 12 of the 20 underlying rows survive — X/Y's
+4 odd days each plus Z's 4 rows — grouped to 3 output rows per scenario in these cat-grain
+queries) but the `SUM(amount) OVER (PARTITION BY cat)` dimension itself was already computed
 inside the view before that outer `WHERE` is applied. This is not one of the brief's two named
 hypotheses cleanly — it is a *third pattern*: "which kind of filter" determines the answer, not
 "is a filter active." TS-side number-match against the two ThoughtSpot candidate formulas
-(query-level pinned filter vs. model-level `filters:` block) is Task 4's job — no Verdict is
-recorded for A1 itself; A2 (below) is the sub-question this same evidence directly decides.
+(query-level pinned filter vs. model-level `filters:` block) was Task 4's job — **that ran on
+2026-07-09; see `### A1 — TS-side` below** — and the A1 Verdict is now recorded; A2 (below) is
+the sub-question this same evidence directly decides.
 
 ### A2 — live results
 
@@ -234,8 +241,9 @@ non-null (30/50 vs. 90/150 for X).
 DBX-only, 2026-07-09).** The filter removes even-day rows before the window computes, and the
 `trailing 3 day` window's range is a genuine date-interval `[anchor−3, anchor−1]` intersected
 with survivors — not a row-positional "3 preceding survivor rows" count. TS-side comparison
-(does ThoughtSpot's model-level `filters:` block interact with `moving_sum` the same way?) is
-Task 4's job — the claim's overall Verdict stays pending that comparison.
+(does ThoughtSpot's model-level `filters:` block interact with `moving_sum` the same way?) ran
+on 2026-07-09 — see `### C1 — TS-side` below; the C1 Verdict is now recorded (split:
+filter-ordering CONFIRMED, frame DIVERGENCE).
 
 ### D1 — live results
 
@@ -284,7 +292,8 @@ row), consistent with but not independently discriminating for either hypothesis
 and Y.** The semi-additive `last`/`first` collapse operates on the rows that survive the
 query-time date-range filter, not on the full unfiltered dataset. TS-side comparison (does
 ThoughtSpot's `last_value`/`first_value` under an equivalent query-level date filter behave the
-same way?) is Task 4's job — no Verdict is recorded for D1 itself yet.
+same way?) ran on 2026-07-09 — see `### D1 — TS-side` below; the D1 Verdict is now recorded
+(CONFIRMED cross-platform).
 
 ### E1 — live results
 
@@ -311,5 +320,135 @@ row-positional and date-interval framings are indistinguishable — that verdict
 caveat in the mapping docs (every trailing/leading mapping built on `moving_sum`, which is
 documented row-positional, silently diverges from DBX's actual date-interval semantics whenever
 the underlying data has date gaps). TS-side comparison (Z-probe against a ThoughtSpot Model, per
-the claim's verification method) is Task 4's job — the claim's overall Verdict stays pending
-that comparison, though the DBX-side ambiguity itself is now fully closed.
+the claim's verification method) ran on 2026-07-09 — see `### E1 — TS-side` below; the E1
+Verdict is now recorded (DIVERGENCE cross-platform: TS row-positional vs. DBX date-interval).
+
+---
+
+## TS-side number-match results (Task 4, live 2026-07-09)
+
+All queries below ran live on 2026-07-09 against `se-thoughtspot`, connection `DBX_DAMIAN`,
+models `PR15_Window_Fixture` (`0fc5abc8-3205-40dd-b938-3215dc140aca`) and
+`PR15_Ratio_Fixture` (`a7730c30-1d9e-4c93-a762-98743eb0554b`), over the same
+`agent_skills.ts_dbx_substrate_pr15.*` fixture tables Task 3 used. Tables were registered via
+`ts tables create` (GUIDs in the Fixture section above); `ts tml export` confirmed
+`db_column_name` matches the physical name on every column of both tables.
+
+**Execution path (same as PR 1's Task 5):** the SpotQL data endpoints still 500 on this build
+(BL-096), so data was fetched via `POST /api/rest/2.0/searchdata` through the scratchpad
+script reusing `ts_cli.client.ThoughtSpotClient` for auth. `ts spotql classify-columns
+--model` ran first and classified as expected (base columns plain; the five formulas:
+`LOD Category Total` and `Excluded Filter` ATTRIBUTE, the three window/semi-additive formulas
+`aggregate_measure`). All imports used `< /dev/null` (BL-097). Date-range pin token syntax
+that worked first try: `[Txn Date] >= '06/03/2026' [Txn Date] <= '06/06/2026'` (MM/DD/YYYY,
+two chained comparison tokens — no `between` keyword needed). Boolean pin token:
+`[Excluded Filter] = 'true'`.
+
+**Import iterations:** zero content failures. Window model: 1 first-try create + 2 planned
+in-place updates (Step 4 add `filters:` block, Step 6 revert it — both `guid:` at document
+root, both first-try OK). Ratio model: first-try create. The step order followed the brief:
+baseline + query-pin + Z-probe ran BEFORE the model filter existed; Battery D ran after the
+filter was reverted (the D baseline reading X=8 — an even, `excluded=true` day — independently
+confirms the revert took effect).
+
+### A1 — TS-side
+
+Model formula under test: `group_aggregate ( sum ( [amount] ) , { [cat] } , query_filters ( ) )`
+(ATTRIBUTE), with `Excluded Filter` = `[excluded] = false` (ATTRIBUTE formula).
+
+| Condition | Search tokens | Actual (X / Y / Z) | Matches DBX condition |
+|---|---|---|---|
+| Baseline (no filter anywhere) | `[Cat] [LOD Category Total]` | 360 / 8360 / 160 | = DBX no-filter (360/8360/160) |
+| Query-level pin | `[Cat] [LOD Category Total] [Excluded Filter] = 'true'` | 160 / 4160 / 160 | = DBX MV global `filter:` (160/4160); ≠ DBX query-time `WHERE` (360/8360) |
+| Model-level `filters:` block (Step 4 in-place update) | `[Cat] [LOD Category Total]` | 160 / 4160 / 160 | = DBX MV global `filter:` (160/4160) |
+
+**TS finding.** `query_filters()` is filter-AWARE under **both** ThoughtSpot filter kinds — a
+query-level pin and a model-level `filters:` block produce the identical 160/4160 reading. The
+doc claim ("respects user-applied filters") is CONFIRMED on the TS side. Cross-platform, TS
+matches DBX's MV-global-`filter:` condition only: DBX's ad hoc query-time `WHERE` is
+filter-blind (360/8360), and ThoughtSpot exhibits no filter-blind condition for a
+`query_filters()` LOD — DBX's third-pattern ("which kind of filter" matters) has **no TS
+analogue** (that is A2's TS-side answer). Task 5 must caveat the A1 mapping accordingly: the
+equivalence DBX MV `filter:` ↔ TS filter holds; a DBX consumer's query-time `WHERE` semantics
+cannot be reproduced by the `query_filters()` form.
+
+### B1 — TS-side
+
+Model formula: `safe_divide ( sum ( [rev] ) , sum ( [qty] ) )` on `PR15_Ratio_Fixture`.
+
+| Grain | Search tokens | Actual |
+|---|---|---|
+| Fine | `[Cat] [Txn Date].'daily' [Rev] [Qty] [Rev Qty Ratio]` | X 06-01: 10, X 06-02: 1, Y 06-01: 100, Y 06-02: 10 |
+| Coarse | `[Cat] [Rev] [Qty] [Rev Qty Ratio]` | X: 1.818181818181818, Y: 18.181818181818183 |
+| Total | `[Rev] [Qty] [Rev Qty Ratio]` | 10 |
+
+Identical to the DBX actuals at every grain (fine {10, 1, 100, 10}; coarse {1.818...,
+18.18...}; total {10}) — exact ratio-of-sums on both platforms. **B1 Verdict: CONFIRMED
+(cross-platform).** The control behaved as expected; Task 5 needs no grain caveat for this
+mapping.
+
+### C1 — TS-side
+
+With the Step 4 model-level `filters:` block active (`Excluded Filter in ('true')`), search
+`[Cat] [Txn Date].'daily' [Amount] [Trailing3 Amount]` returned exactly the 12 surviving rows
+(X/Y odd days + all 4 Z rows), mirroring DBX's filtered-MV output rows. `Trailing3 Amount` =
+`moving_sum ( [amount] , 3 , -1 , [txn_date] )` per surviving day, against the hypotheses:
+
+| cat | day (surviving) | TS ACTUAL | (c1-rows) | (c1-dates) = DBX actual | (c2) |
+|---|---|---|---|---|---|
+| X | 1 | NULL | NULL | NULL | NULL |
+| X | 3 | 10 | 10 | 10 | 30 |
+| X | 5 | 40 | 40 | 30 | 90 |
+| X | 7 | 90 | 90 | 50 | 150 |
+| Y | 1 | NULL | NULL | NULL | NULL |
+| Y | 3 | 1010 | 1010 | 1010 | 2030 |
+| Y | 5 | 2040 | 2040 | 1030 | 3090 |
+| Y | 7 | 3090 | 3090 | 1050 | 3150 |
+
+(Z rode along unchanged: NULL/10/30/80 — same as the Step 3a Z-probe, as expected since no Z
+row is excluded.)
+
+**TS identity: (c1-rows) — filter-before-window, ROW-positional frame** — exactly the
+row-positional prediction, matched at every row. Filter ordering agrees with DBX (both
+filter-before-window: the model filter removes even days before `moving_sum` sees them); frame
+semantics diverge (TS sums the 3 preceding *surviving rows*, DBX intersects a 3-*day* interval
+with survivors). **C1 Verdict: split — filter-ordering CONFIRMED (cross-platform), frame
+DIVERGENCE (documented caveat, same root cause as E1).** This is a platform divergence on
+filtered/gapped data to record honestly — not a formula bug to fix by trial.
+
+### D1 — TS-side
+
+Model filter reverted first (Step 6 in-place re-import without `filters:`). Formulas:
+`last_value ( sum ( [balance] ) , query_groups ( ) , { [txn_date] } )` and the `first_value`
+twin.
+
+| Condition | Search tokens | Actual (Balance Last / Balance First) |
+|---|---|---|
+| Baseline (full range) | `[Cat] [Balance Last] [Balance First]` | X 8/1, Y 108/101, Z 8/1 |
+| Date-range pin 06-03..06-06 | `[Cat] [Balance Last] [Balance First] [Txn Date] >= '06/03/2026' [Txn Date] <= '06/06/2026'` | X 6/3, Y 106/103, Z 5/5 |
+
+Identical to DBX in both conditions, including the Z single-surviving-row edge case (5/5).
+**D1 Verdict: CONFIRMED (cross-platform) — identity (d1), last/first-in-filtered-range** on
+both platforms: the semi-additive collapse operates on the rows that survive the date-range
+filter, matching DBX's Query D exactly.
+
+### E1 — TS-side (Z-probe)
+
+Run in the no-model-filter phase (Step 3a, before the Step 4 filter existed). Search:
+`[Cat] [Txn Date].'daily' [Amount] [Trailing3 Amount] [Cat] = 'Z'` — 4 rows:
+
+| Z day_index / date | TS ACTUAL | ROW-positional | DATE-interval = DBX actual |
+|---|---|---|---|
+| 1 / 06-01 | NULL | NULL | NULL |
+| 2 / 06-02 | 10 | 10 | 10 |
+| 5 / 06-05 | 30 | 30 | 20 |
+| 8 / 06-08 | 80 | 80 | 50 |
+
+TS matches the ROW-positional column exactly — `moving_sum` behaves as documented
+(`ts-from-databricks-rules.md:702-713`), diverging from DBX's date-interval reading at both
+gapped days (30 vs 20; 80 vs 50). **E1 Verdict: DIVERGENCE (cross-platform, documented
+caveat)** — on gapped data, DBX `trailing N day` and TS `moving_sum(m, N, -1, d)` produce
+different numbers; PR 1's C1/C3 equivalences are density-conditional (dense daily data only).
+Task 5 must add the density caveat to the mapping docs; this is a potential
+translation-fidelity blocker on sparse data for Tasks 5/6 to phrase (e.g. densification or a
+"verify data density" pre-check), not a formula bug fixable by a different `moving_sum` shape.
