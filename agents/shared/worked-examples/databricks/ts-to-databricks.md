@@ -392,6 +392,17 @@ query-time `WHERE` on the MV gets a filter-**blind** `Category Quantity` (the
 Databricks-side asymmetry to flag for the consuming team, not a defect in this
 translation.
 
+**A3 follow-up, live-verified 2026-07-09** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A3) — if the source
+ThoughtSpot formula had instead used `group_aggregate(sum(x), {dim}, {})` (the
+empty-set filter argument) with a model-level `filters:` block mirroring this MV's
+`filter:`, the emitted `SUM(x) OVER (PARTITION BY ...)` dimension would reproduce
+**both** DBX conditions above — filter-aware for the MV's own global `filter:` AND
+filter-blind for an ad hoc query-time `WHERE`. `query_filters()` remains the right
+default here (simpler formula, matches the common case); `{}` is the refinement to
+reach for only when a consumer specifically needs the query-time-`WHERE`-blind
+behavior reproduced.
+
 ---
 
 ### Formula 4: `Category Contribution Ratio` (MEASURE — cross-references)

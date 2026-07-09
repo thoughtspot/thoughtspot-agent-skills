@@ -51,12 +51,31 @@ namespace (A/B/C/D-prefixed, not C-prefixed) to avoid collision.
     (`ts connections get` returned connection metadata, not a 404) — **not** deleted, per the
     brief (shared scratch infrastructure for future PR-1-class work).
 
+**A3 fixture (user-suggested follow-up, 2026-07-09) — recreated after the above cleanup, own
+short-lived scratch:**
+- Databricks: same `agent_skills.ts_dbx_substrate_pr15` schema + `window_fixture` table
+  (identical 20-row CTAS, cat X/Y/Z), recreated via 2 statements (`CREATE SCHEMA IF NOT
+  EXISTS`, `CREATE OR REPLACE TABLE ... window_fixture AS SELECT * FROM VALUES ...`) — both
+  `SUCCEEDED`. No Metric Views needed — A3 is a TS-side-only probe; the DBX actuals it
+  compares against (A1/A2's no-filter/MV-filter/query-time-WHERE readings) were already
+  recorded above and were not re-run.
+- ThoughtSpot connection: `DBX_DAMIAN` (reused, not recreated).
+- ThoughtSpot objects (scratch, cleaned up after this probe — see Task 7-style cleanup note
+  at the end of this file): Table `PR15A_WINDOW_FIXTURE` (`8e60c5c2-1622-4ff3-8f1f-58e22ae1bebd`),
+  Model `PR15A_Window_Scoping` (`b4cc4f5e-b969-42d6-9bea-8c831934ede7`).
+
 ## A — LOD dimensions × filters
 
 | ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
 |---|---|---|---|---|---|
 | A1 | `SUM(x) OVER (PARTITION BY dim)` → `group_aggregate(sum(x), {dim}, query_filters())`; the third argument is claimed to make the LOD "respect user-applied filters" | `ts-from-databricks-rules.md:159-176` (esp. line 176), `ts-databricks-formula-translation.md:381-413` (esp. 409-411), `ts-to-databricks-rules.md:244-257`; worked example `ts-to-databricks.md` Formula 3 "Category Quantity" (line ~366) — **verified 2026-05-25 with NO filter ever applied to the query or the MV** | Live DBX (3-condition discriminator: no filter / MV global `filter:` / query-time `WHERE`) + TS number-match (query-level pin vs. model-level filter) | See `### A1 — live results` and `### A1 — TS-side` below — DBX condition-dependent: no-filter=360/8360 (X/Y; Z=160 in every condition), MV global `filter:`=160/4160 (matches a2), query-time `WHERE`=360/8360 (matches a1, i.e. unaffected). TS: baseline=360/8360; query-level pin=160/4160; model-level `filters:`=160/4160 — filter-aware under **both** TS filter kinds | **CONFIRMED (TS-side, live 2026-07-09) + DIVERGENCE caveat (cross-platform)** — the doc claim holds on TS: `query_filters()` makes the LOD respect user-applied filters, under both a query-level pin and a model-level `filters:` block (TS has no filter-blind condition). Cross-platform, that matches DBX's MV-global-`filter:` condition (160/4160) only; DBX's ad hoc query-time `WHERE` is filter-blind (360/8360) and **no `query_filters()`-based TS formula reproduces it** — Task 5 must caveat that the mapping's equivalence holds for the MV-`filter:` condition, not for consumers replicating a DBX query-time `WHERE` |
 | A2 | (sub-probe of A1) Whether an MV's own global `filter:` and an ad hoc query-time `WHERE` on the same unfiltered MV produce the *same* LOD value | None — never asked in any existing doc; surfaced during this plan's research | Live DBX only (compare `window_filtered_mv` output to `window_nofilter_mv WHERE ...` output) | See `### A2 — live results` below — MV filter gives 160/4160, query-time WHERE on the same underlying rows gives 360/8360 | **DIVERGENCE (DBX-internal) (live DBX, 2026-07-09)** — an MV's baked-in global `filter:` is filter-aware for a partition-window LOD dimension; an ad hoc query-time `WHERE` on an MV with no global filter is filter-blind for that same dimension (it still removes rows from output, but does not change the window's computed value). **TS-side (live 2026-07-09): the same two-filter-kind probe on ThoughtSpot shows NO difference** — a query-level pin and a model-level `filters:` block both yield 160/4160 for the `query_filters()` LOD (see `### A1 — TS-side`); DBX's filter-kind sensitivity has no TS analogue |
+
+## A3 — group_aggregate filter-scoping shapes (user-suggested follow-up, 2026-07-09)
+
+| ID | Claim | Source (file:line) | Verification method | Actual (live) | Verdict |
+|---|---|---|---|---|---|
+| A3 | (follow-up of A1/A2, user-suggested) `group_aggregate`'s filter argument has documented shapes beyond `query_filters()` — `{}` ("no filters") and a subtraction form `query_filters() - { [TABLE::col] }` (`thoughtspot-formula-patterns.md:383-389`). Decisive question: does `{}` blind the LOD only to **search/query-time** filters, or also to a **model-level** `filters:` block? If `{}` is search-blind but model-aware, `group_aggregate(sum(x), {dim}, {})` + a model-level `filters:` block reproduces DBX's composite (MV-`filter:`-aware + query-`WHERE`-blind) exactly — upgrading A1/A2's "no TS analogue" caveat | `thoughtspot-formula-patterns.md:383-389` (Filter argument table — documents `query_filters()`, `{}`, and subtraction shapes, but not their live search-vs-model-filter scoping); A1/A2 above (the composite this follow-up resolves) | Live TS-only, 3-condition discriminator on a fresh scratch model (`PR15A_Window_Scoping`) over the same `window_fixture` data: (i) no filter, (ii) search-level pin only, (iii) model-level `filters:` block only, each queried against `query_filters()` [control], `{}` [decisive], and the subtraction candidate | See `### A3 — live results` below — `{}` unchanged at 360/8360/160 under (i) and (ii) (blind to the search pin), but narrows to 160/4160/160 under (iii) (aware of the model filter) — identical readings to `query_filters()` under (i) and (iii), diverging only at (ii) | **CONFIRMED — DBX composite REPRODUCIBLE (live TS-only, 2026-07-09).** `group_aggregate(sum(x), {dim}, {})` is filter-blind to search-level/query-time filters but filter-aware of a model-level `filters:` block — exactly DBX's MV-`filter:`-aware + query-time-`WHERE`-blind composite. This **corrects** A1/A2's "no TS analogue" conclusion: the analogue exists, using `{}` instead of `query_filters()`, paired with a model-level filter mirroring the MV's `filter:`. Subtraction candidate `query_filters() - { [TABLE::col] }` (targeting the physical column underlying a derived boolean filter formula) was import-accepted but did **not** exclude the tested filter — see live results for the exact mechanism |
 
 ## B — Cross-measure ratio inlining × grain
 
@@ -466,3 +485,95 @@ different numbers; PR 1's C1/C3 equivalences are density-conditional (dense dail
 Task 5 must add the density caveat to the mapping docs; this is a potential
 translation-fidelity blocker on sparse data for Tasks 5/6 to phrase (e.g. densification or a
 "verify data density" pre-check), not a formula bug fixable by a different `moving_sum` shape.
+
+---
+
+## A3 — live results (user-suggested follow-up, 2026-07-09)
+
+Ran entirely against a fresh scratch model, `PR15A_Window_Scoping`
+(`b4cc4f5e-b969-42d6-9bea-8c831934ede7`), over `PR15A_WINDOW_FIXTURE`
+(`8e60c5c2-1622-4ff3-8f1f-58e22ae1bebd`) — the identical `window_fixture` rows A1/A2/E1 used,
+re-registered under a distinct table name to avoid colliding with the (already cleaned up)
+Task 4 objects. `ts spotql classify-columns --model` confirmed all four candidate columns
+classify as plain ATTRIBUTE (no `AGG()` wrapping needed in search tokens). Formulas under
+test, all `column_type: ATTRIBUTE`:
+
+- `LOD QF` = `group_aggregate ( sum ( [amount] ) , { [cat] } , query_filters ( ) )` — control,
+  identical construct to A1.
+- `LOD Blind` = `group_aggregate ( sum ( [amount] ) , { [cat] } , {} )` — the decisive
+  candidate. **Import-accepted on the first attempt** — no error, contrary to the possibility
+  that `{}` (documented "untranslatable" cross-platform in `thoughtspot-formula-patterns.md:387`)
+  might also be TS-import-rejected; "untranslatable" there refers only to the Snowflake SV
+  mapping, not TS's own parser.
+- `Excluded Filter` = `[excluded] = false` — same boolean pin/model-filter target as A1.
+- `LOD Subtract` = `group_aggregate ( sum ( [amount] ) , { [cat] } , query_filters ( ) - {
+  [excluded] } )` — subtraction candidate per `thoughtspot-formula-patterns.md:389`'s
+  documented `query_filters() - { [TABLE::col] }` shape, targeting the raw `excluded` column
+  (the physical column the `Excluded Filter` boolean formula wraps). **Also
+  import-accepted on the first attempt**, in the same `ALL_OR_NONE` batch as the other three
+  formulas.
+
+**Query grid** (`searchdata`, BL-096 workaround, same scratch script pattern as Task 4):
+
+| Condition | Search tokens | LOD QF (X/Y/Z) | LOD Blind (X/Y/Z) | LOD Subtract (X/Y/Z) |
+|---|---|---|---|---|
+| (i) No filter anywhere | `[Cat] [LOD QF] [LOD Blind] [LOD Subtract]` | 360/8360/160 | 360/8360/160 | 360/8360/160 |
+| (ii) Search-level pin only | `[Cat] [LOD QF] [LOD Blind] [LOD Subtract] [Excluded Filter] = 'true'` | 160/4160/160 | **360/8360/160** | 160/4160/160 |
+| (iii) Model-level `filters:` block only (no pin; TML updated in-place, `guid` at doc root) | `[Cat] [LOD QF] [LOD Blind] [LOD Subtract]` | 160/4160/160 | **160/4160/160** | 160/4160/160 |
+
+(i) is non-discriminating by construction (no filter anywhere — all three read the full
+unfiltered total; Z=160 throughout since no Z row is ever excluded, same no-op role it played
+in A1/A2/E1). (ii) and (iii) are the decisive rows:
+
+- **(ii) search-level pin:** `LOD Blind` stayed at 360/8360 — **unchanged from baseline** —
+  while `LOD QF` and `LOD Subtract` both dropped to 160/4160. `{}` is **blind to a
+  search-level/query-time filter**, exactly like DBX's ad hoc query-time `WHERE` on an MV with
+  no global filter (A1/A2's `a1` reading, 360/8360).
+- **(iii) model-level filter:** `LOD Blind` dropped to 160/4160 — **identical to `LOD QF`
+  under the same condition**. `{}` is **aware of a model-level `filters:` block**, exactly
+  like DBX's own MV-baked-in global `filter:` (A1/A2's `a2` reading, 160/4160).
+
+**A3 finding.** `{}` is not simply "ignore every filter" — it specifically excludes ad hoc
+**query-level** filters (the ones `query_filters()` would otherwise pass through) while still
+sitting downstream of whatever a **model-level** `filters:` block has already restricted the
+underlying data to. This is architecturally consistent with how ThoughtSpot resolves the two
+filter kinds: a model-level `filters:` block is baked into the model's own query plan (analogous
+to a Databricks MV's global `filter:`, which is baked into the view), while a search-level pin
+is a query-time filter (analogous to a Databricks ad hoc query-time `WHERE`) that only
+`query_filters()` — not `{}` — pulls into the LOD's own aggregation.
+
+**Subtraction candidate finding.** `query_filters() - { [PR15A_WINDOW_FIXTURE::excluded] }`
+was import-accepted (documented syntax, per `thoughtspot-formula-patterns.md:389`) but produced
+**no observable exclusion effect** in this test — under condition (ii) it read identically to
+plain `query_filters()` (160/4160), not to `{}` (360/8360). The pin/model filter in this fixture
+is applied to `Excluded Filter`, a *derived* boolean formula (`[excluded] = false`), not to the
+raw `excluded` column directly — ThoughtSpot's query-filter provenance tracks the column the
+filter predicate was actually applied to (the formula), not that formula's underlying physical
+dependency, so subtracting the raw column does not remove the filter. Recorded as a live
+finding about the subtraction form's exact semantics, not a usable alternative to `{}` for this
+kind of derived-filter scenario.
+
+**A3 Verdict: CONFIRMED — DBX composite REPRODUCIBLE (live TS-only, 2026-07-09).**
+`group_aggregate(sum(x), {dim}, {})`, paired with a model-level `filters:` block mirroring the
+Databricks MV's own `filter:`, reproduces **both halves** of DBX's composite behavior recorded
+in A1/A2 — MV-`filter:`-aware AND query-time-`WHERE`-blind — in a single ThoughtSpot construct.
+This **corrects** A1/A2's "DBX's filter-kind sensitivity has no TS analogue" conclusion: the
+analogue exists, it just requires `{}` instead of `query_filters()`, deliberately paired with a
+model-level filter equivalent to the MV's `filter:`. `query_filters()` remains the right default
+mapping for the common case (an MV's global `filter:`, with a simpler formula and no
+requirement to also emit a matching model-level `filters:` block) — `{}` is the refinement for
+a consumer specifically needing to reproduce a DBX ad hoc query-time `WHERE`'s filter-blind LOD
+behavior. See Task 5-equivalent doc updates in `ts-from-databricks-rules.md`,
+`ts-to-databricks-rules.md`, `ts-databricks-formula-translation.md`,
+`ts-databricks-properties.md`, `databricks-metric-view.md`, `thoughtspot-formula-patterns.md`,
+both `ts-convert-*-databricks-mv/SKILL.md`, and `ts-to-databricks.md` (Formula 3).
+
+**A3 cleanup (2026-07-09) — confirmed complete, second cleanup pass distinct from the Task 7
+pass recorded in the Fixture section above:**
+- Databricks: `DROP SCHEMA IF EXISTS agent_skills.ts_dbx_substrate_pr15 CASCADE` re-run
+  (profile `ts-production`, warehouse `c6ed539a60038b93`) — `status.state: SUCCEEDED`. Confirmed
+  via `SHOW SCHEMAS IN agent_skills LIKE 'ts_dbx_substrate_pr15'` → `total_row_count: 0`.
+- ThoughtSpot: `ts metadata delete b4cc4f5e-b969-42d6-9bea-8c831934ede7
+  8e60c5c2-1622-4ff3-8f1f-58e22ae1bebd --profile se-thoughtspot` (model before table) —
+  confirmed via `ts metadata search --profile se-thoughtspot --name "PR15A_%"` → `[]`.
+  `DBX_DAMIAN` connection left untouched (shared scratch infrastructure).

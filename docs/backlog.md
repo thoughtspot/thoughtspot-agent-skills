@@ -1097,6 +1097,25 @@ underpins a large translation block but is marked **Experimental** in current do
    dimension/metric semantic constructs now carry a live-verified verdict before
    PR 3 (`translate-formulas`) encodes them in code.
 
+   **Update 2026-07-09 (A3, user-suggested follow-up to A1/A2):** the A1/A2 "DBX's
+   filter-kind sensitivity has no TS analogue" conclusion is CORRECTED. Live-tested
+   `group_aggregate`'s documented empty-set filter argument, `group_aggregate(sum(x),
+   {dim}, {})`: it is blind to a search-level/query-time filter (matches DBX's ad hoc
+   query-time `WHERE`-blind reading) but still respects a model-level `filters:`
+   block (matches DBX's own MV-global-`filter:`-aware reading) — exactly DBX's
+   composite. `group_aggregate(sum(x), {dim}, {})` + a model-level `filters:` block
+   mirroring the MV's `filter:` therefore reproduces BOTH halves of the DBX
+   composite in one ThoughtSpot construct. `query_filters()` remains the default LOD
+   mapping (simpler formula, matches the common MV-global-`filter:` case); `{}` +
+   a mirrored model filter is the refinement for reproducing a DBX consumer's ad hoc
+   query-time-`WHERE`-blind LOD specifically. A candidate subtraction form,
+   `query_filters() - { [TABLE::col] }` (also documented in
+   `thoughtspot-formula-patterns.md`), was import-accepted but did not exclude a
+   filter pinned on a *derived* boolean formula built from the subtracted column —
+   recorded as a live finding, not a working alternative. No new backlog item filed
+   — this is a resolved refinement, not an open divergence or blocker. Full evidence:
+   `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md` (A3).
+
 **Target:** 2026-09-30.
 
 ---

@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: TS→MV window emission tables corrected to live-verified forms (C1/C3/C6/C6a), leading PENDING resolved, strict (start,end) reverse-map added; see BL-032 + docs/audit/2026-07-08-dbx-window-claim-matrix.md; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: TS→MV window emission tables corrected to live-verified forms (C1/C3/C6/C6a), leading PENDING resolved, strict (start,end) reverse-map added; see BL-032 + docs/audit/2026-07-08-dbx-window-claim-matrix.md; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
 
 # Mapping Rules Reference
 
@@ -282,6 +282,24 @@ window's computed value). This is a DBX-side asymmetry, not a translation defect
 document it for the consuming team rather than trying to "fix" it with a different
 formula shape. The same caveat applies to the `range: all` window-measure mapping
 below, which uses this identical LOD mechanism.
+
+**A3 follow-up, live-verified 2026-07-09** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A3) — the asymmetry above **is
+reproducible** from the ThoughtSpot side. `group_aggregate`'s filter argument also
+accepts the documented empty-set literal `{}`: live-tested, `group_aggregate(sum(x),
+{dim}, {})` is **blind to a search-level/query-time filter** (matches DBX's ad hoc
+query-time `WHERE`-blind condition) but **still respects a model-level `filters:`
+block** (matches DBX's own MV-global-`filter:`-aware condition) — exactly DBX's
+composite. **When converting a TS Model whose LOD formula uses `{}` + a model-level
+`filters:` block** (rather than `query_filters()`), emit the equivalent Databricks
+shape as the MV's global `filter:` block (as above) — the `{}` + model-filter pair is
+ThoughtSpot's way of expressing "this LOD should see only rows the MV's own filter
+lets through, not ad hoc query-time filters," which is precisely what a DBX global
+`filter:` does. Keep `query_filters()` as the default read for LOD formulas with no
+model-level filter present. A candidate subtraction form,
+`query_filters() - { [TABLE::col] }`, was import-accepted on the TS side but did not
+exclude a filter pinned on a derived boolean formula built from that column — not a
+construct expected to appear in a TS→DBX conversion, recorded for completeness.
 
 ---
 

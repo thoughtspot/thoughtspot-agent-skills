@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: all 5 range values + inclusive|exclusive anchor modifier live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading moving_sum args corrected (C1/C3), exclusive default confirmed (C2), all/cumulative/semi-additive confirmed (C4/C5/C7), period-filter offset corrected to row-relative (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: all 5 range values + inclusive|exclusive anchor modifier live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading moving_sum args corrected (C1/C3), exclusive default confirmed (C2), all/cumulative/semi-additive confirmed (C4/C5/C7), period-filter offset corrected to row-relative (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
 
 # Formula Translation Reference — Databricks
 
@@ -440,6 +440,26 @@ on an MV with no global `filter:` gets a filter-**blind** LOD dimension (the `WH
 prunes output rows only, never the window's computed value) — no `query_filters()`
 form on the ThoughtSpot side reproduces that DBX-side behavior. Document this as a
 DBX-side asymmetry when converting either direction, not as a translation defect.
+
+**A3 follow-up, live-verified 2026-07-09** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A3) — that asymmetry **is
+reproducible** after all, using a different third argument. `group_aggregate`'s
+filter argument also accepts the documented empty-set literal `{}`
+(`thoughtspot-formula-patterns.md`): `group_aggregate(sum(x), {dim}, {})` is
+**blind to a search-level/query-time filter** (matches DBX's ad hoc query-time
+`WHERE`-blind reading) but **still respects a model-level `filters:` block**
+(matches DBX's own MV-global-`filter:`-aware reading). So the refined mapping is:
+
+| ThoughtSpot construct | Reproduces (DBX-side) |
+|---|---|
+| `group_aggregate(sum(x), {dim}, query_filters())`, no model-level filter | An MV's global `filter:` (default mapping, simpler formula) |
+| `group_aggregate(sum(x), {dim}, {})` + a model-level `filters:` block mirroring the MV's `filter:` | Both halves of the DBX composite: MV-`filter:`-aware AND ad hoc query-time-`WHERE`-blind |
+
+A candidate subtraction form, `query_filters() - { [TABLE::col] }`, was
+import-accepted on the TS side but did not exclude a filter pinned on a *derived*
+boolean formula built from that column (the query-filter provenance tracks the
+filtered column, not its underlying physical dependency) — recorded as a live
+finding, not a working alternative to `{}`.
 
 ---
 

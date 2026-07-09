@@ -390,6 +390,20 @@ Full syntax: `group_aggregate ( agg(measure) , grouping , filters )`
 | `query_filters() + { [TABLE::col] = 'value' }` | All query filters + hardcoded — **untranslatable** |
 | `query_filters() - { [TABLE::col] }` | Query filters minus one column — **untranslatable** |
 
+**`{}` is scoped to query-level filters only — live-verified 2026-07-09** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A3). "No filters" means no
+*query-level* filters: `{}` blinds the `group_aggregate` LOD to a search-level pin
+(the LOD value is unchanged whether or not the pin is applied) but it does **not**
+blind the LOD to a model-level `filters:` block — the LOD value still narrows to
+whatever the model-level filter has already restricted the underlying data to. In
+other words, `{}` disables incorporation of ad hoc query-time filters; it does not
+bypass filtering baked into the model itself. Import-accepted with no error on this
+build. The subtraction form (`query_filters() - { [TABLE::col] }`) was also
+import-accepted, but subtracting a raw physical column does not exclude a filter
+pinned on a *derived* boolean formula built from that column — the query-filter
+provenance tracks the column the filter predicate was actually applied to, not that
+column's underlying physical dependency.
+
 ### `group_*` Shorthand Functions
 
 Sugar for `group_aggregate` with `query_filters()` as the filter argument:
