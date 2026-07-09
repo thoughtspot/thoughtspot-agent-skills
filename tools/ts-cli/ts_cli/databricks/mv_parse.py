@@ -288,3 +288,83 @@ def classify_measure_expr(expr: str) -> dict:
         return out
     out["expr_kind"] = "complex"
     return out
+
+
+# ---------------------------------------------------------------------------
+# Joins — nested hierarchy walk (SKILL.md Step 5's walk_joins, codified).
+# on/using XOR, cardinality: > rely: > many_to_one default, per
+# databricks-metric-view.md "Join Structure".
+# ---------------------------------------------------------------------------
+
+_CARDINALITY_VALUES = {"many_to_one", "one_to_many"}
+
+
+def _join_cardinality(j: dict, alias: str) -> tuple[str, str] | str:
+    """Resolve (cardinality, source) for a join, or an error message string."""
+    card = j.get("cardinality")
+    rely = j.get("rely")
+    if card is not None:
+        if card not in _CARDINALITY_VALUES:
+            return (f"join '{alias}': unknown cardinality value {card!r} "
+                    f"(expected many_to_one|one_to_many)")
+        return card, "cardinality"
+    if rely is not None:
+        if not (isinstance(rely, dict) and rely.get("at_most_one_match") is True):
+            return (f"join '{alias}': unrecognized rely block {rely!r} "
+                    f"(only {{at_most_one_match: true}} is documented)")
+        return "many_to_one", "rely"
+    return "many_to_one", "default"
+
+
+def parse_joins(join_list, parent_alias: str = "source",
+                unsupported: list | None = None) -> list[dict]:
+    """Walk the nested joins: hierarchy into the contract's join tree.
+
+    Problems append {"kind": "join", "name", "detail"} entries to
+    `unsupported` and drop that node (and its subtree) from the output —
+    the non-empty unsupported[] list makes the command exit non-zero, so
+    nothing is silently lost.
+    """
+    if unsupported is None:
+        unsupported = []
+    out: list[dict] = []
+    for j in join_list or []:
+        if not isinstance(j, dict) or not j.get("name"):
+            unsupported.append({"kind": "join", "name": None,
+                                "detail": f"join entry missing 'name': {j!r}"})
+            continue
+        alias = str(j["name"])
+        src = classify_source(str(j.get("source", "")))
+        if src is None:
+            unsupported.append({"kind": "join", "name": alias,
+                                "detail": f"join '{alias}': unrecognized "
+                                          f"source {j.get('source')!r}"})
+            continue
+        has_on, has_using = "on" in j, "using" in j
+        if has_on == has_using:
+            unsupported.append({"kind": "join", "name": alias,
+                                "detail": f"join '{alias}': exactly one of "
+                                          f"'on' or 'using' is required"})
+            continue
+        if has_using:
+            using = [str(c) for c in j["using"]]
+            on = " AND ".join(f"{parent_alias}.{c} = {alias}.{c}" for c in using)
+        else:
+            using = None
+            on = str(j["on"])
+        resolved = _join_cardinality(j, alias)
+        if isinstance(resolved, str):
+            unsupported.append({"kind": "join", "name": alias, "detail": resolved})
+            continue
+        cardinality, card_source = resolved
+        out.append({
+            "alias": alias,
+            "source": src,
+            "on": on,
+            "using": using,
+            "parent": parent_alias,
+            "cardinality": cardinality,
+            "cardinality_source": card_source,
+            "joins": parse_joins(j.get("joins"), alias, unsupported),
+        })
+    return out

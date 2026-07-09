@@ -11,6 +11,7 @@ from ts_cli.databricks.mv_parse import (
     classify_measure_expr,
     classify_source,
     extract_cross_refs,
+    parse_joins,
     parse_offset,
     parse_range,
     parse_window,
@@ -366,3 +367,98 @@ class TestClassifyMeasure:
         cls = classify_measure_expr("SUM(DISTINCT amount)")
         assert cls["expr_kind"] == "simple"
         assert cls["distinct"] is True
+
+
+class TestParseJoins:
+    def test_on_join_with_rely(self):
+        joins = [{"name": "orders", "source": "c.s.dm_order",
+                  "on": "source.ORDER_ID = orders.ORDER_ID",
+                  "rely": {"at_most_one_match": True}}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert unsupported == []
+        j = out[0]
+        assert j["alias"] == "orders"
+        assert j["source"]["kind"] == "table_fqn"
+        assert j["on"] == "source.ORDER_ID = orders.ORDER_ID"
+        assert j["using"] is None
+        assert j["parent"] == "source"
+        assert j["cardinality"] == "many_to_one"
+        assert j["cardinality_source"] == "rely"
+        assert j["joins"] == []
+
+    def test_using_synthesizes_on_clause(self):
+        joins = [{"name": "orders", "source": "c.s.dm_order",
+                  "using": ["ORDER_ID", "REGION"]}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert out[0]["using"] == ["ORDER_ID", "REGION"]
+        assert out[0]["on"] == ("source.ORDER_ID = orders.ORDER_ID"
+                                " AND source.REGION = orders.REGION")
+
+    def test_default_cardinality_many_to_one(self):
+        joins = [{"name": "d", "source": "c.s.t", "on": "source.a = d.a"}]
+        out = parse_joins(joins, unsupported=[])
+        assert out[0]["cardinality"] == "many_to_one"
+        assert out[0]["cardinality_source"] == "default"
+
+    def test_cardinality_key_beats_rely(self):
+        joins = [{"name": "d", "source": "c.s.t", "on": "source.a = d.a",
+                  "cardinality": "one_to_many",
+                  "rely": {"at_most_one_match": True}}]
+        out = parse_joins(joins, unsupported=[])
+        assert out[0]["cardinality"] == "one_to_many"
+        assert out[0]["cardinality_source"] == "cardinality"
+
+    def test_nested_joins_parent_tracks_alias(self):
+        joins = [{"name": "orders", "source": "c.s.o", "on": "source.oid = orders.oid",
+                  "joins": [{"name": "customers", "source": "c.s.cu",
+                             "on": "orders.cid = customers.cid"}]}]
+        out = parse_joins(joins, unsupported=[])
+        child = out[0]["joins"][0]
+        assert child["alias"] == "customers"
+        assert child["parent"] == "orders"
+
+    def test_both_on_and_using_is_unsupported(self):
+        joins = [{"name": "d", "source": "c.s.t", "on": "source.a = d.a",
+                  "using": ["a"]}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert out == []
+        assert unsupported and "exactly one" in unsupported[0]["detail"]
+
+    def test_neither_on_nor_using_is_unsupported(self):
+        joins = [{"name": "d", "source": "c.s.t"}]
+        unsupported = []
+        parse_joins(joins, unsupported=unsupported)
+        assert unsupported
+
+    def test_bad_cardinality_value_is_unsupported(self):
+        joins = [{"name": "d", "source": "c.s.t", "on": "source.a = d.a",
+                  "cardinality": "one_to_one"}]
+        unsupported = []
+        parse_joins(joins, unsupported=unsupported)
+        assert unsupported
+
+    def test_rely_without_at_most_one_match_true_is_unsupported(self):
+        joins = [{"name": "d", "source": "c.s.t", "on": "source.a = d.a",
+                  "rely": {"at_most_one_match": False}}]
+        unsupported = []
+        parse_joins(joins, unsupported=unsupported)
+        assert unsupported
+
+    def test_missing_name_is_unsupported(self):
+        joins = [{"source": "c.s.t", "on": "source.a = d.a"}]
+        unsupported = []
+        parse_joins(joins, unsupported=unsupported)
+        assert unsupported
+
+    def test_sql_query_join_source_allowed(self):
+        joins = [{"name": "d", "source": "(SELECT * FROM t)", "on": "source.a = d.a"}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert unsupported == []
+        assert out[0]["source"]["kind"] == "sql_query"
+
+    def test_none_join_list_returns_empty(self):
+        assert parse_joins(None, unsupported=[]) == []
