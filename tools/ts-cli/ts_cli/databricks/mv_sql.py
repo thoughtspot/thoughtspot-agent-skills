@@ -188,13 +188,376 @@ def _keyword_unit(text: str, cur: _Cursor, resolver,
         _keyword_construct(text, cur, resolver, units)  # Task 5
 
 
-def _keyword_construct(text, cur, resolver, units):  # pragma: no cover
-    raise UntranslatableError(f"'{text}' construct not yet implemented")
+# --- function map: ts-databricks-formula-translation.md as data ------------
+
+_RENAME = {
+    "CONCAT": "concat", "LENGTH": "strlen", "SUBSTRING": "substr",
+    "TRIM": "trim", "LTRIM": "ltrim", "RTRIM": "rtrim", "REPLACE": "replace",
+    "CONTAINS": "contains", "STARTSWITH": "starts_with", "LEFT": "left",
+    "RIGHT": "right", "LPAD": "lpad", "RPAD": "rpad", "REVERSE": "reverse",
+    "REPEAT": "repeat",
+    "ABS": "abs", "CEIL": "ceil", "FLOOR": "floor", "ROUND": "round",
+    "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
+    "LOG2": "log2", "LOG10": "log10",
+    "GREATEST": "greatest", "LEAST": "least", "IF": "if",
+    "YEAR": "year", "MONTH": "month_number", "DAY": "day",
+    "HOUR": "hour_of_day", "QUARTER": "quarter_number",
+    "WEEKOFYEAR": "week_number_of_year", "DAYOFWEEK": "day_number_of_week",
+    "DAYOFYEAR": "day_number_of_year", "DATE": "date",
+    "DATE_ADD": "add_days", "ADD_MONTHS": "add_months",
+    "SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
+    "COUNT": "count", "STDDEV": "stddev", "VARIANCE": "variance",
+}
+_PASS_THROUGH_HINT = {"LOWER": "sql_string_op", "UPPER": "sql_string_op",
+                      "MINUTE": "sql_int_op", "SECOND": "sql_int_op",
+                      "DATE_FORMAT": "sql_string_op"}
+_DATE_TRUNC = {"day": "date", "week": "start_of_week",
+               "month": "start_of_month", "quarter": "start_of_quarter",
+               "year": "start_of_year"}
+_EXTRACT = {"YEAR": "year", "MONTH": "month_number", "DAY": "day",
+            "HOUR": "hour_of_day"}
+_DATEDIFF_UNIT = {"DAY": "diff_days", "MONTH": "diff_months"}
+_NULLIF0 = "\x00NULLIF0\x00"  # marker prefix; collapsed before joining
 
 
-def _call(name, cur, resolver):  # pragma: no cover — replaced in Task 5
-    raise UntranslatableError(f"function '{name}' not yet implemented")
+def _emit(name: str, args: list[str]) -> str:
+    inner = " , ".join(args)
+    return f"{name} ( {inner} )" if args else f"{name} ( )"
 
 
-def _collapse_nullif_markers(units: list[str]) -> None:  # Task 5
-    return None
+def _call(name: str, cur: _Cursor, resolver) -> str:
+    """Translate NAME ( … ) — '(' already consumed."""
+    if name == "EXTRACT":
+        return _call_extract(cur, resolver)
+    if name == "COUNT":
+        return _call_count(cur, resolver)
+    if name in _PASS_THROUGH_HINT:
+        raise UntranslatableError(
+            f"'{name}' has no native ThoughtSpot function — needs a "
+            f"{_PASS_THROUGH_HINT[name]} pass-through (manual review, PT1)")
+    if name == "TO_DATE":
+        # TO_DATE's arguments are raw strings — the date-literal wrap must
+        # not fire inside it (would double-wrap 'yyyy-MM-dd'-style args).
+        return _emit("to_date", _call_raw_string_args(cur))
+    if name == "DATEDIFF":
+        return _call_datediff(cur, resolver)
+    args = _call_args(cur, resolver, agg=name)
+    if name == "DATE_TRUNC":
+        return _call_date_trunc(args)
+    if name == "MONTHS_BETWEEN":
+        _need(args, 2, name)
+        return _emit("diff_months", [args[1], args[0]])
+    if name == "LOCATE":
+        _need(args, 2, name)
+        return _emit("strpos", [args[1], args[0]])
+    if name == "NULLIF":
+        return _call_nullif(args)
+    if name == "COALESCE":
+        return _call_coalesce(args)
+    if name in _RENAME:
+        return _emit(_RENAME[name], args)
+    raise UntranslatableError(
+        f"function '{name}' is not in "
+        f"ts-databricks-formula-translation.md — extend the mapping doc and "
+        f"mv_sql._RENAME together")
+
+
+def _need(args: list[str], n: int, name: str) -> None:
+    if len(args) != n:
+        raise UntranslatableError(f"{name} expects {n} arguments, got {len(args)}")
+
+
+def _call_args(cur: _Cursor, resolver, agg: str | None = None) -> list[str]:
+    """Parse a comma-separated argument list up to the closing ')'.
+
+    Rejects DISTINCT here (only COUNT handles it, in _call_count)."""
+    kind, text = cur.peek()
+    if kind == "kw" and text == "DISTINCT":
+        raise UntranslatableError(
+            f"DISTINCT under {agg or 'a function'} has no ThoughtSpot "
+            f"mapping (only COUNT(DISTINCT col) -> unique count)")
+    args: list[str] = []
+    if kind == "op" and text == ")":
+        cur.advance()
+        return args
+    while True:
+        args.append(_expr(cur, resolver))
+        kind, text = cur.peek()
+        if kind == "op" and text == ",":
+            cur.advance()
+            continue
+        cur.expect_op(")")
+        return args
+
+
+def _call_count(cur: _Cursor, resolver) -> str:
+    kind, text = cur.peek()
+    if kind == "op" and text == "*":
+        cur.advance()
+        cur.expect_op(")")
+        return _emit("count", ["1"])
+    if kind == "kw" and text == "DISTINCT":
+        cur.advance()
+        args = _call_args(cur, resolver)
+        _need(args, 1, "COUNT(DISTINCT …)")
+        return f"unique count ( {args[0]} )"
+    args = _call_args(cur, resolver)
+    _need(args, 1, "COUNT")
+    return _emit("count", args)
+
+
+def _call_extract(cur: _Cursor, resolver) -> str:
+    kind, unit = cur.advance()
+    if kind != "ident" or unit.upper() not in _EXTRACT:
+        raise UntranslatableError(
+            f"EXTRACT unit {unit!r} not mapped (YEAR|MONTH|DAY|HOUR — "
+            f"ts-databricks-formula-translation.md)")
+    kw_kind, kw = cur.advance()
+    if kw_kind != "kw" or kw != "FROM":
+        raise UntranslatableError("EXTRACT expects '<unit> FROM <expr>'")
+    inner = _expr(cur, resolver)
+    cur.expect_op(")")
+    return _emit(_EXTRACT[unit.upper()], [inner])
+
+
+def _call_date_trunc(args: list[str]) -> str:
+    _need(args, 2, "DATE_TRUNC")
+    unit = args[0].strip("'").lower()
+    fn = _DATE_TRUNC.get(unit)
+    if fn is None:
+        raise UntranslatableError(
+            f"DATE_TRUNC unit '{unit}' not mapped "
+            f"(day|week|month|quarter|year)")
+    return _emit(fn, [args[1]])
+
+
+def _call_datediff(cur: _Cursor, resolver) -> str:
+    """DATEDIFF(end, start) -> diff_days(start, end); DATEDIFF(unit, s, e).
+
+    The 3-arg unit arrives as a bare ident (e.g. MONTH) that must NOT be
+    resolved as a column — peek for '<unit-ident> ,' before parsing args.
+    """
+    kind, text = cur.peek()
+    nk, nt = cur.peek(1)
+    if (kind == "ident" and text.upper() in _DATEDIFF_UNIT
+            and nk == "op" and nt == ","):
+        cur.advance()
+        cur.advance()
+        rest = _call_args(cur, resolver)
+        _need(rest, 2, "DATEDIFF(unit, …)")
+        return _emit(_DATEDIFF_UNIT[text.upper()], [rest[0], rest[1]])
+    rest = _call_args(cur, resolver)
+    _need(rest, 2, "DATEDIFF")
+    return _emit("diff_days", [rest[1], rest[0]])
+
+
+def _call_nullif(args: list[str]) -> str:
+    _need(args, 2, "NULLIF")
+    if args[1] != "0":
+        raise UntranslatableError(
+            "NULLIF with a non-zero second argument has no documented "
+            "mapping (only NULLIF(x, 0) — ts-databricks-formula-translation.md)")
+    return _NULLIF0 + args[0]
+
+
+def _call_coalesce(args: list[str]) -> str:
+    if len(args) == 2 and args[0].startswith("safe_divide (") and args[1] == "0":
+        return args[0]  # COALESCE(x / NULLIF(y,0), 0) -> safe_divide(x, y)
+    if len(args) == 2:
+        return f"if ( {args[0]} != null ) then {args[0]} else {args[1]}"
+    raise UntranslatableError(
+        "COALESCE with more than two arguments has no documented mapping")
+
+
+def _call_raw_string_args(cur: _Cursor) -> list[str]:
+    args: list[str] = []
+    while True:
+        kind, text = cur.advance()
+        if kind != "string":
+            raise UntranslatableError(
+                "TO_DATE arguments must be string literals")
+        args.append(text)  # verbatim — no date-literal wrapping
+        kind, text = cur.advance()
+        if kind == "op" and text == ",":
+            continue
+        if kind == "op" and text == ")":
+            return args
+        raise UntranslatableError("malformed TO_DATE argument list")
+
+
+# --- keyword constructs: CASE/CAST/NOT/IS/IN/BETWEEN -----------------------
+
+def _keyword_construct(text: str, cur: _Cursor, resolver,
+                       units: list[str]) -> None:
+    if text == "NOT":
+        _construct_not(cur, resolver, units)
+    elif text == "CASE":
+        units.append(_construct_case(cur, resolver))
+    elif text == "CAST":
+        units.append(_construct_cast(cur, resolver))
+    elif text == "IS":
+        _construct_is(cur, units)
+    elif text == "IN":
+        _construct_in(cur, resolver, units)
+    elif text == "BETWEEN":
+        _construct_between(cur, resolver, units)
+    else:
+        # LIKE / OVER / FILTER / WHERE / stray THEN/ELSE/END/FROM/AS/WHEN
+        raise UntranslatableError(
+            f"'{text}' has no documented ThoughtSpot mapping in this "
+            f"position (ts-databricks-formula-translation.md)")
+
+
+def _pop_operand(units: list[str], construct: str) -> str:
+    if not units:
+        raise UntranslatableError(f"'{construct}' without a left operand")
+    return units.pop()
+
+
+def _construct_not(cur: _Cursor, resolver, units: list[str]) -> None:
+    kind, text = cur.peek()
+    if kind == "kw" and text in ("IN", "BETWEEN", "LIKE"):
+        raise UntranslatableError(
+            f"NOT {text} has no documented ThoughtSpot mapping")
+    if kind == "ident":
+        nk, nt = cur.peek(1)
+        if not (nk == "op" and nt == "("):  # NOT <boolean column>
+            cur.advance()
+            units.append(f"{resolver(text)} = false")
+            return
+    # NOT <group/call/…>: translate exactly one operand
+    operand_units = _one_operand(cur, resolver)
+    units.append(f"not ( {' '.join(operand_units)} )")
+
+
+def _one_operand(cur: _Cursor, resolver) -> list[str]:
+    """Translate a single operand (group, call, literal, or column)."""
+    kind, text = cur.peek()
+    if kind is None:
+        raise UntranslatableError("expected an operand")
+    units: list[str] = []
+    cur.advance()
+    if kind == "string":
+        units.append(_string_literal(text))
+    elif kind == "number":
+        units.append(text)
+    elif kind == "op" and text == "(":
+        inner = _expr(cur, resolver)
+        cur.expect_op(")")
+        units.append(f"( {inner} )")
+    elif kind == "ident":
+        _ident_unit(text, cur, resolver, units)  # cursor already past the ident
+    elif kind == "kw":
+        _keyword_unit(text, cur, resolver, units)
+    else:
+        raise UntranslatableError(f"unexpected operand {text!r}")
+    return units
+
+
+def _construct_case(cur: _Cursor, resolver) -> str:
+    branches: list[tuple[str, str]] = []
+    else_val = "null"
+    stop = frozenset({"WHEN", "THEN", "ELSE", "END"})
+    while True:
+        kind, text = cur.advance() if cur.peek()[0] is not None else (None, None)
+        if kind is None:
+            raise UntranslatableError("CASE without END")
+        if text == "WHEN":
+            cond = _expr(cur, resolver, stop)
+            k2, t2 = cur.advance()
+            if t2 != "THEN":
+                raise UntranslatableError("CASE WHEN without THEN")
+            val = _expr(cur, resolver, stop)
+            branches.append((cond, val))
+        elif text == "ELSE":
+            else_val = _expr(cur, resolver, stop)
+        elif text == "END":
+            break
+        else:
+            raise UntranslatableError(f"unexpected {text!r} inside CASE")
+    if not branches:
+        raise UntranslatableError("CASE with no WHEN branch")
+    out = else_val
+    for cond, val in reversed(branches):
+        out = f"if ( {cond} , {val} , {out} )"
+    return out
+
+
+def _construct_cast(cur: _Cursor, resolver) -> str:
+    cur.expect_op("(")
+    inner_units = _expr_units(cur, resolver, frozenset({"AS"}))
+    kind, text = cur.advance()
+    if text != "AS":
+        raise UntranslatableError("CAST without AS")
+    tk, _ttext = cur.advance()  # the target type ident — dropped (implicit in TS)
+    if tk != "ident":
+        raise UntranslatableError("CAST with a non-identifier target type")
+    nk, nt = cur.peek()
+    if nk == "op" and nt == "(":  # DECIMAL(10,2)-style precision — skip it
+        cur.advance()
+        depth = 1
+        while depth:
+            k2, t2 = cur.advance()
+            if k2 == "op" and t2 == "(":
+                depth += 1
+            elif k2 == "op" and t2 == ")":
+                depth -= 1
+    cur.expect_op(")")
+    if len(inner_units) == 1:
+        return inner_units[0]
+    return f"( {' '.join(inner_units)} )"
+
+
+def _construct_is(cur: _Cursor, units: list[str]) -> None:
+    operand = _pop_operand(units, "IS")
+    kind, text = cur.advance()
+    if text == "NULL":
+        units.append(f"isnull ( {operand} )")
+        return
+    if text == "NOT":
+        k2, t2 = cur.advance()
+        if t2 == "NULL":
+            units.append(f"not ( isnull ( {operand} ) )")
+            return
+    raise UntranslatableError("IS supports only IS NULL / IS NOT NULL")
+
+
+def _construct_in(cur: _Cursor, resolver, units: list[str]) -> None:
+    operand = _pop_operand(units, "IN")
+    cur.expect_op("(")
+    values: list[str] = []
+    while True:
+        values.append(_expr(cur, resolver))
+        kind, text = cur.peek()
+        if kind == "op" and text == ",":
+            cur.advance()
+            continue
+        cur.expect_op(")")
+        break
+    ors = " or ".join(f"{operand} = {v}" for v in values)
+    units.append(f"( {ors} )")
+
+
+def _construct_between(cur: _Cursor, resolver, units: list[str]) -> None:
+    operand = _pop_operand(units, "BETWEEN")
+    lo = _expr(cur, resolver, frozenset({"AND"}))
+    kind, text = cur.advance()
+    if text != "AND":
+        raise UntranslatableError("BETWEEN without AND")
+    hi = " ".join(_one_operand(cur, resolver))
+    units.append(f"{operand} >= {lo} and {operand} <= {hi}")
+
+
+def _collapse_nullif_markers(units: list[str]) -> None:
+    """x / NULLIF(y, 0) -> safe_divide ( x , y ); stray marker -> null_if_zero."""
+    i = 0
+    while i < len(units):
+        if units[i].startswith(_NULLIF0):
+            y = units[i][len(_NULLIF0):]
+            if i >= 2 and units[i - 1] == "/":
+                x = units[i - 2]
+                units[i - 2:i + 1] = [f"safe_divide ( {x} , {y} )"]
+                i -= 2
+            else:
+                units[i] = f"null_if_zero ( {y} )"
+        i += 1
