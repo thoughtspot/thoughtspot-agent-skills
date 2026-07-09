@@ -43,6 +43,10 @@ ts_cli/
     mv_parse.py         — Metric View YAML -> structured dict behind `ts databricks parse-mv`: source classification, joins walk, top-level assembly; re-exports the mv_expr/mv_window API (pure functions, no I/O; BL-063 PR2)
     mv_expr.py          — dimension/measure SQL expression classification (pure functions, no I/O)
     mv_window.py        — window-spec parsing: 5 range values, offset, BL-098 density flag (pure functions, no I/O)
+    mv_sql.py           — Databricks SQL expression -> ThoughtSpot formula text (tokenizer, function map, NULLIF/COALESCE collapsing) behind `ts databricks translate-formulas`; re-exports the CASE/CAST/NOT/IS/IN/BETWEEN handlers from mv_sql_constructs.py so translate_sql_expr/UntranslatableError/tokenize stay the public API (pure functions, no I/O; BL-063 PR3)
+    mv_sql_constructs.py — CASE/CAST/NOT/IS/IN/BETWEEN keyword-construct handlers split out of mv_sql.py under the file-size warn line; late-imports mv_sql's expression primitives to avoid a circular import (pure functions, no I/O; BL-063 PR3)
+    mv_translate.py     — parsed Metric View -> translated ThoughtSpot formulas behind `ts databricks translate-formulas`: dot-path resolution, LOD windows, conditional aggregates, cross-measure inlining via dependency DAG; re-exports translate_window_measure from mv_window_translate.py (pure functions, no I/O; BL-063 PR3)
+    mv_window_translate.py — windowed-measure translation (trailing/leading/cumulative/current decision tree, BL-098 sparse-data-risk annotations) split out of mv_translate.py under the file-size warn line; late-imports mv_translate's make_resolver/_formula_measure to avoid a circular import (pure functions, no I/O; BL-063 PR3)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
@@ -56,7 +60,7 @@ ts_cli/
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
-    databricks.py — ts databricks (parse-mv) — BL-063 PR2
+    databricks.py — ts databricks (parse-mv, translate-formulas) — BL-063 PR2/PR3
   audit/
     __init__.py       — run_audit() entry point, angle module registry
     context.py        — AuditContext dataclass + build_context()
@@ -77,7 +81,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.42.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.43.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

@@ -1623,3 +1623,44 @@ the input file is missing or unreadable (no JSON written).
 Every `trailing`/`leading` window measure gets `density_check_required:
 true` plus a stderr WARNING — Databricks date-interval frames vs
 ThoughtSpot row-positional `moving_sum` diverge on gapped data (BL-098).
+
+### `ts databricks translate-formulas`
+
+Translate a `parse-mv` result into ThoughtSpot formula text for the
+`ts-convert-from-databricks-mv` skill. Deterministic — no LLM in the loop:
+dot-path column resolution, the `ts-databricks-formula-translation.md`
+function map, conditional (`FILTER (WHERE …)`) aggregates, LOD `group_aggregate`
+windows, the full window decision tree (trailing/leading/cumulative/current,
+post-PR-1 corrected forms), and cross-measure (`MEASURE()`/`ANY_VALUE()`)
+inlining in dependency order (Databricks needs no phased import).
+
+```bash
+ts databricks translate-formulas \
+  --input parsed.json \
+  --output translated.json \
+  --tables '{"source": "TRANSACTIONS", "orders": "DM_ORDER"}'
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--input` / `-i` | yes | `parsed.json` produced by `ts databricks parse-mv` |
+| `--output` / `-o` | yes | Output path for the translated formulas JSON |
+| `--tables` / `-t` | yes | JSON object mapping MV alias paths to ThoughtSpot table names — a `"source"` key is required (the MV's base table alias); nested join aliases (e.g. `"orders.customers"`) map to their joined ThoughtSpot table |
+
+**Output:** `{"translated": [...], "skipped": [...], "filter": {...}|null,
+"dependency_dag": {...}, "window_measures": [...], "stats": {"total":
+n, "translated": n, "skipped": n}}`. Every dimension/measure lands in
+`translated[]` (with `ts_expr`/`table`+`column`, `aggregation`, and any
+`annotations`) or `skipped[]` (with a `reason` string) — nothing is silently
+dropped.
+
+Exit codes: `0` — every dimension/measure was processed, whether translated
+or skipped (skips are a reported outcome via `skipped[]`, not a failure);
+`1` — the `--input`/`--tables` file is missing or unreadable, or `--tables`
+is not a valid JSON object with a `"source"` key.
+
+Every `trailing`/`leading` window translation emits a `sparse_data_risk`
+annotation plus a stderr WARNING (BL-098): a Databricks date-interval frame
+maps to ThoughtSpot's row-positional `moving_sum`/`moving_average`/etc., so
+the numbers only match when the order column is dense at the window's grain
+(no gaps) — verify density before trusting the translation.

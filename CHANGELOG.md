@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-10
+- feat: ts databricks translate-formulas — deterministic MV formula translation (BL-063 PR3, ts-cli v0.43.0)
+
 ## 2026-07-09
 - feat: add `ts databricks parse-mv` — deterministic Metric View YAML parser (ts-cli v0.42.0, BL-063 PR2; BL-098 density-check warning on trailing/leading window measures)
 - docs: Databricks Metric View window-semantics deep-analysis (BL-063 PR1) — live-verified trailing/leading/cumulative/all/semi-additive range behavior against a Databricks fixture + ThoughtSpot number-match on both platforms. Corrected 2 window mappings: trailing/leading anchor args (`moving_sum([m], N, 0, [date])` actually reproduces the *inclusive* form, not the default/exclusive one — now `moving_sum([m], N, -1, [date])` / `moving_sum([m], -1, N, [date])`) and the `range: current` + `offset` mechanism (row-relative `moving_sum([m], N, -N, [date])` LAG idiom, not a wall-clock `sum_if(diff_months/quarters/years(...), today())`). Documented the `materialization:` block for the first time. Updated `databricks-metric-view.md`, both `ts-databricks-*` mapping files, `ts-convert-from-databricks-mv/SKILL.md` (v1.6.0 — resolves previously-PENDING `leading`/`all`), and `ts-convert-to-databricks-mv/SKILL.md` (v1.0.3). Closes BL-064 items 10 (window range types undocumented) and 13 (`materialization:` undocumented); confirms item 11 (phantom `entities:`/`db_connection:` syntax) already resolved and item 12 (`safe_divide` comment) partially deferred. Files BL-095 (`connections add-tables` missing `authenticationType` + instance `updateConnectionV2` 500s), BL-096 (SpotQL `generate-sql`/`fetch-data` return empty-body 500s, worked around via `searchdata`), and BL-097 (`ts tml import` hangs on an open non-TTY stdin). No ts-cli code changes — sets up BL-063 PR2 (`ts databricks parse-mv`/`translate-formulas`). See `docs/audit/2026-07-08-dbx-window-claim-matrix.md`.

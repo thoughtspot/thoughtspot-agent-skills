@@ -463,7 +463,7 @@ filter: NOT is_return AND transaction_status IN ('Completed', 'Shipped')
 Complex — BETWEEN (formula):
 ```
 filter: churn_date BETWEEN '2024-05-01' AND '2025-04-30'
-→ Formula: [TABLE::churn_date] >= '2024-05-01' and [TABLE::churn_date] <= '2025-04-30'
+→ Formula: [TABLE::churn_date] >= to_date ( '2024-05-01' , 'yyyy-MM-dd' ) and [TABLE::churn_date] <= to_date ( '2025-04-30' , 'yyyy-MM-dd' )
 ```
 
 ---
