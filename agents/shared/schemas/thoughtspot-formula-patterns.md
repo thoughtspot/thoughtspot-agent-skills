@@ -342,9 +342,8 @@ span of calendar time. Re-run on a fixture with date gaps (see
 counted the N preceding *surviving rows* regardless of the calendar distance between
 them — diverging from a date-interval reading whenever the sort column has gaps at
 its nominal grain. Matches the row-count description above exactly; this is a
-ThoughtSpot-side fact independent of any specific cross-platform mapping.
-
-Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
+ThoughtSpot-side fact independent of any specific cross-platform mapping — see the
+claim matrix (E1) for the cross-platform consequences.
 
 ### Rank Functions
 

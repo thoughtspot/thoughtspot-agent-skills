@@ -574,11 +574,10 @@ above didn't catch this), divergent on gapped data.
 
 Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1). Treat this mapping as an approximation requiring a density check on any source with possible gaps.
 
-The
-`range: all`/LOD row (and the LOD `formulas[]` mapping in the Concept Mapping table
-above) carries a separate filter-asymmetry caveat (A1/A2, same matrix): filter-aware
-for a Databricks MV's own global `filter:`, filter-blind for an ad hoc query-time
-`WHERE` on an MV with no global filter.
+The `range: all`/LOD row (and the LOD `formulas[]` mapping in the Concept Mapping
+table above) carries a separate filter-asymmetry caveat (A1/A2, same matrix):
+filter-aware for a Databricks MV's own global `filter:`, filter-blind for an ad hoc
+query-time `WHERE` on an MV with no global filter.
 
 For `moving_sum` / `moving_average`, the inner `expr` is translated **without** the outer
 aggregate wrapper — `SUM(a * b)` with `range: trailing 7 day` becomes
