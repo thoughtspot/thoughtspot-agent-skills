@@ -353,6 +353,22 @@ live-verified citation (Databricks result set + matching TS result) or is
 corrected**; all four Databricks currency anchors bumped;
 `check_mapping_currency.py` clean.
 
+**PR 1.5 — Dimension/metric semantic deep-dive (added 2026-07-09, user-approved).**
+PR 1's C6 finding exposed a failure class: mappings "live-verified" only at a
+non-discriminating query shape. Four remaining constructs share that risk profile
+and get the same claim-matrix + discriminating-experiment treatment before PR 3
+freezes semantics into code: (a) LOD dimensions × filters — does
+`group_aggregate(..., query_filters())` match DBX's window-over-filtered-or-unfiltered
+choice; (b) cross-measure ratio inlining × grain — ratio-of-sums divergence when the
+query grain differs from the MV grain; (c) global `filter:` × window ordering — filter
+applied before or after window computation, both platforms; (d) semi-additive ×
+date-range filters — last-in-data vs last-in-filtered-range. Method and assets reuse
+PR 1's (deterministic fixtures, claim matrix, DBX_DAMIAN connection, searchdata
+workaround). *Acceptance:* each of the four constructs carries a discriminating
+live-verified verdict (or dated PENDING + blocker) in a claim matrix; corrections
+applied to mapping docs/worked examples with the same citation discipline as PR 1;
+anchors updated. Does NOT block PR 2 (parse-mv is structural) — blocks PR 3.
+
 **PR 2 — `ts databricks parse-mv`.** New `ts_cli/databricks/__init__.py`,
 `mv_parse.py`, `commands/databricks.py` (parse-mv only), registered in
 `cli.py`. Covers all BL-032 GA constructs. Tests:
