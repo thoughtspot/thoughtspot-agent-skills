@@ -7,7 +7,10 @@ only until the CLI-command class at the bottom — no live connection anywhere.
 from __future__ import annotations
 
 from ts_cli.databricks.mv_parse import (
+    classify_dimension_expr,
+    classify_measure_expr,
     classify_source,
+    extract_cross_refs,
     parse_offset,
     parse_range,
     parse_window,
@@ -207,3 +210,141 @@ class TestParseWindow:
         win, problems = parse_window(self._win(frame="rows"), "m")
         assert win is None
         assert any("frame" in p for p in problems)
+
+
+class TestExtractCrossRefs:
+    def test_measure_and_any_value(self):
+        expr = "MEASURE(quantity) / ANY_VALUE(category_quantity)"
+        refs, lod = extract_cross_refs(expr)
+        assert refs == ["quantity"]
+        assert lod == ["category_quantity"]
+
+    def test_multiple_measure_refs(self):
+        expr = ("(MEASURE(monthly_revenue) - MEASURE(prior_month_revenue)) "
+                "/ MEASURE(prior_month_revenue) * 100")
+        refs, lod = extract_cross_refs(expr)
+        assert refs == ["monthly_revenue", "prior_month_revenue", "prior_month_revenue"]
+        assert lod == []
+
+    def test_backtick_ref_unquoted(self):
+        refs, _ = extract_cross_refs("MEASURE(`total sales`)")
+        assert refs == ["total sales"]
+
+    def test_no_refs(self):
+        assert extract_cross_refs("SUM(x)") == ([], [])
+
+    def test_case_insensitive(self):
+        refs, lod = extract_cross_refs("measure(a) + any_value(b)")
+        assert refs == ["a"] and lod == ["b"]
+
+
+class TestClassifyDimension:
+    def test_bare_column_is_direct(self):
+        assert classify_dimension_expr("product_category")["kind"] == "direct"
+
+    def test_dot_path_is_direct(self):
+        assert classify_dimension_expr("orders.customers.COMPANY_NAME")["kind"] == "direct"
+
+    def test_backtick_identifier_is_direct(self):
+        assert classify_dimension_expr("`Order Date`")["kind"] == "direct"
+
+    def test_function_is_computed(self):
+        assert classify_dimension_expr(
+            "date_trunc('day', transaction_date)")["kind"] == "computed"
+
+    def test_case_when_is_computed(self):
+        assert classify_dimension_expr(
+            "CASE WHEN tenure < 12 THEN '0-1' ELSE '1+' END")["kind"] == "computed"
+
+    def test_concat_is_computed(self):
+        assert classify_dimension_expr(
+            "CONCAT(orders.employees.LAST_NAME, ', ', orders.employees.FIRST_NAME)"
+        )["kind"] == "computed"
+
+    def test_lod_window(self):
+        cls = classify_dimension_expr(
+            "SUM(source.LINE_TOTAL) OVER (PARTITION BY products.category.CATEGORY_NAME)")
+        assert cls["kind"] == "lod_window"
+        assert cls["inner_agg"] == "SUM"
+        assert cls["inner_expr"] == "source.LINE_TOTAL"
+        assert cls["partition_by"] == ["products.category.CATEGORY_NAME"]
+
+    def test_lod_multi_partition_dims(self):
+        cls = classify_dimension_expr("SUM(x) OVER (PARTITION BY a, b)")
+        assert cls["partition_by"] == ["a", "b"]
+
+    def test_lod_partition_with_function_call(self):
+        cls = classify_dimension_expr(
+            "SUM(x) OVER (PARTITION BY date_trunc('month', d), region)")
+        assert cls["partition_by"] == ["date_trunc('month', d)", "region"]
+
+    def test_over_without_partition_is_unsupported(self):
+        cls = classify_dimension_expr("ROW_NUMBER() OVER (ORDER BY d)")
+        assert cls["kind"] == "unsupported"
+
+    def test_subquery_is_unsupported(self):
+        cls = classify_dimension_expr("(SELECT MAX(d) FROM t)")
+        assert cls["kind"] == "unsupported"
+        assert "subquery" in cls["reason"]
+
+    def test_comment_stripped_before_classifying(self):
+        assert classify_dimension_expr("region -- the sales region")["kind"] == "direct"
+
+
+class TestClassifyMeasure:
+    def test_simple_sum(self):
+        cls = classify_measure_expr("SUM(sales)")
+        assert cls["expr_kind"] == "simple"
+        assert cls["agg_function"] == "SUM"
+        assert cls["physical_ref"] == "sales"
+        assert cls["distinct"] is False
+
+    def test_simple_dot_path(self):
+        cls = classify_measure_expr("SUM(source.LINE_TOTAL)")
+        assert cls["expr_kind"] == "simple"
+        assert cls["physical_ref"] == "source.LINE_TOTAL"
+
+    def test_avg_case_normalized(self):
+        assert classify_measure_expr("avg(tenure)")["agg_function"] == "AVG"
+
+    def test_count_distinct(self):
+        cls = classify_measure_expr("COUNT(DISTINCT customer_id)")
+        assert cls["expr_kind"] == "count_distinct"
+        assert cls["physical_ref"] == "customer_id"
+
+    def test_count_star(self):
+        assert classify_measure_expr("COUNT(*)")["expr_kind"] == "count_star"
+
+    def test_conditional_filter_where(self):
+        cls = classify_measure_expr("SUM(x) FILTER (WHERE region = 'EMEA')")
+        assert cls["expr_kind"] == "conditional"
+
+    def test_cross_measure(self):
+        cls = classify_measure_expr("MEASURE(quantity) / ANY_VALUE(category_quantity)")
+        assert cls["expr_kind"] == "complex_cross_measure"
+        assert cls["cross_refs"] == ["quantity"]
+        assert cls["lod_refs"] == ["category_quantity"]
+
+    def test_arithmetic_in_agg_is_complex(self):
+        cls = classify_measure_expr("SUM(product_price * quantity * (1 - discount_percent))")
+        assert cls["expr_kind"] == "complex"
+
+    def test_ratio_of_aggs_is_complex(self):
+        cls = classify_measure_expr("SUM(x) / COUNT(DISTINCT y)")
+        assert cls["expr_kind"] == "complex"
+
+    def test_subquery_is_unsupported(self):
+        cls = classify_measure_expr(
+            "COUNT(DISTINCT x) / (SELECT COUNT(DISTINCT x) FROM t)")
+        assert cls["expr_kind"] == "unsupported"
+        assert "subquery" in cls["reason"]
+
+    def test_conditional_still_records_cross_refs(self):
+        cls = classify_measure_expr("MEASURE(a) FILTER (WHERE b = 1)")
+        assert cls["expr_kind"] == "conditional"
+        assert cls["cross_refs"] == ["a"]
+
+    def test_sum_distinct_keeps_simple_with_flag(self):
+        cls = classify_measure_expr("SUM(DISTINCT amount)")
+        assert cls["expr_kind"] == "simple"
+        assert cls["distinct"] is True
