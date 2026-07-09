@@ -335,6 +335,16 @@ moving_sum ( [FACT::AMOUNT] , -2 , 2 , [DATE_DIM::ORDER_DATE] )
 Sort column (4th arg) must be a physical `[TABLE::column]` reference. Formula column
 names fail with "Search did not find" errors. Verified 2026-05-28.
 
+**Row-positional, not date-interval (platform-native fact, live-verified 2026-07-09
+on gapped data).** `moving_sum`'s window is a count of *rows* in sort order, not a
+span of calendar time. Re-run on a fixture with date gaps (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, E1), `moving_sum([m], N, -1, [d])`
+counted the N preceding *surviving rows* regardless of the calendar distance between
+them — diverging from a date-interval reading whenever the sort column has gaps at
+its nominal grain. Matches the row-count description above exactly; this is a
+ThoughtSpot-side fact independent of any specific cross-platform mapping — see the
+claim matrix (E1) for the cross-platform consequences.
+
 ### Rank Functions
 
 `rank(agg(measure), 'asc'|'desc')`
@@ -375,10 +385,24 @@ Full syntax: `group_aggregate ( agg(measure) , grouping , filters )`
 | Filter | Behavior |
 |---|---|
 | `query_filters()` | All filters from the query — translatable |
-| `{}` | No filters — **untranslatable** |
+| `{}` | No filters — **untranslatable** to Snowflake SV; **translatable to a Databricks MV** as the query-time-blind LOD paired with a model filter → MV global `filter:` (live-verified 2026-07-09 — see the A3 note below) |
 | `{ [TABLE::col] = 'value' }` | Hardcoded filter — **untranslatable** |
 | `query_filters() + { [TABLE::col] = 'value' }` | All query filters + hardcoded — **untranslatable** |
 | `query_filters() - { [TABLE::col] }` | Query filters minus one column — **untranslatable** |
+
+**`{}` is scoped to query-level filters only — live-verified 2026-07-09** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A3). "No filters" means no
+*query-level* filters: `{}` blinds the `group_aggregate` LOD to a search-level pin
+(the LOD value is unchanged whether or not the pin is applied) but it does **not**
+blind the LOD to a model-level `filters:` block — the LOD value still narrows to
+whatever the model-level filter has already restricted the underlying data to. In
+other words, `{}` disables incorporation of ad hoc query-time filters; it does not
+bypass filtering baked into the model itself. Import-accepted with no error on this
+build. The subtraction form (`query_filters() - { [TABLE::col] }`) was also
+import-accepted, but subtracting a raw physical column does not exclude a filter
+pinned on a *derived* boolean formula built from that column — the query-filter
+provenance tracks the column the filter predicate was actually applied to, not that
+column's underlying physical dependency.
 
 ### `group_*` Shorthand Functions
 

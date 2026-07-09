@@ -379,6 +379,30 @@ Translatable — add as `dimensions[]` entry. LOD results go to **dimensions**, 
 measures. Do NOT use `AGGREGATE OVER` — it causes `PARSE_SYNTAX_ERROR`. Do NOT use
 `window:` for LOD — `window` requires `semiadditive`.
 
+**Live-verified 2026-07-09 — first time this construct has been queried under any
+filter** (see `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A1/A2). On the
+ThoughtSpot side, the source `group_aggregate(..., query_filters())` this dimension
+was translated from is **CONFIRMED** filter-aware under both a query-level pin and
+a model-level `filters:` block. On the emitted Databricks side, the
+`SUM(source.QUANTITY) OVER (PARTITION BY ...)` dimension above reproduces that
+filter-awareness **only** for a Databricks consumer whose filter is baked into this
+MV's own global `filter:` block — a consumer who instead applies an ad hoc
+query-time `WHERE` on the MV gets a filter-**blind** `Category Quantity` (the
+`WHERE` prunes output rows, not the window's computed value). This is a
+Databricks-side asymmetry to flag for the consuming team, not a defect in this
+translation.
+
+**A3 follow-up, live-verified 2026-07-09** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A3) — if the source
+ThoughtSpot formula had instead used `group_aggregate(sum(x), {dim}, {})` (the
+empty-set filter argument) with a model-level `filters:` block mirroring this MV's
+`filter:`, the emitted `SUM(x) OVER (PARTITION BY ...)` dimension would reproduce
+**both** DBX conditions above — filter-aware for the MV's own global `filter:` AND
+filter-blind for an ad hoc query-time `WHERE`. `query_filters()` remains the right
+default here (simpler formula, matches the common case); `{}` is the refinement to
+reach for only when a consumer specifically needs the query-time-`WHERE`-blind
+behavior reproduced.
+
 ---
 
 ### Formula 4: `Category Contribution Ratio` (MEASURE — cross-references)
@@ -395,6 +419,12 @@ Translation:
 
 Translatable — add as `measures[]` entry. Uses `MEASURE()` for measure-to-measure
 references and `ANY_VALUE()` for dimension-from-measure references.
+
+**Live-verified 2026-07-09 across query grain** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, B1) — this is the exact
+`MEASURE(a) / ANY_VALUE(b)` cross-measure ratio pattern Battery B tested: **CONFIRMED**
+to compute true ratio-of-sums, cross-platform, at every grain (fine/coarse/total) —
+no formula change or grain caveat needed.
 
 ---
 
@@ -483,6 +513,13 @@ Translatable — add as `measures[]` in the Inventory MV. The `order:` reference
 raw date dimension, distinguishing this from the period-filter pattern (which uses a
 truncated period).
 
+**Live-verified 2026-07-09 under a query-time date-range filter** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, D1) — **CONFIRMED
+cross-platform**: `last_value` and the equivalent Databricks `window:` measure both
+collapse to the last observation *within the filtered range* under a query-level
+date-range pin (e.g. "this quarter"), identical values on both platforms including
+the single-surviving-row edge case. No formula change needed.
+
 ---
 
 ### Formula 8: `Active Customers` (conditional aggregate)
@@ -533,7 +570,7 @@ Translatable — add as `measures[]` using Databricks `FILTER (WHERE ...)` synta
 | `category_contribution_ratio` | formula | `COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)` | Category Contribution Ratio | Cross-refs via MEASURE() and ANY_VALUE() |
 | `monthly_revenue` | formula_Monthly Revenue | `SUM(source.LINE_TOTAL)` | Monthly Revenue | Window: `range: current`, `order: order_month` |
 | `prior_month_revenue` | formula_Prior Month Revenue | `SUM(source.LINE_TOTAL)` | Prior Month Revenue | Window: `range: current`, `offset: -1 month` |
-| `mom_growth_pct` | (derived) | `(MEASURE(monthly_revenue) - MEASURE(prior_month_revenue)) / MEASURE(prior_month_revenue) * 100` | MoM Growth % | Derived from two period-filter measures |
+| `mom_growth_pct` | (derived) | `(MEASURE(monthly_revenue) - MEASURE(prior_month_revenue)) / MEASURE(prior_month_revenue) * 100` | MoM Growth % | Derived from two period-filter measures. `MEASURE()` cross-references in this ratio are **CONFIRMED** grain-safe (B1, live-verified 2026-07-09, `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`); the underlying `monthly_revenue`/`prior_month_revenue` measures still carry the row-relative-vs-wall-clock caveat from C6/C6a (see Formula 5/6 above) |
 | `active_customers` | formula_Active Customers | `COUNT(DISTINCT orders.customers.CUSTOMER_ID) FILTER (WHERE source.LINE_TOTAL > 0)` | Active Customers | Conditional aggregate |
 
 ### Full YAML Output — Sales MV

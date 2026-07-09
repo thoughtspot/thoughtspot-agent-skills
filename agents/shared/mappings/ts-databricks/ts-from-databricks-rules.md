@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: MV→TS window translations live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading anchor args corrected (C1/C3), leading/all/cumulative/semi-additive confirmed (C3/C4/C5/C7), period-filter offset corrected from wall-clock sum_if to row-relative moving_sum LAG idiom (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: MV→TS window translations live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading anchor args corrected (C1/C3), leading/all/cumulative/semi-additive confirmed (C3/C4/C5/C7), period-filter offset corrected from wall-clock sum_if to row-relative moving_sum LAG idiom (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
 
 # Reverse Mapping Rules Reference
 
@@ -175,6 +175,39 @@ Parse the pattern: `AGG(col) OVER (PARTITION BY dim1, dim2)` →
 
 The third argument `query_filters()` ensures the LOD respects user-applied filters.
 
+**Live-verified 2026-07-09** (see `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`,
+A1/A2) — this claim is **CONFIRMED on the ThoughtSpot side**: `query_filters()` makes
+the LOD respect user-applied filters under both a query-level pin and a model-level
+`filters:` block, with no filter-blind condition on TS. **Cross-platform asymmetry
+(DBX-side):** the equivalence holds for a Databricks consumer whose filter is baked
+into the MV's own global `filter:` block (that condition matches the TS behavior
+above exactly) — it does **not** hold for a Databricks consumer applying an ad hoc
+query-time `WHERE` on an MV with no global `filter:`, because that DBX condition is
+filter-**blind** for a partition-window LOD dimension (it prunes output rows only,
+never the window's computed value). No `query_filters()`-based ThoughtSpot formula
+can reproduce that DBX filter-blind behavior — this is a documented DBX-side
+asymmetry, not a fixable formula gap. The same caveat applies to `range: all` window
+measures below, which use this identical LOD mechanism.
+
+**A3 follow-up, live-verified 2026-07-09** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, A3) — the asymmetry above **is
+reproducible** on the ThoughtSpot side after all. `group_aggregate`'s third argument
+also accepts the documented empty-set literal `{}` (`thoughtspot-formula-patterns.md`
+Filter argument table): `group_aggregate(sum(x), {dim}, {})`. Live-tested against the
+identical fixture, `{}` is **blind to a search-level/query-time filter** (a query pin
+does not change the LOD value — matches DBX's ad hoc query-time `WHERE`-blind
+condition exactly) but **still respects a model-level `filters:` block** (the LOD value
+narrows when the model itself carries a `filters:` block — matches DBX's own
+MV-global-`filter:`-aware condition exactly). **Refined mapping:** default to
+`query_filters()` for the common case (an MV's global `filter:`, simpler formula); use
+`{}` **paired with a model-level `filters:` block that mirrors the MV's own `filter:`**
+when the target needs to reproduce a DBX consumer's ad hoc query-time `WHERE`-blind LOD
+specifically — this combination reproduces both halves of the DBX composite in one
+ThoughtSpot construct. A candidate subtraction form, `query_filters() - { [TABLE::col] }`
+(also documented in `thoughtspot-formula-patterns.md`), was import-accepted but did
+**not** exclude a filter pinned on a *derived* boolean formula built from that column —
+recorded as a live finding, not a working alternative to `{}` for this scenario.
+
 ### Measure → ThoughtSpot Column or Formula
 
 Each measure entry:
@@ -281,6 +314,13 @@ Translation:
 - `ANY_VALUE(dim_name)` → reference to the LOD dimension `[dim_name]`
 - Combined: `[quantity] / [category_quantity]`
 
+**Live-verified 2026-07-09 across query grain** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, B1) — **CONFIRMED**: this
+inlining computes true ratio-of-sums, cross-platform, at every grain tested
+(fine/coarse/total). No sum-of-ratios or average-of-ratios divergence found at any
+grain — the mapping's implicit any-grain assumption holds; no formula change or
+grain caveat is needed.
+
 ### Conditional Aggregates — `FILTER (WHERE ...)` → ThoughtSpot Formula
 
 Databricks SQL `FILTER (WHERE ...)` clauses on aggregates translate to ThoughtSpot's
@@ -383,6 +423,18 @@ If the MV has a filter:
 The `filters:` section enforces the filter on ALL queries against the model.
 Without it, the formula exists but is never applied unless users manually pin it.
 Do NOT duplicate the filter in the model `description` — it's enforced, not advisory.
+
+**Live-verified 2026-07-09** (see `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`,
+C1) — **filter ordering is CONFIRMED cross-platform**: both a Databricks MV's global
+`filter:` and a ThoughtSpot model-level `filters:` block filter rows *before* a
+windowed measure (e.g. `moving_sum`) computes over them — the model-level `filters:`
+pattern above correctly reproduces this ordering. **Frame semantics DIVERGE on
+filtered/gapped data** (same root cause as E1 below): Databricks' `trailing N day`
+spans a date *interval*, while ThoughtSpot's `moving_sum` counts surviving *rows* —
+on data with gaps (including gaps created by this filter itself), the two platforms
+can compute different numbers for a trailing/leading window even though both filter
+before windowing. See the density caveat in the Rolling Window / Leading Window
+subsections below.
 
 **SQL → ThoughtSpot filter translation:**
 
@@ -639,6 +691,13 @@ Example:
 `first` was exercised live for the first time in this repo; both matched DBX exactly
 at category grain.
 
+**Live-verified 2026-07-09 under a query-time date-range filter** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, D1) — **CONFIRMED
+cross-platform**: `last_value`/`first_value` under a query-level date-range pin
+collapse to the last/first observation *within the filtered range* on both
+platforms, identical values at every row including the single-surviving-row edge
+case. No formula change needed.
+
 #### Period Filter (`order:` is truncated period dimension)
 
 Flow/additive metrics (revenue, quantity) with `range: current` + a truncated
@@ -736,6 +795,15 @@ matches this exactly.
 **Live-verified 2026-07-09** — see
 `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1, C2).
 
+**Density caveat (E1, live-verified 2026-07-09 on gapped data — see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`).** The above mapping was
+re-verified against a fixture with date gaps and found to **diverge from Databricks
+on that data**: Databricks' `trailing N day` is a genuine date-interval window;
+`moving_sum` counts rows. On dense daily data (no gaps) the two framings are
+identical, which is why the C1/C2 verification above didn't surface this.
+
+Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1). Treat this mapping as an approximation requiring a density check on any source with possible gaps.
+
 #### Cumulative
 
 | MV window pattern | ThoughtSpot equivalent |
@@ -764,6 +832,11 @@ row of the fixture, including boundary partial-window/NULL rows.
 **Live-verified 2026-07-09** — see
 `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C3).
 
+**Density caveat (E1)** — same as the Rolling Window section above: row-positional:
+matches Databricks' date-interval trailing/leading windows only when the order
+column is dense at the window's unit grain (one row per unit, no gaps) — see
+docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
+
 #### All-Partition Window (`range: all`)
 
 `range: all` spans the entire partition, unbounded in both directions — not a
@@ -786,6 +859,14 @@ not a fixed rule — inspect how the MV's `all_amount`-style measure is queried
 **Live-verified 2026-07-09** — see
 `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C4): matched DBX exactly at
 both row grain and category grain.
+
+**Filter asymmetry caveat (A1/A2, live-verified 2026-07-09)** — because this
+mapping uses the same LOD mechanism as the `AGG() OVER (PARTITION BY ...)` LOD
+Dimension mapping above, it inherits the same DBX-side asymmetry: a Databricks
+MV's own global `filter:` participates in the `range: all` window, but an ad hoc
+query-time `WHERE` on an MV with no global `filter:` does not — see the LOD
+Dimension section above for the full caveat, **including the A3 refinement**
+(`{}` + a mirrored model-level `filters:` block reproduces the DBX composite).
 
 ### Merging Multiple MVs into a Single ThoughtSpot Model
 

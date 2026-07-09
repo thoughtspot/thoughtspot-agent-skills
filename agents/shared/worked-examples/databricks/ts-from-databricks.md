@@ -17,6 +17,19 @@ Verified against live ThoughtSpot and Databricks instances on 2026-05-28.
 > `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1/C2) for the corrected
 > mapping and the old/new formula text.
 
+> **Live-verified 2026-07-09** — this MV combines a global `filter: status !=
+> 'cancelled'` (line 34 below) with the `revenue_7d_rolling` window measure in the
+> same view, a combination never queried together before this pass. See
+> `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md` (C1): filter ordering is
+> **CONFIRMED cross-platform** — the filter removes rows *before* `moving_sum`
+> computes over them, on both Databricks and ThoughtSpot, so the mapping below
+> requires no formula change. **Density note (E1):** this MV's `transaction_date`
+> is daily-dense (one row per day, no gaps) for the categories exercised in this
+> example, so the row-positional/date-interval divergence documented at E1 does
+> not surface here — the numbers below stand as verified. On a source with date
+> gaps, re-check the density caveat in the Rolling Window section of
+> `ts-from-databricks-rules.md` before trusting this formula shape.
+
 ---
 
 ## Source — Metric View YAML (v1.1)
@@ -273,6 +286,11 @@ Ratio of two aggregates — both must be inlined in a single formula expression.
 Cross-formula references fail during TML import, so each aggregate is written
 out directly rather than referencing the Total Revenue or Unique Customers formulas.
 
+**Live-verified 2026-07-09 across query grain** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, B1) — inlined ratio-of-aggregate
+measures like this one are **CONFIRMED** to compute true ratio-of-sums, cross-platform,
+at every grain tested — no formula change needed.
+
 | Property | Value |
 |---|---|
 | Column name | `Avg Order Value` (from `display_name`) |
@@ -375,6 +393,11 @@ Break this into parts:
 - `COUNT(*)` → `count ( 1 )` (ThoughtSpot has no `COUNT(*)` — use `count ( 1 )`)
 - The CAST is implicit in ThoughtSpot — division of two numeric aggregates
   returns a double naturally.
+
+**Live-verified 2026-07-09 across query grain** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, B1) — this ratio-of-aggregates
+pattern is **CONFIRMED** to compute true ratio-of-sums, cross-platform, at every
+grain tested — no formula change needed.
 
 ThoughtSpot formula:
 ```
@@ -662,6 +685,11 @@ model:
    (not `end=0`) is required to exclude the anchor row for the default/exclusive
    form — see
    `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1/C2) and "Measure 5" above.
+
+   Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
+
+   This example's `transaction_date` is daily-dense, so the formula above is
+   exact — verify density before reusing this pattern on a gapped source.
 
 10. **`CASE WHEN ... END` translates to `if (..., val, val)`; `COUNT(*)` becomes
     `count ( 1 )`.** ThoughtSpot has no `COUNT(*)` syntax. `CAST(... AS DOUBLE)` is

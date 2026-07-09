@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: property-coverage window rows corrected to live-verified forms (C1/C3/C6/C6a) and materialization: added as a documented (metadata-only) property (C9); fields:/dimensions: synonym and offset 18.1 gate re-checked, still hold; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: property-coverage window rows corrected to live-verified forms (C1/C3/C6/C6a) and materialization: added as a documented (metadata-only) property (C9); fields:/dimensions: synonym and offset 18.1 gate re-checked, still hold; see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
 
 # ThoughtSpot ↔ Databricks Metric View Property Coverage
 
@@ -36,11 +36,25 @@ fields, what is partially migrated, and what cannot be migrated at all.
 | Rolling window, inclusive (`moving_sum(m, N-1, 0, d)`) | `measures[].window` | `range: trailing N day inclusive`, `order:` date dim, `semiadditive: last` — **Live-verified 2026-07-09**, matrix C1 |
 | Rolling look-ahead, default/exclusive (`moving_sum(m, -1, N, d)`) | `measures[].window` | `range: leading N day` (default) / `leading N day exclusive`, `order:` date dim, `semiadditive: last` — **Live-verified 2026-07-09**, matrix C3 |
 | Rolling look-ahead, inclusive (`moving_sum(m, 0, N-1, d)`) | `measures[].window` | `range: leading N day inclusive`, `order:` date dim, `semiadditive: last` — **Live-verified 2026-07-09**, matrix C3 |
-| Partition-wide LOD (`group_aggregate(sum(m), {dim}, query_filters())`) | `measures[].window` | `range: all`, scoped per query partition — **Live-verified 2026-07-09**, matrix C4 |
+| Partition-wide LOD (`group_aggregate(sum(m), {dim}, query_filters())`) | `measures[].window` | `range: all`, scoped per query partition — **Live-verified 2026-07-09**, matrix C4. Inherits the LOD row's A1/A2 filter asymmetry below (and its A3 refinement) |
 | Conditional aggregate (`*_if(cond, x)` — `sum_if`, `unique_count_if`, etc.) | `AGG(x) FILTER (WHERE cond)` | Native `*_if` functions; fallback: `agg(if (cond) then x else null)` |
 | Boolean filter formula (ATTRIBUTE) | `filter:` field | Translatable boolean expressions → MV global filter; formula removed from dimensions |
 | Cross-formula reference `[measure]` | `MEASURE(measure_name)` | Cross-measure reference |
 | Cross-formula reference `[lod_dim]` | `ANY_VALUE(dimension_name)` | Dimension ref from measure |
+
+**Density caveat (E1, live-verified 2026-07-09 on gapped data —
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`).** The four rolling
+window/look-ahead rows above are row-positional: matches Databricks' date-interval
+trailing/leading windows only when the order column is dense at the window's unit
+grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md
+(E1). **Filter asymmetry caveat (A1/A2, same date):** the LOD row above (and the
+partition-wide LOD row) is filter-aware on ThoughtSpot under both filter kinds and
+matches a Databricks MV's own global `filter:` — it does NOT reproduce a DBX
+consumer's ad hoc query-time `WHERE` on an MV with no global filter, **unless the
+filter argument is `{}` instead of `query_filters()`, paired with a model-level
+`filters:` block mirroring the MV's `filter:`** — that combination reproduces the
+DBX consumer's query-time-`WHERE`-blind reading too (A3 follow-up, live-verified
+2026-07-09, same matrix).
 
 ### Databricks MV → TS (v1.1)
 
@@ -67,12 +81,18 @@ fields, what is partially migrated, and what cannot be migrated at all.
 | `measures[].window`, `range: trailing N day inclusive` | Rolling window formula | `moving_sum([m], N-1, 0, [TABLE::date_col])` — **Live-verified 2026-07-09**, matrix C1 |
 | `measures[].window`, `range: leading N day` (default/exclusive) | Rolling look-ahead formula | `moving_sum([m], -1, N, [TABLE::date_col])` — **Live-verified 2026-07-09**, matrix C3 |
 | `measures[].window`, `range: leading N day inclusive` | Rolling look-ahead formula | `moving_sum([m], 0, N-1, [TABLE::date_col])` — **Live-verified 2026-07-09**, matrix C3 |
-| `measures[].window`, `range: all` | Partition-wide LOD formula | `group_aggregate(sum([m]), {[partition_dim]}, query_filters())`, `column_type: ATTRIBUTE` — **Live-verified 2026-07-09**, matrix C4 |
+| `measures[].window`, `range: all` | Partition-wide LOD formula | `group_aggregate(sum([m]), {[partition_dim]}, query_filters())`, `column_type: ATTRIBUTE` — **Live-verified 2026-07-09**, matrix C4. Inherits the LOD row's A1/A2 filter asymmetry above (and its A3 refinement) |
 | `AGG(x) FILTER (WHERE cond)` | Conditional aggregate formula | `agg_if(cond, [x])` — native `*_if` function |
 | `COUNT(*)` | MEASURE column | `aggregation: COUNT` on any non-null column, or formula `count(1)` |
 | `filter:` | Boolean formula column `[MV Filter]` | Always create formula — never description-only. Users apply `[MV Filter] = true` |
 | `source:` | Table TML `db_table` + `db` + `schema` | Decomposed into catalog/schema/table |
 | `version:` | — | Used for parsing path selection, not stored |
+
+**Density caveat (E1)** — same as the TS → Databricks MV table above: the four
+`range: trailing`/`leading` rows are row-positional: matches Databricks'
+date-interval trailing/leading windows only when the order column is dense at the
+window's unit grain (one row per unit, no gaps) — see
+docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
 
 ---
 
@@ -108,13 +128,18 @@ fields, what is partially migrated, and what cannot be migrated at all.
 | `window[].range: trailing N day inclusive` | **Mapped** | → `moving_sum([m], N-1, 0, [date])` — Live-verified 2026-07-09, matrix C1 |
 | `window[].range: leading N day` (default/exclusive) | **Mapped** | → `moving_sum([m], -1, N, [date])` — Live-verified 2026-07-09, matrix C3 |
 | `window[].range: leading N day inclusive` | **Mapped** | → `moving_sum([m], 0, N-1, [date])` — Live-verified 2026-07-09, matrix C3 |
-| `window[].range: all` | **Mapped** | → `group_aggregate(sum(m), {partition dims}, query_filters())`, scoped per query partition — Live-verified 2026-07-09, matrix C4 |
+| `window[].range: all` | **Mapped** | → `group_aggregate(sum(m), {partition dims}, query_filters())`, scoped per query partition — Live-verified 2026-07-09, matrix C4. Filter-aware for the MV's own global `filter:` only — not for an ad hoc query-time `WHERE` on an MV with no global filter (A1/A2, `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`), **unless emitted as `{}` + a mirrored model-level `filters:` block, which reproduces both halves (A3, same matrix)** |
 | `window[].range: cumulative` | **Mapped** | `range: cumulative` → `cumulative_sum(m, d)` — Live-verified 2026-07-09, matrix C5 |
 | `AGG(x) FILTER (WHERE cond)` | **Mapped** | → `agg_if(cond, [x])` native conditional aggregate |
 | `COUNT(*)` | **Mapped** | → formula `count(1)` |
 | Subquery in `expr` | **Untranslatable** | ThoughtSpot formulas cannot contain SQL subqueries |
 | `source:` as SELECT subquery | **Mapped (with user choice)** | Prompt: (D) create Databricks VIEW, (T) create ThoughtSpot SQL View, (M) map to existing |
 | `materialization:` (top-level block: `schedule`, `mode`, `materialized_views[]`) | **Metadata only** | Databricks-side query-acceleration hint (Public Preview) — no ThoughtSpot analog; not stored on import. See [databricks-metric-view.md](../../schemas/databricks-metric-view.md#materialization-block-public-preview). Docs-research finding (Task 1, `docs/audit/2026-07-08-dbx-window-docs-findings.md`), 2026-07-08 |
+
+**Density caveat (E1)** — the four `window[].range: trailing`/`leading` rows above
+are row-positional: matches Databricks' date-interval trailing/leading windows only
+when the order column is dense at the window's unit grain (one row per unit, no
+gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
 
 ---
 
