@@ -212,6 +212,22 @@ class TestPostfixConstructs:
         with pytest.raises(UntranslatableError, match="NOT IN"):
             t("x NOT IN (1, 2)")
 
+    def test_not_comparison_wraps(self):
+        assert t("NOT status = 'Completed'") == \
+            "not ( [TRANSACTIONS::status] = 'Completed' )"
+
+    def test_not_is_null_wraps(self):
+        assert t("NOT x IS NULL") == "not ( isnull ( [TRANSACTIONS::x] ) )"
+
+    def test_nullif_marker_never_leaks_through_is(self):
+        assert t("NULLIF(x, 0) IS NULL") == \
+            "isnull ( null_if_zero ( [TRANSACTIONS::x] ) )"
+
+    def test_not_ident_in_translates_via_expr(self):
+        # NOT x IN (…) with the ident before IN routes through _expr:
+        assert t("NOT x IN (1, 2)") == \
+            "not ( ( [TRANSACTIONS::x] = 1 or [TRANSACTIONS::x] = 2 ) )"
+
 
 class TestSafeDivide:
     def test_divide_by_nullif(self):

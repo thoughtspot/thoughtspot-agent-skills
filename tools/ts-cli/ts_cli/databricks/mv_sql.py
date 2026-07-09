@@ -411,7 +411,21 @@ def _keyword_construct(text: str, cur: _Cursor, resolver,
 def _pop_operand(units: list[str], construct: str) -> str:
     if not units:
         raise UntranslatableError(f"'{construct}' without a left operand")
-    return units.pop()
+    unit = units.pop()
+    if unit.startswith(_NULLIF0):
+        # NULLIF marker popped mid-expression (before the end-of-expr
+        # collapse) — resolve it to null_if_zero here, never leak raw bytes.
+        return f"null_if_zero ( {unit[len(_NULLIF0):]} )"
+    return unit
+
+
+def _terminates_operand(nk: str | None, nt: str | None) -> bool:
+    """True when the next token ends a bare-column operand (end/and/or/')'/',')."""
+    if nk is None:
+        return True
+    if nk == "kw" and nt in ("AND", "OR"):
+        return True
+    return nk == "op" and nt in (")", ",")
 
 
 def _construct_not(cur: _Cursor, resolver, units: list[str]) -> None:
@@ -421,9 +435,15 @@ def _construct_not(cur: _Cursor, resolver, units: list[str]) -> None:
             f"NOT {text} has no documented ThoughtSpot mapping")
     if kind == "ident":
         nk, nt = cur.peek(1)
-        if not (nk == "op" and nt == "("):  # NOT <boolean column>
+        if _terminates_operand(nk, nt):  # NOT <boolean column>
             cur.advance()
             units.append(f"{resolver(text)} = false")
+            return
+        if not (nk == "op" and nt == "("):
+            # NOT <col> <comparison/IS/IN/…> — the comparison binds tighter
+            # than NOT in SQL, so wrap the whole comparison, not just the col.
+            inner = _expr(cur, resolver, frozenset({"AND", "OR"}))
+            units.append(f"not ( {inner} )")
             return
     # NOT <group/call/…>: translate exactly one operand
     operand_units = _one_operand(cur, resolver)
@@ -451,6 +471,7 @@ def _one_operand(cur: _Cursor, resolver) -> list[str]:
         _keyword_unit(text, cur, resolver, units)
     else:
         raise UntranslatableError(f"unexpected operand {text!r}")
+    _collapse_nullif_markers(units)  # never let a raw marker escape
     return units
 
 
