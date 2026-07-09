@@ -335,6 +335,17 @@ moving_sum ( [FACT::AMOUNT] , -2 , 2 , [DATE_DIM::ORDER_DATE] )
 Sort column (4th arg) must be a physical `[TABLE::column]` reference. Formula column
 names fail with "Search did not find" errors. Verified 2026-05-28.
 
+**Row-positional, not date-interval (platform-native fact, live-verified 2026-07-09
+on gapped data).** `moving_sum`'s window is a count of *rows* in sort order, not a
+span of calendar time. Re-run on a fixture with date gaps (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, E1), `moving_sum([m], N, -1, [d])`
+counted the N preceding *surviving rows* regardless of the calendar distance between
+them — diverging from a date-interval reading whenever the sort column has gaps at
+its nominal grain. Matches the row-count description above exactly; this is a
+ThoughtSpot-side fact independent of any specific cross-platform mapping.
+
+Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
+
 ### Rank Functions
 
 `rank(agg(measure), 'asc'|'desc')`

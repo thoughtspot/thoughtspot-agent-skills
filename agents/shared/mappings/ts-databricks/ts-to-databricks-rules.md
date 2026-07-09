@@ -230,6 +230,18 @@ measures:
 The filter formula column is consumed by the `filter:` field — do **not** also
 emit it as a dimension or measure. Remove it from the column list after converting.
 
+**Live-verified 2026-07-09** (see `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`,
+C1) — **filter ordering is CONFIRMED cross-platform**: a ThoughtSpot model-level
+`filters:` block and a Databricks MV's global `filter:` both filter rows *before* a
+windowed measure (e.g. `moving_sum`) computes over them, so emitting the ThoughtSpot
+filter as the MV's `filter:` field (as above) correctly preserves that ordering.
+**Frame semantics DIVERGE on filtered/gapped data** (same root cause as E1 below):
+Databricks' `trailing N day` spans a date *interval*, while ThoughtSpot's
+`moving_sum` counts surviving *rows* — on data with gaps (including gaps created by
+this filter itself), the two platforms can compute different numbers for a
+trailing/leading window even though both filter before windowing. See the density
+caveat in the Rolling Window Measures section below.
+
 ### Non-filter boolean formulas
 
 Not every boolean ATTRIBUTE is a filter. If the formula is used for grouping or
@@ -256,6 +268,21 @@ entries with window functions — NOT measures with `AGGREGATE OVER`.
 - Do NOT use `AGGREGATE OVER` — it causes `PARSE_SYNTAX_ERROR`
 - Do NOT use `window:` for LOD — `window` requires `semiadditive`
 
+**Filter asymmetry caveat (A1/A2, live-verified 2026-07-09 — see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`).** On the ThoughtSpot side,
+`query_filters()` makes this LOD respect user-applied filters under both a
+query-level pin and a model-level `filters:` block — **CONFIRMED**, no formula
+change. The emitted Databricks `AGG(col) OVER (PARTITION BY ...)` dimension
+reproduces that behavior only for a Databricks consumer who applies the equivalent
+filter as the MV's own global `filter:` block. It does **not** reproduce for a
+consumer who instead layers an ad hoc query-time `WHERE` on the MV — Databricks'
+`OVER (PARTITION BY ...)` is filter-**blind** to a query-time `WHERE` when the MV
+has no global `filter:` baked in (the `WHERE` prunes output rows only, not the
+window's computed value). This is a DBX-side asymmetry, not a translation defect —
+document it for the consuming team rather than trying to "fix" it with a different
+formula shape. The same caveat applies to the `range: all` window-measure mapping
+below, which uses this identical LOD mechanism.
+
 ---
 
 ## Cross-Measure References
@@ -280,6 +307,12 @@ measures:
   - name: category_contribution_ratio
     expr: MEASURE(quantity) / ANY_VALUE(category_quantity)
 ```
+
+**Live-verified 2026-07-09 across query grain** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, B1) — **CONFIRMED**: this
+`MEASURE()`/`ANY_VALUE()` inlining computes true ratio-of-sums, cross-platform, at
+every grain tested (fine/coarse/total) — no sum-of-ratios or average-of-ratios
+divergence found. No formula change or grain caveat is needed.
 
 ---
 
@@ -328,6 +361,13 @@ period like month or quarter).
 
 **Live-verified 2026-07-09** — see
 `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C7).
+
+**Live-verified 2026-07-09 under a query-time date-range filter** (see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`, D1) — **CONFIRMED
+cross-platform**: `last_value`/`first_value` under a query-level date-range pin and
+the equivalent Databricks `window:` measure both collapse to the last/first
+observation *within the filtered range*, identical values at every row including
+the single-surviving-row edge case. No formula change needed.
 
 ---
 
@@ -420,6 +460,17 @@ and recorded **FAIL — matches nothing** against every Databricks `range:` form
 `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1, C2, C3). Boundary
 behavior matches on both platforms: a partial sum when 1..N-1 rows are
 available, `NULL` only when zero rows are available.
+
+**Density caveat (E1, live-verified 2026-07-09 on gapped data — see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`).** All mappings in this
+section (including the strict (start, end) reverse-map table above) were
+re-verified against a fixture with date gaps and found to **diverge from
+Databricks on that data**: Databricks' `trailing`/`leading N day` is a genuine
+date-interval window; `moving_sum` counts rows. On dense daily data the two
+framings are identical, which is why the C1/C2/C3 verification above didn't
+surface this.
+
+Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1). Treat this mapping as an approximation requiring a density check before emitting it for any source with possible gaps.
 
 ---
 

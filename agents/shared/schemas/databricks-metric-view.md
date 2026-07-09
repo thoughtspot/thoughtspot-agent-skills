@@ -114,6 +114,15 @@ source: catalog.schema.table_name   # Required. Table FQN, SQL query (parenthesi
 
 filter: <sql_boolean_expression>    # Optional. Global WHERE clause applied to all queries.
                                     # Uses column names from the source table directly.
+                                    # Live-verified 2026-07-09 (docs/audit/2026-07-09-dbx-
+                                    # semantic-claim-matrix.md, A1/A2): this global filter IS
+                                    # seen by a partition-window LOD dimension computed inside
+                                    # the same MV — but an ad hoc query-time WHERE clause
+                                    # layered on top of an MV with NO global filter: is
+                                    # filter-BLIND for that same LOD dimension (it prunes output
+                                    # rows only, not the window's computed value). See the
+                                    # Filter section of ts-from-databricks-rules.md /
+                                    # ts-to-databricks-rules.md for the ThoughtSpot-side caveat.
 
 dimensions:                         # Optional (but a MV with no dimensions or measures is useless).
   - name: <identifier>              # Required. Only 3 fields allowed: name, expr, window.
@@ -226,7 +235,11 @@ source: catalog.schema.table_name   # Single-source mode — same as v0.1. Also 
                                     # query (parenthesized or bare) or another metric view —
                                     # see Source Forms above.
 
-filter: <sql_boolean_expression>    # Optional. Global WHERE clause.
+filter: <sql_boolean_expression>    # Optional. Global WHERE clause. See the "Live-verified
+                                    # 2026-07-09" note under the v0.1 `filter:` field above —
+                                    # this global filter IS seen by LOD/window dimensions
+                                    # computed in the same MV; an ad hoc query-time WHERE on an
+                                    # unfiltered MV is not.
 
 dimensions:                         # GA canonical key is `fields:`; `dimensions:` accepted for backward compat.
   - name: <identifier>              # Required. Machine-readable identifier.
@@ -285,6 +298,9 @@ joins:                              # Optional. Dimension table joins.
           at_most_one_match: true
 
 filter: <sql_boolean_expression>    # Optional. Uses alias.column or source.column syntax.
+                                    # Same MV-filter-vs-query-time-WHERE asymmetry applies —
+                                    # see the "Live-verified 2026-07-09" note under the v0.1
+                                    # `filter:` field above.
 
 dimensions:                         # GA canonical key is `fields:`; `dimensions:` accepted for backward compat.
   - name: <identifier>
@@ -484,6 +500,16 @@ including boundary partial-window/NULL rows):
 
 **Live-verified 2026-07-09** — see `docs/audit/2026-07-08-dbx-window-claim-matrix.md`
 (C1, C2, C3).
+
+**Density caveat (E1, live-verified 2026-07-09 on gapped data) — see
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`.** The four corrected mappings
+above were re-verified on data with date gaps and found to **diverge**: Databricks'
+`trailing`/`leading N day` frame is a genuine date-interval window, while ThoughtSpot's
+`moving_sum` counts rows. On dense daily data the two framings are indistinguishable
+(which is why the original C1/C3 verification above didn't catch this); on gapped data
+they produce different numbers.
+
+Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
 
 **Partial-window / boundary behavior (Live-verified 2026-07-09 — matrix bonus
 finding):** Databricks `trailing`/`leading` windows return a **partial sum** when
@@ -765,7 +791,7 @@ measures:
 | LOD | Via SQL expressions | Dimension window functions: `SUM(x) OVER (PARTITION BY dim)` |
 | Semi-additive | `last_value()` in SQL | `window: [{order: dim, range: current, semiadditive: last}]` |
 | Cross-measure refs | Via SQL expressions | `MEASURE(measure_name)` + `ANY_VALUE(dim_name)` |
-| Global filter | Not a concept | `filter:` block |
+| Global filter | Not a concept | `filter:` block — filter-aware for LOD/window dimensions computed inside the same MV; an ad hoc query-time `WHERE` on an MV with no `filter:` is filter-blind for those same dimensions (live-verified 2026-07-09, `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md` A1/A2) |
 | CA extension | `with extension (CA='...')` | Not applicable |
 | Preview required | No | No — GA since 2026-04-02 |
 
