@@ -937,3 +937,82 @@ class TestParseMetricViewScalarGuards:
         assert r["dimensions"] == []
         assert any(u["kind"] == "dimension" and "synonyms" in u["detail"]
                    for u in r["unsupported"])
+
+
+import json
+
+from typer.testing import CliRunner
+
+from ts_cli.cli import app
+
+try:
+    runner = CliRunner(mix_stderr=False)
+except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
+    runner = CliRunner()
+
+
+def _stderr(result):
+    try:
+        return result.stderr
+    except ValueError:
+        return ""
+
+
+class TestParseMvCli:
+    def test_parses_file_to_json(self, tmp_path):
+        yml = tmp_path / "mv.yaml"
+        yml.write_text(MV_DM_INVENTORY)
+        out = tmp_path / "parsed.json"
+        result = runner.invoke(app, ["databricks", "parse-mv", str(yml),
+                                     "--output", str(out)])
+        assert result.exit_code == 0, result.stdout + _stderr(result)
+        data = json.loads(out.read_text())
+        assert data["version"] == "1.1"
+        assert data["unsupported"] == []
+        assert {m["name"] for m in data["measures"]} == {"inventory_balance"}
+
+    def test_reads_stdin_dash(self, tmp_path):
+        out = tmp_path / "parsed.json"
+        result = runner.invoke(app, ["databricks", "parse-mv", "-",
+                                     "--output", str(out)],
+                               input=MV_V01_BASIC_SALES)
+        assert result.exit_code == 0, result.stdout + _stderr(result)
+        assert json.loads(out.read_text())["version"] == "0.1"
+
+    def test_creates_missing_output_parent_dir(self, tmp_path):
+        yml = tmp_path / "mv.yaml"
+        yml.write_text(MV_DM_INVENTORY)
+        out = tmp_path / "sub" / "deep" / "parsed.json"
+        result = runner.invoke(app, ["databricks", "parse-mv", str(yml),
+                                     "--output", str(out)])
+        assert result.exit_code == 0
+        assert out.exists()
+
+    def test_missing_input_file_exits_nonzero(self, tmp_path):
+        out = tmp_path / "parsed.json"
+        result = runner.invoke(app, ["databricks", "parse-mv",
+                                     str(tmp_path / "nope.yaml"),
+                                     "--output", str(out)])
+        assert result.exit_code == 1
+        assert not out.exists()
+
+    def test_unsupported_exits_nonzero_but_writes_json(self, tmp_path):
+        yml = tmp_path / "mv.yaml"
+        yml.write_text("version: 2.0\nsource: c.s.t\n")
+        out = tmp_path / "parsed.json"
+        result = runner.invoke(app, ["databricks", "parse-mv", str(yml),
+                                     "--output", str(out)])
+        assert result.exit_code == 1
+        data = json.loads(out.read_text())
+        assert data["unsupported"][0]["kind"] == "unknown_version"
+        assert "UNSUPPORTED" in _stderr(result)
+
+    def test_density_warning_on_stderr_exit_zero(self, tmp_path):
+        yml = tmp_path / "mv.yaml"
+        yml.write_text(MV_V11_WINDOWS_MAT)
+        out = tmp_path / "parsed.json"
+        result = runner.invoke(app, ["databricks", "parse-mv", str(yml),
+                                     "--output", str(out)])
+        assert result.exit_code == 0, result.stdout + _stderr(result)
+        err = _stderr(result)
+        assert "WARNING" in err and "BL-098" in err
