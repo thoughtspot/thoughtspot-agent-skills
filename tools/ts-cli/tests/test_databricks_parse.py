@@ -6,6 +6,8 @@ only until the CLI-command class at the bottom — no live connection anywhere.
 """
 from __future__ import annotations
 
+import yaml
+
 from ts_cli.databricks.mv_parse import (
     classify_dimension_expr,
     classify_measure_expr,
@@ -462,3 +464,45 @@ class TestParseJoins:
 
     def test_none_join_list_returns_empty(self):
         assert parse_joins(None, unsupported=[]) == []
+
+    def test_unquoted_on_key_from_real_yaml(self):
+        # YAML 1.1: unquoted `on:` parses as boolean True — parse_joins must accept it.
+        doc = yaml.safe_load(
+            "joins:\n"
+            "  - name: orders\n"
+            "    source: c.s.o\n"
+            "    on: source.a = orders.a\n")
+        assert True in doc["joins"][0]  # precondition: the trap is real
+        unsupported = []
+        out = parse_joins(doc["joins"], unsupported=unsupported)
+        assert unsupported == []
+        assert out[0]["on"] == "source.a = orders.a"
+
+    def test_using_null_is_problem_not_crash(self):
+        joins = [{"name": "d", "source": "c.s.t", "using": None}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert out == []
+        assert unsupported and "'using' must be a list" in unsupported[0]["detail"]
+
+    def test_using_scalar_is_problem_not_chars(self):
+        joins = [{"name": "d", "source": "c.s.t", "using": "ORDER_ID"}]
+        unsupported = []
+        parse_joins(joins, unsupported=unsupported)
+        assert unsupported and "'using' must be a list" in unsupported[0]["detail"]
+
+    def test_on_null_is_problem_not_literal_none(self):
+        joins = [{"name": "d", "source": "c.s.t", "on": None}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert out == []
+        assert unsupported and "boolean expression" in unsupported[0]["detail"]
+
+    def test_bad_nested_child_dropped_parent_survives(self):
+        joins = [{"name": "orders", "source": "c.s.o", "on": "source.a = orders.a",
+                  "joins": [{"name": "bad", "source": "c.s.b"}]}]
+        unsupported = []
+        out = parse_joins(joins, unsupported=unsupported)
+        assert len(out) == 1 and out[0]["alias"] == "orders"
+        assert out[0]["joins"] == []
+        assert unsupported and unsupported[0]["name"] == "bad"

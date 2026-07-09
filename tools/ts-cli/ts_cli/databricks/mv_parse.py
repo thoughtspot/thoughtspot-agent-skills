@@ -316,6 +316,33 @@ def _join_cardinality(j: dict, alias: str) -> tuple[str, str] | str:
     return "many_to_one", "default"
 
 
+def _join_on_using(j: dict, alias: str, parent_alias: str):
+    """Resolve (on, using) for a join, or an error message string.
+
+    YAML 1.1 resolves an unquoted `on:` key to boolean True — accept both
+    `"on"` and `True` as the key. `using:` must be a list (a null/scalar
+    value is a problem, not a crash or per-character garbage); `on:` must
+    be a real expression (null/boolean values are problems, not literal
+    "None"/"True" clauses).
+    """
+    has_on = "on" in j or True in j
+    has_using = "using" in j
+    if has_on == has_using:
+        return f"join '{alias}': exactly one of 'on' or 'using' is required"
+    if has_using:
+        if not isinstance(j["using"], list):
+            return (f"join '{alias}': 'using' must be a list of column names, "
+                    f"got {j['using']!r}")
+        using = [str(c) for c in j["using"]]
+        on = " AND ".join(f"{parent_alias}.{c} = {alias}.{c}" for c in using)
+        return on, using
+    on_val = j.get("on", j.get(True))
+    if on_val is None or isinstance(on_val, bool):
+        return (f"join '{alias}': 'on' must be a SQL boolean expression, "
+                f"got {on_val!r}")
+    return str(on_val), None
+
+
 def parse_joins(join_list, parent_alias: str = "source",
                 unsupported: list | None = None) -> list[dict]:
     """Walk the nested joins: hierarchy into the contract's join tree.
@@ -340,18 +367,12 @@ def parse_joins(join_list, parent_alias: str = "source",
                                 "detail": f"join '{alias}': unrecognized "
                                           f"source {j.get('source')!r}"})
             continue
-        has_on, has_using = "on" in j, "using" in j
-        if has_on == has_using:
+        resolved_on = _join_on_using(j, alias, parent_alias)
+        if isinstance(resolved_on, str):
             unsupported.append({"kind": "join", "name": alias,
-                                "detail": f"join '{alias}': exactly one of "
-                                          f"'on' or 'using' is required"})
+                                "detail": resolved_on})
             continue
-        if has_using:
-            using = [str(c) for c in j["using"]]
-            on = " AND ".join(f"{parent_alias}.{c} = {alias}.{c}" for c in using)
-        else:
-            using = None
-            on = str(j["on"])
+        on, using = resolved_on
         resolved = _join_cardinality(j, alias)
         if isinstance(resolved, str):
             unsupported.append({"kind": "join", "name": alias, "detail": resolved})
