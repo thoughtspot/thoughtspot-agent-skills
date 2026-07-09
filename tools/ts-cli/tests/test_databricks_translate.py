@@ -14,6 +14,7 @@ from ts_cli.databricks.mv_translate import (
     translate_dimension,
     translate_filter,
     translate_measure,
+    translate_window_measure,
 )
 
 TABLES = {"source": "TRANSACTIONS", "orders": "DM_ORDER",
@@ -220,6 +221,16 @@ class TestTranslateMeasure:
         assert out["ts_expr"] == ("sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) "
                                   "/ count ( 1 )")
 
+    def test_windowed_measure_guard_routes_away(self):
+        # kind=="windowed" measures must go through translate_window_measure;
+        # translate_measure raises rather than silently mistranslating.
+        with pytest.raises(UntranslatableError, match="translate_window_measure"):
+            translate_measure(
+                _measure("m", "SUM(x)", "simple", agg_function="SUM",
+                         physical_ref="x",
+                         window={"order": "d", "range": {"type": "cumulative"}}),
+                TABLES)
+
     def test_cross_measure_placeholders_prepared(self):
         out = translate_measure(
             _measure("ratio", "MEASURE(quantity) / ANY_VALUE(category_quantity)",
@@ -249,3 +260,212 @@ class TestPrepareCrossMeasureSurfaces:
                      "conditional"), TABLES)
         assert out["ts_expr"] == ("sum_if ( [TRANSACTIONS::y] > 1 , "
                                   "[TRANSACTIONS::x] )")
+
+
+def _win_measure(name, expr, expr_kind, window, **kw):
+    m = _measure(name, expr, expr_kind, **kw)
+    m["kind"] = "windowed"
+    m["window"] = window
+    return m
+
+
+def _window(order, rtype, n=None, unit=None, anchor=None, semi="last",
+            offset=None, raw_range=None):
+    return {"order": order,
+            "range": {"type": rtype, "n": n, "unit": unit, "anchor": anchor},
+            "raw_range": raw_range or rtype, "semiadditive": semi,
+            "offset": offset, "raw_offset": None,
+            "density_check_required": rtype in ("trailing", "leading")}
+
+
+DIMS = [
+    _dim("transaction_date", "transaction_date", "direct"),
+    _dim("order_month", "DATE_TRUNC('MONTH', order_date)", "computed"),
+    _dim("order_quarter", "DATE_TRUNC('QUARTER', order_date)", "computed"),
+    _dim("balance_date", "balance_date", "direct"),
+]
+
+
+class TestWindowMeasures:
+    def test_trailing_exclusive_golden(self):
+        # ts-from-databricks.md Measure 5 (post-PR-1 corrected form)
+        out = translate_window_measure(
+            _win_measure("revenue_7d_rolling", "SUM(unit_price * quantity)",
+                         "complex", _window("transaction_date", "trailing", 7,
+                                           "day", "exclusive",
+                                           raw_range="trailing 7 day")),
+            DIMS, TABLES)
+        assert out["ts_expr"] == ("moving_sum ( [TRANSACTIONS::unit_price] * "
+                                  "[TRANSACTIONS::quantity] , 7 , -1 , "
+                                  "[TRANSACTIONS::transaction_date] )")
+        kinds = [a["kind"] for a in out["annotations"]]
+        assert kinds == ["sparse_data_risk"]
+        assert "BL-098" in out["annotations"][0]["detail"]
+
+    def test_trailing_inclusive(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("transaction_date", "trailing", 7, "day",
+                                 "inclusive"), physical_ref="x",
+                         agg_function="SUM"),
+            DIMS, TABLES)
+        assert " , 6 , 0 , " in out["ts_expr"]
+
+    def test_leading_exclusive(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("transaction_date", "leading", 7, "day",
+                                 "exclusive"), physical_ref="x",
+                         agg_function="SUM"),
+            DIMS, TABLES)
+        assert " , -1 , 7 , " in out["ts_expr"]
+
+    def test_avg_uses_moving_average(self):
+        out = translate_window_measure(
+            _win_measure("m", "AVG(x)", "simple",
+                         _window("transaction_date", "trailing", 30, "day",
+                                 "exclusive"), physical_ref="x",
+                         agg_function="AVG"),
+            DIMS, TABLES)
+        assert out["ts_expr"].startswith("moving_average ( [TRANSACTIONS::x] , 30 , -1")
+
+    def test_max_pending_verification(self):
+        out = translate_window_measure(
+            _win_measure("m", "MAX(x)", "simple",
+                         _window("transaction_date", "trailing", 7, "day",
+                                 "exclusive"), physical_ref="x",
+                         agg_function="MAX"),
+            DIMS, TABLES)
+        kinds = [a["kind"] for a in out["annotations"]]
+        assert kinds == ["sparse_data_risk", "pending_verification"]
+
+    def test_trailing_non_day_unit_skipped(self):
+        with pytest.raises(UntranslatableError, match="month.*day grain"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("order_month", "trailing", 2, "month",
+                                     "exclusive"), physical_ref="x",
+                             agg_function="SUM"),
+                DIMS, TABLES)
+
+    def test_cumulative_sum(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("transaction_date", "cumulative"),
+                         physical_ref="x", agg_function="SUM"),
+            DIMS, TABLES)
+        assert out["ts_expr"] == ("cumulative_sum ( [TRANSACTIONS::x] , "
+                                  "[TRANSACTIONS::transaction_date] )")
+        assert out["annotations"] == []
+
+    def test_semiadditive_last_raw_date(self):
+        out = translate_window_measure(
+            _win_measure("inventory_balance", "SUM(FILLED_INVENTORY)", "simple",
+                         _window("balance_date", "current"),
+                         physical_ref="FILLED_INVENTORY", agg_function="SUM"),
+            DIMS, TABLES)
+        assert out["ts_expr"] == ("last_value ( sum ( [TRANSACTIONS::FILLED_INVENTORY] ) , "
+                                  "query_groups ( ) , { [TRANSACTIONS::balance_date] } )")
+
+    def test_semiadditive_first_raw_date(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("balance_date", "current", semi="first"),
+                         physical_ref="x", agg_function="SUM"),
+            DIMS, TABLES)
+        assert out["ts_expr"].startswith("first_value (")
+
+    def test_current_truncated_no_offset_plain_sum(self):
+        out = translate_window_measure(
+            _win_measure("monthly_revenue", "SUM(LINE_TOTAL)", "simple",
+                         _window("order_month", "current"),
+                         physical_ref="LINE_TOTAL", agg_function="SUM"),
+            DIMS, TABLES)
+        assert out["ts_expr"] == "sum ( [TRANSACTIONS::LINE_TOTAL] )"
+
+    def test_current_offset_month_lag_verified(self):
+        out = translate_window_measure(
+            _win_measure("prior_month_revenue", "SUM(LINE_TOTAL)", "simple",
+                         _window("order_month", "current",
+                                 offset={"n": -1, "unit": "month"}),
+                         physical_ref="LINE_TOTAL", agg_function="SUM"),
+            DIMS, TABLES)
+        assert out["ts_expr"] == ("moving_sum ( [TRANSACTIONS::LINE_TOTAL] , 1 , -1 , "
+                                  "[TRANSACTIONS::order_date] )")
+        kinds = [a["kind"] for a in out["annotations"]]
+        assert kinds == ["one_row_per_period"]  # the C6-verified combo — no pending
+
+    def test_current_offset_year_at_month_grain_pending_c8(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("order_month", "current",
+                                 offset={"n": -1, "unit": "year"}),
+                         physical_ref="x", agg_function="SUM"),
+            DIMS, TABLES)
+        assert " , 12 , -12 , " in out["ts_expr"]
+        kinds = [a["kind"] for a in out["annotations"]]
+        assert kinds == ["one_row_per_period", "pending_verification"]
+        assert "C8" in out["annotations"][1]["detail"]
+
+    def test_current_offset_quarter_grain_pending_c8(self):
+        out = translate_window_measure(
+            _win_measure("m", "SUM(x)", "simple",
+                         _window("order_quarter", "current",
+                                 offset={"n": -3, "unit": "month"}),
+                         physical_ref="x", agg_function="SUM"),
+            DIMS, TABLES)
+        assert " , 1 , -1 , " in out["ts_expr"]
+        assert "pending_verification" in [a["kind"] for a in out["annotations"]]
+
+    def test_offset_day_unit_skipped(self):
+        with pytest.raises(UntranslatableError, match="offset unit 'day'"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("order_month", "current",
+                                     offset={"n": -30, "unit": "day"}),
+                             physical_ref="x", agg_function="SUM"),
+                DIMS, TABLES)
+
+    def test_offset_not_divisible_skipped(self):
+        with pytest.raises(UntranslatableError, match="divide"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("order_quarter", "current",
+                                     offset={"n": -1, "unit": "month"}),
+                             physical_ref="x", agg_function="SUM"),
+                DIMS, TABLES)
+
+    def test_range_all_skipped_judgment(self):
+        with pytest.raises(UntranslatableError, match="partition-dimension"):
+            translate_window_measure(
+                _win_measure("all_amount", "SUM(x)", "simple",
+                             _window("transaction_date", "all"),
+                             physical_ref="x", agg_function="SUM"),
+                DIMS, TABLES)
+
+    def test_order_dimension_missing_skipped(self):
+        with pytest.raises(UntranslatableError, match="order.*not found"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("nope", "cumulative"),
+                             physical_ref="x", agg_function="SUM"),
+                DIMS, TABLES)
+
+    def test_complex_inner_expr_stripped_of_outer_agg(self):
+        # golden Measure 5 uses SUM(a * b) — inner is a * b (rule 9)
+        out = translate_window_measure(
+            _win_measure("m", "SUM(unit_price * quantity)", "complex",
+                         _window("transaction_date", "trailing", 7, "day",
+                                 "exclusive")),
+            DIMS, TABLES)
+        assert out["ts_expr"].startswith(
+            "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] ,")
+
+    def test_windowed_cross_measure_skipped(self):
+        with pytest.raises(UntranslatableError, match="MEASURE"):
+            translate_window_measure(
+                _win_measure("m", "MEASURE(a) - MEASURE(b)",
+                             "complex_cross_measure",
+                             _window("order_month", "current"),
+                             cross_refs=["a", "b"]),
+                DIMS, TABLES)
