@@ -228,6 +228,14 @@ class TestPostfixConstructs:
         assert t("NOT x IN (1, 2)") == \
             "not ( ( [TRANSACTIONS::x] = 1 or [TRANSACTIONS::x] = 2 ) )"
 
+    def test_not_flag_inside_case(self):
+        assert t("CASE WHEN NOT is_return THEN 1 ELSE 0 END") == \
+            "if ( [TRANSACTIONS::is_return] = false , 1 , 0 )"
+
+    def test_not_comparison_inside_case(self):
+        assert t("CASE WHEN NOT status = 'x' THEN 1 ELSE 0 END") == \
+            "if ( not ( [TRANSACTIONS::status] = 'x' ) , 1 , 0 )"
+
 
 class TestSafeDivide:
     def test_divide_by_nullif(self):

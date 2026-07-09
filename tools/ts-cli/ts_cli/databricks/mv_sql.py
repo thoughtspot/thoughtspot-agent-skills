@@ -419,11 +419,16 @@ def _pop_operand(units: list[str], construct: str) -> str:
     return unit
 
 
+# Keywords that can never continue a NOT operand: boolean connectors plus
+# the CASE-structure keywords (a NOT inside a CASE condition ends at THEN).
+_NOT_OPERAND_STOP_KWS = frozenset({"AND", "OR", "THEN", "WHEN", "ELSE", "END"})
+
+
 def _terminates_operand(nk: str | None, nt: str | None) -> bool:
-    """True when the next token ends a bare-column operand (end/and/or/')'/',')."""
+    """True when the next token ends a bare-column operand."""
     if nk is None:
         return True
-    if nk == "kw" and nt in ("AND", "OR"):
+    if nk == "kw" and nt in _NOT_OPERAND_STOP_KWS:
         return True
     return nk == "op" and nt in (")", ",")
 
@@ -442,7 +447,7 @@ def _construct_not(cur: _Cursor, resolver, units: list[str]) -> None:
         if not (nk == "op" and nt == "("):
             # NOT <col> <comparison/IS/IN/…> — the comparison binds tighter
             # than NOT in SQL, so wrap the whole comparison, not just the col.
-            inner = _expr(cur, resolver, frozenset({"AND", "OR"}))
+            inner = _expr(cur, resolver, _NOT_OPERAND_STOP_KWS)
             units.append(f"not ( {inner} )")
             return
     # NOT <group/call/…>: translate exactly one operand
