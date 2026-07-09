@@ -1,3 +1,5 @@
+<!-- currency: looker — 2026-07 (inaugural anchor; verify in next external sweep) -->
+
 # LookML → ThoughtSpot TML Generation Rules
 
 Critical rules for producing valid ThoughtSpot TML from a LookML project.

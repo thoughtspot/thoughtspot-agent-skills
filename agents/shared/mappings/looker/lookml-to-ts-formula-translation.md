@@ -1,3 +1,5 @@
+<!-- currency: looker — 2026-07 (inaugural anchor; verify in next external sweep) -->
+
 # LookML → ThoughtSpot Formula Translation Reference
 
 Covers all measure types, dimension types, and expression patterns found in

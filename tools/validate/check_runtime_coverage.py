@@ -71,6 +71,10 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- Tableau migration (CLI skill; no CoCo equivalent — TWB parsing needs shell + LLM) ---
     ("ts-convert-from-tableau", "coco-snowsight"):
         "TWB XML parsing and TML generation require shell access and LLM reasoning; not supported in stored-proc runtime",
+
+    # --- Looker migration (CLI skill; no CoCo equivalent — LookML parsing needs shell + LLM) ---
+    ("ts-convert-from-looker", "coco-snowsight"):
+        "LookML parsing and TML generation require shell access and LLM reasoning; not supported in stored-proc runtime",
     ("ts-profile-tableau", "coco-snowsight"):
         "Tableau Server not accessible from Snowsight stored-proc runtime",
     ("ts-load-source-data", "coco-snowsight"):

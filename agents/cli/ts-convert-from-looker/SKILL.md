@@ -32,7 +32,7 @@ inline strategy + label-vs-name decisions, or chart-type + layout preferences.
 | [shared/schemas/thoughtspot-connection.md](shared/schemas/thoughtspot-connection.md) | Connection handling in TML |
 | [references/coverage-matrix.md](references/coverage-matrix.md) | Mapped and unmapped LookML constructs |
 | [references/open-items.md](references/open-items.md) | Known gaps, validation quirks, deferred items |
-| [fixtures/skilltest-orders/](fixtures/skilltest-orders/) | Verified LookML fixture — input for re-testing the skill |
+| [fixtures/skilltest-orders/skilltest_orders.model.lkml](fixtures/skilltest-orders/skilltest_orders.model.lkml) | Verified LookML fixture — input for re-testing the skill |
 
 ---
 
