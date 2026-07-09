@@ -614,3 +614,277 @@ class TestOrchestrator:
         out = translate_metric_view(_parsed(DIMS, measures), TABLES)
         assert "m1" in out["window_measures"]
         assert {s["name"] for s in out["skipped"]} == {"m1", "m2"}
+
+
+# --- ts databricks translate-formulas CLI (BL-063 PR3) -----------------
+
+import json
+
+from typer.testing import CliRunner
+
+from ts_cli.cli import app
+from ts_cli.databricks.mv_parse import parse_metric_view
+
+try:
+    runner = CliRunner(mix_stderr=False)
+except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
+    runner = CliRunner()
+
+
+def _stderr(result):
+    try:
+        return result.stderr
+    except ValueError:
+        return ""
+
+
+def _write_inputs(tmp_path, parsed, tables):
+    inp = tmp_path / "parsed.json"
+    inp.write_text(json.dumps(parsed))
+    tab = tmp_path / "tables.json"
+    tab.write_text(json.dumps(tables))
+    return inp, tab, tmp_path / "translated.json"
+
+
+class TestTranslateFormulasCli:
+    def test_happy_path_exit_0_and_stats_on_stderr(self, tmp_path):
+        parsed = _parsed([_dim("d", "d", "direct")],
+                         [_measure("m", "SUM(x)", "simple",
+                                   agg_function="SUM", physical_ref="x")])
+        inp, tab, out = _write_inputs(tmp_path, parsed, TABLES)
+        result = runner.invoke(app, ["databricks", "translate-formulas",
+                                     "--input", str(inp), "--output", str(out),
+                                     "--tables", str(tab)])
+        assert result.exit_code == 0, result.stdout + _stderr(result)
+        assert result.stdout == ""  # stdout purity (DEFER m)
+        err = _stderr(result)
+        assert "translated" in err and "2" in err
+        data = json.loads(out.read_text())
+        assert data["stats"]["translated"] == 2
+
+    def test_skips_reported_on_stderr_exit_0(self, tmp_path):
+        parsed = _parsed((), [_win_measure(
+            "all_amount", "SUM(x)", "simple",
+            _window("transaction_date", "all"),
+            physical_ref="x", agg_function="SUM")])
+        parsed["dimensions"] = DIMS
+        inp, tab, out = _write_inputs(tmp_path, parsed, TABLES)
+        result = runner.invoke(app, ["databricks", "translate-formulas",
+                                     "--input", str(inp), "--output", str(out),
+                                     "--tables", str(tab)])
+        assert result.exit_code == 0
+        err = _stderr(result)
+        assert "SKIPPED" in err and "all_amount" in err
+
+    def test_bl098_warning_on_stderr(self, tmp_path):
+        parsed = _parsed(DIMS, [_win_measure(
+            "roll", "SUM(x)", "simple",
+            _window("transaction_date", "trailing", 7, "day", "exclusive",
+                    raw_range="trailing 7 day"),
+            physical_ref="x", agg_function="SUM")])
+        inp, tab, out = _write_inputs(tmp_path, parsed, TABLES)
+        result = runner.invoke(app, ["databricks", "translate-formulas",
+                                     "--input", str(inp), "--output", str(out),
+                                     "--tables", str(tab)])
+        err = _stderr(result)
+        assert "WARNING" in err and "BL-098" in err
+
+    def test_missing_input_exit_1(self, tmp_path):
+        tab = tmp_path / "tables.json"
+        tab.write_text(json.dumps(TABLES))
+        result = runner.invoke(app, ["databricks", "translate-formulas",
+                                     "--input", str(tmp_path / "nope.json"),
+                                     "--output", str(tmp_path / "o.json"),
+                                     "--tables", str(tab)])
+        assert result.exit_code == 1
+
+    def test_bad_tables_map_exit_1(self, tmp_path):
+        parsed = _parsed()
+        inp, tab, out = _write_inputs(tmp_path, parsed, {"orders": "X"})
+        result = runner.invoke(app, ["databricks", "translate-formulas",
+                                     "--input", str(inp), "--output", str(out),
+                                     "--tables", str(tab)])
+        assert result.exit_code == 1
+        assert "source" in _stderr(result)
+
+
+# --- Golden worked-example fixtures (BL-063 PR3 acceptance gate) -------
+#
+# Copied verbatim from the source-of-truth worked examples:
+#   agents/shared/worked-examples/databricks/ts-from-databricks.md
+#   agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md
+# The expected ts_expr strings are the POST-2026-07-09-correction texts
+# recorded in those docs (revenue_7d_rolling uses moving_sum(..., 7, -1, ...)).
+
+ECOMMERCE_MV_YAML = """\
+version: 1.1
+comment: >-
+  E-commerce transaction metrics — revenue, customer counts, order value,
+  and return analysis on the transactions table.
+source: analytics.ecommerce.transactions
+filter: status != 'cancelled'
+dimensions:
+  - name: transaction_id
+    expr: transaction_id
+  - name: product_category
+    expr: product_category
+    display_name: 'Product Category'
+    synonyms: ['category', 'product type']
+  - name: transaction_month
+    expr: DATE_TRUNC('MONTH', transaction_date)
+  - name: customer_region
+    expr: customer_region
+    display_name: 'Region'
+    synonyms: ['area', 'territory']
+  - name: transaction_date
+    expr: transaction_date
+measures:
+  - name: total_revenue
+    expr: SUM(unit_price * quantity * (1 - discount))
+    display_name: 'Total Revenue'
+    comment: 'Net revenue after discount.'
+    synonyms: ['revenue', 'sales']
+  - name: unique_customers
+    expr: COUNT(DISTINCT customer_id)
+    display_name: 'Unique Customers'
+    comment: 'Distinct customer count.'
+  - name: avg_order_value
+    expr: SUM(unit_price * quantity) / COUNT(DISTINCT transaction_id)
+    display_name: 'Avg Order Value'
+    comment: 'Average revenue per transaction.'
+    synonyms: ['AOV']
+  - name: high_value_revenue
+    expr: SUM(unit_price * quantity) FILTER (WHERE unit_price > 100)
+    display_name: 'High Value Revenue'
+    comment: 'Revenue from items priced above 100.'
+  - name: revenue_7d_rolling
+    expr: SUM(unit_price * quantity)
+    display_name: '7-Day Rolling Revenue'
+    comment: 'Trailing 7-day rolling sum of gross revenue.'
+    window:
+      - order: transaction_date
+        range: trailing 7 day
+        semiadditive: last
+  - name: return_rate
+    expr: CAST(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
+    display_name: 'Return Rate'
+    comment: 'Fraction of transactions that were returned.'
+"""
+
+# Expected TS text, byte-exact from ts-from-databricks.md (corrected 2026-07-09)
+ECOMMERCE_EXPECTED = {
+    "transaction_month": "start_of_month ( [TRANSACTIONS::transaction_date] )",
+    "total_revenue": "sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] * ( 1 - [TRANSACTIONS::discount] ) )",
+    "unique_customers": "unique count ( [TRANSACTIONS::customer_id] )",
+    "avg_order_value": "sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] ) / unique count ( [TRANSACTIONS::transaction_id] )",
+    "high_value_revenue": "sum_if ( [TRANSACTIONS::unit_price] > 100 , [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] )",
+    "revenue_7d_rolling": "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )",
+    "return_rate": "sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )",
+}
+
+
+class TestGoldenEcommerce:
+    """ts-from-databricks.md — the post-PR-1 corrected worked example."""
+
+    def _translate(self):
+        parsed = parse_metric_view(ECOMMERCE_MV_YAML)
+        assert parsed["unsupported"] == []
+        return translate_metric_view(parsed, {"source": "TRANSACTIONS"})
+
+    def test_every_formula_matches_recorded_text(self):
+        out = self._translate()
+        by_name = {e["name"]: e for e in out["translated"]}
+        for name, expected in ECOMMERCE_EXPECTED.items():
+            assert by_name[name]["ts_expr"] == expected, name
+
+    def test_direct_dimensions_are_columns(self):
+        out = self._translate()
+        by_name = {e["name"]: e for e in out["translated"]}
+        for name in ("transaction_id", "product_category", "customer_region",
+                     "transaction_date"):
+            assert by_name[name]["output_kind"] == "column", name
+
+    def test_filter_golden(self):
+        out = self._translate()
+        assert out["filter"]["ts_expr"] == "[TRANSACTIONS::status] != 'cancelled'"
+
+    def test_nothing_skipped_and_window_flagged(self):
+        out = self._translate()
+        assert out["skipped"] == []
+        assert out["window_measures"] == ["revenue_7d_rolling"]
+        risk = next(e for e in out["translated"]
+                    if e["name"] == "revenue_7d_rolling")["annotations"]
+        assert risk[0]["kind"] == "sparse_data_risk"  # BL-098 item 2
+
+
+SQL_VIEW_MV_YAML = """\
+version: "1.1"
+source: "select * from analytics.sales.orders"
+filter: "order_status = 'completed'"
+dimensions:
+  - name: order_id
+    expr: order_id
+  - name: order_date
+    expr: order_date
+    display_name: "Order Date"
+  - name: order_status
+    expr: order_status
+    display_name: "Order Status"
+  - name: customer_segment
+    expr: "CASE WHEN total_amount > 1000 THEN 'Premium' WHEN total_amount > 100 THEN 'Standard' ELSE 'Basic' END"
+    display_name: "Customer Segment"
+measures:
+  - name: total_orders
+    expr: "COUNT(*)"
+    display_name: "Total Orders"
+  - name: total_amount
+    expr: "SUM(total_amount)"
+    display_name: "Total Amount"
+  - name: avg_order_amount
+    expr: "SUM(total_amount) / COUNT(DISTINCT order_id)"
+    display_name: "Avg Order Amount"
+"""
+
+
+class TestGoldenSqlView:
+    """ts-from-databricks-sql-view.md — SQL-source MV over Orders_MV_View."""
+
+    def _translate(self):
+        parsed = parse_metric_view(SQL_VIEW_MV_YAML)
+        assert parsed["source"]["kind"] == "sql_query"
+        assert parsed["unsupported"] == []
+        return translate_metric_view(parsed, {"source": "Orders_MV_View"})
+
+    def test_filter_translates_for_pr4_to_bake_or_formula(self):
+        # The worked example bakes this filter into the SQL View's sql_query
+        # (a build-model/skill decision, PR 4); translate-formulas just
+        # translates it faithfully.
+        out = self._translate()
+        assert out["filter"]["ts_expr"] == "[Orders_MV_View::order_status] = 'completed'"
+
+    def test_case_nested_if_golden(self):
+        out = self._translate()
+        seg = next(e for e in out["translated"] if e["name"] == "customer_segment")
+        assert seg["ts_expr"] == (
+            "if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , "
+            "if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )")
+
+    def test_count_star_golden(self):
+        out = self._translate()
+        assert next(e for e in out["translated"]
+                    if e["name"] == "total_orders")["ts_expr"] == "count ( 1 )"
+
+    def test_ratio_golden(self):
+        out = self._translate()
+        assert next(e for e in out["translated"]
+                    if e["name"] == "avg_order_amount")["ts_expr"] == (
+            "sum ( [Orders_MV_View::total_amount] ) / "
+            "unique count ( [Orders_MV_View::order_id] )")
+
+    def test_simple_sum_is_column_bind(self):
+        # ts-from-databricks-sql-view.md: total_amount binds directly with
+        # aggregation: SUM — no formula
+        out = self._translate()
+        ta = next(e for e in out["translated"] if e["name"] == "total_amount")
+        assert ta["output_kind"] == "column"
+        assert ta["aggregation"] == "SUM"
