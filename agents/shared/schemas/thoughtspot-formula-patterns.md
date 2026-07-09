@@ -385,7 +385,7 @@ Full syntax: `group_aggregate ( agg(measure) , grouping , filters )`
 | Filter | Behavior |
 |---|---|
 | `query_filters()` | All filters from the query — translatable |
-| `{}` | No filters — **untranslatable** |
+| `{}` | No filters — **untranslatable** to Snowflake SV; **translatable to a Databricks MV** as the query-time-blind LOD paired with a model filter → MV global `filter:` (live-verified 2026-07-09 — see the A3 note below) |
 | `{ [TABLE::col] = 'value' }` | Hardcoded filter — **untranslatable** |
 | `query_filters() + { [TABLE::col] = 'value' }` | All query filters + hardcoded — **untranslatable** |
 | `query_filters() - { [TABLE::col] }` | Query filters minus one column — **untranslatable** |
