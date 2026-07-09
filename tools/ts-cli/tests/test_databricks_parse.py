@@ -402,6 +402,37 @@ class TestClassifyMeasure:
         assert "dot inside a backtick-quoted identifier" in out["reason"]
 
 
+class TestQuoteAwareScanning:
+    def test_line_marker_inside_literal_preserved(self):
+        assert strip_sql_comments("col = 'a -- b'") == "col = 'a -- b'"
+
+    def test_block_marker_inside_literal_preserved(self):
+        assert strip_sql_comments("col = '/* not a comment */'") == "col = '/* not a comment */'"
+
+    def test_line_marker_inside_block_comment(self):
+        # old two-pass order stripped the -- first, corrupting the block
+        assert strip_sql_comments("SUM(x) /* a -- b */ + 1") == "SUM(x)   + 1"
+
+    def test_escaped_quote_in_literal(self):
+        assert strip_sql_comments("col = 'it''s -- fine'") == "col = 'it''s -- fine'"
+
+    def test_filter_keyword_inside_literal_not_conditional(self):
+        out = classify_measure_expr("SUM(CASE WHEN note = 'FILTER (WHERE' THEN 1 ELSE 0 END)")
+        assert out["expr_kind"] == "complex"
+
+    def test_subquery_keyword_inside_literal_not_unsupported(self):
+        out = classify_measure_expr("COUNT(x) FILTER (WHERE note != '(SELECT hidden')")
+        assert out["expr_kind"] == "conditional"
+
+    def test_over_inside_literal_is_computed_dimension(self):
+        out = classify_dimension_expr("CONCAT(region, ' OVER (', zone)")
+        assert out["kind"] == "computed"
+
+    def test_split_top_level_quote_aware(self):
+        from ts_cli.databricks.mv_expr import _split_top_level
+        assert _split_top_level("a, 'x, y', b") == ["a", "'x, y'", "b"]
+
+
 class TestParseJoins:
     def test_on_join_with_rely(self):
         joins = [{"name": "orders", "source": "c.s.dm_order",
