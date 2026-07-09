@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+import yaml
+
 _LINE_COMMENT_RE = re.compile(r"--[^\n]*")
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
@@ -389,3 +391,185 @@ def parse_joins(join_list, parent_alias: str = "source",
             "joins": parse_joins(j.get("joins"), alias, unsupported),
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# Top-level assembly — `ts databricks parse-mv`'s single entry point.
+# ---------------------------------------------------------------------------
+
+_KNOWN_TOP_KEYS = {"version", "comment", "source", "joins", "filter",
+                   "fields", "dimensions", "measures", "materialization"}
+_KNOWN_VERSIONS = {"0.1", "1.1"}
+
+_DENSITY_WARNING = (
+    "measure '{name}': range '{raw_range}' is a date-interval frame on "
+    "Databricks but translates to row-positional moving_sum on ThoughtSpot — "
+    "numbers match only if order column '{order}' is dense at the {unit} "
+    "grain (one row per {unit}, no gaps). Verify density before trusting the "
+    "translation (BL-098; docs/audit/2026-07-09-dbx-semantic-claim-matrix.md E1)."
+)
+
+
+def _unsupported_entry(kind: str, name, detail: str) -> dict:
+    return {"kind": kind, "name": name, "detail": detail}
+
+
+def _parse_dimension(d: dict, unsupported: list) -> dict | None:
+    name, expr = d.get("name"), d.get("expr")
+    if not name or expr is None:
+        unsupported.append(_unsupported_entry(
+            "dimension", name, f"dimension entry requires name and expr: {d!r}"))
+        return None
+    expr = str(expr)
+    cls = classify_dimension_expr(expr)
+    if cls["kind"] == "unsupported":
+        unsupported.append(_unsupported_entry(
+            "dimension", str(name), f"dimension '{name}': {cls['reason']}"))
+        return None
+    return {"name": str(name), "expr": expr, "kind": cls["kind"],
+            "display_name": d.get("display_name"),
+            "comment": d.get("comment"),
+            "synonyms": list(d.get("synonyms") or []),
+            "inner_agg": cls.get("inner_agg"),
+            "inner_expr": cls.get("inner_expr"),
+            "partition_by": cls.get("partition_by", [])}
+
+
+def _parse_measure(m: dict, unsupported: list, warnings: list) -> dict | None:
+    name, expr = m.get("name"), m.get("expr")
+    if not name or expr is None:
+        unsupported.append(_unsupported_entry(
+            "measure", name, f"measure entry requires name and expr: {m!r}"))
+        return None
+    expr = str(expr)
+    cls = classify_measure_expr(expr)
+    if cls["expr_kind"] == "unsupported":
+        unsupported.append(_unsupported_entry(
+            "measure", str(name), f"measure '{name}': {cls['reason']}"))
+        return None
+    window = None
+    if m.get("window") is not None:
+        window, problems = parse_window(m["window"], str(name))
+        if problems:
+            unsupported.extend(
+                _unsupported_entry("measure", str(name), p) for p in problems)
+            return None
+        if window["density_check_required"]:
+            warnings.append(_DENSITY_WARNING.format(
+                name=name, raw_range=window["raw_range"],
+                order=window["order"], unit=window["range"]["unit"]))
+    return {"name": str(name), "expr": expr,
+            "kind": "windowed" if window else cls["expr_kind"],
+            "expr_kind": cls["expr_kind"],
+            "agg_function": cls["agg_function"],
+            "physical_ref": cls["physical_ref"],
+            "distinct": cls["distinct"],
+            "cross_refs": cls["cross_refs"],
+            "lod_refs": cls["lod_refs"],
+            "display_name": m.get("display_name"),
+            "comment": m.get("comment"),
+            "synonyms": list(m.get("synonyms") or []),
+            "format": m.get("format"),
+            "window": window}
+
+
+def _check_unknown_top_keys(doc: dict, unsupported: list) -> None:
+    for key in doc:
+        if key not in _KNOWN_TOP_KEYS:
+            unsupported.append(_unsupported_entry("unknown_key", None, str(key)))
+
+
+def _resolve_source(doc: dict, unsupported: list) -> dict | None:
+    src_raw = doc.get("source")
+    if src_raw is None:
+        unsupported.append(_unsupported_entry(
+            "missing_source", None, "required top-level 'source' is missing"))
+        return None
+    src = classify_source(str(src_raw))
+    if src is None:
+        unsupported.append(_unsupported_entry(
+            "unrecognized_source", None, str(src_raw)))
+        return None
+    return src
+
+
+def _resolve_dimensions(doc: dict, unsupported: list) -> list[dict]:
+    if "fields" in doc and "dimensions" in doc:
+        unsupported.append(_unsupported_entry(
+            "ambiguous_dimensions", None,
+            "both 'fields:' and 'dimensions:' present — undocumented "
+            "combination, refusing to guess precedence"))
+        return []
+    dims_raw = doc.get("fields", doc.get("dimensions")) or []
+    dims: list[dict] = []
+    for d in dims_raw:
+        entry = _parse_dimension(d if isinstance(d, dict) else {}, unsupported)
+        if entry:
+            dims.append(entry)
+    return dims
+
+
+def _resolve_measures(doc: dict, unsupported: list, warnings: list) -> list[dict]:
+    measures: list[dict] = []
+    for m in doc.get("measures") or []:
+        entry = _parse_measure(m if isinstance(m, dict) else {},
+                               unsupported, warnings)
+        if entry:
+            measures.append(entry)
+    return measures
+
+
+def _resolve_materialization(doc: dict, unsupported: list):
+    mat = doc.get("materialization")
+    if mat is not None and not isinstance(mat, dict):
+        unsupported.append(_unsupported_entry(
+            "materialization", None,
+            f"materialization must be a mapping, got {type(mat).__name__}"))
+        return None
+    return mat  # verbatim pass-through (no TS analog)
+
+
+def parse_metric_view(yaml_text: str) -> dict:
+    """Parse Metric View YAML (v0.1 or v1.1) into the parse-mv JSON contract.
+
+    Never raises on bad input — every failure becomes an unsupported[] entry
+    (the command exits non-zero when unsupported[] is non-empty). Both
+    versions normalize into one shape; there is no downstream version
+    branching.
+    """
+    unsupported: list[dict] = []
+    warnings: list[str] = []
+    result = {"version": None, "comment": None, "source": None, "joins": [],
+              "dimensions": [], "measures": [], "filter": None,
+              "materialization": None, "warnings": warnings,
+              "unsupported": unsupported}
+    try:
+        doc = yaml.safe_load(yaml_text)
+    except yaml.YAMLError as exc:
+        unsupported.append(_unsupported_entry("yaml_error", None, str(exc)))
+        return result
+    if not isinstance(doc, dict):
+        unsupported.append(_unsupported_entry(
+            "yaml_error", None, "top level is not a YAML mapping"))
+        return result
+
+    version = str(doc.get("version", "1.1"))  # GA default; YAML floats -> str
+    if version not in _KNOWN_VERSIONS:
+        unsupported.append(_unsupported_entry("unknown_version", None, version))
+        return result
+    result["version"] = version
+
+    _check_unknown_top_keys(doc, unsupported)
+    result["source"] = _resolve_source(doc, unsupported)
+    result["joins"] = parse_joins(doc.get("joins"), "source", unsupported)
+    result["dimensions"] = _resolve_dimensions(doc, unsupported)
+    result["measures"] = _resolve_measures(doc, unsupported, warnings)
+
+    if not result["dimensions"] and not result["measures"]:
+        warnings.append("Metric View declares no dimensions and no measures")
+
+    flt = doc.get("filter")
+    result["filter"] = str(flt).strip() if flt is not None else None
+    result["comment"] = doc.get("comment")
+    result["materialization"] = _resolve_materialization(doc, unsupported)
+    return result
