@@ -578,3 +578,39 @@ class TestOrchestrator:
     def test_tables_map_validated(self):
         with pytest.raises(ValueError, match="source"):
             translate_metric_view(_parsed(), {"orders": "DM_ORDER"})
+
+    def test_duplicate_refs_to_deferred_measure_not_circular(self):
+        measures = [
+            _measure("a", "SUM(x)", "simple", agg_function="SUM",
+                     physical_ref="x"),
+            _measure("b", "MEASURE(a) * 2", "complex_cross_measure",
+                     cross_refs=["a"]),
+            _measure("c", "MEASURE(b) + MEASURE(b)", "complex_cross_measure",
+                     cross_refs=["b", "b"]),
+        ]
+        out = translate_metric_view(_parsed((), measures), TABLES)
+        assert out["skipped"] == []
+        c = next(e for e in out["translated"] if e["name"] == "c")
+        assert c["ts_expr"] == ("( ( sum ( [TRANSACTIONS::x] ) ) * 2 ) + "
+                                "( ( sum ( [TRANSACTIONS::x] ) ) * 2 )")
+
+    def test_any_value_of_direct_dimension_inlines_column_ref(self):
+        dims = [_dim("region", "region", "direct")]
+        measures = [_measure("m", "SUM(x) * ANY_VALUE(region)",
+                             "complex_cross_measure", lod_refs=["region"])]
+        out = translate_metric_view(_parsed(dims, measures), TABLES)
+        m = next(e for e in out["translated"] if e["name"] == "m")
+        assert m["ts_expr"] == "sum ( [TRANSACTIONS::x] ) * ( [TRANSACTIONS::region] )"
+
+    def test_windowed_cycle_member_listed_in_window_measures(self):
+        measures = [
+            _win_measure("m1", "SUM(x)", "simple",
+                         _window("transaction_date", "cumulative"),
+                         physical_ref="x", agg_function="SUM",
+                         cross_refs=["m2"]),
+            _measure("m2", "MEASURE(m1) * 2", "complex_cross_measure",
+                     cross_refs=["m1"]),
+        ]
+        out = translate_metric_view(_parsed(DIMS, measures), TABLES)
+        assert "m1" in out["window_measures"]
+        assert {s["name"] for s in out["skipped"]} == {"m1", "m2"}

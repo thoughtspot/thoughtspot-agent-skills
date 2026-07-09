@@ -516,12 +516,12 @@ def _translate_item(fn, name, role, translated, skipped, by_name,
     by_name[name] = entry
 
 
-def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
-                              by_name, skip_names, window_measures) -> None:
-    """Kahn topo-sort the MEASURE()/ANY_VALUE() referrers, inline in order."""
-    names = {m["name"] for m in deferred}
-    waiting = {m["name"]: m for m in deferred}
-    indegree = {m["name"]: sum(1 for r in (m["cross_refs"] + m["lod_refs"])
+def _kahn_order(deferred: list[dict], names: set[str]) -> list[str]:
+    """Kahn topological order over the deferred measures (ref -> referrer)."""
+    # Dedupe refs: the loop below decrements once per completed node
+    # (membership check), so duplicate refs (MEASURE(b) + MEASURE(b)) must
+    # count once here or the referrer never reaches indegree 0.
+    indegree = {m["name"]: sum(1 for r in set(m["cross_refs"] + m["lod_refs"])
                                if r in names)
                 for m in deferred}
     queue = [n for n, d in indegree.items() if d == 0]
@@ -534,6 +534,15 @@ def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
                 indegree[other["name"]] -= 1
                 if indegree[other["name"]] == 0:
                     queue.append(other["name"])
+    return order
+
+
+def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
+                              by_name, skip_names, window_measures) -> None:
+    """Kahn topo-sort the MEASURE()/ANY_VALUE() referrers, inline in order."""
+    names = {m["name"] for m in deferred}
+    waiting = {m["name"]: m for m in deferred}
+    order = _kahn_order(deferred, names)
     for m_name in order:
         m = waiting[m_name]
         if m.get("window"):
@@ -543,6 +552,8 @@ def _translate_cross_measures(deferred, parsed, tables, translated, skipped,
                                               skip_names),
             m_name, "measure", translated, skipped, by_name, skip_names)
     for m_name in names - set(order):  # cycle members
+        if waiting[m_name].get("window"):
+            window_measures.append(m_name)
         skipped.append({"name": m_name, "role": "measure",
                         "reason": "circular MEASURE() reference "
                                   f"(cycle involves: {sorted(names - set(order))})"})
@@ -569,6 +580,10 @@ def _inline_and_translate(m, parsed, tables, by_name, skip_names) -> dict:
 def _inline_text(ref_entry: dict) -> str:
     if ref_entry["output_kind"] == "formula":
         return ref_entry["ts_expr"]
+    if ref_entry["aggregation"] is None:  # attribute column (direct dimension)
+        # ANY_VALUE(y) of a direct dimension -> the bare column reference
+        # (mapping doc: ANY_VALUE(name) -> [name]).
+        return f"[{ref_entry['table']}::{ref_entry['column']}]"
     # column-kind simple measure: synthesize its aggregate expression
     lower = {"AVERAGE": "average", "STD_DEVIATION": "stddev"}.get(
         ref_entry["aggregation"], ref_entry["aggregation"].lower())
