@@ -156,7 +156,7 @@ def build_model_cmd(
     """
     from ts_cli.databricks.mv_build_model import build_model_tml_dbx
     from ts_cli.databricks.mv_tml import validate_tml_invariants
-    from ts_cli.tableau.yaml_out import dump_tml_yaml
+    from ts_cli.tml_common import dump_tml_yaml
     from ts_cli.tml_lint import lint_tml
 
     parsed = _load_json(parsed_path, "parsed")
@@ -331,7 +331,7 @@ def _run_import(
     import shlex
     import subprocess
 
-    from ts_cli.tableau.build_model import extract_imported_guid
+    from ts_cli.tml_common import extract_imported_guid
 
     model_tml_str = json.dumps(model_doc)
     completed = subprocess.run(

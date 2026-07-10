@@ -15,6 +15,7 @@ from ts_cli.model_builder import (
     fix_bare_refs,
     fix_double_aggregation,
 )
+from ts_cli.tml_common import extract_imported_guid  # noqa: F401 — moved (BL-063 PR 5)
 
 _CSQ_SUFFIX = re.compile(r"\s*\(Custom SQL Query\d*\)\s*$")
 _CSQ_IN_REF = re.compile(r"\[([^\]]+?)\s+\(\s*Custom SQL Query\d*\)\]")
@@ -269,29 +270,6 @@ def remove_formula(merged: dict, formula_name: str) -> None:
     merged["model"]["columns"] = [
         c for c in merged["model"]["columns"] if c.get("formula_id") != fid
     ]
-
-
-def extract_imported_guid(import_result: list) -> str | None:
-    """Pull the created/updated object GUID out of a tml import response.
-
-    Two response shapes are both live on ThoughtSpot Cloud (verified BL-063 PR4,
-    2026-07-10, se-thoughtspot): the historically-documented nested shape
-    ``response.object[0].header.id_guid``, and a FLAT shape seen on `ts tml
-    import` responses — ``response.header.id_guid`` (no ``object`` wrapper;
-    ``header`` also carries ``name``/``metadata_type``; status lives at
-    ``response.status.status_code``). Try nested first (preserves existing
-    behavior for the Tableau MERGE flow), then fall back to flat. Returns None
-    when neither shape yields a non-empty GUID, or the list is empty.
-    """
-    if not import_result:
-        return None
-    response = import_result[0].get("response", {})
-    obj_list = response.get("object", [])
-    if obj_list:
-        guid = obj_list[0].get("header", {}).get("id_guid")
-        if guid:
-            return guid
-    return response.get("header", {}).get("id_guid") or None
 
 
 def apply_prefix_and_double_agg(
