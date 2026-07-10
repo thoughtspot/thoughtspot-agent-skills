@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-10
+- feat: add `ts databricks build-model` — deterministic ThoughtSpot Model (+ Table) TML assembly from `parse-mv`/`translate-formulas` JSON, with a TML invariant/lint gate (files always written for inspection) and an optional `ts tml import --policy PARTIAL` of the model TML (BL-063 PR4 Task 5, ts-cli v0.44.0)
+
 ## 2026-07-09
 - feat: ts databricks translate-formulas — deterministic MV formula translation (BL-063 PR3, ts-cli v0.43.0)
 - feat: add `ts databricks parse-mv` — deterministic Metric View YAML parser (ts-cli v0.42.0, BL-063 PR2; BL-098 density-check warning on trailing/leading window measures)

@@ -3,7 +3,12 @@
 One class per transform, mirroring test_model_builder.py. Golden classes pin
 the shared worked examples (see TestGoldenEcommerce/TestGoldenSqlView, Task 6).
 """
+import json
+
 import pytest
+from typer.testing import CliRunner
+
+from ts_cli.cli import app
 
 from ts_cli.databricks.mv_build_model import (
     build_columns_and_formulas,
@@ -446,3 +451,156 @@ class TestBuildModelTmlDbx:
             build_model_tml_dbx(model_name="M", parsed=parsed,
                                 translated_doc=translated,
                                 tables={"source": "T"})
+
+
+# --- ts databricks build-model CLI (BL-063 PR4 Task 5) --------------------
+
+PARSED_MIN = {"version": "1.1", "comment": "Metrics.",
+              "source": {"kind": "table_fqn", "raw": "a.e.t", "parts": ["a", "e", "t"],
+                         "needs_live_check": True},
+              "joins": [], "filter": None, "materialization": None,
+              "warnings": [], "unsupported": []}
+TRANSLATED_MIN = {"translated": [
+    {"name": "region", "role": "dimension", "output_kind": "column",
+     "column_type": "ATTRIBUTE", "table": "T", "column": "region", "ts_expr": None,
+     "aggregation": None, "inlined_refs": [], "display_name": None, "comment": None,
+     "synonyms": [], "format": None, "annotations": []}],
+    "skipped": [], "filter": None, "dependency_dag": {}, "window_measures": [],
+    "stats": {"total": 1, "translated": 1, "skipped": 0}}
+
+
+def _write_build_inputs(tmp_path, parsed=None, translated=None, tables=None):
+    (tmp_path / "parsed.json").write_text(json.dumps(parsed or PARSED_MIN))
+    (tmp_path / "translated.json").write_text(json.dumps(translated or TRANSLATED_MIN))
+    (tmp_path / "tables.json").write_text(json.dumps(tables or {"source": "T"}))
+    return tmp_path
+
+
+class TestBuildModelCommand:
+    def _run(self, tmp_path, *extra):
+        runner = CliRunner()
+        args = ["databricks", "build-model",
+                "--parsed", str(tmp_path / "parsed.json"),
+                "--translated", str(tmp_path / "translated.json"),
+                "--tables", str(tmp_path / "tables.json"),
+                "--connection", "Databricks Analytics",
+                "--model-name", "M",
+                "--output-dir", str(tmp_path / "out"), *extra]
+        return runner.invoke(app, args)
+
+    def test_writes_model_tml_and_summary(self, tmp_path):
+        result = self._run(_write_build_inputs(tmp_path))
+        assert result.exit_code == 0, result.output
+        summary = json.loads(result.stdout)
+        assert summary["model_name"] == "M"
+        assert summary["import_status"] == "not_requested"
+        assert summary["lint_findings"] == [] and summary["invariant_findings"] == []
+        model_file = tmp_path / "out" / "M.model.tml"
+        assert model_file.exists()
+        import yaml
+        doc = yaml.safe_load(model_file.read_text())
+        assert doc["model"]["name"] == "M"
+
+    def test_stdout_is_pure_json(self, tmp_path):
+        result = self._run(_write_build_inputs(tmp_path))
+        json.loads(result.stdout)  # raises if any diagnostic leaked to stdout
+
+    def test_table_tml_written_for_create_true(self, tmp_path):
+        tables = {"source": {"name": "T", "create": True, "db": "a", "schema": "e",
+                             "db_table": "t",
+                             "columns": [{"name": "region", "dbx_type": "string"}]}}
+        result = self._run(_write_build_inputs(tmp_path, tables=tables))
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "out" / "T.table.tml").exists()
+        summary = json.loads(result.stdout)
+        assert summary["table_files"] == [str(tmp_path / "out" / "T.table.tml")]
+
+    def test_existing_guid_at_document_root(self, tmp_path):
+        result = self._run(_write_build_inputs(tmp_path), "--existing-guid", "g-1")
+        assert result.exit_code == 0, result.output
+        import yaml
+        doc = yaml.safe_load((tmp_path / "out" / "M.model.tml").read_text())
+        assert doc["guid"] == "g-1" and "guid" not in doc["model"]
+
+    def test_lint_finding_exits_1_but_writes_files(self, tmp_path):
+        # duplicate column_id triggers lint I8
+        bad = dict(TRANSLATED_MIN)
+        bad["translated"] = TRANSLATED_MIN["translated"] + [dict(
+            TRANSLATED_MIN["translated"][0], name="region2", display_name="Region 2")]
+        result = self._run(_write_build_inputs(tmp_path, translated=bad))
+        assert result.exit_code == 1
+        summary = json.loads(result.stdout)
+        assert summary["lint_findings"]
+        assert (tmp_path / "out" / "M.model.tml").exists()
+
+    def test_missing_input_exits_1(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(app, ["databricks", "build-model",
+                                     "--parsed", str(tmp_path / "nope.json"),
+                                     "--translated", str(tmp_path / "nope.json"),
+                                     "--tables", str(tmp_path / "nope.json"),
+                                     "--connection", "C", "--model-name", "M",
+                                     "--output-dir", str(tmp_path / "out")])
+        assert result.exit_code == 1
+
+    def test_dry_run_with_profile_skips_import(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        def boom(*a, **k):
+            raise AssertionError("subprocess must not run under --dry-run")
+        monkeypatch.setattr(sp, "run", boom)
+        result = self._run(_write_build_inputs(tmp_path),
+                           "--profile", "p", "--dry-run")
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["import_status"] == "dry_run"
+
+    def test_import_invokes_tml_import_with_stdin(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        calls = {}
+        class FakeCompleted:
+            returncode = 0
+            # Real extract_imported_guid shape (ts_cli/tableau/build_model.py:274):
+            # import_result[0]["response"]["object"][0]["header"]["id_guid"].
+            stdout = json.dumps([{"response": {"object": [
+                {"header": {"id_guid": "new-guid"}}]}}])
+            stderr = ""
+        def fake_run(cmd, **kwargs):
+            calls["cmd"] = cmd
+            calls["input"] = kwargs.get("input")
+            return FakeCompleted()
+        monkeypatch.setattr(sp, "run", fake_run)
+        result = self._run(_write_build_inputs(tmp_path), "--profile", "p")
+        assert result.exit_code == 0, result.output
+        assert "ts tml import" in " ".join(calls["cmd"])
+        assert calls["input"] is not None            # BL-097: stdin always provided
+        summary = json.loads(result.stdout)
+        assert summary["import_status"] == "imported"
+        assert summary["model_guid"] == "new-guid"
+
+    def test_import_failure_exits_1_with_error_detail(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        class FakeCompleted:
+            returncode = 1
+            stdout = ""
+            stderr = "Error: connection refused"
+        monkeypatch.setattr(sp, "run", lambda cmd, **kwargs: FakeCompleted())
+        result = self._run(_write_build_inputs(tmp_path), "--profile", "p")
+        assert result.exit_code == 1
+        summary = json.loads(result.stdout)
+        assert summary["import_status"] == "failed"
+        assert "connection refused" in summary["import_error"]
+
+    def test_zero_column_table_guard_exits_1_before_writing(self, tmp_path):
+        # Every column in this create:true table maps to an unsupported
+        # Databricks type — build_table_tml omits all of them, leaving an
+        # empty columns[] list. That must be a hard error, not a table.tml
+        # with no columns, and must fail before any file is written.
+        tables = {"source": {"name": "T", "create": True, "db": "a", "schema": "e",
+                             "db_table": "t",
+                             "columns": [{"name": "raw_payload", "dbx_type": "binary"},
+                                         {"name": "tags", "dbx_type": "array<string>"}]}}
+        result = self._run(_write_build_inputs(tmp_path, tables=tables))
+        assert result.exit_code == 1
+        assert "T" in result.output and "zero columns" in result.output
+        assert "raw_payload" in result.output and "tags" in result.output
+        assert not (tmp_path / "out" / "T.table.tml").exists()
+        assert not (tmp_path / "out" / "M.model.tml").exists()

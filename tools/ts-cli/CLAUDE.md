@@ -60,7 +60,7 @@ ts_cli/
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
-    databricks.py — ts databricks (parse-mv, translate-formulas) — BL-063 PR2/PR3
+    databricks.py — ts databricks (parse-mv, translate-formulas, build-model) — BL-063 PR2/PR3/PR4
   audit/
     __init__.py       — run_audit() entry point, angle module registry
     context.py        — AuditContext dataclass + build_context()
@@ -81,7 +81,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.43.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.44.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

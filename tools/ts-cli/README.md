@@ -1664,3 +1664,52 @@ annotation plus a stderr WARNING (BL-098): a Databricks date-interval frame
 maps to ThoughtSpot's row-positional `moving_sum`/`moving_average`/etc., so
 the numbers only match when the order column is dense at the window's grain
 (no gaps) — verify density before trusting the translation.
+
+### `ts databricks build-model`
+
+Assemble ThoughtSpot Model (+ Table) TML from a `parse-mv` + `translate-formulas`
+pair for the `ts-convert-from-databricks-mv` skill, validate it, and optionally
+import it. Deterministic assembly only — no LLM in the loop.
+
+```bash
+ts databricks build-model \
+  --parsed parsed.json --translated translated.json --tables tables.json \
+  --connection "Databricks Analytics" --model-name "Transactions_MV_Model" \
+  --output-dir out/
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--parsed` / `-p` | yes | `parsed.json` from `ts databricks parse-mv` |
+| `--translated` / `-t` | yes | `translated.json` from `ts databricks translate-formulas` |
+| `--tables` | yes | Same `tables.json` used for `translate-formulas` — values may be plain strings or v2 objects (`{"name", "fqn", "create", "db", "schema", "db_table", "columns"}`) |
+| `--connection` / `-c` | yes | ThoughtSpot connection display name (used only for `create: true` table TML) |
+| `--model-name` / `-n` | yes | Model TML `name:` |
+| `--output-dir` / `-o` | yes | Directory for the generated `.model.tml` / `.table.tml` files |
+| `--mv-fqn` | no | Source MV FQN, appended to the model description |
+| `--spotter-enabled` / `--no-spotter-enabled` | no | Tri-state; omitted means no `spotter_config` block at all |
+| `--existing-guid` | no | Stamps `guid:` at the document root (update-in-place, not a MERGE) |
+| `--profile` | no | Import the model TML after a clean lint (`ts tml import --policy PARTIAL`) |
+| `--dry-run` | no | With `--profile`: assemble + lint but skip the import |
+
+A `create: true` table whose columns[] end up empty after Databricks-type
+omissions (e.g. every column is `binary`/`array`/`map`/`struct`) is a hard
+error naming the table and the omitted columns — this is caught before any
+file is written.
+
+**Output:** a summary JSON on stdout (the only stdout output — diagnostics are
+on stderr): `model_name`, `model_file`, `table_files`, `connection`, `tables[]`,
+`columns` (`attributes`/`measures`), `formula_count`, `window_measures[]`,
+`skipped[]`, `name_renames`, `filter_applied`, `spotter_enabled`,
+`existing_guid`, `invariant_findings[]`, `lint_findings[]`, `import_status`
+(`not_requested`|`dry_run`|`imported`|`failed`), `model_guid`, and
+`import_error` (only when `import_status` is `failed`).
+
+TML files are always written to `--output-dir` even when invariant/lint
+findings are non-empty, so the user can inspect what was generated.
+
+Exit codes: `0` — clean lint (and, if `--profile` was given, a successful or
+skipped import); `1` — a builder `ValueError` (bad alias, duplicate formula
+title, unsupported join), the zero-column-table guard, non-empty
+`invariant_findings`/`lint_findings`, an unreadable/invalid input file, or an
+import failure.
