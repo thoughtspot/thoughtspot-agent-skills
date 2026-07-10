@@ -47,6 +47,7 @@ ALLOWLIST = {
     "ts-profile-tableau",       # interactive credential setup — no API mutation flow to test
     "ts-object-answer-promote", # legacy gap; BL-076 (filed 2026-07-03, target 2026-09-30)
     "ts-convert-from-tableau",  # requires .twb fixture file; BL-076 (filed 2026-07-03, target 2026-09-30)
+    "ts-convert-from-looker",   # community contribution PR #201 — smoke test deferred to first live verification
 }
 
 # Skills whose smoke test uses an abbreviated filename rather than the default convention.

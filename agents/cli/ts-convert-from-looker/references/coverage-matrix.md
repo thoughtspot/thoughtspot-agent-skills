@@ -65,7 +65,7 @@ Use this as the canonical limitations reference for audit reports and migration 
 | 37 | `CASE WHEN c THEN a ELSE b END` | `if ( c ) then a else b` |
 | 38 | `SUM(CASE WHEN cond THEN col END)` | `sum_if ( cond , [T::col] )` |
 | 39 | `COUNT(DISTINCT col)` | `unique count ( [T::col] )` |
-| 40 | `UPPER(col)` / `LOWER(col)` | `upper ( [T::col] )` / `lower ( [T::col] )` |
+| 40 | `UPPER(col)` / `LOWER(col)` | `sql_string_op ( "UPPER({0})" , [T::col] )` / `sql_string_op ( "LOWER({0})" , [T::col] )` — no native `upper`/`lower` in ThoughtSpot |
 | 41 | `CONCAT(a, b)` | `concat ( a , b )` |
 | 42 | Date arithmetic (`DATEADD`, `DATEDIFF`) | `add_days/diff_days/diff_months/diff_years` |
 | 43 | `EXTRACT(MONTH FROM col)` | `month ( [T::col] )` |

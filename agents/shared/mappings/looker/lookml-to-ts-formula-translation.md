@@ -102,8 +102,8 @@ safe_divide ( sum ( [ORDER_FACT::NET_REVENUE] ) , unique count ( [ORDER_FACT::OR
 
 | SQL / LookML | ThoughtSpot |
 |--------------|-------------|
-| `UPPER(col)` | `upper ( [T::COL] )` |
-| `LOWER(col)` | `lower ( [T::COL] )` |
+| `UPPER(col)` | `sql_string_op ( "UPPER({0})" , [T::COL] )` — no native `upper` in ThoughtSpot |
+| `LOWER(col)` | `sql_string_op ( "LOWER({0})" , [T::COL] )` — no native `lower` in ThoughtSpot |
 | `CONCAT(a, b)` | `concat ( [T::A] , [T::B] )` |
 | `SUBSTR(col, pos, len)` | `substr ( [T::COL] , pos , len )` |
 | `LENGTH(col)` | `strlen ( [T::COL] )` |

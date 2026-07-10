@@ -120,14 +120,11 @@ Common abbreviations: `of` = ORDER_FACT, `cd` = CUSTOMER_DIM, `pd` = PRODUCT_DIM
 
 ### No `aggregation` inside `formulas[]` (Invariant I2)
 
-```yaml
-# Wrong
-formulas:
-- id: formula_Total Net Revenue
-  name: Total Net Revenue
-  expr: sum ( [ORDER_FACT::NET_REVENUE] )
-  aggregation: SUM               # NEVER here
+**Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained through
+their `expr`. Adding `aggregation:` there causes `FORMULA is not a valid aggregation type`.
+Add `aggregation:` to the corresponding `columns[]` entry instead.
 
+```yaml
 # Correct — aggregation belongs only in columns[]
 formulas:
 - id: formula_Total Net Revenue
@@ -157,13 +154,16 @@ Never use `aggregation: COUNT_DISTINCT` in a `columns[]` entry.
 Always translate `type: count_distinct` to a formula using `unique count()`.
 
 ```yaml
-# Wrong
+# Wrong — COUNT_DISTINCT is not a supported columns[] aggregation, causes import error
+columns:
 - name: Order Count
   column_id: ORDER_FACT::ORDER_ID
   properties:
     column_type: MEASURE
-    aggregation: COUNT_DISTINCT    # not supported — causes import error
+    aggregation: COUNT_DISTINCT
+```
 
+```yaml
 # Correct
 formulas:
 - id: formula_Order Count

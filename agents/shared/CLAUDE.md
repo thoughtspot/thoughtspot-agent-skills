@@ -30,6 +30,10 @@ mappings/tableau/
   tableau-formula-translation.md      — Tableau → ThoughtSpot formula and function mapping
   tableau-tml-rules.md                — TML generation rules for Tableau workbook conversion
 
+mappings/looker/
+  lookml-to-ts-formula-translation.md — LookML measure/dimension expressions → ThoughtSpot formula mapping
+  lookml-tml-rules.md                 — verified TML generation rules for LookML → ThoughtSpot conversion (joins, key dedup, batch import)
+
 schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference

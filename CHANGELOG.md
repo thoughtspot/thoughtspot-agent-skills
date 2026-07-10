@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-11
+- feat: add ts-convert-from-looker skill (community contribution, PR #201)
 - docs: formula function-composition rules + TML import behaviours across shared references (thoughtspot-formula-patterns, ts-snowflake-formula-translation, ts-from-snowflake-rules) + ts-convert-from-snowflake-sv v1.15.0 — SE-cluster-validated batch
 
 ## 2026-07-10

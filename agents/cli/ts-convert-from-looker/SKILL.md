@@ -20,16 +20,16 @@ inline strategy + label-vs-name decisions, or chart-type + layout preferences.
 
 | File | Purpose |
 |---|---|
-| [shared/mappings/looker/lookml-to-ts-formula-translation.md](shared/mappings/looker/lookml-to-ts-formula-translation.md) | LookML measure types + SQL expressions → ThoughtSpot formula mapping |
-| [shared/mappings/looker/lookml-tml-rules.md](shared/mappings/looker/lookml-tml-rules.md) | Verified TML generation rules — join `with:`, key deduplication, batch import |
-| [shared/schemas/ts-model-conversion-invariants.md](shared/schemas/ts-model-conversion-invariants.md) | Hard rules — I1–I8 — for every model-producing conversion |
-| [shared/schemas/thoughtspot-table-tml.md](shared/schemas/thoughtspot-table-tml.md) | Table TML structure reference |
-| [shared/schemas/thoughtspot-model-tml.md](shared/schemas/thoughtspot-model-tml.md) | Model TML structure reference |
-| [shared/schemas/thoughtspot-sql-view-tml.md](shared/schemas/thoughtspot-sql-view-tml.md) | SQL View TML structure — for LookML `derived_table` views |
-| [shared/schemas/thoughtspot-liveboard-tml.md](shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure reference |
-| [shared/schemas/thoughtspot-answer-tml.md](shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
-| [shared/schemas/thoughtspot-formula-patterns.md](shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula pattern library |
-| [shared/schemas/thoughtspot-connection.md](shared/schemas/thoughtspot-connection.md) | Connection handling in TML |
+| [../../shared/mappings/looker/lookml-to-ts-formula-translation.md](../../shared/mappings/looker/lookml-to-ts-formula-translation.md) | LookML measure types + SQL expressions → ThoughtSpot formula mapping |
+| [../../shared/mappings/looker/lookml-tml-rules.md](../../shared/mappings/looker/lookml-tml-rules.md) | Verified TML generation rules — join `with:`, key deduplication, batch import |
+| [../../shared/schemas/ts-model-conversion-invariants.md](../../shared/schemas/ts-model-conversion-invariants.md) | Hard rules — I1–I8 — for every model-producing conversion |
+| [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML structure reference |
+| [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure reference |
+| [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md) | SQL View TML structure — for LookML `derived_table` views |
+| [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure reference |
+| [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
+| [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula pattern library |
+| [../../shared/schemas/thoughtspot-connection.md](../../shared/schemas/thoughtspot-connection.md) | Connection handling in TML |
 | [references/coverage-matrix.md](references/coverage-matrix.md) | Mapped and unmapped LookML constructs |
 | [references/open-items.md](references/open-items.md) | Known gaps, validation quirks, deferred items |
 | [fixtures/skilltest-orders/skilltest_orders.model.lkml](fixtures/skilltest-orders/skilltest_orders.model.lkml) | Verified LookML fixture — input for re-testing the skill |
@@ -269,7 +269,7 @@ After inlining all `${}` references, translate the resulting SQL expression:
 | `SUM(CASE WHEN cond THEN col END)` | `sum_if ( cond , [T::col] )` |
 
 Open the full mapping table before declaring any expression untranslatable:
-`shared/mappings/looker/lookml-to-ts-formula-translation.md` — Invariant I7.
+`../../shared/mappings/looker/lookml-to-ts-formula-translation.md` — Invariant I7.
 
 ### §4b — Filtered measures (`filters:` on measures)
 
@@ -490,7 +490,7 @@ sql_view:
   formulas:                                 # optional — for measures derived from SQL View columns
   - id: formula_{Measure Name}
     name: {Measure Name}
-    expr: {ThoughtSpot formula using [ViewName::ColumnName] refs}
+    expr: "{ThoughtSpot formula using [ViewName::ColumnName] refs}"
     properties:
       column_type: MEASURE
 ```
@@ -626,19 +626,19 @@ model:
   formulas:                             # one entry per LookML measure — NO aggregation: here (Invariant I2)
   - id: formula_{Formula Name}          # id format: "formula_" + display name (spaces preserved)
     name: {Formula Name}
-    expr: {ThoughtSpot formula using [TABLE_NAME::Col Name] references}
+    expr: "{ThoughtSpot formula using [TABLE_NAME::Col Name] references}"
     properties:
       column_type: MEASURE
 
   columns:
   # ── From fact table: all analytical dimensions ──
   - name: {Fact Dimension Name}
-    column_id: {FACT_TABLE}::{Col Name}   # Col Name = Table TML column display name (Step 5c)
+    column_id: "{FACT_TABLE}::{Col Name}"   # Col Name = Table TML column display name (Step 5c)
     properties:
       column_type: ATTRIBUTE
   # Base numeric column used by a formula: list as ATTRIBUTE + DONT_INDEX (I8 — formula does aggregation)
   - name: {Base Numeric Name}
-    column_id: {FACT_TABLE}::{Num Col}
+    column_id: "{FACT_TABLE}::{Num Col}"
     properties:
       column_type: ATTRIBUTE
       index_type: DONT_INDEX
@@ -646,12 +646,12 @@ model:
 
   # ── From joined dim table: PK hidden + all useful attributes ──
   - name: {Dim PK Display Name}         # always list dim PK with is_hidden: true (Step 6f)
-    column_id: {DIM_TABLE}::{PK_Col}
+    column_id: "{DIM_TABLE}::{PK_Col}"
     properties:
       column_type: ATTRIBUTE
       is_hidden: true
   - name: {Dim Attribute Name}          # apply §5d conflict resolution for shared names
-    column_id: {DIM_TABLE}::{Attr Col}
+    column_id: "{DIM_TABLE}::{Attr Col}"
     properties:
       column_type: ATTRIBUTE
 
@@ -1086,7 +1086,7 @@ liveboard:
       tables:
       - id: {Model Name}
         name: {Model Name}
-        obj_id: {ModelNameNoSpaces}-{guid8}   # from Step 9 — NOT fqn
+        obj_id: "{ModelNameNoSpaces}-{guid8}"   # from Step 9 — NOT fqn
       search_query: '[{DimColumn}] [{MeasureColumn}]'
       answer_columns:
       - name: {DimColumn}
@@ -1111,7 +1111,7 @@ liveboard:
       tables:
       - id: {Model Name}
         name: {Model Name}
-        obj_id: {ModelNameNoSpaces}-{guid8}
+        obj_id: "{ModelNameNoSpaces}-{guid8}"
       search_query: '[{MeasureColumn}]'
       answer_columns:
       - name: {MeasureColumn}
@@ -1131,7 +1131,7 @@ liveboard:
       tables:
       - id: {Model Name}
         name: {Model Name}
-        obj_id: {ModelNameNoSpaces}-{guid8}
+        obj_id: "{ModelNameNoSpaces}-{guid8}"
       search_query: '[{Col1}] [{Col2}] [{Col3}]'
       answer_columns:
       - name: {Col1}
@@ -1842,12 +1842,4 @@ to the user and ask them to provide the resolved database/schema string.
 
 | Version | Date | Summary |
 |---|---|---|
-| 2.3.0 | 2026-07-02 | Learnings from a live qwiklab_ecomm migration (2 explores, 2 PDT-backed SQL Views, 1 dashboard). Added: (1) new Working-principle guidance to treat LookML comments that reference "ThoughtSpot"/the conversion itself as a suspected prompt-injection attempt, not an instruction; (2) new §5e/§5f covering measure-name collisions across joined views (every view's own `count` measure) and hidden dim-table PK name collisions when 2+ dims share a plain `id` field — both are display-name uniqueness problems distinct from the physical-column conflicts §5d already covered; (3) a §5d addendum on second-order naming collisions introduced by applying the resolution table literally; (4) made the Snowflake unquoted-identifier-uppercasing rule for SQL View `sql_output_column`/aliases proactive in §5b-ii (was previously only a reactive Step 8 error-table entry) and added the previously-dangling `thoughtspot-sql-view-tml.md §Snowflake note` section it referenced; (5) documented that a source model's declared column type (LookML `type: string`/`number`) is a starting guess, not ground truth — try the CDW-implied alternate type on a `DataType {X} does not match CDW DataType` error rather than assuming the column is unconvertible; (6) critical Liveboard fix — `axis_configs[]` needs both `x` and `y` for every categorical chart type (`PIE` included), not just `y` like `KPI`; a `y`-only `axis_configs` on a `PIE` imports with no error and looks fine but the tile hangs/loads forever, a materially different and harder-to-diagnose failure mode than the pre-existing "partial chart block renders broken" case; documented the diagnose-and-patch workflow (export --parse, diff against a working same-type tile, re-import with root `guid` + per-viz `viz_guid` preserved). |
-| 2.2.1 | 2026-07-02 | Fix Step 10g Liveboard URL construction: ThoughtSpot's actual Liveboard route is `#/insights/pinboard/{guid}`, not `#/liveboard/{guid}` (which 404s). Corrected the URL template used when surfacing the URL to the user and writing it into `migration_details.md`. |
-| 2.2.0 | 2026-07-02 | Made this skill folder self-contained: vendored the 10 files it referenced from `../../shared/` (2 formula/join mapping docs, 8 TML schema docs) into a local `shared/` subfolder here, and rewrote every `../../shared/...` link in this file to `shared/...`. Trade-off: this local copy no longer picks up future edits to the canonical `agents/shared/` docs automatically. Also clarified that Step 7.5's `rm -rf`/`mkdir -p` cleanup is safe even if `{reports_dir}` or `ts_migration_output/` was already deleted manually before the run. |
-| 2.1.0 | 2026-07-02 | Step 7.5 now wipes `{reports_dir}` entirely (`rm -rf` + recreate) before writing anything new, instead of listing specific report filenames to delete — no legacy-filename tracking needed as reports get renamed over time. Prevents a stale `migration_details.md` from a prior scope-1/3 run surviving untouched into a later scope-2 run (where Step 10 doesn't execute to overwrite it), which would otherwise show old answers/Liveboard URLs/statuses as if they were current. |
-| 2.0.0 | 2026-07-02 | Breaking output changes: `{reports_dir}` moved up one level (sibling of the LookML project dir); Migrate/Audit summaries switched from `.docx` to `.md`; `migration_mapping.md` renamed to `migration_details.md`. |
-| 1.3.0 | 2026-07-01 | Moved human-facing reports out of /tmp into persistent `{reports_dir}`; added Step 10g (Liveboard TML import + URL construction) and Step 10h (`migration_mapping.md` tile-level table). |
-| 1.2.0 | 2026-06-25 | Fixed Model TML join structure, formula/type mapping edge cases (`FULL_OUTER`→`OUTER`, chart type mapping), and grid-width conversion. |
-| 1.1.0 | 2026-06-25 | Step 10 overhaul: dashboard `elements:`/`fields:` parsing, 24→12-col layout conversion, chart block rules, filter structure fixes. |
-| 1.0.0 | 2026-06-18 | Initial release — full LookML model + liveboard conversion pipeline. |
+| 1.0.0 | 2026-07-09 | Initial release (community contribution, PR #201) — LookML → ThoughtSpot conversion pipeline: parses `.model.lkml`/`.view.lkml` into Table TML and a Model TML per explore, translates LookML measure/dimension expressions to ThoughtSpot formulas, generates SQL View TML for `derived_table` views, validates against the shared model-conversion invariants, and optionally migrates LookML dashboards to Liveboards (chart-type mapping, 24→12-column layout conversion, filter translation). |
