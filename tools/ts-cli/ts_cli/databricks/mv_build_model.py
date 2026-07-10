@@ -271,25 +271,25 @@ def build_description(comment: str | None, mv_fqn: str | None, has_filter: bool)
     return " ".join(parts)
 
 
-def _check_no_duplicate_formula_names(formulas: list[dict]) -> None:
-    """Fail loud on formula-vs-formula title collisions.
+def _check_no_duplicate_display_names(columns: list[dict]) -> None:
+    """Fail loud on display-title collisions across ALL columns[] entries.
 
-    resolve_name_collisions (Task 3) only resolves formula-vs-parameter and
-    column-vs-formula clashes — two measures that both resolve to the same
-    display title (e.g. identical display_name values) pass through it
-    untouched and would otherwise silently produce two formulas[] entries
-    with the same `name`.
+    resolve_name_collisions only resolves formula-vs-parameter and
+    column-vs-formula clashes — two dimensions (or two measures) that resolve
+    to the same display title pass through it untouched and would emit
+    duplicate column names. `ts tml lint` I8 (unique column_id) cannot catch
+    this: column_id and display name are different fields. (BL-099 #2)
     """
     seen: set[str] = set()
     dupes: set[str] = set()
-    for f in formulas:
-        if f["name"] in seen:
-            dupes.add(f["name"])
-        seen.add(f["name"])
+    for c in columns:
+        if c["name"] in seen:
+            dupes.add(c["name"])
+        seen.add(c["name"])
     if dupes:
         raise ValueError(
-            f"duplicate formula display title(s): {sorted(dupes)} — set "
-            f"distinct display_name values in the MV")
+            f"duplicate display title(s): {sorted(dupes)} — set distinct "
+            f"display_name values in the MV")
 
 
 def build_model_tml_dbx(*, model_name: str, parsed: dict, translated_doc: dict,
@@ -299,7 +299,7 @@ def build_model_tml_dbx(*, model_name: str, parsed: dict, translated_doc: dict,
     filter_entry = translated_doc.get("filter")
     columns, formulas, rename_map = build_columns_and_formulas(
         translated_doc["translated"], filter_entry)
-    _check_no_duplicate_formula_names(formulas)
+    _check_no_duplicate_display_names(columns)
 
     model: dict = {
         "name": model_name,
