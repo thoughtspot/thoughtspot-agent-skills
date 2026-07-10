@@ -2725,8 +2725,9 @@ live-verification pass.
 
 **Source:** 2026-07-10 BL-063 PR4 final whole-branch review.
 **Affects:** `ts_cli/commands/tml.py:478`, `ts_cli/commands/dependency.py:468`,
-`ts_cli/commands/tables.py:187`; `ts_cli/databricks/mv_build_model.py`
-(`_check_no_duplicate_formula_names`, `build_columns_and_formulas`).
+`ts_cli/commands/tables.py:187` (flat-GUID sites); `ts_cli/databricks/mv_build_model.py`
+(`_check_no_duplicate_display_names`); `ts_cli/databricks/mv_parse.py`
+(`duplicate_name` guard).
 **Status:** SHIPPED (BL-063 PR5, ts-cli v0.45.0, 2026-07-10).
 
 1. **SHIPPED** — the flat import-response shape (`resp[0].response.header.id_guid`,
