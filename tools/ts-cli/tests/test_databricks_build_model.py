@@ -5,7 +5,14 @@ the shared worked examples (see TestGoldenEcommerce/TestGoldenSqlView, Task 6).
 """
 import pytest
 
-from ts_cli.databricks.mv_build_model import build_columns_and_formulas, display_title
+from ts_cli.databricks.mv_build_model import (
+    build_columns_and_formulas,
+    build_description,
+    build_model_tables,
+    build_model_tml_dbx,
+    display_title,
+    flatten_join_aliases,
+)
 from ts_cli.databricks.mv_tml import (
     build_table_tml,
     map_dbx_type,
@@ -231,3 +238,179 @@ class TestBuildColumnsAndFormulas:
         _, formulas, _ = build_columns_and_formulas(entries, None)
         by_name = {f["name"]: f for f in formulas}
         assert by_name["Wrapped"]["expr"] == "[formula_Base]"
+
+
+def _join(alias, source_raw, *, on=None, using=None, cardinality="many_to_one", joins=None):
+    return {"alias": alias, "source": {"kind": "table_fqn", "raw": source_raw,
+                                       "parts": source_raw.split("."),
+                                       "needs_live_check": True},
+            "on": on, "using": using, "parent": "source",
+            "cardinality": cardinality, "cardinality_source": "default",
+            "joins": joins or []}
+
+
+NESTED = [_join("orders", "c.s.dm_order", on="source.ORDER_ID = orders.ORDER_ID",
+                joins=[_join("customers", "c.s.dm_customer",
+                             on="orders.CUSTOMER_ID = customers.CUSTOMER_ID")])]
+TABLES3 = {"source": {"name": "FACT_SALES", "fqn": "g-fact"},
+           "orders": {"name": "DM_ORDER", "fqn": "g-ord"},
+           "orders.customers": {"name": "DM_CUSTOMER", "fqn": "g-cust"}}
+
+
+class TestFlattenJoinAliases:
+    def test_nested_paths(self):
+        triples = flatten_join_aliases(NESTED)
+        assert [(a, p) for a, p, _ in triples] == [
+            ("orders", "source"), ("orders.customers", "orders")]
+
+
+class TestBuildModelTables:
+    def test_single_table_no_id_no_joins(self):
+        parsed = {"source": {"kind": "table_fqn", "raw": "a.e.t"}, "joins": []}
+        out = build_model_tables(parsed, {"source": {"name": "TRANSACTIONS",
+                                                     "fqn": "{table_guid}"}})
+        assert out == [{"name": "TRANSACTIONS", "fqn": "{table_guid}"}]
+
+    def test_multi_table_ids_joins_cardinality(self):
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": NESTED}
+        out = build_model_tables(parsed, TABLES3)
+        assert [t["name"] for t in out] == ["FACT_SALES", "DM_ORDER", "DM_CUSTOMER"]
+        assert all(t["id"] == t["name"] for t in out)
+        assert out[0]["joins"] == [{
+            "name": "fact_to_orders", "with": "DM_ORDER",
+            "on": "[FACT_SALES::ORDER_ID] = [DM_ORDER::ORDER_ID]",
+            "type": "INNER", "cardinality": "MANY_TO_ONE"}]
+        assert out[1]["joins"][0]["name"] == "orders_to_customers"
+        assert out[1]["joins"][0]["on"] == (
+            "[DM_ORDER::CUSTOMER_ID] = [DM_CUSTOMER::CUSTOMER_ID]")
+        assert "joins" not in out[2]
+
+    def test_using_join_and_one_to_many(self):
+        joins = [_join("orders", "c.s.dm_order", using=["ORDER_ID", "REGION_ID"],
+                       cardinality="one_to_many")]
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        out = build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+        j = out[0]["joins"][0]
+        assert j["on"] == ("[FACT::ORDER_ID] = [DM_ORDER::ORDER_ID] AND "
+                           "[FACT::REGION_ID] = [DM_ORDER::REGION_ID]")
+        assert j["cardinality"] == "ONE_TO_MANY"
+
+    def test_unknown_alias_in_on_raises(self):
+        joins = [_join("orders", "c.s.dm_order", on="source.ID = warehouse.ID")]
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        with pytest.raises(ValueError, match="warehouse"):
+            build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+
+
+class TestBuildDescription:
+    def test_comment_fqn_filter(self):
+        assert build_description("Metrics.", "a.e.mv", True) == (
+            "Metrics. Converted from Databricks Metric View a.e.mv. "
+            "MV Filter applied automatically via model filter.")
+
+    def test_no_comment_falls_back(self):
+        assert build_description(None, "a.e.mv", False) == (
+            "Converted from Databricks Metric View a.e.mv.")
+
+    def test_nothing_known(self):
+        assert build_description(None, None, False) == (
+            "Converted from a Databricks Metric View.")
+
+
+class TestBuildModelTmlDbx:
+    PARSED = {"version": "1.1", "comment": "Metrics.",
+              "source": {"kind": "table_fqn", "raw": "a.e.t"},
+              "joins": [], "filter": "status != 'cancelled'",
+              "materialization": None, "warnings": [], "unsupported": []}
+    TRANSLATED = {
+        "translated": [
+            {"name": "region", "role": "dimension", "output_kind": "column",
+             "column_type": "ATTRIBUTE", "table": "T", "column": "region",
+             "ts_expr": None, "aggregation": None, "inlined_refs": [],
+             "display_name": None, "comment": None, "synonyms": [], "format": None,
+             "annotations": []},
+            {"name": "rev_7d", "role": "measure", "output_kind": "formula",
+             "column_type": "MEASURE", "table": None, "column": None,
+             "ts_expr": "moving_sum ( [T::a] , 7 , -1 , [T::d] )",
+             "aggregation": "SUM", "inlined_refs": [], "display_name": "Rev 7d",
+             "comment": None, "synonyms": [], "format": None,
+             "annotations": [{"kind": "sparse_data_risk", "detail": "E1"}]}],
+        "skipped": [], "filter": {"name": "MV Filter", "column_type": "ATTRIBUTE",
+                                  "ts_expr": "[T::status] != 'cancelled'"},
+        "dependency_dag": {}, "window_measures": ["rev_7d"],
+        "stats": {"total": 3, "translated": 3, "skipped": 0}}
+
+    def test_document_shape_and_filters_block(self):
+        doc, info = build_model_tml_dbx(
+            model_name="M", parsed=self.PARSED, translated_doc=self.TRANSLATED,
+            tables={"source": {"name": "T", "fqn": "g"}}, mv_fqn="a.e.mv")
+        model = doc["model"]
+        assert set(doc) == {"model"}
+        assert model["name"] == "M"
+        assert model["filters"] == [{"column": ["MV Filter"], "oper": "in",
+                                     "values": ["true"]}]
+        assert model["properties"] == {"is_bypass_rls": False,
+                                       "join_progressive": True}
+        assert info["filter_applied"] is True
+        assert info["window_measures"] == [{
+            "name": "Rev 7d", "mv_name": "rev_7d",
+            "ts_expr": "moving_sum ( [T::a] , 7 , -1 , [T::d] )",
+            "annotations": [{"kind": "sparse_data_risk", "detail": "E1"}]}]
+
+    def test_existing_guid_stamped_at_root(self):
+        doc, _ = build_model_tml_dbx(
+            model_name="M", parsed=self.PARSED, translated_doc=self.TRANSLATED,
+            tables={"source": "T"}, existing_guid="g-123")
+        assert doc["guid"] == "g-123" and "guid" not in doc["model"]
+
+    def test_spotter_config(self):
+        doc, _ = build_model_tml_dbx(
+            model_name="M", parsed=self.PARSED, translated_doc=self.TRANSLATED,
+            tables={"source": "T"}, spotter_enabled=True)
+        assert doc["model"]["properties"]["spotter_config"] == {
+            "is_spotter_enabled": True}
+        doc2, _ = build_model_tml_dbx(
+            model_name="M", parsed=self.PARSED, translated_doc=self.TRANSLATED,
+            tables={"source": "T"}, spotter_enabled=None)
+        assert "spotter_config" not in doc2["model"]["properties"]
+
+    def test_no_filter_no_filters_block(self):
+        translated = dict(self.TRANSLATED, filter=None)
+        parsed = dict(self.PARSED, filter=None)
+        doc, info = build_model_tml_dbx(
+            model_name="M", parsed=parsed, translated_doc=translated,
+            tables={"source": "T"})
+        assert "filters" not in doc["model"]
+        assert info["filter_applied"] is False
+
+    def test_alias_missing_from_tables_raises(self):
+        parsed = dict(self.PARSED, joins=NESTED)
+        with pytest.raises(ValueError, match="orders"):
+            build_model_tml_dbx(model_name="M", parsed=parsed,
+                                translated_doc=self.TRANSLATED,
+                                tables={"source": "T"})
+
+    def test_duplicate_formula_display_title_raises(self):
+        # two measures whose display_name collides once titled — resolve_name_
+        # collisions only covers formula-vs-parameter and column-vs-formula
+        # clashes, not formula-vs-formula, so build_model_tml_dbx must fail
+        # loud rather than silently emit two formulas[] entries with the same
+        # `name` (which ThoughtSpot import would reject or silently mangle).
+        translated = dict(self.TRANSLATED, translated=[
+            {"name": "rev_7d", "role": "measure", "output_kind": "formula",
+             "column_type": "MEASURE", "table": None, "column": None,
+             "ts_expr": "moving_sum ( [T::a] , 7 , -1 , [T::d] )",
+             "aggregation": "SUM", "inlined_refs": [], "display_name": "Revenue",
+             "comment": None, "synonyms": [], "format": None, "annotations": []},
+            {"name": "rev_30d", "role": "measure", "output_kind": "formula",
+             "column_type": "MEASURE", "table": None, "column": None,
+             "ts_expr": "moving_sum ( [T::a] , 30 , -1 , [T::d] )",
+             "aggregation": "SUM", "inlined_refs": [], "display_name": "Revenue",
+             "comment": None, "synonyms": [], "format": None, "annotations": []},
+        ], window_measures=[])
+        parsed = dict(self.PARSED, filter=None)
+        translated = dict(translated, filter=None)
+        with pytest.raises(ValueError, match=r"(?i)duplicate formula display title.*Revenue"):
+            build_model_tml_dbx(model_name="M", parsed=parsed,
+                                translated_doc=translated,
+                                tables={"source": "T"})
