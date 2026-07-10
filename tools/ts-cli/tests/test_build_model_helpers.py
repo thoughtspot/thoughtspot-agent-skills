@@ -383,6 +383,30 @@ def test_extract_imported_guid_empty_string_gives_none():
     assert extract_imported_guid(ir) is None
 
 
+def test_extract_imported_guid_flat_shape_fallback():
+    # Live shape verified BL-063 PR4 (2026-07-10, se-thoughtspot): no `object`
+    # wrapper — header (with id_guid) sits directly under `response`.
+    ir = [{"response": {"header": {"id_guid": "flat-456", "name": "M",
+                                    "metadata_type": "LOGICAL_TABLE"},
+                        "status": {"status_code": "OK"}}}]
+    assert extract_imported_guid(ir) == "flat-456"
+
+
+def test_extract_imported_guid_prefers_nested_when_both_present():
+    ir = [{"response": {"object": [{"header": {"id_guid": "nested-1"}}],
+                        "header": {"id_guid": "flat-1"}}}]
+    assert extract_imported_guid(ir) == "nested-1"
+
+
+def test_extract_imported_guid_neither_shape_gives_none():
+    ir = [{"response": {"status": {"status_code": "OK"}}}]
+    assert extract_imported_guid(ir) is None
+
+
+def test_extract_imported_guid_empty_list_gives_none():
+    assert extract_imported_guid([]) is None
+
+
 # --- apply_prefix_and_double_agg ---
 
 def test_apply_prefix_and_double_agg_mutates_in_place():

@@ -14,6 +14,11 @@ subquery source.
 
 Verified against live instance 2026-05-28.
 
+> **Style aligned 2026-07-10** — Style aligned with ts-from-databricks.md Key
+> Pattern #3 (title-case fallback) and explicit ATTRIBUTE formula
+> `column_type` on 2026-07-10 — semantics unchanged from the 2026-05-28 live
+> verification.
+
 ---
 
 ## Input -- MV YAML (v1.1)
@@ -258,6 +263,8 @@ model:
   - id: formula_Customer Segment
     name: Customer Segment
     expr: "if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )"
+    properties:
+      column_type: ATTRIBUTE
   - id: formula_Total Orders
     name: Total Orders
     expr: "count ( 1 )"
@@ -265,7 +272,7 @@ model:
     name: Avg Order Amount
     expr: "sum ( [Orders_MV_View::total_amount] ) / unique count ( [Orders_MV_View::order_id] )"
   columns:
-  - name: order_id
+  - name: Order Id
     column_id: Orders_MV_View::order_id
     properties:
       column_type: ATTRIBUTE
@@ -308,7 +315,7 @@ model:
   (`Orders_MV_View`) and the GUID from Step 3 as the `fqn`.
 - Column references use `[Orders_MV_View::column]` syntax -- the SQL View name
   as the table qualifier, not the physical Databricks table name.
-- Direct dimensions (order_id, Order Date, Order Status) use
+- Direct dimensions (Order Id, Order Date, Order Status) use
   `column_id: Orders_MV_View::col`.
 - The computed dimension (Customer Segment) uses `formula_id` pointing to the
   `formulas[]` entry with the nested `if()` expression.
@@ -318,7 +325,8 @@ model:
   `aggregation: SUM` as convention (ThoughtSpot evaluates the formula `expr`
   directly and ignores column-level `aggregation` at query time).
 - `display_name` from the MV YAML becomes the column `name` in ThoughtSpot.
-  Where no `display_name` exists (`order_id`), the `name` field is used as-is.
+  Where no `display_name` exists (`order_id`), the `name` field is title-cased
+  (`Order Id`) -- matching ts-from-databricks.md Key Pattern #3.
 - No MV Filter formula is needed -- the filter is already baked into the SQL
   View's `sql_query` WHERE clause. Every query against the SQL View automatically
   applies the filter.

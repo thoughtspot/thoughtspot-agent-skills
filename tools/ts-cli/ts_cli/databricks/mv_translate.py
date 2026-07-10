@@ -246,7 +246,7 @@ _PLACEHOLDER_RE = re.compile(r"__MVREF_(\d+)__")
 def translate_metric_view(parsed: dict, tables: dict) -> dict:
     """Translate a parse-mv result. Content failures -> skipped[]; only a
     malformed tables map raises (ValueError -> command exit 1)."""
-    _validate_tables(tables)
+    tables = normalize_tables(tables)
     translated: list[dict] = []
     skipped: list[dict] = []
     by_name: dict[str, dict] = {}       # name -> translated entry
@@ -293,16 +293,36 @@ def translate_metric_view(parsed: dict, tables: dict) -> dict:
                       "skipped": n_skipped}}
 
 
-def _validate_tables(tables: dict) -> None:
-    if not isinstance(tables, dict) or "source" not in tables:
-        raise ValueError(
-            "--tables map must be a JSON object with a 'source' key "
-            "(alias path -> ThoughtSpot table name)")
-    for k, v in tables.items():
-        if not isinstance(k, str) or not isinstance(v, str) or not v.strip():
+def normalize_tables(tables: dict) -> dict:
+    """Flatten tables.json v2 values to plain name strings.
+
+    Values may be a ThoughtSpot table name (str) or an object with at least
+    a "name" key (build-model's richer form). Raises ValueError naming the
+    offending alias so the CLI can fail loud. This is the single validation
+    path for the --tables map: translate_metric_view calls it first, and
+    build-model (Task 3+) imports it directly to flatten tables.json before
+    constructing resolvers.
+    """
+    if not isinstance(tables, dict):
+        raise ValueError("tables map must be a JSON object of alias -> table name")
+    flat: dict[str, str] = {}
+    for alias, value in tables.items():
+        if isinstance(value, str) and value.strip():
+            flat[alias] = value
+        elif isinstance(value, dict):
+            name = value.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    f"tables map entry '{alias}' is an object without a non-empty "
+                    f"'name' string")
+            flat[alias] = name
+        else:
             raise ValueError(
-                f"--tables entries must map string alias paths to non-empty "
-                f"table names (bad entry: {k!r}: {v!r})")
+                f"tables map entry '{alias}' must be a table-name string or an "
+                f"object with a 'name' key, got {type(value).__name__}")
+    if not flat.get("source"):
+        raise ValueError("tables map must contain a non-empty 'source' entry")
+    return flat
 
 
 def _translate_item(fn, name, role, translated, skipped, by_name,

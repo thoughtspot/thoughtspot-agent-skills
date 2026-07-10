@@ -648,6 +648,47 @@ class TestOrchestrator:
         assert {s["name"] for s in out["skipped"]} == {"m1", "m2"}
 
 
+class TestNormalizeTables:
+    def test_string_values_pass_through(self):
+        from ts_cli.databricks.mv_translate import normalize_tables
+        assert normalize_tables({"source": "FACT", "orders": "DM_ORDER"}) == {
+            "source": "FACT", "orders": "DM_ORDER"}
+
+    def test_object_values_extract_name(self):
+        from ts_cli.databricks.mv_translate import normalize_tables
+        tables = {"source": {"name": "FACT", "fqn": "guid-1", "create": True},
+                  "orders": "DM_ORDER"}
+        assert normalize_tables(tables) == {"source": "FACT", "orders": "DM_ORDER"}
+
+    def test_object_without_name_raises(self):
+        from ts_cli.databricks.mv_translate import normalize_tables
+        with pytest.raises(ValueError, match="orders"):
+            normalize_tables({"source": "FACT", "orders": {"fqn": "guid-2"}})
+
+    def test_non_str_non_dict_value_raises(self):
+        from ts_cli.databricks.mv_translate import normalize_tables
+        with pytest.raises(ValueError, match="orders"):
+            normalize_tables({"source": "FACT", "orders": 7})
+
+    def test_missing_source_raises(self):
+        from ts_cli.databricks.mv_translate import normalize_tables
+        with pytest.raises(ValueError, match="source"):
+            normalize_tables({"orders": "DM_ORDER"})
+
+    def test_translate_accepts_object_form(self):
+        parsed = {"version": "1.1", "comment": None,
+                  "source": {"kind": "table_fqn", "raw": "c.s.t", "parts": ["c", "s", "t"],
+                             "needs_live_check": True},
+                  "joins": [], "filter": None, "materialization": None,
+                  "warnings": [], "unsupported": [],
+                  "dimensions": [{"name": "region", "expr": "region", "kind": "direct",
+                                  "display_name": None, "comment": None, "synonyms": [],
+                                  "inner_agg": None, "inner_expr": None, "partition_by": []}],
+                  "measures": []}
+        out = translate_metric_view(parsed, {"source": {"name": "FACT", "fqn": "g"}})
+        assert out["translated"][0]["table"] == "FACT"
+
+
 # --- ts databricks translate-formulas CLI (BL-063 PR3) -----------------
 
 import json
