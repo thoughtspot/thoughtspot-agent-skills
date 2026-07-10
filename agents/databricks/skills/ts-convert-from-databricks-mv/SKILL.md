@@ -30,6 +30,16 @@ same parse/translate/build code the CLI skill runs via `ts databricks ...`. Do
 not re-implement any conversion logic inline; if a function is wrong, fix it in
 ts-cli and redeploy.
 
+**Serverless compute note (live-verified 2026-07-11):** serverless base
+environments do not include PyYAML, so either `%run` fails with
+`ModuleNotFoundError: No module named 'yaml'`. Run this first, then the `%run`s:
+
+```python
+%pip install pyyaml requests --quiet
+```
+
+Classic DBR clusters ship both packages — no install needed there.
+
 ---
 
 ## References
