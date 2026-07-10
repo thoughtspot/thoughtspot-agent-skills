@@ -2757,3 +2757,41 @@ live-verification pass.
 
 **Target:** fold into BL-063 PR 5, or take as a standalone ts-cli fix — no fixed
 calendar date. **Closed** — all three items shipped in BL-063 PR5 (ts-cli v0.45.0).
+
+## BL-100 — Bring the remaining converters up to the Databricks-from standard
+
+**Filed:** 2026-07-11 (post BL-063 Phase 2 close-out).
+**Source:** user-raised after reviewing what `agents/shared/mappings/` is for now that
+`ts databricks parse-mv / translate-formulas / build-model` codified the from-Databricks
+direction.
+**Status:** OPEN — deliberately sequenced AFTER the next full repo audit, whose angle 11
+(agentic → deterministic) and external sweep will inventory/scope the exact mechanical
+steps per converter and refresh the currency baseline this work builds on.
+
+The from-Databricks direction now sets the bar: (a) **deterministic codification** — the
+mechanical parse → translate → assemble-TML pipeline runs as pure ts-cli code with golden
+fixtures, the LLM handling only the judgment residue (`unsupported[]`/`skipped[]`, review
+steps); (b) **empirical semantic verification** — claim-matrix deep-dives with live
+fixture number-matching on both platforms (BL-063 PR1/PR1.5 pattern), findings recorded
+in the mapping docs with citation-rich currency anchors; (c) **runtime vendoring** where
+a runtime can't call ts-cli (Genie `build_mv_lib` concatenation pattern).
+
+Per-converter gap against that bar:
+
+| Converter | Codification | Empirical verification | Notes |
+|---|---|---|---|
+| ts-convert-from-snowflake-sv | **None** (only `ts snowflake diff`/`lint-ddl`) | Partial — 2026-07-10 SE-cluster formula-composition/TML-import batch, but no per-construct claim matrix | Biggest gap; BL-063's original title named Snowflake too. Mirror the Databricks 3-command pipeline (`parse-sv` / `translate-formulas` / `build-model`). CoCo mirror keeps the doc-driven path (no shell) — docs stay authoritative for it. |
+| ts-convert-to-snowflake-sv | None | Inaugural anchor only (2026-06, never swept) | DDL emission is highly mechanical — strong codification candidate. |
+| ts-convert-to-databricks-mv | None | Window emission tables live-verified (PR1) | MV YAML emission is mechanical; reuse `mv_*` module vocabulary in reverse. |
+| ts-convert-from-tableau | **Done** (full `ts tableau` pipeline) | Doc-driven sweeps only — no fixture number-match has ever run | Only the fidelity leg is missing; needs live Tableau Server access (often unavailable — see feedback memory). Scope as opportunistic. |
+
+Also in scope: normalize currency-anchor style (the Databricks anchors have outgrown
+"context" into changelog territory; the anchor format is `platform — YYYY-MM (context)` —
+long-form evidence belongs in `docs/audit/` claim matrices, referenced from the anchor).
+
+**Relationship to angle 15 (conversion fidelity, PARKED):** the empirical-verification
+leg of this item is a per-converter unparking of angle 15 — coordinate rather than
+duplicate.
+
+**Target:** scope after the next full repo audit (angle 11 output feeds the plan);
+Snowflake-from pipeline is the natural first program (BL-063-style phased PRs).
