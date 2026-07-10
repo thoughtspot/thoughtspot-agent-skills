@@ -49,6 +49,8 @@ Two scenarios are supported:
 | `metrics ( TABLE.COL as complex_sql_expr )` | `formulas[]` with translated ThoughtSpot formula |
 | `metrics ( TABLE.COL non additive by (D.col asc nulls last) as SUM(...) )` | `formulas[]` with `last_value(sum(...), query_groups(), {date})` |
 | `metrics ( TABLE.COL non additive by (D.col desc nulls last) as SUM(...) )` | `formulas[]` with `first_value(sum(...), query_groups(), {date})` |
+| `metrics ( ... OVER (ORDER BY col ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) )` — cumulative/running sum | `formulas[]` with `moving_sum(group_aggregate(agg(...), {[T::PK]}, query_filters()), -1, 0, [T::order_col])` — cannot nest aggregates directly in `moving_sum`; must wrap in `group_aggregate` first |
+| `COUNT_IF(boolean_col)` in metrics | `count_if([T::BOOL_COL], [T::PK])` or `sum ( if ( [T::BOOL_COL] ) then 1 else 0 )` — note parentheses required around BOOL in `if()`. `sum_if([T::BOOL], [T::MEASURE])` also works (L6). |
 | `relationships ( REL as FROM(FK) references TO(PK) )` | `referencing_join` in model_tables (Scenario A, pre-defined joins) OR `joins[]` inline (Scenario B) |
 | `with synonyms=('Display Name','Alt 1','Alt 2',...)` on a dimension/metric | First → column `name`. Rest → `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`). |
 | `comment='...'` on a dimension/metric | column `description` |
@@ -1612,6 +1614,15 @@ top_level = {"guid": "{existing_model_guid}", "model": model_dict}
 On the first import (new model), omit `guid`. After import, record the GUID from the
 response — you will need it if you reimport to fix any errors.
 
+**Two-pass import (L7):** Formulas that reference `[TABLE::COL]` fail during initial
+model creation but succeed when updating an existing model with `--no-create-new`.
+Always use a **two-pass** approach:
+1. First import: model structure only (columns, joins) — no formulas
+2. Second import: add `guid` at root, include all formulas, use `--no-create-new`
+
+This is a ThoughtSpot platform behaviour — the formula parser cannot resolve column
+references until the model's table bindings are committed.
+
 Serialize the top-level dict to a YAML string, then import:
 
 ```python
@@ -1824,6 +1835,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.14.0 | 2026-07-10 | Cumulative window metrics: row 25 corrected to `moving_sum(group_aggregate(...))` (aggregates cannot nest directly in `moving_sum`); new `COUNT_IF` mapping; new limitations L6 (BOOL in `if` requires parentheses — prefer `count_if`/`sum_if`) and L7 (formulas referencing `[TABLE::COL]` fail on initial CREATE — documented mandatory two-pass import in Step 11). Verified on SE cluster. |
 | 1.13.0 | 2026-07-03 | Step C3 change-set computation delegates to `ts snowflake diff` (BL-063 quick win). Prereq ts-cli v0.30.0. |
 | 1.12.0 | 2026-06-17 | Step 6B connection step now offers **E — use existing / C — create a new connection** (Snowflake, key-pair auth via `ts connections create`) instead of only selecting an existing one. Adds the "Database does not exist in connection → role can't see it → create one" guidance and a credential-handling guardrail (private key by file path only; never pasted into chat; password/OAuth → UI + E path). Mirrors the connection-step change in ts-convert-from-tableau; ts-convert-from-databricks-mv gets the explicit stop-and-instruct fallback. |
 | 1.11.2 | 2026-06-17 | Replace the hand-written pre-import grep gate with `ts tml lint` (parser-based; now also catches **I8** duplicate `column_id`). From the full audit sweep (codification, angle 11). |
