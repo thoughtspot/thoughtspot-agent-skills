@@ -479,17 +479,31 @@ model import. Destructive/import steps still pause for user authorization.
 
 ## Open questions
 
-- **Genie multi-module `%run` composition (PR 5 only).** `%run` loads one
-  notebook at a time; `ts_cli/databricks/` has three pure modules plus
-  internal imports between them — **and** `build_model.py` deliberately imports
-  shared pure functions from `ts_cli.tableau.naming`/`ts_cli.model_builder`
-  (see Background), so the vendorable surface is wider than the `databricks/`
-  directory alone. Options: (a) separate `%run` imports, each self-contained
-  (requires avoiding cross-module imports inside the vendored copies, or
-  vendoring the shared functions too); (b) concatenate the full transitive
-  pure-function closure into one vendored notebook at deploy time. Not
-  resolved here — PR 5 is last in the sequence and can settle this once the
-  modules' actual internal coupling is known.
+- **Genie multi-module `%run` composition (PR 5 only) — RESOLVED 2026-07-10.**
+  `%run` loads one notebook at a time; `ts_cli/databricks/` has three pure
+  modules plus internal imports between them — **and** `build_model.py`
+  deliberately imports shared pure functions from
+  `ts_cli.tableau.naming`/`ts_cli.model_builder` (see Background), so the
+  vendorable surface is wider than the `databricks/` directory alone. Options
+  considered: (a) separate `%run` imports, each self-contained (requires
+  avoiding cross-module imports inside the vendored copies, or vendoring the
+  shared functions too); (b) concatenate the full transitive pure-function
+  closure into one vendored notebook at deploy time.
+
+  Resolved on **option (b)**, implemented as `agents/databricks/build_mv_lib.py`
+  (run by `deploy.sh` at deploy time, never committed output): it concatenates
+  the transitive closure — `tml_lint.py`, `tml_common.py`, `formula_common.py`,
+  and the `databricks/mv_*.py` modules — into one generated `databricks_mv_lib`
+  notebook, stripping every `from ts_cli.*` import so names resolve in the
+  single exec namespace. Rationale: `%run` has no selective/partial import, so
+  option (a) would require either duplicating the shared pure functions into
+  each vendored copy (drift risk) or hand-maintaining per-module self-containment;
+  option (b) instead lets the in-function cross-imports (e.g. `build_model.py` →
+  `formula_common.py`) resolve naturally once everything shares one namespace.
+  Determinism is enforced by two build-time gates rather than by convention:
+  `assert_no_duplicate_top_level_names` (a name defined in two source modules
+  would otherwise silently shadow one when concatenated) and a `compile(...,
+  "exec")` syntax gate on the generated source before it's written.
 
 No other open questions — architecture, JSON contracts, delivery sequencing,
 and error-handling philosophy are settled per the fixed decisions this spec

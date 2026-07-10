@@ -10,6 +10,8 @@ ts_cli/
   cli.py              — Typer app entry point; registers command groups
   client.py           — ThoughtSpotClient REST wrapper; handles token caching and auth
   tml_lint.py         — Pre-import TML linter (pure functions, no I/O)
+  tml_common.py       — platform-neutral TML YAML serialization (dump_tml_yaml) + import-response GUID parsing (extract_imported_guid) — relocated from tableau/ (BL-063 PR5); pure functions, Genie-vendorable
+  formula_common.py   — platform-neutral formula/name transforms (resolve_name_collisions, add_formula_prefix, expr_is_aggregated, fix_double_aggregation) — relocated from model_builder.py/tableau/naming.py (BL-063 PR5); pure functions, Genie-vendorable
   model_builder.py     — Tableau TML assembly + phased-import orchestration facade (pure functions, no I/O; TWB parsing lives in ts_cli/tableau/twb.py)
   tableau_translate.py — Tableau → ThoughtSpot formula translation entry point + orchestrator facade over ts_cli/tableau/ (pure functions, no I/O)
   snowflake_ops.py     — Semantic View diff (normalise_expr/exprs_differ/compute_change_set) + DDL lint (lint_sv_ddl) behind `ts snowflake` (pure functions, no I/O)
@@ -30,10 +32,10 @@ ts_cli/
     cleanup.py           — output-cleanup transforms (post-translation)
     dag.py               — dependency DAG building, topological sort, cycle detection
     params.py            — parameter renaming, sanitisation, conflict detection
-    naming.py            — name-clash detection and renaming
+    naming.py            — name-clash detection (detect_name_clashes/apply_name_clash_renames) for Tableau-side collisions; resolve_name_collisions relocated to ts_cli/formula_common.py (BL-063 PR5), re-exported here for backward compat
     reconcile.py           — column cleanup + schema reconciliation for build-model (suffix strip, qualify, suggest/apply name maps)
     validate.py           — pre-import and post-translation validation
-    yaml_out.py           — TML YAML dump helpers
+    yaml_out.py           — shim — dump_tml_yaml relocated to ts_cli/tml_common.py (BL-063 PR5); re-exported here for backward compat
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
     classify.py            — formula tier classification behind `ts tableau classify-formulas` (classify_formulas/TRANSLATABLE_TIERS/UNTRANSLATABLE_TIERS; delegates the translatable verdict to tableau_translate.py so audit and migrate agree)
     build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
@@ -81,7 +83,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.44.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.45.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from ts_cli.cli import app
 
 from ts_cli.databricks.mv_build_model import (
+    _check_no_duplicate_display_names,
     build_columns_and_formulas,
     build_description,
     build_model_tables,
@@ -232,6 +233,9 @@ class TestBuildColumnsAndFormulas:
         assert [f["name"] for f in formulas] == ["Status"]
         assert [c["name"] for c in cols] == ["Status"]           # the paired entry only
         assert "formula_id" in cols[0] and "column_id" not in cols[0]
+        # BL-099 #2 — the shadowed physical column never reaches columns[], so
+        # the duplicate-title guard must NOT fire on this already-resolved case.
+        _check_no_duplicate_display_names(cols)
 
     def test_paired_columns_survive_collision_pass(self):
         # regression for the sequencing trap: N formulas in, N paired columns out.
@@ -251,6 +255,19 @@ class TestBuildColumnsAndFormulas:
         _, formulas, _ = build_columns_and_formulas(entries, None)
         by_name = {f["name"]: f for f in formulas}
         assert by_name["Wrapped"]["expr"] == "[formula_Base]"
+
+    def test_duplicate_dimension_display_titles_fail_loud(self):
+        # BL-099 #2 — two physical dimensions with the same display_name must
+        # not silently emit duplicate columns[] names. `ts tml lint` I8 (unique
+        # column_id) can't catch this: column_id ("T1::REGION_A" vs.
+        # "T1::REGION_B") differs even though the display name collides.
+        columns, _, _ = build_columns_and_formulas(
+            [_t("region_a", "column", "ATTRIBUTE", table="T1", column="REGION_A",
+                display_name="Region"),
+             _t("region_b", "column", "ATTRIBUTE", table="T1", column="REGION_B",
+                display_name="Region")], None)
+        with pytest.raises(ValueError, match=r"(?i)duplicate.*Region"):
+            _check_no_duplicate_display_names(columns)
 
 
 def _join(alias, source_raw, *, on=None, using=None, cardinality="many_to_one", joins=None):
@@ -439,8 +456,9 @@ class TestBuildModelTmlDbx:
         # two measures whose display_name collides once titled — resolve_name_
         # collisions only covers formula-vs-parameter and column-vs-formula
         # clashes, not formula-vs-formula, so build_model_tml_dbx must fail
-        # loud rather than silently emit two formulas[] entries with the same
-        # `name` (which ThoughtSpot import would reject or silently mangle).
+        # loud (via _check_no_duplicate_display_names, BL-099 #2) rather than
+        # silently emit two formulas[]/columns[] entries with the same `name`
+        # (which ThoughtSpot import would reject or silently mangle).
         translated = dict(self.TRANSLATED, translated=[
             {"name": "rev_7d", "role": "measure", "output_kind": "formula",
              "column_type": "MEASURE", "table": None, "column": None,
@@ -455,7 +473,7 @@ class TestBuildModelTmlDbx:
         ], window_measures=[])
         parsed = dict(self.PARSED, filter=None)
         translated = dict(translated, filter=None)
-        with pytest.raises(ValueError, match=r"(?i)duplicate formula display title.*Revenue"):
+        with pytest.raises(ValueError, match=r"(?i)duplicate display title.*Revenue"):
             build_model_tml_dbx(model_name="M", parsed=parsed,
                                 translated_doc=translated,
                                 tables={"source": "T"})

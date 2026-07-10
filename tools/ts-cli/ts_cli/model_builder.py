@@ -7,14 +7,17 @@ This module fills the gap between the formula translator (tableau_translate.py)
 and the TML importer. The translator handles per-formula syntax; this module
 handles model-level concerns:
 
-  1. formula_ prefix for cross-references
-  2. Double-aggregation detection (sum([formula_X]) where X is already aggregated)
+  1. formula_ prefix for cross-references (delegates to ts_cli/formula_common.py)
+  2. Double-aggregation detection (sum([formula_X]) where X is already aggregated;
+     delegates to ts_cli/formula_common.py)
   3. sum(if...else 0) → sum_if simplification (re-applied post-assembly)
   4. Table-qualified column references (re-applied post-assembly)
   5. String concat + → concat() (re-applied post-assembly)
   6. Parameter extraction and ordering (params before formulas)
-  7. Name collision resolution (column / formula / parameter)
-  8. Column/formula clash resolution (drop column, keep formula)
+  7. Name collision resolution (column / formula / parameter; delegates to
+     ts_cli/formula_common.py)
+  8. Column/formula clash resolution (drop column, keep formula; delegates to
+     ts_cli/formula_common.py)
 """
 from __future__ import annotations
 
@@ -25,7 +28,12 @@ from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for back-compat
     build_formula_levels,
     resolve_all_internal_refs,
 )
-from ts_cli.tableau.naming import resolve_name_collisions  # noqa: F401
+from ts_cli.formula_common import (  # noqa: F401 — moved (BL-063 PR 5)
+    add_formula_prefix,
+    expr_is_aggregated,
+    fix_double_aggregation,
+    resolve_name_collisions,
+)
 from ts_cli.tableau.twb import (  # noqa: F401 — re-exported for back-compat
     _extract_joins,
     _extract_tables,
@@ -37,76 +45,6 @@ from ts_cli.tableau.twb import (  # noqa: F401 — re-exported for back-compat
     extract_table_calc_addressing,
     parse_twb,
 )
-
-
-# ---------------------------------------------------------------------------
-# 1. Formula cross-reference prefix
-# ---------------------------------------------------------------------------
-
-def add_formula_prefix(
-    expr: str,
-    formula_names: set[str],
-    parameter_names: set[str],
-) -> str:
-    """Rewrite [Name] → [formula_Name] for formula cross-references.
-
-    Skips table-qualified refs ([TABLE::COL]), parameter refs, and refs
-    that already have the formula_ prefix.
-    """
-    def _replace(m: re.Match) -> str:
-        ref = m.group(1)
-        if "::" in ref:
-            return m.group(0)
-        if ref in parameter_names:
-            return m.group(0)
-        if ref.startswith("formula_"):
-            return m.group(0)
-        if ref in formula_names:
-            return f"[formula_{ref}]"
-        return m.group(0)
-
-    return re.sub(r"\[([^\]]+)\]", _replace, expr)
-
-
-# ---------------------------------------------------------------------------
-# 2. Double-aggregation detection
-# ---------------------------------------------------------------------------
-
-_AGG_FUNCTIONS = re.compile(
-    r"\b(sum|average|count|unique\s+count|max|min|sum_if|count_if|average_if|"
-    r"unique_count_if|cumulative_sum|cumulative_average|cumulative_max|"
-    r"cumulative_min|stddev|variance|moving_sum|moving_average|moving_max|"
-    r"moving_min|group_aggregate)\s*\(",
-    re.IGNORECASE,
-)
-
-
-def expr_is_aggregated(expr: str) -> bool:
-    """Check if an expression contains aggregation functions."""
-    return bool(_AGG_FUNCTIONS.search(expr))
-
-
-def fix_double_aggregation(
-    expr: str,
-    formula_exprs: dict[str, str],
-) -> str:
-    """Replace sum([formula_X]) with [formula_X] when X is already aggregated.
-
-    Handles sum, count, average, max, min and their _if variants.
-    """
-    _WRAPPED_REF = re.compile(
-        r"\b(sum|average|count|max|min)\s*\(\s*\[formula_([^\]]+)\]\s*\)",
-        re.IGNORECASE,
-    )
-
-    def _replace(m: re.Match) -> str:
-        ref_name = m.group(2)
-        ref_expr = formula_exprs.get(ref_name, "")
-        if expr_is_aggregated(ref_expr):
-            return f"[formula_{ref_name}]"
-        return m.group(0)
-
-    return _WRAPPED_REF.sub(_replace, expr)
 
 
 # ---------------------------------------------------------------------------

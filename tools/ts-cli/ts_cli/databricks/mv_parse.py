@@ -385,6 +385,21 @@ def parse_metric_view(yaml_text: str) -> dict:
     result["dimensions"] = _resolve_dimensions(doc, unsupported)
     result["measures"] = _resolve_measures(doc, unsupported, warnings)
 
+    # BL-099 #3 — duplicate identifiers across dimensions + measures would
+    # double-emit downstream (mv_name-keyed lookups are last-write-wins).
+    # Databricks rejects these at CREATE VIEW ... WITH METRICS time, so this
+    # only fires on hand-edited or partially-applied YAML — fail loud anyway.
+    seen: set[str] = set()
+    dupes: set[str] = set()
+    for entry in result["dimensions"] + result["measures"]:
+        if entry["name"] in seen:
+            dupes.add(entry["name"])
+        seen.add(entry["name"])
+    if dupes:
+        unsupported.append(_unsupported_entry(
+            "duplicate_name", None,
+            f"duplicate dimension/measure name(s): {sorted(dupes)}"))
+
     if not result["dimensions"] and not result["measures"]:
         warnings.append("Metric View declares no dimensions and no measures")
 

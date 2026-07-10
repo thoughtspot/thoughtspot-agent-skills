@@ -872,31 +872,13 @@ and column summary so the user has the full picture before importing.
 
 ---
 
-#### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
+#### Pre-import validation gate
 
-`build-model` already ran these checks on what it wrote — re-lint whenever a TML file
-has been hand-edited after Step 9.
-
-Before running `ts tml import`, lint the generated **Model** TML with **`ts tml lint`** — a
-parser-based check of the hard invariants in
-[`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md)
-that `--policy VALIDATE_ONLY` does **not** catch (ThoughtSpot accepts the TML and then
-behaves wrong, or rejects it on import):
-
-- **I1** — every `formulas[]` entry has a paired `columns[]` entry (`formula_id:` == `id:`). *(Unpaired formula silently dropped.)*
-- **I2** — no `aggregation:` inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
-- **I4** — every `model_tables[]` `id:` (when present) equals its `name:`. *(Mismatch makes joins silently fail.)*
-- **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
-- **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
-
-`ts tml lint` reads the same stdin shape as `ts tml import` and exits non-zero on any
-finding, so it gates the import (replace `<file>`):
-
-```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('<file>').read_text()]))" | ts tml lint
-```
-
-Do not import until it reports `"clean": true`. Fix any finding and re-lint.
+Before any `ts tml import`, run the mandatory lint gate — see
+[`../../shared/schemas/ts-tml-import-gate.md`](../../shared/schemas/ts-tml-import-gate.md)
+for the invariant list (I1/I2/I4/I5/I8), the stdin command, and the
+update-vs-create `guid` and import-policy rules. Do not import until
+`ts tml lint` reports `"clean": true`.
 
 ---
 
@@ -925,12 +907,6 @@ With `--profile`, the command imports the model TML via
 `import_status` and `model_guid` in the summary JSON. **Save the GUID** —
 required for any future update import. On `import_status: "failed"` read
 `import_error` and consult the table below.
-
-**Import policy:** Use `--policy PARTIAL` when importing multiple models in a batch.
-`ALL_OR_NONE` rolls back the **entire** batch if any single TML fails — including
-models that parsed and imported successfully. The response still returns success GUIDs
-for the rolled-back models, making the failure silent. Use `ALL_OR_NONE` only for
-atomic pairs (one table + one model that references it).
 
 **Common import errors:**
 
@@ -1059,6 +1035,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.8.1 | 2026-07-10 | Pre-import lint gate extracted to shared `ts-tml-import-gate.md` (BL-063 PR5) — content unchanged, now linked. |
 | 1.8.0 | 2026-07-10 | Steps 5/6/9/9.5/10/11 rewired onto ts databricks parse-mv / translate-formulas / build-model; tables.json v2 |
 | 1.7.0 | 2026-07-09 | Dimension/metric semantic deep-dive (BL-063 PR1.5, `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`). **New capability (A3, the MINOR):** `group_aggregate`'s `{}` filter argument, paired with a model-level `filters:` block mirroring the source MV's `filter:`, reproduces BOTH halves of the A1/A2 DBX composite (MV-`filter:`-aware AND query-time-`WHERE`-blind) in a single ThoughtSpot construct — corrects A1/A2's "no TS analogue" conclusion. `query_filters()` remains the default LOD mapping; `{}` + a mirrored model filter is the new option for reproducing a DBX consumer's ad hoc query-time-`WHERE`-blind LOD. Subtraction form `query_filters() - {col}` tested and found not to exclude a filter pinned on a derived boolean formula — recorded, not adopted. **Corrections/caveats:** LOD `query_filters()` dimension confirmed filter-aware on TS under both filter kinds, with the caveat that the equivalence holds for a Databricks MV's own global `filter:` only, not for a consumer's ad hoc query-time `WHERE` (A1/A2, refined by A3 above); cross-measure ratio inlining confirmed grain-safe at every grain, no caveat needed (B1); global `filter:` × window ordering confirmed filter-before-window on both platforms, with a new frame-semantics caveat — Databricks `trailing`/`leading` windows are date-interval framed while `moving_sum` is row-positional, so results diverge on sparse/gapped data (C1, same root cause as E1); semi-additive `last`/`first_value` under a date-range filter confirmed cross-platform (D1). |
 | 1.6.0 | 2026-07-09 | Window semantics live-verified against a Databricks fixture + ThoughtSpot number-match (`docs/audit/2026-07-08-dbx-window-claim-matrix.md`, C1–C7/C6a); resolves the previously-PENDING `leading`/`all` cases — new capability, not just a correction. **CORRECTED:** `range: trailing N day` (default/exclusive) — was `moving_sum([m], N, 0, [date])` (actually reproduces `trailing (N+1) day inclusive`), now `moving_sum([m], N, -1, [date])` (C1); `range: current` + `offset: -N <unit>` — was wall-clock `sum_if(diff_months/quarters/years([date], today())=N, [m])`, now row-relative `moving_sum([m], N, -N, [date])` LAG idiom, valid only with one row per period (C6/C6a; quarter/year grains and N>1 Deferred per C8). **RESOLVED (was PENDING):** `range: leading N day` (default/exclusive) → `moving_sum([m], -1, N, [date])` (C3); `range: all` → `group_aggregate(sum([m]), {partition dims}, query_filters())` (C4); `inclusive`/`exclusive` anchor modifier default confirmed `exclusive` (C2). **CONFIRMED unchanged:** `range: cumulative` → `cumulative_sum([m], [date])` (C5); `semiadditive: last`/`first` → `last_value`/`first_value(...)` (C7). Adds `trailing`/`leading` `inclusive` variants (`moving_sum([m], N-1, 0, [date])` / `moving_sum([m], 0, N-1, [date])`). |

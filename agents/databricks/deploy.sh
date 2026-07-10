@@ -46,8 +46,15 @@ cp "$SHARED_SRC/mappings/ts-databricks/ts-databricks-properties.md"            "
 cp "$SHARED_SRC/schemas/databricks-metric-view.md"                             "$SHARED_DST/schemas/"
 cp "$SHARED_SRC/schemas/thoughtspot-table-tml.md"                              "$SHARED_DST/schemas/"
 cp "$SHARED_SRC/schemas/thoughtspot-model-tml.md"                              "$SHARED_DST/schemas/"
+cp "$SHARED_SRC/schemas/ts-tml-import-gate.md"                                 "$SHARED_DST/schemas/"
 
 echo "✓ Copied shared references → $SHARED_DST"
+
+# --- Vendor the pure ts-cli conversion closure as a Genie notebook (BL-063 PR 5) ---
+python3 "$SCRIPT_DIR/build_mv_lib.py" \
+    --ts-cli-root "$REPO_ROOT/tools/ts-cli" \
+    --out "$SCRIPT_DIR/notebooks/databricks_mv_lib.py"
+echo "✓ Built vendored databricks_mv_lib notebook"
 
 # --- Deploy bundle (notebooks + token refresh job) ---
 cd "$SCRIPT_DIR"
@@ -91,6 +98,9 @@ done
 # Import ts_client as a notebook (for %run from skill context)
 databricks workspace import "${ASSISTANT_ROOT}/notebooks/ts_client" \
     --file "$SCRIPT_DIR/notebooks/ts_client.py" --format SOURCE --language PYTHON --overwrite
+
+databricks workspace import "${ASSISTANT_ROOT}/notebooks/databricks_mv_lib" \
+    --file "$SCRIPT_DIR/notebooks/databricks_mv_lib.py" --format SOURCE --language PYTHON --overwrite
 
 echo "✓ Genie skills deployed to ${ASSISTANT_ROOT}"
 echo ""

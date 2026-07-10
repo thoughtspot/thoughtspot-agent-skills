@@ -967,6 +967,41 @@ class TestParseMetricViewFailLoud:
         assert len([u for u in r["unsupported"]
                     if u["kind"] in ("dimension", "measure")]) == 2
 
+    def test_duplicate_identifier_across_dims_and_measures_is_unsupported(self):
+        """BL-099 #3 — Databricks rejects dup names at CREATE time, but a hand-edited
+        YAML must not silently last-write-wins through the mv_name-keyed lookups."""
+        yaml_text = """
+version: 1.1
+source: cat.sch.sales
+dimensions:
+  - name: amount
+    expr: amount_col
+measures:
+  - name: amount
+    expr: SUM(amount_col)
+"""
+        r = parse_metric_view(yaml_text)
+        kinds = [u["kind"] for u in r["unsupported"]]
+        assert "duplicate_name" in kinds
+        entry = next(u for u in r["unsupported"] if u["kind"] == "duplicate_name")
+        assert "amount" in entry["detail"]
+
+    def test_duplicate_identifier_within_dimensions_is_unsupported(self):
+        r = parse_metric_view(
+            "source: c.s.t\ndimensions:\n"
+            "  - {name: region, expr: region_col}\n"
+            "  - {name: region, expr: other_region_col}\n")
+        entry = next(u for u in r["unsupported"] if u["kind"] == "duplicate_name")
+        assert "region" in entry["detail"]
+
+    def test_duplicate_identifier_within_measures_is_unsupported(self):
+        r = parse_metric_view(
+            "source: c.s.t\nmeasures:\n"
+            "  - {name: revenue, expr: SUM(a)}\n"
+            "  - {name: revenue, expr: SUM(b)}\n")
+        entry = next(u for u in r["unsupported"] if u["kind"] == "duplicate_name")
+        assert "revenue" in entry["detail"]
+
     def test_non_dict_materialization(self):
         r = parse_metric_view("source: c.s.t\nmaterialization: fast\n")
         assert any(u["kind"] == "materialization" for u in r["unsupported"])

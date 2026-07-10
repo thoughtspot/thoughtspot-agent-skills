@@ -1571,28 +1571,13 @@ and column summary so the user has the full picture before importing.
 
 ---
 
-#### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
+#### Pre-import validation gate
 
-Before running `ts tml import`, lint the generated **Model** TML with **`ts tml lint`** — a
-parser-based check of the hard invariants in
-[`../../shared/schemas/ts-model-conversion-invariants.md`](../../shared/schemas/ts-model-conversion-invariants.md)
-that `--policy VALIDATE_ONLY` does **not** catch (ThoughtSpot accepts the TML and then
-behaves wrong, or rejects it on import):
-
-- **I1** — every `formulas[]` entry has a paired `columns[]` entry (`formula_id:` == `id:`). *(Unpaired formula silently dropped.)*
-- **I2** — no `aggregation:` inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
-- **I4** — every `model_tables[]` `id:` (when present) equals its `name:`. *(Mismatch makes joins silently fail.)*
-- **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
-- **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
-
-`ts tml lint` reads the same stdin shape as `ts tml import` and exits non-zero on any
-finding, so it gates the import (replace `<file>`):
-
-```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('<file>').read_text()]))" | ts tml lint
-```
-
-Do not import until it reports `"clean": true`. Fix any finding and re-lint.
+Before any `ts tml import`, run the mandatory lint gate — see
+[`../../shared/schemas/ts-tml-import-gate.md`](../../shared/schemas/ts-tml-import-gate.md)
+for the invariant list (I1/I2/I4/I5/I8), the stdin command, and the
+update-vs-create `guid` and import-policy rules. Do not import until
+`ts tml lint` reports `"clean": true`.
 
 ---
 
@@ -1646,12 +1631,6 @@ print(result.stdout)
 if result.returncode != 0:
     print(result.stderr)
 ```
-
-**Import policy:** Use `--policy PARTIAL` when importing multiple models in a batch.
-`ALL_OR_NONE` rolls back the **entire** batch if any single TML fails — including
-models that parsed and imported successfully. The response still returns success GUIDs
-for the rolled-back models, making the failure silent. Use `ALL_OR_NONE` only for
-atomic pairs (one table + one model that references it).
 
 On success, parse the response JSON to extract the created model's GUID. **Save it** —
 required for any future reimports to update the model without creating a duplicate.
@@ -1835,6 +1814,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.14.1 | 2026-07-10 | Pre-import lint gate + import-policy text extracted to shared `ts-tml-import-gate.md` (BL-063 PR5) — content unchanged, now linked. |
 | 1.14.0 | 2026-07-10 | Cumulative window metrics: row 25 corrected to `moving_sum(group_aggregate(...))` (aggregates cannot nest directly in `moving_sum`); new `COUNT_IF` mapping; new limitations L6 (BOOL in `if` requires parentheses — prefer `count_if`/`sum_if`) and L7 (formulas referencing `[TABLE::COL]` fail on initial CREATE — documented mandatory two-pass import in Step 11). Verified on SE cluster. |
 | 1.13.0 | 2026-07-03 | Step C3 change-set computation delegates to `ts snowflake diff` (BL-063 quick win). Prereq ts-cli v0.30.0. |
 | 1.12.0 | 2026-06-17 | Step 6B connection step now offers **E — use existing / C — create a new connection** (Snowflake, key-pair auth via `ts connections create`) instead of only selecting an existing one. Adds the "Database does not exist in connection → role can't see it → create one" guidance and a credential-handling guardrail (private key by file path only; never pasted into chat; password/OAuth → UI + E path). Mirrors the connection-step change in ts-convert-from-tableau; ts-convert-from-databricks-mv gets the explicit stop-and-instruct fallback. |
