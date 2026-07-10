@@ -7,6 +7,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-07-10
 - feat: add `ts databricks build-model` — deterministic ThoughtSpot Model (+ Table) TML assembly from `parse-mv`/`translate-formulas` JSON, with a TML invariant/lint gate (files always written for inspection) and an optional `ts tml import --policy PARTIAL` of the model TML (BL-063 PR4 Task 5, ts-cli v0.44.0)
+- feat: `ts-convert-from-databricks-mv` Steps 5/6/9/9.5/10/11 rewired onto the deterministic 3-command pipeline (`ts databricks parse-mv` / `translate-formulas` / `build-model`) instead of inline LLM parsing/translation/TML assembly; `tables.json` moves to a v2 shape (BL-063 PR4, `ts-convert-from-databricks-mv` v1.8.0)
+- fix: ts-cli live e2e fixes found and closed during BL-063 PR4's end-to-end gate against se-thoughtspot — flat import-response GUID shape in `extract_imported_guid`; connection-scoped GUID resolution + `BOOLEAN`→`BOOL` data-type normalization in `ts tables create` (previously could resolve to a same-named table on the wrong connection, or reject a valid `BOOLEAN` column); in-band `ERROR`-status import responses now surfaced as a non-empty `import_error` by `ts databricks build-model` instead of being swallowed. The `ts tables create` fixes affect all callers of that command, not just this skill (BL-063 PR4)
 
 ## 2026-07-09
 - feat: ts databricks translate-formulas — deterministic MV formula translation (BL-063 PR3, ts-cli v0.43.0)

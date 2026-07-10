@@ -1658,10 +1658,16 @@ expression ends with `)` after `else`, but rare enough to be acceptable as a war
 
 **Source:** Architectural comparison of conversion skill implementations (2026-06-28)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, tools/ts-cli
-**Status:** PARTIALLY DONE — the two quick wins (`ts snowflake diff` + `ts snowflake
-lint-ddl`) shipped 2026-07-03 (ts-cli v0.30.0; see the Scope extension section below).
-Phases 1a-4, `build-sv`, and the shared lint+import procedure remain OPEN — assess
-feasibility before scheduling those.
+**Status:** PARTIALLY DONE — the two Snowflake quick wins (`ts snowflake diff` +
+`ts snowflake lint-ddl`) shipped 2026-07-03 (ts-cli v0.30.0; see the Scope extension
+section below). The Databricks track is now DONE through phases 2a/2b/2c + the
+Databricks half of Phase 4: `ts databricks parse-mv` (PR #200, ts-cli v0.42.0),
+`ts databricks translate-formulas` (PR #202, ts-cli v0.43.0), and `ts databricks
+build-model` + `ts-convert-from-databricks-mv` SKILL.md rewiring (PR4, ts-cli v0.44.0,
+2026-07-10 — see Update below), pending only PR 5 (shared lint+import extraction +
+Genie-vendoring surface widening). Snowflake phases 1a-1c, `build-sv`, the Snowflake
+half of Phase 4, and the shared lint+import procedure remain OPEN — assess feasibility
+before scheduling those.
 **Related:** BL-032 (Databricks parser support), BL-014 (Databricks coverage review)
 
 ### Problem
@@ -1707,11 +1713,11 @@ commands, mirroring the Tableau pattern:
 | 1a | `ts snowflake parse-sv` — parse SV DDL into structured JSON | ~1 week |
 | 1b | `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formulas | ~2 weeks |
 | 1c | `ts snowflake build-model` — assemble Model TML from parsed/translated data (adapter for existing `model_builder.py`) | ~1 week |
-| 2a | `ts databricks parse-mv` — parse MV YAML into structured JSON | ~1 week |
-| 2b | `ts databricks translate-formulas` — Databricks SQL → ThoughtSpot formulas | ~2 weeks |
-| 2c | `ts databricks build-model` — assemble Model TML from parsed/translated data | ~1 week |
+| 2a | `ts databricks parse-mv` — parse MV YAML into structured JSON | **DONE** (PR #200, ts-cli v0.42.0) |
+| 2b | `ts databricks translate-formulas` — Databricks SQL → ThoughtSpot formulas | **DONE** (PR #202, ts-cli v0.43.0) |
+| 2c | `ts databricks build-model` — assemble Model TML from parsed/translated data | **DONE** (PR4, ts-cli v0.44.0, 2026-07-10) |
 | 3 | Reverse direction (`ts snowflake translate-formulas --reverse`) for to-SV | ~1 week |
-| 4 | Update SKILL.md files to use CLI commands instead of inline LLM translation | ~1 week |
+| 4 | Update SKILL.md files to use CLI commands instead of inline LLM translation | **Databricks DONE** (PR4, `ts-convert-from-databricks-mv` v1.8.0); Snowflake OPEN |
 
 ### Decision to make first
 
@@ -1759,6 +1765,24 @@ resolved and locked with live citations against a Databricks fixture + ThoughtSp
 number-match; nothing is left PENDING or unresolved. **Stop-condition NOT triggered** —
 this is in line with (not beyond) the churn BL-064 already catalogued. PR2
 (`ts databricks parse-mv`/`translate-formulas`) may proceed.
+
+**Update 2026-07-10 (PR4 — build-model + Phase-4 Databricks rewiring):** the Databricks
+track completes phases 2a-2c and its half of Phase 4. `ts databricks build-model`
+(ts-cli v0.44.0) assembles Model (+ Table) TML from `parse-mv`/`translate-formulas`
+JSON with a TML invariant/lint gate and an optional `ts tml import`; `ts-convert-from-databricks-mv`
+Steps 5/6/9/9.5/10/11 (v1.8.0) now call the deterministic 3-command pipeline instead of
+inline LLM parsing/translation/assembly. Live e2e-verified against se-thoughtspot +
+DBX_DAMIAN (Task 10), which surfaced and fixed 3 ts-cli defects along the way: the flat
+import-response GUID shape in `extract_imported_guid`, connection-scoped GUID resolution
++ `BOOLEAN`→`BOOL` normalization in `ts tables create`, and in-band `ERROR`-status import
+errors now surfaced via `build-model`'s `import_error` (previously swallowed as an empty
+string). BL-098 items 1 and 2 (density-check warning, sparse-data-risk annotation) are
+DONE as part of PR2/PR3 — see BL-098. **Remaining for the Databricks track:** PR 5 —
+extract the shared lint+import procedure (the ~200-line duplication flagged in the
+2026-07-03 scope extension, now also present a third time in the Databricks build-model
+contract) and widen the pure-function vendorable surface (`ts_cli/databricks/`) for a
+future Genie Code adoption. The Snowflake phases (1a-1c, `build-sv`, Snowflake's Phase 4)
+remain OPEN and unscheduled.
 
 ---
 
@@ -2660,7 +2684,9 @@ ordering). Full evidence: `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`.
 **Affects:** `ts-convert-from-databricks-mv` and `ts-convert-to-databricks-mv` skills (both
 directions' `trailing`/`leading` `range:` mapping); the planned BL-063 PR2
 (`ts databricks parse-mv`) and PR3 (`ts databricks translate-formulas`) substrate.
-**Status:** OPEN.
+**Status:** OPEN — items 1 and 2 are DONE (shipped in BL-063 PR2 and PR3
+respectively, 2026-07-09/10); item 3 (a live probe on a DENSE non-day-grain fixture)
+is the entry's sole remaining scope.
 
 Databricks `trailing N day`/`leading N day` window frames are date-interval framed — the
 frame boundary is a calendar-date interval intersected with surviving rows. ThoughtSpot's
@@ -2677,15 +2703,18 @@ files, and `ts-databricks-properties.md`).
 
 ### Approach
 
-1. PR2 (`ts databricks parse-mv`) should emit a density-check warning flag on any measure
-   using a `trailing`/`leading`/`window` `range:` — flagging when the parsed MV's source
-   table cannot be confirmed dense at the query grain (no date gaps).
-2. PR3 (`ts databricks translate-formulas`) must mark every trailing/leading translation
-   with a sparse-data-risk caveat in its output (a `pending_verification`-style annotation)
-   rather than asserting equivalence unconditionally.
-3. A future live probe should test DENSE non-day units (e.g. month grain) to confirm the
-   date-interval/row-positional distinction — and its practical impact — generalizes beyond
-   daily grain.
+1. **DONE — PR #200** (`ts-cli` v0.42.0, BL-063 PR2). `ts databricks parse-mv`
+   (`ts_cli/databricks/mv_window.py`) sets `density_check_required: true` on every
+   `trailing`/`leading`/`window` `range:` measure and emits a stderr WARNING; the
+   flag is surfaced by `ts-convert-from-databricks-mv` SKILL.md Step 5.
+2. **DONE — PR #202** (`ts-cli` v0.43.0, BL-063 PR3). `ts databricks translate-formulas`
+   (`ts_cli/databricks/mv_window_translate.py`) attaches a `sparse_data_risk` annotation
+   to every trailing/leading translation plus a stderr WARNING, rather than asserting
+   equivalence unconditionally. Carried through into `ts databricks build-model`'s
+   `window_measures[]` summary field (BL-063 PR4, ts-cli v0.44.0, 2026-07-10).
+3. **OPEN — remaining scope.** A future live probe should test DENSE non-day units
+   (e.g. month grain) to confirm the date-interval/row-positional distinction — and its
+   practical impact — generalizes beyond daily grain.
 
-**Target:** resolve as part of BL-063 PR2/PR3 scope (tied to those PRs' delivery, no fixed
-calendar date).
+**Target:** item 3 — no fixed calendar date; opportunistic, alongside the next Databricks
+live-verification pass.
