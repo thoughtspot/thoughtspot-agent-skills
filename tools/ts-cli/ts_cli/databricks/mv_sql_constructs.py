@@ -21,10 +21,21 @@ from __future__ import annotations
 _NOT_OPERAND_STOP_KWS = frozenset({"AND", "OR", "THEN", "WHEN", "ELSE", "END"})
 
 
+# Arithmetic/comparison operators that can precede a postfix construct's
+# left operand. 'and'/'or' are deliberately excluded — a boolean connector
+# two positions back (e.g. `a = 1 AND b IN (...)`) must still pop `b`, not
+# be treated as a compound operand.
+_COMPOUND_GUARD_OPS = {"+", "-", "*", "/", "=", "!=", "<", ">", "<=", ">="}
+
+
 def _pop_operand(units: list[str], construct: str) -> str:
     from ts_cli.databricks.mv_sql import UntranslatableError, _NULLIF0
     if not units:
         raise UntranslatableError(f"'{construct}' without a left operand")
+    if len(units) >= 2 and units[-2] in _COMPOUND_GUARD_OPS:
+        raise UntranslatableError(
+            f"compound left operand of {construct} — parenthesize it "
+            f"(e.g. (a * b) {construct} …)")
     unit = units.pop()
     if unit.startswith(_NULLIF0):
         # NULLIF marker popped mid-expression (before the end-of-expr

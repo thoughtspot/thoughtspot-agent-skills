@@ -86,6 +86,8 @@ class _Cursor:
         return self.toks[j] if j < len(self.toks) else (None, None)
 
     def advance(self) -> tuple[str, str]:
+        if self.i >= len(self.toks):
+            raise UntranslatableError("unexpected end of expression")
         tok = self.toks[self.i]
         self.i += 1
         return tok

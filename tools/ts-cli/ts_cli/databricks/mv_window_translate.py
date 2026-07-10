@@ -29,6 +29,8 @@ from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 _OUTER_AGG_RE = re.compile(r"^([A-Za-z_]\w*)\s*\((.*)\)\s*$", re.DOTALL)
 _DATE_TRUNC_DIM_RE = re.compile(
     r"^DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(.+?)\s*\)\s*$", re.IGNORECASE | re.DOTALL)
+_PLAIN_COLUMN_RE = re.compile(
+    r"^(?:`[^`]+`|[A-Za-z_][\w$]*)(?:\.(?:`[^`]+`|[A-Za-z_][\w$]*))*$")
 _MOVING_FN = {"SUM": "moving_sum", "AVG": "moving_average",
               "MIN": "moving_min", "MAX": "moving_max"}
 _CUMULATIVE_FN = {"SUM": "cumulative_sum", "AVG": "cumulative_average",
@@ -102,10 +104,15 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
         m = _DATE_TRUNC_DIM_RE.match(stripped)
         if m:
             unit = m.group(1).lower()
+            inner = m.group(2).strip()
+            if not _PLAIN_COLUMN_RE.match(inner):
+                raise UntranslatableError(
+                    f"order dimension '{order_name}' truncates a non-column "
+                    f"expression — cannot derive the physical sort column")
             if unit == "day":
-                return {"grain": "day", "sort_ref": resolver(m.group(2))}
+                return {"grain": "day", "sort_ref": resolver(inner)}
             if unit in _GRAIN_MONTHS:
-                return {"grain": unit, "sort_ref": resolver(m.group(2))}
+                return {"grain": unit, "sort_ref": resolver(inner)}
             raise UntranslatableError(
                 f"order dimension '{order_name}' truncates to '{unit}' — "
                 f"only day/month/quarter/year grains are mapped")
@@ -193,9 +200,17 @@ def _window_cumulative(measure, order, agg, inner) -> dict:
         annotations=annotations)
 
 
+_CURRENT_AGGS = {"SUM", "AVG", "MIN", "MAX", "COUNT", "STDDEV", "VARIANCE"}
+
+
 def _window_current(measure, window, order, agg, inner) -> dict:
     from ts_cli.databricks.mv_translate import _formula_measure
-    lower = agg.lower() if agg != "AVG" else "average"
+    if agg not in _CURRENT_AGGS:
+        raise UntranslatableError(
+            f"aggregate '{agg}' has no ThoughtSpot aggregate-function "
+            f"mapping for a range: current window")
+    lower = {"AVG": "average", "STDDEV": "stddev",
+             "VARIANCE": "variance"}.get(agg, agg.lower())
     if order["grain"] == "day":  # raw date -> true semi-additive (C7)
         fn = "last_value" if window["semiadditive"] == "last" else "first_value"
         ts = (f"{fn} ( {lower} ( {inner} ) , query_groups ( ) , "

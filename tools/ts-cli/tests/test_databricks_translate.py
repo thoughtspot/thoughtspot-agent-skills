@@ -452,6 +452,19 @@ class TestWindowMeasures:
                              physical_ref="x", agg_function="SUM"),
                 DIMS, TABLES)
 
+    def test_order_dimension_truncates_non_column_raises(self):
+        # DATE_TRUNC('MONTH', CAST(x AS DATE)) — the inner isn't a plain
+        # column, so the sort ref must not leak "CAST(x AS DATE)" verbatim
+        # into the resolver; fail loud instead.
+        dims = DIMS + [_dim("bad_month", "DATE_TRUNC('MONTH', CAST(x AS DATE))",
+                            "computed")]
+        with pytest.raises(UntranslatableError, match="non-column"):
+            translate_window_measure(
+                _win_measure("m", "SUM(x)", "simple",
+                             _window("bad_month", "cumulative"),
+                             physical_ref="x", agg_function="SUM"),
+                dims, TABLES)
+
     def test_complex_inner_expr_stripped_of_outer_agg(self):
         # golden Measure 5 uses SUM(a * b) — inner is a * b (rule 9)
         out = translate_window_measure(
@@ -461,6 +474,15 @@ class TestWindowMeasures:
             DIMS, TABLES)
         assert out["ts_expr"].startswith(
             "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] ,")
+
+    def test_current_window_unmapped_agg_raises(self):
+        # MEDIAN has no ThoughtSpot aggregate-function mapping for a range:
+        # current window — must fail loud, not silently emit `median ( … )`.
+        with pytest.raises(UntranslatableError, match="MEDIAN"):
+            translate_window_measure(
+                _win_measure("m", "MEDIAN(x)", "complex",
+                             _window("order_month", "current")),
+                DIMS, TABLES)
 
     def test_windowed_cross_measure_skipped(self):
         with pytest.raises(UntranslatableError, match="MEASURE"):
@@ -602,6 +624,16 @@ class TestOrchestrator:
         m = next(e for e in out["translated"] if e["name"] == "m")
         assert m["ts_expr"] == "sum ( [TRANSACTIONS::x] ) * ( [TRANSACTIONS::region] )"
 
+    def test_truncated_expr_skipped_not_crashed(self):
+        # A truncated SQL expression (dangling IS with no NULL/NOT NULL that
+        # follows) must land in skipped[] with a reason, never raise an
+        # unguarded IndexError out of translate_metric_view.
+        measures = [_measure("bad", "x IS", "complex")]
+        out = translate_metric_view(_parsed((), measures), TABLES)
+        assert out["skipped"] == [
+            {"name": "bad", "role": "measure",
+             "reason": "unexpected end of expression"}]
+
     def test_windowed_cycle_member_listed_in_window_measures(self):
         measures = [
             _win_measure("m1", "SUM(x)", "simple",
@@ -706,6 +738,44 @@ class TestTranslateFormulasCli:
                                      "--tables", str(tab)])
         assert result.exit_code == 1
         assert "source" in _stderr(result)
+
+    def test_tables_file_non_dict_json_exit_1_no_traceback(self, tmp_path):
+        # A syntactically-valid JSON array (not an object) for --tables must
+        # exit cleanly with a message on stderr, not an unguarded traceback.
+        # (translate_metric_view's own _validate_tables already catches this
+        # shape, but _load_json must guard it too — see the --input variant
+        # below, which crashes with an unguarded IndexError/TypeError today.)
+        parsed = _parsed()
+        inp = tmp_path / "parsed.json"
+        inp.write_text(json.dumps(parsed))
+        tab = tmp_path / "tables.json"
+        tab.write_text(json.dumps([1, 2]))
+        out = tmp_path / "translated.json"
+        result = runner.invoke(app, ["databricks", "translate-formulas",
+                                     "--input", str(inp), "--output", str(out),
+                                     "--tables", str(tab)])
+        assert result.exit_code == 1
+        err = _stderr(result)
+        assert "must be a JSON object" in err
+        assert "Traceback" not in err
+
+    def test_input_file_non_dict_json_exit_1_no_traceback(self, tmp_path):
+        # A syntactically-valid JSON array for --input has no downstream
+        # dict-shape validation before translate_metric_view indexes into
+        # it (parsed["dimensions"]) — today this escapes as a raw
+        # TypeError traceback instead of a clean exit 1.
+        inp = tmp_path / "parsed.json"
+        inp.write_text(json.dumps([1, 2]))
+        tab = tmp_path / "tables.json"
+        tab.write_text(json.dumps(TABLES))
+        out = tmp_path / "translated.json"
+        result = runner.invoke(app, ["databricks", "translate-formulas",
+                                     "--input", str(inp), "--output", str(out),
+                                     "--tables", str(tab)])
+        assert result.exit_code == 1
+        err = _stderr(result)
+        assert "must be a JSON object" in err
+        assert "Traceback" not in err
 
 
 # --- Golden worked-example fixtures (BL-063 PR3 acceptance gate) -------

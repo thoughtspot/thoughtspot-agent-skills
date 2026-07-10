@@ -120,7 +120,11 @@ def _load_json(path_str: str, label: str) -> dict:
         typer.echo(f"{label} file not found: {path_str}", err=True)
         raise SystemExit(1)
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         typer.echo(f"cannot read {label} {path_str}: {exc}", err=True)
         raise SystemExit(1)
+    if not isinstance(data, dict):
+        typer.echo(f"{label} must be a JSON object: {path_str}", err=True)
+        raise SystemExit(1)
+    return data

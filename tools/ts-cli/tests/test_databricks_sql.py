@@ -236,6 +236,36 @@ class TestPostfixConstructs:
         assert t("CASE WHEN NOT status = 'x' THEN 1 ELSE 0 END") == \
             "if ( not ( [TRANSACTIONS::status] = 'x' ) , 1 , 0 )"
 
+    def test_between_compound_left_operand_raises(self):
+        with pytest.raises(UntranslatableError, match="parenthesize"):
+            t("price * qty BETWEEN 10 AND 20")
+
+    def test_is_compound_left_operand_raises(self):
+        with pytest.raises(UntranslatableError, match="parenthesize"):
+            t("a + b IS NULL")
+
+    def test_between_parenthesized_compound_translates(self):
+        assert t("(price * qty) BETWEEN 10 AND 20") == (
+            "( [TRANSACTIONS::price] * [TRANSACTIONS::qty] ) >= 10 and "
+            "( [TRANSACTIONS::price] * [TRANSACTIONS::qty] ) <= 20")
+
+    def test_and_in_guard_rail_still_translates(self):
+        # 'and'/'or' are deliberately excluded from the compound-operand
+        # guard — b IN (...) after 'a = 1 AND' must still pop b, not raise.
+        assert t("a = 1 AND status IN ('x', 'y')") == (
+            "[TRANSACTIONS::a] = 1 and "
+            "( [TRANSACTIONS::status] = 'x' or [TRANSACTIONS::status] = 'y' )")
+
+
+class TestTruncatedInput:
+    def test_dangling_is_raises(self):
+        with pytest.raises(UntranslatableError, match="end of expression"):
+            t("x IS")
+
+    def test_dangling_cast_raises(self):
+        with pytest.raises(UntranslatableError, match="end of expression"):
+            t("CAST(x AS")
+
 
 class TestSafeDivide:
     def test_divide_by_nullif(self):
