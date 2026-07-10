@@ -2716,6 +2716,15 @@ files, and `ts-databricks-properties.md`).
    (e.g. month grain) to confirm the date-interval/row-positional distinction — and its
    practical impact — generalizes beyond daily grain.
 
+**2026-07-11 status:** BL-063 Phase 2 (PR4 `ts databricks build-model` #204, PR5
+naming/import-guard follow-ups #206) shipped and closed without touching item 3.
+`_window_moving` in `ts_cli/databricks/mv_window_translate.py` (:159-163) still hard-fails
+non-day `rng["unit"]` trailing/leading windows with `"only day grain trailing/leading
+windows are live-verified (BL-098 item 3 / C8); non-day units need a live probe first"` —
+confirming no month/quarter/year-grain live probe has been run. Item 3 remains OPEN;
+unblocking it needs a live Databricks fixture at a dense non-day grain, opportunistic
+alongside the next Databricks live-verification pass.
+
 **Target:** item 3 — no fixed calendar date; opportunistic, alongside the next Databricks
 live-verification pass.
 
@@ -2795,3 +2804,39 @@ duplicate.
 
 **Target:** scope after the next full repo audit (angle 11 output feeds the plan);
 Snowflake-from pipeline is the natural first program (BL-063-style phased PRs).
+
+---
+
+## BL-101 — Surface chart-axis-role classification in `ts metadata report` (schema 1.0 contract change)
+
+**Filed:** 2026-07-11.
+**Source:** BL-083 PR2 scope decision + `agents/cli/ts-dependency-manager/references/open-items.md`
+open-item #22.
+**Affects:** `tools/ts-cli/ts_cli/report/__init__.py` (`build_report`, `DependentSignals`),
+`ts-dependency-manager` Step 6.
+**Status:** OPEN — no fixed target date.
+
+`ts dependency apply-change` already classifies per-viz chart-axis roles itself
+(`ts_cli.dependency.apply.chart_role_for_answer` / `classify_liveboard_viz_roles`),
+defaulting every x/y-axis-affected visualization to the always-safe `CONVERT_TO_TABLE`
+with a per-viz plan override — so the destructive mutation path is deterministic and
+safe today. What is missing is surfacing that same classification in `ts metadata
+report`'s output so Step 6 can present the `CONVERT_TO_TABLE`-vs-`REMOVE` decision
+interactively from the report itself, rather than requiring a separate TML read.
+
+This was deferred out of BL-083 PR2 rather than folded in because `build_report` does
+not wire per-dependent chart classification at all today — `DependentSignals.chart_axis_use`
+exists as a field but is never populated (`build_report` feeds only the aggregate from the
+RLS/join/AI-surface probes). Emitting a per-viz `action` touches the report's
+`schema_version` 1.0 contract, which is a larger, deliberate change rather than something
+to bundle into the apply-change orchestrator.
+
+**Scope:** extend `build_report`'s per-dependent output to populate
+`DependentSignals.chart_axis_use` per liveboard visualization (reusing the same
+`chart_role_for_answer` / `classify_liveboard_viz_roles` pure functions
+`apply.py` already computes), emit a per-viz role in the report JSON, and have
+Step 6 consume it directly instead of a separate TML read. Consider bumping the report
+schema version if the new field changes the existing contract's shape expectations.
+
+**Target:** no fixed date — natural next step whenever `ts_cli/report/__init__.py` is
+next touched, or as part of a future ts-dependency-manager UX pass.

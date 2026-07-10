@@ -156,6 +156,9 @@ contract, a larger change than the orchestrator needs.
 **Action:** populate `DependentSignals.chart_axis_use` per liveboard viz in
 `build_report`, emit a per-viz role in the report JSON, and have Step 6 consume it.
 
+**Tracked as:** `docs/backlog.md` BL-101 (filed 2026-07-11) — per the repo-audit two-bucket
+rule, this finding now has a dated backlog entry rather than living only as an open-item.
+
 **Related fidelity follow-up:** `mutate._apply_remove_liveboard` currently converts EVERY source-referencing viz to TABLE_MODE on the CONVERT_TO_TABLE default (safe, but over-flattens a viz that used the removed column only as a color/size/shape binding). A strip-in-place path for REMOVE_COLUMN vizzes (using `classify_liveboard_viz_roles`) would preserve those charts — pair it with the report surfacing above.
 
 ---

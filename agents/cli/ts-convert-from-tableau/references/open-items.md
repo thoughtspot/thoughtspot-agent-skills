@@ -22,13 +22,14 @@ live VALIDATE_ONLY behaviour
 
 ---
 
-## #3 — COLLECTION datasources — NOT IMPLEMENTED
+## #3 — COLLECTION datasources — DEFERRED
 
 Tableau COLLECTION datasources (multiple primary data sources combined) should generate
 one model per underlying table. This edge case is not handled.
 
-Status: DEFERRED — no committed target version or BL-NNN filed as of 2026-07-03; revisit
-if a workbook using a COLLECTION datasource is encountered
+Status: DEFERRED — still open as of 2026-07-11; no committed target version or BL-NNN
+filed as of 2026-07-03, and no COLLECTION-datasource workbook has been encountered since;
+revisit if/when one is encountered
 
 ---
 
