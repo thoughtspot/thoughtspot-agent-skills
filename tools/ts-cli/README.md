@@ -819,7 +819,9 @@ cat tables.json | ts tables create --profile my-profile
 
 **Field notes:**
 - `connection_name` — the ThoughtSpot connection display name (string), not a GUID
-- `data_type` — one of: `INT64`, `DOUBLE`, `VARCHAR`, `DATE`, `DATE_TIME`, `BOOLEAN`
+- `data_type` — one of: `INT64`, `DOUBLE`, `VARCHAR`, `DATE`, `DATE_TIME`, `BOOL`.
+  `BOOLEAN` is accepted too and normalized to `BOOL` — the live import API rejects
+  `BOOLEAN` with `"Data type BOOLEAN is not valid for column ..."` (verified 2026-07-10)
 - `column_type` — `ATTRIBUTE` (default) or `MEASURE` (adds `aggregation: SUM`)
 
 **Output:** JSON object mapping table name → GUID for all successfully created tables.
@@ -829,7 +831,12 @@ Tables that failed after all retries are included with `null` as the GUID.
 {"FACT_SALES": "b1e360c4-d571-490f-bae2-e8dc7443c9fa"}
 ```
 
-Auto-retries transient JDBC errors and resolves GUIDs via metadata search after import.
+Auto-retries transient JDBC errors. After each successful import, resolves the GUID via
+metadata search if not already returned in the import response — the search is
+**connection-scoped**: it filters candidates on `metadata_header.dataSourceName ==
+connection_name`, so a same-named table registered on a different connection is never
+returned (live finding, BL-063 PR4, 2026-07-10 — see `_find_guid_by_name` in
+`ts_cli/commands/tables.py`).
 
 ---
 
