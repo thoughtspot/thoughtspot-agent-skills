@@ -10,6 +10,7 @@ import typer
 import yaml
 
 from ts_cli.client import ThoughtSpotClient, resolve_profile
+from ts_cli.tml_common import extract_imported_guid
 
 app = typer.Typer(help="ThoughtSpot logical table object commands.")
 
@@ -181,10 +182,8 @@ def create_tables(
             status_code = status.get("status_code", "ERROR")
 
             if status_code == "OK":
-                # Try to get GUID from response first
-                obj_list = item.get("response", {}).get("object", [])
-                if obj_list:
-                    guid = obj_list[0].get("header", {}).get("id_guid")
+                # Try to get GUID from response first (nested or flat shape)
+                guid = extract_imported_guid([item])
                 # If not in response, search for it (connection-scoped — see
                 # _find_guid_by_name docstring for why name-only isn't enough)
                 if not guid:

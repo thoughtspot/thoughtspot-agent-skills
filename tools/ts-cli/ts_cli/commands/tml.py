@@ -468,6 +468,8 @@ def import_tml(
 
     # ThoughtSpot often returns an empty object list despite a successful import.
     # For each OK response with no GUID, search by name and back-fill the GUID.
+    from ts_cli.tml_common import extract_imported_guid
+
     items = data if isinstance(data, list) else [data]
     for item in items:
         response_block = item.get("response", {})
@@ -475,8 +477,8 @@ def import_tml(
         if status.get("status_code") != "OK":
             continue
         obj_list = response_block.get("object", [])
-        if obj_list and obj_list[0].get("header", {}).get("id_guid"):
-            continue  # GUID already present
+        if extract_imported_guid([item]):
+            continue  # GUID already present (nested or flat shape)
         # Try to recover the GUID from the TML name field
         idx = item.get("request_index", 0)
         if idx < len(tmls):

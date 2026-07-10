@@ -29,3 +29,20 @@ class TestExtractImportedGuid:
         from ts_cli.tml_common import extract_imported_guid as canonical
         from ts_cli.tableau.build_model import extract_imported_guid as via_tableau
         assert via_tableau is canonical
+
+
+class TestFlatShapeSites:
+    """BL-099 #1 — each site wraps its single response item and calls the helper."""
+
+    def test_single_item_wrap_flat(self):
+        from ts_cli.tml_common import extract_imported_guid
+        item = {"response": {"header": {"id_guid": "g1"},
+                             "status": {"status_code": "OK"}}}
+        assert extract_imported_guid([item]) == "g1"
+
+    def test_response_block_wrap(self):
+        # dependency.py rollback holds only the response block — wrap it back
+        from ts_cli.tml_common import extract_imported_guid
+        response_block = {"object": [], "header": {"id_guid": "g2"},
+                          "status": {"status_code": "OK"}}
+        assert extract_imported_guid([{"response": response_block}]) == "g2"

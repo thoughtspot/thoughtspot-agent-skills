@@ -285,6 +285,36 @@ class TestRollbackCommand:
         assert results["failed"] == []
         assert results["new_guids"]["del-1"] == "new-guid-123"
 
+    def test_rollback_picks_up_flat_shape_guid(self, tmp_path):
+        # BL-099 #1 — ThoughtSpot Cloud also returns a FLAT response shape
+        # (response.header.id_guid, no `object` list). Rollback must still
+        # recover the new GUID for a DELETE-intent restore.
+        backup_dir = self._make_backup(tmp_path)
+        mock_client = MagicMock()
+
+        def fake_post(path, json=None, **kwargs):
+            resp = MagicMock()
+            resp.ok = True
+            resp.json.return_value = [{
+                "response": {
+                    "status": {"status_code": "OK"},
+                    "header": {"id_guid": "new-guid"},
+                }
+            }]
+            return resp
+
+        mock_client.post.side_effect = fake_post
+
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"],
+            )
+
+        assert result.exit_code == 0, _all_output(result)
+        results = json.loads(result.stdout)
+        assert results["new_guids"]["del-1"] == "new-guid"
+
     def test_deleted_entry_serializes_without_duplicate_guid(self, tmp_path):
         # Regression test for the duplicate-`guid:` bug found during extraction
         # (see _dump_tml_yaml docstring): an Answer-type restore, in particular,

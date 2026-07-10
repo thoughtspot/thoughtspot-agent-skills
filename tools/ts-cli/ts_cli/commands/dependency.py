@@ -28,6 +28,7 @@ from ts_cli.dependency.backup import (
     rollback_order,
 )
 from ts_cli.dependency.mutate import apply_remove, apply_repoint
+from ts_cli.tml_common import extract_imported_guid
 
 app = typer.Typer(help="ThoughtSpot dependency backup / mutate / rollback / apply-change (BL-083).")
 
@@ -462,10 +463,7 @@ def _rollback_one_entry(client: ThoughtSpotClient, entry: dict, results: Dict[st
     ok, response_block = _parse_import_status(resp)
 
     if ok:
-        new_guid = None
-        obj_list = response_block.get("object", [])
-        if obj_list:
-            new_guid = obj_list[0].get("header", {}).get("id_guid")
+        new_guid = extract_imported_guid([{"response": response_block}])
         label = name
         if was_deleted and new_guid:
             label = f"{name} (new GUID: {new_guid})"
