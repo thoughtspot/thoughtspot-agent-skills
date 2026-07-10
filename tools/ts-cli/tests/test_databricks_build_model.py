@@ -115,6 +115,11 @@ class TestBuildTableTml:
         with pytest.raises(ValueError, match="db"):
             build_table_tml(info, "C")
 
+    def test_missing_dbx_type_raises_clean_error(self):
+        info = dict(self.INFO, columns=[{"name": "mystery_col"}])
+        with pytest.raises(ValueError, match="mystery_col"):
+            build_table_tml(info, "C")
+
 
 class TestValidateTmlInvariants:
     def test_clean_table_tml(self):

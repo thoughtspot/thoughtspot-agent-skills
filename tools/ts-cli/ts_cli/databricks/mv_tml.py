@@ -41,11 +41,16 @@ def build_table_tml(alias_info: dict, connection_name: str) -> tuple[dict, list[
     notes: list[str] = []
     columns = []
     for col in alias_info["columns"]:
-        ts_type = map_dbx_type(col["dbx_type"])
+        dbx_type = col.get("dbx_type")
+        if not dbx_type:
+            raise ValueError(
+                f"table '{alias_info['name']}' column "
+                f"'{col.get('name', '?')}' is missing 'dbx_type'")
+        ts_type = map_dbx_type(dbx_type)
         if ts_type is None:
             notes.append(
                 f"column '{col['name']}' omitted: Databricks type "
-                f"'{col['dbx_type']}' is not supported in ThoughtSpot")
+                f"'{dbx_type}' is not supported in ThoughtSpot")
             continue
         column_type = col.get("column_type") or (
             "MEASURE" if ts_type in _NUMERIC_TS_TYPES else "ATTRIBUTE")

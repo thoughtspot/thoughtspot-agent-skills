@@ -797,7 +797,7 @@ as the assumption line), and Spotter from `spotter_enabled`:
 ```
 Model to import: {view_name}
 Source: {catalog}.{schema}.{view_name} (Databricks Metric View v{version})
-Filter: {filter_applied or "none"}
+Filter: {parsed.json "filter" expr if summary filter_applied else "none"}
 
 Tables:
   ✓ {tables[].name} (fqn: {tables[].fqn}) — alias: {tables[].alias}

@@ -2718,3 +2718,35 @@ files, and `ts-databricks-properties.md`).
 
 **Target:** item 3 — no fixed calendar date; opportunistic, alongside the next Databricks
 live-verification pass.
+
+---
+
+## BL-099 — Databricks/TML import-response parsing + naming guards — PR4 final-review follow-ups
+
+**Source:** 2026-07-10 BL-063 PR4 final whole-branch review.
+**Affects:** `ts_cli/commands/tml.py:478`, `ts_cli/commands/dependency.py:468`,
+`ts_cli/commands/tables.py:187`; `ts_cli/databricks/mv_build_model.py`
+(`_check_no_duplicate_formula_names`, `build_columns_and_formulas`).
+**Status:** OPEN.
+
+1. The flat import-response shape (`resp[0].response.header.id_guid`,
+   live-verified 2026-07-10) is parsed only by `extract_imported_guid`
+   (`ts_cli/tableau/build_model.py`). The nested-only sites `commands/tml.py:478`,
+   `commands/dependency.py:468`, and `commands/tables.py:187` still read only
+   `response.object[0].header.id_guid` and silently fall back to slower/degraded
+   paths (name search, "no GUID" branches) when a caller hits the flat shape.
+   Migrate them to the shared helper, or add the same flat-shape fallback inline.
+2. `_check_no_duplicate_formula_names` (`mv_build_model.py`) covers `formulas[]`
+   only — it does not extend to all `columns[]` display names. Two dimensions
+   with identical `display_name` emit duplicate column names that `ts tml lint`'s
+   I8 (unique `column_id`) can't catch, because `column_id` and display `name`
+   are different fields.
+3. `parse-mv` has no name-uniqueness guard: duplicate MV identifiers across
+   `dimensions` + `measures` would double-emit via the `mv_name`-keyed lookups
+   in `build_columns_and_formulas` (`physical_by_mv`/`formula_by_mv`, last-write-wins).
+   Theoretical only — Databricks rejects duplicate dimension/measure names at
+   `CREATE VIEW ... WITH METRICS` time — but worth a defensive check if the
+   parser is ever fed a hand-edited or partially-applied YAML.
+
+**Target:** fold into BL-063 PR 5, or take as a standalone ts-cli fix — no fixed
+calendar date.

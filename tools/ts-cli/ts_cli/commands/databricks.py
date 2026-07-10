@@ -308,9 +308,9 @@ def _run_import(
 ) -> tuple[str, Optional[str], Optional[str]]:
     """Run `ts tml import` for the model TML only. Returns (status, guid, error).
 
-    BL-097: stdin is always provided to the subprocess, even though there is
-    always a payload here, to keep the invocation shape identical to callers
-    that might not have one. No retry loop — a single import attempt.
+    stdin is always provided (BL-097: `ts tml import` hangs waiting on an open
+    non-TTY stdin when no input is passed). No retry loop — a single import
+    attempt.
 
     Error surfacing (BL-063 PR4 live e2e fix, 2026-07-10): every `failed`
     outcome now carries a non-empty `import_error` —
@@ -328,6 +328,7 @@ def _run_import(
     if dry_run:
         return "dry_run", None, None
 
+    import shlex
     import subprocess
 
     from ts_cli.tableau.build_model import extract_imported_guid
@@ -335,7 +336,7 @@ def _run_import(
     model_tml_str = json.dumps(model_doc)
     completed = subprocess.run(
         ["bash", "-c",
-         f"source ~/.zshenv && ts tml import --policy PARTIAL --profile '{profile}'"],
+         f"source ~/.zshenv && ts tml import --policy PARTIAL --profile {shlex.quote(profile)}"],
         input=json.dumps([model_tml_str]), capture_output=True, text=True)
     stderr_tail = (completed.stderr or "")[-500:]
 
