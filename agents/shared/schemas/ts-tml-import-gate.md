@@ -1,3 +1,5 @@
+<!-- currency: thoughtspot — 2026-07 (inaugural anchor; extracted from ts-convert-from-databricks-mv / ts-convert-from-snowflake-sv, BL-063 PR5; verify in next external sweep) -->
+
 # Pre-import lint gate + TML import procedure
 
 Canonical procedure for importing generated Model (+ Table) TML into ThoughtSpot.
