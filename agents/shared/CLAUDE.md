@@ -35,6 +35,7 @@ schemas/
   thoughtspot-table-tml.md            — table TML construction reference
   thoughtspot-model-tml.md            — model TML construction reference
   ts-model-conversion-invariants.md  — canonical hard rules every Model-producing conversion skill must obey
+  ts-tml-import-gate.md               — pre-import lint gate (I1/I2/I4/I5/I8), guid placement, and import-policy procedure
   thoughtspot-answer-tml.md           — Answer TML structure (formulas, parameters, sets, data source lookup) — verified
   thoughtspot-liveboard-tml.md        — Liveboard TML structure (visualizations, filters, layout, tabs) — verified
   thoughtspot-chart-types.md          — verified answer.chart.type enum (44 values) + analytical-intent → chart-type mapping

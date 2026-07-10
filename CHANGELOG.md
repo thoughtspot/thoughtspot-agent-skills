@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-10
+- docs: shared ts-tml-import-gate.md extracted from ts-convert-from-databricks-mv (1.8.1) + ts-convert-from-snowflake-sv (1.14.1) — pre-import lint gate + import policy now one reference (BL-063 PR5)
 - docs: `ts-convert-from-snowflake-sv` v1.14.0 — cumulative window metrics corrected to `moving_sum(group_aggregate(...))`, new `COUNT_IF` mapping, limitations L6 (BOOL-in-`if` parentheses) and L7 (two-pass formula import), verified on SE cluster
 - feat: add `ts databricks build-model` — deterministic ThoughtSpot Model (+ Table) TML assembly from `parse-mv`/`translate-formulas` JSON, with a TML invariant/lint gate (files always written for inspection) and an optional `ts tml import --policy PARTIAL` of the model TML (BL-063 PR4 Task 5, ts-cli v0.44.0)
 - feat: `ts-convert-from-databricks-mv` Steps 5/6/9/9.5/10/11 rewired onto the deterministic 3-command pipeline (`ts databricks parse-mv` / `translate-formulas` / `build-model`) instead of inline LLM parsing/translation/TML assembly; `tables.json` moves to a v2 shape (BL-063 PR4, `ts-convert-from-databricks-mv` v1.8.0)

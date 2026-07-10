@@ -46,6 +46,7 @@ cp "$SHARED_SRC/mappings/ts-databricks/ts-databricks-properties.md"            "
 cp "$SHARED_SRC/schemas/databricks-metric-view.md"                             "$SHARED_DST/schemas/"
 cp "$SHARED_SRC/schemas/thoughtspot-table-tml.md"                              "$SHARED_DST/schemas/"
 cp "$SHARED_SRC/schemas/thoughtspot-model-tml.md"                              "$SHARED_DST/schemas/"
+cp "$SHARED_SRC/schemas/ts-tml-import-gate.md"                                 "$SHARED_DST/schemas/"
 
 echo "✓ Copied shared references → $SHARED_DST"
 
