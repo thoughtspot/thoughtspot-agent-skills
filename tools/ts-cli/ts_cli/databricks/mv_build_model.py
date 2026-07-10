@@ -36,21 +36,31 @@ def build_columns_and_formulas(
     translated: list[dict], filter_entry: dict | None
 ) -> tuple[list[dict], list[dict], dict[str, str]]:
     # 1. candidates, titled — plain dicts so resolve_name_collisions can
-    #    operate BEFORE formula ids / paired columns exist.
+    #    operate BEFORE formula ids / paired columns exist. Each candidate
+    #    carries the MV `name` (distinct from its display "name"/title) so
+    #    step 4 can walk `translated` once and emit in MV declaration order
+    #    (worked-example docs interleave formula and physical columns in MV
+    #    order — see ts-from-databricks.md "Output — Model TML": Transaction
+    #    Id, Product Category, Transaction Month [formula], Region,
+    #    Transaction Date, ... — not physical-first).
     physical = []
     formula_entries = []
     for entry in translated:
         titled = dict(entry, title=display_title(entry))
         if entry["output_kind"] == "column":
-            physical.append({"name": titled["title"], "entry": titled})
+            physical.append({"name": titled["title"], "entry": titled,
+                             "mv_name": entry["name"]})
         else:
             formula_entries.append({"name": titled["title"],
-                                    "expr": entry["ts_expr"], "entry": titled})
+                                    "expr": entry["ts_expr"], "entry": titled,
+                                    "mv_name": entry["name"]})
     if filter_entry is not None:
+        # mv_name None is the sentinel for "not in `translated`" — the MV
+        # Filter is always emitted last (step 4), never in-place.
         formula_entries.append({
             "name": filter_entry["name"], "expr": filter_entry["ts_expr"],
             "entry": {"column_type": "ATTRIBUTE", "comment": None, "synonyms": [],
-                      "aggregation": None}})
+                      "aggregation": None}, "mv_name": None})
 
     # 2. collisions: drops physical columns shadowed by a formula name;
     #    parameter renames never fire (MVs have no parameters).
@@ -65,22 +75,45 @@ def build_columns_and_formulas(
         expr = add_formula_prefix(f["expr"], formula_names, set())
         f["expr"] = fix_double_aggregation(expr, formula_exprs)
 
-    # 4. stamp ids + emit TML entries from post-rename names.
+    # 4. stamp ids + emit TML entries, walking `translated` once so each
+    #    entry is emitted in place (dropped-by-collision entries have no
+    #    mv_name match in either map and are skipped); the filter — never
+    #    part of `translated` — is emitted last.
+    physical_by_mv = {p["mv_name"]: p for p in physical}
+    formula_by_mv = {f["mv_name"]: f for f in formula_entries
+                     if f["mv_name"] is not None}
+
     formulas = []
     columns = []
-    for p in physical:
-        entry = p["entry"]
-        columns.append({"name": p["name"],
-                        "column_id": f"{entry['table']}::{entry['column']}",
-                        "properties": _column_props(entry, is_formula=False)})
-    for f in formula_entries:
-        entry = f["entry"]
-        formula = {"id": f"formula_{f['name']}", "name": f["name"], "expr": f["expr"]}
-        if entry["column_type"] == "ATTRIBUTE":
-            formula["properties"] = {"column_type": "ATTRIBUTE"}
-        formulas.append(formula)
-        columns.append({"name": f["name"], "formula_id": formula["id"],
-                        "properties": _column_props(entry, is_formula=True)})
+
+    def _emit(candidate: dict, *, is_formula: bool) -> None:
+        entry = candidate["entry"]
+        if is_formula:
+            formula = {"id": f"formula_{candidate['name']}",
+                      "name": candidate["name"], "expr": candidate["expr"]}
+            if entry["column_type"] == "ATTRIBUTE":
+                formula["properties"] = {"column_type": "ATTRIBUTE"}
+            formulas.append(formula)
+            columns.append({"name": candidate["name"], "formula_id": formula["id"],
+                            "properties": _column_props(entry, is_formula=True)})
+        else:
+            columns.append({"name": candidate["name"],
+                            "column_id": f"{entry['table']}::{entry['column']}",
+                            "properties": _column_props(entry, is_formula=False)})
+
+    for entry in translated:
+        mv_name = entry["name"]
+        if mv_name in physical_by_mv:
+            _emit(physical_by_mv[mv_name], is_formula=False)
+        elif mv_name in formula_by_mv:
+            _emit(formula_by_mv[mv_name], is_formula=True)
+        # else: dropped by the collision pass (physical shadowed by a formula).
+
+    filter_candidate = next(
+        (f for f in formula_entries if f["mv_name"] is None), None)
+    if filter_candidate is not None:
+        _emit(filter_candidate, is_formula=True)
+
     return columns, formulas, rename_map
 
 

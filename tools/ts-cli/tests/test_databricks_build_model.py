@@ -6,6 +6,7 @@ the shared worked examples (see TestGoldenEcommerce/TestGoldenSqlView, Task 6).
 import json
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from ts_cli.cli import app
@@ -18,11 +19,13 @@ from ts_cli.databricks.mv_build_model import (
     display_title,
     flatten_join_aliases,
 )
+from ts_cli.databricks.mv_parse import parse_metric_view
 from ts_cli.databricks.mv_tml import (
     build_table_tml,
     map_dbx_type,
     validate_tml_invariants,
 )
+from ts_cli.databricks.mv_translate import translate_metric_view
 
 
 class TestMapDbxType:
@@ -604,3 +607,516 @@ class TestBuildModelCommand:
         assert "raw_payload" in result.output and "tags" in result.output
         assert not (tmp_path / "out" / "T.table.tml").exists()
         assert not (tmp_path / "out" / "M.model.tml").exists()
+
+
+# --- Golden acceptance tests — both shared worked examples (BL-063 PR4 Task 6) ---
+#
+# Fixtures below are copied VERBATIM from the two worked-example docs at
+# implementation time (repo convention: no on-disk fixture directories):
+#   agents/shared/worked-examples/databricks/ts-from-databricks.md
+#   agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md
+#
+# Semantic equality only (yaml.safe_load), never byte equality or hand-
+# normalization of folded scalars — the worked examples are ground truth
+# (agents/shared/CLAUDE.md). On mismatch, fix the builder, never the doc.
+
+
+class TestGoldenEcommerce:
+    """Pins agents/shared/worked-examples/databricks/ts-from-databricks.md.
+
+    Semantic equality (yaml.safe_load), not byte equality — TML meaning,
+    not YAML style. The worked example is ground truth; on mismatch fix
+    the builder, never the doc (agents/shared/CLAUDE.md).
+    """
+
+    MV_YAML = """\
+version: 1.1
+comment: >-
+  E-commerce transaction metrics — revenue, customer counts, order value,
+  and return analysis on the transactions table.
+
+source: analytics.ecommerce.transactions
+
+filter: status != 'cancelled'
+
+dimensions:
+  - name: transaction_id
+    expr: transaction_id
+
+  - name: product_category
+    expr: product_category
+    display_name: 'Product Category'
+    synonyms: ['category', 'product type']
+
+  - name: transaction_month
+    expr: DATE_TRUNC('MONTH', transaction_date)
+
+  - name: customer_region
+    expr: customer_region
+    display_name: 'Region'
+    synonyms: ['area', 'territory']
+
+  - name: transaction_date
+    expr: transaction_date
+
+measures:
+  - name: total_revenue
+    expr: SUM(unit_price * quantity * (1 - discount))
+    display_name: 'Total Revenue'
+    comment: 'Net revenue after discount.'
+    synonyms: ['revenue', 'sales']
+
+  - name: unique_customers
+    expr: COUNT(DISTINCT customer_id)
+    display_name: 'Unique Customers'
+    comment: 'Distinct customer count.'
+
+  - name: avg_order_value
+    expr: SUM(unit_price * quantity) / COUNT(DISTINCT transaction_id)
+    display_name: 'Avg Order Value'
+    comment: 'Average revenue per transaction.'
+    synonyms: ['AOV']
+
+  - name: high_value_revenue
+    expr: SUM(unit_price * quantity) FILTER (WHERE unit_price > 100)
+    display_name: 'High Value Revenue'
+    comment: 'Revenue from items priced above 100.'
+
+  - name: revenue_7d_rolling
+    expr: SUM(unit_price * quantity)
+    display_name: '7-Day Rolling Revenue'
+    comment: 'Trailing 7-day rolling sum of gross revenue.'
+    window:
+      - order: transaction_date
+        range: trailing 7 day
+        semiadditive: last
+
+  - name: return_rate
+    expr: CAST(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
+    display_name: 'Return Rate'
+    comment: 'Fraction of transactions that were returned.'
+"""
+
+    EXPECTED_TABLE_TML = """\
+table:
+  name: TRANSACTIONS
+  db: analytics
+  schema: ecommerce
+  db_table: transactions
+  connection:
+    name: "Databricks Analytics"
+  columns:
+  - name: transaction_id
+    db_column_name: transaction_id
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: product_category
+    db_column_name: product_category
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: transaction_date
+    db_column_name: transaction_date
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: DATE
+  - name: customer_region
+    db_column_name: customer_region
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: customer_id
+    db_column_name: customer_id
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+  - name: unit_price
+    db_column_name: unit_price
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+    db_column_properties:
+      data_type: DOUBLE
+  - name: quantity
+    db_column_name: quantity
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+    db_column_properties:
+      data_type: INT64
+  - name: discount
+    db_column_name: discount
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+    db_column_properties:
+      data_type: DOUBLE
+  - name: status
+    db_column_name: status
+    properties:
+      column_type: ATTRIBUTE
+    db_column_properties:
+      data_type: VARCHAR
+"""
+
+    EXPECTED_MODEL_TML = """\
+model:
+  name: Transactions_MV_Model
+  description: >-
+    E-commerce transaction metrics — revenue, customer counts, order value,
+    and return analysis on the transactions table.
+    Converted from Databricks Metric View analytics.ecommerce.ecommerce_transactions_mv.
+    MV Filter applied automatically via model filter.
+  model_tables:
+  - name: TRANSACTIONS
+    fqn: "{table_guid}"
+  formulas:
+  - id: formula_Transaction Month
+    name: "Transaction Month"
+    expr: "start_of_month ( [TRANSACTIONS::transaction_date] )"
+    properties:
+      column_type: ATTRIBUTE
+  - id: formula_Total Revenue
+    name: "Total Revenue"
+    expr: "sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] * ( 1 - [TRANSACTIONS::discount] ) )"
+  - id: formula_Unique Customers
+    name: "Unique Customers"
+    expr: "unique count ( [TRANSACTIONS::customer_id] )"
+  - id: formula_Avg Order Value
+    name: "Avg Order Value"
+    expr: "sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] ) / unique count ( [TRANSACTIONS::transaction_id] )"
+  - id: formula_High Value Revenue
+    name: "High Value Revenue"
+    expr: "sum_if ( [TRANSACTIONS::unit_price] > 100 , [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] )"
+  - id: "formula_7-Day Rolling Revenue"
+    name: "7-Day Rolling Revenue"
+    expr: "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )"
+  - id: formula_Return Rate
+    name: "Return Rate"
+    expr: "sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )"
+  - id: "formula_MV Filter"
+    name: "MV Filter"
+    expr: "[TRANSACTIONS::status] != 'cancelled'"
+    properties:
+      column_type: ATTRIBUTE
+  columns:
+  - name: "Transaction Id"
+    column_id: TRANSACTIONS::transaction_id
+    properties:
+      column_type: ATTRIBUTE
+  - name: "Product Category"
+    column_id: TRANSACTIONS::product_category
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - "category"
+      - "product type"
+      synonym_type: USER_DEFINED
+  - name: "Transaction Month"
+    formula_id: formula_Transaction Month
+    properties:
+      column_type: ATTRIBUTE
+  - name: "Region"
+    column_id: TRANSACTIONS::customer_region
+    properties:
+      column_type: ATTRIBUTE
+      synonyms:
+      - "area"
+      - "territory"
+      synonym_type: USER_DEFINED
+  - name: "Transaction Date"
+    column_id: TRANSACTIONS::transaction_date
+    properties:
+      column_type: ATTRIBUTE
+  - name: "Total Revenue"
+    formula_id: formula_Total Revenue
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+      description: "Net revenue after discount."
+      synonyms:
+      - "revenue"
+      - "sales"
+      synonym_type: USER_DEFINED
+  - name: "Unique Customers"
+    formula_id: formula_Unique Customers
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+      description: "Distinct customer count."
+  - name: "Avg Order Value"
+    formula_id: formula_Avg Order Value
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+      description: "Average revenue per transaction."
+      synonyms:
+      - "AOV"
+      synonym_type: USER_DEFINED
+  - name: "High Value Revenue"
+    formula_id: formula_High Value Revenue
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+      description: "Revenue from items priced above 100."
+  - name: "7-Day Rolling Revenue"
+    formula_id: "formula_7-Day Rolling Revenue"
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+      description: "Trailing 7-day rolling sum of gross revenue."
+  - name: "Return Rate"
+    formula_id: formula_Return Rate
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+      description: "Fraction of transactions that were returned."
+  - name: "MV Filter"
+    formula_id: "formula_MV Filter"
+    properties:
+      column_type: ATTRIBUTE
+  filters:
+  - column:
+    - "MV Filter"
+    oper: in
+    values:
+    - "true"
+  properties:
+    is_bypass_rls: false
+    join_progressive: true
+"""
+
+    TABLES = {"source": {
+        "name": "TRANSACTIONS", "fqn": "{table_guid}", "create": True,
+        "db": "analytics", "schema": "ecommerce", "db_table": "transactions",
+        "columns": [
+            {"name": "transaction_id", "dbx_type": "string"},
+            {"name": "product_category", "dbx_type": "string"},
+            {"name": "transaction_date", "dbx_type": "date"},
+            {"name": "customer_region", "dbx_type": "string"},
+            {"name": "customer_id", "dbx_type": "string"},
+            {"name": "unit_price", "dbx_type": "double"},
+            {"name": "quantity", "dbx_type": "bigint"},
+            {"name": "discount", "dbx_type": "double"},
+            {"name": "status", "dbx_type": "string"},
+        ]}}
+
+    def _build(self):
+        parsed = parse_metric_view(self.MV_YAML)
+        assert parsed["unsupported"] == []
+        translated = translate_metric_view(parsed, self.TABLES)
+        assert translated["skipped"] == []
+        doc, info = build_model_tml_dbx(
+            model_name="Transactions_MV_Model", parsed=parsed,
+            translated_doc=translated, tables=self.TABLES,
+            mv_fqn="analytics.ecommerce.ecommerce_transactions_mv")
+        return doc, info
+
+    def test_model_tml_matches_worked_example(self):
+        doc, _ = self._build()
+        assert doc == yaml.safe_load(self.EXPECTED_MODEL_TML)
+
+    def test_table_tml_matches_worked_example(self):
+        doc, notes = build_table_tml(self.TABLES["source"], "Databricks Analytics")
+        assert notes == []
+        assert doc == yaml.safe_load(self.EXPECTED_TABLE_TML)
+
+    def test_window_measures_surfaced(self):
+        _, info = self._build()
+        assert [w["mv_name"] for w in info["window_measures"]] == ["revenue_7d_rolling"]
+        assert any(a["kind"] == "sparse_data_risk"
+                   for a in info["window_measures"][0]["annotations"])
+
+
+class TestGoldenSqlView:
+    """Pins agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md.
+
+    The MV's `source:` is a SELECT subquery, so the user-chosen option (T)
+    builds a ThoughtSpot SQL View from that subquery and the MV's own
+    `filter:` gets baked into the SQL View's `sql_query` WHERE clause at
+    Step 5T of the doc — it never survives as a Model-level filter. That
+    means the inputs fed to translate/build here are NOT a literal re-parse
+    of the MV YAML: `filter` is nulled before translation (mirroring the
+    Step 5T consumption) and `comment` is set to the doc's own bespoke
+    Model-description prose (this MV has no top-level `comment:`, and the
+    description text describing the SQL-View path is composed by the skill
+    step that builds the SQL View — see doc Step 6 "Key points"). Passed
+    through build_description's comment-only branch (mv_fqn=None,
+    has_filter=False), `comment.strip()` alone reproduces the doc's
+    description verbatim — no generator change needed for this path.
+
+    KNOWN DIVERGENCE (BLOCKED — see test_model_tml_matches_worked_example's
+    xfail reason): two fields in this doc's Model TML contradict the
+    already-shipped, already-tested conventions the ecommerce golden pins,
+    and the two worked examples cannot both be satisfied by one generator:
+
+    1. Title-case fallback. `order_id` has no `display_name`. This doc's own
+       "Key points" (#9 below Step 6) says the bare `name:` is "used as-is"
+       -> literal `order_id`. ts-from-databricks.md's Key Pattern #3 says
+       "When absent, title-case the `name` field" -> `Transaction Id` for
+       `transaction_id` (also no display_name) — already pinned by
+       TestDisplayTitle.test_title_case_fallback (Task 3) and by
+       TestGoldenEcommerce above. ts-from-databricks-rules.md line 139
+       ("name: use display_name (or name if no display_name)") does not
+       specify a case transform either way.
+    2. `formulas[]` `properties.column_type` for an ATTRIBUTE-kind formula.
+       `formula_Customer Segment` here has no `properties:` block at all.
+       The ecommerce doc's `formula_Transaction Month` / `formula_MV
+       Filter` (also ATTRIBUTE-kind) both carry
+       `properties: {column_type: ATTRIBUTE}`.
+       agents/shared/schemas/thoughtspot-model-tml.md:193 documents this
+       field as OPTIONAL on formulas[] — so neither doc's TML violates a
+       hard invariant; they simply made opposite (both valid) choices.
+
+    Changing the generator to match this doc's choice on either point would
+    break the co-equal ecommerce golden and the already-shipped Task 3 unit
+    test — per the Task 6 brief's STOP clause, neither side is being fixed
+    unilaterally. Report this to a human/orchestrator for a documentation
+    correction or live re-verification of ts-from-databricks-sql-view.md.
+    """
+
+    MV_YAML = """\
+version: "1.1"
+source: "select * from analytics.sales.orders"
+filter: "order_status = 'completed'"
+dimensions:
+  - name: order_id
+    expr: order_id
+  - name: order_date
+    expr: order_date
+    display_name: "Order Date"
+  - name: order_status
+    expr: order_status
+    display_name: "Order Status"
+  - name: customer_segment
+    expr: "CASE WHEN total_amount > 1000 THEN 'Premium' WHEN total_amount > 100 THEN 'Standard' ELSE 'Basic' END"
+    display_name: "Customer Segment"
+measures:
+  - name: total_orders
+    expr: "COUNT(*)"
+    display_name: "Total Orders"
+  - name: total_amount
+    expr: "SUM(total_amount)"
+    display_name: "Total Amount"
+  - name: avg_order_amount
+    expr: "SUM(total_amount) / COUNT(DISTINCT order_id)"
+    display_name: "Avg Order Amount"
+"""
+
+    EXPECTED_MODEL_TML = """\
+model:
+  name: Orders_MV_Model
+  description: "Converted from Databricks Metric View. Source: select * from analytics.sales.orders. Filter baked into SQL View WHERE clause."
+  model_tables:
+  - name: Orders_MV_View
+    fqn: "11111111-2222-3333-4444-555555555555"
+  formulas:
+  - id: formula_Customer Segment
+    name: Customer Segment
+    expr: "if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )"
+  - id: formula_Total Orders
+    name: Total Orders
+    expr: "count ( 1 )"
+  - id: formula_Avg Order Amount
+    name: Avg Order Amount
+    expr: "sum ( [Orders_MV_View::total_amount] ) / unique count ( [Orders_MV_View::order_id] )"
+  columns:
+  - name: order_id
+    column_id: Orders_MV_View::order_id
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Date
+    column_id: Orders_MV_View::order_date
+    properties:
+      column_type: ATTRIBUTE
+  - name: Order Status
+    column_id: Orders_MV_View::order_status
+    properties:
+      column_type: ATTRIBUTE
+  - name: Customer Segment
+    formula_id: formula_Customer Segment
+    properties:
+      column_type: ATTRIBUTE
+  - name: Total Orders
+    formula_id: formula_Total Orders
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+  - name: Total Amount
+    column_id: Orders_MV_View::total_amount
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+  - name: Avg Order Amount
+    formula_id: formula_Avg Order Amount
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
+      index_type: DONT_INDEX
+  properties:
+    is_bypass_rls: false
+    join_progressive: true
+"""
+
+    TABLES = {"source": {"name": "Orders_MV_View",
+                         "fqn": "11111111-2222-3333-4444-555555555555"}}
+
+    DESCRIPTION = ("Converted from Databricks Metric View. Source: select * "
+                   "from analytics.sales.orders. Filter baked into SQL View "
+                   "WHERE clause.")
+
+    def _build(self):
+        parsed = parse_metric_view(self.MV_YAML)
+        assert parsed["unsupported"] == []
+        # Step 5T: filter consumed into the SQL View's sql_query — does not
+        # survive to translate/build as a Model-level filter.
+        parsed_for_pipeline = dict(parsed, filter=None)
+        translated = translate_metric_view(parsed_for_pipeline, self.TABLES)
+        assert translated["skipped"] == []
+        parsed_for_model = dict(parsed_for_pipeline, comment=self.DESCRIPTION)
+        doc, info = build_model_tml_dbx(
+            model_name="Orders_MV_Model", parsed=parsed_for_model,
+            translated_doc=translated, tables=self.TABLES)
+        return doc, info
+
+    @pytest.mark.xfail(
+        reason=(
+            "BLOCKED (BL-063 PR4 Task 6) — two fields diverge from this doc's "
+            "literal text for reasons that are cross-doc convention conflicts, "
+            "not generator bugs (see class docstring 'KNOWN DIVERGENCE'): "
+            "(1) columns[0].name is 'Order Id' (title-case fallback, matching "
+            "the already-shipped TestDisplayTitle.test_title_case_fallback + "
+            "the ecommerce golden) vs the doc's literal 'order_id'; "
+            "(2) formulas[0] (Customer Segment) carries "
+            "properties: {column_type: ATTRIBUTE} (matching the ecommerce "
+            "doc's formula_Transaction Month/formula_MV Filter) vs the doc's "
+            "formula with no properties: block. Both fields are individually "
+            "valid TML (thoughtspot-model-tml.md:193 marks the formulas[] "
+            "properties.column_type optional); fixing the generator either "
+            "way breaks the co-equal ecommerce golden. Not fixing either side "
+            "unilaterally — needs a human/orchestrator call or a live "
+            "re-verification of ts-from-databricks-sql-view.md."
+        ),
+        strict=True,
+    )
+    def test_model_tml_matches_worked_example(self):
+        doc, _ = self._build()
+        assert doc == yaml.safe_load(self.EXPECTED_MODEL_TML)
+
+    def test_no_filter_block(self):
+        doc, info = self._build()
+        assert "filters" not in doc["model"]
+        assert info["filter_applied"] is False
