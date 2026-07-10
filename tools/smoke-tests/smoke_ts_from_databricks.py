@@ -196,8 +196,20 @@ def _run_build_model(cmd: list[str]) -> dict:
 # Optional live-import leg (--import-model)
 # ---------------------------------------------------------------------------
 
-def _resolve_table_guids(r: SmokeTestResult, ts_profile: str, tables: dict) -> dict | None:
+def _resolve_table_guids(
+    r: SmokeTestResult, ts_profile: str, connection: str, tables: dict,
+) -> dict | None:
     """Search ThoughtSpot for each table alias's real Table object GUID.
+
+    Connection-scoped: filters exact-name matches to those whose
+    ``metadata_header.dataSourceName`` equals `connection` (live finding,
+    BL-063 PR4, 2026-07-10, se-thoughtspot — DM_ORDER_DETAIL had 3 exact-name
+    matches across connections (Power, APJ_BIRD, DBX_DAMIAN); an unscoped
+    lookup failed "ambiguous" even though exactly one match was on the
+    requested connection — same pattern as `_find_guid_by_name` in
+    ts_cli/commands/tables.py; see .claude/rules/ts-cli.md). Ambiguity is
+    only raised for >1 match AFTER connection scoping — a genuine duplicate
+    on one connection is still an error.
 
     Fails naming Step 8B (`ts tables create`) as the manual precondition —
     this smoke test does NOT create tables, only verifies they already exist.
@@ -210,24 +222,31 @@ def _resolve_table_guids(r: SmokeTestResult, ts_profile: str, tables: dict) -> d
                  "--subtype", "ONE_TO_ONE_LOGICAL", "--name", f"%{table_name}%"])
             exact = [x for x in results
                      if (x.get("metadata_name") or "").upper() == table_name.upper()]
-            if not exact:
+            scoped = [x for x in exact
+                      if (x.get("metadata_header") or {}).get("dataSourceName")
+                      == connection]
+            if not scoped:
                 raise RuntimeError(
-                    f"Table '{table_name}' not found in ThoughtSpot (subtype "
-                    "ONE_TO_ONE_LOGICAL). This smoke test does NOT create tables "
+                    f"Table '{table_name}' not found on connection "
+                    f"'{connection}' in ThoughtSpot (subtype ONE_TO_ONE_LOGICAL; "
+                    f"{len(exact)} exact-name match(es) found on other "
+                    "connection(s)). This smoke test does NOT create tables "
                     "— run Step 8B (`ts tables create`) in "
                     "ts-convert-from-databricks-mv/SKILL.md first, then re-run "
                     "with --import-model."
                 )
-            if len(exact) > 1:
+            if len(scoped) > 1:
                 raise RuntimeError(
-                    f"Table '{table_name}' is ambiguous — {len(exact)} exact-name "
-                    "matches found. Disambiguate manually (see Step 8A) before "
-                    "running --import-model."
+                    f"Table '{table_name}' is ambiguous on connection "
+                    f"'{connection}' — {len(scoped)} exact-name matches found. "
+                    "Disambiguate manually (see Step 8A) before running "
+                    "--import-model."
                 )
-            return exact[0]["metadata_id"]
+            return scoped[0]["metadata_id"]
 
         ok, guid = r.step(
-            f"Resolve ThoughtSpot table GUID for '{table_name}' (alias '{alias}')",
+            f"Resolve ThoughtSpot table GUID for '{table_name}' (alias '{alias}') "
+            f"on connection '{connection}'",
             _search)
         if not ok:
             return None
@@ -245,7 +264,7 @@ def _run_import_leg(
     verification step in this leg failed — so no SMOKE_* object is ever left
     behind. A cleanup failure is itself a smoke-test failure.
     """
-    guids = _resolve_table_guids(r, args.ts_profile, tables)
+    guids = _resolve_table_guids(r, args.ts_profile, args.connection, tables)
     if guids is None:
         return
 
