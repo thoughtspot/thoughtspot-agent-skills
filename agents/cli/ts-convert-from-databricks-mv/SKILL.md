@@ -298,39 +298,36 @@ and confirm the user's role has `SELECT` on the view.
 
 ---
 
-### Step 5: Parse the YAML
+### Step 5: Parse the YAML — `ts databricks parse-mv`
 
-Parse the YAML string extracted in Step 4. The Metric View YAML follows the schema
-documented in [../../shared/schemas/databricks-metric-view.md](../../shared/schemas/databricks-metric-view.md).
+Parse the YAML string extracted in Step 4 with the deterministic parser (schema:
+[../../shared/schemas/databricks-metric-view.md](../../shared/schemas/databricks-metric-view.md)):
 
-```python
-import yaml
-
-mv_yaml = yaml.safe_load(yaml_string)
-
-version = mv_yaml.get("version", "0.1")
-source_fqn = mv_yaml.get("source", "")          # fact table FQN
-joins = mv_yaml.get("joins", [])                  # v1.1: nested dimension joins
-dimensions = mv_yaml.get("fields", mv_yaml.get("dimensions", []))  # GA uses fields:; dimensions: is backward compat
-measures = mv_yaml.get("measures", [])
-mv_filter = mv_yaml.get("filter", "")
+```bash
+printf '%s' "$MV_YAML" > mv.yaml
+source ~/.zshenv && ts databricks parse-mv mv.yaml --output parsed.json
 ```
 
-**Subquery source detection (before version routing):**
+The command handles version routing (0.1 / 1.1), `fields:`/`dimensions:` aliasing,
+dimension/measure classification (including `window:` and its 5 `range` values),
+the nested `joins:` walk (`on`/`using`, `cardinality`/`rely` precedence), the
+`materialization:` block, and metadata pass-through. It prints `WARNING:` lines
+(e.g. BL-098 density checks) on stderr.
 
-`source:` accepts four forms — table FQN, parenthesized SQL, bare SQL, or another
-metric view (see [Source Forms](../../shared/schemas/databricks-metric-view.md)).
-Check for a SQL query in **either** the parenthesized or bare form — do not assume
-parentheses are present:
+**Exit 1 with `unsupported[]`:** the JSON is still written; each entry names the
+construct and why. Show the list to the user and ask whether to skip this MV
+(log to the Unmapped Report) or handle the construct manually. Never continue
+silently past a non-empty `unsupported[]`.
 
-```python
-_stripped = source_fqn.strip()
-is_subquery = _stripped.lower().startswith(("(select", "(with")) or \
-              _stripped.lower().startswith(("select ", "with "))
-```
+Read `parsed.json` and branch on `source.kind`:
 
-If `is_subquery` is true, the MV source cannot be mapped directly to a ThoughtSpot
-Table object. Present these options to the user:
+- **`sql_query`** — the source is a SELECT subquery. Present the (D / T / M / S)
+  options below.
+- **`table_fqn` with `needs_live_check: true`** — run the MV-on-MV live check
+  below before treating it as a physical table. The same check applies to every
+  `joins[].source`.
+
+Present these options to the user:
 
 | Option | Action |
 |---|---|
@@ -348,11 +345,11 @@ selected option. For **(D)**, **(M)**, and **(S)**, the rest of Step 5 proceeds 
 See [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md)
 for the full TML reference.
 
-1. Construct the SQL query by combining `source` and `filter`:
+1. Read `source.raw` and `filter` from `parsed.json`, then construct the SQL query:
    ```python
-   sql_query = source_fqn  # the SELECT statement
-   if mv_filter:
-       sql_query = f"SELECT * FROM ({source_fqn}) _mv WHERE {mv_filter}"
+   sql_query = parsed["source"]["raw"]  # the SELECT statement
+   if parsed.get("filter"):
+       sql_query = f"SELECT * FROM ({parsed['source']['raw']}) _mv WHERE {parsed['filter']}"
    ```
 
 2. Introspect the query columns. Execute the query with `LIMIT 0` via the Statement
@@ -390,7 +387,7 @@ for a complete worked example.
 
 ---
 
-**MV-on-MV detection (when `is_subquery` is false):** an FQN-shaped `source:`
+**MV-on-MV detection (when `source.kind` is `table_fqn`):** an FQN-shaped `source:`
 cannot be assumed to be a physical table — it may be another metric view. Query:
 
 ```sql
@@ -414,268 +411,88 @@ to `joins[].source` values.
 
 ---
 
-**Version routing:**
-- `version: 0.1` → single-source parsing path (basic column metadata only)
-- `version: 1.1` → rich metadata + optional multi-source with joins (verified 2026-05-26)
+Version routing and classification are handled by `parse-mv` — both versions
+normalize into one `parsed.json` shape.
 
-**v0.1 — single source:**
-
-1. Decompose `source` FQN into `catalog`, `schema`, `table_name`:
-   ```python
-   parts = source_fqn.split(".")
-   src_catalog, src_schema, src_table = parts[0], parts[1], parts[2]
-   ```
-
-2. For each dimension, classify:
-   - **Direct column reference** (single identifier, no functions): `expr` is a physical
-     column name → maps to `ATTRIBUTE` column with `column_id` pointing to the physical column.
-   - **Computed expression** (contains functions, operators, CASE): → maps to a `formulas[]`
-     entry with a translated ThoughtSpot formula + a `columns[]` entry with `formula_id`.
-
-3. For each measure, classify:
-   - **Simple aggregate** (`AGG(column_name)` or `AGG(DISTINCT column_name)`): extract the
-     aggregate function → `aggregation` field, extract inner column → `column_id`.
-   - **Complex expression** (ratios, nested aggregates, arithmetic inside aggregate): → maps
-     to a `formulas[]` entry + `columns[]` with `formula_id`.
-
-4. Record the global `filter` (if present) for inclusion in the model description.
-
-Build an internal map:
-- `source_table`: catalog, schema, table_name
-- `dimensions_parsed`: list of `{name, expr, is_direct, physical_col_or_formula}`
-- `measures_parsed`: list of `{name, expr, is_simple, agg_function, physical_col_or_formula}`
-- `filter_expr`: the global filter string (or empty)
-
-**v1.1 — multi-source with joins (when encountered):**
-
-Parse the `joins:` hierarchy to identify all source tables and their relationships:
-
-```python
-joins = mv_yaml.get("joins", [])
-
-def walk_joins(join_list, parent_alias="source"):
-    tables = []
-    for j in join_list:
-        alias = j["name"]
-        source_fqn = j["source"]
-        # A join has exactly one of "on" or "using" — never assume "on" is present.
-        if "on" in j:
-            on_clause = j["on"]
-        else:
-            shared_cols = j["using"]                        # array of shared column names
-            on_clause = " AND ".join(
-                f"{parent_alias}.{col} = {alias}.{col}" for col in shared_cols
-            )
-        cardinality_field = j.get("cardinality", "")       # Runtime 18.1+: "many_to_one" or "one_to_many"
-        rely = j.get("rely", {})
-        if cardinality_field:
-            many_to_one = cardinality_field == "many_to_one"
-        elif rely:
-            many_to_one = rely.get("at_most_one_match", False)
-        else:
-            many_to_one = True   # spec default when neither rely: nor cardinality: is present
-        tables.append({
-            "alias": alias,
-            "source": source_fqn,
-            "on": on_clause,
-            "parent": parent_alias,
-            "many_to_one": many_to_one,
-        })
-        # Recurse into nested sub-joins
-        sub_joins = j.get("joins", [])
-        tables.extend(walk_joins(sub_joins, parent_alias=alias))
-    return tables
-
-all_dim_tables = walk_joins(joins)
-```
-
-This produces one entry per dimension table. Each entry records the alias, source FQN,
-join condition, parent alias, and cardinality hint. Map each entry to a ThoughtSpot
-Table TML and build model joins from the parent→child relationships.
-
-Column references in `expr` use dot-path notation through the join hierarchy:
-- `source.COL` → fact table column
-- `alias.COL` → first-level dimension column
-- `alias.sub_alias.COL` → nested dimension column
-
-Parse dot-paths to determine which Table TML each column belongs to. The last segment
-is the column name; preceding segments trace the join path.
-
-Follow [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md)
-(v1.1 Multi-Source Parsing section) for the full mapping reference.
+See [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md)
+(v1.1 Multi-Source Parsing section) for background reading on the join-walk
+semantics `parse-mv` implements.
 
 ---
 
-### Step 6: Map to ThoughtSpot columns and translate expressions
+### Step 6: Translate expressions — `ts databricks translate-formulas`
 
-Apply the classification from Step 5 to build ThoughtSpot column and formula entries.
-Use the translation rules in
-[../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md).
+**1. Author `tables.json`** — the alias-path → ThoughtSpot-table-name map:
 
-**Dimensions:**
+- Key `"source"` (required) plus one key per join alias; nested joins use
+  dot-joined paths from the root (`"orders.customers"`).
+- Value: the ThoughtSpot Table object name. Derive the initial name from the
+  FQN's table part upper-cased (`analytics.ecommerce.transactions` →
+  `TRANSACTIONS`); Step 8 confirms it against the real objects and enriches
+  these values with GUIDs.
 
-For each dimension:
+```json
+{"source": "TRANSACTIONS", "orders": "DM_ORDER", "orders.customers": "DM_CUSTOMER"}
+```
 
-| Dimension type | ThoughtSpot mapping |
-|---|---|
-| Direct column (`expr: region`) | `columns[]` entry: `column_id: {table}::{region}`, `column_type: ATTRIBUTE` |
-| Computed (`expr: date_trunc('day', col)`) | `formulas[]` entry with translated expression + `columns[]` with `formula_id` |
+**2. Translate:**
 
-**Measures:**
+```bash
+source ~/.zshenv && ts databricks translate-formulas \
+  --input parsed.json --tables tables.json --output translated.json
+```
 
-For each measure:
+The command encodes the full mapping surface — the function map from
+[../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md),
+the window decision tree from
+[../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md),
+conditional aggregates, LOD `group_aggregate` (3-arg with `query_filters()`),
+`COUNT(DISTINCT)` → `unique count`, and cross-measure inlining. Every
+dimension/measure lands in `translated[]` or `skipped[]` with a reason —
+review both.
 
-| Measure type | ThoughtSpot mapping |
-|---|---|
-| Simple `SUM(col)` | `columns[]` entry: `column_id: {table}::{col}`, `column_type: MEASURE`, `aggregation: SUM` |
-| Simple `AVG(col)` | `columns[]` entry: `column_id: {table}::{col}`, `column_type: MEASURE`, `aggregation: AVERAGE` |
-| Simple `COUNT(DISTINCT col)` | `formulas[]` entry: `unique count ( [TABLE::col] )` + `columns[]` with `formula_id`, `column_type: MEASURE` |
-| Complex expression | `formulas[]` entry with translated expression + `columns[]` with `formula_id` |
-| Any measure with `window:` | See **Window measures** below — translated to `moving_sum`/`moving_average`/`cumulative_sum`/`sum`/`last_value`/`first_value`/`group_aggregate` depending on window type. Always flagged for review. |
+**3. Review the output with the user:**
 
-**Window measures — `window:` handling:**
+- **`skipped[]`** — each entry needs a decision: accept the omission, or build
+  the formula manually per the reason text (e.g. `range: all` needs a
+  partition-dimension judgment call — the reason names the manual recipe).
+- **`annotations[]`** — surface every `sparse_data_risk` (BL-098: Databricks
+  date-interval windows vs ThoughtSpot row-positional `moving_sum`; numbers
+  match only on data dense at the window grain), `pending_verification` (C8
+  grain/offset extrapolations), `one_row_per_period`, and
+  `lod_filter_asymmetry` note. These feed the Step 10 `⚠ WINDOW` markers.
+- The `filter` entry (when present) becomes the model-level filter in Step 9.
 
-When a measure has a `window:` section, the `expr` and `window` are translated **together**
-into a single ThoughtSpot formula. The `expr` alone is not sufficient — the `window:`
-changes the semantic meaning of the measure. Follow the decision tree in
-[../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md)
-(Window Function Translation section).
-
-| MV window pattern | ThoughtSpot formula |
-|---|---|
-| `range: trailing N day` (default/exclusive), `order: date_dim` | `moving_sum ( expr , N , -1 , [TABLE::date_col] )` or `moving_average` if `AVG` |
-| `range: trailing N day inclusive`, `order: date_dim` | `moving_sum ( expr , N-1 , 0 , [TABLE::date_col] )` |
-| `range: leading N day` (default/exclusive), `order: date_dim` | `moving_sum ( expr , -1 , N , [TABLE::date_col] )` |
-| `range: leading N day inclusive`, `order: date_dim` | `moving_sum ( expr , 0 , N-1 , [TABLE::date_col] )` |
-| `range: cumulative`, `order: date_dim` | `cumulative_sum ( expr , [TABLE::date_col] )` |
-| `range: current`, `order:` raw date, `semiadditive: last`/`first` | `last_value ( sum ( [m] ) , query_groups ( ) , { [TABLE::date_col] } )` / `first_value ( ... )` |
-| `range: current`, `order:` truncated period, no `offset` | `sum ( [m] )` at the query grain |
-| `range: current`, `order:` truncated period, `offset: -N <unit>` | `moving_sum ( [m] , N , -N , [TABLE::date_col] )` — row-relative `LAG(N)` idiom, NOT wall-clock; valid only with one row per period; live-verified at month grain N=1, quarter/year grains Deferred (C8) |
-| `range: all` | `group_aggregate ( sum ( [m] ) , { partition dims } , query_filters ( ) )`, `column_type: ATTRIBUTE` — scoped per query partition |
-
-**Live-verified 2026-07-08/09 (C1–C7); offset rows at quarter/year grains Deferred (C8)** —
-see `docs/audit/2026-07-08-dbx-window-claim-matrix.md` (C1–C7). The pre-2026-07-09
-`moving_sum(expr, N, 0, [date])` mapping for `trailing N day` was **wrong** (it
-always includes the anchor row, reproducing `trailing (N+1) day inclusive`), and
-the pre-2026-07-09 `sum_if(diff_months/quarters/years(...), today())` mapping for
-`range: current` + `offset` was also **wrong** (Databricks' offset is row-relative,
-not wall-clock) — both are corrected above.
-
-`range` also accepts an `inclusive|exclusive` anchor-row modifier, applying only to
-`trailing`/`leading` — **confirmed default `exclusive`** (Live-verified 2026-07-09,
-matrix C1/C2/C3).
+**Semantic caveats (live-verified):**
 
 **Density caveat (E1, live-verified 2026-07-09 on gapped data — see
-`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`).** All four `trailing`/`leading`
-rows in the table above were re-verified on data with date gaps and found to
-**diverge**: Databricks' `trailing`/`leading N day` is a genuine date-interval
-window; `moving_sum` counts rows — indistinguishable on dense daily data (why C1/C2/C3
-above didn't catch this), divergent on gapped data.
+`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`).** Databricks'
+`trailing`/`leading N day` windows are genuine date-interval windows;
+ThoughtSpot's `moving_sum`/`moving_average` are row-positional — the two are
+indistinguishable on dense daily data, but diverge on data with date gaps.
+Treat any `translated[]` entry carrying a `sparse_data_risk` annotation as an
+approximation that matches Databricks only when the order column is dense at
+the window's unit grain (one row per unit, no gaps); run a density check on
+any source with possible gaps before accepting the translation.
 
-Row-positional: matches Databricks' date-interval trailing/leading windows only when the order column is dense at the window's unit grain (one row per unit, no gaps) — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1). Treat this mapping as an approximation requiring a density check on any source with possible gaps.
+**Filter-asymmetry caveat (A1/A2/A3, live-verified 2026-07-09 — same matrix).**
+The `range: all` / LOD `group_aggregate(..., query_filters())` mapping is
+filter-aware for a Databricks MV's own global `filter:`, but filter-blind to
+an ad hoc query-time `WHERE` on an MV with no global filter — **unless** the
+third argument is `{}` instead of `query_filters()`, paired with a
+model-level `filters:` block mirroring the MV's `filter:` (live-tested
+2026-07-09, A3 follow-up): that combination is filter-blind to a
+search-level pin and filter-aware of the model filter, reproducing both
+Databricks conditions in one formula. Every entry carrying a
+`lod_filter_asymmetry` annotation needs this judgment call made explicitly
+with the user.
 
-The `range: all`/LOD row (and the LOD `formulas[]` mapping in the Concept Mapping
-table above) carries a separate filter-asymmetry caveat (A1/A2, same matrix):
-filter-aware for a Databricks MV's own global `filter:`, filter-blind for an ad hoc
-query-time `WHERE` on an MV with no global filter — **unless** the third argument
-is `{}` instead of `query_filters()`, paired with a model-level `filters:` block
-mirroring the MV's `filter:`; live-tested 2026-07-09 (A3 follow-up, same matrix),
-that combination is filter-blind to a search-level pin and filter-aware of the
-model filter, reproducing both DBX conditions in one formula.
-
-For `moving_sum` / `moving_average`, the inner `expr` is translated **without** the outer
-aggregate wrapper — `SUM(a * b)` with `range: trailing 7 day` becomes
-`moving_sum ( [TABLE::a] * [TABLE::b] , 7 , -1 , [TABLE::date_col] )`, not
-`moving_sum ( sum ( [TABLE::a] * [TABLE::b] ) , 7 , -1 , [TABLE::date_col] )`.
-
-**The sort/date argument must be a physical column reference** (`[TABLE::transaction_date]`),
-not a formula dimension name. Look up the `order:` dimension's `expr` to resolve the
-underlying physical column. Formula references in `moving_sum`'s sort position fail with
-"Search did not find" errors.
-
-**All measures with `window:` definitions must be flagged in the Step 10 review checkpoint**
-with a `⚠ WINDOW` marker so the user can verify the translation is correct. Window
-semantics (daily grain assumption, offset direction, period boundaries) vary between
-platforms and are the most likely source of subtle data mismatches.
-
-**Runtime note:** If the source MV uses `offset` in any `window:` entry, the MV was
-authored on a Runtime 18.1+ warehouse. This has no impact on the `from-databricks`
-parser (it reads what exists), but note it in the review checkpoint for the user's
-awareness.
-
-**Why COUNT_DISTINCT is a formula, not a simple aggregate:** Using `aggregation: COUNT_DISTINCT`
-on a direct `column_id` causes ThoughtSpot to silently override `column_type: MEASURE` to
-`ATTRIBUTE` on the physical column reference. Always create a `formulas[]` entry with
-`unique count ( [TABLE::col] )` instead.
-
-**Aggregate extraction mapping:**
-
-| Databricks aggregate | ThoughtSpot `aggregation` |
-|---|---|
-| `SUM` | `SUM` |
-| `COUNT` | `COUNT` |
-| `AVG` | `AVERAGE` |
-| `MIN` | `MIN` |
-| `MAX` | `MAX` |
-
-> **MANDATORY — read the reference before assessing any expression:**
-> Open [../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md](../../shared/mappings/ts-databricks/ts-databricks-formula-translation.md)
-> and use its **Databricks → TS** sections for each SQL pattern. Do **not** classify
-> an expression as untranslatable based on SQL syntax recognition alone.
-
-**Formula translation examples:**
-
-| Databricks `expr` | ThoughtSpot formula |
-|---|---|
-| `date_trunc('day', transaction_date)` | `date ( [TABLE::transaction_date] )` |
-| `date_trunc('month', col)` | `start_of_month ( [TABLE::col] )` |
-| `CASE WHEN x > 10 THEN 'High' ELSE 'Low' END` | `if ( [TABLE::x] > 10 ) then 'High' else 'Low'` |
-| `SUM(price * quantity * (1 - discount))` | `sum ( [TABLE::price] * [TABLE::quantity] * ( 1 - [TABLE::discount] ) )` |
-| `SUM(x) / COUNT(DISTINCT y)` | `sum ( [TABLE::x] ) / unique count ( [TABLE::y] )` |
-
-**Column references in translated formulas:**
-
-Use the `name:` from the corresponding `model_tables[]` entry. Column name is the
-column name from the ThoughtSpot Table TML.
-
-Example:
-- MV EXPR: `SUM(product_price * quantity * (1 - discount_percent))`
-- ThoughtSpot formula: `sum ( [ECOMMERCE_TRANSACTIONS::product_price] * [ECOMMERCE_TRANSACTIONS::quantity] * ( 1 - [ECOMMERCE_TRANSACTIONS::discount_percent] ) )`
-
-**Curly brace formulas — YAML block scalar required:**
-
-When the translated formula contains `{ [col] }` (curly braces — e.g. in
-`group_aggregate` LOD formulas or `last_value` semi-additive formulas), use a `>-`
-block scalar for the `expr` field. Inline YAML string assignment fails because `{`
-is a flow mapping start character:
-
-```yaml
-formulas:
-- name: "Category Total Revenue"
-  expr: >-
-    group_aggregate ( sum ( [TABLE::LINE_TOTAL] ) , { [TABLE::CATEGORY_NAME] } , query_filters ( ) )
-  properties:
-    column_type: MEASURE
-- name: "Inventory Balance"
-  expr: >-
-    last_value ( sum ( [TABLE::FILLED_INVENTORY] ) , query_groups ( ) , { [TABLE::BALANCE_DATE] } )
-  properties:
-    column_type: MEASURE
-```
-
-In Python, set the formula string in the dict as a plain string — `yaml.dump` will emit
-it as a block scalar automatically when the string contains `{`. If it doesn't, force it:
-
-```python
-from yaml.representer import SafeRepresenter
-
-def literal_representer(dumper, data):
-    if '{' in data or '\n' in data:
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='>')
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-
-yaml.add_representer(str, literal_representer)
-```
+**Deferred grains note (C8).** The `range: current` + `offset: -N <unit>`
+row-relative `LAG(N)` mapping is live-verified at month grain (`N=1`) only;
+quarter/year grain offsets remain Deferred (C8 — see
+`docs/audit/2026-07-08-dbx-window-claim-matrix.md`). Entries carrying a
+`pending_verification` annotation at those grains need this caveat surfaced
+to the user before the translation is treated as final.
 
 ---
 
