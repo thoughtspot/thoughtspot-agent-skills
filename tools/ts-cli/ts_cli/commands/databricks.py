@@ -8,6 +8,7 @@ ts-cli. Pure logic lives in ts_cli/databricks/ (stdlib + PyYAML only).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,8 @@ from typing import Optional
 import typer
 
 app = typer.Typer(help="Databricks Metric View conversion commands (offline file transforms).")
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 @app.command("parse-mv")
@@ -271,6 +274,35 @@ def _write_tml_files(output_dir: str, model_name: str, model_doc: dict,
     return str(model_file), table_files
 
 
+def _clean_error_message(msg: str) -> str:
+    """Strip HTML tags, collapse whitespace, and cap at ~1000 chars."""
+    cleaned = _HTML_TAG_RE.sub(" ", msg or "")
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:1000]
+
+
+def _extract_status_error(import_result: list) -> Optional[str]:
+    """If the parsed import response carries an in-band ERROR status, return
+    a cleaned error message. Returns None for OK status, an unrecognized
+    shape, or an empty response list.
+
+    Live finding, BL-063 PR4 (2026-07-10, se-thoughtspot): `ts tml import`
+    can return returncode 0 with a response body carrying
+    `status.status_code == "ERROR"` and a rich (HTML-laden) `error_message`
+    — that error was previously swallowed, surfacing only as
+    `import_status: "failed"`, `import_error: ""`.
+    """
+    if not import_result or not isinstance(import_result, list):
+        return None
+    first = import_result[0]
+    if not isinstance(first, dict):
+        return None
+    status = (first.get("response") or {}).get("status") or {}
+    if status.get("status_code") != "ERROR":
+        return None
+    return _clean_error_message(status.get("error_message", ""))
+
+
 def _run_import(
     profile: Optional[str], dry_run: bool, model_doc: dict,
 ) -> tuple[str, Optional[str], Optional[str]]:
@@ -279,6 +311,17 @@ def _run_import(
     BL-097: stdin is always provided to the subprocess, even though there is
     always a payload here, to keep the invocation shape identical to callers
     that might not have one. No retry loop — a single import attempt.
+
+    Error surfacing (BL-063 PR4 live e2e fix, 2026-07-10): every `failed`
+    outcome now carries a non-empty `import_error` —
+      (a) an in-band ERROR status (see _extract_status_error) wins first,
+          even when the subprocess itself exited 0;
+      (b) rc != 0 with stdout that didn't parse as JSON falls back to the
+          existing stderr tail;
+      (c) rc == 0 with an OK-shaped response but no extractable GUID (should
+          be rare now that extract_imported_guid handles the flat response
+          shape) gets a synthesized message naming the problem, with a
+          response-tail excerpt for diagnosis.
     """
     if not profile:
         return "not_requested", None, None
@@ -296,15 +339,29 @@ def _run_import(
         input=json.dumps([model_tml_str]), capture_output=True, text=True)
     stderr_tail = (completed.stderr or "")[-500:]
 
-    model_guid = None
-    if completed.returncode == 0:
-        try:
-            import_result = json.loads(completed.stdout)
-            model_guid = extract_imported_guid(import_result)
-        except Exception:
-            model_guid = None
-    if completed.returncode != 0 or model_guid is None:
+    try:
+        import_result = json.loads(completed.stdout)
+    except Exception:
+        import_result = None
+
+    if import_result is not None:
+        status_error = _extract_status_error(import_result)
+        if status_error is not None:
+            return "failed", None, status_error
+
+    if completed.returncode != 0:
         return "failed", None, stderr_tail
+
+    if import_result is None:
+        tail = (completed.stdout or "")[-500:]
+        return "failed", None, f"import response unparseable — response tail: {tail}"
+
+    model_guid = extract_imported_guid(import_result)
+    if model_guid is None:
+        tail = (completed.stdout or "")[-500:]
+        return "failed", None, (
+            f"import response OK but no GUID found — response tail: {tail}"
+        )
     return "imported", model_guid, None
 
 

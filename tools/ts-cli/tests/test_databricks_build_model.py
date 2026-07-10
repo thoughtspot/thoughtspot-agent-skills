@@ -592,6 +592,52 @@ class TestBuildModelCommand:
         assert summary["import_status"] == "failed"
         assert "connection refused" in summary["import_error"]
 
+    def test_in_band_error_status_surfaced_even_when_returncode_zero(self, tmp_path, monkeypatch):
+        # Live finding, BL-063 PR4 (2026-07-10, se-thoughtspot): `ts tml
+        # import` exited 0, but the response body carried
+        # status.status_code == "ERROR" with a rich, HTML-laden
+        # error_message — previously swallowed as import_error: "".
+        import subprocess as sp
+        class FakeCompleted:
+            returncode = 0
+            stdout = json.dumps([{"response": {
+                "status": {"status_code": "ERROR",
+                           "error_message": "<p>Could not find column <b>REGION</b> "
+                                             "— tables belong to different "
+                                             "connections</p>"},
+                "object": []}}])
+            stderr = ""
+        monkeypatch.setattr(sp, "run", lambda cmd, **kwargs: FakeCompleted())
+        result = self._run(_write_build_inputs(tmp_path), "--profile", "p")
+        assert result.exit_code == 1
+        summary = json.loads(result.stdout)
+        assert summary["import_status"] == "failed"
+        assert summary["model_guid"] is None
+        assert summary["import_error"]  # non-empty — the original live bug
+        assert "<" not in summary["import_error"] and ">" not in summary["import_error"]
+        assert "Could not find column REGION" in summary["import_error"]
+        assert "different connections" in summary["import_error"]
+
+    def test_ok_status_but_no_guid_gets_synthesized_error(self, tmp_path, monkeypatch):
+        # Live finding, BL-063 PR4 (2026-07-10, se-thoughtspot): import
+        # succeeded (rc 0, status OK) but GUID extraction failed (the
+        # Defect-1 flat-response-shape bug) — previously swallowed as
+        # import_status: "failed", import_error: "".
+        import subprocess as sp
+        class FakeCompleted:
+            returncode = 0
+            stdout = json.dumps([{"response": {
+                "status": {"status_code": "OK"}, "object": []}}])
+            stderr = ""
+        monkeypatch.setattr(sp, "run", lambda cmd, **kwargs: FakeCompleted())
+        result = self._run(_write_build_inputs(tmp_path), "--profile", "p")
+        assert result.exit_code == 1
+        summary = json.loads(result.stdout)
+        assert summary["import_status"] == "failed"
+        assert summary["model_guid"] is None
+        assert summary["import_error"]  # non-empty — the original live bug
+        assert "no GUID found" in summary["import_error"]
+
     def test_zero_column_table_guard_exits_1_before_writing(self, tmp_path):
         # Every column in this create:true table maps to an unsupported
         # Databricks type — build_table_tml omits all of them, leaving an

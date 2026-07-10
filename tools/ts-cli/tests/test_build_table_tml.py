@@ -1,4 +1,4 @@
-"""Unit tests for _build_table_tml() in ts_cli/commands/tables.py.
+"""Unit tests for _build_table_tml() and _find_guid_by_name() in ts_cli/commands/tables.py.
 
 Tests verify the TML invariants documented in agents/shared/schemas/thoughtspot-table-tml.md.
 No live ThoughtSpot connection required.
@@ -6,7 +6,7 @@ No live ThoughtSpot connection required.
 import pytest
 import yaml
 
-from ts_cli.commands.tables import _build_table_tml
+from ts_cli.commands.tables import _build_table_tml, _find_guid_by_name
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,9 +128,15 @@ class TestMeasureAggregation:
 
 # ---------------------------------------------------------------------------
 # Valid ThoughtSpot data types
+#
+# BOOL (not BOOLEAN) is the type the live import API accepts — verified
+# BL-063 PR4, 2026-07-10, se-thoughtspot: "Data type BOOLEAN is not valid
+# for column ...". _build_table_tml normalizes an input of "BOOLEAN" to
+# "BOOL" so specs written against the old help text keep working — see
+# TestBooleanNormalization below.
 # ---------------------------------------------------------------------------
 
-VALID_DATA_TYPES = ["INT64", "DOUBLE", "VARCHAR", "DATE", "DATE_TIME", "BOOLEAN"]
+VALID_DATA_TYPES = ["INT64", "DOUBLE", "VARCHAR", "DATE", "DATE_TIME", "BOOL"]
 
 class TestDataTypes:
     @pytest.mark.parametrize("data_type", VALID_DATA_TYPES)
@@ -141,6 +147,32 @@ class TestDataTypes:
         tml = parse_tml(_build_table_tml(spec))
         col = tml["table"]["columns"][0]
         assert col["db_column_properties"]["data_type"] == data_type
+
+
+class TestBooleanNormalization:
+    def test_boolean_input_normalized_to_bool(self):
+        spec = make_spec(columns=[
+            {"name": "IS_ACTIVE", "data_type": "BOOLEAN", "column_type": "ATTRIBUTE"},
+        ])
+        tml = parse_tml(_build_table_tml(spec))
+        col = tml["table"]["columns"][0]
+        assert col["db_column_properties"]["data_type"] == "BOOL"
+
+    def test_bool_input_passes_through_unchanged(self):
+        spec = make_spec(columns=[
+            {"name": "IS_ACTIVE", "data_type": "BOOL", "column_type": "ATTRIBUTE"},
+        ])
+        tml = parse_tml(_build_table_tml(spec))
+        col = tml["table"]["columns"][0]
+        assert col["db_column_properties"]["data_type"] == "BOOL"
+
+    def test_other_data_types_unaffected_by_normalization(self):
+        spec = make_spec(columns=[
+            {"name": "COL", "data_type": "VARCHAR", "column_type": "ATTRIBUTE"},
+        ])
+        tml = parse_tml(_build_table_tml(spec))
+        col = tml["table"]["columns"][0]
+        assert col["db_column_properties"]["data_type"] == "VARCHAR"
 
 
 # ---------------------------------------------------------------------------
@@ -166,3 +198,78 @@ class TestYamlOutput:
         assert t["db"] == "MY_DB"
         assert t["schema"] == "MY_SCHEMA"
         assert t["db_table"] == "MY_TABLE"
+
+
+# ---------------------------------------------------------------------------
+# _find_guid_by_name — connection-scoped GUID resolution
+#
+# Live finding, BL-063 PR4 (2026-07-10, se-thoughtspot): same-named
+# "DM_ORDER" tables existed on both the "Power" and "APJ_BIRD" connections.
+# A name-only search resolved to the wrong connection's GUID, so the built
+# model referenced foreign tables and import failed with "Could not find
+# column"/"different connections". _find_guid_by_name now requires an
+# exact name match AND metadata_header.dataSourceName == connection_name.
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    def __init__(self, json_data):
+        self._json = json_data
+
+    def json(self):
+        return self._json
+
+
+class _FakeClient:
+    """Minimal stand-in for ThoughtSpotClient — only .post() is used by
+    _find_guid_by_name."""
+    def __init__(self, search_results):
+        self.search_results = search_results
+        self.calls = []
+
+    def post(self, path, json=None, **kwargs):
+        self.calls.append((path, json))
+        return _FakeResp(self.search_results)
+
+
+class TestFindGuidByNameConnectionScoped:
+    def test_picks_matching_connection_among_same_named_items(self):
+        # Two tables both named DM_ORDER, on different connections.
+        results = [
+            {"metadata_id": "power-guid", "metadata_name": "DM_ORDER",
+             "metadata_header": {"id": "power-guid", "name": "DM_ORDER",
+                                  "dataSourceName": "Power"}},
+            {"metadata_id": "bird-guid", "metadata_name": "DM_ORDER",
+             "metadata_header": {"id": "bird-guid", "name": "DM_ORDER",
+                                  "dataSourceName": "APJ_BIRD"}},
+        ]
+        client = _FakeClient(results)
+        guid = _find_guid_by_name(client, "DM_ORDER", "APJ_BIRD")
+        assert guid == "bird-guid"
+
+    def test_returns_none_when_no_connection_matches(self):
+        results = [
+            {"metadata_id": "power-guid", "metadata_name": "DM_ORDER",
+             "metadata_header": {"id": "power-guid", "name": "DM_ORDER",
+                                  "dataSourceName": "Power"}},
+        ]
+        client = _FakeClient(results)
+        assert _find_guid_by_name(client, "DM_ORDER", "APJ_BIRD") is None
+
+    def test_returns_none_when_name_matches_but_no_results(self):
+        client = _FakeClient([])
+        assert _find_guid_by_name(client, "DM_ORDER", "APJ_BIRD") is None
+
+    def test_ignores_name_mismatch_even_if_connection_matches(self):
+        results = [
+            {"metadata_id": "other-guid", "metadata_name": "DM_OTHER",
+             "metadata_header": {"id": "other-guid", "name": "DM_OTHER",
+                                  "dataSourceName": "APJ_BIRD"}},
+        ]
+        client = _FakeClient(results)
+        assert _find_guid_by_name(client, "DM_ORDER", "APJ_BIRD") is None
+
+    def test_swallows_client_exception_and_returns_none(self):
+        class _RaisingClient:
+            def post(self, *a, **kw):
+                raise RuntimeError("boom")
+        assert _find_guid_by_name(_RaisingClient(), "DM_ORDER", "APJ_BIRD") is None
