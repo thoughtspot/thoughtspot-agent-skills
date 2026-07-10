@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-11
+- docs: formula function-composition rules + TML import behaviours across shared references (thoughtspot-formula-patterns, ts-snowflake-formula-translation, ts-from-snowflake-rules) + ts-convert-from-snowflake-sv v1.15.0 — SE-cluster-validated batch
+
 ## 2026-07-10
 - docs: shared ts-tml-import-gate.md extracted from ts-convert-from-databricks-mv (1.8.1) + ts-convert-from-snowflake-sv (1.14.1) — pre-import lint gate + import policy now one reference (BL-063 PR5)
 - docs: `ts-convert-from-snowflake-sv` v1.14.0 — cumulative window metrics corrected to `moving_sum(group_aggregate(...))`, new `COUNT_IF` mapping, limitations L6 (BOOL-in-`if` parentheses) and L7 (two-pass formula import), verified on SE cluster

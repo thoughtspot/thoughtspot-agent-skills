@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl) -->
+<!-- currency: thoughtspot — 2026-07 (variable endpoints: per-identifier update-values; rename + bulk delete added in 26.4.0.cl; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — function composition rules, if() parens mandatory) -->
 
 # ThoughtSpot Formula Patterns — Reference
 
@@ -133,6 +133,14 @@ count_if ( [TABLE::region] = 'west' , [TABLE::region] )
 | `and` / `or` | `[a] and [b]` / `[a] or [b]` |
 | `in` | `[col] in ( 'a' , 'b' )` |
 | `between` | `[col] between [a] and [b]` |
+
+**TML import requirement:** The parentheses around the condition in
+`if ( condition ) then ... else ...` are **mandatory** for TML import via
+`ts tml import`. Without them, the formula parser rejects the expression with
+"Search did not find ... in your data or metadata. Expecting keyword '('."
+
+This applies to all condition types — BOOL columns, string comparisons, compound
+AND/OR, and NULL checks. Verified 2026-07-10, SE cluster.
 
 Conditions in `if` can include `and` / `or` and function calls:
 
@@ -344,6 +352,61 @@ them — diverging from a date-interval reading whenever the sort column has gap
 its nominal grain. Matches the row-count description above exactly; this is a
 ThoughtSpot-side fact independent of any specific cross-platform mapping — see the
 claim matrix (E1) for the cross-platform consequences.
+
+### Function Composition Rules
+
+ThoughtSpot formulas have strict rules about which functions can contain which:
+
+**1. Group functions are shorthand for `group_aggregate`:**
+
+| Shorthand | Expands to |
+|---|---|
+| `group_sum(col, dim)` | `group_aggregate(sum(col), {dim}, query_filters())` |
+| `group_average(col, dim)` | `group_aggregate(average(col), {dim}, query_filters())` |
+| `group_count(col, dim)` | `group_aggregate(count(col), {dim}, query_filters())` |
+| `group_max(col, dim)` | `group_aggregate(max(col), {dim}, query_filters())` |
+| `group_min(col, dim)` | `group_aggregate(min(col), {dim}, query_filters())` |
+| `group_unique_count(col, dim)` | `group_aggregate(unique count(col), {dim}, query_filters())` |
+
+All group functions return a **row-level scalar** value.
+
+**2. Group functions CANNOT nest inside each other:**
+
+```
+# INVALID — group inside group
+group_sum ( group_count ( [T::ID] , [T::CATEGORY] ) , [T::REGION] )
+
+# VALID — use separate formulas and reference by name
+# Formula 1: "Count by Category" = group_count([T::ID], [T::CATEGORY])
+# Formula 2: group_sum([Count by Category], [T::REGION])
+```
+
+**3. Window functions accept group function output:**
+
+Window functions (`cumulative_*`, `moving_*`) take either:
+- A column reference: `cumulative_sum([T::AMOUNT], [T::ORDER_DATE])`
+- A group function result: `moving_sum(group_aggregate(sum([T::COL]), {[T::PK]}, query_filters()), -1, 0, [T::ORDER])`
+
+**4. Raw aggregates CANNOT go directly into window functions:**
+
+```
+# INVALID — raw aggregate inside moving_sum
+moving_sum ( sum ( [T::AMOUNT] ) , -1 , 0 , [T::ORDER_DATE] )
+
+# VALID — wrap in group_aggregate first
+moving_sum ( group_aggregate ( sum ( [T::AMOUNT] ) , { [T::PK] } , query_filters ( ) ) , -1 , 0 , [T::ORDER_DATE] )
+
+# VALID — use a column reference (ThoughtSpot handles aggregation implicitly)
+cumulative_sum ( [T::AMOUNT] , [T::ORDER_DATE] )
+```
+
+**Summary:**
+
+| Input to... | Column ref | group_aggregate / group_* | Raw aggregate (sum, count...) |
+|---|---|---|---|
+| **group functions** | ✓ | ✗ (cannot nest) | ✓ (inside group_aggregate only) |
+| **window functions** | ✓ | ✓ | ✗ (wrap in group_aggregate first) |
+| **aggregates** (sum, count...) | ✓ | — | — |
 
 ### Rank Functions
 

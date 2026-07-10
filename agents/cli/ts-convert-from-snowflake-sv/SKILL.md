@@ -1334,10 +1334,20 @@ where it causes an import error).
 > | Looks untranslatable | Actually translatable as |
 > |---|---|
 > | `SUM(col)` + `NON ADDITIVE BY (date ASC NULLS LAST)` | `last_value ( sum ( [col] ) , query_groups ( ) , { [date_col] } )` |
-> | `SUM(m) OVER (PARTITION BY dim1, dim2)` | `group_sum ( measure, dim1, dim2 )` |
-> | `SUM(m) OVER (PARTITION BY EXCLUDING dim1)` | `group_aggregate ( sum(m), query_groups()-{dim1}, query_filters() )` |
-> | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` | `safe_divide ( sum(m), group_sum(m, dim) )` — contribution ratio |
-> | `SUM(m) OVER (PARTITION BY EXCLUDING dim ORDER BY dim ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` | `cumulative_sum ( measure, dim )` |
+> | `SUM(m) OVER (PARTITION BY dim1, dim2)` | `group_sum ( [T::col] , [T::dim1] , [T::dim2] )` — column ref only, no nested aggregates |
+> | `SUM(m) OVER (PARTITION BY EXCLUDING dim1)` | `group_aggregate ( sum([T::col]), query_groups()-{[T::dim1]}, query_filters() )` |
+> | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` | `safe_divide ( sum([T::col]), group_sum([T::col], [T::dim]) )` — contribution ratio |
+> | `SUM(m) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` | `moving_sum ( group_aggregate(sum([T::col]), {[T::PK]}, query_filters()) , -1 , 0 , [T::order_col] )` |
+> | Same — simple column, no inner aggregate | `cumulative_sum ( [T::col] , [T::order_col] )` — when source is a raw column |
+>
+> **ThoughtSpot formula function nesting rules (CRITICAL):**
+> - **Group functions** (`group_sum`, `group_count`, `group_average`, `group_max`, `group_min`, `group_unique_count`) are **shorthand** for `group_aggregate`:
+>   - `group_sum(sales, category)` = `group_aggregate(sum(sales), {category}, query_filters())`
+>   - `group_max(orderDate, dim)` = `group_aggregate(max(orderDate), {dim}, query_filters())`
+> - All group functions return a **row-level scalar**. They CANNOT be nested inside each other.
+> - **Window functions** (`cumulative_sum`, `cumulative_average`, `moving_sum`, `moving_average`, etc.) accept group function output as their input (scalar in → windowed scalar out).
+> - You CANNOT place raw aggregates (`sum(...)`, `count(...)`) directly inside window functions — wrap in `group_aggregate` first.
+> - All `if()` conditions require parentheses: `if ( condition ) then ... else ...`
 >
 > Consult the reference. Never reason from first principles about SQL window functions.
 
@@ -1387,10 +1397,12 @@ in the expression. Use the Identifier Resolution Algorithm in
 **Window metrics referencing metrics (GAP-13):** when a window function metric
 (e.g. `SUM(...) OVER (ORDER BY ... ROWS BETWEEN ...)`) references another metric
 in its base expression, resolve the inner metric first:
-- If the inner metric is a simple `AGG(col)`: inline the aggregation directly:
-  `cumulative_sum(count([TABLE::col]), [TABLE::order_col])`
-- Do NOT wrap in `group_aggregate` — cumulative/moving functions already handle
-  the aggregation grain internally.
+- If the inner metric is a simple `AGG(col)`: wrap in `group_aggregate` and pass to
+  the window function:
+  `moving_sum(group_aggregate(count([TABLE::col]), {[TABLE::PK]}, query_filters()), -1, 0, [TABLE::order_col])`
+- You CANNOT place aggregates directly inside `moving_sum` / `cumulative_sum` —
+  always use `group_aggregate` as the bridge.
+- For raw columns (no aggregation needed): `cumulative_sum([TABLE::col], [TABLE::order_col])`
 
 For each metric whose `EXPR` is not a simple `AGG(table.col)` (after applying identifier resolution above — references have been resolved or the metric has been translated via double aggregation):
 
@@ -1814,6 +1826,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.15.0 | 2026-07-11 | Formula function-composition rules (group_* = group_aggregate shorthand; no nesting group functions; raw aggregates must wrap in group_aggregate before window functions; if() conditions require parentheses) + refined cumulative/moving_sum mapping rows. Companion shared-reference additions: Function Composition Rules + if() parens (thoughtspot-formula-patterns.md), cumulative reverse-translation decision table + COUNT_IF table (ts-snowflake-formula-translation.md), TML Import Behaviours (ts-from-snowflake-rules.md). Verified on SE cluster via TML import (Payroll Test Model). |
 | 1.14.1 | 2026-07-10 | Pre-import lint gate + import-policy text extracted to shared `ts-tml-import-gate.md` (BL-063 PR5) — content unchanged, now linked. |
 | 1.14.0 | 2026-07-10 | Cumulative window metrics: row 25 corrected to `moving_sum(group_aggregate(...))` (aggregates cannot nest directly in `moving_sum`); new `COUNT_IF` mapping; new limitations L6 (BOOL in `if` requires parentheses — prefer `count_if`/`sum_if`) and L7 (formulas referencing `[TABLE::COL]` fail on initial CREATE — documented mandatory two-pass import in Step 11). Verified on SE cluster. |
 | 1.13.0 | 2026-07-03 | Step C3 change-set computation delegates to `ts snowflake diff` (BL-063 quick win). Prereq ts-cli v0.30.0. |

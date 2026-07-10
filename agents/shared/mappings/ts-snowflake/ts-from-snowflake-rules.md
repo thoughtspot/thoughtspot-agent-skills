@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support) -->
 
 # Reverse Mapping Rules Reference
 
@@ -946,4 +946,91 @@ Semantic view dimension:    SUPERHERO.SUPERHERO_NAME as superhero.SUPERHERO_NAME
 ThoughtSpot Table TML col:  SUPERHERO_NAME
 model_tables name:          SUPERHERO
 Correct column_id:          SUPERHERO::SUPERHERO_NAME
+```
+
+---
+
+## TML Import Behaviours (Verified 2026-07-10, SE cluster)
+
+Runtime behaviours observed during `ts tml import` that affect formula translation
+and model creation. These are ThoughtSpot platform behaviours, not Snowflake-specific.
+
+### Two-pass import required
+
+Formulas that reference `[TABLE::COL]` notation fail during **initial model creation**
+(`ts tml import` without `--no-create-new`) with "Search did not find ... in your data
+or metadata."
+
+The same formulas succeed when **updating an existing model** (`--no-create-new` with
+`guid:` at the document root).
+
+**Required workflow:**
+1. First import: model structure only (model_tables, columns, joins) — NO formulas
+2. Record the returned GUID from the import response
+3. Second import: full model TML including formulas, with `guid: "<GUID>"` at root
+   and `--no-create-new` flag
+
+**Cause:** The formula parser validates column references against committed table
+bindings. On initial CREATE, the bindings don't exist yet at validation time.
+
+### `if()` parentheses mandatory
+
+All conditions in `if ... then ... else` must be wrapped in parentheses for TML import:
+
+| Syntax | Result |
+|---|---|
+| `if ( [T::COL] = 'x' ) then 1 else 0` | ✓ PASS |
+| `if [T::COL] = 'x' then 1 else 0` | ✗ FAIL |
+| `if ( [T::BOOL] ) then 1 else 0` | ✓ PASS |
+| `if [T::BOOL] then 1 else 0` | ✗ FAIL |
+| `if ( [T::BOOL] and [T::COL] != 'x' ) then 1 else 0` | ✓ PASS |
+| `if ( [T::BOOL] ) and [T::COL] != 'x' then 1 else 0` | ✗ FAIL (and must be inside parens) |
+| `if ( [T::DATE_COL] != null ) then 1 else 0` | ✓ PASS |
+
+This applies regardless of column data type (BOOL, VARCHAR, DATE, INT).
+
+### BOOL columns in formula functions
+
+BOOL-typed columns are fully supported in formula functions:
+
+| Function | Example | Result |
+|---|---|---|
+| `count_if` | `count_if ( [T::BOOL_COL] , [T::PK] )` | ✓ PASS |
+| `sum_if` | `sum_if ( [T::BOOL_COL] , [T::MEASURE] )` | ✓ PASS |
+| `if()` with parens | `sum ( if ( [T::BOOL_COL] ) then 1 else 0 )` | ✓ PASS |
+| `if` without parens | `sum ( if [T::BOOL_COL] then 1 else 0 )` | ✗ FAIL |
+
+### Validated formula patterns (TML import compilation)
+
+All of the following compile successfully via `ts tml import --no-create-new`:
+
+```
+# Simple aggregates
+count ( [T::COL] )
+sum ( [T::COL] )
+
+# Conditional aggregates
+count_if ( [T::BOOL_COL] , [T::PK] )
+sum_if ( [T::BOOL_COL] , [T::MEASURE] )
+sum ( if ( [T::VARCHAR] = 'value' ) then 1 else 0 )
+average ( if ( [T::VARCHAR] = 'value' ) then 1 else 0 )
+average ( if ( [T::BOOL] and [T::VARCHAR] != 'value' ) then 1 else 0 )
+sum ( if ( [T::DATE] != null ) then 1 else 0 )
+
+# Math
+safe_divide ( sum ( [T::COL1] ) , count ( [T::COL2] ) )
+
+# Distinct
+unique count ( [T::COL] )
+
+# LOD / Group
+group_sum ( [T::COL] , [T::DIM] )
+group_aggregate ( sum ( [T::COL] ) , query_groups ( ) - { [T::DIM] } , query_filters ( ) )
+
+# Window — simple column
+cumulative_sum ( [T::COL] , [T::ORDER_COL] )
+
+# Window — with group_aggregate bridge
+moving_sum ( group_aggregate ( sum ( [T::COL] ) , { [T::PK] } , query_filters ( ) ) , -1 , 0 , [T::ORDER_COL] )
+moving_sum ( group_aggregate ( count_if ( [T::BOOL] , [T::PK] ) , { [T::PK] } , query_filters ( ) ) , -1 , 0 , [T::ORDER_COL] )
 ```

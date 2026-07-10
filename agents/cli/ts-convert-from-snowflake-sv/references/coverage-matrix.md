@@ -48,7 +48,7 @@ Use this as the canonical limitations reference.
 | 20 | Complex metric expressions (multi-column, arithmetic) | `formulas[]` with translated ThoughtSpot formula | |
 | 21 | `non additive by (col asc nulls last) as AGG(...)` — semi-additive | `last_value(agg(...), query_groups(), {date})` formula | |
 | 22 | `non additive by (col desc nulls last) as AGG(...)` | `first_value(agg(...), query_groups(), {date})` formula | |
-| 23 | Window functions: `OVER (PARTITION BY ... ORDER BY ...)` | `group_sum` / `group_aggregate` formula | |
+| 23 | Window functions: `OVER (PARTITION BY ... ORDER BY ...)` | `group_sum([T::col], [T::dim])` for PARTITION BY; `group_aggregate(agg(...), query_groups()-{dim}, query_filters())` for EXCLUDING | Group functions take columns only, cannot nest in each other. Window functions (`cumulative_*`, `moving_*`) accept `group_aggregate(...)` as input but not raw aggregates. |
 | 24 | `PARTITION BY EXCLUDING` | `group_aggregate(... query_groups()-{dim})` | |
 | 25 | Cumulative: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` | `moving_sum(group_aggregate(agg(...), {[T::PK]}, query_filters()), -1, 0, [T::order_col])` | Cannot nest aggregates directly in `moving_sum`; must wrap in `group_aggregate` first |
 | 26 | Metric-on-fact resolution (`AVG(table.fact_name)`) | `average([formula_<id>])` | References fact by formula `id` |

@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (fiscal-calendar functions: custom_instructions mitigation documented) -->
+<!-- currency: snowflake — 2026-07 (fiscal-calendar functions: custom_instructions mitigation documented; formula composition + TML import behaviours validated on SE cluster 2026-07-10 — cumulative reverse-translation decision table, COUNT_IF mapping) -->
 
 # Formula Translation Reference — Snowflake
 
@@ -122,6 +122,25 @@ These functions translate 1:1 in both directions.
 | `variance ( [x] )` → `VARIANCE(x)` | `VARIANCE(x)` → `variance ( [x] )` |
 | `sum_if ( [cond] , [x] )` → `SUM(CASE WHEN cond THEN x END)` | `SUM(CASE WHEN cond THEN x END)` → `sum_if ( [cond] , [x] )` |
 | `unique_count_if ( [cond] , [x] )` → `COUNT(DISTINCT CASE WHEN cond THEN x END)` | `COUNT(DISTINCT CASE WHEN cond THEN x END)` → `unique_count_if ( [cond] , [x] )` |
+
+### COUNT_IF Translation (Snowflake → ThoughtSpot)
+
+Snowflake's `COUNT_IF(condition)` has multiple ThoughtSpot equivalents depending on
+the condition type:
+
+| Snowflake | ThoughtSpot | Notes |
+|---|---|---|
+| `COUNT_IF(bool_col)` | `count_if ( [T::BOOL_COL] , [T::count_col] )` | 2-arg form; count_col is typically the PK or any non-null column |
+| `COUNT_IF(status = 'val')` | `sum ( if ( [T::STATUS] = 'val' ) then 1 else 0 )` | Parentheses around condition mandatory |
+| `COUNT_IF(bool_col AND status != 'x')` | `sum ( if ( [T::BOOL_COL] and [T::STATUS] != 'x' ) then 1 else 0 )` | Compound conditions inside `if()` |
+| `SUM(CASE WHEN bool THEN measure END)` | `sum_if ( [T::BOOL_COL] , [T::MEASURE] )` | Direct mapping |
+
+**BOOL columns in formulas:**
+- `count_if` and `sum_if` accept BOOL column references without issue
+- `if ( [T::BOOL_COL] ) then...` works — parentheses required
+- `if [T::BOOL_COL] then...` FAILS — parser cannot resolve BOOL without parens
+
+Verified 2026-07-10, SE cluster.
 
 ### Conditional Functions
 
@@ -391,6 +410,38 @@ SUM(metric) OVER (
 Match the outer window function to determine the ThoughtSpot function name:
 `SUM` → `cumulative_sum`, `AVG` → `cumulative_average`,
 `MAX` → `cumulative_max`, `MIN` → `cumulative_min`.
+
+**Reverse translation — ORDER BY only (no PARTITION BY EXCLUDING):**
+
+When the SV metric uses `ORDER BY` with `ROWS BETWEEN UNBOUNDED PRECEDING` but has
+NO `PARTITION BY EXCLUDING` clause, `cumulative_sum` is not the correct translation.
+ThoughtSpot's `cumulative_sum` always dynamically adds query dimensions to the
+partition — which changes the semantics when no EXCLUDING is specified.
+
+Use `moving_sum` with `group_aggregate` for explicit grain control:
+
+```
+SUM(tbl.metric) OVER (
+  ORDER BY tbl.order_col
+  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+)
+→ moving_sum (
+    group_aggregate ( sum ( [T::col] ) , { [T::PK] } , query_filters ( ) ) ,
+    -1 ,
+    0 ,
+    [T::order_col]
+  )
+```
+
+**Decision table for cumulative reverse translation:**
+
+| SV window clause | ThoughtSpot translation | Rationale |
+|---|---|---|
+| `PARTITION BY EXCLUDING dim ORDER BY dim ROWS UNBOUNDED PRECEDING` | `cumulative_sum ( [T::col] , [T::dim] )` | EXCLUDING matches TS's dynamic partition behaviour |
+| `ORDER BY dim ROWS UNBOUNDED PRECEDING` (no PARTITION BY) | `moving_sum ( group_aggregate(sum([T::col]), {[T::PK]}, query_filters()) , -1 , 0 , [T::dim] )` | No EXCLUDING = need explicit grain via group_aggregate |
+| `PARTITION BY dim1 ORDER BY dim2 ROWS UNBOUNDED PRECEDING` (fixed partition) | `moving_sum ( group_aggregate(sum([T::col]), {[T::dim1]}, query_filters()) , -1 , 0 , [T::dim2] )` | Fixed partition mapped to group_aggregate grain |
+
+Verified 2026-07-10 on SE cluster: `moving_sum(group_aggregate(sum([PAYROLL_COMPANIES::FAILED_PAYROLLS]), {[PAYROLL_COMPANIES::PAYROLL_COMPANY_ID]}, query_filters()), -1, 0, [PAYROLL_COMPANIES::PAYROLL_COMPANY_CREATED_AT])` — compiles and imports via TML.
 
 ### Moving Functions
 
