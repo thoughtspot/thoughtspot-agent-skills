@@ -7,14 +7,17 @@ This module fills the gap between the formula translator (tableau_translate.py)
 and the TML importer. The translator handles per-formula syntax; this module
 handles model-level concerns:
 
-  1. formula_ prefix for cross-references
-  2. Double-aggregation detection (sum([formula_X]) where X is already aggregated)
+  1. formula_ prefix for cross-references (delegates to ts_cli/formula_common.py)
+  2. Double-aggregation detection (sum([formula_X]) where X is already aggregated;
+     delegates to ts_cli/formula_common.py)
   3. sum(if...else 0) → sum_if simplification (re-applied post-assembly)
   4. Table-qualified column references (re-applied post-assembly)
   5. String concat + → concat() (re-applied post-assembly)
   6. Parameter extraction and ordering (params before formulas)
-  7. Name collision resolution (column / formula / parameter)
-  8. Column/formula clash resolution (drop column, keep formula)
+  7. Name collision resolution (column / formula / parameter; delegates to
+     ts_cli/formula_common.py)
+  8. Column/formula clash resolution (drop column, keep formula; delegates to
+     ts_cli/formula_common.py)
 """
 from __future__ import annotations
 

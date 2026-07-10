@@ -13,7 +13,7 @@ import re
 
 
 # ---------------------------------------------------------------------------
-# 7 & 8. Name collision resolution
+# Name collision resolution
 # ---------------------------------------------------------------------------
 
 def resolve_name_collisions(
@@ -52,7 +52,7 @@ def resolve_name_collisions(
 
 
 # ---------------------------------------------------------------------------
-# 1. Formula cross-reference prefix
+# Formula cross-reference prefix
 # ---------------------------------------------------------------------------
 
 def add_formula_prefix(
@@ -81,7 +81,7 @@ def add_formula_prefix(
 
 
 # ---------------------------------------------------------------------------
-# 2. Double-aggregation detection
+# Double-aggregation detection
 # ---------------------------------------------------------------------------
 
 _AGG_FUNCTIONS = re.compile(

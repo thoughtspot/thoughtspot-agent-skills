@@ -33,13 +33,29 @@ CLOSURE = [
     "ts_cli/databricks/mv_build_model.py",
 ]
 
-_STRIP_PREFIXES = ("from ts_cli.", "from ts_cli ", "import ts_cli",
+_STRIP_PREFIXES = ("from ts_cli.", "from ts_cli ", "import ts_cli.", "import ts_cli ",
                    "from __future__")
 
 
 def strip_internal_imports(source: str) -> str:
     """Drop `from ts_cli.*` / `from __future__` statements at ANY indent level,
-    including parenthesized multi-line forms (state machine on paren depth)."""
+    including parenthesized multi-line forms (state machine on paren depth).
+
+    Assumptions (safe today, would mis-strip in these edge cases):
+    - The paren-depth counter is not comment/string-aware — an import line
+      whose trailing `#` comment contains an unbalanced paren would throw
+      off the depth count and over/under-strip subsequent lines.
+    - Backslash-continued `import` statements (`import ts_cli.foo \\`) are
+      not recognized as continuations — only the parenthesized multi-line
+      form is.
+    Neither form appears anywhere in the CLOSURE modules today, and either
+    would fail loud rather than silent: a mis-stripped closure either fails
+    the `compile()` syntax gate in `build_source`, or fails
+    `test_source_is_self_contained` / `test_end_to_end_parse_translate_build_lint`
+    in `tests/test_vendor_mv_lib.py`. `_STRIP_PREFIXES` is anchored on
+    `"import ts_cli."` / `"import ts_cli "` (not bare `"import ts_cli"`) so it
+    does not also match `import ts_client` (Genie's `%run ts_client` counterpart,
+    string-prefix-adjacent to `ts_cli`)."""
     out: list[str] = []
     lines = source.splitlines()
     i = 0
@@ -68,6 +84,8 @@ def assert_no_duplicate_top_level_names(parts: dict[str, str]) -> None:
                 names = [node.name]
             elif isinstance(node, ast.Assign):
                 names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                names = [node.target.id]
             for name in names:
                 if name in owners and owners[name] != path:
                     raise SystemExit(

@@ -134,12 +134,20 @@ assert not findings, findings
 ### Step 7: Import
 
 Tables first, then the model (PARTIAL policy — see the import-gate reference
-for why not ALL_OR_NONE):
+for why not ALL_OR_NONE). With PARTIAL, per-object failures arrive **in-band**
+(HTTP 200, `response.status.status_code == "ERROR"`) — capture the table
+import result and gate on it before proceeding to the model import, or a
+failed table silently falls through and the model import fails on a missing
+dependency with a much less obvious error:
 
 ```python
 if table_docs:
-    client.tml_import([dump_tml_yaml(d) for d in table_docs], policy="PARTIAL",
-                      create_new=True)
+    table_result = client.tml_import(
+        [dump_tml_yaml(d) for d in table_docs], policy="PARTIAL", create_new=True)
+    for r in table_result:
+        status = r.get("response", {}).get("status", {})
+        assert status.get("status_code") == "OK", status
+
 result = client.tml_import([dump_tml_yaml(model_doc)], policy="PARTIAL",
                            create_new=model_doc.get("guid") is None)
 model_guid = extract_imported_guid(result)
