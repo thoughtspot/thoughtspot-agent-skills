@@ -957,34 +957,32 @@ class TestGoldenSqlView:
     has_filter=False), `comment.strip()` alone reproduces the doc's
     description verbatim — no generator change needed for this path.
 
-    KNOWN DIVERGENCE (BLOCKED — see test_model_tml_matches_worked_example's
-    xfail reason): two fields in this doc's Model TML contradict the
-    already-shipped, already-tested conventions the ecommerce golden pins,
-    and the two worked examples cannot both be satisfied by one generator:
+    RESOLVED (BL-063 PR4 Task 6 fix round 1, 2026-07-10): the doc originally
+    diverged from the already-shipped, already-tested conventions the
+    ecommerce golden pins on two stylistic (not semantic) points — a
+    controller decision aligned the doc to the canonical style rather than
+    changing the generator:
 
-    1. Title-case fallback. `order_id` has no `display_name`. This doc's own
-       "Key points" (#9 below Step 6) says the bare `name:` is "used as-is"
-       -> literal `order_id`. ts-from-databricks.md's Key Pattern #3 says
-       "When absent, title-case the `name` field" -> `Transaction Id` for
-       `transaction_id` (also no display_name) — already pinned by
-       TestDisplayTitle.test_title_case_fallback (Task 3) and by
-       TestGoldenEcommerce above. ts-from-databricks-rules.md line 139
-       ("name: use display_name (or name if no display_name)") does not
-       specify a case transform either way.
+    1. Title-case fallback. `order_id` has no `display_name`. The doc's
+       "Key points" now says the bare `name:` is title-cased -> `Order Id`,
+       matching ts-from-databricks.md's Key Pattern #3 ("When absent,
+       title-case the `name` field") and the pre-existing
+       TestDisplayTitle.test_title_case_fallback (Task 3) / TestGoldenEcommerce
+       above. ts-from-databricks-rules.md line 139 ("name: use display_name
+       (or name if no display_name)") does not specify a case transform
+       either way, so this was a style choice, not a rule conflict.
     2. `formulas[]` `properties.column_type` for an ATTRIBUTE-kind formula.
-       `formula_Customer Segment` here has no `properties:` block at all.
-       The ecommerce doc's `formula_Transaction Month` / `formula_MV
-       Filter` (also ATTRIBUTE-kind) both carry
-       `properties: {column_type: ATTRIBUTE}`.
+       `formula_Customer Segment` now carries `properties: {column_type:
+       ATTRIBUTE}`, matching the ecommerce doc's `formula_Transaction Month`
+       / `formula_MV Filter` (also ATTRIBUTE-kind).
        agents/shared/schemas/thoughtspot-model-tml.md:193 documents this
-       field as OPTIONAL on formulas[] — so neither doc's TML violates a
-       hard invariant; they simply made opposite (both valid) choices.
+       field as OPTIONAL on formulas[] — both renderings were valid TML;
+       the doc was updated to the canonical (explicit) form for consistency
+       across worked examples.
 
-    Changing the generator to match this doc's choice on either point would
-    break the co-equal ecommerce golden and the already-shipped Task 3 unit
-    test — per the Task 6 brief's STOP clause, neither side is being fixed
-    unilaterally. Report this to a human/orchestrator for a documentation
-    correction or live re-verification of ts-from-databricks-sql-view.md.
+    Neither change affects import semantics or numbers — the doc's
+    "verified 2026-05-28" live-verification claim stands; see the doc's own
+    "Style aligned 2026-07-10" note.
     """
 
     MV_YAML = """\
@@ -1026,6 +1024,8 @@ model:
   - id: formula_Customer Segment
     name: Customer Segment
     expr: "if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )"
+    properties:
+      column_type: ATTRIBUTE
   - id: formula_Total Orders
     name: Total Orders
     expr: "count ( 1 )"
@@ -1033,7 +1033,7 @@ model:
     name: Avg Order Amount
     expr: "sum ( [Orders_MV_View::total_amount] ) / unique count ( [Orders_MV_View::order_id] )"
   columns:
-  - name: order_id
+  - name: Order Id
     column_id: Orders_MV_View::order_id
     properties:
       column_type: ATTRIBUTE
@@ -1092,26 +1092,6 @@ model:
             translated_doc=translated, tables=self.TABLES)
         return doc, info
 
-    @pytest.mark.xfail(
-        reason=(
-            "BLOCKED (BL-063 PR4 Task 6) — two fields diverge from this doc's "
-            "literal text for reasons that are cross-doc convention conflicts, "
-            "not generator bugs (see class docstring 'KNOWN DIVERGENCE'): "
-            "(1) columns[0].name is 'Order Id' (title-case fallback, matching "
-            "the already-shipped TestDisplayTitle.test_title_case_fallback + "
-            "the ecommerce golden) vs the doc's literal 'order_id'; "
-            "(2) formulas[0] (Customer Segment) carries "
-            "properties: {column_type: ATTRIBUTE} (matching the ecommerce "
-            "doc's formula_Transaction Month/formula_MV Filter) vs the doc's "
-            "formula with no properties: block. Both fields are individually "
-            "valid TML (thoughtspot-model-tml.md:193 marks the formulas[] "
-            "properties.column_type optional); fixing the generator either "
-            "way breaks the co-equal ecommerce golden. Not fixing either side "
-            "unilaterally — needs a human/orchestrator call or a live "
-            "re-verification of ts-from-databricks-sql-view.md."
-        ),
-        strict=True,
-    )
     def test_model_tml_matches_worked_example(self):
         doc, _ = self._build()
         assert doc == yaml.safe_load(self.EXPECTED_MODEL_TML)
