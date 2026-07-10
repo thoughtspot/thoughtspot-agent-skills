@@ -272,11 +272,26 @@ def remove_formula(merged: dict, formula_name: str) -> None:
 
 
 def extract_imported_guid(import_result: list) -> str | None:
-    """Pull the created/updated object GUID out of a tml import response."""
-    obj_list = import_result[0].get("response", {}).get("object", [])
+    """Pull the created/updated object GUID out of a tml import response.
+
+    Two response shapes are both live on ThoughtSpot Cloud (verified BL-063 PR4,
+    2026-07-10, se-thoughtspot): the historically-documented nested shape
+    ``response.object[0].header.id_guid``, and a FLAT shape seen on `ts tml
+    import` responses — ``response.header.id_guid`` (no ``object`` wrapper;
+    ``header`` also carries ``name``/``metadata_type``; status lives at
+    ``response.status.status_code``). Try nested first (preserves existing
+    behavior for the Tableau MERGE flow), then fall back to flat. Returns None
+    when neither shape yields a non-empty GUID, or the list is empty.
+    """
+    if not import_result:
+        return None
+    response = import_result[0].get("response", {})
+    obj_list = response.get("object", [])
     if obj_list:
-        return obj_list[0].get("header", {}).get("id_guid") or None
-    return None
+        guid = obj_list[0].get("header", {}).get("id_guid")
+        if guid:
+            return guid
+    return response.get("header", {}).get("id_guid") or None
 
 
 def apply_prefix_and_double_agg(

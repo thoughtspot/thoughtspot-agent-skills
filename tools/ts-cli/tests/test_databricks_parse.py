@@ -36,6 +36,19 @@ class TestStripSqlComments:
         assert strip_sql_comments("a - b") == "a - b"
 
 
+class TestSplitDotPath:
+    def test_plain_path(self):
+        from ts_cli.databricks.mv_expr import split_dot_path
+        assert split_dot_path("orders.customers.COL") == ["orders", "customers", "COL"]
+
+    def test_backticked_segment(self):
+        from ts_cli.databricks.mv_expr import split_dot_path
+        assert split_dot_path("`my table`.COL") == ["my table", "COL"]
+
+    def test_reexported_from_mv_parse(self):
+        from ts_cli.databricks.mv_parse import split_dot_path  # noqa: F401
+
+
 class TestClassifySource:
     def test_table_fqn(self):
         src = classify_source("catalog.schema.fact_table")
@@ -377,6 +390,47 @@ class TestClassifyMeasure:
         cls = classify_measure_expr("SUM(DISTINCT amount)")
         assert cls["expr_kind"] == "simple"
         assert cls["distinct"] is True
+
+    def test_physical_ref_backticks_normalized(self):
+        out = classify_measure_expr("SUM(`source`.`LINE_TOTAL`)")
+        assert out["expr_kind"] == "simple"
+        assert out["physical_ref"] == "source.LINE_TOTAL"
+
+    def test_backticked_segment_with_dot_unsupported(self):
+        out = classify_measure_expr("SUM(`weird.col`)")
+        assert out["expr_kind"] == "unsupported"
+        assert "dot inside a backtick-quoted identifier" in out["reason"]
+
+
+class TestQuoteAwareScanning:
+    def test_line_marker_inside_literal_preserved(self):
+        assert strip_sql_comments("col = 'a -- b'") == "col = 'a -- b'"
+
+    def test_block_marker_inside_literal_preserved(self):
+        assert strip_sql_comments("col = '/* not a comment */'") == "col = '/* not a comment */'"
+
+    def test_line_marker_inside_block_comment(self):
+        # old two-pass order stripped the -- first, corrupting the block
+        assert strip_sql_comments("SUM(x) /* a -- b */ + 1") == "SUM(x)   + 1"
+
+    def test_escaped_quote_in_literal(self):
+        assert strip_sql_comments("col = 'it''s -- fine'") == "col = 'it''s -- fine'"
+
+    def test_filter_keyword_inside_literal_not_conditional(self):
+        out = classify_measure_expr("SUM(CASE WHEN note = 'FILTER (WHERE' THEN 1 ELSE 0 END)")
+        assert out["expr_kind"] == "complex"
+
+    def test_subquery_keyword_inside_literal_not_unsupported(self):
+        out = classify_measure_expr("COUNT(x) FILTER (WHERE note != '(SELECT hidden')")
+        assert out["expr_kind"] == "conditional"
+
+    def test_over_inside_literal_is_computed_dimension(self):
+        out = classify_dimension_expr("CONCAT(region, ' OVER (', zone)")
+        assert out["kind"] == "computed"
+
+    def test_split_top_level_quote_aware(self):
+        from ts_cli.databricks.mv_expr import _split_top_level
+        assert _split_top_level("a, 'x, y', b") == ["a", "'x, y'", "b"]
 
 
 class TestParseJoins:
@@ -951,6 +1005,40 @@ class TestParseMetricViewScalarGuards:
         assert r["dimensions"] == []
         assert any(u["kind"] == "dimension" and "synonyms" in u["detail"]
                    for u in r["unsupported"])
+
+
+class TestContractGating:
+    def test_source_mixed_backtick_bare_segment_validated(self):
+        # bare middle segment 'bad name' must be rejected even though
+        # another segment is backticked (old code skipped ALL validation
+        # when any backtick was present)
+        assert classify_source("`cat`.bad name.tbl") is None
+
+    def test_source_sql_detected_with_newline(self):
+        out = classify_source("select\n1 as x from t")
+        assert out["kind"] == "sql_query"
+
+    def test_source_selector_prefix_word_bound(self):
+        # 'selection.schema.tbl' must NOT classify as SQL
+        out = classify_source("selection.schema.tbl")
+        assert out["kind"] == "table_fqn"
+
+    def test_lod_ordered_aggregate_rejected(self):
+        out = classify_dimension_expr(
+            "ARRAY_AGG(x ORDER BY y) OVER (PARTITION BY cat)")
+        assert out["kind"] == "unsupported"
+
+    def test_range_unknown_unit_rejected(self):
+        assert parse_range("trailing 2 fortnight") is None
+
+    def test_range_zero_n_rejected(self):
+        assert parse_range("trailing 0 day") is None
+
+    def test_offset_zero_rejected(self):
+        assert parse_offset("-0 month") is None
+
+    def test_offset_unknown_unit_rejected(self):
+        assert parse_offset("-1 sprint") is None
 
 
 import json

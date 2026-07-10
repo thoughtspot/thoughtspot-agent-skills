@@ -22,6 +22,7 @@ from ts_cli.databricks.mv_expr import (  # noqa: F401 — re-exported API
     classify_dimension_expr,
     classify_measure_expr,
     extract_cross_refs,
+    split_dot_path,
     strip_sql_comments,
 )
 from ts_cli.databricks.mv_window import (  # noqa: F401 — re-exported API
@@ -30,25 +31,8 @@ from ts_cli.databricks.mv_window import (  # noqa: F401 — re-exported API
     parse_window,
 )
 
-
-def _split_fqn(s: str) -> list[str]:
-    """Split a dotted identifier on '.', respecting backtick-quoted segments."""
-    parts: list[str] = []
-    buf: list[str] = []
-    in_backtick = False
-    for ch in s:
-        if ch == "`":
-            in_backtick = not in_backtick
-        elif ch == "." and not in_backtick:
-            parts.append("".join(buf))
-            buf = []
-        else:
-            buf.append(ch)
-    parts.append("".join(buf))
-    return parts
-
-
 _IDENT_SEGMENT_RE = re.compile(r"^[A-Za-z_][\w$]*$")
+_SQL_SOURCE_RE = re.compile(r"^\(?\s*(select|with)\b", re.IGNORECASE)
 
 
 def classify_source(raw: str) -> dict | None:
@@ -63,22 +47,37 @@ def classify_source(raw: str) -> dict | None:
     stripped = raw.strip()
     if not stripped:
         return None
-    low = stripped.lower()
-    if low.startswith(("(select", "(with")) or low.startswith(("select ", "with ")):
+    if _SQL_SOURCE_RE.match(stripped):
         return {"kind": "sql_query", "raw": stripped,
                 "parenthesized": stripped.startswith("(")}
-    parts = _split_fqn(stripped)
-    for part in parts:
-        # A backtick-quoted segment (now unquoted by _split_fqn) may hold any
-        # non-empty text; a bare segment must be a plain identifier.
-        bare = part if "`" not in stripped else None
+    parts = split_dot_path(stripped)
+    # Re-walk the raw text so each segment keeps its own quoted/bare flag
+    # (split_dot_path strips the backticks).
+    quoted_flags = _segment_quoted_flags(stripped)
+    for part, quoted in zip(parts, quoted_flags):
         if not part:
             return None
-        if bare is not None and not _IDENT_SEGMENT_RE.match(part):
+        if not quoted and not _IDENT_SEGMENT_RE.match(part):
             return None
     return {"kind": "table_fqn", "raw": stripped,
             "parts": parts if len(parts) == 3 else None,
             "needs_live_check": True}
+
+
+def _segment_quoted_flags(s: str) -> list[bool]:
+    """Per dot-segment of s: True when the segment is backtick-quoted."""
+    flags: list[bool] = []
+    quoted = False
+    in_backtick = False
+    for ch in s:
+        if ch == "`":
+            in_backtick = not in_backtick
+            quoted = True
+        elif ch == "." and not in_backtick:
+            flags.append(quoted)
+            quoted = False
+    flags.append(quoted)
+    return flags
 
 
 # ---------------------------------------------------------------------------

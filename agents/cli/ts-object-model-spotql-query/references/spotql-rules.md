@@ -126,6 +126,16 @@ expression.
   two or more model-derived CTEs in the main SELECT, and a CTE selecting `FROM` an earlier
   CTE (chained CTEs), **both work on current builds** (were broken on older ones — see
   `limitations.md`).
+- **Outer joins between CTEs work** — `LEFT OUTER JOIN`, `RIGHT OUTER JOIN` and
+  `FULL OUTER JOIN` (equi-`ON` only) compile verbatim into the warehouse SQL and execute
+  correctly (verified live, nebula-spotQL 2026-07-10). The Model's own join types don't
+  constrain this: a query can outer-join CTE results even where the Model defines an
+  inner join.
+- **An attribute-only CTE compiles to a dimension-only scan** — the fact table (and the
+  Model's inner join to it) enters the generated SQL only when a measure requires it. So
+  `SELECT "t1"."Customer Name" … GROUP BY` returns *all* members, including those with no
+  fact rows. Combined with the outer-join rule above, this expresses "members with no
+  activity" without any Model change — see `patterns.md` § Dimension-anchored anti-join.
 - **Set operations inside a CTE work when the branches carry no aggregate measure**
   (raw columns, or attribute-only `GROUP BY`) — verified 2026-07-08. A branch with
   `SUM(col) … GROUP BY` is rejected; see the set-operations caveats above.

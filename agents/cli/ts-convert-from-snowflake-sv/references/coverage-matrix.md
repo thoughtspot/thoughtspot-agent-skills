@@ -50,7 +50,7 @@ Use this as the canonical limitations reference.
 | 22 | `non additive by (col desc nulls last) as AGG(...)` | `first_value(agg(...), query_groups(), {date})` formula | |
 | 23 | Window functions: `OVER (PARTITION BY ... ORDER BY ...)` | `group_sum` / `group_aggregate` formula | |
 | 24 | `PARTITION BY EXCLUDING` | `group_aggregate(... query_groups()-{dim})` | |
-| 25 | Cumulative: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` | `cumulative_sum` / `cumulative_avg` formula | |
+| 25 | Cumulative: `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` | `moving_sum(group_aggregate(agg(...), {[T::PK]}, query_filters()), -1, 0, [T::order_col])` | Cannot nest aggregates directly in `moving_sum`; must wrap in `group_aggregate` first |
 | 26 | Metric-on-fact resolution (`AVG(table.fact_name)`) | `average([formula_<id>])` | References fact by formula `id` |
 | 27 | Double aggregation / metric-on-metric (`AVG(table.count_metric)`) | `average(group_count([T::col], [DIM::pk]))` | `group_*` shorthands |
 | 28 | Window metrics referencing other metrics | Combined window + double-agg translation | |
@@ -84,6 +84,8 @@ Use this as the canonical limitations reference.
 | L3 | `ACCESS_MODIFIER: PRIVATE` on facts/metrics | No "private column" concept in ThoughtSpot models | Omit private facts/metrics; or include with `index_type: DONT_INDEX` so Spotter ignores them |
 | L4 | `unique_keys` declarations on table entries | No key declarations in ThoughtSpot models | Not needed — ThoughtSpot does not use key metadata |
 | L5 | Subquery-backed sources (`FROM (<subquery>)` in tables block) | N/A — Snowflake `tables()` does not support subquery sources | If a future SV version adds subquery support, implement using the pattern from `ts-convert-from-databricks-mv` (Step 2c) |
+| L6 | BOOL columns in `if` expressions require parentheses | `if [TABLE::BOOL_COL] then...` fails. Must use `if ( [TABLE::BOOL_COL] ) then...` with parentheses around the condition. `count_if` and `sum_if` also work without this issue. | Use `if ( [T::BOOL] ) then 1 else 0` (parens required) or prefer `count_if([T::BOOL], [T::PK])` / `sum_if([T::BOOL], [T::MEASURE])` which don't need the workaround. |
+| L7 | Formula import on initial model CREATE | Formulas referencing `[TABLE::COL]` fail during initial `ts tml import` (CREATE) but succeed on UPDATE (`--no-create-new`) | Always import model structure first (no formulas), then update with formulas in a second pass |
 
 ### Notes on limitations
 
@@ -94,3 +96,12 @@ cosmetic/metadata features that do not affect the structural correctness of the 
 **L5** is N/A — Snowflake's `tables()` block does not support subquery sources. Only named
 database objects (tables and views) are valid. If a future SV version adds subquery support,
 this limitation would need to be reopened.
+
+**L6** is LOW severity — purely a syntax quirk. BOOL columns work in all formula contexts;
+the `if` construct just requires parentheses around BOOL conditions: `if ( [T::BOOL] ) then`.
+The `count_if` and `sum_if` functions work without any workaround. Verified on ThoughtSpot
+Cloud (SE cluster).
+
+**L7** is a runtime behaviour — not a fundamental limitation. The skill's Step 11 workflow
+already uses two-pass import (create model without formulas → update with formulas).
+This note documents WHY that pattern is required.

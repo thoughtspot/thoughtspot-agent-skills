@@ -819,7 +819,9 @@ cat tables.json | ts tables create --profile my-profile
 
 **Field notes:**
 - `connection_name` — the ThoughtSpot connection display name (string), not a GUID
-- `data_type` — one of: `INT64`, `DOUBLE`, `VARCHAR`, `DATE`, `DATE_TIME`, `BOOLEAN`
+- `data_type` — one of: `INT64`, `DOUBLE`, `VARCHAR`, `DATE`, `DATE_TIME`, `BOOL`.
+  `BOOLEAN` is accepted too and normalized to `BOOL` — the live import API rejects
+  `BOOLEAN` with `"Data type BOOLEAN is not valid for column ..."` (verified 2026-07-10)
 - `column_type` — `ATTRIBUTE` (default) or `MEASURE` (adds `aggregation: SUM`)
 
 **Output:** JSON object mapping table name → GUID for all successfully created tables.
@@ -829,7 +831,12 @@ Tables that failed after all retries are included with `null` as the GUID.
 {"FACT_SALES": "b1e360c4-d571-490f-bae2-e8dc7443c9fa"}
 ```
 
-Auto-retries transient JDBC errors and resolves GUIDs via metadata search after import.
+Auto-retries transient JDBC errors. After each successful import, resolves the GUID via
+metadata search if not already returned in the import response — the search is
+**connection-scoped**: it filters candidates on `metadata_header.dataSourceName ==
+connection_name`, so a same-named table registered on a different connection is never
+returned (live finding, BL-063 PR4, 2026-07-10 — see `_find_guid_by_name` in
+`ts_cli/commands/tables.py`).
 
 ---
 
@@ -1623,3 +1630,93 @@ the input file is missing or unreadable (no JSON written).
 Every `trailing`/`leading` window measure gets `density_check_required:
 true` plus a stderr WARNING — Databricks date-interval frames vs
 ThoughtSpot row-positional `moving_sum` diverge on gapped data (BL-098).
+
+### `ts databricks translate-formulas`
+
+Translate a `parse-mv` result into ThoughtSpot formula text for the
+`ts-convert-from-databricks-mv` skill. Deterministic — no LLM in the loop:
+dot-path column resolution, the `ts-databricks-formula-translation.md`
+function map, conditional (`FILTER (WHERE …)`) aggregates, LOD `group_aggregate`
+windows, the full window decision tree (trailing/leading/cumulative/current,
+post-PR-1 corrected forms), and cross-measure (`MEASURE()`/`ANY_VALUE()`)
+inlining in dependency order (Databricks needs no phased import).
+
+```bash
+ts databricks translate-formulas \
+  --input parsed.json \
+  --output translated.json \
+  --tables '{"source": "TRANSACTIONS", "orders": "DM_ORDER"}'
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--input` / `-i` | yes | `parsed.json` produced by `ts databricks parse-mv` |
+| `--output` / `-o` | yes | Output path for the translated formulas JSON |
+| `--tables` / `-t` | yes | JSON object mapping MV alias paths to ThoughtSpot table names — a `"source"` key is required (the MV's base table alias); nested join aliases (e.g. `"orders.customers"`) map to their joined ThoughtSpot table |
+
+**Output:** `{"translated": [...], "skipped": [...], "filter": {...}|null,
+"dependency_dag": {...}, "window_measures": [...], "stats": {"total":
+n, "translated": n, "skipped": n}}`. Every dimension/measure lands in
+`translated[]` (with `ts_expr`/`table`+`column`, `aggregation`, and any
+`annotations`) or `skipped[]` (with a `reason` string) — nothing is silently
+dropped.
+
+Exit codes: `0` — every dimension/measure was processed, whether translated
+or skipped (skips are a reported outcome via `skipped[]`, not a failure);
+`1` — the `--input`/`--tables` file is missing or unreadable, or `--tables`
+is not a valid JSON object with a `"source"` key.
+
+Every `trailing`/`leading` window translation emits a `sparse_data_risk`
+annotation plus a stderr WARNING (BL-098): a Databricks date-interval frame
+maps to ThoughtSpot's row-positional `moving_sum`/`moving_average`/etc., so
+the numbers only match when the order column is dense at the window's grain
+(no gaps) — verify density before trusting the translation.
+
+### `ts databricks build-model`
+
+Assemble ThoughtSpot Model (+ Table) TML from a `parse-mv` + `translate-formulas`
+pair for the `ts-convert-from-databricks-mv` skill, validate it, and optionally
+import it. Deterministic assembly only — no LLM in the loop.
+
+```bash
+ts databricks build-model \
+  --parsed parsed.json --translated translated.json --tables tables.json \
+  --connection "Databricks Analytics" --model-name "Transactions_MV_Model" \
+  --output-dir out/
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--parsed` / `-p` | yes | `parsed.json` from `ts databricks parse-mv` |
+| `--translated` / `-t` | yes | `translated.json` from `ts databricks translate-formulas` |
+| `--tables` | yes | Same `tables.json` used for `translate-formulas` — values may be plain strings or v2 objects (`{"name", "fqn", "create", "db", "schema", "db_table", "columns"}`) |
+| `--connection` / `-c` | yes | ThoughtSpot connection display name (used only for `create: true` table TML) |
+| `--model-name` / `-n` | yes | Model TML `name:` |
+| `--output-dir` / `-o` | yes | Directory for the generated `.model.tml` / `.table.tml` files |
+| `--mv-fqn` | no | Source MV FQN, appended to the model description |
+| `--spotter-enabled` / `--no-spotter-enabled` | no | Tri-state; omitted means no `spotter_config` block at all |
+| `--existing-guid` | no | Stamps `guid:` at the document root (update-in-place, not a MERGE) |
+| `--profile` | no | Import the model TML after a clean lint (`ts tml import --policy PARTIAL`) |
+| `--dry-run` | no | With `--profile`: assemble + lint but skip the import |
+
+A `create: true` table whose columns[] end up empty after Databricks-type
+omissions (e.g. every column is `binary`/`array`/`map`/`struct`) is a hard
+error naming the table and the omitted columns — this is caught before any
+file is written.
+
+**Output:** a summary JSON on stdout (the only stdout output — diagnostics are
+on stderr): `model_name`, `model_file`, `table_files`, `connection`, `tables[]`,
+`columns` (`attributes`/`measures`), `formula_count`, `window_measures[]`,
+`skipped[]`, `name_renames`, `filter_applied`, `spotter_enabled`,
+`existing_guid`, `invariant_findings[]`, `lint_findings[]`, `import_status`
+(`not_requested`|`dry_run`|`imported`|`failed`), `model_guid`, and
+`import_error` (only when `import_status` is `failed`).
+
+TML files are always written to `--output-dir` even when invariant/lint
+findings are non-empty, so the user can inspect what was generated.
+
+Exit codes: `0` — clean lint (and, if `--profile` was given, a successful or
+skipped import); `1` — a builder `ValueError` (bad alias, duplicate formula
+title, unsupported join), the zero-column-table guard, non-empty
+`invariant_findings`/`lint_findings`, an unreadable/invalid input file, or an
+import failure.

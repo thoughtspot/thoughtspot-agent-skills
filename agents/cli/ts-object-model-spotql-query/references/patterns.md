@@ -112,6 +112,45 @@ FROM "Model" AS "t1" GROUP BY "t1"."Product Category"
 `ROW_NUMBER()` over the raw measure ordered by date desc, filtered to rank 1. If the
 correct behaviour is unclear from the TML, say so rather than silently `SUM`.
 
+## Dimension-anchored anti-join — members with no fact rows
+
+**When:** "which customers have **no** sales?", "products never ordered", "suppliers with
+no purchase transactions". The Model's dimension↔fact join is typically INNER, so members
+with no fact rows vanish from every ordinary query — this pattern surfaces them **without
+changing the Model's join definition**.
+
+**Why it works (both verified live, nebula-spotQL 2026-07-10):**
+1. **An attribute-only CTE compiles to a scan of the dimension table alone** — SpotQL only
+   pulls the fact table (and the Model's inner join) into the generated SQL when a measure
+   demands it. So a CTE selecting just the member attribute returns the *full* member list.
+2. **Outer joins between CTEs compile and execute verbatim** — `LEFT OUTER JOIN`,
+   `RIGHT OUTER JOIN` and `FULL OUTER JOIN` all work (equi-`ON` only, as with all CTE joins).
+
+```sql
+WITH "all_members" AS (
+  SELECT "t1"."Customer Name"
+  FROM "Model" AS "t1" GROUP BY "t1"."Customer Name"
+), "with_sales" AS (
+  SELECT "t2"."Customer Name", SUM("t2"."Amount") AS "Total Sales"
+  FROM "Model" AS "t2" GROUP BY "t2"."Customer Name"
+)
+SELECT "a"."Customer Name", "s"."Total Sales"
+FROM "all_members" AS "a"
+LEFT OUTER JOIN "with_sales" AS "s" ON "a"."Customer Name" = "s"."Customer Name"
+WHERE "s"."Total Sales" IS NULL
+```
+
+- Drop the `WHERE … IS NULL` to get **all** members with their activity (NULL = none) —
+  the outer-join equivalent the Model's inner join can't express.
+- The `IS NULL` lands in the outer query of the generated SQL (correct anti-join
+  semantics). The compiled aggregated CTE wraps the sum in `CASE … ELSE 0`, but unmatched
+  members never appear in that CTE at all (inner join), so they still surface as true NULLs.
+- The anchor attribute must live on the **dimension side** (check `column_id` in the TML).
+  A formula column spanning other tables drags their joins into the "all members" CTE and
+  narrows the list.
+- No set operators needed — `EXCEPT` could express "all minus active", but this form also
+  returns the measure column and avoids the aggregated-branch-in-CTE set-op limitation.
+
 ## When there's no working form
 
 Still no reliable SpotQL form today: non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`,
@@ -130,7 +169,8 @@ dated, ticket-linked list.
 
 **When:** combining disjoint result sets, subtracting one set from another, or finding the
 intersection of two sets. Since [SCAL-313049](https://thoughtspot.atlassian.net/browse/SCAL-313049),
-set operations work at the **top level** of the query (not inside CTEs).
+set operations work at the **top level** of the query, and inside a CTE when no branch
+carries an aggregate measure.
 
 **Basic UNION ALL** — combine results from different filters:
 
@@ -176,4 +216,6 @@ SELECT "t1"."Country" FROM "Model" AS "t1" WHERE "t1"."Country" = 'canada' GROUP
 - Branches can use different aggregate functions (`SUM` in one, `AVG` in another).
 - HAVING, ILIKE, window functions all work inside individual branches.
 - **Cannot** apply ORDER BY or LIMIT to the combined result (silently mishandled).
-- **Cannot** place a set operation inside a CTE (hard error).
+- Inside a user-defined CTE, set operations work **only when no branch contains an
+  aggregate measure** — an aggregated branch (`SUM(col) … GROUP BY`) is a hard error.
+  See `limitations.md`.

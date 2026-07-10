@@ -24,15 +24,24 @@ def _is_jdbc_error(status: Dict[str, Any]) -> bool:
     return any(e in msg for e in _JDBC_ERRORS)
 
 
+# Live-verified BL-063 PR4 (2026-07-10, se-thoughtspot): the import API rejects
+# "BOOLEAN" ("Data type BOOLEAN is not valid for column ...") — it wants "BOOL".
+# Normalize the common spelling so existing specs authored against the old
+# help text keep working without every caller needing to change.
+_DATA_TYPE_NORMALIZE = {"BOOLEAN": "BOOL"}
+
+
 def _build_table_tml(spec: Dict[str, Any]) -> str:
     """Build a ThoughtSpot table TML YAML string from a spec dict."""
     columns = []
     for col in spec.get("columns", []):
+        data_type = col["data_type"]
+        data_type = _DATA_TYPE_NORMALIZE.get(data_type, data_type)
         col_entry: Dict[str, Any] = {
             "name": col["name"],
             "db_column_name": col["name"],
             "properties": {"column_type": col.get("column_type", "ATTRIBUTE")},
-            "db_column_properties": {"data_type": col["data_type"]},
+            "db_column_properties": {"data_type": data_type},
         }
         if col.get("column_type") == "MEASURE":
             col_entry["properties"]["aggregation"] = col.get("aggregation", "SUM")
@@ -51,8 +60,23 @@ def _build_table_tml(spec: Dict[str, Any]) -> str:
     return yaml.dump(tbl, default_flow_style=False, allow_unicode=True)
 
 
-def _find_guid_by_name(client: ThoughtSpotClient, name: str) -> Optional[str]:
-    """Search for a ONE_TO_ONE_LOGICAL table by exact name and return its GUID."""
+def _find_guid_by_name(
+    client: ThoughtSpotClient, name: str, connection_name: str,
+) -> Optional[str]:
+    """Search for a ONE_TO_ONE_LOGICAL table by exact name AND connection, return its GUID.
+
+    Connection-scoped: a name-only search can return the wrong table when two
+    connections both have a table with the same name (live finding, BL-063
+    PR4, 2026-07-10, se-thoughtspot — same-named DM_ORDER tables existed on
+    both the "Power" and "APJ_BIRD" connections; a name-only lookup resolved
+    to the wrong connection's GUID, and the resulting model referenced
+    foreign tables, failing import with "Could not find column"/"different
+    connections"). Filters candidates to those whose
+    ``metadata_header.dataSourceName`` matches ``connection_name`` (the
+    verified field — see .claude/rules/ts-cli.md and
+    agents/cli/ts-audit/SKILL.md for the same pattern). Returns None if no
+    candidate matches both name and connection.
+    """
     try:
         resp = client.post(
             "/api/rest/2.0/metadata/search",
@@ -67,8 +91,11 @@ def _find_guid_by_name(client: ThoughtSpotClient, name: str) -> Optional[str]:
         results = resp.json()
         if isinstance(results, list):
             for r in results:
-                if r.get("metadata_name") == name:
-                    return r["metadata_id"]
+                if r.get("metadata_name") != name:
+                    continue
+                header = r.get("metadata_header") or r
+                if header.get("dataSourceName") == connection_name:
+                    return r.get("metadata_id")
     except Exception:
         pass
     return None
@@ -103,7 +130,9 @@ def create_tables(
       }
     ]
 
-    Data types: INT64, DOUBLE, VARCHAR, DATE, DATE_TIME, BOOLEAN.
+    Data types: INT64, DOUBLE, VARCHAR, DATE, DATE_TIME, BOOL. ("BOOLEAN" is
+    accepted too and normalized to BOOL — the live import API rejects BOOLEAN
+    with "Data type BOOLEAN is not valid for column ...", verified 2026-07-10.)
     Column types: ATTRIBUTE (default) or MEASURE (adds aggregation: SUM).
 
     Auto-retries on transient JDBC errors. After each successful import,
@@ -156,9 +185,10 @@ def create_tables(
                 obj_list = item.get("response", {}).get("object", [])
                 if obj_list:
                     guid = obj_list[0].get("header", {}).get("id_guid")
-                # If not in response, search for it
+                # If not in response, search for it (connection-scoped — see
+                # _find_guid_by_name docstring for why name-only isn't enough)
                 if not guid:
-                    guid = _find_guid_by_name(client, name)
+                    guid = _find_guid_by_name(client, name, spec["connection_name"])
                 success = True
                 break
             elif _is_jdbc_error(status):
