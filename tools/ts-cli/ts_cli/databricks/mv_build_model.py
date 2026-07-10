@@ -1,7 +1,7 @@
 """Model TML assembly from parse-mv + translate-formulas output.
 
 Pure functions: dicts in, dicts out. No I/O, no network. Shared formula
-transforms are IMPORTED from ts_cli.model_builder / ts_cli.tableau.naming —
+transforms are IMPORTED from ts_cli.formula_common (BL-063 PR 5) —
 never forked (spec 2026-07-08 §Background). No phased import: cross-measure
 refs were inlined at translate time.
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 import re
 
 from ts_cli.databricks.mv_translate import normalize_tables
-from ts_cli.model_builder import add_formula_prefix, fix_double_aggregation
-from ts_cli.tableau.naming import resolve_name_collisions
+from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
+                                   resolve_name_collisions)
 
 
 def display_title(entry: dict) -> str:
