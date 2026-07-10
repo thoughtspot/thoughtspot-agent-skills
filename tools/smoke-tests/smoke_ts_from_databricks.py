@@ -274,6 +274,31 @@ def _run_import_leg(
         f"ts databricks build-model --profile {args.ts_profile} -> import '{model_name}'",
         _import_step)
     if not ok:
+        # The import step can fail AFTER a model was actually created in
+        # ThoughtSpot — e.g. a PARTIAL import that created the object but
+        # whose GUID extraction failed, so we have no model_guid to target
+        # a direct delete. Do a best-effort name-scoped sweep so no SMOKE_*
+        # object is left behind. This must not clear the import failure
+        # already recorded in r.failures above.
+        if args.no_cleanup:
+            r.info(f"Skipping cleanup sweep (--no-cleanup). Model name: {model_name}")
+        else:
+            def _cleanup_sweep():
+                results = _run_ts_json(
+                    ["ts", "metadata", "search", "--profile", args.ts_profile,
+                     "--name", f"%{model_name}%"])
+                exact = [x for x in results
+                         if (x.get("metadata_name") or "").upper() == model_name.upper()]
+                if not exact:
+                    r.info(f"No leaked '{model_name}' object found in metadata search")
+                    return
+                for item in exact:
+                    guid = item["metadata_id"]
+                    _run_ts_json(
+                        ["ts", "metadata", "delete", guid, "--profile", args.ts_profile])
+                    r.info(f"Deleted leaked model '{model_name}' (GUID {guid})")
+
+            r.step("cleanup sweep (import failed)", _cleanup_sweep)
         return
 
     model_guid = import_summary["model_guid"]
