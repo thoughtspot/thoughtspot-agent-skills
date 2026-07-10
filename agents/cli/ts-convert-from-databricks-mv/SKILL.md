@@ -149,10 +149,10 @@ Steps:
   6.   Map to ThoughtSpot columns + translate expressions .... auto
   7.   Table registration question (reuse or create) ........ you choose
   8.   Discover / create ThoughtSpot Table objects ........... auto (may ask for clarification)
-  9.   Build Table TML (if needed) and Model TML ............ auto
-  9.5. Confirm Spotter enablement (default: enabled) ........ you choose
+  9.   Build Table + Model TML — ts databricks build-model .... auto
+  9.5. Confirm Spotter enablement (re-run build-model + flag) . you choose
  10.   Review checkpoint — inspect TML before import ......... you confirm
- 11.   Import Table TML(s) + Model TML via ts tml import ..... auto
+ 11.   Import Model TML — ts databricks build-model --profile . auto
  12.   Verify import and produce summary report .............. auto
 
 File-only mode: at Step 10, choose FILE to write TML files for manual import.
@@ -597,6 +597,15 @@ Do not proceed until the user confirms. If any table is **not found**, follow St
 for those tables. If any table has **missing columns**, follow Step 8C before building
 the model.
 
+**Enrich `tables.json`:** upgrade each value from a name string to an object
+carrying the ThoughtSpot GUID, e.g.
+`{"source": {"name": "TRANSACTIONS", "fqn": "<guid>"}}`. Step 9's
+`build-model` stamps these GUIDs as `model_tables[].fqn`. For **file-only**
+runs (Step 10-FILE) where new tables were needed but NOT created, instead set
+`"create": true` with `db`/`schema`/`db_table` and a `columns` list of
+`{"name", "dbx_type"}` from the `DESCRIBE TABLE` output — `build-model` then
+writes a `{name}.table.tml` alongside the model.
+
 ---
 
 ### Step 8B: Create ThoughtSpot Table objects (Scenario B) — also the connection picker for the Step 8A connection-scoped search
@@ -670,6 +679,15 @@ GUID resolution automatically, and outputs `{name: guid}`.
 
 Record the created GUID for use in the model TML.
 
+**Enrich `tables.json`:** upgrade each value from a name string to an object
+carrying the ThoughtSpot GUID, e.g.
+`{"source": {"name": "TRANSACTIONS", "fqn": "<guid>"}}`. Step 9's
+`build-model` stamps these GUIDs as `model_tables[].fqn`. For **file-only**
+runs (Step 10-FILE) where new tables were needed but NOT created, instead set
+`"create": true` with `db`/`schema`/`db_table` and a `columns` list of
+`{"name", "dbx_type"}` from the `DESCRIBE TABLE` output — `build-model` then
+writes a `{name}.table.tml` alongside the model.
+
 ---
 
 ### Step 8C: Update existing tables with missing columns
@@ -699,49 +717,34 @@ After import, re-export the updated TMLs to refresh the column map before Step 9
 
 ---
 
-### Step 9: Build the Model TML
+### Step 9: Build the Model TML — `ts databricks build-model`
 
-Construct the model TML as a YAML string. Use the templates in
-[../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md).
+**Model name:** `{view_name_title_case}` — derived from the Metric View name.
+Ask the user if they want a different name. Do not add a `TEST_MV_` or other
+prefix — see [../../shared/schemas/ts-model-conversion-invariants.md](../../shared/schemas/ts-model-conversion-invariants.md) (N1).
 
-**Model name:** `{view_name_title_case}` — derived from the Databricks Metric View name.
-Ask the user if they want a different name. Do not add a `TEST_MV_` or other prefix —
-see `../../shared/schemas/ts-model-conversion-invariants.md` (N1).
-
-**Model description:** Include source metadata only — filters are enforced via the
-model-level `filters:` section, not documented in the description:
-
-```python
-model_description = f"Imported from Databricks Metric View: {catalog}.{schema}.{view_name}"
+```bash
+source ~/.zshenv && ts databricks build-model \
+  --parsed parsed.json --translated translated.json --tables tables.json \
+  --connection "{connection_name}" --model-name "{model_name}" \
+  --mv-fqn "{catalog}.{schema}.{view_name}" --output-dir ./tml_out
 ```
 
-**Filter handling:** If the MV has a `filter:` field, **always create a boolean formula
-column** — never rely on description-only documentation. Users won't remember to apply
-column filters manually; a formula makes the filter discoverable and pinnable.
+The command assembles the Model TML (columns, formulas, joins, the model-level
+`filters:` block when the MV has a `filter:`, `properties:`), assembles Table
+TML for any `create: true` entries, validates the hard TML invariants
+(`db_column_name` on every table column, `name:`-only connection blocks,
+`guid:` at document root, formula/column `formula_id` pairing, no
+`aggregation:` in `formulas[]`) and runs the `ts tml lint` checks (I1/I2/I4/
+I5/I8) — exit 1 names the specific field on any finding. It prints a summary
+JSON on stdout; keep it for Step 10.
 
-```
-If the MV has a filter:
-  1. Translate the SQL filter to a ThoughtSpot boolean formula
-  2. Create a formula column:
-       name: "MV Filter"
-       id: "formula_MV Filter"
-       expr: <translated SQL filter → ThoughtSpot formula>
-       column_type: ATTRIBUTE
-  3. Add a columns[] entry with formula_id: "formula_MV Filter"
-  4. Add a model-level filters: section to apply the filter automatically:
-       filters:
-       - column:
-         - MV Filter
-         oper: in
-         values:
-         - 'true'
-  5. Note in description: "MV Filter applied automatically via model filter."
-```
-
-The `filters:` section is a model-level filter — it applies to ALL queries against
-the model without users needing to do anything. This is the correct way to enforce
-the MV's global filter in ThoughtSpot. Without it, the formula column exists but
-is never applied unless users manually pin it.
+**Filter handling** is automatic: the MV `filter:` becomes an `MV Filter`
+ATTRIBUTE formula plus a model-level `filters:` block (`oper: in`,
+`values: ['true']`) — the live-verified emulation of the MV's global filter
+(A1, `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`). If the filter was
+skipped at translate time it appears in `skipped[]` — resolve it with the user
+before importing (an unfiltered model silently changes every number).
 
 **Live-verified 2026-07-09** (see `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`,
 A1) — this model-level `filters:` approach is the **CONFIRMED** correct emulation of
@@ -752,42 +755,7 @@ exactly. It does not, and cannot, reproduce a DBX consumer's ad hoc query-time
 `WHERE` on an MV with no global filter — that DBX condition is filter-blind for
 LOD/window dimensions, a source-side asymmetry, not a ThoughtSpot gap.
 
-**SQL → ThoughtSpot filter translation:**
-
-| SQL pattern | ThoughtSpot formula |
-|---|---|
-| `col = 'val'` | `[TABLE::col] = 'val'` |
-| `NOT col` (boolean) | `[TABLE::col] = false` |
-| `col IN ('a', 'b')` | `[TABLE::col] = 'a' or [TABLE::col] = 'b'` |
-| `col BETWEEN a AND b` | `[TABLE::col] >= a and [TABLE::col] <= b` |
-| `col >= 'date'` | `[TABLE::col] >= 'date'` |
-
-**Example — complex filter formula:**
-```yaml
-formulas:
-- id: "formula_MV Filter"
-  name: "MV Filter"
-  expr: >-
-    [TABLE::is_return] = false and ( [TABLE::transaction_status] = 'Completed' or [TABLE::transaction_status] = 'Shipped' )
-  properties:
-    column_type: ATTRIBUTE
-
-columns:
-# ... other columns ...
-- name: "MV Filter"
-  formula_id: "formula_MV Filter"
-  properties:
-    column_type: ATTRIBUTE
-
-filters:
-- column:
-  - MV Filter
-  oper: in
-  values:
-  - 'true'
-```
-
-**Critical `id` rules (applies to all scenarios):**
+`build-model` emits these correctly; they matter when you hand-edit TML:
 - **`id` must equal `name` exactly** (same case, same characters). ThoughtSpot resolves
   `with` and `on` join references against the table's actual `name` — if `id` differs
   in case, joins fail with "{table_name} does not exist in schema". Use the exact
@@ -796,151 +764,56 @@ filters:
 - `name` values must also be **unique** — ThoughtSpot rejects models where two tables
   share the same `name` value ("Multiple tables have same alias")
 
-**Model TML skeleton (v0.1 — single source, Scenario A):**
-
-```yaml
-model:
-  name: "{view_name}"
-  description: "Imported from Databricks Metric View: {catalog}.{schema}.{view_name} | Filter: {filter}"
-  model_tables:
-  - id: SOURCE_TABLE          # MUST equal name exactly
-    name: SOURCE_TABLE        # exact ThoughtSpot table object name
-    fqn: "{table_guid}"       # GUID from Step 8A
-  columns:
-  - name: "{dimension_display_name}"
-    description: "{comment}"             # from MV comment field (v1.1)
-    column_id: SOURCE_TABLE::{physical_col}
-    properties:
-      column_type: ATTRIBUTE
-      synonyms:                          # from MV synonyms field (v1.1)
-      - "{synonym_1}"
-      synonym_type: USER_DEFINED
-  - name: "{measure_display_name}"
-    description: "{comment}"
-    column_id: SOURCE_TABLE::{physical_col}
-    properties:
-      column_type: MEASURE
-      aggregation: SUM
-      synonyms:
-      - "{synonym_1}"
-      synonym_type: USER_DEFINED
-  formulas:
-  - id: "formula_{formula_name}"
-    name: "{formula_name}"
-    expr: "{translated_ts_formula}"
-    properties:
-      column_type: MEASURE
-```
-
-**Synonym placement:** synonyms MUST be inside `properties:` alongside `column_type`,
-with `synonym_type: USER_DEFINED`. Top-level `synonyms:` at the column root is silently
-dropped on import — see open-items #5.
-
-**Model TML skeleton (v1.1 — multi-source, inline joins):**
-
-```yaml
-model:
-  name: "{view_name}"
-  description: "Imported from Databricks Metric View: {catalog}.{schema}.{view_name}"
-  model_tables:
-  - id: PRIMARY_TABLE
-    name: PRIMARY_TABLE
-    fqn: "{primary_guid}"
-    joins:
-    - name: "{join_name}"
-      with: DIM_TABLE       # REQUIRED — must equal `id` (= `name`) of the target entry
-      on: "[PRIMARY_TABLE::{fk_col}] = [DIM_TABLE::{pk_col}]"
-      type: INNER
-      cardinality: MANY_TO_ONE
-  - id: DIM_TABLE
-    name: DIM_TABLE
-    fqn: "{dim_guid}"
-  columns:
-  # ... same pattern as single source ...
-```
-
-**Every formula must have a `columns[]` entry.** Add a `columns[]` entry with
-`formula_id:` for every entry in `formulas[]`:
-
-```yaml
-formulas:
-- id: formula_Total Sales
-  name: "Total Sales"
-  expr: >-
-    sum ( [ECOMMERCE_TRANSACTIONS::product_price] * [ECOMMERCE_TRANSACTIONS::quantity] * ( 1 - [ECOMMERCE_TRANSACTIONS::discount_percent] ) )
-  properties:
-    column_type: MEASURE
-
-columns:
-# ... physical columns ...
-- name: "Total Sales"
-  formula_id: formula_Total Sales   # must match the formula's `id` exactly
-  properties:
-    column_type: MEASURE
-    aggregation: SUM
-    index_type: DONT_INDEX   # recommended for computed numeric measures
-```
-
-`aggregation:` on a `columns[]` formula entry is allowed (unlike in `formulas[]` entries
-where it causes an import error).
-
-- **Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained
-  via their `expr`. ThoughtSpot rejects TML with `FORMULA is not a valid aggregation type`.
-
 ---
 
 ### Step 9.5: Spotter enablement
 
-Before assembling the final TML, ask whether Spotter (AI search) should be enabled
-for this model. Default is **yes** — Spotter is the primary natural-language
-interface for Models, and a converted MV usually exists to be queried this way.
+Ask whether Spotter (AI search) should be enabled. Default is **yes**.
 
 ```
 Enable Spotter (AI search) for this model? [Y / n] (default: Y)
 ```
 
-Apply the answer to the model TML's properties block:
-
-```yaml
-model:
-  name: {view_name}
-  # ... model_tables, columns, formulas, etc.
-  properties:
-    spotter_config:
-      is_spotter_enabled: true   # or false based on answer
-```
-
-If the user answers `n` or `no`, set `is_spotter_enabled: false`. Pre-existing
-models being updated in place (Step 11): if the user does not explicitly answer,
-preserve the existing setting from the previously-exported model TML rather than
-overwriting it with a default.
+Re-run the Step 9 `build-model` command appending `--spotter-enabled` (or
+`--no-spotter-enabled`) — assembly is deterministic and cheap; the flag adds
+`properties.spotter_config.is_spotter_enabled` to the model TML. When
+**updating** an existing model (`--existing-guid`) and the user does not
+explicitly answer: export the existing model first (`ts tml export {guid}
+--profile {profile} --parse`), read its current
+`properties.spotter_config.is_spotter_enabled`, and pass the matching flag —
+never overwrite a live setting with a default.
 
 ---
 
 ### Step 10: Review checkpoint
 
-Before importing, show the user a summary:
+Before importing, show the user a summary built from the Step 9 `build-model` summary
+JSON (and `translated.json`/`parsed.json` for the formula log): tables from `tables[]`
+(`alias`/`name`/`fqn`), column lists from `columns.attributes`/`columns.measures`,
+formula translations from `translated.json`'s `translated[]`/`skipped[]` entries,
+window markers from `window_measures[]` (`name`, `ts_expr`, each annotation's `detail`
+as the assumption line), and Spotter from `spotter_enabled`:
 
 ```
 Model to import: {view_name}
 Source: {catalog}.{schema}.{view_name} (Databricks Metric View v{version})
-Filter: {filter_expr or "none"}
+Filter: {filter_applied or "none"}
 
 Tables:
-  ✓ {TABLE_NAME} (GUID: {guid}) — source table
+  ✓ {tables[].name} (fqn: {tables[].fqn}) — alias: {tables[].alias}
 
 Columns ({n} total):
-  ATTRIBUTE: {list of display names}
-  MEASURE:   {list of display names}
-  Formulas:  {list of display names}
+  ATTRIBUTE: {columns.attributes}
+  MEASURE:   {columns.measures}
+  Formulas:  {formula_count} formula(s)
 
 Formula translations:
-  ✓ {name}: {dbx_expr} → {ts_formula}
-  ⚠ {name}: OMITTED — {reason}
+  ✓ {name}: {mv expr from parsed.json} → {ts_expr}     # translated[]
+  ⚠ {name}: OMITTED — {reason}                          # skipped[]
 
 Window measures (review required):
-  ⚠ WINDOW {name}: {window_type} → {ts_formula}
-    Assumption: {grain assumption, e.g. "daily grain — one row per day"}
+  ⚠ WINDOW {name}: {ts_expr}
+    Assumption: {annotation.detail}
 
 If any window measures exist, display this warning:
 
@@ -968,32 +841,11 @@ If the user selects **file**, skip to [Step 10-FILE](#step-10-file-output-tml-fi
 This path is used when the user selected **file** at the Step 10 checkpoint, explicitly
 said "file only", or has no ThoughtSpot `DATAMANAGEMENT` access.
 
-**1. Determine output filenames:**
+**1. Files are already on disk** — Step 9's `build-model --output-dir` wrote
+`{model_name}.model.tml` (and `{table_name}.table.tml` for every
+`create: true` table). Nothing to generate here.
 
-- Model TML: `{model_name}.model.tml`
-- Any new Table TMLs created in Step 8B (Scenario B): `{table_name}.table.tml`
-
-**2. Write the files:**
-
-```python
-from pathlib import Path
-import yaml
-
-# Model TML
-model_tml_str = yaml.dump(
-    {"model": model_dict}, default_flow_style=False, allow_unicode=True
-)
-Path(f"{model_name}.model.tml").write_text(model_tml_str, encoding="utf-8")
-
-# Table TMLs (Scenario B only)
-for tbl_name, tbl_dict in new_table_tmls.items():
-    tbl_str = yaml.dump(
-        {"table": tbl_dict}, default_flow_style=False, allow_unicode=True
-    )
-    Path(f"{tbl_name}.table.tml").write_text(tbl_str, encoding="utf-8")
-```
-
-**3. Report:**
+**2. Report:**
 
 ```
 TML files written:
@@ -1015,12 +867,15 @@ To import to ThoughtSpot when you have access:
   will assign a GUID — save it from the import response if you need to update the model later.
 ```
 
-**4. Proceed to Step 12** (Produce summary report) — include the formula translation log
+**3. Proceed to Step 12** (Produce summary report) — include the formula translation log
 and column summary so the user has the full picture before importing.
 
 ---
 
 #### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
+
+`build-model` already ran these checks on what it wrote — re-lint whenever a TML file
+has been hand-edited after Step 9.
 
 Before running `ts tml import`, lint the generated **Model** TML with **`ts tml lint`** — a
 parser-based check of the hard invariants in
@@ -1047,54 +902,35 @@ Do not import until it reports `"clean": true`. Fix any finding and re-lint.
 
 ### Step 11: Import the model
 
-**IMPORTANT — Updating vs creating:** Without a `guid` field in the TML, ThoughtSpot
-always creates a **new** object, even if a model with the same name already exists.
-To update an existing model in-place, add `guid` at the **document root** — as a
-top-level key alongside `model:`, NOT nested inside `model:`:
+**IMPORTANT — Updating vs creating:** without `--existing-guid`, ThoughtSpot
+always creates a **new** object, even when a model with the same name exists.
+To update in place, pass the existing model's GUID — `build-model` stamps it
+as a top-level `guid:` alongside `model:` (a `guid:` nested inside `model:` is
+silently ignored). On first import omit it; record the returned GUID.
 
-```python
-# CORRECT — guid at document root
-top_level = {"guid": "{existing_model_guid}", "model": model_dict}
-
-# WRONG — guid nested under model (silently ignored by ThoughtSpot)
-# model_dict["guid"] = "..."   <- do NOT do this
-```
-
-On the first import (new model), omit `guid`. After import, record the GUID from the
-response — you will need it if you reimport to fix any errors.
-
-Serialize the top-level dict to a YAML string, then import:
-
-```python
-import yaml, json, subprocess
-
+```bash
 # First import (new model):
-top_level = {"model": model_dict}
-# Update existing model:
-top_level = {"guid": existing_guid, "model": model_dict}
+source ~/.zshenv && ts databricks build-model \
+  --parsed parsed.json --translated translated.json --tables tables.json \
+  --connection "{connection_name}" --model-name "{model_name}" \
+  --mv-fqn "{catalog}.{schema}.{view_name}" --output-dir ./tml_out \
+  {--spotter-enabled|--no-spotter-enabled} --profile {profile}
 
-model_tml = yaml.dump(top_level, default_flow_style=False, allow_unicode=True)
-payload = json.dumps([model_tml])
-
-result = subprocess.run(
-    ["bash", "-c",
-     f"source ~/.zshenv && ts tml import --policy PARTIAL --profile '{profile_name}'"],
-    input=payload,
-    capture_output=True, text=True,
-)
-print(result.stdout)
-if result.returncode != 0:
-    print(result.stderr)
+# Update an existing model in place:
+#   ... same command plus: --existing-guid {existing_model_guid}
 ```
+
+With `--profile`, the command imports the model TML via
+`ts tml import --policy PARTIAL` after a clean lint, and reports
+`import_status` and `model_guid` in the summary JSON. **Save the GUID** —
+required for any future update import. On `import_status: "failed"` read
+`import_error` and consult the table below.
 
 **Import policy:** Use `--policy PARTIAL` when importing multiple models in a batch.
 `ALL_OR_NONE` rolls back the **entire** batch if any single TML fails — including
 models that parsed and imported successfully. The response still returns success GUIDs
 for the rolled-back models, making the failure silent. Use `ALL_OR_NONE` only for
 atomic pairs (one table + one model that references it).
-
-On success, parse the response JSON to extract the created model's GUID. **Save it** —
-required for any future reimports to update the model without creating a duplicate.
 
 **Common import errors:**
 
@@ -1107,7 +943,7 @@ required for any future reimports to update the model without creating a duplica
 | `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — keep only one entry |
 | `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-run Step 8A to get fresh GUIDs |
 | `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
-| YAML mapping error on formula with `{` | Formula with `{ [col] }` emitted as inline YAML string | Use `>-` block scalar for `expr` — see Step 6 |
+| YAML mapping error on formula with `{` | Formula with `{ [col] }` emitted as inline YAML string | The CLI's YAML emitter quotes `{` correctly; this arises only in hand-edited TML |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |
 
 ---
@@ -1135,7 +971,7 @@ source ~/.zshenv && ts tml export {created_guid} --fqn --profile {profile}
 
 Parse the returned TML and count `model.columns[]` entries. This count must be >= the
 number of translatable fields from the MV (total dimensions + measures, minus any
-omitted from the untranslatable list in Step 6).
+entries in translated.json's `skipped[]`).
 
 If the column count is lower than expected: compare the exported TML against the TML
 sent in Step 11 to identify which columns ThoughtSpot silently dropped, and investigate.
