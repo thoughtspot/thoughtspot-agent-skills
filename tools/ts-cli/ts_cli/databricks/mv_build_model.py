@@ -139,12 +139,19 @@ def _resolve_join_ref(ref: str, flat: dict, index: dict) -> str:
     return f"[{flat[path]}::{col}]"
 
 
+# Standalone `=` only — not part of a wider operator like `>=`, `<=`, `!=`,
+# `==`, or `<=>`. Negative lookbehind/lookahead exclude `=` chars adjacent to
+# `<`, `>`, `!`, or another `=`.
+_EQUALITY_SPLIT = re.compile(r"(?<![<>!=])=(?!=)")
+
+
 def _translate_on(on: str, flat: dict, index: dict) -> str:
     conjuncts = re.split(r"(?i)\bAND\b", on)
     parts = []
     for conjunct in conjuncts:
-        sides = conjunct.split("=")
-        if len(sides) != 2:
+        sides = _EQUALITY_SPLIT.split(conjunct)
+        if len(sides) != 2 or any(
+                ch in side for side in sides for ch in "<>!="):
             raise ValueError(
                 f"join on-clause conjunct '{conjunct.strip()}' is not a simple "
                 f"equality — only 'a.COL = b.COL [AND ...]' joins are supported")
@@ -162,9 +169,14 @@ def _join_display(parent_path: str, alias_path: str) -> str:
 def _join_on_clause(node: dict, parent_path: str, path: str, flat: dict, index: dict) -> str:
     if node.get("on"):
         return _translate_on(node["on"], flat, index)
+    using = node.get("using")
+    if not using:
+        raise ValueError(
+            f"join '{path}' has neither an on: clause nor a non-empty "
+            f"using: list")
     return " AND ".join(
         f"[{flat[parent_path]}::{c}] = [{flat[path]}::{c}]"
-        for c in node["using"])
+        for c in using)
 
 
 def _join_entries(triples: list, flat: dict, index: dict) -> dict[str, list[dict]]:

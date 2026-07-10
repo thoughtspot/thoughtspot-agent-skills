@@ -301,6 +301,38 @@ class TestBuildModelTables:
         with pytest.raises(ValueError, match="warehouse"):
             build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
 
+    def test_on_with_ge_operator_raises(self):
+        # `>=` contains `=` — split("=") would silently produce a malformed
+        # ref like `[FACT::QTY >]` if not guarded against.
+        joins = [_join("orders", "c.s.dm_order", on="source.QTY >= orders.QTY")]
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        with pytest.raises(ValueError, match="not a simple equality"):
+            build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+
+    def test_on_with_ne_operator_raises(self):
+        joins = [_join("orders", "c.s.dm_order", on="source.STATUS != orders.STATUS")]
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        with pytest.raises(ValueError, match="not a simple equality"):
+            build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+
+    def test_on_with_null_safe_eq_operator_raises(self):
+        joins = [_join("orders", "c.s.dm_order", on="source.ID <=> orders.ID")]
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        with pytest.raises(ValueError, match="not a simple equality"):
+            build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+
+    def test_missing_on_and_using_raises(self):
+        joins = [_join("orders", "c.s.dm_order", on=None, using=None)]
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        with pytest.raises(ValueError, match="neither"):
+            build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+
+    def test_empty_using_list_raises(self):
+        joins = [_join("orders", "c.s.dm_order", using=[])]
+        parsed = {"source": {"kind": "table_fqn", "raw": "c.s.fact"}, "joins": joins}
+        with pytest.raises(ValueError, match="neither"):
+            build_model_tables(parsed, {"source": "FACT", "orders": "DM_ORDER"})
+
 
 class TestBuildDescription:
     def test_comment_fqn_filter(self):
