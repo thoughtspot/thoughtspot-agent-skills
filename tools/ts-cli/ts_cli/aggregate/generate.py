@@ -87,21 +87,23 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
     `_build_model_columns` reads. Both functions turned out adaptable (not
     "too Tableau-shaped"), so this stays an adapter, not hand-assembly.
 
-    Known reuse limitation (not exercised by this task's SUM/AVG fixtures):
-    `_build_model_columns` hardcodes `aggregation: SUM` for every MEASURE
-    column regardless of any per-column aggregation passed in. A MIN/MAX
-    single-component measure's aggregate-model column would therefore read
-    `aggregation: SUM` in the *model* TML even though its physical column in
-    the aggregate *table* (see build_aggregate_table_spec) correctly carries
-    MIN/MAX. Fixing this means changing shared model_builder.py, which other
-    skills (Tableau conversion) depend on — out of scope here; flagged for a
-    follow-up rather than silently worked around.
+    Reuse quirk, corrected in the post-pass: `_build_model_columns` hardcodes
+    `aggregation: SUM` for every MEASURE column regardless of per-column input.
+    For a MIN/MAX single-component primary measure that SUM is wrong (it would
+    SUM the per-grain extrema when queried above the stored grain). Rather than
+    fork shared model_builder.py (the Tableau conversion path depends on it),
+    the post-pass below rewrites those columns' aggregation to the measure's
+    `reagg` locally. The physical column in the aggregate *table* (see
+    build_aggregate_table_spec) already carries the correct MIN/MAX.
     """
     from ts_cli.model_builder import build_model_tml
 
     tables = [{"name": agg_table_name, "db_table": agg_table_name}]
     columns, translated_formulas = [], []
     hidden_aliases = set()
+    # display name -> reagg for columns whose model aggregation must be corrected
+    # away from _build_model_columns' hardcoded SUM (see the post-pass below).
+    reagg_overrides: dict = {}
     for name, dtype, _ in _grain_columns(candidate, model_tml):
         columns.append({"name": name, "table": agg_table_name,
                         "db_column_name": name, "data_type": dtype,
@@ -114,6 +116,7 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
             columns.append({"name": plan["name"], "table": agg_table_name,
                             "db_column_name": alias, "data_type": "DOUBLE",
                             "column_type": "MEASURE", "aggregation": comp["reagg"]})
+            reagg_overrides[plan["name"]] = comp["reagg"]
             continue
         # Stored component of a decomposed measure (AVG/COUNT/RATIO): hidden,
         # recombined via the formula below.
@@ -150,6 +153,15 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
     for c in tml["model"]["columns"]:
         if c["name"] in hidden_aliases:
             c.setdefault("properties", {})["is_hidden"] = True
+        # Correct the model column's aggregation for measures whose reagg is not
+        # SUM (MIN/MAX primaries). _build_model_columns hardcodes SUM for every
+        # MEASURE; without this, a MIN/MAX aggregate model would SUM the
+        # per-grain extrema when queried above the stored grain — wrong numbers.
+        # Fixed locally here (not in shared model_builder.py, which the Tableau
+        # conversion path depends on).
+        override = reagg_overrides.get(c["name"])
+        if override:
+            c.setdefault("properties", {})["aggregation"] = override
     return tml
 
 
@@ -158,15 +170,14 @@ def patch_association(primary_tml: dict, entries: list) -> dict:
 
     entries: [{"id": guid_or_name, "date_column": str|None, "bucket": str|None,
                "projected_rows": int|None}]. Emits {id, optional
-    date_aggregation_info: {column_id, bucket}}; projected_rows is an internal
-    sort key, stripped before emission.
+    date_aggregation_info: [{column_id, bucket}]}; projected_rows is an
+    internal sort key, stripped before emission.
 
-    This shape is unverified against live TML (skill Open Item #2) —
-    implemented per the task-6 brief's spec, including the single-dict
-    date_aggregation_info form (the schema doc at
-    agents/shared/schemas/thoughtspot-model-tml.md shows a LIST under
-    date_aggregation_info; both are plausible until verified live — Open
-    Item #2 covers reconciling this).
+    date_aggregation_info is emitted as a single-element LIST to match the
+    authoritative schema doc (agents/shared/schemas/thoughtspot-model-tml.md
+    § aggregated_models, which shows `- column_id: ...`). The overall
+    aggregated_models shape is still unverified against a live 26.6+ cluster —
+    skill Open Item #2 (Task 11).
     """
     patched = copy.deepcopy(primary_tml)
     ordered = sorted(entries, key=lambda e: (e.get("projected_rows") is None,
@@ -175,8 +186,8 @@ def patch_association(primary_tml: dict, entries: list) -> dict:
     for e in ordered:
         item = {"id": e["id"]}
         if e.get("date_column") and e.get("bucket"):
-            item["date_aggregation_info"] = {"column_id": e["date_column"],
-                                             "bucket": e["bucket"]}
+            item["date_aggregation_info"] = [{"column_id": e["date_column"],
+                                              "bucket": e["bucket"]}]
         block.append(item)
     patched["model"]["aggregated_models"] = block
     return patched

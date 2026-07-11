@@ -73,6 +73,45 @@ def test_association_sorted_most_aggregated_first():
     ids = [e["id"] for e in patched["model"]["aggregated_models"]]
     assert ids == ["tiny-agg", "wide-agg", "unprofiled"]  # smallest first, None last
     tiny = patched["model"]["aggregated_models"][0]
-    assert tiny["date_aggregation_info"] == {"column_id": "Order Date",
-                                             "bucket": "MONTHLY"}
+    # date_aggregation_info is a LIST item per the authoritative schema doc
+    # (agents/shared/schemas/thoughtspot-model-tml.md § aggregated_models shows
+    # `- column_id: ...`), not a bare dict. Full shape still unverified live —
+    # skill Open Item #2 (Task 11).
+    assert tiny["date_aggregation_info"] == [{"column_id": "Order Date",
+                                              "bucket": "MONTHLY"}]
     assert "projected_rows" not in tiny  # internal field not emitted
+
+
+def test_min_max_primary_measure_keeps_reagg_in_model_column():
+    # A MIN/MAX single-component primary measure must carry its reagg (MIN/MAX)
+    # on the aggregate MODEL column, not the SUM that _build_model_columns
+    # hardcodes — SUM-of-monthly-maxes would be wrong numbers. Fixed in
+    # build_aggregate_model_tml's post-pass (locally, not in shared model_builder).
+    plans = {"Peak Price": classify_measure("Peak Price", aggregation="MAX"),
+             "Sales": classify_measure("Sales", aggregation="SUM"),
+             "Orders": classify_measure("Orders", aggregation="COUNT"),
+             "Avg Sale": classify_measure("Avg Sale", expr="average ( [Sales] )")}
+    cand = {"id": "c2", "dimensions": ["Category"], "date_column": "Order Date",
+            "bucket": "MONTHLY",
+            "measure_columns": ["Peak Price", "Sales", "Orders", "Avg Sale"],
+            "covered": [0], "flags": []}
+    tml = build_aggregate_model_tml(cand, plans, MODEL,
+                                    agg_table_name="AGG_T",
+                                    model_name="M (Agg)", connection_name="SF Prod")
+    cols = {c["name"]: c for c in tml["model"]["columns"]}
+    # MAX primary measure → model column aggregation MAX (not SUM)
+    assert cols["Peak Price"]["properties"]["aggregation"] == "MAX"
+    # SUM primary measure unaffected
+    assert cols["Sales"]["properties"]["aggregation"] == "SUM"
+    # COUNT decomposes to a formula ("Orders" = sum([orders_cnt])) over a summed
+    # count component; the component (reagg SUM) is unaffected by the override.
+    assert cols["orders_cnt"]["properties"]["aggregation"] == "SUM"
+    # AVG components (hidden, summed) — unaffected
+    assert cols["avg_sale_sum"]["properties"]["aggregation"] == "SUM"
+    assert cols["avg_sale_cnt"]["properties"]["aggregation"] == "SUM"
+
+    # The table spec's MAX component column is already correct and stays MAX.
+    spec = build_aggregate_table_spec(cand, plans, MODEL, db="D", schema="S",
+                                      table_name="AGG_T", connection_name="SF Prod")
+    scols = {c["name"]: c for c in spec["columns"]}
+    assert scols["peak_price_max"]["aggregation"] == "MAX"
