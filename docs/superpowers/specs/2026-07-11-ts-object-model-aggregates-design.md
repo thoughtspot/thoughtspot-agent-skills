@@ -132,9 +132,21 @@ by a width guard (grain > 8 columns is flagged; wide grains rarely compress).
    `COUNT(*) GROUP BY <grain>` per candidate. Then re-rank by
    `benefit(G) = Σ weight(S) × (base_rows − agg_rows)` (scan-rows saved).
 
-**Greedy marginal-gain selection:** repeatedly pick the highest-benefit
-candidate, remove its covered signatures, recompute. The report presents the
-diminishing-returns curve, e.g.:
+**Greedy marginal-gain selection — cost-based, not coverage-based.** Nested
+candidates make pure coverage-greedy wrong: given aggregate A =
+(Sales, Customer, Category, State) and B = (Sales, Category), B adds zero
+*coverage* beyond A but real *value* — "Sales by Category" queries reroute
+from A's rows to B's far fewer rows. So each round picks the candidate with
+the highest marginal benefit computed against the best already-selected
+aggregate, not against the base model:
+
+    marginal_benefit(c) = Σ over sigs c covers:
+        weight(sig) × (current_best_rows(sig) − rows(c))
+
+where `current_best_rows(sig)` = base-model rows if no selected aggregate
+covers the signature, else the smallest selected aggregate's rows. The report
+presents the diminishing-returns curve in scan-rows-saved (coverage % as a
+secondary column), e.g.:
 
 > #1 (Region × Product, MONTHLY): 58% of weighted queries, 240× compression
 > +#2 (Store, DAILY): → 79% · +#3: → 85% · +#4: → 87%
@@ -175,7 +187,12 @@ Each artifact is shown to the user before anything executes or imports.
    directly (visibility handling is Open Item #3).
 3. **Association patch** — `aggregated_models` block (with
    `date_aggregation_info` when the grain has a date bucket) added to the
-   primary Model TML. The primary TML is **backed up first**
+   primary Model TML. Entries are ordered **most-aggregated-first** (smallest
+   projected row count first): if routing resolves multiple satisfying
+   aggregates by definition order, a first-match walk then lands on the
+   cheapest satisfying model; if ThoughtSpot auto-picks the best aggregate,
+   the ordering is harmless (see Open Item #6). Re-runs that add an aggregate
+   re-sort the whole block. The primary TML is **backed up first**
    (ts-dependency-manager pattern); rollback is a single import.
 
 Import gotchas honoured: root `guid:` + `--no-create-new` to update in place;
@@ -236,6 +253,12 @@ the association patch (restore backed-up primary TML).
    our coverage rule matches actual routing behaviour).
 5. **Cross-connection aggregates:** docs say the aggregate may live on a
    different connection — verify, since it affects the DDL/connection prompt.
+6. **Multi-aggregate precedence:** when several associated aggregates can
+   satisfy the same query, does routing follow `aggregated_models` definition
+   order (first match), pick the smallest, or behave unspecified? Test with
+   two nested aggregates (e.g. Sales×Category ⊂ Sales×Customer×Category×
+   State) in both orderings. The most-aggregated-first emission rule is
+   correct under first-match and harmless under auto-pick.
 
 ## Phase 2 (discovery done, implementation deferred): SpotCache target via Analyst Studio Datasets
 
