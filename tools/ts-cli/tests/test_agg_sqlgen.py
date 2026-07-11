@@ -62,6 +62,108 @@ def test_profile_and_base_sql():
     assert base == 'SELECT COUNT(*) AS base_rows FROM "SALESDB"."PUBLIC"."FACT_SALES"'
 
 
+def test_star_join_pruned_to_needed_tables():
+    # Fix 1 (CRITICAL): star FACT->{DIM, DIM2} with a candidate needing only
+    # DIM must not emit the DIM2 join — an extra INNER join silently drops
+    # fact rows with dangling D2_ID (or multiplies on dirty M:1).
+    model = {"model": {
+        "model_tables": [
+            {"name": "FACT", "joins": [
+                {"with": "DIM", "on": "[FACT::CAT_ID] = [DIM::CAT_ID]",
+                 "type": "INNER", "cardinality": "MANY_TO_ONE"},
+                {"with": "DIM2", "on": "[FACT::D2_ID] = [DIM2::D2_ID]",
+                 "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+            {"name": "DIM"}, {"name": "DIM2"},
+        ],
+        "columns": MODEL["model"]["columns"] + [
+            {"name": "Region", "column_id": "DIM2::REGION",
+             "properties": {"column_type": "ATTRIBUTE"}}],
+    }}
+    tables = dict(TABLES)
+    tables["DIM2"] = {"table": {"db": "SALESDB", "schema": "PUBLIC",
+                                "db_table": "DIM_REGION",
+                                "columns": [{"name": "REGION", "db_column_name": "REGION"},
+                                            {"name": "D2_ID", "db_column_name": "D2_ID"}]}}
+    sql = build_select(model, tables, CAND, PLANS, dialect="snowflake")
+    assert 'JOIN "SALESDB"."PUBLIC"."DIM_CATEGORY" "DIM"' in sql
+    assert "DIM_REGION" not in sql
+    assert "DIM2" not in sql
+
+
+def test_reversed_outer_join_traversal_swaps_type():
+    # Fix 2 (IMPORTANT): FACT LEFT_OUTER DIM traversed from root DIM must emit
+    # RIGHT JOIN FACT (keep all FACT rows), not LEFT JOIN FACT.
+    model = {"model": {
+        "model_tables": [
+            {"name": "DIM"},
+            {"name": "FACT", "joins": [
+                {"with": "DIM", "on": "[FACT::CAT_ID] = [DIM::CAT_ID]",
+                 "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}]},
+        ],
+        "columns": MODEL["model"]["columns"],
+    }}
+    sql = build_select(model, TABLES, CAND, PLANS, dialect="snowflake")
+    assert 'FROM "SALESDB"."PUBLIC"."DIM_CATEGORY" "DIM"' in sql
+    assert ('RIGHT JOIN "SALESDB"."PUBLIC"."FACT_SALES" "FACT" '
+            'ON "FACT"."CAT_ID" = "DIM"."CAT_ID"') in sql
+    assert "LEFT JOIN" not in sql
+
+
+def test_quote_char_in_identifier_is_escaped():
+    # Fix 3 (IMPORTANT): quote chars inside display names must be escaped.
+    model = {"model": {
+        "model_tables": MODEL["model"]["model_tables"],
+        "columns": [
+            {"name": "Sales", "column_id": "FACT::AMOUNT",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+            {"name": 'Net "Adj" Category', "column_id": "DIM::CATEGORY",
+             "properties": {"column_type": "ATTRIBUTE"}},
+        ],
+    }}
+    cand = {"id": "cand_1", "dimensions": ['Net "Adj" Category'],
+            "date_column": None, "bucket": None,
+            "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, TABLES, cand, PLANS, dialect="snowflake")
+    assert 'AS "Net ""Adj"" Category"' in sql
+    sql_bq = build_select(model, TABLES, cand, PLANS, dialect="bigquery")
+    assert 'AS `Net "Adj" Category`' in sql_bq  # double quotes fine in backticks
+
+
+def test_backtick_in_identifier_escaped_per_dialect():
+    model = {"model": {
+        "model_tables": MODEL["model"]["model_tables"],
+        "columns": [
+            {"name": "Sales", "column_id": "FACT::AMOUNT",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+            {"name": "Cat `X`", "column_id": "DIM::CATEGORY",
+             "properties": {"column_type": "ATTRIBUTE"}},
+        ],
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Cat `X`"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0],
+            "flags": []}
+    dbx = build_select(model, TABLES, cand, PLANS, dialect="databricks")
+    assert "AS `Cat ``X```" in dbx  # databricks doubles the backtick
+    bq = build_select(model, TABLES, cand, PLANS, dialect="bigquery")
+    assert "AS `Cat \\`X\\``" in bq  # bigquery backslash-escapes it
+
+
+def test_unknown_table_prefix_raises_unsupported():
+    # Fix 4 (IMPORTANT): aliased/unknown model_tables prefixes must raise
+    # UnsupportedModelError (downstream fallback keys on it), not KeyError.
+    model = {"model": {
+        "model_tables": MODEL["model"]["model_tables"],
+        "columns": MODEL["model"]["columns"] + [
+            {"name": "Alias Dim", "column_id": "FACT_A::CATEGORY",
+             "properties": {"column_type": "ATTRIBUTE"}}],
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Alias Dim"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0],
+            "flags": []}
+    with pytest.raises(UnsupportedModelError, match="FACT_A.*not resolvable"):
+        build_select(model, TABLES, cand, PLANS, dialect="snowflake")
+
+
 def test_ddl_dialects():
     sf = build_ddl("SELECT 1", "SALESDB.PUBLIC.FACT_AGG_M", "snowflake",
                    warehouse="WH")

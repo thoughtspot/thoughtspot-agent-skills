@@ -10,13 +10,29 @@ class UnsupportedModelError(Exception):
 
 
 _QUOTE = {"snowflake": '"', "databricks": "`", "bigquery": "`"}
+# How the quote char is escaped when it appears inside an identifier:
+# Snowflake doubles the ", Databricks doubles the `, BigQuery backslash-escapes the `.
+_QUOTE_ESCAPE = {"snowflake": '""', "databricks": "``", "bigquery": "\\`"}
 _JOIN_COND = re.compile(r"\[([^:\]]+)::([^\]]+)\]")
+_JOIN_TYPE = {"INNER": "JOIN", "LEFT_OUTER": "LEFT JOIN",
+              "RIGHT_OUTER": "RIGHT JOIN", "OUTER": "FULL JOIN"}
+# Traversing a directional edge target->source flips which side is preserved.
+_SWAPPED_JOIN = {"LEFT_OUTER": "RIGHT_OUTER", "RIGHT_OUTER": "LEFT_OUTER"}
 DATE_TRUNC_FN = {"snowflake": "DATE_TRUNC", "databricks": "DATE_TRUNC", "bigquery": "DATE_TRUNC"}
 
 
 def _q(dialect: str, ident: str) -> str:
     q = _QUOTE[dialect]
-    return f"{q}{ident}{q}"
+    return f"{q}{ident.replace(q, _QUOTE_ESCAPE[dialect])}{q}"
+
+
+def _table_doc(table_tmls: dict, table: str) -> dict:
+    try:
+        return table_tmls[table]
+    except KeyError:
+        raise UnsupportedModelError(
+            f"table '{table}' not resolvable — possibly an aliased "
+            f"model_tables entry") from None
 
 
 def _table_ref(table_tml: dict, dialect: str) -> str:
@@ -25,7 +41,7 @@ def _table_ref(table_tml: dict, dialect: str) -> str:
 
 
 def _db_col(table_tmls: dict, table: str, col: str) -> str:
-    for c in table_tmls[table]["table"].get("columns", []):
+    for c in _table_doc(table_tmls, table)["table"].get("columns", []):
         if c["name"] == col:
             return c.get("db_column_name", col)
     return col
@@ -54,39 +70,83 @@ def _date_trunc(dialect: str, bucket: str, col_sql: str) -> str:
     return f"{fn}('{part}', {col_sql})"
 
 
+def _collect_edges(entries):
+    """(src, tgt, join_dict) edges from inline model_tables joins."""
+    edges = []
+    for e in entries:
+        for j in e.get("joins", []) or []:
+            if "referencing_join" in j:
+                raise UnsupportedModelError(
+                    f"referencing_join to {j['with']} — supply SQL manually")
+            edges.append((e["name"], j["with"], j))
+    return edges
+
+
+def _bfs_parents(root, edges):
+    """BFS over the bidirectional edge set from root.
+
+    Returns (parent, order): parent maps node -> (parent_node, join_dict,
+    reversed) where reversed means the edge was traversed target->source;
+    order is the deterministic BFS discovery order (declaration order per
+    frontier node).
+    """
+    parent = {root: None}
+    order = [root]
+    frontier = [root]
+    while frontier:
+        nxt = []
+        for node in frontier:
+            for src, tgt, j in edges:
+                other = tgt if src == node else (src if tgt == node else None)
+                if other is None or other in parent:
+                    continue
+                parent[other] = (node, j, tgt == node)
+                order.append(other)
+                nxt.append(other)
+        frontier = nxt
+    return parent, order
+
+
+def _path_tables(needed_tables, parent, root):
+    """Tables on root->needed paths (excluding root) — the joins to keep."""
+    keep = set()
+    for t in needed_tables:
+        cur = t
+        while cur != root:
+            keep.add(cur)
+            cur = parent[cur][0]
+    return keep
+
+
+def _join_condition_sql(join, table_tmls, dialect):
+    return _JOIN_COND.sub(
+        lambda m: f"{_q(dialect, m.group(1))}."
+                  f"{_q(dialect, _db_col(table_tmls, m.group(1), m.group(2)))}",
+        join["on"])
+
+
 def _join_clauses(model_tml, table_tmls, dialect, needed_tables):
     entries = model_tml["model"]["model_tables"]
-    names = [e["name"] for e in entries]
-    root = names[0]
-    clauses, joined = [], {root}
-    # walk join edges breadth-first from the root until all needed tables joined
-    frontier = True
-    while frontier and not needed_tables <= joined:
-        frontier = False
-        for e in entries:
-            for j in e.get("joins", []) or []:
-                if "referencing_join" in j:
-                    raise UnsupportedModelError(
-                        f"referencing_join to {j['with']} — supply SQL manually")
-                src, tgt = e["name"], j["with"]
-                new = tgt if src in joined and tgt not in joined else (
-                    src if tgt in joined and src not in joined else None)
-                if new is None:
-                    continue
-                cond = _JOIN_COND.sub(
-                    lambda m: f"{_q(dialect, m.group(1))}."
-                              f"{_q(dialect, _db_col(table_tmls, m.group(1), m.group(2)))}",
-                    j["on"])
-                jt = {"INNER": "JOIN", "LEFT_OUTER": "LEFT JOIN",
-                      "RIGHT_OUTER": "RIGHT JOIN", "OUTER": "FULL JOIN"}[j.get("type", "INNER")]
-                clauses.append(f"{jt} {_table_ref(table_tmls[new], dialect)} "
-                               f"{_q(dialect, new)} ON {cond}")
-                joined.add(new)
-                frontier = True
-    if not needed_tables <= joined:
+    root = entries[0]["name"]
+    parent, order = _bfs_parents(root, _collect_edges(entries))
+    missing = sorted(needed_tables - set(parent))
+    if missing:
         raise UnsupportedModelError(
-            f"tables {sorted(needed_tables - joined)} unreachable via inline joins")
-    return f"FROM {_table_ref(table_tmls[root], dialect)} {_q(dialect, root)}", clauses
+            f"tables {missing} unreachable via inline joins")
+    keep = _path_tables(needed_tables, parent, root)
+    clauses = []
+    for node in order:
+        if node == root or node not in keep:
+            continue
+        _, join, reverse = parent[node]
+        jtype = join.get("type", "INNER")
+        if reverse:
+            jtype = _SWAPPED_JOIN.get(jtype, jtype)
+        clauses.append(
+            f"{_JOIN_TYPE[jtype]} {_table_ref(_table_doc(table_tmls, node), dialect)} "
+            f"{_q(dialect, node)} ON {_join_condition_sql(join, table_tmls, dialect)}")
+    return (f"FROM {_table_ref(_table_doc(table_tmls, root), dialect)} "
+            f"{_q(dialect, root)}", clauses)
 
 
 def _select_dimension_items(model_tml, table_tmls, dialect, candidate, needed):
@@ -155,7 +215,8 @@ def build_profile_sql(select_sql: str) -> str:
 def build_base_count_sql(model_tml: dict, table_tmls: dict,
                          dialect: str = "snowflake") -> str:
     root = model_tml["model"]["model_tables"][0]["name"]
-    return f"SELECT COUNT(*) AS base_rows FROM {_table_ref(table_tmls[root], dialect)}"
+    return (f"SELECT COUNT(*) AS base_rows FROM "
+            f"{_table_ref(_table_doc(table_tmls, root), dialect)}")
 
 
 def build_ddl(select_sql: str, target: str, dialect: str,
