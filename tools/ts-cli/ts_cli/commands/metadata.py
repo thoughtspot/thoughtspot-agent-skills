@@ -258,6 +258,33 @@ def _normalize_dependents_response(resp_json) -> list:
     return rows
 
 
+def _collect_dependents(client: ThoughtSpotClient, guid: str,
+                        type: str = "LOGICAL_TABLE") -> list:
+    """Single-hop dependents for one source GUID, shaped for callers that only
+    need identity + owner (e.g. `ts aggregate signatures`).
+
+    Reuses the same walk as `ts metadata dependents` / `ts metadata report` /
+    `ts audit` (`_build_dependents_payload` + `_normalize_dependents_response`)
+    rather than hand-rolling a separate metadata/search call — see
+    references/open-items.md #1 for the verified request/response shape.
+
+    Returns: [{"guid", "name", "type", "owner"}, ...] where owner is
+    {"id", "display_name"} or None when the API didn't return an author.
+    """
+    resp = client.post(
+        "/api/rest/2.0/metadata/search",
+        json=_build_dependents_payload([guid], type),
+    )
+    rows = _normalize_dependents_response(resp.json())
+    out = []
+    for row in rows:
+        owner = None
+        if row.get("author_id"):
+            owner = {"id": row["author_id"], "display_name": row.get("author_display_name")}
+        out.append({"guid": row["guid"], "name": row["name"], "type": row["type"], "owner": owner})
+    return out
+
+
 @app.command("dependents")
 def dependents(
     guids: List[str] = typer.Argument(..., help="One or more source GUIDs to query"),

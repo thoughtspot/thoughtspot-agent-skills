@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import pytest
 
+from unittest.mock import MagicMock
+
 from ts_cli.commands.metadata import (
     _build_dependents_payload,
     _normalize_dependents_response,
     _BUCKET_TO_TYPE,
+    _collect_dependents,
 )
 
 
@@ -232,3 +235,51 @@ class TestBucketTypeMap:
         assert _BUCKET_TO_TYPE["LOGICAL_TABLE"] == "LOGICAL_TABLE"
         assert _BUCKET_TO_TYPE["COHORT"] == "SET"
         assert _BUCKET_TO_TYPE["FEEDBACK"] == "FEEDBACK"
+
+
+# ---------------------------------------------------------------------------
+# _collect_dependents — single-guid convenience wrapper (used by
+# `ts aggregate signatures`; reuses _build_dependents_payload/_normalize_
+# dependents_response rather than a hand-rolled call — see Task 7 brief).
+# ---------------------------------------------------------------------------
+
+
+class TestCollectDependents:
+    def _client_returning(self, resp_json):
+        client = MagicMock()
+        client.post.return_value.json.return_value = resp_json
+        return client
+
+    def test_shapes_rows_with_owner(self):
+        resp = _make_response("model-1", {
+            "QUESTION_ANSWER_BOOK": [
+                {"id": "a1", "name": "My Answer", "author": "u1",
+                 "authorDisplayName": "alice"}
+            ],
+        })
+        client = self._client_returning(resp)
+        rows = _collect_dependents(client, "model-1")
+        assert rows == [{
+            "guid": "a1", "name": "My Answer", "type": "ANSWER",
+            "owner": {"id": "u1", "display_name": "alice"},
+        }]
+
+    def test_missing_author_yields_none_owner(self):
+        resp = _make_response("model-1", {
+            "PINBOARD_ANSWER_BOOK": [{"id": "lb1", "name": "LB"}],
+        })
+        client = self._client_returning(resp)
+        rows = _collect_dependents(client, "model-1")
+        assert rows[0]["owner"] is None
+
+    def test_posts_the_shared_dependents_payload(self):
+        client = self._client_returning([])
+        _collect_dependents(client, "model-1", type="LOGICAL_TABLE")
+        client.post.assert_called_once_with(
+            "/api/rest/2.0/metadata/search",
+            json=_build_dependents_payload(["model-1"], "LOGICAL_TABLE"),
+        )
+
+    def test_no_dependents_returns_empty_list(self):
+        client = self._client_returning([])
+        assert _collect_dependents(client, "model-1") == []
