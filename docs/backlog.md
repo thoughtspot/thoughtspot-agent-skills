@@ -2189,13 +2189,19 @@ for AI-instructions fetch failures.
 
 **Source:** 2026-07-03 full audit, finding 14.5.
 **Affects:** ts-audit, ts-dependency-manager, ts-object-answer-promote, ts-object-model-coach,
-ts-object-model-erd, ts-profile-tableau, both ts-recipe-* skills.
+ts-object-model-erd, ts-profile-tableau, both ts-recipe-* skills, `ts-profile-thoughtspot:10`,
+`ts-profile-databricks:10`, `ts-variable-timezone:11` (strict serial-prompt wording; per-skill
+judgment needed for the partly-sequential credential flows).
 **Status:** OPEN.
 
 ts-convert-from-tableau 1.13.0 relaxed "Ask one question at a time" to dependent/independent
 wording (independent questions may be batched); the strict wording remains verbatim in the
 8 skills above, serialising independent prompts. Apply the same boilerplate update (PATCH
 bump each).
+
+**Note (2026-07-11 full audit finding 14.1):** this Affects line was incomplete — the three
+credential-flow skills above also carry the strict wording; their flows are only partly
+sequential, so apply per-skill judgment rather than a blanket copy of the Tableau relaxation.
 
 **Target:** 2026-08-31.
 
@@ -2276,6 +2282,11 @@ between both skills and has already drifted from `load.py:_connect_python()` (ke
 handling). Move the SQL to `references/*.sql` templates and add `ts snowflake exec -f
 <file.sql> --sf-profile <name> [--var k=v]` reusing the load.py connector; point both
 recipes (and their smoke tests, deduped in PR #174) at it.
+
+**Note (2026-07-11 full audit finding 11.3, two-bucket exit):** when `ts snowflake
+exec` lands, add a `check_patterns` rule for the cloned `snowflake.connector` connect
+block (in SKILL.md; references/ carve-out) in the same PR — the permanent check that
+keeps the ~30-line clone from re-drifting.
 
 **Target:** 2026-08-31.
 
@@ -2388,6 +2399,12 @@ security.md — the credential VALUE never passes through the CLI conversation; 
 (everything except the secret) becomes `ts profiles add/update/remove` + `ts profiles
 sync-env`. Also adopt `ts profiles list --json` in the 4 skills that hand-parse
 `~/.claude/*-profiles.json`.
+
+**Note (2026-07-11 full audit finding 11.2):** the adoption pass should also fold in a
+shared select-and-verify authenticate reference in `agents/shared/` — from-looker's
+Step 1 dropped profile discovery entirely (bare `ts auth whoami`, no multi-profile
+menu) and from-databricks-mv inlines ~15 lines of profile-JSON Python duplicated from
+ts-profile-databricks. Cross-reference BL-079/11.3 above.
 
 **Target:** 2026-10-31.
 
@@ -2794,6 +2811,7 @@ Per-converter gap against that bar:
 | ts-convert-to-snowflake-sv | None | Inaugural anchor only (2026-06, never swept) | DDL emission is highly mechanical — strong codification candidate. |
 | ts-convert-to-databricks-mv | None | Window emission tables live-verified (PR1) | MV YAML emission is mechanical; reuse `mv_*` module vocabulary in reverse. |
 | ts-convert-from-tableau | **Done** (full `ts tableau` pipeline) | Doc-driven sweeps only — no fixture number-match has ever run | Only the fidelity leg is missing; needs live Tableau Server access (often unavailable — see feedback memory). Scope as opportunistic. |
+| ts-convert-from-looker | **None** | Not yet swept | (audit finding 5.2) 1,845 lines run lkml parsing, field resolution, measure translation, and TML emission agentically — the same mechanical shape codified for Tableau/Databricks. Cheapest parse leg of all converters (mature `lkml` parser on PyPI); build-model can reuse existing machinery. Model on the BL-063 phases (`ts looker parse` / `translate-formulas` / `build-model`). Shipped 6 days after the codification review, so it was absent from the original table. |
 
 Also in scope: normalize currency-anchor style (the Databricks anchors have outgrown
 "context" into changelog territory; the anchor format is `platform — YYYY-MM (context)` —
@@ -2841,3 +2859,253 @@ schema version if the new field changes the existing contract's shape expectatio
 
 **Target:** no fixed date — natural next step whenever `ts_cli/report/__init__.py` is
 next touched, or as part of a future ts-dependency-manager UX pass.
+
+---
+
+## BL-102 — Databricks MV `parameters:` parse + emit support (live-verify on Runtime 18.2)
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 13.2.
+**Affects:** `tools/ts-cli/ts_cli/databricks/mv_parse.py` (known-key set, line 190),
+`tools/ts-cli/ts_cli/databricks/mv_build_model.py` (line 66 comment); `ts-convert-from-databricks-mv`.
+**Status:** OPEN.
+
+`ts databricks parse-mv` (mv_parse.py:190 known-key set) rejects the GA `parameters:`
+block as `unknown_key`; mv_build_model.py:66's comment "MVs have no parameters" is now
+wrong. Decide TS Parameter ↔ MV parameter translation both directions and live-verify
+on an 18.2 SQL warehouse. Doc corrections already shipped in the 2026-07-11 mapping
+batch (PR #213); this is the parser/emitter half. Companion to finding 13.1.
+
+**Target:** no fixed date — next Databricks-from touch, paired with the 13.1 companion work.
+
+---
+
+## BL-103 — Retest `searchConnection` with explicit `authentication_type` for OAuth hierarchy
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 13.3.
+**Affects:** `tools/ts-cli/ts_cli/commands/connections.py` (`_fetch_connection_v2`); `.claude/rules/ts-cli.md`.
+**Status:** OPEN.
+
+`.claude/rules/ts-cli.md` claims OAuth/PKCE connections return an empty warehouse
+hierarchy as a product limitation, but the `searchConnection` spec exposes an
+`authentication_type` field (defaults to `SERVICE_ACCOUNT`), and `_fetch_connection_v2`
+never passes it. Live-test passing the matching type; if the hierarchy is retrievable,
+fix `_fetch_connection_v2` and soften the "do not rely on connection introspection" rule.
+
+**Target:** no fixed date — next live-instance session with an OAuth/PKCE connection available.
+
+---
+
+## BL-104 — Evaluate Databricks BI compatibility mode (GA 18.0+) as an alt MV architecture
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 13.9.
+**Affects:** `agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md:106`; `ts-convert-from-databricks-mv`.
+**Status:** OPEN.
+
+BI compatibility mode lets BI tools query MV measures without `MEASURE()`, opening up
+registering the MV itself over an Embrace connection instead of building over source
+tables. Evaluate connector support and semi-additive/window behaviour. Nothing is
+broken today — the mode is opt-in and the repo builds over source tables. Also add a
+one-line caveat at ts-from-databricks-rules.md:106.
+
+**Target:** no fixed date — evaluation item, not a defect.
+
+---
+
+## BL-105 — Bump `requests` floor to `>=2.33.0` on the next ts-cli version bump
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 16.1.
+**Affects:** `tools/ts-cli/pyproject.toml`.
+**Status:** OPEN.
+
+The current `requests>=2.32.4` floor permits requests 2.32.5 (GHSA-gc5v-m9x4-r6x2,
+fixed in 2.33.0) and transitive urllib3 2.6.3 (PYSEC-2026-141/-142, fixed in 2.7.0).
+Real environments resolve clean today; a floor-constrained resolution would silently
+reintroduce the CVEs. urllib3 is covered transitively — no separate pin needed.
+
+**Target:** bundle with the next ts-cli version bump.
+
+---
+
+## BL-106 — Lift the CPython 3.14 cap; plan the 3.11 floor bump
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 16.2.
+**Affects:** `tools/ts-cli/pyproject.toml` (`requires-python`).
+**Status:** OPEN.
+
+`requires-python = ">=3.10,<3.14"` blocks CPython 3.14 (GA Oct 2025). Run the test
+suite on 3.14 and lift the cap; separately, plan the floor bump to `>=3.11` after the
+3.10 EOL (2026-10).
+
+**Target:** lift the 3.14 cap opportunistically; revisit the 3.11 floor bump after 2026-10.
+
+---
+
+## BL-107 — Add a small CI Python matrix (3.10, 3.13) on the pytest step
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 16.4.
+**Affects:** `.github/workflows/validate.yml` (pytest step).
+**Status:** OPEN.
+
+CI tests a single Python version (3.12) while `pyproject.toml` claims support for
+3.10–3.13, and the user's own uv-tool environment runs 3.11. Add 3.10 and 3.13 to the
+pytest step's matrix only — the rest of CI (validators, linters) stays single-version.
+
+**Target:** no fixed date — small, low-risk workflow edit.
+
+---
+
+## BL-108 — SHA-pin GitHub Actions (`checkout@v4`, `setup-python@v5`)
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 16.5.
+**Affects:** `.github/workflows/validate.yml`.
+**Status:** OPEN.
+
+Actions are pinned by mutable tags — the tj-actions incident class. Only two
+first-party actions are in use, so risk is modest. SHA-pin both with a version-tag
+comment; batch with the next workflow edit rather than open a standalone PR.
+
+**Target:** bundle with the next workflow edit (e.g. alongside BL-107).
+
+---
+
+## BL-109 — Retire `agents/claude/references/direct-api-auth.md` + remove its two dead reference rows
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 1.2.
+**Affects:** `agents/claude/references/direct-api-auth.md`; `agents/cli/ts-convert-from-snowflake-sv/SKILL.md:33`;
+`agents/cli/ts-convert-to-snowflake-sv/SKILL.md:28`.
+**Status:** OPEN.
+
+The doc describes a curl + `/tmp/ts_token.txt` fallback that `ts-cli.md` and
+`security.md` now prohibit; its only consumers are two dead reference-table rows
+(from-snowflake-sv SKILL.md:33, to-snowflake-sv SKILL.md:28) with no corresponding
+step logic. Remove the two rows (PATCH version bump to both skills) and delete the doc.
+
+**Target:** no fixed date — small cleanup, next time either skill is touched.
+
+---
+
+## BL-110 — Consolidate the hardcoded runtime skill-dir list into a shared `tools/validate/_dirs.py`
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 4.4.
+**Affects:** 18 files under `tools/validate/`.
+**Status:** OPEN.
+
+18 validators independently hardcode `('agents/cli', 'agents/claude',
+'agents/coco-snowsight')`; a directory rename means ~18 edits, and a missed one
+silently reports PASS. The three dirs are stable today — this is drift insurance,
+the same pattern as the existing ALLOWLIST/NAME_ALIASES consolidation.
+
+**Target:** no fixed date — opportunistic refactor, or triggered if a runtime dir is ever renamed.
+
+---
+
+## BL-111 — `--connection <name>` filter on `ts metadata search` (optionally `ts tables discover`)
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 11.1.
+**Affects:** `tools/ts-cli/ts_cli/commands/metadata.py`; `ts-convert-from-snowflake-sv` Step 6A,
+`ts-convert-from-databricks-mv` Step 8A, `ts-convert-from-tableau`, `ts-audit`.
+**Status:** OPEN.
+
+Connection-scoped table discovery is duplicated near-verbatim across 3+ converters
+(from-snowflake-sv Step 6A, from-databricks-mv Step 8A, from-tableau, ts-audit prose):
+metadata search → client-side `dataSourceName` filter → stripe disambiguation →
+column-gap map. Meets ts-cli.md's "2+ skills duplicate the same raw API call" trigger.
+(a) add a `--connection` filter to `ts metadata search` (small, immediate); (b)
+optionally add `ts tables discover` returning the found/missing/column-gap map
+directly. The scope-selection prompt stays agentic either way.
+
+**Target:** (a) opportunistic, low effort; (b) scope alongside the next converter that needs it.
+
+---
+
+## BL-112 — Rewire `smoke_ts_audit.py` onto `ts audit run`/`report` + dedup the PII pattern list
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 6.2.
+**Affects:** `tools/smoke-tests/smoke_ts_audit.py`; `tools/ts-cli/ts_cli/audit/checks_security.py` (`_PII_PATTERNS`).
+**Status:** OPEN.
+
+The smoke test predates the ts_cli audit engine: it never invokes `ts audit
+run`/`report`, and its Step 8 duplicates a local `PII_PATTERNS` list ("mirrors the
+skill logic") that can silently diverge from `_PII_PATTERNS` in checks_security.py.
+Point the smoke test at `ts audit run` live; import or delete the duplicated list.
+Parallels the 6.1 dependency-manager smoke-test rewire shipped in PR #212.
+
+**Target:** no fixed date — natural next touch of the audit smoke test.
+
+---
+
+## BL-113 — Add a live provisioning step to `smoke_ts_load_source_data.py`
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 6.4.
+**Affects:** `tools/smoke-tests/smoke_ts_load_source_data.py`.
+**Status:** OPEN.
+
+The smoke test covers only the offline half — `ts load snowflake` provisioning
+(CREATE TABLE + PUT + COPY) has mocked unit coverage but no live smoke test. The
+runner already has `--sf-profile` plumbing in place to support one.
+
+**Target:** no fixed date — next live-instance session with a Snowflake profile available.
+
+---
+
+## BL-114 — Document `export_with_column_aliases` when it stabilises or a skill needs it
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 13.11.
+**Affects:** `agents/shared/schemas/thoughtspot-model-tml.md`; ts-convert-* mappings.
+**Status:** OPEN.
+
+`export_with_column_aliases` (Beta, 10.13.0.cl) confirms Models carry a column-alias
+feature distinct from `properties.synonyms`; `thoughtspot-model-tml.md` has no
+coverage today and ts-convert-* mappings only target synonyms. This is a newly
+possible mapping target once the flag reaches GA — document it then, or sooner if a
+skill needs it before GA.
+
+**Target:** no fixed date — triggered by GA or by a skill requirement, whichever comes first.
+
+---
+
+## BL-115 — Write a smoke test for `ts-convert-from-looker`
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 6.3.
+**Affects:** `tools/smoke-tests/smoke_ts_convert_from_looker.py` (new);
+`tools/validate/check_smoke_tests.py:50` (ALLOWLIST entry).
+**Status:** OPEN.
+
+from-looker (shipped 2026-07-09) has an undated `ALLOWLIST` exemption in
+check_smoke_tests.py; this backlog item is the dated exit that exemption's comment
+should reference. Author `tools/smoke-tests/smoke_ts_convert_from_looker.py` on the
+first live LookML verification (needs a LookML fixture project).
+
+**Target:** first live-verification pass against a real or fixture Looker project.
+
+---
+
+## BL-116 — Live destructive run of the rewired `smoke_ts_dependency_manager.py`
+
+**Filed:** 2026-07-11.
+**Source:** 2026-07-11 full audit finding 6.1; rewrite shipped in PR #212 — this item
+is the deferred live-verification follow-up.
+**Affects:** `tools/smoke-tests/smoke_ts_dependency_manager.py`.
+**Status:** OPEN.
+
+The smoke test was rewired onto `ts dependency backup/apply-change/rollback` with the
+destructive `apply-change` leg gated behind `--run-apply-change`. The safe legs
+(backup + `rollback --only updates`) and the destructive leg under the flag both need
+a live-instance run against a disposable model — reserved for a user-authorized
+destructive gate.
+
+**Target:** next live-instance session with an expendable ThoughtSpot model and explicit user authorization for the destructive leg.
