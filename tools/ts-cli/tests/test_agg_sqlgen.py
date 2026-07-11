@@ -2,7 +2,7 @@ import pytest
 from ts_cli.aggregate.sqlgen import (build_select, build_profile_sql,
                                      build_base_count_sql, build_ddl,
                                      UnsupportedModelError)
-from ts_cli.aggregate.measures import classify_measure
+from ts_cli.aggregate.measures import classify_measure, build_rewrite_plans
 
 MODEL = {"model": {
     "model_tables": [
@@ -63,16 +63,27 @@ def test_profile_and_base_sql():
 
 
 def test_star_join_pruned_to_needed_tables():
-    # Fix 1 (CRITICAL): star FACT->{DIM, DIM2} with a candidate needing only
-    # DIM must not emit the DIM2 join — an extra INNER join silently drops
-    # fact rows with dangling D2_ID (or multiplies on dirty M:1).
+    # Fix 1 (CRITICAL, original intent): star FACT->{DIM, DIM2} with a
+    # candidate needing only DIM must not emit an unnecessary DIM2 join.
+    #
+    # Post open-item #11 fix (see test_inner_joined_unreferenced_table_is_
+    # retained below): an INNER-joined table reachable from root is now
+    # ALWAYS retained even when unreferenced, because dropping a mandatory
+    # INNER join can silently keep fact rows the primary Model's canonical
+    # query would exclude (nullable/orphan FK) — wrong totals. That
+    # deterministic safe rule means an unreferenced DIM2 joined via INNER
+    # would now correctly be *kept*, not pruned, so this test's DIM2 join is
+    # changed to LEFT_OUTER to preserve its original intent (pruning a
+    # genuinely optional/unreferenced dimension) — a LEFT_OUTER join to an
+    # unreferenced table never changes the root row set, so pruning it
+    # remains correct and desirable.
     model = {"model": {
         "model_tables": [
             {"name": "FACT", "joins": [
                 {"with": "DIM", "on": "[FACT::CAT_ID] = [DIM::CAT_ID]",
                  "type": "INNER", "cardinality": "MANY_TO_ONE"},
                 {"with": "DIM2", "on": "[FACT::D2_ID] = [DIM2::D2_ID]",
-                 "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+                 "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}]},
             {"name": "DIM"}, {"name": "DIM2"},
         ],
         "columns": MODEL["model"]["columns"] + [
@@ -88,6 +99,39 @@ def test_star_join_pruned_to_needed_tables():
     assert 'JOIN "SALESDB"."PUBLIC"."DIM_CATEGORY" "DIM"' in sql
     assert "DIM_REGION" not in sql
     assert "DIM2" not in sql
+
+
+def test_inner_joined_unreferenced_table_is_retained():
+    # Fix 3 (IMPORTANT, open-item #11): FACT INNER JOIN DIM must be retained
+    # even when the candidate selects no DIM column — dropping a mandatory
+    # INNER join would silently keep FACT rows the primary Model's canonical
+    # query excludes (nullable/orphan FK), producing wrong totals.
+    cand = {"id": "cand_1", "dimensions": [], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0],
+            "flags": []}
+    sql = build_select(MODEL, TABLES, cand, PLANS, dialect="snowflake")
+    assert 'JOIN "SALESDB"."PUBLIC"."DIM_CATEGORY" "DIM"' in sql
+
+
+def test_left_outer_joined_unreferenced_table_is_pruned():
+    # Fix 3 counterpart: a LEFT_OUTER join to an unreferenced table never
+    # changes the root row set (it preserves all root rows regardless of
+    # match), so pruning it when unreferenced remains correct.
+    model = {"model": {
+        "model_tables": [
+            {"name": "FACT", "joins": [
+                {"with": "DIM", "on": "[FACT::CAT_ID] = [DIM::CAT_ID]",
+                 "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}]},
+            {"name": "DIM"},
+        ],
+        "columns": MODEL["model"]["columns"],
+    }}
+    cand = {"id": "cand_1", "dimensions": [], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0],
+            "flags": []}
+    sql = build_select(model, TABLES, cand, PLANS, dialect="snowflake")
+    assert "DIM_CATEGORY" not in sql
+    assert "JOIN" not in sql
 
 
 def test_reversed_outer_join_traversal_swaps_type():
@@ -162,6 +206,62 @@ def test_unknown_table_prefix_raises_unsupported():
             "flags": []}
     with pytest.raises(UnsupportedModelError, match="FACT_A.*not resolvable"):
         build_select(model, TABLES, cand, PLANS, dialect="snowflake")
+
+
+def test_formula_backed_measure_column_does_not_crash_col_map():
+    # Fix 1 (CRITICAL): every ThoughtSpot formula appears in model.columns[]
+    # with a formula_id and NO column_id (the physical-vs-formula column
+    # rule). _col_map previously did `c["column_id"].split("::", 1)` for
+    # every column unconditionally, so a formula-backed MEASURE (formula_id,
+    # no column_id — e.g. an AVG measure) raised a bare KeyError here before
+    # this fix, crashing `ts aggregate profile`/`generate` (both call
+    # build_select). After the fix, the measure's stored components resolve
+    # via their source_column physical columns ("Sales"), not via the
+    # formula entry itself.
+    model = {"model": {
+        "model_tables": MODEL["model"]["model_tables"],
+        "formulas": [{"id": "formula_Avg Sale", "name": "Avg Sale",
+                      "expr": "average ( [Sales] )"}],
+        "columns": MODEL["model"]["columns"] + [
+            {"name": "Avg Sale", "formula_id": "formula_Avg Sale",
+             "properties": {"column_type": "MEASURE"}}],
+    }}
+    plans = build_rewrite_plans(model)
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["Avg Sale"], "covered": [0],
+            "flags": []}
+    sql = build_select(model, TABLES, cand, plans, dialect="snowflake")
+    assert 'SUM("FACT"."AMOUNT") AS "avg_sale_sum"' in sql
+    assert 'COUNT("FACT"."AMOUNT") AS "avg_sale_cnt"' in sql
+
+
+def test_nested_formula_source_column_raises_unsupported_not_keyerror():
+    # Fix 2 (IMPORTANT): a measure that decomposes to a source_column that is
+    # itself a formula (not a physical display name resolvable via
+    # column_id) must raise UnsupportedModelError, not a bare KeyError, so
+    # callers (`profile`/`generate`) fall back to the documented "skip
+    # candidate / manual SQL" path instead of crashing.
+    model = {"model": {
+        "model_tables": MODEL["model"]["model_tables"],
+        "formulas": [
+            {"id": "formula_Net Sale", "name": "Net Sale",
+             "expr": "[Sales] - [Discount]"},
+            {"id": "formula_Avg Net Sale", "name": "Avg Net Sale",
+             "expr": "average ( [Net Sale] )"},
+        ],
+        "columns": MODEL["model"]["columns"] + [
+            {"name": "Net Sale", "formula_id": "formula_Net Sale",
+             "properties": {"column_type": "MEASURE"}},
+            {"name": "Avg Net Sale", "formula_id": "formula_Avg Net Sale",
+             "properties": {"column_type": "MEASURE"}},
+        ],
+    }}
+    plans = build_rewrite_plans(model)
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["Avg Net Sale"],
+            "covered": [0], "flags": []}
+    with pytest.raises(UnsupportedModelError):
+        build_select(model, TABLES, cand, plans, dialect="snowflake")
 
 
 def test_ddl_dialects():

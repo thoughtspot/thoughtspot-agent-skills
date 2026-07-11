@@ -84,6 +84,45 @@ def test_recommend_cost_mode_reports_excluded_unprofiled(tmp_path):
     assert out["excluded_unprofiled"] == region_ids
 
 
+def test_colmap_from_model_skips_formula_backed_columns():
+    """Fix 1 (CRITICAL): `_colmap_from_model` (used by `ts aggregate history`
+    to match warehouse query-history GROUP BY shapes back to Model display
+    names) previously did `c["column_id"].split("::", 1)` for every column
+    unconditionally. Every ThoughtSpot formula appears in model.columns[]
+    with a formula_id and NO column_id — so a formula-backed column raised a
+    bare KeyError here before this fix. It must be skipped (it has no
+    physical TABLE.COL shape to match warehouse GROUP BY clauses against),
+    not crash the whole command."""
+    from ts_cli.commands.aggregate import _colmap_from_model
+
+    model = {"model": {
+        "formulas": [{"id": "formula_Avg Sale", "name": "Avg Sale",
+                      "expr": "average ( [Sales] )"}],
+        "columns": [
+            {"name": "Sales", "column_id": "FACT::AMOUNT",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+            {"name": "Category", "column_id": "DIM::CATEGORY",
+             "properties": {"column_type": "ATTRIBUTE"}},
+            {"name": "Avg Sale", "formula_id": "formula_Avg Sale",
+             "properties": {"column_type": "MEASURE"}},
+        ],
+    }}
+    colmap = _colmap_from_model(model)
+    assert colmap == {"FACT.AMOUNT": "Sales", "DIM.CATEGORY": "Category"}
+
+
+def test_recommend_missing_dir_files_errors_clearly(tmp_path):
+    """Fix 4 (NICE): `recommend` against a --dir missing model.tml.yaml/
+    signatures.jsonl (e.g. `signatures` was never run, or the wrong --dir was
+    passed) must fail with a clear diagnostic, not a bare FileNotFoundError
+    traceback."""
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "recommend", "--dir", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "model.tml.yaml" in result.stderr
+    assert "ts aggregate signatures" in result.stderr
+
+
 def test_filtered_dependents_keeps_only_answers_and_liveboards(monkeypatch):
     from ts_cli.commands import aggregate as agg_mod
 

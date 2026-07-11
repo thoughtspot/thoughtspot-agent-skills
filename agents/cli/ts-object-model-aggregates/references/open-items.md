@@ -263,7 +263,7 @@ alongside the plain grouped one for any MONTHLY+ candidate.
 
 ---
 
-## #11 — Join-pruning fidelity — OPEN
+## #11 — Join-pruning fidelity — OPEN (rule now IMPLEMENTED; live check pending)
 
 **Question:** `sqlgen.build_select`'s join-pruning
 (`_join_clauses` / `_path_tables` in
@@ -285,11 +285,29 @@ advisor claims it "covers."
 SQL-presence check wouldn't catch it (the aggregate table does get used); only a
 row-count or aggregate-value comparison against the primary would.
 
-**Live-test script:** pick (or construct) a Model with a nullable FK on an
-INNER-joined dimension; generate a candidate whose grain doesn't select any column
-from that dimension; compare `ts aggregate profile`'s `agg_rows`-adjacent measure
-totals (e.g. `SUM(Revenue)`) against the same grain queried through the full primary
-Model (not just row counts — a measure total is the more sensitive check). If they
-diverge, `sqlgen.py` needs an "always include mandatory INNER joins even when
-unreferenced by the grain" rule (a design note carried forward from the Task 5
-build review).
+**Update (final whole-branch review fixes):** the deterministic
+"always-include-mandatory-INNER-joins" rule this item called for is now
+**IMPLEMENTED** in `sqlgen.py` — `_mandatory_inner_tables` walks the join BFS
+spanning tree and force-retains any table whose direct join edge is an
+unconditional `INNER` (regardless of whether its columns are in the selected
+grain), on the reasoning that an INNER join can only ever reduce the row set, so
+retaining one unreferenced is always safe (at worst an unnecessary join, never
+wrong numbers). `LEFT_OUTER`/`RIGHT_OUTER`/`OUTER` joins to unreferenced tables are
+still pruned (they don't change the root row set). Covered by
+`test_inner_joined_unreferenced_table_is_retained` and
+`test_left_outer_joined_unreferenced_table_is_pruned` in
+`tools/ts-cli/tests/test_agg_sqlgen.py`. The pre-existing star-schema pruning test
+(`test_star_join_pruned_to_needed_tables`) asserted an INNER-joined, unreferenced
+DIM2 got pruned — under the new rule that assertion is no longer correct (an
+unreferenced INNER-joined DIM2 must now be retained), so that test's DIM2 join type
+was changed to `LEFT_OUTER` to preserve its original intent (pruning a genuinely
+optional/unreferenced dimension) rather than deleting the coverage.
+
+**Remaining live-test script (why this item stays OPEN):** pick (or construct) a
+Model with a nullable FK on an INNER-joined dimension; generate a candidate whose
+grain doesn't select any column from that dimension; compare `ts aggregate
+profile`'s `agg_rows`-adjacent measure totals (e.g. `SUM(Revenue)`) against the same
+grain queried through the full primary Model (not just row counts — a measure total
+is the more sensitive check) to confirm the aggregate's counts now match the base
+model for covered queries on a live instance. The rule is implemented and unit-
+tested; only this live-instance confirmation is outstanding.

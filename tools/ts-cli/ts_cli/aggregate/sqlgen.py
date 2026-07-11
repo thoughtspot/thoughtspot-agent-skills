@@ -48,16 +48,32 @@ def _db_col(table_tmls: dict, table: str, col: str) -> str:
 
 
 def _col_map(model_tml: dict) -> dict:
-    """display name -> (table, physical column name)."""
+    """display name -> (table, physical column name).
+
+    Every ThoughtSpot formula appears in model.columns[] with a formula_id
+    and NO column_id (the physical-vs-formula column rule — a column has
+    either column_id XOR formula_id, never both). Formula-backed columns
+    have no physical TABLE::COL shape to map, so they're skipped here; their
+    rewrite-plan components resolve via their own source_column physical
+    columns instead (see measures.build_rewrite_plans).
+    """
     out = {}
     for c in model_tml["model"].get("columns", []) or []:
+        if not c.get("column_id"):
+            continue
         table, col = c["column_id"].split("::", 1)
         out[c["name"]] = (table, col)
     return out
 
 
 def _resolve(model_tml, table_tmls, dialect, display_name):
-    table, col = _col_map(model_tml)[display_name]
+    try:
+        table, col = _col_map(model_tml)[display_name]
+    except KeyError:
+        raise UnsupportedModelError(
+            f"'{display_name}' is not a resolvable physical column — likely a "
+            "formula referencing another formula/nested measure; supply SQL "
+            "manually") from None
     return f"{_q(dialect, table)}.{_q(dialect, _db_col(table_tmls, table, col))}", table
 
 
@@ -118,6 +134,37 @@ def _path_tables(needed_tables, parent, root):
     return keep
 
 
+def _mandatory_inner_tables(order, parent):
+    """Tables whose direct join to the BFS spanning tree is an unconditional
+    INNER join — these must always be retained, even when no column from
+    them is selected (open-item #11).
+
+    An INNER join can only ever reduce the row set relative to whatever has
+    been joined so far; retaining one is always correct — at worst it's an
+    over-inclusive join, never a source of wrong numbers. Dropping a
+    mandatory INNER join because its columns aren't in the grain is the
+    dangerous case: it silently keeps rows the primary Model's canonical
+    query would have excluded (a nullable/orphan FK with no match), inflating
+    aggregate totals. LEFT_OUTER/RIGHT_OUTER/OUTER joins to unreferenced
+    tables carry no such risk (they don't change the row set if dropped), so
+    they're still eligible for pruning.
+
+    INNER's effective type is direction-invariant — only LEFT_OUTER/
+    RIGHT_OUTER flip on a reversed (target->source) traversal (see
+    _SWAPPED_JOIN); INNER/OUTER are unaffected, so the raw declared type is
+    checked directly rather than the reversal-adjusted one.
+    """
+    keep = set()
+    for node in order:
+        info = parent.get(node)
+        if info is None:
+            continue  # root
+        _, join, _reverse = info
+        if join.get("type", "INNER") == "INNER":
+            keep.add(node)
+    return keep
+
+
 def _join_condition_sql(join, table_tmls, dialect):
     return _JOIN_COND.sub(
         lambda m: f"{_q(dialect, m.group(1))}."
@@ -133,7 +180,8 @@ def _join_clauses(model_tml, table_tmls, dialect, needed_tables):
     if missing:
         raise UnsupportedModelError(
             f"tables {missing} unreachable via inline joins")
-    keep = _path_tables(needed_tables, parent, root)
+    mandatory = _mandatory_inner_tables(order, parent)
+    keep = _path_tables(needed_tables | mandatory, parent, root)
     clauses = []
     for node in order:
         if node == root or node not in keep:

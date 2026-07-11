@@ -178,6 +178,24 @@ def _merge_prior_agg_rows(candidates: list, prior_path: Path,
     return base_rows
 
 
+def _read_signatures_dir(d: Path) -> tuple:
+    """Load model.tml.yaml + signatures.jsonl from a `signatures`-command
+    output directory for `recommend`, failing with a clear diagnostic —
+    rather than a bare FileNotFoundError traceback — when either file is
+    missing (e.g. `signatures` was never run, or the wrong --dir was passed).
+    """
+    try:
+        model_tml = yaml.safe_load((d / "model.tml.yaml").read_text())
+        sigs = [json.loads(line) for line in
+                (d / "signatures.jsonl").read_text().splitlines() if line.strip()]
+    except FileNotFoundError as exc:
+        _err(f"Missing expected file in {d}: {exc.filename}. "
+             "Run `ts aggregate signatures` first to produce model.tml.yaml "
+             "and signatures.jsonl.")
+        raise typer.Exit(code=1) from None
+    return model_tml, sigs
+
+
 def _excluded_unprofiled(candidates: list, mode: str) -> list:
     """Candidate ids left out of cost-mode selection because they have no
     agg_rows yet (never profiled) — surfaced so the skill can tell the user to
@@ -202,9 +220,7 @@ def recommend(
     from cost-mode selection because they have no `agg_rows` yet.
     """
     d = Path(dir)
-    model_tml = yaml.safe_load((d / "model.tml.yaml").read_text())
-    sigs = [json.loads(line) for line in
-            (d / "signatures.jsonl").read_text().splitlines() if line.strip()]
+    model_tml, sigs = _read_signatures_dir(d)
     _apply_weights(sigs, weights)
 
     plans = build_rewrite_plans(model_tml)
@@ -385,9 +401,18 @@ def profile(
 
 def _colmap_from_model(model_tml: dict) -> dict:
     """Physical `TABLE.COL` (upper) -> Model display name, for matching
-    warehouse query-history GROUP BY shapes back to signature dimensions."""
+    warehouse query-history GROUP BY shapes back to signature dimensions.
+
+    Every ThoughtSpot formula appears in model.columns[] with a formula_id
+    and NO column_id (the physical-vs-formula column rule), so formula-backed
+    columns are skipped here — they have no physical TABLE.COL shape to
+    match a warehouse GROUP BY clause against, and iterating them
+    unconditionally used to crash with a bare KeyError.
+    """
     colmap = {}
     for c in model_tml["model"].get("columns", []) or []:
+        if not c.get("column_id"):
+            continue
         table, col = c["column_id"].split("::", 1)
         colmap[f"{table.upper()}.{col.upper()}"] = c["name"]
     return colmap
