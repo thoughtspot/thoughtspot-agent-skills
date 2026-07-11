@@ -174,7 +174,335 @@ def test_signatures_command_offline(monkeypatch, tmp_path):
     assert (tmp_path / "signatures.jsonl").exists()
 
 
-def test_profile_generate_history_are_stubs():
-    for sub in ("profile", "generate", "history"):
-        result = runner.invoke(app, ["aggregate", sub])
-        assert result.exit_code == 2
+def test_profile_emit_sql_manual_mode(tmp_path):
+    model = {"model": {"name": "M", "model_tables": [{"name": "FACT"}], "columns": [
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": None,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+    script = tmp_path / "profile.sql"
+    result = runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                 "--tables-dir", str(tdir),
+                                 "--emit-sql", str(script)])
+    assert result.exit_code == 0, result.output
+    text = script.read_text()
+    assert "-- __base__" in text and "-- cand_1" in text
+    assert "GROUP BY" in text
+
+
+def test_profile_results_ingestion(tmp_path):
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump({"model": {"columns": []}}))
+    cand = {"id": "cand_1", "dimensions": [], "date_column": None, "bucket": None,
+            "covered": [0], "flags": [], "agg_rows": None, "measure_columns": []}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [cand], "selection": {}}))
+    res = tmp_path / "res.json"
+    res.write_text(json.dumps({"base_rows": 1000000, "candidates": {"cand_1": 86}}))
+    tdir = tmp_path / "tables"; tdir.mkdir()
+    result = runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                 "--tables-dir", str(tdir), "--results", str(res)])
+    assert result.exit_code == 0, result.output
+    saved = json.loads((tmp_path / "candidates.json").read_text())
+    assert saved["base_rows"] == 1000000
+    assert saved["candidates"][0]["agg_rows"] == 86
+
+
+def test_profile_requires_a_mode(tmp_path):
+    """No --results, --emit-sql, or --snowflake-profile: fail clearly instead
+    of silently trying to connect with an empty profile name."""
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(
+        {"model": {"columns": [], "model_tables": [{"name": "FACT"}]}}))
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT", "columns": []}}))
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                          "--tables-dir", str(tdir)])
+    assert result.exit_code == 1
+    assert "snowflake-profile" in result.stderr or "snowflake-profile" in (result.output or "")
+
+
+def test_profile_skips_unsupported_candidate(tmp_path):
+    """A candidate whose SELECT can't be built deterministically (aliased
+    model_tables prefix) is skipped with a reason, not fatal for the run."""
+    model = {"model": {"name": "M", "model_tables": [{"name": "FACT"}], "columns": [
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Alias Dim", "column_id": "FACT_ALIAS::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Alias Dim"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": None,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"}]}}))
+    script = tmp_path / "profile.sql"
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                          "--tables-dir", str(tdir), "--emit-sql", str(script)])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    assert out["skipped"] == [{"id": "cand_1", "reason":
+                              "table 'FACT_ALIAS' not resolvable — possibly an aliased "
+                              "model_tables entry"}]
+    # base statement still emitted even though the only candidate was skipped
+    assert "-- __base__" in script.read_text()
+
+
+def test_profile_connected_mode_writes_agg_rows_and_base_rows(tmp_path, monkeypatch):
+    """Connected mode (no --emit-sql/--results): resolves the Snowflake
+    profile + connects via the real `ts_cli.commands.load` helpers
+    (`load_snowflake_profile` + `_connect_python` — see `_snowflake_connection`'s
+    docstring for why not `_connect_snowflake`, which doesn't exist), executes
+    the base + candidate statements, and writes agg_rows/base_rows back into
+    candidates.json."""
+    import ts_cli.commands.load as load_mod
+
+    model = {"model": {"name": "M", "model_tables": [{"name": "FACT"}], "columns": [
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": None,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+
+    monkeypatch.setattr(load_mod, "load_snowflake_profile",
+                        lambda name: {"name": name, "default_warehouse": "WH",
+                                      "default_role": "ROLE"})
+
+    class FakeCursor:
+        def __init__(self, values):
+            self._values = values
+            self._i = -1
+
+        def execute(self, sql, params=None):
+            self._i += 1
+
+        def fetchone(self):
+            return (self._values[self._i],)
+
+    class FakeConn:
+        def __init__(self):
+            self._cursor = FakeCursor([1000000, 86])  # base_rows, then cand_1
+
+        def cursor(self):
+            return self._cursor
+
+    monkeypatch.setattr(load_mod, "_connect_python", lambda profile, wh, role: FakeConn())
+
+    result = runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                 "--tables-dir", str(tdir),
+                                 "--snowflake-profile", "My SF Profile"])
+    assert result.exit_code == 0, result.output
+    saved = json.loads((tmp_path / "candidates.json").read_text())
+    assert saved["base_rows"] == 1000000
+    assert saved["candidates"][0]["agg_rows"] == 86
+
+
+def test_snowflake_connection_requires_warehouse(monkeypatch):
+    """No --warehouse and no default_warehouse on the profile: fail clearly
+    instead of connecting with an empty warehouse string."""
+    import ts_cli.commands.aggregate as agg_mod
+    import ts_cli.commands.load as load_mod
+
+    monkeypatch.setattr(load_mod, "load_snowflake_profile",
+                        lambda name: {"name": name})
+    import pytest
+    with pytest.raises(SystemExit, match="No warehouse specified"):
+        agg_mod._snowflake_connection("My SF Profile", None, None)
+
+
+def test_history_command_offline(tmp_path, monkeypatch):
+    """`ts aggregate history` connects, mines QUERY_HISTORY, matches via the
+    pure `match_history`, and writes weights.json — all offline via a
+    monkeypatched connection."""
+    import ts_cli.commands.load as load_mod
+
+    model = {"model": {"columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    sig = {"source_guid": "g1", "viz_name": None, "dimensions": ["Category"],
+           "date_column": None, "parse_status": "full"}
+    (tmp_path / "signatures.jsonl").write_text(json.dumps(sig) + "\n")
+
+    monkeypatch.setattr(load_mod, "load_snowflake_profile",
+                        lambda name: {"name": name, "default_warehouse": "WH"})
+
+    class FakeCursor:
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchall(self):
+            return [("SELECT 1 FROM fact GROUP BY fact.category",)]
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+    monkeypatch.setattr(load_mod, "_connect_python", lambda profile, wh, role: FakeConn())
+
+    result = runner.invoke(app, ["aggregate", "history", "--dir", str(tmp_path),
+                                 "--snowflake-profile", "My SF Profile",
+                                 "--tables", "FACT"])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    assert out["history_rows"] == 1
+    weights = json.loads((tmp_path / "weights.json").read_text())
+    assert weights["g1::"] == 2.0  # base weight + 1 history match
+
+
+def test_generate_writes_all_artifacts_and_never_imports(tmp_path, monkeypatch):
+    """`ts aggregate generate` writes ddl.sql/table_spec.json/table.tml.yaml/
+    agg_model.tml.yaml/primary_patched.tml.yaml and calls the TML *export*
+    endpoint only — never metadata/tml/import."""
+    import ts_cli.client as client_mod
+
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+
+    primary_edoc = yaml.safe_dump({"model": {"name": "Sales Model"}})
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, profile_name):
+            self.calls = []
+
+        def post(self, path, json=None):
+            self.calls.append(path)
+            assert "import" not in path  # generate must never import
+            return FakeResponse([{"edoc": primary_edoc}])
+
+    monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
+    monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
+
+    result = runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                 "--candidate", "cand_1", "--model-guid", "model-guid",
+                                 "--tables-dir", str(tdir), "--db", "SALESDB",
+                                 "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                 "--warehouse", "WH"])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    outdir = tmp_path / "cand_1"
+    assert set(out["files"]) == {"ddl.sql", "table_spec.json", "table.tml.yaml",
+                                 "agg_model.tml.yaml", "primary_patched.tml.yaml"}
+    assert (outdir / "ddl.sql").exists()
+    ddl = (outdir / "ddl.sql").read_text()
+    assert "DYNAMIC TABLE" in ddl and "WAREHOUSE = WH" in ddl
+    patched = yaml.safe_load((outdir / "primary_patched.tml.yaml").read_text())
+    # aggregated_models entries key on the aggregate MODEL's display name
+    # ("<primary name> (<agg table name>)"), not the raw table/candidate name.
+    assert (patched["model"]["aggregated_models"][0]["id"]
+            == f"Sales Model ({out['aggregate_name']})")
+
+
+def test_generate_requires_warehouse_for_snowflake_dynamic_table(tmp_path):
+    """Task 5 review carry-forward: a Snowflake dynamic table with no
+    --warehouse must fail clearly rather than emit DDL missing the
+    WAREHOUSE clause Snowflake requires at execution time."""
+    model = {"model": {"name": "M", "model_tables": [{"name": "FACT"}], "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": None,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod"])
+    assert result.exit_code != 0
+    assert "--warehouse is required" in str(result.exception)
+
+
+def test_generate_reports_unsupported_candidate_instead_of_crashing(tmp_path):
+    """A candidate needing a manual-SQL fallback (aliased model_tables prefix
+    sqlgen can't resolve) must exit cleanly with a diagnostic, not crash with
+    an unhandled UnsupportedModelError traceback."""
+    model = {"model": {"name": "M", "model_tables": [{"name": "FACT"}], "columns": [
+        {"name": "Alias Dim", "column_id": "FACT_ALIAS::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Alias Dim"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": None,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"}]}}))
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--warehouse", "WH"])
+    assert result.exit_code == 1
+    assert "cannot generate SQL" in result.stderr

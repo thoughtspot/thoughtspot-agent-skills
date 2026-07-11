@@ -1,8 +1,11 @@
 """ts aggregate — aggregate-model advisor (signatures/recommend/profile/generate/history).
 
-`signatures` and `recommend` are implemented here (Task 7). `profile`, `generate`,
-and `history` are registered as stubs (exit code 2) so the command group's shape
-is stable for skill authoring; Task 8 fills in their bodies.
+All five subcommands are implemented. `signatures`/`recommend` (Task 7) work
+purely from exported TML + the pure engine. `profile`/`history` (Task 8) add a
+Snowflake connection for warehouse profiling and query-history mining, each
+with a fully offline "manual mode" for dialects/setups without a live
+connection. `generate` (Task 8) emits DDL + TML for one approved candidate —
+it never imports; the skill gates each import separately.
 """
 from __future__ import annotations
 
@@ -39,6 +42,13 @@ def _signatures_summary(sigs: list) -> dict:
 
 def _err(msg: str) -> None:
     print(msg, file=sys.stderr)
+    # Explicit flush: when a caller follows this with a SystemExit/typer.Exit,
+    # Click's CliRunner(mix_stderr=False) only flushes sys.stdout in its
+    # invoke() finally block (not sys.stderr) before reading the captured
+    # stderr buffer — an unflushed diagnostic here would otherwise vanish from
+    # `result.stderr` in tests (and risks being lost on a hard process exit
+    # outside tests too).
+    sys.stderr.flush()
 
 
 def _export_tml(client, guid: str) -> dict:
@@ -218,22 +228,330 @@ def recommend(
     }, indent=2))
 
 
-@app.command()
-def profile() -> None:
-    """Profile top candidates against the warehouse (Task 8)."""
-    _err("`ts aggregate profile` is not implemented yet — see Task 8.")
-    raise typer.Exit(code=2)
+def _load_tables_dir(tables_dir: str) -> dict:
+    return {p.stem.replace(".tml", ""): yaml.safe_load(p.read_text())
+            for p in Path(tables_dir).glob("*.yaml")}
+
+
+def _read_candidates_context(dir_path: Path, tables_dir: str) -> tuple:
+    """Load candidates.json + model.tml.yaml + Table TMLs + rewrite plans.
+
+    Shared by `profile` and `generate` — both need the same on-disk context
+    `recommend` produced.
+    """
+    payload = json.loads((dir_path / "candidates.json").read_text())
+    model_tml = yaml.safe_load((dir_path / "model.tml.yaml").read_text())
+    table_tmls = _load_tables_dir(tables_dir)
+    plans = build_rewrite_plans(model_tml)
+    return payload, model_tml, table_tmls, plans
+
+
+def _snowflake_connection(profile_name: str, warehouse: Optional[str],
+                          role: Optional[str]):
+    """Connect to Snowflake for `profile`/`history`, reusing the profile loader
+    and connector from `ts_cli.commands.load` — never re-implement Snowflake
+    auth here.
+
+    NOTE (Task 8 deviation from the task brief): the brief's illustrative code
+    imports a `_connect_snowflake` helper from `ts_cli.commands.load`. No such
+    function exists there — the real connector is `_connect_python(profile,
+    warehouse, role)`, which takes an explicit warehouse/role rather than
+    resolving them itself. This wrapper reproduces the same warehouse-
+    resolution fallback `ts load snowflake` uses (CLI flag -> profile's
+    `default_warehouse` -> hard error) so `aggregate profile`/`history` behave
+    identically to `ts load snowflake` for the same profile.
+    """
+    from ts_cli.commands.load import _connect_python, load_snowflake_profile
+    sf_profile = load_snowflake_profile(profile_name)
+    wh = warehouse or sf_profile.get("default_warehouse", "")
+    rl = role or sf_profile.get("default_role", "")
+    if not wh:
+        raise SystemExit(
+            f"No warehouse specified for Snowflake profile '{profile_name}'. "
+            "Use --warehouse or set default_warehouse in the profile."
+        )
+    return _connect_python(sf_profile, wh, rl)
+
+
+def _ingest_profile_results(payload: dict, results_path: str) -> dict:
+    r = json.loads(Path(results_path).read_text())
+    payload["base_rows"] = r["base_rows"]
+    for c in payload["candidates"]:
+        if c["id"] in r["candidates"]:
+            c["agg_rows"] = int(r["candidates"][c["id"]])
+    return {"ingested": len(r["candidates"])}
+
+
+def _build_profile_statements(payload: dict, model_tml: dict, table_tmls: dict,
+                              plans: dict, top_k: int, dialect: str) -> tuple:
+    """Base-count + per-candidate profiling SQL for the top-K candidates by
+    coverage. Candidates whose SELECT can't be built deterministically
+    (`UnsupportedModelError`) are skipped, not fatal — the skill advises
+    manual SQL for those instead."""
+    from ts_cli.aggregate.sqlgen import (UnsupportedModelError, build_base_count_sql,
+                                         build_profile_sql, build_select)
+    ranked = sorted(payload["candidates"], key=lambda c: -len(c["covered"]))[:top_k]
+    statements = [("__base__", build_base_count_sql(model_tml, table_tmls, dialect))]
+    skipped = []
+    for c in ranked:
+        try:
+            statements.append(
+                (c["id"], build_profile_sql(
+                    build_select(model_tml, table_tmls, c, plans, dialect))))
+        except UnsupportedModelError as exc:
+            skipped.append({"id": c["id"], "reason": str(exc)})
+            _err(f"skipping {c['id']}: {exc}")
+    return statements, skipped
+
+
+def _emit_profile_script(path: str, statements: list) -> None:
+    script = "\n\n".join(f"-- {cid}\n{sql};" for cid, sql in statements)
+    Path(path).write_text(script + "\n")
+
+
+def _run_connected_profile(statements: list, snowflake_profile: str,
+                           warehouse: Optional[str], role: Optional[str]) -> dict:
+    conn = _snowflake_connection(snowflake_profile, warehouse, role)
+    counts = {}
+    for cid, sql in statements:
+        cur = conn.cursor()
+        cur.execute(sql)
+        counts[cid] = int(cur.fetchone()[0])
+    return counts
 
 
 @app.command()
-def generate() -> None:
-    """Generate DDL + TML for an approved candidate (Task 8)."""
-    _err("`ts aggregate generate` is not implemented yet — see Task 8.")
-    raise typer.Exit(code=2)
+def profile(
+    dir: str = typer.Option(..., "--dir"),
+    tables_dir: str = typer.Option(
+        ..., help="Directory of exported Table TMLs, <NAME>.tml.yaml per model_tables entry"),
+    snowflake_profile: Optional[str] = typer.Option(
+        None, "--snowflake-profile", help="Connected mode: profile from ts-profile-snowflake"),
+    emit_sql: Optional[str] = typer.Option(
+        None, help="Manual mode: write a numbered profiling script here instead of connecting"),
+    results: Optional[str] = typer.Option(
+        None, help='Manual mode: ingest {"base_rows": N, "candidates": {"cand_1": rows, ...}}'),
+    top_k: int = typer.Option(10, "--top-k"),
+    dialect: str = typer.Option("snowflake"),
+    warehouse: Optional[str] = typer.Option(
+        None, help="Connected mode: Snowflake warehouse (default: profile's default_warehouse)"),
+    role: Optional[str] = typer.Option(
+        None, help="Connected mode: Snowflake role (default: profile's default_role)"),
+) -> None:
+    """Measure base + per-candidate row counts (connected or manual mode).
+
+    Three modes, mutually exclusive: `--results` ingests a manual profiling
+    run's output; `--emit-sql` writes a numbered SQL script for manual
+    execution; otherwise `--snowflake-profile` connects and profiles directly.
+    Writes `agg_rows`/`base_rows` back into `<dir>/candidates.json`.
+    """
+    d = Path(dir)
+    payload, model_tml, table_tmls, plans = _read_candidates_context(d, tables_dir)
+
+    if results:
+        summary = _ingest_profile_results(payload, results)
+        (d / "candidates.json").write_text(json.dumps(payload, indent=2))
+        print(json.dumps(summary))
+        return
+
+    statements, skipped = _build_profile_statements(
+        payload, model_tml, table_tmls, plans, top_k, dialect)
+
+    if emit_sql:
+        _emit_profile_script(emit_sql, statements)
+        print(json.dumps({"emitted": len(statements), "skipped": skipped,
+                          "next": "run the script, then re-run with --results"}))
+        return
+
+    if not snowflake_profile:
+        _err("Provide --snowflake-profile for connected mode, or --emit-sql for manual mode.")
+        raise typer.Exit(code=1)
+
+    counts = _run_connected_profile(statements, snowflake_profile, warehouse, role)
+    payload["base_rows"] = counts.pop("__base__")
+    for c in payload["candidates"]:
+        if c["id"] in counts:
+            c["agg_rows"] = counts[c["id"]]
+    (d / "candidates.json").write_text(json.dumps(payload, indent=2))
+    print(json.dumps({"base_rows": payload["base_rows"], "profiled": len(counts),
+                      "skipped": skipped}, indent=2))
+
+
+def _colmap_from_model(model_tml: dict) -> dict:
+    """Physical `TABLE.COL` (upper) -> Model display name, for matching
+    warehouse query-history GROUP BY shapes back to signature dimensions."""
+    colmap = {}
+    for c in model_tml["model"].get("columns", []) or []:
+        table, col = c["column_id"].split("::", 1)
+        colmap[f"{table.upper()}.{col.upper()}"] = c["name"]
+    return colmap
+
+
+def _query_history_rows(conn, tables: str, days: int) -> list:
+    table_list = [t.strip() for t in tables.split(",") if t.strip()]
+    like = " OR ".join("query_text ILIKE %s" for _ in table_list)
+    sql = ("SELECT query_text FROM snowflake.account_usage.query_history "
+           f"WHERE start_time >= DATEADD('day', -{int(days)}, CURRENT_TIMESTAMP()) "
+           f"AND query_type = 'SELECT' AND ({like}) LIMIT 10000")
+    cur = conn.cursor()
+    cur.execute(sql, [f"%{t}%" for t in table_list])
+    return [{"query_text": r[0]} for r in cur.fetchall()]
 
 
 @app.command()
-def history() -> None:
-    """Mine warehouse query history into signature weights (Task 8)."""
-    _err("`ts aggregate history` is not implemented yet — see Task 8.")
-    raise typer.Exit(code=2)
+def history(
+    dir: str = typer.Option(..., "--dir"),
+    snowflake_profile: str = typer.Option(..., "--snowflake-profile"),
+    tables: str = typer.Option(..., help="Comma-separated physical table names"),
+    days: int = typer.Option(30),
+    warehouse: Optional[str] = typer.Option(
+        None, help="Snowflake warehouse (default: profile's default_warehouse)"),
+    role: Optional[str] = typer.Option(
+        None, help="Snowflake role (default: profile's default_role)"),
+) -> None:
+    """Mine Snowflake QUERY_HISTORY into signature weights (weights.json)."""
+    from ts_cli.aggregate.history import match_history
+    d = Path(dir)
+    sigs = [json.loads(line) for line in
+            (d / "signatures.jsonl").read_text().splitlines() if line.strip()]
+    model_tml = yaml.safe_load((d / "model.tml.yaml").read_text())
+    colmap = _colmap_from_model(model_tml)
+
+    conn = _snowflake_connection(snowflake_profile, warehouse, role)
+    rows = _query_history_rows(conn, tables, days)
+    weights = match_history(rows, sigs, colmap)
+    (d / "weights.json").write_text(json.dumps(weights, indent=2))
+    print(json.dumps({"history_rows": len(rows), "weighted_signatures": len(weights)}))
+
+
+def _read_generate_context(dir_path: Path, candidate: str, tables_dir: str) -> tuple:
+    """Same on-disk context as `_read_candidates_context`, narrowed to the one
+    approved candidate `generate` acts on."""
+    payload, model_tml, table_tmls, plans = _read_candidates_context(dir_path, tables_dir)
+    cand = next((c for c in payload["candidates"] if c["id"] == candidate), None)
+    if cand is None:
+        raise SystemExit(f"Candidate '{candidate}' not found in {dir_path / 'candidates.json'}")
+    return cand, model_tml, table_tmls, plans
+
+
+def _aggregate_name(model_tml: dict, cand: dict, agg_name: Optional[str]) -> str:
+    root = model_tml["model"]["model_tables"][0]["name"]
+    grain = "_".join([cand["bucket"] or ""] + cand["dimensions"]).strip("_")
+    return agg_name or f"{root}_AGG_{grain}".upper()[:120]
+
+
+def _require_warehouse_for_dynamic_table(dialect: str, materialization: str,
+                                         warehouse: Optional[str]) -> None:
+    """Snowflake dynamic tables require an assigned warehouse — `CREATE DYNAMIC
+    TABLE ... TARGET_LAG = ...` fails at execution time with no WAREHOUSE
+    clause. Task 5 review carry-forward: fail clearly here rather than let
+    sqlgen silently emit DDL that only breaks when someone runs it."""
+    from ts_cli.aggregate.sqlgen import resolve_materialization
+    resolved = resolve_materialization(dialect, materialization)
+    if dialect == "snowflake" and resolved == "dynamic" and not warehouse:
+        raise SystemExit(
+            "--warehouse is required to create a Snowflake dynamic table "
+            "(TARGET_LAG needs an assigned warehouse to refresh from). Pass "
+            "--warehouse, or use --materialization ctas for a plain "
+            "CREATE TABLE AS instead."
+        )
+
+
+def _write_ddl(outdir: Path, select_sql: str, db: str, schema: str, name: str,
+              dialect: str, materialization: str, warehouse: Optional[str]) -> None:
+    from ts_cli.aggregate.sqlgen import build_ddl
+    _require_warehouse_for_dynamic_table(dialect, materialization, warehouse)
+    (outdir / "ddl.sql").write_text(build_ddl(
+        select_sql, f"{db}.{schema}.{name}", dialect, materialization,
+        warehouse=warehouse) + ";\n")
+
+
+def _write_table_artifacts(outdir: Path, cand: dict, plans: dict, model_tml: dict,
+                          db: str, schema: str, name: str, connection_name: str) -> None:
+    from ts_cli.aggregate.generate import build_aggregate_table_spec
+    from ts_cli.commands.tables import _build_table_tml
+    spec = build_aggregate_table_spec(cand, plans, model_tml, db=db, schema=schema,
+                                      table_name=name, connection_name=connection_name)
+    (outdir / "table_spec.json").write_text(json.dumps(spec, indent=2))
+    (outdir / "table.tml.yaml").write_text(_build_table_tml(spec))
+
+
+def _write_model_artifact(outdir: Path, cand: dict, plans: dict, model_tml: dict,
+                         name: str, connection_name: str) -> str:
+    from ts_cli.aggregate.generate import build_aggregate_model_tml
+    model_name = f"{model_tml['model']['name']} ({name})"
+    agg_model = build_aggregate_model_tml(cand, plans, model_tml, agg_table_name=name,
+                                          model_name=model_name,
+                                          connection_name=connection_name)
+    (outdir / "agg_model.tml.yaml").write_text(dump_tml_yaml(agg_model))
+    return model_name
+
+
+def _patch_and_write_primary(outdir: Path, model_guid: str, profile: Optional[str],
+                            model_name: str, cand: dict) -> None:
+    """Export the primary Model fresh (never reuse a cached copy — the patch
+    must never clobber concurrent edits made since `signatures` last ran) and
+    write the aggregated_models-patched TML. Reuses `_export_tml` (same
+    non-printable-safe edoc parsing `signatures` uses) rather than hand-rolling
+    the export + yaml.safe_load `client.post` and json.loads(edoc) the task
+    brief's illustrative code used."""
+    from ts_cli.aggregate.generate import patch_association
+    from ts_cli.client import ThoughtSpotClient, resolve_profile
+    client = ThoughtSpotClient(resolve_profile(profile))
+    primary = _export_tml(client, model_guid)
+    existing = [dict(e, projected_rows=None)
+                for e in primary["model"].get("aggregated_models", []) or []
+                if isinstance(e, dict)]
+    entries = existing + [{"id": model_name, "date_column": cand.get("date_column"),
+                           "bucket": cand.get("bucket"),
+                           "projected_rows": cand.get("agg_rows")}]
+    patched = patch_association(primary, entries)
+    (outdir / "primary_patched.tml.yaml").write_text(dump_tml_yaml(patched))
+
+
+@app.command()
+def generate(
+    dir: str = typer.Option(..., "--dir"),
+    candidate: str = typer.Option(..., help="Candidate id, e.g. cand_3"),
+    model_guid: str = typer.Option(...),
+    tables_dir: str = typer.Option(...),
+    db: str = typer.Option(...),
+    schema: str = typer.Option(...),
+    connection_name: str = typer.Option(...),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE"),
+    dialect: str = typer.Option("snowflake"),
+    materialization: str = typer.Option("auto"),
+    warehouse: Optional[str] = typer.Option(None),
+    agg_name: Optional[str] = typer.Option(
+        None, help="Override aggregate table/model base name"),
+    out_dir: Optional[str] = typer.Option(None),
+) -> None:
+    """Emit DDL + Table TML + aggregate Model TML + patched primary TML.
+
+    Never imports — writes `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
+    `agg_model.tml.yaml`, `primary_patched.tml.yaml` to `<out-dir>` (default
+    `<dir>/<candidate>`). The skill gates each import separately.
+    """
+    from ts_cli.aggregate.sqlgen import UnsupportedModelError, build_select
+
+    d = Path(dir)
+    outdir = Path(out_dir or (d / candidate))
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    cand, model_tml, table_tmls, plans = _read_generate_context(d, candidate, tables_dir)
+    name = _aggregate_name(model_tml, cand, agg_name)
+
+    try:
+        select_sql = build_select(model_tml, table_tmls, cand, plans, dialect)
+    except UnsupportedModelError as exc:
+        _err(f"cannot generate SQL for {candidate}: {exc}")
+        _err("This candidate needs manual SQL authoring — see `ts aggregate profile --emit-sql`.")
+        raise typer.Exit(code=1)
+
+    _write_ddl(outdir, select_sql, db, schema, name, dialect, materialization, warehouse)
+    _write_table_artifacts(outdir, cand, plans, model_tml, db, schema, name, connection_name)
+    model_name = _write_model_artifact(outdir, cand, plans, model_tml, name, connection_name)
+    _patch_and_write_primary(outdir, model_guid, profile, model_name, cand)
+
+    print(json.dumps({"candidate": candidate, "aggregate_name": name,
+                      "files": sorted(p.name for p in outdir.iterdir())}, indent=2))

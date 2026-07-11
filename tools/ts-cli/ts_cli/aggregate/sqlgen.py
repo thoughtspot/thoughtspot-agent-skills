@@ -219,11 +219,23 @@ def build_base_count_sql(model_tml: dict, table_tmls: dict,
             f"{_table_ref(_table_doc(table_tmls, root), dialect)}")
 
 
+def resolve_materialization(dialect: str, materialization: str) -> str:
+    """Resolve `materialization="auto"` to the dialect's default target type.
+
+    Extracted so callers that need to know the *actual* materialization ahead
+    of DDL emission (e.g. the `generate` command's warehouse-required check for
+    Snowflake dynamic tables) share this one resolution rule with `build_ddl`
+    instead of re-deriving it and risking drift.
+    """
+    if materialization == "auto":
+        return "dynamic" if dialect == "snowflake" else "mview"
+    return materialization
+
+
 def build_ddl(select_sql: str, target: str, dialect: str,
               materialization: str = "auto", target_lag: str = "1 hour",
               warehouse: Optional[str] = None) -> str:
-    if materialization == "auto":
-        materialization = "dynamic" if dialect == "snowflake" else "mview"
+    materialization = resolve_materialization(dialect, materialization)
     if materialization == "ctas":
         return f"CREATE OR REPLACE TABLE {target} AS\n{select_sql}"
     if dialect == "snowflake" and materialization == "dynamic":
