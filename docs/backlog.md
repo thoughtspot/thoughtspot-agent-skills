@@ -2982,14 +2982,15 @@ comment; batch with the next workflow edit rather than open a standalone PR.
 **Source:** 2026-07-11 full audit finding 1.2.
 **Affects:** `agents/claude/references/direct-api-auth.md`; `agents/cli/ts-convert-from-snowflake-sv/SKILL.md:33`;
 `agents/cli/ts-convert-to-snowflake-sv/SKILL.md:28`.
-**Status:** OPEN.
+**Status:** DONE (2026-07-11) — `direct-api-auth.md` deleted (its only consumers were the two
+dead reference rows); both rows removed; ts-convert-from-snowflake-sv → 1.16.1, ts-convert-to-snowflake-sv
+→ 1.3.2 (PATCH). Also removed the now-stale "NOT in scope" paragraph in `check_orphan_references.py`
+that tracked this item. No CoCo references existed, so no mirror bump / stage-sync.
 
-The doc describes a curl + `/tmp/ts_token.txt` fallback that `ts-cli.md` and
-`security.md` now prohibit; its only consumers are two dead reference-table rows
-(from-snowflake-sv SKILL.md:33, to-snowflake-sv SKILL.md:28) with no corresponding
-step logic. Remove the two rows (PATCH version bump to both skills) and delete the doc.
+The doc described a curl + `/tmp/ts_token.txt` fallback that `ts-cli.md` and `security.md` prohibit;
+its only consumers were two dead reference-table rows with no corresponding step logic.
 
-**Target:** no fixed date — small cleanup, next time either skill is touched.
+**Target:** ✅ done.
 
 ---
 

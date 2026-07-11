@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-11
+- chore(cleanup): retire `agents/claude/references/direct-api-auth.md` (curl + `/tmp/ts_token.txt` fallback now prohibited by `ts-cli.md`/`security.md`) + its two dead reference rows in ts-convert-from-snowflake-sv (→1.16.1) / ts-convert-to-snowflake-sv (→1.3.2); drop the now-stale note in `check_orphan_references.py` (BL-109)
+- fix(hooks): `pre-push.sh` now smoke-tests only dirs with a `SKILL.md` — a shared dir matching the skill path pattern (`agents/claude/references/`) or a fully-deleted skill dir no longer trips a false "no smoke test found" failure (surfaced by BL-109's deletion)
 - chore(security): bump ts-cli to v0.45.2 — `requests>=2.33.0` floor (closes GHSA-gc5v-m9x4-r6x2 / transitive urllib3 PYSEC-2026-141/-142; BL-105); SHA-pin GitHub Actions `checkout` (v4.3.1) + `setup-python` (v5.6.0) in validate.yml (BL-108)
 - feat(validate): 2026-07-11 audit backlog+validators batch — new `check_orphan_references` (kills the dead-reference-file class; deleted 2 obsolete Mode C specs); extend `check_references` to `references/*.md` + `docs/`; `check_smoke_tests` ALLOWLIST BL-reference gate; `check_patterns` Check 6 (blocks the stdin `ts tml import` wrapper); fix `check_open_items` WONTFIX-convention false-positives; weekly scheduled `pip-audit` CVE sweep (audit 1.1/1.4/5.1/6.3/16.3)
 - chore(skills): migrate ts-convert-from-looker (1.0.1) + ts-object-model-coach (2.3.2) to `ts tml import --file`/`--dir` (audit 5.1); file BL-102–BL-117 for the remaining backlog-bucket findings

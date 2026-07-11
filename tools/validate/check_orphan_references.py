@@ -37,11 +37,6 @@ any individual file. Allowlist the basename so all 11 pass without per-file
 exceptions (mirrors the ALLOWLIST convention-comment style in
 `check_smoke_tests.py`).
 
-NOT in scope: `agents/claude/references/direct-api-auth.md` is currently cited
-by two (dead) SKILL.md table rows and so is not flagged today — but its retirement
-is tracked separately as BL-109. This validator does not special-case it; it is
-simply cited, like any other file that passes the substring check.
-
 Exit codes:
   0 — every references/*.md file is either cited or allowlisted
   1 — at least one orphan found
