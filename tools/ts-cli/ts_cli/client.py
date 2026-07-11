@@ -75,7 +75,14 @@ def _slugify(name: str) -> str:
 
 def resolve_profile(profile: Optional[str]) -> str:
     """Return the profile name to use, with fallback to TS_PROFILE env var
-    and then the first profile in the profiles file."""
+    and then the first profile in the profiles file.
+
+    File parsing is delegated to load_profiles() (audit finding 4.2) — it is
+    the single source of truth for the three documented profiles-file shapes
+    (wrapped, bare list, name-keyed dict). Do not re-parse the file here; a
+    hand-rolled `list(raw.values())[0]` fallback previously broke on the
+    wrapped `{"profiles": [...]}` shape (audit finding 4.1).
+    """
     if profile:
         return profile
     env = os.environ.get("TS_PROFILE", "")
@@ -86,14 +93,13 @@ def resolve_profile(profile: Optional[str]) -> str:
             f"No profiles file found at {PROFILES_PATH}.\n"
             "Run /ts-profile-thoughtspot to create a profile first."
         )
-    raw = json.loads(PROFILES_PATH.read_text())
-    profiles = raw if isinstance(raw, list) else list(raw.values())
+    profiles = load_profiles()
     if not profiles:
         raise SystemExit(
             "No ThoughtSpot profiles configured.\n"
             "Run /ts-profile-thoughtspot to add a profile."
         )
-    return profiles[0]["name"]
+    return next(iter(profiles.values()))["name"]
 
 
 def load_profiles() -> Dict[str, Any]:

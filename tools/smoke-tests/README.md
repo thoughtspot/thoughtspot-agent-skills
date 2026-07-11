@@ -10,7 +10,7 @@ effects and require live credentials.
 |---|---|
 | `smoke_ts_to_snowflake.py` | SV YAML validation → dry-run → create → SHOW → SELECT → cleanup |
 | `smoke_ts_from_snowflake.py` | GET_DDL → parse DDL → find TS tables → import model → verify → cleanup |
-| `smoke_ts_dependency_manager.py` | auth → find model → export TML → dependency API → backup → rename → import → verify → rollback → verify → cleanup |
+| `smoke_ts_dependency_manager.py` | auth → resolve model → `ts dependency backup` → (opt-in) `ts dependency apply-change` → `ts dependency rollback --only updates` → cleanup |
 
 ## Prerequisites
 
@@ -62,25 +62,31 @@ python tools/smoke-tests/smoke_ts_from_snowflake.py \
     --sv-fqn "BIRD.SUPERHERO_SV.BIRD_SUPERHEROS_SV"
 ```
 
-### ts-dependency-manager (rename column + rollback)
+### ts-dependency-manager (BL-083 `ts dependency` command surface)
 
 ```bash
+# Safe legs only (default): ts dependency backup + rollback --only updates (idempotent no-op)
 python tools/smoke-tests/smoke_ts_dependency_manager.py \
     --ts-profile production \
-    --model-name "Retail Sales" \
-    --column-name "Revenue"
+    --model-name "Retail Sales"
 
 # Keep backup for manual inspection:
 python tools/smoke-tests/smoke_ts_dependency_manager.py \
     --ts-profile production \
     --model-name "Retail Sales" \
-    --column-name "Revenue" \
     --no-cleanup
+
+# Opt in to the DESTRUCTIVE apply-change leg (removes real columns — use a disposable model):
+python tools/smoke-tests/smoke_ts_dependency_manager.py \
+    --ts-profile production \
+    --model-name "Disposable Model" \
+    --run-apply-change --apply-change-columns "Col A,Col B"
 ```
 
-The test renames the column to `<column-name>_smoke_test` and then rolls back automatically.
-Step 4 (dependency API) is non-blocking — if the v1 API is unavailable it is marked SKIP,
-not FAIL. A PASS on step 4 marks open item #1 as VERIFIED.
+The test exercises the real `ts dependency backup` / `apply-change` / `rollback` subcommands
+(BL-083). `backup` (TML export only) and `rollback --only updates` (re-import of the unchanged
+backed-up TML) are non-destructive and run by default; the destructive `apply-change` leg is
+gated behind `--run-apply-change` (plus `--apply-change-columns`) and is skipped unless opted in.
 
 ## Output
 

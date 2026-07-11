@@ -75,12 +75,29 @@ def _resolve_profile(config: dict) -> str | None:
     if os.environ.get("TS_PROFILE"):
         return os.environ["TS_PROFILE"]
     profiles_path = Path.home() / ".claude" / "thoughtspot-profiles.json"
-    if profiles_path.exists():
+    if not profiles_path.exists():
+        return None
+    # Delegate to ts_cli.client.load_profiles() — the single source of truth for the
+    # three documented profiles-file shapes (audit finding 4.2: this file's own
+    # hand-rolled `data.get("profiles", data)` parse silently mishandled the
+    # name-keyed `{"name": {...}}` shape). ts_cli isn't guaranteed importable from
+    # every context this validator runs in (pre-commit/CI may invoke it without the
+    # package installed), so fall back to the same wrapped/bare-list/name-keyed
+    # logic inline rather than reintroducing a divergent, buggy parse.
+    try:
+        from ts_cli.client import load_profiles
+        profiles = load_profiles()
+    except ImportError:
         data = json.loads(profiles_path.read_text())
-        profiles = data.get("profiles", data) if isinstance(data, dict) else data
-        if profiles:
-            return profiles[0]["name"]
-    return None
+        if isinstance(data, list):
+            profiles = {p["name"]: p for p in data}
+        elif isinstance(data, dict) and isinstance(data.get("profiles"), list):
+            profiles = {p["name"]: p for p in data["profiles"]}
+        elif isinstance(data, dict):
+            profiles = data
+        else:
+            profiles = {}
+    return next(iter(profiles.values()))["name"] if profiles else None
 
 
 def _smoke_test_path(skill: str) -> Path | None:
