@@ -1419,6 +1419,160 @@ formulas, rename map, phase count).
 
 ---
 
+### `ts aggregate signatures` / `recommend` / `profile` / `history` / `generate`
+
+The aggregate-model advisor for the `ts-object-model-aggregates` skill (planned):
+mines a Model's dependent Answers/Liveboards into query "signatures", generates and
+ranks candidate aggregate grains, optionally profiles/reweights them against a live
+Snowflake warehouse, and emits the DDL + TML to create one approved aggregate. Each
+step writes to a shared working directory so the pipeline can be resumed or re-run
+independently. Pure logic lives in `ts_cli/aggregate/` (`signatures.py`,
+`measures.py`, `lattice.py`, `scoring.py`, `sqlgen.py`, `generate.py`, `history.py`);
+this command group is the I/O shell.
+
+#### `ts aggregate signatures`
+
+Export the primary Model and its Answer/Liveboard dependents, and extract query
+signatures (grouping columns, filters, date bucket) from each.
+
+```bash
+ts aggregate signatures --model abc-123 --out /tmp/agg --profile prod
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model` | — | Primary Model GUID (required) |
+| `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile |
+| `--out` | — | Output directory (required) |
+
+**Output:** writes `<out>/model.tml.yaml` and `<out>/signatures.jsonl`. Stdout JSON:
+`{"model_guid", "signatures", "full", "partial", "dependents", "export_failures"}` —
+`partial` counts signatures whose source query couldn't be fully parsed;
+`export_failures` counts dependents that failed to export (skipped, not fatal).
+
+#### `ts aggregate recommend`
+
+Generate candidate aggregate grains from the signatures and rank them with a
+greedy marginal-gain selection.
+
+```bash
+ts aggregate recommend --dir /tmp/agg --max-select 10
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dir` | — | Directory from `signatures` (required) |
+| `--weights` | — | `weights.json` produced by `history`, to reweight signatures by observed query volume |
+| `--base-rows` | — | Base (unaggregated) row count, enables cost-mode selection once at least one candidate is profiled |
+| `--max-select` | `10` | Maximum number of candidates to select |
+
+**Output:** writes/updates `<dir>/candidates.json`. Stdout JSON: `{"mode",
+"selected", "curve", "candidates", "excluded_unprofiled"}` — `mode` is `"cost"` once
+profiling data exists, else `"coverage"`; `excluded_unprofiled` lists candidate ids
+skipped from cost-mode ranking because they have no `agg_rows` yet.
+
+#### `ts aggregate profile`
+
+Measure base and per-candidate row counts, in connected or manual mode.
+
+```bash
+ts aggregate profile --dir /tmp/agg --tables-dir /tmp/agg/tables \
+  --snowflake-profile my-sf --top-k 10
+
+ts aggregate profile --dir /tmp/agg --tables-dir /tmp/agg/tables \
+  --emit-sql /tmp/agg/profile.sql
+ts aggregate profile --dir /tmp/agg --tables-dir /tmp/agg/tables \
+  --results /tmp/agg/manual_counts.json
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dir` | — | Directory from `signatures`/`recommend` (required) |
+| `--tables-dir` | — | Directory of exported Table TMLs, one `<NAME>.tml.yaml` per `model_tables` entry (required) |
+| `--snowflake-profile` | — | Connected mode: profile directly via a `ts-profile-snowflake` profile |
+| `--emit-sql` | — | Manual mode: write a numbered profiling SQL script here instead of connecting |
+| `--results` | — | Manual mode: ingest `{"base_rows": N, "candidates": {"cand_1": rows, ...}}` from a manual profiling run |
+| `--top-k` | `10` | Profile only the top-K candidates by coverage |
+| `--dialect` | `snowflake` | SQL dialect for generated statements |
+| `--warehouse` | profile's `default_warehouse` | Connected mode: Snowflake warehouse |
+| `--role` | profile's `default_role` | Connected mode: Snowflake role |
+
+The three modes are mutually exclusive: `--results` ingests, `--emit-sql` writes a
+script (no connection), otherwise `--snowflake-profile` connects and profiles
+directly. Candidates whose SELECT can't be built deterministically are skipped
+(reported, not fatal) — the skill falls back to manual SQL for those.
+
+**Output:** writes `agg_rows`/`base_rows` back into `<dir>/candidates.json`. Stdout
+JSON varies by mode (`emitted`/`skipped`, `ingested`, or `base_rows`/`profiled`/`skipped`).
+
+#### `ts aggregate history`
+
+Mine Snowflake `QUERY_HISTORY` for the physical tables behind a Model into
+signature weights, reflecting actual query volume rather than assuming every
+dependent is queried equally.
+
+```bash
+ts aggregate history --dir /tmp/agg --snowflake-profile my-sf \
+  --tables "SALES_FACT,DIM_CUSTOMER" --days 30
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dir` | — | Directory from `signatures` (required) |
+| `--snowflake-profile` | — | `ts-profile-snowflake` profile (required) |
+| `--tables` | — | Comma-separated physical table names to match in query history (required) |
+| `--days` | `30` | Lookback window in days |
+| `--warehouse` | profile's `default_warehouse` | Snowflake warehouse |
+| `--role` | profile's `default_role` | Snowflake role |
+
+**Output:** writes `<dir>/weights.json`. Stdout: `{"history_rows",
+"weighted_signatures"}`.
+
+#### `ts aggregate generate`
+
+Emit the DDL and TML for one approved candidate — never imports; the calling skill
+gates each import separately.
+
+```bash
+ts aggregate generate --dir /tmp/agg --candidate cand_3 \
+  --model-guid abc-123 --tables-dir /tmp/agg/tables \
+  --db ANALYTICS --schema PUBLIC --connection-name "Snowflake Prod" \
+  --profile prod --materialization auto
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dir` | — | Directory from `recommend`/`profile` (required) |
+| `--candidate` | — | Candidate id, e.g. `cand_3` (required) |
+| `--model-guid` | — | Primary Model GUID, re-exported fresh to patch `aggregated_models` (required) |
+| `--tables-dir` | — | Directory of exported Table TMLs (required) |
+| `--db` | — | Target database for the aggregate table (required) |
+| `--schema` | — | Target schema for the aggregate table (required) |
+| `--connection-name` | — | ThoughtSpot connection display name (required) |
+| `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile (used to re-export the primary Model) |
+| `--dialect` | `snowflake` | SQL dialect |
+| `--materialization` | `auto` | `auto` \| `ctas` \| `dynamic` — a Snowflake dynamic table requires `--warehouse` |
+| `--warehouse` | — | Warehouse for a dynamic table materialization |
+| `--agg-name` | derived from root table + grain | Override the aggregate table/model base name |
+| `--out-dir` | `<dir>/<candidate>` | Output directory |
+
+**Output:** writes `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
+`agg_model.tml.yaml`, and `primary_patched.tml.yaml` (the primary Model TML with the
+new `aggregated_models` entry patched in) to `--out-dir`. Stdout: `{"candidate",
+"aggregate_name", "files"}`.
+
+---
+
 ## Piping and scripting
 
 All commands write JSON to stdout, making them easy to pipe into `jq` or Python:

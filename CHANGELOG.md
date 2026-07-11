@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-11
+- feat: add ts aggregate command group (aggregate-model advisor engine) — ts-cli v0.46.0
 - chore: bump ts-cli to v0.45.1 — fix `resolve_profile` crash on the wrapped `{"profiles":[...]}` file format (audit 4.1) + consolidate triplicated profile parsing on `load_profiles()` (audit 4.2)
 - fix: rewire `smoke_ts_dependency_manager.py` onto the real `ts dependency backup/apply-change/rollback` surface with a destructive-leg opt-in gate (audit 6.1)
 - feat: add ts-convert-from-looker skill (community contribution, PR #201)
