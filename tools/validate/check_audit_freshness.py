@@ -13,7 +13,9 @@ Two cadences, surfaced as SOFT nudges (never blocks a commit):
   - Full deep audit (all angles): due on EITHER trigger —
       * time:     latest docs/audit/*-full.md older than FULL_MAX_AGE_DAYS, OR
       * activity: substantial change since the last full audit (new skill, new
-                  runtime, N+ new shared refs, ts-cli bump, or N+ commits).
+                  runtime, N+ new shared refs, ts-cli bump, or N+ commits). Measured
+                  from the report's COMMIT (git log <report-sha>..HEAD), not its date,
+                  so the audit's own same-day routing wave isn't counted as new drift.
 
 It prints nothing when nothing is due, so it is safe to run on every commit / at
 session start. A full audit is NEVER auto-run — many agents, human-routed findings —
@@ -93,13 +95,25 @@ def _git(args: list[str], root: Path) -> str:
     return r.stdout if r.returncode == 0 else ""
 
 
-def _activity_since(since: date | None, root: Path) -> dict[str, int]:
-    """Count substantive changes since `since` (or all-time if None)."""
-    rng = ["--since", since.isoformat()] if since else []
-    name_status = _git(["log", *rng, "--name-status", "--pretty=format:"], root)
-    new_skills = new_shared = ts_cli_bumps = 0
+_TS_CLI_VERSION_FILES = ("tools/ts-cli/pyproject.toml", "tools/ts-cli/ts_cli/__init__.py")
+
+
+def _parse_activity(log_text: str) -> dict[str, int]:
+    """Count substantive changes from `git log --name-status --pretty=format:%x00%H`.
+
+    Commit boundaries are the NUL-prefixed header lines, so a ts-cli version bump that
+    touches BOTH pyproject.toml and __init__.py in one commit counts once, not twice
+    (the previous per-file tally double-counted every bump). Pure — no I/O — so the
+    counting logic is unit-tested git-free.
+    """
+    new_skills = new_shared = ts_cli_bumps = commits = 0
     runtimes: set[str] = set()
-    for line in name_status.splitlines():
+    commit_has_bump = False
+    for line in log_text.splitlines():
+        if line.startswith("\x00"):
+            commits += 1
+            commit_has_bump = False
+            continue
         parts = line.split("\t")
         if len(parts) < 2:
             continue
@@ -111,11 +125,9 @@ def _activity_since(since: date | None, root: Path) -> dict[str, int]:
                 runtimes.add(seg[1])
         elif status == "A" and path.startswith("agents/shared/"):
             new_shared += 1
-        elif status == "M" and path in (
-            "tools/ts-cli/pyproject.toml", "tools/ts-cli/ts_cli/__init__.py",
-        ):
+        elif status == "M" and path in _TS_CLI_VERSION_FILES and not commit_has_bump:
             ts_cli_bumps += 1
-    commits = len([l for l in _git(["rev-list", *rng, "HEAD"], root).splitlines() if l])
+            commit_has_bump = True
     return {
         "new_skills": new_skills,
         "new_runtimes": len(runtimes),
@@ -123,6 +135,37 @@ def _activity_since(since: date | None, root: Path) -> dict[str, int]:
         "ts_cli_bumps": ts_cli_bumps,
         "commits": commits,
     }
+
+
+def _latest_full_audit_commit(audit_dir: Path, root: Path) -> str | None:
+    """SHA of the commit that ADDED the latest docs/audit/*-full.md report.
+
+    This is the activity baseline — NOT the report's calendar date. A date baseline
+    (`git log --since <date>`) wrongly counts everything committed on the report's day,
+    including work that landed *before* the report and the audit's own same-day routing
+    wave; measuring from the report's commit counts only what came strictly after it.
+    Returns None if there is no report or git can't resolve the adding commit.
+    """
+    if not audit_dir.is_dir():
+        return None
+    full_files = sorted(audit_dir.glob("*-full.md"))  # YYYY-MM-DD names sort chronologically
+    if not full_files:
+        return None
+    latest = full_files[-1]
+    rel = latest.relative_to(root) if latest.is_absolute() else latest
+    out = _git(["log", "--diff-filter=A", "--format=%H", "--", str(rel)], root)
+    shas = [l for l in out.splitlines() if l.strip()]
+    return shas[-1] if shas else None  # oldest add == the true creating commit
+
+
+def _activity_since(since_ref: str | None, root: Path) -> dict[str, int]:
+    """Count substantive changes in `since_ref`..HEAD (or all-time if None).
+
+    `since_ref` is a commit SHA (see _latest_full_audit_commit), not a date.
+    """
+    rng = f"{since_ref}..HEAD" if since_ref else "HEAD"
+    log_text = _git(["log", rng, "--name-status", "--pretty=format:%x00%H"], root)
+    return _parse_activity(log_text)
 
 
 def _activity_reasons(counts: dict[str, int]) -> list[str]:
@@ -176,7 +219,9 @@ def main() -> int:
 
     # Full audit cadence: time OR activity
     time_due = _is_due(latest_full, FULL_MAX_AGE_DAYS, today)
-    counts = _activity_since(latest_full, root)
+    # Activity is measured from the report's COMMIT, not its date — the audit's own
+    # same-day routing wave must not read as "substantial work since the audit".
+    counts = _activity_since(_latest_full_audit_commit(audit_dir, root), root)
     reasons = _activity_reasons(counts)
     if time_due or reasons:
         if latest_full is None:
