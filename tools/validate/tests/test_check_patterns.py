@@ -171,3 +171,30 @@ def test_main_carves_out_coco_snowsight(tmp_path):
     res = _run(tmp_path)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "stdin-json-array-tml-import" not in res.stdout
+
+
+def test_main_flags_wrapper_in_shared_reference_doc(tmp_path):
+    # BL-117: Check 6 also gates agents/shared/**/*.md — the converters inherit the
+    # wrapper from a shared reference doc, so it must be caught there too.
+    shared_dir = tmp_path / "agents" / "shared" / "schemas"
+    shared_dir.mkdir(parents=True)
+    (shared_dir / "ts-tml-import-gate.md").write_text(WRAPPER_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "stdin-json-array-tml-import" in res.stdout
+
+
+def test_main_does_not_scan_generated_databricks_shared_copy(tmp_path):
+    # agents/databricks/shared/ is a generated copy that regenerates from
+    # agents/shared/ on deploy — it sits outside the agents/shared/** glob, so a
+    # wrapper there is never flagged (fixing the source is what matters).
+    dbx_dir = tmp_path / "agents" / "databricks" / "shared" / "schemas"
+    dbx_dir.mkdir(parents=True)
+    (dbx_dir / "ts-tml-import-gate.md").write_text(WRAPPER_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "stdin-json-array-tml-import" not in res.stdout

@@ -13,8 +13,9 @@ without false positives, so there is no separate declarative registry):
   4. %% in Python help strings (should be % — Typer doubles %)
   5. Direct `requests.*` calls in Claude SKILL.md files (should use the `ts` CLI)
   6. The superseded stdin JSON-array wrapper (`python3 -c "...json.dumps([...
-     read_text() ...])..." | ts tml import`/`lint`) in Claude SKILL.md files —
-     use `ts tml import --file <path>` / `--dir <dir>` (ts-cli >= v0.27.0) instead
+     read_text() ...])..." | ts tml import`/`lint`) in Claude SKILL.md files AND
+     shared reference docs (agents/shared/**/*.md, inherited by the converters —
+     BL-117) — use `ts tml import --file <path>` / `--dir <dir>` (ts-cli >= v0.27.0) instead
 
 Usage:
     python tools/validate/check_patterns.py
@@ -174,6 +175,11 @@ def main() -> int:
         skill_md_files = [f for f in all_md_files
                           if ("agents/cli" in str(f) or "agents/claude" in str(f))
                           and f.name == "SKILL.md"]
+        # Check 6 also gates shared reference docs (agents/shared/**/*.md) — the
+        # stdin wrapper there is inherited by every converter that links to it
+        # (BL-117). agents/databricks/shared/ is a generated, untracked copy that
+        # regenerates from agents/shared/ on deploy, so it is never scanned here.
+        shared_md_files = [f for f in all_md_files if "agents/shared" in str(f)]
     else:
         md_files_for_tml = sorted(
             f for f in repo_root.glob("**/*.md")
@@ -186,7 +192,7 @@ def main() -> int:
         # Only check SKILL.md files that are tracked by git (skip gitignored pending skills)
         import subprocess as _sp
         _tracked = set(
-            _sp.run(["git", "ls-files", "agents/cli", "agents/claude"],
+            _sp.run(["git", "ls-files", "agents/cli", "agents/claude", "agents/shared"],
                     capture_output=True, text=True, cwd=repo_root).stdout.splitlines()
         )
         skill_md_files = sorted(
@@ -194,6 +200,13 @@ def main() -> int:
              if str(f.relative_to(repo_root)) in _tracked),
         ) + sorted(
             f for f in repo_root.glob("agents/claude/*/SKILL.md")
+            if str(f.relative_to(repo_root)) in _tracked
+        )
+        # Check 6 also gates shared reference docs (agents/shared/**/*.md) — see
+        # the --staged branch comment above. Tracked-only, so the generated
+        # agents/databricks/shared/ copy is excluded (BL-117).
+        shared_md_files = sorted(
+            f for f in repo_root.glob("agents/shared/**/*.md")
             if str(f.relative_to(repo_root)) in _tracked
         )
 
@@ -285,10 +298,11 @@ def main() -> int:
                 total_hits += 1
 
     # Check 6: superseded stdin JSON-array `ts tml import`/`lint` wrapper in Claude
-    # SKILL.md files (should use --file/--dir instead — ts-cli >= v0.27.0).
+    # SKILL.md files AND shared reference docs (agents/shared/**/*.md, which the
+    # converters inherit — BL-117) (should use --file/--dir instead — ts-cli >= v0.27.0).
     # Legitimate exceptions: references/ subdirs (open-items test scripts) and agents/coco-snowsight/ (no CLI available)
     # In --staged mode: only flag hits where at least one half of the pattern is a NEW line in this commit
-    for md_file in skill_md_files:
+    for md_file in skill_md_files + shared_md_files:
         # When staged, only flag newly-added lines to avoid blocking commits that
         # touch files with pre-existing violations unrelated to this change
         added_lines = (

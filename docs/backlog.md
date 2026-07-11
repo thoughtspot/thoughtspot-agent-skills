@@ -3117,7 +3117,13 @@ destructive gate.
 
 **Filed:** 2026-07-11
 **Source:** 2026-07-11 full audit finding 5.1 (remainder; surfaced during the PR-batch-3 migration).
-**Status:** OPEN
+**Status:** DONE (2026-07-11) — (a) `ts-tml-import-gate.md` §1 lint wrapper rewritten to `ts tml lint
+--file`/`--dir`, and §3 now shows the canonical `ts tml import --file`/`--dir --policy PARTIAL` form;
+(b) `check_patterns` Check 6 extended to scan tracked `agents/shared/**/*.md` (2 new regression tests —
+shared doc IS flagged, generated `agents/databricks/shared/` copy is NOT, being outside the glob);
+(c) post-merge `./scripts/stage-sync.sh` REQUIRED (shared file → CoCo stage); the `agents/databricks/shared/`
+copy regenerates from source on `deploy.sh`. Referencing SKILL.md files are byte-unchanged (they link,
+not inline) so no skill version bumps.
 
 The audit-5.1 fix migrated `ts-convert-from-looker` and `ts-object-model-coach` off the superseded
 `python3 -c "…json.dumps([…])" | ts tml import/lint` stdin wrapper to `--file`/`--dir`, and added
