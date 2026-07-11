@@ -2920,7 +2920,7 @@ one-line caveat at ts-from-databricks-rules.md:106.
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 16.1.
 **Affects:** `tools/ts-cli/pyproject.toml`.
-**Status:** OPEN.
+**Status:** DONE (2026-07-11) — requests floor bumped to >=2.33.0 + ts-cli 0.45.2 (feat/audit-backlog-quickwins)
 
 The current `requests>=2.32.4` floor permits requests 2.32.5 (GHSA-gc5v-m9x4-r6x2,
 fixed in 2.33.0) and transitive urllib3 2.6.3 (PYSEC-2026-141/-142, fixed in 2.7.0).
@@ -2966,7 +2966,7 @@ pytest step's matrix only — the rest of CI (validators, linters) stays single-
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 16.5.
 **Affects:** `.github/workflows/validate.yml`.
-**Status:** OPEN.
+**Status:** DONE (2026-07-11) — checkout@v4→v4.3.1 SHA + setup-python@v5→v5.6.0 SHA pinned in validate.yml (feat/audit-backlog-quickwins)
 
 Actions are pinned by mutable tags — the tj-actions incident class. Only two
 first-party actions are in use, so risk is modest. SHA-pin both with a version-tag
