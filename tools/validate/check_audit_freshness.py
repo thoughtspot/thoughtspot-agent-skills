@@ -12,10 +12,10 @@ Two cadences, surfaced as SOFT nudges (never blocks a commit):
     external-only run happens.
   - Full deep audit (all angles): due on EITHER trigger —
       * time:     latest docs/audit/*-full.md older than FULL_MAX_AGE_DAYS, OR
-      * activity: substantial change since the last full audit (new skill, new
-                  runtime, N+ new shared refs, ts-cli bump, or N+ commits). Measured
-                  from the report's COMMIT (git log <report-sha>..HEAD), not its date,
-                  so the audit's own same-day routing wave isn't counted as new drift.
+      * activity: the audit surface grew since the last full audit (new skill, new
+                  runtime, N+ new shared refs, or N+ commits). Measured from the
+                  report's COMMIT (git log <report-sha>..HEAD), not its date, so the
+                  audit's own same-day routing wave isn't counted as new drift.
 
 It prints nothing when nothing is due, so it is safe to run on every commit / at
 session start. A full audit is NEVER auto-run — many agents, human-routed findings —
@@ -42,11 +42,16 @@ AUDIT_DIR = "docs/audit"
 EXTERNAL_MAX_AGE_DAYS = 7
 FULL_MAX_AGE_DAYS = 90
 # Activity thresholds — any one trips the "consider a full audit" nudge.
+# Each is a signal that the AUDIT SURFACE grew: new skills/runtimes/shared references
+# are new things to check for consistency and currency; a high commit count is a proxy
+# for "a lot changed". A ts-cli version bump is deliberately NOT here — the internal CLI
+# version isn't audit surface (audits examine skills, mappings, product currency,
+# security), bumps are too frequent to signal anything at a low threshold, and real
+# churn they ride along with is already caught by `commits`.
 ACTIVITY = {
     "new_skills": 1,       # a new SKILL.md in any runtime
     "new_runtimes": 1,     # a new agents/<runtime>/ tree
     "new_shared": 2,       # new agents/shared/ reference files
-    "ts_cli_bumps": 1,     # a ts-cli version bump
     "commits": 40,         # raw commit count since the last full audit
 }
 # ─────────────────────────────────────────────────────────────────────────────
@@ -95,24 +100,18 @@ def _git(args: list[str], root: Path) -> str:
     return r.stdout if r.returncode == 0 else ""
 
 
-_TS_CLI_VERSION_FILES = ("tools/ts-cli/pyproject.toml", "tools/ts-cli/ts_cli/__init__.py")
-
-
 def _parse_activity(log_text: str) -> dict[str, int]:
     """Count substantive changes from `git log --name-status --pretty=format:%x00%H`.
 
-    Commit boundaries are the NUL-prefixed header lines, so a ts-cli version bump that
-    touches BOTH pyproject.toml and __init__.py in one commit counts once, not twice
-    (the previous per-file tally double-counted every bump). Pure — no I/O — so the
-    counting logic is unit-tested git-free.
+    Commit boundaries are the NUL-prefixed header lines (used to count commits). Pure —
+    no I/O — so the counting logic is unit-tested git-free. ts-cli version bumps are
+    deliberately not counted (see the ACTIVITY comment — not audit surface).
     """
-    new_skills = new_shared = ts_cli_bumps = commits = 0
+    new_skills = new_shared = commits = 0
     runtimes: set[str] = set()
-    commit_has_bump = False
     for line in log_text.splitlines():
         if line.startswith("\x00"):
             commits += 1
-            commit_has_bump = False
             continue
         parts = line.split("\t")
         if len(parts) < 2:
@@ -125,14 +124,10 @@ def _parse_activity(log_text: str) -> dict[str, int]:
                 runtimes.add(seg[1])
         elif status == "A" and path.startswith("agents/shared/"):
             new_shared += 1
-        elif status == "M" and path in _TS_CLI_VERSION_FILES and not commit_has_bump:
-            ts_cli_bumps += 1
-            commit_has_bump = True
     return {
         "new_skills": new_skills,
         "new_runtimes": len(runtimes),
         "new_shared": new_shared,
-        "ts_cli_bumps": ts_cli_bumps,
         "commits": commits,
     }
 
@@ -174,7 +169,6 @@ def _activity_reasons(counts: dict[str, int]) -> list[str]:
         "new_skills": "new skill(s)",
         "new_runtimes": "new runtime(s)",
         "new_shared": "new shared reference(s)",
-        "ts_cli_bumps": "ts-cli version bump(s)",
         "commits": "commit(s)",
     }
     return [
