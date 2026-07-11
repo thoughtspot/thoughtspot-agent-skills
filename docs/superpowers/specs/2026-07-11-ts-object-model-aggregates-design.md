@@ -237,6 +237,47 @@ the association patch (restore backed-up primary TML).
 5. **Cross-connection aggregates:** docs say the aggregate may live on a
    different connection — verify, since it affects the DDL/connection prompt.
 
+## Phase 2 (discovery done, implementation deferred): SpotCache target via Analyst Studio Datasets
+
+Instead of materialising the aggregate in the customer warehouse, the
+aggregate could live in **SpotCache** as an Analyst Studio Dataset
+(https://docs.thoughtspot.com/cloud/26.7.0.cl/analyst-studio-datasets):
+encrypted tables stored in ThoughtSpot, refreshed on a schedule, published to
+TS as tables. Attractive because aggregates are small by construction (the
+10GB/dataset cap is a non-issue), scans cost no warehouse credits, and no
+warehouse DDL rights are needed.
+
+**API discovery findings (26.7.0.cl docs + Mode-heritage API reference):**
+
+| Operation | API support | Endpoint |
+|---|---|---|
+| Create a Dataset | **No** — UI only ("Make a new Dataset" or from a Report query) | — |
+| Update a Dataset's SQL | **No** — `PATCH /{account}/datasets/{dataset}` accepts only `name`, `description`, `space_token` | — |
+| Trigger a refresh | **Yes** | `POST /{account}/datasets/{dataset}/runs` (202; run states pending/enqueued/failed/succeeded/…) |
+| Refresh datasets via report | Yes | `POST /{account}/reports/{report}/runs` with `dataset_tokens` |
+| List/inspect datasets + run history | Yes | `GET .../datasets`, `GET .../datasets/{d}/runs`; Discovery API (read-only batch) |
+| Create/update *queries* (raw SQL + data_source_id) in a Report | Yes | `POST/PATCH /{account}/reports/{report}/queries` |
+| Auth | Workspace/Member API tokens (basic auth), ~4 req/s rate limit | — |
+
+**Implication:** dataset *creation and SQL definition* would be a one-time
+manual UI step (skill emits the aggregate SQL, user pastes into "Make a new
+Dataset" and publishes) — structurally identical to manual-mode DDL. From
+then on everything is automatable: refresh via dataset-runs API, discovery
+via Discovery API, and the whole model layer (aggregate Model TML over the
+published dataset table + association patch) exactly as in v1. Cross-
+connection aggregation (Open Item #5) is the enabler — primary on the
+warehouse connection, aggregate Model on the dataset's table.
+
+**Phase-2 open items:**
+1. What connection/TML shape a published dataset table exposes, and whether
+   an aggregate Model over it participates in routing.
+2. Whether a dataset SQL edit is possible via any endpoint (docs say no —
+   confirm; otherwise grain changes mean recreate-in-UI).
+3. Analyst Studio licensing/enablement prerequisites; workspace storage caps
+   (25/50GB total) as a fleet-of-aggregates constraint.
+4. Whether dataset refresh schedules are settable via API or UI-only
+   (API-triggered runs could be driven externally either way).
+
 ## Out of scope (v1)
 
 - STDEV/VAR decomposition; HLL sketches for approximate distinct counts.
