@@ -4,8 +4,12 @@ check_audit_freshness.py — nudge when a repo audit is due (see .claude/rules/r
 
 Two cadences, surfaced as SOFT nudges (never blocks a commit):
 
-  - External sweep (angles 13/14/16): due when the latest docs/audit/*-external.md
-    report is older than EXTERNAL_MAX_AGE_DAYS.
+  - External sweep (angles 13/14/16): due when the more recent of the latest
+    docs/audit/*-external.md AND docs/audit/*-full.md report is older than
+    EXTERNAL_MAX_AGE_DAYS. A full audit runs all angles (external ones included), so
+    it is a superset of an external sweep and resets the external clock too — without
+    this, every full audit leaves a stale external nudge firing until a separate
+    external-only run happens.
   - Full deep audit (all angles): due on EITHER trigger —
       * time:     latest docs/audit/*-full.md older than FULL_MAX_AGE_DAYS, OR
       * activity: substantial change since the last full audit (new skill, new
@@ -70,6 +74,18 @@ def _age_days(d: date, today: date) -> int:
 def _is_due(latest: date | None, max_age: int, today: date) -> bool:
     """Due if there is no prior report, or the latest is older than max_age."""
     return latest is None or _age_days(latest, today) > max_age
+
+
+def _effective_external_date(latest_ext: date | None, latest_full: date | None) -> date | None:
+    """Date the external cadence measures from: the more recent of the last
+    external-only sweep and the last full audit.
+
+    A full audit runs ALL angles (the external ones included), so it is a superset
+    of an external sweep and resets the external clock too. Returns None only when
+    neither has ever run.
+    """
+    candidates = [d for d in (latest_ext, latest_full) if d is not None]
+    return max(candidates) if candidates else None
 
 
 def _git(args: list[str], root: Path) -> str:
@@ -139,19 +155,26 @@ def main() -> int:
 
     nudges: list[str] = []
 
-    # External sweep cadence
     ext_dates = _report_dates(audit_dir, "external")
+    full_dates = _report_dates(audit_dir, "full")
     latest_ext = ext_dates[-1] if ext_dates else None
-    if _is_due(latest_ext, EXTERNAL_MAX_AGE_DAYS, today):
-        age = f"{_age_days(latest_ext, today)}d ago" if latest_ext else "never run"
+    latest_full = full_dates[-1] if full_dates else None
+
+    # External sweep cadence. A full audit runs ALL angles — the external ones
+    # (13 product-currency, 14 performance, 16 deps) included — so it is a superset
+    # of an external-only sweep and satisfies the external cadence too. Take the more
+    # recent of the two: otherwise every full audit leaves a stale "external sweep
+    # due" nudge firing until a separate external-only run happens, which is exactly
+    # the false nudge that showed "~13d overdue" the day after the 2026-07-11 full audit.
+    latest_ext_effective = _effective_external_date(latest_ext, latest_full)
+    if _is_due(latest_ext_effective, EXTERNAL_MAX_AGE_DAYS, today):
+        age = f"{_age_days(latest_ext_effective, today)}d ago" if latest_ext_effective else "never run"
         nudges.append(
             f"External sweep due ({age}) — "
             'Workflow({name:"repo-audit", args:{scope:"external"}})'
         )
 
     # Full audit cadence: time OR activity
-    full_dates = _report_dates(audit_dir, "full")
-    latest_full = full_dates[-1] if full_dates else None
     time_due = _is_due(latest_full, FULL_MAX_AGE_DAYS, today)
     counts = _activity_since(latest_full, root)
     reasons = _activity_reasons(counts)

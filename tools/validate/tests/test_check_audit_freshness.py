@@ -56,3 +56,33 @@ def test_activity_reasons_multiple():
     counts = {"new_skills": 1, "new_runtimes": 1, "new_shared": 2,
               "ts_cli_bumps": 1, "commits": 99}
     assert len(af._activity_reasons(counts)) == 5
+
+
+# --- External cadence is satisfied by a full audit (a full audit covers the
+#     external angles 13/14/16) ---------------------------------------------------
+
+def test_full_audit_resets_external_clock():
+    # The exact bug: a recent full audit but an older external-only report. The
+    # external cadence must measure from the full audit, not the stale external file.
+    latest_ext = date(2026, 6, 28)   # last external-only sweep
+    latest_full = date(2026, 7, 11)  # more recent full audit
+    eff = af._effective_external_date(latest_ext, latest_full)
+    assert eff == date(2026, 7, 11)
+    assert af._is_due(eff, af.EXTERNAL_MAX_AGE_DAYS, date(2026, 7, 12)) is False
+
+
+def test_external_only_used_when_more_recent_than_full():
+    eff = af._effective_external_date(date(2026, 7, 10), date(2026, 7, 1))
+    assert eff == date(2026, 7, 10)
+
+
+def test_effective_external_date_with_only_full():
+    assert af._effective_external_date(None, date(2026, 7, 11)) == date(2026, 7, 11)
+
+
+def test_effective_external_date_with_only_external():
+    assert af._effective_external_date(date(2026, 7, 11), None) == date(2026, 7, 11)
+
+
+def test_effective_external_date_none_when_neither_run():
+    assert af._effective_external_date(None, None) is None

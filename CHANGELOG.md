@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-11
+- fix(validate): `check_audit_freshness` — a full audit now satisfies the external-sweep cadence (it runs all angles, external included). Previously the external nudge measured only from `*-external.md`, so it kept firing "~13d overdue" the day after a full audit until a separate external-only sweep ran
 - fix(codification): migrate shared `ts-tml-import-gate.md` off the superseded stdin JSON-array wrapper to `ts tml lint --file`/`--dir` + `ts tml import --file`/`--dir` (audit 5.1 remainder, BL-117); extend `check_patterns` Check 6 to scan `agents/shared/**/*.md` so the shared doc can't regress (2 new tests). Post-merge: `./scripts/stage-sync.sh` (shared file → CoCo stage). No skill version bumps — the referencing SKILL.md files are unchanged
 - feat(ts-cli): bump to v0.47.0 — `ts metadata search --connection <name>` (`-c`), a client-side case-insensitive filter on `metadata_header.dataSourceName` for connection-scoped table discovery (BL-111 part a; pure `filter_by_connection` helper + 11 tests). Deconflicts with the concurrent v0.46.0 CI PR — merge that first
 - chore(cleanup): retire `agents/claude/references/direct-api-auth.md` (curl + `/tmp/ts_token.txt` fallback now prohibited by `ts-cli.md`/`security.md`) + its two dead reference rows in ts-convert-from-snowflake-sv (→1.16.1) / ts-convert-to-snowflake-sv (→1.3.2); drop the now-stale note in `check_orphan_references.py` (BL-109)
