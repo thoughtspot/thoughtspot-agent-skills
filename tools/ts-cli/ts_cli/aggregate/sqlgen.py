@@ -86,14 +86,48 @@ def _date_trunc(dialect: str, bucket: str, col_sql: str) -> str:
     return f"{fn}('{part}', {col_sql})"
 
 
-def _collect_edges(entries):
-    """(src, tgt, join_dict) edges from inline model_tables joins."""
+def _resolve_referencing_join(source_table: str, ref_name: str, table_tmls: dict) -> dict:
+    """Resolve a `referencing_join` pointer to its real `on` + `type`.
+
+    Real ThoughtSpot models (26.9) express most joins this way: the model's
+    model_tables[].joins[] entry carries only a `referencing_join` name; the
+    actual condition lives on the SOURCE table's own TML, in
+    `table.joins_with[]`, keyed by that same name (`destination.name` there
+    is just confirmation of the target — `with` on the model side remains
+    the trusted key for the joined-table). The `on` string uses the
+    identical `[T::col] = [T::col]` format as an inline join, and `type`
+    uses the same INNER/LEFT_OUTER/RIGHT_OUTER/OUTER vocabulary — both are
+    consumed as-is by the existing inline-join machinery once resolved here.
+
+    Never silently drops a join: source table TML missing, no `joins_with`
+    at all, or no `joins_with` entry matching `ref_name` all raise
+    UnsupportedModelError rather than proceeding without a condition, which
+    would risk an unintended cartesian join / wrong aggregate totals.
+    """
+    joins_with = (table_tmls.get(source_table) or {}).get("table", {}).get("joins_with") or []
+    for jw in joins_with:
+        if jw.get("name") == ref_name:
+            return {"on": jw["on"], "type": jw.get("type", "INNER")}
+    raise UnsupportedModelError(
+        f"referencing_join '{ref_name}' not found in table '{source_table}' joins_with")
+
+
+def _collect_edges(entries, table_tmls):
+    """(src, tgt, join_dict) edges from model_tables joins.
+
+    Inline `on` joins pass through unchanged; `referencing_join` entries are
+    resolved against the source table's `joins_with[]` (see
+    `_resolve_referencing_join`) so downstream code — condition rewriting,
+    join-type mapping, and the open-item #11 mandatory-INNER-retention rule —
+    all see a uniform join_dict shape regardless of which form the model used.
+    """
     edges = []
     for e in entries:
         for j in e.get("joins", []) or []:
             if "referencing_join" in j:
-                raise UnsupportedModelError(
-                    f"referencing_join to {j['with']} — supply SQL manually")
+                resolved = _resolve_referencing_join(
+                    e["name"], j["referencing_join"], table_tmls)
+                j = {**j, "on": resolved["on"], "type": resolved["type"]}
             edges.append((e["name"], j["with"], j))
     return edges
 
@@ -175,7 +209,7 @@ def _join_condition_sql(join, table_tmls, dialect):
 def _join_clauses(model_tml, table_tmls, dialect, needed_tables):
     entries = model_tml["model"]["model_tables"]
     root = entries[0]["name"]
-    parent, order = _bfs_parents(root, _collect_edges(entries))
+    parent, order = _bfs_parents(root, _collect_edges(entries, table_tmls))
     missing = sorted(needed_tables - set(parent))
     if missing:
         raise UnsupportedModelError(

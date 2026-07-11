@@ -33,6 +33,57 @@ PLANS = {"Sales": classify_measure("Sales", aggregation="SUM")}
 CAND = {"id": "cand_1", "dimensions": ["Category"], "date_column": "Order Date",
         "bucket": "MONTHLY", "measure_columns": ["Sales"], "covered": [0], "flags": []}
 
+# --- referencing_join fixtures --------------------------------------------
+# Minimal shapes lifted from a real 26.9 champ-staging export (Dunder Mifflin
+# Sales) — see .superpowers/sdd/task-12-brief.md and
+# .superpowers/sdd/dunder_assoc_sample.json (not shipped as a fixture; these
+# are the extracted-down minimal pieces needed to exercise the resolver).
+DM_TABLES = {
+    "DM_ORDER_DETAIL": {"table": {
+        "db": "DUNDERMIFFLIN", "schema": "PUBLIC", "db_table": "DM_ORDER_DETAIL",
+        "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                    {"name": "ORDER_ID", "db_column_name": "ORDER_ID"},
+                    {"name": "PRODUCT_ID", "db_column_name": "PRODUCT_ID"}],
+        "joins_with": [
+            {"name": "DM_ORDER_DETAIL_to_DM_ORDER", "destination": {"name": "DM_ORDER"},
+             "on": "[DM_ORDER_DETAIL::ORDER_ID] = [DM_ORDER::ORDER_ID]", "type": "INNER"},
+            {"name": "DM_ORDER_DETAIL_to_DM_PRODUCT", "destination": {"name": "DM_PRODUCT"},
+             "on": "[DM_ORDER_DETAIL::PRODUCT_ID] = [DM_PRODUCT::PRODUCT_ID]", "type": "INNER"},
+        ],
+    }},
+    "DM_ORDER": {"table": {
+        "db": "DUNDERMIFFLIN", "schema": "PUBLIC", "db_table": "DM_ORDER",
+        "columns": [{"name": "STATUS", "db_column_name": "STATUS"},
+                    {"name": "ORDER_ID", "db_column_name": "ORDER_ID"},
+                    {"name": "CUSTOMER_ID", "db_column_name": "CUSTOMER_ID"}],
+        "joins_with": [
+            {"name": "DM_ORDER_to_DM_CUSTOMER", "destination": {"name": "DM_CUSTOMER"},
+             "on": "[DM_ORDER::CUSTOMER_ID] = [DM_CUSTOMER::CUSTOMER_ID]", "type": "INNER"},
+        ],
+    }},
+    "DM_PRODUCT": {"table": {
+        "db": "DUNDERMIFFLIN", "schema": "PUBLIC", "db_table": "DM_PRODUCT",
+        "columns": [{"name": "PRODUCT_ID", "db_column_name": "PRODUCT_ID"}],
+    }},
+    "DM_CUSTOMER": {"table": {
+        "db": "DUNDERMIFFLIN", "schema": "PUBLIC", "db_table": "DM_CUSTOMER",
+        "columns": [{"name": "CUSTOMER_ID", "db_column_name": "CUSTOMER_ID"},
+                    {"name": "COUNTRY", "db_column_name": "COUNTRY"}],
+    }},
+    "DM_LOCALE_COUNTRY": {"table": {
+        "db": "DUNDERMIFFLIN", "schema": "PUBLIC", "db_table": "DM_LOCALE_COUNTRY",
+        "columns": [{"name": "COUNTRY_KEY", "db_column_name": "COUNTRY_KEY"},
+                    {"name": "COUNTRY_NAME", "db_column_name": "COUNTRY_NAME"}],
+    }},
+}
+DM_COLUMNS = [
+    {"name": "Sales", "column_id": "DM_ORDER_DETAIL::AMOUNT",
+     "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+    {"name": "Order Status", "column_id": "DM_ORDER::STATUS",
+     "properties": {"column_type": "ATTRIBUTE"}},
+]
+DM_PLANS = {"Sales": classify_measure("Sales", aggregation="SUM")}
+
 
 def test_build_select_joins_groups_and_truncates():
     sql = build_select(MODEL, TABLES, CAND, PLANS, dialect="snowflake")
@@ -48,12 +99,166 @@ def test_bigquery_date_trunc_argument_order():
     assert 'DATE_TRUNC(`FACT`.`ORDER_DT`, MONTH)' in sql
 
 
-def test_referencing_join_raises_unsupported():
+def test_referencing_join_source_table_no_joins_with_raises_unsupported():
+    # Requirement 3 (task 12): source table TML present but carries no
+    # `joins_with` key at all — must raise UnsupportedModelError, never
+    # silently drop the join.
     model = {"model": {"model_tables": [
         {"name": "FACT", "joins": [{"with": "DIM", "referencing_join": "SYS_X"}]},
         {"name": "DIM"}], "columns": MODEL["model"]["columns"]}}
-    with pytest.raises(UnsupportedModelError):
+    with pytest.raises(UnsupportedModelError, match="SYS_X.*FACT.*joins_with"):
         build_select(model, TABLES, CAND, PLANS, dialect="snowflake")
+
+
+def test_referencing_join_source_table_tml_entirely_missing_raises_unsupported():
+    # Requirement 3 counterpart: the source table isn't in table_tmls at all.
+    model = {"model": {"model_tables": [
+        {"name": "GHOST", "joins": [{"with": "DIM", "referencing_join": "SYS_X"}]},
+        {"name": "DIM"}], "columns": MODEL["model"]["columns"]}}
+    with pytest.raises(UnsupportedModelError, match="SYS_X.*GHOST.*joins_with"):
+        build_select(model, TABLES, CAND, PLANS, dialect="snowflake")
+
+
+def test_referencing_join_name_not_found_in_joins_with_raises_unsupported():
+    # Requirement 3: joins_with exists but has no entry matching the
+    # referencing_join value.
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_ORDER", "referencing_join": "SOME_UNKNOWN_JOIN_NAME"}]},
+            {"name": "DM_ORDER"},
+        ],
+        "columns": DM_COLUMNS,
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Order Status"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    with pytest.raises(UnsupportedModelError,
+                        match="SOME_UNKNOWN_JOIN_NAME.*DM_ORDER_DETAIL.*joins_with"):
+        build_select(model, DM_TABLES, cand, DM_PLANS, dialect="snowflake")
+
+
+def test_referencing_join_resolves_single_hop():
+    # Requirement 1 (task 12): a model_tables join entry carrying only
+    # `referencing_join` resolves against the source table's `joins_with[]`
+    # entry of the same name, emitting the JOIN with the resolved `on` +
+    # `type` exactly as the inline path would. Real 26.9 shape from the brief.
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_ORDER", "referencing_join": "DM_ORDER_DETAIL_to_DM_ORDER"}]},
+            {"name": "DM_ORDER"},
+        ],
+        "columns": DM_COLUMNS,
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Order Status"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, DM_TABLES, cand, DM_PLANS, dialect="snowflake")
+    assert ('JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_ORDER" "DM_ORDER" '
+            'ON "DM_ORDER_DETAIL"."ORDER_ID" = "DM_ORDER"."ORDER_ID"') in sql
+
+
+def test_referencing_join_multi_hop_chain():
+    # Requirement: DM_ORDER_DETAIL -> DM_ORDER -> DM_CUSTOMER, both hops via
+    # referencing_join — all intermediate joins resolve and emit in BFS
+    # dependency order.
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_ORDER", "referencing_join": "DM_ORDER_DETAIL_to_DM_ORDER"}]},
+            {"name": "DM_ORDER", "joins": [
+                {"with": "DM_CUSTOMER", "referencing_join": "DM_ORDER_to_DM_CUSTOMER"}]},
+            {"name": "DM_CUSTOMER"},
+        ],
+        "columns": DM_COLUMNS[:1] + [
+            {"name": "Customer Country", "column_id": "DM_CUSTOMER::COUNTRY",
+             "properties": {"column_type": "ATTRIBUTE"}}],
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Customer Country"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, DM_TABLES, cand, DM_PLANS, dialect="snowflake")
+    assert ('JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_ORDER" "DM_ORDER" '
+            'ON "DM_ORDER_DETAIL"."ORDER_ID" = "DM_ORDER"."ORDER_ID"') in sql
+    assert ('JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_CUSTOMER" "DM_CUSTOMER" '
+            'ON "DM_ORDER"."CUSTOMER_ID" = "DM_CUSTOMER"."CUSTOMER_ID"') in sql
+
+
+def test_mixed_inline_and_referencing_join_both_resolve():
+    # Requirement: one inline `on` join (DM_CUSTOMER -> DM_LOCALE_COUNTRY) +
+    # one referencing_join (DM_ORDER_DETAIL -> DM_ORDER, and DM_ORDER ->
+    # DM_CUSTOMER) in the same model — all must resolve correctly.
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_ORDER", "referencing_join": "DM_ORDER_DETAIL_to_DM_ORDER"}]},
+            {"name": "DM_ORDER", "joins": [
+                {"with": "DM_CUSTOMER", "referencing_join": "DM_ORDER_to_DM_CUSTOMER"}]},
+            {"name": "DM_CUSTOMER", "joins": [
+                {"with": "DM_LOCALE_COUNTRY",
+                 "on": "[DM_CUSTOMER::COUNTRY] = [DM_LOCALE_COUNTRY::COUNTRY_KEY]",
+                 "type": "INNER"}]},
+            {"name": "DM_LOCALE_COUNTRY"},
+        ],
+        "columns": DM_COLUMNS[:1] + [
+            {"name": "Country Name", "column_id": "DM_LOCALE_COUNTRY::COUNTRY_NAME",
+             "properties": {"column_type": "ATTRIBUTE"}}],
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Country Name"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, DM_TABLES, cand, DM_PLANS, dialect="snowflake")
+    assert ('JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_ORDER" "DM_ORDER" '
+            'ON "DM_ORDER_DETAIL"."ORDER_ID" = "DM_ORDER"."ORDER_ID"') in sql
+    assert ('JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_CUSTOMER" "DM_CUSTOMER" '
+            'ON "DM_ORDER"."CUSTOMER_ID" = "DM_CUSTOMER"."CUSTOMER_ID"') in sql
+    assert ('JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_LOCALE_COUNTRY" "DM_LOCALE_COUNTRY" '
+            'ON "DM_CUSTOMER"."COUNTRY" = "DM_LOCALE_COUNTRY"."COUNTRY_KEY"') in sql
+
+
+def test_referencing_join_inner_unreferenced_table_is_retained():
+    # open-item #11's mandatory-INNER-retention rule must see the RESOLVED
+    # type: DM_ORDER_DETAIL's referencing_join to DM_PRODUCT resolves to
+    # INNER via joins_with, and must be retained even though the candidate
+    # selects no DM_PRODUCT column.
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_PRODUCT", "referencing_join": "DM_ORDER_DETAIL_to_DM_PRODUCT"}]},
+            {"name": "DM_PRODUCT"},
+        ],
+        "columns": DM_COLUMNS[:1],
+    }}
+    cand = {"id": "cand_1", "dimensions": [], "date_column": None, "bucket": None,
+            "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, DM_TABLES, cand, DM_PLANS, dialect="snowflake")
+    assert 'JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_PRODUCT" "DM_PRODUCT"' in sql
+
+
+def test_referencing_join_left_outer_unreferenced_table_is_pruned():
+    # Counterpart: a resolved LEFT_OUTER referencing_join to an unreferenced
+    # table never changes the root row set, so pruning it remains correct.
+    tables = {
+        "DM_ORDER_DETAIL": {"table": {
+            **DM_TABLES["DM_ORDER_DETAIL"]["table"],
+            "joins_with": [
+                {"name": "DM_ORDER_DETAIL_to_DM_PRODUCT", "destination": {"name": "DM_PRODUCT"},
+                 "on": "[DM_ORDER_DETAIL::PRODUCT_ID] = [DM_PRODUCT::PRODUCT_ID]",
+                 "type": "LEFT_OUTER"},
+            ],
+        }},
+        "DM_PRODUCT": DM_TABLES["DM_PRODUCT"],
+    }
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_PRODUCT", "referencing_join": "DM_ORDER_DETAIL_to_DM_PRODUCT"}]},
+            {"name": "DM_PRODUCT"},
+        ],
+        "columns": DM_COLUMNS[:1],
+    }}
+    cand = {"id": "cand_1", "dimensions": [], "date_column": None, "bucket": None,
+            "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, tables, cand, DM_PLANS, dialect="snowflake")
+    assert "DM_PRODUCT" not in sql
+    assert "JOIN" not in sql
 
 
 def test_profile_and_base_sql():

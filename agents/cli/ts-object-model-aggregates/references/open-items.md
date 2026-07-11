@@ -36,7 +36,28 @@ change, already called out in that function's docstring.
 
 ---
 
-## #2 — `aggregated_models` TML syntax on a live 26.6+ cluster — OPEN
+## #2 — `aggregated_models` TML syntax on a live 26.6+ cluster — VERIFIED 2026-07-11 (champ-staging, 26.9.0.cl-31)
+
+**Finding:** A live production model on champ-staging ("Dunder Mifflin Sales &
+Inventory", `4da3a07f`) carries a real, ThoughtSpot-accepted block:
+`aggregated_models: [{id: "DM_AGGR_PRODUCT_MONTHLY", date_aggregation_info:
+[{column_id: "Transaction Date", bucket: "MONTHLY"}]}]`. This matches
+`patch_association`'s emitted shape exactly:
+- `date_aggregation_info` is a **list** (confirms the Task 6 dict→list fix).
+- `bucket` uses the **`-LY` form** (`MONTHLY`), matching `lattice.BUCKETS` — the
+  schema doc's `MONTH` enum list is wrong; **no translation table needed**.
+- `id` is a string identifier (the aggregate model's name); `column_id` is the
+  date column's **display name**, matching what `patch_association` uses.
+Structure of the associated aggregate model (`DM_AGGR_PRODUCT_MONTHLY`,
+`b07f3aaf`) also validates `generate.build_aggregate_model_tml`: single logical
+table, `properties.spotter_config.is_spotter_enabled: true` (confirms the Task 6
+nested-path deviation), grain columns named to match the primary, SUM measures
+exposed under the primary's display names via `sum()` formulas over the stored
+column. **Residual (minor):** we matched an exported live block and validated
+structure; still worth one direct import of a `patch_association`-emitted block
+to confirm write-acceptance, but the shape risk is resolved.
+
+## #2 (historical) — original OPEN text retained below for reference
 
 **Question:** Does the shape
 [`generate.py::patch_association`](../../../../tools/ts-cli/ts_cli/aggregate/generate.py)
@@ -156,7 +177,17 @@ aggregate table appears in the generated SQL each time.
 
 ---
 
-## #7 — Dependent type-filter values — OPEN (narrow)
+## #7 — Dependent type-filter values — VERIFIED 2026-07-11 (champ-staging, 26.9.0.cl-31)
+
+**Finding:** `ts aggregate signatures --model 0e4406c7 --profile champ-staging`
+returned **50 dependents** and **188 signatures** (63 full / 125 partial), 0
+export failures. The type-string filter matches what the v2 dependents walk emits
+on 26.9 — dependents are found, not silently zero-filtered. (Double-counting
+sub-check still worth a spot audit on a Liveboard-with-embedded-answers, but the
+1:1 mechanism held — no obvious doubling in the 188 vs 50 relationship given
+multi-viz Liveboards.)
+
+## #7 (historical OPEN text below)
 
 **Question:** `ts_cli.commands.aggregate._SIGNATURE_TYPES` filters the dependents walk
 to `{"ANSWER", "LIVEBOARD", "PINBOARD_ANSWER_BOOK", "QUESTION_ANSWER_BOOK"}`. This
@@ -183,7 +214,22 @@ Answers/Liveboard-tiles actually present (no missing, no doubled).
 
 ---
 
-## #8 — Real TML `search_query` token casing — OPEN
+## #8 — Real TML `search_query` token casing — VERIFIED 2026-07-11 (champ-staging, 26.9.0.cl-31)
+
+**Finding:** Real exported `search_query` strings preserve the model's
+display-name casing exactly — e.g. `growth of [Amount] by [order date]
+[order date].monthly [Company] [Product]`, `[Amount] [Country]`, `sum [Amount]
+[Product]`. Tokens like `[Amount]`/`[Company]`/`[Product]` match the model's
+column display names case-for-case; the lowercase `[order date]` matches because
+that column's display name is *literally* lowercase, not because tokens are
+lowercased. The case-sensitive lookup in `column_kinds_from_model` /
+`extract_signatures` is correct against live exports — **no case-insensitive
+fallback needed**. (Separately observed: the ~67% partial rate on this model is
+expected — driven by parameter tokens, `growth of…` headline constructs, and
+columns outside the kinds map — the conservative "exclude from coverage, count
+it" design, not a casing failure.)
+
+## #8 (historical OPEN text below)
 
 **Question:** `ts_cli.aggregate.signatures.extract_signatures` matches `search_query`
 tokens against the Model's display-name kinds map
@@ -311,3 +357,29 @@ grain queried through the full primary Model (not just row counts — a measure 
 is the more sensitive check) to confirm the aggregate's counts now match the base
 model for covered queries on a live instance. The rule is implemented and unit-
 tested; only this live-instance confirmation is outstanding.
+
+---
+
+## #12 — `referencing_join` resolution (Task 12) — IMPLEMENTED 2026-07-12
+
+**Update:** `sqlgen.build_select` previously raised `UnsupportedModelError` on any
+`referencing_join` in `model.model_tables[].joins[]` — but real ThoughtSpot models
+express joins predominantly this way (system-inferred), not via inline `on:`, so
+this made connected-mode DDL generation fall back to manual SQL for most real
+models. `_collect_edges` / `_resolve_referencing_join` in
+[`sqlgen.py`](../../../../tools/ts-cli/ts_cli/aggregate/sqlgen.py) now resolve
+`referencing_join` pointers against the source table's own `table.joins_with[]`
+entry (matched by `name`), reusing the existing `_JOIN_COND` rewrite and join-type
+map exactly as the inline `on:` path does. The open-item #11 mandatory-INNER-
+retention rule composes correctly through resolution — it reads the resolved
+`type`, so a resolved INNER `referencing_join` to an unreferenced table is still
+retained. Graceful degradation is preserved: a missing source table TML, a source
+table with no `joins_with`, or a `referencing_join` name with no matching
+`joins_with` entry all raise `UnsupportedModelError` (never a silent dropped join).
+Verified against real 26.9 champ-staging shapes (Dunder Mifflin Sales —
+`DM_ORDER_DETAIL` → `DM_ORDER` → `DM_CUSTOMER` referencing_join chain, plus mixed
+inline+referencing_join models). Covered by 8 new tests in
+`tools/ts-cli/tests/test_agg_sqlgen.py` (single-hop resolve, multi-hop chain,
+missing-joins_with, missing-table-TML, name-not-found, mixed inline+referencing,
+INNER-retained, LEFT_OUTER-pruned). **Connected-mode DDL generation is no longer
+limited to models using only inline `on:` joins.**
