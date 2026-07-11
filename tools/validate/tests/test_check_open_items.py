@@ -32,10 +32,55 @@ def test_item_n_header_with_untested_is_flagged(tmp_path):
     assert len(res) == 1 and "UNTESTED" in res[0][1]
 
 
-def test_not_implemented_marker_is_flagged(tmp_path):
-    f = _write(tmp_path, "## #2 — Custom instructions — NOT IMPLEMENTED (LOW)\n\nno TS equivalent\n")
+def test_bare_not_implemented_marker_is_flagged(tmp_path):
+    # No decision qualifier (no LOW/WONT-FIX/DEFERRED/Workaround) — a genuine gap.
+    f = _write(tmp_path, "## #2 — Custom instructions — NOT IMPLEMENTED\n\nno TS equivalent\n")
     res = check_open_items.check_open_items_file(f)
     assert len(res) == 1 and res[0][1] == "Status: NOT IMPLEMENTED"
+
+
+def test_not_implemented_with_low_qualifier_is_resolved(tmp_path):
+    # Regression guard for the audit finding (PR #210 / 2026-07-11 sweep): a
+    # `NOT IMPLEMENTED (LOW)` item with a documented Workaround is a deliberate
+    # non-goal, not an unresolved gap — mirrors from-snowflake-sv items #2-#5.
+    f = _write(
+        tmp_path,
+        "## #2 — Custom instructions mapping — NOT IMPLEMENTED (LOW)\n\n"
+        "The skill does not parse or map custom instructions.\n\n"
+        "**Workaround:** run another skill to fill the gap.\n\n"
+        "Status: NOT IMPLEMENTED — LOW priority (post-conversion coaching covers the gap)\n",
+    )
+    res = check_open_items.check_open_items_file(f)
+    assert res == []
+
+
+def test_not_implemented_with_only_low_qualifier_is_resolved(tmp_path):
+    # The `(LOW)` qualifier alone (no Workaround line) is sufficient on its own —
+    # the qualifiers are OR'd, not required in combination.
+    f = _write(tmp_path, "## #6 — Some corner case — NOT IMPLEMENTED (LOW)\n\nno TS equivalent\n")
+    res = check_open_items.check_open_items_file(f)
+    assert res == []
+
+
+def test_not_implemented_with_only_workaround_is_resolved(tmp_path):
+    # A documented Workaround alone (no LOW/WONT-FIX/DEFERRED tag) is also sufficient.
+    f = _write(
+        tmp_path,
+        "## #7 — Another gap — NOT IMPLEMENTED\n\n"
+        "**Workaround:** do the equivalent thing manually.\n",
+    )
+    res = check_open_items.check_open_items_file(f)
+    assert res == []
+
+
+def test_not_implemented_with_wontfix_or_deferred_is_resolved(tmp_path):
+    f = _write(
+        tmp_path,
+        "## #8 — Wont-fix case — NOT IMPLEMENTED, WONT-FIX\n\nsuperseded by another approach.\n\n"
+        "## #9 — Deferred case — NOT IMPLEMENTED (DEFERRED to a future release)\n\nfuture work.\n",
+    )
+    res = check_open_items.check_open_items_file(f)
+    assert res == []
 
 
 def test_placeholder_is_flagged(tmp_path):
