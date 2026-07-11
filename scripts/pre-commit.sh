@@ -203,6 +203,15 @@ if echo "$STAGED" | grep -qE '(^agents/.*\.md$|tools/validate/check_slash_comman
   run_check "slash-command refs" "tools/validate/check_slash_command_refs.py --root $REPO_ROOT"
 fi
 
+# Orphan reference files — every agents/{cli,claude,coco-snowsight}/**/references/*.md
+# must be cited somewhere else in the repo (or allowlisted by basename, e.g.
+# open-items.md) — audit finding 1.1 (the two update-mode-spec.md Mode C design docs
+# that lingered "pending implementation" long after Mode C shipped). Runs when any
+# references/*.md file or the validator itself changes.
+if echo "$STAGED" | grep -qE '(^agents/.*references/.*\.md$|tools/validate/check_orphan_references\.py)'; then
+  run_check "orphan refs" "tools/validate/check_orphan_references.py --root $REPO_ROOT"
+fi
+
 # SKILL.md flag cross-check — every `ts <group> <command> --<flag>` a SKILL.md
 # instructs must be a real registered option (audit finding 11.1b). Runs when a
 # SKILL.md, a ts_cli command module, or the validator changes — a flag rename in

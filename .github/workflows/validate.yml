@@ -62,6 +62,7 @@ jobs:
           python3 tools/validate/check_no_inline_requests.py --root .
           python3 tools/validate/check_pagination_convention.py --root .
           python3 tools/validate/check_slash_command_refs.py --root .
+          python3 tools/validate/check_orphan_references.py --root .
           # Needs ts_cli's own typer command tree (installed above) to cross-check
           # SKILL.md `--flag` references against the real, registered CLI options.
           python3 tools/validate/check_skill_flag_usage.py --root .
