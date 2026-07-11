@@ -275,6 +275,12 @@ def _snowflake_connection(profile_name: str, warehouse: Optional[str],
 
 def _ingest_profile_results(payload: dict, results_path: str) -> dict:
     r = json.loads(Path(results_path).read_text())
+    for key in ("base_rows", "candidates"):
+        if key not in r:
+            raise SystemExit(
+                f"Results JSON {results_path} is missing required key '{key}'. "
+                'Expected {"base_rows": N, "candidates": {"cand_1": rows, ...}}.'
+            )
     payload["base_rows"] = r["base_rows"]
     for c in payload["candidates"]:
         if c["id"] in r["candidates"]:
@@ -389,6 +395,12 @@ def _colmap_from_model(model_tml: dict) -> dict:
 
 def _query_history_rows(conn, tables: str, days: int) -> list:
     table_list = [t.strip() for t in tables.split(",") if t.strip()]
+    if not table_list:
+        # An empty --tables (e.g. ",  ,") would otherwise build "AND ()", a
+        # SQL syntax error the warehouse rejects with a cryptic message.
+        _err("No table names supplied via --tables (all entries were empty after "
+             "trimming). Pass one or more comma-separated physical table names.")
+        raise typer.Exit(code=1)
     like = " OR ".join("query_text ILIKE %s" for _ in table_list)
     sql = ("SELECT query_text FROM snowflake.account_usage.query_history "
            f"WHERE start_time >= DATEADD('day', -{int(days)}, CURRENT_TIMESTAMP()) "

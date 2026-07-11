@@ -382,6 +382,55 @@ def test_history_command_offline(tmp_path, monkeypatch):
     assert weights["g1::"] == 2.0  # base weight + 1 history match
 
 
+def test_history_empty_tables_after_strip_errors_clearly(tmp_path, monkeypatch):
+    """MINOR guard: --tables that collapses to nothing after strip filtering
+    (e.g. ",  ,") must fail with a clear message, not build "AND ()" and hand
+    Snowflake a syntax error."""
+    import ts_cli.commands.load as load_mod
+
+    model = {"model": {"columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    (tmp_path / "signatures.jsonl").write_text(json.dumps(
+        {"source_guid": "g1", "viz_name": None, "dimensions": ["Category"],
+         "date_column": None, "parse_status": "full"}) + "\n")
+    monkeypatch.setattr(load_mod, "load_snowflake_profile",
+                        lambda name: {"name": name, "default_warehouse": "WH"})
+
+    class FakeConn:
+        def cursor(self):
+            raise AssertionError("should never reach the warehouse with empty --tables")
+
+    monkeypatch.setattr(load_mod, "_connect_python", lambda profile, wh, role: FakeConn())
+
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "history", "--dir", str(tmp_path),
+                                          "--snowflake-profile", "My SF Profile",
+                                          "--tables", ",  ,"])
+    assert result.exit_code != 0
+    assert "table name" in result.stderr.lower()
+
+
+def test_profile_results_missing_key_errors_clearly(tmp_path):
+    """MINOR guard: a --results JSON missing base_rows or candidates must fail
+    with a message naming the missing key, not a bare KeyError traceback."""
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump({"model": {"columns": []}}))
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    res = tmp_path / "res.json"
+    res.write_text(json.dumps({"candidates": {"cand_1": 5}}))  # base_rows missing
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                          "--tables-dir", str(tdir), "--results", str(res)])
+    assert result.exit_code != 0
+    # A clean SystemExit with a helpful message — NOT a bare KeyError traceback.
+    assert isinstance(result.exception, SystemExit)
+    assert "base_rows" in str(result.exception)
+
+
 def test_generate_writes_all_artifacts_and_never_imports(tmp_path, monkeypatch):
     """`ts aggregate generate` writes ddl.sql/table_spec.json/table.tml.yaml/
     agg_model.tml.yaml/primary_patched.tml.yaml and calls the TML *export*
