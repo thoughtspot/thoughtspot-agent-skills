@@ -40,22 +40,19 @@ def test_age_days():
 
 
 def test_activity_reasons_only_lists_crossed_thresholds():
-    counts = {"new_skills": 2, "new_runtimes": 0, "new_shared": 0,
-              "ts_cli_bumps": 0, "commits": 5}
+    counts = {"new_skills": 2, "new_runtimes": 0, "new_shared": 0, "commits": 5}
     reasons = af._activity_reasons(counts)
     assert reasons == ["2 new skill(s)"]
 
 
 def test_activity_reasons_empty_when_below_all():
-    counts = {"new_skills": 0, "new_runtimes": 0, "new_shared": 1,
-              "ts_cli_bumps": 0, "commits": 3}
+    counts = {"new_skills": 0, "new_runtimes": 0, "new_shared": 1, "commits": 3}
     assert af._activity_reasons(counts) == []
 
 
 def test_activity_reasons_multiple():
-    counts = {"new_skills": 1, "new_runtimes": 1, "new_shared": 2,
-              "ts_cli_bumps": 1, "commits": 99}
-    assert len(af._activity_reasons(counts)) == 5
+    counts = {"new_skills": 1, "new_runtimes": 1, "new_shared": 2, "commits": 99}
+    assert len(af._activity_reasons(counts)) == 4  # all four remaining triggers
 
 
 # --- External cadence is satisfied by a full audit (a full audit covers the
@@ -96,27 +93,18 @@ def _commit(sha: str, *rows: str) -> str:
     return "\x00" + sha + "\n" + "\n".join(rows)
 
 
-def test_ts_cli_bump_touching_both_version_files_counts_once():
-    # The double-count bug: one bump edits pyproject.toml AND __init__.py — one commit,
-    # one bump, not two.
-    log = _commit(
-        "a" * 40,
-        "M\ttools/ts-cli/pyproject.toml",
-        "M\ttools/ts-cli/ts_cli/__init__.py",
-    )
-    counts = af._parse_activity(log)
-    assert counts["ts_cli_bumps"] == 1
-    assert counts["commits"] == 1
-
-
-def test_two_separate_bump_commits_count_twice():
+def test_ts_cli_bumps_are_not_counted_as_activity():
+    # ts-cli version bumps are deliberately NOT an activity trigger (not audit surface,
+    # redundant with commit count). A bump-only commit contributes to `commits` but
+    # never yields a new-skill/shared reason.
     log = "\n".join([
         _commit("a" * 40, "M\ttools/ts-cli/pyproject.toml", "M\ttools/ts-cli/ts_cli/__init__.py"),
         _commit("b" * 40, "M\ttools/ts-cli/pyproject.toml", "M\ttools/ts-cli/ts_cli/__init__.py"),
     ])
     counts = af._parse_activity(log)
-    assert counts["ts_cli_bumps"] == 2
+    assert "ts_cli_bumps" not in counts
     assert counts["commits"] == 2
+    assert af._activity_reasons(counts) == []
 
 
 def test_new_skill_and_runtime_and_shared_counted():
@@ -139,4 +127,4 @@ def test_modified_skill_is_not_a_new_skill():
 def test_empty_log_is_all_zeros():
     counts = af._parse_activity("")
     assert counts == {"new_skills": 0, "new_runtimes": 0, "new_shared": 0,
-                      "ts_cli_bumps": 0, "commits": 0}
+                      "commits": 0}
