@@ -2936,13 +2936,15 @@ reintroduce the CVEs. urllib3 is covered transitively — no separate pin needed
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 16.2.
 **Affects:** `tools/ts-cli/pyproject.toml` (`requires-python`).
-**Status:** OPEN.
+**Status:** DONE (2026-07-11, cap-lift half) — cap lifted to `>=3.10,<3.15` (ts-cli v0.46.0);
+3.14 added to the CI `pytest-matrix` job so the suite is exercised on it every PR (couples with
+BL-107 — `pip install -e` refuses interpreters outside `requires-python`, so the cap had to lift
+for 3.14 to be testable). **Remaining:** the `>=3.11` floor bump after 3.10 EOL (2026-10) — still OPEN.
 
-`requires-python = ">=3.10,<3.14"` blocks CPython 3.14 (GA Oct 2025). Run the test
-suite on 3.14 and lift the cap; separately, plan the floor bump to `>=3.11` after the
-3.10 EOL (2026-10).
+`requires-python = ">=3.10,<3.14"` blocked CPython 3.14 (GA Oct 2025). The cap is now lifted and
+3.14 is CI-verified; the floor bump to `>=3.11` remains deferred.
 
-**Target:** lift the 3.14 cap opportunistically; revisit the 3.11 floor bump after 2026-10.
+**Target:** ✅ cap lifted; revisit the 3.11 floor bump after 2026-10.
 
 ---
 
@@ -2951,13 +2953,14 @@ suite on 3.14 and lift the cap; separately, plan the floor bump to `>=3.11` afte
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 16.4.
 **Affects:** `.github/workflows/validate.yml` (pytest step).
-**Status:** OPEN.
+**Status:** DONE (2026-07-11) — added a dedicated `pytest-matrix` job running the unit/validator
+tests on `["3.10", "3.11", "3.13", "3.14"]` (3.12 already covered by `validate`). Validators/linters
+stay single-version in `validate`, per the item's scope.
 
-CI tests a single Python version (3.12) while `pyproject.toml` claims support for
-3.10–3.13, and the user's own uv-tool environment runs 3.11. Add 3.10 and 3.13 to the
-pytest step's matrix only — the rest of CI (validators, linters) stays single-version.
+CI tested a single Python version (3.12) while `pyproject.toml` claimed support for a wider range.
+The new matrix job fills in the rest of `requires-python` without duplicating the validator suite.
 
-**Target:** no fixed date — small, low-risk workflow edit.
+**Target:** ✅ done.
 
 ---
 
@@ -2982,14 +2985,15 @@ comment; batch with the next workflow edit rather than open a standalone PR.
 **Source:** 2026-07-11 full audit finding 1.2.
 **Affects:** `agents/claude/references/direct-api-auth.md`; `agents/cli/ts-convert-from-snowflake-sv/SKILL.md:33`;
 `agents/cli/ts-convert-to-snowflake-sv/SKILL.md:28`.
-**Status:** OPEN.
+**Status:** DONE (2026-07-11) — `direct-api-auth.md` deleted (its only consumers were the two
+dead reference rows); both rows removed; ts-convert-from-snowflake-sv → 1.16.1, ts-convert-to-snowflake-sv
+→ 1.3.2 (PATCH). Also removed the now-stale "NOT in scope" paragraph in `check_orphan_references.py`
+that tracked this item. No CoCo references existed, so no mirror bump / stage-sync.
 
-The doc describes a curl + `/tmp/ts_token.txt` fallback that `ts-cli.md` and
-`security.md` now prohibit; its only consumers are two dead reference-table rows
-(from-snowflake-sv SKILL.md:33, to-snowflake-sv SKILL.md:28) with no corresponding
-step logic. Remove the two rows (PATCH version bump to both skills) and delete the doc.
+The doc described a curl + `/tmp/ts_token.txt` fallback that `ts-cli.md` and `security.md` prohibit;
+its only consumers were two dead reference-table rows with no corresponding step logic.
 
-**Target:** no fixed date — small cleanup, next time either skill is touched.
+**Target:** ✅ done.
 
 ---
 

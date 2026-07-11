@@ -34,7 +34,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     BATCH=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null \
         | grep -E '^agents/(cli|claude)/[^/]+/' \
         | grep -oE '^agents/(cli|claude)/[^/]+' \
-        | sed 's|^agents/cli/||;s|^agents/claude/||' \
+        | sort -u \
+        | while read -r d; do
+            # Keep only real skill dirs — those with a SKILL.md in the working tree.
+            # Excludes shared dirs that match the pattern but aren't skills
+            # (e.g. agents/claude/references/) and fully-deleted skill dirs, neither
+            # of which is smoke-testable.
+            [ -f "$d/SKILL.md" ] && basename "$d"
+          done \
         | sort -u || true)
 
     SKILLS=$(printf "%s\n%s" "$SKILLS" "$BATCH" | sort -u | grep -v '^$' || true)
