@@ -31,6 +31,34 @@ _MARKER_RE = re.compile(
     r'(?<![A-Za-z])(' + '|'.join(re.escape(m) for m in _UNRESOLVED_MARKERS) + r')(?![A-Za-z])'
 )
 
+# Resolved-by-decision convention: the repo's open-items status vocabulary (documented
+# legend, e.g. agents/cli/ts-convert-from-looker/references/open-items.md:4) is
+# `OPEN | VERIFIED | DEFERRED | WONT-FIX`. A `NOT IMPLEMENTED` item is a deliberate,
+# documented non-goal — not a shipped-unverified gap — when its section carries an
+# explicit decision qualifier: a `(LOW)` / `— LOW` / `LOW priority` annotation, an
+# explicit `WONT-FIX`/`WONTFIX` or `DEFERRED` status, or a `**Workaround:**` line (a
+# documented workaround is itself evidence the decision not to build was made on
+# purpose). Any ONE of these qualifiers is sufficient — they are not required in
+# combination. See from-snowflake-sv items #2-#5 (audit 2026-07-11 / PR #210 finding)
+# for the motivating case: `NOT IMPLEMENTED (LOW)` + `**Workaround:**` was previously
+# a false-positive FAIL.
+#
+# This exception applies ONLY to the `NOT IMPLEMENTED` marker. A bare `NOT IMPLEMENTED`
+# with none of these qualifiers is still a genuine unresolved gap and must stay flagged
+# — that is the validator's actual purpose. `UNTESTED` / `NEEDS VERIFICATION` /
+# `UNVERIFIED` are unaffected; those always mean "not yet verified," never "decided
+# not to do."
+_RESOLVED_DECISION_MARKERS = [
+    r'\(LOW\)',              # "NOT IMPLEMENTED (LOW)"
+    r'—\s*LOW\b',            # "— LOW" / "— LOW priority" (em-dash form)
+    r'\bLOW priority\b',     # "LOW priority" without a preceding em-dash
+    r'WONT-FIX',
+    r'WONTFIX',
+    r'DEFERRED',
+    r'\*\*Workaround:\*\*',  # a documented workaround = the decision was made
+]
+_RESOLVED_DECISION_RE = re.compile('|'.join(_RESOLVED_DECISION_MARKERS))
+
 
 def check_open_items_file(path: Path) -> list[tuple[str, str]]:
     """
@@ -39,6 +67,10 @@ def check_open_items_file(path: Path) -> list[tuple[str, str]]:
     Unresolved = the section contains an unresolved status marker
     (UNTESTED / NEEDS VERIFICATION / UNVERIFIED / NOT IMPLEMENTED) or the
     `[Record result here]` placeholder. Handles both `## Item N` and `## #N` headers.
+
+    Exception: `NOT IMPLEMENTED` is resolved-by-decision (not unresolved) when the
+    section also carries a decision qualifier — see `_RESOLVED_DECISION_MARKERS`.
+    A bare `NOT IMPLEMENTED` with no qualifier is still flagged.
     """
     content = path.read_text(encoding="utf-8")
 
@@ -55,7 +87,13 @@ def check_open_items_file(path: Path) -> list[tuple[str, str]]:
 
         marker = _MARKER_RE.search(section)
         if marker:
-            unresolved.append((title, f"Status: {marker.group(1)}"))
+            marker_text = marker.group(1)
+            # A qualified "NOT IMPLEMENTED" (LOW / WONT-FIX / DEFERRED / has a
+            # Workaround) is a deliberate non-goal, not an unresolved gap — skip it.
+            # Other markers (UNTESTED, NEEDS VERIFICATION, UNVERIFIED) always flag.
+            if marker_text == "NOT IMPLEMENTED" and _RESOLVED_DECISION_RE.search(section):
+                continue
+            unresolved.append((title, f"Status: {marker_text}"))
         elif _PLACEHOLDER.search(section):
             unresolved.append((title, "Finding not recorded"))
 

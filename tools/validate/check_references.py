@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-check_references.py — verify all file paths referenced in SKILL.md files exist.
+check_references.py — verify all file paths referenced in SKILL.md, references/*.md,
+and docs/**/*.md files exist.
 
-Scans every SKILL.md in agents/cli/, agents/claude/, and agents/coco-snowsight/
+Scans:
+  - every SKILL.md in agents/cli/, agents/claude/, and agents/coco-snowsight/
+  - every references/*.md under those same three skill runtimes
+  - every docs/**/*.md file, excluding docs/audit/, docs/superpowers/, and any
+    *backlog-archive* path (historical / generated content, not maintained links)
+
 for markdown links [text](path) and maps runtime-specific path prefixes back to
 repo paths before checking existence.
 
-Path mappings:
+Path mappings (SKILL.md only — see "Per-file-class link resolution" below):
   Claude / CLI skills  (~/.claude/...):
     ~/.claude/shared/         → agents/shared/
     ~/.claude/mappings/       → agents/shared/mappings/
@@ -14,6 +20,25 @@ Path mappings:
 
   CoCo skills (relative ../../shared/...):
     ../../shared/             → agents/shared/   (from skill dir two levels deep)
+
+Per-file-class link resolution:
+  SKILL.md files keep the exact behaviour above (prefix maps first, else resolve
+  relative to the SKILL.md's own directory) — unchanged from before this file's
+  scope was extended.
+
+  references/*.md files sit ONE level deeper than SKILL.md (agents/<runtime>/<skill>/
+  references/foo.md vs agents/<runtime>/<skill>/SKILL.md), so the SKILL.md prefix
+  maps — which are depth-sensitive shorthand written for SKILL.md's specific
+  location (e.g. CoCo's "../../shared/" assumes exactly two levels up from the
+  skill dir) — would misresolve a relative link from this deeper location. These
+  files instead resolve plain relative links against their own directory (which is
+  depth-correct by construction via Path.resolve()), while still honouring the
+  ~/.claude/... prefixes (CLAUDE_PREFIX_MAP) since those are absolute-style
+  shorthand that map straight to a repo path regardless of the caller's depth.
+
+  docs/**/*.md files live outside agents/<runtime>/<skill>/ entirely, so none of
+  the skill prefix maps apply. These resolve plain relative links against the
+  docs file's own directory, same as references/*.md.
 
 Usage:
     python tools/validate/check_references.py
@@ -53,6 +78,32 @@ def _prefix_map_for(skill_file: Path) -> dict:
     return CLAUDE_PREFIX_MAP
 
 
+def _file_class(source_file: Path, repo_root: Path) -> str:
+    """Classify a source .md file so resolve_path() applies the right base path.
+
+    - "skill": agents/<runtime>/<skill>/SKILL.md — the original, depth-sensitive
+      prefix-map behaviour applies (unchanged).
+    - "reference": any references/*.md file (one level deeper than SKILL.md) —
+      resolve relative links from the file's own directory instead.
+    - "doc": anything under docs/ — also resolves relative to its own directory;
+      none of the skill prefix maps are meaningful outside agents/.
+    """
+    try:
+        rel_parts = source_file.relative_to(repo_root).parts
+    except ValueError:
+        rel_parts = source_file.parts
+
+    if source_file.name == "SKILL.md":
+        return "skill"
+    if "references" in rel_parts:
+        return "reference"
+    if rel_parts and rel_parts[0] == "docs":
+        return "doc"
+    # Anything else falls back to the original skill-style resolution rather
+    # than silently changing behaviour for an unanticipated file class.
+    return "skill"
+
+
 def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | None:
     """Resolve a markdown link target to a repo-absolute path. Returns None if unresolvable."""
     # Skip HTTP links, anchors, and empty paths
@@ -70,7 +121,17 @@ def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | 
     if "{" in path_part or "}" in path_part:
         return None
 
-    prefix_map = _prefix_map_for(skill_file)
+    file_class = _file_class(skill_file, repo_root)
+
+    if file_class == "skill":
+        prefix_map = _prefix_map_for(skill_file)
+    else:
+        # references/*.md and docs/**/*.md: only the absolute-style ~/.claude/...
+        # shorthand is safe to apply regardless of depth. The CoCo "../../shared/"
+        # convention is depth-sensitive and written for SKILL.md's location —
+        # applying it here would misresolve a legit relative link from a deeper
+        # (references/) or differently-rooted (docs/) file. See module docstring.
+        prefix_map = CLAUDE_PREFIX_MAP
 
     # Apply prefix mappings (longest-prefix-first to avoid partial matches)
     resolved = path_part
@@ -79,7 +140,9 @@ def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | 
             resolved = replacement + resolved[len(prefix):]
             return repo_root / resolved
 
-    # Relative path — resolve from the skill file's directory
+    # Relative path — resolve from the source file's own directory. This is
+    # depth-correct by construction (Path.resolve() walks the actual ../ segments),
+    # which is why references/*.md and docs/*.md rely on it rather than a prefix map.
     if not resolved.startswith("/"):
         return (skill_file.parent / resolved).resolve()
 
@@ -130,8 +193,26 @@ def check_skill_file(
     return broken
 
 
+# docs/ subtrees excluded from validation entirely:
+#   docs/audit/          — dated audit reports; historical snapshots, not maintained links
+#   docs/superpowers/     — generated plan/spec scratch docs from the superpowers skill workflow
+#   *backlog-archive*    — archived backlog content, not maintained
+DOCS_EXCLUDED_PREFIXES = ("docs/audit/", "docs/superpowers/")
+
+
+def _is_excluded_doc(doc_file: Path, repo_root: Path) -> bool:
+    rel = str(doc_file.relative_to(repo_root))
+    if rel.startswith(DOCS_EXCLUDED_PREFIXES):
+        return True
+    if "backlog-archive" in doc_file.name:
+        return True
+    return False
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check SKILL.md file references.")
+    parser = argparse.ArgumentParser(
+        description="Check SKILL.md / references/*.md / docs/**/*.md file references."
+    )
     parser.add_argument("--root", default=".", help="Repo root directory (default: current dir)")
     args = parser.parse_args()
 
@@ -141,15 +222,26 @@ def main() -> int:
         list(repo_root.glob("agents/claude/*/SKILL.md")) +
         list(repo_root.glob("agents/coco-snowsight/*/SKILL.md"))
     )
+    reference_files = (
+        list(repo_root.glob("agents/cli/*/references/*.md")) +
+        list(repo_root.glob("agents/claude/*/references/*.md")) +
+        list(repo_root.glob("agents/coco-snowsight/*/references/*.md"))
+    )
+    doc_files = [
+        p for p in repo_root.glob("docs/**/*.md")
+        if not _is_excluded_doc(p, repo_root)
+    ]
 
-    if not skill_files:
-        print("No SKILL.md files found.")
+    all_files = skill_files + reference_files + doc_files
+
+    if not all_files:
+        print("No SKILL.md / references / docs files found.")
         return 1
 
     tracked = _git_tracked(repo_root)
 
     total_broken = 0
-    for skill_file in sorted(skill_files):
+    for skill_file in sorted(all_files):
         rel = skill_file.relative_to(repo_root)
         broken = check_skill_file(skill_file, repo_root, tracked)
         if broken:

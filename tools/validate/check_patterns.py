@@ -12,6 +12,9 @@ without false positives, so there is no separate declarative registry):
   3. connection_fqn in Python files (should be connection_name)
   4. %% in Python help strings (should be % — Typer doubles %)
   5. Direct `requests.*` calls in Claude SKILL.md files (should use the `ts` CLI)
+  6. The superseded stdin JSON-array wrapper (`python3 -c "...json.dumps([...
+     read_text() ...])..." | ts tml import`/`lint`) in Claude SKILL.md files —
+     use `ts tml import --file <path>` / `--dir <dir>` (ts-cli >= v0.27.0) instead
 
 Usage:
     python tools/validate/check_patterns.py
@@ -68,6 +71,51 @@ def check_connection_fqn_in_tml(file_path: Path) -> list[tuple[int, str]]:
                 in_connection_block = False
             elif re.match(r'^\s+fqn:\s+', line):
                 hits.append((line_num, line.strip()))
+
+    return hits
+
+
+# Fingerprints for the superseded stdin JSON-array `ts tml import`/`lint` wrapper:
+#   python3 -c "import json,pathlib; print(json.dumps([pathlib.Path(f).read_text() ...]))" \
+#     | ts tml import --policy ...
+# The two halves (payload-builder line, pipe-into-`ts tml` line) can appear on the
+# same line or be split across a few lines (continuation `\`, multi-statement `-c`
+# blocks), so this uses a small line-window state machine rather than one regex —
+# same rationale as the connection:/formulas: block checks above.
+_DUMPS_READ_TEXT_RE = re.compile(r'json\.dumps\(.*read_text\(')
+_TML_IMPORT_LINT_RE = re.compile(r'\bts tml (import|lint)\b')
+_STDIN_WRAPPER_WINDOW = 6  # max lines between the payload-builder line and the ts tml call
+
+
+def check_stdin_tml_import_wrapper(file_path: Path) -> list[tuple[int, str, int, str]]:
+    """
+    Flag the superseded `python3 -c "...json.dumps([...read_text()...])..." | ts tml
+    import`/`lint` stdin wrapper. Superseded by `--file`/`--dir` (ts-cli >= v0.27.0).
+
+    Detected as two co-occurring fingerprints within a small line window: a line
+    containing both `json.dumps(` and `read_text(` (the payload builder), followed
+    within `_STDIN_WRAPPER_WINDOW` lines by a line mentioning `ts tml import` or
+    `ts tml lint` (the piped-into command) — regardless of exactly what sits between
+    the `|` and `ts tml`, since some sites pipe through an intermediate `source
+    ~/.zshenv &&` before the `ts` invocation.
+
+    Returns (payload_line_num, payload_line_text, tml_line_num, tml_line_text) tuples
+    so callers can check either half against a staged-added-lines set.
+    """
+    hits = []
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    pending_line_num: int | None = None
+
+    for line_num, line in enumerate(lines, 1):
+        if _DUMPS_READ_TEXT_RE.search(line):
+            pending_line_num = line_num
+        if pending_line_num is not None and _TML_IMPORT_LINT_RE.search(line):
+            if line_num - pending_line_num <= _STDIN_WRAPPER_WINDOW:
+                hits.append((
+                    pending_line_num, lines[pending_line_num - 1].strip(),
+                    line_num, line.strip(),
+                ))
+            pending_line_num = None
 
     return hits
 
@@ -235,6 +283,28 @@ def main() -> int:
                     f"      Move test scripts to references/open-items.md; add a ts-cli command for production use."
                 )
                 total_hits += 1
+
+    # Check 6: superseded stdin JSON-array `ts tml import`/`lint` wrapper in Claude
+    # SKILL.md files (should use --file/--dir instead — ts-cli >= v0.27.0).
+    # Legitimate exceptions: references/ subdirs (open-items test scripts) and agents/coco-snowsight/ (no CLI available)
+    # In --staged mode: only flag hits where at least one half of the pattern is a NEW line in this commit
+    for md_file in skill_md_files:
+        # When staged, only flag newly-added lines to avoid blocking commits that
+        # touch files with pre-existing violations unrelated to this change
+        added_lines = (
+            get_staged_added_lines(repo_root, md_file) if args.staged else None
+        )
+        for payload_line_num, payload_text, tml_line_num, tml_text in check_stdin_tml_import_wrapper(md_file):
+            if added_lines is not None and payload_text not in added_lines and tml_text not in added_lines:
+                continue  # pre-existing violation — skip in staged mode
+            rel = md_file.relative_to(repo_root)
+            print(
+                f"FAIL  {rel}:{payload_line_num}  stdin-json-array-tml-import  →  {payload_text!r}\n"
+                f"      (piped into {tml_text!r} at line {tml_line_num})\n"
+                f"      Use `ts tml import --file <path>` / `--dir <dir>` (ts-cli >= v0.27.0) "
+                f"instead of piping a JSON array."
+            )
+            total_hits += 1
 
     print()
     if total_hits:

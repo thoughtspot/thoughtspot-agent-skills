@@ -843,11 +843,11 @@ write the file with "No gaps — full coverage."
 
 ---
 
-## Step 8 — Build zip + batch payload, import all TMLs
+## Step 8 — Build zip + batch import all TMLs
 
-Bundle all Table TMLs and the Model TML — both as a zip (for ThoughtSpot UI import) and as a
-JSON array (for CLI import). ThoughtSpot resolves `model_tables[].name:` references within the
-batch — no GUID capture required.
+Bundle all Table TMLs and the Model TML into a zip (for ThoughtSpot UI import), then
+import the same directory via the CLI. ThoughtSpot resolves `model_tables[].name:`
+references within the batch — no GUID capture required.
 
 ```bash
 cd /tmp/ts_looker_mig/output/{explore_name}
@@ -857,19 +857,16 @@ zip {explore_name}_tml.zip *.table.tml *.sql_view.tml *.model.tml 2>/dev/null ||
   zip {explore_name}_tml.zip *.table.tml *.model.tml
 cp {explore_name}_tml.zip {output_dir}/{explore_name}_tml.zip
 
-# 2. Build JSON payload + import via CLI (stdin JSON array of TML strings)
-#    Order: table TMLs first, then SQL view TMLs, then model TML, then liveboards
-files=($(ls *.table.tml 2>/dev/null | sort) \
-       $(ls *.sql_view.tml 2>/dev/null | sort) \
-       $(ls *.model.tml 2>/dev/null | sort))
-
-# 3. Validate first (catch errors before touching the instance)
-python3 -c "
-import json, pathlib, sys
-files = sys.argv[1:]
-print(json.dumps([pathlib.Path(f).read_text() for f in files]))
-" "${files[@]}" | ts tml import --policy VALIDATE_ONLY --profile {name}
+# 2. Validate first (catch errors before touching the instance)
+#    --order tableau sorts table -> sql_view -> model -> cohort -> liveboard, matching
+#    the *.table.tml / *.sql_view.tml / *.model.tml suffixes this skill emits.
+ts tml lint  --dir {output_dir} --order tableau
+ts tml import --dir {output_dir} --order tableau --policy VALIDATE_ONLY --profile {name}
 ```
+
+Caution: `--dir` is **non-recursive** and imports every `.tml`/`.yaml`/`.yml`/`.json` file
+it finds in the directory — `{output_dir}` must contain only this explore's generated
+TMLs (no stray files left over from a prior run).
 
 Expected WARNING during validation (not an error):
 ```
@@ -880,18 +877,14 @@ This is normal — new tables have no GUID yet; ThoughtSpot matches them by conn
 Once validation passes, import for real:
 
 ```bash
-python3 -c "
-import json, pathlib, sys
-files = sys.argv[1:]
-print(json.dumps([pathlib.Path(f).read_text() for f in files]))
-" "${files[@]}" | ts tml import --policy PARTIAL --create-new --profile {name}
+ts tml import --dir {output_dir} --order tableau --policy PARTIAL --create-new --profile {name}
 ```
 
 **CLI flag notes (verified):**
 - The flag is `--policy`, **not** `--import-policy` (which does not exist).
 - `PARTIAL` is safer than `ALL_OR_NONE` — objects that parse correctly are imported even if others fail. Use `ALL_OR_NONE` only when you need atomicity.
 - `--create-new` is required when importing objects that do not yet exist in ThoughtSpot (i.e. no `guid:` in the TML). Omit when updating existing objects that already have a `guid:`.
-- `ts tml import` reads the JSON array from **stdin** — it does NOT accept a file path as a positional argument. Passing a file path produces `Got unexpected extra argument`.
+- `--dir`/`--order`/`--pattern`/`--model-phase` require ts-cli ≥ v0.27.0.
 
 **Alternative — UI import:** Upload `{explore_name}_tml.zip` via ThoughtSpot UI:
 `Data → TML Import → select zip file → Import`
@@ -1207,15 +1200,9 @@ Import the Liveboard TML built in 10e/10f the same way Step 8 imports tables and
 model — validate first, then import for real:
 
 ```bash
-python3 -c "
-import json, pathlib, sys
-print(json.dumps([pathlib.Path(sys.argv[1]).read_text()]))
-" "{output_dir}/{dashboard_name}.liveboard.tml" | ts tml import --policy VALIDATE_ONLY --profile {name}
+ts tml import --file {output_dir}/{dashboard_name}.liveboard.tml --policy VALIDATE_ONLY --profile {name}
 
-python3 -c "
-import json, pathlib, sys
-print(json.dumps([pathlib.Path(sys.argv[1]).read_text()]))
-" "{output_dir}/{dashboard_name}.liveboard.tml" | ts tml import --policy PARTIAL --create-new --profile {name}
+ts tml import --file {output_dir}/{dashboard_name}.liveboard.tml --policy PARTIAL --create-new --profile {name}
 ```
 
 Retrieve the Liveboard's GUID from the import response, or confirm via search if the
@@ -1842,4 +1829,5 @@ to the user and ask them to provide the resolved database/schema string.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-07-11 | Migrate `ts tml import`/`lint` calls from the stdin JSON-array boilerplate to `--file`/`--dir` (ts-cli ≥ v0.27.0); remove the obsolete "does not accept a file path" note (audit 5.1). |
 | 1.0.0 | 2026-07-09 | Initial release (community contribution, PR #201) — LookML → ThoughtSpot conversion pipeline: parses `.model.lkml`/`.view.lkml` into Table TML and a Model TML per explore, translates LookML measure/dimension expressions to ThoughtSpot formulas, generates SQL View TML for `derived_table` views, validates against the shared model-conversion invariants, and optionally migrates LookML dashboards to Liveboards (chart-type mapping, 24→12-column layout conversion, filter translation). |
