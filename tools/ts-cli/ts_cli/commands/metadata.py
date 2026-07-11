@@ -32,6 +32,31 @@ _SUBTYPES = [
 ]
 
 
+def filter_by_connection(results: List[dict], connection: Optional[str]) -> List[dict]:
+    """Keep only results whose ``metadata_header.dataSourceName`` matches ``connection``.
+
+    Client-side connection scoping — the metadata/search API has no server-side
+    connection filter, so callers that want "objects on connection X" fetch and
+    then filter on the ``dataSourceName`` field (the verified field — see
+    .claude/rules/ts-cli.md and the same pattern in tables.py / ts-audit). Match is
+    case-insensitive on the display name; objects with no ``dataSourceName``
+    (e.g. worksheets/models, which aren't connection-scoped) never match.
+
+    Pure function — no I/O — so it can be unit-tested without a live instance.
+    Returns the list unchanged when ``connection`` is None.
+    """
+    if not connection:
+        return results
+    wanted = connection.strip().casefold()
+    out: List[dict] = []
+    for r in results:
+        header = r.get("metadata_header") or r
+        ds = header.get("dataSourceName")
+        if isinstance(ds, str) and ds.casefold() == wanted:
+            out.append(r)
+    return out
+
+
 @app.command("search")
 def search(
     profile: Optional[str] = _profile_option,
@@ -40,6 +65,11 @@ def search(
     subtype: Optional[List[str]] = typer.Option(None, "--subtype", "-s",
                                                 help="Subtype filter within LOGICAL_TABLE (repeatable). "
                                                      "E.g. --subtype WORKSHEET to find worksheets and models."),
+    connection: Optional[str] = typer.Option(None, "--connection", "-c",
+                                             help="Filter results to a single connection by display name "
+                                                  "(client-side match on metadata_header.dataSourceName, "
+                                                  "case-insensitive). Objects not scoped to a connection "
+                                                  "(worksheets/models) are excluded when this is set."),
     name: Optional[str] = typer.Option(None, "--name", "-n",
                                        help="Filter by name using SQL LIKE syntax: "
                                             "% = any chars, _ = one char. E.g. '%BIRD%' or 'Sales_%'"),
@@ -79,6 +109,8 @@ def search(
       ts metadata search --subtype WORKSHEET --name "%BIRD%"
       ts metadata search --subtype WORKSHEET --name "%sales%"
       ts metadata search --guid abc-123-def
+      ts metadata search --connection "Snowflake Prod"          # only tables on that connection
+      ts metadata search --connection "Snowflake Prod" --name "%DIM%"
       ts metadata search --type LIVEBOARD --limit 10   # single page only (legacy)
     """
     client = ThoughtSpotClient(resolve_profile(profile))
@@ -108,7 +140,15 @@ def search(
         # Explicit --limit: preserve legacy single-page behavior. --all is a
         # no-op here — an explicit limit always wins.
         resp = client.post("/api/rest/2.0/metadata/search", json=_build_payload(offset, limit))
-        print(json.dumps(resp.json()))
+        data = resp.json()
+        if connection:
+            # Filtering requires a flat list; normalize the wrapper shape first.
+            page = data if isinstance(data, list) else data.get("metadata", [])
+            print(json.dumps(filter_by_connection(page, connection)))
+        else:
+            # No filter → print resp.json() verbatim (legacy contract: whatever
+            # shape the API returns, dict wrapper included).
+            print(json.dumps(data))
         return
 
     # Default: auto-paginate and collect the full result set. --all_pages is
@@ -128,7 +168,7 @@ def search(
             break
         current_offset += page_size
 
-    print(json.dumps(all_results))
+    print(json.dumps(filter_by_connection(all_results, connection)))
 
 
 @app.command("delete")

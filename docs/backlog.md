@@ -3015,17 +3015,19 @@ the same pattern as the existing ALLOWLIST/NAME_ALIASES consolidation.
 **Source:** 2026-07-11 full audit finding 11.1.
 **Affects:** `tools/ts-cli/ts_cli/commands/metadata.py`; `ts-convert-from-snowflake-sv` Step 6A,
 `ts-convert-from-databricks-mv` Step 8A, `ts-convert-from-tableau`, `ts-audit`.
-**Status:** OPEN.
+**Status:** PARTIAL — (a) DONE (2026-07-11, ts-cli v0.47.0): `ts metadata search --connection <name>`
+(alias `-c`) added, a client-side case-insensitive filter on `metadata_header.dataSourceName` via the
+pure, unit-tested `filter_by_connection` helper (11 tests). Available for converters to adopt.
+**Remaining:** (b) the optional `ts tables discover` command returning the found/missing/column-gap
+map directly, and rewiring the converter Step-6A/8A prose to call `--connection` instead of describing
+the manual filter — both deferred to the next converter that needs them.
 
 Connection-scoped table discovery is duplicated near-verbatim across 3+ converters
 (from-snowflake-sv Step 6A, from-databricks-mv Step 8A, from-tableau, ts-audit prose):
 metadata search → client-side `dataSourceName` filter → stripe disambiguation →
 column-gap map. Meets ts-cli.md's "2+ skills duplicate the same raw API call" trigger.
-(a) add a `--connection` filter to `ts metadata search` (small, immediate); (b)
-optionally add `ts tables discover` returning the found/missing/column-gap map
-directly. The scope-selection prompt stays agentic either way.
 
-**Target:** (a) opportunistic, low effort; (b) scope alongside the next converter that needs it.
+**Target:** ✅ (a) shipped; (b) + converter rewiring scope alongside the next converter that needs it.
 
 ---
 
