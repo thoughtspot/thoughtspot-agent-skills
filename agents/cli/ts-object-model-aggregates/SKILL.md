@@ -395,6 +395,28 @@ same flow as
 [ts-convert-from-snowflake-sv Step 6B](../ts-convert-from-snowflake-sv/SKILL.md).
 Save the exact `name` value from the response as `{connection_name}`.
 
+**Warehouse for the DDL (Snowflake default materialization only).** The **C** branch
+already collects a warehouse (for the connection itself); the **E** branch does not —
+but `--materialization auto` on Snowflake resolves to a dynamic table, and
+`ts aggregate generate` **hard-fails** with `--warehouse is required to create a
+Snowflake dynamic table` if no warehouse is passed. So on the **E** branch (Snowflake
+only), before generating, ask:
+
+```
+The default materialization for a Snowflake aggregate is a dynamic table, which needs
+an assigned warehouse to refresh. How would you like to materialize {grain_summary}?
+
+  W  Dynamic table — give me the warehouse name to refresh it (auto-refreshing)
+  C  Plain table   — CREATE TABLE AS (no warehouse needed; refresh it yourself)
+
+Enter W (then the warehouse name) / C:
+```
+
+If **W**, save the warehouse name as `{warehouse}` and keep `--materialization auto`.
+If **C**, leave `{warehouse}` empty and use `--materialization ctas` in 6b instead.
+(Databricks/BigQuery resolve `auto` to a materialized view, which needs no
+`--warehouse` — this prompt only applies to Snowflake.)
+
 **C — create a new connection (Snowflake only in v1):**
 
 ```bash
@@ -413,19 +435,23 @@ Ask for the target `{db}` and `{schema}` for the aggregate table.
 
 ### 6b. Generate the artifacts
 
+Use `{materialization}` = `auto` (dynamic table / materialized view) or `ctas` (plain
+`CREATE TABLE AS`) per the 6a warehouse prompt — `auto` + Snowflake requires a non-empty
+`{warehouse}`, `ctas` requires none:
+
 ```bash
 source ~/.zshenv && ts aggregate generate \
   --dir "{workdir}" --candidate {candidate_id} --model-guid {model_guid} \
   --tables-dir "{workdir}/tables" --db "{db}" --schema "{schema}" \
   --connection-name "{connection_name}" --profile "{profile_name}" \
-  --dialect {dialect} --materialization auto \
+  --dialect {dialect} --materialization {materialization} \
   $([ -n "{warehouse}" ] && echo --warehouse "{warehouse}") \
   --out-dir "{workdir}/{candidate_id}"
 ```
 
-`--materialization auto` resolves to a Snowflake dynamic table (needs `--warehouse`)
-or a materialized view elsewhere; pass `--materialization ctas` for a plain
-`CREATE TABLE AS` if dynamic refresh isn't wanted. Writes five files to
+`--materialization auto` resolves to a Snowflake dynamic table (needs `--warehouse` —
+prompted in 6a) or a materialized view on Databricks/BigQuery; `--materialization ctas`
+emits a plain `CREATE TABLE AS` that needs no warehouse. Writes five files to
 `{workdir}/{candidate_id}/`: `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
 `agg_model.tml.yaml`, `primary_patched.tml.yaml`. Stdout:
 `{"candidate", "aggregate_name", "files"}`.
@@ -601,12 +627,16 @@ does, and one that shouldn't, doesn't. Use
 
 ```bash
 source ~/.zshenv && ts spotql generate-sql \
-  "SELECT {dims_and_measures} FROM {primary_table_alias} GROUP BY {dims}" \
+  'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' \
   --model {model_guid} --profile "{profile_name}"
 ```
 
-Build the SELECT to match the candidate's exact grain (dimensions + bucketed date
-column + measures it covers). Inspect the returned `executable_sql` for the
+SpotQL requires double-quoted identifiers, a table alias, and quoted column
+references (see the worked example in `tools/ts-cli/README.md`'s `ts spotql` section).
+Build the SELECT to match the candidate's exact grain — swap the illustrative
+`"Region"`/`"Sales"`/`"ORDERS"` above for this candidate's dimension columns, bucketed
+date column, and the measures it covers, keeping every identifier quoted and the
+`FROM "…" AS "t1"` alias in place. Inspect the returned `executable_sql` for the
 **aggregate table's physical name** (`table_spec.json`'s `db_table`). If present,
 routing worked. Then run a **detail-grain** query (one that needs a column outside
 the aggregate's grain) and confirm `executable_sql` references the **primary's**
