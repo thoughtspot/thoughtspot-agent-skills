@@ -812,7 +812,9 @@ Detect formula columns that are boolean ATTRIBUTE filters (e.g., named "MV Filte
 
 1. Check if the expression is translatable to SQL (see filter translation table below)
 2. If translatable → add as `filter:` field in the MV YAML, remove from dimensions list
-3. If untranslatable (parameters, LOD-based) → log in Unmapped Report
+3. If untranslatable (LOD-based), or a parameter reference (not yet auto-translated —
+   MV `parameters:` is a GA target at Runtime 18.2+, but emission is deferred pending
+   live 18.2 verification, audit finding 13.2) → log in Unmapped Report
 
 | ThoughtSpot formula | MV `filter:` |
 |---|---|
@@ -835,7 +837,11 @@ a date *interval*, `moving_sum` counts surviving *rows* — see the density cave
 the rolling-window rows in the Concept Mapping table above.
 
 Confirmed untranslatable patterns (after checking the reference):
-- `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
+- `[parameter_name]` — ThoughtSpot runtime parameter. **Not** "no SQL equivalent": MV
+  `parameters:` is a GA target (Runtime 18.2+, mutually exclusive with
+  `materialization:`), but this skill does not yet emit it — auto-translation is
+  deferred pending live verification against an 18.2+ warehouse (audit finding 13.2).
+  Log it in the Unmapped Report until that lands.
 - `ts_first_day_of_week(...)`, `last_n_days(...)` — period-scoped time intelligence with no Databricks equivalent
 - `group_aggregate(...)` with `query_groups()` modifier — hardcoded/selective filters unsupported
 - Hyperlink markup: `concat("{caption}", ..., "{/caption}", ...)` — ThoughtSpot display hint
@@ -942,7 +948,7 @@ code block.
 [../../shared/mappings/ts-databricks/ts-databricks-properties.md](../../shared/mappings/ts-databricks/ts-databricks-properties.md).
 Include only sections that have entries. Common sections:
 - AI Context not migrated (no MV equivalent)
-- Parameters not migrated
+- Parameters not yet migrated (MV `parameters:` GA at Runtime 18.2+; emission deferred — audit 13.2)
 - Column groups not migrated
 - AI Context not migrated
 - Format patterns not migrated

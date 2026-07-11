@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: trailing/leading/cumulative/all/semi-additive range behavior live-verified against a Databricks fixture + ThoughtSpot number-match; corrected trailing/leading moving_sum anchor args (C1/C3) and the period-filter offset mechanism from wall-clock to row-relative (C6/C6a); exclusive-default confirmed (C2); materialization: block documented for the first time (C9); quarter/year period-offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: parameters: block GA (18.2+, mutually exclusive with materialization:) documented; runtime requirement corrected to tiered 16.4/17.3/18.1/18.2 (findings 13.1/13.10)) -->
 
 # Databricks Metric View Schema
 
@@ -8,11 +8,23 @@ semantic layers with dimensions, measures, and filters using YAML embedded in SQ
 **Generally available (verified 2026-06-17).** Unity Catalog Business Semantics (which
 includes Metric Views) went **GA on 2026-04-02**. The earlier "Preview channel required"
 instruction is **obsolete** — do **not** flip warehouses to the Preview channel. Current
-requirement: a SQL warehouse running **Databricks Runtime 17.3 or above** plus `CAN USE`
-permission. (A `PARSE_SYNTAX_ERROR` on a GA-era runtime is no longer attributable to the
-warehouse channel.) Sources: Databricks "Redefining the Semantics Data Layer" (2026-04) and
-the [create/edit](https://docs.databricks.com/aws/en/business-semantics/metric-views/create-edit)
-+ [YAML reference](https://docs.databricks.com/aws/en/business-semantics/metric-views/yaml-reference) docs.
+requirement: a SQL warehouse with `CAN USE` permission, running at or above a **tiered
+minimum Databricks Runtime** depending on which features the MV uses — there is no single
+blanket floor:
+
+| Runtime | Unlocks |
+|---|---|
+| **16.4** | Baseline — Metric Views run at all |
+| **17.3+** | Agent metadata (`display_name` / `comment` / `synonyms` — which this repo's converters emit) |
+| **18.1+** | Join `cardinality:` and window `offset:` |
+| **18.2+** | The `parameters:` block (see "Parameters Block" below) |
+
+(A `PARSE_SYNTAX_ERROR` on a GA-era runtime is no longer attributable to the warehouse
+channel — check which tier the failing feature actually needs.) Sources: Databricks
+"Redefining the Semantics Data Layer" (2026-04) and the
+[create/edit](https://docs.databricks.com/aws/en/business-semantics/metric-views/create-edit)
++ [YAML reference](https://docs.databricks.com/aws/en/business-semantics/metric-views/yaml-reference) docs;
+tiered requirement corrected per the 2026-07-11 audit (findings 13.1/13.10).
 
 ---
 
@@ -247,6 +259,8 @@ filter: <sql_boolean_expression>    # Optional. Global WHERE clause. See the "Li
                                     # computed in the same MV; an ad hoc query-time WHERE on an
                                     # unfiltered MV is not.
 
+# parameters:  (optional; GA Runtime 18.2+; mutually exclusive with materialization:) — see "Parameters Block" below
+
 dimensions:                         # GA canonical key is `fields:`; `dimensions:` accepted for backward compat.
   - name: <identifier>              # Required. Machine-readable identifier.
     expr: <sql_expression>          # Required. SQL expression or column reference.
@@ -307,6 +321,8 @@ filter: <sql_boolean_expression>    # Optional. Uses alias.column or source.colu
                                     # Same MV-filter-vs-query-time-WHERE asymmetry applies —
                                     # see the "Live-verified 2026-07-09" note under the v0.1
                                     # `filter:` field above.
+
+# parameters:  (optional; GA Runtime 18.2+; mutually exclusive with materialization:) — see "Parameters Block" below
 
 dimensions:                         # GA canonical key is `fields:`; `dimensions:` accepted for backward compat.
   - name: <identifier>
@@ -425,9 +441,11 @@ measures:
 
 ### Window with Offset — Period-over-Period (verified 2026-05-26; requires Runtime 18.1+)
 
-> **Runtime gate:** The `offset` property requires **Runtime 18.1+**. On Runtime 17.3,
+> **Runtime gate:** The `offset` property requires **Runtime 18.1+** (see the tiered
+> runtime table above — 16.4 is the MV floor, not 17.3). On a runtime below 18.1,
 > MVs with `offset` in a `window:` entry cause `PARSE_SYNTAX_ERROR`. The base `window:`
-> syntax (`order`, `range`, `semiadditive`) works on Runtime 17.3+; only `offset` is gated.
+> syntax (`order`, `range`, `semiadditive`) works from the 16.4 baseline; only `offset`
+> needs 18.1+.
 
 The `window:` field supports an `offset` property for period comparisons:
 
@@ -577,6 +595,47 @@ with no analog in Model TML. See
 `docs/audit/2026-07-08-dbx-window-docs-findings.md`; not live-SQL-tested (the parser
 only needs to recognize the block's shape and pass it through, not execute
 materialization).
+
+### Parameters Block (GA — Runtime 18.2+)
+
+`parameters:` is a top-level key — a sibling of `source:`, `fields:`/`dimensions:`,
+`measures:`, `joins:`, and `filter:` — that declares runtime parameters an MV consumer
+can supply at query time. **GA at Databricks Runtime 18.2+** (see the tiered runtime
+table above). **Mutually exclusive with `materialization:`** — an MV cannot declare
+both blocks in the same YAML body.
+
+| Field | Required? | Notes |
+|---|---|---|
+| `name` | Required | Identifier used to reference the parameter (bare word, no `::`) in a `measures[].expr` or `dimensions[].expr` |
+| `data_type` | Required | SQL data type of the parameter value |
+| `default` | Optional | Default value used when the consumer does not supply one at query time |
+
+```yaml
+parameters:
+  - name: region_filter
+    data_type: STRING
+    default: 'ALL'
+
+measures:
+  - name: filtered_revenue
+    expr: SUM(CASE WHEN region_filter = 'ALL' OR region = region_filter THEN revenue ELSE 0 END)
+```
+
+Parameters are referenced by **bare name** inside a measure or dimension `expr` — no
+`::` delimiter, no table/alias prefix. This is the same bare-word shape this repo's
+formula-translation reference previously (and incorrectly) treated as inherently
+"untranslatable" — see
+[ts-databricks-formula-translation.md](../mappings/ts-databricks/ts-databricks-formula-translation.md).
+
+**Corrected 2026-07-11 (audit findings 13.1/13.10):** earlier drafts of this repo's
+mapping docs stated that MV runtime parameters "don't exist" or have "no SQL
+equivalent." That was wrong — `parameters:` is a documented GA construct at Runtime
+18.2+. **Scope note:** this schema section documents the construct's shape only. The
+ThoughtSpot Parameter → MV `parameters:` entry **translation is not yet auto-emitted**
+by the conversion skills — that emission (and corresponding `ts databricks parse-mv`
+read support) is deferred pending live verification against an 18.2+ warehouse (audit
+finding 13.2). Until that lands, ThoughtSpot parameters continue to be logged in the
+Unmapped Report rather than emitted into the MV YAML.
 
 ### LOD Patterns (verified 2026-05-25)
 
