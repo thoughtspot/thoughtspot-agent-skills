@@ -2,17 +2,33 @@
 """
 smoke_ts_dependency_manager.py — live smoke test for ts-dependency-manager.
 
-Verifies the dependency management workflow against a real ThoughtSpot instance:
-  1.  ThoughtSpot auth
-  2.  Find target model by name and get its GUID
-  3.  Export model TML with --associated --parse
-  4.  ts metadata dependents (flat row output)
-  5.  ts metadata dependents --raw (v2 structured output)
-  6.  Create TML backup
-  7.  Import original model TML via stdin (round-trip; no modifications)
-  8.  Verify round-trip via re-export
-  9.  (Optional) ts metadata delete --type — requires --test-delete-guid and
-      --test-delete-type to provide a throwaway object for the deletion test
+Rewired (audit finding 6.1) onto the real BL-083 command surface — skill v1.3.0/1.4.0
+wired ts-dependency-manager Steps 7/9/11 to `ts dependency backup` / `apply-change` /
+`rollback`, but this smoke test used to hand-roll its own backup dir + manifest and do
+a no-op `ts tml import` round-trip instead of calling any of those subcommands. A
+regression in the actual backup assembly, apply-change ordering, or ROOT-first
+rollback would have passed silently. It now drives the three subcommands directly:
+
+  1.  ThoughtSpot auth (ts auth whoami)
+  2.  Find target model by name/GUID (ts metadata search --subtype WORKSHEET)
+  3.  ts dependency backup            — NON-destructive; builds a REMOVE plan for the
+      target model (source only, unless --fix-guid/--delete-guid are given), pipes it
+      to `ts dependency backup` on stdin, and validates the returned manifest JSON and
+      the backup directory it wrote to disk.
+  4.  ts dependency apply-change      — DESTRUCTIVE. Gated behind an explicit opt-in
+      flag, --run-apply-change (default OFF). Without the flag this step is SKIPPED,
+      not run. When set, it builds a minimal REMOVE plan against the Step 3 backup_dir
+      and validates the results JSON shape.
+  5.  ts dependency rollback --only updates — restores the Step 3 backup's
+      update-in-place entries (source + any --fix-guid) by re-importing the backed-up
+      TML unchanged. This is an idempotent no-op when nothing was actually changed
+      (i.e. when Step 4 was skipped), and is the safe way to exercise the rollback
+      command surface every run.
+  6.  Cleanup — removes the backup directory unless --no-cleanup is passed.
+
+Safety tiers: Steps 3 and 5 are non-destructive/idempotent and always run. Step 4 is
+the one destructive leg and requires an explicit opt-in flag — this smoke test does
+not touch live data unless the caller passes --run-apply-change.
 
 The test does NOT perform RENAME — that operation is not supported by the
 ts-dependency-manager skill (see SKILL.md for rationale).
@@ -22,7 +38,9 @@ Usage:
         --ts-profile production \\
         --model-guid  abc123...   \\           # preferred — stable, unambiguous
         [--model-name "Retail Sales"]          # alternative — resolved to GUID at runtime
-        [--test-delete-guid <guid> --test-delete-type LIVEBOARD] \\
+        [--fix-guid <guid>]                    # optional: include a dependent in the backup
+        [--delete-guid <guid>]                 # optional: include a delete-candidate in the backup
+        [--run-apply-change --apply-change-columns "Some Column,Other Column"] \\
         [--no-cleanup]
 
 Provide exactly one of --model-guid or --model-name.
@@ -37,14 +55,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
-
-try:
-    import yaml
-except ImportError:
-    print("ERROR: PyYAML is required. Run: pip install PyYAML")
-    sys.exit(1)
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -52,25 +63,70 @@ from _common import SmokeTestResult, SkipStep, ts_auth_check, run_ts  # noqa: E4
 
 
 # ---------------------------------------------------------------------------
-# TML import helper (stdin only — ts tml import has no --file flag)
+# Pure plan-builders — no I/O, unit-tested in
+# tools/ts-cli/tests/test_smoke_ts_dependency_manager_plan.py
 # ---------------------------------------------------------------------------
 
-def _ts_import_stdin(ts_profile: str, tml_str: str,
-                     extra_flags: list[str]) -> list | dict:
-    """Import a single TML YAML string via ts tml import (reads JSON array from stdin)."""
-    cmd = ["ts", "tml", "import", "--profile", ts_profile] + extra_flags
-    result = subprocess.run(cmd, input=json.dumps([tml_str]),
-                            capture_output=True, text=True)
+def _build_remove_plan(source: dict, fix: list | None = None,
+                       delete: list | None = None, out_dir: str = "/tmp") -> dict:
+    """Build a REMOVE plan JSON for `ts dependency backup` (pure — no I/O, no network).
+
+    Matches the stdin shape `ts_cli.commands.dependency.backup_cmd` reads:
+    `{"operation", "source", "fix", "delete", "out_dir"}`. `fix`/`delete` default to
+    `[]` (a safe backup scoped to just the source object); `out_dir` defaults to
+    `"/tmp"` matching the CLI's own default.
+    """
+    return {
+        "operation": "REMOVE",
+        "source": source,
+        "fix": list(fix or []),
+        "delete": list(delete or []),
+        "out_dir": out_dir,
+    }
+
+
+def _build_apply_change_plan(source: dict, backup_dir: str, columns_to_remove: list,
+                             fix: list | None = None, delete: list | None = None) -> dict:
+    """Build a minimal REMOVE plan JSON for `ts dependency apply-change` (pure — no I/O).
+
+    Matches what `ts_cli.commands.dependency_apply.apply_change_cmd` validates:
+    `operation`, `source.guid`, a `backup_dir` (required — that's how rollback stays
+    possible), and — for REMOVE — a non-empty `columns_to_remove`.
+    """
+    return {
+        "operation": "REMOVE",
+        "backup_dir": backup_dir,
+        "source": source,
+        "columns_to_remove": list(columns_to_remove),
+        "fix": list(fix or []),
+        "delete": list(delete or []),
+    }
+
+
+# ---------------------------------------------------------------------------
+# ts CLI stdin helper — `ts dependency backup` / `apply-change` read a plan on stdin
+# ---------------------------------------------------------------------------
+
+def _run_ts_stdin(args: list[str], profile: str, payload: dict) -> tuple:
+    """Run a `ts` subcommand that reads a JSON plan on stdin, returning
+    `(parsed_stdout_json, stderr_text)`. Raises RuntimeError on non-zero exit or
+    non-JSON stdout. Mirrors `_common.run_ts` but adds the stdin payload that
+    `ts dependency backup`/`apply-change` require.
+    """
+    cmd = ["ts"] + args + ["--profile", profile]
+    result = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
-            f"ts tml import failed:\n{result.stderr.strip() or result.stdout.strip()}"
+            f"ts {' '.join(args)} failed (exit {result.returncode}):\n"
+            f"{result.stderr.strip() or result.stdout.strip()}"
         )
     try:
-        return json.loads(result.stdout)
+        parsed = json.loads(result.stdout)
     except json.JSONDecodeError as e:
         raise RuntimeError(
-            f"ts tml import returned non-JSON:\n{result.stdout[:300]}"
+            f"ts {' '.join(args)} returned non-JSON stdout:\n{result.stdout[:300]}"
         ) from e
+    return parsed, result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -78,10 +134,11 @@ def _ts_import_stdin(ts_profile: str, tml_str: str,
 # ---------------------------------------------------------------------------
 
 def run_smoke_test(ts_profile: str, model_name: str | None, model_guid: str | None,
-                   test_delete_guid: str | None, test_delete_type: str | None,
+                   fix_guid: str | None, delete_guid: str | None,
+                   run_apply_change: bool, apply_change_columns: list,
                    no_cleanup: bool) -> int:
     result = SmokeTestResult()
-    backup_dir = None
+    backup_dir: Path | None = None
 
     print("=" * 60)
     print("Smoke test: ts-dependency-manager")
@@ -91,8 +148,11 @@ def run_smoke_test(ts_profile: str, model_name: str | None, model_guid: str | No
         print(f"  Target model GUID:    {model_guid}")
     else:
         print(f"  Target model name:    {model_name}")
-    if test_delete_guid:
-        print(f"  Delete test GUID:     {test_delete_guid} ({test_delete_type})")
+    if fix_guid:
+        print(f"  Fix entry GUID:       {fix_guid}")
+    if delete_guid:
+        print(f"  Delete entry GUID:    {delete_guid}")
+    print(f"  apply-change:         {'ENABLED (--run-apply-change)' if run_apply_change else 'SKIPPED (opt-in, not set)'}")
     print()
 
     # ── Step 1: Auth ──────────────────────────────────────────────────────
@@ -134,180 +194,109 @@ def run_smoke_test(ts_profile: str, model_name: str | None, model_guid: str | No
         model_display_name = search_results[0].get("metadata_name", model_name)
 
     result.info(f"Model GUID: {model_guid}  ({model_display_name})")
+    source = {"guid": model_guid, "type": "MODEL", "name": model_display_name}
+    fix_list = [{"guid": fix_guid, "type": "ANSWER", "name": fix_guid}] if fix_guid else []
+    delete_list = [{"guid": delete_guid, "type": "LIVEBOARD", "name": delete_guid}] if delete_guid else []
 
-    # ── Step 3: Export TML ───────────────────────────────────────────────
-    ok, tml_docs = result.step(
-        "Export model TML (--fqn --associated --parse)",
-        run_ts, ["tml", "export", model_guid, "--fqn", "--associated", "--parse"],
-        ts_profile,
+    # ── Step 3: ts dependency backup (non-destructive) ───────────────────
+    def _run_backup():
+        plan = _build_remove_plan(source, fix=fix_list, delete=delete_list,
+                                  out_dir=tempfile.gettempdir())
+        manifest, stderr = _run_ts_stdin(["dependency", "backup"], ts_profile, plan)
+
+        if not isinstance(manifest, dict):
+            raise RuntimeError(f"Expected a manifest JSON object, got: {type(manifest).__name__}")
+        required = {"source_object", "objects", "operation"}
+        missing = required - set(manifest.keys())
+        if missing:
+            raise RuntimeError(f"Manifest missing expected keys: {missing}")
+
+        objects = manifest.get("objects") or []
+        if not objects:
+            raise RuntimeError("Manifest has no backed-up objects (expected at least the source).")
+
+        dir_path = Path(objects[0]["backup_file"]).parent
+        if not dir_path.is_dir():
+            raise RuntimeError(f"Backup directory reported by manifest does not exist: {dir_path}")
+        if not (dir_path / "manifest.json").is_file():
+            raise RuntimeError(f"manifest.json not found in backup dir: {dir_path}")
+        for obj in objects:
+            bf = Path(obj["backup_file"])
+            if not bf.is_file():
+                raise RuntimeError(f"Backed-up TML file missing on disk: {bf}")
+
+        last_line = stderr.strip().splitlines()[-1] if stderr.strip() else "(no stderr)"
+        result.info(f"CLI stderr: {last_line}")
+        return manifest, dir_path
+
+    ok, backup_out = result.step(
+        "ts dependency backup (non-destructive export + manifest)", _run_backup,
     )
     if not ok:
         return result.summary()
+    manifest, backup_dir = backup_out
+    result.info(f"Backup dir: {backup_dir}  ({len(manifest['objects'])} object(s) backed up)")
 
-    if not isinstance(tml_docs, list) or not tml_docs:
-        print("  FAIL  TML export returned empty result.")
-        return 1
+    # ── Step 4: ts dependency apply-change (DESTRUCTIVE — opt-in only) ───
+    def _run_apply_change():
+        if not run_apply_change:
+            raise SkipStep(
+                "apply-change is destructive — pass --run-apply-change to exercise it"
+            )
+        plan = _build_apply_change_plan(
+            source, backup_dir=str(backup_dir), columns_to_remove=apply_change_columns,
+        )
+        parsed, _stderr = _run_ts_stdin(["dependency", "apply-change"], ts_profile, plan)
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"Expected a results JSON object, got: {type(parsed).__name__}")
+        required = {"operation", "source", "succeeded", "failed"}
+        missing = required - set(parsed.keys())
+        if missing:
+            raise RuntimeError(f"apply-change result missing expected keys: {missing}")
+        return parsed
 
-    model_doc = next(
-        (d for d in tml_docs if d.get("type") in ("worksheet", "logical_table", "model")),
-        None,
+    ok, apply_result = result.step(
+        "ts dependency apply-change (DESTRUCTIVE — opt-in via --run-apply-change)",
+        _run_apply_change,
     )
-    if not model_doc:
-        print(f"  FAIL  No model TML found in export (got types: "
-              f"{[d.get('type') for d in tml_docs]})")
-        return 1
+    if ok and apply_result:
+        result.info(
+            f"apply-change: {len(apply_result.get('succeeded') or [])} succeeded, "
+            f"{len(apply_result.get('failed') or [])} failed, "
+            f"{len(apply_result.get('deleted') or [])} deleted"
+        )
 
-    result.info(f"Exported {len(tml_docs)} TML document(s)")
+    # ── Step 5: ts dependency rollback --only updates (idempotent no-op) ─
+    def _run_rollback_updates():
+        parsed = run_ts(
+            ["dependency", "rollback", "--backup-dir", str(backup_dir), "--only", "updates"],
+            ts_profile,
+        )
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"Expected a results JSON object, got: {type(parsed).__name__}")
+        required = {"succeeded", "failed", "new_guids"}
+        missing = required - set(parsed.keys())
+        if missing:
+            raise RuntimeError(f"rollback result missing expected keys: {missing}")
+        failed = parsed.get("failed") or []
+        if failed:
+            raise RuntimeError(f"rollback --only updates reported {len(failed)} failure(s): {failed}")
+        return parsed
 
-    # ── Step 4: ts metadata dependents (flat) ────────────────────────────
-    def _test_dependents_flat():
-        rows = run_ts(["metadata", "dependents", model_guid], ts_profile)
-        if not isinstance(rows, list):
-            raise RuntimeError(f"Expected list output, got: {type(rows).__name__}")
-        result.info(f"dependents (flat): {len(rows)} row(s)")
-        if rows:
-            sample = rows[0]
-            required = {"guid", "name", "type"}
-            missing = required - set(sample.keys())
-            if missing:
-                raise RuntimeError(f"Flat row missing expected keys: {missing}")
-        return rows
-
-    ok, dep_rows = result.step(
-        "ts metadata dependents (flat output)",
-        _test_dependents_flat,
+    ok, rollback_result = result.step(
+        "ts dependency rollback --only updates (idempotent no-op restore)",
+        _run_rollback_updates,
     )
     if ok:
-        result.info("Open item #1: VERIFIED — ts metadata dependents returns valid flat rows")
-
-    # ── Step 5: ts metadata dependents --raw ─────────────────────────────
-    def _test_dependents_raw():
-        raw = run_ts(["metadata", "dependents", model_guid, "--raw"], ts_profile)
-        # --raw returns a list of per-GUID objects; each has dependent_objects.dependents
-        if not isinstance(raw, list) or not raw:
-            raise RuntimeError(f"Expected non-empty list from --raw, got: {type(raw).__name__}")
-        first = raw[0]
-        dep_obj = first.get("dependent_objects", {})
-        if not isinstance(dep_obj, dict):
-            raise RuntimeError(f"Expected dependent_objects dict, got: {type(dep_obj).__name__}")
-        deps = dep_obj.get("dependents", {})
-        result.info(f"dependents (raw): {len(deps)} dependent GUID(s)")
-        return raw
-
-    ok, _ = result.step(
-        "ts metadata dependents --raw (v2 structured output)",
-        _test_dependents_raw,
-    )
-
-    # ── Step 6: Create TML backup ─────────────────────────────────────────
-    timestamp = int(time.time())
-    backup_dir = Path(tempfile.gettempdir()) / f"ts_dep_smoke_{timestamp}"
-
-    def _create_backup():
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        manifest = {"model_guid": model_guid, "model_name": model_name,
-                    "timestamp": timestamp, "files": []}
-        for i, doc in enumerate(tml_docs):
-            doc_type = doc.get("type", f"doc_{i}")
-            doc_body = doc.get(doc_type) or {}
-            doc_guid = doc_body.get("guid") or f"unknown_{i}"
-            fname = f"{doc_type}_{doc_guid}.yaml"
-            (backup_dir / fname).write_text(
-                yaml.dump(doc, allow_unicode=True, default_flow_style=False)
-            )
-            manifest["files"].append(fname)
-        (backup_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
-        return backup_dir
-
-    ok, _ = result.step("Create TML backup", _create_backup)
-    if not ok:
-        return result.summary()
-    result.info(f"Backup: {backup_dir}")
-
-    # ── Step 7: Import original model TML via stdin (round-trip) ─────────
-    def _import_round_trip():
-        tml_str = yaml.dump(model_doc, allow_unicode=True, default_flow_style=False)
-        resp = _ts_import_stdin(ts_profile, tml_str,
-                                ["--policy", "ALL_OR_NONE", "--no-create-new"])
-        # Treat api=ERROR + verified (post-check) as success per open-item #15
-        items = resp if isinstance(resp, list) else [resp]
-        for item in items:
-            status = (item.get("response", {}).get("status", {}) or
-                      item.get("object", [{}])[0].get("response", {}).get("status", {}))
-            sc = (status.get("status_code") if isinstance(status, dict) else None)
-            if sc not in (None, "OK", "ERROR"):
-                raise RuntimeError(f"Unexpected import status_code: {sc}")
-        return resp
-
-    ok, _ = result.step(
-        "Import original model TML via stdin (round-trip, no modifications)",
-        _import_round_trip,
-    )
-    if not ok:
-        return result.summary()
-
-    # ── Step 8: Verify round-trip via re-export ───────────────────────────
-    def _verify_round_trip():
-        re_exported = run_ts(
-            ["tml", "export", model_guid, "--fqn", "--parse"], ts_profile,
+        result.info(
+            f"Rollback restored {len(rollback_result.get('succeeded') or [])} object(s), 0 failures"
         )
-        for doc in re_exported:
-            if doc.get("type") in ("worksheet", "logical_table", "model"):
-                return doc
-        raise RuntimeError("Model TML not found in re-export after round-trip import")
 
-    ok, _ = result.step("Verify round-trip via re-export", _verify_round_trip)
-
-    # ── Step 9 (optional): ts metadata delete --type ─────────────────────
-    if test_delete_guid and test_delete_type:
-        v2_type_map = {
-            "ANSWER":    "ANSWER",
-            "LIVEBOARD": "LIVEBOARD",
-            "MODEL":     "LOGICAL_TABLE",
-            "WORKSHEET": "LOGICAL_TABLE",
-            "VIEW":      "LOGICAL_TABLE",
-            "TABLE":     "LOGICAL_TABLE",
-            "SET":       "LOGICAL_COLUMN",
-            "COHORT":    "LOGICAL_COLUMN",
-        }
-        v2_type = v2_type_map.get(test_delete_type.upper(), test_delete_type)
-
-        def _test_delete():
-            r = subprocess.run(
-                ["bash", "-c",
-                 f"source ~/.zshenv && ts metadata delete {test_delete_guid} "
-                 f"--type {v2_type} --profile '{ts_profile}'"],
-                capture_output=True, text=True,
-            )
-            if r.returncode != 0:
-                raise RuntimeError(f"ts metadata delete failed: {r.stderr[:300]}")
-            # Verify deletion by re-querying
-            check = subprocess.run(
-                ["bash", "-c",
-                 f"source ~/.zshenv && ts metadata get {test_delete_guid} "
-                 f"--type {v2_type} --profile '{ts_profile}'"],
-                capture_output=True, text=True,
-            )
-            if check.returncode == 0 and check.stdout.strip():
-                raise RuntimeError(
-                    f"Object still present after delete — "
-                    f"ts metadata delete --type may not be working correctly"
-                )
-            return True
-
-        ok, _ = result.step(
-            f"ts metadata delete --type {v2_type} (open-item #17 verification)",
-            _test_delete,
-        )
-        if ok:
-            result.info(f"Open item #17: VERIFIED — object {test_delete_guid[:8]}... "
-                        f"genuinely deleted (post-query returned not-found)")
-
-    # ── Cleanup ───────────────────────────────────────────────────────────
+    # ── Step 6: Cleanup ───────────────────────────────────────────────────
     if not no_cleanup and backup_dir and backup_dir.exists():
         shutil.rmtree(backup_dir, ignore_errors=True)
         result.info(f"Backup directory cleaned up: {backup_dir}")
-    elif no_cleanup:
+    elif no_cleanup and backup_dir:
         result.info(f"--no-cleanup: backup preserved at {backup_dir}")
 
     return result.summary()
@@ -324,23 +313,37 @@ def main() -> int:
                           help="GUID of the ThoughtSpot model (preferred — stable, unambiguous)")
     id_group.add_argument("--model-name",
                           help="Display name of the ThoughtSpot model (resolved to GUID at runtime)")
-    parser.add_argument("--test-delete-guid",
-                        help="Optional: GUID of a throwaway object to test ts metadata delete --type")
-    parser.add_argument("--test-delete-type",
-                        help="Type of the throwaway object (LIVEBOARD, ANSWER, etc.)")
+    parser.add_argument("--fix-guid",
+                        help="Optional: GUID of a dependent object (e.g. an Answer) to include "
+                             "in the backup plan's 'fix' list.")
+    parser.add_argument("--delete-guid",
+                        help="Optional: GUID of a dependent object (e.g. a Liveboard) to include "
+                             "in the backup plan's 'delete' list.")
+    parser.add_argument("--run-apply-change", action="store_true",
+                        help="Opt in to running the DESTRUCTIVE `ts dependency apply-change` leg. "
+                             "Default OFF — without this flag the step is skipped, not run.")
+    parser.add_argument("--apply-change-columns",
+                        help="Comma-separated source column name(s) to remove via apply-change. "
+                             "Required (non-empty) when --run-apply-change is set; ignored otherwise.")
     parser.add_argument("--no-cleanup", action="store_true",
                         help="Keep backup directory after test for inspection")
     args = parser.parse_args()
 
-    if bool(args.test_delete_guid) != bool(args.test_delete_type):
-        parser.error("--test-delete-guid and --test-delete-type must be provided together")
+    apply_change_columns = [c.strip() for c in (args.apply_change_columns or "").split(",") if c.strip()]
+    if args.run_apply_change and not apply_change_columns:
+        parser.error(
+            "--apply-change-columns is required (non-empty, comma-separated) when "
+            "--run-apply-change is set."
+        )
 
     return run_smoke_test(
         ts_profile=args.ts_profile,
         model_name=args.model_name,
         model_guid=args.model_guid,
-        test_delete_guid=args.test_delete_guid,
-        test_delete_type=args.test_delete_type,
+        fix_guid=args.fix_guid,
+        delete_guid=args.delete_guid,
+        run_apply_change=args.run_apply_change,
+        apply_change_columns=apply_change_columns,
         no_cleanup=args.no_cleanup,
     )
 
