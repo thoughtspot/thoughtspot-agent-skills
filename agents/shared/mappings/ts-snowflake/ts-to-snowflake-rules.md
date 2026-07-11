@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-06 (inaugural anchor; verify in first external sweep) -->
+<!-- currency: snowflake — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
 
 # Mapping Rules Reference
 

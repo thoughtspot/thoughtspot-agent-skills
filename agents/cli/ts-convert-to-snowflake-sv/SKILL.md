@@ -1447,6 +1447,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.3.1 | 2026-07-11 | Document `sql_view` → `base_table.definition:` (D-Direct) auto-map option; emission deferred to BL-031 (audit 13.4). |
 | 1.3.0 | 2026-07-03 | Step 9.5C diff + Step 11 mechanical DDL checks now delegate to `ts snowflake diff` / `ts snowflake lint-ddl` (BL-063 quick wins); semantic checks remain manual. Prereq ts-cli v0.30.0. |
 | 1.2.4 | 2026-07-03 | Replace the inline macOS-only Keychain token-refresh procedure with a pointer to `/ts-profile-thoughtspot` (U3 — Refresh Credential), the canonical cross-platform procedure (audit finding 11.4). |
 | 1.2.3 | 2026-06-13 | Fix INFORMATION_SCHEMA case comparison (F12); add join-type drop reporting table to T-RULES. |

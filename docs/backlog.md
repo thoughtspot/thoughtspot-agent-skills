@@ -1011,7 +1011,8 @@ requiring `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`.
 The published semantic-view YAML spec now accepts constructs the converter still treats as
 DDL-only or unsupported: per-table `facts:`, dimension `sample_values:` (Snowflake-recommended
 for Cortex Analyst accuracy), `labels: [filter]`, `unique:`, `cortex_search_service:`,
-`access_modifier:`. The schema doc has been corrected (2026-06-17); the **converter emit
+`access_modifier:`, and `base_table.definition:` (SQL-query logical tables, GA 2026-06-26 —
+audit 13.4). The schema doc has been corrected (2026-06-17); the **converter emit
 behaviour has deliberately not changed** pending verification.
 
 ### Approach
