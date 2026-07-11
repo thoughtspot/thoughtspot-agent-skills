@@ -105,6 +105,40 @@ jobs:
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
 
+  # Cross-version pytest matrix. The `validate` job above runs the full suite on 3.12; this
+  # job re-runs ONLY the unit/validator tests on the rest of the declared support range
+  # (pyproject `requires-python = ">=3.10,<3.15"`). Validators/linters stay single-version in
+  # `validate` — this matrix exists purely to catch interpreter-specific test breakage
+  # (audit finding 16.4 → BL-107; 3.14 entry also verifies the lifted cap → BL-106).
+  pytest-matrix:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every version's result — don't cancel siblings when one fails, so a single
+      # interpreter-specific break is visible in isolation.
+      fail-fast: false
+      matrix:
+        # 3.12 is covered by `validate`; this fills in the rest of requires-python.
+        python-version: ["3.10", "3.11", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test/runtime deps
+        run: |
+          pip install pytest pyyaml
+          pip install -e tools/ts-cli
+
+      - name: Run unit + validator tests
+        # Same three invocations as `validate` (see that job for why they're split).
+        run: |
+          pytest tools/ts-cli/tests/ tools/validate/tests/ -q
+          pytest agents/cli/ts-object-model-erd/tests/ -q
+          pytest agents/databricks/tests/ -q
+
   # Weekly scheduled CVE sweep — pip-audit ONLY (no validators/tests). Keeps the existing
   # CVE gate time-driven as well as event-driven without re-running the whole suite on cron
   # (audit finding 16.3). The push/PR pip-audit step inside `validate` is unchanged.
