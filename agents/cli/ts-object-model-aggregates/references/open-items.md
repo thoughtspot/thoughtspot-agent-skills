@@ -7,7 +7,8 @@ be **VERIFIED** before this skill merges to `main` (see
 [.claude/rules/branching.md](../../../../.claude/rules/branching.md) merge criteria).
 
 Status legend: **VERIFIED** (tested live) | **CONFIRMED** (direction known via MCP/docs,
-needs live verification) | **OPEN** (unknown)
+needs live verification) | **OPEN** (unknown) | **IMPLEMENTED** (coded + unit-tested, live
+check pending) | **DEFERRED** (explicit non-v1 decision, tracked as a follow-up)
 
 ---
 
