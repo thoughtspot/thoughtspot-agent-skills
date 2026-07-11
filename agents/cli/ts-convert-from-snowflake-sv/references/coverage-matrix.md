@@ -73,25 +73,34 @@ Use this as the canonical limitations reference.
 | 35 | Mode B (merge multiple SVs → one model) | Multi-SV DDL fetch + dedup + merge |
 | 36 | Mode C (update existing model from changed SV) | Structural + metadata diff with per-column MERGE/UPDATE/KEEP |
 
+### SQL-Query Logical Tables (GA 2026-06-26)
+
+| # | Semantic View Construct | ThoughtSpot Equivalent | Notes |
+|---|---|---|---|
+| 37 | `ALIAS as (SELECT ...)` in `tables()` — SQL-query logical table (YAML: `base_table.definition:`) | ThoughtSpot SQL View TML (`sql_view:`), referenced from `model_tables[]` | Parser now recognizes this form. Distinct from row 2 (named Snowflake views) — this is an inline SQL query with no named database object. To-direction emission of `definition:` from a ThoughtSpot `sql_view` is a separate, deferred concern tracked in BL-031 and does not affect this from-direction parse. |
+
 ---
 
 ## Unmapped Constructs (Limitations)
 
 | # | Semantic View Construct | Limitation | Workaround |
 |---|---|---|---|
-| L1 | `CUSTOM_INSTRUCTIONS` (`AI_QUESTION_CATEGORIZATION`, `AI_SQL_GENERATION`) | No `data_model_instructions` mapping | Run `/ts-object-model-coach` after conversion to add Spotter instructions |
+| L1 | `CUSTOM_INSTRUCTIONS` / `AI_SQL_GENERATION` / `AI_QUESTION_CATEGORIZATION` — free-text instruction strings, not ON/OFF toggles (corrected 2026-07) | No ThoughtSpot Model TML field yet for Data Model Instructions (location TBD — see `ts-object-model-coach` references/open-items.md #4) | Parse the free text (`module_custom_instructions.sql_generation` / `.question_categorization` per snowflake-schema.md) and surface as candidate Data Model Instructions content; run `/ts-object-model-coach` after conversion to place it |
 | L2 | Table-level `with synonyms=('...')` on `tables()` entries | No ThoughtSpot table-level synonym concept | Add table synonyms to `model.description` or `data_model_instructions` for Spotter context |
 | L3 | `ACCESS_MODIFIER: PRIVATE` on facts/metrics | No "private column" concept in ThoughtSpot models | Omit private facts/metrics; or include with `index_type: DONT_INDEX` so Spotter ignores them |
 | L4 | `unique_keys` declarations on table entries | No key declarations in ThoughtSpot models | Not needed — ThoughtSpot does not use key metadata |
 | L5 | Subquery-backed sources (`FROM (<subquery>)` in tables block) | N/A — Snowflake `tables()` does not support subquery sources | If a future SV version adds subquery support, implement using the pattern from `ts-convert-from-databricks-mv` (Step 2c) |
 | L6 | BOOL columns in `if` expressions require parentheses | `if [TABLE::BOOL_COL] then...` fails. Must use `if ( [TABLE::BOOL_COL] ) then...` with parentheses around the condition. `count_if` and `sum_if` also work without this issue. | Use `if ( [T::BOOL] ) then 1 else 0` (parens required) or prefer `count_if([T::BOOL], [T::PK])` / `sum_if([T::BOOL], [T::MEASURE])` which don't need the workaround. |
 | L7 | Formula import on initial model CREATE | Formulas referencing `[TABLE::COL]` fail during initial `ts tml import` (CREATE) but succeed on UPDATE (`--no-create-new`) | Always import model structure first (no formulas), then update with formulas in a second pass |
+| L8 | `is_enum` dimension property (GA 2026-06-25) | No ThoughtSpot enum/categorical-dimension concept | Informational Cortex-Analyst-only aid — parsed but not carried to TML; no action needed |
+| L9 | `with sample values (...)` on a dimension (Snowflake best-practice NL-parsing aid) | No ThoughtSpot sample-values concept | Informational Cortex-Analyst-only aid — parsed but not carried to TML; no action needed |
 
 ### Notes on limitations
 
-**L1–L4** are low severity — ThoughtSpot has no direct equivalent or the equivalent is
-easily achieved via post-conversion coaching (`/ts-object-model-coach`). These are
-cosmetic/metadata features that do not affect the structural correctness of the converted model.
+**L1–L4, L8, L9** are low severity — ThoughtSpot has no direct equivalent or the
+equivalent is easily achieved via post-conversion coaching (`/ts-object-model-coach`).
+These are cosmetic/metadata features that do not affect the structural correctness of
+the converted model.
 
 **L5** is N/A — Snowflake's `tables()` block does not support subquery sources. Only named
 database objects (tables and views) are valid. If a future SV version adds subquery support,

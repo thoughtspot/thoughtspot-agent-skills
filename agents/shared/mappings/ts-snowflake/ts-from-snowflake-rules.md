@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support) -->
+<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7) -->
 
 # Reverse Mapping Rules Reference
 
@@ -22,6 +22,9 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         DB.SCHEMA.TABLE comment='...' with synonyms=('Alt Name','...'),
         -- View-backed source (no primary key — Snowflake view, not physical table)
         DB.SCHEMA.VIEW_NAME,
+        -- SQL-query logical table (GA 2026-06-26) — mirrors YAML base_table.definition:
+        -- see "SQL-Query Logical Table → ThoughtSpot SQL View TML" below
+        ALIAS as (SELECT ...) [primary key (COL)],
         -- Range constraint (for range/temporal joins — half-open interval)
         DB.SCHEMA.TABLE primary key (COL) unique (START_COL, END_COL)
             constraint CONSTRAINT_NAME distinct range between START_COL and END_COL exclusive,
@@ -58,6 +61,14 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         TABLE_REF.VIEW_COL as view_alias.DIM_NAME with cortex search service SVC_NAME,
         -- Filter-labeled dimension (boolean expr, available as WHERE clause)
         TABLE_REF.DIM_NAME labels = (filter) as BOOLEAN_EXPR [comment='...'],
+        -- Sample values (Snowflake best practice; improves Cortex Analyst accuracy) —
+        -- DDL clause form not yet confirmed against a live GET_DDL round-trip; expected
+        -- to parallel `with synonyms=(...)`. → ThoughtSpot: no equivalent; see note below.
+        TABLE_REF.VIEW_COL as view_alias.DIM_NAME with sample values ('val1', 'val2', ...),
+        -- is_enum indicator (GA 2026-06-25; marks dimension as enumerable) — DDL clause
+        -- form not yet confirmed against a live GET_DDL round-trip. → ThoughtSpot: no
+        -- equivalent; see note below.
+        TABLE_REF.VIEW_COL as view_alias.DIM_NAME is_enum,
         ...
     )
     -- Uniqueness constraints (inline on tables; range constraints defined in tables() block)
@@ -73,8 +84,11 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
     )
     comment='top-level view description'
     -- Cortex Analyst clauses (optional; may appear after comment)
-    ai_sql_generation = 'ON'|'OFF'
-    ai_question_categorization = 'ON'|'OFF'
+    -- Corrected 2026-07 (finding 13.6): free-text instruction strings, NOT ON/OFF
+    -- toggles (Jan 12 2026 "custom instructions" release) — see snowflake-schema.md
+    -- module_custom_instructions.sql_generation / .question_categorization
+    ai_sql_generation = '<free-text instructions>'
+    ai_question_categorization = '<free-text instructions>'
     ai_verified_queries (
         QUERY_NAME AS (
             QUESTION 'natural language question'
@@ -129,6 +143,19 @@ create or replace semantic view BIRD_FINANCIAL_SV
 - Each metric entry format: `TABLE_ALIAS.VIEW_COLUMN as AGG(view_alias.METRIC_NAME)`
   - The `AGG(...)` expression defines the aggregation
 - `comment='...'` is optional metadata — use as a ThoughtSpot column description
+- `ai_sql_generation = '<text>'` / `ai_question_categorization = '<text>'` are free-text
+  instruction strings (not ON/OFF toggles) that parse as
+  `module_custom_instructions.sql_generation` / `.question_categorization` in Snowflake's
+  own YAML (see snowflake-schema.md). → ThoughtSpot: treat the text as candidate content
+  for Model **Data Model Instructions** — surface it to the user rather than silently
+  dropping it. The exact ThoughtSpot TML field for Data Model Instructions is still TBD
+  (see `ts-object-model-coach` references/open-items.md #4), so this is currently a
+  reporting/handoff step, not a structural TML mapping — see coverage-matrix.md L1 for
+  the tracked limitation and the `/ts-object-model-coach` workaround.
+- `with sample values (...)` and an `is_enum` indicator (GA 2026-06-25) may appear on a
+  dimension entry — Cortex-Analyst-only NL-parsing aids with no ThoughtSpot equivalent.
+  → ThoughtSpot: parse but do not attempt to emit; `sample_values` improves NL parsing,
+  `is_enum` marks the dimension as enumerable — both are informational only.
 
 ---
 
@@ -918,6 +945,49 @@ Import with: `ts tml import --policy ALL_OR_NONE --profile {profile}`
 - Complex SQL (subqueries, CTEs, CASE, window functions) cannot be faithfully converted
   to search tokens. Log these as "manual review needed" in the report.
 - Column name resolution depends on the Model import succeeding first.
+
+---
+
+## SQL-Query Logical Table → ThoughtSpot SQL View TML
+
+### Detection
+
+GA 2026-06-26 ("SQL queries as logical tables"): a `tables (...)` entry may define a
+logical table by a SQL query instead of a physical `database.schema.table` reference:
+
+```sql
+ALIAS as (SELECT ... FROM ...) [primary key (COL)],
+```
+
+(YAML equivalent on the to-direction: `base_table.definition: "SELECT ..."` — see
+snowflake-schema.md "Complete Schema".) Detect this form when a `tables()` entry's
+right-hand side, after `as`, begins with `(SELECT` or `(WITH` instead of a
+`DB.SCHEMA.TABLE` / `DB.SCHEMA."TABLE"` reference.
+
+### Translation
+
+Unlike the ambiguous Databricks `source:` SELECT-subquery case (which offers a D/T/M/S
+choice because the Metric View YAML doesn't declare intent — see
+`ts-databricks/ts-from-databricks-rules.md`), a Snowflake SQL-query logical table
+declares its SQL-backed nature explicitly in the semantic view definition — **no user
+decision is needed**. Map directly to a ThoughtSpot **SQL View TML** (`sql_view:` — see
+[thoughtspot-sql-view-tml.md](../../schemas/thoughtspot-sql-view-tml.md)):
+
+- Create a `sql_view` TML with `sql_query:` set to the `SELECT ...` text verbatim
+  (referencing the same connection as the rest of the model) and `sql_view_columns:`
+  derived from the query's output columns.
+- The Model's `model_tables[]` entry for `ALIAS` then points at this SQL View instead
+  of a physical Table TML — same join/column-reference handling as any other
+  `model_tables[]` entry.
+
+This rule is distinct from "View-Backed Sources" below, which covers **named**
+Snowflake views (`DB.SCHEMA.VIEW_NAME` with no `primary key`) — those map straight to a
+physical Table TML pointing at the view. This rule covers **inline** SQL-query tables
+with no named database object at all.
+
+**Note:** this is the from-direction parse only. The to-snowflake-sv converter emitting
+a ThoughtSpot `sql_view` back out as `base_table.definition:` is a separate, deferred
+concern — see BL-031 and ts-snowflake-properties.md "Partial Migrations — SQL Views".
 
 ---
 
