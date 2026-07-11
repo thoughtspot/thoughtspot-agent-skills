@@ -4,9 +4,17 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    # Weekly CVE sweep (Mondays 06:00 UTC). pip-audit only fires on push/PR today, so an
+    # advisory published between merges goes undetected until the next PR — this catches it
+    # on a cadence (audit finding 16.3). Complements the nudge-driven external sweep.
+    - cron: "0 6 * * 1"
 
 jobs:
   validate:
+    # Full validator/test suite only makes sense on a code change — skip it on the weekly
+    # cron (the scheduled run does the pip-audit-only job below instead).
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,3 +104,24 @@ jobs:
           pytest tools/ts-cli/tests/ tools/validate/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
           pytest agents/databricks/tests/ -q
+
+  # Weekly scheduled CVE sweep — pip-audit ONLY (no validators/tests). Keeps the existing
+  # CVE gate time-driven as well as event-driven without re-running the whole suite on cron
+  # (audit finding 16.3). The push/PR pip-audit step inside `validate` is unchanged.
+  scheduled-audit:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime deps + pip-audit
+        run: |
+          pip install pip-audit
+          pip install -e tools/ts-cli
+
+      - name: Dependency vulnerability scan (pip-audit)
+        run: pip-audit
