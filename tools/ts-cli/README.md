@@ -121,6 +121,7 @@ ts metadata search [OPTIONS]
 | `--profile`, `-p` | first profile | Profile to use |
 | `--type`, `-t` | `LOGICAL_TABLE` | Object type: `LOGICAL_TABLE`, `LIVEBOARD`, `ANSWER` |
 | `--subtype`, `-s` | (none) | Subtype filter within `LOGICAL_TABLE` (repeatable): `WORKSHEET`, `MODEL`, `ONE_TO_ONE_LOGICAL`, `USER_DEFINED`, `AGGR_WORKSHEET` |
+| `--connection`, `-c` | (none) | Scope results to one connection by display name (client-side, case-insensitive match on `metadata_header.dataSourceName`). Objects not scoped to a connection (worksheets/models) are excluded when set. |
 | `--name`, `-n` | (none) | Name filter using SQL LIKE syntax: `%` = any chars, `_` = one char |
 | `--guid`, `-g` | (none) | Filter by GUID (exact match) |
 | `--tag` | (none) | Filter by tag name or GUID (repeatable) |
@@ -141,6 +142,10 @@ ts metadata search --subtype WORKSHEET
 
 # Search by name
 ts metadata search --subtype WORKSHEET --name "%sales%"
+
+# Scope to a single connection (client-side dataSourceName filter)
+ts metadata search --connection "Snowflake Prod"
+ts metadata search --connection "Snowflake Prod" --name "%DIM%"
 
 # Search liveboards, full result set (--all is accepted but no longer needed)
 ts metadata search --type LIVEBOARD --all
