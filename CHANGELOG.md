@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-11
+- feat(validate): 2026-07-11 audit backlog+validators batch — new `check_orphan_references` (kills the dead-reference-file class; deleted 2 obsolete Mode C specs); extend `check_references` to `references/*.md` + `docs/`; `check_smoke_tests` ALLOWLIST BL-reference gate; `check_patterns` Check 6 (blocks the stdin `ts tml import` wrapper); fix `check_open_items` WONTFIX-convention false-positives; weekly scheduled `pip-audit` CVE sweep (audit 1.1/1.4/5.1/6.3/16.3)
+- chore(skills): migrate ts-convert-from-looker (1.0.1) + ts-object-model-coach (2.3.2) to `ts tml import --file`/`--dir` (audit 5.1); file BL-102–BL-117 for the remaining backlog-bucket findings
 - docs(mappings): 2026-07-11 audit mapping-update batch — Databricks MV `parameters:` GA (18.2+) + tiered runtime; Snowflake SQL-query logical tables (`base_table.definition:`), free-text AI instructions, `is_enum`/`sample_values`; thoughtspot-* + ts-to-snowflake-rules currency anchors bumped to 2026-07 (audit 13.1/13.4–13.7/13.10/13.12)
 - chore(skills): bump ts-convert-from-snowflake-sv 1.16.0, ts-convert-to-snowflake-sv 1.3.1, ts-convert-to-databricks-mv 1.1.1, ts-convert-from-databricks-mv 1.8.2
 - chore: bump ts-cli to v0.45.1 — fix `resolve_profile` crash on the wrapped `{"profiles":[...]}` file format (audit 4.1) + consolidate triplicated profile parsing on `load_profiles()` (audit 4.2)

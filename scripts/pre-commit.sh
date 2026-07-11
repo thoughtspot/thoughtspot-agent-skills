@@ -120,9 +120,10 @@ if echo "$STAGED" | grep -q 'SKILL\.md'; then
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
-# Smoke tests — every Claude skill (not on the allowlist) must have a smoke test
-# Runs when a SKILL.md or smoke test is touched
-if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/)'; then
+# Smoke tests — every Claude skill (not on the allowlist) must have a smoke test,
+# and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3).
+# Runs when a SKILL.md, a smoke test, or the validator itself is touched.
+if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/|tools/validate/check_smoke_tests\.py)'; then
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
 fi
 

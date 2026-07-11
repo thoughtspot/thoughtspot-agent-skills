@@ -3110,3 +3110,29 @@ a live-instance run against a disposable model — reserved for a user-authorize
 destructive gate.
 
 **Target:** next live-instance session with an expendable ThoughtSpot model and explicit user authorization for the destructive leg.
+
+---
+
+## BL-117 — Migrate the shared `ts-tml-import-gate.md` off the stdin-import wrapper
+
+**Filed:** 2026-07-11
+**Source:** 2026-07-11 full audit finding 5.1 (remainder; surfaced during the PR-batch-3 migration).
+**Status:** OPEN
+
+The audit-5.1 fix migrated `ts-convert-from-looker` and `ts-object-model-coach` off the superseded
+`python3 -c "…json.dumps([…])" | ts tml import/lint` stdin wrapper to `--file`/`--dir`, and added
+`check_patterns` Check 6 to block re-entry — but Check 6 scans only `SKILL.md` files (mirroring
+Check 5's carve-out). The shared reference `agents/shared/schemas/ts-tml-import-gate.md` (line ~27)
+and its generated copy under `agents/databricks/shared/` **still teach the old wrapper** as the
+canonical import-gate procedure, and two CLI-runtime converters (`ts-convert-from-databricks-mv`,
+`ts-convert-from-snowflake-sv`) defer to it — both run ts-cli ≥ v0.27.0 and would execute the taught
+wrapper literally. So 5.1 is only partially closed repo-wide.
+
+**Work:** (a) rewrite the `ts-tml-import-gate.md` procedure to use `ts tml lint --file`/`--dir` /
+`ts tml import --file`/`--dir`; (b) extend Check 6 (or a sibling) to also scan
+`agents/shared/schemas/*.md` so the shared doc can't regress; (c) run `./scripts/stage-sync.sh` (shared
+file changed → CoCo stage) and confirm the `agents/databricks/shared/` copy regenerates on deploy.
+This carries the CLAUDE.md change-impact fan-out, which is why it was scoped out of the batch-3
+validators PR rather than bundled.
+
+**Target:** next converter/codification pass (fold into BL-100 sequencing if convenient).
