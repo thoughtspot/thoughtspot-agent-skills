@@ -116,6 +116,7 @@ These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
 | Skill | What it does |
 |---|---|
 | [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model |
+| [`ts-object-model-aggregates`](agents/cli/ts-object-model-aggregates/SKILL.md) | Audit a Model's Liveboards/Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing) — signature mining, cost-based candidate ranking, gated DDL/TML generation ⚠️ pre-merge, open items unverified |
 | [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
 | [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login |
 | [`ts-object-model-spotql-query`](agents/cli/ts-object-model-spotql-query/SKILL.md) | Query a Model with SpotQL — write Semantic SQL, validate it to warehouse SQL, execute it, and review the data results; includes a reference for calling the SpotQL API from your own product or agent. New to SpotQL? Start with [**Why SpotQL**](agents/cli/ts-object-model-spotql-query/references/architecture.md) — the architecture & trust model vs raw DB SQL. |

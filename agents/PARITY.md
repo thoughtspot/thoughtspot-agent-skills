@@ -10,6 +10,7 @@
 | ts-dependency-manager | Y | — | — | — |
 | ts-load-source-data | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
+| ts-object-model-aggregates | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |
 | ts-object-model-erd | Y | — | — | — |
 | ts-object-model-spotql-query | Y | — | — | — |
