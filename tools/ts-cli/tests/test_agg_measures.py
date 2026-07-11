@@ -43,6 +43,61 @@ def test_unrecognised_expr_is_unknown():
     assert plan["decomposable"] is False
 
 
+def test_formula_backed_measure_column_is_not_double_planned():
+    # A MEASURE column carrying a formula_id is the formula's surface, not a
+    # physical warehouse column — it must not yield a spurious raw-SUM plan.
+    model_tml = {"model": {
+        "columns": [
+            {"name": "Avg Sale Col", "column_id": "FACT::X",
+             "formula_id": "formula_Avg Sale",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+            {"name": "Sales", "column_id": "FACT::AMOUNT",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        ],
+        "formulas": [
+            {"id": "formula_Avg Sale", "name": "Avg Sale", "expr": "average ( [Sales] )"},
+        ],
+    }}
+    plans = build_rewrite_plans(model_tml)
+    assert set(plans) == {"Avg Sale", "Sales"}  # no "Avg Sale Col" plan
+    assert plans["Avg Sale"]["class"] == "AVG"
+    # No plan may claim the formula-backed column as a physical source column.
+    sources = [c["source_column"] for p in plans.values() for c in p["components"]]
+    assert "Avg Sale Col" not in sources
+
+
+def test_colliding_slugs_get_unique_aliases():
+    # "Avg Sale" and "Avg-Sale" both slug to avg_sale; non-ASCII names slug to
+    # the "measure" fallback. All aliases across plans must be unique, and any
+    # renamed alias must be rewritten inside its plan's model_expr too.
+    model_tml = {"model": {
+        "formulas": [
+            {"id": "f1", "name": "Avg Sale", "expr": "average ( [Sales] )"},
+            {"id": "f2", "name": "Avg-Sale", "expr": "average ( [Sales USD] )"},
+            {"id": "f3", "name": "売上", "expr": "sum ( [Amount JP] )"},
+            {"id": "f4", "name": "収益", "expr": "sum ( [Amount JP 2] )"},
+        ],
+    }}
+    plans = build_rewrite_plans(model_tml)
+    all_aliases = [c["alias"] for p in plans.values() for c in p["components"]]
+    assert len(all_aliases) == len(set(all_aliases))
+    # Deterministic: first occurrence keeps the base alias, later ones get _2, _3...
+    assert [c["alias"] for c in plans["Avg Sale"]["components"]] == [
+        "avg_sale_sum", "avg_sale_cnt"]
+    assert [c["alias"] for c in plans["Avg-Sale"]["components"]] == [
+        "avg_sale_sum_2", "avg_sale_cnt_2"]
+    assert plans["Avg-Sale"]["model_expr"] == (
+        "sum ( [avg_sale_sum_2] ) / sum ( [avg_sale_cnt_2] )")
+    # Empty slugs fall back to "measure" instead of colliding on "_sum".
+    assert plans["売上"]["components"][0]["alias"] == "measure_sum"
+    assert plans["収益"]["components"][0]["alias"] == "measure_sum_2"
+
+
+def test_non_ascii_name_gets_fallback_slug():
+    plan = classify_measure("売上", expr="sum ( [Amount] )")
+    assert plan["components"][0]["alias"] == "measure_sum"
+
+
 def test_build_rewrite_plans_reads_model_tml():
     model_tml = {"model": {
         "columns": [

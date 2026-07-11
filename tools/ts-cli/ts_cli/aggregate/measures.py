@@ -20,7 +20,8 @@ _RATIO = re.compile(
 
 
 def _slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    return slug or "measure"  # fully non-ASCII/symbol names must not slug to ""
 
 
 def _plan(name, klass, decomposable, components=None, model_expr=None, requires=None):
@@ -97,17 +98,49 @@ def classify_measure(name: str, aggregation: Optional[str] = None,
     return _plan(name, "UNKNOWN", False)
 
 
+def _uniquify_aliases(plans: dict) -> None:
+    """Make component aliases unique across all plans, in stable iteration order.
+
+    Aliases are the binding contract downstream tasks (SQL/TML generation) key on;
+    colliding slugs ("Avg Sale" vs "Avg-Sale") would silently merge components.
+    First occurrence keeps its base alias; later collisions get _2, _3, ... and any
+    renamed alias is rewritten inside that plan's model_expr as well.
+    """
+    seen: set = set()
+    for plan in plans.values():
+        renames = {}
+        for comp in plan["components"]:
+            alias = comp["alias"]
+            if alias in seen:
+                n = 2
+                while f"{alias}_{n}" in seen:
+                    n += 1
+                new_alias = f"{alias}_{n}"
+                renames[alias] = new_alias
+                comp["alias"] = new_alias
+                alias = new_alias
+            seen.add(alias)
+        if renames and plan["model_expr"]:
+            for old, new in renames.items():
+                plan["model_expr"] = plan["model_expr"].replace(f"[{old}]", f"[{new}]")
+
+
 def build_rewrite_plans(model_tml: dict) -> dict:
     """Map every MEASURE column and formula in a Model TML to its rewrite plan."""
     model = model_tml.get("model", {})
     plans: dict = {}
-    formula_names = set()
     for f in model.get("formulas", []) or []:
         plans[f["name"]] = classify_measure(f["name"], expr=f.get("expr"))
-        formula_names.add(f["name"])
     for c in model.get("columns", []) or []:
+        if c.get("formula_id"):
+            # Formula-backed column: its plan comes from the formulas[] entry
+            # (resolved by formula_id, same as spotql_ops.classify_model_columns).
+            # The column name is NOT a physical warehouse column — planning it as
+            # a raw measure would emit a spurious SUM over a nonexistent column.
+            continue
         props = c.get("properties", {}) or {}
-        if props.get("column_type") == "MEASURE" and c["name"] not in formula_names:
+        if props.get("column_type") == "MEASURE":
             plans[c["name"]] = classify_measure(
                 c["name"], aggregation=props.get("aggregation", "SUM"))
+    _uniquify_aliases(plans)
     return plans
