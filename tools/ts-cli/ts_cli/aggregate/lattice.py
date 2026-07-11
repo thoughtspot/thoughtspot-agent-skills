@@ -68,14 +68,22 @@ def _merge_similar_dimsets(base: set, jaccard_threshold: float) -> set:
 
 
 def _finest_bucket(cand: dict, usable: list, plans: dict) -> Optional[str]:
-    """Finest bucket required among sigs this dimset+datecol could cover."""
+    """Finest bucket required among sigs this dimset+datecol could cover.
+
+    A coverable detail-date sig (date_bucket=None) on this candidate's date
+    column needs raw dates — it forces the candidate to bucket=None."""
     trial = dict(cand)
     finest = None
     for _, s in usable:
         trial["bucket"] = s.get("date_bucket")
-        if covers(trial, s, plans) and s.get("date_bucket"):
-            idx = BUCKETS.index(s["date_bucket"])
-            finest = idx if finest is None else min(finest, idx)
+        if not covers(trial, s, plans):
+            continue
+        if s.get("date_column") != cand.get("date_column"):
+            continue  # non-dated sig: coverable at any bucket, imposes none
+        if s.get("date_bucket") is None:
+            return None  # detail-date query: raw dates are the finest requirement
+        idx = BUCKETS.index(s["date_bucket"])
+        finest = idx if finest is None else min(finest, idx)
     return BUCKETS[finest] if finest is not None else None
 
 

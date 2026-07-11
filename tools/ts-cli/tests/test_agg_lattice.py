@@ -56,6 +56,17 @@ def test_candidates_use_finest_required_bucket():
     assert best and best[0]["bucket"] == "DAILY"
 
 
+def test_detail_date_sig_forces_raw_date_bucket():
+    # A detail-date sig (date_bucket=None) needs raw dates: the merged candidate
+    # must land at bucket=None and cover BOTH sigs, not bucket=MONTHLY covering one.
+    sigs = [_sig(["State"], date_column="Order Date", bucket="MONTHLY"),
+            _sig(["State"], date_column="Order Date", bucket=None)]
+    cands = generate_candidates(sigs, PLANS)
+    best = [c for c in cands if len(c["covered"]) == 2]
+    assert best and best[0]["bucket"] is None
+    assert sorted(best[0]["covered"]) == [0, 1]
+
+
 def test_wide_grain_flagged():
     dims = [f"D{i}" for i in range(9)]
     cands = generate_candidates([_sig(dims)], PLANS, max_width=8)
