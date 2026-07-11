@@ -100,7 +100,7 @@ Build `agents/databricks/` as a third runtime alongside CLI and CoCo:
 ### Design spec
 
 Full architecture, auth design, command mapping, test cases, and SETUP.md outline:
-[`docs/superpowers/specs/2026-06-11-databricks-ts-client-design.md`](../superpowers/specs/2026-06-11-databricks-ts-client-design.md)
+[`docs/superpowers/specs/2026-06-11-databricks-ts-client-design.md`](superpowers/specs/2026-06-11-databricks-ts-client-design.md)
 
 ---
 
@@ -208,7 +208,8 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 **Source:** Smoke test of `connection/create` on se-thoughtspot (2026-06-11)
 **Affects:** NEW skill `agents/cli/ts-object-connection-create`; `tools/ts-cli` (`connections create`)
 **Status:** Not started
-**Full plan:** [`superpowers/plans/2026-06-11-ts-object-connection-create.md`](superpowers/plans/2026-06-11-ts-object-connection-create.md)
+**Full plan:** no separate plan doc was ever written — see Problem / Verified facts /
+Proposed approach below for the full design.
 
 ### Problem
 

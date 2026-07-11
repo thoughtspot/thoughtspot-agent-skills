@@ -63,6 +63,10 @@ run_check() {
 
 # Always run these — they're fast and catch the most common mistakes
 run_check "secrets"              "tools/validate/check_secrets.py --root $REPO_ROOT"
+# check_references.py runs unconditionally (not gated to a staged-file pattern) — it
+# already fires on every commit, which is a superset of "fires when a SKILL.md,
+# references/*.md, or docs/**/*.md changes" (audit finding 1.4 extended its scope to
+# those file classes; the existing unconditional trigger already covers them).
 run_check "reference paths"      "tools/validate/check_references.py --root $REPO_ROOT"
 run_check "anti-patterns"        "tools/validate/check_patterns.py --root $REPO_ROOT --staged"
 run_check "version sync"         "tools/validate/check_version_sync.py --root $REPO_ROOT"
