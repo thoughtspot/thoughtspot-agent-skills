@@ -21,8 +21,18 @@ approval at every step — creates the warehouse aggregate tables, the aggregate
 Model TML, and the association patch.
 
 **Scope decision:** end-to-end but gated (audit → recommend → user shortlist →
-generate DDL/TML/association with confirmation gates). Warehouses: Snowflake
-and Databricks in v1.
+generate DDL/TML/association with confirmation gates). Warehouse support is
+**tiered by execution mode**, not hard-coded per vendor:
+
+- **Connected mode** (Snowflake, Databricks in v1 — existing `ts-profile-*`
+  auth): the skill runs profiling SQL and executes the aggregate-table DDL
+  directly.
+- **Manual mode** (BigQuery in v1; extensible to any dialect): the skill emits
+  dialect-correct DDL plus a profiling SQL script; the user executes both in
+  the source and feeds the profiling results back (results file or paste), so
+  compression scoring still works. Only DDL execution and profiling are
+  manual — table registration in TS and the entire model layer remain
+  automated (see Generation).
 
 ## Architecture
 
@@ -40,7 +50,7 @@ column), confirmation gates, and the judgment calls code cannot make
 | `ts aggregate signatures` | Fetch the Model's dependents (Liveboards + Answers), export TML, parse every viz/answer into a normalized query signature | `--model <guid>` → `signatures.jsonl` |
 | `ts aggregate history` | Mine Snowflake `QUERY_HISTORY` / Databricks `system.query.history` for ThoughtSpot-issued queries against the Model's tables; produce run-frequency weights per signature | warehouse profile → `weights.json` |
 | `ts aggregate recommend` | Lattice generalization + greedy weighted set-cover → ranked candidates and marginal-gain curve | signatures + weights (+ profiling results on second pass) → `candidates.json` |
-| `ts aggregate profile` | Profiling SQL for top-K candidates: base row count, `COUNT(*) GROUP BY <grain>` per candidate → compression ratios written back | candidates + warehouse profile → updated `candidates.json` |
+| `ts aggregate profile` | Profiling SQL for top-K candidates: base row count, `COUNT(*) GROUP BY <grain>` per candidate → compression ratios written back. Connected mode runs the SQL; manual mode emits the script (`--emit-sql`) and ingests a results file (`--results`) | candidates (+ warehouse profile in connected mode) → updated `candidates.json` |
 | `ts aggregate generate` | Emit warehouse DDL, aggregate Model TML, and `aggregated_models` association patch for one approved candidate. Never auto-imports. | `--candidate <id>` → artifact files |
 
 Dependent-walking reuses the `ts-dependency-manager` approach, **including
@@ -137,10 +147,20 @@ covering only stale/unviewed objects.
 
 Each artifact is shown to the user before anything executes or imports.
 
-1. **Warehouse DDL** — Snowflake: dynamic table (configurable `TARGET_LAG`,
-   default 1h), CTAS fallback. Databricks: materialized view, CTAS fallback.
+1. **Warehouse DDL** — dialect templates per warehouse. Snowflake: dynamic
+   table (configurable `TARGET_LAG`, default 1h), CTAS fallback. Databricks:
+   materialized view, CTAS fallback. BigQuery: materialized view where the
+   rewrite plan fits BQ MV restrictions, else CTAS + scheduled-query refresh.
    Naming `<BASE>_AGG_<grain summary>`, user confirms/edits. SELECT is built
    from the rewrite plans (stored components, not display measures).
+   *Connected mode:* skill executes the DDL after the gate. *Manual mode:*
+   skill writes the DDL to a file, pauses, and resumes when the user confirms
+   they have run it (flow is idempotent, so resuming a later session is fine).
+   In both modes the skill then registers the table in TS by importing Table
+   TML against the existing connection (`table.schema` is validated against
+   the connection at import, which doubles as proof the DDL ran); if that
+   import fails, fall back to asking the user to add the table via the TS UI
+   and resume.
 2. **Aggregate Model TML** — single logical table over the aggregate table.
    Column and formula names copied exactly (case-sensitive) from the primary.
    Decomposed measures rebuilt as formulas. `is_spotter_enabled: true`
@@ -183,7 +203,7 @@ the association patch (restore backed-up primary TML).
 |---|---|
 | Dependent TML export fails | Skip object, count in report |
 | Unparseable viz/search tokens | Signature marked `partial`, excluded from coverage, counted ("12 of 87 signatures unparseable") |
-| No warehouse profile configured | Coverage-only scoring with explicit "compression unestimated" caveat |
+| No warehouse profile configured (manual mode) | Emit profiling SQL script; accept results file/paste for compression scoring; else coverage-only with explicit "compression unestimated" caveat |
 | Profiling SQL timeout | Fall back to sampling / `APPROX_COUNT_DISTINCT` |
 | Routing verification fails | Report + offer association rollback |
 
