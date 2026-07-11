@@ -1,4 +1,4 @@
-<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: all 5 range values + inclusive|exclusive anchor modifier live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading moving_sum args corrected (C1/C3), exclusive default confirmed (C2), all/cumulative/semi-additive confirmed (C4/C5/C7), period-filter offset corrected to row-relative (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032) -->
+<!-- currency: databricks — 2026-07 (PR1 window deep-analysis 2026-07-09: all 5 range values + inclusive|exclusive anchor modifier live-verified against a Databricks fixture + ThoughtSpot number-match — trailing/leading moving_sum args corrected (C1/C3), exclusive default confirmed (C2), all/cumulative/semi-additive confirmed (C4/C5/C7), period-filter offset corrected to row-relative (C6/C6a); quarter/year offset grains Deferred (C8); see BL-032; PR1.5 semantic deep-dive 2026-07-09: LOD dimension × filter (A1) CONFIRMED filter-aware on TS under both filter kinds, cross-platform DIVERGENCE for a DBX consumer's ad hoc query-time WHERE (A2, DBX-internal asymmetry); cross-measure ratio × grain (B1) CONFIRMED ratio-of-sums cross-platform at every grain; global filter: × window ordering (C1) CONFIRMED filter-before-window cross-platform, frame semantics DIVERGENCE (date-interval vs row-positional); semi-additive × date-range filter (D1) CONFIRMED last/first-in-filtered-range cross-platform; trailing-window frame (E1) DIVERGENCE — DBX date-interval vs TS row-positional on gapped data, density caveat added; A3 follow-up (user-suggested) 2026-07-09: group_aggregate's `{}` filter argument CORRECTS the A1/A2 "no TS analogue" conclusion — `{}` is search-filter-blind but model-filter-aware, reproducing DBX's MV-filter-aware + query-WHERE-blind composite when paired with a mirrored model-level filters: block; subtraction form query_filters() - {col} import-accepted but does not exclude a derived-formula filter — see docs/audit/2026-07-09-dbx-semantic-claim-matrix.md; see BL-032; 2026-07-11 audit: corrected the "Parameter References (untranslatable)" flowchart node and Untranslatable Patterns table row — MV `parameters:` IS a GA construct (18.2+); auto-translation is deferred, not "doesn't exist" (findings 13.1/13.10, deferred to 13.2)) -->
 
 # Formula Translation Reference — Databricks
 
@@ -19,7 +19,7 @@ ThoughtSpot models.
 
 ```
 Formula / Expression contains...
-├── [word] with no ::           → Parameter References (untranslatable)
+├── [word] with no ::           → Parameter References (see note below — not yet auto-translated)
 ├── (SELECT ... FROM ...)       → Subquery (untranslatable — log in Unmapped Report)
 ├── -- or /* ... */             → SQL Comments (strip before translating)
 ├── *_if(cond, x)               → Conditional Aggregates (native *_if functions)
@@ -37,6 +37,18 @@ Formula / Expression contains...
 ├── [other_formula_name]        → Resolve via Nested Column References
 └── standard function(args)     → Scalar Functions
 ```
+
+**Corrected 2026-07-11 (audit findings 13.1/13.10) — Parameter References.** A bare
+`[word]` with no `::` is only untranslatable when the target Metric View has no
+matching entry in its `parameters:` block. Databricks MV runtime parameters ARE a
+GA construct (Runtime 18.2+, see
+[databricks-metric-view.md](../../schemas/databricks-metric-view.md#parameters-block-ga--runtime-182) —
+"parameters don't exist in MVs" was wrong. The gap is on the *conversion* side, not
+the platform side: this repo's converters do not yet auto-emit a ThoughtSpot Parameter
+as an MV `parameters:` entry (or parse one back), pending live verification against an
+18.2+ warehouse (audit finding 13.2, deferred). Until that lands, treat bare-word
+Parameter References as **not yet auto-translated** and log them in the Unmapped
+Report rather than treating them as inherently impossible.
 
 ---
 
@@ -645,7 +657,7 @@ These ThoughtSpot formula patterns cannot be translated to Databricks MV express
 
 | Pattern | Reason |
 |---|---|
-| Parameter references: `[Param]` (no `::`) | Runtime parameters don't exist in MVs |
+| Parameter references: `[Param]` (no `::`) | **Not yet auto-translated** (deferred — audit finding 13.2). MV `parameters:` DOES exist as a GA construct (Runtime 18.2+) — this is a conversion-tooling gap, not a platform limitation; see [databricks-metric-view.md](../../schemas/databricks-metric-view.md#parameters-block-ga--runtime-182) |
 | `last_value(...)` / `first_value(...)` — when NOT a semi-additive pattern | Only translatable when the formula matches the semi-additive pattern `last_value(sum([m]), query_groups(), {[d]})` → `window: [{semiadditive: last}]`. Other uses are untranslatable. |
 | Complex `group_aggregate(...)` with `query_groups()` modifier | Cannot express the query-group-aware variant |
 | `AGGREGATE OVER` in YAML `expr` | Causes `PARSE_SYNTAX_ERROR` — use dimension window function instead |

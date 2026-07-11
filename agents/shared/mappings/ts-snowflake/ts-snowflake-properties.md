@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (parameters: variables GA; model-level filters downgraded to Partial via named SV filters) -->
+<!-- currency: snowflake — 2026-07 (parameters: variables GA; model-level filters downgraded to Partial via named SV filters; correction 2026-07: SQL-query logical tables (base_table.definition:, GA 2026-06-26) — "Partial Migrations — SQL Views" no longer claims complex sql_view sources "cannot be auto-mapped"; adds D (Direct) option, emission deferred to BL-031 — finding 13.4) -->
 
 # ThoughtSpot → Snowflake Property Coverage
 
@@ -222,13 +222,24 @@ unrolled into direct pair-wise relationships. Flag at the checkpoint for user re
 
 ### `sql_view` (complex SQL)
 
-**Status: Partial — requires user decision**
+**Status: Partial — D is the documented target; C/M/S remain the operative fallbacks**
 
 ThoughtSpot `sql_view` objects are virtual tables backed by an arbitrary SQL query.
 Simple `SELECT *` views are resolved automatically to the underlying physical table.
-Complex views (WHERE clauses, column aliases, JOINs, aggregations, subqueries) cannot
-be auto-mapped and require one of three user-directed options at the checkpoint:
 
+**Correction (2026-07, finding 13.4):** complex views (WHERE clauses, column aliases,
+JOINs, aggregations, subqueries) are **no longer categorically unmappable**. Snowflake's
+2026-06-26 "SQL queries as logical tables" GA lets a Semantic View logical table be
+defined directly by a SQL query via `base_table.definition:` — see "`base_table`
+sub-structure" in the Field Reference above (already documents this field). The DDL
+equivalent is `ALIAS as (SELECT ...)` inside `tables (...)`. This auto-maps the common
+case with no user decision required:
+
+- **D (Direct) — documented target, not yet emitted:** emit the ThoughtSpot `sql_query`
+  verbatim as the logical table's `base_table.definition:` in the SV YAML. This is the
+  preferred outcome for the common case and needs no `CREATE VIEW` privilege in
+  Snowflake. **The converter does not emit `definition:` yet — tracked in BL-031.**
+  Until BL-031 ships, fall back to one of C/M/S below.
 - **C (Create):** A Snowflake VIEW is created in the target schema using the
   ThoughtSpot `sql_query` verbatim. Requires the Snowflake role to have `CREATE VIEW`
   on the target schema.
@@ -236,6 +247,10 @@ be auto-mapped and require one of three user-directed options at the checkpoint:
   `base_table`. Requires the named object to already exist and be accessible.
 - **S (Skip):** All model columns sourced from the sql_view are omitted and logged
   in the Unmapped Report.
+
+Once BL-031 ships, reserve C/M/S for cases where the `sql_query` uses constructs
+Snowflake's SV `definition:` doesn't accept (e.g. syntax outside what the semantic-view
+SQL dialect supports) — they stop being the only path and become true fallbacks.
 
 ---
 
@@ -437,6 +452,9 @@ section that has no entries for the current model.
 | {name} | {sql_query} | {db}.{schema}.{db_table} |
 
 #### SQL Views Requiring User Decision (complex SQL)
+Note: D (Direct — auto-mapped via `base_table.definition:`) is the documented target
+but not yet emitted by the converter (BL-031); until then only C/M/S decisions appear
+in this table.
 | sql_view Name | sql_query | Decision | Outcome |
 |---|---|---|---|
 | {name} | {sql_query} | C / M / S | Created view / Mapped to {name} / Skipped |

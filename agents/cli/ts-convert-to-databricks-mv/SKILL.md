@@ -812,7 +812,9 @@ Detect formula columns that are boolean ATTRIBUTE filters (e.g., named "MV Filte
 
 1. Check if the expression is translatable to SQL (see filter translation table below)
 2. If translatable → add as `filter:` field in the MV YAML, remove from dimensions list
-3. If untranslatable (parameters, LOD-based) → log in Unmapped Report
+3. If untranslatable (LOD-based), or a parameter reference (not yet auto-translated —
+   MV `parameters:` is a GA target at Runtime 18.2+, but emission is deferred pending
+   live 18.2 verification, audit finding 13.2) → log in Unmapped Report
 
 | ThoughtSpot formula | MV `filter:` |
 |---|---|
@@ -835,7 +837,11 @@ a date *interval*, `moving_sum` counts surviving *rows* — see the density cave
 the rolling-window rows in the Concept Mapping table above.
 
 Confirmed untranslatable patterns (after checking the reference):
-- `[parameter_name]` — ThoughtSpot runtime parameter (no SQL equivalent)
+- `[parameter_name]` — ThoughtSpot runtime parameter. **Not** "no SQL equivalent": MV
+  `parameters:` is a GA target (Runtime 18.2+, mutually exclusive with
+  `materialization:`), but this skill does not yet emit it — auto-translation is
+  deferred pending live verification against an 18.2+ warehouse (audit finding 13.2).
+  Log it in the Unmapped Report until that lands.
 - `ts_first_day_of_week(...)`, `last_n_days(...)` — period-scoped time intelligence with no Databricks equivalent
 - `group_aggregate(...)` with `query_groups()` modifier — hardcoded/selective filters unsupported
 - Hyperlink markup: `concat("{caption}", ..., "{/caption}", ...)` — ThoughtSpot display hint
@@ -942,9 +948,8 @@ code block.
 [../../shared/mappings/ts-databricks/ts-databricks-properties.md](../../shared/mappings/ts-databricks/ts-databricks-properties.md).
 Include only sections that have entries. Common sections:
 - AI Context not migrated (no MV equivalent)
-- Parameters not migrated
+- Parameters not yet migrated (MV `parameters:` GA at Runtime 18.2+; emission deferred — audit 13.2)
 - Column groups not migrated
-- AI Context not migrated
 - Format patterns not migrated
 - Formula Translation Log (all formulas, translated and untranslated)
 - SQL Views resolved or skipped
@@ -1219,6 +1224,7 @@ If no (or no more models remain): the session is complete. No token cleanup need
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-07-11 | Correct MV `parameters:` GA (Runtime 18.2+, mutually exclusive with materialization) + tiered runtime; TS→MV parameter emission deferred (audit 13.1/13.10/13.2). Minor cleanup: dedup duplicate "AI Context not migrated" bullet in the Unmapped Properties Report list. |
 | 1.1.0 | 2026-07-09 | Dimension/metric semantic deep-dive (BL-063 PR1.5, `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`). **New capability (A3, the MINOR):** `group_aggregate`'s `{}` filter argument, paired with a model-level `filters:` block mirroring the target MV's `filter:`, reproduces BOTH halves of the A1/A2 DBX composite (MV-`filter:`-aware AND query-time-`WHERE`-blind) in a single ThoughtSpot construct — corrects A1/A2's "no TS analogue" conclusion. `query_filters()` remains the default LOD mapping; `{}` + a mirrored model filter is the new option for reproducing a DBX consumer's ad hoc query-time-`WHERE`-blind LOD. Subtraction form `query_filters() - {col}` tested and found not to exclude a filter pinned on a derived boolean formula — recorded, not adopted. **Corrections/caveats:** LOD `query_filters()` dimension confirmed filter-aware on TS under both filter kinds, with the caveat that the equivalence holds for a Databricks MV's own global `filter:` only, not for a consumer's ad hoc query-time `WHERE` (A1/A2, refined by A3 above); cross-measure ratio inlining confirmed grain-safe at every grain, no caveat needed (B1); global `filter:` × window ordering confirmed filter-before-window on both platforms, with a new frame-semantics caveat — Databricks `trailing`/`leading` windows are date-interval framed while `moving_sum` is row-positional, so results diverge on sparse/gapped data (C1, same root cause as E1); semi-additive `last`/`first_value` under a date-range filter confirmed cross-platform (D1). |
 | 1.0.3 | 2026-07-09 | Correct window translation tables to live-verified forms (claim matrix C1/C3/C6); see docs/audit/2026-07-08-dbx-window-claim-matrix.md. Fixes the Concept Mapping table (rolling window rows: `moving_sum(m,7,0,d)` was wrong — resolves to `trailing (N+1) day inclusive`, not `trailing N day`; the `leading N unit` PENDING row is now resolved to `moving_sum([m], -1, N, [d])`/inclusive `moving_sum([m], 0, N-1, [d])`, both live-verified) and the Step 7 period-filter decision tree/examples (adds the row-relative-vs-wall-clock lossy-approximation caveat for `offset`, corrected by matrix C6/C6a; quarter/year rows marked Deferred per C8). |
 | 1.0.2 | 2026-07-03 | Product-currency fix (audit 2026-07-03, finding 13.7): flag ThoughtSpot `moving_sum`/`moving_average` with a non-zero look-ahead argument as PENDING LIVE VERIFICATION (candidate `range: leading N unit` emission) instead of silently falling through the `range: trailing N day` mapping. |
