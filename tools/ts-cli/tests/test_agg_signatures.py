@@ -56,6 +56,90 @@ def test_liveboard_yields_one_signature_per_viz():
     assert sigs[0]["viz_name"] == "A1"
 
 
+# --- Fix 1 (CRITICAL): same column grouped AND filtered keeps both roles ---
+
+def test_column_both_grouped_and_filtered_keeps_both_roles():
+    doc = _answer("[Sales] [Order Date].monthly [Order Date] > '01/01/2024'",
+                  ["Sales", "Order Date"])
+    s = extract_signatures(doc, KINDS, "g1", "A1")[0]
+    assert s["date_column"] == "Order Date"
+    assert s["date_bucket"] == "MONTHLY"
+    assert s["filter_columns"] == ["Order Date"]
+    assert s["measures"] == ["Sales"]
+    assert s["parse_status"] == "full"
+
+
+# --- Fix 2: formula_ tokens resolve via prefix strip, or mark partial ---
+
+def test_formula_token_resolves_to_known_column():
+    kinds = dict(KINDS)
+    kinds["margin"] = "MEASURE"
+    doc = _answer("[Sales] [formula_margin] [Category]",
+                  ["Sales", "margin", "Category"])
+    s = extract_signatures(doc, kinds, "g1", "A1")[0]
+    assert s["measures"] == ["Sales", "margin"]
+    assert s["dimensions"] == ["Category"]
+    assert s["parse_status"] == "full"
+
+
+def test_unresolved_formula_token_marks_partial():
+    doc = _answer("[Sales] [formula_mystery]", ["Sales"])
+    s = extract_signatures(doc, KINDS, "g1", "A1")[0]
+    assert s["measures"] == ["Sales"]
+    assert s["parse_status"] == "partial"
+
+
+# --- Fix 3: extended filter operators ---
+
+def test_in_operator_captured_as_filter():
+    doc = _answer("[Sales] [Category] [State] in ('california', 'oregon')",
+                  ["Sales", "Category"])
+    s = extract_signatures(doc, KINDS, "g1", "A1")[0]
+    assert s["filter_columns"] == ["State"]
+    assert "State" not in s["dimensions"]
+
+
+def test_between_operator_captured_as_filter():
+    doc = _answer(
+        "[Sales] [Category] [Order Date] between '01/01/2024' and '02/01/2024'",
+        ["Sales", "Category"])
+    s = extract_signatures(doc, KINDS, "g1", "A1")[0]
+    assert s["filter_columns"] == ["Order Date"]
+    assert s["date_column"] is None  # filter occurrence, not grouped
+    assert s["dimensions"] == ["Category"]
+    assert s["parse_status"] == "full"
+
+
+def test_word_operators_captured_as_filters():
+    doc = _answer("[Sales] [Customer] contains 'inc' [State] begins with 'ca'",
+                  ["Sales"])
+    s = extract_signatures(doc, KINDS, "g1", "A1")[0]
+    assert s["filter_columns"] == ["Customer", "State"]
+    assert s["dimensions"] == []
+
+
+# --- Fix 4: second date column keeps first + marks partial ---
+
+def test_second_date_column_keeps_first_and_marks_partial():
+    kinds = dict(KINDS)
+    kinds["Ship Date"] = "DATE"
+    doc = _answer("[Sales] [Order Date].monthly [Ship Date].weekly",
+                  ["Sales", "Order Date", "Ship Date"])
+    s = extract_signatures(doc, kinds, "g1", "A1")[0]
+    assert s["date_column"] == "Order Date"
+    assert s["date_bucket"] == "MONTHLY"
+    assert s["parse_status"] == "partial"
+
+
+# --- Fix 5: filter_columns deduped, order-preserving ---
+
+def test_filter_columns_deduped_order_preserving():
+    doc = _answer("[Sales] [State] = 'ca' [Customer] != 'x' [State] = 'or'",
+                  ["Sales"])
+    s = extract_signatures(doc, KINDS, "g1", "A1")[0]
+    assert s["filter_columns"] == ["State", "Customer"]
+
+
 def test_column_kinds_from_model():
     model_tml = {"model": {"columns": [
         {"name": "Sales", "properties": {"column_type": "MEASURE"}},

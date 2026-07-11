@@ -7,8 +7,15 @@ from typing import Optional
 BUCKET_TOKENS = {"hourly": "HOURLY", "daily": "DAILY", "weekly": "WEEKLY",
                  "monthly": "MONTHLY", "quarterly": "QUARTERLY", "yearly": "YEARLY"}
 _TOKEN = re.compile(r"\[([^\]]+)\](?:\.(\w+))?")
-_FILTER = re.compile(r"\[([^\]]+)\]\s*(=|!=|>=|<=|>|<)")
+_FILTER = re.compile(
+    r"\[([^\]]+)\]\s*"
+    r"(!=|>=|<=|=|>|<"
+    r"|in\s*\(|between\b|contains\b|begins\s+with\b|ends\s+with\b"
+    r"|after\b|before\b)",
+    re.IGNORECASE,
+)
 _DATE_KINDS = ("DATE", "DATE_TIME", "TIMESTAMP")
+_FORMULA_PREFIX = "formula_"
 
 
 def column_kinds_from_model(model_tml: dict) -> dict:
@@ -31,28 +38,40 @@ def column_kinds_from_model(model_tml: dict) -> dict:
 def _parse_answer(answer: dict, kinds: dict, source_guid: str, source_name: str,
                   source_type: str, viz_name: Optional[str]) -> dict:
     query = answer.get("search_query", "") or ""
-    filter_cols = [m.group(1) for m in _FILTER.finditer(query)]
+    # Filter role is decided per OCCURRENCE, not per name: a column can be
+    # grouped in one token and filtered in another (e.g. "[Order Date].monthly
+    # [Order Date] > '01/01/2024'"). Match filter spans by start position.
+    filter_spans = {m.start() for m in _FILTER.finditer(query)}
+    filter_cols: list = []
     dims, measures = [], []
     date_column, date_bucket = None, None
     partial = not query
     seen = set()
     for m in _TOKEN.finditer(query):
         name, suffix = m.group(1), (m.group(2) or "").lower()
+        if m.start() in filter_spans:
+            if name not in filter_cols:  # dedupe, order-preserving
+                filter_cols.append(name)
+            continue  # filter occurrence — never grouped
+        if name not in kinds and name.startswith(_FORMULA_PREFIX):
+            # ad-hoc formula token: try resolving the underlying column name
+            name = name[len(_FORMULA_PREFIX):]
         if name in seen:
             continue
         seen.add(name)
         kind = kinds.get(name)
         if kind is None:
-            if not name.startswith("formula_"):
-                partial = True
+            partial = True
             continue
-        if name in filter_cols and kind != "MEASURE":
-            continue  # filter-only column
         if kind == "MEASURE":
             measures.append(name)
         elif kind == "DATE":
-            date_column = name
-            date_bucket = BUCKET_TOKENS.get(suffix)
+            if date_column is None:
+                date_column = name
+                date_bucket = BUCKET_TOKENS.get(suffix)
+            else:
+                # second grouped date column — keep the first, flag partial
+                partial = True
         else:
             dims.append(name)
     return {
