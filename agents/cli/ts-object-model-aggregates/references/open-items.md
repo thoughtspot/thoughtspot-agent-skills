@@ -383,3 +383,45 @@ inline+referencing_join models). Covered by 8 new tests in
 missing-joins_with, missing-table-TML, name-not-found, mixed inline+referencing,
 INNER-retained, LEFT_OUTER-pruned). **Connected-mode DDL generation is no longer
 limited to models using only inline `on:` joins.**
+
+---
+
+## #13 — Snowflake 2-step flat materialized view — DEFERRED (future enhancement, non-blocking)
+
+**Context:** live-tested on Snowflake `AGGR_AWARENESS` (Task 13): a materialized view
+whose definition **joins more than one table** is rejected with error `002212`
+("Invalid materialized view definition. More than one table referenced in the view
+definition."); a materialized view with `GROUP BY` on a **single table** is fine. Since
+every non-trivial aggregate candidate this skill generates joins the star's fact table
+to at least one dimension, Snowflake materialized views are not usable directly for
+aggregate DDL — [`sqlgen.build_ddl`](../../../../tools/ts-cli/ts_cli/aggregate/sqlgen.py)
+now raises `UnsupportedModelError` for `dialect="snowflake"` + `materialization="mview"`,
+and [SKILL.md Step 6a.1](../SKILL.md#6a1--choose-the-materialization) only offers
+Snowflake users a **dynamic table** (joins natively, auto-refresh, needs a warehouse) or
+a **plain table** (CTAS, manual refresh) — never a materialized view.
+
+**Deferred option — the 2-step flat MV:** Snowflake materialized views *can* still serve
+an aggregate if the join is done first: (1) create a flat, single-table view or table
+that pre-joins the star (fact + dimensions) with no aggregation, then (2) create the
+actual materialized view as a `GROUP BY` over *that* flat object (single-table
+reference, so `002212` doesn't apply). This gets Snowflake auto-refresh semantics
+without a dynamic table's warehouse dependency, at the cost of a second object to
+maintain (the flat view/table) and, if the flat layer is itself a plain view rather
+than a materialized one, the join re-executes on every MV refresh anyway — the
+performance case for it over a dynamic table needs to be established, not assumed.
+
+**Why it's not built in v1:** the dynamic table already covers the "I want
+auto-refresh" case for Snowflake with a single object and no extra maintenance surface;
+the 2-step flat MV only helps if a warehouse genuinely isn't available for scheduled
+dynamic-table refreshes but a Snowflake-native auto-refresh is still wanted. That's a
+narrower case than v1's two-option (dynamic/plain) split covers, and building it means
+generating and gating a *second* DDL artifact per candidate (the flat layer) — real
+scope, not a one-line addition to `build_ddl`.
+
+**Candidate future enhancement:** if requested, this would need (a) a new
+`materialization` value (e.g. `"flat_mview"`) in `sqlgen.py` that emits both the flat
+object DDL and the MV-over-flat DDL, (b) a Step 6 gate for the extra artifact/import,
+and (c) a live-test to confirm Snowflake's automatic-refresh behavior on an MV built
+over a flat *view* (vs. a flat *table*) actually refreshes downstream when the
+underlying star tables change — not otherwise assumed here. Not scheduled; recorded so
+the `002212` guard's rationale and the considered alternative aren't lost.

@@ -100,14 +100,21 @@ def _resolve_referencing_join(source_table: str, ref_name: str, table_tmls: dict
     consumed as-is by the existing inline-join machinery once resolved here.
 
     Never silently drops a join: source table TML missing, no `joins_with`
-    at all, or no `joins_with` entry matching `ref_name` all raise
-    UnsupportedModelError rather than proceeding without a condition, which
-    would risk an unintended cartesian join / wrong aggregate totals.
+    at all, no `joins_with` entry matching `ref_name`, or a matching entry
+    missing its `on` condition all raise UnsupportedModelError rather than
+    proceeding without a condition, which would risk an unintended cartesian
+    join / wrong aggregate totals. `type` is optional and defaults to INNER,
+    matching the `_JOIN_TYPE` fallback used elsewhere for inline joins.
     """
     joins_with = (table_tmls.get(source_table) or {}).get("table", {}).get("joins_with") or []
     for jw in joins_with:
         if jw.get("name") == ref_name:
-            return {"on": jw["on"], "type": jw.get("type", "INNER")}
+            on = jw.get("on")
+            if not on:
+                raise UnsupportedModelError(
+                    f"joins_with entry '{ref_name}' on table '{source_table}' "
+                    "has no 'on' condition")
+            return {"on": on, "type": jw.get("type", "INNER")}
     raise UnsupportedModelError(
         f"referencing_join '{ref_name}' not found in table '{source_table}' joins_with")
 
@@ -213,7 +220,7 @@ def _join_clauses(model_tml, table_tmls, dialect, needed_tables):
     missing = sorted(needed_tables - set(parent))
     if missing:
         raise UnsupportedModelError(
-            f"tables {missing} unreachable via inline joins")
+            f"tables {missing} not reachable from root via model joins")
     mandatory = _mandatory_inner_tables(order, parent)
     keep = _path_tables(needed_tables | mandatory, parent, root)
     clauses = []
@@ -318,6 +325,13 @@ def build_ddl(select_sql: str, target: str, dialect: str,
               materialization: str = "auto", target_lag: str = "1 hour",
               warehouse: Optional[str] = None) -> str:
     materialization = resolve_materialization(dialect, materialization)
+    if dialect == "snowflake" and materialization == "mview":
+        raise UnsupportedModelError(
+            "Snowflake materialized views cannot contain joins (Snowflake "
+            "error 002212 — 'More than one table referenced in the view "
+            "definition'); use a dynamic table (--materialization dynamic, "
+            "auto-refreshing, needs a warehouse) or a plain table "
+            "(--materialization ctas, CREATE TABLE AS, manual refresh) instead.")
     if materialization == "ctas":
         return f"CREATE OR REPLACE TABLE {target} AS\n{select_sql}"
     if dialect == "snowflake" and materialization == "dynamic":

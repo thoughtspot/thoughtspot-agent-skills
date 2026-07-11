@@ -585,7 +585,11 @@ def generate(
         _err("This candidate needs manual SQL authoring — see `ts aggregate profile --emit-sql`.")
         raise typer.Exit(code=1)
 
-    _write_ddl(outdir, select_sql, db, schema, name, dialect, materialization, warehouse)
+    try:
+        _write_ddl(outdir, select_sql, db, schema, name, dialect, materialization, warehouse)
+    except UnsupportedModelError as exc:
+        _err(f"cannot generate DDL for {candidate}: {exc}")
+        raise typer.Exit(code=1)
     _write_table_artifacts(outdir, cand, plans, model_tml, db, schema, name, connection_name)
     model_name = _write_model_artifact(outdir, cand, plans, model_tml, name, connection_name)
     _patch_and_write_primary(outdir, model_guid, profile, model_name, cand)

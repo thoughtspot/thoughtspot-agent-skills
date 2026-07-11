@@ -213,6 +213,65 @@ def test_mixed_inline_and_referencing_join_both_resolve():
             'ON "DM_CUSTOMER"."COUNTRY" = "DM_LOCALE_COUNTRY"."COUNTRY_KEY"') in sql
 
 
+def test_referencing_join_missing_on_key_raises_unsupported():
+    # Task 13 minor (a): a joins_with entry matched by `name` but missing the
+    # `on` key must raise UnsupportedModelError naming the join, not a bare
+    # KeyError — same graceful-degradation treatment as the other
+    # missing-shape cases above.
+    tables = {
+        "DM_ORDER_DETAIL": {"table": {
+            **DM_TABLES["DM_ORDER_DETAIL"]["table"],
+            "joins_with": [
+                {"name": "DM_ORDER_DETAIL_to_DM_ORDER", "destination": {"name": "DM_ORDER"},
+                 "type": "INNER"},  # no "on"
+            ],
+        }},
+        "DM_ORDER": DM_TABLES["DM_ORDER"],
+    }
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_ORDER", "referencing_join": "DM_ORDER_DETAIL_to_DM_ORDER"}]},
+            {"name": "DM_ORDER"},
+        ],
+        "columns": DM_COLUMNS,
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Order Status"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    with pytest.raises(UnsupportedModelError,
+                        match="DM_ORDER_DETAIL_to_DM_ORDER.*on"):
+        build_select(model, tables, cand, DM_PLANS, dialect="snowflake")
+
+
+def test_referencing_join_missing_type_key_defaults_to_inner():
+    # Companion case: `type` absent on the matched joins_with entry defaults
+    # to INNER (matching the existing _JOIN_TYPE fallback elsewhere), rather
+    # than raising.
+    tables = {
+        "DM_ORDER_DETAIL": {"table": {
+            **DM_TABLES["DM_ORDER_DETAIL"]["table"],
+            "joins_with": [
+                {"name": "DM_ORDER_DETAIL_to_DM_ORDER", "destination": {"name": "DM_ORDER"},
+                 "on": "[DM_ORDER_DETAIL::ORDER_ID] = [DM_ORDER::ORDER_ID]"},  # no "type"
+            ],
+        }},
+        "DM_ORDER": DM_TABLES["DM_ORDER"],
+    }
+    model = {"model": {
+        "model_tables": [
+            {"name": "DM_ORDER_DETAIL", "joins": [
+                {"with": "DM_ORDER", "referencing_join": "DM_ORDER_DETAIL_to_DM_ORDER"}]},
+            {"name": "DM_ORDER"},
+        ],
+        "columns": DM_COLUMNS,
+    }}
+    cand = {"id": "cand_1", "dimensions": ["Order Status"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, tables, cand, DM_PLANS, dialect="snowflake")
+    assert ('JOIN "DUNDERMIFFLIN"."PUBLIC"."DM_ORDER" "DM_ORDER" '
+            'ON "DM_ORDER_DETAIL"."ORDER_ID" = "DM_ORDER"."ORDER_ID"') in sql
+
+
 def test_referencing_join_inner_unreferenced_table_is_retained():
     # open-item #11's mandatory-INNER-retention rule must see the RESOLVED
     # type: DM_ORDER_DETAIL's referencing_join to DM_PRODUCT resolves to
@@ -478,3 +537,35 @@ def test_ddl_dialects():
     assert dbx.startswith("CREATE OR REPLACE MATERIALIZED VIEW cat.sch.agg")
     bq = build_ddl("SELECT 1", "proj.ds.agg", "bigquery", materialization="ctas")
     assert bq.startswith("CREATE OR REPLACE TABLE proj.ds.agg AS")
+
+
+def test_snowflake_materialized_view_guard_raises():
+    # Task 13 (c): Snowflake materialized views can't contain joins (live-
+    # verified error 002212 — "More than one table referenced in the view
+    # definition"). A caller that explicitly requests
+    # --materialization mview on Snowflake must get a clear
+    # UnsupportedModelError steering to dynamic/ctas, not DDL that will fail
+    # at CREATE time.
+    with pytest.raises(UnsupportedModelError, match="002212"):
+        build_ddl("SELECT 1", "SALESDB.PUBLIC.FACT_AGG_M", "snowflake",
+                  materialization="mview")
+
+
+def test_snowflake_dynamic_and_ctas_unaffected_by_mview_guard():
+    # The guard must not catch snowflake+dynamic or snowflake+ctas — only
+    # the snowflake+mview combination.
+    dynamic = build_ddl("SELECT 1", "SALESDB.PUBLIC.FACT_AGG_M", "snowflake",
+                        materialization="dynamic", warehouse="WH")
+    assert dynamic.startswith("CREATE OR REPLACE DYNAMIC TABLE")
+    ctas = build_ddl("SELECT 1", "SALESDB.PUBLIC.FACT_AGG_M", "snowflake",
+                     materialization="ctas")
+    assert ctas.startswith("CREATE OR REPLACE TABLE")
+
+
+def test_databricks_bigquery_mview_unaffected_by_snowflake_guard():
+    # The guard is snowflake-specific — databricks/bigquery mview (including
+    # the "auto" resolution path) must keep working.
+    dbx = build_ddl("SELECT 1", "cat.sch.agg", "databricks", materialization="mview")
+    assert dbx.startswith("CREATE OR REPLACE MATERIALIZED VIEW cat.sch.agg")
+    bq = build_ddl("SELECT 1", "proj.ds.agg", "bigquery", materialization="auto")
+    assert bq.startswith("CREATE MATERIALIZED VIEW proj.ds.agg")

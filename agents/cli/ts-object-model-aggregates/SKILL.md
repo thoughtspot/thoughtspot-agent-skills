@@ -395,28 +395,6 @@ same flow as
 [ts-convert-from-snowflake-sv Step 6B](../ts-convert-from-snowflake-sv/SKILL.md).
 Save the exact `name` value from the response as `{connection_name}`.
 
-**Warehouse for the DDL (Snowflake default materialization only).** The **C** branch
-already collects a warehouse (for the connection itself); the **E** branch does not —
-but `--materialization auto` on Snowflake resolves to a dynamic table, and
-`ts aggregate generate` **hard-fails** with `--warehouse is required to create a
-Snowflake dynamic table` if no warehouse is passed. So on the **E** branch (Snowflake
-only), before generating, ask:
-
-```
-The default materialization for a Snowflake aggregate is a dynamic table, which needs
-an assigned warehouse to refresh. How would you like to materialize {grain_summary}?
-
-  W  Dynamic table — give me the warehouse name to refresh it (auto-refreshing)
-  C  Plain table   — CREATE TABLE AS (no warehouse needed; refresh it yourself)
-
-Enter W (then the warehouse name) / C:
-```
-
-If **W**, save the warehouse name as `{warehouse}` and keep `--materialization auto`.
-If **C**, leave `{warehouse}` empty and use `--materialization ctas` in 6b instead.
-(Databricks/BigQuery resolve `auto` to a materialized view, which needs no
-`--warehouse` — this prompt only applies to Snowflake.)
-
 **C — create a new connection (Snowflake only in v1):**
 
 ```bash
@@ -433,11 +411,63 @@ the **E** path.
 
 Ask for the target `{db}` and `{schema}` for the aggregate table.
 
+### 6a.1 — Choose the materialization
+
+**Always ask this** — both the **E** and **C** branches above, for every dialect
+(this replaced a v1 prompt that only fired on the **E** branch and only mentioned a
+warehouse, not the underlying materialization choice).
+
+Live-tested on Snowflake: a materialized view whose definition **joins more than one
+table** is rejected outright with error `002212` ("Invalid materialized view
+definition. More than one table referenced in the view definition."), and this
+skill's aggregate SELECTs join the star's fact + dimension tables. So Snowflake
+never offers a materialized view — only a dynamic table (which supports joins) or a
+plain table. Databricks and BigQuery materialized views join natively, so they keep
+the materialized-view option.
+
+**Snowflake:**
+
+```
+How would you like to materialize {grain_summary}?
+
+  D  Dynamic table — auto-refreshing; needs a warehouse to run refreshes
+  T  Plain table   — CREATE TABLE AS (no warehouse needed; refresh it yourself)
+
+Note: a Snowflake materialized view isn't offered here — Snowflake rejects a
+materialized view whose definition joins more than one table (error 002212), and
+this aggregate's SELECT joins the star's tables. Forcing --materialization mview
+on Snowflake will error at generate time.
+
+Enter D (then the warehouse name) / T:
+```
+
+If **D**: ask for the warehouse name (if the **C** branch above already created a
+connection with a warehouse, offer to reuse that name) and save it as `{warehouse}`
+— it's **required**; `ts aggregate generate` hard-fails with `--warehouse is
+required to create a Snowflake dynamic table` if it's empty. If the user has no
+warehouse to give, steer them to **T** instead. Set `{materialization}` = `dynamic`.
+
+If **T**: leave `{warehouse}` empty and set `{materialization}` = `ctas`.
+
+**Databricks / BigQuery:**
+
+```
+How would you like to materialize {grain_summary}?
+
+  M  Materialized view — auto-refreshing
+  T  Plain table        — CREATE TABLE AS (manual refresh)
+
+Enter M / T:
+```
+
+If **M**: set `{materialization}` = `mview` (`{warehouse}` stays empty — not
+needed). If **T**: set `{materialization}` = `ctas`.
+
 ### 6b. Generate the artifacts
 
-Use `{materialization}` = `auto` (dynamic table / materialized view) or `ctas` (plain
-`CREATE TABLE AS`) per the 6a warehouse prompt — `auto` + Snowflake requires a non-empty
-`{warehouse}`, `ctas` requires none:
+Use the `{materialization}` (`dynamic` | `ctas` | `mview`) and `{warehouse}` chosen
+in 6a.1 — `dynamic` requires a non-empty `{warehouse}` (Snowflake only); `ctas` and
+`mview` need none:
 
 ```bash
 source ~/.zshenv && ts aggregate generate \
@@ -449,11 +479,14 @@ source ~/.zshenv && ts aggregate generate \
   --out-dir "{workdir}/{candidate_id}"
 ```
 
-`--materialization auto` resolves to a Snowflake dynamic table (needs `--warehouse` —
-prompted in 6a) or a materialized view on Databricks/BigQuery; `--materialization ctas`
-emits a plain `CREATE TABLE AS` that needs no warehouse. Writes five files to
-`{workdir}/{candidate_id}/`: `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
-`agg_model.tml.yaml`, `primary_patched.tml.yaml`. Stdout:
+`--materialization dynamic` emits a Snowflake dynamic table (needs `--warehouse` —
+chosen in 6a.1); `--materialization mview` emits a Databricks/BigQuery materialized
+view; `--materialization ctas` emits a plain `CREATE TABLE AS` on any dialect and
+needs no warehouse. `--materialization mview` on Snowflake is rejected by `ts
+aggregate generate` itself (the 002212 guard in `sqlgen.build_ddl`) — 6a.1 never
+offers that combination, so this only fires if the flags are overridden by hand.
+Writes five files to `{workdir}/{candidate_id}/`: `ddl.sql`, `table_spec.json`,
+`table.tml.yaml`, `agg_model.tml.yaml`, `primary_patched.tml.yaml`. Stdout:
 `{"candidate", "aggregate_name", "files"}`.
 
 ### 6c. DDL gate

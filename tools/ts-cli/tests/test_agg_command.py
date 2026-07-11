@@ -594,3 +594,35 @@ def test_generate_reports_unsupported_candidate_instead_of_crashing(tmp_path):
                                           "--warehouse", "WH"])
     assert result.exit_code == 1
     assert "cannot generate SQL" in result.stderr
+
+
+def test_generate_rejects_snowflake_materialized_view_cleanly(tmp_path):
+    """Task 13 (c): --dialect snowflake --materialization mview must exit
+    cleanly with the 002212 guidance, not crash with an unhandled
+    UnsupportedModelError traceback."""
+    model = {"model": {"name": "M", "model_tables": [{"name": "FACT"}], "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": None,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": None, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--dialect", "snowflake", "--materialization", "mview"])
+    assert result.exit_code == 1
+    assert "cannot generate DDL" in result.stderr
+    assert "002212" in result.stderr
