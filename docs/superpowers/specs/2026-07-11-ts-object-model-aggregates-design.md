@@ -160,7 +160,13 @@ Each artifact is shown to the user before anything executes or imports.
    TML against the existing connection (`table.schema` is validated against
    the connection at import, which doubles as proof the DDL ran); if that
    import fails, fall back to asking the user to add the table via the TS UI
-   and resume.
+   and resume. Registration needs **no warehouse credentials**: the TS
+   Connection holds its own auth server-side and validates the import with
+   it. Requirements are TS-side only — the importing user needs the *Can
+   manage data* privilege plus edit access to the connection, and the
+   connection's credentials must be able to see the schema the aggregate
+   table landed in (flag clearly if aggregates are placed in a schema the
+   connection cannot read).
 2. **Aggregate Model TML** — single logical table over the aggregate table.
    Column and formula names copied exactly (case-sensitive) from the primary.
    Decomposed measures rebuilt as formulas. `is_spotter_enabled: true`
