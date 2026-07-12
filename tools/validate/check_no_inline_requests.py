@@ -41,13 +41,15 @@ import re
 import sys
 from pathlib import Path
 
+from _dirs import COCO, CLI_RUNTIME_PATHS
+
 # Runtimes that use the `ts` CLI at runtime — the anti-pattern applies to these only.
 # agents/coco-snowsight/ is deliberately excluded (see module docstring).
-SCAN_ROOTS = ("agents/cli", "agents/claude")
+SCAN_ROOTS = CLI_RUNTIME_PATHS
 
 # Reference files that are legitimate scratch/test-script surfaces per ts-cli.md.
 EXEMPT_FILENAMES = ("open-items.md",)
-EXEMPT_PATH_SEGMENTS = ("coco-snowsight",)
+EXEMPT_PATH_SEGMENTS = (COCO,)
 
 IMPORT_REQUESTS_RE = re.compile(r'(?:^|\s)import\s+requests\b')
 REQUESTS_CALL_RE = re.compile(

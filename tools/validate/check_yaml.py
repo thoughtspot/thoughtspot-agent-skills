@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES
+
 try:
     import yaml
 except ImportError:
@@ -91,15 +93,9 @@ def main() -> int:
         md_files = [f for f in staged if f.exists()]
     else:
         # Full repo scan — focus on reference/schema/mapping files
-        md_files = sorted(
-            repo_root.glob("agents/shared/**/*.md")
-        ) + sorted(
-            repo_root.glob("agents/cli/**/*.md")
-        ) + sorted(
-            repo_root.glob("agents/claude/**/*.md")
-        ) + sorted(
-            repo_root.glob("agents/coco-snowsight/**/*.md")
-        )
+        md_files = sorted(repo_root.glob("agents/shared/**/*.md"))
+        for runtime in ALL_RUNTIMES:
+            md_files += sorted(repo_root.glob(f"agents/{runtime}/**/*.md"))
         md_files = [f for f in md_files if not any(p in f.parts for p in skip_dirs)]
 
     total_errors = 0

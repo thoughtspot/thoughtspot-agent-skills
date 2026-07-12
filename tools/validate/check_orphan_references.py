@@ -50,7 +50,7 @@ import argparse
 import sys
 from pathlib import Path
 
-RUNTIME_DIRS = ("cli", "claude", "coco-snowsight")
+from _dirs import ALL_RUNTIMES
 
 # Reference basenames exempt from the citation requirement — see module docstring.
 ALLOWLIST_BASENAMES = {"open-items.md"}
@@ -75,7 +75,7 @@ def find_reference_files(repo_root: Path) -> list[Path]:
     like the cli/coco-snowsight skills.
     """
     files: list[Path] = []
-    for runtime in RUNTIME_DIRS:
+    for runtime in ALL_RUNTIMES:
         runtime_root = repo_root / "agents" / runtime
         if not runtime_root.is_dir():
             continue

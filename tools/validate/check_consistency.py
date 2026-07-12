@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES, CLI_RUNTIMES
+
 
 def _get_staged_names(repo_root: Path) -> list[str]:
     result = subprocess.run(
@@ -65,7 +67,7 @@ def check_readme_skills(repo_root: Path) -> list[str]:
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     tracked = _get_tracked_paths(repo_root)
 
-    for runtime in ("claude", "cli", "coco-snowsight"):
+    for runtime in ALL_RUNTIMES:
         agent_dir = repo_root / "agents" / runtime
         if not agent_dir.is_dir():
             continue
@@ -97,7 +99,7 @@ def check_claude_setup_symlinks(repo_root: Path) -> list[str]:
     failures = []
     tracked = _get_tracked_paths(repo_root)
 
-    for runtime in ("cli", "claude"):
+    for runtime in CLI_RUNTIMES:
         agent_dir = repo_root / "agents" / runtime
         if not agent_dir.is_dir():
             continue

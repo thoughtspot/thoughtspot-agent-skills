@@ -39,6 +39,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _dirs import CLI_RUNTIMES, CLI_RUNTIME_PATHS
+
+# Trailing-slash prefixes for str.startswith on repo-relative paths.
+_CLI_SKILL_PREFIXES = tuple(f"{p}/" for p in CLI_RUNTIME_PATHS)
+
 
 # Skills exempt from the smoke-test requirement.
 # Add a comment for each entry explaining why; remove when the exemption no longer applies.
@@ -159,8 +164,7 @@ def _get_staged_names(repo_root: Path) -> list[str]:
 def _staged_touches_skills_or_smoke(staged: list[str]) -> bool:
     """Return True if staged files include anything that would change a skill or smoke test."""
     for f in staged:
-        if (f.startswith("agents/cli/") or f.startswith("agents/claude/")
-                or f.startswith("tools/smoke-tests/")):
+        if f.startswith(_CLI_SKILL_PREFIXES) or f.startswith("tools/smoke-tests/"):
             return True
     return False
 
@@ -194,7 +198,7 @@ def _find_orphan_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
     alias_targets = set(NAME_ALIASES.values())
 
     known_skills: set[str] = set()
-    for runtime in ("cli", "claude"):
+    for runtime in CLI_RUNTIMES:
         runtime_dir = repo_root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue
@@ -237,7 +241,7 @@ def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[s
     tracked = _get_tracked_paths(repo_root)
 
     # Canonical CLI skills live in agents/cli/; agents/claude/ holds Claude-only skills.
-    for runtime in ("cli", "claude"):
+    for runtime in CLI_RUNTIMES:
         runtime_dir = repo_root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue

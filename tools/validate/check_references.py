@@ -52,6 +52,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _dirs import runtime_globs
+
 LINK_PATTERN = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
 
 # Links whose targets exist locally but are deliberately untracked / gitignored at
@@ -217,16 +219,8 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(args.root).resolve()
-    skill_files = (
-        list(repo_root.glob("agents/cli/*/SKILL.md")) +
-        list(repo_root.glob("agents/claude/*/SKILL.md")) +
-        list(repo_root.glob("agents/coco-snowsight/*/SKILL.md"))
-    )
-    reference_files = (
-        list(repo_root.glob("agents/cli/*/references/*.md")) +
-        list(repo_root.glob("agents/claude/*/references/*.md")) +
-        list(repo_root.glob("agents/coco-snowsight/*/references/*.md"))
-    )
+    skill_files = runtime_globs(repo_root, "*/SKILL.md")
+    reference_files = runtime_globs(repo_root, "*/references/*.md")
     doc_files = [
         p for p in repo_root.glob("docs/**/*.md")
         if not _is_excluded_doc(p, repo_root)

@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES
+
 # Patterns that indicate an unresolved item
 # Item headers come in two styles across the repo: `## Item 4 — …` and `## #4 — …`.
 # The original regex only matched `## Item N`, so it silently ignored 6 of 7 files.
@@ -115,13 +117,11 @@ def main() -> int:
 
     repo_root = Path(args.root).resolve()
 
-    open_items_files = sorted(
-        repo_root.glob("agents/cli/*/references/open-items.md")
-    ) + sorted(
-        repo_root.glob("agents/claude/*/references/open-items.md")
-    ) + sorted(
-        repo_root.glob("agents/coco-snowsight/*/references/open-items.md")
-    )
+    open_items_files: list[Path] = []
+    for runtime in ALL_RUNTIMES:
+        open_items_files += sorted(
+            repo_root.glob(f"agents/{runtime}/*/references/open-items.md")
+        )
 
     if not open_items_files:
         print("No open-items.md files found.")

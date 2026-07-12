@@ -41,8 +41,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES
+
 # Runtimes whose skill directories are valid resolution targets.
-RUNTIMES = ("cli", "claude", "coco-snowsight")
+RUNTIMES = ALL_RUNTIMES
 
 # `/ts-foo-bar` not immediately preceded by a word char, `.`, `/`, or `#` — the
 # character classes that show up in file paths, relative links, and markdown anchors.

@@ -54,7 +54,9 @@ import re
 import sys
 from pathlib import Path
 
-SCAN_ROOTS = ("agents/cli", "agents/claude")
+from _dirs import CLI_RUNTIME_PATHS
+
+SCAN_ROOTS = CLI_RUNTIME_PATHS
 
 # Populated by build_flag_map on import failure so the SKIP line can say WHICH
 # module was missing — "typer not importable" and "ts_cli's own deps not
