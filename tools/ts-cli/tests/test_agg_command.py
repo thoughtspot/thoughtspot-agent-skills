@@ -639,6 +639,87 @@ def test_generate_idempotent_multi_date_preserves_existing_and_new(tmp_path, mon
     assert patched2 == patched1
 
 
+def test_generate_regenerating_same_aggregate_produces_no_duplicate(tmp_path, monkeypatch):
+    """Task 16 (idempotence): `_aggregate_name` is deterministic, so
+    re-generating an already-imported aggregate produces the same model_name.
+    The re-exported primary then already carries that entry — patch_association
+    must NOT append a second entry with the same id. Exactly one entry
+    survives, and it reflects the freshly generated grains (last wins), not the
+    stale imported ones."""
+    import ts_cli.client as client_mod
+
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Transaction Date", "column_id": "FACT::TXN_DT", "data_type": "DATE",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None, "bucket": None,
+            "date_grains": [{"column": "Transaction Date", "bucket": "DAILY"}],
+            "covered": [0], "flags": [], "agg_rows": 50, "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"},
+                               {"name": "TXN_DT", "db_column_name": "TXN_DT"}]}}))
+
+    # Mutable exported-primary state so the second run can "see" the aggregate
+    # as if it had been imported between runs.
+    state = {"edoc": yaml.safe_dump({"model": {"name": "Sales Model",
+                                               "aggregated_models": []}})}
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, profile_name):
+            pass
+
+        def post(self, path, json=None):
+            assert "import" not in path
+            return FakeResponse([{"edoc": state["edoc"]}])
+
+    monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
+    monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
+
+    args = ["aggregate", "generate", "--dir", str(tmp_path),
+            "--candidate", "cand_1", "--model-guid", "model-guid",
+            "--tables-dir", str(tdir), "--db", "SALESDB",
+            "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH"]
+
+    result1 = runner.invoke(app, args)
+    assert result1.exit_code == 0, result1.output
+    agg_id = f"Sales Model ({json.loads(result1.stdout)['aggregate_name']})"
+
+    # Simulate the aggregate having been imported, with a STALE bucket, since
+    # the last run — the re-exported primary now carries it.
+    state["edoc"] = yaml.safe_dump({"model": {"name": "Sales Model",
+                                              "aggregated_models": [
+        {"id": agg_id, "date_aggregation_info": [
+            {"column_id": "Transaction Date", "bucket": "MONTHLY"}]}]}})
+
+    result2 = runner.invoke(app, args)
+    assert result2.exit_code == 0, result2.output
+    patched = yaml.safe_load(((tmp_path / "cand_1") / "primary_patched.tml.yaml").read_text())
+    aggs = patched["model"]["aggregated_models"]
+    assert [e["id"] for e in aggs].count(agg_id) == 1  # no duplicate
+    entry = next(e for e in aggs if e["id"] == agg_id)
+    # Fresh grains won (DAILY from cand), not the stale imported MONTHLY.
+    assert entry["date_aggregation_info"] == [
+        {"column_id": "Transaction Date", "bucket": "DAILY"}]
+
+
 def test_generate_requires_warehouse_for_snowflake_dynamic_table(tmp_path):
     """Task 5 review carry-forward: a Snowflake dynamic table with no
     --warehouse must fail clearly rather than emit DDL missing the

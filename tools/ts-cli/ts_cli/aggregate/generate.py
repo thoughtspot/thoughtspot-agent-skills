@@ -218,11 +218,21 @@ def date_aggregation_info_to_grains(entry: dict) -> list:
     `patch_association`'s emission mapping — see
     test_date_aggregation_info_to_grains_round_trip.
     """
-    info = entry.get("date_aggregation_info") or []
-    return [
-        {"column": g["column_id"], "bucket": None if g["bucket"] == "NO_BUCKET" else g["bucket"]}
-        for g in info
-    ]
+    grains = []
+    for g in entry.get("date_aggregation_info") or []:
+        column = g.get("column_id")
+        if column is None:
+            # A grain with no column_id is meaningless (no date column to
+            # associate) — skip rather than emit a column-less grain that would
+            # KeyError on re-emission. Defensive against hand-authored TML.
+            continue
+        # A missing/None/"NO_BUCKET" bucket all mean the same internal thing:
+        # the date carried at full (raw) grain. `.get()` keeps a hand-authored
+        # entry that omits `bucket` from KeyError-ing.
+        bucket = g.get("bucket")
+        grains.append({"column": column,
+                       "bucket": None if bucket == "NO_BUCKET" else bucket})
+    return grains
 
 
 def patch_association(primary_tml: dict, entries: list) -> dict:
@@ -246,8 +256,19 @@ def patch_association(primary_tml: dict, entries: list) -> dict:
     `date_aggregation_info` entirely, unchanged from before Task 15.
     """
     patched = copy.deepcopy(primary_tml)
-    ordered = sorted(entries, key=lambda e: (e.get("projected_rows") is None,
-                                             e.get("projected_rows") or 0))
+    # Dedup by id, last entry wins. `_aggregate_name` is deterministic, so
+    # re-generating an already-imported aggregate produces the same id; the
+    # re-exported primary already carries that entry, so it appears twice in
+    # `entries` (existing + new). Keep the LAST occurrence (the freshly
+    # generated entry) so re-generate replaces the stale entry in place rather
+    # than appending a duplicate. dict assignment overwrites the value while
+    # keeping first-seen key order, which is irrelevant here — we re-sort next.
+    deduped = {}
+    for e in entries:
+        deduped[e["id"]] = e
+    ordered = sorted(deduped.values(),
+                     key=lambda e: (e.get("projected_rows") is None,
+                                    e.get("projected_rows") or 0))
     block = []
     for e in ordered:
         item = {"id": e["id"]}

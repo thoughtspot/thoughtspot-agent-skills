@@ -170,6 +170,44 @@ def test_date_aggregation_info_to_grains_round_trip():
     assert date_aggregation_info_to_grains({"id": "dateless"}) == []
 
 
+def test_patch_association_dedups_by_id_last_wins():
+    # Task 16 (idempotence): re-generating an already-imported aggregate
+    # deterministically produces the same id; the re-exported primary already
+    # carries that entry, so it appears twice in `entries`. patch_association
+    # must dedup by id with the LAST (freshly generated) entry winning — one
+    # entry, carrying the new grains, not a stale duplicate.
+    primary = {"guid": "p", "model": {"name": "M", "aggregated_models": []}}
+    entries = [
+        {"id": "X", "date_grains": [{"column": "D", "bucket": "MONTHLY"}],
+         "projected_rows": None},          # stale existing entry
+        {"id": "X", "date_grains": [{"column": "D", "bucket": "DAILY"}],
+         "projected_rows": 50},            # fresh new entry — must win
+    ]
+    patched = patch_association(primary, entries)
+    aggs = patched["model"]["aggregated_models"]
+    assert len(aggs) == 1
+    assert aggs[0]["id"] == "X"
+    assert aggs[0]["date_aggregation_info"] == [{"column_id": "D", "bucket": "DAILY"}]
+
+
+def test_date_aggregation_info_to_grains_missing_bucket_and_column():
+    # Task 16 (robustness): a hand-authored / externally-exported primary entry
+    # whose grain omits `bucket` must not KeyError — a missing bucket (like an
+    # explicit None or "NO_BUCKET") maps to internal None. A grain missing
+    # `column_id` is skipped rather than emitting a column-less grain.
+    entry = {"id": "x", "date_aggregation_info": [
+        {"column_id": "Order Date"},                       # bucket omitted -> None
+        {"column_id": "Ship Date", "bucket": "NO_BUCKET"},  # -> None
+        {"column_id": "Due Date", "bucket": None},          # -> None
+        {"bucket": "MONTHLY"},                              # no column_id -> skipped
+    ]}
+    assert date_aggregation_info_to_grains(entry) == [
+        {"column": "Order Date", "bucket": None},
+        {"column": "Ship Date", "bucket": None},
+        {"column": "Due Date", "bucket": None},
+    ]
+
+
 def test_min_max_primary_measure_keeps_reagg_in_model_column():
     # A MIN/MAX single-component primary measure must carry its reagg (MIN/MAX)
     # on the aggregate MODEL column, not the SUM that _build_model_columns
