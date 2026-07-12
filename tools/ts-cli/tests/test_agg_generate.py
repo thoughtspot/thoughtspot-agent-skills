@@ -61,6 +61,57 @@ def test_model_tml_names_match_primary_exactly_and_spotter_enabled():
     assert f["expr"] == "sum ( [avg_sale_sum] ) / sum ( [avg_sale_cnt] )"
 
 
+def test_multi_date_grain_columns_in_table_spec_and_model_tml():
+    # Task 15: a candidate with a multi-date date_grains list must yield a
+    # grain column for EVERY date, in both the table spec and the model TML
+    # (generalized _grain_columns), not just the first/shim date_column.
+    plans = {"Sales": classify_measure("Sales", aggregation="SUM")}
+    cand = {"id": "cand_2", "dimensions": ["Category"],
+            "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"},
+                            {"column": "Shipped Date", "bucket": None}],
+            "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    model = {"model": {"name": "Sales Model", "columns": MODEL["model"]["columns"] + [
+        {"name": "Shipped Date", "column_id": "FACT::SHIPPED_DT", "data_type": "DATE",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    spec = build_aggregate_table_spec(cand, plans, model, db="SALESDB", schema="PUBLIC",
+                                      table_name="AGG_T", connection_name="SF Prod")
+    names = [c["name"] for c in spec["columns"]]
+    assert "Order Date" in names and "Shipped Date" in names
+
+    tml = build_aggregate_model_tml(cand, plans, model, agg_table_name="AGG_T",
+                                    model_name="M (Agg)", connection_name="SF Prod")
+    col_names = [c["name"] for c in tml["model"]["columns"]]
+    assert "Order Date" in col_names and "Shipped Date" in col_names
+
+
+def test_patch_association_multi_date_grains_no_bucket():
+    # Task 15: two-grain entry (one bucketed, one raw) -> date_aggregation_info
+    # has two entries, the raw one emitting bucket: NO_BUCKET (the emission-
+    # only string for internal bucket=None; NOT added to lattice.BUCKETS).
+    primary = {"guid": "p", "model": {"name": "Sales Model"}}
+    entries = [
+        {"id": "multi-agg", "projected_rows": 100,
+         "date_grains": [{"column": "Transaction Date", "bucket": "DAILY"},
+                         {"column": "Shipped Date", "bucket": None}]},
+    ]
+    patched = patch_association(primary, entries)
+    info = patched["model"]["aggregated_models"][0]["date_aggregation_info"]
+    assert info == [{"column_id": "Transaction Date", "bucket": "DAILY"},
+                    {"column_id": "Shipped Date", "bucket": "NO_BUCKET"}]
+
+
+def test_patch_association_single_date_shim_unchanged():
+    # Task 15 regression guard: the pre-existing single-date shim form
+    # (date_column/bucket, no date_grains key) must still emit the exact same
+    # single-entry list as before Task 15.
+    primary = {"guid": "p", "model": {"name": "Sales Model"}}
+    entries = [{"id": "agg", "date_column": "Order Date", "bucket": "MONTHLY",
+                "projected_rows": 86}]
+    patched = patch_association(primary, entries)
+    assert patched["model"]["aggregated_models"][0]["date_aggregation_info"] == \
+        [{"column_id": "Order Date", "bucket": "MONTHLY"}]
+
+
 def test_association_sorted_most_aggregated_first():
     primary = {"guid": "p", "model": {"name": "Sales Model"}}
     entries = [

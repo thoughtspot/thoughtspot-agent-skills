@@ -110,6 +110,23 @@ Gaps this surfaces:
    matters in practice; and confirms `date_aggregation_info` is optional
    (dateless aggregate `DM_AGGR_PRODUCT`), which our code already handles.
 
+**Update 2026-07-12 (Task 15 — emission side): gaps 1 and 2 above are now
+SUPPORTED.** `sqlgen.build_select` iterates every grain in
+`candidate["date_grains"]`, emitting `DATE_TRUNC(...)` for a bucketed grain
+and the plain column (no truncation) for a raw grain (`bucket=None`), all
+joined into the same GROUP BY. `generate._grain_columns` (shared by
+`build_aggregate_table_spec` and `build_aggregate_model_tml`) emits an
+ATTRIBUTE column for every date grain, not just the first. `patch_association`
+emits one `date_aggregation_info` entry per grain, mapping internal
+`bucket=None` to the string `"NO_BUCKET"` at the emission boundary only —
+`lattice.BUCKETS` is untouched. Single-date candidates (1 grain) are
+byte-identical to pre-Task-15 output (verified by test + full suite green).
+**Residual:** `commands/aggregate.py`'s `_patch_and_write_primary` still
+builds its `patch_association` entry from the single-date `date_column`/
+`bucket` shim fields, not `cand["date_grains"]` — CLI wiring to pass the full
+multi-date list through `ts aggregate generate` is deliberately out of scope
+for Task 15 (pure-module task) and is a follow-up.
+
 ## #2 (historical) — original OPEN text retained below for reference
 
 **Question:** Does the shape

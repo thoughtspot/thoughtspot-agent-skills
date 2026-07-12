@@ -248,15 +248,29 @@ def _select_dimension_items(model_tml, table_tmls, dialect, candidate, needed):
     return select_items, group_items
 
 
+def _cand_date_grains(candidate: dict) -> list:
+    """Candidate's date grains (Task 15). Falls back to a 1-item list derived
+    from the date_column/bucket compat shim (Task 14) when date_grains is
+    absent, so hand-built single-date candidate dicts (existing callers/tests)
+    keep working unchanged — a 1-grain candidate must produce byte-identical
+    SQL to the pre-Task-15 single-date code path."""
+    grains = candidate.get("date_grains")
+    if grains is not None:
+        return grains
+    col = candidate.get("date_column")
+    return [{"column": col, "bucket": candidate.get("bucket")}] if col else []
+
+
 def _select_date_items(model_tml, table_tmls, dialect, candidate, needed):
     select_items, group_items = [], []
-    if candidate.get("date_column"):
-        col_sql, table = _resolve(model_tml, table_tmls, dialect,
-                                  candidate["date_column"])
+    for grain in _cand_date_grains(candidate):
+        col_sql, table = _resolve(model_tml, table_tmls, dialect, grain["column"])
         needed.add(table)
-        expr = (_date_trunc(dialect, candidate["bucket"], col_sql)
-                if candidate.get("bucket") else col_sql)
-        select_items.append(f"{expr} AS {_q(dialect, candidate['date_column'])}")
+        # bucket is None for a raw/unbucketed date grain — select the plain
+        # column (no DATE_TRUNC) rather than truncating it.
+        expr = (_date_trunc(dialect, grain["bucket"], col_sql)
+                if grain.get("bucket") else col_sql)
+        select_items.append(f"{expr} AS {_q(dialect, grain['column'])}")
         group_items.append(expr)
     return select_items, group_items
 

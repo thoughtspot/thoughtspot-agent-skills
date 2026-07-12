@@ -24,12 +24,29 @@ def _sql_type(display_name: str, model_tml: dict, default: str = "DOUBLE") -> st
     return default
 
 
+def _cand_date_grains(candidate: dict) -> list:
+    """Candidate's date grains (Task 15). Falls back to a 1-item list derived
+    from the date_column/bucket compat shim (Task 14) when date_grains is
+    absent, so hand-built single-date candidate dicts (existing callers/tests)
+    keep working unchanged. Same shim-fallback pattern as sqlgen.py's and
+    lattice.py's private helpers of the same name (deliberately duplicated,
+    not shared, to keep each module's date-grain reading self-contained)."""
+    grains = candidate.get("date_grains")
+    if grains is not None:
+        return grains
+    col = candidate.get("date_column")
+    return [{"column": col, "bucket": candidate.get("bucket")}] if col else []
+
+
 def _grain_columns(candidate: dict, model_tml: dict):
-    """(name, data_type, column_type) for dims + date column of the grain."""
+    """(name, data_type, column_type) for dims + EVERY date grain (Task 15:
+    generalized from the single date_column to the full date_grains list —
+    a raw/unbucketed grain is emitted as just another ATTRIBUTE column, same
+    as a bucketed one)."""
     out = [(d, _sql_type(d, model_tml, "VARCHAR"), "ATTRIBUTE")
            for d in candidate["dimensions"]]
-    if candidate.get("date_column"):
-        out.append((candidate["date_column"], "DATE", "ATTRIBUTE"))
+    for g in _cand_date_grains(candidate):
+        out.append((g["column"], "DATE", "ATTRIBUTE"))
     return out
 
 
@@ -165,19 +182,39 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
     return tml
 
 
+def _entry_date_grains(entry: dict) -> list:
+    """Entry's date grains for `date_aggregation_info` (Task 15). Falls back to
+    a 1-item list derived from the single-date `date_column`/`bucket` form
+    when `date_grains` is absent, so existing single-date callers (commands/
+    aggregate.py's `_patch_and_write_primary`, hand-built entries in tests)
+    keep working unchanged. Same shim-fallback pattern as `_cand_date_grains`
+    above."""
+    grains = entry.get("date_grains")
+    if grains is not None:
+        return grains
+    col = entry.get("date_column")
+    return [{"column": col, "bucket": entry.get("bucket")}] if col else []
+
+
 def patch_association(primary_tml: dict, entries: list) -> dict:
     """Set model.aggregated_models, most-aggregated (smallest projected_rows) first.
 
-    entries: [{"id": guid_or_name, "date_column": str|None, "bucket": str|None,
-               "projected_rows": int|None}]. Emits {id, optional
-    date_aggregation_info: [{column_id, bucket}]}; projected_rows is an
-    internal sort key, stripped before emission.
+    entries: [{"id": guid_or_name, "projected_rows": int|None, ...}] where the
+    date grain(s) come from either the multi-date `date_grains`
+    ([{"column", "bucket"}], Task 15) or the single-date compat shim
+    (`date_column`/`bucket`, Task 14) — see `_entry_date_grains`. Emits {id,
+    optional date_aggregation_info: [{column_id, bucket}]}, one entry per date
+    grain; projected_rows is an internal sort key, stripped before emission.
 
-    date_aggregation_info is emitted as a single-element LIST to match the
-    authoritative schema doc (agents/shared/schemas/thoughtspot-model-tml.md
-    § aggregated_models, which shows `- column_id: ...`). The overall
-    aggregated_models shape is still unverified against a live 26.6+ cluster —
-    skill Open Item #2 (Task 11).
+    date_aggregation_info is a LIST — confirmed against a real live 26.9
+    export (skill Open Item #2, VERIFIED 2026-07-11/12). That same live
+    export showed multi-date associations (multiple {column_id, bucket}
+    entries) and a raw/unbucketed date grain emitted as `bucket: NO_BUCKET`
+    — both reproduced here: internal `bucket=None` (raw date) maps to the
+    string `"NO_BUCKET"` only at this emission boundary; `lattice.BUCKETS`
+    itself is untouched (NO_BUCKET is not a matchable bucket value there). A
+    candidate/entry with no date grains at all still omits
+    `date_aggregation_info` entirely, unchanged from before Task 15.
     """
     patched = copy.deepcopy(primary_tml)
     ordered = sorted(entries, key=lambda e: (e.get("projected_rows") is None,
@@ -185,9 +222,12 @@ def patch_association(primary_tml: dict, entries: list) -> dict:
     block = []
     for e in ordered:
         item = {"id": e["id"]}
-        if e.get("date_column") and e.get("bucket"):
-            item["date_aggregation_info"] = [{"column_id": e["date_column"],
-                                              "bucket": e["bucket"]}]
+        grains = _entry_date_grains(e)
+        if grains:
+            item["date_aggregation_info"] = [
+                {"column_id": g["column"], "bucket": g["bucket"] or "NO_BUCKET"}
+                for g in grains
+            ]
         block.append(item)
     patched["model"]["aggregated_models"] = block
     return patched

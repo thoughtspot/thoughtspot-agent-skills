@@ -94,6 +94,48 @@ def test_build_select_joins_groups_and_truncates():
     assert 'GROUP BY "DIM"."CATEGORY", DATE_TRUNC(\'MONTH\', "FACT"."ORDER_DT")' in sql
 
 
+def test_build_select_single_raw_date_grain_no_date_trunc():
+    # Task 15: a single grain with bucket=None (raw/unbucketed date) selects
+    # the plain column — no DATE_TRUNC — via the date_column/bucket shim
+    # fallback (no explicit date_grains key on the candidate).
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": "Order Date",
+            "bucket": None, "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(MODEL, TABLES, cand, PLANS, dialect="snowflake")
+    assert "DATE_TRUNC" not in sql
+    assert '"FACT"."ORDER_DT" AS "Order Date"' in sql
+    assert 'GROUP BY "DIM"."CATEGORY", "FACT"."ORDER_DT"' in sql
+
+
+def test_build_select_multi_date_grains_one_bucketed_one_raw():
+    # Task 15: two-grain candidate (via the new date_grains list) — one
+    # bucketed (MONTHLY -> DATE_TRUNC) and one raw (bucket None -> plain
+    # column, no DATE_TRUNC). Both must appear in SELECT and GROUP BY in
+    # their respective forms.
+    model = {"model": {
+        "model_tables": MODEL["model"]["model_tables"],
+        "columns": MODEL["model"]["columns"] + [
+            {"name": "Shipped Date", "column_id": "FACT::SHIPPED_DT", "data_type": "DATE",
+             "properties": {"column_type": "ATTRIBUTE"}}],
+    }}
+    tables = {
+        "FACT": {"table": {**TABLES["FACT"]["table"],
+                           "columns": TABLES["FACT"]["table"]["columns"] +
+                           [{"name": "SHIPPED_DT", "db_column_name": "SHIPPED_DT"}]}},
+        "DIM": TABLES["DIM"],
+    }
+    cand = {"id": "cand_1", "dimensions": ["Category"],
+            "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"},
+                            {"column": "Shipped Date", "bucket": None}],
+            "measure_columns": ["Sales"], "covered": [0], "flags": []}
+    sql = build_select(model, tables, cand, PLANS, dialect="snowflake")
+    assert 'DATE_TRUNC(\'MONTH\', "FACT"."ORDER_DT") AS "Order Date"' in sql
+    assert '"FACT"."SHIPPED_DT" AS "Shipped Date"' in sql
+    assert 'DATE_TRUNC(\'MONTH\', "FACT"."SHIPPED_DT")' not in sql
+    group_line = next(l for l in sql.splitlines() if l.startswith("GROUP BY"))
+    assert 'DATE_TRUNC(\'MONTH\', "FACT"."ORDER_DT")' in group_line
+    assert '"FACT"."SHIPPED_DT"' in group_line
+
+
 def test_bigquery_date_trunc_argument_order():
     sql = build_select(MODEL, TABLES, CAND, PLANS, dialect="bigquery")
     assert 'DATE_TRUNC(`FACT`.`ORDER_DT`, MONTH)' in sql
