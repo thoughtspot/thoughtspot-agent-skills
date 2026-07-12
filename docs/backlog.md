@@ -2278,7 +2278,21 @@ changelog gate's `--base`).
 
 **Source:** 2026-07-03 full audit finding 11.2 + codification review rows 14/22.
 **Affects:** both ts-recipe-formula-* skills, `tools/ts-cli/`.
-**Status:** OPEN. **Blocks:** should land before the next ts-recipe-* skill (BL-037 plans six).
+**Status:** ✅ DONE in PR #229 (ts-cli v0.48.0) — flip on merge. Delivered: `ts snowflake
+exec -f/-q --sf-profile --var` (reuses `load.py`'s `_connect_python`, both python/cli
+methods); UDF DDL moved to `references/business-day-udfs.sql` /
+`references/duration-udfs.sql`; both SKILL.md Steps 1/3/4 rewired (no inline
+`snowflake.connector` connect block, no retyped SQL); both smoke tests deploy via the
+real command against the single-source templates; **11.3 two-bucket exit satisfied** —
+`check_patterns` rule 7 flags a cloned `snowflake.connector.connect(` in any SKILL.md
+(`ts-profile-snowflake` allowlisted, references/ carved out). Pure helpers
+(`parse_var_assignment`/`substitute_sql_vars`/`json_safe_value`) unit-tested; CoCo
+mirrors won't-sync (CLI-only) — acknowledged in SYNC-DEBT.md. **Live-verified on
+se-thoughtspot (`AGENT_SKILLS.PUBLIC`)**: both smoke tests green end-to-end — business-days
+via the **python/key_pair** profile, hms-display via the **cli** profile (both methods).
+The live run found+fixed a serialization bug: `_exec_python` returned `datetime`/`Decimal`
+that crashed `json.dumps` (`SELECT CURRENT_TIMESTAMP()` etc.) → added `json_safe_value`
+coercer. **Blocks:** should land before the next ts-recipe-* skill (BL-037 plans six).
 
 The recipes' UDF SQL — the entire point of the skills — exists only as markdown fences the
 LLM transcribes into Python strings each run (a `-1` vs `-2` DATEDIFF slip is syntactically

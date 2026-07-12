@@ -24,7 +24,9 @@ docstring on that function for exactly which checklist items are covered.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import re
+from decimal import Decimal
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -553,3 +555,94 @@ def lint_sv_ddl(ddl_text: str) -> list[dict[str, str]]:
     findings.extend(_check_comment_quotes(ddl_text))
     findings.extend(_check_structure(working))
     return _dedupe_findings(findings)
+
+
+# ---------------------------------------------------------------------------
+# SQL variable substitution (BL-079 — `ts snowflake exec`)
+# ---------------------------------------------------------------------------
+#
+# The ts-recipe-formula-*-snowflake skills used to embed their UDF DDL as
+# markdown fences the LLM transcribed into Python strings each run — a class of
+# silent transcription slip (a `-1` vs `-2` DATEDIFF offset is syntactically
+# valid and wrong). The DDL now lives in `references/*.sql` template files with
+# `{name}` placeholders that `ts snowflake exec --var name=value` fills in
+# deterministically. These two helpers are the pure substitution logic behind
+# that command (the connect/execute path is I/O and lives in commands/snowflake.py,
+# reusing the load.py connector).
+
+# A `{identifier}` placeholder token: `{` + a Python-style identifier + `}`.
+# UDF bodies use `$$ ... $$` with SQL punctuation but no `{ident}` braces, so a
+# leftover match after substitution is an unfilled placeholder, not real SQL.
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def parse_var_assignment(assignment: str) -> tuple[str, str]:
+    """Parse a single ``--var key=value`` assignment into ``(key, value)``.
+
+    Splits on the FIRST ``=`` only, so a value may itself contain ``=``. The key
+    must be a valid ``{placeholder}`` identifier (letters, digits, underscore;
+    not starting with a digit). The value may be empty. Raises ``ValueError`` on
+    a missing ``=`` or an invalid key.
+    """
+    if "=" not in assignment:
+        raise ValueError(
+            f"Invalid --var {assignment!r}: expected key=value (missing '=')."
+        )
+    key, value = assignment.split("=", 1)
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        raise ValueError(
+            f"Invalid --var key {key!r}: must be a valid placeholder identifier "
+            "(letters, digits, underscore; not starting with a digit)."
+        )
+    return key, value
+
+
+def substitute_sql_vars(sql: str, variables: dict[str, str]) -> str:
+    """Fill ``{name}`` placeholders in ``sql`` from ``variables`` and verify none remain.
+
+    Every ``{name}`` occurrence is replaced with ``variables[name]`` (all
+    occurrences of each name). After substitution, any remaining ``{identifier}``
+    token is an unfilled placeholder — a missing ``--var`` — and raises
+    ``ValueError`` naming the offenders, so the command fails loudly instead of
+    shipping a literal ``{target_schema}`` to Snowflake. Extra variables with no
+    matching placeholder are ignored. SQL with no placeholders is returned
+    verbatim.
+    """
+    out = sql
+    for name, value in variables.items():
+        out = out.replace("{" + name + "}", value)
+
+    leftover = sorted({m.group(1) for m in _PLACEHOLDER_RE.finditer(out)})
+    if leftover:
+        raise ValueError(
+            "Unsubstituted placeholder(s) remain after applying --var: "
+            + ", ".join("{" + n + "}" for n in leftover)
+            + ". Supply each with --var <name>=<value>."
+        )
+    return out
+
+
+def json_safe_value(obj: Any) -> Any:
+    """`json.dumps(default=...)` coercer for Snowflake result values.
+
+    `ts snowflake exec` serialises query results to JSON, but the snowflake
+    connector returns types the stdlib encoder rejects — `Decimal` for NUMBER,
+    `datetime`/`date`/`time` for temporal columns, `bytes` for BINARY. Without
+    this, `SELECT CURRENT_TIMESTAMP()` (or any decimal/timestamp result) crashes
+    the command. Native JSON types never reach here (the encoder only calls
+    `default` for objects it can't handle), so ints/floats/strings/bools are
+    untouched.
+
+    - `Decimal` → `int` when integral (so a scalar like `4` compares as a number),
+      else `float`.
+    - `date`/`datetime`/`time` → ISO 8601 string.
+    - `bytes`/`bytearray` → hex string.
+    - anything else → `str(obj)` as a last resort.
+    """
+    if isinstance(obj, Decimal):
+        return int(obj) if obj == obj.to_integral_value() else float(obj)
+    if isinstance(obj, (_dt.datetime, _dt.date, _dt.time)):
+        return obj.isoformat()
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.hex()
+    return str(obj)

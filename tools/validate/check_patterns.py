@@ -16,6 +16,12 @@ without false positives, so there is no separate declarative registry):
      read_text() ...])..." | ts tml import`/`lint`) in Claude SKILL.md files AND
      shared reference docs (agents/shared/**/*.md, inherited by the converters —
      BL-117) — use `ts tml import --file <path>` / `--dir <dir>` (ts-cli >= v0.27.0) instead
+  7. A cloned `snowflake.connector.connect(` block in a Claude SKILL.md (BL-079,
+     2026-07-11 audit finding 11.3) — Snowflake execution goes through `ts snowflake
+     exec`, which reuses the one connector in ts-cli (load.py `_connect_python`).
+     Re-inlining the connect block re-clones the ~30-line copy that had already
+     drifted. Allowlisted: ts-profile-snowflake, whose purpose IS demonstrating the
+     connection setup. references/ is carved out automatically (only SKILL.md scanned)
 
 Usage:
     python tools/validate/check_patterns.py
@@ -88,6 +94,13 @@ def check_connection_fqn_in_tml(file_path: Path) -> list[tuple[int, str]]:
 _DUMPS_READ_TEXT_RE = re.compile(r'json\.dumps\(.*read_text\(')
 _TML_IMPORT_LINT_RE = re.compile(r'\bts tml (import|lint)\b')
 _STDIN_WRAPPER_WINDOW = 6  # max lines between the payload-builder line and the ts tml call
+
+# Check 7 (BL-079): a cloned snowflake.connector connect block in a SKILL.md.
+# Snowflake execution goes through `ts snowflake exec` (reuses load.py's one
+# connector); re-inlining the connect call re-clones the drift-prone block.
+_SF_CONNECT_RE = re.compile(r'snowflake\.connector\.connect\s*\(')
+# Skill dirs where demonstrating the connection IS the point.
+_SF_CONNECT_ALLOWLIST = {"ts-profile-snowflake"}
 
 
 def check_stdin_tml_import_wrapper(file_path: Path) -> list[tuple[int, str, int, str]]:
@@ -320,6 +333,28 @@ def main() -> int:
                 f"instead of piping a JSON array."
             )
             total_hits += 1
+
+    # Check 7: cloned snowflake.connector.connect( in a Claude SKILL.md (BL-079).
+    # Allowlist ts-profile-snowflake (its purpose is the connection demo).
+    # references/ is carved out automatically — only SKILL.md files are scanned.
+    # In --staged mode: only flag newly-added lines.
+    for md_file in skill_md_files:
+        if md_file.parent.name in _SF_CONNECT_ALLOWLIST:
+            continue
+        added_lines = (
+            get_staged_added_lines(repo_root, md_file) if args.staged else None
+        )
+        for line_num, line in enumerate(md_file.read_text(encoding="utf-8").splitlines(), 1):
+            if _SF_CONNECT_RE.search(line):
+                if added_lines is not None and line not in added_lines:
+                    continue  # pre-existing violation — skip in staged mode
+                rel = md_file.relative_to(repo_root)
+                print(
+                    f"FAIL  {rel}:{line_num}  cloned-snowflake-connector-in-skill  →  {line.strip()!r}\n"
+                    f"      Deploy/execute Snowflake SQL via `ts snowflake exec` (reuses the one\n"
+                    f"      connector in ts-cli), not an inlined snowflake.connector.connect() block."
+                )
+                total_hits += 1
 
     print()
     if total_hits:

@@ -15,6 +15,10 @@ ThoughtSpot's built-in `diff_days` / `diff_hours` / `diff_minutes` count calenda
 
 All three clamp weekend boundaries: if start or end falls on a Saturday or Sunday, the function shifts to the nearest weekday rather than erroring. `get_business_duration_str` internally calls `get_business_minutes_clamped` by fully qualified name, so creation order matters — create minutes first.
 
+The UDF DDL lives in [references/business-day-udfs.sql](references/business-day-udfs.sql) and is deployed with `ts snowflake exec` (ts-cli ≥ 0.48.0) — the SQL is never retyped, and `{target_db}` / `{target_schema}` are filled deterministically via `--var`.
+
+In the commands below, `{skill_dir}` is the absolute path of the directory containing this SKILL.md (e.g. `~/.claude/skills/ts-recipe-formula-business-days-snowflake` in Claude Code, `~/.snowflake/cortex/skills/...` in Cortex Code CLI). Substitute the real path when running.
+
 Ask one question at a time. Wait for each answer before proceeding.
 
 ---
@@ -30,57 +34,15 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 Read `~/.claude/snowflake-profiles.json`. If the file is missing or the array is empty, ask the user to run `/ts-profile-snowflake` first.
 
-If multiple profiles exist, show a numbered list and ask which to use. If exactly one exists, confirm it.
+If multiple profiles exist, show a numbered list and ask which to use. If exactly one exists, confirm it. Save the chosen profile name as `{sf_profile_name}`.
 
-Save:
-- `{sf_profile_name}` — profile name
-- `{sf_method}` — `"python"` or `"cli"` (from the profile's `method` field)
-- `{cli_connection}` — for `method: cli`
-- `{account}`, `{username}`, `{auth}`, `{default_warehouse}`, `{default_role}` — for `method: python`
+Test the connection — `ts snowflake exec` handles both `method: python` and `method: cli` profiles, reusing the same connector as `ts load` (no credential handling in this skill):
 
-Test the connection:
-
-**method: cli**
 ```bash
-snow sql -c "{cli_connection}" -q "SELECT CURRENT_USER()"
+ts snowflake exec -q "SELECT CURRENT_USER()" --sf-profile "{sf_profile_name}"
 ```
 
-**method: python**
-```python
-import snowflake.connector, json, pathlib
-
-profiles = json.loads(pathlib.Path("~/.claude/snowflake-profiles.json").expanduser().read_text())
-p = next(x for x in profiles if x["name"] == "{sf_profile_name}")
-
-if p.get("auth") == "key_pair":
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.backends import default_backend
-    key_path = pathlib.Path("~/.ssh/snowflake_key.p8").expanduser()
-    private_key = serialization.load_pem_private_key(
-        key_path.read_bytes(), password=None, backend=default_backend()
-    )
-    private_key_bytes = private_key.private_bytes(
-        serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption()
-    )
-    conn = snowflake.connector.connect(
-        account=p["account"], user=p["username"], private_key=private_key_bytes,
-        warehouse=p.get("default_warehouse"), role=p.get("default_role")
-    )
-else:
-    import keyring
-    password = keyring.get_password(f"snowflake-{p['name'].lower().replace(' ','-')}", p["username"])
-    conn = snowflake.connector.connect(
-        account=p["account"], user=p["username"], password=password,
-        warehouse=p.get("default_warehouse"), role=p.get("default_role")
-    )
-
-cur = conn.cursor()
-cur.execute("SELECT CURRENT_USER()")
-print(cur.fetchone())
-```
-
-If the test fails, refer the user to `/ts-profile-snowflake` for credential troubleshooting.
+Expect a JSON object on stdout with a `rows` array containing the current user. If the command fails, refer the user to `/ts-profile-snowflake` for credential troubleshooting.
 
 ---
 
@@ -121,139 +83,18 @@ Proceed? (Y / N)
 
 ## Step 3 — Create the UDFs
 
-Create the functions in the order below — `get_business_duration_str` calls `get_business_minutes_clamped` by fully qualified name and will fail if that function doesn't exist first.
+Deploy all three UDFs in one call. The DDL comes from [references/business-day-udfs.sql](references/business-day-udfs.sql); `ts snowflake exec` runs its statements in file order (minutes first, so `get_business_duration_str`'s fully-qualified call resolves) and stops at the first error, so a dependent function is never created after the function it references failed.
 
-If any creation step fails, show the error and stop. Don't attempt to create dependent functions after a failure.
-
-### 3a. get_business_minutes_clamped
-
-```sql
-CREATE OR REPLACE FUNCTION {target_db}.{target_schema}.get_business_minutes_clamped(
-    start_ts TIMESTAMP, end_ts TIMESTAMP
-)
-RETURNS INT
-AS
-$$
-    DATEDIFF('minute',
-        CASE
-            WHEN DAYNAME(start_ts) = 'Sat' THEN DATEADD('day', 2, DATE_TRUNC('day', start_ts))
-            WHEN DAYNAME(start_ts) = 'Sun' THEN DATEADD('day', 1, DATE_TRUNC('day', start_ts))
-            ELSE start_ts
-        END,
-        CASE
-            WHEN DAYNAME(end_ts) = 'Sat' THEN DATEADD('second', -1, DATE_TRUNC('day', end_ts))
-            WHEN DAYNAME(end_ts) = 'Sun' THEN DATEADD('second', -1, DATEADD('day', -1, DATE_TRUNC('day', end_ts)))
-            ELSE end_ts
-        END
-    )
-    - (DATEDIFF('week',
-        CASE
-            WHEN DAYNAME(start_ts) = 'Sat' THEN DATEADD('day', 2, DATE_TRUNC('day', start_ts))
-            WHEN DAYNAME(start_ts) = 'Sun' THEN DATEADD('day', 1, DATE_TRUNC('day', start_ts))
-            ELSE start_ts
-        END,
-        CASE
-            WHEN DAYNAME(end_ts) = 'Sat' THEN DATEADD('second', -1, DATE_TRUNC('day', end_ts))
-            WHEN DAYNAME(end_ts) = 'Sun' THEN DATEADD('second', -1, DATEADD('day', -1, DATE_TRUNC('day', end_ts)))
-            ELSE end_ts
-        END
-    ) * 2 * 1440)
-$$;
+```bash
+ts snowflake exec -f "{skill_dir}/references/business-day-udfs.sql" \
+  --sf-profile "{sf_profile_name}" \
+  --var target_db={target_db} \
+  --var target_schema={target_schema}
 ```
 
-### 3b. get_business_days_clamped
+`--var` fills the `{target_db}` / `{target_schema}` placeholders in the SQL. If a placeholder is left without a `--var`, the command aborts before touching Snowflake rather than shipping a literal `{target_schema}`.
 
-```sql
-CREATE OR REPLACE FUNCTION {target_db}.{target_schema}.get_business_days_clamped(
-    start_ts TIMESTAMP, end_ts TIMESTAMP, inclusive BOOLEAN
-)
-RETURNS INT
-AS
-$$
-    (DATEDIFF('day',
-        CASE
-            WHEN DAYNAME(start_ts) = 'Sat' THEN DATEADD('day', 2, DATE_TRUNC('day', start_ts))
-            WHEN DAYNAME(start_ts) = 'Sun' THEN DATEADD('day', 1, DATE_TRUNC('day', start_ts))
-            ELSE start_ts
-        END,
-        CASE
-            WHEN DAYNAME(end_ts) = 'Sat' THEN DATEADD('day', -1, DATE_TRUNC('day', end_ts))
-            WHEN DAYNAME(end_ts) = 'Sun' THEN DATEADD('day', -2, DATE_TRUNC('day', end_ts))
-            ELSE end_ts
-        END
-    ) + CASE WHEN inclusive THEN 1 ELSE 0 END)
-    - (DATEDIFF('week',
-        CASE
-            WHEN DAYNAME(start_ts) = 'Sat' THEN DATEADD('day', 2, DATE_TRUNC('day', start_ts))
-            WHEN DAYNAME(start_ts) = 'Sun' THEN DATEADD('day', 1, DATE_TRUNC('day', start_ts))
-            ELSE start_ts
-        END,
-        CASE
-            WHEN DAYNAME(end_ts) = 'Sat' THEN DATEADD('day', -1, DATE_TRUNC('day', end_ts))
-            WHEN DAYNAME(end_ts) = 'Sun' THEN DATEADD('day', -2, DATE_TRUNC('day', end_ts))
-            ELSE end_ts
-        END
-    ) * 2)
-$$;
-```
-
-### 3c. get_business_duration_str
-
-This function calls `get_business_minutes_clamped` by its fully qualified name — both must live in the same database and schema.
-
-```sql
-CREATE OR REPLACE FUNCTION {target_db}.{target_schema}.get_business_duration_str(
-    start_ts TIMESTAMP, end_ts TIMESTAMP
-)
-RETURNS STRING
-AS
-$$
-    FLOOR({target_db}.{target_schema}.get_business_minutes_clamped(start_ts, end_ts) / 60)
-    || ':'
-    || LPAD(MOD({target_db}.{target_schema}.get_business_minutes_clamped(start_ts, end_ts), 60), 2, '0')
-$$;
-```
-
-**Executing each DDL statement:**
-
-**method: cli**
-```python
-import subprocess, tempfile, pathlib
-
-for fname, ddl in [
-    ("get_business_minutes_clamped", ddl_minutes),
-    ("get_business_days_clamped",    ddl_days),
-    ("get_business_duration_str",    ddl_duration_str),
-]:
-    tmp = pathlib.Path(tempfile.mktemp(suffix=".sql"))
-    tmp.write_text(ddl)
-    r = subprocess.run(
-        ["snow", "sql", "-c", "{cli_connection}", "-f", str(tmp)],
-        capture_output=True, text=True
-    )
-    tmp.unlink()
-    if r.returncode != 0:
-        print(f"FAILED {fname}: {r.stderr or r.stdout}")
-        break
-    print(f"Created {fname}")
-```
-
-**method: python**
-```python
-for fname, ddl in [
-    ("get_business_minutes_clamped", ddl_minutes),
-    ("get_business_days_clamped",    ddl_days),
-    ("get_business_duration_str",    ddl_duration_str),
-]:
-    try:
-        cur.execute(ddl)
-        print(f"Created {fname}")
-    except Exception as e:
-        print(f"FAILED {fname}: {e}")
-        break
-```
-
-After all three succeed, confirm:
+If the command exits non-zero, show the error and stop — do not proceed to verification. On success, confirm:
 
 ```
 ✓ get_business_minutes_clamped created
@@ -265,36 +106,33 @@ After all three succeed, confirm:
 
 ## Step 4 — Verify
 
-Run three smoke tests to confirm the UDFs return expected values.
+Run three checks to confirm the UDFs return expected values. Each reads the scalar from the `rows` array of the JSON on stdout.
 
 **Test 1:** Mon 2026-01-05 → Fri 2026-01-09, exclusive → 4 business days
 
-```sql
-SELECT {target_db}.{target_schema}.get_business_days_clamped(
-    '2026-01-05'::TIMESTAMP, '2026-01-09'::TIMESTAMP, FALSE
-);
--- Expected: 4
+```bash
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "SELECT {target_db}.{target_schema}.get_business_days_clamped('2026-01-05'::TIMESTAMP, '2026-01-09'::TIMESTAMP, FALSE)"
+# Expected: 4
 ```
 
 **Test 2:** One full business day (Mon 09:00 → Tue 09:00) → 1440 minutes
 
-```sql
-SELECT {target_db}.{target_schema}.get_business_minutes_clamped(
-    '2026-01-05 09:00:00'::TIMESTAMP, '2026-01-06 09:00:00'::TIMESTAMP
-);
--- Expected: 1440
+```bash
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "SELECT {target_db}.{target_schema}.get_business_minutes_clamped('2026-01-05 09:00:00'::TIMESTAMP, '2026-01-06 09:00:00'::TIMESTAMP)"
+# Expected: 1440
 ```
 
 **Test 3:** Duration string for same interval → `24:00`
 
-```sql
-SELECT {target_db}.{target_schema}.get_business_duration_str(
-    '2026-01-05 09:00:00'::TIMESTAMP, '2026-01-06 09:00:00'::TIMESTAMP
-);
--- Expected: 24:00
+```bash
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "SELECT {target_db}.{target_schema}.get_business_duration_str('2026-01-05 09:00:00'::TIMESTAMP, '2026-01-06 09:00:00'::TIMESTAMP)"
+# Expected: 24:00
 ```
 
-If any test returns an unexpected value, show the actual result and re-run `CREATE OR REPLACE` for that function to refresh it.
+If any test returns an unexpected value, show the actual result and re-run Step 3 to refresh the functions.
 
 ---
 
@@ -386,6 +224,7 @@ If N → done.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.1.0 | 2026-07-12 | Codify UDF DDL as `references/business-day-udfs.sql` deployed via `ts snowflake exec` (ts-cli ≥ 0.48.0); Steps 1/3/4 no longer inline `snowflake.connector` connect blocks or transcribe SQL (BL-079) |
 | 2.0.0 | 2026-05-13 | Renamed from ts-setup-snowflake-udfs-business-days to ts-recipe-formula-business-days-snowflake; new ts-recipe-* family introduced |
 | 1.0.1 | 2026-05-12 | Step 5: explicit formulas[] + columns[] TML pattern; formula alone is hidden without the columns[] entry |
 | 1.0.0 | 2026-05-12 | Initial release — deploy three Snowflake business-day UDFs and show ThoughtSpot formula syntax |

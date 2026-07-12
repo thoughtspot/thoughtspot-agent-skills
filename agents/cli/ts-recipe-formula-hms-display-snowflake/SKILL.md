@@ -16,6 +16,10 @@ ThoughtSpot stores durations as integer columns (seconds or minutes) but cannot 
 
 All four UDFs are independent — no creation order constraint.
 
+The UDF DDL lives in [references/duration-udfs.sql](references/duration-udfs.sql) and is deployed with `ts snowflake exec` (ts-cli ≥ 0.48.0) — the SQL is never retyped, and `{target_db}` / `{target_schema}` are filled deterministically via `--var`.
+
+In the commands below, `{skill_dir}` is the absolute path of the directory containing this SKILL.md (e.g. `~/.claude/skills/ts-recipe-formula-hms-display-snowflake` in Claude Code, `~/.snowflake/cortex/skills/...` in Cortex Code CLI). Substitute the real path when running.
+
 Ask one question at a time. Wait for each answer before proceeding.
 
 ---
@@ -31,57 +35,15 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 Read `~/.claude/snowflake-profiles.json`. If the file is missing or the array is empty, ask the user to run `/ts-profile-snowflake` first.
 
-If multiple profiles exist, show a numbered list and ask which to use. If exactly one exists, confirm it.
+If multiple profiles exist, show a numbered list and ask which to use. If exactly one exists, confirm it. Save the chosen profile name as `{sf_profile_name}`.
 
-Save:
-- `{sf_profile_name}` — profile name
-- `{sf_method}` — `"python"` or `"cli"` (from the profile's `method` field)
-- `{cli_connection}` — for `method: cli`
-- `{account}`, `{username}`, `{auth}`, `{default_warehouse}`, `{default_role}` — for `method: python`
+Test the connection — `ts snowflake exec` handles both `method: python` and `method: cli` profiles, reusing the same connector as `ts load` (no credential handling in this skill):
 
-Test the connection:
-
-**method: cli**
 ```bash
-snow sql -c "{cli_connection}" -q "SELECT CURRENT_USER()"
+ts snowflake exec -q "SELECT CURRENT_USER()" --sf-profile "{sf_profile_name}"
 ```
 
-**method: python**
-```python
-import snowflake.connector, json, pathlib
-
-profiles = json.loads(pathlib.Path("~/.claude/snowflake-profiles.json").expanduser().read_text())
-p = next(x for x in profiles if x["name"] == "{sf_profile_name}")
-
-if p.get("auth") == "key_pair":
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.backends import default_backend
-    key_path = pathlib.Path("~/.ssh/snowflake_key.p8").expanduser()
-    private_key = serialization.load_pem_private_key(
-        key_path.read_bytes(), password=None, backend=default_backend()
-    )
-    private_key_bytes = private_key.private_bytes(
-        serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption()
-    )
-    conn = snowflake.connector.connect(
-        account=p["account"], user=p["username"], private_key=private_key_bytes,
-        warehouse=p.get("default_warehouse"), role=p.get("default_role")
-    )
-else:
-    import keyring
-    password = keyring.get_password(f"snowflake-{p['name'].lower().replace(' ','-')}", p["username"])
-    conn = snowflake.connector.connect(
-        account=p["account"], user=p["username"], password=password,
-        warehouse=p.get("default_warehouse"), role=p.get("default_role")
-    )
-
-cur = conn.cursor()
-cur.execute("SELECT CURRENT_USER()")
-print(cur.fetchone())
-```
-
-If the test fails, refer the user to `/ts-profile-snowflake` for credential troubleshooting.
+Expect a JSON object on stdout with a `rows` array containing the current user. If the command fails, refer the user to `/ts-profile-snowflake` for credential troubleshooting.
 
 ---
 
@@ -122,98 +84,18 @@ Proceed? (Y / N)
 
 ## Step 3 — Create the UDFs
 
-All four UDFs are independent. If any creation step fails, show the error and stop — do not attempt subsequent UDFs.
+Deploy all four UDFs in one call. The DDL comes from [references/duration-udfs.sql](references/duration-udfs.sql); `ts snowflake exec` runs its statements in order and stops at the first error.
 
-### 3a. format_seconds_to_hms
-
-```sql
-CREATE OR REPLACE FUNCTION {target_db}.{target_schema}.format_seconds_to_hms(seconds INT)
-RETURNS STRING
-AS
-$$
-    LPAD(TRUNC(seconds / 3600)::STRING, 2, '0') || ':' ||
-    LPAD(TRUNC(MOD(seconds, 3600) / 60)::STRING, 2, '0') || ':' ||
-    LPAD(MOD(seconds, 60)::STRING, 2, '0')
-$$;
+```bash
+ts snowflake exec -f "{skill_dir}/references/duration-udfs.sql" \
+  --sf-profile "{sf_profile_name}" \
+  --var target_db={target_db} \
+  --var target_schema={target_schema}
 ```
 
-### 3b. format_seconds_to_dhms
+`--var` fills the `{target_db}` / `{target_schema}` placeholders in the SQL. If a placeholder is left without a `--var`, the command aborts before touching Snowflake rather than shipping a literal `{target_schema}`.
 
-```sql
-CREATE OR REPLACE FUNCTION {target_db}.{target_schema}.format_seconds_to_dhms(seconds INT)
-RETURNS STRING
-AS
-$$
-    LPAD(TRUNC(seconds / 86400)::STRING, 2, '0') || ':' ||
-    LPAD(TRUNC(MOD(seconds, 86400) / 3600)::STRING, 2, '0') || ':' ||
-    LPAD(TRUNC(MOD(seconds, 3600) / 60)::STRING, 2, '0') || ':' ||
-    LPAD(MOD(seconds, 60)::STRING, 2, '0')
-$$;
-```
-
-### 3c. format_minutes_to_hm
-
-```sql
-CREATE OR REPLACE FUNCTION {target_db}.{target_schema}.format_minutes_to_hm(minutes INT)
-RETURNS STRING
-AS
-$$
-    LPAD(TRUNC(minutes / 60)::STRING, 2, '0') || ':' ||
-    LPAD(MOD(minutes, 60)::STRING, 2, '0')
-$$;
-```
-
-### 3d. format_minutes_to_dhm
-
-```sql
-CREATE OR REPLACE FUNCTION {target_db}.{target_schema}.format_minutes_to_dhm(minutes INT)
-RETURNS STRING
-AS
-$$
-    LPAD(TRUNC(minutes / 1440)::STRING, 2, '0') || ':' ||
-    LPAD(TRUNC(MOD(minutes, 1440) / 60)::STRING, 2, '0') || ':' ||
-    LPAD(MOD(minutes, 60)::STRING, 2, '0')
-$$;
-```
-
-**Executing each DDL statement:**
-
-**method: cli**
-```python
-import subprocess, tempfile, pathlib
-
-udfs = [
-    ("format_seconds_to_hms",  ddl_hms),
-    ("format_seconds_to_dhms", ddl_dhms),
-    ("format_minutes_to_hm",   ddl_hm),
-    ("format_minutes_to_dhm",  ddl_dhm),
-]
-for fname, ddl in udfs:
-    tmp = pathlib.Path(tempfile.mktemp(suffix=".sql"))
-    tmp.write_text(ddl)
-    r = subprocess.run(
-        ["snow", "sql", "-c", "{cli_connection}", "-f", str(tmp)],
-        capture_output=True, text=True
-    )
-    tmp.unlink()
-    if r.returncode != 0:
-        print(f"FAILED {fname}: {r.stderr or r.stdout}")
-        break
-    print(f"Created {fname}")
-```
-
-**method: python**
-```python
-for fname, ddl in udfs:
-    try:
-        cur.execute(ddl)
-        print(f"Created {fname}")
-    except Exception as e:
-        print(f"FAILED {fname}: {e}")
-        break
-```
-
-After all four succeed, confirm:
+If the command exits non-zero, show the error and stop — do not proceed to verification. On success, confirm:
 
 ```
 ✓ format_seconds_to_hms created
@@ -226,23 +108,27 @@ After all four succeed, confirm:
 
 ## Step 4 — Verify
 
-Run four spot checks to confirm the UDFs return expected values.
+Run four spot checks to confirm the UDFs return expected values. Each reads the scalar from the `rows` array of the JSON on stdout.
 
-```sql
--- Expected: 01:01:05  (1h 1m 5s)
-SELECT {target_db}.{target_schema}.format_seconds_to_hms(3665);
+```bash
+# Expected: 01:01:05  (1h 1m 5s)
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "SELECT {target_db}.{target_schema}.format_seconds_to_hms(3665)"
 
--- Expected: 01:01:01:01  (1d 1h 1m 1s)
-SELECT {target_db}.{target_schema}.format_seconds_to_dhms(90061);
+# Expected: 01:01:01:01  (1d 1h 1m 1s)
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "SELECT {target_db}.{target_schema}.format_seconds_to_dhms(90061)"
 
--- Expected: 01:05  (1h 5m)
-SELECT {target_db}.{target_schema}.format_minutes_to_hm(65);
+# Expected: 01:05  (1h 5m)
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "SELECT {target_db}.{target_schema}.format_minutes_to_hm(65)"
 
--- Expected: 01:01:01  (1d 1h 1m)
-SELECT {target_db}.{target_schema}.format_minutes_to_dhm(1501);
+# Expected: 01:01:01  (1d 1h 1m)
+ts snowflake exec --sf-profile "{sf_profile_name}" \
+  -q "SELECT {target_db}.{target_schema}.format_minutes_to_dhm(1501)"
 ```
 
-If any test returns an unexpected value, re-run `CREATE OR REPLACE` for that function.
+If any test returns an unexpected value, re-run Step 3 to refresh the functions.
 
 ---
 
@@ -333,4 +219,5 @@ If N → done.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-12 | Codify UDF DDL as `references/duration-udfs.sql` deployed via `ts snowflake exec` (ts-cli ≥ 0.48.0); Steps 1/3/4 no longer inline `snowflake.connector` connect blocks or transcribe SQL (BL-079) |
 | 1.0.0 | 2026-05-13 | Initial release — deploy four Snowflake duration-display UDFs and show ThoughtSpot formula syntax |

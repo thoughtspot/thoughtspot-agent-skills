@@ -244,62 +244,62 @@ def snow_file(snow_cmd: str, cli_connection: str, sql_file: str) -> None:
         )
 
 
-def check_sf_cli_method(profile: dict) -> tuple[str, str]:
+def ts_snowflake_exec(
+    sf_profile: str,
+    *,
+    file: str | Path | None = None,
+    query: str | None = None,
+    variables: dict[str, str] | None = None,
+) -> dict:
     """
-    Verify a loaded Snowflake profile uses method: cli — required by smoke tests
-    that shell out to `snow sql` (the recipe UDF-deploy smokes, in particular).
-    Returns (snow_cmd, cli_connection).
+    Run `ts snowflake exec` (ts-cli >= 0.48.0) and return its parsed JSON stdout.
+
+    This is the same runtime path the ts-recipe-formula-*-snowflake skills use to
+    deploy and verify their UDFs, so the smoke tests exercise the real command
+    (and the single-source `references/*.sql` templates) rather than a
+    re-implemented `snow sql` deploy. Works with both `python` and `cli` profile
+    methods. Raises RuntimeError on non-zero exit or non-JSON output.
     """
-    method = profile.get("method", "")
-    if method != "cli":
+    cmd = ["ts", "snowflake", "exec", "--sf-profile", sf_profile]
+    if file is not None:
+        cmd += ["-f", str(file)]
+    if query is not None:
+        cmd += ["-q", query]
+    for k, v in (variables or {}).items():
+        cmd += ["--var", f"{k}={v}"]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
         raise RuntimeError(
-            f"Profile method is '{method}' — smoke tests require method: cli. "
-            "Create a CLI-method Snowflake profile via /ts-profile-snowflake."
+            f"ts snowflake exec failed:\n{result.stderr.strip() or result.stdout.strip()}"
         )
-    cli_conn = profile.get("cli_connection")
-    if not cli_conn:
-        raise RuntimeError("Profile has no 'cli_connection' field.")
-    return get_snow_cmd(profile), cli_conn
-
-
-def create_udf(snow_cmd: str, cli_connection: str, ddl: str) -> None:
-    """
-    Deploy a single scalar UDF via `snow sql -f`. Writes the DDL to a temp file
-    so multiline function bodies survive shell quoting — required by the
-    ts-recipe-formula-*-snowflake smoke tests (business-days, hms-display, and
-    any future recipe UDF).
-    """
-    import tempfile
-    tmp = Path(tempfile.mktemp(suffix=".sql"))
-    tmp.write_text(ddl)
     try:
-        result = subprocess.run(
-            [snow_cmd, "sql", "-c", cli_connection, "-f", str(tmp)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
-    finally:
-        tmp.unlink(missing_ok=True)
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"ts snowflake exec returned non-JSON:\n{result.stdout[:300]}"
+        ) from e
 
 
-def query_scalar(snow_cmd: str, cli_connection: str, sql: str) -> Any:
-    """Run a SQL query via the Snowflake CLI and return the first column of the first row."""
-    rows = snow_json(snow_cmd, cli_connection, sql)
+def ts_snowflake_scalar(sf_profile: str, query: str) -> Any:
+    """Run a single-query `ts snowflake exec -q` and return the first column of the
+    first row (the top-level `rows` convenience field)."""
+    data = ts_snowflake_exec(sf_profile, query=query)
+    rows = data.get("rows", [])
     if not rows:
-        raise RuntimeError(f"Query returned no rows: {sql}")
+        raise RuntimeError(f"Query returned no rows: {query}")
     return list(rows[0].values())[0]
 
 
-def drop_udfs(snow_cmd: str, cli_connection: str, signatures: list[str]) -> None:
+def ts_snowflake_drop_udfs(sf_profile: str, signatures: list[str]) -> None:
     """
     Best-effort `DROP FUNCTION IF EXISTS` for each fully-qualified signature
-    (e.g. `DB.SCHEMA.my_udf(TIMESTAMP, TIMESTAMP)`). Failures are swallowed —
-    this is cleanup, not a test assertion.
+    (e.g. `DB.SCHEMA.my_udf(TIMESTAMP, TIMESTAMP)`), via `ts snowflake exec`.
+    Failures are swallowed — this is cleanup, not a test assertion.
     """
     for sig in signatures:
         try:
-            snow_exec(snow_cmd, cli_connection, f"DROP FUNCTION IF EXISTS {sig}")
+            ts_snowflake_exec(sf_profile, query=f"DROP FUNCTION IF EXISTS {sig}")
         except Exception:
             pass  # best-effort cleanup
 

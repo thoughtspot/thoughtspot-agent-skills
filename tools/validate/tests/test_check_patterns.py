@@ -198,3 +198,75 @@ def test_main_does_not_scan_generated_databricks_shared_copy(tmp_path):
     res = _run(tmp_path)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "stdin-json-array-tml-import" not in res.stdout
+
+
+# --- Check 7: cloned snowflake.connector.connect( in a SKILL.md (BL-079) --------
+
+_SF_CONNECT_SNIPPET = (
+    "---\nname: ts-recipe-formula-foo-snowflake\n---\n\n"
+    "## Step 1\n\n"
+    "```python\n"
+    "import snowflake.connector\n"
+    "conn = snowflake.connector.connect(account=a, user=u, password=p)\n"
+    "```\n"
+)
+
+_SF_EXEC_SNIPPET = (
+    "---\nname: ts-recipe-formula-foo-snowflake\n---\n\n"
+    "## Step 3\n\n"
+    "```bash\n"
+    'ts snowflake exec -f "{skill_dir}/references/udfs.sql" --sf-profile "{sf_profile_name}"\n'
+    "```\n"
+)
+
+
+def test_main_flags_cloned_sf_connector_in_skill_md(tmp_path):
+    skill_dir = tmp_path / "agents" / "cli" / "ts-recipe-formula-foo-snowflake"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_SF_CONNECT_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "cloned-snowflake-connector-in-skill" in res.stdout
+
+
+def test_main_does_not_flag_ts_snowflake_exec(tmp_path):
+    skill_dir = tmp_path / "agents" / "cli" / "ts-recipe-formula-foo-snowflake"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_SF_EXEC_SNIPPET)
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "cloned-snowflake-connector-in-skill" not in res.stdout
+
+
+def test_main_allowlists_ts_profile_snowflake(tmp_path):
+    # ts-profile-snowflake's whole purpose is demonstrating the connection setup.
+    skill_dir = tmp_path / "agents" / "claude" / "ts-profile-snowflake"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        _SF_CONNECT_SNIPPET.replace("ts-recipe-formula-foo-snowflake", "ts-profile-snowflake")
+    )
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "cloned-snowflake-connector-in-skill" not in res.stdout
+
+
+def test_main_check7_carves_out_references_dir(tmp_path):
+    # The .sql templates + any test scripts under references/ are never scanned.
+    skill_dir = tmp_path / "agents" / "cli" / "ts-recipe-formula-foo-snowflake"
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_SF_EXEC_SNIPPET)
+    (refs_dir / "probe.py").write_text(
+        "conn = snowflake.connector.connect(account=a)\n"
+    )
+    _git_init_and_add(tmp_path)
+
+    res = _run(tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "cloned-snowflake-connector-in-skill" not in res.stdout
