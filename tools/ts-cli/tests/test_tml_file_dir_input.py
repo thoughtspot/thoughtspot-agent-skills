@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -34,6 +36,7 @@ from ts_cli.commands.tml import (
     read_tml_texts,
     load_input_tmls,
     order_and_filter_tml_paths,
+    _stdin_has_piped_content,
 )
 
 try:
@@ -209,6 +212,95 @@ class TestLoadInputTmlsFileMode:
         msg = str(exc_info.value)
         assert "stdin" in msg.lower()
         assert "--file" in msg or "--dir" in msg
+
+
+# ---------------------------------------------------------------------------
+# _stdin_has_piped_content — must never block on an idle open non-TTY stdin
+# (BL-097: a background/script shell whose stdin is an open-but-empty pipe made
+# the unconditional sys.stdin.read() hang forever; select() must short-circuit it)
+# ---------------------------------------------------------------------------
+
+class _PipeStdin:
+    """Wrap the read end of a real OS pipe so isatty()/fileno() behave like a
+    genuine redirected stdin — select() can poll it, unlike an io.StringIO."""
+
+    def __init__(self, read_fd):
+        self._f = os.fdopen(read_fd)
+
+    def isatty(self):
+        return False
+
+    def fileno(self):
+        return self._f.fileno()
+
+    def read(self, *args):
+        return self._f.read(*args)
+
+    def close(self):
+        self._f.close()
+
+
+class TestStdinHasPipedContentNoHang:
+    def _run_with_timeout(self, monkeypatch, read_fd, timeout=3.0):
+        stdin = _PipeStdin(read_fd)
+        monkeypatch.setattr(sys, "stdin", stdin)
+        box = {}
+
+        def worker():
+            box["result"] = _stdin_has_piped_content()
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        t.join(timeout)
+        return t, box
+
+    def test_open_pipe_no_data_returns_false_without_blocking(self, monkeypatch):
+        """The BL-097 repro: writer end stays open, nothing written. The old
+        unconditional read() blocked here forever; select() must return not-ready
+        so the call completes promptly and reports 'no piped content'."""
+        r, w = os.pipe()
+        try:
+            t, box = self._run_with_timeout(monkeypatch, r)
+            assert not t.is_alive(), "read blocked on an idle open pipe (BL-097 regression)"
+            assert box["result"] is False
+        finally:
+            os.close(w)
+
+    def test_pipe_with_data_returns_true(self, monkeypatch):
+        r, w = os.pipe()
+        try:
+            os.write(w, b"table:\n  name: A\n")
+        finally:
+            os.close(w)  # close writer so the read reaches EOF after the data
+        t, box = self._run_with_timeout(monkeypatch, r)
+        assert not t.is_alive()
+        assert box["result"] is True
+
+    def test_closed_pipe_eof_returns_false(self, monkeypatch):
+        """A closed/empty pipe (e.g. `< /dev/null`) is readable but yields '' —
+        that is 'no content', not a block."""
+        r, w = os.pipe()
+        os.close(w)  # immediate EOF, no data
+        t, box = self._run_with_timeout(monkeypatch, r)
+        assert not t.is_alive()
+        assert box["result"] is False
+
+    def test_tty_stdin_short_circuits_true_to_false(self, monkeypatch):
+        class _TtyStdin(io.StringIO):
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(sys, "stdin", _TtyStdin(""))
+        assert _stdin_has_piped_content() is False
+
+    def test_stringio_fallback_preserves_prior_behaviour(self, monkeypatch):
+        """io.StringIO has no pollable fd, so select() raises UnsupportedOperation
+        and we fall back to the prior blocking read — which is safe for an
+        already-buffered in-memory stream and keeps the CliRunner tests valid."""
+        monkeypatch.setattr(sys, "stdin", io.StringIO("some tml"))
+        assert _stdin_has_piped_content() is True
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        assert _stdin_has_piped_content() is False
 
 
 # ---------------------------------------------------------------------------

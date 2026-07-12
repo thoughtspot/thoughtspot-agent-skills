@@ -2681,17 +2681,21 @@ time SpotQL commands are exercised live.
 ## BL-097 — ts-cli: `_stdin_has_piped_content()` hangs forever on an open non-TTY stdin
 
 **Source:** 2026-07-09 BL-063 PR1 Task 5 live run against se-thoughtspot — `ts tml import --file` invoked from a script context (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, "TS-side number-match results (Task 5, live 2026-07-09)" import-iterations note).
-**Affects:** `tools/ts-cli/ts_cli/commands/tml.py:182` (`_stdin_has_piped_content()`); any skill or script invoking `ts tml import`/`ts tml lint` from a non-interactive shell with an open stdin.
-**Status:** OPEN.
+**Affects:** `tools/ts-cli/ts_cli/commands/tml.py` (`_stdin_has_piped_content()`); any skill or script invoking `ts tml import`/`ts tml lint` from a non-interactive shell with an open stdin.
+**Status:** DONE — ts-cli v0.47.1 (2026-07-12).
 
-`_stdin_has_piped_content()` blocks on `sys.stdin.read()` whenever stdin is open but
-not a TTY and nothing has actually been piped in (e.g. a background shell context) — it
-hangs forever instead of falling through to the `--file`/`--dir` path. The workaround
-used during Task 5 was `< /dev/null`. Fix: only read stdin when `select`/`poll` reports
-data ready, or stdin is explicitly closed/piped — never an unconditional blocking read;
-add a unit test covering the non-TTY-no-data case.
+`_stdin_has_piped_content()` blocked on `sys.stdin.read()` whenever stdin was open but
+not a TTY and nothing had actually been piped in (e.g. a background shell context) — it
+hung forever instead of falling through to the `--file`/`--dir` path. The workaround
+used during Task 5 was `< /dev/null`.
 
-**Target:** fix opportunistically with the next ts-cli tml-command work or by 2026-08-31.
+**Fix (v0.47.1):** the read is now `select()`-guarded with a zero timeout — it reads only
+when the fd reports readable (data → content, EOF / `< /dev/null` → empty, regular-file
+redirect → readable) and returns False without reading on an idle open pipe. Falls back
+to the prior blocking read where `select` can't poll the handle (e.g. a Windows
+non-socket handle), preserving prior behaviour there. Covered by
+`TestStdinHasPipedContentNoHang` in `tests/test_tml_file_dir_input.py`, including a
+real-pipe hang guard that fails against the pre-fix code.
 
 ---
 

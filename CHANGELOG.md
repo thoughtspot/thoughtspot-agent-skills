@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-12
+- fix(ts-cli): bump to v0.47.1 — `_stdin_has_piped_content()` no longer hangs forever on an idle open non-TTY stdin (BL-097). A background/script shell whose stdin is an open-but-empty pipe made the unconditional `sys.stdin.read()` block waiting on an EOF that never came (Task 5 workaround was `< /dev/null`). Now `select()`-guarded: read only when the fd reports readable within a zero timeout (data → content, EOF/`< /dev/null` → empty, regular-file redirect → readable); an idle open pipe reports not-ready and returns False without reading. Falls back to the prior blocking read where `select` can't poll the handle (e.g. Windows non-socket). 5 new tests incl. a real-pipe hang guard that fails against the old code
+
 ## 2026-07-11
 - fix(validate): `check_audit_freshness` — drop ts-cli version bumps as a full-audit *activity* trigger. The internal CLI version isn't audit surface (audits examine skills/mappings/currency/security), bumps are too frequent to signal anything, and the real churn they ride along with is already caught by the commit-count trigger. Activity now = new skill / new runtime / 2+ new shared refs / 40+ commits. With this + the SHA baseline, the checker is silent again after the 2026-07-11 wave
 - fix(validate): `check_audit_freshness` — measure full-audit *activity* from the report's commit SHA (`git log <report-sha>..HEAD`), not its calendar date. The date baseline swept in same-day-as-the-report work (the audit's own routing wave) as "substantial work since the audit", and double-counted each ts-cli bump (it edits 2 version files). Now counts per-commit and only work strictly after the report. New pure `_parse_activity`/`_latest_full_audit_commit` + 6 tests
