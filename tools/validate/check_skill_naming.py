@@ -24,6 +24,8 @@ import re
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES
+
 
 # Each family: (regex, one-line description used in error output)
 # Patterns must match the FULL directory name (use \A and \Z anchors implicitly
@@ -85,7 +87,7 @@ def find_skills(root: Path) -> list[tuple[str, str, Path]]:
     """
     found: list[tuple[str, str, Path]] = []
 
-    for runtime in ("cli", "claude", "coco-snowsight"):
+    for runtime in ALL_RUNTIMES:
         runtime_dir = root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue

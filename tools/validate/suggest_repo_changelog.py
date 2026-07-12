@@ -27,6 +27,11 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from _dirs import ALL_RUNTIME_PATHS
+
+# Trailing-slash prefixes for str.startswith on repo-relative paths.
+_RUNTIME_PREFIXES = tuple(f"{p}/" for p in ALL_RUNTIME_PATHS)
+
 CHANGELOG = "CHANGELOG.md"
 TODAY = str(date.today())
 
@@ -97,9 +102,7 @@ def detect_significant_changes(
         status, path = parts[0].strip(), parts[1].strip()
 
         # New SKILL.md added
-        if status == "A" and path.endswith("/SKILL.md") and path.startswith(
-            ("agents/cli/", "agents/claude/", "agents/coco-snowsight/")
-        ):
+        if status == "A" and path.endswith("/SKILL.md") and path.startswith(_RUNTIME_PREFIXES):
             skill_name = path.split("/")[2]
             changes.append(("new-skill", f"feat: add {skill_name} skill"))
 

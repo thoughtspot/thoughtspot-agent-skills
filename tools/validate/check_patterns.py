@@ -28,6 +28,8 @@ import re
 import sys
 from pathlib import Path
 
+from _dirs import CLI_RUNTIMES, CLI_RUNTIME_PATHS
+
 
 def check_connection_fqn_in_tml(file_path: Path) -> list[tuple[int, str]]:
     """
@@ -173,7 +175,7 @@ def main() -> int:
         md_files_for_tml = all_md_files
         py_files = all_py_files
         skill_md_files = [f for f in all_md_files
-                          if ("agents/cli" in str(f) or "agents/claude" in str(f))
+                          if any(rp in str(f) for rp in CLI_RUNTIME_PATHS)
                           and f.name == "SKILL.md"]
         # Check 6 also gates shared reference docs (agents/shared/**/*.md) — the
         # stdin wrapper there is inherited by every converter that links to it
@@ -192,16 +194,15 @@ def main() -> int:
         # Only check SKILL.md files that are tracked by git (skip gitignored pending skills)
         import subprocess as _sp
         _tracked = set(
-            _sp.run(["git", "ls-files", "agents/cli", "agents/claude", "agents/shared"],
+            _sp.run(["git", "ls-files", *CLI_RUNTIME_PATHS, "agents/shared"],
                     capture_output=True, text=True, cwd=repo_root).stdout.splitlines()
         )
-        skill_md_files = sorted(
-            (f for f in repo_root.glob("agents/cli/*/SKILL.md")
-             if str(f.relative_to(repo_root)) in _tracked),
-        ) + sorted(
-            f for f in repo_root.glob("agents/claude/*/SKILL.md")
-            if str(f.relative_to(repo_root)) in _tracked
-        )
+        skill_md_files: list[Path] = []
+        for runtime in CLI_RUNTIMES:
+            skill_md_files += sorted(
+                f for f in repo_root.glob(f"agents/{runtime}/*/SKILL.md")
+                if str(f.relative_to(repo_root)) in _tracked
+            )
         # Check 6 also gates shared reference docs (agents/shared/**/*.md) — see
         # the --staged branch comment above. Tracked-only, so the generated
         # agents/databricks/shared/ copy is excluded (BL-117).

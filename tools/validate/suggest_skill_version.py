@@ -25,6 +25,11 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from _dirs import ALL_RUNTIME_PATHS
+
+# Trailing-slash prefixes for str.startswith on repo-relative paths.
+_RUNTIME_PREFIXES = tuple(f"{p}/" for p in ALL_RUNTIME_PATHS)
+
 
 # ── diff classification ────────────────────────────────────────────────────────
 
@@ -226,11 +231,7 @@ def main() -> int:
     staged = result.stdout.splitlines()
     staged_skills = [
         repo_root / p for p in staged
-        if (
-            (p.startswith("agents/cli/") and p.endswith("/SKILL.md"))
-            or (p.startswith("agents/claude/") and p.endswith("/SKILL.md"))
-            or (p.startswith("agents/coco-snowsight/") and p.endswith("/SKILL.md"))
-        )
+        if p.endswith("/SKILL.md") and p.startswith(_RUNTIME_PREFIXES)
     ]
 
     if not staged_skills:

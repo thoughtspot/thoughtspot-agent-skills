@@ -3005,15 +3005,28 @@ its only consumers were two dead reference-table rows with no corresponding step
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 4.4.
-**Affects:** 18 files under `tools/validate/`.
-**Status:** OPEN.
+**Affects:** files under `tools/validate/`.
+**Status:** DONE — 2026-07-12.
 
-18 validators independently hardcode `('agents/cli', 'agents/claude',
-'agents/coco-snowsight')`; a directory rename means ~18 edits, and a missed one
-silently reports PASS. The three dirs are stable today — this is drift insurance,
+18 validators independently hardcoded `('agents/cli', 'agents/claude',
+'agents/coco-snowsight')`; a directory rename meant ~18 edits, and a missed one
+silently reported PASS. The three dirs are stable today — this is drift insurance,
 the same pattern as the existing ALLOWLIST/NAME_ALIASES consolidation.
 
-**Target:** no fixed date — opportunistic refactor, or triggered if a runtime dir is ever renamed.
+**Resolution (2026-07-12):** new `tools/validate/_dirs.py` is the single source of
+truth — `ALL_RUNTIMES` / `CLI_RUNTIMES` (short names), `ALL_RUNTIME_PATHS` /
+`CLI_RUNTIME_PATHS` (agents-prefixed), the `CLI`/`CLAUDE`/`COCO` scalars, and a
+`runtime_globs()` helper. Three semantic groupings were preserved: all-three-runtime
+enumerations, the CLI family (CoCo deliberately excluded — no `ts` CLI in Snowsight),
+and CoCo-alone. 14 validators now import from it; every runtime *enumeration* is
+consolidated (single-runtime literals for runtime-specific checks left in place, as
+they are not the drift surface). A `test_dirs.py` guard asserts every listed runtime
+dir exists on disk, so a rename fails loudly here instead of no-opping a downstream
+validator. Verified output-neutral by diffing all ~28 validators before/after: the
+only diffs are `check_runtime_coverage --verbose` column order (claude-first →
+canonical cli-first) and `check_smoke_tests`' self-referential ALLOWLIST line numbers
+(shifted by the added import) — both cosmetic, no logic change. Sibling import
+resolves in pre-commit, CI, and the test conftest.
 
 ---
 

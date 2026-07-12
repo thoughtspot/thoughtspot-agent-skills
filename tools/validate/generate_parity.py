@@ -7,12 +7,20 @@ Run with no args to print the generated matrix to stdout.
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES
+
 ROOT = Path(__file__).resolve().parents[2]
+# Column order (and thus PARITY.md layout) is dict-insertion order: the three
+# mirror runtimes from _dirs.ALL_RUNTIMES (cli, claude, coco-snowsight), then the
+# Databricks Genie runtime. Databricks is deliberately outside the mirror tooling
+# (see .claude/rules/runtime-coverage.md) and its skills live under a nested
+# skills/ dir, so it stays an explicit extra column.
 RUNTIMES = {
-    "cli": lambda: {p.parent.name for p in (ROOT / "agents/cli").glob("*/SKILL.md")},
-    "claude": lambda: {p.parent.name for p in (ROOT / "agents/claude").glob("*/SKILL.md")},
-    "coco-snowsight": lambda: {p.parent.name for p in (ROOT / "agents/coco-snowsight").glob("*/SKILL.md")},
-    "databricks": lambda: {p.parent.name for p in (ROOT / "agents/databricks/skills").glob("*/SKILL.md")},
+    rt: (lambda rt=rt: {p.parent.name for p in (ROOT / f"agents/{rt}").glob("*/SKILL.md")})
+    for rt in ALL_RUNTIMES
+}
+RUNTIMES["databricks"] = lambda: {
+    p.parent.name for p in (ROOT / "agents/databricks/skills").glob("*/SKILL.md")
 }
 
 
