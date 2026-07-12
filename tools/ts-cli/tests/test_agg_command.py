@@ -536,6 +536,109 @@ def test_generate_writes_all_artifacts_and_never_imports(tmp_path, monkeypatch):
             == f"Sales Model ({out['aggregate_name']})")
 
 
+def test_generate_idempotent_multi_date_preserves_existing_and_new(tmp_path, monkeypatch):
+    """Task 16: re-patching a primary that already has a single-date aggregate
+    (A, in the REAL live-TML shape — date_aggregation_info, not date_grains/
+    date_column) while generating a new multi-date aggregate (B, incl a
+    NO_BUCKET raw grain) must preserve A's date_aggregation_info byte-for-byte
+    (not silently strip it — the Task 16 bug) and emit B's full multi-date
+    list, ordered most-aggregated-first. Running `generate` again against the
+    same starting primary (generate never imports, so nothing on the server
+    has changed) must produce byte-identical output — no drift, no
+    duplication, no stripping."""
+    import ts_cli.client as client_mod
+
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Transaction Date", "column_id": "FACT::TXN_DT", "data_type": "DATE",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Shipped Date", "column_id": "FACT::SHIP_DT", "data_type": "DATE",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None, "bucket": None,
+            "date_grains": [{"column": "Transaction Date", "bucket": "DAILY"},
+                            {"column": "Shipped Date", "bucket": None}],
+            "covered": [0], "flags": [], "agg_rows": 50, "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"},
+                               {"name": "TXN_DT", "db_column_name": "TXN_DT"},
+                               {"name": "SHIP_DT", "db_column_name": "SHIP_DT"}]}}))
+
+    # The "live" primary already carries aggregate A as a real exported TML
+    # entry would look — date_aggregation_info, never date_grains/date_column.
+    primary_before = {"model": {"name": "Sales Model", "aggregated_models": [
+        {"id": "Sales Model (A_AGG)",
+         "date_aggregation_info": [{"column_id": "Order Date", "bucket": "MONTHLY"}]},
+    ]}}
+    primary_edoc = yaml.safe_dump(primary_before)
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, profile_name):
+            pass
+
+        def post(self, path, json=None):
+            assert "import" not in path  # generate must never import
+            return FakeResponse([{"edoc": primary_edoc}])
+
+    monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
+    monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
+
+    args = ["aggregate", "generate", "--dir", str(tmp_path),
+            "--candidate", "cand_1", "--model-guid", "model-guid",
+            "--tables-dir", str(tdir), "--db", "SALESDB",
+            "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH"]
+
+    result1 = runner.invoke(app, args)
+    assert result1.exit_code == 0, result1.output
+    outdir = tmp_path / "cand_1"
+    patched1 = yaml.safe_load((outdir / "primary_patched.tml.yaml").read_text())
+    aggs1 = patched1["model"]["aggregated_models"]
+    assert len(aggs1) == 2
+    by_id1 = {e["id"]: e for e in aggs1}
+
+    # A's original single-date info survives byte-for-byte — not stripped.
+    assert by_id1["Sales Model (A_AGG)"]["date_aggregation_info"] == \
+        [{"column_id": "Order Date", "bucket": "MONTHLY"}]
+
+    # B's full multi-date list, including the NO_BUCKET raw grain.
+    out1 = json.loads(result1.stdout)
+    b_name = f"Sales Model ({out1['aggregate_name']})"
+    assert by_id1[b_name]["date_aggregation_info"] == [
+        {"column_id": "Transaction Date", "bucket": "DAILY"},
+        {"column_id": "Shipped Date", "bucket": "NO_BUCKET"},
+    ]
+
+    # Ordered most-aggregated-first: B has a known projected_rows (50); A's
+    # existing entry carries no known row count (unprofiled) — known counts
+    # sort before unknown ones.
+    assert [e["id"] for e in aggs1] == [b_name, "Sales Model (A_AGG)"]
+
+    # Re-run the same generate call again against the same starting primary
+    # (generate never imports — nothing on the server has changed) — output
+    # must be byte-identical: no drift, no duplication, no stripping.
+    result2 = runner.invoke(app, args)
+    assert result2.exit_code == 0, result2.output
+    patched2 = yaml.safe_load((outdir / "primary_patched.tml.yaml").read_text())
+    assert patched2 == patched1
+
+
 def test_generate_requires_warehouse_for_snowflake_dynamic_table(tmp_path):
     """Task 5 review carry-forward: a Snowflake dynamic table with no
     --warehouse must fail clearly rather than emit DDL missing the

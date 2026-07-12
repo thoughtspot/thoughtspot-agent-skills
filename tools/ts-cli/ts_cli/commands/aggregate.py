@@ -524,6 +524,21 @@ def _write_model_artifact(outdir: Path, cand: dict, plans: dict, model_tml: dict
     return model_name
 
 
+def _new_entry_date_grains(cand: dict) -> list:
+    """The just-generated aggregate's date grains for `_patch_and_write_primary`'s
+    new entry: `cand["date_grains"]` (Task 15 multi-date) when present, falling
+    back to a 1-item list from the single-date `date_column`/`bucket` compat
+    shim (Task 14) otherwise — same fallback pattern as generate.py's
+    `_cand_date_grains`/`_entry_date_grains` (deliberately duplicated per that
+    module's docstring, to keep each module's date-grain reading
+    self-contained)."""
+    grains = cand.get("date_grains")
+    if grains is not None:
+        return grains
+    col = cand.get("date_column")
+    return [{"column": col, "bucket": cand.get("bucket")}] if col else []
+
+
 def _patch_and_write_primary(outdir: Path, model_guid: str, profile: Optional[str],
                             model_name: str, cand: dict) -> None:
     """Export the primary Model fresh (never reuse a cached copy — the patch
@@ -531,16 +546,29 @@ def _patch_and_write_primary(outdir: Path, model_guid: str, profile: Optional[st
     write the aggregated_models-patched TML. Reuses `_export_tml` (same
     non-printable-safe edoc parsing `signatures` uses) rather than hand-rolling
     the export + yaml.safe_load `client.post` and json.loads(edoc) the task
-    brief's illustrative code used."""
-    from ts_cli.aggregate.generate import patch_association
+    brief's illustrative code used.
+
+    Task 16 fix: the primary's EXISTING `aggregated_models` entries carry
+    `date_aggregation_info` (the real live-TML shape), never `date_grains`/
+    `date_column` — feeding them into `patch_association` unconverted reads no
+    grains at all and silently strips their date association on re-patch.
+    `date_aggregation_info_to_grains` (the inverse of `patch_association`'s
+    emission mapping) reconstructs each existing entry's `date_grains` first,
+    so re-patching preserves it byte-for-byte instead of stripping it. The new
+    entry threads the just-generated aggregate's full multi-date list via
+    `_new_entry_date_grains`, so a multi-date candidate's association is no
+    longer collapsed to the single-date shim."""
+    from ts_cli.aggregate.generate import date_aggregation_info_to_grains, patch_association
     from ts_cli.client import ThoughtSpotClient, resolve_profile
     client = ThoughtSpotClient(resolve_profile(profile))
     primary = _export_tml(client, model_guid)
-    existing = [dict(e, projected_rows=None)
-                for e in primary["model"].get("aggregated_models", []) or []
-                if isinstance(e, dict)]
-    entries = existing + [{"id": model_name, "date_column": cand.get("date_column"),
-                           "bucket": cand.get("bucket"),
+    existing = [
+        {"id": e["id"], "date_grains": date_aggregation_info_to_grains(e),
+         "projected_rows": None}
+        for e in primary["model"].get("aggregated_models", []) or []
+        if isinstance(e, dict)
+    ]
+    entries = existing + [{"id": model_name, "date_grains": _new_entry_date_grains(cand),
                            "projected_rows": cand.get("agg_rows")}]
     patched = patch_association(primary, entries)
     (outdir / "primary_patched.tml.yaml").write_text(dump_tml_yaml(patched))

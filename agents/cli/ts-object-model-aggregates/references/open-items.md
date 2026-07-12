@@ -121,11 +121,28 @@ emits one `date_aggregation_info` entry per grain, mapping internal
 `bucket=None` to the string `"NO_BUCKET"` at the emission boundary only —
 `lattice.BUCKETS` is untouched. Single-date candidates (1 grain) are
 byte-identical to pre-Task-15 output (verified by test + full suite green).
-**Residual:** `commands/aggregate.py`'s `_patch_and_write_primary` still
-builds its `patch_association` entry from the single-date `date_column`/
-`bucket` shim fields, not `cand["date_grains"]` — CLI wiring to pass the full
-multi-date list through `ts aggregate generate` is deliberately out of scope
-for Task 15 (pure-module task) and is a follow-up.
+**Update 2026-07-12 (Task 16 — CLI wiring + re-patch idempotence): residual
+above is CLOSED.** `commands/aggregate.py`'s `_patch_and_write_primary` now
+threads the just-generated aggregate's full `cand["date_grains"]` (falling
+back to the single-date `date_column`/`bucket` shim only when absent) into
+its `patch_association` entry, so a multi-date candidate's association is no
+longer collapsed to one date column. A latent bug surfaced alongside this:
+the primary's EXISTING `aggregated_models` entries carry `date_aggregation_info`
+(the real live-TML shape), not `date_grains`/`date_column` — re-feeding them
+through `patch_association` unconverted read no grains at all and silently
+stripped every existing entry's date association on re-patch (harmless with
+one aggregate, real with two+). Fixed via a new pure helper,
+`date_aggregation_info_to_grains` (`ts_cli/aggregate/generate.py`), the exact
+inverse of `patch_association`'s emission mapping (`"NO_BUCKET"` <-> internal
+`bucket=None`); `_patch_and_write_primary` uses it to reconstruct each
+existing entry's `date_grains` before re-patching. Covered by an emit∘parse /
+parse∘emit round-trip test (incl. a NO_BUCKET grain) and a command-level
+idempotence test: a primary with an existing single-date aggregate (A) plus a
+newly generated multi-date aggregate (B, incl. NO_BUCKET) — re-patch keeps
+A's `date_aggregation_info` byte-for-byte and emits B's full list, ordered
+most-aggregated-first; running `generate` again against the same starting
+primary produces byte-identical output. CLI now threads multi-date end-to-end
+and re-patch is idempotent — no further residual here.
 
 ## #2 (historical) — original OPEN text retained below for reference
 

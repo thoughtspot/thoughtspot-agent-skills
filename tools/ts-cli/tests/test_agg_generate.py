@@ -1,5 +1,6 @@
 from ts_cli.aggregate.generate import (build_aggregate_table_spec,
                                        build_aggregate_model_tml,
+                                       date_aggregation_info_to_grains,
                                        patch_association)
 from ts_cli.aggregate.measures import classify_measure
 
@@ -131,6 +132,42 @@ def test_association_sorted_most_aggregated_first():
     assert tiny["date_aggregation_info"] == [{"column_id": "Order Date",
                                               "bucket": "MONTHLY"}]
     assert "projected_rows" not in tiny  # internal field not emitted
+
+
+def test_date_aggregation_info_to_grains_round_trip():
+    # Task 16: date_aggregation_info_to_grains is the inverse of
+    # patch_association's emission mapping (NO_BUCKET <-> None). This is the
+    # helper `_patch_and_write_primary` needs to reconstruct an EXISTING
+    # aggregated_models entry's date_grains from its already-emitted
+    # date_aggregation_info — without it, re-patching a primary silently
+    # strips every existing entry's date association (Task 16 bug).
+    primary = {"guid": "p", "model": {"name": "M"}}
+    grains = [{"column": "Transaction Date", "bucket": "DAILY"},
+              {"column": "Shipped Date", "bucket": None}]
+
+    # emit ∘ parse == identity, including the raw (NO_BUCKET) grain.
+    patched = patch_association(primary, [{"id": "agg", "date_grains": grains,
+                                           "projected_rows": 10}])
+    entry = patched["model"]["aggregated_models"][0]
+    assert date_aggregation_info_to_grains(entry) == grains
+
+    # parse ∘ emit == identity: a raw TML entry parsed back to grains and
+    # re-emitted through patch_association reproduces the same
+    # date_aggregation_info byte-for-byte.
+    raw_entry = {"id": "agg2", "date_aggregation_info": [
+        {"column_id": "Order Date", "bucket": "MONTHLY"},
+        {"column_id": "Ship Date", "bucket": "NO_BUCKET"},
+    ]}
+    parsed_grains = date_aggregation_info_to_grains(raw_entry)
+    re_emitted = patch_association(primary, [{"id": raw_entry["id"],
+                                              "date_grains": parsed_grains,
+                                              "projected_rows": None}])
+    assert (re_emitted["model"]["aggregated_models"][0]["date_aggregation_info"]
+            == raw_entry["date_aggregation_info"])
+
+    # A dateless existing entry (no date_aggregation_info) round-trips to no
+    # grains — unchanged.
+    assert date_aggregation_info_to_grains({"id": "dateless"}) == []
 
 
 def test_min_max_primary_measure_keeps_reagg_in_model_column():

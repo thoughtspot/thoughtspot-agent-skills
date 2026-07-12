@@ -196,6 +196,35 @@ def _entry_date_grains(entry: dict) -> list:
     return [{"column": col, "bucket": entry.get("bucket")}] if col else []
 
 
+def date_aggregation_info_to_grains(entry: dict) -> list:
+    """Reconstruct `date_grains` ([{"column", "bucket"}]) from an already-
+    patched `aggregated_models` entry's `date_aggregation_info`
+    ([{"column_id", "bucket"}]) — the exact inverse of the emission mapping
+    in `patch_association` below (`"NO_BUCKET"` <-> internal `bucket=None`).
+
+    Needed because a primary Model's EXISTING `aggregated_models` entries
+    (re-exported from the live TML on every `generate` call — see
+    `_patch_and_write_primary` in commands/aggregate.py) carry
+    `date_aggregation_info`, never `date_grains`/`date_column`. Re-feeding
+    those entries straight into `patch_association` without this conversion
+    reads no grains at all (`_entry_date_grains` only understands the
+    `date_grains`/`date_column` input shapes), which silently strips every
+    pre-existing entry's date association on re-patch — Task 16 bug.
+
+    An entry with no `date_aggregation_info` (a dateless aggregate, e.g.
+    dimensional-only) round-trips to `[]` — unchanged, no date association.
+
+    emit ∘ parse and parse ∘ emit must be identity against
+    `patch_association`'s emission mapping — see
+    test_date_aggregation_info_to_grains_round_trip.
+    """
+    info = entry.get("date_aggregation_info") or []
+    return [
+        {"column": g["column_id"], "bucket": None if g["bucket"] == "NO_BUCKET" else g["bucket"]}
+        for g in info
+    ]
+
+
 def patch_association(primary_tml: dict, entries: list) -> dict:
     """Set model.aggregated_models, most-aggregated (smallest projected_rows) first.
 
