@@ -1473,7 +1473,11 @@ whether the same gap (audit overpromises vs actual migration rate) exists.
   validated mockup `docs/superpowers/specs/2026-06-27-ts-object-model-erd-mockup.html`
 **Affects:** New skill `agents/cli/ts-object-model-erd/`; new shared module `agents/shared/erd/`;
   future `ts-audit` integration (per-model ERD in `audit_report.html`)
-**Status:** Spec approved + plan written + mockup validated — ready for implementation
+**Status:** DONE — shipped as `ts-object-model-erd` v1.0.0 (PR #142, 2026-07-01) and iterated
+  through v1.7.0 (subject-area grouping, PR #160). The Python core (`parser.py`/`erd_data.py`/
+  `render.py`) and the shared vanilla-SVG renderer (`agents/shared/erd/renderer.{css,js}`) both
+  landed as specced. Remaining follow-on (`ts-audit` findings-overlay integration) is tracked
+  separately, not under this item.
 **Priority:** MEDIUM
 
 ### Problem
@@ -2940,10 +2944,10 @@ reintroduce the CVEs. urllib3 is covered transitively — no separate pin needed
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 16.2.
 **Affects:** `tools/ts-cli/pyproject.toml` (`requires-python`).
-**Status:** DONE (2026-07-11, cap-lift half) — cap lifted to `>=3.10,<3.15` (ts-cli v0.46.0);
+**Status:** PARTIAL — (a) DONE (2026-07-11): cap lifted to `>=3.10,<3.15` (ts-cli v0.46.0);
 3.14 added to the CI `pytest-matrix` job so the suite is exercised on it every PR (couples with
 BL-107 — `pip install -e` refuses interpreters outside `requires-python`, so the cap had to lift
-for 3.14 to be testable). **Remaining:** the `>=3.11` floor bump after 3.10 EOL (2026-10) — still OPEN.
+for 3.14 to be testable). **Remaining:** (b) the `>=3.11` floor bump after 3.10 EOL (2026-10) — still OPEN.
 
 `requires-python = ">=3.10,<3.14"` blocked CPython 3.14 (GA Oct 2025). The cap is now lifted and
 3.14 is CI-verified; the floor bump to `>=3.11` remains deferred.
