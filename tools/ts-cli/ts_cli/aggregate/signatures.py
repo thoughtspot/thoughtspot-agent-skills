@@ -35,6 +35,16 @@ def column_kinds_from_model(model_tml: dict) -> dict:
     return kinds
 
 
+def _first_grain(date_grains: list) -> tuple:
+    """Compat shim (Task 14, removed in Task 15): date_column/date_bucket derive
+    from date_grains[0] so sqlgen/generate/history/commands keep reading the
+    single-date fields unchanged."""
+    if not date_grains:
+        return None, None
+    first = date_grains[0]
+    return first["column"], first["bucket"]
+
+
 def _parse_answer(answer: dict, kinds: dict, source_guid: str, source_name: str,
                   source_type: str, viz_name: Optional[str]) -> dict:
     query = answer.get("search_query", "") or ""
@@ -44,7 +54,7 @@ def _parse_answer(answer: dict, kinds: dict, source_guid: str, source_name: str,
     filter_spans = {m.start() for m in _FILTER.finditer(query)}
     filter_cols: list = []
     dims, measures = [], []
-    date_column, date_bucket = None, None
+    date_grains: list = []
     partial = not query
     seen = set()
     for m in _TOKEN.finditer(query):
@@ -66,18 +76,17 @@ def _parse_answer(answer: dict, kinds: dict, source_guid: str, source_name: str,
         if kind == "MEASURE":
             measures.append(name)
         elif kind == "DATE":
-            if date_column is None:
-                date_column = name
-                date_bucket = BUCKET_TOKENS.get(suffix)
-            else:
-                # second grouped date column — keep the first, flag partial
-                partial = True
+            # capture EVERY grouped date column, in query order (Task 14);
+            # bucket is None for a raw/unbucketed date token
+            date_grains.append({"column": name, "bucket": BUCKET_TOKENS.get(suffix)})
         else:
             dims.append(name)
+    date_column, date_bucket = _first_grain(date_grains)
     return {
         "source_guid": source_guid, "source_name": source_name,
         "source_type": source_type, "viz_name": viz_name,
         "dimensions": dims, "date_column": date_column, "date_bucket": date_bucket,
+        "date_grains": date_grains,
         "measures": measures, "filter_columns": filter_cols,
         "parse_status": "partial" if partial else "full", "weight": 1.0,
     }

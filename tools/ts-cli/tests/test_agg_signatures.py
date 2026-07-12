@@ -18,6 +18,7 @@ def test_simple_answer_signature():
     assert s["measures"] == ["Sales"]
     assert s["dimensions"] == ["Category"]
     assert s["date_column"] is None and s["date_bucket"] is None
+    assert s["date_grains"] == []
     assert s["parse_status"] == "full"
     assert s["weight"] == 1.0
 
@@ -28,6 +29,7 @@ def test_date_bucket_token_parsed():
     s = extract_signatures(doc, KINDS, "g1", "A1")[0]
     assert s["date_column"] == "Order Date"
     assert s["date_bucket"] == "MONTHLY"
+    assert s["date_grains"] == [{"column": "Order Date", "bucket": "MONTHLY"}]
     assert s["dimensions"] == ["State"]
 
 
@@ -118,17 +120,37 @@ def test_word_operators_captured_as_filters():
     assert s["dimensions"] == []
 
 
-# --- Fix 4: second date column keeps first + marks partial ---
+# --- Task 14: multiple grouped date columns are captured, not partial ---
 
-def test_second_date_column_keeps_first_and_marks_partial():
+def test_second_date_column_now_captured_in_date_grains_and_full():
     kinds = dict(KINDS)
     kinds["Ship Date"] = "DATE"
     doc = _answer("[Sales] [Order Date].monthly [Ship Date].weekly",
                   ["Sales", "Order Date", "Ship Date"])
     s = extract_signatures(doc, kinds, "g1", "A1")[0]
+    assert s["date_grains"] == [
+        {"column": "Order Date", "bucket": "MONTHLY"},
+        {"column": "Ship Date", "bucket": "WEEKLY"},
+    ]
+    # compat shim: date_column/date_bucket derive from date_grains[0]
     assert s["date_column"] == "Order Date"
     assert s["date_bucket"] == "MONTHLY"
-    assert s["parse_status"] == "partial"
+    assert s["parse_status"] == "full"
+
+
+def test_two_date_columns_second_raw_yields_full_with_shim_from_first():
+    kinds = dict(KINDS)
+    kinds["Ship Date"] = "DATE"
+    doc = _answer("[Sales] [Order Date].monthly [Ship Date]",
+                  ["Sales", "Order Date", "Ship Date"])
+    s = extract_signatures(doc, kinds, "g1", "A1")[0]
+    assert s["date_grains"] == [
+        {"column": "Order Date", "bucket": "MONTHLY"},
+        {"column": "Ship Date", "bucket": None},
+    ]
+    assert s["date_column"] == "Order Date"
+    assert s["date_bucket"] == "MONTHLY"
+    assert s["parse_status"] == "full"
 
 
 # --- Fix 5: filter_columns deduped, order-preserving ---

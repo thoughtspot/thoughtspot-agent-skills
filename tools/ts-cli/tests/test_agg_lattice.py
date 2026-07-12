@@ -5,12 +5,16 @@ PLANS = {"Sales": classify_measure("Sales", aggregation="SUM"),
          "Customers": classify_measure("Customers", expr="unique count ( [Customer] )")}
 
 
-def _sig(dims, measures=("Sales",), date_column=None, bucket=None, filters=()):
-    return {"dimensions": list(dims), "measures": list(measures),
-            "date_column": date_column, "date_bucket": bucket,
-            "filter_columns": list(filters), "parse_status": "full", "weight": 1.0,
-            "source_guid": "g", "source_name": "s", "source_type": "ANSWER",
-            "viz_name": None}
+def _sig(dims, measures=("Sales",), date_column=None, bucket=None, filters=(),
+         date_grains=None):
+    sig = {"dimensions": list(dims), "measures": list(measures),
+           "date_column": date_column, "date_bucket": bucket,
+           "filter_columns": list(filters), "parse_status": "full", "weight": 1.0,
+           "source_guid": "g", "source_name": "s", "source_type": "ANSWER",
+           "viz_name": None}
+    if date_grains is not None:
+        sig["date_grains"] = date_grains
+    return sig
 
 
 def test_bucket_covers_finer_or_equal_serves_coarser():
@@ -72,3 +76,58 @@ def test_wide_grain_flagged():
     cands = generate_candidates([_sig(dims)], PLANS, max_width=8)
     wide = [c for c in cands if len(c["dimensions"]) == 9]
     assert wide and "wide_grain" in wide[0]["flags"]
+
+
+# --- Task 14: multi-date signatures/candidates ---
+
+_MULTI_SIG = {"dimensions": ["State"], "measures": ["Sales"], "filter_columns": [],
+              "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"},
+                              {"column": "Ship Date", "bucket": None}],
+              "parse_status": "full", "weight": 1.0,
+              "source_guid": "g", "source_name": "s", "source_type": "ANSWER",
+              "viz_name": None}
+
+
+def test_covers_requires_every_signature_date_grain():
+    covers_both = {"dimensions": ["State"], "date_grains": [
+        {"column": "Order Date", "bucket": "DAILY"},
+        {"column": "Ship Date", "bucket": None}]}
+    assert covers(covers_both, _MULTI_SIG, PLANS) is True
+
+    missing_ship_date = {"dimensions": ["State"], "date_grains": [
+        {"column": "Order Date", "bucket": "DAILY"}]}
+    assert covers(missing_ship_date, _MULTI_SIG, PLANS) is False
+
+    too_coarse_order_date = {"dimensions": ["State"], "date_grains": [
+        {"column": "Order Date", "bucket": "YEARLY"},
+        {"column": "Ship Date", "bucket": None}]}
+    assert covers(too_coarse_order_date, _MULTI_SIG, PLANS) is False
+
+    # sig wants Ship Date raw (None); a bucketed candidate grain can't serve it
+    ship_date_bucketed_not_raw = {"dimensions": ["State"], "date_grains": [
+        {"column": "Order Date", "bucket": "DAILY"},
+        {"column": "Ship Date", "bucket": "DAILY"}]}
+    assert covers(ship_date_bucketed_not_raw, _MULTI_SIG, PLANS) is False
+
+    # raw candidate grains serve any bucket, including another raw requirement
+    all_raw = {"dimensions": ["State"], "date_grains": [
+        {"column": "Order Date", "bucket": None},
+        {"column": "Ship Date", "bucket": None}]}
+    assert covers(all_raw, _MULTI_SIG, PLANS) is True
+
+
+def test_generate_candidates_multi_date_groups_and_finest_per_column():
+    sigs = [
+        _sig(["State"], date_grains=[{"column": "Order Date", "bucket": "MONTHLY"},
+                                     {"column": "Ship Date", "bucket": "WEEKLY"}]),
+        _sig(["State"], date_grains=[{"column": "Order Date", "bucket": "DAILY"},
+                                     {"column": "Ship Date", "bucket": "MONTHLY"}]),
+    ]
+    cands = generate_candidates(sigs, PLANS)
+    best = [c for c in cands if len(c["covered"]) == 2]
+    assert best
+    grains = {g["column"]: g["bucket"] for g in best[0]["date_grains"]}
+    assert grains == {"Order Date": "DAILY", "Ship Date": "WEEKLY"}
+    # compat shim: date_column/bucket derive from date_grains[0]
+    assert best[0]["date_column"] == best[0]["date_grains"][0]["column"]
+    assert best[0]["bucket"] == best[0]["date_grains"][0]["bucket"]
