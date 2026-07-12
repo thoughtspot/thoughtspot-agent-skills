@@ -12,6 +12,30 @@ check pending) | **DEFERRED** (explicit non-v1 decision, tracked as a follow-up)
 
 ---
 
+## #0 — Does routing fire at all + which API path triggers it — OPEN (blocker, needs a working cluster)
+
+**Context (2026-07-12):** champ-staging (26.9.0.cl-31) does not route — a
+grain+name+bucket-matched Search Data query against a primary with an associated
+aggregate scanned the DETAIL tables (verified via real-time
+`DUNDERMIFFLIN.INFORMATION_SCHEMA.QUERY_HISTORY()`; `ACCOUNT_USAGE` has ~45-min
+latency and is unusable for this). Likely champ-staging isn't a working
+routing environment right now (a dedicated aggregate cluster is being set up).
+
+**Verification method (ready to run on a working cluster):** POST
+`/api/rest/2.0/searchdata` with `{query_string, logical_table_identifier}` →
+read `<DB>.INFORMATION_SCHEMA.QUERY_HISTORY()` in real time → confirm the
+scanned physical table is the aggregate, not the detail fact.
+
+**Two things to establish on the working cluster, in order:**
+1. Does routing fire for a **Search Data API** query? (Expected yes per product
+   owner.) This unblocks #1/#4/#6/#10 verification.
+2. Does **`ts spotql generate-sql`** reflect routing, or only the Search Data /
+   Spotter execution path? (Earlier assumption that SpotQL ignores routing is
+   UNPROVEN — on champ-staging nothing routed, so the two paths were
+   indistinguishable. May be an open item for the SpotQL team.) This decides
+   how the skill's **Step 7 routing-verification** must observe routing —
+   currently Step 7 inspects SpotQL SQL, which may not surface routing.
+
 ## #1 — Date re-aggregation — OPEN
 
 **Question:** Can a DAILY aggregate serve a MONTHLY query, or is aggregate routing
@@ -57,6 +81,34 @@ exposed under the primary's display names via `sum()` formulas over the stored
 column. **Residual (minor):** we matched an exported live block and validated
 structure; still worth one direct import of a `patch_association`-emitted block
 to confirm write-acceptance, but the shape risk is resolved.
+
+**Update 2026-07-12 (real multi-date TML evidence):** a fuller live block
+(exported "Dunder Mifflin Sales & Inventory") shows shapes our code does NOT
+yet produce — track as follow-ups:
+```yaml
+aggregated_models:
+  - id: CM_AGGR_SHIPPED_ORDER_DATES_COMPANY
+    date_aggregation_info:
+    - {column_id: Transaction Date, bucket: DAILY}
+    - {column_id: Shipped Date,     bucket: NO_BUCKET}   # <-- multiple date cols + NO_BUCKET
+  - id: DM_AGGR_PRODUCT                                   # <-- no date_aggregation_info (dimensional only)
+  - id: DM_AGGR_PRODUCT_MONTHLY
+    date_aggregation_info: [{column_id: Transaction Date, bucket: MONTHLY}]
+  - id: DM_AGGR_CUSTOMER_MONTHLY
+    date_aggregation_info: [{column_id: Transaction Date, bucket: MONTHLY}]
+```
+Gaps this surfaces:
+1. **Multi-date aggregates** — `date_aggregation_info` is a list of *N* date
+   columns, each with its own bucket. Our `lattice` candidate carries a single
+   `date_column`+`bucket`, and `patch_association` emits a single-element list.
+   v1 = single-date only (document as a limitation); multi-date is a follow-up
+   (both candidate generation and `patch_association` would extend).
+2. **`NO_BUCKET`** is a valid bucket value (date carried at full grain) not in
+   `lattice.BUCKETS`; maps to our raw-date (`date_bucket=None`) concept — add
+   `NO_BUCKET` emission when a date column is present but ungrouped.
+3. Confirms multi-aggregate-per-primary is common (≥4 here) → `#6` precedence
+   matters in practice; and confirms `date_aggregation_info` is optional
+   (dateless aggregate `DM_AGGR_PRODUCT`), which our code already handles.
 
 ## #2 (historical) — original OPEN text retained below for reference
 
