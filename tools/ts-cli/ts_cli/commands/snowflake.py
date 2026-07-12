@@ -8,13 +8,20 @@ logic lives in `ts_cli.snowflake_ops` (no I/O); this module is the CLI/file-I/O 
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
-from ts_cli.snowflake_ops import compute_change_set, lint_sv_ddl
+from ts_cli.snowflake_ops import (
+    compute_change_set,
+    lint_sv_ddl,
+    parse_var_assignment,
+    substitute_sql_vars,
+)
 
 app = typer.Typer(help="Snowflake Semantic View conversion helper commands.")
 
@@ -161,3 +168,190 @@ def lint_ddl_cmd(
 
     print(json.dumps(findings))
     raise SystemExit(1 if errors else 0)
+
+
+# ---------------------------------------------------------------------------
+# ts snowflake exec — run a .sql template (or inline query) against a profile
+# (BL-079). SQL lives in references/*.sql files instead of markdown fences the
+# LLM retypes each run; `--var` fills `{placeholder}` tokens deterministically.
+# ---------------------------------------------------------------------------
+
+
+def _exec_python(profile: dict, sql: str, warehouse: Optional[str],
+                 role: Optional[str]) -> list[dict]:
+    """Execute a (possibly multi-statement) SQL script via snowflake.connector,
+    reusing load.py's canonical connector so the connect logic never drifts.
+
+    Returns one result-set dict per statement: {"rows": [ {col: val}, ... ]}.
+    Statements run in file order and stop at the first error (so a dependent UDF
+    is not created after the function it references failed)."""
+    # Imported here (not at module top) so `ts snowflake diff`/`lint-ddl` do not
+    # pay for the load module — and to keep the "reuse the load connector" wiring
+    # explicit at the one call site that needs it.
+    from ts_cli.commands.load import _connect_python
+
+    conn = _connect_python(profile, warehouse, role)
+    results: list[dict] = []
+    try:
+        for cur in conn.execute_string(sql):
+            if cur.description:
+                cols = [c[0] for c in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            else:
+                rows = []
+            results.append({"rows": rows})
+    finally:
+        conn.close()
+    return results
+
+
+def _exec_cli(cli_connection: str, sql: str) -> list[dict]:
+    """Execute a SQL script via `snow sql -f` (method: cli profiles). The file
+    path avoids shell-quoting issues with `$$`-delimited UDF bodies. Returns the
+    result set snow emits as JSON, wrapped as a single-element results list."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sql", delete=False) as f:
+        f.write(sql)
+        tmp_path = f.name
+    try:
+        result = subprocess.run(
+            ["snow", "sql", "-c", cli_connection, "--format", "json", "-f", tmp_path],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise SystemExit(
+                "snow sql failed:\n"
+                + (result.stderr.strip() or result.stdout.strip()
+                   or "(no error detail — try `snow sql --debug`)")
+            )
+        out = result.stdout.strip()
+        if not out:
+            return [{"rows": []}]
+        try:
+            parsed = json.loads(out)
+        except json.JSONDecodeError:
+            # snow emitted non-JSON status text (e.g. DDL confirmations) — pass
+            # it through as a diagnostic rather than pretending it was rows.
+            print(out, file=sys.stderr)
+            return [{"rows": []}]
+        rows = parsed if isinstance(parsed, list) else [parsed]
+        return [{"rows": rows}]
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def _resolve_exec_sql(file: Optional[str], query: Optional[str]) -> str:
+    """Resolve the SQL text from exactly one of --file / --query / stdin, or exit
+    with a clear message on ambiguity/emptiness."""
+    if file is not None and query is not None:
+        raise SystemExit("Pass only one of --file / --query.")
+    if file is not None:
+        p = Path(file)
+        if not p.is_file():
+            raise SystemExit(f"--file path does not exist or is not a file: {file}")
+        sql = p.read_text(encoding="utf-8")
+    elif query is not None:
+        sql = query
+    else:
+        sql = sys.stdin.read()
+    if not sql.strip():
+        raise SystemExit("No SQL provided (empty --file / --query / stdin).")
+    return sql
+
+
+def _resolve_exec_vars(var: Optional[List[str]]) -> dict[str, str]:
+    """Parse repeatable `--var name=value` into a dict, exiting on a malformed one."""
+    variables: dict[str, str] = {}
+    for assignment in (var or []):
+        try:
+            k, v = parse_var_assignment(assignment)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        variables[k] = v
+    return variables
+
+
+@app.command("exec")
+def exec_cmd(
+    file: Optional[str] = typer.Option(
+        None, "--file", "-f",
+        help="Path to a .sql file to execute. Reads stdin if neither --file nor --query is given.",
+    ),
+    query: Optional[str] = typer.Option(
+        None, "--query", "-q",
+        help="Inline SQL to execute (mutually exclusive with --file).",
+    ),
+    sf_profile: str = typer.Option(
+        ..., "--sf-profile",
+        help="Snowflake profile name from ~/.claude/snowflake-profiles.json.",
+    ),
+    var: Optional[List[str]] = typer.Option(
+        None, "--var",
+        help="Placeholder substitution as name=value (repeatable). Fills {name} tokens in the SQL.",
+    ),
+    warehouse: Optional[str] = typer.Option(
+        None, "--warehouse", "-w", help="Warehouse (default: profile default_warehouse).",
+    ),
+    role: Optional[str] = typer.Option(
+        None, "--role", "-r", help="Role (default: profile default_role).",
+    ),
+) -> None:
+    """Execute a .sql template (or inline query) against a Snowflake profile.
+
+    SQL is read from `--file`, `--query`, or stdin (exactly one). `{name}`
+    placeholders are filled from `--var name=value` (repeatable) before
+    execution; any placeholder left without a value aborts the run rather than
+    shipping a literal `{target_schema}` to Snowflake. Statements run in order
+    and stop at the first error.
+
+    Works with both profile methods: `python` reuses the shared snowflake.connector
+    connector (so credentials never drift from `ts load`), `cli` shells to
+    `snow sql -f`.
+
+    Output: JSON to stdout — `{"profile", "method", "statement_count", "results":
+    [{"rows": [...]}, ...], "rows": <last result set's rows>}`. The top-level
+    `rows` is a convenience for single-query verifies. Diagnostics go to stderr.
+
+    Examples:
+
+    \b
+      ts snowflake exec -f references/business-day-udfs.sql --sf-profile PROD \\
+        --var target_db=ANALYTICS --var target_schema=PUBLIC
+      ts snowflake exec -q "SELECT ANALYTICS.PUBLIC.get_business_days_clamped(
+        '2026-01-05'::TIMESTAMP, '2026-01-09'::TIMESTAMP, FALSE)" --sf-profile PROD
+    """
+    sql = _resolve_exec_sql(file, query)
+    variables = _resolve_exec_vars(var)
+
+    try:
+        sql = substitute_sql_vars(sql, variables)
+    except ValueError as e:
+        raise SystemExit(str(e))
+
+    # load.py owns profile resolution — reuse it rather than re-reading the JSON.
+    from ts_cli.commands.load import load_snowflake_profile
+
+    profile = load_snowflake_profile(sf_profile)
+    method = profile.get("method", "python")
+
+    if method == "cli":
+        cli_conn = profile.get("cli_connection")
+        if not cli_conn:
+            raise SystemExit(
+                f"Profile '{sf_profile}' has method: cli but no 'cli_connection' field."
+            )
+        print(f"  Executing against {sf_profile} (method: cli)...", file=sys.stderr)
+        results = _exec_cli(cli_conn, sql)
+    else:
+        wh = warehouse or profile.get("default_warehouse")
+        rl = role or profile.get("default_role")
+        print(f"  Executing against {sf_profile} (method: python)...", file=sys.stderr)
+        results = _exec_python(profile, sql, wh, rl)
+
+    output = {
+        "profile": sf_profile,
+        "method": method,
+        "statement_count": len(results),
+        "results": results,
+        "rows": results[-1]["rows"] if results else [],
+    }
+    print(json.dumps(output, indent=2))

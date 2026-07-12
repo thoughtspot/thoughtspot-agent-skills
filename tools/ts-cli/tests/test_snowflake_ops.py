@@ -3,11 +3,15 @@ and `ts snowflake lint-ddl` (BL-063 codification quick wins).
 
 Pure-function tests — no ThoughtSpot or Snowflake connection required.
 """
+import pytest
+
 from ts_cli.snowflake_ops import (
     compute_change_set,
     exprs_differ,
     lint_sv_ddl,
     normalise_expr,
+    parse_var_assignment,
+    substitute_sql_vars,
 )
 
 
@@ -355,3 +359,61 @@ def test_findings_are_deduplicated():
     # finding per distinct message rather than a single collapsed one.
     messages = {f["message"] for f in findings}
     assert len(findings) == len(messages)
+
+
+# ---------------------------------------------------------------------------
+# parse_var_assignment / substitute_sql_vars (BL-079 — `ts snowflake exec`)
+# ---------------------------------------------------------------------------
+
+def test_parse_var_assignment_basic():
+    assert parse_var_assignment("target_db=ANALYTICS") == ("target_db", "ANALYTICS")
+
+
+def test_parse_var_assignment_splits_on_first_equals_only():
+    # A value may legitimately contain '=' (e.g. a predicate fragment).
+    assert parse_var_assignment("clause=a=b") == ("clause", "a=b")
+
+
+def test_parse_var_assignment_allows_empty_value():
+    assert parse_var_assignment("suffix=") == ("suffix", "")
+
+
+def test_parse_var_assignment_rejects_missing_equals():
+    with pytest.raises(ValueError):
+        parse_var_assignment("target_db")
+
+
+def test_parse_var_assignment_rejects_empty_key():
+    with pytest.raises(ValueError):
+        parse_var_assignment("=ANALYTICS")
+
+
+def test_parse_var_assignment_rejects_non_identifier_key():
+    with pytest.raises(ValueError):
+        parse_var_assignment("target-db=ANALYTICS")
+
+
+def test_substitute_sql_vars_replaces_all_occurrences():
+    sql = "CREATE FUNCTION {db}.{sc}.f() ... {db}.{sc}.g()"
+    out = substitute_sql_vars(sql, {"db": "ANALYTICS", "sc": "PUBLIC"})
+    assert out == "CREATE FUNCTION ANALYTICS.PUBLIC.f() ... ANALYTICS.PUBLIC.g()"
+
+
+def test_substitute_sql_vars_leaves_sql_without_placeholders_untouched():
+    sql = "SELECT DATEADD('day', 2, ts)"  # braces-free SQL must survive verbatim
+    assert substitute_sql_vars(sql, {}) == sql
+
+
+def test_substitute_sql_vars_raises_on_unsubstituted_placeholder():
+    # A placeholder with no matching --var is the dangerous case: silently
+    # emitting `{target_schema}` into Snowflake would fail confusingly.
+    with pytest.raises(ValueError) as exc:
+        substitute_sql_vars("... {target_db}.{target_schema} ...", {"target_db": "DB"})
+    assert "target_schema" in str(exc.value)
+
+
+def test_substitute_sql_vars_does_not_flag_dollar_quoted_body():
+    # UDF bodies use $$ ... $$ and SQL punctuation, not {ident} braces — must
+    # not be mistaken for placeholders.
+    sql = "AS\n$$\n  LPAD(MOD(seconds, 60), 2, '0')\n$$"
+    assert substitute_sql_vars(sql, {}) == sql

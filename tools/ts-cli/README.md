@@ -1607,6 +1607,41 @@ composes with `&&` to gate on a clean lint before creating the view:
 ts snowflake lint-ddl generated_sv.sql && echo "clean, proceeding"
 ```
 
+### `ts snowflake exec`
+
+Execute a `.sql` template (or inline query) against a Snowflake profile. Backs
+the `ts-recipe-formula-*-snowflake` skills, which keep their UDF DDL in
+`references/*.sql` files instead of markdown fences the agent retypes each run.
+Works with both `python` and `cli` profile methods and reuses the same connector
+as `ts load` (so credentials never drift).
+
+```bash
+ts snowflake exec -f references/business-day-udfs.sql --sf-profile PROD \
+  --var target_db=ANALYTICS --var target_schema=PUBLIC
+ts snowflake exec -q "SELECT ANALYTICS.PUBLIC.get_business_days_clamped(
+  '2026-01-05'::TIMESTAMP, '2026-01-09'::TIMESTAMP, FALSE)" --sf-profile PROD
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--file` / `-f` | — | Path to a `.sql` file to execute |
+| `--query` / `-q` | — | Inline SQL (mutually exclusive with `--file`); reads stdin if neither is given |
+| `--sf-profile` | *(required)* | Snowflake profile name from `~/.claude/snowflake-profiles.json` |
+| `--var` | — | Placeholder substitution as `name=value` (repeatable); fills `{name}` tokens in the SQL |
+| `--warehouse` / `-w` | profile `default_warehouse` | Warehouse override |
+| `--role` / `-r` | profile `default_role` | Role override |
+
+`{name}` placeholders are filled from `--var` before execution; any placeholder
+left without a value aborts the run rather than shipping a literal
+`{target_schema}` to Snowflake. Statements run in file order and stop at the
+first error (so a dependent UDF is not created after the function it references
+failed).
+
+**Output:** JSON to stdout — `{"profile", "method", "statement_count",
+"results": [{"rows": [...]}, ...], "rows": <last result set's rows>}`. The
+top-level `rows` is a convenience for single-query verifies. Diagnostics go to
+stderr.
+
 ### `ts databricks parse-mv`
 
 Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured
