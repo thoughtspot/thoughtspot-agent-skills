@@ -24,7 +24,9 @@ docstring on that function for exactly which checklist items are covered.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import re
+from decimal import Decimal
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -618,3 +620,29 @@ def substitute_sql_vars(sql: str, variables: dict[str, str]) -> str:
             + ". Supply each with --var <name>=<value>."
         )
     return out
+
+
+def json_safe_value(obj: Any) -> Any:
+    """`json.dumps(default=...)` coercer for Snowflake result values.
+
+    `ts snowflake exec` serialises query results to JSON, but the snowflake
+    connector returns types the stdlib encoder rejects — `Decimal` for NUMBER,
+    `datetime`/`date`/`time` for temporal columns, `bytes` for BINARY. Without
+    this, `SELECT CURRENT_TIMESTAMP()` (or any decimal/timestamp result) crashes
+    the command. Native JSON types never reach here (the encoder only calls
+    `default` for objects it can't handle), so ints/floats/strings/bools are
+    untouched.
+
+    - `Decimal` → `int` when integral (so a scalar like `4` compares as a number),
+      else `float`.
+    - `date`/`datetime`/`time` → ISO 8601 string.
+    - `bytes`/`bytearray` → hex string.
+    - anything else → `str(obj)` as a last resort.
+    """
+    if isinstance(obj, Decimal):
+        return int(obj) if obj == obj.to_integral_value() else float(obj)
+    if isinstance(obj, (_dt.datetime, _dt.date, _dt.time)):
+        return obj.isoformat()
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.hex()
+    return str(obj)

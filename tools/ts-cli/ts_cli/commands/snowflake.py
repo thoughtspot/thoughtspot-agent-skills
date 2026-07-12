@@ -18,6 +18,7 @@ import typer
 
 from ts_cli.snowflake_ops import (
     compute_change_set,
+    json_safe_value,
     lint_sv_ddl,
     parse_var_assignment,
     substitute_sql_vars,
@@ -354,4 +355,6 @@ def exec_cmd(
         "results": results,
         "rows": results[-1]["rows"] if results else [],
     }
-    print(json.dumps(output, indent=2))
+    # default=json_safe_value coerces Decimal/datetime/bytes the connector returns
+    # for NUMBER/temporal/BINARY columns (native JSON types never reach it).
+    print(json.dumps(output, indent=2, default=json_safe_value))
