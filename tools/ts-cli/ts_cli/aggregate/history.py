@@ -38,6 +38,13 @@ def extract_group_by(sql: str) -> tuple:
 def _signature_matches(display: set, had_dropped: bool, sig: dict) -> bool:
     """Does a history row's parsed GROUP BY shape match this signature's grain?
 
+    NOTE (single-date only, documented not fixed — see open-items.md #16):
+    this only reads `sig["date_column"]`, never `sig.get("date_grains")`
+    (Task 14's multi-date list). On a multi-date signature every date column
+    after the first is invisible to history matching/weighting — degraded
+    best-effort, not a crash or a wrong-answer risk (weights only bias
+    `recommend`'s greedy ranking, never `covers()`'s correctness).
+
     `display` is the set of Model display names for the identifiers we could
     parse out of the query's GROUP BY. Two regimes:
 

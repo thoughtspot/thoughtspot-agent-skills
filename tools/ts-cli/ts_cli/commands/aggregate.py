@@ -17,7 +17,7 @@ from typing import Optional
 import typer
 import yaml
 
-from ts_cli.aggregate.lattice import generate_candidates
+from ts_cli.aggregate.lattice import _cand_date_grains, generate_candidates
 from ts_cli.aggregate.measures import build_rewrite_plans
 from ts_cli.aggregate.scoring import greedy_select
 from ts_cli.aggregate.signatures import column_kinds_from_model, extract_signatures
@@ -155,7 +155,31 @@ def _apply_weights(sigs: list, weights_path: Optional[str]) -> None:
 
 
 def _candidate_key(c: dict) -> str:
-    return json.dumps([c["dimensions"], c["date_column"], c["bucket"]])
+    """Stable cross-run identity for a candidate, used to merge profiled
+    `agg_rows` forward across `recommend` re-runs (see `_merge_prior_agg_rows`).
+
+    Bug fixed here (final whole-branch review): this used to key on
+    `c["date_column"]`/`c["bucket"]` — the single-date COMPAT SHIM fields,
+    which only ever carry the candidate's FIRST date grain (Task 14). Two
+    distinct candidates sharing the same dimensions and the same first grain —
+    one single-date, one multi-date — hashed identically, so a prior
+    `profile` run's `agg_rows` for one could get assigned to the other on the
+    next `recommend`. That corrupts cost-mode ranking and (open-item #6)
+    `patch_association`'s projected_rows sort, which is load-bearing for
+    first-match routing order — it does NOT affect generated DDL, which reads
+    the full candidate dict directly, never this key.
+
+    Fix: key on the full `date_grains` list (via `lattice._cand_date_grains`,
+    which also supplies the same single-date shim fallback for any candidate
+    dict that predates Task 14 and only carries `date_column`/`bucket`) so a
+    single-date and a multi-date candidate can never collide. Grains are
+    sorted by column so the key doesn't depend on list order.
+    """
+    grains = sorted(
+        ([g["column"], g["bucket"]] for g in _cand_date_grains(c)),
+        key=lambda g: g[0],
+    )
+    return json.dumps([c["dimensions"], grains])
 
 
 def _merge_prior_agg_rows(candidates: list, prior_path: Path,

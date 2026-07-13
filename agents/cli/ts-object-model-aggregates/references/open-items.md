@@ -758,3 +758,37 @@ Covered by `test_aggregate_name_sanitizes_multiword_dimension_to_valid_identifie
 for a "Product Category" dimension). Not yet re-run against the live cluster that
 surfaced the bug — unit-verified only; flag as a follow-up smoke check next time the
 skill runs end-to-end against that cluster.
+
+---
+
+## #16 — `_candidate_key` collided single-date vs multi-date candidates — FIXED 2026-07-14
+
+**Found:** final whole-branch review. `_candidate_key` (`ts_cli/commands/aggregate.py`,
+used by `_merge_prior_agg_rows` to carry a prior `profile` run's `agg_rows` forward
+across `recommend` re-runs) keyed on `c["dimensions"]` + the single-date
+`date_column`/`bucket` COMPAT SHIM fields — which only ever hold a candidate's FIRST
+date grain (Task 14's `date_grains` list). Two distinct candidates sharing the same
+dimensions and the same first grain — one single-date, one multi-date — therefore
+produced an identical key, so `_merge_prior_agg_rows` could assign one candidate's
+profiled `agg_rows` to the other on the next `recommend` run. On a multi-date model
+this skews cost-mode ranking and (via `cand["agg_rows"]` → `projected_rows`) the
+`patch_association` ordering item #6 verified is load-bearing for first-match routing.
+Does not corrupt generated DDL — DDL generation reads the full candidate dict, never
+this key.
+
+**Fix:** `_candidate_key` now keys on the full `date_grains` list (reusing
+`lattice._cand_date_grains`'s single-date-shim fallback, so pre-Task-14 candidate
+dicts that only carry `date_column`/`bucket` still key correctly), with grains sorted
+by column so the key doesn't depend on list order. Covered by
+`test_candidate_key_distinguishes_single_vs_multi_date_grains`,
+`test_candidate_key_stable_regardless_of_date_grains_order`, and
+`test_merge_prior_agg_rows_does_not_cross_assign_single_vs_multi_date` in
+`tools/ts-cli/tests/test_agg_command.py`.
+
+**Related, documented but explicitly NOT fixed here (out of scope):**
+`history._signature_matches`/`match_history` (`ts_cli/aggregate/history.py`) only reads
+a signature's `date_column`, never its `date_grains` list — multi-date history-based
+signature weighting is degraded best-effort (an extra date column beyond the first is
+invisible to matching), not a correctness bug, since weights only bias `recommend`'s
+greedy ranking, never `covers()`'s coverage correctness. Noted inline on
+`_signature_matches` as well.

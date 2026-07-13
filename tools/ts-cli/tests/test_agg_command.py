@@ -2,7 +2,7 @@ import json
 import yaml
 from typer.testing import CliRunner
 from ts_cli.cli import app
-from ts_cli.commands.aggregate import _signatures_summary
+from ts_cli.commands.aggregate import _candidate_key, _merge_prior_agg_rows, _signatures_summary
 
 runner = CliRunner()
 
@@ -82,6 +82,70 @@ def test_recommend_cost_mode_reports_excluded_unprofiled(tmp_path):
     assert out["mode"] == "cost"
     region_ids = [c["id"] for c in saved["candidates"] if c["dimensions"] == ["Region"]]
     assert out["excluded_unprofiled"] == region_ids
+
+
+def test_candidate_key_distinguishes_single_vs_multi_date_grains():
+    """Bug (final whole-branch review): `_candidate_key` used to key off the
+    single-date `date_column`/`bucket` COMPAT SHIM fields only — a candidate's
+    FIRST date grain — never the full `date_grains` list. Two distinct
+    candidates that share dimensions and the same first grain (one single-date,
+    one multi-date) therefore hashed identically, and `_merge_prior_agg_rows`
+    (below) could cross-assign a profiled `agg_rows` between them."""
+    single = {"id": "cand_1", "dimensions": ["Category"], "date_column": "Order Date",
+              "bucket": "MONTHLY",
+              "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"}]}
+    multi = {"id": "cand_2", "dimensions": ["Category"], "date_column": "Order Date",
+             "bucket": "MONTHLY",
+             "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"},
+                             {"column": "Ship Date", "bucket": "MONTHLY"}]}
+    assert _candidate_key(single) != _candidate_key(multi)
+
+
+def test_candidate_key_stable_regardless_of_date_grains_order():
+    """The key must not depend on `date_grains` list order — candidates.json
+    round-trips through JSON (which preserves list order), but the key should
+    still treat two grains lists with the same members in different orders as
+    the same candidate identity."""
+    a = {"id": "cand_1", "dimensions": ["Category"],
+         "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"},
+                         {"column": "Ship Date", "bucket": "MONTHLY"}]}
+    b = {"id": "cand_2", "dimensions": ["Category"],
+         "date_grains": [{"column": "Ship Date", "bucket": "MONTHLY"},
+                         {"column": "Order Date", "bucket": "MONTHLY"}]}
+    assert _candidate_key(a) == _candidate_key(b)
+
+
+def test_merge_prior_agg_rows_does_not_cross_assign_single_vs_multi_date(tmp_path):
+    """Reproduces the bug end-to-end through `_merge_prior_agg_rows`: a prior
+    `profile` run measured only the multi-date candidate. Re-running `recommend`
+    must not leak that row count onto a different, single-date candidate that
+    merely shares dimensions and the same first grain."""
+    single = {"id": "cand_1", "dimensions": ["Category"], "date_column": "Order Date",
+              "bucket": "MONTHLY",
+              "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"}],
+              "agg_rows": None}
+    multi = {"id": "cand_2", "dimensions": ["Category"], "date_column": "Order Date",
+             "bucket": "MONTHLY",
+             "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"},
+                             {"column": "Ship Date", "bucket": "MONTHLY"}],
+             "agg_rows": None}
+    prior_payload = {
+        "base_rows": 1000,
+        "candidates": [
+            {"id": "cand_2_old", "dimensions": ["Category"], "date_column": "Order Date",
+             "bucket": "MONTHLY",
+             "date_grains": [{"column": "Order Date", "bucket": "MONTHLY"},
+                             {"column": "Ship Date", "bucket": "MONTHLY"}],
+             "agg_rows": 500},
+        ],
+    }
+    prior_path = tmp_path / "candidates.json"
+    prior_path.write_text(json.dumps(prior_payload))
+
+    _merge_prior_agg_rows([single, multi], prior_path, base_rows=None)
+
+    assert single["agg_rows"] is None, "single-date candidate must not inherit the multi-date row count"
+    assert multi["agg_rows"] == 500
 
 
 def test_colmap_from_model_skips_formula_backed_columns():
