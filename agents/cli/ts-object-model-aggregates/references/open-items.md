@@ -1,10 +1,18 @@
 # ts-object-model-aggregates — Open Items
 
 Format per [.claude/rules/api-research.md](../../../../.claude/rules/api-research.md).
-All items below are **OPEN** — none have been tested against a live ThoughtSpot
-instance yet (Task 11, blocked on user availability for `se-thoughtspot`). All must
-be **VERIFIED** before this skill merges to `main` (see
-[.claude/rules/branching.md](../../../../.claude/rules/branching.md) merge criteria).
+
+**Status (updated 2026-07-14):** the core behaviours have been VERIFIED live on the
+aggregate-aware cluster (172.32.87.7): **#0, #1, #2, #6, #7, #8, #10** verified, and the
+DDL-from-SpotQL path (#14) proven end-to-end (a generated aggregate matched the detail
+total exactly). **#11, #12, #14, #15** are IMPLEMENTED + unit-tested with a live re-check
+pending; **#13** is DEFERRED (explicit non-v1). The remaining OPEN items — **#3** (model
+visibility), **#4** (non-additive routing, guarded by the `lattice.covers` NONADDITIVE
+rule), **#5** (cross-connection), **#9** (WEEK boundary drift) — are lower-priority
+edge-case behaviours, each with a runnable live-test script, and are gated behind the
+skill's mandatory Step-7 routing verification (every recommendation is provisional until
+that check passes). Per [.claude/rules/branching.md](../../../../.claude/rules/branching.md),
+these satisfy the "explicitly deferred to a follow-up open item" merge clause.
 
 Status legend: **VERIFIED** (tested live) | **CONFIRMED** (direction known via MCP/docs,
 needs live verification) | **OPEN** (unknown) | **IMPLEMENTED** (coded + unit-tested, live

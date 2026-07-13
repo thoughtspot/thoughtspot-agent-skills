@@ -36,11 +36,15 @@ Dependent-walking reuses the same alias-aware v2 `metadata dependents` path
 `ts-object-model-coach`. Backup/rollback of the primary Model's TML reuses
 `ts dependency backup`/`rollback`, exactly as `ts-dependency-manager` does.
 
-**This skill is pre-merge.** Every item in
-[references/open-items.md](references/open-items.md) is still OPEN — several of them
-(non-additive routing, join-pruning fidelity, the `aggregated_models` TML shape
-itself) are correctness-affecting, not just cosmetic. Treat every recommendation this
-skill produces as provisional until Step 7's routing verification passes, and read the
+**This skill is pre-merge.** The core behaviours are now VERIFIED live on an
+aggregate-aware cluster (routing fires for formula measures, date re-aggregation, the
+`aggregated_models` TML shape, first-match precedence, dependent types, token casing,
+filter precision — see [references/open-items.md](references/open-items.md) #0/#1/#2/#6/#7/#8/#10),
+and the DDL-from-SpotQL path is proven end-to-end. The remaining OPEN items (#3 model
+visibility, #4 non-additive routing, #5 cross-connection, #9 WEEK-boundary drift) are
+lower-priority edge cases with live-test scripts; a few IMPLEMENTED items (#11/#14/#15)
+still want a live re-check. Treat every recommendation this skill produces as provisional
+until Step 7's routing verification passes, and read the
 open items before trusting a candidate the classifier or lattice flagged as ambiguous.
 
 Ask one question at a time. Wait for each answer before proceeding.
@@ -51,7 +55,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 | File | Purpose |
 |---|---|
-| [references/open-items.md](references/open-items.md) | Eleven unverified behaviours (routing semantics, TML shape, precedence, casing, timezone/week-start drift, join-pruning fidelity) — read before trusting any recommendation, and before merging this skill to `main` |
+| [references/open-items.md](references/open-items.md) | Live-verification tracker — core routing/TML/precedence behaviours VERIFIED live (#0/#1/#2/#6/#7/#8/#10); #3/#4/#5/#9 remain OPEN edge cases with test scripts; #11/#14/#15 IMPLEMENTED pending live re-check; #13 DEFERRED. Read before trusting any recommendation and before merging to `main` |
 | [references/measure-decomposition-rules.md](references/measure-decomposition-rules.md) | Human-readable mirror of the measure decomposition table; what to do when the classifier returns `UNKNOWN` |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [ts-profile-snowflake (Claude Code)](../../claude/ts-profile-snowflake/SKILL.md) | Claude Code: Snowflake profile for connected-mode profiling/history/DDL execution (Cortex Code CLI users use their native `cortex connections` instead) |
