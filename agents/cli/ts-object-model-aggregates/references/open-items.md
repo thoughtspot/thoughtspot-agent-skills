@@ -446,7 +446,19 @@ the org's week start isn't Monday).
 
 ---
 
-## #10 — Filter-precision-vs-bucket (known design limitation, verify impact) — OPEN
+## #10 — Filter-precision-vs-bucket — VERIFIED SAFE 2026-07-14 (aggregate-aware cluster 172.32.87.7)
+
+**RESULT: the engine self-protects — no wrong/empty results.** A MONTHLY-grain
+query filtered at DAY precision (`[Transaction Date] = '01/15/2024'`) against a
+primary with only a MONTHLY aggregate fell back to the DETAIL fact (scanned
+`LINE_TOTAL`), not the month-grain aggregate. So `lattice.covers` not checking
+filter precision is at most a mild **coverage over-estimate** (we might count a
+day-filtered query as "covered" when the engine will actually serve it from
+detail) — it never causes wrong or empty results, because ThoughtSpot's router
+declines to serve a finer-than-grain filter from the aggregate. Low risk; the
+Step-8 caveat about coverage estimates remains appropriate.
+
+### #10 (historical OPEN text)
 
 **Context:** a query signature carries `date_bucket` (the GROUP BY grain) but **not**
 the filter's own date precision — this is a documented design limitation from the
