@@ -6,105 +6,10 @@ and **Databricks** (Genie Code).
 
 ---
 
-## Prerequisites
-
-You need one of the following coding agents installed:
-
-**Cortex Code CLI** (recommended for Snowflake users):
-
-| Platform | Command |
-|---|---|
-| macOS / Linux / WSL | `curl -LsS https://ai.snowflake.com/static/cc-scripts/install.sh \| sh` |
-| Windows (PowerShell) | `irm https://ai.snowflake.com/static/cc-scripts/install.ps1 \| iex` |
-
-Then run `cortex` to launch and connect to your Snowflake account.
-
-**Claude Code CLI:**
-
-| Platform | Command |
-|---|---|
-| macOS / Linux | `curl -fsSL https://claude.ai/install.sh \| bash` |
-| Windows / npm | `npm install -g @anthropic-ai/claude-code` |
-
-Then run `claude` to launch.
-
-**Also required:**
-- Python 3.9–3.13 (Python 3.14 has a macOS `libexpat` incompatibility — see [Troubleshooting](#troubleshooting))
-- Git
-
----
-
-## Quick Start (Claude Code or Cortex Code CLI)
-
-```bash
-# 1. Clone
-git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/thoughtspot-agent-skills
-
-# 2. Install the ts CLI
-pip install -e ~/thoughtspot-agent-skills/tools/ts-cli
-
-# 3. Symlink skills (choose your runtime)
-```
-
-**Cortex Code CLI:**
-```bash
-mkdir -p ~/.snowflake/cortex/skills
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.snowflake/cortex/skills/ts-profile-thoughtspot
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv ~/.snowflake/cortex/skills/ts-convert-to-snowflake-sv
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv ~/.snowflake/cortex/skills/ts-convert-from-snowflake-sv
-ln -s ~/thoughtspot-agent-skills/agents/shared ~/.snowflake/cortex/shared
-```
-
-**Claude Code:**
-```bash
-mkdir -p ~/.claude/skills
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.claude/skills/ts-profile-thoughtspot
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-to-snowflake-sv ~/.claude/skills/ts-convert-to-snowflake-sv
-ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-snowflake-sv ~/.claude/skills/ts-convert-from-snowflake-sv
-ln -s ~/thoughtspot-agent-skills/agents/shared ~/.claude/shared
-ln -s ~/thoughtspot-agent-skills/agents/shared/mappings ~/.claude/mappings
-```
-
-See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for the full setup (all skills,
-credential configuration, and verification steps).
-
----
-
-## Repository Structure
-
-```
-thoughtspot-agent-skills/
-├── agents/
-│   ├── cli/        — Canonical CLI skills (Claude Code + Cortex Code CLI)
-│   ├── claude/     — Claude Code-only skills (ts-profile-snowflake)
-│   ├── coco-snowsight/ — Snowsight Workspace skills (stored procedures)
-│   ├── databricks/ — Databricks runtime (Genie Code, Asset Bundles)
-│   └── shared/     — Shared reference files used by all runtimes
-│       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules
-│       ├── mappings/ts-databricks/      — ThoughtSpot ↔ Databricks Metric View mapping rules
-│       ├── mappings/tableau/            — Tableau → ThoughtSpot formula and TML rules
-│       ├── mappings/looker/             — LookML → ThoughtSpot formula and TML rules
-│       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV)
-│       └── worked-examples/snowflake/   — End-to-end conversion examples
-├── scripts/        — Deployment helpers (pre-commit hook, deploy gate, stage sync)
-└── tools/
-    ├── ts-cli/     — ThoughtSpot CLI used by CLI skills at runtime
-    ├── validate/   — Static validators (runtime coverage, consistency)
-    └── smoke-tests/ — End-to-end smoke tests requiring live credentials
-```
-
----
-
 ## Skills
 
-Skills are grouped by category. The runtime columns show where each skill is available —
-each ✓ links to the SKILL.md for that runtime.
-
-| Runtime | Setup guide | How it works |
-|---|---|---|
-| **CLI** — Claude Code + Cortex Code CLI | [agents/cli/SETUP.md](agents/cli/SETUP.md) | `ts` CLI for API calls, OS credential store |
-| **Snowsight** — Snowflake Workspaces | [agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md) | Stored procedures via internal stage, no local install |
-| **Databricks** — Genie Code | [agents/databricks/SETUP.md](agents/databricks/SETUP.md) | Asset Bundles, `ThoughtSpotClient` via `%run` |
+Skills are grouped by category. The runtime columns show where each skill is
+available — each ✓ links to the SKILL.md for that runtime.
 
 ### Conversion
 
@@ -173,19 +78,89 @@ Pre-built analytical capabilities for ThoughtSpot.
 
 ---
 
-## ThoughtSpot CLI
+## Getting Started
+
+### 1. Pick your runtime
+
+| Runtime | Best for | Setup guide |
+|---|---|---|
+| **CLI** — Claude Code + Cortex Code CLI | Full skill catalog, local development, interactive use | [agents/cli/SETUP.md](agents/cli/SETUP.md) |
+| **Snowsight** — Snowflake Workspaces | Snowflake-native users, no local install needed | [agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md) |
+| **Databricks** — Genie Code | Databricks-native users, Asset Bundle deployment | [agents/databricks/SETUP.md](agents/databricks/SETUP.md) |
+
+Each setup guide covers prerequisites, installation, credential configuration, and
+verification steps for that runtime.
+
+### 2. CLI quick start
+
+Most users start here. Snowsight and Databricks users — follow the setup guide for
+your runtime instead.
+
+```bash
+# Clone
+git clone https://github.com/thoughtspot/thoughtspot-agent-skills.git ~/thoughtspot-agent-skills
+
+# Install the ts CLI (requires Python 3.9–3.13)
+pip install -e ~/thoughtspot-agent-skills/tools/ts-cli
+
+# Symlink skills — see agents/cli/SETUP.md for the full list
+```
+
+**Cortex Code CLI:**
+```bash
+mkdir -p ~/.snowflake/cortex/skills
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.snowflake/cortex/skills/ts-profile-thoughtspot
+ln -s ~/thoughtspot-agent-skills/agents/shared ~/.snowflake/cortex/shared
+```
+
+**Claude Code:**
+```bash
+mkdir -p ~/.claude/skills
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-thoughtspot ~/.claude/skills/ts-profile-thoughtspot
+ln -s ~/thoughtspot-agent-skills/agents/shared ~/.claude/shared
+ln -s ~/thoughtspot-agent-skills/agents/shared/mappings ~/.claude/mappings
+```
+
+Then symlink each skill you want from the [skills catalog](#skills) above. The full
+symlink list is in [agents/cli/SETUP.md](agents/cli/SETUP.md).
+
+### 3. ThoughtSpot CLI (`ts`)
 
 A lightweight Python CLI used by CLI skills at runtime to authenticate with
 ThoughtSpot, search metadata, export/import TML, list connections, and create
 logical table objects. Located in [`tools/ts-cli/`](tools/ts-cli/).
 
 ```bash
-pip install -e tools/ts-cli
 ts --help
 ```
 
 Commands: `ts auth`, `ts metadata search`, `ts tml export/import`,
 `ts connections list/get/add-tables`, `ts tables create`, `ts profiles list`.
+
+---
+
+## Repository Structure
+
+```
+thoughtspot-agent-skills/
+├── agents/
+│   ├── cli/        — Canonical CLI skills (Claude Code + Cortex Code CLI)
+│   ├── claude/     — Claude Code-only skills (ts-profile-snowflake)
+│   ├── coco-snowsight/ — Snowsight Workspace skills (stored procedures)
+│   ├── databricks/ — Databricks runtime (Genie Code, Asset Bundles)
+│   └── shared/     — Shared reference files used by all runtimes
+│       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules
+│       ├── mappings/ts-databricks/      — ThoughtSpot ↔ Databricks Metric View mapping rules
+│       ├── mappings/tableau/            — Tableau → ThoughtSpot formula and TML rules
+│       ├── mappings/looker/             — LookML → ThoughtSpot formula and TML rules
+│       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV)
+│       └── worked-examples/snowflake/   — End-to-end conversion examples
+├── scripts/        — Deployment helpers (pre-commit hook, deploy gate, stage sync)
+└── tools/
+    ├── ts-cli/     — ThoughtSpot CLI used by CLI skills at runtime
+    ├── validate/   — Static validators (runtime coverage, consistency)
+    └── smoke-tests/ — End-to-end smoke tests requiring live credentials
+```
 
 ---
 
