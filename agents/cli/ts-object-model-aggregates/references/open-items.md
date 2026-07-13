@@ -95,7 +95,18 @@ scanned physical table is the aggregate, not the detail fact.
    how the skill's **Step 7 routing-verification** must observe routing —
    currently Step 7 inspects SpotQL SQL, which may not surface routing.
 
-## #1 — Date re-aggregation — OPEN
+## #1 — Date re-aggregation — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+
+**RESULT: finer-serves-coarser confirmed — `bucket_covers` is correct as written.**
+Against a MONTHLY aggregate (`DM_AGG_CAT_MONTHLY`): a **monthly** query routed to
+it (exact bucket); a **yearly** query routed to it and re-aggregated
+(`EXTRACT(YEAR FROM TXN_MONTH)`, months→years); a **daily** query correctly fell
+back to the detail fact (the monthly aggregate can't produce daily grain). This
+matches `lattice.bucket_covers` (`BUCKETS.index(grain) <= BUCKETS.index(sig)`)
+exactly — **no equality-only fallback needed.** (Tested with a formula measure so
+routing was in play — see #0.)
+
+### #1 (historical OPEN text)
 
 **Question:** Can a DAILY aggregate serve a MONTHLY query, or is aggregate routing
 exact-bucket-only? ThoughtSpot's docs imply "token-satisfiable = routable" (a coarser
@@ -297,7 +308,20 @@ a routed query to confirm it resolves.
 
 ---
 
-## #6 — Multi-aggregate precedence — OPEN
+## #6 — Multi-aggregate precedence — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+
+**RESULT: first-match by `aggregated_models` definition order — NOT auto-smallest.**
+With two aggregates both able to serve a category query (`DM_AGG_CAT`, 8 rows, and
+`DM_AGG_CAT_MONTHLY`, 192 rows): listing `DM_AGG_CAT` first → it won; reversing so
+`DM_AGG_CAT_MONTHLY` was first → it won. So routing takes the **first** satisfying
+entry in list order. This confirms `patch_association`'s most-aggregated-first
+ordering (ascending `projected_rows`, None last) is **load-bearing and correct** —
+emitting smallest-first is exactly what makes the cheapest satisfying aggregate win.
+Refinement (tracked): existing entries reconstructed from a primary's TML carry no
+`projected_rows` (sort last); persist/re-derive row counts so a genuinely-smaller
+existing aggregate isn't ordered after a larger new one under first-match.
+
+### #6 (historical OPEN text)
 
 **Question:** With two aggregates associated to the same primary Model that both
 satisfy a query (e.g. `(Sales × Category)` nested inside
