@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tempfile
 import time
@@ -65,12 +64,10 @@ def format_http_error(method: str, url: str, resp: "requests.Response") -> str:
 def _slugify(name: str) -> str:
     """Derive the profile slug used for Keychain service names.
 
-    Matches the slug derivation in ts-profile-setup/SKILL.md:
-      lowercase, non-alphanumeric → hyphens, collapsed and stripped.
+    Delegates to profile_ops.slugify — the single source of truth.
     """
-    s = name.lower()
-    s = re.sub(r"[^a-z0-9]+", "-", s)
-    return s.strip("-")
+    from ts_cli.profile_ops import slugify
+    return slugify(name)
 
 
 def resolve_profile(profile: Optional[str]) -> str:
