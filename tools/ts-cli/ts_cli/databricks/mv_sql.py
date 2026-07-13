@@ -247,9 +247,7 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name == "COUNT":
         return _call_count(cur, resolver)
     if name in _PASS_THROUGH_HINT:
-        raise UntranslatableError(
-            f"'{name}' has no native ThoughtSpot function — needs a "
-            f"{_PASS_THROUGH_HINT[name]} pass-through (manual review, PT1)")
+        return _call_pass_through(name, cur, resolver)
     if name == "TO_DATE":
         # TO_DATE's arguments are raw strings — the date-literal wrap must
         # not fire inside it (would double-wrap 'yyyy-MM-dd'-style args).
@@ -342,6 +340,17 @@ def _call_if(cur: _Cursor, resolver) -> str:
     args = _call_args(cur, resolver)
     _need(args, 3, "IF")
     return f"if ( {args[0]} ) then {args[1]} else {args[2]}"
+
+
+def _call_pass_through(name: str, cur: _Cursor, resolver) -> str:
+    """Generate sql_*_op pass-through for functions with no native TS equivalent."""
+    op_type = _PASS_THROUGH_HINT[name]
+    args = _call_args(cur, resolver)
+    if name == "DATE_FORMAT":
+        _need(args, 2, name)
+        return (f'{op_type} ( "DATE_FORMAT({{0}}, {args[1]})" , {args[0]} )')
+    _need(args, 1, name)
+    return f'{op_type} ( "{name}({{0}})" , {args[0]} )'
 
 
 _DATE_TRUNC_PASSTHROUGH = frozenset({"hour", "minute", "second"})

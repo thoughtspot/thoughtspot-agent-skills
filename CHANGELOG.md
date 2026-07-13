@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-13
+- feat(ts-cli): bump to v0.50.0 — auto-generate `sql_*_op` pass-through formulas for LOWER, UPPER, MINUTE, SECOND, and DATE_FORMAT instead of skipping them as untranslatable. Eliminates the manual export→edit→reimport cycle for these functions. DATE_FORMAT bakes the format literal into the SQL template
 - fix(ts-cli): bump to v0.49.0 — CASE WHEN / IF() translation now emits correct ThoughtSpot `if (cond) then val else val` syntax instead of the comma-separated `if (cond, val, val)` form that was rejected by the TML import formula parser. DATE_TRUNC now handles sub-day units (HOUR, MINUTE, SECOND) via `sql_date_time_op` pass-through instead of raising UntranslatableError. Updated worked examples and formula translation doc
 
 ## 2026-07-12

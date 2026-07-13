@@ -161,9 +161,25 @@ class TestFunctions:
                            match="MEDIAN.*ts-databricks-formula-translation"):
             t("MEDIAN(x)")
 
-    def test_passthrough_hint(self):
-        with pytest.raises(UntranslatableError, match="sql_string_op"):
-            t("LOWER(s)")
+    def test_passthrough_lower(self):
+        assert t("LOWER(s)") == \
+            'sql_string_op ( "LOWER({0})" , [TRANSACTIONS::s] )'
+
+    def test_passthrough_upper(self):
+        assert t("UPPER(s)") == \
+            'sql_string_op ( "UPPER({0})" , [TRANSACTIONS::s] )'
+
+    def test_passthrough_minute(self):
+        assert t("MINUTE(ts_col)") == \
+            'sql_int_op ( "MINUTE({0})" , [TRANSACTIONS::ts_col] )'
+
+    def test_passthrough_second(self):
+        assert t("SECOND(ts_col)") == \
+            'sql_int_op ( "SECOND({0})" , [TRANSACTIONS::ts_col] )'
+
+    def test_passthrough_date_format(self):
+        assert t("DATE_FORMAT(dt, 'yyyy-MM')") == \
+            "sql_string_op ( \"DATE_FORMAT({0}, 'yyyy-MM')\" , [TRANSACTIONS::dt] )"
 
     def test_to_date_args_not_double_wrapped(self):
         assert t("d >= TO_DATE('2024-05-01', 'yyyy-MM-dd')") == \

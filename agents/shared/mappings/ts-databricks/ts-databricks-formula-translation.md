@@ -76,8 +76,8 @@ Resolution:
 | `strlen(s)` | `LENGTH(s)` | |
 | `strpos(s, sub)` | `LOCATE(sub, s)` | Argument order reversed |
 | `substr(s, start, len)` | `SUBSTRING(s, start, len)` | |
-| ~~`lower(s)`~~ | `LOWER(s)` | Not a native TS function — use `sql_string_op("LOWER({0})", s)` pass-through |
-| ~~`upper(s)`~~ | `UPPER(s)` | Not a native TS function — use `sql_string_op("UPPER({0})", s)` pass-through |
+| `sql_string_op("LOWER({0})", s)` | `LOWER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
+| `sql_string_op("UPPER({0})", s)` | `UPPER(s)` | Auto-translated pass-through (ts-cli v0.50.0) |
 | `trim(s)` | `TRIM(s)` | |
 | `ltrim(s)` | `LTRIM(s)` | |
 | `rtrim(s)` | `RTRIM(s)` | |
@@ -123,8 +123,8 @@ Resolution:
 | `day_number_of_week(d)` | `DAYOFWEEK(d)` | TS `day_number_of_week` returns number (1=Mon, 7=Sun); Databricks `DAYOFWEEK` returns number (1=Sun). `day_of_week(d)` also exists but returns the name (e.g. "Friday"). |
 | `day_number_of_year(d)` | `DAYOFYEAR(d)` | TS function is `day_number_of_year`, not `day_of_year` |
 | `hour_of_day(ts)` | `HOUR(ts)` | TS function is `hour_of_day`, not `hour` |
-| ~~`minute(ts)`~~ | `MINUTE(ts)` | Not a native TS function — use `sql_int_op("MINUTE({0})", ts)` pass-through |
-| ~~`second(ts)`~~ | `SECOND(ts)` | Not a native TS function — use `sql_int_op("SECOND({0})", ts)` pass-through |
+| `sql_int_op("MINUTE({0})", ts)` | `MINUTE(ts)` | Auto-translated pass-through (ts-cli v0.50.0) |
+| `sql_int_op("SECOND({0})", ts)` | `SECOND(ts)` | Auto-translated pass-through (ts-cli v0.50.0) |
 | `quarter_number(d)` | `QUARTER(d)` | TS function is `quarter_number`, not `quarter` |
 | `week_number_of_year(d)` | `WEEKOFYEAR(d)` | TS function is `week_number_of_year`, not `week_of_year` |
 | `start_of_month(d)` | `date_trunc('month', d)` | |
@@ -141,7 +141,7 @@ Resolution:
 | `hour_of_day(ts)` | `EXTRACT(HOUR FROM ts)` | `EXTRACT` form — same as `HOUR(ts)` |
 | `add_days(d, n)` | `DATE_ADD(d, n)` | |
 | `add_months(d, n)` | `ADD_MONTHS(d, n)` | |
-| ~~`date_format(d, fmt)`~~ | `DATE_FORMAT(d, fmt)` | Not a native TS function — use `sql_string_op("DATE_FORMAT({0}, 'fmt')", d)` pass-through |
+| `sql_string_op("DATE_FORMAT({0}, 'fmt')", d)` | `DATE_FORMAT(d, fmt)` | Auto-translated pass-through — format literal baked into SQL template (ts-cli v0.50.0) |
 
 ### Conditional / Logic Functions
 
