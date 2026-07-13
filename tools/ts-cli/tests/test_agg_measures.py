@@ -8,7 +8,59 @@ def test_sum_column_is_directly_additive():
     assert plan["components"] == [
         {"alias": "sales_sum", "source_column": "Sales", "func": "SUM", "reagg": "SUM"}
     ]
-    assert plan["model_expr"] is None  # plain column, no formula needed
+    # Live-verified (aggregate-aware cluster, 2026-07-13): query routing to an
+    # aggregate fires ONLY for FORMULA measures, never a plain measure column
+    # (default-aggregation switching on columns isn't coded). So even a direct
+    # SUM must surface as a formula over its hidden stored component, not a
+    # plain column — see skill Open Item #0.
+    assert plan["model_expr"] == "sum ( [sales_sum] )"
+
+
+def test_min_column_gets_formula_model_expr():
+    plan = classify_measure("Low Price", aggregation="MIN")
+    assert plan["class"] == "MIN"
+    assert plan["decomposable"] is True
+    assert plan["components"] == [
+        {"alias": "low_price_min", "source_column": "Low Price", "func": "MIN", "reagg": "MIN"}
+    ]
+    assert plan["model_expr"] == "min ( [low_price_min] )"
+
+
+def test_max_column_gets_formula_model_expr():
+    plan = classify_measure("Peak Price", aggregation="MAX")
+    assert plan["class"] == "MAX"
+    assert plan["model_expr"] == "max ( [peak_price_max] )"
+
+
+def test_min_expr_gets_formula_model_expr():
+    plan = classify_measure("Low Price", expr="min ( [Price] )")
+    assert plan["class"] == "MIN"
+    assert plan["components"][0]["alias"] == "low_price_min"
+    assert plan["model_expr"] == "min ( [low_price_min] )"
+
+
+def test_max_expr_gets_formula_model_expr():
+    plan = classify_measure("Peak Price", expr="max ( [Price] )")
+    assert plan["class"] == "MAX"
+    assert plan["components"][0]["alias"] == "peak_price_max"
+    assert plan["model_expr"] == "max ( [peak_price_max] )"
+
+
+def test_every_decomposable_plan_has_model_expr():
+    # After the routing fix, EVERY decomposable class (SUM/MIN/MAX/COUNT/AVG/
+    # RATIO) has a non-None model_expr — there is no more "plain column, no
+    # formula needed" case.
+    plans = [
+        classify_measure("Sales", aggregation="SUM"),
+        classify_measure("Low Price", aggregation="MIN"),
+        classify_measure("Peak Price", aggregation="MAX"),
+        classify_measure("Orders", aggregation="COUNT"),
+        classify_measure("Avg Sale", expr="average ( [Sales] )"),
+        classify_measure("Margin Pct", expr="sum ( [Profit] ) / sum ( [Revenue] )"),
+    ]
+    for plan in plans:
+        assert plan["decomposable"] is True
+        assert plan["model_expr"] is not None
 
 
 def test_average_decomposes_to_sum_and_count():

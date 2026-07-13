@@ -489,6 +489,15 @@ Writes five files to `{workdir}/{candidate_id}/`: `ddl.sql`, `table_spec.json`,
 `table.tml.yaml`, `agg_model.tml.yaml`, `primary_patched.tml.yaml`. Stdout:
 `{"candidate", "aggregate_name", "files"}`.
 
+**This first `generate` call has no `--agg-model-guid` yet** (the aggregate Model
+doesn't exist in ThoughtSpot until 6f imports it) — `primary_patched.tml.yaml` from
+this pass is keyed by the aggregate Model's *name*, which is ambiguous (it collides
+with the equally-named backing Table, `DUPLICATE_OBJECT_FOUND` on a live cluster). Do
+**not** import this provisional file. `ts aggregate generate` prints a stderr warning
+to that effect. Only `ddl.sql`, `table_spec.json`, `table.tml.yaml`, and
+`agg_model.tml.yaml` from this pass are used going forward; 6f.1 below regenerates
+`primary_patched.tml.yaml` correctly once the aggregate Model's GUID is known.
+
 ### 6c. DDL gate
 
 Show the full contents of `{workdir}/{candidate_id}/ddl.sql`. Ask:
@@ -612,6 +621,33 @@ agg_model_guid = resp[0]["response"]["object"][0]["header"]["id_guid"]
 
 If the import fails, check that the RLS/CLS gate above wasn't bypassed and that the
 `connection_name` matches exactly (case-sensitive) an existing connection.
+
+### 6f.1. Re-patch the primary with the aggregate Model's GUID
+
+**Why this step exists:** the aggregate Model and its backing Table share a name (both
+`{aggregate_name}`) — a name-based `aggregated_models` association id is ambiguous and
+ThoughtSpot has been observed to reject it (`DUPLICATE_OBJECT_FOUND`). The GUID only
+exists after 6f's import, so `primary_patched.tml.yaml` must be regenerated now that it
+does, before 6g imports it. Re-run the exact same `ts aggregate generate` call from 6b,
+adding `--agg-model-guid {agg_model_guid}`:
+
+```bash
+source ~/.zshenv && ts aggregate generate \
+  --dir "{workdir}" --candidate {candidate_id} --model-guid {model_guid} \
+  --tables-dir "{workdir}/tables" --db "{db}" --schema "{schema}" \
+  --connection-name "{connection_name}" --profile "{profile_name}" \
+  --dialect {dialect} --materialization {materialization} \
+  $([ -n "{warehouse}" ] && echo --warehouse "{warehouse}") \
+  --agg-model-guid "{agg_model_guid}" \
+  --out-dir "{workdir}/{candidate_id}"
+```
+
+This rewrites all five files identically to 6b except `primary_patched.tml.yaml`,
+whose new `aggregated_models` entry is now keyed by `{agg_model_guid}` instead of the
+ambiguous name — no stderr warning this time. `ts aggregate generate` is idempotent
+(Task 16): re-running it never duplicates or drifts the primary's *other* existing
+aggregate associations, it only affects this candidate's own entry. Use **this**
+`primary_patched.tml.yaml` in 6g, not the provisional one from 6b.
 
 ### 6g. Back up and patch the primary Model
 

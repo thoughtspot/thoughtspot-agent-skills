@@ -104,22 +104,39 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
     `_build_model_columns` reads. Both functions turned out adaptable (not
     "too Tableau-shaped"), so this stays an adapter, not hand-assembly.
 
-    Reuse quirk, corrected in the post-pass: `_build_model_columns` hardcodes
-    `aggregation: SUM` for every MEASURE column regardless of per-column input.
-    For a MIN/MAX single-component primary measure that SUM is wrong (it would
-    SUM the per-grain extrema when queried above the stored grain). Rather than
-    fork shared model_builder.py (the Tableau conversion path depends on it),
-    the post-pass below rewrites those columns' aggregation to the measure's
-    `reagg` locally. The physical column in the aggregate *table* (see
-    build_aggregate_table_spec) already carries the correct MIN/MAX.
+    Task 17 (routing fix): a live aggregate-aware cluster (2026-07-13) proved
+    query routing to an aggregate fires ONLY when the primary's measure is a
+    FORMULA — never a plain measure column (default-aggregation switching on
+    columns isn't coded on the product side). Every decomposable measure's
+    plan (`measures.classify_measure`) therefore now carries a non-None
+    `model_expr`, including direct SUM/MIN/MAX, and every one of them is
+    emitted the same way here: a hidden stored component column (carrying its
+    `reagg` aggregation) plus a formula named exactly as the primary measure
+    (`expr = plan["model_expr"]`, e.g. `sum ( [sales_sum] )`), wired via
+    `formula_id`. There is deliberately NO plain MEASURE column emitted under
+    a primary measure's own display name any more — see skill Open Item #0.
+
+    Reuse quirk, still corrected in the post-pass below (widened by Task 17,
+    not retired by it): `_build_model_columns` hardcodes `aggregation: SUM`
+    for every MEASURE column regardless of per-column input. Before Task 17
+    this only mattered for a MIN/MAX *primary* measure's plain column; now
+    that MIN/MAX components are always hidden (never surfaced under the
+    primary's own name), it's the hidden component column's aggregation that
+    must be corrected to its `reagg` — SUM-of-monthly-maxes would be wrong
+    numbers. Rather than fork shared model_builder.py (the Tableau conversion
+    path depends on it), the post-pass rewrites each hidden component's
+    aggregation from `reagg_overrides` (keyed by alias, not primary name).
+    The physical column in the aggregate *table* (build_aggregate_table_spec)
+    already carries the correct MIN/MAX independently of this.
     """
     from ts_cli.model_builder import build_model_tml
 
     tables = [{"name": agg_table_name, "db_table": agg_table_name}]
     columns, translated_formulas = [], []
     hidden_aliases = set()
-    # display name -> reagg for columns whose model aggregation must be corrected
-    # away from _build_model_columns' hardcoded SUM (see the post-pass below).
+    # alias -> reagg for hidden component columns whose model aggregation must
+    # be corrected away from _build_model_columns' hardcoded SUM (see the
+    # post-pass below).
     reagg_overrides: dict = {}
     for name, dtype, _ in _grain_columns(candidate, model_tml):
         columns.append({"name": name, "table": agg_table_name,
@@ -127,20 +144,14 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
                         "column_type": "ATTRIBUTE"})
     emitted_formula = set()
     for alias, plan, comp in _component_columns(candidate, plans):
-        if plan["model_expr"] is None:
-            # Single direct-additive component (SUM/MIN/MAX primary measure):
-            # expose it under the primary's own display name — no formula needed.
-            columns.append({"name": plan["name"], "table": agg_table_name,
-                            "db_column_name": alias, "data_type": "DOUBLE",
-                            "column_type": "MEASURE", "aggregation": comp["reagg"]})
-            reagg_overrides[plan["name"]] = comp["reagg"]
-            continue
-        # Stored component of a decomposed measure (AVG/COUNT/RATIO): hidden,
-        # recombined via the formula below.
+        # Every stored component (direct SUM/MIN/MAX included) is hidden and
+        # recombined via a formula named as the primary measure — see the
+        # Task 17 docstring note above.
         columns.append({"name": alias, "table": agg_table_name,
                         "db_column_name": alias, "data_type": "DOUBLE",
                         "column_type": "MEASURE", "aggregation": comp["reagg"]})
         hidden_aliases.add(alias)
+        reagg_overrides[alias] = comp["reagg"]
         if plan["name"] not in emitted_formula:
             emitted_formula.add(plan["name"])
             translated_formulas.append({"name": plan["name"],
@@ -170,12 +181,8 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
     for c in tml["model"]["columns"]:
         if c["name"] in hidden_aliases:
             c.setdefault("properties", {})["is_hidden"] = True
-        # Correct the model column's aggregation for measures whose reagg is not
-        # SUM (MIN/MAX primaries). _build_model_columns hardcodes SUM for every
-        # MEASURE; without this, a MIN/MAX aggregate model would SUM the
-        # per-grain extrema when queried above the stored grain — wrong numbers.
-        # Fixed locally here (not in shared model_builder.py, which the Tableau
-        # conversion path depends on).
+        # Correct a hidden component's aggregation for measures whose reagg
+        # is not SUM (MIN/MAX components). See the Task 17 docstring note.
         override = reagg_overrides.get(c["name"])
         if override:
             c.setdefault("properties", {})["aggregation"] = override

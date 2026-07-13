@@ -42,9 +42,16 @@ def classify_measure(name: str, aggregation: Optional[str] = None,
     if expr is None and aggregation:
         agg = aggregation.upper()
         if agg in _DIRECT:
-            comp = {"alias": f"{slug}_{agg.lower()}", "source_column": name,
+            fn = agg.lower()
+            alias = f"{slug}_{fn}"
+            comp = {"alias": alias, "source_column": name,
                     "func": agg, "reagg": agg}
-            return _plan(name, agg, True, [comp])
+            # Live-verified (aggregate-aware cluster, 2026-07-13): aggregate
+            # routing fires ONLY for FORMULA measures, never a plain measure
+            # column (default-aggregation switching on columns isn't coded).
+            # So even a direct SUM/MIN/MAX must surface as a formula over its
+            # hidden stored component — see skill Open Item #0.
+            return _plan(name, agg, True, [comp], model_expr=f"{fn} ( [{alias}] )")
         if agg == "COUNT":
             comp = {"alias": f"{slug}_cnt", "source_column": name,
                     "func": "COUNT", "reagg": "SUM"}
@@ -69,9 +76,13 @@ def classify_measure(name: str, aggregation: Optional[str] = None,
         fn, col = m.group(1).lower(), m.group(2)
         if fn in ("sum", "min", "max"):
             f = fn.upper()
-            comp = {"alias": f"{slug}_{fn}", "source_column": col,
+            alias = f"{slug}_{fn}"
+            comp = {"alias": alias, "source_column": col,
                     "func": f, "reagg": f}
-            return _plan(name, f, True, [comp])
+            # See the aggregation-path comment above: routing needs a
+            # formula, so a direct sum()/min()/max() expr also gets a
+            # model_expr over its hidden stored component.
+            return _plan(name, f, True, [comp], model_expr=f"{fn} ( [{alias}] )")
         if fn == "count":
             comp = {"alias": f"{slug}_cnt", "source_column": col,
                     "func": "COUNT", "reagg": "SUM"}

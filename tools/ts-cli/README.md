@@ -1565,6 +1565,7 @@ ts aggregate generate --dir /tmp/agg --candidate cand_3 \
 | `--warehouse` | — | Warehouse for a dynamic table materialization |
 | `--agg-name` | derived from root table + grain | Override the aggregate table/model base name |
 | `--out-dir` | `<dir>/<candidate>` | Output directory |
+| `--agg-model-guid` | — | Aggregate Model's GUID, once known (import `agg_model.tml.yaml` first, then pass its returned GUID here). Used as the `aggregated_models` association `id` — the aggregate Model and its backing Table share a name, so a name-based id is ambiguous (`DUPLICATE_OBJECT_FOUND` on a live cluster). Omit on the first, pre-import pass; a stderr warning flags the name-based fallback. |
 
 **Output:** writes `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
 `agg_model.tml.yaml`, and `primary_patched.tml.yaml` (the primary Model TML with the

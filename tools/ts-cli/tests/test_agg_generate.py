@@ -54,12 +54,54 @@ def test_model_tml_names_match_primary_exactly_and_spotter_enabled():
     assert m["properties"]["spotter_config"]["is_spotter_enabled"] is True
     col_names = [c["name"] for c in m["columns"]]
     assert "Category" in col_names and "Order Date" in col_names
-    assert "Sales" in col_names           # direct-additive measure keeps column name
+    # Task 17 (routing fix): a live aggregate-aware cluster proved routing
+    # fires ONLY for formula measures. "Sales" (a direct SUM) must therefore
+    # be a FORMULA-backed column (formula_id, no column_id) — not a plain
+    # MEASURE column carrying a column_id — with its stored component hidden.
+    sales_col = next(c for c in m["columns"] if c["name"] == "Sales")
+    assert "formula_id" in sales_col and "column_id" not in sales_col
     hidden = [c["name"] for c in m["columns"]
               if (c.get("properties") or {}).get("is_hidden")]
+    assert "sales_sum" in hidden
     assert "avg_sale_sum" in hidden and "avg_sale_cnt" in hidden
+    f_sales = [f for f in m["formulas"] if f["name"] == "Sales"][0]
+    assert f_sales["expr"] == "sum ( [sales_sum] )"
     f = [f for f in m["formulas"] if f["name"] == "Avg Sale"][0]
     assert f["expr"] == "sum ( [avg_sale_sum] ) / sum ( [avg_sale_cnt] )"
+
+
+def test_sum_min_max_formula_survives_dump_and_lint_clean():
+    # Task 17 guard: the emitted model TML must round-trip through
+    # tml_common.dump_tml_yaml + tml_lint.lint_tml with NO findings, and each
+    # formula's expr must stay exactly `<func> ( [<alias>] )` — not get
+    # mangled by fix_double_aggregation (which only rewrites sum([formula_X])
+    # references, and our stored-component aliases are plain physical
+    # columns, never formula names, so they must never match that rewrite).
+    import yaml as _yaml
+
+    from ts_cli.tml_common import dump_tml_yaml
+    from ts_cli.tml_lint import lint_tml
+
+    plans = {"Sales": classify_measure("Sales", aggregation="SUM"),
+             "Peak Price": classify_measure("Peak Price", aggregation="MAX"),
+             "Low Price": classify_measure("Low Price", aggregation="MIN"),
+             "Avg Sale": classify_measure("Avg Sale", expr="average ( [Sales] )")}
+    cand = {"id": "c3", "dimensions": ["Category"], "date_column": "Order Date",
+            "bucket": "MONTHLY",
+            "measure_columns": ["Sales", "Peak Price", "Low Price", "Avg Sale"],
+            "covered": [0], "flags": []}
+    tml = build_aggregate_model_tml(cand, plans, MODEL, agg_table_name="AGG_T",
+                                    model_name="M (Agg)", connection_name="SF Prod")
+
+    yaml_text = dump_tml_yaml(tml)
+    round_tripped = _yaml.safe_load(yaml_text)
+    assert lint_tml(round_tripped) == []
+
+    formulas = {f["name"]: f["expr"] for f in round_tripped["model"]["formulas"]}
+    assert formulas["Sales"] == "sum ( [sales_sum] )"
+    assert formulas["Peak Price"] == "max ( [peak_price_max] )"
+    assert formulas["Low Price"] == "min ( [low_price_min] )"
+    assert formulas["Avg Sale"] == "sum ( [avg_sale_sum] ) / sum ( [avg_sale_cnt] )"
 
 
 def test_multi_date_grain_columns_in_table_spec_and_model_tml():
@@ -208,11 +250,13 @@ def test_date_aggregation_info_to_grains_missing_bucket_and_column():
     ]
 
 
-def test_min_max_primary_measure_keeps_reagg_in_model_column():
-    # A MIN/MAX single-component primary measure must carry its reagg (MIN/MAX)
-    # on the aggregate MODEL column, not the SUM that _build_model_columns
-    # hardcodes — SUM-of-monthly-maxes would be wrong numbers. Fixed in
-    # build_aggregate_model_tml's post-pass (locally, not in shared model_builder).
+def test_min_max_primary_measure_becomes_formula_over_reagg_component():
+    # Task 17 (routing fix): a MIN/MAX primary measure must become a FORMULA
+    # over its stored MIN/MAX component (routing fires only for formula
+    # measures on a live aggregate-aware cluster) — never a plain MEASURE
+    # column, which would anyway have carried the wrong aggregation
+    # (_build_model_columns hardcodes SUM for every MEASURE column;
+    # SUM-of-monthly-maxes would be wrong numbers).
     plans = {"Peak Price": classify_measure("Peak Price", aggregation="MAX"),
              "Sales": classify_measure("Sales", aggregation="SUM"),
              "Orders": classify_measure("Orders", aggregation="COUNT"),
@@ -225,12 +269,22 @@ def test_min_max_primary_measure_keeps_reagg_in_model_column():
                                     agg_table_name="AGG_T",
                                     model_name="M (Agg)", connection_name="SF Prod")
     cols = {c["name"]: c for c in tml["model"]["columns"]}
-    # MAX primary measure → model column aggregation MAX (not SUM)
-    assert cols["Peak Price"]["properties"]["aggregation"] == "MAX"
-    # SUM primary measure unaffected
-    assert cols["Sales"]["properties"]["aggregation"] == "SUM"
+    formulas = {f["name"]: f for f in tml["model"]["formulas"]}
+
+    # MAX primary measure -> formula over its stored MAX component, no plain
+    # column under "Peak Price".
+    assert "column_id" not in cols["Peak Price"] and "formula_id" in cols["Peak Price"]
+    assert formulas["Peak Price"]["expr"] == "max ( [peak_price_max] )"
+    assert cols["peak_price_max"]["properties"]["aggregation"] == "MAX"
+    assert cols["peak_price_max"]["properties"]["is_hidden"] is True
+
+    # SUM primary measure: same shape, reagg SUM.
+    assert "column_id" not in cols["Sales"] and "formula_id" in cols["Sales"]
+    assert formulas["Sales"]["expr"] == "sum ( [sales_sum] )"
+    assert cols["sales_sum"]["properties"]["aggregation"] == "SUM"
+
     # COUNT decomposes to a formula ("Orders" = sum([orders_cnt])) over a summed
-    # count component; the component (reagg SUM) is unaffected by the override.
+    # count component; the component (reagg SUM) is unaffected.
     assert cols["orders_cnt"]["properties"]["aggregation"] == "SUM"
     # AVG components (hidden, summed) — unaffected
     assert cols["avg_sale_sum"]["properties"]["aggregation"] == "SUM"

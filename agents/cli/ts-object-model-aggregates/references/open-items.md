@@ -35,6 +35,39 @@ query re-summed the month-grain aggregate).
 3. `patch_association` id should be the aggregate model GUID (name is ambiguous
    against the equally-named backing table → `DUPLICATE_OBJECT_FOUND`).
 
+**Update 2026-07-14 (Task 17): consequences 1 and 3 are now IMPLEMENTED.**
+
+1. `measures.classify_measure` now sets `model_expr` for the direct-additive
+   classes (SUM/MIN/MAX) — e.g. SUM → `"sum ( [alias] )"` — so every
+   decomposable plan has a non-None `model_expr` (COUNT/AVG/RATIO already did).
+   `generate.build_aggregate_model_tml` no longer has a "plain column" branch:
+   every decomposable measure emits a hidden stored component (carrying its
+   `reagg`) plus a formula named exactly as the primary measure, over that
+   component. No aggregate model exposes a plain MEASURE column under a
+   primary measure's own display name any more. Guarded by a round-trip test
+   (`test_sum_min_max_formula_survives_dump_and_lint_clean` in
+   `tools/ts-cli/tests/test_agg_generate.py`) confirming the emitted formula
+   survives `tml_common.dump_tml_yaml` + `tml_lint.lint_tml` clean and the
+   `expr` stays exactly `sum ( [alias] )` — `formula_common.fix_double_aggregation`
+   only rewrites `sum([formula_X])` references (formula cross-refs), and a
+   stored component's alias is never a formula name, so it's never touched.
+2. `ts aggregate generate` gained `--agg-model-guid`, threaded into the new
+   `aggregated_models` entry's `id` in `commands/aggregate.py`'s
+   `_patch_and_write_primary` (falls back to the aggregate Model's display
+   name with a stderr warning when omitted — e.g. the first, pre-import
+   `generate` pass, before the GUID exists). SKILL.md Step 6 now reorders:
+   6b generates provisionally (no GUID yet, warned) → 6f imports the
+   aggregate Model and captures its GUID → **new 6f.1** re-runs `generate`
+   with `--agg-model-guid <guid>` to regenerate `primary_patched.tml.yaml`
+   keyed correctly → 6g imports that (GUID-keyed) file. Task 16's
+   single-aggregate/idempotence behavior (dedup-by-id, last-wins) is
+   untouched — `patch_association` doesn't care whether `id` is a name or a
+   GUID.
+
+Item #1 (which candidate class this consequence narrows down to — item 2
+above, "target formula measures") remains open at the recommendation-scoring
+level; only the TML-emission and association-id mechanics are closed here.
+
 Residual: SpotQL-vs-SearchData routing (does `ts spotql generate-sql` reflect the
 switch?) still unconfirmed — secondary, affects only Step 7's verification method.
 

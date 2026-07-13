@@ -540,7 +540,8 @@ def _new_entry_date_grains(cand: dict) -> list:
 
 
 def _patch_and_write_primary(outdir: Path, model_guid: str, profile: Optional[str],
-                            model_name: str, cand: dict) -> None:
+                            model_name: str, cand: dict,
+                            agg_model_guid: Optional[str] = None) -> None:
     """Export the primary Model fresh (never reuse a cached copy — the patch
     must never clobber concurrent edits made since `signatures` last ran) and
     write the aggregated_models-patched TML. Reuses `_export_tml` (same
@@ -557,7 +558,20 @@ def _patch_and_write_primary(outdir: Path, model_guid: str, profile: Optional[st
     so re-patching preserves it byte-for-byte instead of stripping it. The new
     entry threads the just-generated aggregate's full multi-date list via
     `_new_entry_date_grains`, so a multi-date candidate's association is no
-    longer collapsed to the single-date shim."""
+    longer collapsed to the single-date shim.
+
+    Task 17 (Part B): the new entry's `id` must be the aggregate Model's GUID,
+    not its display name — a live 26.x cluster confirmed the aggregate Model
+    and its backing Table share a name, so a name-based id is ambiguous
+    (`DUPLICATE_OBJECT_FOUND`). `agg_model_guid` only exists once the aggregate
+    Model TML has actually been imported, which happens after `generate` first
+    writes `agg_model.tml.yaml` — so the skill re-invokes `generate`
+    (`--agg-model-guid <guid>`) once it has the GUID, to regenerate
+    `primary_patched.tml.yaml` keyed correctly before importing it. When
+    `agg_model_guid` is omitted (e.g. the first, pre-import pass, or a caller
+    that hasn't been updated), fall back to `model_name` and warn on stderr —
+    keeps this function usable standalone without forcing GUID-first ordering,
+    but flags the ambiguity risk rather than silently accepting it."""
     from ts_cli.aggregate.generate import date_aggregation_info_to_grains, patch_association
     from ts_cli.client import ThoughtSpotClient, resolve_profile
     client = ThoughtSpotClient(resolve_profile(profile))
@@ -568,7 +582,17 @@ def _patch_and_write_primary(outdir: Path, model_guid: str, profile: Optional[st
         for e in primary["model"].get("aggregated_models", []) or []
         if isinstance(e, dict)
     ]
-    entries = existing + [{"id": model_name, "date_grains": _new_entry_date_grains(cand),
+    entry_id = agg_model_guid
+    if not entry_id:
+        _err(
+            f"--agg-model-guid not provided; using name '{model_name}' as the "
+            "aggregated_models id. This can be ambiguous — the aggregate Model "
+            "and its backing Table share a name, so a name-based id can "
+            "collide (DUPLICATE_OBJECT_FOUND). Import the aggregate Model TML "
+            "first, then re-run with --agg-model-guid <the returned GUID>."
+        )
+        entry_id = model_name
+    entries = existing + [{"id": entry_id, "date_grains": _new_entry_date_grains(cand),
                            "projected_rows": cand.get("agg_rows")}]
     patched = patch_association(primary, entries)
     (outdir / "primary_patched.tml.yaml").write_text(dump_tml_yaml(patched))
@@ -590,6 +614,15 @@ def generate(
     agg_name: Optional[str] = typer.Option(
         None, help="Override aggregate table/model base name"),
     out_dir: Optional[str] = typer.Option(None),
+    agg_model_guid: Optional[str] = typer.Option(
+        None, "--agg-model-guid",
+        help="Aggregate Model's GUID, once known (import agg_model.tml.yaml first "
+             "and pass its returned GUID here). Used as the aggregated_models "
+             "association id in primary_patched.tml.yaml instead of the aggregate "
+             "Model's display name, which is ambiguous — it collides with the "
+             "equally-named backing Table (DUPLICATE_OBJECT_FOUND on a live "
+             "cluster). Omit on the first, pre-import pass; a stderr warning "
+             "flags the name-based fallback."),
 ) -> None:
     """Emit DDL + Table TML + aggregate Model TML + patched primary TML.
 
@@ -620,7 +653,7 @@ def generate(
         raise typer.Exit(code=1)
     _write_table_artifacts(outdir, cand, plans, model_tml, db, schema, name, connection_name)
     model_name = _write_model_artifact(outdir, cand, plans, model_tml, name, connection_name)
-    _patch_and_write_primary(outdir, model_guid, profile, model_name, cand)
+    _patch_and_write_primary(outdir, model_guid, profile, model_name, cand, agg_model_guid)
 
     print(json.dumps({"candidate": candidate, "aggregate_name": name,
                       "files": sorted(p.name for p in outdir.iterdir())}, indent=2))

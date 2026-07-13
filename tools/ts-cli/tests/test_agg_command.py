@@ -520,7 +520,7 @@ def test_generate_writes_all_artifacts_and_never_imports(tmp_path, monkeypatch):
                                  "--candidate", "cand_1", "--model-guid", "model-guid",
                                  "--tables-dir", str(tdir), "--db", "SALESDB",
                                  "--schema", "PUBLIC", "--connection-name", "SF Prod",
-                                 "--warehouse", "WH"])
+                                 "--warehouse", "WH", "--agg-model-guid", "agg-guid-1"])
     assert result.exit_code == 0, result.output
     out = json.loads(result.stdout)
     outdir = tmp_path / "cand_1"
@@ -530,8 +530,70 @@ def test_generate_writes_all_artifacts_and_never_imports(tmp_path, monkeypatch):
     ddl = (outdir / "ddl.sql").read_text()
     assert "DYNAMIC TABLE" in ddl and "WAREHOUSE = WH" in ddl
     patched = yaml.safe_load((outdir / "primary_patched.tml.yaml").read_text())
-    # aggregated_models entries key on the aggregate MODEL's display name
-    # ("<primary name> (<agg table name>)"), not the raw table/candidate name.
+    # Task 17 Part B: aggregated_models entries key on the aggregate MODEL's
+    # GUID (--agg-model-guid), not its display name — the aggregate model and
+    # its backing table share a name, so name is ambiguous
+    # (DUPLICATE_OBJECT_FOUND on a live cluster).
+    assert patched["model"]["aggregated_models"][0]["id"] == "agg-guid-1"
+
+
+def test_generate_falls_back_to_name_id_with_warning_when_no_agg_model_guid(
+        tmp_path, monkeypatch):
+    """Task 17 Part B: omitting --agg-model-guid must still work (backward
+    compatible) but must warn on stderr that the name-based id can collide
+    with the equally-named backing table."""
+    import ts_cli.client as client_mod
+
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+
+    primary_edoc = yaml.safe_dump({"model": {"name": "Sales Model"}})
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, profile_name):
+            pass
+
+        def post(self, path, json=None):
+            return FakeResponse([{"edoc": primary_edoc}])
+
+    monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
+    monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
+
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--warehouse", "WH"])
+    assert result.exit_code == 0, result.output
+    assert "--agg-model-guid" in result.stderr
+    assert "ambiguous" in result.stderr or "collide" in result.stderr
+    out = json.loads(result.stdout)
+    outdir = tmp_path / "cand_1"
+    patched = yaml.safe_load((outdir / "primary_patched.tml.yaml").read_text())
     assert (patched["model"]["aggregated_models"][0]["id"]
             == f"Sales Model ({out['aggregate_name']})")
 
@@ -603,7 +665,8 @@ def test_generate_idempotent_multi_date_preserves_existing_and_new(tmp_path, mon
     args = ["aggregate", "generate", "--dir", str(tmp_path),
             "--candidate", "cand_1", "--model-guid", "model-guid",
             "--tables-dir", str(tdir), "--db", "SALESDB",
-            "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH"]
+            "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH",
+            "--agg-model-guid", "b-guid-1"]
 
     result1 = runner.invoke(app, args)
     assert result1.exit_code == 0, result1.output
@@ -617,9 +680,9 @@ def test_generate_idempotent_multi_date_preserves_existing_and_new(tmp_path, mon
     assert by_id1["Sales Model (A_AGG)"]["date_aggregation_info"] == \
         [{"column_id": "Order Date", "bucket": "MONTHLY"}]
 
-    # B's full multi-date list, including the NO_BUCKET raw grain.
-    out1 = json.loads(result1.stdout)
-    b_name = f"Sales Model ({out1['aggregate_name']})"
+    # B's full multi-date list, including the NO_BUCKET raw grain. B's id is
+    # the passed --agg-model-guid (Task 17 Part B), not the ambiguous name.
+    b_name = "b-guid-1"
     assert by_id1[b_name]["date_aggregation_info"] == [
         {"column_id": "Transaction Date", "bucket": "DAILY"},
         {"column_id": "Shipped Date", "bucket": "NO_BUCKET"},
@@ -696,11 +759,15 @@ def test_generate_regenerating_same_aggregate_produces_no_duplicate(tmp_path, mo
     args = ["aggregate", "generate", "--dir", str(tmp_path),
             "--candidate", "cand_1", "--model-guid", "model-guid",
             "--tables-dir", str(tdir), "--db", "SALESDB",
-            "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH"]
+            "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH",
+            "--agg-model-guid", "stable-guid-1"]
 
     result1 = runner.invoke(app, args)
     assert result1.exit_code == 0, result1.output
-    agg_id = f"Sales Model ({json.loads(result1.stdout)['aggregate_name']})"
+    # Task 17 Part B: id is the passed --agg-model-guid, stable across runs
+    # (as it would be in the real flow — the aggregate model's GUID doesn't
+    # change between generate calls).
+    agg_id = "stable-guid-1"
 
     # Simulate the aggregate having been imported, with a STALE bucket, since
     # the last run — the re-exported primary now carries it.
