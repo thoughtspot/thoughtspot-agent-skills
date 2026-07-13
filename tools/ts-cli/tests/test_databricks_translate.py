@@ -219,7 +219,7 @@ class TestTranslateMeasure:
             _measure("return_rate",
                      "CAST(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)",
                      "complex"), TABLES)
-        assert out["ts_expr"] == ("sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) "
+        assert out["ts_expr"] == ("sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 ) "
                                   "/ count ( 1 )")
 
     def test_windowed_measure_guard_routes_away(self):
@@ -890,7 +890,7 @@ ECOMMERCE_EXPECTED = {
     "avg_order_value": "sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] ) / unique count ( [TRANSACTIONS::transaction_id] )",
     "high_value_revenue": "sum_if ( [TRANSACTIONS::unit_price] > 100 , [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] )",
     "revenue_7d_rolling": "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )",
-    "return_rate": "sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )",
+    "return_rate": "sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 ) / count ( 1 )",
 }
 
 
@@ -977,8 +977,8 @@ class TestGoldenSqlView:
         out = self._translate()
         seg = next(e for e in out["translated"] if e["name"] == "customer_segment")
         assert seg["ts_expr"] == (
-            "if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , "
-            "if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )")
+            "if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' "
+            "else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic'")
 
     def test_count_star_golden(self):
         out = self._translate()

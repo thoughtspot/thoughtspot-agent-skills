@@ -387,8 +387,8 @@ CAST(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
 Break this into parts:
 
 - `CASE WHEN status = 'returned' THEN 1 ELSE 0 END` →
-  `if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 )`
-- `SUM(CASE ...)` → `sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) )`
+  `if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0`
+- `SUM(CASE ...)` → `sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 )`
   (ThoughtSpot's `sum()` accepts inline `if` expressions without needing CAST)
 - `COUNT(*)` → `count ( 1 )` (ThoughtSpot has no `COUNT(*)` — use `count ( 1 )`)
 - The CAST is implicit in ThoughtSpot — division of two numeric aggregates
@@ -401,14 +401,14 @@ grain tested — no formula change needed.
 
 ThoughtSpot formula:
 ```
-sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )
+sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 ) / count ( 1 )
 ```
 
 | Property | Value |
 |---|---|
 | Column name | `Return Rate` (from `display_name`) |
 | Formula id | `formula_Return Rate` |
-| Formula expr | `sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )` |
+| Formula expr | `sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 ) / count ( 1 )` |
 | `column_type` | `MEASURE` |
 | `aggregation` | `SUM` |
 | `description` | `Fraction of transactions that were returned.` |
@@ -539,7 +539,7 @@ model:
     expr: "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )"
   - id: formula_Return Rate
     name: "Return Rate"
-    expr: "sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )"
+    expr: "sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 ) / count ( 1 )"
   - id: "formula_MV Filter"
     name: "MV Filter"
     expr: "[TRANSACTIONS::status] != 'cancelled'"

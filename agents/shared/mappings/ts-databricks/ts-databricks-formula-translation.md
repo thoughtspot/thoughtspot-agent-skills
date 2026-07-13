@@ -695,9 +695,13 @@ formula equivalents:
 | Databricks SQL (in MV expr) | ThoughtSpot formula |
 |---|---|
 | `date_trunc('day', col)` | `date(col)` |
+| `date_trunc('week', col)` | `start_of_week(col)` |
 | `date_trunc('month', col)` | `start_of_month(col)` |
 | `date_trunc('quarter', col)` | `start_of_quarter(col)` |
 | `date_trunc('year', col)` | `start_of_year(col)` |
+| `date_trunc('hour', col)` | `sql_date_time_op("DATE_TRUNC('HOUR', {0})", col)` — no native TS function returns DATETIME truncated to the hour; `start_of_hour` returns TIME only |
+| `date_trunc('minute', col)` | `sql_date_time_op("DATE_TRUNC('MINUTE', {0})", col)` — same as hour; `start_of_min` returns TIME only |
+| `date_trunc('second', col)` | `sql_date_time_op("DATE_TRUNC('SECOND', {0})", col)` — no native TS equivalent |
 | `CASE WHEN x THEN y WHEN z THEN w ELSE v END` | `if (x) then y else if (z) then w else v` |
 | `COALESCE(a, b)` | `if (a != null) then a else b` |
 | `CONCAT(a, ' ', b)` | `concat(a, ' ', b)` |

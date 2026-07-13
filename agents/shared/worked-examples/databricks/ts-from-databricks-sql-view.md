@@ -201,13 +201,13 @@ CASE WHEN total_amount > 1000 THEN 'Premium' WHEN total_amount > 100 THEN 'Stand
 
 ThoughtSpot formula:
 ```
-if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )
+if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic'
 ```
 
-Multi-branch `CASE WHEN ... WHEN ... ELSE ... END` maps to nested `if()` using
-**comma syntax**: `if ( cond , true_val , false_val )`. The comma form and the
-keyword form (`if (cond) then true else false`) are both valid ThoughtSpot formula
-syntax. This example uses the comma form.
+Multi-branch `CASE WHEN ... WHEN ... ELSE ... END` maps to nested
+`if (cond) then val else if (cond2) then val2 else val3`. ThoughtSpot requires
+the `then`/`else` keyword form for TML import — the comma form
+(`if (cond, val, val)`) is rejected by the formula parser.
 
 The column reference uses `[Orders_MV_View::total_amount]` -- the SQL View name
 as the table qualifier, because the Model sits on top of the SQL View.
@@ -262,7 +262,7 @@ model:
   formulas:
   - id: formula_Customer Segment
     name: Customer Segment
-    expr: "if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )"
+    expr: "if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic'"
     properties:
       column_type: ATTRIBUTE
   - id: formula_Total Orders
