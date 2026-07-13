@@ -318,6 +318,16 @@ def _ingest_profile_results(payload: dict, results_path: str) -> dict:
 # hard failure, since the SQL-gen endpoint being down must not block the
 # whole advisor workflow. A fallback always emits a stderr note that
 # role-playing/ambiguous-path dimensions may be wrong on that candidate.
+#
+# Task 19 correction (live-proven, aggregate-aware cluster): build_spotql now
+# references measures by display name (never a real aggregate fn over a
+# physical column — invalid SpotQL) and selects raw date columns with no
+# bucket function (SpotQL has none) — see spotql_aggregate.py's module
+# docstring. wrap_as_ddl does the date bucketing + measure re-aggregation
+# in an outer SELECT instead. Unchanged here: the try/except-and-fall-back
+# shape below already treats spotql_aggregate.UnsupportedMeasureError
+# (AVG/RATIO measures, out of SpotQL's expressible scope) like any other
+# best-effort SpotQL failure.
 # ──────────────────────────────────────────────────────────────────────────────
 
 _SPOTQL_FALLBACK_NOTE = (
@@ -349,14 +359,14 @@ def _spotql_ddl_or_none(model_tml: dict, cand: dict, plans: dict, model_guid: st
         return None
     from ts_cli.aggregate.spotql_aggregate import build_spotql, wrap_as_ddl
     try:
-        spotql, aliases = build_spotql(cand, plans, model_tml["model"]["name"])
+        spotql, descriptors = build_spotql(cand, plans, model_tml["model"]["name"])
         result = _spotql_generate_sql(spotql, model_guid, ts_profile)
         if result["status"] != "SUCCESS" or not result["executable_sql"]:
             _err(f"SpotQL generate-sql did not return SUCCESS for candidate "
                  f"{cand.get('id')} (status={result['status']}, "
                  f"errors={result['errors']}) — {_SPOTQL_FALLBACK_NOTE}")
             return None
-        return wrap_as_ddl(result["executable_sql"], aliases, target, dialect,
+        return wrap_as_ddl(result["executable_sql"], descriptors, target, dialect,
                            materialization, warehouse=warehouse)
     except (Exception, SystemExit) as exc:  # noqa: BLE001 — best-effort path
         _err(f"SpotQL DDL generation raised {exc!r} for candidate "
@@ -374,7 +384,7 @@ def _spotql_profile_sql_or_none(model_tml: dict, cand: dict, plans: dict, model_
         return None
     from ts_cli.aggregate.spotql_aggregate import _strip_trailing_limit, build_spotql
     try:
-        spotql, _aliases = build_spotql(cand, plans, model_tml["model"]["name"])
+        spotql, _descriptors = build_spotql(cand, plans, model_tml["model"]["name"])
         result = _spotql_generate_sql(spotql, model_guid, ts_profile)
         if result["status"] != "SUCCESS" or not result["executable_sql"]:
             _err(f"SpotQL generate-sql did not return SUCCESS for candidate "

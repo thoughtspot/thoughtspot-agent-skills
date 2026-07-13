@@ -23,7 +23,7 @@ ts_cli/
     lattice.py            — grain lattice: bucket/coverage rule + candidate generation from signatures + rewrite plans behind `ts aggregate recommend` (pure functions, no I/O)
     scoring.py            — cost-based (profiled) / coverage-based (unprofiled) greedy candidate selection with a marginal-gain curve behind `ts aggregate recommend` (pure functions, no I/O)
     sqlgen.py             — aggregate SELECT / profiling SQL / DDL emission across snowflake/databricks/bigquery dialects behind `ts aggregate profile`/`generate` (pure functions, no I/O); fallback path only as of Task 18 — see spotql_aggregate.py
-    spotql_aggregate.py   — Task 18: build a SpotQL SELECT for a candidate's grain (build_spotql) and wrap ThoughtSpot-compiled warehouse SQL as aggregate DDL (wrap_as_ddl), reusing sqlgen.build_ddl for materialization shapes — the default DDL SELECT source behind `ts aggregate profile`/`generate`, because ThoughtSpot's own SQL generation resolves joins correctly on role-playing/ambiguous-path dimensions where sqlgen.build_select's hand-rolled walker can be wrong (pure functions, no I/O)
+    spotql_aggregate.py   — Task 18/19: build a SpotQL SELECT for a candidate's grain (build_spotql — measures by display name, raw date columns, no bucket fn; single-component SUM/MIN/MAX/COUNT measures only, AVG/RATIO raise UnsupportedMeasureError) and wrap ThoughtSpot-compiled warehouse SQL as aggregate DDL (wrap_as_ddl — outer DATE_TRUNC+reagg aggregating SELECT when a date descriptor carries a bucket, plain positional pass-through otherwise), reusing sqlgen.build_ddl/_date_trunc for materialization shapes and per-dialect date truncation — the default DDL SELECT source behind `ts aggregate profile`/`generate`, because ThoughtSpot's own SQL generation resolves joins correctly on role-playing/ambiguous-path dimensions where sqlgen.build_select's hand-rolled walker can be wrong (pure functions, no I/O)
     generate.py           — aggregate Table/Model TML assembly + `aggregated_models` association patch on the primary Model, reusing tables.py/model_builder.py rather than hand-assembling TML (pure functions, no I/O)
     history.py            — match Snowflake QUERY_HISTORY GROUP BY shapes to signatures, producing reweighted signature weights behind `ts aggregate history` (pure functions, no I/O)
   dependency/
@@ -94,7 +94,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.46.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.48.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
