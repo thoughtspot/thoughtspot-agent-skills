@@ -16,6 +16,7 @@ ts_cli/
   tableau_translate.py — Tableau → ThoughtSpot formula translation entry point + orchestrator facade over ts_cli/tableau/ (pure functions, no I/O)
   snowflake_ops.py     — Semantic View diff (normalise_expr/exprs_differ/compute_change_set) + DDL lint (lint_sv_ddl) + SQL var substitution (parse_var_assignment/substitute_sql_vars, behind `ts snowflake exec` — BL-079) behind `ts snowflake` (pure functions, no I/O)
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/classify_model_columns) behind `ts spotql classify-columns` (pure functions, no I/O)
+  promote.py           — Formula promotion merge (extract_answer_formulas/detect_duplicates/map_references/build_merged_model) behind `ts model promote-formula` (pure functions, no I/O; BL-066)
   dependency/
     __init__.py          — re-exports mutate.py + backup.py public entry points
     mutate.py             — REMOVE/REPOINT TML dict transforms (apply_remove/apply_repoint dispatchers + remove_columns_from_*/repoint_* helpers) behind `ts dependency mutate` (pure functions, no I/O; BL-083)
@@ -53,6 +54,7 @@ ts_cli/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
     metadata.py   — ts metadata search
+    model.py      — ts model (promote-formula) — BL-066
     tml.py        — ts tml export / import / lint
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
@@ -83,7 +85,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.50.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.51.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

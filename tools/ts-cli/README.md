@@ -365,6 +365,42 @@ ts metadata delete abc-123 --profile se-thoughtspot
 
 ---
 
+### `ts model promote-formula`
+
+Promote formulas from an Answer into a Model. Exports both TMLs, detects
+duplicate formula names, maps column references, infers column_type
+(MEASURE/ATTRIBUTE), and emits the merged Model TML ready for import.
+
+```bash
+ts model promote-formula --answer <answer-guid> --model <model-guid> --profile <name>
+
+# Promote specific formulas only
+ts model promote-formula -a <answer-guid> -m <model-guid> --formula "Profit Margin" --formula "YoY Growth"
+
+# Overwrite duplicates instead of skipping
+ts model promote-formula -a <answer-guid> -m <model-guid> --duplicates overwrite
+
+# Include auto-generated formulas (excluded by default)
+ts model promote-formula -a <answer-guid> -m <model-guid> --all --include-auto
+```
+
+**Output:** JSON with `added`, `skipped`, `overwritten`, `unresolved_refs`, `params_added`,
+`deps_added`, and `merged_tml_yaml` (the full merged Model TML string ready for `ts tml import`).
+
+| Flag | Default | Description |
+|---|---|---|
+| `--answer`, `-a` | required | Answer GUID — source of the formulas |
+| `--model`, `-m` | required | Model GUID — target to merge formulas into |
+| `--profile`, `-p` | first profile | Profile to use |
+| `--formula` | all non-auto | Formula names to promote (repeatable). Omit for all. |
+| `--all` | false | Promote all formulas (equivalent to omitting `--formula`) |
+| `--duplicates`, `-d` | `skip` | `skip` or `overwrite` — what to do when a formula name already exists |
+| `--include-auto` | false | Include auto-generated formulas (`was_auto_generated=true`) |
+| `--include-params/--no-params` | true | Auto-include referenced parameters |
+| `--include-deps/--no-deps` | true | Auto-include unselected formula dependencies |
+
+---
+
 ### `ts tml export <guid> [<guid> ...]`
 
 Export TML for one or more objects.

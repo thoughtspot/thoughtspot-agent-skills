@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-13
+- feat(ts-cli): `ts model promote-formula` CLI command (BL-066, ts-cli v0.51.0) — codifies formula promotion merge as deterministic Python: duplicate detection, reference mapping, column_type inference, TML merge, parameter co-promotion
+- feat: ts-object-answer-promote v1.4.0 — Steps 7–10 delegate to `ts model promote-formula` CLI command (BL-066)
 - feat: adopt `ts profiles` CLI commands across 4 profile skills (BL-084 PR2) — ts-profile-thoughtspot v1.2.0, ts-profile-snowflake v1.1.0, ts-profile-databricks v1.1.0, ts-profile-tableau v1.1.0. Replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O with the shared CLI substrate from PR1
 - feat(ts-cli): `ts profiles add/update/remove/sync-env` + `list --json` — codifies profile substrate (BL-084 PR1, ts-cli v0.50.0). New `profile_ops` module consolidates slug derivation, env-var naming, keychain command generation, zshenv upsert, and profile JSON CRUD across 4 platforms. Legacy `load_profiles`/`load_tableau_profiles` delegate to the shared module
 - docs: shared profile-select-and-authenticate reference for conversion skills

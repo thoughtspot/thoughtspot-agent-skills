@@ -455,360 +455,105 @@ on all instance versions — see open-items.md #2.
 
 ---
 
-## Step 7 — Export and Parse Model TML
+## Steps 7–10 — Promote Formulas via CLI
 
-Export the Model TML with its associated Table objects:
+Steps 7–10 (Model export, duplicate detection, reference mapping, column_type inference,
+and TML merge) are handled by the `ts model promote-formula` CLI command. This replaces
+~300 lines of inline Python with one command call.
 
-```bash
-source ~/.zshenv && ts tml export {model_guid} \
-  --profile "{profile_name}" \
-  --fqn \
-  --associated \
-  --parse
+### Determine duplicate policy
+
+Before running the command, ask the user what to do about duplicates:
+
+```
+If any selected formula already exists in the Model, should I:
+
+  S  Skip — keep the existing Model formula (default)
+  O  Overwrite — replace the existing Model formula with the Answer version
+
+Enter S or O:
 ```
 
-`--parse` returns structured JSON directly. Separate by `type` field:
+Map: `S` → `--duplicates skip`, `O` → `--duplicates overwrite`.
+
+### Build and run the command
+
+```bash
+source ~/.zshenv && ts model promote-formula \
+  --answer {answer_guid} \
+  --model {model_guid} \
+  --profile "{profile_name}" \
+  --formula "{formula_1}" \
+  --formula "{formula_2}" \
+  --duplicates {skip|overwrite}
+```
+
+If the user selected all formulas in Step 4, omit `--formula` flags (promotes all
+non-auto-generated formulas by default). Add `--include-auto` if the user selected
+auto-generated formulas.
+
+### Parse the output
+
+The command returns JSON to stdout:
 
 ```python
 import json, subprocess
 
 result = subprocess.run(
-    ["bash", "-c",
-     f"source ~/.zshenv && ts tml export {model_guid} --profile '{profile_name}' --fqn --associated --parse"],
+    ["bash", "-c", f"source ~/.zshenv && ts model promote-formula "
+     f"--answer {answer_guid} --model {model_guid} --profile '{profile_name}' "
+     f"--duplicates {dup_policy} " +
+     " ".join(f'--formula "{name}"' for name in selected_names)],
     capture_output=True, text=True,
 )
-export_json = json.loads(result.stdout)
-
-model_tml = None
-model_guid_from_export = None
-table_tmls = {}
-
-for item in export_json:
-    if item["type"] == "model":
-        model_tml = item["tml"]
-        model_guid_from_export = item["guid"]   # required for in-place update
-    elif item["type"] == "table":
-        model_tml_obj = item["tml"]
-        table_tmls[model_tml_obj["table"]["name"]] = model_tml_obj
+promote_result = json.loads(result.stdout)
 ```
 
-The `guid` at the document root of the model TML is required to update the Model
-in-place. If it is absent, search for it:
+Key fields in `promote_result`:
 
-```bash
-source ~/.zshenv && ts metadata search \
-  --subtype MODEL \
-  --name "%{model_name}%" \
-  --profile "{profile_name}"
-```
+- `added` — formulas merged (name, column_type, aggregation, expr, formula_id)
+- `skipped` — formulas skipped as duplicates (name, reason)
+- `overwritten` — formulas that replaced existing entries
+- `unresolved_refs` — references the CLI could not auto-resolve
+- `params_added` — parameters co-promoted with formulas
+- `deps_added` — formula dependencies auto-included
+- `merged_tml_yaml` — the full merged Model TML (YAML string ready for import)
 
-Extract from the Model TML:
+### Handle unresolved references
 
-```python
-model = model_tml["model"]
-existing_formulas = model.get("formulas", [])
-existing_columns  = model.get("columns", [])
-model_tables      = model.get("model_tables", [])
-
-# Build column lookups for Step 9
-col_by_name = {c["name"]: c for c in existing_columns}
-col_by_id   = {c["column_id"]: c for c in existing_columns if "column_id" in c}
-formula_names_in_model = {f["name"] for f in existing_formulas}
-formula_ids_in_model   = {f["id"]   for f in existing_formulas}
-```
-
-Also build a lookup of valid table names for formula column reference validation:
-
-```python
-valid_table_names = {t["name"] for t in model_tables}
-if any(t.get("alias") for t in model_tables):
-    valid_table_names.update(t["alias"] for t in model_tables if t.get("alias"))
-```
-
----
-
-## Step 8 — Detect Duplicate Formula and Parameter Names
-
-**Formulas:** Check whether any selected formula name already exists in the Model:
-
-```python
-duplicates = [f for f in selected_formulas if f["name"] in formula_names_in_model]
-```
-
-If duplicates exist:
+If `unresolved_refs` is non-empty, show each to the user for interactive resolution:
 
 ```
-The following formula names already exist in "{model_name}":
-
-  - "Profit Margin"
-
-For each duplicate, choose:
-  R  Rename — keep both; enter a new name for the promoted formula
-  O  Overwrite — replace the existing Model formula with the Answer version
-  S  Skip — leave the existing Model formula unchanged
-
-"Profit Margin":
-```
-
-For **Rename**: prompt for the new name, then check it does not also conflict with existing
-names or other formulas being promoted. Use the new name in the `formulas[]` `name:` field,
-the `columns[]` `name:` field, and the `columns[]` `formula_id:` field. The `id` in
-`formulas[]` is derived from the (new) name.
-
-Remove skipped formulas from the promotion list. Mark overwrite formulas — their existing
-`formulas[]` and `columns[]` entries will be removed before the new entries are added in
-Step 10.
-
-**Parameters:** Check whether any parameter in `params_to_promote` already exists in the Model:
-
-```python
-param_names_in_model = {p["name"] for p in model.get("parameters", [])}
-param_duplicates = [p for p in params_to_promote if p["name"] in param_names_in_model]
-```
-
-If parameter duplicates exist:
-
-```
-The following parameters already exist in "{model_name}":
-
-  - "today"
-
-For each duplicate, choose:
-  K  Keep existing — the Model parameter is already there; formula will resolve against it
-  O  Overwrite — replace the existing Model parameter with the Answer version
-
-"today":
-```
-
-For **K — Keep existing:** remove the parameter from `params_to_promote` (it's already
-in the Model; no change needed).
-For **O — Overwrite:** mark it; the existing `parameters[]` entry will be removed before
-the new one is added in Step 10.
-
----
-
-## Step 9 — Map Formula Column References
-
-For each formula to promote, parse its column references and validate them against the
-target Model. Column references are the `[...]` tokens in the expression.
-
-```python
-import re
-
-def extract_refs(expr):
-    """Return all [token] references from a formula expression."""
-    return re.findall(r'\[([^\]]+)\]', expr)
-```
-
-For each `[token]` reference in the expression, classify it:
-
-**Class A — References another formula (no `::` separator):**
-The token matches the name of another formula being promoted, OR the name of an existing
-formula already in the Model. No rewriting needed — keep `[token]` as-is.
-
-**Class B — Explicit `TABLE::column` format (token contains `::`):**
-Split on `::` to get `table_part` and `col_part`.
-- If `table_part` is in `valid_table_names` AND `col_part` exists in the table's column
-  list (cross-check against the exported Table TML) → keep as-is.
-- If `table_part` is not in `valid_table_names` → flag for user review (the table name
-  may have been aliased differently in this Model).
-
-**Class C — Bare name, no `::`:**
-Search for the column by display name across all Model columns:
-
-```python
-match = col_by_name.get(token)
-```
-
-If found: translate to the table-qualified form using the column's `column_id`:
-
-```python
-match = col_by_name.get(token)
-if match and "column_id" in match:
-    rewrites[f"[{token}]"] = f"[{match['column_id']}]"
-```
-
-This replaces `[Amount]` with `[DM_ORDER_DETAIL::LINE_TOTAL]`, matching the convention
-used by all existing Model formulas. [OPEN ITEMS #3 — bare display-name refs untested;
-`TABLE::COLUMN_ID` translation is confirmed working]
-
-If not found and not a known formula name: the reference is ambiguous. Show the user the
-Model's columns and ask for a mapping:
-
-```
-Column reference [Prior Year Revenue] in formula "{formula_name}" was not found in
-"{model_name}".
+Column reference [{ref}] in formula "{formula}" was not found in the Model.
 
   Is it:
     F  Another formula — enter the formula or column name as it appears in the Model: ___
-    C  Map to a Model column — here are the available columns:
+    C  Map to a Model column — search by name to find the right column
 
-  Model columns (first 20 shown — enter a search term to filter):
-    1  Revenue           MEASURE   (FACT_ORDERS::AMOUNT)
-    2  Cost              MEASURE   (FACT_ORDERS::COST)
-    3  Order Count       MEASURE   (formula_Order Count)
-    ...
-
-  Enter F or the column number:
+  Enter F or C:
 ```
 
-After mapping, record the substitution:
+After resolving all references, the user must manually update the `merged_tml_yaml`
+string: find and replace the unresolved `[token]` with the resolved name.
 
-```python
-rewrites[f"[{token}]"] = f"[{resolved_name}]"
-```
+If no unresolved refs, proceed directly to Step 11.
 
-Apply all rewrites to produce `{rewritten_expr}` for each formula.
+### What the CLI command handles internally
 
----
-
-## Step 10 — Build Updated Model TML
-
-**Generate formula IDs** following the convention from
-[thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md):
-`"formula_"` + name (spaces preserved).
-
-```python
-def make_formula_id(name):
-    return f"formula_{name}"
-
-for f in formulas_to_add:
-    fid = make_formula_id(f["name"])
-    # Disambiguate if the id already exists (should not happen after Step 8, but be safe)
-    if fid in formula_ids_in_model:
-        fid = f"formula_{f['name']}_promoted"
-    f["_generated_id"] = fid
-```
-
-**Build `formulas[]` entries** (no `aggregation:` — that belongs in `columns[]` only):
-
-```python
-new_formula_entries = []
-for f in formulas_to_add:
-    entry = {"id": f["_generated_id"], "name": f["name"], "expr": f["rewritten_expr"]}
-    # Include column_type in formulas[] only if present in source Answer TML
-    if f.get("column_type"):
-        entry.setdefault("properties", {})["column_type"] = f["column_type"]
-    new_formula_entries.append(entry)
-```
-
-**Infer `column_type` and `aggregation`.** Answer formula entries do not carry these
-fields — they live on the Model column. Delegate the aggregate-function detection to
-`ts spotql classify-columns` (BL-087) instead of re-implementing the keyword list here —
-it's the same canonical function list `ts-object-model-spotql-query` uses for its
-SUM-vs-`AGG` decision, so the two skills can't drift apart again. Pipe
-`formulas_to_add` in as a JSON array of `{name, expr}` on stdin:
-
-```python
-import json, subprocess
-
-exprs_payload = json.dumps(
-    [{"name": f["name"], "expr": f["expr"]} for f in formulas_to_add]
-)
-
-result = subprocess.run(
-    ["bash", "-c", "source ~/.zshenv && ts spotql classify-columns"],
-    input=exprs_payload,
-    capture_output=True, text=True,
-)
-classified = json.loads(result.stdout)   # [{"name", "column_type", "aggregation", "is_aggregate"}, ...]
-classified_by_name = {c["name"]: c for c in classified}
-
-for f in formulas_to_add:
-    c = classified_by_name[f["name"]]
-    f["_column_type"] = c["column_type"]
-    f["_aggregation"] = c["aggregation"]
-```
-
-`column_type` is `MEASURE` iff the expression contains a call to an aggregate function
-(`sum`, `count`, `group_aggregate`, `last_value`, `first_value`, … — the full canonical
-list lives in `ts_cli.spotql_ops.AGGREGATE_FUNCS`, not duplicated here); `aggregation` is
-`SUM` for every MEASURE formula (ThoughtSpot ignores the `aggregation` property on
-formula columns at query time — the expr is self-contained; `SUM` is the convention for
-all MEASURE formulas) and `None` for an ATTRIBUTE. A `--exprs-file <path>` flag is also
-available if you'd rather write the array to a temp file than pipe it via stdin.
-
-**Build `columns[]` entries:**
-
-```python
-new_column_entries = []
-for f in formulas_to_add:
-    props = {"column_type": f["_column_type"]}
-    if f["_aggregation"]:
-        props["aggregation"] = f["_aggregation"]  # MEASURE → SUM; ATTRIBUTE → omitted
-    entry = {"name": f["name"], "formula_id": f["_generated_id"], "properties": props}
-    new_column_entries.append(entry)
-```
-
-**Merge into a deep copy of the Model TML:**
-
-```python
-import copy
-
-updated = copy.deepcopy(model_tml)
-m = updated["model"]
-
-# Remove overwrite targets first
-overwrite_names = {f["name"] for f in formulas_to_overwrite}
-if overwrite_names:
-    m["formulas"] = [x for x in m.get("formulas", []) if x.get("name") not in overwrite_names]
-    m["columns"]  = [x for x in m.get("columns",  []) if x.get("name") not in overwrite_names]
-
-# Append new formulas and columns
-m.setdefault("formulas", []).extend(new_formula_entries)
-m["columns"].extend(new_column_entries)
-
-# Merge parameters
-if params_to_promote:
-    overwrite_param_names = {p["name"] for p in params_to_overwrite}
-    if overwrite_param_names:
-        m["parameters"] = [
-            x for x in m.get("parameters", [])
-            if x.get("name") not in overwrite_param_names
-        ]
-    new_param_entries = [build_model_param_entry(p) for p in params_to_promote]
-    m.setdefault("parameters", []).extend(new_param_entries)
-```
-
-**Run the self-validation checklist** from
-[thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) — all 12
-checks, silently, before showing the user. The checks most critical for formula promotion:
-
-- **#7** — No `aggregation:` in any `formulas[]` entry
-- **#8** — No duplicate display names across all `columns[]` entries
-- **#10** — Every `formulas[].id` has a matching `formula_id:` in `columns[]`
-- **#11** — Any `expr` containing `{ }` curly braces uses `>-` block scalar encoding
-- **#12** — `guid:` is at the document root (not nested inside `model:`)
-
-Fix any issues silently before continuing.
-
-**Serialize to YAML:**
-
-```python
-import yaml
-
-def _str_representer(dumper, data):
-    if '\n' in data or ('{' in data and '}' in data):
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='>')
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-
-yaml.add_representer(str, _str_representer)
-updated_yaml = yaml.dump(updated, allow_unicode=True, default_flow_style=False)
-```
-
-Verify that the GUID is the first key in the serialized YAML (required for in-place
-update). If it is not, prepend it:
-
-```python
-if not updated_yaml.strip().startswith("guid:"):
-    updated_yaml = f"guid: {model_guid_from_export}\n" + updated_yaml
-```
+- Exports both Answer and Model TMLs (with `--fqn --associated`)
+- Classifies formula column references (Class A/B/C from the original Steps 8-9)
+- Rewrites bare `[Name]` refs to `[TABLE::COLUMN_ID]` form automatically
+- Detects aggregate functions to infer MEASURE vs ATTRIBUTE (`spotql_ops.classify_expr`)
+- Generates `formula_id` values (`formula_{name}` convention, dedup if collision)
+- Builds merged `formulas[]` and `columns[]` entries with correct `aggregation:`
+- Handles parameter co-promotion and formula dependency auto-inclusion
+- Serializes the merged TML with `guid:` at document root
 
 ---
 
 ## Step 11 — Checkpoint
 
-Before importing, show a summary:
+Before importing, show a summary built from `promote_result`:
 
 ```
 Ready to update "{model_name}":
@@ -817,14 +562,17 @@ Ready to update "{model_name}":
     + Profit Margin    MEASURE    →  [Revenue] - [Cost]
     + YoY Growth %     MEASURE    →  ( [Revenue] - [Prior Year Revenue] ) / ...
 
-  Formulas to overwrite:
+  Formulas to overwrite:       (from promote_result["overwritten"], if any)
     ~ High Value Flag  ATTRIBUTE  →  if ( [Revenue] > 10000 ) then 'High' else 'Low'
 
-  Parameters to add:       (shown only when params_to_promote is non-empty)
+  Skipped (duplicates):        (from promote_result["skipped"], if any)
+    - Existing Formula   (already in Model, policy=skip)
+
+  Parameters to add:           (from promote_result["params_added"], if any)
     + today    DATE    dynamic default: TODAY
 
-  Parameters to overwrite: (shown only when any param is marked overwrite)
-    ~ rate     INT64   default: 40
+  Dependencies auto-included:  (from promote_result["deps_added"], if any)
+    + Helper Calc  ATTRIBUTE  →  ...
 
   Source Answer:   "{answer_name}"
   Target Model:    "{model_name}"
@@ -839,11 +587,13 @@ If N, ask what the user would like to change and loop back to the relevant step.
 
 ## Step 12 — Import Updated Model TML
 
-Write the YAML to a temp file and pipe it to the `ts` CLI:
+Write the merged YAML from `promote_result["merged_tml_yaml"]` to a temp file and pipe
+it to the `ts` CLI:
 
 ```python
 import subprocess, json
 
+updated_yaml = promote_result["merged_tml_yaml"]
 temp_path = "/tmp/ts_promote_formula_model.yaml"
 with open(temp_path, "w") as f:
     f.write(updated_yaml)
@@ -906,11 +656,11 @@ To verify, open the Model URL above and check the Columns section for the new fo
 | Data source is a Worksheet | Worksheets are legacy — inform user to migrate it to a Model in the ThoughtSpot UI first (no skill for this yet) |
 | Import returns 403 / UNAUTHORIZED | User lacks edit access on the Model — see Step 6 |
 | Import: `FORMULA is not a valid aggregation type` | `aggregation:` is in a `formulas[]` entry — move it to the matching `columns[]` entry |
-| Import: `duplicate column name` | A promoted formula name conflicts with an existing column — rename or skip it in Step 8 |
-| Import: `column_id not found` | A column reference in the formula expression doesn't resolve — revisit Step 9 mapping |
-| Import: model already exists with same name | `guid:` may be missing or mis-placed — check Step 10 GUID placement |
+| Import: `duplicate column name` | A promoted formula name conflicts with an existing column — re-run `ts model promote-formula` with `--duplicates overwrite` or rename the formula |
+| Import: `column_id not found` | A column reference in the formula expression doesn't resolve — check `unresolved_refs` in the CLI output and resolve manually |
+| Import: model already exists with same name | `guid:` may be missing or mis-placed — the CLI handles this, but verify with `ts metadata search` |
 | Import creates a duplicate model instead of updating | `--no-create-new` flag is missing from the import command — add it and delete the duplicate |
-| Import: `Found multiple data sources with same name` | Model TML was exported without `--fqn` — `model_tables[]` entries lack `fqn:` GUIDs. Re-export with `--fqn` (Step 7 already specifies this) |
+| Import: `Found multiple data sources with same name` | Model TML was exported without `--fqn` — the CLI uses `--fqn` automatically; if still failing, re-export manually |
 | `pyyaml` not installed | `pip install pyyaml` |
 | Import: `parameter not found` or formula resolves to NULL after import | Parameter name in the formula expression does not match a `model.parameters[].name` — verify the promoted parameter name matches exactly (case-sensitive) |
 | `dynamic_default_date` rejected on import | Older ThoughtSpot instances may not support `dynamic_default_date` at the model level. Fall back to a static `default_value` — ask the user for a sensible default (e.g. today's date as a string `"2026-04-22"` for a DATE parameter). |
@@ -929,6 +679,7 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.0 | 2026-07-13 | Steps 7–10 delegate to `ts model promote-formula` CLI command (BL-066): duplicate detection, reference mapping, column_type inference, and TML merge are now deterministic. Prereq ts-cli v0.51.0. |
 | 1.3.0 | 2026-07-03 | MEASURE/ATTRIBUTE + aggregation inference delegates to `ts spotql classify-columns` (BL-087), replacing the drifted inline keyword list. Prereq ts-cli v0.31.0. |
 | 1.2.2 | 2026-07-03 | Soften phantom `/ts-object-model-builder` recommendation in Step 5 and Error Handling to "no skill for this yet — migrate in the ThoughtSpot UI" (audit finding 1.1 — that skill was never shipped). |
 | 1.2.1 | 2026-06-19 | Resolve open items 4 & 5 as deferred scope — embedded-Liveboard Answers and set/cohort promotion are out of current scope (formulas + parameters only), tracked in BL-039; neither is a shipped-unverified path. Correct the Liveboard-TML reference note (no fallback path exists in Step 2). |
