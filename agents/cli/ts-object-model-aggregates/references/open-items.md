@@ -12,7 +12,33 @@ check pending) | **DEFERRED** (explicit non-v1 decision, tracked as a follow-up)
 
 ---
 
-## #0 — Does routing fire at all + which API path triggers it — OPEN (blocker, needs a working cluster)
+## #0 — Does routing fire + trigger condition — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+
+**RESULT: routing works, and fires ONLY for FORMULA measures — not plain
+measure columns.** A `[Agg Test Sales] [Product Category]` query (where
+`Agg Test Sales` = a formula `sum([DM_ORDER_DETAIL::LINE_TOTAL])`) routed to the
+aggregate table `DM_AGG_CAT_MONTHLY` (192 rows, single table, no joins) instead
+of the 1.2M-row detail fact — confirmed via real-time
+`DUNDERMIFFLIN.INFORMATION_SCHEMA.QUERY_HISTORY`. Three prior tests that queried
+the plain `Amount` **measure column** did NOT route. Product limitation (per
+product owner, now confirmed): default-aggregation switching on measure columns
+is not yet coded, so only formula measures trigger the switch. Fires via the
+**Search Data API** (no UI needed). Re-aggregation also demonstrated (a dateless
+query re-summed the month-grain aggregate).
+
+**Tooling consequences (must implement — see [[routing-formula-measure-consequences]]):**
+1. `generate.build_aggregate_model_tml` must expose EVERY measure as a formula
+   `sum(component)` (even direct SUM), never a plain measure column — else the
+   aggregate won't route. Matches the real `DM_AGGR_PRODUCT_MONTHLY` pattern.
+2. The skill must target formula measures (plain measure columns can't benefit),
+   and/or recommend promoting measure columns to formulas.
+3. `patch_association` id should be the aggregate model GUID (name is ambiguous
+   against the equally-named backing table → `DUPLICATE_OBJECT_FOUND`).
+
+Residual: SpotQL-vs-SearchData routing (does `ts spotql generate-sql` reflect the
+switch?) still unconfirmed — secondary, affects only Step 7's verification method.
+
+## #0 (historical) — original OPEN text
 
 **Context (2026-07-12):** champ-staging (26.9.0.cl-31) does not route — a
 grain+name+bucket-matched Search Data query against a primary with an associated
