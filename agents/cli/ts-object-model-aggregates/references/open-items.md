@@ -718,3 +718,31 @@ Until then, treat a role-playing-dimension or multi-date SpotQL-path DDL as prov
 in the same way Step 7's routing verification already treats every recommendation —
 this item doesn't change that standing caveat for those cases; the core measure-by-name
 / raw-date / outer-aggregate mechanism itself is no longer provisional.
+
+## #15 — Aggregate name contained a raw space for multi-word dimensions — FIXED 2026-07-14
+
+**Found:** live testing (aggregate-aware cluster) showed `ts aggregate generate` emitting
+an aggregate table/model name with a literal space —
+`DM_CATEGORY_AGG_MONTHLY_PRODUCT CATEGORY` — for a candidate over the "Product Category"
+dimension. `_aggregate_name` (`ts_cli/commands/aggregate.py`) built the name by joining
+the root table, bucket, and raw dimension *display* names, then only `.upper()`'d the
+result — a multi-word display name's space survives uppercasing. An unquoted SQL
+identifier containing a space breaks `CREATE TABLE`/`CREATE DYNAMIC TABLE`, so this
+blocked DDL execution for any candidate grouped by a multi-word dimension.
+
+**Fix:** `_aggregate_name` now runs the fully-assembled name (and any `--agg-name`
+override) through `sanitise_name` (`ts_cli/commands/load.py` — already used for `ts
+load`'s warehouse identifier derivation, reused here rather than duplicated): uppercase,
+any run of non-`[A-Z0-9]` characters collapsed to a single underscore, leading/trailing
+underscores stripped. `"Product Category"` → `PRODUCT_CATEGORY`, giving
+`DM_CATEGORY_AGG_MONTHLY_PRODUCT_CATEGORY`. Still deterministic (same candidate → same
+name, required for the Task 16 idempotence/dedup path) and length-capped at 120. Flows
+into the DDL target, the Table TML `db_table`/`name`, and the aggregate Model name alike,
+since all three are derived from the same `name` value in `commands/aggregate.py`'s
+`generate()`.
+
+Covered by `test_aggregate_name_sanitizes_multiword_dimension_to_valid_identifier` in
+`tools/ts-cli/tests/test_agg_command.py` (asserts no space and `[A-Z0-9_]`-only output
+for a "Product Category" dimension). Not yet re-run against the live cluster that
+surfaced the bug — unit-verified only; flag as a follow-up smoke check next time the
+skill runs end-to-end against that cluster.

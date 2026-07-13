@@ -788,6 +788,25 @@ def test_generate_regenerating_same_aggregate_produces_no_duplicate(tmp_path, mo
         {"column_id": "Transaction Date", "bucket": "DAILY"}]
 
 
+def test_aggregate_name_sanitizes_multiword_dimension_to_valid_identifier():
+    """Live-testing bug: `ts aggregate generate` emitted an aggregate name with
+    a literal space — `DM_CATEGORY_AGG_MONTHLY_PRODUCT CATEGORY` — because a
+    multi-word dimension name ("Product Category") was uppercased and
+    concatenated without sanitizing the space first. An unquoted SQL
+    identifier containing a space breaks `CREATE TABLE`. The derived name
+    must contain only [A-Z0-9_] characters, with runs of anything else
+    (spaces, punctuation) collapsed to a single underscore."""
+    import re
+    from ts_cli.commands import aggregate as agg_mod
+
+    model_tml = {"model": {"model_tables": [{"name": "DM_CATEGORY"}]}}
+    cand = {"bucket": "MONTHLY", "dimensions": ["Product Category"]}
+    name = agg_mod._aggregate_name(model_tml, cand, None)
+    assert " " not in name
+    assert re.fullmatch(r"[A-Z0-9_]+", name), name
+    assert name == "DM_CATEGORY_AGG_MONTHLY_PRODUCT_CATEGORY"
+
+
 def test_generate_requires_warehouse_for_snowflake_dynamic_table(tmp_path):
     """Task 5 review carry-forward: a Snowflake dynamic table with no
     --warehouse must fail clearly rather than emit DDL missing the

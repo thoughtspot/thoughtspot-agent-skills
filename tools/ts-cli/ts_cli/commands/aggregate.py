@@ -597,9 +597,22 @@ def _read_generate_context(dir_path: Path, candidate: str, tables_dir: str) -> t
 
 
 def _aggregate_name(model_tml: dict, cand: dict, agg_name: Optional[str]) -> str:
+    """Derive the aggregate table/model base name, or sanitize a passed
+    override. A candidate's dimension names are human-readable display names
+    (e.g. "Product Category") — uppercasing alone leaves the space in place,
+    producing an unquoted SQL identifier like `..._PRODUCT CATEGORY` that
+    breaks `CREATE TABLE`. `sanitise_name` (shared with `ts load`'s warehouse
+    identifier derivation) collapses any run of non-alphanumeric characters
+    to a single underscore, so the result is deterministic (same candidate
+    always yields the same name — required for Task 16 idempotence/dedup)
+    and safe to use unquoted in DDL, the Table TML db_table/name, and the
+    aggregate Model name alike."""
+    from ts_cli.commands.load import sanitise_name
+    if agg_name:
+        return sanitise_name(agg_name)[:120]
     root = model_tml["model"]["model_tables"][0]["name"]
     grain = "_".join([cand["bucket"] or ""] + cand["dimensions"]).strip("_")
-    return agg_name or f"{root}_AGG_{grain}".upper()[:120]
+    return sanitise_name(f"{root}_AGG_{grain}")[:120]
 
 
 def _require_warehouse_for_dynamic_table(dialect: str, materialization: str,
