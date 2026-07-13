@@ -53,6 +53,9 @@ schemas/
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
   databricks-metric-view.md           — Databricks Metric View YAML schema (v0.1/v1.1)
 
+references/
+  profile-select-and-authenticate.md  — canonical profile select + verify flow for conversion skills
+
 worked-examples/tableau/
   liveboard-kpi-sparkline.md          — KPI viz with sparkline: client_state_v2 requirement, before/after, verified template (2026-06-11)
   static-set-to-column-set.md         — Tableau static set → ThoughtSpot column set: worksheet binding, EQ-list, {Null}, NE/except, formula-col anchor, live-verified (2026-06-12)

@@ -42,13 +42,76 @@ List all configured ThoughtSpot profiles. Credentials are never shown.
 
 ```bash
 ts profiles list
+ts profiles list --snowflake
+ts profiles list --tableau
+ts profiles list --databricks
+ts profiles list --json
+ts profiles list --snowflake --json
 ```
 
-**Output:**
+**Output (table):**
 
 ```
   champ-staging         token         https://champagne-master-aws.thoughtspotstaging.cloud
 ```
+
+**Output (`--json`):** JSON array with credential fields stripped.
+
+---
+
+### `ts profiles add`
+
+Add or replace a profile. Derives slug, env var name, and keychain commands.
+The credential value is NEVER passed through this command.
+
+```bash
+ts profiles add \
+  --platform thoughtspot \
+  --name "My Staging" \
+  --auth-type token \
+  --field base_url=https://my.thoughtspot.cloud \
+  --field username=admin@example.com
+```
+
+**Output:** JSON with `profile`, `slug`, `env_var`, `keychain_store_commands`, `zshenv_line`.
+
+---
+
+### `ts profiles update`
+
+Update fields on an existing profile.
+
+```bash
+ts profiles update \
+  --platform thoughtspot \
+  --name "My Staging" \
+  --field base_url=https://new.thoughtspot.cloud
+```
+
+---
+
+### `ts profiles remove`
+
+Remove a profile and report cleanup info.
+
+```bash
+ts profiles remove --platform snowflake --name "Partner AP"
+```
+
+**Output:** JSON with `removed` profile, `keychain_service`, `env_var_to_remove`.
+
+---
+
+### `ts profiles sync-env`
+
+Regenerate ~/.zshenv export lines from all configured profiles.
+
+```bash
+ts profiles sync-env
+ts profiles sync-env --platform snowflake
+```
+
+**Output:** JSON with `lines` array — each entry has `platform`, `name`, `env_var`, `line`.
 
 ---
 

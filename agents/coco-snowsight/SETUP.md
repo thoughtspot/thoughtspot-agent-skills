@@ -85,6 +85,7 @@ snow stage copy agents/shared/worked-examples/tableau/data-blend-to-model.md @SK
 snow stage copy agents/shared/worked-examples/databricks/ts-to-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
+snow stage copy agents/shared/references/profile-select-and-authenticate.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/references/ --overwrite
 ```
 
 Or use the sync script (only uploads changed files):

@@ -31,6 +31,11 @@ class TestSlugifyTableau:
 
 
 class TestLoadTableauProfiles:
+    @staticmethod
+    def _patch_tableau_path(path):
+        import ts_cli.profile_ops as _po
+        return patch.object(_po, "PROFILE_PATHS", {**_po.PROFILE_PATHS, "tableau": path})
+
     def test_load_array_format(self, tmp_path):
         profiles_file = tmp_path / "tableau-profiles.json"
         profiles_file.write_text(json.dumps([
@@ -38,14 +43,14 @@ class TestLoadTableauProfiles:
              "site_content_url": "mysite", "auth": "password",
              "username": "user@test.com", "password_env": "TAB_PW_DEV"},
         ]))
-        with patch("ts_cli.tableau.client.TABLEAU_PROFILES_PATH", profiles_file):
+        with self._patch_tableau_path(profiles_file):
             result = load_tableau_profiles()
         assert len(result) == 1
         assert result[0]["name"] == "Dev"
 
     def test_load_missing_file(self, tmp_path):
         missing = tmp_path / "nonexistent.json"
-        with patch("ts_cli.tableau.client.TABLEAU_PROFILES_PATH", missing):
+        with self._patch_tableau_path(missing):
             result = load_tableau_profiles()
         assert result == []
 

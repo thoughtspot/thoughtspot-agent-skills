@@ -27,8 +27,6 @@ from ts_cli.tableau.client import load_tableau_profiles, TABLEAU_PROFILES_PATH
 
 app = typer.Typer(help="Profile management commands.")
 
-SNOWFLAKE_PROFILES_PATH = PROFILE_PATHS["snowflake"]
-
 _CREDENTIAL_FIELDS = {
     "token_env", "password_env", "secret_key_env", "secret_env",
     "pat_secret_env", "private_key_path", "private_key_passphrase_env",

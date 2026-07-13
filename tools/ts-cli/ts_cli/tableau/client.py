@@ -35,14 +35,10 @@ def _slugify_tableau(name: str) -> str:
 def load_tableau_profiles() -> list:
     """Load Tableau profiles from ~/.claude/tableau-profiles.json.
 
-    Returns a list of profile dicts, or an empty list if the file does not exist.
+    Delegates to profile_ops.load_platform_profiles.
     """
-    if not TABLEAU_PROFILES_PATH.exists():
-        return []
-    raw = json.loads(TABLEAU_PROFILES_PATH.read_text())
-    if isinstance(raw, list):
-        return raw
-    return []
+    from ts_cli.profile_ops import load_platform_profiles
+    return load_platform_profiles("tableau")
 
 
 def _resolve_tableau_profile(profile_name: Optional[str]) -> dict:

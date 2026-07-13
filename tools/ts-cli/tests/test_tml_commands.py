@@ -285,6 +285,7 @@ class TestProfilesListSnowflake:
 
     def test_no_snowflake_flag_does_not_read_sf_profiles(self, tmp_path):
         """Without --snowflake, the command should not touch snowflake-profiles.json."""
+        import ts_cli.profile_ops as _po
         sf_path = self._make_sf_profiles_file(tmp_path)
         ts_path = tmp_path / "thoughtspot-profiles.json"
         ts_path.write_text(json.dumps([{
@@ -293,9 +294,11 @@ class TestProfilesListSnowflake:
             "username": "user@example.com",
             "token_env": "TS_TOKEN_PROD",
         }]))
+        patched = {**_po.PROFILE_PATHS, "snowflake": sf_path, "thoughtspot": ts_path}
         with self._patch_sf_path(sf_path), \
              patch("ts_cli.client.PROFILES_PATH", ts_path), \
-             patch("ts_cli.commands.profiles.PROFILES_PATH", ts_path):
+             patch("ts_cli.commands.profiles.PROFILES_PATH", ts_path), \
+             patch.object(_po, "PROFILE_PATHS", patched):
             result = runner.invoke(app, ["profiles", "list"])
         assert "SE_DEMO_WH" not in result.stdout  # Snowflake detail must not appear
         assert "prod" in result.stdout
