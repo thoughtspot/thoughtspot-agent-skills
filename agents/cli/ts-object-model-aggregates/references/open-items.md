@@ -595,3 +595,78 @@ and (c) a live-test to confirm Snowflake's automatic-refresh behavior on an MV b
 over a flat *view* (vs. a flat *table*) actually refreshes downstream when the
 underlying star tables change — not otherwise assumed here. Not scheduled; recorded so
 the `002212` guard's rationale and the considered alternative aren't lost.
+
+---
+
+## #14 — DDL path now wraps ThoughtSpot-generated SQL (Task 18) — IMPLEMENTED, live validation pending
+
+**Why:** live testing on an aggregate-aware cluster proved `sqlgen.build_select`'s
+hand-rolled join walker produces **semantically wrong SQL on role-playing / ambiguous-
+path dimensions** — a concrete case grouped revenue by the *inventory-balance* month
+instead of the *order* month, because the walker's own join-path resolution (BFS over
+`model_tables[].joins[]`) doesn't disambiguate which role-played path a query intends
+the way ThoughtSpot's full semantic-model query generation does. This is a silent
+wrong-aggregate bug, not a routing or import failure — Step 7's SQL-presence check
+would not have caught it.
+
+**Change:** `ts aggregate generate`/`profile` now build a SpotQL statement for the
+candidate's grain (`ts_cli/aggregate/spotql_aggregate.py::build_spotql`) and ask
+ThoughtSpot to compile it against the primary Model via the existing `ts spotql
+generate-sql` client path (`ts_cli/commands/spotql.py`'s `_run`) — reusing, not
+reimplementing, that HTTP call. The returned join-correct `executable_sql` (positional
+`ca_1, ca_2, …` columns, per `build_spotql`'s SELECT order, plus a trailing `LIMIT`) is
+wrapped as aggregate-table DDL (`wrap_as_ddl`, reusing `sqlgen.build_ddl` for the
+per-dialect materialization shape and the Snowflake mview-can't-join guard) or, for
+`profile`, as `SELECT COUNT(*) FROM (<ts_sql_no_limit>) _agg`. `sqlgen.build_select`
+remains as an explicit fallback (`--no-spotql`, or automatically when SpotQL generation
+is unavailable/errors) — a stderr note flags that a fallback's result may be wrong on
+role-playing/ambiguous-path dimensions, i.e. the exact bug this pivot fixes. Covered by
+unit tests in `tools/ts-cli/tests/test_agg_spotql.py` (SpotQL string shape for
+SUM/AVG/multi-date grains + component dedupe; `wrap_as_ddl` LIMIT-strip, positional
+alias mapping, dialect shapes, and the mview guard) and
+`tools/ts-cli/tests/test_agg_command.py` (SpotQL-success and both fallback paths for
+`generate`/`profile`, stubbed via a monkeypatched `ts_cli.commands.spotql._run` — no
+live connection in these tests).
+
+**Residual risk flagged, not yet resolved by unit tests:**
+1. **Date-bucket function names are unverified.** SpotQL explicitly forbids
+   `DATE_TRUNC`/`TRUNC(date, part)` (see
+   `agents/cli/ts-object-model-spotql-query/references/spotql-rules.md` and
+   `udf-reference.md`) — its documented UDFs only extract integer date parts or return
+   TODAY-anchored period boundaries, neither of which can bucket an arbitrary historical
+   date to a period start. `build_spotql` instead calls `start_of_month`/`start_of_quarter`/
+   `start_of_week`/`start_of_day`/`start_of_year`/`start_of_hour` on the date column — these
+   mirror the confirmed ThoughtSpot **formula-language** functions of the same name
+   (`start_of_month ( [date] )` → `DATE_TRUNC('MONTH', date)`, per
+   `agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md`) — the
+   best-evidenced choice available without a live cluster to probe, but genuinely
+   unverified as valid SpotQL syntax.
+2. **Measure-component double-aggregation.** Component expressions apply a real
+   aggregate (`SUM`/`COUNT`/…) directly over `comp["source_column"]` — the same base the
+   model's own formula decomposes to (`measures.classify_measure`) — which is correct as
+   long as `source_column` never itself names an aggregate-formula column. That
+   classification guarantee lives in `measures.py`, out of this task's scope to change;
+   if a future measure decomposition ever violated it, this would double-aggregate
+   (`NESTED_AGGREGATE_NOT_SUPPORTED`).
+3. **Component dedupe vs. the aggregate Table's declared columns.** `build_spotql`
+   dedupes identical `(source_column, func)` components across different measure names
+   sharing the same underlying computation (collapsing to one SELECT item + one output
+   alias), but `generate.py`'s `build_aggregate_table_spec`/`build_aggregate_model_tml`
+   (`_component_columns`, untouched by this task) declare one physical column per
+   measure's own alias, **not** deduped. In the (currently theoretical — no known
+   real-model case constructs it) event that two candidate measures decompose to the
+   identical `(source_column, func)`, the wrapped DDL would have fewer columns than the
+   Table TML declares. Not fixed here (measures.py/generate.py logic is out of scope);
+   flag if a live model ever exhibits this shape.
+
+**Live-test script (why this stays IMPLEMENTED, not VERIFIED):** on the aggregate-aware
+cluster, run `ts aggregate generate` for a candidate whose primary Model has a genuine
+role-playing dimension (the live-proven inventory-balance-vs-order-date case), confirm
+(a) `ts spotql generate-sql` accepts `build_spotql`'s output (including a bucketed date
+grain — resolves risk #1 above), (b) the wrapped `ddl.sql` executes and produces the
+grain-correct row counts a hand-checked query against the primary would produce, and (c)
+a measure whose plan decomposes through a non-trivial formula chain resolves without
+double-aggregating (resolves risk #2). Until then, treat every SpotQL-path DDL from this
+skill as provisional in the same way Step 7's routing verification already treats every
+recommendation — this item doesn't change that standing caveat, it narrows *which*
+mechanism (join resolution) it was protecting against.

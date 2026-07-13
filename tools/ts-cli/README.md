@@ -1502,11 +1502,17 @@ ts aggregate profile --dir /tmp/agg --tables-dir /tmp/agg/tables \
 | `--dialect` | `snowflake` | SQL dialect for generated statements |
 | `--warehouse` | profile's `default_warehouse` | Connected mode: Snowflake warehouse |
 | `--role` | profile's `default_role` | Connected mode: Snowflake role |
+| `--model-guid` | — | Primary Model GUID — enables SpotQL-based profiling SQL per candidate (ThoughtSpot resolves joins correctly on role-playing/ambiguous-path dimensions; the built-in join walker can be wrong there). Omit to always use the built-in walker (pre-Task-18 default; no ThoughtSpot connection needed). |
+| `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile — used with `--model-guid` to call `ts spotql generate-sql`. Ignored if `--model-guid` is omitted. |
+| `--no-spotql` | `false` | Even with `--model-guid`, use the built-in join walker directly |
 
 The three modes are mutually exclusive: `--results` ingests, `--emit-sql` writes a
 script (no connection), otherwise `--snowflake-profile` connects and profiles
-directly. Candidates whose SELECT can't be built deterministically are skipped
-(reported, not fatal) — the skill falls back to manual SQL for those.
+directly. Each candidate's profiling SQL prefers SpotQL when `--model-guid` is
+given (falling back to the built-in join walker on any failure); the base-row
+count is always a plain single-table count either way. Candidates whose SELECT
+can't be built deterministically by either path are skipped (reported, not
+fatal) — the skill falls back to manual SQL for those.
 
 **Output:** writes `agg_rows`/`base_rows` back into `<dir>/candidates.json`. Stdout
 JSON varies by mode (`emitted`/`skipped`, `ingested`, or `base_rows`/`profiled`/`skipped`).
@@ -1541,6 +1547,15 @@ ts aggregate history --dir /tmp/agg --snowflake-profile my-sf \
 Emit the DDL and TML for one approved candidate — never imports; the calling skill
 gates each import separately.
 
+**DDL SELECT source (default: SpotQL):** builds a SpotQL statement for the
+candidate's grain and asks ThoughtSpot to compile it against the primary Model
+(`--model-guid`/`--profile`) — this resolves joins against the full semantic
+model, so it's correct on role-playing/ambiguous-path dimensions where the
+built-in join walker (`sqlgen.build_select`) can silently be wrong. Falls back
+to that walker automatically if SpotQL generation is unavailable or errors, or
+always with `--no-spotql`; a fallback prints a stderr note that the result may
+be wrong on such dimensions.
+
 ```bash
 ts aggregate generate --dir /tmp/agg --candidate cand_3 \
   --model-guid abc-123 --tables-dir /tmp/agg/tables \
@@ -1566,6 +1581,7 @@ ts aggregate generate --dir /tmp/agg --candidate cand_3 \
 | `--agg-name` | derived from root table + grain | Override the aggregate table/model base name |
 | `--out-dir` | `<dir>/<candidate>` | Output directory |
 | `--agg-model-guid` | — | Aggregate Model's GUID, once known (import `agg_model.tml.yaml` first, then pass its returned GUID here). Used as the `aggregated_models` association `id` — the aggregate Model and its backing Table share a name, so a name-based id is ambiguous (`DUPLICATE_OBJECT_FOUND` on a live cluster). Omit on the first, pre-import pass; a stderr warning flags the name-based fallback. |
+| `--no-spotql` | `false` | Skip SpotQL SQL generation and use the built-in join walker directly — see the DDL SELECT source note above |
 
 **Output:** writes `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
 `agg_model.tml.yaml`, and `primary_patched.tml.yaml` (the primary Model TML with the

@@ -291,15 +291,22 @@ Enter C / M / S:
 
 ```bash
 source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
-  --snowflake-profile "{sf_profile_name}" --top-k 10
+  --snowflake-profile "{sf_profile_name}" --top-k 10 \
+  --model-guid "{model_guid}" --profile "{profile_name}"
 ```
 
 **M — manual mode:**
 
 ```bash
 source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
-  --emit-sql "{workdir}/profile.sql"
+  --emit-sql "{workdir}/profile.sql" \
+  --model-guid "{model_guid}" --profile "{profile_name}"
 ```
+
+`--model-guid`/`--profile` (both already established in Step 3) let each candidate's
+profiling SQL prefer SpotQL — the same ThoughtSpot-generated-SQL path Step 6 uses for
+DDL — so the row counts reflect the correct join path on role-playing/ambiguous-path
+dimensions, falling back to the built-in walker automatically on any failure.
 
 Tell the user: *"Run `{workdir}/profile.sql` against your warehouse (any dialect — the
 script is dialect-specific SQL, not a `ts` command). Each numbered statement returns
@@ -488,6 +495,17 @@ offers that combination, so this only fires if the flags are overridden by hand.
 Writes five files to `{workdir}/{candidate_id}/`: `ddl.sql`, `table_spec.json`,
 `table.tml.yaml`, `agg_model.tml.yaml`, `primary_patched.tml.yaml`. Stdout:
 `{"candidate", "aggregate_name", "files"}`.
+
+**DDL SELECT source:** by default `ts aggregate generate` builds SpotQL for the
+candidate's grain and asks ThoughtSpot (via `--model-guid`/`--profile`, already
+passed above) to compile it — this resolves joins against the full semantic
+model, avoiding wrong joins the built-in walker can produce on role-playing /
+ambiguous-path dimensions (e.g. grouping by the wrong role-played date column).
+It falls back to the built-in walker automatically if SpotQL generation is
+unavailable or errors, printing a stderr note when it does; pass `--no-spotql`
+to force that walker directly. If `ddl.sql`'s SELECT looks wrong for a Model
+with role-playing dimensions, check stderr for a fallback note before assuming
+the DDL itself is broken.
 
 **This first `generate` call has no `--agg-model-guid` yet** (the aggregate Model
 doesn't exist in ThoughtSpot until 6f imports it) — `primary_patched.tml.yaml` from

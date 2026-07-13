@@ -304,25 +304,120 @@ def _ingest_profile_results(payload: dict, results_path: str) -> dict:
     return {"ingested": len(r["candidates"])}
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Task 18: SpotQL-first SQL generation (DDL + profiling), sqlgen as fallback.
+#
+# ThoughtSpot's own SQL generation resolves joins against the FULL semantic
+# model, so it gets role-playing / ambiguous-path dimensions right where
+# sqlgen.build_select's hand-rolled join walker can silently get them wrong
+# (live-proven: it grouped revenue by inventory-balance month instead of
+# order month). Both `generate` and `profile` therefore try
+# build_spotql -> `ts spotql generate-sql` -> wrap first, and fall back to
+# sqlgen.build_select only when SpotQL generation is unavailable or errors
+# (network/profile issue, --no-spotql, or a rejected statement) — never a
+# hard failure, since the SQL-gen endpoint being down must not block the
+# whole advisor workflow. A fallback always emits a stderr note that
+# role-playing/ambiguous-path dimensions may be wrong on that candidate.
+# ──────────────────────────────────────────────────────────────────────────────
+
+_SPOTQL_FALLBACK_NOTE = (
+    "falling back to the built-in join walker. Role-playing/ambiguous-path "
+    "dimensions may be wrong; verify manually (see the ts-object-model-"
+    "aggregates skill's open-items.md)."
+)
+
+
+def _spotql_generate_sql(spotql: str, model_guid: str, ts_profile: Optional[str]) -> dict:
+    """Call the existing `ts spotql generate-sql` client path — a local
+    import (not a top-of-file one) so tests can monkeypatch
+    `ts_cli.commands.spotql._run` directly, the same pattern this module
+    already uses to reuse `_collect_dependents`/`_export_tml` from sibling
+    command modules. Never reimplement the HTTP call here."""
+    from ts_cli.commands.spotql import _GENERATE_PATH, _run
+    return _run(_GENERATE_PATH, spotql, model_guid, ts_profile)
+
+
+def _spotql_ddl_or_none(model_tml: dict, cand: dict, plans: dict, model_guid: str,
+                        ts_profile: Optional[str], target: str, dialect: str,
+                        materialization: str, warehouse: Optional[str]) -> Optional[str]:
+    """Try the SpotQL-based DDL path for one candidate. Returns None on ANY
+    failure (unavailable model_guid, a non-SUCCESS generate-sql status, or an
+    exception/SystemExit from the client) so the caller falls back to
+    sqlgen.build_select — SpotQL is the preferred path here, not a hard
+    dependency, so this never raises."""
+    if not model_guid:
+        return None
+    from ts_cli.aggregate.spotql_aggregate import build_spotql, wrap_as_ddl
+    try:
+        spotql, aliases = build_spotql(cand, plans, model_tml["model"]["name"])
+        result = _spotql_generate_sql(spotql, model_guid, ts_profile)
+        if result["status"] != "SUCCESS" or not result["executable_sql"]:
+            _err(f"SpotQL generate-sql did not return SUCCESS for candidate "
+                 f"{cand.get('id')} (status={result['status']}, "
+                 f"errors={result['errors']}) — {_SPOTQL_FALLBACK_NOTE}")
+            return None
+        return wrap_as_ddl(result["executable_sql"], aliases, target, dialect,
+                           materialization, warehouse=warehouse)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — best-effort path
+        _err(f"SpotQL DDL generation raised {exc!r} for candidate "
+             f"{cand.get('id')} — {_SPOTQL_FALLBACK_NOTE}")
+        return None
+
+
+def _spotql_profile_sql_or_none(model_tml: dict, cand: dict, plans: dict, model_guid: str,
+                                ts_profile: Optional[str]) -> Optional[str]:
+    """Same SpotQL-first attempt as `_spotql_ddl_or_none`, but for profiling:
+    wraps the returned executable_sql (LIMIT stripped) in
+    `SELECT COUNT(*) FROM (...) _agg` instead of DDL. Returns None on any
+    failure so the caller falls back to sqlgen's build_select/build_profile_sql."""
+    if not model_guid:
+        return None
+    from ts_cli.aggregate.spotql_aggregate import _strip_trailing_limit, build_spotql
+    try:
+        spotql, _aliases = build_spotql(cand, plans, model_tml["model"]["name"])
+        result = _spotql_generate_sql(spotql, model_guid, ts_profile)
+        if result["status"] != "SUCCESS" or not result["executable_sql"]:
+            _err(f"SpotQL generate-sql did not return SUCCESS for candidate "
+                 f"{cand.get('id')} (status={result['status']}) — "
+                 f"{_SPOTQL_FALLBACK_NOTE}")
+            return None
+        inner = _strip_trailing_limit(result["executable_sql"])
+        return f"SELECT COUNT(*) AS agg_rows FROM (\n{inner}\n) _agg"
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — best-effort path
+        _err(f"SpotQL profiling SQL generation raised {exc!r} for candidate "
+             f"{cand.get('id')} — {_SPOTQL_FALLBACK_NOTE}")
+        return None
+
+
 def _build_profile_statements(payload: dict, model_tml: dict, table_tmls: dict,
-                              plans: dict, top_k: int, dialect: str) -> tuple:
+                              plans: dict, top_k: int, dialect: str,
+                              model_guid: Optional[str] = None,
+                              ts_profile: Optional[str] = None,
+                              no_spotql: bool = False) -> tuple:
     """Base-count + per-candidate profiling SQL for the top-K candidates by
-    coverage. Candidates whose SELECT can't be built deterministically
-    (`UnsupportedModelError`) are skipped, not fatal — the skill advises
-    manual SQL for those instead."""
+    coverage. Each candidate tries the SpotQL path first (only when
+    `model_guid` is supplied and `no_spotql` is False — omitting `--model-guid`
+    is the pre-Task-18 default and must never attempt a ThoughtSpot call),
+    falling back to sqlgen.build_select. Candidates whose sqlgen SELECT can't
+    be built deterministically either (`UnsupportedModelError`) are skipped,
+    not fatal — the skill advises manual SQL for those instead."""
     from ts_cli.aggregate.sqlgen import (UnsupportedModelError, build_base_count_sql,
                                          build_profile_sql, build_select)
     ranked = sorted(payload["candidates"], key=lambda c: -len(c["covered"]))[:top_k]
     statements = [("__base__", build_base_count_sql(model_tml, table_tmls, dialect))]
     skipped = []
     for c in ranked:
-        try:
-            statements.append(
-                (c["id"], build_profile_sql(
-                    build_select(model_tml, table_tmls, c, plans, dialect))))
-        except UnsupportedModelError as exc:
-            skipped.append({"id": c["id"], "reason": str(exc)})
-            _err(f"skipping {c['id']}: {exc}")
+        sql = None
+        if model_guid and not no_spotql:
+            sql = _spotql_profile_sql_or_none(model_tml, c, plans, model_guid, ts_profile)
+        if sql is None:
+            try:
+                sql = build_profile_sql(build_select(model_tml, table_tmls, c, plans, dialect))
+            except UnsupportedModelError as exc:
+                skipped.append({"id": c["id"], "reason": str(exc)})
+                _err(f"skipping {c['id']}: {exc}")
+                continue
+        statements.append((c["id"], sql))
     return statements, skipped
 
 
@@ -359,6 +454,20 @@ def profile(
         None, help="Connected mode: Snowflake warehouse (default: profile's default_warehouse)"),
     role: Optional[str] = typer.Option(
         None, help="Connected mode: Snowflake role (default: profile's default_role)"),
+    model_guid: Optional[str] = typer.Option(
+        None, "--model-guid",
+        help="Primary Model GUID — enables SpotQL-based profiling SQL (Task 18): "
+             "ThoughtSpot's own SQL generation resolves joins correctly on "
+             "role-playing/ambiguous-path dimensions, where the built-in join "
+             "walker can be wrong. Omit to always use the built-in walker "
+             "(pre-Task-18 behaviour; no ThoughtSpot connection needed)."),
+    ts_profile: Optional[str] = typer.Option(
+        None, "--profile", "-p", envvar="TS_PROFILE",
+        help="ThoughtSpot profile — used with --model-guid to call `ts spotql "
+             "generate-sql`. Ignored if --model-guid is omitted."),
+    no_spotql: bool = typer.Option(
+        False, "--no-spotql",
+        help="Even with --model-guid, use the built-in join walker directly."),
 ) -> None:
     """Measure base + per-candidate row counts (connected or manual mode).
 
@@ -366,6 +475,11 @@ def profile(
     run's output; `--emit-sql` writes a numbered SQL script for manual
     execution; otherwise `--snowflake-profile` connects and profiles directly.
     Writes `agg_rows`/`base_rows` back into `<dir>/candidates.json`.
+
+    Per-candidate profiling SQL prefers SpotQL (see `--model-guid` above),
+    falling back to the built-in join walker when unavailable or `--no-spotql`
+    is set; the base-row count is always a plain single-table count
+    (sqlgen.build_base_count_sql), unaffected by this choice.
     """
     d = Path(dir)
     payload, model_tml, table_tmls, plans = _read_candidates_context(d, tables_dir)
@@ -377,7 +491,8 @@ def profile(
         return
 
     statements, skipped = _build_profile_statements(
-        payload, model_tml, table_tmls, plans, top_k, dialect)
+        payload, model_tml, table_tmls, plans, top_k, dialect,
+        model_guid=model_guid, ts_profile=ts_profile, no_spotql=no_spotql)
 
     if emit_sql:
         _emit_profile_script(emit_sql, statements)
@@ -494,13 +609,28 @@ def _require_warehouse_for_dynamic_table(dialect: str, materialization: str,
         )
 
 
-def _write_ddl(outdir: Path, select_sql: str, db: str, schema: str, name: str,
-              dialect: str, materialization: str, warehouse: Optional[str]) -> None:
-    from ts_cli.aggregate.sqlgen import build_ddl
-    _require_warehouse_for_dynamic_table(dialect, materialization, warehouse)
-    (outdir / "ddl.sql").write_text(build_ddl(
-        select_sql, f"{db}.{schema}.{name}", dialect, materialization,
-        warehouse=warehouse) + ";\n")
+def _fallback_ddl_or_exit(model_tml: dict, table_tmls: dict, cand: dict, plans: dict,
+                          dialect: str, target: str, materialization: str,
+                          warehouse: Optional[str], candidate_id: str) -> str:
+    """The pre-Task-18 sqlgen.build_select-based DDL path — used when SpotQL
+    generation is unavailable/erroring or --no-spotql was passed. Its
+    hand-rolled join walker can be wrong on role-playing/ambiguous-path
+    dimensions (the bug Task 18's SpotQL-first default path fixes); this
+    remains only as the documented fallback. Exits cleanly (never a bare
+    traceback) on either an unresolvable SELECT or a rejected DDL shape
+    (e.g. the Snowflake materialized-view join guard)."""
+    from ts_cli.aggregate.sqlgen import UnsupportedModelError, build_ddl, build_select
+    try:
+        select_sql = build_select(model_tml, table_tmls, cand, plans, dialect)
+    except UnsupportedModelError as exc:
+        _err(f"cannot generate SQL for {candidate_id}: {exc}")
+        _err("This candidate needs manual SQL authoring — see `ts aggregate profile --emit-sql`.")
+        raise typer.Exit(code=1)
+    try:
+        return build_ddl(select_sql, target, dialect, materialization, warehouse=warehouse)
+    except UnsupportedModelError as exc:
+        _err(f"cannot generate DDL for {candidate_id}: {exc}")
+        raise typer.Exit(code=1)
 
 
 def _write_table_artifacts(outdir: Path, cand: dict, plans: dict, model_tml: dict,
@@ -623,34 +753,48 @@ def generate(
              "equally-named backing Table (DUPLICATE_OBJECT_FOUND on a live "
              "cluster). Omit on the first, pre-import pass; a stderr warning "
              "flags the name-based fallback."),
+    no_spotql: bool = typer.Option(
+        False, "--no-spotql",
+        help="Skip ThoughtSpot SpotQL SQL generation (Task 18's default path) "
+             "and use the built-in join walker directly. That walker can be "
+             "wrong on role-playing/ambiguous-path dimensions — use only when "
+             "SpotQL generate-sql is known unavailable for this Model/profile."),
 ) -> None:
     """Emit DDL + Table TML + aggregate Model TML + patched primary TML.
 
     Never imports — writes `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
     `agg_model.tml.yaml`, `primary_patched.tml.yaml` to `<out-dir>` (default
     `<dir>/<candidate>`). The skill gates each import separately.
-    """
-    from ts_cli.aggregate.sqlgen import UnsupportedModelError, build_select
 
+    DDL SELECT source (Task 18): by default, builds a SpotQL statement for
+    the candidate's grain and asks ThoughtSpot to compile it against the
+    primary Model (`--model-guid`/`--profile`, reusing `ts spotql
+    generate-sql`'s client path) — ThoughtSpot resolves joins against the
+    full semantic model, so this is correct on role-playing/ambiguous-path
+    dimensions where the built-in join walker (sqlgen.build_select) can be
+    wrong. Falls back to that walker automatically if SpotQL generation is
+    unavailable or errors, or always with `--no-spotql`; a fallback always
+    prints a stderr note that the result may be wrong on such dimensions.
+    """
     d = Path(dir)
     outdir = Path(out_dir or (d / candidate))
     outdir.mkdir(parents=True, exist_ok=True)
 
     cand, model_tml, table_tmls, plans = _read_generate_context(d, candidate, tables_dir)
     name = _aggregate_name(model_tml, cand, agg_name)
+    target = f"{db}.{schema}.{name}"
+    # Applies regardless of DDL source (SpotQL-wrapped or sqlgen fallback) —
+    # neither wrap_as_ddl nor sqlgen.build_ddl enforces this on its own.
+    _require_warehouse_for_dynamic_table(dialect, materialization, warehouse)
 
-    try:
-        select_sql = build_select(model_tml, table_tmls, cand, plans, dialect)
-    except UnsupportedModelError as exc:
-        _err(f"cannot generate SQL for {candidate}: {exc}")
-        _err("This candidate needs manual SQL authoring — see `ts aggregate profile --emit-sql`.")
-        raise typer.Exit(code=1)
-
-    try:
-        _write_ddl(outdir, select_sql, db, schema, name, dialect, materialization, warehouse)
-    except UnsupportedModelError as exc:
-        _err(f"cannot generate DDL for {candidate}: {exc}")
-        raise typer.Exit(code=1)
+    ddl_text = None
+    if not no_spotql:
+        ddl_text = _spotql_ddl_or_none(model_tml, cand, plans, model_guid, profile,
+                                       target, dialect, materialization, warehouse)
+    if ddl_text is None:
+        ddl_text = _fallback_ddl_or_exit(model_tml, table_tmls, cand, plans, dialect,
+                                         target, materialization, warehouse, candidate)
+    (outdir / "ddl.sql").write_text(ddl_text + ";\n")
     _write_table_artifacts(outdir, cand, plans, model_tml, db, schema, name, connection_name)
     model_name = _write_model_artifact(outdir, cand, plans, model_tml, name, connection_name)
     _patch_and_write_primary(outdir, model_guid, profile, model_name, cand, agg_model_guid)

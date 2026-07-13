@@ -520,7 +520,8 @@ def test_generate_writes_all_artifacts_and_never_imports(tmp_path, monkeypatch):
                                  "--candidate", "cand_1", "--model-guid", "model-guid",
                                  "--tables-dir", str(tdir), "--db", "SALESDB",
                                  "--schema", "PUBLIC", "--connection-name", "SF Prod",
-                                 "--warehouse", "WH", "--agg-model-guid", "agg-guid-1"])
+                                 "--warehouse", "WH", "--agg-model-guid", "agg-guid-1",
+                                 "--no-spotql"])
     assert result.exit_code == 0, result.output
     out = json.loads(result.stdout)
     outdir = tmp_path / "cand_1"
@@ -587,7 +588,7 @@ def test_generate_falls_back_to_name_id_with_warning_when_no_agg_model_guid(
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
                                           "--schema", "PUBLIC", "--connection-name", "SF Prod",
-                                          "--warehouse", "WH"])
+                                          "--warehouse", "WH", "--no-spotql"])
     assert result.exit_code == 0, result.output
     assert "--agg-model-guid" in result.stderr
     assert "ambiguous" in result.stderr or "collide" in result.stderr
@@ -666,7 +667,7 @@ def test_generate_idempotent_multi_date_preserves_existing_and_new(tmp_path, mon
             "--candidate", "cand_1", "--model-guid", "model-guid",
             "--tables-dir", str(tdir), "--db", "SALESDB",
             "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH",
-            "--agg-model-guid", "b-guid-1"]
+            "--agg-model-guid", "b-guid-1", "--no-spotql"]
 
     result1 = runner.invoke(app, args)
     assert result1.exit_code == 0, result1.output
@@ -760,7 +761,7 @@ def test_generate_regenerating_same_aggregate_produces_no_duplicate(tmp_path, mo
             "--candidate", "cand_1", "--model-guid", "model-guid",
             "--tables-dir", str(tdir), "--db", "SALESDB",
             "--schema", "PUBLIC", "--connection-name", "SF Prod", "--warehouse", "WH",
-            "--agg-model-guid", "stable-guid-1"]
+            "--agg-model-guid", "stable-guid-1", "--no-spotql"]
 
     result1 = runner.invoke(app, args)
     assert result1.exit_code == 0, result1.output
@@ -812,7 +813,8 @@ def test_generate_requires_warehouse_for_snowflake_dynamic_table(tmp_path):
     result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
-                                          "--schema", "PUBLIC", "--connection-name", "SF Prod"])
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--no-spotql"])
     assert result.exit_code != 0
     assert "--warehouse is required" in str(result.exception)
 
@@ -842,7 +844,7 @@ def test_generate_reports_unsupported_candidate_instead_of_crashing(tmp_path):
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
                                           "--schema", "PUBLIC", "--connection-name", "SF Prod",
-                                          "--warehouse", "WH"])
+                                          "--warehouse", "WH", "--no-spotql"])
     assert result.exit_code == 1
     assert "cannot generate SQL" in result.stderr
 
@@ -873,7 +875,244 @@ def test_generate_rejects_snowflake_materialized_view_cleanly(tmp_path):
                                           "--candidate", "cand_1", "--model-guid", "model-guid",
                                           "--tables-dir", str(tdir), "--db", "SALESDB",
                                           "--schema", "PUBLIC", "--connection-name", "SF Prod",
-                                          "--dialect", "snowflake", "--materialization", "mview"])
+                                          "--dialect", "snowflake", "--materialization", "mview",
+                                          "--no-spotql"])
     assert result.exit_code == 1
     assert "cannot generate DDL" in result.stderr
     assert "002212" in result.stderr
+
+
+# --- Task 18: SpotQL-first DDL generation, sqlgen as fallback ---------------
+
+_SPOTQL_MODEL = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                           "columns": [
+    {"name": "Category", "column_id": "FACT::CATEGORY",
+     "properties": {"column_type": "ATTRIBUTE"}},
+    {"name": "Sales", "column_id": "FACT::AMOUNT",
+     "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+_SPOTQL_CAND = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+               "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+               "measure_columns": ["Sales"]}
+# Positional ca_N matches build_spotql's output_aliases for _SPOTQL_CAND:
+# ["Category", "sales_sum"].
+_SPOTQL_TS_SQL = (
+    'SELECT "ta_1"."CATEGORY_NAME" AS "ca_1", SUM("ta_1"."AMOUNT") AS "ca_2" '
+    'FROM "SALESDB"."PUBLIC"."FACT_SALES" "ta_1" GROUP BY "ca_1" LIMIT 100000'
+)
+
+
+def _write_spotql_fixture(tmp_path):
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(_SPOTQL_MODEL))
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [_SPOTQL_CAND], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+    return tdir
+
+
+def _patch_primary_export(monkeypatch):
+    """Fake the primary Model export (`_patch_and_write_primary`'s
+    `_export_tml`), independent of the SpotQL `_run` monkeypatch below —
+    `generate` always re-exports the primary regardless of which DDL path
+    was used."""
+    import ts_cli.client as client_mod
+
+    primary_edoc = yaml.safe_dump({"model": {"name": "Sales Model"}})
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, profile_name):
+            pass
+
+        def post(self, path, json=None):
+            assert "import" not in path
+            return FakeResponse([{"edoc": primary_edoc}])
+
+    monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
+    monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
+
+
+def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatch):
+    """Default behaviour (no --no-spotql): `generate` builds SpotQL for the
+    candidate's grain, calls the existing `ts spotql generate-sql` client
+    path (monkeypatched here, never a real network call), and wraps the
+    returned join-correct `executable_sql` as DDL — never touching
+    sqlgen.build_select's hand-rolled join walker."""
+    tdir = _write_spotql_fixture(tmp_path)
+    _patch_primary_export(monkeypatch)
+
+    calls = []
+
+    def fake_run(path, spotql, model, profile):
+        calls.append((path, spotql, model, profile))
+        return {"status": "SUCCESS", "executable_sql": _SPOTQL_TS_SQL,
+                "errors": [], "columns": [], "rows": []}
+
+    monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
+
+    result = runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                 "--candidate", "cand_1", "--model-guid", "model-guid",
+                                 "--tables-dir", str(tdir), "--db", "SALESDB",
+                                 "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                 "--warehouse", "WH", "--agg-model-guid", "agg-guid-1",
+                                 "--profile", "my-ts-profile"])
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert calls[0][2] == "model-guid"
+    assert calls[0][3] == "my-ts-profile"
+
+    ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
+    assert "LIMIT" not in ddl
+    assert 'ca_1 AS "Category"' in ddl
+    assert 'ca_2 AS "sales_sum"' in ddl
+    assert ddl.startswith("CREATE OR REPLACE DYNAMIC TABLE")
+    assert "WAREHOUSE = WH" in ddl
+    assert 'FROM (\n' in ddl and ') "src"' in ddl
+    # Never routed through the hand-rolled join walker's physical resolution.
+    assert "FACT_SALES" not in ddl or '"ta_1"' in ddl  # only via the wrapped ts_sql
+
+
+def test_generate_falls_back_to_sqlgen_when_spotql_status_not_success(tmp_path, monkeypatch):
+    """SpotQL generate-sql returning a non-SUCCESS status (e.g. a rejected
+    statement) must fall back to sqlgen.build_select, with a stderr note that
+    role-playing/ambiguous-path dimensions may be wrong on that fallback."""
+    tdir = _write_spotql_fixture(tmp_path)
+    _patch_primary_export(monkeypatch)
+
+    def fake_run(path, spotql, model, profile):
+        return {"status": "COLUMN_NOT_FOUND", "executable_sql": "",
+                "errors": [{"code": "COLUMN_NOT_FOUND", "message": "nope"}],
+                "columns": [], "rows": []}
+
+    monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
+
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--warehouse", "WH", "--agg-model-guid", "agg-guid-1"])
+    assert result.exit_code == 0, result.output
+    assert "falling back" in result.stderr.lower()
+    assert "role-playing" in result.stderr.lower()
+
+    ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
+    # sqlgen.build_select's physical-column-resolution shape, not the SpotQL wrap.
+    assert 'SUM("FACT"."AMOUNT") AS "sales_sum"' in ddl
+    assert '"src"' not in ddl
+
+
+def test_generate_falls_back_to_sqlgen_when_spotql_run_raises(tmp_path, monkeypatch):
+    """An exception from the SpotQL client path (e.g. no ThoughtSpot profile
+    configured, network error) must not crash `generate` — it falls back to
+    sqlgen.build_select just like a rejected statement."""
+    tdir = _write_spotql_fixture(tmp_path)
+    _patch_primary_export(monkeypatch)
+
+    def fake_run(path, spotql, model, profile):
+        raise SystemExit("no profile configured")
+
+    monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
+
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--warehouse", "WH", "--agg-model-guid", "agg-guid-1"])
+    assert result.exit_code == 0, result.output
+    assert "falling back" in result.stderr.lower()
+    ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
+    assert 'SUM("FACT"."AMOUNT") AS "sales_sum"' in ddl
+
+
+def test_generate_no_spotql_flag_never_calls_spotql_run(tmp_path, monkeypatch):
+    """--no-spotql skips the SpotQL attempt entirely — the built-in join
+    walker is used directly, matching pre-Task-18 behaviour."""
+    tdir = _write_spotql_fixture(tmp_path)
+    _patch_primary_export(monkeypatch)
+
+    def fake_run(path, spotql, model, profile):
+        raise AssertionError("SpotQL must not be attempted with --no-spotql")
+
+    monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
+
+    result = runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                 "--candidate", "cand_1", "--model-guid", "model-guid",
+                                 "--tables-dir", str(tdir), "--db", "SALESDB",
+                                 "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                 "--warehouse", "WH", "--agg-model-guid", "agg-guid-1",
+                                 "--no-spotql"])
+    assert result.exit_code == 0, result.output
+    ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
+    assert 'SUM("FACT"."AMOUNT") AS "sales_sum"' in ddl
+
+
+def test_profile_spotql_path_used_when_model_guid_given(tmp_path, monkeypatch):
+    """`ts aggregate profile --model-guid ... --profile ...` builds SpotQL per
+    candidate and wraps the returned executable_sql as
+    `SELECT COUNT(*) FROM (<ts_sql_no_limit>) _agg` for the compression count."""
+    tdir = _write_spotql_fixture(tmp_path)
+
+    def fake_run(path, spotql, model, profile):
+        return {"status": "SUCCESS", "executable_sql": _SPOTQL_TS_SQL,
+                "errors": [], "columns": [], "rows": []}
+
+    monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
+
+    script = tmp_path / "profile.sql"
+    result = runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                 "--tables-dir", str(tdir), "--emit-sql", str(script),
+                                 "--model-guid", "model-guid", "--profile", "my-ts-profile"])
+    assert result.exit_code == 0, result.output
+    text = script.read_text()
+    assert "-- __base__" in text and "-- cand_1" in text
+    assert 'SUM("ta_1"."AMOUNT") AS "ca_2"' in text
+    assert "LIMIT" not in text.split("-- cand_1", 1)[1]
+
+
+def test_profile_spotql_falls_back_to_sqlgen_on_failure(tmp_path, monkeypatch):
+    tdir = _write_spotql_fixture(tmp_path)
+
+    def fake_run(path, spotql, model, profile):
+        return {"status": "QUERY_GEN_ERROR", "executable_sql": "", "errors": [],
+                "columns": [], "rows": []}
+
+    monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
+
+    script = tmp_path / "profile.sql"
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                          "--tables-dir", str(tdir), "--emit-sql", str(script),
+                                          "--model-guid", "model-guid"])
+    assert result.exit_code == 0, result.output
+    assert "falling back" in result.stderr.lower()
+    text = script.read_text()
+    assert "GROUP BY" in text.split("-- cand_1", 1)[1]
+
+
+def test_profile_without_model_guid_never_calls_spotql(tmp_path, monkeypatch):
+    """Backward compatibility: omitting --model-guid (every pre-Task-18 caller)
+    must never attempt the SpotQL path at all."""
+    tdir = _write_spotql_fixture(tmp_path)
+
+    def fake_run(path, spotql, model, profile):
+        raise AssertionError("SpotQL must not be attempted without --model-guid")
+
+    monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
+
+    script = tmp_path / "profile.sql"
+    result = runner.invoke(app, ["aggregate", "profile", "--dir", str(tmp_path),
+                                 "--tables-dir", str(tdir), "--emit-sql", str(script)])
+    assert result.exit_code == 0, result.output
+    assert "GROUP BY" in script.read_text()

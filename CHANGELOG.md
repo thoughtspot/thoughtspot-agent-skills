@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-14
+- feat: pivot `ts aggregate generate`/`profile` DDL and profiling SQL to wrap ThoughtSpot-generated SQL (`ts spotql generate-sql`) instead of the hand-rolled join walker, fixing wrong joins on role-playing/ambiguous-path dimensions — ts-cli v0.47.0 (`ts_cli/aggregate/spotql_aggregate.py`; `sqlgen.build_select` kept as a `--no-spotql` fallback)
+
 ## 2026-07-11
 - feat: add ts aggregate command group (aggregate-model advisor engine) — ts-cli v0.46.0
 - chore: bump ts-cli to v0.45.1 — fix `resolve_profile` crash on the wrapped `{"profiles":[...]}` file format (audit 4.1) + consolidate triplicated profile parsing on `load_profiles()` (audit 4.2)

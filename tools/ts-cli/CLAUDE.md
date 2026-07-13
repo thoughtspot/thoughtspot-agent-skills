@@ -22,7 +22,8 @@ ts_cli/
     measures.py           — measure decomposition rewrite plans (SUM/MIN/MAX/COUNT/AVG/ratio classification) for aggregate models (pure functions, no I/O)
     lattice.py            — grain lattice: bucket/coverage rule + candidate generation from signatures + rewrite plans behind `ts aggregate recommend` (pure functions, no I/O)
     scoring.py            — cost-based (profiled) / coverage-based (unprofiled) greedy candidate selection with a marginal-gain curve behind `ts aggregate recommend` (pure functions, no I/O)
-    sqlgen.py             — aggregate SELECT / profiling SQL / DDL emission across snowflake/databricks/bigquery dialects behind `ts aggregate profile`/`generate` (pure functions, no I/O)
+    sqlgen.py             — aggregate SELECT / profiling SQL / DDL emission across snowflake/databricks/bigquery dialects behind `ts aggregate profile`/`generate` (pure functions, no I/O); fallback path only as of Task 18 — see spotql_aggregate.py
+    spotql_aggregate.py   — Task 18: build a SpotQL SELECT for a candidate's grain (build_spotql) and wrap ThoughtSpot-compiled warehouse SQL as aggregate DDL (wrap_as_ddl), reusing sqlgen.build_ddl for materialization shapes — the default DDL SELECT source behind `ts aggregate profile`/`generate`, because ThoughtSpot's own SQL generation resolves joins correctly on role-playing/ambiguous-path dimensions where sqlgen.build_select's hand-rolled walker can be wrong (pure functions, no I/O)
     generate.py           — aggregate Table/Model TML assembly + `aggregated_models` association patch on the primary Model, reusing tables.py/model_builder.py rather than hand-assembling TML (pure functions, no I/O)
     history.py            — match Snowflake QUERY_HISTORY GROUP BY shapes to signatures, producing reweighted signature weights behind `ts aggregate history` (pure functions, no I/O)
   dependency/
