@@ -825,32 +825,58 @@ five functions, all unit-tested in
    `[{table, name, expr, columns, path_ids}]`, handling both the dict-nested shape
    (`rls_rules: {rules:[...], table_paths:[...]}`, the verified live shape — see
    `test_report_matched_columns.py::_TABLE_TML_WITH_RLS`) and a flat rule-list shape
-   (no `table_paths` at all), mirroring `agents/shared/erd/parser.py::_rls_rule_list`.
-   The flat shape resolves a bracket ref's identifier against the owning table's own
-   name via a seeded `{own_table: (own_table, [])}` fallback entry in the path map —
-   this fallback shape is a reasonable inference (no concrete flat-shape TML example
-   was available to verify against), flagged here for re-check if a real flat-shape
-   export ever surfaces.
+   (no `table_paths` at all). Note: `agents/shared/erd/parser.py::_rls_rule_list`
+   normalizes the two *nesting shapes* but does NOT resolve bracket refs to columns —
+   that resolution is this module's own logic. **UNVERIFIED (no in-repo flat-shape
+   TML example):** the flat shape resolves a bracket ref's identifier against the
+   owning table's own name via a seeded `{own_table: (own_table, [])}` fallback entry
+   in the path map — a reasonable inference, flagged for re-check by Task 23 / live
+   testing if a real flat-shape export ever surfaces.
 2. `rls_filter_columns(rules)` — the `(base table, physical column)` pairs the RLS
    exprs filter on, parsed from each rule's own `path_ids` map (supports cross-table
-   RLS refs, not just a rule's owning table).
+   RLS refs, not just a rule's owning table). **Fail-closed:** a ref whose path_id is
+   neither declared nor the owning table name surfaces as `(<raw ref_id>, col)` rather
+   than being dropped — see the security fix below.
 3. `candidate_rls_conflict(candidate, plans, model_tml, rules)` — maps each RLS filter
    to the model's display column (via `column_id` match) and checks grain membership;
    returns `{required, present, missing}`. An RLS column the model doesn't expose at
-   all still surfaces (falls back to the raw `column_id` string) rather than being
-   silently dropped.
+   all (or one that resolved to a fail-closed pseudo-table) still surfaces (falls back
+   to the raw `<table>::<column>` string, never a grain name) — a candidate is never
+   reported securable while an unresolvable/un-modeled ref exists.
 4. `add_rls_columns_to_candidate(candidate, missing_display_cols)` — the force-add
    mechanic: returns a copy with the missing columns folded into `dimensions`.
-5. `propagate_rls(base_rules, agg_table_name, display_to_aggcol)` — builds the
+5. `propagate_rls(base_rules, agg_table_name, filter_to_aggcol)` — builds the
    aggregate table's `rls_rules` block: one merged `table_paths` entry (id
    `"<agg_table_name>_1"`, following the `"<name>_1"` self-path convention in
    `thoughtspot-sets-tml.md`) plus rewritten rule exprs (`ts_*` system-var portions
    copied verbatim, since they're never bracket-wrapped so the rewrite regex never
-   touches them). Raises `ValueError` naming every unmapped filter column if
-   `display_to_aggcol` is incomplete — a programming-error guard, since Task 23's
-   caller is expected to guarantee coverage via #3/#4 above. A round-trip test
-   confirms the emitted block survives `tml_common.dump_tml_yaml` +
-   `tml_lint.lint_tml` clean when attached to a Table TML.
+   touches them). `filter_to_aggcol` is keyed by the **`(base table, physical column)`
+   tuple** (the same pair `rls_filter_columns` emits / `candidate_rls_conflict`
+   resolves), NOT the bare column name — Task 23 must build the dict with tuple keys.
+   Raises `ValueError` naming every unmapped filter `(table, col)` if `filter_to_aggcol`
+   is incomplete — a programming-error / fail-closed guard, since Task 23's caller is
+   expected to guarantee coverage via #3/#4 above. A round-trip test confirms the
+   emitted block survives `tml_common.dump_tml_yaml` + `tml_lint.lint_tml` clean when
+   attached to a Table TML.
+
+**Security fixes applied post-review (2026-07-14, before Task 23 wiring):**
+- **Same-name cross-table columns (was a silent mis-securing / leak):** `propagate_rls`
+  originally keyed its column mapping by the BARE physical column name inside `[id::COL]`,
+  discarding the table qualifier. Two base tables each RLS-filtering on a same-named
+  physical column (e.g. both a fact and a dim have `REGION`, mapping to DISTINCT aggregate
+  grain columns) both remapped to the SAME aggregate column → a valid, lint-clean rule
+  enforcing the WRONG row restriction (potential row-visibility leak). Fixed by keying the
+  mapping (and the missing-mapping guard) on the `(table, col)` tuple `rls_filter_columns`
+  already emits. Regression test: two RLS'd base tables sharing physical col `REGION` →
+  the two propagated rules reference distinct aggregate columns.
+- **Fail-open → fail-closed on unresolvable refs:** `rls_filter_columns` /
+  `candidate_rls_conflict` previously silently dropped an RLS ref whose path_id was
+  undeclared in `table_paths` and wasn't the owning table name (e.g. `[T_9::SECRET]` when
+  only `T_1` is declared → `missing:[]` "securable" while an unsecurable ref existed). For
+  a security control this now fails CLOSED: an unresolved ref surfaces (via `_resolve_ref`,
+  using the raw ref_id as a pseudo-table) as a required-but-unresolvable column, so it
+  always lands in `required`/`missing` and `propagate_rls` raises on it — never reported
+  "securable as-is". Tests added for both.
 
 **Deliberately NOT done here (Task 23's scope):** wiring `rls.py` into
 `generate.py`/`commands/aggregate.py`/the skill's Step 6 flow, the exclude-vs-force-add

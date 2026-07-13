@@ -21,18 +21,31 @@ Verified TML shape (see the task-22 brief and
             expr: "[T_1::ZIPCODE] = ts_groups_int"
 
 Some builds instead emit a flat list directly under `rls_rules:` (no
-`table_paths` wrapper) — mirrors the two shapes `agents/shared/erd/parser.py`'s
-`_rls_rule_list` normalizes. In that flat shape there is no separate path-id
-indirection, so a bracket ref's identifier is resolved against the owning
-table's own name (a `[<TABLE_NAME>::COL]`-style self-reference) rather than a
-declared `table_paths` entry — handled uniformly here by seeding the path map
-with a `{own_table: (own_table, [])}` fallback entry before resolving refs.
+`table_paths` wrapper). `agents/shared/erd/parser.py`'s `_rls_rule_list`
+normalizes the two *nesting shapes* (dict-with-`rules` vs. flat list) but does
+NOT resolve bracket refs to columns — that resolution is this module's job, and
+it is unverified for the flat shape. **UNVERIFIED (no in-repo flat-shape TML
+example):** in the flat shape there is no `table_paths` indirection, so this
+module infers a bracket ref's identifier resolves against the owning table's
+own name (a `[<TABLE_NAME>::COL]`-style self-reference), implemented by seeding
+the path map with a `{own_table: (own_table, [])}` fallback entry before
+resolving refs. Task 23 / live testing must confirm this against a real
+flat-shape export — see open-items.md #17.
 
 Rule exprs reference `[<path_id>::<COLUMN>]` and ThoughtSpot system vars
 (`ts_groups`, `ts_groups_int`, `ts_username`, `ts_var(...)`, etc.) — the system
 vars are never bracket-wrapped, so the `[id::COL]` regex never touches them;
 only bracketed column/table refs get remapped in `propagate_rls`, and rule
 names are copied verbatim.
+
+Fail-closed: an RLS ref whose path_id is neither a declared `table_paths`
+entry nor the owning table name cannot be resolved to a base table, but it
+still names a security filter. Rather than silently drop it (which would
+report a candidate "securable as-is" while an unsecurable ref exists — a
+fail-open leak), such a ref surfaces using its raw ref_id as the pseudo-table,
+so it flows through `rls_filter_columns` / `candidate_rls_conflict` as a
+required-but-missing column and through `propagate_rls` as an unmapped column
+that raises.
 """
 from __future__ import annotations
 
@@ -79,6 +92,17 @@ def _normalize_rls_block(raw, own_table: str):
     return rules_list, path_map
 
 
+def _resolve_ref(ref_id: str, path_ids: dict):
+    """Resolve one `[ref_id::col]` bracket ref's identifier to a base table.
+
+    Returns the declared path's table when `ref_id` is known, else the raw
+    `ref_id` itself (fail-closed: an undeclared ref still names a security
+    filter, so it surfaces as a distinct pseudo-table rather than being
+    dropped — never resolves to None/silent-skip)."""
+    resolved = path_ids.get(ref_id)
+    return resolved[0] if resolved is not None else ref_id
+
+
 def extract_rls(base_table_tmls: dict) -> list:
     """Normalize every base Table TML's `rls_rules` into a flat list of rules.
 
@@ -89,6 +113,10 @@ def extract_rls(base_table_tmls: dict) -> list:
     (shared across rules of the same table; used by `rls_filter_columns` and
     `propagate_rls` to resolve/rewrite each bracket ref). Empty list when no
     table carries RLS.
+
+    `columns` includes every referenced physical column, even one whose
+    path_id is undeclared (fail-closed — an unresolvable ref is still a
+    security filter and must not vanish).
     """
     out = []
     for table_name, tdict in base_table_tmls.items():
@@ -98,9 +126,7 @@ def extract_rls(base_table_tmls: dict) -> list:
             expr = r.get("expr") or r.get("expression") or ""
             columns = []
             seen = set()
-            for ref_id, col in _REF.findall(expr):
-                if ref_id not in path_map:
-                    continue  # unresolvable ref — not a known path/table
+            for _ref_id, col in _REF.findall(expr):
                 if col not in seen:
                     seen.add(col)
                     columns.append(col)
@@ -119,15 +145,15 @@ def rls_filter_columns(rules: list) -> set:
 
     Parses each rule's `[id::COL]` refs via that rule's own `path_ids` map
     (not `rule["table"]`/`rule["columns"]` directly — a rule can reference a
-    joined table's column via its own path, not only its owning table's).
+    joined table's column via its own path, not only its owning table's). An
+    undeclared path_id surfaces as `(<raw ref_id>, col)` rather than being
+    dropped — see `_resolve_ref` (fail-closed).
     """
     out = set()
     for r in rules:
         path_ids = r.get("path_ids") or {}
         for ref_id, col in _REF.findall(r.get("expr", "")):
-            resolved = path_ids.get(ref_id)
-            if resolved is not None:
-                out.add((resolved[0], col))
+            out.add((_resolve_ref(ref_id, path_ids), col))
     return out
 
 
@@ -141,11 +167,15 @@ def candidate_rls_conflict(candidate: dict, plans: dict, model_tml: dict, rules:
     by this grain-membership check.
 
     Each RLS filter (base table, column) is mapped to the model column whose
-    `column_id` is `<table>::<column>`; a filter column not modeled at all
-    still appears (falling back to the raw `column_id` string) so it is never
-    silently dropped from `required`/`missing` — omitting an un-modeled
-    security-relevant column would be worse than surfacing an unresolvable
-    display name.
+    `column_id` is `<table>::<column>`; a filter column not modeled at all —
+    or one whose path_id was undeclared and so resolved to a pseudo-table via
+    `_resolve_ref` (fail-closed) — still appears (falling back to the raw
+    `<table>::<column>` string, which is never a grain display name, so it can
+    never be `present`). It is thus never silently dropped from
+    `required`/`missing`: a candidate can never be reported securable
+    (`missing == []`) while an unresolvable or un-modeled RLS ref exists —
+    omitting an un-modeled security-relevant column would be worse than
+    surfacing an unresolvable display name.
 
     Returns `{"required": [...], "present": [...], "missing": [...]}`, all
     sorted for determinism. `missing` empty means the candidate is securable
@@ -180,7 +210,7 @@ def add_rls_columns_to_candidate(candidate: dict, missing_display_cols) -> dict:
     return new_candidate
 
 
-def propagate_rls(base_rules: list, agg_table_name: str, display_to_aggcol: dict) -> dict:
+def propagate_rls(base_rules: list, agg_table_name: str, filter_to_aggcol: dict) -> dict:
     """Build the `rls_rules` block to attach to the AGGREGATE table's TML.
 
     Emits one merged `table_paths` entry (id `"<agg_table_name>_1"`, mirroring
@@ -192,18 +222,23 @@ def propagate_rls(base_rules: list, agg_table_name: str, display_to_aggcol: dict
     `ts_*` system-var portion of the expr are copied verbatim (system vars are
     never bracket-wrapped, so the rewrite regex never touches them).
 
-    `display_to_aggcol` is keyed by the same column name that appears inside
-    a base rule's `[id::COL]` reference — i.e. the physical base column, which
-    in this codebase's convention is also the aggregate grain column's stored
-    name (`generate.py`'s `_grain_columns`/`build_aggregate_table_spec` use a
-    candidate's display-named grain columns directly as the aggregate table's
-    physical column names, with no separate renaming step) — mapped to the
-    aggregate table's physical column name for that same filter. Every RLS
-    filter column referenced by `base_rules` must have an entry; a missing one
-    raises `ValueError` naming every offending column (the caller — Task 23 —
-    guarantees this via `candidate_rls_conflict`'s conflict check or the
+    `filter_to_aggcol` is keyed by the **`(base table, physical column)`
+    tuple** — exactly the pair `rls_filter_columns` emits and
+    `candidate_rls_conflict` resolves — NOT the bare column name. The table
+    qualifier is load-bearing for correctness: two base tables that each
+    RLS-filter on a same-named physical column (e.g. both a fact and a dim
+    have `REGION`) map to DISTINCT aggregate columns; keying by bare column
+    name would silently collapse them onto one aggregate column and emit a
+    valid, lint-clean rule enforcing the WRONG row restriction (a leak). The
+    value is the aggregate table's physical column name for that filter.
+
+    Every RLS filter `(table, col)` referenced by `base_rules` must have an
+    entry — including one that resolved via the fail-closed pseudo-table path
+    (`_resolve_ref`) for an undeclared path_id. A missing one raises
+    `ValueError` naming every offending `(table, col)` (the caller — Task 23 —
+    guarantees coverage via `candidate_rls_conflict`'s conflict check or the
     force-add path in `add_rls_columns_to_candidate`, so this is a
-    programming-error guard, not expected user-facing behavior).
+    programming-error / fail-closed guard, not expected user-facing behavior).
 
     Returns `{}` when `base_rules` is empty (no RLS to propagate).
     """
@@ -215,13 +250,12 @@ def propagate_rls(base_rules: list, agg_table_name: str, display_to_aggcol: dict
     for rule in base_rules:
         path_ids = rule.get("path_ids") or {}
         for ref_id, col in _REF.findall(rule.get("expr", "")):
-            if ref_id not in path_ids:
-                continue
-            if col not in seen_needed:
-                seen_needed.add(col)
-                needed.append(col)
+            key = (_resolve_ref(ref_id, path_ids), col)
+            if key not in seen_needed:
+                seen_needed.add(key)
+                needed.append(key)
 
-    missing = [c for c in needed if c not in display_to_aggcol]
+    missing = [k for k in needed if k not in filter_to_aggcol]
     if missing:
         raise ValueError(
             "propagate_rls: missing aggregate column mapping for RLS filter "
@@ -232,8 +266,8 @@ def propagate_rls(base_rules: list, agg_table_name: str, display_to_aggcol: dict
 
     agg_path_id = f"{agg_table_name}_1"
     agg_cols = []
-    for col in needed:
-        agg_col = display_to_aggcol[col]
+    for key in needed:
+        agg_col = filter_to_aggcol[key]
         if agg_col not in agg_cols:
             agg_cols.append(agg_col)
 
@@ -244,9 +278,10 @@ def propagate_rls(base_rules: list, agg_table_name: str, display_to_aggcol: dict
 
         def _remap(match, path_ids=path_ids):
             ref_id, col = match.group(1), match.group(2)
-            if ref_id not in path_ids or col not in display_to_aggcol:
+            key = (_resolve_ref(ref_id, path_ids), col)
+            if key not in filter_to_aggcol:
                 return match.group(0)  # not a filter ref we resolved — copy verbatim
-            return f"[{agg_path_id}::{display_to_aggcol[col]}]"
+            return f"[{agg_path_id}::{filter_to_aggcol[key]}]"
 
         rules_out.append({"name": rule.get("name", ""), "expr": _REF.sub(_remap, expr)})
 
