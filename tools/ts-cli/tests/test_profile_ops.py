@@ -1,14 +1,22 @@
 """Tests for profile_ops — the deterministic profile substrate."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from ts_cli import profile_ops
 from ts_cli.profile_ops import (
+    add_profile,
     derive_env_var,
     derive_keychain_service,
+    get_profile,
     keychain_store_commands,
     keychain_verify_commands,
+    load_platform_profiles,
+    remove_profile,
     remove_zshenv_line,
+    save_platform_profiles,
     slug_to_upper,
     slugify,
     upsert_zshenv,
@@ -202,3 +210,197 @@ class TestRemoveZshenvLine:
         original = "export A=1\n\nexport MY_VAR=old\n\nexport B=2\n"
         result = remove_zshenv_line(original, "MY_VAR")
         assert "\n\n\n" not in result
+
+
+# ---------------------------------------------------------------------------
+# Profile JSON CRUD (Task 2)
+# ---------------------------------------------------------------------------
+
+from ts_cli.profile_ops import (
+    load_platform_profiles, save_platform_profiles,
+    add_profile, remove_profile, get_profile,
+)
+from ts_cli import profile_ops
+
+
+@pytest.fixture
+def profile_dir(tmp_path, monkeypatch):
+    """Point all PROFILE_PATHS at temp files."""
+    paths = {
+        "thoughtspot": tmp_path / "thoughtspot-profiles.json",
+        "snowflake": tmp_path / "snowflake-profiles.json",
+        "databricks": tmp_path / "databricks-profiles.json",
+        "tableau": tmp_path / "tableau-profiles.json",
+    }
+    monkeypatch.setattr(profile_ops, "PROFILE_PATHS", paths)
+    return paths
+
+
+class TestLoadPlatformProfiles:
+    def test_missing_file_returns_empty_list(self, profile_dir):
+        assert load_platform_profiles("thoughtspot") == []
+
+    def test_bare_list(self, profile_dir):
+        profile_dir["snowflake"].write_text(json.dumps([{"name": "A"}]))
+        assert load_platform_profiles("snowflake") == [{"name": "A"}]
+
+    def test_wrapped_list(self, profile_dir):
+        profile_dir["thoughtspot"].write_text(
+            json.dumps({"profiles": [{"name": "A"}, {"name": "B"}]})
+        )
+        result = load_platform_profiles("thoughtspot")
+        assert len(result) == 2
+        assert result[0]["name"] == "A"
+
+    def test_name_keyed_dict(self, profile_dir):
+        profile_dir["thoughtspot"].write_text(
+            json.dumps({"A": {"name": "A", "base_url": "https://a"}})
+        )
+        result = load_platform_profiles("thoughtspot")
+        assert len(result) == 1
+        assert result[0]["name"] == "A"
+
+
+class TestSavePlatformProfiles:
+    def test_saves_as_bare_list(self, profile_dir):
+        save_platform_profiles("snowflake", [{"name": "X"}])
+        raw = json.loads(profile_dir["snowflake"].read_text())
+        assert isinstance(raw, list)
+        assert raw == [{"name": "X"}]
+
+
+class TestAddProfile:
+    def test_add_to_empty(self, profile_dir):
+        result = add_profile("snowflake", {"name": "New", "account": "acct"})
+        assert result["name"] == "New"
+        saved = load_platform_profiles("snowflake")
+        assert len(saved) == 1
+
+    def test_add_replaces_existing_by_name(self, profile_dir):
+        add_profile("snowflake", {"name": "A", "account": "old"})
+        add_profile("snowflake", {"name": "A", "account": "new"})
+        saved = load_platform_profiles("snowflake")
+        assert len(saved) == 1
+        assert saved[0]["account"] == "new"
+
+    def test_add_preserves_other_profiles(self, profile_dir):
+        add_profile("snowflake", {"name": "A"})
+        add_profile("snowflake", {"name": "B"})
+        saved = load_platform_profiles("snowflake")
+        assert len(saved) == 2
+
+
+class TestRemoveProfile:
+    def test_remove_existing(self, profile_dir):
+        add_profile("snowflake", {"name": "A"})
+        removed = remove_profile("snowflake", "A")
+        assert removed["name"] == "A"
+        assert load_platform_profiles("snowflake") == []
+
+    def test_remove_nonexistent_returns_none(self, profile_dir):
+        assert remove_profile("snowflake", "X") is None
+
+
+class TestGetProfile:
+    def test_get_existing(self, profile_dir):
+        add_profile("tableau", {"name": "Server1", "server_url": "https://tab"})
+        p = get_profile("tableau", "Server1")
+        assert p is not None
+        assert p["server_url"] == "https://tab"
+
+    def test_get_nonexistent_returns_none(self, profile_dir):
+        assert get_profile("tableau", "X") is None
+
+
+# ---------------------------------------------------------------------------
+# Profile JSON CRUD
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def profile_dir(tmp_path, monkeypatch):
+    """Point all PROFILE_PATHS at temp files."""
+    paths = {
+        "thoughtspot": tmp_path / "thoughtspot-profiles.json",
+        "snowflake": tmp_path / "snowflake-profiles.json",
+        "databricks": tmp_path / "databricks-profiles.json",
+        "tableau": tmp_path / "tableau-profiles.json",
+    }
+    monkeypatch.setattr(profile_ops, "PROFILE_PATHS", paths)
+    return paths
+
+
+class TestLoadPlatformProfiles:
+    def test_missing_file_returns_empty_list(self, profile_dir):
+        assert load_platform_profiles("thoughtspot") == []
+
+    def test_bare_list(self, profile_dir):
+        profile_dir["snowflake"].write_text(json.dumps([{"name": "A"}]))
+        assert load_platform_profiles("snowflake") == [{"name": "A"}]
+
+    def test_wrapped_list(self, profile_dir):
+        profile_dir["thoughtspot"].write_text(
+            json.dumps({"profiles": [{"name": "A"}, {"name": "B"}]})
+        )
+        result = load_platform_profiles("thoughtspot")
+        assert len(result) == 2
+        assert result[0]["name"] == "A"
+
+    def test_name_keyed_dict(self, profile_dir):
+        profile_dir["thoughtspot"].write_text(
+            json.dumps({"A": {"name": "A", "base_url": "https://a"}})
+        )
+        result = load_platform_profiles("thoughtspot")
+        assert len(result) == 1
+        assert result[0]["name"] == "A"
+
+
+class TestSavePlatformProfiles:
+    def test_saves_as_bare_list(self, profile_dir):
+        save_platform_profiles("snowflake", [{"name": "X"}])
+        raw = json.loads(profile_dir["snowflake"].read_text())
+        assert isinstance(raw, list)
+        assert raw == [{"name": "X"}]
+
+
+class TestAddProfile:
+    def test_add_to_empty(self, profile_dir):
+        result = add_profile("snowflake", {"name": "New", "account": "acct"})
+        assert result["name"] == "New"
+        saved = load_platform_profiles("snowflake")
+        assert len(saved) == 1
+
+    def test_add_replaces_existing_by_name(self, profile_dir):
+        add_profile("snowflake", {"name": "A", "account": "old"})
+        add_profile("snowflake", {"name": "A", "account": "new"})
+        saved = load_platform_profiles("snowflake")
+        assert len(saved) == 1
+        assert saved[0]["account"] == "new"
+
+    def test_add_preserves_other_profiles(self, profile_dir):
+        add_profile("snowflake", {"name": "A"})
+        add_profile("snowflake", {"name": "B"})
+        saved = load_platform_profiles("snowflake")
+        assert len(saved) == 2
+
+
+class TestRemoveProfile:
+    def test_remove_existing(self, profile_dir):
+        add_profile("snowflake", {"name": "A"})
+        removed = remove_profile("snowflake", "A")
+        assert removed["name"] == "A"
+        assert load_platform_profiles("snowflake") == []
+
+    def test_remove_nonexistent_returns_none(self, profile_dir):
+        assert remove_profile("snowflake", "X") is None
+
+
+class TestGetProfile:
+    def test_get_existing(self, profile_dir):
+        add_profile("tableau", {"name": "Server1", "server_url": "https://tab"})
+        p = get_profile("tableau", "Server1")
+        assert p is not None
+        assert p["server_url"] == "https://tab"
+
+    def test_get_nonexistent_returns_none(self, profile_dir):
+        assert get_profile("tableau", "X") is None

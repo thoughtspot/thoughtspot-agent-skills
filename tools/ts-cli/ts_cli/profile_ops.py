@@ -11,7 +11,9 @@ ts-profile-tableau) and two Python client modules (`client.py::_slugify`,
 """
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Slug derivation
@@ -180,3 +182,73 @@ def remove_zshenv_line(content: str, env_var: str) -> str:
     while "\n\n\n" in text:
         text = text.replace("\n\n\n", "\n\n")
     return text
+
+
+# ---------------------------------------------------------------------------
+# Profile JSON CRUD
+# ---------------------------------------------------------------------------
+
+PROFILE_PATHS: dict[str, Path] = {
+    "thoughtspot": Path.home() / ".claude" / "thoughtspot-profiles.json",
+    "snowflake": Path.home() / ".claude" / "snowflake-profiles.json",
+    "databricks": Path.home() / ".claude" / "databricks-profiles.json",
+    "tableau": Path.home() / ".claude" / "tableau-profiles.json",
+}
+
+
+def load_platform_profiles(platform: str) -> list[dict]:
+    """Load profiles from the platform's JSON file.
+
+    Handles three documented file shapes (ThoughtSpot legacy):
+      [...]                     — bare list
+      {"profiles": [...]}      — wrapped list
+      {"name": {...}, ...}     — name-keyed dict
+    All are normalised to a flat list of profile dicts.
+    """
+    path = PROFILE_PATHS[platform]
+    if not path.exists():
+        return []
+    raw = json.loads(path.read_text())
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        if "profiles" in raw and isinstance(raw["profiles"], list):
+            return raw["profiles"]
+        return [v if isinstance(v, dict) and "name" in v else {"name": k, **v}
+                for k, v in raw.items()]
+    return []
+
+
+def save_platform_profiles(platform: str, profiles: list[dict]) -> None:
+    """Write profiles as a bare JSON list."""
+    path = PROFILE_PATHS[platform]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(profiles, indent=2) + "\n")
+
+
+def add_profile(platform: str, profile: dict) -> dict:
+    """Add or replace a profile (matched by name). Returns the saved profile."""
+    profiles = load_platform_profiles(platform)
+    profiles = [p for p in profiles if p.get("name") != profile["name"]]
+    profiles.append(profile)
+    save_platform_profiles(platform, profiles)
+    return profile
+
+
+def remove_profile(platform: str, name: str) -> dict | None:
+    """Remove a profile by name. Returns the removed profile, or None if not found."""
+    profiles = load_platform_profiles(platform)
+    removed = [p for p in profiles if p.get("name") == name]
+    if not removed:
+        return None
+    remaining = [p for p in profiles if p.get("name") != name]
+    save_platform_profiles(platform, remaining)
+    return removed[0]
+
+
+def get_profile(platform: str, name: str) -> dict | None:
+    """Find a profile by name."""
+    for p in load_platform_profiles(platform):
+        if p.get("name") == name:
+            return p
+    return None
