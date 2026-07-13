@@ -95,100 +95,82 @@ thoughtspot-agent-skills/
 
 ---
 
-## CLI Skills (Claude Code & Cortex Code CLI)
+## Skills
 
-These skills work in both **Claude Code** and **Cortex Code CLI**. They use the
-`ts` CLI for ThoughtSpot API calls and store credentials in the OS credential store.
+Skills are grouped by category. The runtime columns show where each skill is available —
+skill names link to the CLI version (canonical); runtime checkmarks link to that runtime's
+version where it differs.
 
-**Conversion** — move semantic models between ThoughtSpot and external platforms
-
-| Skill | What it does | Coverage |
+| Runtime | Setup guide | How it works |
 |---|---|---|
-| [`ts-convert-to-snowflake-sv`](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | — |
-| [`ts-convert-from-snowflake-sv`](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) |
-| [`ts-convert-to-databricks-mv`](agents/cli/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | — |
-| [`ts-convert-from-databricks-mv`](agents/cli/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | [coverage](agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md) |
-| [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) |
-| [`ts-convert-from-looker`](agents/cli/ts-convert-from-looker/SKILL.md) | Convert a Looker LookML project (model + view files) into ThoughtSpot Table and Model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-looker/references/coverage-matrix.md) |
+| **CLI** — Claude Code + Cortex Code CLI | [agents/cli/SETUP.md](agents/cli/SETUP.md) | `ts` CLI for API calls, OS credential store |
+| **Snowsight** — Snowflake Workspaces | [agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md) | Stored procedures via internal stage, no local install |
+| **Databricks** — Genie Code | [agents/databricks/SETUP.md](agents/databricks/SETUP.md) | Asset Bundles, `ThoughtSpotClient` via `%run` |
 
-**ThoughtSpot Objects** — author and manage ThoughtSpot Models
+### Conversion
 
-| Skill | What it does |
-|---|---|
-| [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model |
-| [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
-| [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login |
-| [`ts-object-model-spotql-query`](agents/cli/ts-object-model-spotql-query/SKILL.md) | Query a Model with SpotQL — write Semantic SQL, validate it to warehouse SQL, execute it, and review the data results; includes a reference for calling the SpotQL API from your own product or agent. New to SpotQL? Start with [**Why SpotQL**](agents/cli/ts-object-model-spotql-query/references/architecture.md) — the architecture & trust model vs raw DB SQL. |
-| [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
-| [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards |
-| [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
+Move semantic models between ThoughtSpot and external platforms.
 
-**Data Loading** — load source data into warehouses for ThoughtSpot
+| Skill | What it does | Coverage | CLI | Snowsight | DBX |
+|---|---|---|:-:|:-:|:-:|
+| [`ts-convert-to-snowflake-sv`](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | — | ✓ | [✓](agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md) | — |
+| [`ts-convert-from-snowflake-sv`](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) | ✓ | [✓](agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md) | — |
+| [`ts-convert-to-databricks-mv`](agents/cli/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | — | ✓ | — | [✓](agents/databricks/skills/ts-convert-to-databricks-mv/SKILL.md) |
+| [`ts-convert-from-databricks-mv`](agents/cli/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | [coverage](agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md) | ✓ | — | [✓](agents/databricks/skills/ts-convert-from-databricks-mv/SKILL.md) |
+| [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) | ✓ | — | — |
+| [`ts-convert-from-looker`](agents/cli/ts-convert-from-looker/SKILL.md) | Convert a Looker LookML project (model + view files) into ThoughtSpot Table and Model TMLs, with optional dashboard-to-liveboard migration | [coverage](agents/cli/ts-convert-from-looker/references/coverage-matrix.md) | ✓ | — | — |
 
-| Skill | What it does |
-|---|---|
-| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to |
+### ThoughtSpot Objects
 
-**Connection Profiles** — manage credentials and connections
+Author, manage, and assess ThoughtSpot Models and environments.
 
-| Skill | What it does |
-|---|---|
-| [`ts-profile-thoughtspot`](agents/cli/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles |
-| [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (**Claude Code only** — Cortex Code manages Snowflake connections natively) |
-| [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile |
-| [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth |
+| Skill | What it does | CLI | Snowsight | DBX |
+|---|---|:-:|:-:|:-:|
+| [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model | ✓ | — | — |
+| [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements | ✓ | — | — |
+| [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login | ✓ | — | — |
+| [`ts-object-model-spotql-query`](agents/cli/ts-object-model-spotql-query/SKILL.md) | Query a Model with SpotQL — write Semantic SQL, validate to warehouse SQL, execute, and review results. New to SpotQL? Start with [**Why SpotQL**](agents/cli/ts-object-model-spotql-query/references/architecture.md). | ✓ | — | — |
+| [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings | ✓ | — | — |
+| [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards | ✓ | — | — |
+| [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 | ✓ | — | — |
 
-**Recipes** — pre-built analytical capabilities for ThoughtSpot
+### Data Loading
 
-| Skill | What it builds | Platform |
-|---|---|---|
-| [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | Snowflake |
-| [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | Snowflake |
+| Skill | What it does | CLI | Snowsight | DBX |
+|---|---|:-:|:-:|:-:|
+| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to | ✓ | — | — |
 
-See **[agents/cli/SETUP.md](agents/cli/SETUP.md)** for installation and setup.
+### Connection Profiles
 
----
+| Skill | What it does | CLI | Snowsight | DBX |
+|---|---|:-:|:-:|:-:|
+| [`ts-profile-thoughtspot`](agents/cli/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles | ✓ | [✓](agents/coco-snowsight/ts-profile-thoughtspot/SKILL.md) | — |
+| [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively) | ✓ | — | — |
+| [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile | ✓ | — | — |
+| [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth | ✓ | — | — |
 
-## Snowsight Workspace Skills
+### Recipes
 
-Skills deployed in Snowsight Workspaces via a Snowflake internal stage. No local
-install required — runs entirely within Snowflake using stored procedures.
+Pre-built analytical capabilities for ThoughtSpot.
 
-| Skill | What it does |
-|---|---|
-| [`ts-profile-thoughtspot`](agents/coco-snowsight/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles (uses Snowflake Secrets) |
-| [`ts-setup-sv`](agents/coco-snowsight/ts-setup-sv/SKILL.md) | Install or upgrade stored procedures required by the other skills |
-| [`ts-recipe-formula-business-days-snowflake`](agents/coco-snowsight/ts-recipe-formula-business-days-snowflake/SKILL.md) | Deploy three Snowflake scalar UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
-| [`ts-recipe-formula-hms-display-snowflake`](agents/coco-snowsight/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Deploy four Snowflake scalar UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` |
-| [`ts-convert-to-snowflake-sv`](agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View |
-| [`ts-convert-from-snowflake-sv`](agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model |
+| Skill | What it builds | CLI | Snowsight | DBX |
+|---|---|:-:|:-:|:-:|
+| [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | ✓ | [✓](agents/coco-snowsight/ts-recipe-formula-business-days-snowflake/SKILL.md) | — |
+| [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | ✓ | [✓](agents/coco-snowsight/ts-recipe-formula-hms-display-snowflake/SKILL.md) | — |
 
-See **[agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md)** for stage
-setup and Workspace deployment.
+### Setup & Infrastructure
 
----
+| Skill | What it does | CLI | Snowsight | DBX |
+|---|---|:-:|:-:|:-:|
+| [`ts-setup-sv`](agents/coco-snowsight/ts-setup-sv/SKILL.md) | Install or upgrade stored procedures required by Snowsight skills | — | ✓ | — |
 
-## Databricks Skills (Genie Code)
-
-Skills deployed to a Databricks workspace via Asset Bundles. Uses
-`ThoughtSpotClient` — a single-file Python class with full ts-cli parity,
-consumed via `%run` in Databricks notebooks.
-
-| Skill | What it does |
-|---|---|
-| [`ts-convert-to-databricks-mv`](agents/databricks/skills/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View |
-| [`ts-convert-from-databricks-mv`](agents/databricks/skills/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model |
-
-**Also included:**
+**Databricks runtime** also includes support notebooks — see [agents/databricks/SETUP.md](agents/databricks/SETUP.md):
 
 | Notebook | Purpose |
 |---|---|
 | `ts_client.py` | ThoughtSpotClient — 22 methods, auth via Databricks Secrets, in-memory token caching |
 | `ts_profile_setup.py` | Widget-driven profile creation (stores credentials in Databricks Secrets) |
 | `token_refresh.py` | Scheduled job for credential rotation (12h cron) |
-
-See **[agents/databricks/SETUP.md](agents/databricks/SETUP.md)** for deployment
-with `databricks bundle deploy`.
 
 ---
 
