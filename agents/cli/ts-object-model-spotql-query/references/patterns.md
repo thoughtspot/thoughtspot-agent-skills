@@ -97,16 +97,25 @@ FROM per_cat
 **When:** a measure that must not be summed across time — e.g. an inventory balance, an
 account balance.
 
-**First choice — use the Model's own formula.** If the Model already has a semi-additive
-**aggregate-formula** column (its formula is `last_value(sum(...))` / `first_value(...)` —
-e.g. `Inventory Balance`), just wrap it in `AGG()`. The formula encodes the
-non-additivity; `AGG()` returns the right number. Do **not** `SUM` it (that double-counts
-*and* errors `NESTED_AGGREGATE_NOT_SUPPORTED` on an aggregate formula).
+**First choice — use the Model's own formula, wrapped in `SUM()`.** If the Model already
+has a semi-additive column whose **outermost** op is `last_value`/`first_value` (formula
+`last_value(sum(col), query_groups(), {date})` — e.g. `Inventory Balance`), wrap it in
+**`SUM(...)`**. The formula encodes the non-additivity; the outer `SUM` is an identity
+pass-through over the one already-collapsed value per query group, and it is what forces
+the engine to resolve `query_groups()`.
 
 ```sql
-SELECT "t1"."Product Category", AGG("t1"."Inventory Balance") AS "Inventory Balance"
+SELECT "t1"."Product Category", SUM("t1"."Inventory Balance") AS "Inventory Balance"
 FROM "Model" AS "t1" GROUP BY "t1"."Product Category"
 ```
+
+**Do NOT use `AGG()` here** — on a `last_value`/`first_value` semi-additive measure it
+errors `NON_CONVERTIBLE_FUNCTION` ("Non standard sql function QueryGroups"). This is the
+one measure kind that takes `SUM` over `AGG`; verified live at grand-total, grouped, and
+monthly grain (nebula-aggregate-aware, 2026-07-13), all matching Snowflake ground truth.
+Run `ts spotql classify-columns` and follow the `wrapper` field (`semiadditive_measure` →
+`SUM`) rather than guessing. Note the inverse case — `sum(last_value(...))`, where the
+outer op is additive — is a normal aggregate-formula and takes `AGG()`.
 
 **Only if no such column exists:** hand-roll "latest value per entity" with
 `ROW_NUMBER()` over the raw measure ordered by date desc, filtered to rank 1. If the

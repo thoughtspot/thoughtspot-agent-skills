@@ -7,6 +7,7 @@ from ts_cli.spotql_ops import (
     classify_expr,
     classify_model_columns,
     is_aggregate_expr,
+    outermost_func,
 )
 
 
@@ -158,6 +159,7 @@ def test_classify_model_columns_attribute():
     assert r["kind"] == "attribute"
     assert r["needs_agg"] is False
     assert r["aggregation"] is None
+    assert r["wrapper"] is None
 
 
 def test_classify_model_columns_raw_measure_plain_column():
@@ -166,6 +168,7 @@ def test_classify_model_columns_raw_measure_plain_column():
     assert r["kind"] == "raw_measure"
     assert r["needs_agg"] is False
     assert r["aggregation"] == "SUM"
+    assert r["wrapper"] == "SUM"
 
 
 def test_classify_model_columns_raw_measure_non_aggregate_formula():
@@ -184,6 +187,7 @@ def test_classify_model_columns_aggregate_formula_measure():
     assert r["kind"] == "aggregate_measure"
     assert r["needs_agg"] is True
     assert r["aggregation"] is None
+    assert r["wrapper"] == "AGG"
 
 
 def test_classify_model_columns_respects_explicit_aggregation_property():
@@ -232,3 +236,107 @@ def test_classify_model_columns_accepts_bare_model_dict_without_wrapper():
 
 def test_classify_model_columns_empty_model_returns_empty_list():
     assert classify_model_columns({"model": {}}) == []
+
+
+# ---------------------------------------------------------------------------
+# outermost_func — distinguishes the wrapping call from nested calls
+# ---------------------------------------------------------------------------
+
+def test_outermost_func_simple_call():
+    assert outermost_func("sum([Amount])") == "sum"
+
+
+def test_outermost_func_semiadditive_wrapping():
+    assert outermost_func(
+        "last_value ( sum ( [Inv::Filled] ) , query_groups ( ) , { [D::Date] } )"
+    ) == "last_value"
+
+
+def test_outermost_func_additive_wrapping_a_window():
+    # sum(last_value(...)) — the OUTER op is sum, not last_value. This is the
+    # distinction that keeps sum(last_value()) out of the semi-additive bucket.
+    assert outermost_func(
+        "sum ( last_value ( sum ( [Inv::Filled] ) , query_groups ( ) , { [D::Date] } ) )"
+    ) == "sum"
+
+
+def test_outermost_func_none_for_bare_column():
+    assert outermost_func("[Amount]") is None
+
+
+def test_outermost_func_none_for_compound_expression():
+    # last_value(...) + 1 — outer op is `+`, not a single wrapping call.
+    assert outermost_func("last_value ( [Amount] ) + 1") is None
+
+
+def test_outermost_func_none_for_empty():
+    assert outermost_func("") is None
+    assert outermost_func(None) is None
+
+
+def test_outermost_func_is_case_insensitive():
+    assert outermost_func("LAST_VALUE([Amount])") == "last_value"
+
+
+# ---------------------------------------------------------------------------
+# semi-additive measures — live-verified matrix (nebula-aggregate-aware, 2026-07-13)
+# ---------------------------------------------------------------------------
+
+SEMIADDITIVE_TML = {
+    "model": {
+        "columns": [
+            {"name": "Inventory Balance", "formula_id": "f_inv",
+             "properties": {"column_type": "MEASURE"}},
+            {"name": "Sum Of Snapshot", "formula_id": "f_sum_lv",
+             "properties": {"column_type": "MEASURE"}},
+            {"name": "Opening Balance", "formula_id": "f_open",
+             "properties": {"column_type": "MEASURE"}},
+            {"name": "Category LOD", "formula_id": "f_lod",
+             "properties": {"column_type": "MEASURE"}},
+        ],
+        "formulas": [
+            # A — last_value(sum(), query_groups()) → SUM() wrapper (AGG → NON_CONVERTIBLE)
+            {"id": "f_inv", "name": "Inventory Balance",
+             "expr": "last_value ( sum ( [Inv::Filled] ) , query_groups ( ) , { [D::Date] } )"},
+            # B — sum(last_value(...)) → additive outer → AGG() wrapper (SUM → NESTED)
+            {"id": "f_sum_lv", "name": "Sum Of Snapshot",
+             "expr": "sum ( last_value ( sum ( [Inv::Filled] ) , query_groups ( ) , { [D::Date] } ) )"},
+            # first_value counterpart of A
+            {"id": "f_open", "name": "Opening Balance",
+             "expr": "first_value ( sum ( [Inv::Filled] ) , query_groups ( ) , { [D::Date] } )"},
+            # group_sum LOD (non-query_groups window) → normal AGG() measure
+            {"id": "f_lod", "name": "Category LOD",
+             "expr": "group_sum ( [OD::Line Total] , [P::Product ID] )"},
+        ],
+    },
+}
+
+
+def test_classify_semiadditive_last_value_uses_sum_wrapper():
+    r = _by_name(classify_model_columns(SEMIADDITIVE_TML), "Inventory Balance")
+    assert r["kind"] == "semiadditive_measure"
+    assert r["needs_agg"] is False
+    assert r["wrapper"] == "SUM"
+
+
+def test_classify_semiadditive_first_value_uses_sum_wrapper():
+    r = _by_name(classify_model_columns(SEMIADDITIVE_TML), "Opening Balance")
+    assert r["kind"] == "semiadditive_measure"
+    assert r["wrapper"] == "SUM"
+
+
+def test_classify_sum_wrapping_last_value_is_normal_aggregate_measure():
+    # The user's case: sum(last_value(...)) must NOT be treated as semi-additive —
+    # its outer op is sum, so it wraps in AGG() (an extra SUM would double-aggregate).
+    r = _by_name(classify_model_columns(SEMIADDITIVE_TML), "Sum Of Snapshot")
+    assert r["kind"] == "aggregate_measure"
+    assert r["needs_agg"] is True
+    assert r["wrapper"] == "AGG"
+
+
+def test_classify_group_sum_lod_is_normal_aggregate_measure():
+    # A non-query_groups window (group_sum LOD) is a normal AGG() measure —
+    # "contains a window function" is too broad a trigger for the SUM() rule.
+    r = _by_name(classify_model_columns(SEMIADDITIVE_TML), "Category LOD")
+    assert r["kind"] == "aggregate_measure"
+    assert r["wrapper"] == "AGG"

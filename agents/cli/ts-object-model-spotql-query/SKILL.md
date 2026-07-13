@@ -144,15 +144,27 @@ source ~/.zshenv && ts spotql classify-columns --model {model_guid} --profile "{
 
 This calls the same aggregate-function detector `ts-object-answer-promote` uses (BL-087 —
 one canonical keyword list, not two drifted copies), applied to every `model.columns[]`
-entry. It returns a JSON array of `{name, column_type, kind, needs_agg, aggregation}`:
+entry. It returns a JSON array of `{name, column_type, kind, needs_agg, aggregation, wrapper}`.
+The `wrapper` field is the directly-actionable output — the SpotQL function to wrap a
+reference to that column in (or `None` for attributes):
 
-| `kind` | Meaning | How it was detected | In SpotQL |
+| `kind` | Meaning | How it was detected | In SpotQL (`wrapper`) |
 |---|---|---|---|
-| `attribute` | `properties.column_type: ATTRIBUTE` | — | group by it |
+| `attribute` | `properties.column_type: ATTRIBUTE` | — | group by it (`None`) |
 | `raw_measure` | `properties.column_type: MEASURE`, **no** aggregating formula (a plain `column_id`, or a `formula_id` whose `expr` has no aggregate) | `needs_agg: false` | `SUM`/`AVG`/`MIN`/`MAX` (`aggregation` field names which) |
 | `aggregate_measure` | `properties.column_type: MEASURE` **and** its `formulas[].expr` contains an aggregate | `needs_agg: true` | **`AGG(...)`** — never `SUM` (errors `NESTED_AGGREGATE_NOT_SUPPORTED`) |
+| `semiadditive_measure` | aggregate-formula whose **outermost** call is `last_value`/`first_value` (the `last_value(sum(col), query_groups(), {date})` snapshot form) | `needs_agg: false`, `wrapper: SUM` | **`SUM(...)`** — `AGG(...)` errors `NON_CONVERTIBLE_FUNCTION` (see below) |
 
-Match each column you plan to use in Step 3 against its `kind`/`needs_agg` in this output —
+**Semi-additive is the one inversion of the aggregate-formula rule.** A measure whose
+outermost op is `last_value`/`first_value` cannot use `AGG(...)` — the SpotQL→SQL
+serializer can't emit its `query_groups()` and fails with `NON_CONVERTIBLE_FUNCTION`
+("Non standard sql function QueryGroups"). Wrap it in `SUM(...)` instead: that forces a
+per-group materialisation that resolves `query_groups()` and passes the already-collapsed
+snapshot value through unchanged (verified at grand-total, grouped, and time-series
+grain). The trigger is the **outermost** op only — `sum(last_value(...))` is a normal
+`aggregate_measure` (use `AGG`; an extra `SUM` double-aggregates → `NESTED_AGGREGATE`).
+
+Match each column you plan to use in Step 3 against its `wrapper`/`kind` in this output —
 do not re-derive the classification by reading the TML expr yourself. See
 `spotql-rules.md` § Aggregation for the full rule and the "compile-it-to-check" probe if
 a column is still ambiguous after classification. If TML export is FORBIDDEN, you lack
@@ -167,8 +179,11 @@ question. The essentials (full list in the rules file):
 - Every column reference alias-prefixed and double-quoted: `"t1"."Product Category"`.
 - **Raw measures** get a real aggregate (`SUM` is the default): `SUM("t1"."Amount")`.
   **Aggregate-formula columns** (formula already contains `sum`/`count`/`group_aggregate`/
-  `last_value(...)`) get **`AGG("t1"."# Employees")`** — never `SUM` (that errors
-  `NESTED_AGGREGATE_NOT_SUPPORTED`). Attributes go in `GROUP BY`. See `spotql-rules.md`.
+  `cumulative_*`/…) get **`AGG("t1"."# Employees")`** — never `SUM` (that errors
+  `NESTED_AGGREGATE_NOT_SUPPORTED`). **Semi-additive columns** (`semiadditive_measure` —
+  outermost op `last_value`/`first_value`) are the exception: wrap in **`SUM(...)`**, not
+  `AGG` (which errors `NON_CONVERTIBLE_FUNCTION`). Just follow each column's `wrapper` from
+  Step 2. Attributes go in `GROUP BY`. See `spotql-rules.md`.
   Alias only computed/aggregate expressions, in Title Case. Never alias a plain model column.
 - **Never** `SELECT *`, `COUNT(*)`, subqueries, set operations, or arithmetic between an
   aggregate and a numeric literal (it silently returns zeros — see the rules).
@@ -241,6 +256,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.0 | 2026-07-13 | Semi-additive measures use `SUM(...)`, not `AGG(...)`: a measure whose outermost formula op is `last_value`/`first_value` errors `NON_CONVERTIBLE_FUNCTION` under `AGG()` and must be wrapped in `SUM()` (identity pass-through over the per-group snapshot). `ts spotql classify-columns` now returns this as `kind: semiadditive_measure` + a directly-actionable `wrapper` field (ts-cli v0.52.0). Corrects earlier docs that wrongly showed `AGG("Inventory Balance")` as verified. `sum(last_value(...))` (additive outer op) stays `AGG`. Live-verified at grand-total/grouped/monthly grain on nebula-aggregate-aware. |
 | 1.3.2 | 2026-07-10 | Live-verified on nebula-spotQL (Supplier Model): `LEFT`/`RIGHT`/`FULL OUTER JOIN` between CTEs compile verbatim and execute correctly; an attribute-only CTE compiles to a dimension-only scan (no fact join). Together these bypass a Model's inner join without changing it — new `patterns.md` § Dimension-anchored anti-join ("customers without sales"). Fix stale patterns.md set-op-in-CTE notes to match the 1.3.1 finding. |
 | 1.3.1 | 2026-07-08 | Fold in 2026-07 set-operator bug-hunt findings (live-verified on nebula-spotQL): correct CTE set-operation limitation — works when no branch contains an aggregate measure, only aggregated branches fail (engineering-confirmed); note `10000: Failed to transform QuerySpec: null` on outer re-aggregation (likely SCAL-318834); document aggregate-in-WHERE silently reparsed as HAVING; document set-op branch type mismatch compiling but failing at fetch-data. |
 | 1.3.0 | 2026-07-03 | Column classification now delegates to `ts spotql classify-columns` (BL-087); single canonical aggregate-function list. Prereq ts-cli v0.31.0. |
