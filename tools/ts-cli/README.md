@@ -1008,13 +1008,20 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql cla
 
 **Output (JSON to stdout):**
 
-- `--model` mode → array of `{name, column_type, kind, needs_agg, aggregation}` — one
-  entry per `model.columns[]` entry. `kind` is `"attribute"`, `"raw_measure"`, or
-  `"aggregate_measure"`. `kind == "aggregate_measure"` (equivalently `needs_agg: true`)
-  means SpotQL must wrap the column in `AGG(...)` — never a real aggregate, or
-  ThoughtSpot rejects the query with `NESTED_AGGREGATE_NOT_SUPPORTED`. `"raw_measure"`
-  means a real aggregate (`aggregation` names which — `SUM`/`AVG`/…). `"attribute"`
-  means group by it.
+- `--model` mode → array of `{name, column_type, kind, needs_agg, aggregation, wrapper}`
+  — one entry per `model.columns[]` entry. `wrapper` is the directly-actionable output —
+  the SpotQL function to wrap the column reference in (`None` for attributes). `kind` is
+  `"attribute"`, `"raw_measure"`, `"aggregate_measure"`, or `"semiadditive_measure"`:
+  - `"aggregate_measure"` (equivalently `needs_agg: true`, `wrapper: "AGG"`) — wrap in
+    `AGG(...)`; a real aggregate errors `NESTED_AGGREGATE_NOT_SUPPORTED`.
+  - `"semiadditive_measure"` (`wrapper: "SUM"`) — an aggregate-formula whose **outermost**
+    call is `last_value`/`first_value` (the `last_value(sum(col), query_groups(), {date})`
+    snapshot form). Inverts the rule: wrap in `SUM(...)`; `AGG(...)` errors
+    `NON_CONVERTIBLE_FUNCTION`. `sum(last_value(...))` (additive outer op) is NOT this — it
+    stays `aggregate_measure`.
+  - `"raw_measure"` (`wrapper: "SUM"`) — a real aggregate (`aggregation` names which —
+    `SUM`/`AVG`/…).
+  - `"attribute"` — group by it.
 - `--exprs-file`/stdin mode → array of `{name, column_type, aggregation, is_aggregate}` —
   `column_type` is `MEASURE` iff the expression contains a call to an aggregate function
   (`sum`, `count`, `group_aggregate`, `last_value`, …), else `ATTRIBUTE`; `aggregation` is

@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-13
+- feat(ts-cli): bump to v0.52.0 — `ts spotql classify-columns` now detects **semi-additive** measures (outermost op `last_value`/`first_value`) as a new `semiadditive_measure` kind and adds a `wrapper` field (`AGG`/`SUM`/`None`) to every result. Fixes a misclassification: these must be referenced in SpotQL as `SUM(...)` (`AGG()` errors `NON_CONVERTIBLE_FUNCTION`), the inverse of ordinary aggregate-formula measures. Live-verified on nebula-aggregate-aware
+- feat: ts-object-model-spotql-query v1.4.0 — semi-additive `SUM`-vs-`AGG` wrapper rule (Step 2/3, spotql-rules.md, limitations.md, patterns.md); corrects earlier docs that wrongly showed `AGG("Inventory Balance")` for a `last_value` snapshot measure
 - feat(ts-cli): `ts model promote-formula` CLI command (BL-066, ts-cli v0.51.0) — codifies formula promotion merge as deterministic Python: duplicate detection, reference mapping, column_type inference, TML merge, parameter co-promotion
 - feat: ts-object-answer-promote v1.4.0 — Steps 7–10 delegate to `ts model promote-formula` CLI command (BL-066)
 - feat: adopt `ts profiles` CLI commands across 4 profile skills (BL-084 PR2) — ts-profile-thoughtspot v1.2.0, ts-profile-snowflake v1.1.0, ts-profile-databricks v1.1.0, ts-profile-tableau v1.1.0. Replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O with the shared CLI substrate from PR1
