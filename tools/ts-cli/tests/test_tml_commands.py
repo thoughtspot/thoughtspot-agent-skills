@@ -250,9 +250,16 @@ class TestProfilesListSnowflake:
         p.write_text(json.dumps(profiles))
         return p
 
+    def _patch_sf_path(self, sf_path):
+        """Patch the snowflake path in profile_ops.PROFILE_PATHS."""
+        import ts_cli.profile_ops as _po
+        original = _po.PROFILE_PATHS.copy()
+        patched = {**original, "snowflake": sf_path}
+        return patch.object(_po, "PROFILE_PATHS", patched)
+
     def test_snowflake_flag_lists_profiles(self, tmp_path):
         sf_path = self._make_sf_profiles_file(tmp_path)
-        with patch("ts_cli.commands.profiles.SNOWFLAKE_PROFILES_PATH", sf_path):
+        with self._patch_sf_path(sf_path):
             result = runner.invoke(app, ["profiles", "list", "--snowflake"])
         assert result.exit_code == 0
         assert "ThoughtSpot Partner (AP)" in result.stdout
@@ -260,19 +267,19 @@ class TestProfilesListSnowflake:
 
     def test_snowflake_shows_account(self, tmp_path):
         sf_path = self._make_sf_profiles_file(tmp_path)
-        with patch("ts_cli.commands.profiles.SNOWFLAKE_PROFILES_PATH", sf_path):
+        with self._patch_sf_path(sf_path):
             result = runner.invoke(app, ["profiles", "list", "--snowflake"])
         assert "thoughtspot_partner.ap-southeast-2" in result.stdout
 
     def test_snowflake_shows_warehouse(self, tmp_path):
         sf_path = self._make_sf_profiles_file(tmp_path)
-        with patch("ts_cli.commands.profiles.SNOWFLAKE_PROFILES_PATH", sf_path):
+        with self._patch_sf_path(sf_path):
             result = runner.invoke(app, ["profiles", "list", "--snowflake"])
         assert "SE_DEMO_WH" in result.stdout
 
     def test_snowflake_missing_file_exits_nonzero(self, tmp_path):
         missing = tmp_path / "no-such-file.json"
-        with patch("ts_cli.commands.profiles.SNOWFLAKE_PROFILES_PATH", missing):
+        with self._patch_sf_path(missing):
             result = runner.invoke(app, ["profiles", "list", "--snowflake"])
         assert result.exit_code != 0
 
@@ -286,7 +293,7 @@ class TestProfilesListSnowflake:
             "username": "user@example.com",
             "token_env": "TS_TOKEN_PROD",
         }]))
-        with patch("ts_cli.commands.profiles.SNOWFLAKE_PROFILES_PATH", sf_path), \
+        with self._patch_sf_path(sf_path), \
              patch("ts_cli.client.PROFILES_PATH", ts_path), \
              patch("ts_cli.commands.profiles.PROFILES_PATH", ts_path):
             result = runner.invoke(app, ["profiles", "list"])
