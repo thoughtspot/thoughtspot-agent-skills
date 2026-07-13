@@ -11,8 +11,10 @@ visibility), **#4** (non-additive routing, guarded by the `lattice.covers` NONAD
 rule), **#5** (cross-connection), **#9** (WEEK boundary drift) — are lower-priority
 edge-case behaviours, each with a runnable live-test script, and are gated behind the
 skill's mandatory Step-7 routing verification (every recommendation is provisional until
-that check passes). Per [.claude/rules/branching.md](../../../../.claude/rules/branching.md),
-these satisfy the "explicitly deferred to a follow-up open item" merge clause.
+that check passes). **#17** (RLS propagation) is IMPLEMENTED as a pure engine only —
+wiring into the skill flow and a live leak-test are Task 23. Per
+[.claude/rules/branching.md](../../../../.claude/rules/branching.md), these satisfy the
+"explicitly deferred to a follow-up open item" merge clause.
 
 Status legend: **VERIFIED** (tested live) | **CONFIRMED** (direction known via MCP/docs,
 needs live verification) | **OPEN** (unknown) | **IMPLEMENTED** (coded + unit-tested, live
@@ -800,3 +802,62 @@ signature weighting is degraded best-effort (an extra date column beyond the fir
 invisible to matching), not a correctness bug, since weights only bias `recommend`'s
 greedy ranking, never `covers()`'s coverage correctness. Noted inline on
 `_signature_matches` as well.
+
+---
+
+## #17 — RLS propagation (Task 22) — IMPLEMENTED (pure engine); wiring + live leak-test PENDING
+
+**Context:** live review surfaced that the skill previously only GATED on base-table
+row-level security — it refused to import until the user manually replicated the RLS
+elsewhere, and never checked whether a candidate's grain even contained the RLS filter
+column at all. Decisions (user): (a) auto-propagate the base tables' `rls_rules` onto
+the aggregate table (remapped to its own columns), plus verify routing enforces them
+(no leak) — this second half is **Task 23**; (b) on a candidate whose grain omits an
+RLS filter column, offer the user exclude-vs-force-add per candidate.
+
+**What's IMPLEMENTED (this task, pure engine only):** a new pure module,
+[`ts_cli/aggregate/rls.py`](../../../../tools/ts-cli/ts_cli/aggregate/rls.py), with
+five functions, all unit-tested in
+[`tools/ts-cli/tests/test_agg_rls.py`](../../../../tools/ts-cli/tests/test_agg_rls.py)
+(26 tests):
+
+1. `extract_rls(base_table_tmls)` — normalizes a base Table TML's `rls_rules` into
+   `[{table, name, expr, columns, path_ids}]`, handling both the dict-nested shape
+   (`rls_rules: {rules:[...], table_paths:[...]}`, the verified live shape — see
+   `test_report_matched_columns.py::_TABLE_TML_WITH_RLS`) and a flat rule-list shape
+   (no `table_paths` at all), mirroring `agents/shared/erd/parser.py::_rls_rule_list`.
+   The flat shape resolves a bracket ref's identifier against the owning table's own
+   name via a seeded `{own_table: (own_table, [])}` fallback entry in the path map —
+   this fallback shape is a reasonable inference (no concrete flat-shape TML example
+   was available to verify against), flagged here for re-check if a real flat-shape
+   export ever surfaces.
+2. `rls_filter_columns(rules)` — the `(base table, physical column)` pairs the RLS
+   exprs filter on, parsed from each rule's own `path_ids` map (supports cross-table
+   RLS refs, not just a rule's owning table).
+3. `candidate_rls_conflict(candidate, plans, model_tml, rules)` — maps each RLS filter
+   to the model's display column (via `column_id` match) and checks grain membership;
+   returns `{required, present, missing}`. An RLS column the model doesn't expose at
+   all still surfaces (falls back to the raw `column_id` string) rather than being
+   silently dropped.
+4. `add_rls_columns_to_candidate(candidate, missing_display_cols)` — the force-add
+   mechanic: returns a copy with the missing columns folded into `dimensions`.
+5. `propagate_rls(base_rules, agg_table_name, display_to_aggcol)` — builds the
+   aggregate table's `rls_rules` block: one merged `table_paths` entry (id
+   `"<agg_table_name>_1"`, following the `"<name>_1"` self-path convention in
+   `thoughtspot-sets-tml.md`) plus rewritten rule exprs (`ts_*` system-var portions
+   copied verbatim, since they're never bracket-wrapped so the rewrite regex never
+   touches them). Raises `ValueError` naming every unmapped filter column if
+   `display_to_aggcol` is incomplete — a programming-error guard, since Task 23's
+   caller is expected to guarantee coverage via #3/#4 above. A round-trip test
+   confirms the emitted block survives `tml_common.dump_tml_yaml` +
+   `tml_lint.lint_tml` clean when attached to a Table TML.
+
+**Deliberately NOT done here (Task 23's scope):** wiring `rls.py` into
+`generate.py`/`commands/aggregate.py`/the skill's Step 6 flow, the exclude-vs-force-add
+user prompt, and the **live leak-test**: does an RLS-restricted query against the
+primary Model, once routed to the propagated aggregate, actually still enforce the
+rule (a user in group A never sees group B's rows), or does routing to the aggregate
+silently bypass the base table's RLS? This is the single question that decides whether
+auto-propagation is safe to ship — until it's verified live, treat any propagated RLS
+as unverified in the same provisional sense the routing-verification caveat already
+applies to every other recommendation in this skill.
