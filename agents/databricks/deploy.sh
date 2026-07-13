@@ -62,45 +62,56 @@ databricks bundle deploy "${BUNDLE_ARGS[@]+"${BUNDLE_ARGS[@]}"}"
 echo "✓ Bundle deployed"
 
 # --- Deploy Genie skills to user's .assistant/ path ---
+# Leave the bundle directory so `databricks workspace` commands don't pick up
+# databricks.yml (whose default target may have a placeholder host).
+cd "$REPO_ROOT"
+
 echo ""
 echo "Deploying Genie skills to .assistant/ ..."
 
 ASSISTANT_ROOT="/Workspace/Users/${USER_EMAIL}/.assistant"
+DBX_PROFILE_ARGS=()
+if [ -n "${DATABRICKS_CONFIG_PROFILE:-}" ]; then
+    DBX_PROFILE_ARGS=(--profile "$DATABRICKS_CONFIG_PROFILE")
+fi
 
 echo "  User: $USER_EMAIL"
 echo "  Path: $ASSISTANT_ROOT"
+if [ ${#DBX_PROFILE_ARGS[@]} -gt 0 ]; then
+    echo "  Profile: $DATABRICKS_CONFIG_PROFILE"
+fi
 
 # Create directory structure
-databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/ts-convert-from-databricks-mv" 2>/dev/null || true
-databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/ts-convert-to-databricks-mv" 2>/dev/null || true
-databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/shared/mappings/ts-databricks" 2>/dev/null || true
-databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/shared/schemas" 2>/dev/null || true
-databricks workspace mkdirs "${ASSISTANT_ROOT}/notebooks" 2>/dev/null || true
+databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/ts-convert-from-databricks-mv" "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}" 2>/dev/null || true
+databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/ts-convert-to-databricks-mv" "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}" 2>/dev/null || true
+databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/shared/mappings/ts-databricks" "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}" 2>/dev/null || true
+databricks workspace mkdirs "${ASSISTANT_ROOT}/skills/shared/schemas" "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}" 2>/dev/null || true
+databricks workspace mkdirs "${ASSISTANT_ROOT}/notebooks" "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}" 2>/dev/null || true
 
 # Import skills
 databricks workspace import "${ASSISTANT_ROOT}/skills/ts-convert-from-databricks-mv/SKILL.md" \
-    --file "$SCRIPT_DIR/skills/ts-convert-from-databricks-mv/SKILL.md" --format AUTO --overwrite
+    --file "$SCRIPT_DIR/skills/ts-convert-from-databricks-mv/SKILL.md" --format AUTO --overwrite "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}"
 databricks workspace import "${ASSISTANT_ROOT}/skills/ts-convert-to-databricks-mv/SKILL.md" \
-    --file "$SCRIPT_DIR/skills/ts-convert-to-databricks-mv/SKILL.md" --format AUTO --overwrite
+    --file "$SCRIPT_DIR/skills/ts-convert-to-databricks-mv/SKILL.md" --format AUTO --overwrite "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}"
 
 # Import shared references
 for f in "$SHARED_DST/mappings/ts-databricks/"*.md; do
     fname=$(basename "$f")
     databricks workspace import "${ASSISTANT_ROOT}/skills/shared/mappings/ts-databricks/${fname}" \
-        --file "$f" --format AUTO --overwrite
+        --file "$f" --format AUTO --overwrite "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}"
 done
 for f in "$SHARED_DST/schemas/"*.md; do
     fname=$(basename "$f")
     databricks workspace import "${ASSISTANT_ROOT}/skills/shared/schemas/${fname}" \
-        --file "$f" --format AUTO --overwrite
+        --file "$f" --format AUTO --overwrite "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}"
 done
 
 # Import ts_client as a notebook (for %run from skill context)
 databricks workspace import "${ASSISTANT_ROOT}/notebooks/ts_client" \
-    --file "$SCRIPT_DIR/notebooks/ts_client.py" --format SOURCE --language PYTHON --overwrite
+    --file "$SCRIPT_DIR/notebooks/ts_client.py" --format SOURCE --language PYTHON --overwrite "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}"
 
 databricks workspace import "${ASSISTANT_ROOT}/notebooks/databricks_mv_lib" \
-    --file "$SCRIPT_DIR/notebooks/databricks_mv_lib.py" --format SOURCE --language PYTHON --overwrite
+    --file "$SCRIPT_DIR/notebooks/databricks_mv_lib.py" --format SOURCE --language PYTHON --overwrite "${DBX_PROFILE_ARGS[@]+"${DBX_PROFILE_ARGS[@]}"}"
 
 echo "✓ Genie skills deployed to ${ASSISTANT_ROOT}"
 echo ""
