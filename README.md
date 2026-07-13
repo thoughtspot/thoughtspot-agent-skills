@@ -68,14 +68,6 @@ Pre-built analytical capabilities for ThoughtSpot.
 |---|---|:-:|:-:|:-:|
 | [`ts-setup-sv`](agents/coco-snowsight/ts-setup-sv/SKILL.md) | Install or upgrade stored procedures required by Snowsight skills | — | [✓](agents/coco-snowsight/ts-setup-sv/SKILL.md) | — |
 
-**Databricks runtime** also includes support notebooks — see [agents/databricks/SETUP.md](agents/databricks/SETUP.md):
-
-| Notebook | Purpose |
-|---|---|
-| `ts_client.py` | ThoughtSpotClient — 22 methods, auth via Databricks Secrets, in-memory token caching |
-| `ts_profile_setup.py` | Widget-driven profile creation (stores credentials in Databricks Secrets) |
-| `token_refresh.py` | Scheduled job for credential rotation (12h cron) |
-
 ---
 
 ## Getting Started
