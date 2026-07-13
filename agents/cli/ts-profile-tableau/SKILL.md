@@ -45,94 +45,58 @@ If **password**:
 If **pat**:
 5. **PAT name** — the token label (not a secret)
 
-### Step 2 — Derive names
+### Step 2 — Save profile and derive credentials
 
-From the profile name, derive:
+Build the `--field` arguments from the collected details.
 
+For **password** auth:
+
+```bash
+ts profiles add \
+  --platform tableau \
+  --name "{PROFILE_NAME}" \
+  --auth-type password \
+  --field server_url={SERVER_URL} \
+  --field site_content_url={SITE_CONTENT_URL} \
+  --field username={USERNAME} \
+  --field api_version=3.22
 ```
-slug        = lowercase, non-alphanumeric → hyphens
-              e.g. "My Tableau Cloud" → "my-tableau-cloud"
-SLUG        = slug uppercased, hyphens → underscores
-              e.g. "MY_TABLEAU_CLOUD"
+
+For **PAT** auth:
+
+```bash
+ts profiles add \
+  --platform tableau \
+  --name "{PROFILE_NAME}" \
+  --auth-type pat \
+  --field server_url={SERVER_URL} \
+  --field site_content_url={SITE_CONTENT_URL} \
+  --field pat_name={PAT_NAME} \
+  --field api_version=3.22
 ```
 
-Credential env var:
-- Password: `TABLEAU_PASSWORD_{SLUG}`
-- PAT: `TABLEAU_PAT_SECRET_{SLUG}`
-
-Keychain service: `tableau-{slug}`
-Keychain account:
-- Password: the username (email)
-- PAT: the PAT name
+Parse the JSON output. It contains `keychain_store_commands`, `keychain_verify_commands`,
+`zshenv_line`, and `windows_env_commands`.
 
 ### Step 3 — Store credential
 
 **Never accept the credential in this conversation.**
 
-Show the user the commands to run in their own terminal. Do not ask them
-to paste the credential here.
+Show the user the keychain store command for their platform from the
+`keychain_store_commands` in the Step 2 output, replacing `VALUE` with
+`PASTE_CREDENTIAL_HERE`. Tell them to run it in their own terminal.
 
-#### macOS
+After the user confirms the credential is stored, show the verify command
+from `keychain_verify_commands` to confirm it worked.
 
-```bash
-security add-generic-password -s "tableau-{slug}" -a "{account}" -w "PASTE_CREDENTIAL_HERE"
-```
+### Step 4 — Update shell profile
 
-Then add the env var to `~/.zshenv`:
+**macOS / Linux:** Read `~/.zshenv`, upsert the `zshenv_line` from Step 2
+(replace an existing line for the same env var, or append if not present),
+write back. Then tell the user to run `source ~/.zshenv`.
 
-```bash
-echo 'export {ENV_VAR}="$(security find-generic-password -s tableau-{slug} -a {account} -w)"' >> ~/.zshenv
-source ~/.zshenv
-```
-
-#### Windows
-
-```powershell
-python -c "import keyring; keyring.set_password('tableau-{slug}', '{account}', input('Credential: '))"
-```
-
-Then set the env var permanently:
-
-```powershell
-[System.Environment]::SetEnvironmentVariable('{ENV_VAR}', (python -c "import keyring; print(keyring.get_password('tableau-{slug}', '{account}'))"), 'User')
-```
-
-#### Linux
-
-```bash
-python3 -c "import keyring; keyring.set_password('tableau-{slug}', '{account}', input('Credential: '))"
-echo 'export {ENV_VAR}="$(python3 -c \"import keyring; print(keyring.get_password(\\\"tableau-{slug}\\\", \\\"{account}\\\"))\")"' >> ~/.zshenv
-source ~/.zshenv
-```
-
-### Step 4 — Write profile JSON
-
-Build the profile entry and write to `~/.claude/tableau-profiles.json`:
-
-```python
-import json
-from pathlib import Path
-
-profile_path = Path.home() / ".claude" / "tableau-profiles.json"
-existing = json.loads(profile_path.read_text()) if profile_path.exists() else []
-
-new_profile = {
-    "name": "{PROFILE_NAME}",
-    "server_url": "{SERVER_URL}",
-    "site_content_url": "{SITE_CONTENT_URL}",
-    "auth": "{AUTH_METHOD}",
-    # password fields:
-    "username": "{USERNAME}",          # omit if PAT
-    "password_env": "{ENV_VAR}",       # omit if PAT
-    # PAT fields:
-    "pat_name": "{PAT_NAME}",          # omit if password
-    "pat_secret_env": "{ENV_VAR}",     # omit if password
-    "api_version": "3.22"
-}
-
-existing.append(new_profile)
-profile_path.write_text(json.dumps(existing, indent=2))
-```
+**Windows:** Show the `windows_env_commands` from Step 2 for the user to
+run in PowerShell.
 
 ### Step 5 — Test
 
@@ -167,27 +131,33 @@ Report success or failure with the error detail.
 
 ## Remove
 
-Ask which profile to remove, then:
-
-1. Remove the profile entry from `~/.claude/tableau-profiles.json`
-2. Show the user the command to remove the keychain entry:
+Ask which profile to remove, then run:
 
 ```bash
-# macOS
-security delete-generic-password -s "tableau-{slug}" -a "{account}"
+ts profiles remove --platform tableau --name "{PROFILE_NAME}"
 ```
 
+Parse the JSON output for `keychain_service` and `env_var_to_remove`.
+
+Show the user the command to remove the keychain entry for their platform:
+
+**macOS:**
+```bash
+security delete-generic-password -s "{keychain_service}" -a "{account}"
+```
+
+**Windows:**
 ```powershell
-# Windows
-python -c "import keyring; keyring.delete_password('tableau-{slug}', '{account}')"
+python -c "import keyring; keyring.delete_password('{keychain_service}', '{account}')"
 ```
 
+**Linux:**
 ```bash
-# Linux
-python3 -c "import keyring; keyring.delete_password('tableau-{slug}', '{account}')"
+python3 -c "import keyring; keyring.delete_password('{keychain_service}', '{account}')"
 ```
 
-3. Show the user the env var line to remove from `~/.zshenv`
+Then remove the export line for `env_var_to_remove` from `~/.zshenv` (read,
+filter out the line starting with `export {env_var_to_remove}=`, write back).
 
 ---
 
@@ -195,4 +165,5 @@ python3 -c "import keyring; keyring.delete_password('tableau-{slug}', '{account}
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-13 | Adopt `ts profiles add/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, and profile JSON I/O; fixes append-only zshenv bug |
 | 1.0.0 | 2026-06-26 | Initial release — password and PAT auth |

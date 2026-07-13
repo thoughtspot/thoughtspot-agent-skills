@@ -201,123 +201,60 @@ Let me know when you've done that.
 
 Wait for confirmation.
 
-**Write the profile:**
-```json
-{
-  "name": "{profile_name}",
-  "method": "python",
-  "account": "{account}",
-  "username": "{username}",
-  "auth": "key_pair",
-  "private_key_path": "~/.ssh/snowflake_key.p8",
-  "private_key_passphrase_env": "",
-  "default_warehouse": "{warehouse}",
-  "default_role": "{role}"
-}
+**Save the profile:**
+
+```bash
+ts profiles add \
+  --platform snowflake \
+  --name "{profile_name}" \
+  --auth-type key_pair \
+  --field account={account} \
+  --field username={username} \
+  --field private_key_path=~/.ssh/snowflake_key.p8 \
+  --field default_warehouse={warehouse} \
+  --field default_role={role}
 ```
+
+Key pair auth does not use a keychain entry or env var — the key file is the credential.
 
 ---
 
 #### A3b — Password Auth
 
-Derive names from `{profile_name}`:
-- `{slug}` — lowercase, non-alphanumeric → hyphens, collapse multiples, strip ends
-  e.g. `"My Staging"` → `"my-staging"`
-- `{keychain_service}` — `"snowflake-{slug}"`
-- `{SLUG}` — slug uppercased, hyphens → underscores
-- `{env_var}` — `SNOWFLAKE_PASSWORD_{SLUG}`
+**Save profile and derive credentials:**
 
-**Store credential** — detect platform first (`python -c "import platform; print(platform.system())"`), then ask the user to run **in their own terminal** so the password is never written into the conversation or history file:
-
-**macOS** (`Darwin`):
-```
-Run this in your terminal:
-
-  security add-generic-password \
-    -s "{keychain_service}" \
-    -a "{username}" \
-    -w "YOUR_PASSWORD_HERE"
-
-Let me know when done.
+```bash
+ts profiles add \
+  --platform snowflake \
+  --name "{profile_name}" \
+  --auth-type password \
+  --field account={account} \
+  --field username={username} \
+  --field default_warehouse={warehouse} \
+  --field default_role={role}
 ```
 
-**Windows** (PowerShell):
-```
-Run this in PowerShell:
+Parse the JSON output. It contains `keychain_store_commands`, `keychain_verify_commands`,
+`zshenv_line`, and `windows_env_commands`.
 
-  python -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_PASSWORD_HERE')"
+**Store credential** — detect platform first (`python -c "import platform; print(platform.system())"`),
+then show the user the keychain store command for their platform from the
+`keychain_store_commands` in the output, replacing `VALUE` with `YOUR_PASSWORD_HERE`.
+Tell them to run it **in their own terminal** so the password never enters the conversation.
 
-Let me know when done.
-```
-
-**Linux**:
-```
-Run this in your terminal:
-
-  python3 -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_PASSWORD_HERE')"
-
-Let me know when done.
-```
-
-After confirmation, verify:
-
-**macOS:**
-```python
-import subprocess
-r = subprocess.run(
-    ["security", "find-generic-password", "-s", "{keychain_service}", "-a", "{username}"],
-    capture_output=True
-)
-print("Stored." if r.returncode == 0 else "Not found — check the command ran without errors.")
-```
-
-**Windows / Linux:**
-```python
-import keyring
-stored = keyring.get_password("{keychain_service}", "{username}")
-print("Stored." if stored else "Not found — check the command ran without errors.")
-```
+After the user confirms, show the verify command from `keychain_verify_commands`.
 
 Stop if verification fails — do not proceed without a confirmed credential write.
 
 **Update shell profile**
 
-**macOS** — export line for `~/.zshenv`:
-```
-export {env_var}=$(security find-generic-password -s "{keychain_service}" -a "{username}" -w 2>/dev/null)
-```
+**macOS / Linux:** Read `~/.zshenv`, upsert the `zshenv_line` from the output
+(replace an existing line for the same env var, or append if not present), write back.
+Tell the user to run `source ~/.zshenv` and wait for confirmation.
 
-**Linux** — export line for `~/.zshenv` (or `~/.bashrc`):
-```
-export {env_var}=$(python3 -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')" 2>/dev/null)
-```
-
-For both: read the shell profile (empty string if missing). If the line already exports `{env_var}`, replace it. Otherwise append (preceded by a blank line if file is non-empty). Tell the user to run `source ~/.zshenv` and wait for confirmation.
-
-**Windows** — set a permanent user environment variable:
-```
-Run this in PowerShell:
-
-  $val = python -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')"
-  [System.Environment]::SetEnvironmentVariable('{env_var}', $val, 'User')
-
-Restart your terminal after, then let me know when done.
-```
-Note: on Windows this step is optional — the connector reads from Windows Credential Manager via `keyring` at runtime.
-
-**Write the profile:**
-```json
-{
-  "name": "{profile_name}",
-  "method": "python",
-  "account": "{account}",
-  "username": "{username}",
-  "auth": "password",
-  "password_env": "{env_var}",
-  "default_warehouse": "{warehouse}",
-  "default_role": "{role}"
-}
-```
+**Windows:** Show the `windows_env_commands` from the output for the user to run in
+PowerShell. Note: on Windows this step is optional — the connector reads from Windows
+Credential Manager via `keyring` at runtime.
 
 ---
 
@@ -462,29 +399,24 @@ Read `~/.snowflake/connections.toml`, update the `private_key_path` for the rele
 
 Show output. If it still fails, stop and ask the user to fix the CLI config before continuing.
 
-#### B5 — Write Profile
+#### B5 — Save Profile
 
-```json
-{
-  "name": "{profile_name}",
-  "method": "cli",
-  "cli_connection": "{cli_connection}",
-  "snow_cmd": "{snow_cmd}",
-  "default_warehouse": "{warehouse}",
-  "default_role": "{role}"
-}
+```bash
+ts profiles add \
+  --platform snowflake \
+  --name "{profile_name}" \
+  --auth-type cli \
+  --field cli_connection={cli_connection} \
+  --field snow_cmd={snow_cmd} \
+  --field default_warehouse={warehouse} \
+  --field default_role={role}
 ```
 
-`snow_cmd` is the resolved path to the `snow` binary (e.g. `~/Library/Python/3.9/bin/snow`). If `snow` was found on PATH, store `"snow"` as the value.
+CLI auth does not use a keychain entry or env var.
 
 ---
 
-### Save Profile
-
-Read `~/.claude/snowflake-profiles.json`.
-- Profile with same name exists → replace it.
-- Other profiles exist → append.
-- File missing → create with this profile as the only entry.
+### Confirm
 
 On success:
 ```
@@ -542,13 +474,27 @@ What would you like to update?
 Enter 1–3:
 ```
 
-### U — Simple Field Updates (Account, Username, Warehouse, Role, CLI Connection)
+### U — Simple Field Updates (Account, Warehouse, Role, CLI Connection)
 
 ```
 New {field}: [{current_value}]
 ```
 
-Update the field in profile JSON. For username changes on password profiles, migrate the stored credential:
+Run:
+
+```bash
+ts profiles update --platform snowflake --name "{profile_name}" --field {field_key}={new_value}
+```
+
+Confirm: `{Field} updated.`
+
+### U — Update Username (Password Profiles)
+
+```
+New username: [{current_username}]
+```
+
+If username changes on a password profile, migrate the stored credential:
 
 **macOS:**
 ```python
@@ -568,13 +514,24 @@ if credential:
     keyring.set_password("{keychain_service}", "{new_username}", credential)
 ```
 
-Update `username` in profile JSON.
+Where `{keychain_service}` is `snowflake-{slug}` (slug derived from the profile name).
 
-Confirm: `{Field} updated.`
+Then update the profile:
+
+```bash
+ts profiles update --platform snowflake --name "{profile_name}" --field username={new_username}
+```
+
+Also update the export line in `~/.zshenv` to reference the new username.
+
+Confirm: `Username updated.`
 
 ### U — Refresh Password
 
-Show the profile's auth details, then detect platform (`platform.system()`) and ask the user to run **in their own terminal**:
+Show the profile's auth details, then detect platform (`platform.system()`) and
+ask the user to run **in their own terminal**.
+
+The keychain service is `snowflake-{slug}` and the account is the profile's `username`.
 
 **macOS** (`Darwin`):
 ```
@@ -625,8 +582,8 @@ Password updated. Run this in your terminal to apply:
 ### U — Change Auth Method
 
 Run the full auth setup section of [Add](#add) for the chosen method:
-- **Key pair:** generate or reuse key → assign public key in Snowsight → update profile JSON (`auth: key_pair`, remove `password_env`)
-- **Password:** prompt → Keychain → ~/.zshenv → update profile JSON (`auth: password`, add `password_env`, remove `private_key_path`)
+- **Key pair:** generate or reuse key → assign public key in Snowsight → `ts profiles add` with `--auth-type key_pair` (replaces the existing profile; remove `password_env`)
+- **Password:** `ts profiles add` with `--auth-type password` → keychain → ~/.zshenv (replaces the existing profile; remove `private_key_path`)
 
 Clean up the old auth:
 - Switching to key pair: delete Keychain entry, remove export line from `~/.zshenv`
@@ -651,7 +608,13 @@ Y / N:
 
 If confirmed:
 
-1. **Remove from profile JSON** — filter out the entry with matching `name`. Write the updated file (or delete the file if no profiles remain).
+1. **Remove profile:**
+
+```bash
+ts profiles remove --platform snowflake --name "{profile_name}"
+```
+
+Parse the JSON output for `keychain_service` and `env_var_to_remove`.
 
 2. **If password auth — remove credential store entry:**
 
@@ -671,7 +634,7 @@ If confirmed:
 
    If not found, continue silently.
 
-3. **If password auth — remove export line from shell profile** (macOS/Linux only) — read `~/.zshenv` (or `~/.bashrc`), filter out any line that exports `{password_env}`, write back. Skip on Windows.
+3. **If password auth — remove export line from shell profile** (macOS/Linux only) — read `~/.zshenv` (or `~/.bashrc`), filter out any line that exports `{env_var_to_remove}`, write back. Skip on Windows.
 
 4. Tell the user:
 ```
@@ -856,5 +819,6 @@ Lowercase in `SHOW` output = case-sensitive identifier = must be quoted in SQL.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |
 | 1.0.1 | 2026-04-24 | Add one-line context before menu |
 | 1.0.0 | 2026-04-24 | Initial versioned release |

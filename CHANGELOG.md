@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-13
+- feat: adopt `ts profiles` CLI commands across 4 profile skills (BL-084 PR2) — ts-profile-thoughtspot v1.2.0, ts-profile-snowflake v1.1.0, ts-profile-databricks v1.1.0, ts-profile-tableau v1.1.0. Replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O with the shared CLI substrate from PR1
 - feat(ts-cli): `ts profiles add/update/remove/sync-env` + `list --json` — codifies profile substrate (BL-084 PR1, ts-cli v0.50.0). New `profile_ops` module consolidates slug derivation, env-var naming, keychain command generation, zshenv upsert, and profile JSON CRUD across 4 platforms. Legacy `load_profiles`/`load_tableau_profiles` delegate to the shared module
 - docs: shared profile-select-and-authenticate reference for conversion skills
 - feat(ts-cli): bump to v0.50.0 — auto-generate `sql_*_op` pass-through formulas for LOWER, UPPER, MINUTE, SECOND, and DATE_FORMAT instead of skipping them as untranslatable. Eliminates the manual export→edit→reimport cycle for these functions. DATE_FORMAT bakes the format literal into the SQL template

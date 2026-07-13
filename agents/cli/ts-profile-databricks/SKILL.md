@@ -242,109 +242,39 @@ Profile name: [Production]
 ```
 Default to `Production`. Store as `{profile_name}`.
 
-#### A-SP2 — Store Client Secret
+#### A-SP2 — Save Profile and Store Client Secret
 
-Derive names from `{profile_name}`:
-- `{slug}` — lowercase, non-alphanumeric → hyphens, collapse multiples, strip ends
-  e.g. `"My Staging"` → `"my-staging"`
-- `{keychain_service}` — `"databricks-{slug}"`
-- `{SLUG}` — slug uppercased, hyphens → underscores  e.g. `"MY_STAGING"`
-- `{secret_env}` — `DATABRICKS_SP_SECRET_{SLUG}`
-- `{dbx_profile}` — `"ts-{slug}"` (the profile name in `~/.databrickscfg`)
-
-First detect the platform:
-```python
-import platform
-print(platform.system())  # Darwin = macOS, Windows, Linux
+```bash
+ts profiles add \
+  --platform databricks \
+  --name "{profile_name}" \
+  --auth-type oauth-m2m \
+  --field host={host} \
+  --field client_id={client_id}
 ```
 
-Ask the user to run this command **in their own terminal** (not here — credentials
-must not enter the conversation or its history):
+Parse the JSON output. It contains `slug`, `keychain_store_commands`,
+`keychain_verify_commands`, `zshenv_line`, `windows_env_commands`, and
+`keychain_service`.
 
-**macOS** (`Darwin`):
-```
-Run this in your terminal to store the client secret securely:
+**Never accept the credential in this conversation.**
 
-  security add-generic-password \
-    -s "databricks-{slug}" \
-    -a "{client_id}" \
-    -w "YOUR_CLIENT_SECRET_HERE"
+Show the user the keychain store command for their platform from the
+`keychain_store_commands` in the output, replacing `VALUE` with
+`YOUR_CLIENT_SECRET_HERE`. Tell them to run it **in their own terminal**.
 
-Replace YOUR_CLIENT_SECRET_HERE with the Service Principal's secret value, then let me know when done.
-```
+After the user confirms, show the verify command from `keychain_verify_commands`.
 
-**Windows** (PowerShell):
-```
-Run this in PowerShell to store the client secret securely:
-
-  python -c "import keyring; keyring.set_password('databricks-{slug}', '{client_id}', 'YOUR_CLIENT_SECRET_HERE')"
-
-Replace YOUR_CLIENT_SECRET_HERE with the Service Principal's secret value, then let me know when done.
-```
-
-**Linux**:
-```
-Run this in your terminal to store the client secret securely:
-
-  python3 -c "import keyring; keyring.set_password('databricks-{slug}', '{client_id}', 'YOUR_CLIENT_SECRET_HERE')"
-
-Replace YOUR_CLIENT_SECRET_HERE with the Service Principal's secret value, then let me know when done.
-```
-
-After the user confirms, verify the entry was written:
-
-**macOS:**
-```python
-import subprocess
-r = subprocess.run(
-    ["security", "find-generic-password", "-s", "databricks-{slug}", "-a", "{client_id}"],
-    capture_output=True
-)
-print("Stored." if r.returncode == 0 else "Not found — check the command ran without errors.")
-```
-
-**Windows / Linux:**
-```python
-import keyring
-stored = keyring.get_password("databricks-{slug}", "{client_id}")
-print("Stored." if stored else "Not found — check the command ran without errors.")
-```
-
-Stop if verification fails — do not proceed without a confirmed credential write.
+Stop if verification fails.
 
 #### A-SP3 — Update Shell Profile
 
-**macOS** (`Darwin`) — export line for `~/.zshenv`:
-```
-export {secret_env}=$(security find-generic-password -s "databricks-{slug}" -a "{client_id}" -w 2>/dev/null)
-```
-Read `~/.zshenv` (empty string if missing). If the line already exports `{secret_env}`, replace it. Otherwise append (preceded by a blank line if file is non-empty).
+**macOS / Linux:** Read `~/.zshenv`, upsert the `zshenv_line` from the output
+(replace an existing line for the same env var, or append if not present), write back.
+Tell the user to run `source ~/.zshenv` and wait for confirmation.
 
-Tell the user:
-```
-~/.zshenv updated. Run this in your terminal:
-
-  source ~/.zshenv
-
-Let me know when done.
-```
-Wait for confirmation.
-
-**Linux** — export line for `~/.zshenv` (or `~/.bashrc` if that is the user's shell profile):
-```
-export {secret_env}=$(python3 -c "import keyring; v=keyring.get_password('databricks-{slug}', '{client_id}'); print(v or '', end='')" 2>/dev/null)
-```
-Apply the same read/replace/append logic as macOS. Tell the user to run `source ~/.zshenv` and wait for confirmation.
-
-**Windows** — set a permanent user environment variable via PowerShell:
-```
-Run this in PowerShell to persist the credential as an env var:
-
-  $val = python -c "import keyring; v=keyring.get_password('databricks-{slug}', '{client_id}'); print(v or '', end='')"
-  [System.Environment]::SetEnvironmentVariable('{secret_env}', $val, 'User')
-
-Let me know when done, then restart your terminal for the change to take effect.
-```
+**Windows:** Show the `windows_env_commands` from the output for the user to run in
+PowerShell. Wait for confirmation.
 
 #### A-SP4 — Write Databricks CLI Config
 
@@ -357,6 +287,8 @@ if not secret:
     print("ERROR: {secret_env} is empty — run 'source ~/.zshenv' first.")
 ```
 
+Where `{secret_env}` is the `env_var` from the `ts profiles add` output.
+
 Write or update the `[{dbx_profile}]` section in `~/.databrickscfg`:
 
 ```ini
@@ -366,6 +298,8 @@ client_id     = {client_id}
 client_secret = <value from env var>
 auth_type     = oauth-m2m
 ```
+
+Where `{dbx_profile}` is `ts-{slug}` from the `ts profiles add` output.
 
 Read `~/.databrickscfg` first. If a section named `[{dbx_profile}]` already exists, replace it. Otherwise append. Preserve all other sections.
 
@@ -411,6 +345,15 @@ To find the HTTP path:
 You can also skip this for now and add it later with U → Update.
 ```
 
+Update the profile with workspace defaults:
+
+```bash
+ts profiles update --platform databricks --name "{profile_name}" \
+  --field default_catalog={default_catalog} \
+  --field default_schema={default_schema} \
+  --field sql_warehouse_http_path={sql_warehouse_http_path}
+```
+
 ---
 
 ### Path B — Personal Access Token (PAT)
@@ -429,14 +372,19 @@ Profile name: [Production]
 ```
 Default to `Production`. Store as `{profile_name}`.
 
-#### A-PAT2 — Store Token
+#### A-PAT2 — Save Profile and Store Token
 
-Derive names from `{profile_name}`:
-- `{slug}` — lowercase, non-alphanumeric → hyphens, collapse multiples, strip ends
-- `{keychain_service}` — `"databricks-{slug}"`
-- `{SLUG}` — slug uppercased, hyphens → underscores
-- `{secret_env}` — `DATABRICKS_TOKEN_{SLUG}`
-- `{dbx_profile}` — `"ts-{slug}"`
+```bash
+ts profiles add \
+  --platform databricks \
+  --name "{profile_name}" \
+  --auth-type pat \
+  --field host={host}
+```
+
+Parse the JSON output for `slug`, `keychain_store_commands`,
+`keychain_verify_commands`, `zshenv_line`, `windows_env_commands`,
+`keychain_service`, and `env_var`.
 
 ```
 To get your token:
@@ -447,60 +395,17 @@ To get your token:
   5. Copy the token value (you won't see it again)
 ```
 
-Detect platform (`platform.system()`), then ask the user to store the token
-**in their own terminal** (same pattern as Service Principal — replace
-`"databricks-{slug}"` service name and use `"token"` as the account name):
+Show the user the keychain store command for their platform from the
+`keychain_store_commands` in the output, replacing `VALUE` with
+`YOUR_TOKEN_HERE`. Tell them to run it **in their own terminal**.
 
-**macOS** (`Darwin`):
-```
-Run this in your terminal to store the token securely:
-
-  security add-generic-password \
-    -s "databricks-{slug}" \
-    -a "token" \
-    -w "YOUR_TOKEN_HERE"
-
-Replace YOUR_TOKEN_HERE with the token you copied, then let me know when done.
-```
-
-**Windows** (PowerShell):
-```
-Run this in PowerShell to store the token securely:
-
-  python -c "import keyring; keyring.set_password('databricks-{slug}', 'token', 'YOUR_TOKEN_HERE')"
-
-Replace YOUR_TOKEN_HERE with the token you copied, then let me know when done.
-```
-
-**Linux**:
-```
-Run this in your terminal to store the token securely:
-
-  python3 -c "import keyring; keyring.set_password('databricks-{slug}', 'token', 'YOUR_TOKEN_HERE')"
-
-Replace YOUR_TOKEN_HERE with the token you copied, then let me know when done.
-```
-
-Verify the entry was written (same pattern as Service Principal, account name = `"token"`).
+After the user confirms, show the verify command from `keychain_verify_commands`.
 
 Stop if verification fails.
 
 #### A-PAT3 — Update Shell Profile
 
-Same pattern as A-SP3, but using `{secret_env}` = `DATABRICKS_TOKEN_{SLUG}` and
-account name `"token"` in the keychain lookup.
-
-**macOS:**
-```
-export {secret_env}=$(security find-generic-password -s "databricks-{slug}" -a "token" -w 2>/dev/null)
-```
-
-**Linux:**
-```
-export {secret_env}=$(python3 -c "import keyring; v=keyring.get_password('databricks-{slug}', 'token'); print(v or '', end='')" 2>/dev/null)
-```
-
-Apply the same read/replace/append logic. Wait for `source ~/.zshenv` confirmation.
+Same as A-SP3 — upsert the `zshenv_line` from the output.
 
 #### A-PAT4 — Write Databricks CLI Config
 
@@ -512,6 +417,8 @@ host  = {host}
 token = <value from env var>
 ```
 
+Where `{dbx_profile}` is `ts-{slug}` from the `ts profiles add` output.
+
 Same read/replace/append logic as A-SP4. Set file permissions to 0600.
 
 **Note:** Same plaintext trade-off as Service Principal — `~/.databrickscfg` must
@@ -519,7 +426,8 @@ contain the token value. The keychain entry is the authoritative copy.
 
 #### A-PAT5 — Collect Workspace Defaults
 
-Same as A-SP5 — collect default catalog, default schema, SQL warehouse HTTP path.
+Same as A-SP5 — collect default catalog, default schema, SQL warehouse HTTP path,
+and update the profile with `ts profiles update`.
 
 ---
 
@@ -574,65 +482,27 @@ This CLI profile has authentication issues. You may need to re-authenticate:
 Try re-authenticating, then let me know when done.
 ```
 
-#### A-CLI3 — Collect Details
+#### A-CLI3 — Collect Details and Save Profile
 
 ```
 Profile name for this connection: [Production]
 ```
 Default to `Production`. Store as `{profile_name}`.
 
-Then collect workspace defaults (same as A-SP5).
+```bash
+ts profiles add \
+  --platform databricks \
+  --name "{profile_name}" \
+  --auth-type databricks-cli \
+  --field host={host} \
+  --field dbx_profile={dbx_cli_profile}
+```
+
+CLI auth does not use a keychain entry or env var.
+
+Then collect workspace defaults (same as A-SP5) and update with `ts profiles update`.
 
 ---
-
-### Save Profile
-
-Read `~/.claude/databricks-profiles.json`.
-- Profile with same name exists → replace it.
-- Other profiles exist → append.
-- File missing → create with this profile as the only entry.
-
-**Service principal profile entry:**
-```json
-{
-  "name": "{profile_name}",
-  "dbx_profile": "{dbx_profile}",
-  "host": "{host}",
-  "auth_type": "oauth-m2m",
-  "client_id": "{client_id}",
-  "secret_env": "{secret_env}",
-  "default_catalog": "{default_catalog}",
-  "default_schema": "{default_schema}",
-  "sql_warehouse_http_path": "{sql_warehouse_http_path}"
-}
-```
-
-**PAT profile entry:**
-```json
-{
-  "name": "{profile_name}",
-  "dbx_profile": "{dbx_profile}",
-  "host": "{host}",
-  "auth_type": "pat",
-  "secret_env": "{secret_env}",
-  "default_catalog": "{default_catalog}",
-  "default_schema": "{default_schema}",
-  "sql_warehouse_http_path": "{sql_warehouse_http_path}"
-}
-```
-
-**CLI profile entry:**
-```json
-{
-  "name": "{profile_name}",
-  "dbx_profile": "{dbx_cli_profile}",
-  "host": "{host}",
-  "auth_type": "databricks-cli",
-  "default_catalog": "{default_catalog}",
-  "default_schema": "{default_schema}",
-  "sql_warehouse_http_path": "{sql_warehouse_http_path}"
-}
-```
 
 ### Test and Confirm
 
@@ -674,8 +544,12 @@ Enter 1–6:
 New workspace URL: [{current_host}]
 ```
 
-Update `host` in the profile JSON. Also update `host` in `~/.databrickscfg` under the
-`[{dbx_profile}]` section if the profile uses SP or PAT auth.
+```bash
+ts profiles update --platform databricks --name "{profile_name}" --field host={new_host}
+```
+
+Also update `host` in `~/.databrickscfg` under the `[{dbx_profile}]` section if the
+profile uses SP or PAT auth.
 
 Confirm: `URL updated.`
 
@@ -683,7 +557,9 @@ Confirm: `URL updated.`
 
 **Service principal:**
 
-Detect platform, then ask the user to run **in their own terminal**:
+Detect platform, then ask the user to run **in their own terminal**.
+
+The keychain service is `databricks-{slug}` and the account is the `client_id`.
 
 **macOS** (`Darwin`):
 ```
@@ -724,8 +600,8 @@ After confirmation, verify (re-use the platform-specific verification block from
 
 After sourcing, also update `client_secret` in `~/.databrickscfg` under `[{dbx_profile}]`.
 
-**PAT:** Same pattern but with account name `"token"`, env var `DATABRICKS_TOKEN_{SLUG}`,
-and updating the `token` field in `~/.databrickscfg`.
+**PAT:** Same pattern but with account name `"token"`, and updating the `token` field
+in `~/.databrickscfg`.
 
 **CLI profile:** Show:
 ```
@@ -739,12 +615,13 @@ to re-authenticate, then let me know when done.
 ### U3 — Change Auth Method
 
 Run the full credential setup section of [Add](#a--add) for the chosen method.
+`ts profiles add` will replace the existing profile entry.
 
 Clean up the old auth:
 - Delete old Keychain entry
 - Remove old export line from `~/.zshenv` (macOS/Linux)
 - Remove or replace old `~/.databrickscfg` section
-- Update profile JSON with new auth fields
+- Profile JSON is already updated by `ts profiles add`
 
 ### U4–U6 — Simple Field Updates (Catalog, Schema, Warehouse)
 
@@ -752,7 +629,9 @@ Clean up the old auth:
 New {field}: [{current_value}]
 ```
 
-Update the field in profile JSON. No credential or config changes needed.
+```bash
+ts profiles update --platform databricks --name "{profile_name}" --field {field_key}={new_value}
+```
 
 Confirm: `{Field} updated.`
 
@@ -775,13 +654,19 @@ Y / N:
 
 If confirmed:
 
-1. **Remove from profile JSON** — filter out the entry with matching `name`. Write the updated file (or delete the file if no profiles remain).
+1. **Remove profile:**
+
+```bash
+ts profiles remove --platform databricks --name "{profile_name}"
+```
+
+Parse the JSON output for `keychain_service` and `env_var_to_remove`.
 
 2. **If SP or PAT auth — remove credential store entry:**
 
    **macOS:**
    ```bash
-   security delete-generic-password -s "databricks-{slug}" -a "{account_name}"
+   security delete-generic-password -s "{keychain_service}" -a "{account_name}"
    ```
    Where `{account_name}` is `{client_id}` for SP or `"token"` for PAT.
 
@@ -789,14 +674,14 @@ If confirmed:
    ```python
    import keyring
    try:
-       keyring.delete_password("databricks-{slug}", "{account_name}")
+       keyring.delete_password("{keychain_service}", "{account_name}")
    except Exception:
        pass
    ```
 
    If not found, continue silently.
 
-3. **If SP or PAT auth — remove export line from shell profile** (macOS/Linux only) — read `~/.zshenv`, filter out any line that exports `{secret_env}`, write back.
+3. **If SP or PAT auth — remove export line from shell profile** (macOS/Linux only) — read `~/.zshenv`, filter out any line that exports `{env_var_to_remove}`, write back.
 
 4. **If SP or PAT auth — remove `~/.databrickscfg` section** — read the file, remove the `[{dbx_profile}]` section, write back. Preserve all other sections.
 
@@ -953,4 +838,5 @@ warehouse_id = profile["sql_warehouse_http_path"].rstrip("/").split("/")[-1]
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |
 | 1.0.0 | 2026-05-20 | Initial release — Service Principal, PAT, and CLI profile auth |
