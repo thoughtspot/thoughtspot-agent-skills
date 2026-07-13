@@ -107,17 +107,26 @@ def _date_rows(candidate: dict) -> List[_Row]:
 
 
 def _measure_rows(candidate: dict, plans: dict) -> List[_Row]:
+    """One aggregate select item per rewrite-plan component, in the SAME
+    iteration order as generate._component_columns / build_aggregate_table_spec
+    (iterate measure_columns, then each plan's components) — NOT deduped.
+
+    Deduping by (source_column, func) would diverge from the aggregate Table
+    spec, which declares one physical column per component alias without
+    deduping: a raw SUM measure `Sales` and a summing formula
+    `Total Revenue = sum([Sales])` both decompose to ("Sales", "SUM") on an
+    ordinary model, so a deduped SELECT would emit only `sales_sum` while the
+    Table TML declares both `sales_sum` and `total_revenue_sum` — leaving the
+    latter with no physical backing (schema mismatch on import, broken
+    aggregate formula). Emitting the redundant identical `sum()` item is
+    harmless and keeps ca_N <-> output_alias <-> table-spec column 1:1 and
+    identically ordered."""
     rows: List[_Row] = []
-    seen: set = set()
     for m in candidate.get("measure_columns", []) or []:
         plan = plans.get(m)
         if not plan or not plan.get("decomposable"):
             continue
         for comp in plan["components"]:
-            key = (comp["source_column"], comp["func"])
-            if key in seen:
-                continue
-            seen.add(key)
             expr = f"{comp['func']}({_col(comp['source_column'])})"
             rows.append((expr, _sq(comp["alias"]), comp["alias"], False))
     return rows
@@ -127,8 +136,9 @@ def build_spotql(candidate: dict, plans: dict, source_name: str) -> Tuple[str, L
     """SpotQL SELECT over the primary's semantic columns for `candidate`'s
     grain: dimensions (quoted, unaliased), date grains at their bucket (a raw
     column, unaliased, when bucket is None), and one aggregate select item
-    per rewrite-plan component covering `candidate["measure_columns"]`
-    (deduped by identical `(source_column, func)`).
+    per rewrite-plan component covering `candidate["measure_columns"]` — one
+    per component, NOT deduped, in `_component_columns` order (see
+    `_measure_rows` for why deduping would diverge from the Table spec).
 
     Returns `(spotql, output_aliases)` — `output_aliases` is the ordered list
     (dims, then dates, then measure-component stored aliases) `wrap_as_ddl`
@@ -182,7 +192,12 @@ def wrap_as_ddl(ts_executable_sql: str, output_aliases: List[str], target: str,
     materialized-view-can't-join guard and the warehouse rule.
     """
     inner = _strip_trailing_limit(ts_executable_sql)
-    select_items = [f"ca_{i + 1} AS {_dq(dialect, alias)}"
+    # Reference the inner derived columns as QUOTED ca_N: ThoughtSpot emits
+    # them quoted-lowercase (`"ta_1"."X" "ca_1"`), which is case-sensitive on
+    # the warehouse. An unquoted ca_1 folds to CA_1 on Snowflake and fails to
+    # bind ("invalid identifier") at execution — so quote it per-dialect, the
+    # same way the outer alias is quoted.
+    select_items = [f"{_dq(dialect, f'ca_{i + 1}')} AS {_dq(dialect, alias)}"
                     for i, alias in enumerate(output_aliases)]
     wrapper_select = ("SELECT " + ",\n       ".join(select_items) + "\n" +
                       f"FROM (\n{inner}\n) {_dq(dialect, 'src')}")

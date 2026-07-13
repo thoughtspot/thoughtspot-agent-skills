@@ -648,25 +648,41 @@ live connection in these tests).
    classification guarantee lives in `measures.py`, out of this task's scope to change;
    if a future measure decomposition ever violated it, this would double-aggregate
    (`NESTED_AGGREGATE_NOT_SUPPORTED`).
-3. **Component dedupe vs. the aggregate Table's declared columns.** `build_spotql`
-   dedupes identical `(source_column, func)` components across different measure names
-   sharing the same underlying computation (collapsing to one SELECT item + one output
-   alias), but `generate.py`'s `build_aggregate_table_spec`/`build_aggregate_model_tml`
-   (`_component_columns`, untouched by this task) declare one physical column per
-   measure's own alias, **not** deduped. In the (currently theoretical — no known
-   real-model case constructs it) event that two candidate measures decompose to the
-   identical `(source_column, func)`, the wrapped DDL would have fewer columns than the
-   Table TML declares. Not fixed here (measures.py/generate.py logic is out of scope);
-   flag if a live model ever exhibits this shape.
+3. **Component dedupe vs. the aggregate Table's declared columns — RESOLVED (review
+   fix).** This is reachable on an *ordinary* model, not just theoretically: a raw SUM
+   measure `Sales` and a summing formula `Total Revenue = sum([Sales])` both decompose
+   to `("Sales", "SUM")`. `build_spotql` originally deduped by `(source_column, func)`,
+   which would have emitted only `sales_sum` while `generate.build_aggregate_table_spec`
+   / `_component_columns` (undeduped) declare **both** `sales_sum` and
+   `total_revenue_sum` — leaving `total_revenue_sum` with no physical backing (Table TML
+   schema mismatch on import + a broken aggregate formula). Fixed by **removing the
+   dedup**: `_measure_rows` now emits one SELECT item per component in the same iteration
+   order as `_component_columns`, so `ca_N` ↔ `output_aliases` ↔ table-spec columns are
+   1:1 and identically ordered (a redundant identical `sum()` item is harmless). Guarded
+   by `test_build_spotql_emits_one_item_per_component_no_dedup` and
+   `test_build_spotql_aliases_match_table_spec_component_order` (cross-checks
+   `build_spotql`'s aliases against `build_aggregate_table_spec`'s MEASURE columns) in
+   `tools/ts-cli/tests/test_agg_spotql.py`.
 
-**Live-test script (why this stays IMPLEMENTED, not VERIFIED):** on the aggregate-aware
-cluster, run `ts aggregate generate` for a candidate whose primary Model has a genuine
-role-playing dimension (the live-proven inventory-balance-vs-order-date case), confirm
-(a) `ts spotql generate-sql` accepts `build_spotql`'s output (including a bucketed date
-grain — resolves risk #1 above), (b) the wrapped `ddl.sql` executes and produces the
-grain-correct row counts a hand-checked query against the primary would produce, and (c)
-a measure whose plan decomposes through a non-trivial formula chain resolves without
-double-aggregating (resolves risk #2). Until then, treat every SpotQL-path DDL from this
-skill as provisional in the same way Step 7's routing verification already treats every
-recommendation — this item doesn't change that standing caveat, it narrows *which*
-mechanism (join resolution) it was protecting against.
+**Live round-trip checklist (why this stays IMPLEMENTED, not VERIFIED):** on the
+aggregate-aware cluster, run `ts aggregate generate` for a candidate whose primary Model
+has a genuine role-playing dimension (the live-proven inventory-balance-vs-order-date
+case), and confirm:
+- (a) `ts spotql generate-sql` **accepts `build_spotql`'s output**, including a bucketed
+  date grain — resolves risk #1 (the `start_of_month`/etc. bucket-function names) above.
+- (b) The compiled `executable_sql` emits its derived columns as **quoted-lowercase
+  `"ca_N"`** (the assumption `wrap_as_ddl` now encodes by referencing them as quoted
+  `"ca_N"` in the outer SELECT). If a build instead emits bare/upper-case `ca_N` or a
+  different alias scheme, the positional wrap breaks — re-probe the real generate-sql
+  output shape and adjust `wrap_as_ddl` accordingly. (Review fix: unquoted `ca_1` folds
+  to `CA_1` on Snowflake and fails to bind against the case-sensitive `"ca_1"` derived
+  column — "invalid identifier" at execution.)
+- (c) The wrapped `ddl.sql` **executes** and produces the grain-correct row counts a
+  hand-checked query against the primary would produce.
+- (d) A measure whose plan decomposes through a non-trivial formula chain resolves
+  **without double-aggregating** — resolves risk #2.
+
+Until then, treat every SpotQL-path DDL from this skill as provisional in the same way
+Step 7's routing verification already treats every recommendation — this item doesn't
+change that standing caveat, it narrows *which* mechanism (join resolution) it was
+protecting against.

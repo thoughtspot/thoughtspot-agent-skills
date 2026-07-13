@@ -973,8 +973,8 @@ def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatc
 
     ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
     assert "LIMIT" not in ddl
-    assert 'ca_1 AS "Category"' in ddl
-    assert 'ca_2 AS "sales_sum"' in ddl
+    assert '"ca_1" AS "Category"' in ddl
+    assert '"ca_2" AS "sales_sum"' in ddl
     assert ddl.startswith("CREATE OR REPLACE DYNAMIC TABLE")
     assert "WAREHOUSE = WH" in ddl
     assert 'FROM (\n' in ddl and ') "src"' in ddl

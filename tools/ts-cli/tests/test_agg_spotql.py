@@ -66,28 +66,58 @@ def test_build_spotql_multi_date_grain_both_dates_present():
     assert aliases == ["Category", "Order Date", "Shipped Date", "sales_sum"]
 
 
-def test_build_spotql_dedupes_shared_components_across_measures():
-    # Two different measure names whose plans happen to decompose to the
-    # identical (source_column, func) — must emit ONE select item, not two,
-    # and the alias list must reflect only the surviving one.
+def test_build_spotql_emits_one_item_per_component_no_dedup():
+    # Two measures whose plans decompose to the identical (source_column,
+    # func) pair — a RAW SUM measure `Sales` and a summing formula
+    # `Total Revenue = sum([Sales])`, both -> ("Sales", "SUM"). build_spotql
+    # must NOT dedup them: generate.build_aggregate_table_spec declares one
+    # physical column per component (sales_sum AND total_revenue_sum), so a
+    # deduped SELECT would leave total_revenue_sum with no backing column
+    # (Table TML schema mismatch). Redundant identical sum() items are
+    # harmless. One SELECT item + one output alias per component, in order.
     plans = {
-        "Total Sales": classify_measure("Total Sales", aggregation="SUM"),
-        "Net Sales": {
-            "name": "Net Sales", "class": "SUM", "decomposable": True,
-            "components": [{"alias": "net_sales_sum", "source_column": "Sales",
-                            "func": "SUM", "reagg": "SUM"}],
-            "model_expr": "sum ( [net_sales_sum] )", "requires_grain_column": None,
-        },
+        "Sales": classify_measure("Sales", aggregation="SUM"),
+        "Total Revenue": classify_measure("Total Revenue", expr="sum ( [Sales] )"),
     }
-    # Force both plans' single component onto the identical (source_column,
-    # func) pair — "Sales"/SUM — to exercise the dedupe path directly.
-    plans["Total Sales"]["components"][0]["source_column"] = "Sales"
     cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
-            "bucket": None, "measure_columns": ["Total Sales", "Net Sales"],
+            "bucket": None, "measure_columns": ["Sales", "Total Revenue"],
             "covered": [0], "flags": []}
     spotql, aliases = build_spotql(cand, plans, "Sales Model")
-    assert spotql.count('SUM("t1"."Sales")') == 1
-    assert aliases == ["Category", "total_sales_sum"]
+    assert spotql.count('SUM("t1"."Sales")') == 2
+    assert 'SUM("t1"."Sales") AS "sales_sum"' in spotql
+    assert 'SUM("t1"."Sales") AS "total_revenue_sum"' in spotql
+    assert aliases == ["Category", "sales_sum", "total_revenue_sum"]
+
+
+def test_build_spotql_aliases_match_table_spec_component_order():
+    # Cross-check against generate.build_aggregate_table_spec: the measure-
+    # component tail of build_spotql's output_aliases must equal the aggregate
+    # Table's MEASURE column names, in the SAME order, so ca_N <-> output
+    # alias <-> table-spec column are 1:1. Uses the raw-measure + summing-
+    # formula model that reaches the (previously dedup-divergent) case.
+    from ts_cli.aggregate.generate import build_aggregate_table_spec
+    from ts_cli.aggregate.measures import build_rewrite_plans
+
+    model = {"model": {"name": "Sales Model", "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}],
+        "formulas": [{"id": "f1", "name": "Total Revenue", "expr": "sum ( [Sales] )"}]}}
+    model["model"]["columns"].append(
+        {"name": "Total Revenue", "formula_id": "f1",
+         "properties": {"column_type": "MEASURE"}})
+    plans = build_rewrite_plans(model)
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales", "Total Revenue"],
+            "covered": [0], "flags": []}
+
+    _spotql, aliases = build_spotql(cand, plans, "Sales Model")
+    spec = build_aggregate_table_spec(cand, plans, model, db="DB", schema="S",
+                                      table_name="AGG", connection_name="C")
+    measure_cols = [c["name"] for c in spec["columns"] if c["column_type"] == "MEASURE"]
+    # Tail of aliases (after the "Category" dim) is the component list.
+    assert aliases[1:] == measure_cols == ["sales_sum", "total_revenue_sum"]
 
 
 def test_build_spotql_no_group_by_when_no_dims_or_dates():
@@ -134,9 +164,14 @@ def test_wrap_as_ddl_strips_limit_and_maps_positional_aliases():
     ddl = wrap_as_ddl(TS_SQL, ALIASES, "SALESDB.PUBLIC.FACT_AGG_M", "snowflake",
                       materialization="ctas")
     assert "LIMIT" not in ddl
-    assert 'ca_1 AS "Category"' in ddl
-    assert 'ca_2 AS "Order Date"' in ddl
-    assert 'ca_3 AS "sales_sum"' in ddl
+    # ThoughtSpot emits the inner derived columns as quoted-lowercase "ca_N"
+    # (case-sensitive). The outer SELECT must reference them quoted too, or
+    # Snowflake folds an unquoted ca_1 to CA_1 and fails to bind ("invalid
+    # identifier") at execution time.
+    assert '"ca_1" AS "Category"' in ddl
+    assert '"ca_2" AS "Order Date"' in ddl
+    assert '"ca_3" AS "sales_sum"' in ddl
+    assert 'ca_1 AS' not in ddl  # never the unquoted, case-folding form
     assert "GROUP BY \"ca_1\", \"ca_2\"" in ddl  # inner content otherwise intact
     assert ddl.startswith("CREATE OR REPLACE TABLE SALESDB.PUBLIC.FACT_AGG_M AS")
     assert 'FROM (\n' in ddl and ') "src"' in ddl
@@ -160,7 +195,7 @@ def test_wrap_as_ddl_databricks_mview_shape_and_quoting():
     ddl = wrap_as_ddl(TS_SQL, ALIASES, "cat.sch.agg", "databricks",
                       materialization="mview")
     assert ddl.startswith("CREATE OR REPLACE MATERIALIZED VIEW cat.sch.agg AS")
-    assert "ca_1 AS `Category`" in ddl
+    assert "`ca_1` AS `Category`" in ddl
     assert '`src`' in ddl
 
 
@@ -168,7 +203,7 @@ def test_wrap_as_ddl_bigquery_ctas_shape():
     ddl = wrap_as_ddl(TS_SQL, ALIASES, "proj.ds.agg", "bigquery",
                       materialization="ctas")
     assert ddl.startswith("CREATE OR REPLACE TABLE proj.ds.agg AS")
-    assert "ca_1 AS `Category`" in ddl
+    assert "`ca_1` AS `Category`" in ddl
 
 
 def test_wrap_as_ddl_snowflake_materialized_view_guard_still_fires():
