@@ -38,7 +38,6 @@ from pathlib import Path
 # note never expires and quietly rots (repo audit finding). Enforced by
 # _bad_backlog_justifications() below.
 BACKLOG: dict[str, str] = {
-    "ts-convert-from-databricks-mv": "needs matrix — target 2026-08-31 (BL-029)",
     "ts-convert-to-snowflake-sv": "needs matrix — target 2026-08-31 (BL-029)",
     "ts-convert-to-databricks-mv": "needs matrix — target 2026-08-31 (BL-029)",
 }
