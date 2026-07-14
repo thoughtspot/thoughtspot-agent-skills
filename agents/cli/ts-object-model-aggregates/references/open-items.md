@@ -11,8 +11,9 @@ visibility), **#4** (non-additive routing, guarded by the `lattice.covers` NONAD
 rule), **#5** (cross-connection), **#9** (WEEK boundary drift) — are lower-priority
 edge-case behaviours, each with a runnable live-test script, and are gated behind the
 skill's mandatory Step-7 routing verification (every recommendation is provisional until
-that check passes). **#17** (RLS propagation) is IMPLEMENTED as a pure engine only —
-wiring into the skill flow and a live leak-test are Task 23. Per
+that check passes). **#17** (RLS propagation) is WIRED end-to-end, its known import bugs
+are FIXED, and its identical-rule dedup + pass-2 fail-closed hardening (Task 26) are DONE
+— only the live leak-test and the flat-shape confirmation remain OPEN. Per
 [.claude/rules/branching.md](../../../../.claude/rules/branching.md), these satisfy the
 "explicitly deferred to a follow-up open item" merge clause.
 
@@ -835,7 +836,7 @@ greedy ranking, never `covers()`'s coverage correctness. Noted inline on
 
 ---
 
-## #17 — RLS propagation (Task 22/23/25) — WIRED; import bugs FIXED, single-rule propagation VERIFIED live; leak-test + flat-shape confirmation OPEN
+## #17 — RLS propagation (Task 22/23/25/26) — WIRED; import bugs FIXED, identical-rule dedup + pass-2 fail-closed DONE, single-rule propagation VERIFIED live; leak-test + flat-shape confirmation OPEN
 
 **Context:** live review surfaced that the skill previously only GATED on base-table
 row-level security — it refused to import until the user manually replicated the RLS
@@ -992,6 +993,53 @@ five functions, all unit-tested in
   already handled this — see `test_two_base_tables_each_with_a_rule_merge_into_one_
   aggregate_block` in `test_agg_rls.py`, added this task to make the confirmation
   explicit).
+
+**Task 26 (this task) — two RLS hardening fixes, from live testing + the product owner's
+clarification:**
+
+1. **Identical-rule dedup (non-strict RLS).** Product-owner clarification: STRICT RLS is
+   usually a single rule; NON-STRICT RLS repeats the SAME rule across MANY base tables —
+   a cluster-wide setting that is **undetectable from our TML data** (we can't tell from
+   a Table TML export whether a cluster is running strict or non-strict RLS). The
+   dedup-identical-rules approach fixed here is correct either way: a genuinely strict
+   single rule is never affected (nothing to dedup), while a non-strict cluster's
+   repeated-rule-per-table pattern collapses to one rule instead of propagating N
+   byte-identical copies. Previously `propagate_rls` emitted one output rule per base
+   rule with no dedup — confirmed (live-review scenario): two base tables carrying the
+   same rule, both remapping to the same aggregate column, produced 2 identical rules on
+   the aggregate. Fixed: `propagate_rls` (`ts_cli/aggregate/rls.py`) now dedupes rules
+   whose REMAPPED expr is identical (whitespace-normalized) down to ONE, keeping the
+   FIRST occurrence's name deterministically. Multiple DIFFERENT rules still all apply
+   to the aggregate; the Task 22 collision-fix case (two rules on same-named physical
+   columns that remap to DIFFERENT aggregate columns) is untouched — those remapped
+   exprs genuinely differ, so they never collide on the dedup key. `table_paths`' merged
+   column list was already deduped (pre-existing `if agg_col not in agg_cols` guard), so
+   no separate fix was needed there — verified by a new test asserting a single-column
+   `table_paths` entry survives the same repeated-rule scenario.
+   Tests (`tools/ts-cli/tests/test_agg_rls.py`,
+   `TestPropagateRlsIdenticalRuleDedup`): same rule repeated across N base tables →
+   exactly one output rule; first-occurrence name wins when names differ but the
+   remapped expr matches; whitespace-only expr differences still dedup; genuinely
+   different rules both kept; the Task 22 same-physical-column/distinct-aggregate-column
+   case still keeps both; the deduped block round-trips through `dump_tml_yaml` +
+   `lint_tml` clean.
+2. **Pass-2 RLS attach failure now fails CLOSED.** `ts tables create`'s two-pass RLS
+   registration (Task 25) printed a loud stderr error when pass 2 (the `--no-create-new`
+   attach import) failed, but still exited 0 and reported the table's GUID as if the
+   create had fully succeeded — the one fail-OPEN link in an otherwise fail-closed
+   pipeline: a scripted caller (the skill itself, or any other automation) had no
+   non-zero-exit signal that the table it just "successfully" created is actually
+   UNSECURED. Fixed in `commands/tables.py`'s `create_tables`: a pass-2 failure is now
+   collected per table and, after the JSON name→guid map is still printed to stdout (the
+   manual-attach recovery — "set `guid: <guid>` ... `--no-create-new`" — depends on that
+   guid), the command raises `typer.Exit(1)`. The happy paths (no-RLS single create;
+   successful two-pass RLS) are unaffected — still exit 0. Tests
+   (`tools/ts-cli/tests/test_tables_command.py`, `TestPassTwoFailureFailsClosed`): pass-2
+   failure exits non-zero; the guid is still present in stdout; the stderr error names
+   the affected table and retains the "do not re-run `ts tables create`" recovery
+   guidance; a multi-spec invocation where one table's RLS attach fails and another
+   table (no RLS) succeeds still reports BOTH guids while exiting non-zero overall; both
+   happy paths still exit 0.
 
 **Still OPEN — the only two pieces left:**
 1. **Live leak-test.** Task 25 verified single-rule propagation's IMPORT/ATTACH path

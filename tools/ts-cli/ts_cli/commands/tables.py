@@ -255,7 +255,10 @@ def create_tables(
     Output: JSON object mapping table name → GUID for all successfully created tables.
     Tables that failed after all retries are included with null as the GUID. A table
     whose pass 1 (create) succeeded but pass 2 (RLS attach) failed still reports its
-    GUID here (the table exists) — check stderr for an RLS-attach error in that case.
+    GUID here (the table exists, and the manual-attach recovery in the stderr error
+    needs that GUID) — but the command FAILS CLOSED: it exits non-zero (Task 26) so
+    a scripted caller can't mistake a created-but-UNSECURED table for success. Check
+    stderr for the RLS-attach error naming the affected table in that case.
 
     Examples:
 
@@ -273,6 +276,7 @@ def create_tables(
 
     client = ThoughtSpotClient(resolve_profile(profile))
     results: Dict[str, Optional[str]] = {}
+    rls_attach_failed: List[str] = []
 
     for spec in specs:
         name = spec["name"]
@@ -301,6 +305,7 @@ def create_tables(
                     # would create a DUPLICATE same-named table, not update this
                     # one. The table already exists (guid known); only the
                     # attach needs retrying, directly against that guid.
+                    rls_attach_failed.append(name)
                     _err(f"  ERROR {name}: table created ({guid}) but attaching "
                         "row-level security failed after retries — the table is "
                         "UNSECURED. Do not re-run `ts tables create` (creates a "
@@ -318,3 +323,13 @@ def create_tables(
         _err(f"  OK  {name}: {guid}")
 
     print(json.dumps(results))
+
+    if rls_attach_failed:
+        # Fail CLOSED (Task 26): print the guid JSON above first (the manual
+        # attach recovery needs it), then exit non-zero — a pass-2 (RLS
+        # attach) failure must never look like success to a scripted caller,
+        # since the table exists but is UNSECURED until the rules attach.
+        _err(f"ERROR: row-level security failed to attach for: "
+            f"{', '.join(rls_attach_failed)} — see the per-table ERROR "
+            "line(s) above for manual recovery instructions.")
+        raise typer.Exit(1)

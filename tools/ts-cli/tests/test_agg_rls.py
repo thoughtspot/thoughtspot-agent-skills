@@ -463,3 +463,147 @@ class TestPropagateRls:
         # must survive the dump/lint round trip too — its absence is what
         # made live import fail with OBJECT_NOT_FOUND ... LOGICAL_TABLE.
         assert round_tripped["table"]["rls_rules"]["tables"] == [{"name": "SALES_AGG"}]
+
+
+# ── propagate_rls — identical-rule dedup (Task 26, non-strict RLS) ─────────
+#
+# Product-owner clarification: STRICT RLS is usually a single rule;
+# NON-STRICT RLS repeats the SAME rule across MANY base tables (a cluster
+# setting undetectable from our data). Propagating one output rule per base
+# rule with no dedup means non-strict RLS emits N byte-identical rules on
+# the aggregate. Fix: after remapping, collapse rules whose REMAPPED expr is
+# identical (whitespace-normalized) to ONE rule, keeping the first
+# occurrence's name. Genuinely different rules, and same-named-physical-
+# column rules that remap to DIFFERENT aggregate columns (Task 22's
+# collision fix), must still both survive.
+
+def _region_rule_table(table_name: str, path_id: str, rule_name: str = "region_rule",
+                       expr_suffix: str = "") -> dict:
+    return {
+        "table": {
+            "name": table_name,
+            "rls_rules": {
+                "table_paths": [{"id": path_id, "table": table_name, "column": ["REGION"]}],
+                "rules": [{"name": rule_name, "expr": f"[{path_id}::REGION] = ts_groups{expr_suffix}"}],
+            },
+        }
+    }
+
+
+class TestPropagateRlsIdenticalRuleDedup:
+    def test_same_rule_repeated_on_n_base_tables_collapses_to_one(self):
+        # (a) N base tables, non-strict-cluster style: the SAME rule name +
+        # expr shape repeated per table, each mapping to the SAME aggregate
+        # column. Must collapse to exactly one rule.
+        rules = extract_rls({
+            "Table A": _region_rule_table("Table A", "A_1"),
+            "Table B": _region_rule_table("Table B", "B_1"),
+            "Table C": _region_rule_table("Table C", "C_1"),
+        })
+        out = propagate_rls(rules, "NONSTRICT_AGG", {
+            ("Table A", "REGION"): "REGION",
+            ("Table B", "REGION"): "REGION",
+            ("Table C", "REGION"): "REGION",
+        })
+        assert len(out["rules"]) == 1
+        assert out["rules"][0]["name"] == "region_rule"
+        assert out["rules"][0]["expr"] == "[NONSTRICT_AGG_1::REGION] = ts_groups"
+        # table_paths also dedupes to one distinct aggregate column entry
+        assert out["table_paths"][0]["column"] == ["REGION"]
+
+    def test_keeps_first_occurrence_name_when_names_differ_but_remapped_expr_matches(self):
+        rules = extract_rls({
+            "Table A": _region_rule_table("Table A", "A_1", rule_name="rule_alpha"),
+            "Table B": _region_rule_table("Table B", "B_1", rule_name="rule_beta"),
+        })
+        out = propagate_rls(rules, "AGG", {
+            ("Table A", "REGION"): "REGION",
+            ("Table B", "REGION"): "REGION",
+        })
+        assert len(out["rules"]) == 1
+        assert out["rules"][0]["name"] == "rule_alpha"
+
+    def test_dedup_normalizes_whitespace_before_comparing(self):
+        table_a = _region_rule_table("Table A", "A_1")
+        table_b = {
+            "table": {
+                "name": "Table B",
+                "rls_rules": {
+                    "table_paths": [{"id": "B_1", "table": "Table B", "column": ["REGION"]}],
+                    "rules": [{"name": "region_rule", "expr": "[B_1::REGION]   =   ts_groups"}],
+                },
+            }
+        }
+        rules = extract_rls({"Table A": table_a, "Table B": table_b})
+        out = propagate_rls(rules, "AGG", {
+            ("Table A", "REGION"): "REGION",
+            ("Table B", "REGION"): "REGION",
+        })
+        assert len(out["rules"]) == 1
+
+    def test_genuinely_different_rules_both_kept(self):
+        # (b) Two DIFFERENT rules (different filter columns) must both survive.
+        rules = extract_rls({"Multi Table": _MULTI_RULE_MULTI_COL_TABLE_TML})
+        out = propagate_rls(rules, "MULTI_AGG",
+                            {("Multi Table", "ZIPCODE"): "ZIPCODE",
+                             ("Multi Table", "STATE"): "STATE"})
+        assert len(out["rules"]) == 2
+        names = {r["name"] for r in out["rules"]}
+        assert names == {"geo_rule", "state_rule"}
+
+    def test_same_named_physical_column_distinct_agg_columns_both_kept(self):
+        # (c) Task 22 collision-fix regression: two rules on same-named
+        # physical columns that remap to DIFFERENT aggregate columns must
+        # NOT be deduped — their remapped exprs genuinely differ.
+        table_a = {
+            "table": {
+                "name": "Sales Fact",
+                "rls_rules": {
+                    "table_paths": [{"id": "A_1", "table": "Sales Fact", "column": ["REGION"]}],
+                    "rules": [{"name": "sales_region", "expr": "[A_1::REGION] = ts_groups"}],
+                },
+            }
+        }
+        table_b = {
+            "table": {
+                "name": "Cost Dim",
+                "rls_rules": {
+                    "table_paths": [{"id": "B_1", "table": "Cost Dim", "column": ["REGION"]}],
+                    "rules": [{"name": "cost_region", "expr": "[B_1::REGION] = ts_groups"}],
+                },
+            }
+        }
+        rules = extract_rls({"Sales Fact": table_a, "Cost Dim": table_b})
+        out = propagate_rls(rules, "COMBO_AGG", {
+            ("Sales Fact", "REGION"): "SALES_REGION",
+            ("Cost Dim", "REGION"): "COST_REGION",
+        })
+        assert len(out["rules"]) == 2
+        exprs = {r["name"]: r["expr"] for r in out["rules"]}
+        assert exprs["sales_region"] == "[COMBO_AGG_1::SALES_REGION] = ts_groups"
+        assert exprs["cost_region"] == "[COMBO_AGG_1::COST_REGION] = ts_groups"
+
+    def test_dedup_round_trips_through_dump_and_lint_clean(self):
+        # (d) round-trip lint-clean for the deduped multi-table case.
+        rules = extract_rls({
+            "Table A": _region_rule_table("Table A", "A_1"),
+            "Table B": _region_rule_table("Table B", "B_1"),
+        })
+        rls_block = propagate_rls(rules, "NONSTRICT_AGG", {
+            ("Table A", "REGION"): "REGION",
+            ("Table B", "REGION"): "REGION",
+        })
+        table_tml = {
+            "table": {
+                "name": "NONSTRICT_AGG",
+                "columns": [
+                    {"name": "REGION", "db_column_name": "REGION",
+                     "data_type": "VARCHAR", "column_type": "ATTRIBUTE"},
+                ],
+                "rls_rules": rls_block,
+            }
+        }
+        yaml_text = dump_tml_yaml(table_tml)
+        round_tripped = yaml.safe_load(yaml_text)
+        assert lint_tml(round_tripped) == []
+        assert len(round_tripped["table"]["rls_rules"]["rules"]) == 1

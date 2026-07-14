@@ -130,6 +130,12 @@ class TestTwoPassRlsRegistration:
         # be surfaced loudly on stderr, not silently swallowed. The SKILL's
         # own "confirm they attached (export + check)" step is the actual
         # safety net; this only checks the CLI doesn't hide the failure.
+        #
+        # Task 26 (fail-closed fix): a pass-2 failure must also exit non-zero
+        # — previously this printed a loud stderr error but still exited 0,
+        # so a scripted caller saw "success" for a created-but-UNSECURED
+        # table. The GUID must still be preserved in stdout (the manual-
+        # attach recovery instructions in the stderr error depend on it).
         calls = []
 
         class FlakyClient:
@@ -153,6 +159,8 @@ class TestTwoPassRlsRegistration:
         assert len(calls) == 2
         assert "row-level security" in result.stderr
         assert json.loads(result.stdout) == {"SALES_AGG": "agg-guid-1"}
+        assert result.exit_code != 0
+        assert "SALES_AGG" in result.stderr
 
 
 class TestSinglePassUnaffected:
@@ -167,3 +175,119 @@ class TestSinglePassUnaffected:
         assert len(calls) == 1
         assert calls[0]["create_new"] is True
         assert json.loads(result.stdout) == {"PLAIN_TABLE": "plain-guid-1"}
+
+
+class TestPassTwoFailureFailsClosed:
+    """Task 26: pass-2 (RLS attach) failure is the one fail-OPEN link in an
+    otherwise fail-closed pipeline — it printed a loud stderr error but
+    still exited 0, so a scripted caller saw "success" (a non-null GUID)
+    for a created-but-UNSECURED table. Fixed: exit non-zero whenever any
+    table's pass-2 attach fails, while still printing the guid JSON (the
+    manual-attach recovery — "set guid: <guid> ... --no-create-new" — needs
+    it) and naming the offending table in the error.
+    """
+
+    def _flaky_client(self, calls, guid="agg-guid-1"):
+        class FlakyClient:
+            def __init__(self, profile_name):
+                self.n = 0
+
+            def post(self, path, json=None, **kwargs):
+                calls.append(json)
+                self.n += 1
+                if self.n == 1:
+                    return _FakeResp(_ok_response(guid))
+                return _FakeResp([{"response": {
+                    "status": {"status_code": "ERROR", "error_message": "boom"}}}])
+
+        return FlakyClient
+
+    def test_pass_two_failure_exits_non_zero(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(tables_mod, "ThoughtSpotClient", self._flaky_client(calls))
+        monkeypatch.setattr(tables_mod, "resolve_profile", lambda p: "test-profile")
+
+        result = runner.invoke(app, ["tables", "create", "--profile", "test-profile",
+                                     "--retries", "1"],
+                               input=json.dumps([_RLS_SPEC]))
+        assert result.exit_code != 0
+
+    def test_pass_two_failure_still_preserves_guid_in_stdout(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(tables_mod, "ThoughtSpotClient", self._flaky_client(calls, "agg-guid-2"))
+        monkeypatch.setattr(tables_mod, "resolve_profile", lambda p: "test-profile")
+
+        result = runner.invoke(app, ["tables", "create", "--profile", "test-profile",
+                                     "--retries", "1"],
+                               input=json.dumps([_RLS_SPEC]))
+        assert json.loads(result.stdout) == {"SALES_AGG": "agg-guid-2"}
+
+    def test_pass_two_failure_error_names_the_table(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(tables_mod, "ThoughtSpotClient", self._flaky_client(calls))
+        monkeypatch.setattr(tables_mod, "resolve_profile", lambda p: "test-profile")
+
+        result = runner.invoke(app, ["tables", "create", "--profile", "test-profile",
+                                     "--retries", "1"],
+                               input=json.dumps([_RLS_SPEC]))
+        assert "SALES_AGG" in result.stderr
+        assert "row-level security" in result.stderr
+        # the "do NOT re-run ts tables create" recovery guidance must survive
+        assert "do not re-run" in result.stderr.lower()
+
+    def test_one_table_rls_attach_fails_other_table_succeeds_still_reports_both_guids(
+        self, monkeypatch,
+    ):
+        # Multiple specs in one invocation: one plain table (no RLS, one
+        # call) and one RLS table whose pass-2 attach fails (two calls,
+        # second fails). Overall exit must be non-zero (fail-closed), but
+        # BOTH tables' guids must still be in the output JSON — the
+        # successful table's happy path must not be collateral damage.
+        calls = []
+
+        class MixedClient:
+            def __init__(self, profile_name):
+                self.n = 0
+
+            def post(self, path, json=None, **kwargs):
+                calls.append(json)
+                self.n += 1
+                if self.n == 1:
+                    # PLAIN_TABLE pass 1 — succeeds
+                    return _FakeResp(_ok_response("plain-guid-1"))
+                if self.n == 2:
+                    # SALES_AGG pass 1 (create) — succeeds
+                    return _FakeResp(_ok_response("agg-guid-1"))
+                # SALES_AGG pass 2 (attach RLS) — fails
+                return _FakeResp([{"response": {
+                    "status": {"status_code": "ERROR", "error_message": "boom"}}}])
+
+        monkeypatch.setattr(tables_mod, "ThoughtSpotClient", MixedClient)
+        monkeypatch.setattr(tables_mod, "resolve_profile", lambda p: "test-profile")
+
+        result = runner.invoke(app, ["tables", "create", "--profile", "test-profile",
+                                     "--retries", "1"],
+                               input=json.dumps([_PLAIN_SPEC, _RLS_SPEC]))
+        assert result.exit_code != 0
+        assert json.loads(result.stdout) == {
+            "PLAIN_TABLE": "plain-guid-1",
+            "SALES_AGG": "agg-guid-1",
+        }
+
+    def test_happy_path_no_rls_still_exits_zero(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(tables_mod, "ThoughtSpotClient", _make_fake_client(calls, "plain-guid-1"))
+        monkeypatch.setattr(tables_mod, "resolve_profile", lambda p: "test-profile")
+
+        result = runner.invoke(app, ["tables", "create", "--profile", "test-profile"],
+                               input=json.dumps([_PLAIN_SPEC]))
+        assert result.exit_code == 0
+
+    def test_happy_path_successful_two_pass_rls_still_exits_zero(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(tables_mod, "ThoughtSpotClient", _make_fake_client(calls, "agg-guid-1"))
+        monkeypatch.setattr(tables_mod, "resolve_profile", lambda p: "test-profile")
+
+        result = runner.invoke(app, ["tables", "create", "--profile", "test-profile"],
+                               input=json.dumps([_RLS_SPEC]))
+        assert result.exit_code == 0

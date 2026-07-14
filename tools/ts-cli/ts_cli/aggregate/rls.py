@@ -249,6 +249,22 @@ def propagate_rls(base_rules: list, agg_table_name: str, filter_to_aggcol: dict)
     rules listed — since the aggregate is one table no matter how many base
     tables fed it.
 
+    **Identical-rule dedup (Task 26 — product-owner clarification on STRICT
+    vs. NON-STRICT RLS):** STRICT RLS is usually a single rule; NON-STRICT
+    RLS repeats the SAME rule across MANY base tables (a cluster-wide
+    setting this module cannot detect from TML alone — the dedup below is
+    correct either way, since a genuinely single rule is never affected by
+    it). Emitting one output rule per base rule with no dedup means
+    non-strict RLS would propagate N byte-identical rules onto the
+    aggregate. After remapping, this function collapses rules whose
+    REMAPPED expr is identical (compared with runs of whitespace collapsed
+    to single spaces) down to ONE rule, keeping the FIRST occurrence's name
+    (base_rules order) deterministically. Genuinely different rules survive
+    untouched, and — the load-bearing case — two rules on same-named
+    physical columns that remap to DIFFERENT aggregate columns (the
+    same-name collision fix documented above) are never deduped: their
+    remapped exprs differ, so they never match on the dedup key.
+
     `filter_to_aggcol` is keyed by the **`(base table, physical column)`
     tuple** — exactly the pair `rls_filter_columns` emits and
     `candidate_rls_conflict` resolves — NOT the bare column name. The table
@@ -299,6 +315,7 @@ def propagate_rls(base_rules: list, agg_table_name: str, filter_to_aggcol: dict)
             agg_cols.append(agg_col)
 
     rules_out = []
+    seen_remapped = set()
     for rule in base_rules:
         path_ids = rule.get("path_ids") or {}
         expr = rule.get("expr", "")
@@ -310,7 +327,17 @@ def propagate_rls(base_rules: list, agg_table_name: str, filter_to_aggcol: dict)
                 return match.group(0)  # not a filter ref we resolved — copy verbatim
             return f"[{agg_path_id}::{filter_to_aggcol[key]}]"
 
-        rules_out.append({"name": rule.get("name", ""), "expr": _REF.sub(_remap, expr)})
+        remapped_expr = _REF.sub(_remap, expr)
+        # Identical-rule dedup (Task 26): collapse rules whose remapped expr
+        # is the same, whitespace differences aside — non-strict RLS's
+        # repeated-rule-per-table pattern must collapse to one rule on the
+        # aggregate. Keyed on the REMAPPED expr only (not name), so the
+        # surviving rule keeps whichever name occurred first.
+        dedup_key = " ".join(remapped_expr.split())
+        if dedup_key in seen_remapped:
+            continue
+        seen_remapped.add(dedup_key)
+        rules_out.append({"name": rule.get("name", ""), "expr": remapped_expr})
 
     return {
         "tables": [{"name": agg_table_name}],
