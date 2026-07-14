@@ -1304,7 +1304,7 @@ def test_build_filter_to_aggcol_resolves_display_name():
     — the same string `build_aggregate_table_spec` stores the grain column
     under, so no further lookup against the table spec is needed."""
     from ts_cli.aggregate.rls import extract_rls
-    from ts_cli.commands.aggregate import _build_filter_to_aggcol
+    from ts_cli.commands.aggregate_rls import _build_filter_to_aggcol
 
     model_tml = {"model": {"columns": [
         {"name": "Customer Zipcode", "column_id": "Source Table::ZIPCODE",
@@ -1324,7 +1324,7 @@ def test_build_filter_to_aggcol_skips_unmodeled_column():
     bogus mapping), relying on the fail-closed guard upstream to have already
     refused to reach this point for a candidate that needed it."""
     from ts_cli.aggregate.rls import extract_rls
-    from ts_cli.commands.aggregate import _build_filter_to_aggcol
+    from ts_cli.commands.aggregate_rls import _build_filter_to_aggcol
 
     model_tml = {"model": {"columns": []}}
     table_tml = {"table": {"name": "Source Table", "rls_rules": {
@@ -1504,3 +1504,89 @@ def test_generate_no_op_when_no_base_rls(tmp_path, monkeypatch):
     assert "rls_rules" not in table_tml["table"]
     spec = json.loads((tmp_path / "cand_1" / "table_spec.json").read_text())
     assert "rls_rules" not in spec
+
+
+def test_generate_fails_closed_when_tables_dir_empty(tmp_path):
+    """Task 23 review fix (security, fail-OPEN on bad input): the RLS guard is
+    only as strong as `--tables-dir`. An EMPTY tables-dir would make
+    `extract_rls` return `[]`, silently skip propagation, and emit an
+    UNSECURED aggregate. For a security control this must fail CLOSED —
+    exit 1, no files written — because the base tables it would need to assess
+    RLS were never loaded."""
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()  # deliberately empty — no Table TMLs exported
+
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--warehouse", "WH", "--no-spotql"])
+    assert result.exit_code == 1
+    assert "row-level security" in result.stderr
+    outdir = tmp_path / "cand_1"
+    assert list(outdir.iterdir()) == []  # fail closed — zero side effects
+
+
+def test_generate_fails_closed_when_tables_dir_incomplete(tmp_path):
+    """Same fail-closed input guard, but for an INCOMPLETE tables-dir: the
+    Model has two base tables (FACT, DIM) but only FACT's TML was exported.
+    RLS on the un-loaded DIM would be invisible, so `generate` must fail
+    closed and name the missing table rather than emit a possibly-unsecured
+    aggregate."""
+    model = {"model": {"name": "Sales Model",
+                       "model_tables": [{"name": "FACT"}, {"name": "DIM"}],
+                       "columns": [
+        {"name": "Category", "column_id": "DIM::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    # Only FACT exported — DIM (an RLS-bearing base table) is missing.
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"}]}}))
+
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--warehouse", "WH", "--no-spotql"])
+    assert result.exit_code == 1
+    assert "DIM" in result.stderr
+    outdir = tmp_path / "cand_1"
+    assert list(outdir.iterdir()) == []  # fail closed — zero side effects
+
+
+def test_load_tables_dir_matches_yml_and_json(tmp_path):
+    """Task 23 review fix: `_load_tables_dir`'s glob broadened beyond `*.yaml`
+    (which already covers Step 3's `.tml.yaml` exports) to also pick up
+    `.yml`/`.json` — so an export written in a sibling format is loaded rather
+    than silently ignored (which would be a fail-open for the RLS guard)."""
+    from ts_cli.commands.aggregate import _load_tables_dir
+
+    (tmp_path / "FACT.tml.yaml").write_text(yaml.safe_dump({"table": {"name": "FACT"}}))
+    (tmp_path / "DIM.yml").write_text(yaml.safe_dump({"table": {"name": "DIM"}}))
+    (tmp_path / "GEO.json").write_text(json.dumps({"table": {"name": "GEO"}}))
+    loaded = _load_tables_dir(str(tmp_path))
+    assert set(loaded) == {"FACT", "DIM", "GEO"}

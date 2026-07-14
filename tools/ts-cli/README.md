@@ -1561,13 +1561,16 @@ always with `--no-spotql`; a fallback prints a stderr note that the result may
 be wrong on such dimensions.
 
 **RLS propagation (Task 23):** before anything is written, extracts row-level
-security from the `--tables-dir` Table TMLs. If any base table carries `rls_rules`,
-recomputes the grain conflict on this candidate and **fails closed** (`exit 1`,
-nothing written) if the grain still omits a required filter column — otherwise the
-base rule(s) are remapped onto the aggregate's own grain columns and attached to
-`table.tml.yaml`'s `table.rls_rules` (and `table_spec.json`'s `rls_rules` key). A no-op
-when no base table carries RLS. No dedicated flag for the force-add path — the calling
-skill applies `ts_cli.aggregate.rls.add_rls_columns_to_candidate` directly to
+security from the `--tables-dir` Table TMLs. It **fails closed** (`exit 1`, nothing
+written) in two cases: (1) the `--tables-dir` didn't load a Table TML for every
+`model_tables` entry, so RLS can't even be assessed (an empty/incomplete dir would
+otherwise read as "no RLS" and emit an unsecured aggregate — a fail-open); or (2) any
+base table carries `rls_rules` and the candidate's grain still omits a required filter
+column. Otherwise the base rule(s) are remapped onto the aggregate's own grain columns
+and attached to `table.tml.yaml`'s `table.rls_rules` (and `table_spec.json`'s
+`rls_rules` key); a no-op only when the tables-dir fully covers the model and no covered
+base table carries RLS. No dedicated flag for the force-add path — the calling skill
+applies `ts_cli.aggregate.rls.add_rls_columns_to_candidate` directly to
 `candidates.json` before calling `generate`, so `generate` just reads the
 already-widened candidate.
 

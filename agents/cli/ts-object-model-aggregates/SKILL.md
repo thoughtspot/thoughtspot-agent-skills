@@ -426,10 +426,20 @@ candidates[idx] = add_rls_columns_to_candidate(candidates[idx], candidates[idx][
 open(f"{workdir}/candidates.json", "w").write(json.dumps(payload, indent=2))
 ```
 
-The grain just changed, so re-run 5b (profile) and 5c (recommend) before generating this
-candidate in Step 6 — its row count and compression will differ now that the RLS
-column is part of the grain. `ts aggregate generate` recomputes the conflict on this
-widened candidate and will no longer fail closed on it.
+The grain just changed, so re-run **5b (profile) ONLY** for this candidate before
+generating it in Step 6 — its row count and compression will differ now that the RLS
+column is part of the grain, and profile just adds `agg_rows` to the widened candidate
+in place. `ts aggregate generate` recomputes the conflict on this widened candidate and
+will no longer fail closed on it.
+
+**Do NOT re-run 5c / `ts aggregate recommend` after a force-add.** `recommend`
+regenerates `candidates.json` from `signatures.jsonl` (via `generate_candidates`) and
+fully overwrites it — it does not read the existing candidates, so the force-added
+dimension (which lives only in `candidates.json`) would be **discarded**, the candidate
+would revert to its un-widened grain, `rls_conflict` would be true again, and Step 6's
+`generate` would fail closed — an infinite loop. Profile-only preserves the widened
+dimensions; recommend erases them. If you must re-run `recommend` for an unrelated
+reason (e.g. new weights), re-apply every force-add afterward, before generating.
 
 **X — exclude.** Drop this id from `{selected_candidates}` and move on to the next
 conflicting id (or Step 6 if none remain).

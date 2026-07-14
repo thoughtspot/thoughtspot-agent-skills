@@ -74,6 +74,7 @@ ts_cli/
     audit.py      — ts audit run / report
     databricks.py — ts databricks (parse-mv, translate-formulas, build-model) — BL-063 PR2/PR3/PR4
     aggregate.py  — ts aggregate (signatures, recommend, profile, history, generate) — aggregate-model advisor engine
+    aggregate_rls.py — RLS command-layer wiring for `ts aggregate` (Task 23): _attach_rls_conflicts (recommend advisory surfacing) + _propagate_rls_or_fail_closed (generate security gate — fails closed on incomplete tables-dir or grain missing an RLS filter column) over the pure aggregate/rls.py engine; split out of aggregate.py to stay under the file-size gate, imported lazily from recommend/generate
   audit/
     __init__.py       — run_audit() entry point, angle module registry
     context.py        — AuditContext dataclass + build_context()
