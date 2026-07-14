@@ -162,3 +162,29 @@ Not yet determined whether this is a YAML escaping issue or a ThoughtSpot valida
 restriction. If YAML escaping, quoting the values may work — not tested.
 
 Status: VERIFIED — workaround is to avoid special characters in parameter values
+
+---
+
+## #17 — Spotter last-mile (`ts spotter answer`, Step 12.6) — SPEC-VERIFIED, LIVE-VERIFICATION PENDING
+
+Step 12.6 calls `ts spotter answer` (ts-cli v0.53.0), which wraps
+`POST /api/rest/2.0/ai/answer/create` (`singleAnswer`).
+
+**Spec verified 2026-07-15** via `get-rest-api-reference(apiName: "singleAnswer")`:
+request body `{query, metadata_identifier}` (both required); 200 success returns
+`{message_type, visualization_type, session_identifier, generation_number, tokens,
+display_tokens}`; requires `CAN_USE_SPOTTER` + view access to the model; Beta (10.4.0.cl+),
+needs Spotter enabled on the cluster. The command's `normalise_answer_response` is
+unit-tested (10 cases) for SUCCESS / FORBIDDEN / UNAUTHORIZED / SPOTTER_ERROR / 201-error /
+empty-body / parse-error.
+
+**Not yet live-verified.** No live call has been made: the local `ps-internal` profile
+has no cached credential in this environment, and it is not confirmed Spotter-enabled. To
+close: run against a Spotter-enabled instance (ideally the customer's own model, since the
+value depends on that model's data) and confirm (a) `tokens`/`display_tokens` come back
+non-empty for a real question, (b) the returned Search reproduces the source measure's
+number when run via `ts spotql fetch-data` or a coverage answer, and (c) the FORBIDDEN
+path fires cleanly for a user without `CAN_USE_SPOTTER`.
+
+Status: SPEC-VERIFIED via MCP 2026-07-15; LIVE-VERIFICATION PENDING (run on a
+Spotter-enabled instance before relying on Step 12.6 output)

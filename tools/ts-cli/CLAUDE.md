@@ -61,6 +61,7 @@ ts_cli/
     tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model)
     snowflake.py  — ts snowflake (diff, lint-ddl, exec)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
+    spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
@@ -85,7 +86,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.52.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.53.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

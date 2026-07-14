@@ -31,6 +31,7 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
 | [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
+| [../../../tools/ts-cli/README.md](../../../tools/ts-cli/README.md) | `ts spotter answer` — the Spotter last-mile command (Step 12.6) |
 | [references/open-items.md](references/open-items.md) | Known validation quirks and workarounds |
 | [references/coverage-matrix.md](references/coverage-matrix.md) | Canonical mapped/unmapped construct matrix — cite in Audit mode (A4) and the migration report (Step 12) |
 | [references/liveboard-style-themes.md](references/liveboard-style-themes.md) | Step 10.5 curated themes — brand tokens + per-chart `viz_style` color palettes |
@@ -67,6 +68,7 @@ export/merge/import TML, iterate over formula failures, or assemble model JSON.
 | Build/merge model + formulas | `ts tableau build-model --existing-guid` | Manual export → JSON merge → import loop |
 | Create tables | `ts tables create` | Raw HTTP calls to the TML import endpoint |
 | Export/import TML | `ts tml export` / `ts tml import` | Manual curl or HTTP library calls |
+| Ask Spotter to express a parked formula (Step 12.6) | `ts spotter answer` | Raw `requests` to `ai/answer/create` |
 
 If a CLI command fails or produces wrong results, **fix the CLI** (`tools/ts-cli/`) and
 re-run — do not work around it with manual scripting. The CLI encodes months of
@@ -4130,10 +4132,85 @@ shrinks or disappears.
 
 ---
 
+## Step 12.6 — Spotter Last-Mile (Parked Formulas)
+
+> **Scope gate:** runs for scopes **1, 2, 4** (wherever formulas are imported).
+> **Condition:** only runs when `{parked_formulas}` is still non-empty *after* Step 12.5,
+> **and** Spotter is enabled on the model (Step 5.5 = Y). Requires **ts-cli ≥ v0.53.0**.
+> **Optional** — offer it; never run it silently.
+
+Deterministic rewriting (Step 12.5) fixes formulas whose ThoughtSpot equivalent is
+*syntactically* derivable from the Tableau expression. What remains parked is usually a
+measure whose *intent* is clear in English ("year-over-year growth of profit", "distinct
+customers this quarter") even though no mechanical translation exists. Spotter — the
+model's own AI — can often express that intent as a valid ThoughtSpot Search. This step
+asks Spotter, shows you what it produced, and lets you **verify then adopt or leave
+parked**. It never auto-adopts: Spotter's answer is a *suggestion to check against the
+source numbers*, exactly like every other non-1:1 resolution in this skill (see the
+**surface, recommend, resolve** principle at the top).
+
+Prompt:
+
+```
+{N} formula(s) are still parked and Spotter is enabled on the model.
+Ask Spotter to express each as a ThoughtSpot Search? [Y / n] (default: Y)
+
+  Y  Yes    — ask Spotter per formula, show its tokens, you verify + adopt/park
+  N  No     — leave them parked; the Step 12 report stands
+```
+
+**If N:** end here; the report is unchanged.
+
+**If Y:** for each parked measure that is *expressible as a plain-English question* (skip
+structural / table-addressing artifacts — Spotter answers questions about data, not
+row-offset window mechanics):
+
+1. **Phrase the intent** as a natural-language question from the parked record's
+   `original_tableau` expression and name — e.g. `SUM([Profit])` growth-vs-prior-year →
+   `"year over year growth of profit by month"`.
+2. **Ask Spotter** (CLI-first — never a raw `requests` call):
+
+   ```bash
+   ts spotter answer "year over year growth of profit by month" \
+     --model {model_guid} --profile {profile_name}
+   ```
+
+   Output is JSON: `{status, tokens, display_tokens, visualization_type, errors}`.
+   - `status: SUCCESS` → `display_tokens` is the human-readable Search Spotter chose
+     (e.g. `Profit growth of Profit by Order Date monthly`); `tokens` is the raw form.
+   - `status: FORBIDDEN` → the profile's user lacks `CAN_USE_SPOTTER` or view access to
+     the model. Stop the step, tell the user, and leave the formulas parked (this is an
+     entitlement issue, not a translation failure).
+   - `status: SPOTTER_ERROR` → Spotter could not answer (or is not enabled). Leave that
+     formula parked; continue with the rest.
+3. **Verify the numbers — do not trust the tokens blind.** Present Spotter's
+   `display_tokens` next to the original Tableau expression, then confirm the result
+   matches the source. Reuse the existing verification paths rather than eyeballing:
+   run the tokens as a coverage answer (Step 11.5) or fetch the value with
+   `ts spotql fetch-data` against the model and compare to the Tableau workbook's number.
+4. **Adopt or park (user decides):**
+   - **Match + user approves** → adopt. If Spotter's expression maps cleanly to a model
+     formula, add it via the Step 12.5 fix cycle (or `ts model promote-formula` if it was
+     built as an answer formula), so it becomes a first-class ✅ Migrated formula. Move it
+     out of ⏸ Parked.
+   - **Mismatch, or user unsure** → leave parked. Record Spotter's suggested tokens in the
+     parked record so a human can pick it up later — but it stays ⏸, not ✅.
+
+**Never** promote a Spotter suggestion to ✅ without a confirmed number match — an
+AI-generated Search that *looks* right but returns different numbers is worse than an
+honestly-parked formula. When in doubt, park it and say so in the report.
+
+After the step, **regenerate the Step 12 report**: adopted formulas move to ✅ (note
+"via Spotter last-mile" in the mapping table); the ⏸ Parked section lists any that Spotter
+suggested-but-unverified with its tokens for manual follow-up.
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.28.0 | 2026-07-15 | **New Step 12.6 — Spotter Last-Mile (parked formulas).** After deterministic rewriting (Step 12.5) leaves a measure parked, optionally ask Spotter (the model's own AI) to express its intent as a ThoughtSpot Search via the new `ts spotter answer` command (wraps `POST /api/rest/2.0/ai/answer/create`; returns `tokens`/`display_tokens`). The step is opt-in, gated on Spotter being enabled (Step 5.5) and `CAN_USE_SPOTTER`; it **surfaces** Spotter's suggested Search, requires a **verified number match** (via a Step 11.5 coverage answer or `ts spotql fetch-data`) before adopting, and otherwise leaves the formula honestly ⏸ Parked with the suggestion recorded. Never auto-adopts. Added to the CLI-first table and References. Prereq ts-cli v0.53.0. |
 | 1.27.0 | 2026-07-08 | **Parse published-datasource `.tds`/`.tdsx` for the physical model (BL-089 M8).** `ts tableau parse` and `ts tableau build-model` now accept a `.tds`/`.tdsx` (root *is* `<datasource>`) — extracting its real tables/joins/columns/calcs — so a multi-query published datasource builds a multi-table model **automatically via GENERATE mode, no hand-assembly**. Get the `.tds` via `ts tableau download {id}` (the `.tds` inside the `.tdsx`) or a user-supplied file. Step 3.5 corrected: the field API (VizQL `read-metadata`) returns **columns/calcs only, not tables/joins** — the physical model lives in the `.tds`. Step 5b "Multi-query datasources" now leads with the `.tds` path; hand-assembly is the fallback for when only the `.twb` is available. Prereq ts-cli v0.38.0. |
 | 1.26.0 | 2026-07-06 | **Custom SQL → SQL View is now automated in `build-model`** (Step 5a/5c), realizing what the skill documented since 1.1.0. `ts tableau build-model` extracts `<relation type='text'>` Custom SQL (SQL + columns from `metadata-record` `parent-name`/`remote-name`, decoding `<<`/`>>`/`==`), emits a `.sql_view.tml` per relation, and references it by name in `model_tables[]` (no GUID at emit time). Physical/SQL-View column dedup prevents duplicate-name import failures; formula resolvability no longer blanket-drops qualified `[SQL View::col]` refs. Verified end-to-end live on ps-internal (parse → emit → import → searchdata returns correct numbers) and against real workbooks (single-CTE + Tableau's 6-query ts_users). Known follow-ons: drop the extract table when its Custom SQL becomes a view; substitute/flag Tableau params embedded in SQL. Prereq ts-cli v0.37.0. |
 | 1.25.0 | 2026-07-05 | **Multi-query datasource → multi-table model guidance + liveboard parameter rule (BL-090).** Step 5b: new "Multi-query datasources" subsection — a published/sqlproxy datasource that joins several Custom SQL Queries must become a **multi-table model** (a single-view reconcile silently filters the other queries' formulas as "Unresolved Custom SQL Query alias"); documents detection, greedy table-set cover + shared-key join confirmation, hand-built base → `build-model --existing-guid` (which now auto-migrates parameters, validates qualified columns, cascade-drops, and table-qualifies bare refs to the real owning table), plus **(M14)** collision-renamed formulas, **(M15)** absent-column data-gap surfacing, **(M16)** measure classification on all-ATTRIBUTE table exports. Step 7 Phase-2 pipeline list updated: parameter auto-migration, deterministic qualified-column + cross-formula-cascade filtering, `--max-retries` default 25→10. Step 10f: parameter chips only stick when a param-consuming formula tile is on the board (ThoughtSpot drops unreferenced params) — filter-type params → liveboard filters; display-toggle params (sheet-swap) → per-metric tiles or omit. Live-verified in the CPG Merch migration (tentpole 119/119, prod 137/163). Prereq ts-cli v0.36.1. |

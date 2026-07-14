@@ -1034,6 +1034,36 @@ skill's SKILL.md.
 
 ---
 
+### `ts spotter answer`
+
+Ask Spotter (ThoughtSpot AI) a single natural-language question over a Model and return
+its answer — crucially the **search tokens** Spotter chose. Wraps the V2 endpoint
+`POST /api/rest/2.0/ai/answer/create` (`singleAnswer`, Beta / 10.4.0.cl+). This is the
+"Spotter last-mile" the conversion skills use: after a model is built, a measure that
+could not be translated deterministically is phrased in plain English, handed to Spotter,
+and the returned tokens are shown to a human to verify against the source numbers before
+being flagged or adopted.
+
+```bash
+ts spotter answer "total sales by region last quarter" --model <model-guid> --profile <name>
+ts spotter answer "count of distinct customers this year" -m <model-guid>
+```
+
+**Output (JSON to stdout):** `{status, message_type, visualization_type,
+session_identifier, generation_number, tokens, display_tokens, errors}`.
+
+- `tokens` / `display_tokens` — the ThoughtSpot Search expression Spotter produced (the
+  field the last-mile workflow inspects). `display_tokens` is the human-friendly form.
+- `status` is `SUCCESS` when an answer was returned, else an error code with a populated
+  `errors[]`: `FORBIDDEN` (missing `CAN_USE_SPOTTER` privilege or no view access to the
+  Model), `UNAUTHORIZED` (bad/expired token), or `SPOTTER_ERROR` (Spotter could not answer,
+  or is not enabled on the cluster).
+
+Requires `CAN_USE_SPOTTER` and view access to the target Model, and Spotter enabled on the
+cluster. Diagnostics go to stderr; the JSON goes to stdout.
+
+---
+
 ### `ts orgs search`
 
 List/search orgs (auto-paginated by default).

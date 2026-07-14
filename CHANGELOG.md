@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-15
+- feat(ts-cli): add `ts spotter answer` (v0.53.0) — ask Spotter (ThoughtSpot AI) a natural-language question over a Model and return its search `tokens`/`display_tokens`. Wraps the V2 endpoint `POST /api/rest/2.0/ai/answer/create` (`singleAnswer`, Beta 10.4.0.cl+; spec verified via `get-rest-api-reference`), surfacing structured `FORBIDDEN`/`UNAUTHORIZED`/`SPOTTER_ERROR` statuses. Pure `normalise_answer_response` + 10 unit tests. Live-verification against a Spotter-enabled instance is a tracked open item
+- feat: ts-convert-from-tableau v1.28.0 — new Step 12.6 "Spotter Last-Mile" uses `ts spotter answer` to express still-parked formulas as a ThoughtSpot Search, verify the numbers, then adopt or leave parked (opt-in; never auto-adopts)
+
 ## 2026-07-13
 - feat(ts-cli): bump to v0.52.0 — `ts spotql classify-columns` now detects **semi-additive** measures (outermost op `last_value`/`first_value`) as a new `semiadditive_measure` kind and adds a `wrapper` field (`AGG`/`SUM`/`None`) to every result. Fixes a misclassification: these must be referenced in SpotQL as `SUM(...)` (`AGG()` errors `NON_CONVERTIBLE_FUNCTION`), the inverse of ordinary aggregate-formula measures. Live-verified on nebula-aggregate-aware
 - feat: ts-object-model-spotql-query v1.4.0 — semi-additive `SUM`-vs-`AGG` wrapper rule (Step 2/3, spotql-rules.md, limitations.md, patterns.md); corrects earlier docs that wrongly showed `AGG("Inventory Balance")` for a `last_value` snapshot measure
