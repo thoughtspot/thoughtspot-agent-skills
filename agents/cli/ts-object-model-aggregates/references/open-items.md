@@ -805,7 +805,7 @@ greedy ranking, never `covers()`'s coverage correctness. Noted inline on
 
 ---
 
-## #17 — RLS propagation (Task 22) — IMPLEMENTED (pure engine); wiring + live leak-test PENDING
+## #17 — RLS propagation (Task 22/23) — WIRED; live leak-test + flat-shape confirmation OPEN
 
 **Context:** live review surfaced that the skill previously only GATED on base-table
 row-level security — it refused to import until the user manually replicated the RLS
@@ -878,12 +878,52 @@ five functions, all unit-tested in
   always lands in `required`/`missing` and `propagate_rls` raises on it — never reported
   "securable as-is". Tests added for both.
 
-**Deliberately NOT done here (Task 23's scope):** wiring `rls.py` into
-`generate.py`/`commands/aggregate.py`/the skill's Step 6 flow, the exclude-vs-force-add
-user prompt, and the **live leak-test**: does an RLS-restricted query against the
-primary Model, once routed to the propagated aggregate, actually still enforce the
-rule (a user in group A never sees group B's rows), or does routing to the aggregate
-silently bypass the base table's RLS? This is the single question that decides whether
-auto-propagation is safe to ship — until it's verified live, treat any propagated RLS
-as unverified in the same provisional sense the routing-verification caveat already
-applies to every other recommendation in this skill.
+**Task 23 (this task) WIRED the above into the command layer and the skill:**
+- `ts aggregate recommend` extracts RLS from the tables-dir Table TMLs (`--tables-dir`,
+  default `<dir>/tables`) and attaches `rls: {required, missing}` + `rls_conflict`
+  (bool) to every candidate in `candidates.json`, plus an `rls_conflicts` (candidate
+  ids) summary field on stdout — a no-op when no base table carries RLS
+  (`_attach_rls_conflicts` in `commands/aggregate.py`).
+- `ts aggregate generate` recomputes `candidate_rls_conflict` on the (possibly
+  force-added) candidate and **FAILS CLOSED** (`typer.Exit(1)`, before writing any of
+  the five output files) if the grain still omits a required RLS column; otherwise it
+  resolves `filter_to_aggcol` — `(base_table, physical_col) -> aggregate stored column
+  name` — via the model's `column_id` map (the same display name
+  `build_aggregate_table_spec` stores the grain column under) and calls `propagate_rls`,
+  attaching the result to the aggregate Table TML's `table.rls_rules` (both
+  `table.tml.yaml` and `table_spec.json`) before either is written
+  (`_propagate_rls_or_fail_closed`/`_build_filter_to_aggcol` in `commands/aggregate.py`;
+  `_build_table_tml` in `commands/tables.py` now passes an optional `rls_rules` spec key
+  straight through). No new CLI flag — the skill applies `add_rls_columns_to_candidate`
+  directly to `candidates.json` before calling `generate`, so `generate` just reads the
+  already-widened candidate ("pick the simpler" option from the task-23 brief).
+- SKILL.md Step 5e prompts exclude (X) vs force-add (F) per conflicting candidate (and
+  says to re-profile after a force-add); Step 6e's manual "apply RLS in the UI" hard
+  gate is replaced by a show-and-confirm of the auto-propagated `rls_rules` (a hard stop
+  remains only for a fail-closed `generate` error — CLS stays its own unchanged manual
+  gate); Step 7 adds the RLS leak-test described below as the live gate; Step 5d's
+  candidate table now also shows measures carried (`measure_columns`) and the proposed
+  aggregate name (`_aggregate_name`, computed the same deterministic way `generate` will
+  name the real table/Model) before the user picks the cut-off.
+- Command-level tests (CliRunner + offline fixtures, no live instance): `recommend`
+  surfacing (conflict/no-conflict/no-RLS no-op) and `generate` (fail-closed with zero
+  files written; successful propagation onto both TML artifacts; no-op absent RLS) — see
+  `tools/ts-cli/tests/test_agg_command.py`'s "Task 23" section. `rls.py`'s own pure
+  functions are unchanged (Task 22, only called here).
+
+**Still OPEN — the only two pieces left:**
+1. **Live leak-test.** Does an RLS-restricted query against the primary Model, once
+   routed to the propagated aggregate, actually still enforce the rule (a user in group
+   A never sees group B's rows), or does routing to the aggregate silently bypass the
+   base table's RLS? This is the single question that decides whether auto-propagation
+   is safe to ship — until it's verified live, treat any propagated RLS as unverified in
+   the same provisional sense the routing-verification caveat already applies to every
+   other recommendation in this skill. SKILL.md Step 7 now documents the procedure:
+   re-run the same aggregate-hit `ts spotql generate-sql` check authenticated as a
+   restricted user (swap `--profile`) and confirm the returned rows actually respect the
+   rule. This item stays OPEN until someone actually runs it against a live
+   aggregate-aware cluster with a real RLS rule.
+2. **Flat-shape `rls_rules` confirmation.** `extract_rls`'s flat-list handling (no
+   `table_paths`, resolved via the own-table-name fallback) is still unverified against
+   a real flat-shape TML export — see `rls.py`'s module docstring. Re-check the first
+   time a live table export actually shows this shape.

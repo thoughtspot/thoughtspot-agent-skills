@@ -33,7 +33,15 @@ _DATA_TYPE_NORMALIZE = {"BOOLEAN": "BOOL"}
 
 
 def _build_table_tml(spec: Dict[str, Any]) -> str:
-    """Build a ThoughtSpot table TML YAML string from a spec dict."""
+    """Build a ThoughtSpot table TML YAML string from a spec dict.
+
+    An optional `rls_rules` key on `spec` (Task 23 — `ts aggregate generate`
+    attaches the block `ts_cli.aggregate.rls.propagate_rls` returns) is
+    passed straight through onto `table.rls_rules`. Absent for every other
+    spec-building caller (Tableau/Databricks conversions, hand-authored
+    specs), so this is purely additive — no behavior change when the key
+    isn't present.
+    """
     columns = []
     for col in spec.get("columns", []):
         data_type = col["data_type"]
@@ -58,6 +66,8 @@ def _build_table_tml(spec: Dict[str, Any]) -> str:
             "columns": columns,
         }
     }
+    if spec.get("rls_rules"):
+        tbl["table"]["rls_rules"] = spec["rls_rules"]
     return yaml.dump(tbl, default_flow_style=False, allow_unicode=True)
 
 

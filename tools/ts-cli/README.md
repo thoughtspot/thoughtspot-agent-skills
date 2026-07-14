@@ -1469,11 +1469,15 @@ ts aggregate recommend --dir /tmp/agg --max-select 10
 | `--weights` | — | `weights.json` produced by `history`, to reweight signatures by observed query volume |
 | `--base-rows` | — | Base (unaggregated) row count, enables cost-mode selection once at least one candidate is profiled |
 | `--max-select` | `10` | Maximum number of candidates to select |
+| `--tables-dir` | `<dir>/tables` | Directory of exported Table TMLs (Step 3's `<NAME>.tml.yaml` per `model_tables` entry) — read to detect base-table row-level security and surface per-candidate conflicts. A missing/empty directory is a no-op. |
 
 **Output:** writes/updates `<dir>/candidates.json`. Stdout JSON: `{"mode",
-"selected", "curve", "candidates", "excluded_unprofiled"}` — `mode` is `"cost"` once
-profiling data exists, else `"coverage"`; `excluded_unprofiled` lists candidate ids
-skipped from cost-mode ranking because they have no `agg_rows` yet.
+"selected", "curve", "candidates", "excluded_unprofiled", "rls_conflicts"}` — `mode` is
+`"cost"` once profiling data exists, else `"coverage"`; `excluded_unprofiled` lists
+candidate ids skipped from cost-mode ranking because they have no `agg_rows` yet;
+`rls_conflicts` (Task 23) lists candidate ids whose grain omits a base-table RLS filter
+column — each also carries `rls: {required, missing}` + `rls_conflict: true` in
+`candidates.json`; empty when no base table carries RLS at all.
 
 #### `ts aggregate profile`
 
@@ -1555,6 +1559,17 @@ built-in join walker (`sqlgen.build_select`) can silently be wrong. Falls back
 to that walker automatically if SpotQL generation is unavailable or errors, or
 always with `--no-spotql`; a fallback prints a stderr note that the result may
 be wrong on such dimensions.
+
+**RLS propagation (Task 23):** before anything is written, extracts row-level
+security from the `--tables-dir` Table TMLs. If any base table carries `rls_rules`,
+recomputes the grain conflict on this candidate and **fails closed** (`exit 1`,
+nothing written) if the grain still omits a required filter column — otherwise the
+base rule(s) are remapped onto the aggregate's own grain columns and attached to
+`table.tml.yaml`'s `table.rls_rules` (and `table_spec.json`'s `rls_rules` key). A no-op
+when no base table carries RLS. No dedicated flag for the force-add path — the calling
+skill applies `ts_cli.aggregate.rls.add_rls_columns_to_candidate` directly to
+`candidates.json` before calling `generate`, so `generate` just reads the
+already-widened candidate.
 
 ```bash
 ts aggregate generate --dir /tmp/agg --candidate cand_3 \

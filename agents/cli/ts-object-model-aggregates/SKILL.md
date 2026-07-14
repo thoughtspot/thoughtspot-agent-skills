@@ -40,12 +40,17 @@ Dependent-walking reuses the same alias-aware v2 `metadata dependents` path
 aggregate-aware cluster (routing fires for formula measures, date re-aggregation, the
 `aggregated_models` TML shape, first-match precedence, dependent types, token casing,
 filter precision — see [references/open-items.md](references/open-items.md) #0/#1/#2/#6/#7/#8/#10),
-and the DDL-from-SpotQL path is proven end-to-end. The remaining OPEN items (#3 model
-visibility, #4 non-additive routing, #5 cross-connection, #9 WEEK-boundary drift) are
-lower-priority edge cases with live-test scripts; a few IMPLEMENTED items (#11/#14/#15)
-still want a live re-check. Treat every recommendation this skill produces as provisional
-until Step 7's routing verification passes, and read the
-open items before trusting a candidate the classifier or lattice flagged as ambiguous.
+and the DDL-from-SpotQL path is proven end-to-end. Row-level security is now auto-
+propagated onto every generated aggregate (#17, WIRED) rather than gated manually, but
+its live enforcement is unverified — treat every propagated RLS rule as provisional
+until Step 7's RLS leak-test passes. The remaining OPEN items (#3 model
+visibility, #4 non-additive routing, #5 cross-connection, #9 WEEK-boundary drift, #17's
+live leak-test + flat-shape confirmation) are lower-priority edge cases with live-test
+scripts (or, for #17, a documented live-test procedure); a few IMPLEMENTED items
+(#11/#14/#15) still want a live re-check. Treat every recommendation this skill produces
+as provisional until Step 7's routing verification (and, when RLS was propagated, its
+leak-test) passes, and read the open items before trusting a candidate the classifier or
+lattice flagged as ambiguous.
 
 Ask one question at a time. Wait for each answer before proceeding.
 
@@ -55,7 +60,7 @@ Ask one question at a time. Wait for each answer before proceeding.
 
 | File | Purpose |
 |---|---|
-| [references/open-items.md](references/open-items.md) | Live-verification tracker — core routing/TML/precedence behaviours VERIFIED live (#0/#1/#2/#6/#7/#8/#10); #3/#4/#5/#9 remain OPEN edge cases with test scripts; #11/#14/#15 IMPLEMENTED pending live re-check; #13 DEFERRED. Read before trusting any recommendation and before merging to `main` |
+| [references/open-items.md](references/open-items.md) | Live-verification tracker — core routing/TML/precedence behaviours VERIFIED live (#0/#1/#2/#6/#7/#8/#10); #3/#4/#5/#9 remain OPEN edge cases with test scripts; #11/#14/#15 IMPLEMENTED pending live re-check; #13 DEFERRED; #17 RLS propagation WIRED, live leak-test + flat-shape confirmation OPEN. Read before trusting any recommendation and before merging to `main` |
 | [references/measure-decomposition-rules.md](references/measure-decomposition-rules.md) | Human-readable mirror of the measure decomposition table; what to do when the classifier returns `UNKNOWN` |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [ts-profile-snowflake (Claude Code)](../../claude/ts-profile-snowflake/SKILL.md) | Claude Code: Snowflake profile for connected-mode profiling/history/DDL execution (Cortex Code CLI users use their native `cortex connections` instead) |
@@ -104,8 +109,9 @@ association patch, gated by your approval at every step.
   7.  Verify routing ......................................... auto, you confirm on failure
   8.  Summary report ......................................... auto
 
-Confirmation required: Steps 2, 4, 5, 6 (connection, DDL execution, table
-registration fallback, RLS/CLS parity, each TML import), 7 (only if a rollback
+Confirmation required: Steps 2, 4, 5 (cut-off, and RLS force-add/exclude if any
+selected candidate conflicts), 6 (connection, DDL execution, table registration
+fallback, RLS propagation confirm, CLS parity, each TML import), 7 (only if a rollback
 decision is needed)
 Auto-executed: Steps 1, 3, 8
 
@@ -347,28 +353,86 @@ important).
 ### 5d. Present the curve and let the user pick the cut-off
 
 Join each `curve` entry (`id`, `marginal_benefit`, `cumulative_coverage_pct`,
-`compression`) with that candidate's own `dimensions`/`bucket`/`flags` from
-`candidates.json`:
+`compression`) with that candidate's own `dimensions`/`bucket`/`flags`/`measure_columns`
+from `candidates.json`, plus the proposed aggregate name — deterministic and computed
+the same way `ts aggregate generate` will name the real table/Model, via
+`ts_cli.commands.aggregate._aggregate_name`:
+
+```python
+import json, yaml
+from ts_cli.commands.aggregate import _aggregate_name
+
+model_tml = yaml.safe_load(open(f"{workdir}/model.tml.yaml").read())
+payload = json.loads(open(f"{workdir}/candidates.json").read())
+for c in payload["candidates"]:
+    c["_proposed_name"] = _aggregate_name(model_tml, c, None)
+```
 
 ```
-#   Grain                              Bucket    Rows saved   Compression   Cum. coverage   Flags
-1   Region × Product Category          MONTHLY   4.2M          240×          58%
-2   Store                              DAILY     1.1M           38×          79%
-3   Customer × Category × State        —         0.3M           12×          85%            wide_grain
-4   Region × Product Category × SKU    WEEKLY    0.2M            9×          87%            compression<10×
+#   Grain                         Bucket   Rows saved  Compr.  Cum.cov.  Measures       Proposed aggregate            Flags
+1   Region × Product Category    MONTHLY  4.2M         240×    58%       Sales, Units   DM_SALES_AGG_MONTHLY_REGION_PRODUCT_CATEGORY
+2   Store                        DAILY    1.1M          38×    79%       Sales          DM_SALES_AGG_DAILY_STORE
+3   Customer × Category × State  —        0.3M          12×    85%       Sales, Margin  DM_SALES_AGG_CUSTOMER_CATEGORY_STATE          wide_grain
+4   Region × Product Category    WEEKLY   0.2M           9×    87%       Sales          DM_SALES_AGG_WEEKLY_REGION_PRODUCT_CATEGORY   compression<10×, rls_conflict
 
 (mode: cost — profiled row counts; coverage % is weighted by history if you mined it in Step 4)
 ```
 
 Soft flags to call out, not hard rules — the maintenance-cost judgment stays human:
 `compression < 10×`, `wide_grain` (grain > 8 columns), a candidate covering only
-stale/rarely-viewed dependents. Also surface the standing caveat from
+stale/rarely-viewed dependents, and `rls_conflict` (candidate's own `rls_conflict: true`
+from `recommend` — see 5e below, this candidate's grain omits a base-table RLS filter
+column). Also surface the standing caveat from
 [open-items.md #10](references/open-items.md#10--filter-precision-vs-bucket-known-design-limitation-verify-impact-open):
 coverage % doesn't account for filter precision finer than the bucket — a candidate
 may look like it covers a query that filters more precisely than its stored grain.
 
 Ask the user to pick a cut-off (e.g. "1,2" or "1-3" or "all" or "none"). Save the
 selected candidate ids as `{selected_candidates}`.
+
+### 5e. Resolve RLS conflicts on the selected candidates
+
+`ts aggregate recommend` (5a/5c) already attached `rls_conflict`/`rls` to every candidate
+in `candidates.json` when the base tables carry row-level security (a no-op when they
+don't). If none of `{selected_candidates}` have `rls_conflict: true`, skip this step
+entirely.
+
+For each conflicting id, show the conflict and ask:
+
+```
+⚠ RLS CONFLICT — {grain_summary}
+
+  Base table row-level security requires: {rls.required}
+  This candidate's grain omits:           {rls.missing}
+
+  F  Force-add the missing column(s) to this candidate's grain — widens the grain,
+     which lowers compression (you'll want to re-profile it below)
+  X  Exclude this candidate from the selected set
+
+Enter F / X:
+```
+
+**F — force-add.** Apply `add_rls_columns_to_candidate` directly to this candidate in
+`candidates.json`:
+
+```python
+import json
+from ts_cli.aggregate.rls import add_rls_columns_to_candidate
+
+payload = json.loads(open(f"{workdir}/candidates.json").read())
+candidates = payload["candidates"]
+idx = next(i for i, c in enumerate(candidates) if c["id"] == candidate_id)
+candidates[idx] = add_rls_columns_to_candidate(candidates[idx], candidates[idx]["rls"]["missing"])
+open(f"{workdir}/candidates.json", "w").write(json.dumps(payload, indent=2))
+```
+
+The grain just changed, so re-run 5b (profile) and 5c (recommend) before generating this
+candidate in Step 6 — its row count and compression will differ now that the RLS
+column is part of the grain. `ts aggregate generate` recomputes the conflict on this
+widened candidate and will no longer fail closed on it.
+
+**X — exclude.** Drop this id from `{selected_candidates}` and move on to the next
+conflicting id (or Step 6 if none remain).
 
 ---
 
@@ -572,48 +636,60 @@ ask the user to add the table via the ThoughtSpot UI manually, then resume once 
 exists — check with `ts metadata search --subtype ONE_TO_ONE_LOGICAL --name
 "{aggregate_table_name}"`.
 
-### 6e. RLS/CLS parity — HARD GATE
+### 6e. RLS propagation — show and confirm; CLS parity stays a manual gate
 
-**A fast aggregate that leaks rows across tenants is worse than no aggregate.** Check
-every base table this candidate draws from (the `{workdir}/tables/*.tml.yaml` files
-exported in Step 3) for `table.rls_rules`:
+**A fast aggregate that leaks rows across tenants is worse than no aggregate.** As of
+Task 23, this is no longer a manual "go apply RLS yourself in the UI" gate — 6b's `ts
+aggregate generate` call already did the work, before you ever saw the artifacts:
+
+- It extracted `rls_rules` from every base Table TML in `{workdir}/tables/` this
+  candidate draws from.
+- If the candidate's grain omitted a required RLS filter column, `generate` already
+  **FAILED CLOSED** (non-zero exit, before writing any of the five output files) —
+  if that happened, Step 5e was skipped or the force-add wasn't applied to
+  `candidates.json` before this `generate` call; go back to 5e, force-add or exclude,
+  then re-run 6b from scratch. Do not hand-author RLS on the aggregate table as a
+  workaround for a fail-closed error.
+- Otherwise, the base rule(s) were remapped onto the aggregate's own grain columns and
+  are already sitting in `{workdir}/{candidate_id}/table.tml.yaml`'s `table.rls_rules`.
+
+Read it back and show the user what was propagated:
 
 ```python
-import yaml, pathlib
+import yaml
 
-rls_found = []
-for f in pathlib.Path(f"{workdir}/tables").glob("*.tml.yaml"):
-    doc = yaml.safe_load(f.read_text())
-    rules = doc.get("table", {}).get("rls_rules")
-    if rules:
-        rls_found.append((f.stem, rules))
+table_tml = yaml.safe_load(open(f"{workdir}/{candidate_id}/table.tml.yaml").read())
+rls = table_tml["table"].get("rls_rules")
 ```
 
-If `rls_found` is non-empty, this is a **hard stop** — refuse to import
-`agg_model.tml.yaml` until the user explicitly confirms parity:
+If `rls` is falsy, no base table carried RLS — nothing to show, proceed straight to the
+CLS question below. Otherwise, pull the "before" side of the comparison from the same
+`{workdir}/tables/*.tml.yaml` files read in the bullet list above (each base table's own
+`table.rls_rules.rules[].expr`) and show both sides:
 
 ```
-⛔ RLS PARITY REQUIRED
+RLS auto-propagated onto {aggregate_table_name}:
 
-  Base table(s) with Row-Level Security:
-    {table_name}: rule "{rule_name}" — {rule_expr}
+  {rule_name}: {rewritten_expr}
+  ...
 
-  The new aggregate table has NO row-level security applied. Any user who can query
-  the aggregate (directly or via routing) would see ALL rows, bypassing the primary
-  Model's access control.
+Rewritten from the base table's rule(s) (same filter shape, remapped to the aggregate's
+own columns):
+  {base_table}: {rule_name}: {base_expr}
+  ...
 
-  Before this aggregate Model is imported, you must either:
-    a) Apply an equivalent RLS rule to the new aggregate table in the ThoughtSpot UI
-       (Table → Row Security), replicating the rule(s) above, or
-    b) Confirm the aggregate table's data is not sensitive / RLS doesn't apply here
+This is PROVISIONAL until Step 7's live leak-test confirms it actually enforces the
+rule once queries route to this aggregate — auto-propagation copies the rule's shape,
+it does not (yet) prove ThoughtSpot evaluates it correctly against the new table.
 
-  Have you applied equivalent RLS to the aggregate table, or confirmed it's not
-  needed? (type CONFIRM to proceed, anything else cancels this candidate)
+Confirm this matches your intent before the aggregate Model is imported. (type CONFIRM
+to proceed, anything else cancels this candidate)
 ```
 
-Column-Level Security (CLS) cannot be reliably auto-detected today — retrieval of
-`column_security_rules` TML is itself an open item on `ts-dependency-manager`
-(unverified). Ask explicitly instead of silently skipping the check:
+**Column-Level Security (CLS) is unchanged — still a manual gate.** It cannot be
+reliably auto-detected today — retrieval of `column_security_rules` TML is itself an
+open item on `ts-dependency-manager` (unverified). Ask explicitly instead of silently
+skipping the check:
 
 ```
 Do any of the base tables for this aggregate have Column-Level Security (CLS)
@@ -739,8 +815,43 @@ run that `unique count(...)` query specifically and confirm it falls back to the
 primary rather than silently returning a wrong number from the aggregate (see
 [open-items.md #4](references/open-items.md#4--non-additive-measure-routing--open)).
 
+**RLS leak-test — the live gate for propagated security (Task 23).** If 6e showed a
+propagated `rls_rules` block for this candidate, it is provisional until this test
+passes. Re-run the same aggregate-hit query above, but authenticated as a user who is
+actually subject to the base table's RLS rule instead of `{profile_name}`:
+
+```bash
+source ~/.zshenv && ts spotql generate-sql \
+  'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' \
+  --model {model_guid} --profile "{restricted_user_profile}"
+```
+
+Ask the user to configure `{restricted_user_profile}` via `/ts-profile-thoughtspot` for
+a ThoughtSpot user account that belongs to the RLS rule's restricted group (e.g. a user
+in "West" for a `[T_1::REGION] = ts_groups` rule) if one isn't already set up — do not
+skip this by reasoning about the rule's expr in the abstract, it must be observed
+against a live query. Confirm two things:
+
+1. `executable_sql` still hits the **aggregate table's physical name** (routing is
+   unaffected by RLS — the point of Step 7's first check still holds).
+2. Actually run the returned SQL against the warehouse and confirm every returned row
+   satisfies the restricted user's RLS group (e.g. only `Region = 'West'` rows) — never
+   assume the propagated predicate is correct from reading the expr alone.
+
+If ThoughtSpot returns rows the restricted user should NOT see, this is the same class
+of failure as a routing failure below — the propagated RLS did not survive onto the
+aggregate correctly, and this candidate's aggregate must be treated as leaking sensitive
+data. Roll back immediately (below) and do not consider the aggregate safe to keep, even
+temporarily, until re-generated and re-tested. If no restricted-user profile is
+available to actually run this test, say so explicitly in the Step 8 report as an
+**unverified** RLS propagation — do not report the candidate as secured. See
+[open-items.md #17](references/open-items.md#17--rls-propagation-task-2223--wired-live-leak-test--flat-shape-confirmation-open)
+for the standing caveat: every propagated RLS rule is provisional until this leak-test
+has actually been run.
+
 **On failure** (aggregate doesn't get hit when it should, or gets hit when it
-shouldn't, or a NONADDITIVE query routes to the aggregate):
+shouldn't, a NONADDITIVE query routes to the aggregate, or the RLS leak-test above
+returns unauthorized rows):
 
 ```
 Routing verification FAILED for {candidate_id}: {what was expected vs. observed}

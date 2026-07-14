@@ -1199,3 +1199,308 @@ def test_profile_without_model_guid_never_calls_spotql(tmp_path, monkeypatch):
                                  "--tables-dir", str(tdir), "--emit-sql", str(script)])
     assert result.exit_code == 0, result.output
     assert "GROUP BY" in script.read_text()
+
+
+# --- Task 23: wire RLS propagation into recommend/generate --------------------
+
+def test_recommend_attaches_rls_conflict_and_summary(tmp_path):
+    """Part A: when a base table (from the default `<dir>/tables`) carries
+    `rls_rules` and a candidate's grain omits the filter column, `recommend`
+    attaches `rls: {required, missing}` + `rls_conflict: true` to that
+    candidate in candidates.json, and lists its id in the stdout summary's
+    `rls_conflicts`."""
+    model = {"model": {"name": "M", "columns": [
+        {"name": "Sales", "column_id": "F::A",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Category", "column_id": "F::C",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Region", "column_id": "F::R",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    sig = {"source_guid": "g", "source_name": "s", "source_type": "ANSWER",
+           "viz_name": None, "dimensions": ["Category"], "date_column": None,
+           "date_bucket": None, "measures": ["Sales"], "filter_columns": [],
+           "parse_status": "full", "weight": 1.0}
+    (tmp_path / "signatures.jsonl").write_text(json.dumps(sig) + "\n")
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "F.tml.yaml").write_text(yaml.safe_dump({
+        "table": {"name": "F", "rls_rules": {
+            "table_paths": [{"id": "T_1", "table": "F", "column": ["R"]}],
+            "rules": [{"name": "region_rule", "expr": "[T_1::R] = ts_groups"}],
+        }}}))
+
+    result = runner.invoke(app, ["aggregate", "recommend", "--dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    saved = json.loads((tmp_path / "candidates.json").read_text())
+    cand = next(c for c in saved["candidates"] if c["dimensions"] == ["Category"])
+    assert cand["rls"] == {"required": ["Region"], "missing": ["Region"]}
+    assert cand["rls_conflict"] is True
+    assert cand["id"] in out["rls_conflicts"]
+
+
+def test_recommend_no_conflict_when_grain_covers_rls_column(tmp_path):
+    """Part A: a candidate whose grain already covers the RLS filter column
+    gets `rls_conflict: false` and is absent from `rls_conflicts`."""
+    model = {"model": {"name": "M", "columns": [
+        {"name": "Sales", "column_id": "F::A",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Category", "column_id": "F::C",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    sig = {"source_guid": "g", "source_name": "s", "source_type": "ANSWER",
+           "viz_name": None, "dimensions": ["Category"], "date_column": None,
+           "date_bucket": None, "measures": ["Sales"], "filter_columns": [],
+           "parse_status": "full", "weight": 1.0}
+    (tmp_path / "signatures.jsonl").write_text(json.dumps(sig) + "\n")
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "F.tml.yaml").write_text(yaml.safe_dump({
+        "table": {"name": "F", "rls_rules": {
+            "table_paths": [{"id": "T_1", "table": "F", "column": ["C"]}],
+            "rules": [{"name": "cat_rule", "expr": "[T_1::C] = ts_groups"}],
+        }}}))
+
+    result = runner.invoke(app, ["aggregate", "recommend", "--dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    saved = json.loads((tmp_path / "candidates.json").read_text())
+    cand = next(c for c in saved["candidates"] if c["dimensions"] == ["Category"])
+    assert cand["rls"] == {"required": ["Category"], "missing": []}
+    assert cand["rls_conflict"] is False
+    assert out["rls_conflicts"] == []
+
+
+def test_recommend_rls_no_op_without_base_rls(tmp_path):
+    """No base table RLS at all (no `--tables-dir` given and no `<dir>/tables`
+    on disk either) is a complete no-op: candidates.json carries no `rls`/
+    `rls_conflict` keys and the summary's `rls_conflicts` is empty — no
+    behavior change for a Model without RLS."""
+    model = {"model": {"name": "M", "columns": [
+        {"name": "Sales", "column_id": "F::A",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Category", "column_id": "F::C",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    sig = {"source_guid": "g", "source_name": "s", "source_type": "ANSWER",
+           "viz_name": None, "dimensions": ["Category"], "date_column": None,
+           "date_bucket": None, "measures": ["Sales"], "filter_columns": [],
+           "parse_status": "full", "weight": 1.0}
+    (tmp_path / "signatures.jsonl").write_text(json.dumps(sig) + "\n")
+
+    result = runner.invoke(app, ["aggregate", "recommend", "--dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    assert out["rls_conflicts"] == []
+    saved = json.loads((tmp_path / "candidates.json").read_text())
+    assert "rls" not in saved["candidates"][0]
+    assert "rls_conflict" not in saved["candidates"][0]
+
+
+def test_build_filter_to_aggcol_resolves_display_name():
+    """Part B helper: `_build_filter_to_aggcol` resolves an RLS filter's
+    `(base_table, physical_col)` to the model's DISPLAY name via `column_id`
+    — the same string `build_aggregate_table_spec` stores the grain column
+    under, so no further lookup against the table spec is needed."""
+    from ts_cli.aggregate.rls import extract_rls
+    from ts_cli.commands.aggregate import _build_filter_to_aggcol
+
+    model_tml = {"model": {"columns": [
+        {"name": "Customer Zipcode", "column_id": "Source Table::ZIPCODE",
+         "properties": {"column_type": "ATTRIBUTE"}}]}}
+    table_tml = {"table": {"name": "Source Table", "rls_rules": {
+        "table_paths": [{"id": "T_1", "table": "Source Table", "column": ["ZIPCODE"]}],
+        "rules": [{"name": "geo_rule", "expr": "[T_1::ZIPCODE] = ts_groups_int"}],
+    }}}
+    rules = extract_rls({"Source Table": table_tml})
+    mapping = _build_filter_to_aggcol(rules, model_tml)
+    assert mapping == {("Source Table", "ZIPCODE"): "Customer Zipcode"}
+
+
+def test_build_filter_to_aggcol_skips_unmodeled_column():
+    """An RLS filter column the model doesn't expose at all can't resolve to
+    a display name — `_build_filter_to_aggcol` must skip it (never emit a
+    bogus mapping), relying on the fail-closed guard upstream to have already
+    refused to reach this point for a candidate that needed it."""
+    from ts_cli.aggregate.rls import extract_rls
+    from ts_cli.commands.aggregate import _build_filter_to_aggcol
+
+    model_tml = {"model": {"columns": []}}
+    table_tml = {"table": {"name": "Source Table", "rls_rules": {
+        "table_paths": [{"id": "T_1", "table": "Source Table", "column": ["SECRET"]}],
+        "rules": [{"name": "r", "expr": "[T_1::SECRET] = ts_groups"}],
+    }}}
+    rules = extract_rls({"Source Table": table_tml})
+    mapping = _build_filter_to_aggcol(rules, model_tml)
+    assert mapping == {}
+
+
+def test_generate_fails_closed_when_grain_omits_rls_column(tmp_path):
+    """Part B: a candidate whose grain omits a required RLS filter column
+    must fail closed (exit 1, NOTHING written to the output directory)
+    rather than emit an unsecured aggregate table. No client mock needed —
+    the guard runs before any network call."""
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Region", "column_id": "FACT::REGION",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "rls_rules": {
+                       "table_paths": [{"id": "T_1", "table": "FACT", "column": ["REGION"]}],
+                       "rules": [{"name": "region_rule", "expr": "[T_1::REGION] = ts_groups"}],
+                   },
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"},
+                               {"name": "REGION", "db_column_name": "REGION"}]}}))
+    isolated_runner = CliRunner(mix_stderr=False)
+    result = isolated_runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                          "--candidate", "cand_1", "--model-guid", "model-guid",
+                                          "--tables-dir", str(tdir), "--db", "SALESDB",
+                                          "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                          "--warehouse", "WH", "--no-spotql"])
+    assert result.exit_code == 1
+    assert "Region" in result.stderr
+    assert "row-level security" in result.stderr
+    outdir = tmp_path / "cand_1"
+    assert list(outdir.iterdir()) == []  # fail closed — zero side effects
+
+
+def test_generate_propagates_rls_onto_aggregate_table(tmp_path, monkeypatch):
+    """Part B: when the candidate's grain covers every RLS filter column,
+    `generate` propagates the base rule(s) onto both `table_spec.json` and
+    `table.tml.yaml`, remapped to the aggregate's own (display-name) grain
+    column and a new `<agg_name>_1` path id."""
+    import ts_cli.client as client_mod
+
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "rls_rules": {
+                       "table_paths": [{"id": "T_1", "table": "FACT", "column": ["CATEGORY"]}],
+                       "rules": [{"name": "cat_rule", "expr": "[T_1::CATEGORY] = ts_groups"}],
+                   },
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+
+    primary_edoc = yaml.safe_dump({"model": {"name": "Sales Model"}})
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, profile_name):
+            pass
+
+        def post(self, path, json=None):
+            assert "import" not in path
+            return FakeResponse([{"edoc": primary_edoc}])
+
+    monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
+    monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
+
+    result = runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                 "--candidate", "cand_1", "--model-guid", "model-guid",
+                                 "--tables-dir", str(tdir), "--db", "SALESDB",
+                                 "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                 "--warehouse", "WH", "--agg-model-guid", "agg-guid-1",
+                                 "--no-spotql"])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.stdout)
+    agg_name = out["aggregate_name"]
+
+    table_tml = yaml.safe_load((tmp_path / "cand_1" / "table.tml.yaml").read_text())
+    rls = table_tml["table"]["rls_rules"]
+    assert rls["table_paths"] == [
+        {"id": f"{agg_name}_1", "table": agg_name, "column": ["Category"]}]
+    assert rls["rules"] == [
+        {"name": "cat_rule", "expr": f"[{agg_name}_1::Category] = ts_groups"}]
+
+    spec = json.loads((tmp_path / "cand_1" / "table_spec.json").read_text())
+    assert spec["rls_rules"] == rls
+
+
+def test_generate_no_op_when_no_base_rls(tmp_path, monkeypatch):
+    """No base table RLS at all: `table.tml.yaml`/`table_spec.json` carry no
+    `rls_rules` key at all — byte-identical to pre-Task-23 behavior."""
+    import ts_cli.client as client_mod
+
+    model = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
+                       "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]}}
+    (tmp_path / "model.tml.yaml").write_text(yaml.safe_dump(model))
+    cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "covered": [0], "flags": [], "agg_rows": 86,
+            "measure_columns": ["Sales"]}
+    (tmp_path / "candidates.json").write_text(json.dumps(
+        {"base_rows": 1000000, "candidates": [cand], "selection": {}}))
+    tdir = tmp_path / "tables"
+    tdir.mkdir()
+    (tdir / "FACT.tml.yaml").write_text(yaml.safe_dump(
+        {"table": {"db": "DB", "schema": "S", "db_table": "FACT",
+                   "columns": [{"name": "AMOUNT", "db_column_name": "AMOUNT"},
+                               {"name": "CATEGORY", "db_column_name": "CATEGORY"}]}}))
+
+    primary_edoc = yaml.safe_dump({"model": {"name": "Sales Model"}})
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, profile_name):
+            pass
+
+        def post(self, path, json=None):
+            return FakeResponse([{"edoc": primary_edoc}])
+
+    monkeypatch.setattr(client_mod, "ThoughtSpotClient", FakeClient)
+    monkeypatch.setattr(client_mod, "resolve_profile", lambda p: "test-profile")
+
+    result = runner.invoke(app, ["aggregate", "generate", "--dir", str(tmp_path),
+                                 "--candidate", "cand_1", "--model-guid", "model-guid",
+                                 "--tables-dir", str(tdir), "--db", "SALESDB",
+                                 "--schema", "PUBLIC", "--connection-name", "SF Prod",
+                                 "--warehouse", "WH", "--agg-model-guid", "agg-guid-1",
+                                 "--no-spotql"])
+    assert result.exit_code == 0, result.output
+    table_tml = yaml.safe_load((tmp_path / "cand_1" / "table.tml.yaml").read_text())
+    assert "rls_rules" not in table_tml["table"]
+    spec = json.loads((tmp_path / "cand_1" / "table_spec.json").read_text())
+    assert "rls_rules" not in spec
