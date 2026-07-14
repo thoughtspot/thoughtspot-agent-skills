@@ -47,6 +47,7 @@ from check_smoke_tests import ALLOWLIST, NAME_ALIASES  # noqa: E402
 REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-audit":                                   ["--model-guid"],
     "ts-dependency-manager":                    ["--model-guid"],
+    "ts-object-model-aggregates":               ["--model-guid"],
     "ts-object-model-coach":                    ["--model-guid"],
     "ts-object-model-spotql-query":              ["--model-guid", "--spotql"],
     "ts-convert-to-snowflake-sv":               ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
