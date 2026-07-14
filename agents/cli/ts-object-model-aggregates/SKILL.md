@@ -638,32 +638,56 @@ print(json.dumps([spec]))
 " | ts tables create --profile "{profile_name}"
 ```
 
-Output: `{{aggregate_table_name}: guid_or_null}`. Schema validation against the
-connection here doubles as proof the DDL actually ran — `ts tables create` reuses the
-existing JDBC-error retry handling (transient errors retried automatically). If the
-GUID comes back `null` after retries (a persistent JDBC/schema error), fall back:
-ask the user to add the table via the ThoughtSpot UI manually, then resume once it
-exists — check with `ts metadata search --subtype ONE_TO_ONE_LOGICAL --name
-"{aggregate_table_name}"`.
+Output: `{{aggregate_table_name}: guid_or_null}`. Save the GUID as
+`{aggregate_table_guid}` — 6e needs it to confirm RLS attached. Schema validation
+against the connection here doubles as proof the DDL actually ran — `ts tables create`
+reuses the existing JDBC-error retry handling (transient errors retried
+automatically). If the GUID comes back `null` after retries (a persistent
+JDBC/schema error), fall back: ask the user to add the table via the ThoughtSpot UI
+manually, then resume once it exists — check with `ts metadata search --subtype
+ONE_TO_ONE_LOGICAL --name "{aggregate_table_name}"`.
 
-### 6e. RLS propagation — show and confirm; CLS parity stays a manual gate
+**RLS registration is a two-pass import, handled automatically by this same command
+(Task 25 — live finding).** When `table_spec.json` carries `rls_rules` (Task 23's
+propagation — see 6e below for what it contains), a single `create_new` import that
+already includes `rls_rules` fails live: `OBJECT_NOT_FOUND ... LOGICAL_TABLE`. The
+propagated rule's `table_paths` entry self-references the table being created
+(`[{aggregate_table_name}_1::COL]`), and that reference can't resolve to a
+`LOGICAL_TABLE` that doesn't exist yet in the same call that creates it. So
+`ts tables create` does this instead, with no extra flag or step required from you:
+
+1. **Pass 1 — create.** Import the table TML *without* `rls_rules`, `--create-new`.
+   This is the GUID reported above.
+2. **Pass 2 — attach.** Re-import the *same* TML *with* `rls_rules` and the
+   just-created GUID at the document root, `--no-create-new` (update in place).
+
+A table with no RLS at all is unaffected — one pass, as always. If pass 2 fails (the
+table imports fine but attaching RLS doesn't), stderr shows `table created ({guid})
+but attaching row-level security failed` — the table now EXISTS but is UNSECURED. Do
+not treat the GUID coming back non-null as proof RLS attached; 6e's confirm step below
+is what actually proves it either way.
+
+### 6e. RLS propagation — confirm it actually attached; CLS parity stays a manual gate
 
 **A fast aggregate that leaks rows across tenants is worse than no aggregate.** As of
 Task 23, this is no longer a manual "go apply RLS yourself in the UI" gate — 6b's `ts
-aggregate generate` call already did the work, before you ever saw the artifacts:
+aggregate generate` call already did the propagation work, before you ever saw the
+artifacts, and 6d's `ts tables create` call already did the two-pass registration
+against the live cluster:
 
-- It extracted `rls_rules` from every base Table TML in `{workdir}/tables/` this
-  candidate draws from.
+- `generate` extracted `rls_rules` from every base Table TML in `{workdir}/tables/`
+  this candidate draws from.
 - If the candidate's grain omitted a required RLS filter column, `generate` already
   **FAILED CLOSED** (non-zero exit, before writing any of the five output files) —
   if that happened, Step 5e was skipped or the force-add wasn't applied to
   `candidates.json` before this `generate` call; go back to 5e, force-add or exclude,
   then re-run 6b from scratch. Do not hand-author RLS on the aggregate table as a
   workaround for a fail-closed error.
-- Otherwise, the base rule(s) were remapped onto the aggregate's own grain columns and
-  are already sitting in `{workdir}/{candidate_id}/table.tml.yaml`'s `table.rls_rules`.
+- Otherwise, the base rule(s) were remapped onto the aggregate's own grain columns,
+  written into `{workdir}/{candidate_id}/table.tml.yaml`'s `table.rls_rules`, and 6d
+  attempted to attach them live via its pass 2.
 
-Read it back and show the user what was propagated:
+Read back what *should* have been propagated:
 
 ```python
 import yaml
@@ -672,13 +696,36 @@ table_tml = yaml.safe_load(open(f"{workdir}/{candidate_id}/table.tml.yaml").read
 rls = table_tml["table"].get("rls_rules")
 ```
 
-If `rls` is falsy, no base table carried RLS — nothing to show, proceed straight to the
-CLS question below. Otherwise, pull the "before" side of the comparison from the same
-`{workdir}/tables/*.tml.yaml` files read in the bullet list above (each base table's own
+If `rls` is falsy, no base table carried RLS — nothing to show or confirm, proceed
+straight to the CLS question below.
+
+Otherwise, **confirm it actually attached live** — 6d's pass 2 can fail independently
+of pass 1 (the table exists either way), so a non-null GUID in 6d's output is not
+proof RLS is in effect. Export the live object and compare:
+
+```bash
+source ~/.zshenv && ts tml export {aggregate_table_guid} --profile "{profile_name}" --parse
+```
+
+Check the returned `table.rls_rules` is present and matches `rls` above (same
+`tables`/`table_paths`/`rules` shape — all three sub-blocks; a live rule missing the
+`tables` sub-block naming the table itself is malformed and would not have imported in
+the first place, so its presence here is also confirmation the shape was well-formed).
+If it's missing or doesn't match, 6d's pass 2 silently failed despite its own stderr
+check (or that check was missed) — do not proceed. **Do not re-run 6d** — its pass 1 is
+a `--create-new` import, so re-running it against an already-created table makes a
+DUPLICATE same-named table rather than updating this one. Instead attach RLS directly
+against the known `{aggregate_table_guid}`: add `guid: {aggregate_table_guid}` to the
+document root of `table.tml.yaml` and run `ts tml import --file
+{workdir}/{candidate_id}/table.tml.yaml --profile "{profile_name}" --no-create-new`,
+then re-export and re-check before continuing.
+
+Once confirmed, pull the "before" side of the comparison from the same
+`{workdir}/tables/*.tml.yaml` files read above (each base table's own
 `table.rls_rules.rules[].expr`) and show both sides:
 
 ```
-RLS auto-propagated onto {aggregate_table_name}:
+RLS auto-propagated onto {aggregate_table_name} (confirmed attached via live export):
 
   {rule_name}: {rewritten_expr}
   ...
@@ -688,9 +735,10 @@ own columns):
   {base_table}: {rule_name}: {base_expr}
   ...
 
-This is PROVISIONAL until Step 7's live leak-test confirms it actually enforces the
-rule once queries route to this aggregate — auto-propagation copies the rule's shape,
-it does not (yet) prove ThoughtSpot evaluates it correctly against the new table.
+This is still PROVISIONAL until Step 7's live leak-test confirms it actually enforces
+the rule once queries route to this aggregate — this step only confirms the rule is
+attached to the table object, not that ThoughtSpot evaluates it correctly once routing
+kicks in.
 
 Confirm this matches your intent before the aggregate Model is imported. (type CONFIRM
 to proceed, anything else cancels this candidate)
@@ -924,6 +972,7 @@ Backup location(s): {backup_dir per candidate, if any patches were applied}
 | Most signatures come back `partial` | Likely token-casing mismatch in `search_query` — see [open-items.md #8](references/open-items.md#8--real-tml-search_query-token-casing--open) |
 | `ts aggregate generate` fails with `UnsupportedModelError` | Candidate needs manual SQL authoring — use `ts aggregate profile --emit-sql`'s output for that candidate as a starting point, or exclude it from the selected set |
 | `ts tables create` returns a `null` GUID after retries | Persistent JDBC/schema error — confirm the connection's role can see the target `{db}.{schema}`; fall back to creating the table via the ThoughtSpot UI and resume |
+| `ts tables create` stderr shows `table created (...) but attaching row-level security failed` | Pass 2 of the two-pass RLS registration (6d) failed after retries — the table exists but is UNSECURED. **Do not re-run `ts tables create`** — a second `--create-new` pass creates a DUPLICATE same-named table, it does not update the one that already exists. Instead attach RLS directly: add `guid: {aggregate_table_guid}` to the document root of `table.tml.yaml` (which already carries `rls_rules`) and run `ts tml import --file {workdir}/{candidate_id}/table.tml.yaml --no-create-new`. Then re-run 6e's confirm-via-export check |
 | `ts tml import --create-new` for `agg_model.tml.yaml` fails | Check the RLS/CLS gate wasn't bypassed; confirm `connection_name` matches an existing connection exactly (case-sensitive) |
 | Primary Model import (`primary_patched.tml.yaml`) fails with a version conflict | The primary drifted since Step 3 — re-run `ts aggregate generate` for this candidate (it re-exports the primary fresh every time) and retry |
 | Routing verification fails | Offer rollback via `ts dependency rollback --backup-dir {backup_dir} --only updates`; the aggregate Table/Model objects are NOT auto-deleted — note their GUIDs for manual cleanup |

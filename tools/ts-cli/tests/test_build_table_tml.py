@@ -6,7 +6,7 @@ No live ThoughtSpot connection required.
 import pytest
 import yaml
 
-from ts_cli.commands.tables import _build_table_tml, _find_guid_by_name
+from ts_cli.commands.tables import _build_table_tml, _find_guid_by_name, _strip_rls_rules
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -198,6 +198,74 @@ class TestYamlOutput:
         assert t["db"] == "MY_DB"
         assert t["schema"] == "MY_SCHEMA"
         assert t["db_table"] == "MY_TABLE"
+
+
+# ---------------------------------------------------------------------------
+# Bug B (Task 25, two-pass RLS import): `_build_table_tml`'s optional `guid`
+# param puts `guid:` at the document root — required for pass 2's
+# update-in-place (`--no-create-new`) import that attaches a propagated
+# `rls_rules` block onto an aggregate table created (without RLS) in pass 1.
+# ---------------------------------------------------------------------------
+
+class TestBuildTableTmlGuid:
+    def test_no_guid_by_default(self):
+        spec = make_spec()
+        tml = parse_tml(_build_table_tml(spec))
+        assert "guid" not in tml
+
+    def test_guid_placed_at_document_root(self):
+        spec = make_spec()
+        tml = parse_tml(_build_table_tml(spec, guid="abc-123"))
+        assert tml["guid"] == "abc-123"
+        # guid: is a document-root sibling of table:, never nested inside it
+        assert "guid" not in tml["table"]
+
+    def test_guid_does_not_affect_table_body(self):
+        spec = make_spec(rls_rules={"tables": [{"name": "MY_TABLE"}],
+                                    "table_paths": [{"id": "MY_TABLE_1", "table": "MY_TABLE",
+                                                     "column": ["ID"]}],
+                                    "rules": [{"name": "r", "expr": "[MY_TABLE_1::ID] = ts_groups"}]})
+        without_guid = parse_tml(_build_table_tml(spec))
+        with_guid = parse_tml(_build_table_tml(spec, guid="abc-123"))
+        assert with_guid["table"] == without_guid["table"]
+
+
+# ---------------------------------------------------------------------------
+# Bug B (Task 25): `_strip_rls_rules` — the RLS-less spec variant for pass 1
+# (create). A self-referencing rls_rules block can't resolve before the
+# table exists on a live cluster, so pass 1 must create without it.
+# ---------------------------------------------------------------------------
+
+class TestStripRlsRules:
+    def test_removes_rls_rules_key(self):
+        spec = make_spec(rls_rules={"tables": [{"name": "MY_TABLE"}], "table_paths": [],
+                                    "rules": []})
+        stripped = _strip_rls_rules(spec)
+        assert "rls_rules" not in stripped
+
+    def test_leaves_other_keys_untouched(self):
+        spec = make_spec(rls_rules={"tables": [{"name": "MY_TABLE"}]})
+        stripped = _strip_rls_rules(spec)
+        assert stripped["name"] == spec["name"]
+        assert stripped["columns"] == spec["columns"]
+        assert stripped["connection_name"] == spec["connection_name"]
+
+    def test_no_op_when_rls_rules_absent(self):
+        spec = make_spec()
+        stripped = _strip_rls_rules(spec)
+        assert stripped == spec
+
+    def test_original_spec_untouched(self):
+        spec = make_spec(rls_rules={"tables": [{"name": "MY_TABLE"}]})
+        _strip_rls_rules(spec)
+        assert "rls_rules" in spec
+
+    def test_stripped_spec_produces_tml_without_rls_rules(self):
+        spec = make_spec(rls_rules={"tables": [{"name": "MY_TABLE"}], "table_paths": [],
+                                    "rules": []})
+        stripped = _strip_rls_rules(spec)
+        tml = parse_tml(_build_table_tml(stripped))
+        assert "rls_rules" not in tml["table"]
 
 
 # ---------------------------------------------------------------------------

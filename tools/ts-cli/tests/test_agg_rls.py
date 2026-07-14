@@ -329,12 +329,29 @@ class TestPropagateRls:
         rules = extract_rls({"Source Table": _NESTED_TABLE_TML})
         out = propagate_rls(rules, "SALES_AGG", {("Source Table", "ZIPCODE"): "ZIPCODE"})
 
+        assert out["tables"] == [{"name": "SALES_AGG"}]
         assert out["table_paths"] == [
             {"id": "SALES_AGG_1", "table": "SALES_AGG", "column": ["ZIPCODE"]}
         ]
         assert len(out["rules"]) == 1
         assert out["rules"][0]["name"] == "geo_rule"
         assert out["rules"][0]["expr"] == "[SALES_AGG_1::ZIPCODE] = ts_groups_int"
+
+    def test_emits_tables_block_naming_the_aggregate_table(self):
+        # BUG A (live import failure): a known-good ThoughtSpot rls_rules
+        # block has THREE sub-blocks — tables/table_paths/rules — not two.
+        # Omitting `tables` fails live import with
+        # `OBJECT_NOT_FOUND ... LOGICAL_TABLE`. The aggregate is always a
+        # single table, so exactly one `tables` entry, naming it.
+        rules = extract_rls({"Source Table": _NESTED_TABLE_TML})
+        out = propagate_rls(rules, "SALES_AGG", {("Source Table", "ZIPCODE"): "ZIPCODE"})
+        assert out["tables"] == [{"name": "SALES_AGG"}]
+
+    def test_sub_blocks_ordered_tables_table_paths_rules(self):
+        # Matches the known-good live shape's block order.
+        rules = extract_rls({"Source Table": _NESTED_TABLE_TML})
+        out = propagate_rls(rules, "SALES_AGG", {("Source Table", "ZIPCODE"): "ZIPCODE"})
+        assert list(out.keys()) == ["tables", "table_paths", "rules"]
 
     def test_renamed_aggregate_column(self):
         rules = extract_rls({"Source Table": _NESTED_TABLE_TML})
@@ -347,11 +364,34 @@ class TestPropagateRls:
         out = propagate_rls(rules, "MULTI_AGG",
                             {("Multi Table", "ZIPCODE"): "ZIPCODE",
                              ("Multi Table", "STATE"): "STATE"})
+        assert out["tables"] == [{"name": "MULTI_AGG"}]
         assert len(out["table_paths"]) == 1
         assert out["table_paths"][0]["column"] == ["STATE", "ZIPCODE"]
         exprs = {r["name"]: r["expr"] for r in out["rules"]}
         assert exprs["geo_rule"] == "[MULTI_AGG_1::ZIPCODE] = ts_groups_int"
         assert exprs["state_rule"] == "[MULTI_AGG_1::STATE] = ts_var('state')"
+
+    def test_two_base_tables_each_with_a_rule_merge_into_one_aggregate_block(self):
+        # CONFIRM (Task 25 brief): multi-rule / multi-BASE-TABLE propagation
+        # — two DISTINCT base tables, each carrying its own RLS rule on its
+        # own physical column — must still collapse onto the single
+        # aggregate's one `rls_rules` block: one `tables` entry (the
+        # aggregate is always one table), one merged `table_paths` entry
+        # carrying both remapped columns, and both rules present.
+        rules = extract_rls({
+            "Source Table": _NESTED_TABLE_TML,   # ZIPCODE
+            "Second Table": _SECOND_TABLE_TML,   # REGION
+        })
+        out = propagate_rls(rules, "COMBO_AGG", {
+            ("Source Table", "ZIPCODE"): "ZIPCODE",
+            ("Second Table", "REGION"): "REGION",
+        })
+        assert out["tables"] == [{"name": "COMBO_AGG"}]
+        assert len(out["table_paths"]) == 1
+        assert out["table_paths"][0]["column"] == ["REGION", "ZIPCODE"]
+        exprs = {r["name"]: r["expr"] for r in out["rules"]}
+        assert exprs["geo_rule"] == "[COMBO_AGG_1::ZIPCODE] = ts_groups_int"
+        assert exprs["region_rule"] == "[COMBO_AGG_1::REGION] = ts_groups"
 
     def test_cross_table_same_physical_col_maps_to_distinct_agg_cols(self):
         # SECURITY regression: two base tables each RLS-filter on a same-named
@@ -383,6 +423,7 @@ class TestPropagateRls:
             ("Cost Dim", "REGION"): "COST_REGION",
         })
         # both distinct aggregate columns appear on the merged path
+        assert out["tables"] == [{"name": "COMBO_AGG"}]
         assert out["table_paths"][0]["column"] == ["COST_REGION", "SALES_REGION"]
         exprs = {r["name"]: r["expr"] for r in out["rules"]}
         assert exprs["sales_region"] == "[COMBO_AGG_1::SALES_REGION] = ts_groups"
@@ -418,3 +459,7 @@ class TestPropagateRls:
             "[SALES_AGG_1::ZIPCODE] = ts_groups_int"
         )
         assert round_tripped["table"]["rls_rules"]["table_paths"][0]["table"] == "SALES_AGG"
+        # BUG A: the `tables` sub-block (naming the aggregate LOGICAL_TABLE)
+        # must survive the dump/lint round trip too — its absence is what
+        # made live import fail with OBJECT_NOT_FOUND ... LOGICAL_TABLE.
+        assert round_tripped["table"]["rls_rules"]["tables"] == [{"name": "SALES_AGG"}]

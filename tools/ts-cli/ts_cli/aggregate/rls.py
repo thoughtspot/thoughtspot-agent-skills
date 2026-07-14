@@ -8,10 +8,17 @@ table (remapped to its own columns) and detect when a candidate's grain omits
 a required RLS filter column.
 
 Verified TML shape (see the task-22 brief and
-`tools/ts-cli/tests/test_report_matched_columns.py::_TABLE_TML_WITH_RLS`):
+`tools/ts-cli/tests/test_report_matched_columns.py::_TABLE_TML_WITH_RLS` for the
+simplified two-block illustration `extract_rls` reads on input — that fixture
+predates the discovery below and is fine for `extract_rls`, which never reads
+`tables:` itself). The full shape a live UI-created rule round-trips through
+import cleanly (live-verified, Task 25) has a THIRD sub-block, `tables`,
+naming the owning table — this is the shape `propagate_rls` must EMIT:
 
     table:
       rls_rules:
+        tables:
+          - name: Source Table
         table_paths:
           - id: T_1
             table: Source Table
@@ -19,6 +26,12 @@ Verified TML shape (see the task-22 brief and
         rules:
           - name: geo_rule
             expr: "[T_1::ZIPCODE] = ts_groups_int"
+
+Omitting `tables` (the pre-Task-25 bug) is accepted by `extract_rls` on input
+(it never reads that key) but rejected on IMPORT of `propagate_rls`'s output
+— `OBJECT_NOT_FOUND ... LOGICAL_TABLE` — because the aggregate table doesn't
+exist as an object `table_paths`' self-reference can resolve against until
+`tables` names it explicitly. See `propagate_rls`'s docstring.
 
 Some builds instead emit a flat list directly under `rls_rules:` (no
 `table_paths` wrapper). `agents/shared/erd/parser.py`'s `_rls_rule_list`
@@ -213,7 +226,16 @@ def add_rls_columns_to_candidate(candidate: dict, missing_display_cols) -> dict:
 def propagate_rls(base_rules: list, agg_table_name: str, filter_to_aggcol: dict) -> dict:
     """Build the `rls_rules` block to attach to the AGGREGATE table's TML.
 
-    Emits one merged `table_paths` entry (id `"<agg_table_name>_1"`, mirroring
+    Emits THREE sub-blocks, in this order — `tables`, `table_paths`, `rules`
+    — matching the known-good shape a live UI-created rule re-imports as
+    (live-verified, Task 25; see the module docstring). `tables` is
+    `[{"name": agg_table_name}]` — one entry, since the aggregate is always a
+    single table. **This block is load-bearing, not decorative:** omitting it
+    (the pre-Task-25 bug) made a live import of this exact TML fail with
+    `OBJECT_NOT_FOUND ... LOGICAL_TABLE` — `table_paths`' self-reference to
+    `agg_table_name` apparently resolves against `tables`, not independently.
+
+    `table_paths` is one merged entry (id `"<agg_table_name>_1"`, mirroring
     the `"<name>_1"` self-path convention documented in
     `agents/shared/schemas/thoughtspot-sets-tml.md`) pointing at
     `agg_table_name`, carrying every aggregate physical column the RLS filters
@@ -221,6 +243,11 @@ def propagate_rls(base_rules: list, agg_table_name: str, filter_to_aggcol: dict)
     becomes `[<agg_path>::<AGGCOL>]`; the rule name and any non-bracketed
     `ts_*` system-var portion of the expr are copied verbatim (system vars are
     never bracket-wrapped, so the rewrite regex never touches them).
+
+    Multiple base tables (each contributing their own rule(s)) collapse onto
+    this SAME single aggregate block — one `tables`/`table_paths` entry, all
+    rules listed — since the aggregate is one table no matter how many base
+    tables fed it.
 
     `filter_to_aggcol` is keyed by the **`(base table, physical column)`
     tuple** — exactly the pair `rls_filter_columns` emits and
@@ -286,6 +313,7 @@ def propagate_rls(base_rules: list, agg_table_name: str, filter_to_aggcol: dict)
         rules_out.append({"name": rule.get("name", ""), "expr": _REF.sub(_remap, expr)})
 
     return {
+        "tables": [{"name": agg_table_name}],
         "table_paths": [{"id": agg_path_id, "table": agg_table_name, "column": sorted(agg_cols)}],
         "rules": rules_out,
     }

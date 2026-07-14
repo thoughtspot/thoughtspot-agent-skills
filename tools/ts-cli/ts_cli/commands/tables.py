@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import typer
 import yaml
@@ -25,6 +25,20 @@ def _is_jdbc_error(status: Dict[str, Any]) -> bool:
     return any(e in msg for e in _JDBC_ERRORS)
 
 
+def _err(msg: str) -> None:
+    """print(..., file=sys.stderr) plus an explicit flush.
+
+    Duplicated locally rather than imported from `commands.aggregate` (same
+    helper, same reasoning as that module's own docstring — see rls.py's
+    convention of keeping each module's diagnostics self-contained): Click's
+    `CliRunner(mix_stderr=False)` only flushes `sys.stdout` in its `invoke()`
+    finally block, not `sys.stderr` — an unflushed stderr diagnostic here
+    would otherwise vanish from `result.stderr` in tests.
+    """
+    print(msg, file=sys.stderr)
+    sys.stderr.flush()
+
+
 # Live-verified BL-063 PR4 (2026-07-10, se-thoughtspot): the import API rejects
 # "BOOLEAN" ("Data type BOOLEAN is not valid for column ...") — it wants "BOOL".
 # Normalize the common spelling so existing specs authored against the old
@@ -32,7 +46,7 @@ def _is_jdbc_error(status: Dict[str, Any]) -> bool:
 _DATA_TYPE_NORMALIZE = {"BOOLEAN": "BOOL"}
 
 
-def _build_table_tml(spec: Dict[str, Any]) -> str:
+def _build_table_tml(spec: Dict[str, Any], guid: Optional[str] = None) -> str:
     """Build a ThoughtSpot table TML YAML string from a spec dict.
 
     An optional `rls_rules` key on `spec` (Task 23 — `ts aggregate generate`
@@ -41,6 +55,15 @@ def _build_table_tml(spec: Dict[str, Any]) -> str:
     spec-building caller (Tableau/Databricks conversions, hand-authored
     specs), so this is purely additive — no behavior change when the key
     isn't present.
+
+    An optional `guid` (Bug B, Task 25 — two-pass RLS registration) is placed
+    at the document root, a sibling of `table:` — never nested inside it, per
+    the "guid: goes at the document root" TML invariant
+    (`agents/shared/schemas/thoughtspot-table-tml.md`). `create_tables` uses
+    this for pass 2's update-in-place (`--no-create-new`) import that attaches
+    a propagated `rls_rules` block once the table (and its GUID) already
+    exist. Omitted by default — every other caller creates a brand-new table
+    with no GUID yet.
     """
     columns = []
     for col in spec.get("columns", []):
@@ -68,7 +91,27 @@ def _build_table_tml(spec: Dict[str, Any]) -> str:
     }
     if spec.get("rls_rules"):
         tbl["table"]["rls_rules"] = spec["rls_rules"]
-    return yaml.dump(tbl, default_flow_style=False, allow_unicode=True)
+
+    doc: Dict[str, Any] = {}
+    if guid:
+        doc["guid"] = guid
+    doc.update(tbl)
+    return yaml.dump(doc, default_flow_style=False, allow_unicode=True)
+
+
+def _strip_rls_rules(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of `spec` with `rls_rules` removed — the RLS-less spec
+    variant `create_tables` uses for pass 1 (create).
+
+    Bug B (Task 25, live import failure): a table TML that carries a
+    self-referencing `rls_rules` block (`[<agg_table>_1::COL]` pointing at
+    the table being imported) in the SAME `create_new` import call fails —
+    the self-reference can't resolve to a `LOGICAL_TABLE` that doesn't exist
+    yet. Pass 1 must create the table without it; pass 2 re-imports WITH
+    `rls_rules` once the table (and its GUID) exist (see `create_tables`).
+    A no-op (returns an equal, distinct dict) when `rls_rules` isn't present.
+    """
+    return {k: v for k, v in spec.items() if k != "rls_rules"}
 
 
 def _find_guid_by_name(
@@ -112,6 +155,52 @@ def _find_guid_by_name(
     return None
 
 
+def _import_one(client: ThoughtSpotClient, tml_str: str, create_new: bool,
+                retries: int, retry_delay: float, name: str,
+                connection_name: str) -> Tuple[Optional[str], bool]:
+    """One create-or-update import attempt for a single table TML string,
+    with the existing transient-JDBC-error retry loop. Shared by
+    `create_tables`'s pass 1 (create, `create_new=True`) and pass 2 (update
+    in place with `create_new=False`, Bug B / Task 25 — attaches a
+    propagated `rls_rules` block onto the table pass 1 just created) — same
+    retry semantics either way. Returns `(guid, success)`; `guid` is
+    resolved from the response first, falling back to a connection-scoped
+    name search (`_find_guid_by_name`) when the import response omits it.
+    """
+    guid: Optional[str] = None
+    for attempt in range(1, retries + 1):
+        if attempt > 1:
+            time.sleep(retry_delay)
+
+        result = client.post(
+            "/api/rest/2.0/metadata/tml/import",
+            json={"metadata_tmls": [tml_str], "import_policy": "PARTIAL", "create_new": create_new},
+        )
+        resp_data = result.json()
+        # Handle both list and dict response shapes
+        items = resp_data if isinstance(resp_data, list) else resp_data.get("object", [resp_data])
+        item = items[0] if items else {}
+        status = item.get("response", item).get("status", {})
+        status_code = status.get("status_code", "ERROR")
+
+        if status_code == "OK":
+            # Try to get GUID from response first (nested or flat shape)
+            guid = extract_imported_guid([item])
+            # If not in response, search for it (connection-scoped — see
+            # _find_guid_by_name docstring for why name-only isn't enough)
+            if not guid:
+                guid = _find_guid_by_name(client, name, connection_name)
+            return guid, True
+        elif _is_jdbc_error(status):
+            _err(f"  RETRY {name} (attempt {attempt}/{retries}): transient JDBC error")
+            continue
+        else:
+            err = status.get("error_message", "")[:200]
+            _err(f"  ERROR {name}: {err}")
+            return None, False
+    return None, False
+
+
 @app.command("create")
 def create_tables(
     profile: Optional[str] = _profile_option,
@@ -149,8 +238,24 @@ def create_tables(
     Auto-retries on transient JDBC errors. After each successful import,
     resolves the GUID via metadata search if not returned in the import response.
 
+    Row-level security (Bug B, Task 25 — two-pass import): a spec whose
+    `rls_rules` key is set (Task 23 — `ts aggregate generate` attaches the
+    block `ts_cli.aggregate.rls.propagate_rls` returns) is registered in TWO
+    passes automatically, transparent to the caller. Pass 1 creates the
+    table WITHOUT `rls_rules`; pass 2 re-imports the SAME table WITH
+    `rls_rules` plus the just-created GUID at the document root and
+    `--no-create-new`, attaching the rules. This is required — live-verified
+    — because `rls_rules`' `table_paths` entry self-references the table
+    being created (`[<name>_1::COL]`); resolving that reference in the SAME
+    `create_new` call the table itself is created in fails with
+    `OBJECT_NOT_FOUND ... LOGICAL_TABLE`, since the table doesn't exist yet
+    at the moment ThoughtSpot tries to resolve the self-reference. A spec
+    with no `rls_rules` is completely unaffected — one pass, as before.
+
     Output: JSON object mapping table name → GUID for all successfully created tables.
-    Tables that failed after all retries are included with null as the GUID.
+    Tables that failed after all retries are included with null as the GUID. A table
+    whose pass 1 (create) succeeded but pass 2 (RLS attach) failed still reports its
+    GUID here (the table exists) — check stderr for an RLS-attach error in that case.
 
     Examples:
 
@@ -171,48 +276,45 @@ def create_tables(
 
     for spec in specs:
         name = spec["name"]
-        tml_str = _build_table_tml(spec)
-        payload = json.dumps([tml_str])
-        guid: Optional[str] = None
-        success = False
+        connection_name = spec["connection_name"]
+        has_rls = bool(spec.get("rls_rules"))
 
-        for attempt in range(1, retries + 1):
-            if attempt > 1:
-                time.sleep(retry_delay)
+        # Pass 1: create. Strip rls_rules first when present — a
+        # self-referencing rule can't resolve before the table exists (Bug B).
+        create_spec = _strip_rls_rules(spec) if has_rls else spec
+        tml_str = _build_table_tml(create_spec)
+        guid, success = _import_one(client, tml_str, True, retries, retry_delay,
+                                    name, connection_name)
 
-            result = client.post(
-                "/api/rest/2.0/metadata/tml/import",
-                json={"metadata_tmls": [tml_str], "import_policy": "PARTIAL", "create_new": True},
-            )
-            resp_data = result.json()
-            # Handle both list and dict response shapes
-            items = resp_data if isinstance(resp_data, list) else resp_data.get("object", [resp_data])
-            item = items[0] if items else {}
-            status = item.get("response", item).get("status", {})
-            status_code = status.get("status_code", "ERROR")
-
-            if status_code == "OK":
-                # Try to get GUID from response first (nested or flat shape)
-                guid = extract_imported_guid([item])
-                # If not in response, search for it (connection-scoped — see
-                # _find_guid_by_name docstring for why name-only isn't enough)
-                if not guid:
-                    guid = _find_guid_by_name(client, name, spec["connection_name"])
-                success = True
-                break
-            elif _is_jdbc_error(status):
-                print(f"  RETRY {name} (attempt {attempt}/{retries}): transient JDBC error",
-                      file=sys.stderr)
-                continue
-            else:
-                err = status.get("error_message", "")[:200]
-                print(f"  ERROR {name}: {err}", file=sys.stderr)
-                break
-
-        if success:
-            results[name] = guid
-            print(f"  OK  {name}: {guid}", file=sys.stderr)
-        else:
+        if not success:
             results[name] = None
+            continue
+
+        # Pass 2: attach RLS now that the table (and its GUID) exist.
+        if has_rls:
+            if guid:
+                rls_tml_str = _build_table_tml(spec, guid=guid)
+                _, rls_success = _import_one(client, rls_tml_str, False, retries,
+                                             retry_delay, name, connection_name)
+                if not rls_success:
+                    # NOT "re-run ts tables create" — a second create_new pass
+                    # would create a DUPLICATE same-named table, not update this
+                    # one. The table already exists (guid known); only the
+                    # attach needs retrying, directly against that guid.
+                    _err(f"  ERROR {name}: table created ({guid}) but attaching "
+                        "row-level security failed after retries — the table is "
+                        "UNSECURED. Do not re-run `ts tables create` (creates a "
+                        f"duplicate); instead set `guid: {guid}` at the document "
+                        "root of the table's TML (with rls_rules) and run "
+                        "`ts tml import --file <that TML> --no-create-new`.")
+            else:
+                _err(f"  WARNING {name}: table created but its GUID could not be "
+                    "resolved — cannot attach row-level security automatically. "
+                    "Find the GUID, set it at the document root of the table's "
+                    "TML (with rls_rules), and run `ts tml import --file <that "
+                    "TML> --no-create-new`.")
+
+        results[name] = guid
+        _err(f"  OK  {name}: {guid}")
 
     print(json.dumps(results))

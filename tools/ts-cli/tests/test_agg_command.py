@@ -1444,6 +1444,10 @@ def test_generate_propagates_rls_onto_aggregate_table(tmp_path, monkeypatch):
 
     table_tml = yaml.safe_load((tmp_path / "cand_1" / "table.tml.yaml").read_text())
     rls = table_tml["table"]["rls_rules"]
+    # Bug A (Task 25, live import failure): the propagated block must carry
+    # a `tables` sub-block naming the aggregate table, or live import fails
+    # with OBJECT_NOT_FOUND ... LOGICAL_TABLE.
+    assert rls["tables"] == [{"name": agg_name}]
     assert rls["table_paths"] == [
         {"id": f"{agg_name}_1", "table": agg_name, "column": ["Category"]}]
     assert rls["rules"] == [

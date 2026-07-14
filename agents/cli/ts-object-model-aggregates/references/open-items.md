@@ -835,7 +835,7 @@ greedy ranking, never `covers()`'s coverage correctness. Noted inline on
 
 ---
 
-## #17 — RLS propagation (Task 22/23) — WIRED; live leak-test + flat-shape confirmation OPEN
+## #17 — RLS propagation (Task 22/23/25) — WIRED; import bugs FIXED, single-rule propagation VERIFIED live; leak-test + flat-shape confirmation OPEN
 
 **Context:** live review surfaced that the skill previously only GATED on base-table
 row-level security — it refused to import until the user manually replicated the RLS
@@ -876,18 +876,21 @@ five functions, all unit-tested in
 4. `add_rls_columns_to_candidate(candidate, missing_display_cols)` — the force-add
    mechanic: returns a copy with the missing columns folded into `dimensions`.
 5. `propagate_rls(base_rules, agg_table_name, filter_to_aggcol)` — builds the
-   aggregate table's `rls_rules` block: one merged `table_paths` entry (id
-   `"<agg_table_name>_1"`, following the `"<name>_1"` self-path convention in
-   `thoughtspot-sets-tml.md`) plus rewritten rule exprs (`ts_*` system-var portions
-   copied verbatim, since they're never bracket-wrapped so the rewrite regex never
-   touches them). `filter_to_aggcol` is keyed by the **`(base table, physical column)`
-   tuple** (the same pair `rls_filter_columns` emits / `candidate_rls_conflict`
-   resolves), NOT the bare column name — Task 23 must build the dict with tuple keys.
-   Raises `ValueError` naming every unmapped filter `(table, col)` if `filter_to_aggcol`
-   is incomplete — a programming-error / fail-closed guard, since Task 23's caller is
-   expected to guarantee coverage via #3/#4 above. A round-trip test confirms the
-   emitted block survives `tml_common.dump_tml_yaml` + `tml_lint.lint_tml` clean when
-   attached to a Table TML.
+   aggregate table's `rls_rules` block: **as of Task 25** (see below — the original
+   Task 22 version of this function omitted `tables` and failed live import; this
+   description reflects the fixed version) one `tables` entry (`[{"name":
+   agg_table_name}]`) plus one merged `table_paths` entry (id `"<agg_table_name>_1"`,
+   following the `"<name>_1"` self-path convention in `thoughtspot-sets-tml.md`) plus
+   rewritten rule exprs (`ts_*` system-var portions copied verbatim, since they're
+   never bracket-wrapped so the rewrite regex never touches them). `filter_to_aggcol`
+   is keyed by the **`(base table, physical column)` tuple** (the same pair
+   `rls_filter_columns` emits / `candidate_rls_conflict` resolves), NOT the bare
+   column name — Task 23 must build the dict with tuple keys. Raises `ValueError`
+   naming every unmapped filter `(table, col)` if `filter_to_aggcol` is incomplete —
+   a programming-error / fail-closed guard, since Task 23's caller is expected to
+   guarantee coverage via #3/#4 above. A round-trip test confirms the emitted block
+   survives `tml_common.dump_tml_yaml` + `tml_lint.lint_tml` clean when attached to a
+   Table TML.
 
 **Security fixes applied post-review (2026-07-14, before Task 23 wiring):**
 - **Same-name cross-table columns (was a silent mis-securing / leak):** `propagate_rls`
@@ -941,14 +944,66 @@ five functions, all unit-tested in
   `tools/ts-cli/tests/test_agg_command.py`'s "Task 23" section. `rls.py`'s own pure
   functions are unchanged (Task 22, only called here).
 
+**Task 25 (this task) — LIVE testing surfaced two real import bugs, both FIXED:**
+
+- **Bug A — `propagate_rls` omitted the `tables` sub-block.** A known-good ThoughtSpot
+  `rls_rules` block (a live UI-created rule that re-imports cleanly) has THREE
+  sub-blocks — `tables`, `table_paths`, `rules` — not two. `propagate_rls` only ever
+  emitted `table_paths` + `rules`; on live import this failed `OBJECT_NOT_FOUND ...
+  LOGICAL_TABLE`, because `table_paths`' self-reference to the aggregate table can't
+  resolve without a `tables` entry naming that table. Fixed: `propagate_rls` now
+  returns `{"tables": [{"name": agg_table_name}], "table_paths": [...], "rules":
+  [...]}` (one `tables` entry — the aggregate is always a single table), sub-blocks in
+  that order. Verified: adding `tables` made the live import succeed and the rule
+  attach to the aggregate. Tests: `tools/ts-cli/tests/test_agg_rls.py` (`tables`
+  presence/content on single-rule, multi-rule-same-table, and multi-BASE-TABLE
+  propagation; key order; round-trip through `dump_tml_yaml` + `lint_tml` stays
+  clean) and `tools/ts-cli/tests/test_agg_command.py`'s Task 23 section (`generate`'s
+  emitted `table.tml.yaml`/`table_spec.json` both carry `tables`).
+- **Bug B — single-pass import of a self-referencing `rls_rules` block fails.** A
+  `create_new` import of the aggregate table TML that already carries `rls_rules`
+  fails live — the same self-reference above can't resolve to a `LOGICAL_TABLE` that
+  doesn't exist yet in the SAME call that creates it (independent of Bug A; still
+  fails even with `tables` present). The working sequence, live-verified, is two
+  passes: (1) create the table WITHOUT `rls_rules`; (2) re-import the SAME table WITH
+  `rls_rules` + the created table's `guid` at the document root + `--no-create-new`,
+  which attaches the rules to the now-existing table. Fixed in `ts tables create`
+  (`tools/ts-cli/ts_cli/commands/tables.py`) — `create_tables` now does this
+  automatically whenever a spec carries `rls_rules`; the caller (this skill) doesn't
+  orchestrate it by hand. `_build_table_tml` gained an optional `guid` param (places
+  `guid:` at the document root, per the TML invariant) and a new `_strip_rls_rules`
+  pure helper produces the RLS-less pass-1 variant; the retry loop was extracted into
+  `_import_one`, shared by both passes. A spec with no `rls_rules` is byte-for-byte
+  unaffected (still one pass). SKILL.md Step 6d documents the two-pass behavior and
+  why; Step 6e was reworked from "show and confirm the propagated shape" to "confirm
+  it actually attached live" (a live `ts tml export` + compare, since pass 2 can fail
+  independently of pass 1 — a non-null GUID is no longer proof RLS is in effect) before
+  the show-and-confirm prompt. Tests: `tools/ts-cli/tests/test_tables_command.py` (new
+  — two import calls for an RLS spec, pass 1 has no `rls_rules`/`guid`, pass 2 has
+  `create_new: false` + `guid` + `rls_rules`, a pass-2-failure case still reports the
+  GUID with a loud stderr error, a no-RLS spec makes exactly one call) and
+  `tools/ts-cli/tests/test_build_table_tml.py` (new — the `guid` param and
+  `_strip_rls_rules` in isolation).
+- **Multi-rule / multi-base-table propagation — CONFIRMED, no code change needed.**
+  Two base tables, each with its own RLS rule on its own column, propagate through
+  `extract_rls` -> `propagate_rls` into a SINGLE aggregate `rls_rules` block: one
+  `tables` entry, one merged `table_paths` entry carrying both remapped columns, both
+  rules present, referencing distinct aggregate columns (the Task-22 collision fix
+  already handled this — see `test_two_base_tables_each_with_a_rule_merge_into_one_
+  aggregate_block` in `test_agg_rls.py`, added this task to make the confirmation
+  explicit).
+
 **Still OPEN — the only two pieces left:**
-1. **Live leak-test.** Does an RLS-restricted query against the primary Model, once
-   routed to the propagated aggregate, actually still enforce the rule (a user in group
-   A never sees group B's rows), or does routing to the aggregate silently bypass the
-   base table's RLS? This is the single question that decides whether auto-propagation
-   is safe to ship — until it's verified live, treat any propagated RLS as unverified in
-   the same provisional sense the routing-verification caveat already applies to every
-   other recommendation in this skill. SKILL.md Step 7 now documents the procedure:
+1. **Live leak-test.** Task 25 verified single-rule propagation's IMPORT/ATTACH path
+   live (the rule now imports and attaches to the aggregate table, per Bugs A/B above)
+   — that is a DIFFERENT question from this one. Does an RLS-restricted query against
+   the primary Model, once routed to the propagated aggregate, actually still enforce
+   the rule (a user in group A never sees group B's rows), or does routing to the
+   aggregate silently bypass the base table's RLS? This is the question that decides
+   whether auto-propagation is safe to ship — until it's verified live, treat a
+   propagated-and-attached RLS rule as unverified for ENFORCEMENT in the same
+   provisional sense the routing-verification caveat already applies to every other
+   recommendation in this skill. SKILL.md Step 7 now documents the procedure:
    re-run the same aggregate-hit `ts spotql generate-sql` check authenticated as a
    restricted user (swap `--profile`) and confirm the returned rows actually respect the
    rule. This item stays OPEN until someone actually runs it against a live
