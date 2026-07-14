@@ -620,7 +620,7 @@ the `002212` guard's rationale and the considered alternative aren't lost.
 
 ---
 
-## #14 — DDL path now wraps ThoughtSpot-generated SQL (Task 18/19) — Task 19 fix VERIFIED live 2026-07-14, full round-trip checklist still pending
+## #14 — DDL path now wraps ThoughtSpot-generated SQL (Task 18/19/24) — Task 19 + Task 24 fixes VERIFIED live 2026-07-14, full round-trip checklist still pending
 
 **Why (Task 18):** live testing on an aggregate-aware cluster proved `sqlgen.build_select`'s
 hand-rolled join walker produces **semantically wrong SQL on role-playing / ambiguous-
@@ -684,30 +684,60 @@ expressibility remains an open follow-up (see below), and every AVG/RATIO candid
 still gets correct DDL via the fallback today.
 
 `wrap_as_ddl` now branches on whether any descriptor carries a `bucket`:
-- **No bucketed date** (dateless, or every grain raw): unchanged pass-through —
-  positional `ca_N AS alias` rename, no outer GROUP BY. `build_spotql`'s own GROUP BY
+- **No bucketed date** (dateless, or every grain raw): pass-through —
+  positional rename, no outer GROUP BY. `build_spotql`'s own GROUP BY
   (dims + raw dates) already lands on the final target grain.
 - **A bucketed date is present:** emits the live-proven outer AGGREGATING select —
-  `DATE_TRUNC(bucket, "ca_N") AS "date_alias"` for a bucketed date grain (also a GROUP BY
-  term), `reagg("ca_N") AS "measure_alias"` for each measure (never a GROUP BY term), and
-  a bare positional `"ca_N" AS "alias"` (still a GROUP BY term) for dims and any
+  `DATE_TRUNC(bucket, ...) AS "date_alias"` for a bucketed date grain (also a GROUP BY
+  term), `reagg(...) AS "measure_alias"` for each measure (never a GROUP BY term), and
+  a bare positional rename (still a GROUP BY term) for dims and any
   unbucketed grain in a multi-date candidate. Per-dialect DATE_TRUNC is `sqlgen._date_trunc`
   reused directly (not re-derived) — same Snowflake/Databricks `DATE_TRUNC('MONTH', x)`
   vs. BigQuery `DATE_TRUNC(x, MONTH)` mapping `sqlgen.build_select` already uses.
   `build_spotql`'s GROUP BY is only ever at the *raw* date grain (SpotQL can't bucket),
   so this second aggregation pass is what actually reaches the candidate's target grain.
 
+**Task 24 fix — `wrap_as_ddl` no longer assumes ThoughtSpot's own `ca_N` naming
+(VERIFIED live 2026-07-14, aggregate-aware cluster).** Task 18/19's `wrap_as_ddl`
+referenced ThoughtSpot's compiled output columns by an ASSUMED name — `"ca_1"`,
+`"ca_2"`, ..., `"ca_N"`, 1-based and contiguous, one per descriptor in order. **This
+assumption is false in general.** For a measure whose rewrite plan compiles through a
+CTE — a count-over-join like "# Employees" — ThoughtSpot's own final SELECT aliases its
+columns starting from a HIGHER number (observed live: `ca_7`, `ca_8`, `ca_9`), not
+`ca_1`. The outer wrapper SELECT then referenced a `"ca_1"` that never existed in that
+compiled SQL, and Snowflake raised `invalid identifier '"ca_1"'` — `CREATE TABLE`
+failed outright. The Task 19 test suite's own SUM fixture happened to compile to
+`ca_1..ca_3` (no CTE) and did not exercise this path — a coverage gap, not a
+contradiction of the Task 19 finding.
+
+**Fix:** `wrap_as_ddl` (via new helper `_positional_alias`) renames the derived table's
+output columns using a DERIVED-TABLE COLUMN-ALIAS LIST — `FROM (<inner>)
+"src"("g1", "g2", ..., "gN")`, one `gN` entry per descriptor, in order — and the outer
+SELECT references `g1..gN` instead of guessing at ThoughtSpot's own column names.
+Snowflake, Databricks, and BigQuery all support `FROM (subquery) alias(col1, col2,
+...)`, which renames the subquery's exposed columns by POSITION only, independent of
+whatever ThoughtSpot called them internally. **Verified live** against the actual
+"# Employees" CTE query that reproduced the bug: the old `ca_N` form failed with the
+invalid-identifier error above; the `g1..gN` column-alias-list form succeeded, on both
+the bucketed-aggregating wrapper and the dateless pass-through. The profile `COUNT(*)`
+wrapper (`_spotql_profile_sql_or_none` in `commands/aggregate.py`) was checked and
+confirmed unaffected — it wraps `SELECT COUNT(*) AS agg_rows FROM (...) _agg` and never
+references any inner column by name.
+
 Covered by unit tests in `tools/ts-cli/tests/test_agg_spotql.py` (measure-by-display-name
 assertions for SUM/MIN/MAX/COUNT with no wrapping aggregate function; raw-date,
 no-bucket-function assertions; `UnsupportedMeasureError` for AVG and RATIO; descriptor
 list shape/order for single- and multi-date candidates; component dedupe cross-check
 against `generate.build_aggregate_table_spec` — Task 18's invariant, kept; `wrap_as_ddl`
-LIMIT-strip, positional mapping, the new bucketed-outer-aggregate shape incl. a mixed
-bucketed/raw multi-date case, per-dialect DATE_TRUNC argument order, and the mview guard
-under both no-bucket and bucketed inputs) and `tools/ts-cli/tests/test_agg_command.py`
-(SpotQL-success and both fallback paths for `generate`/`profile`, stubbed via a
-monkeypatched `ts_cli.commands.spotql._run` — no live connection in these tests; these
-fixtures are all dateless/no-bucket, so they exercise the unchanged pass-through branch).
+LIMIT-strip, positional column-alias-list mapping (Task 24), the bucketed-outer-aggregate
+shape incl. a mixed bucketed/raw multi-date case, per-dialect DATE_TRUNC argument order,
+the mview guard under both no-bucket and bucketed inputs, and a canned-SQL regression
+fixture whose final projection uses non-1-based `ca_7`/`ca_8`/`ca_9` aliases — asserting
+the wrapper never references `ca_N` and instead emits/uses the `g1..gN` alias list) and
+`tools/ts-cli/tests/test_agg_command.py` (SpotQL-success and both fallback paths for
+`generate`/`profile`, stubbed via a monkeypatched `ts_cli.commands.spotql._run` — no live
+connection in these tests; these fixtures are all dateless/no-bucket, so they exercise
+the pass-through branch, now updated to assert the `g1..gN` alias-list form).
 
 **Residual, explicitly out of this task's scope:**
 1. **AVG/RATIO SpotQL-component expressibility — OPEN follow-up.** No live-proven way

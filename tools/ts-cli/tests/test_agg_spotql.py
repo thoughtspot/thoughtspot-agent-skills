@@ -242,25 +242,74 @@ DESCRIPTORS_BUCKETED = [
     {"alias": "sales_sum", "kind": "measure", "bucket": None, "reagg": "SUM"},
 ]
 
+# Task 24 live bug: a measure that compiles through a CTE (e.g. a
+# count-over-join like "# Employees") makes ThoughtSpot's OWN final
+# projection alias its columns starting from a HIGHER number than 1 — this
+# canned fixture reproduces that with ca_7/ca_8/ca_9 standing in for the
+# live-observed numbering. `wrap_as_ddl` must never assume ca_N is 1-based
+# (or even present at all) — it must reference the derived table's columns
+# via a POSITIONAL column-alias list it controls itself.
+TS_SQL_CTE_HIGH_ALIASES = (
+    'WITH cte1 AS (SELECT "ta_1"."EMP_ID" AS "x1" FROM "HRDB"."PUBLIC"."EMPLOYEES" "ta_1") '
+    'SELECT "ta_2"."CATEGORY_NAME" AS "ca_7", "ta_2"."ORDER_DT" AS "ca_8", '
+    'COUNT("cte1"."x1") AS "ca_9" '
+    'FROM "SALESDB"."PUBLIC"."FACT_SALES" "ta_2" '
+    'JOIN cte1 ON TRUE '
+    'GROUP BY "ca_7", "ca_8" LIMIT 100000'
+)
+DESCRIPTORS_CTE_HIGH_ALIASES = [
+    {"alias": "Category", "kind": "dim", "bucket": None, "reagg": None},
+    {"alias": "Order Date", "kind": "date", "bucket": "MONTHLY", "reagg": None},
+    {"alias": "employees_cnt", "kind": "measure", "bucket": None, "reagg": "SUM"},
+]
+
 
 def test_wrap_as_ddl_strips_limit_and_maps_positional_aliases():
     ddl = wrap_as_ddl(TS_SQL_NO_BUCKET, DESCRIPTORS_NO_BUCKET,
                       "SALESDB.PUBLIC.FACT_AGG_M", "snowflake", materialization="ctas")
     assert "LIMIT" not in ddl
-    # ThoughtSpot emits the inner derived columns as quoted-lowercase "ca_N"
-    # (case-sensitive). The outer SELECT must reference them quoted too, or
-    # Snowflake folds an unquoted ca_1 to CA_1 and fails to bind ("invalid
-    # identifier") at execution time.
-    assert '"ca_1" AS "Category"' in ddl
-    assert '"ca_2" AS "Order Date"' in ddl
-    assert '"ca_3" AS "sales_sum"' in ddl
-    assert 'ca_1 AS' not in ddl  # never the unquoted, case-folding form
+    # wrap_as_ddl no longer assumes ThoughtSpot's own ca_N naming/numbering —
+    # it renames the derived table's columns POSITIONALLY via a
+    # column-alias list ("g1".."gN") on the derived table itself, and the
+    # outer SELECT references those, quoted per-dialect.
+    outer_head = ddl.split("FROM (\n", 1)[0]
+    assert '"g1" AS "Category"' in outer_head
+    assert '"g2" AS "Order Date"' in outer_head
+    assert '"g3" AS "sales_sum"' in outer_head
+    assert 'ca_' not in outer_head  # outer SELECT never references ca_N
+    assert 'g1 AS' not in outer_head  # never the unquoted, case-folding form
+    # The derived table's column-alias list is positional, one entry per
+    # output column, in descriptor order.
+    assert ') "src"("g1", "g2", "g3")' in ddl
     # Pass-through (no bucketed date): only ONE GROUP BY in the whole DDL —
     # the inner (preserved) one; the outer wrapper never adds its own.
     assert ddl.count("GROUP BY") == 1
     assert "GROUP BY \"ca_1\", \"ca_2\"" in ddl  # inner content otherwise intact
     assert ddl.startswith("CREATE OR REPLACE TABLE SALESDB.PUBLIC.FACT_AGG_M AS")
-    assert 'FROM (\n' in ddl and ') "src"' in ddl
+    assert 'FROM (\n' in ddl and ') "src"("g1", "g2", "g3")' in ddl
+
+
+def test_wrap_as_ddl_cte_high_numbered_ts_aliases_uses_positional_list_not_ca_n():
+    # THE BUG: a measure whose rewrite plan generates a CTE (count-over-join,
+    # e.g. "# Employees") makes ThoughtSpot's compiled SQL alias its final
+    # projection ca_7/ca_8/ca_9 instead of ca_1/ca_2/ca_3 — the old
+    # `ca_{i+1}`-by-position scheme referenced a non-existent "ca_1" and
+    # Snowflake raised "invalid identifier '\"ca_1\"'". The fix must produce
+    # a correct DDL regardless of what ThoughtSpot happened to call its own
+    # output columns.
+    ddl = wrap_as_ddl(TS_SQL_CTE_HIGH_ALIASES, DESCRIPTORS_CTE_HIGH_ALIASES,
+                      "SALESDB.PUBLIC.FACT_AGG_M", "snowflake", materialization="ctas")
+    outer_head = ddl.split("FROM (\n", 1)[0]
+    # The outer SELECT must reference the positional alias list, never any
+    # ca_N form (neither the old assumed ca_1..ca_3 nor the actual ca_7..ca_9
+    # ThoughtSpot emitted here) — position, not name-matching, is the contract.
+    assert 'ca_' not in outer_head
+    assert '"g1" AS "Category"' in outer_head
+    assert "DATE_TRUNC('MONTH', \"g2\") AS \"Order Date\"" in outer_head
+    assert 'SUM("g3") AS "employees_cnt"' in outer_head
+    # Derived-table column-alias list renames the subquery's 3 output columns
+    # positionally, independent of ThoughtSpot's own ca_7/ca_8/ca_9 naming.
+    assert ') "src"("g1", "g2", "g3")' in ddl
 
 
 def test_wrap_as_ddl_leaves_sql_without_a_limit_intact():
@@ -282,15 +331,16 @@ def test_wrap_as_ddl_databricks_mview_shape_and_quoting():
     ddl = wrap_as_ddl(TS_SQL_NO_BUCKET, DESCRIPTORS_NO_BUCKET,
                       "cat.sch.agg", "databricks", materialization="mview")
     assert ddl.startswith("CREATE OR REPLACE MATERIALIZED VIEW cat.sch.agg AS")
-    assert "`ca_1` AS `Category`" in ddl
-    assert '`src`' in ddl
+    assert "`g1` AS `Category`" in ddl
+    assert '`src`(`g1`, `g2`, `g3`)' in ddl
 
 
 def test_wrap_as_ddl_bigquery_ctas_shape():
     ddl = wrap_as_ddl(TS_SQL_NO_BUCKET, DESCRIPTORS_NO_BUCKET,
                       "proj.ds.agg", "bigquery", materialization="ctas")
     assert ddl.startswith("CREATE OR REPLACE TABLE proj.ds.agg AS")
-    assert "`ca_1` AS `Category`" in ddl
+    assert "`g1` AS `Category`" in ddl
+    assert '`src`(`g1`, `g2`, `g3`)' in ddl
 
 
 def test_wrap_as_ddl_snowflake_materialized_view_guard_still_fires():
@@ -311,23 +361,25 @@ def test_wrap_as_ddl_auto_resolves_per_dialect_default():
 
 def test_wrap_as_ddl_bucketed_date_emits_outer_aggregating_select():
     # The live-proven shape: CREATE TABLE AS SELECT dims,
-    # DATE_TRUNC('MONTH', ca_date), SUM(ca_measure) FROM (spotql_sql) src
-    # GROUP BY dims, DATE_TRUNC(...).
+    # DATE_TRUNC('MONTH', g_date), SUM(g_measure) FROM (spotql_sql) src(...)
+    # GROUP BY dims, DATE_TRUNC(...) — referencing the derived table's
+    # positional column-alias list, never ThoughtSpot's own ca_N naming.
     ddl = wrap_as_ddl(TS_SQL_BUCKETED, DESCRIPTORS_BUCKETED,
                       "SALESDB.PUBLIC.FACT_AGG_M", "snowflake", materialization="ctas")
-    assert '"ca_1" AS "Category"' in ddl
-    assert "DATE_TRUNC('MONTH', \"ca_2\") AS \"Order Date\"" in ddl
-    assert 'SUM("ca_3") AS "sales_sum"' in ddl
+    assert '"g1" AS "Category"' in ddl
+    assert "DATE_TRUNC('MONTH', \"g2\") AS \"Order Date\"" in ddl
+    assert 'SUM("g3") AS "sales_sum"' in ddl
+    assert ') "src"("g1", "g2", "g3")' in ddl
     group_line = next(l for l in ddl.splitlines() if l.startswith("GROUP BY"))
-    assert '"ca_1"' in group_line
-    assert "DATE_TRUNC('MONTH', \"ca_2\")" in group_line
+    assert '"g1"' in group_line
+    assert "DATE_TRUNC('MONTH', \"g2\")" in group_line
     assert "sales_sum" not in group_line  # measures never in the outer GROUP BY
 
 
 def test_wrap_as_ddl_bigquery_bucketed_date_trunc_argument_order():
     ddl = wrap_as_ddl(TS_SQL_BUCKETED, DESCRIPTORS_BUCKETED,
                       "proj.ds.agg", "bigquery", materialization="ctas")
-    assert "DATE_TRUNC(`ca_2`, MONTH) AS `Order Date`" in ddl
+    assert "DATE_TRUNC(`g2`, MONTH) AS `Order Date`" in ddl
 
 
 def test_wrap_as_ddl_bucketed_multi_date_mixes_raw_and_bucketed_grains():
@@ -345,11 +397,12 @@ def test_wrap_as_ddl_bucketed_multi_date_mixes_raw_and_bucketed_grains():
     )
     ddl = wrap_as_ddl(ts_sql, descriptors, "SALESDB.PUBLIC.FACT_AGG_M", "snowflake",
                       materialization="ctas")
-    assert "DATE_TRUNC('MONTH', \"ca_2\") AS \"Order Date\"" in ddl
-    assert '"ca_3" AS "Shipped Date"' in ddl  # raw grain: positional rename, still grouped
+    assert "DATE_TRUNC('MONTH', \"g2\") AS \"Order Date\"" in ddl
+    assert '"g3" AS "Shipped Date"' in ddl  # raw grain: positional rename, still grouped
+    assert ') "src"("g1", "g2", "g3", "g4")' in ddl
     group_line = next(l for l in ddl.splitlines() if l.startswith("GROUP BY"))
-    assert '"ca_1"' in group_line and '"ca_3"' in group_line
-    assert "DATE_TRUNC('MONTH', \"ca_2\")" in group_line
+    assert '"g1"' in group_line and '"g3"' in group_line
+    assert "DATE_TRUNC('MONTH', \"g2\")" in group_line
 
 
 def test_wrap_as_ddl_bucketed_snowflake_materialized_view_guard_still_fires():

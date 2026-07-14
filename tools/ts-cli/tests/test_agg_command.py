@@ -1056,11 +1056,14 @@ def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatc
 
     ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
     assert "LIMIT" not in ddl
-    assert '"ca_1" AS "Category"' in ddl
-    assert '"ca_2" AS "sales_sum"' in ddl
+    # Task 24: the outer SELECT references the derived table's positional
+    # column-alias list (g1..gN), never ThoughtSpot's own ca_N naming — see
+    # spotql_aggregate.wrap_as_ddl.
+    assert '"g1" AS "Category"' in ddl
+    assert '"g2" AS "sales_sum"' in ddl
     assert ddl.startswith("CREATE OR REPLACE DYNAMIC TABLE")
     assert "WAREHOUSE = WH" in ddl
-    assert 'FROM (\n' in ddl and ') "src"' in ddl
+    assert 'FROM (\n' in ddl and ') "src"("g1", "g2")' in ddl
     # Never routed through the hand-rolled join walker's physical resolution.
     assert "FACT_SALES" not in ddl or '"ta_1"' in ddl  # only via the wrapped ts_sql
 
