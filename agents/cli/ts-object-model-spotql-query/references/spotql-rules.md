@@ -41,27 +41,48 @@ expression.
   ```
 
 - **Aggregate-formula column** — a formula column whose expression **already contains an
-  aggregate** (`sum(...)`, `count(...)`, `group_aggregate(...)`, `last_value(sum(...))`,
-  etc. — these are the `is_aggregate_template` columns). **Wrap it in `AGG()`** so it is not
-  re-aggregated. **Never `SUM` it** — `SUM("aggregate formula")` fails with
+  aggregate** (`sum(...)`, `count(...)`, `group_aggregate(...)`, `safe_divide(sum(...),
+  sum(...))`, `cumulative_sum(...)`, `sum(last_value(...))`, etc.). **Wrap it in `AGG()`**
+  so it is not re-aggregated. **Never `SUM` it** — `SUM("aggregate formula")` fails with
   `NESTED_AGGREGATE_NOT_SUPPORTED`. `AGG()`'s argument must be a bare column reference, not
   an expression.
 
   ```sql
   AGG("t1"."# Employees")          -- formula is count(...); AGG, never SUM
-  AGG("t1"."Inventory Balance")    -- formula is last_value(sum(...)); semi-additive handled by the formula
+  AGG("t1"."Avg Revenue Per Unit") -- formula is safe_divide(sum,sum); AGG, never SUM
   ```
 
-  This is verified live (champ-staging, 2026-06-25): `AGG()` on an aggregate-formula column
-  returns correct results; `SUM()` on the same column errors. A semi-additive measure that
-  already exists as a `last_value`/`first_value` aggregate formula is handled correctly by
-  `AGG()` — don't hand-roll a "latest value per entity" query for it (see `patterns.md` for
-  the case where no such formula column exists).
+  Verified live (nebula-aggregate-aware, 2026-07-13): `AGG()` returns correct results;
+  `SUM()` on the same column errors `NESTED_AGGREGATE`. This holds even when an additive
+  aggregate *wraps* a window — `sum(last_value(...))`, `sum(group_sum(...))` — because the
+  **outermost** op is additive.
 
-  > Quick test if unsure which kind a column is: `ts spotql generate-sql 'SELECT
-  > "t1"."<col>" FROM "<Model>" AS "t1"'`. If it compiles, the column carries its own
-  > aggregation (use `AGG()`); if it needs an explicit aggregate, it's a raw measure (use
-  > `SUM`).
+- **Semi-additive measure** — an aggregate-formula whose **outermost** call is
+  `last_value`/`first_value` (the snapshot form `last_value(sum(col), query_groups(),
+  {date})`). This one **inverts** the rule above: **wrap it in `SUM(...)`, never `AGG()`**.
+  `AGG()` fails with `NON_CONVERTIBLE_FUNCTION` ("Non standard sql function QueryGroups") —
+  the serializer can't emit `query_groups()` natively. `SUM(...)` forces a per-group
+  materialisation that resolves `query_groups()` and passes the already-collapsed snapshot
+  value through unchanged (it is an identity over one value per query group).
+
+  ```sql
+  SUM("t1"."Inventory Balance")    -- formula is last_value(sum(...)); SUM, never AGG
+  ```
+
+  Verified live (nebula-aggregate-aware, 2026-07-13) at grand-total, grouped-by-dimension,
+  and monthly grain — every result matched Snowflake ground truth (`sum(filled_inventory)`
+  at the latest balance date). The trigger is the **outermost** op only: `sum(last_value(...))`
+  is a normal aggregate-formula (`AGG`, previous bullet), not this case. `ts spotql
+  classify-columns` detects this and returns `kind: semiadditive_measure`, `wrapper: SUM`
+  — follow the `wrapper` field; don't re-derive it by eye. (Earlier docs wrongly showed
+  `AGG("Inventory Balance")` as correct — that was never verified against a live semi-additive
+  measure and is wrong; corrected here.)
+
+  > Quick test if unsure which kind a column is: run `ts spotql classify-columns` (it parses
+  > the outer op for you). Or compile a probe: `ts spotql generate-sql 'SELECT
+  > AGG("t1"."<col>") FROM "<Model>" AS "t1"'` — `NESTED_AGGREGATE` means raw (use `SUM`),
+  > `NON_CONVERTIBLE_FUNCTION` means semi-additive (use `SUM`), success means aggregate-formula
+  > (use `AGG`).
 
 - **Attributes go in `GROUP BY`.** Every non-aggregate column in the SELECT must appear in
   `GROUP BY`. Every CTE that contains an aggregate must have its own `GROUP BY` (the main

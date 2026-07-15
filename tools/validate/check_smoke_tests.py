@@ -33,13 +33,26 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
+import re
 import subprocess
 import sys
 from pathlib import Path
 
+from _dirs import CLI_RUNTIMES, CLI_RUNTIME_PATHS
+
+# Trailing-slash prefixes for str.startswith on repo-relative paths.
+_CLI_SKILL_PREFIXES = tuple(f"{p}/" for p in CLI_RUNTIME_PATHS)
+
 
 # Skills exempt from the smoke-test requirement.
 # Add a comment for each entry explaining why; remove when the exemption no longer applies.
+#
+# Two-bucket rule (audit 6.3): a non-credential-setup exemption is a deferral, not a
+# permanent pass — it MUST cite a dated backlog item (`BL-NNN`) in its trailing comment.
+# Credential-setup skills (`ts-profile-*`) are exempt from that citation requirement — they
+# have no API mutation flow to test, so there is nothing to defer to a backlog item.
+# `check_allowlist_bl_references()` below enforces this by parsing this file's own source.
 ALLOWLIST = {
     "ts-profile-thoughtspot",   # interactive credential setup — no API mutation flow to test
     "ts-profile-snowflake",     # interactive credential setup
@@ -47,7 +60,7 @@ ALLOWLIST = {
     "ts-profile-tableau",       # interactive credential setup — no API mutation flow to test
     "ts-object-answer-promote", # legacy gap; BL-076 (filed 2026-07-03, target 2026-09-30)
     "ts-convert-from-tableau",  # requires .twb fixture file; BL-076 (filed 2026-07-03, target 2026-09-30)
-    "ts-convert-from-looker",   # community contribution PR #201 — smoke test deferred to first live verification
+    "ts-convert-from-looker",   # community contribution PR #201; smoke test deferred — BL-115 (filed 2026-07-11)
 }
 
 # Skills whose smoke test uses an abbreviated filename rather than the default convention.
@@ -58,6 +71,77 @@ NAME_ALIASES = {
     "ts-convert-to-databricks-mv":   "tools/smoke-tests/smoke_ts_to_databricks.py",
     "ts-convert-from-databricks-mv": "tools/smoke-tests/smoke_ts_from_databricks.py",
 }
+
+
+_BL_REF_RE = re.compile(r"BL-\d+")
+
+
+def _find_allowlist_entries(source_text: str) -> list[tuple[str, int, str]]:
+    """Parse ALLOWLIST out of this validator's own source and return, in source order,
+    (skill_name, line_no, trailing_comment) for every entry.
+
+    ALLOWLIST is a runtime `set` literal — by the time this module is imported, the
+    trailing `# ...` justification comments are gone. Enforcing the BL-reference rule
+    (audit 6.3) means re-reading the source text and pairing each element with the
+    comment on its own line. Uses `ast` to find the `ALLOWLIST = {...}` assignment and
+    the exact source line each string literal lives on (robust to reordering or
+    reformatting of the block), then a line-scoped regex to pull the trailing comment
+    off that specific line.
+    """
+    tree = ast.parse(source_text)
+    lines = source_text.splitlines()
+    entries: list[tuple[str, int, str]] = []
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "ALLOWLIST"):
+            continue
+        if not isinstance(node.value, ast.Set):
+            continue  # ALLOWLIST is expected to be a set literal of skill-name strings
+
+        for elt in node.value.elts:
+            if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+                continue
+            line_no = elt.lineno
+            line_text = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+            comment = line_text.split("#", 1)[1].strip() if "#" in line_text else ""
+            entries.append((elt.value, line_no, comment))
+
+    return entries
+
+
+def check_allowlist_bl_references(source_text: str) -> tuple[list[str], list[str]]:
+    """Return (failures, info) for the ALLOWLIST BL-NNN citation rule (audit 6.3).
+
+    Two-bucket rule: every non-credential-setup ALLOWLIST entry is a deferral, not a
+    permanent pass, so it must cite a dated backlog item (`BL-\\d+`) in its trailing
+    comment. Credential-setup entries are exempt from the citation requirement — they
+    are classified by the `ts-profile-` prefix (not a hardcoded name list), so a future
+    `ts-profile-bigquery` or similar is automatically covered without editing this check.
+    """
+    failures: list[str] = []
+    info: list[str] = []
+
+    for skill_name, line_no, comment in _find_allowlist_entries(source_text):
+        if skill_name.startswith("ts-profile-"):
+            # Credential-setup skills have no API mutation flow to test — nothing to
+            # defer to a backlog item, so no BL-NNN citation is required.
+            info.append(f"  PASS  {skill_name}  (line {line_no})  →  credential-setup exemption")
+            continue
+
+        if _BL_REF_RE.search(comment):
+            info.append(f"  PASS  {skill_name}  (line {line_no})  →  cites {_BL_REF_RE.search(comment).group()}")
+        else:
+            failures.append(
+                f"FAIL  ALLOWLIST entry {skill_name!r} (line {line_no}) has no dated "
+                f"backlog reference in its trailing comment. Non-credential-setup "
+                f"exemptions must cite a dated BL-NNN backlog item (audit 6.3 "
+                f"two-bucket rule) — e.g. '# deferred — BL-123 (filed YYYY-MM-DD)'."
+            )
+
+    return failures, info
 
 
 def _get_tracked_paths(repo_root: Path) -> set[str]:
@@ -80,8 +164,7 @@ def _get_staged_names(repo_root: Path) -> list[str]:
 def _staged_touches_skills_or_smoke(staged: list[str]) -> bool:
     """Return True if staged files include anything that would change a skill or smoke test."""
     for f in staged:
-        if (f.startswith("agents/cli/") or f.startswith("agents/claude/")
-                or f.startswith("tools/smoke-tests/")):
+        if f.startswith(_CLI_SKILL_PREFIXES) or f.startswith("tools/smoke-tests/"):
             return True
     return False
 
@@ -115,7 +198,7 @@ def _find_orphan_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
     alias_targets = set(NAME_ALIASES.values())
 
     known_skills: set[str] = set()
-    for runtime in ("cli", "claude"):
+    for runtime in CLI_RUNTIMES:
         runtime_dir = repo_root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue
@@ -158,7 +241,7 @@ def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[s
     tracked = _get_tracked_paths(repo_root)
 
     # Canonical CLI skills live in agents/cli/; agents/claude/ holds Claude-only skills.
-    for runtime in ("cli", "claude"):
+    for runtime in CLI_RUNTIMES:
         runtime_dir = repo_root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue
@@ -200,6 +283,15 @@ def main() -> int:
     repo_root = Path(args.root).resolve()
     failures, info = check(repo_root, staged_only=args.staged)
 
+    # ALLOWLIST BL-reference gate (audit 6.3). This parses the validator's OWN source
+    # (comments are stripped from the ALLOWLIST set at import time), so it runs
+    # unconditionally — it is a self-contained integrity check on this file, not tied
+    # to whichever other files happen to be staged in this commit.
+    self_source = Path(__file__).resolve().read_text(encoding="utf-8")
+    bl_failures, bl_info = check_allowlist_bl_references(self_source)
+    failures = failures + bl_failures
+    info = info + bl_info
+
     for msg in info:
         print(msg)
 
@@ -208,8 +300,9 @@ def main() -> int:
         for f in failures:
             print(f)
         print()
-        print(f"{len(failures)} problem(s): skills missing a smoke test, and/or "
-              f"smoke tests resolving to no skill (orphaned).")
+        print(f"{len(failures)} problem(s): skills missing a smoke test, smoke tests "
+              f"resolving to no skill (orphaned), and/or ALLOWLIST entries missing a "
+              f"dated BL-NNN backlog reference.")
         print()
         print("To fix:")
         print("  1. Create tools/smoke-tests/smoke_<skill_name>.py")
@@ -217,11 +310,13 @@ def main() -> int:
         print("  3. Mirror an existing smoke test (e.g. smoke_ts_dependency_manager.py)")
         print()
         print("If the skill genuinely cannot be smoke-tested (interactive setup, etc.),")
-        print("add it to ALLOWLIST in this file with a justification comment.")
+        print("add it to ALLOWLIST in this file with a justification comment. Non-")
+        print("credential-setup exemptions must also cite a dated BL-NNN backlog item.")
         return 1
 
     print()
-    print("All skills have smoke tests (or are on the allowlist).")
+    print("All skills have smoke tests (or are on the allowlist), and all "
+          "non-credential-setup ALLOWLIST entries cite a dated BL-NNN reference.")
     return 0
 
 

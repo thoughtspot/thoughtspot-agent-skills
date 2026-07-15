@@ -42,13 +42,76 @@ List all configured ThoughtSpot profiles. Credentials are never shown.
 
 ```bash
 ts profiles list
+ts profiles list --snowflake
+ts profiles list --tableau
+ts profiles list --databricks
+ts profiles list --json
+ts profiles list --snowflake --json
 ```
 
-**Output:**
+**Output (table):**
 
 ```
   champ-staging         token         https://champagne-master-aws.thoughtspotstaging.cloud
 ```
+
+**Output (`--json`):** JSON array with credential fields stripped.
+
+---
+
+### `ts profiles add`
+
+Add or replace a profile. Derives slug, env var name, and keychain commands.
+The credential value is NEVER passed through this command.
+
+```bash
+ts profiles add \
+  --platform thoughtspot \
+  --name "My Staging" \
+  --auth-type token \
+  --field base_url=https://my.thoughtspot.cloud \
+  --field username=admin@example.com
+```
+
+**Output:** JSON with `profile`, `slug`, `env_var`, `keychain_store_commands`, `zshenv_line`.
+
+---
+
+### `ts profiles update`
+
+Update fields on an existing profile.
+
+```bash
+ts profiles update \
+  --platform thoughtspot \
+  --name "My Staging" \
+  --field base_url=https://new.thoughtspot.cloud
+```
+
+---
+
+### `ts profiles remove`
+
+Remove a profile and report cleanup info.
+
+```bash
+ts profiles remove --platform snowflake --name "Partner AP"
+```
+
+**Output:** JSON with `removed` profile, `keychain_service`, `env_var_to_remove`.
+
+---
+
+### `ts profiles sync-env`
+
+Regenerate ~/.zshenv export lines from all configured profiles.
+
+```bash
+ts profiles sync-env
+ts profiles sync-env --platform snowflake
+```
+
+**Output:** JSON with `lines` array — each entry has `platform`, `name`, `env_var`, `line`.
 
 ---
 
@@ -121,6 +184,7 @@ ts metadata search [OPTIONS]
 | `--profile`, `-p` | first profile | Profile to use |
 | `--type`, `-t` | `LOGICAL_TABLE` | Object type: `LOGICAL_TABLE`, `LIVEBOARD`, `ANSWER` |
 | `--subtype`, `-s` | (none) | Subtype filter within `LOGICAL_TABLE` (repeatable): `WORKSHEET`, `MODEL`, `ONE_TO_ONE_LOGICAL`, `USER_DEFINED`, `AGGR_WORKSHEET` |
+| `--connection`, `-c` | (none) | Scope results to one connection by display name (client-side, case-insensitive match on `metadata_header.dataSourceName`). Objects not scoped to a connection (worksheets/models) are excluded when set. |
 | `--name`, `-n` | (none) | Name filter using SQL LIKE syntax: `%` = any chars, `_` = one char |
 | `--guid`, `-g` | (none) | Filter by GUID (exact match) |
 | `--tag` | (none) | Filter by tag name or GUID (repeatable) |
@@ -141,6 +205,10 @@ ts metadata search --subtype WORKSHEET
 
 # Search by name
 ts metadata search --subtype WORKSHEET --name "%sales%"
+
+# Scope to a single connection (client-side dataSourceName filter)
+ts metadata search --connection "Snowflake Prod"
+ts metadata search --connection "Snowflake Prod" --name "%DIM%"
 
 # Search liveboards, full result set (--all is accepted but no longer needed)
 ts metadata search --type LIVEBOARD --all
@@ -294,6 +362,42 @@ ts metadata delete abc-123 --profile se-thoughtspot
 | `--type`, `-t` | `LOGICAL_TABLE` | Object type: `LOGICAL_TABLE`, `LIVEBOARD`, `ANSWER` |
 
 **Output:** `{"deleted": ["guid1", "guid2", ...]}` on success.
+
+---
+
+### `ts model promote-formula`
+
+Promote formulas from an Answer into a Model. Exports both TMLs, detects
+duplicate formula names, maps column references, infers column_type
+(MEASURE/ATTRIBUTE), and emits the merged Model TML ready for import.
+
+```bash
+ts model promote-formula --answer <answer-guid> --model <model-guid> --profile <name>
+
+# Promote specific formulas only
+ts model promote-formula -a <answer-guid> -m <model-guid> --formula "Profit Margin" --formula "YoY Growth"
+
+# Overwrite duplicates instead of skipping
+ts model promote-formula -a <answer-guid> -m <model-guid> --duplicates overwrite
+
+# Include auto-generated formulas (excluded by default)
+ts model promote-formula -a <answer-guid> -m <model-guid> --all --include-auto
+```
+
+**Output:** JSON with `added`, `skipped`, `overwritten`, `unresolved_refs`, `params_added`,
+`deps_added`, and `merged_tml_yaml` (the full merged Model TML string ready for `ts tml import`).
+
+| Flag | Default | Description |
+|---|---|---|
+| `--answer`, `-a` | required | Answer GUID — source of the formulas |
+| `--model`, `-m` | required | Model GUID — target to merge formulas into |
+| `--profile`, `-p` | first profile | Profile to use |
+| `--formula` | all non-auto | Formula names to promote (repeatable). Omit for all. |
+| `--all` | false | Promote all formulas (equivalent to omitting `--formula`) |
+| `--duplicates`, `-d` | `skip` | `skip` or `overwrite` — what to do when a formula name already exists |
+| `--include-auto` | false | Include auto-generated formulas (`was_auto_generated=true`) |
+| `--include-params/--no-params` | true | Auto-include referenced parameters |
+| `--include-deps/--no-deps` | true | Auto-include unselected formula dependencies |
 
 ---
 
@@ -904,13 +1008,20 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql cla
 
 **Output (JSON to stdout):**
 
-- `--model` mode → array of `{name, column_type, kind, needs_agg, aggregation}` — one
-  entry per `model.columns[]` entry. `kind` is `"attribute"`, `"raw_measure"`, or
-  `"aggregate_measure"`. `kind == "aggregate_measure"` (equivalently `needs_agg: true`)
-  means SpotQL must wrap the column in `AGG(...)` — never a real aggregate, or
-  ThoughtSpot rejects the query with `NESTED_AGGREGATE_NOT_SUPPORTED`. `"raw_measure"`
-  means a real aggregate (`aggregation` names which — `SUM`/`AVG`/…). `"attribute"`
-  means group by it.
+- `--model` mode → array of `{name, column_type, kind, needs_agg, aggregation, wrapper}`
+  — one entry per `model.columns[]` entry. `wrapper` is the directly-actionable output —
+  the SpotQL function to wrap the column reference in (`None` for attributes). `kind` is
+  `"attribute"`, `"raw_measure"`, `"aggregate_measure"`, or `"semiadditive_measure"`:
+  - `"aggregate_measure"` (equivalently `needs_agg: true`, `wrapper: "AGG"`) — wrap in
+    `AGG(...)`; a real aggregate errors `NESTED_AGGREGATE_NOT_SUPPORTED`.
+  - `"semiadditive_measure"` (`wrapper: "SUM"`) — an aggregate-formula whose **outermost**
+    call is `last_value`/`first_value` (the `last_value(sum(col), query_groups(), {date})`
+    snapshot form). Inverts the rule: wrap in `SUM(...)`; `AGG(...)` errors
+    `NON_CONVERTIBLE_FUNCTION`. `sum(last_value(...))` (additive outer op) is NOT this — it
+    stays `aggregate_measure`.
+  - `"raw_measure"` (`wrapper: "SUM"`) — a real aggregate (`aggregation` names which —
+    `SUM`/`AVG`/…).
+  - `"attribute"` — group by it.
 - `--exprs-file`/stdin mode → array of `{name, column_type, aggregation, is_aggregate}` —
   `column_type` is `MEASURE` iff the expression contains a call to an aggregate function
   (`sum`, `count`, `group_aggregate`, `last_value`, …), else `ATTRIBUTE`; `aggregation` is
@@ -1790,6 +1901,41 @@ composes with `&&` to gate on a clean lint before creating the view:
 ```bash
 ts snowflake lint-ddl generated_sv.sql && echo "clean, proceeding"
 ```
+
+### `ts snowflake exec`
+
+Execute a `.sql` template (or inline query) against a Snowflake profile. Backs
+the `ts-recipe-formula-*-snowflake` skills, which keep their UDF DDL in
+`references/*.sql` files instead of markdown fences the agent retypes each run.
+Works with both `python` and `cli` profile methods and reuses the same connector
+as `ts load` (so credentials never drift).
+
+```bash
+ts snowflake exec -f references/business-day-udfs.sql --sf-profile PROD \
+  --var target_db=ANALYTICS --var target_schema=PUBLIC
+ts snowflake exec -q "SELECT ANALYTICS.PUBLIC.get_business_days_clamped(
+  '2026-01-05'::TIMESTAMP, '2026-01-09'::TIMESTAMP, FALSE)" --sf-profile PROD
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--file` / `-f` | — | Path to a `.sql` file to execute |
+| `--query` / `-q` | — | Inline SQL (mutually exclusive with `--file`); reads stdin if neither is given |
+| `--sf-profile` | *(required)* | Snowflake profile name from `~/.claude/snowflake-profiles.json` |
+| `--var` | — | Placeholder substitution as `name=value` (repeatable); fills `{name}` tokens in the SQL |
+| `--warehouse` / `-w` | profile `default_warehouse` | Warehouse override |
+| `--role` / `-r` | profile `default_role` | Role override |
+
+`{name}` placeholders are filled from `--var` before execution; any placeholder
+left without a value aborts the run rather than shipping a literal
+`{target_schema}` to Snowflake. Statements run in file order and stop at the
+first error (so a dependent UDF is not created after the function it references
+failed).
+
+**Output:** JSON to stdout — `{"profile", "method", "statement_count",
+"results": [{"rows": [...]}, ...], "rows": <last result set's rows>}`. The
+top-level `rows` is a convenience for single-query verifies. Diagnostics go to
+stderr.
 
 ### `ts databricks parse-mv`
 

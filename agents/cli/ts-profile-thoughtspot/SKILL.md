@@ -129,158 +129,66 @@ To get your token:
 
 Tokens are valid for ~24 hours. When yours expires, run /ts-profile-thoughtspot,
 choose U (Update), then Refresh credential.
-
-Paste your token (will not be displayed):
 ```
 
 **Password (2):**
 ```
-Password (will not be displayed):
+Have your password ready — you'll enter it directly into a terminal command (not here).
 ```
 
 **Secret key (3):**
 ```
-Secret key (will not be displayed):
+Have your secret key ready — you'll enter it directly into a terminal command (not here).
 ```
 
-Store input as `{credential_value}`. Never echo it back.
+### Save profile and derive credentials
 
-### Derive names
+Map the auth method to `{auth_type}`: `1` → `token`, `2` → `password`, `3` → `secret_key`.
 
-From `{profile_name}`:
-- `{slug}` — lowercase, non-alphanumeric → hyphens, collapse multiples, strip ends
-  e.g. `"My Staging"` → `"my-staging"`
-- `{keychain_service}` — `"thoughtspot-{slug}"`
-- `{SLUG}` — slug uppercased, hyphens → underscores  e.g. `"MY_STAGING"`
-- `{env_var}`:
-  - token      → `THOUGHTSPOT_TOKEN_{SLUG}`
-  - password   → `THOUGHTSPOT_PASSWORD_{SLUG}`
-  - secret key → `THOUGHTSPOT_SECRET_KEY_{SLUG}`
-- `{credential_field}`:
-  - token      → `token_env`
-  - password   → `password_env`
-  - secret key → `secret_key_env`
+Run:
+
+```bash
+ts profiles add \
+  --platform thoughtspot \
+  --name "{profile_name}" \
+  --auth-type {auth_type} \
+  --field base_url={base_url} \
+  --field username={username}
+```
+
+Add `--field verify_ssl=false` only if the user confirmed a private/self-signed cluster.
+
+Parse the JSON output. It contains `keychain_store_commands`, `keychain_verify_commands`,
+`zshenv_line`, and `windows_env_commands`.
 
 ### Store credential
 
-First detect the platform:
-```python
-import platform
-print(platform.system())  # Darwin = macOS, Windows, Linux
-```
+**Never accept the credential in this conversation.**
 
-Ask the user to run this command **in their own terminal** (not here — credentials
-must not enter the conversation or its history):
+Show the user the keychain store command for their platform from the
+`keychain_store_commands` in the output above, replacing `VALUE` with the
+appropriate placeholder:
 
-**macOS** (`Darwin`):
-```
-Run this in your terminal to store the credential securely:
+- Token → `PASTE_YOUR_TOKEN_HERE`
+- Password → `YOUR_PASSWORD_HERE`
+- Secret key → `YOUR_SECRET_KEY_HERE`
 
-  security add-generic-password \
-    -s "{keychain_service}" \
-    -a "{username}" \
-    -w "YOUR_{CREDENTIAL_TYPE}_HERE"
+Tell them to run it in their own terminal.
 
-Replace YOUR_{CREDENTIAL_TYPE}_HERE with your actual value, then let me know when done.
-```
-
-**Windows** (PowerShell):
-```
-Run this in PowerShell to store the credential securely:
-
-  python -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_{CREDENTIAL_TYPE}_HERE')"
-
-Replace YOUR_{CREDENTIAL_TYPE}_HERE with your actual value, then let me know when done.
-```
-
-**Linux**:
-```
-Run this in your terminal to store the credential securely:
-
-  python3 -c "import keyring; keyring.set_password('{keychain_service}', '{username}', 'YOUR_{CREDENTIAL_TYPE}_HERE')"
-
-Replace YOUR_{CREDENTIAL_TYPE}_HERE with your actual value, then let me know when done.
-```
-
-Where `{CREDENTIAL_TYPE}` is `TOKEN`, `PASSWORD`, or `SECRET_KEY` depending on the
-auth method chosen. The value will not appear in this conversation.
-
-After the user confirms, verify the entry was written:
-
-**macOS:**
-```python
-import subprocess
-r = subprocess.run(
-    ["security", "find-generic-password", "-s", "{keychain_service}", "-a", "{username}"],
-    capture_output=True
-)
-print("Stored." if r.returncode == 0 else "Not found — check the command ran without errors.")
-```
-
-**Windows / Linux:**
-```python
-import keyring
-stored = keyring.get_password("{keychain_service}", "{username}")
-print("Stored." if stored else "Not found — check the command ran without errors.")
-```
+After the user confirms the credential is stored, show the verify command
+from `keychain_verify_commands` to confirm it worked.
 
 Stop if verification fails — do not proceed without a confirmed credential write.
 
 ### Update shell profile
 
-**macOS** (`Darwin`) — export line for `~/.zshenv`:
-```
-export {env_var}=$(security find-generic-password -s "{keychain_service}" -a "{username}" -w 2>/dev/null)
-```
-Read `~/.zshenv` (empty string if missing). If the line already exports `{env_var}`, replace it. Otherwise append (preceded by a blank line if file is non-empty).
+**macOS / Linux:** Read `~/.zshenv`, upsert the `zshenv_line` from the output
+above (replace an existing line for the same env var, or append if not present),
+write back. Then tell the user to run `source ~/.zshenv` and wait for confirmation.
 
-Tell the user:
-```
-~/.zshenv updated. Run this in your terminal:
-
-  source ~/.zshenv
-
-Let me know when done.
-```
-Wait for confirmation.
-
-**Linux** — export line for `~/.zshenv` (or `~/.bashrc` if that is the user's shell profile):
-```
-export {env_var}=$(python3 -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')" 2>/dev/null)
-```
-Apply the same read/replace/append logic as macOS. Tell the user to run `source ~/.zshenv` (or the appropriate profile file).
-
-**Windows** — set a permanent user environment variable via PowerShell:
-```
-Run this in PowerShell to persist the credential as an env var:
-
-  $val = python -c "import keyring; v=keyring.get_password('{keychain_service}', '{username}'); print(v or '', end='')"
-  [System.Environment]::SetEnvironmentVariable('{env_var}', $val, 'User')
-
-Let me know when done, then restart your terminal for the change to take effect.
-```
-Note: on Windows the env var step is **optional** — the `ts` CLI reads credentials
-directly from Windows Credential Manager at runtime. Skip this step if the user only
-needs `ts` commands.
-
-### Save profile
-
-Read `~/.claude/thoughtspot-profiles.json`.
-- Profile with same name exists → replace it.
-- Other profiles exist → append.
-- File missing → create with this profile as the only entry.
-
-Profile entry:
-```json
-{
-  "name": "{profile_name}",
-  "base_url": "{base_url}",
-  "username": "{username}",
-  "{credential_field}": "{env_var}"
-}
-```
-
-Add `"verify_ssl": false` only if the user confirmed a private/self-signed cluster.
+**Windows:** Show the `windows_env_commands` from the output above for the user to
+run in PowerShell. Note: on Windows the env var step is **optional** — the `ts` CLI
+reads credentials directly from Windows Credential Manager at runtime.
 
 ### Test and confirm
 
@@ -320,7 +228,11 @@ Enter 1–4:
 New URL: [{current_base_url}]
 ```
 
-Update `base_url` in the profile JSON. No Keychain or env var changes needed.
+Run:
+
+```bash
+ts profiles update --platform thoughtspot --name "{profile_name}" --field base_url={new_url}
+```
 
 Confirm: `URL updated.`
 
@@ -330,16 +242,13 @@ Confirm: `URL updated.`
 New username: [{current_username}]
 ```
 
-If username changes:
-- The credential store entry is keyed by username — migrate it to the new username:
+If username changes, the credential store entry is keyed by username — migrate it:
 
 **macOS:**
 ```python
 import subprocess
-# Read existing credential
 r = subprocess.run(["security", "find-generic-password", "-s", "{keychain_service}", "-a", "{old_username}", "-w"], capture_output=True, text=True)
 credential = r.stdout.strip()
-# Delete old, add new
 subprocess.run(["security", "delete-generic-password", "-s", "{keychain_service}", "-a", "{old_username}"], capture_output=True)
 subprocess.run(["security", "add-generic-password", "-s", "{keychain_service}", "-a", "{new_username}", "-w", credential], capture_output=True)
 print("Keychain entry updated.")
@@ -357,13 +266,27 @@ else:
     print("No stored credential found for old username — re-add manually.")
 ```
 
-Update `username` in profile JSON. Return to menu.
+Where `{keychain_service}` is `thoughtspot-{slug}` (slug derived from the profile name).
+
+Then update the profile JSON:
+
+```bash
+ts profiles update --platform thoughtspot --name "{profile_name}" --field username={new_username}
+```
+
+Also update the export line in `~/.zshenv` to reference the new username in the
+keychain lookup (read, replace the line exporting the profile's env var, write back).
+
+Return to menu.
 
 ### U3 — Refresh Credential
 
-Show the auth method for the selected profile, then prompt for the new credential value (same prompt as Add step for that method).
+Show the auth method for the selected profile, then prompt for the new credential
+value (same guidance as Add flow for that method).
 
-Detect platform (`platform.system()`), then ask the user to run **in their own terminal**:
+Detect platform (`platform.system()`), then ask the user to run **in their own terminal**.
+
+The keychain service is `thoughtspot-{slug}` and the account is the profile's `username`.
 
 **macOS** (`Darwin`):
 ```
@@ -418,12 +341,12 @@ source ~/.zshenv && ts auth logout --profile {profile_name}
 
 ### U4 — Change Auth Method
 
-Run the full credential setup section of [Add](#a--add) for this profile (auth method selection → credential prompt → Keychain store → ~/.zshenv update → profile JSON update).
+Run the full Add flow for the new auth method. `ts profiles add` will replace the
+existing profile entry.
 
-The old Keychain entry and env var are cleaned up as part of the new setup:
-- Delete old Keychain entry.
-- Replace old export line in `~/.zshenv` with new one.
-- Update profile JSON with new `{credential_field}` and `{env_var}`.
+Clean up the old auth:
+- Delete old Keychain entry (show platform-specific delete command).
+- Replace old export line in `~/.zshenv` with the new one (the Add flow handles this).
 
 ---
 
@@ -444,9 +367,15 @@ Y / N:
 
 If confirmed:
 
-1. **Remove from profile JSON** — filter out the entry with matching `name`. Write the updated file (or delete the file if no profiles remain).
+1. **Remove profile:**
 
-2. **Remove credential store entry:**
+```bash
+ts profiles remove --platform thoughtspot --name "{profile_name}"
+```
+
+Parse the JSON output for `keychain_service` and `env_var_to_remove`.
+
+2. **Remove credential store entry** — show the user the command for their platform:
 
    **macOS:**
    ```bash
@@ -464,7 +393,7 @@ If confirmed:
 
    If not found, continue silently.
 
-3. **Remove export line from ~/.zshenv** — read the file, filter out any line that exports `{env_var}`, write back.
+3. **Remove export line from ~/.zshenv** — read the file, filter out any line that exports `{env_var_to_remove}`, write back.
 
 4. Tell the user:
 ```
@@ -555,5 +484,6 @@ need to manage this file.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |
 | 1.1.0 | 2026-05-11 | Add Step 0 orientation paragraph shown before the mode-selection menu |
 | 1.0.0 | 2026-05-06 | Initial CoCo CLI version (adapted from Claude Code skill) |

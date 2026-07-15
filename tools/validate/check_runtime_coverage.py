@@ -25,6 +25,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES
+
 
 # Documented intentional divergences from the coverage rule.
 # Each entry must have a one-line justification comment so PR reviewers can sanity-check.
@@ -89,7 +91,7 @@ def find_skills(root: Path) -> dict[str, set[str]]:
     runtimes."""
     coverage: dict[str, set[str]] = {}
 
-    for runtime in ("claude", "cli", "coco-snowsight"):
+    for runtime in ALL_RUNTIMES:
         runtime_dir = root / "agents" / runtime
         if runtime_dir.is_dir():
             for child in runtime_dir.iterdir():
@@ -119,7 +121,7 @@ def main() -> int:
         runtimes = coverage[skill_name]
         per_runtime_status: dict[str, str] = {}
 
-        for runtime in ("claude", "cli", "coco-snowsight"):
+        for runtime in ALL_RUNTIMES:
             if runtime in runtimes:
                 per_runtime_status[runtime] = "present"
             elif (skill_name, runtime) in EXPECTED_DIVERGENCES:
@@ -153,7 +155,7 @@ def main() -> int:
 
         if args.verbose:
             cells = []
-            for runtime in ("claude", "cli", "coco-snowsight"):
+            for runtime in ALL_RUNTIMES:
                 status = per_runtime_status[runtime]
                 if status == "present":
                     cells.append(f"{runtime}=✓")

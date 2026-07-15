@@ -111,9 +111,21 @@ class TestFunctions:
     def test_date_trunc_day_is_date(self):
         assert t("date_trunc('day', ts_col)") == "date ( [TRANSACTIONS::ts_col] )"
 
+    def test_date_trunc_hour_passthrough(self):
+        assert t("DATE_TRUNC('HOUR', ts_col)") == \
+            "sql_date_time_op ( \"DATE_TRUNC('HOUR', {0})\" , [TRANSACTIONS::ts_col] )"
+
+    def test_date_trunc_minute_passthrough(self):
+        assert t("DATE_TRUNC('minute', ts_col)") == \
+            "sql_date_time_op ( \"DATE_TRUNC('MINUTE', {0})\" , [TRANSACTIONS::ts_col] )"
+
+    def test_date_trunc_second_passthrough(self):
+        assert t("DATE_TRUNC('SECOND', ts_col)") == \
+            "sql_date_time_op ( \"DATE_TRUNC('SECOND', {0})\" , [TRANSACTIONS::ts_col] )"
+
     def test_date_trunc_unknown_unit_raises(self):
-        with pytest.raises(UntranslatableError, match="hour"):
-            t("DATE_TRUNC('hour', ts_col)")
+        with pytest.raises(UntranslatableError, match="microsecond"):
+            t("DATE_TRUNC('microsecond', ts_col)")
 
     def test_extract_year(self):
         assert t("EXTRACT(YEAR FROM d)") == "year ( [TRANSACTIONS::d] )"
@@ -140,18 +152,34 @@ class TestFunctions:
     def test_power_is_pow(self):
         assert t("POWER(x, 2)") == "pow ( [TRANSACTIONS::x] , 2 )"
 
-    def test_if_comma_form(self):
+    def test_if_then_else_form(self):
         assert t("IF(x > 1, 'a', 'b')") == \
-            "if ( [TRANSACTIONS::x] > 1 , 'a' , 'b' )"
+            "if ( [TRANSACTIONS::x] > 1 ) then 'a' else 'b'"
 
     def test_unknown_function_raises_with_doc_pointer(self):
         with pytest.raises(UntranslatableError,
                            match="MEDIAN.*ts-databricks-formula-translation"):
             t("MEDIAN(x)")
 
-    def test_passthrough_hint(self):
-        with pytest.raises(UntranslatableError, match="sql_string_op"):
-            t("LOWER(s)")
+    def test_passthrough_lower(self):
+        assert t("LOWER(s)") == \
+            'sql_string_op ( "LOWER({0})" , [TRANSACTIONS::s] )'
+
+    def test_passthrough_upper(self):
+        assert t("UPPER(s)") == \
+            'sql_string_op ( "UPPER({0})" , [TRANSACTIONS::s] )'
+
+    def test_passthrough_minute(self):
+        assert t("MINUTE(ts_col)") == \
+            'sql_int_op ( "MINUTE({0})" , [TRANSACTIONS::ts_col] )'
+
+    def test_passthrough_second(self):
+        assert t("SECOND(ts_col)") == \
+            'sql_int_op ( "SECOND({0})" , [TRANSACTIONS::ts_col] )'
+
+    def test_passthrough_date_format(self):
+        assert t("DATE_FORMAT(dt, 'yyyy-MM')") == \
+            "sql_string_op ( \"DATE_FORMAT({0}, 'yyyy-MM')\" , [TRANSACTIONS::dt] )"
 
     def test_to_date_args_not_double_wrapped(self):
         assert t("d >= TO_DATE('2024-05-01', 'yyyy-MM-dd')") == \
@@ -162,18 +190,18 @@ class TestCaseWhen:
     def test_single_branch_golden(self):
         # ts-from-databricks.md Measure 6
         assert t("SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END)") == \
-            "sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) )"
+            "sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 )"
 
     def test_multi_branch_golden(self):
         # ts-from-databricks-sql-view.md Customer Segment
         assert t("CASE WHEN total_amount > 1000 THEN 'Premium' "
                  "WHEN total_amount > 100 THEN 'Standard' ELSE 'Basic' END") == \
-            ("if ( [TRANSACTIONS::total_amount] > 1000 , 'Premium' , "
-             "if ( [TRANSACTIONS::total_amount] > 100 , 'Standard' , 'Basic' ) )")
+            ("if ( [TRANSACTIONS::total_amount] > 1000 ) then 'Premium' "
+             "else if ( [TRANSACTIONS::total_amount] > 100 ) then 'Standard' else 'Basic'")
 
     def test_no_else_defaults_null(self):
         assert t("CASE WHEN x = 1 THEN 'y' END") == \
-            "if ( [TRANSACTIONS::x] = 1 , 'y' , null )"
+            "if ( [TRANSACTIONS::x] = 1 ) then 'y' else null"
 
 
 class TestPostfixConstructs:
@@ -230,11 +258,11 @@ class TestPostfixConstructs:
 
     def test_not_flag_inside_case(self):
         assert t("CASE WHEN NOT is_return THEN 1 ELSE 0 END") == \
-            "if ( [TRANSACTIONS::is_return] = false , 1 , 0 )"
+            "if ( [TRANSACTIONS::is_return] = false ) then 1 else 0"
 
     def test_not_comparison_inside_case(self):
         assert t("CASE WHEN NOT status = 'x' THEN 1 ELSE 0 END") == \
-            "if ( not ( [TRANSACTIONS::status] = 'x' ) , 1 , 0 )"
+            "if ( not ( [TRANSACTIONS::status] = 'x' ) ) then 1 else 0"
 
     def test_between_compound_left_operand_raises(self):
         with pytest.raises(UntranslatableError, match="parenthesize"):

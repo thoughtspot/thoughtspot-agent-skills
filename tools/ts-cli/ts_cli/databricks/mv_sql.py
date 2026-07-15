@@ -214,7 +214,7 @@ _RENAME = {
     "ABS": "abs", "CEIL": "ceil", "FLOOR": "floor", "ROUND": "round",
     "MOD": "mod", "POWER": "pow", "SQRT": "sqrt", "LN": "ln",
     "LOG2": "log2", "LOG10": "log10",
-    "GREATEST": "greatest", "LEAST": "least", "IF": "if",
+    "GREATEST": "greatest", "LEAST": "least",
     "YEAR": "year", "MONTH": "month_number", "DAY": "day",
     "HOUR": "hour_of_day", "QUARTER": "quarter_number",
     "WEEKOFYEAR": "week_number_of_year", "DAYOFWEEK": "day_number_of_week",
@@ -247,15 +247,15 @@ def _call(name: str, cur: _Cursor, resolver) -> str:
     if name == "COUNT":
         return _call_count(cur, resolver)
     if name in _PASS_THROUGH_HINT:
-        raise UntranslatableError(
-            f"'{name}' has no native ThoughtSpot function — needs a "
-            f"{_PASS_THROUGH_HINT[name]} pass-through (manual review, PT1)")
+        return _call_pass_through(name, cur, resolver)
     if name == "TO_DATE":
         # TO_DATE's arguments are raw strings — the date-literal wrap must
         # not fire inside it (would double-wrap 'yyyy-MM-dd'-style args).
         return _emit("to_date", _call_raw_string_args(cur))
     if name == "DATEDIFF":
         return _call_datediff(cur, resolver)
+    if name == "IF":
+        return _call_if(cur, resolver)
     args = _call_args(cur, resolver, agg=name)
     if name == "DATE_TRUNC":
         return _call_date_trunc(args)
@@ -335,15 +335,39 @@ def _call_extract(cur: _Cursor, resolver) -> str:
     return _emit(_EXTRACT[unit.upper()], [inner])
 
 
+def _call_if(cur: _Cursor, resolver) -> str:
+    """IF(cond, then_val, else_val) → if ( cond ) then val else val."""
+    args = _call_args(cur, resolver)
+    _need(args, 3, "IF")
+    return f"if ( {args[0]} ) then {args[1]} else {args[2]}"
+
+
+def _call_pass_through(name: str, cur: _Cursor, resolver) -> str:
+    """Generate sql_*_op pass-through for functions with no native TS equivalent."""
+    op_type = _PASS_THROUGH_HINT[name]
+    args = _call_args(cur, resolver)
+    if name == "DATE_FORMAT":
+        _need(args, 2, name)
+        return (f'{op_type} ( "DATE_FORMAT({{0}}, {args[1]})" , {args[0]} )')
+    _need(args, 1, name)
+    return f'{op_type} ( "{name}({{0}})" , {args[0]} )'
+
+
+_DATE_TRUNC_PASSTHROUGH = frozenset({"hour", "minute", "second"})
+
+
 def _call_date_trunc(args: list[str]) -> str:
     _need(args, 2, "DATE_TRUNC")
     unit = args[0].strip("'").lower()
     fn = _DATE_TRUNC.get(unit)
-    if fn is None:
-        raise UntranslatableError(
-            f"DATE_TRUNC unit '{unit}' not mapped "
-            f"(day|week|month|quarter|year)")
-    return _emit(fn, [args[1]])
+    if fn is not None:
+        return _emit(fn, [args[1]])
+    if unit in _DATE_TRUNC_PASSTHROUGH:
+        return (f"sql_date_time_op ( \"DATE_TRUNC('{unit.upper()}', "
+                f"{{0}})\" , {args[1]} )")
+    raise UntranslatableError(
+        f"DATE_TRUNC unit '{unit}' not mapped "
+        f"(day|week|month|quarter|year|hour|minute|second)")
 
 
 def _call_datediff(cur: _Cursor, resolver) -> str:

@@ -868,7 +868,7 @@ model:
     expr: "moving_sum ( [TRANSACTIONS::unit_price] * [TRANSACTIONS::quantity] , 7 , -1 , [TRANSACTIONS::transaction_date] )"
   - id: formula_Return Rate
     name: "Return Rate"
-    expr: "sum ( if ( [TRANSACTIONS::status] = 'returned' , 1 , 0 ) ) / count ( 1 )"
+    expr: "sum ( if ( [TRANSACTIONS::status] = 'returned' ) then 1 else 0 ) / count ( 1 )"
   - id: "formula_MV Filter"
     name: "MV Filter"
     expr: "[TRANSACTIONS::status] != 'cancelled'"
@@ -1092,7 +1092,7 @@ model:
   formulas:
   - id: formula_Customer Segment
     name: Customer Segment
-    expr: "if ( [Orders_MV_View::total_amount] > 1000 , 'Premium' , if ( [Orders_MV_View::total_amount] > 100 , 'Standard' , 'Basic' ) )"
+    expr: "if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic'"
     properties:
       column_type: ATTRIBUTE
   - id: formula_Total Orders

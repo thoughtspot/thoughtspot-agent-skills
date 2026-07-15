@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-06 (inaugural anchor; verify in next external sweep) -->
+<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
 
 # ThoughtSpot Connection — Reference
 

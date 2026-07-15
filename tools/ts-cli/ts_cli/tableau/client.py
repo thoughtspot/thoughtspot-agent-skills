@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 import random
-import re
 import time
 import zipfile
 from pathlib import Path
@@ -27,26 +26,19 @@ TABLEAU_PROFILES_PATH = Path.home() / ".claude" / "tableau-profiles.json"
 def _slugify_tableau(name: str) -> str:
     """Derive a URL-safe slug from a Tableau profile name.
 
-    Lowercases, collapses non-alphanumeric runs to a single hyphen, strips
-    leading/trailing hyphens. Matches the slug derivation pattern used for
-    ThoughtSpot profiles.
+    Delegates to profile_ops.slugify — the single source of truth.
     """
-    s = name.lower()
-    s = re.sub(r"[^a-z0-9]+", "-", s)
-    return s.strip("-")
+    from ts_cli.profile_ops import slugify
+    return slugify(name)
 
 
 def load_tableau_profiles() -> list:
     """Load Tableau profiles from ~/.claude/tableau-profiles.json.
 
-    Returns a list of profile dicts, or an empty list if the file does not exist.
+    Delegates to profile_ops.load_platform_profiles.
     """
-    if not TABLEAU_PROFILES_PATH.exists():
-        return []
-    raw = json.loads(TABLEAU_PROFILES_PATH.read_text())
-    if isinstance(raw, list):
-        return raw
-    return []
+    from ts_cli.profile_ops import load_platform_profiles
+    return load_platform_profiles("tableau")
 
 
 def _resolve_tableau_profile(profile_name: Optional[str]) -> dict:

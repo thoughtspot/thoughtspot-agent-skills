@@ -1477,21 +1477,17 @@ If N, exit gracefully — leave the run dir in place so the user can re-run or h
 ### 9a. Import patched Model TML (if any of surfaces 1, 2, 6 are non-empty)
 
 ```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{run_dir}/after/model.tml').read_text()]))" \
-  | source ~/.zshenv && ts tml import \
+source ~/.zshenv && ts tml import --file {run_dir}/after/model.tml \
   --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
-> **CLI format:** `ts tml import` reads a **JSON array of TML strings** from stdin —
-> not a raw YAML file. The `python3 -c` wrapper handles the encoding. Passing the raw
-> `.tml` file directly causes `Invalid JSON on stdin` and silently creates a duplicate
-> (if `--create-new` is used) or errors out.
+> **CLI format:** `--file` reads the raw TML file directly (ts-cli ≥ v0.27.0) — no JSON
+> wrapping needed.
 
 ### 9b. Import feedback TML (if any of surfaces 3, 4 are non-empty)
 
 ```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{run_dir}/after/feedback.tml').read_text()]))" \
-  | source ~/.zshenv && ts tml import \
+source ~/.zshenv && ts tml import --file {run_dir}/after/feedback.tml \
   --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
@@ -1564,8 +1560,8 @@ Coaching import complete for "{model_name}":
     → paste these rules into the Spotter UI under Settings → Coach Spotter → Instructions
 
   Run directory: {run_dir}
-  Rollback:      python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('{run_dir}/before/model.tml').read_text()]))" \
-                 | ts tml import --profile {profile_name} --policy ALL_OR_NONE --no-create-new
+  Rollback:      ts tml import --file {run_dir}/before/model.tml \
+                 --profile {profile_name} --policy ALL_OR_NONE --no-create-new
                  (and feedback.tml if applicable)
 
 Spotter will use the applied coaching on the next index refresh.
@@ -1606,6 +1602,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.3.2 | 2026-07-11 | Migrate Step 9a/9b/rollback imports to `ts tml import --file` (removes a broken `\| source ~/.zshenv &&` pipe that discarded the piped TML) (audit 5.1). |
 | 2.3.1 | 2026-07-03 | Audit fixes: soften phantom `/ts-object-model-builder` recommendations (Step 1 and Error Handling) to "no skill for this yet — planned"; remove stale "CLI does not yet expose `--include-dependent-objects`" framing in Step 3a (it never did — `ts metadata dependents` is the command used). Same phantom-skill fix applied to `references/ai-asset-review-rules.md`. |
 | 2.3.0 | 2026-05-19 | **`column_metadata` + `hierarchies` categories added to `model_instructions`.** Two new structured categories for agent disambiguation: `column_metadata` (cardinality tier, sample values, usage hint, value format per dimension column — requires Snowflake profile) and `hierarchies` (ordered drill-path declarations from coarse to fine grain). Allowed-key list updated (5 → 7 categories). Budget-trim order updated: `output_formatting` → `samples` → `value_format` → `note:/reason:` → `aggregation_defaults`; mandatory tier now includes `hierarchies`. Step 5 adds scope menu option 8; Step 6.5 adds generation algorithms (PII-gated cardinality queries, functional dependency validation for hierarchies, date-dim auto-detection); Step 7 adds `column_metadata.md` review file (Block 9 in review-explainers); Step 8b adds deploy-time validation for new enums/refs. Smoke test updated with structural validation steps for both categories. |
 | 2.2.0 | 2026-05-11 | Migrate all direct urllib API calls to ts CLI: Step 2b feedback fetch now uses `ts tml export --type FEEDBACK --parse` (requires ts-cli v0.5.0); Step 3a dependents now use `ts metadata dependents --raw`; Step 9c smoke-test count now uses `ts metadata dependents` (flat output). Introduce `existing_entries` variable in Step 2b for consistent use in Steps 8a, 8c, 9c (replaces `existing_feedback_entries`). |

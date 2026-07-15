@@ -26,6 +26,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _dirs import ALL_RUNTIMES, ALL_RUNTIME_PATHS
+
+# Trailing-slash prefixes for str.startswith on repo-relative paths.
+_RUNTIME_PREFIXES = tuple(f"{p}/" for p in ALL_RUNTIME_PATHS)
+
 ROW_RE = re.compile(
     r"^\|\s*(\d+\.\d+\.\d+)\s*\|\s*(\d{4}-\d{2}-\d{2})\s*\|.+\|"
 )
@@ -50,9 +55,7 @@ def _staged_skill_files(repo_root: Path) -> list[str]:
     )
     out = []
     for f in result.stdout.splitlines():
-        if f.endswith("/SKILL.md") and f.startswith(
-            ("agents/cli/", "agents/claude/", "agents/coco-snowsight/")
-        ):
+        if f.endswith("/SKILL.md") and f.startswith(_RUNTIME_PREFIXES):
             out.append(f)
     return out
 
@@ -125,26 +128,14 @@ def collect_skill_files(repo_root: Path) -> list[Path]:
     """Return all tracked skill files across all runtimes."""
     files: list[Path] = []
 
-    # Canonical CLI skills: agents/cli/*/SKILL.md
-    tracked_cli = get_tracked_files(repo_root, "agents/cli")
-    files += sorted(
-        f for f in (repo_root / "agents" / "cli").glob("*/SKILL.md")
-        if str(f.relative_to(repo_root)) in tracked_cli
-    )
-
-    # Claude Code-only skills: agents/claude/*/SKILL.md
-    tracked_claude = get_tracked_files(repo_root, "agents/claude")
-    files += sorted(
-        f for f in (repo_root / "agents" / "claude").glob("*/SKILL.md")
-        if str(f.relative_to(repo_root)) in tracked_claude
-    )
-
-    # CoCo skills: agents/coco-snowsight/*/SKILL.md
-    tracked_coco = get_tracked_files(repo_root, "agents/coco-snowsight")
-    files += sorted(
-        f for f in (repo_root / "agents" / "coco-snowsight").glob("*/SKILL.md")
-        if str(f.relative_to(repo_root)) in tracked_coco
-    )
+    # cli = canonical CLI skills; claude = Claude-only annex; coco-snowsight = CoCo.
+    # Per-runtime sorted, concatenated in ALL_RUNTIMES order.
+    for runtime in ALL_RUNTIMES:
+        tracked = get_tracked_files(repo_root, f"agents/{runtime}")
+        files += sorted(
+            f for f in (repo_root / "agents" / runtime).glob("*/SKILL.md")
+            if str(f.relative_to(repo_root)) in tracked
+        )
 
     return files
 

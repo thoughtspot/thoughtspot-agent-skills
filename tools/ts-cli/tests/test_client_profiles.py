@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 import ts_cli.client as client_module
+import ts_cli.profile_ops as profile_ops_module
 from ts_cli.client import load_profiles, resolve_profile
 
 PROFILE_A = {"name": "A", "base_url": "https://a.thoughtspot.cloud", "token_env": "TOK_A"}
@@ -51,6 +52,8 @@ def profiles_path(tmp_path, monkeypatch) -> Path:
     """Point PROFILES_PATH at a temp file for the duration of the test."""
     path = tmp_path / "thoughtspot-profiles.json"
     monkeypatch.setattr(client_module, "PROFILES_PATH", path)
+    patched = {**profile_ops_module.PROFILE_PATHS, "thoughtspot": path}
+    monkeypatch.setattr(profile_ops_module, "PROFILE_PATHS", patched)
     return path
 
 

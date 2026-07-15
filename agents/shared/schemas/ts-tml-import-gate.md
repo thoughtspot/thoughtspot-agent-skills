@@ -20,11 +20,13 @@ accepts the TML and then behaves wrong, or rejects it on import):
 - **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
 - **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 
-`ts tml lint` reads the same stdin shape as `ts tml import` and exits non-zero on
-any finding, so it gates the import (replace `<file>`):
+`ts tml lint` reads raw TML file paths via `--file`/`--dir` (the same input `ts tml
+import` takes) and exits non-zero on any finding, so it gates the import (replace
+`<file>` / `<dir>`):
 
 ```bash
-python3 -c "import json,pathlib; print(json.dumps([pathlib.Path('<file>').read_text()]))" | ts tml lint
+ts tml lint --file <file>          # one TML file
+ts tml lint --dir <dir>            # every *.tml in a directory
 ```
 
 Do not import until it reports `"clean": true`. Fix any finding and re-lint.
@@ -41,6 +43,14 @@ silently ignored. On first import omit it; **record the returned GUID** — it i
 required for any future update.
 
 ## 3. Import policy
+
+Import the linted TML with `ts tml import` — same `--file`/`--dir` input as the
+lint gate:
+
+```bash
+ts tml import --file <file> --policy PARTIAL      # one object
+ts tml import --dir <dir> --policy PARTIAL        # a batch
+```
 
 Use `--policy PARTIAL` when importing multiple objects in a batch. `ALL_OR_NONE`
 rolls back the **entire** batch if any single TML fails — including objects that

@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions) -->
+<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7) -->
 
 # Snowflake Semantic View YAML Schema
 
@@ -31,10 +31,19 @@ tags:                              # Optional. GA 2026-05-05. Fully-qualified ta
 tables:                           # Required. At least one entry.
 - name: string                    # Alias used in expr fields and relationships.
                                   # Must be unique within this semantic view.
-  base_table:
+  base_table:                     # Physical triad OR `definition:` below — mutually exclusive.
     database: string              # Snowflake database name. Uppercase recommended.
     schema: string                # Snowflake schema name. Uppercase recommended.
     table: string                 # Physical table or view name.
+    # --- OR (SQL-query logical table — GA 2026-06-26) ---
+    definition: string            # SQL query defining the logical table in place of the
+                                  # database/schema/table triad. DDL equivalent:
+                                  # `ALIAS as (SELECT ...)` inside `tables (...)`.
+                                  # Mutually exclusive with database/schema/table. See
+                                  # ts-snowflake-properties.md "Field Reference" and
+                                  # "Partial Migrations — SQL Views" (D option) — the
+                                  # to-snowflake-sv converter does not yet emit this
+                                  # (tracked in BL-031).
 
   primary_key:                    # Required on tables that appear as right_table
     columns:                      # in any relationship. List of physical column names.
@@ -54,6 +63,9 @@ tables:                           # Required. At least one entry.
                                   # Quote reserved words: table_alias."date"
     data_type: string             # TEXT | NUMBER | DATE | TIMESTAMP | BOOLEAN
     unique: boolean               # Optional. Marks dimension as having unique values.
+    is_enum: boolean              # Optional. GA 2026-06-25. Marks dimension as enumerable
+                                  # (a small fixed set of distinct values) — improves
+                                  # Cortex Analyst categorization accuracy.
     sample_values:                # Optional. Example values — improves Cortex Analyst accuracy.
     - string                      # Recommended by Snowflake best-practices for NL queries.
     access_modifier: string       # Optional. "private_access" | "public_access"
@@ -325,6 +337,10 @@ Run all checks before calling `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
 ---
 
 ## Example Structure
+
+> Note: `base_table` below uses the physical `database`/`schema`/`table` triad. It may
+> instead use `definition: <SQL query>` for a SQL-query logical table (GA 2026-06-26) —
+> see `base_table` in "Complete Schema" above. Not shown in this example.
 
 ```yaml
 name: retail_sales

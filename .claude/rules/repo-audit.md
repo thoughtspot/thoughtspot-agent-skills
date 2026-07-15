@@ -151,8 +151,8 @@ be a deliberate `Workflow` call, not unattended automation.)
 
 | Nudge | Trigger |
 |---|---|
-| External sweep due | latest `docs/audit/*-external.md` older than `EXTERNAL_MAX_AGE_DAYS` (7) |
-| Full audit worth considering | **time:** latest `*-full.md` older than `FULL_MAX_AGE_DAYS` (90), **OR activity:** a new skill / new runtime / 2+ new shared refs / a ts-cli bump / 40+ commits since the last full audit |
+| External sweep due | the more recent of the latest `docs/audit/*-external.md` **and** `docs/audit/*-full.md` older than `EXTERNAL_MAX_AGE_DAYS` (7) — a full audit runs all angles (external included), so it satisfies the external cadence too |
+| Full audit worth considering | **time:** latest `*-full.md` older than `FULL_MAX_AGE_DAYS` (90), **OR activity:** a new skill / new runtime / 2+ new shared refs / 40+ commits since the last full audit (measured from the report's commit, `git log <report-sha>..HEAD`). A ts-cli version bump is deliberately not an activity trigger — not audit surface, and redundant with the commit count |
 
 The activity trigger is the important half: it fires the full audit when *substantial
 work* has landed, not just when the calendar says so.

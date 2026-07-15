@@ -40,19 +40,91 @@ def test_age_days():
 
 
 def test_activity_reasons_only_lists_crossed_thresholds():
-    counts = {"new_skills": 2, "new_runtimes": 0, "new_shared": 0,
-              "ts_cli_bumps": 0, "commits": 5}
+    counts = {"new_skills": 2, "new_runtimes": 0, "new_shared": 0, "commits": 5}
     reasons = af._activity_reasons(counts)
     assert reasons == ["2 new skill(s)"]
 
 
 def test_activity_reasons_empty_when_below_all():
-    counts = {"new_skills": 0, "new_runtimes": 0, "new_shared": 1,
-              "ts_cli_bumps": 0, "commits": 3}
+    counts = {"new_skills": 0, "new_runtimes": 0, "new_shared": 1, "commits": 3}
     assert af._activity_reasons(counts) == []
 
 
 def test_activity_reasons_multiple():
-    counts = {"new_skills": 1, "new_runtimes": 1, "new_shared": 2,
-              "ts_cli_bumps": 1, "commits": 99}
-    assert len(af._activity_reasons(counts)) == 5
+    counts = {"new_skills": 1, "new_runtimes": 1, "new_shared": 2, "commits": 99}
+    assert len(af._activity_reasons(counts)) == 4  # all four remaining triggers
+
+
+# --- External cadence is satisfied by a full audit (a full audit covers the
+#     external angles 13/14/16) ---------------------------------------------------
+
+def test_full_audit_resets_external_clock():
+    # The exact bug: a recent full audit but an older external-only report. The
+    # external cadence must measure from the full audit, not the stale external file.
+    latest_ext = date(2026, 6, 28)   # last external-only sweep
+    latest_full = date(2026, 7, 11)  # more recent full audit
+    eff = af._effective_external_date(latest_ext, latest_full)
+    assert eff == date(2026, 7, 11)
+    assert af._is_due(eff, af.EXTERNAL_MAX_AGE_DAYS, date(2026, 7, 12)) is False
+
+
+def test_external_only_used_when_more_recent_than_full():
+    eff = af._effective_external_date(date(2026, 7, 10), date(2026, 7, 1))
+    assert eff == date(2026, 7, 10)
+
+
+def test_effective_external_date_with_only_full():
+    assert af._effective_external_date(None, date(2026, 7, 11)) == date(2026, 7, 11)
+
+
+def test_effective_external_date_with_only_external():
+    assert af._effective_external_date(date(2026, 7, 11), None) == date(2026, 7, 11)
+
+
+def test_effective_external_date_none_when_neither_run():
+    assert af._effective_external_date(None, None) is None
+
+
+# --- Activity counting from a git-log block (baseline = commit SHA, not date) ------
+# Input mirrors `git log <sha>..HEAD --name-status --pretty=format:%x00%H`: each commit
+# is a NUL-prefixed header line followed by its name-status rows.
+
+def _commit(sha: str, *rows: str) -> str:
+    return "\x00" + sha + "\n" + "\n".join(rows)
+
+
+def test_ts_cli_bumps_are_not_counted_as_activity():
+    # ts-cli version bumps are deliberately NOT an activity trigger (not audit surface,
+    # redundant with commit count). A bump-only commit contributes to `commits` but
+    # never yields a new-skill/shared reason.
+    log = "\n".join([
+        _commit("a" * 40, "M\ttools/ts-cli/pyproject.toml", "M\ttools/ts-cli/ts_cli/__init__.py"),
+        _commit("b" * 40, "M\ttools/ts-cli/pyproject.toml", "M\ttools/ts-cli/ts_cli/__init__.py"),
+    ])
+    counts = af._parse_activity(log)
+    assert "ts_cli_bumps" not in counts
+    assert counts["commits"] == 2
+    assert af._activity_reasons(counts) == []
+
+
+def test_new_skill_and_runtime_and_shared_counted():
+    log = "\n".join([
+        _commit("a" * 40, "A\tagents/cli/ts-new/SKILL.md"),
+        _commit("b" * 40, "A\tagents/shared/schemas/foo.md", "A\tagents/shared/mappings/bar.md"),
+    ])
+    counts = af._parse_activity(log)
+    assert counts["new_skills"] == 1
+    assert counts["new_runtimes"] == 1   # "cli"
+    assert counts["new_shared"] == 2
+    assert counts["commits"] == 2
+
+
+def test_modified_skill_is_not_a_new_skill():
+    log = _commit("a" * 40, "M\tagents/cli/ts-existing/SKILL.md")
+    assert af._parse_activity(log)["new_skills"] == 0
+
+
+def test_empty_log_is_all_zeros():
+    counts = af._parse_activity("")
+    assert counts == {"new_skills": 0, "new_runtimes": 0, "new_shared": 0,
+                      "commits": 0}

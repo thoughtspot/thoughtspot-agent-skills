@@ -13,6 +13,8 @@ import re
 import sys
 from pathlib import Path
 
+from _dirs import COCO
+
 ROOT = Path(__file__).resolve().parents[2]
 
 # Skills that exist only in one runtime with no CLI/claude source to sync from
@@ -67,7 +69,7 @@ def load_sync_debt() -> set[str]:
 def discover_mirrors() -> list[Path]:
     """Find all mirror files (CoCo SKILL.md)."""
     mirrors = []
-    for p in sorted((ROOT / "agents/coco-snowsight").glob("*/SKILL.md")):
+    for p in sorted((ROOT / "agents" / COCO).glob("*/SKILL.md")):
         mirrors.append(p)
     return mirrors
 

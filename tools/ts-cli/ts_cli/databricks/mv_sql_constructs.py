@@ -130,7 +130,7 @@ def _construct_case(cur, resolver) -> str:
         raise UntranslatableError("CASE with no WHEN branch")
     out = else_val
     for cond, val in reversed(branches):
-        out = f"if ( {cond} , {val} , {out} )"
+        out = f"if ( {cond} ) then {val} else {out}"
     return out
 
 

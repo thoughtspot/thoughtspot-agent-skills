@@ -30,7 +30,6 @@ Two scenarios are supported:
 | [../../shared/worked-examples/snowflake/ts-from-snowflake.md](../../shared/worked-examples/snowflake/ts-from-snowflake.md) | End-to-end example: BIRD_SUPERHEROS_SV → ThoughtSpot Model (se-thoughtspot, inline joins, verified against live DDL) |
 | [../../shared/worked-examples/snowflake/ts-from-snowflake-dunder.md](../../shared/worked-examples/snowflake/ts-from-snowflake-dunder.md) | End-to-end example: DUNDER_MIFFLIN_SALES_INVENTORY → TS Model. Exercises multi-value synonyms, per-column descriptions, table comments, semi-additive metrics (closing/opening), `unique count` formula, and `concat()` for strings. |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth methods, profile config, CLI usage |
-| [../../claude/references/direct-api-auth.md](../../claude/references/direct-api-auth.md) | Direct API authentication fallback when stored procedures are unavailable |
 | Cortex Code connection (configured via `cortex connections set`) | Snowflake connection code, SQL execution patterns |
 | [references/open-items.md](references/open-items.md) | Known gaps and deferred capabilities for this skill |
 
@@ -1826,6 +1825,8 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.16.1 | 2026-07-11 | Remove the dead `direct-api-auth.md` reference-table row (the doc taught a curl + `/tmp/ts_token.txt` fallback now prohibited by `ts-cli.md`/`security.md`, with no step logic using it); doc retired repo-wide (BL-109). |
+| 1.16.0 | 2026-07-11 | Recognize SQL-query logical tables (`base_table.definition:` → SQL View TML), `is_enum`/`sample_values` dimension clauses, and free-text `ai_sql_generation`/`ai_question_categorization` instructions (audit 13.5/13.6/13.7). |
 | 1.15.0 | 2026-07-11 | Formula function-composition rules (group_* = group_aggregate shorthand; no nesting group functions; raw aggregates must wrap in group_aggregate before window functions; if() conditions require parentheses) + refined cumulative/moving_sum mapping rows. Companion shared-reference additions: Function Composition Rules + if() parens (thoughtspot-formula-patterns.md), cumulative reverse-translation decision table + COUNT_IF table (ts-snowflake-formula-translation.md), TML Import Behaviours (ts-from-snowflake-rules.md). Verified on SE cluster via TML import (Payroll Test Model). |
 | 1.14.1 | 2026-07-10 | Pre-import lint gate + import-policy text extracted to shared `ts-tml-import-gate.md` (BL-063 PR5) — content unchanged, now linked. |
 | 1.14.0 | 2026-07-10 | Cumulative window metrics: row 25 corrected to `moving_sum(group_aggregate(...))` (aggregates cannot nest directly in `moving_sum`); new `COUNT_IF` mapping; new limitations L6 (BOOL in `if` requires parentheses — prefer `count_if`/`sum_if`) and L7 (formulas referencing `[TABLE::COL]` fail on initial CREATE — documented mandatory two-pass import in Step 11). Verified on SE cluster. |

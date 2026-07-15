@@ -156,18 +156,19 @@ from L2 (HIGH unsupported) to a translated construct with a PT1 (pass-through) m
 **Finding (2026-06, qwiklab_ecomm migration):** `ts tml import` uses `--policy` (not
 `--import-policy`). Using `--import-policy` produces `No such option: --import-policy`.
 
-**Also verified:**
-- `ts tml import` reads the TML JSON array from **stdin** only — passing a file path as
-  a positional argument fails with `Got unexpected extra argument`.
-- Correct invocation pattern:
-  ```bash
-  python3 -c "import json,pathlib,sys; print(json.dumps([pathlib.Path(f).read_text() for f in sys.argv[1:]]))" *.table.tml *.sql_view.tml *.model.tml \
-    | ts tml import --policy PARTIAL --create-new --profile {name}
-  ```
+**Also verified (2026-06, stdin-only era — superseded, see update below):**
 - `PARTIAL` is the recommended policy for first-run migrations — objects that parse
   correctly import even if others fail.
 
-**SKILL.md:** Step 8 updated with correct flag and stdin pattern.
+**Update (2026-07-11, audit 5.1):** ts-cli v0.27.0 added `--file`/`--dir` to `ts tml
+import`/`ts tml lint`, so the stdin-JSON-array requirement above no longer holds — a
+directory path is now accepted directly. SKILL.md Step 8 migrated from the
+`python3 -c "...json.dumps(...)..." | ts tml import` wrapper to
+`ts tml import --dir {output_dir} --order tableau --policy PARTIAL --create-new
+--profile {name}`. The `--policy` (not `--import-policy`) flag name finding above is
+unaffected and still applies.
+
+**SKILL.md:** Step 8 updated with the `--dir`/`--order tableau` invocation.
 
 ---
 

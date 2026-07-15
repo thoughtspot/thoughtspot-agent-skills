@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tempfile
 import time
@@ -65,12 +64,10 @@ def format_http_error(method: str, url: str, resp: "requests.Response") -> str:
 def _slugify(name: str) -> str:
     """Derive the profile slug used for Keychain service names.
 
-    Matches the slug derivation in ts-profile-setup/SKILL.md:
-      lowercase, non-alphanumeric → hyphens, collapsed and stripped.
+    Delegates to profile_ops.slugify — the single source of truth.
     """
-    s = name.lower()
-    s = re.sub(r"[^a-z0-9]+", "-", s)
-    return s.strip("-")
+    from ts_cli.profile_ops import slugify
+    return slugify(name)
 
 
 def resolve_profile(profile: Optional[str]) -> str:
@@ -105,22 +102,12 @@ def resolve_profile(profile: Optional[str]) -> str:
 def load_profiles() -> Dict[str, Any]:
     """Load all profiles as a name → profile dict.
 
-    Handles three file formats produced by the ts-profile-setup skill:
-      {"profiles": [{...}, ...]}   — wrapped list (current format)
-      [{...}, ...]                 — bare list
-      {"name": {...}, ...}         — dict keyed by profile name
+    Delegates to profile_ops.load_platform_profiles and converts to the
+    name-keyed dict that callers (ThoughtSpotClient, resolve_profile) expect.
     """
-    if not PROFILES_PATH.exists():
-        return {}
-    raw = json.loads(PROFILES_PATH.read_text())
-    if isinstance(raw, list):
-        return {p["name"]: p for p in raw}
-    if isinstance(raw, dict):
-        # Unwrap {"profiles": [...]} if present
-        if "profiles" in raw and isinstance(raw["profiles"], list):
-            return {p["name"]: p for p in raw["profiles"]}
-        return raw  # already keyed by name
-    return {}
+    from ts_cli.profile_ops import load_platform_profiles
+    profiles = load_platform_profiles("thoughtspot")
+    return {p["name"]: p for p in profiles}
 
 
 class ThoughtSpotClient:

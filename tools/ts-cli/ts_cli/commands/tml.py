@@ -4,6 +4,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+import select
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -176,8 +177,24 @@ def _stdin_has_piped_content() -> bool:
     path, where the original JSON-array stdin read never happens, so nothing is lost.
     Skips reading entirely when stdin is a TTY (interactive terminal, nothing piped) so
     an interactive invocation of --file/--dir never blocks waiting on input.
+
+    An open non-TTY stdin that carries no data (e.g. a background/script shell whose
+    stdin is an idle pipe) must NOT trigger a blocking read — a bare `sys.stdin.read()`
+    there hangs forever waiting on an EOF that never comes (BL-097). We therefore only
+    read once `select` reports the fd readable within a zero timeout: data ready reads
+    as content; EOF (a closed pipe or `< /dev/null`) reads as empty; a regular-file
+    redirect always reports readable. An idle open pipe reports not-readable and we
+    return False without reading. On platforms/handles where `select` can't poll stdin
+    (e.g. a Windows non-socket handle) we fall back to the prior blocking read rather
+    than risk misclassifying genuine piped input.
     """
     if sys.stdin.isatty():
+        return False
+    try:
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+    except (OSError, ValueError):
+        return bool(sys.stdin.read().strip())
+    if not ready:
         return False
     return bool(sys.stdin.read().strip())
 

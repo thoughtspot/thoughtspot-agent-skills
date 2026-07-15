@@ -63,6 +63,10 @@ run_check() {
 
 # Always run these — they're fast and catch the most common mistakes
 run_check "secrets"              "tools/validate/check_secrets.py --root $REPO_ROOT"
+# check_references.py runs unconditionally (not gated to a staged-file pattern) — it
+# already fires on every commit, which is a superset of "fires when a SKILL.md,
+# references/*.md, or docs/**/*.md changes" (audit finding 1.4 extended its scope to
+# those file classes; the existing unconditional trigger already covers them).
 run_check "reference paths"      "tools/validate/check_references.py --root $REPO_ROOT"
 run_check "anti-patterns"        "tools/validate/check_patterns.py --root $REPO_ROOT --staged"
 run_check "version sync"         "tools/validate/check_version_sync.py --root $REPO_ROOT"
@@ -116,9 +120,10 @@ if echo "$STAGED" | grep -q 'SKILL\.md'; then
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root $REPO_ROOT"
 fi
 
-# Smoke tests — every Claude skill (not on the allowlist) must have a smoke test
-# Runs when a SKILL.md or smoke test is touched
-if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/)'; then
+# Smoke tests — every Claude skill (not on the allowlist) must have a smoke test,
+# and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3).
+# Runs when a SKILL.md, a smoke test, or the validator itself is touched.
+if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/|tools/validate/check_smoke_tests\.py)'; then
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root $REPO_ROOT --staged"
 fi
 
@@ -201,6 +206,15 @@ fi
 # entry (audit finding 1.1). Runs when any doc under agents/ or the validator changes.
 if echo "$STAGED" | grep -qE '(^agents/.*\.md$|tools/validate/check_slash_command_refs\.py)'; then
   run_check "slash-command refs" "tools/validate/check_slash_command_refs.py --root $REPO_ROOT"
+fi
+
+# Orphan reference files — every agents/{cli,claude,coco-snowsight}/**/references/*.md
+# must be cited somewhere else in the repo (or allowlisted by basename, e.g.
+# open-items.md) — audit finding 1.1 (the two update-mode-spec.md Mode C design docs
+# that lingered "pending implementation" long after Mode C shipped). Runs when any
+# references/*.md file or the validator itself changes.
+if echo "$STAGED" | grep -qE '(^agents/.*references/.*\.md$|tools/validate/check_orphan_references\.py)'; then
+  run_check "orphan refs" "tools/validate/check_orphan_references.py --root $REPO_ROOT"
 fi
 
 # SKILL.md flag cross-check — every `ts <group> <command> --<flag>` a SKILL.md
