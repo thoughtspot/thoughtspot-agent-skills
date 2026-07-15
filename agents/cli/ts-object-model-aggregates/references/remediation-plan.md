@@ -27,8 +27,8 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 | F10/11/13 | MED | verification | **CORRECTED**: SpotQL *does* verify routing incl. semi-additive; Step 7 must pick the wrapper (`AGG` vs `SUM`) via `classify-columns`; its hardcoded `SUM("Sales")` example is wrong for aggregate-formula measures |
 | F14 | MED | verification | RLS leak-test (restricted user) not run — routed queries so far ran as bypass admin (open-item #17) |
 | F2 | MED | packaging | `ts` uv-tool env lacks `snowflake-connector-python`; connected profiling dies with a bare ImportError |
-| F16 | LOW | UX | Model naming is source-first; UI truncation hides the aggregate token |
-| F17 | LOW | UX | Aggregate models ship with no description |
+| F16 | LOW | UX | **FIXED** — model name is now aggregate-first `<aggregate> (<source>)` |
+| F17 | LOW | UX | **FIXED** — `generate` auto-writes a description (grain, measures, routing, RLS) |
 | F7 | — | POSITIVE | RLS fail-closed guard + rule remap works; keep as the model for other guards |
 
 ---
@@ -152,9 +152,12 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 - *Verify:* confirm routing still fires on the formula-only shape (measure identity is the
   formula name, unchanged) before adopting.
 
-### Theme D — UX / output  [F16, F17]
-- **F16:** name `<Aggregate> (<Source Model>)` (aggregate-first) in `_aggregate_model_name`.
-- **F17:** auto-generate a `description` (grain, measures, what routes / what falls back, RLS).
+### Theme D — UX / output  [F16, F17] — DONE
+- **F16 (DONE):** `_write_model_artifact` names the model `<aggregate> (<source>)`
+  (aggregate-first) so the distinguishing token survives UI truncation.
+- **F17 (DONE):** `_aggregate_description()` auto-writes a description (grain via
+  `_grain_summary`, measures, routing behaviour, RLS note) onto the aggregate Model TML.
+  Both unit-tested; `_grain_summary` tolerates malformed date-grain shapes (F6 lesson).
 
 ### Theme E — Packaging  [F2]
 - Add a `snowflake` extra (`thoughtspot-cli[snowflake]`); on ImportError in

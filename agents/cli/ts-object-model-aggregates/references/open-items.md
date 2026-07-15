@@ -1116,7 +1116,7 @@ Summary of tracked items:
   aggregate models (formulas over physical component cols, no hidden component model columns —
   also unblocks in-place editing).
 
-**UX (Phase 3):** **F16** name aggregate-first `<Aggregate> (<Source>)`; **F17** auto-generate
-model descriptions.
+**UX (Phase 3) — DONE:** **F16** model name now aggregate-first `<aggregate> (<source>)`;
+**F17** `generate` auto-writes a description (grain/measures/routing/RLS). Both unit-tested.
 
 **Positive (keep):** **F7** RLS fail-closed guard + rule remap worked correctly end to end.

@@ -149,7 +149,8 @@ def build_aggregate_table_spec(candidate: dict, plans: dict, model_tml: dict,
 
 def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
                               agg_table_name: str, model_name: str,
-                              connection_name: str) -> dict:
+                              connection_name: str,
+                              description: Optional[str] = None) -> dict:
     """Adapter over model_builder.build_model_tml + aggregate-specific post-pass.
 
     Reuses the conversion substrate's assembly (formula_ prefixing, double-agg
@@ -239,6 +240,8 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
     tml["model"].setdefault("properties", {})["spotter_config"] = {
         "is_spotter_enabled": True,
     }
+    if description:
+        tml["model"]["description"] = description
     for c in tml["model"]["columns"]:
         if c["name"] in hidden_aliases:
             c.setdefault("properties", {})["is_hidden"] = True

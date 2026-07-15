@@ -776,13 +776,42 @@ def _write_table_artifacts(outdir: Path, cand: dict, plans: dict, model_tml: dic
     (outdir / "table.tml.yaml").write_text(_build_table_tml(spec))
 
 
+def _grain_summary(cand: dict) -> str:
+    """Human grain string for a candidate: 'Dim A x Dim B x Date (monthly)' or
+    'grand total'. Tolerant of both the `date_grains` list and the
+    `date_column`/`bucket` compat shim; ignores malformed date-grain entries."""
+    parts = list(cand.get("dimensions") or [])
+    grains = cand.get("date_grains")
+    if grains is None and cand.get("date_column"):
+        grains = [{"column": cand["date_column"], "bucket": cand.get("bucket")}]
+    for g in grains or []:
+        if not isinstance(g, dict) or not g.get("column"):
+            continue
+        bucket = (g.get("bucket") or "").upper()
+        suffix = f" ({bucket.lower()})" if bucket and bucket != "NO_BUCKET" else ""
+        parts.append(f"{g['column']}{suffix}")
+    return " x ".join(parts) if parts else "grand total"
+
+
+def _aggregate_description(cand: dict, model_tml: dict) -> str:
+    """F17: a self-describing model description — grain, measures, routing behaviour."""
+    src = model_tml["model"].get("name", "the primary Model")
+    measures = ", ".join(cand.get("measure_columns") or []) or "(none)"
+    return (f'Pre-aggregated Model of "{src}": {measures} by {_grain_summary(cand)}. '
+            f"Aggregate-aware routing uses it automatically for matching queries at or "
+            f"above this grain; finer or out-of-grain queries fall back to the primary Model. "
+            f"Any base-table row-level security is propagated onto this aggregate.")
+
+
 def _write_model_artifact(outdir: Path, cand: dict, plans: dict, model_tml: dict,
                          name: str, connection_name: str) -> str:
     from ts_cli.aggregate.generate import build_aggregate_model_tml
-    model_name = f"{model_tml['model']['name']} ({name})"
+    # F16: aggregate-first so the distinguishing token survives UI name truncation.
+    model_name = f"{name} ({model_tml['model']['name']})"
     agg_model = build_aggregate_model_tml(cand, plans, model_tml, agg_table_name=name,
                                           model_name=model_name,
-                                          connection_name=connection_name)
+                                          connection_name=connection_name,
+                                          description=_aggregate_description(cand, model_tml))
     (outdir / "agg_model.tml.yaml").write_text(dump_tml_yaml(agg_model))
     return model_name
 
