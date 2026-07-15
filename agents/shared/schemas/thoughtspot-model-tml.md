@@ -202,12 +202,21 @@ evaluates the formula `expr` directly — the column-level `aggregation` does no
 the result. Use `SUM` as the convention for all MEASURE formula columns; do not attempt to
 infer a "correct" aggregation from the expression shape (e.g. ratio vs. sum).
 
-**Formula cross-references fail on first import.** A formula `expr` that references another
-formula column by bracket notation (`[Other Formula Name]`) fails with "Search did not find
-'other formula name'". ThoughtSpot resolves bracket refs by display name, but the referenced
-formula does not yet exist in the model during initial import validation. **Workaround:**
-inline the referenced formula's full expression, or use a two-pass import (import base
-formulas first, export to get GUIDs, then add dependent formulas via update).
+**Formula cross-references: reference by id, not display name.** The two reference styles
+behave differently on import, and only one fails:
+
+- **Display-name ref** (`[Other Formula Name]`) **fails on first import** with "Search did not
+  find 'other formula name'" — ThoughtSpot parses the bare name as search tokens, and the
+  referenced formula is not resolvable as a reference during import validation.
+- **Id-ref** (`[formula_<Name>]`) **resolves on first import and is order-independent** — a
+  formula may be declared before the one it references. So all formulas can go in a **single
+  import pass** (one model TML, formulas emitted with `formula_`-prefixed refs); no two-pass or
+  phasing is required for cross-reference resolution. Verified on ps-internal 2026-07-09
+  (id-refs resolved both ordered and forward; display-name refs failed identically either way).
+
+**Workaround (only if you must keep a display-name ref, e.g. legacy):** inline the referenced
+formula's full expression, or use a two-pass import (import base formulas first, export to get
+GUIDs, then add dependent formulas via update).
 
 ### Geo Config
 
