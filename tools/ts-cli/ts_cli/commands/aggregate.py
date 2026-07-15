@@ -471,9 +471,18 @@ def _spotql_profile_sql_or_none(model_tml: dict, cand: dict, plans: dict, model_
     failure so the caller falls back to sqlgen's build_select/build_profile_sql."""
     if not model_guid:
         return None
-    from ts_cli.aggregate.spotql_aggregate import _strip_trailing_limit, build_spotql
+    from ts_cli.aggregate.spotql_aggregate import (_strip_trailing_limit,
+                                                   build_profiling_spotql)
     try:
-        spotql, _descriptors = build_spotql(cand, plans, model_tml["model"]["name"])
+        # Row-count profiling uses a MEASURE-FREE grain SpotQL: the distinct
+        # grain row count is measure-independent, so this keeps profiling on the
+        # SpotQL path (correct joins) even for candidates carrying an AVG/RATIO
+        # measure that build_spotql can't express (#14). `plans` is unused here
+        # for that reason (kept in the signature for caller symmetry with
+        # `_spotql_ddl_or_none`, which does need it).
+        spotql = build_profiling_spotql(cand, model_tml["model"]["name"])
+        if spotql is None:
+            return "SELECT 1 AS agg_rows"   # grand-total grain: exactly one row
         result = _spotql_generate_sql(spotql, model_guid, ts_profile)
         if result["status"] != "SUCCESS" or not result["executable_sql"]:
             _err(f"SpotQL generate-sql did not return SUCCESS for candidate "

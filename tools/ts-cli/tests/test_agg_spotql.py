@@ -409,3 +409,24 @@ def test_wrap_as_ddl_bucketed_snowflake_materialized_view_guard_still_fires():
     with pytest.raises(UnsupportedModelError, match="002212"):
         wrap_as_ddl(TS_SQL_BUCKETED, DESCRIPTORS_BUCKETED,
                    "SALESDB.PUBLIC.FACT_AGG_M", "snowflake", materialization="mview")
+
+
+def test_build_profiling_spotql_is_measure_free_grain():
+    from ts_cli.aggregate.spotql_aggregate import build_profiling_spotql
+    # F1(c): profiling SpotQL references ONLY the grain (no measures), so a
+    # candidate with an unrepresentable AVG/RATIO measure still profiles via
+    # SpotQL instead of the walker.
+    cand = {"dimensions": ["Customer State", "Product Category"],
+            "date_column": None, "bucket": None,
+            "measure_columns": ["Amount", "Average Revenue Per Unit"]}
+    sql = build_profiling_spotql(cand, "M")
+    assert '"Customer State"' in sql and '"Product Category"' in sql
+    assert "Amount" not in sql and "Revenue" not in sql   # no measures
+    assert "GROUP BY" in sql
+
+
+def test_build_profiling_spotql_none_for_grand_total():
+    from ts_cli.aggregate.spotql_aggregate import build_profiling_spotql
+    assert build_profiling_spotql(
+        {"dimensions": [], "date_column": None, "bucket": None,
+         "measure_columns": ["Amount"]}, "M") is None

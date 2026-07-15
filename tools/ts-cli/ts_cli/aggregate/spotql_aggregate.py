@@ -220,6 +220,30 @@ def _measure_rows(candidate: dict, plans: dict) -> List[_Row]:
     return rows
 
 
+def build_profiling_spotql(candidate: dict, source_name: str) -> Optional[str]:
+    """Measure-FREE grain SpotQL for ROW-COUNT profiling.
+
+    A candidate's distinct row count depends only on its grain (dimensions +
+    date columns), never on which measures it stores — so profiling needn't
+    reference measures at all. That matters because `build_spotql` raises on
+    AVG/RATIO measures (#14): once such a measure is decomposable it joins every
+    candidate's measure set, which would force EVERY candidate onto the built-in
+    walker for profiling (losing SpotQL's correct joins on role-playing /
+    ambiguous-path dimensions). Counting a measure-free grain SELECT keeps
+    profiling on the SpotQL path regardless of measure kinds.
+
+    Returns None for a grand-total grain (no dims/dates) — that aggregate is
+    exactly one row, which the caller counts as 1 without a query."""
+    rows = _dim_rows(candidate) + _date_rows(candidate)
+    if not rows:
+        return None
+    select_items = [r.expr for r in rows]
+    group_items = [r.expr for r in rows if r.group]
+    return ("SELECT\n  " + ",\n  ".join(select_items)
+            + f"\nFROM {_sq(source_name)} AS {_sq(_ALIAS)}"
+            + "\nGROUP BY " + ", ".join(group_items))
+
+
 def build_spotql(candidate: dict, plans: dict, source_name: str) -> Tuple[str, List[dict]]:
     """SpotQL SELECT over the primary's semantic columns for `candidate`'s
     grain: dimensions (quoted, unaliased), raw date columns (quoted,
