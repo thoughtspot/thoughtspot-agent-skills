@@ -2,9 +2,30 @@ import json
 import yaml
 from typer.testing import CliRunner
 from ts_cli.cli import app
-from ts_cli.commands.aggregate import _candidate_key, _merge_prior_agg_rows, _signatures_summary
+from ts_cli.commands.aggregate import (_candidate_key, _merge_prior_agg_rows,
+                                       _signatures_summary, flag_suspect_base_rows)
 
 runner = CliRunner()
+
+
+def test_flag_suspect_base_rows_fires_when_base_below_max_agg():
+    # F1(b): base_rows=8 (a dim) but an aggregate has 14 rows — impossible, so flag it.
+    payload = {"base_rows": 8, "candidates": [
+        {"id": "c1", "agg_rows": 14}, {"id": "c2", "agg_rows": 8}]}
+    assert flag_suspect_base_rows(payload) is True
+    assert payload["base_rows_suspect"] is True
+
+
+def test_flag_suspect_base_rows_silent_when_base_is_largest():
+    payload = {"base_rows": 1_208_243, "candidates": [
+        {"id": "c1", "agg_rows": 14}, {"id": "c2", "agg_rows": 8798}]}
+    assert flag_suspect_base_rows(payload) is False
+    assert "base_rows_suspect" not in payload
+
+
+def test_flag_suspect_base_rows_noop_without_profiled_candidates():
+    payload = {"base_rows": 8, "candidates": [{"id": "c1"}]}  # no agg_rows yet
+    assert flag_suspect_base_rows(payload) is False
 
 
 def test_aggregate_group_registered():

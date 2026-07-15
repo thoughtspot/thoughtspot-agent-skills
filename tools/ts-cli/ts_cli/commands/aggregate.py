@@ -357,6 +357,26 @@ def _ingest_profile_results(payload: dict, results_path: str) -> dict:
     return {"ingested": len(r["candidates"])}
 
 
+def flag_suspect_base_rows(payload: dict) -> bool:
+    """Guard against a bogus `base_rows` (F1). An aggregate can never have more
+    rows than the base grain it rolls up, so `base_rows < max(agg_rows)` means
+    the base count is wrong (e.g. anchored on a tiny dimension instead of the
+    fact). Sets `payload["base_rows_suspect"] = True`, warns on stderr, and
+    returns whether it fired — so compression ratios are flagged, not trusted."""
+    base = payload.get("base_rows")
+    aggs = [c["agg_rows"] for c in payload.get("candidates", [])
+            if isinstance(c.get("agg_rows"), int)]
+    if base is None or not aggs or base >= max(aggs):
+        return False
+    payload["base_rows_suspect"] = True
+    _err(f"WARNING: base_rows ({base:,}) is smaller than the largest aggregate "
+         f"row count ({max(aggs):,}). An aggregate cannot exceed its base grain, "
+         f"so the base count is almost certainly wrong (commonly anchored on a "
+         f"dimension, not the fact). Compression ratios are unreliable — verify "
+         f"the base table before trusting the ranking.")
+    return True
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Task 18: SpotQL-first SQL generation (DDL + profiling), sqlgen as fallback.
 #
@@ -549,6 +569,7 @@ def profile(
 
     if results:
         summary = _ingest_profile_results(payload, results)
+        summary["base_rows_suspect"] = flag_suspect_base_rows(payload)
         (d / "candidates.json").write_text(json.dumps(payload, indent=2))
         print(json.dumps(summary))
         return
@@ -572,9 +593,10 @@ def profile(
     for c in payload["candidates"]:
         if c["id"] in counts:
             c["agg_rows"] = counts[c["id"]]
+    suspect = flag_suspect_base_rows(payload)
     (d / "candidates.json").write_text(json.dumps(payload, indent=2))
     print(json.dumps({"base_rows": payload["base_rows"], "profiled": len(counts),
-                      "skipped": skipped}, indent=2))
+                      "skipped": skipped, "base_rows_suspect": suspect}, indent=2))
 
 
 def _colmap_from_model(model_tml: dict) -> dict:

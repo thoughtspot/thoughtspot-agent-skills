@@ -1071,9 +1071,9 @@ Summary of tracked items:
 **Correctness bugs (Phase 0):**
 - **F1 — part (a) FIXED.** `build_base_count_sql` counted `model_tables[0]` (a dim, no fact
   join) → `base_rows=8`. Now `sqlgen.base_table_name` anchors the count on the measure-owning
-  fact (unit-tested: dim-first + formula-measure cases). Remaining: (b) sanity guard
-  (`base_rows` < max(agg_rows) → warn/mark suspect); (c) fix internal SpotQL so profiling
-  stops falling back to the walker.
+  fact (unit-tested). (b) DONE — `flag_suspect_base_rows` warns + sets `base_rows_suspect`
+  when `base_rows` < max(agg_rows), both profile paths. Remaining (c): fix internal SpotQL
+  so profiling stops falling back to the walker (needs live repro).
 - **F6 — INVALIDATED (operator error, not a tool bug).** The reported crash on a
   `bucket=MONTHLY` candidate was caused by a malformed injected candidate
   (`date_grains: ['MONTHLY']` — list of strings — instead of the real

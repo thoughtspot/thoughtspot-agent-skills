@@ -45,8 +45,11 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
   (plain measure `column_id` table, or formula measure's `[TABLE::col]` ref; most measures
   wins; falls back to `model_tables[0]`). `build_base_count_sql` now anchors on it. Unit
   tests: dim-listed-first and formula-measure cases both assert the fact, not the dim.
-- *Remaining:* (b) sanity guard — warn + mark `suspect` when `base_rows` < max(agg_rows);
-  (c) fix the internal SpotQL construction so profiling stops falling back to the walker.
+- *Part (b) DONE:* `commands/aggregate.flag_suspect_base_rows` warns + sets
+  `base_rows_suspect` when `base_rows < max(agg_rows)` (an aggregate can't exceed its base),
+  in both connected and manual profile paths (unit-tested).
+- *Remaining (c):* fix the internal SpotQL construction so profiling stops falling back to
+  the walker (needs live repro of why generate-sql returned QUERY_GEN_ERROR per candidate).
 - *Verify live (on skill re-run):* re-profile; base must be ~1.2M, not 8.
 
 **F6 — INVALIDATED (operator error, not a tool bug). Downgraded HIGH → LOW.**
