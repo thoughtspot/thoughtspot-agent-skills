@@ -58,7 +58,71 @@ def semiadditive_measures(plans: dict) -> list:
     return out
 
 
+import re
+
 _DATE_DTYPES = {"DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"}
+_DATE_JOIN_RE = re.compile(r"\[([^\]:]+::[^\]]+)\]\s*=\s*\[([^\]:]+::[^\]]+)\]")
+
+
+def _colid_dtype(cid: str, table_tmls: dict) -> str:
+    """Physical data_type (upper) for a `TABLE::COL` column_id, via the Table TML."""
+    if "::" not in cid:
+        return ""
+    tbl, col = cid.split("::", 1)
+    tdoc = (table_tmls.get(tbl) or {}).get("table", {})
+    for tc in tdoc.get("columns", []) or []:
+        if col in (tc.get("name"), tc.get("db_column_name")):
+            return ((tc.get("db_column_properties") or {}).get("data_type") or "").upper()
+    return ""
+
+
+def _join_on_conditions(model_tml: dict, table_tmls: dict) -> list:
+    """Every join `on` string — inline `model_tables[].joins` and table
+    `joins_with` (both carry the same `[T::col] = [T::col]` shape)."""
+    m = model_tml.get("model", {})
+    ons = [j["on"] for t in m.get("model_tables", []) or []
+           for j in t.get("joins", []) or [] if j.get("on")]
+    ons += [jw["on"] for tdoc in table_tmls.values()
+            for jw in (tdoc.get("table", {}) or {}).get("joins_with", []) or [] if jw.get("on")]
+    return ons
+
+
+def _date_join_graph(model_tml: dict, table_tmls: dict) -> dict:
+    """Undirected adjacency of date column_ids that join to one another."""
+    graph: dict = {}
+    for on in _join_on_conditions(model_tml, table_tmls):
+        for a, b in _DATE_JOIN_RE.findall(on):
+            if (_colid_dtype(a, table_tmls) in _DATE_DTYPES
+                    and _colid_dtype(b, table_tmls) in _DATE_DTYPES):
+                graph.setdefault(a, set()).add(b)
+                graph.setdefault(b, set()).add(a)
+    return graph
+
+
+def conformed_dates(model_tml: dict, table_tmls: dict) -> list:
+    """Role-playing / conformed date columns (F12): a date column that MULTIPLE
+    other date columns join to (a shared date-dimension column, e.g.
+    "Transaction Date" that both "Order Date" and "Balance Date" conform to).
+
+    Surfaced by `recommend` so the user keys a date-bucketed / snapshot aggregate
+    on the CONFORMED date — one aggregate then serves queries phrased via any of
+    the role-playing dates, and (per column-name routing) a combined multi-fact
+    monthly grain can route. Reports each date column that is the hub of >= 2
+    role-playing dates and is itself a Model column."""
+    id2name = {c["column_id"]: c["name"]
+               for c in model_tml.get("model", {}).get("columns", []) or []
+               if c.get("column_id")}
+    out = []
+    for cid, roles in _date_join_graph(model_tml, table_tmls).items():
+        if len(roles) >= 2 and cid in id2name:
+            out.append({
+                "conformed": id2name[cid],
+                "role_playing": sorted(id2name[r] for r in roles if r in id2name),
+                "note": "date columns conform to one shared date dimension — key a "
+                        "date-bucketed/snapshot aggregate on the conformed date so it "
+                        "serves queries via any role-playing date and can route.",
+            })
+    return out
 
 
 def _physical_attribute_dims(model_tml: dict, table_tmls: dict) -> set:

@@ -1760,3 +1760,45 @@ def test_physical_attribute_dims_excludes_measures_formulas_dates():
             {"name": "AMT", "db_column_name": "AMT", "db_column_properties": {"data_type": "DOUBLE"}}]}},
     }
     assert _physical_attribute_dims(model, tables) == {"State"}
+
+
+def test_conformed_dates_detects_role_playing_dates():
+    from ts_cli.commands.aggregate_advisories import conformed_dates
+    # Order Date + Balance Date both join to the shared DM_DATE_DIM date
+    # (Transaction Date) — the conformed date.
+    model = {"model": {
+        "columns": [
+            {"name": "Transaction Date", "column_id": "DD::DATE"},
+            {"name": "Order Date", "column_id": "O::ODT"},
+            {"name": "Balance Date", "column_id": "INV::BDT"}],
+        "model_tables": [
+            {"name": "O", "joins": [{"with": "DD", "on": "[O::ODT] = [DD::DATE]"}]},
+            {"name": "INV", "joins": [{"with": "DD", "on": "[INV::BDT] = [DD::DATE]"}]},
+            {"name": "DD"}]}}
+    tables = {
+        "DD": {"table": {"columns": [{"name": "DATE", "db_column_name": "DATE",
+               "db_column_properties": {"data_type": "DATE"}}]}},
+        "O": {"table": {"columns": [{"name": "ODT", "db_column_name": "ODT",
+              "db_column_properties": {"data_type": "DATE"}}]}},
+        "INV": {"table": {"columns": [{"name": "BDT", "db_column_name": "BDT",
+                "db_column_properties": {"data_type": "DATE"}}]}},
+    }
+    out = conformed_dates(model, tables)
+    assert len(out) == 1
+    assert out[0]["conformed"] == "Transaction Date"
+    assert out[0]["role_playing"] == ["Balance Date", "Order Date"]
+
+
+def test_conformed_dates_empty_without_shared_date():
+    from ts_cli.commands.aggregate_advisories import conformed_dates
+    # A single fact date joining to the dim date is not a role-playing set.
+    model = {"model": {
+        "columns": [{"name": "Order Date", "column_id": "O::ODT"},
+                    {"name": "Transaction Date", "column_id": "DD::DATE"}],
+        "model_tables": [{"name": "O", "joins": [{"with": "DD", "on": "[O::ODT] = [DD::DATE]"}]},
+                         {"name": "DD"}]}}
+    tables = {"DD": {"table": {"columns": [{"name": "DATE", "db_column_name": "DATE",
+              "db_column_properties": {"data_type": "DATE"}}]}},
+              "O": {"table": {"columns": [{"name": "ODT", "db_column_name": "ODT",
+              "db_column_properties": {"data_type": "DATE"}}]}}}
+    assert conformed_dates(model, tables) == []
