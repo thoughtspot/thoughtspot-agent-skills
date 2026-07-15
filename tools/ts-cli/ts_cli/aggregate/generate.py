@@ -97,13 +97,21 @@ def _column_dtype(tbl: Optional[str], col: Optional[str],
     return None
 
 
-def _measure_source_type(measure_name: str, model_tml: dict,
-                         table_tmls: Optional[dict]) -> Optional[str]:
-    """TS data_type of the physical column a measure sums over, from the base
-    Table TMLs. None when unresolvable (caller falls back to DOUBLE)."""
+def _component_source_type(comp: dict, model_tml: dict,
+                           table_tmls: Optional[dict]) -> Optional[str]:
+    """TS data_type of the physical column ONE component aggregates over, from
+    the base Table TMLs. A component's `source_column` is either a physical
+    `TABLE::COL` path (formula measures, and each of a ratio's num/den — which
+    reference DIFFERENT columns, so they must be typed independently) or a model
+    column display name (plain measure columns). None when unresolvable (caller
+    falls back to DOUBLE)."""
     if not table_tmls:
         return None
-    tbl, col = _measure_physical_ref(measure_name, model_tml)
+    src = comp.get("source_column") or ""
+    if "::" in src:
+        tbl, col = src.split("::", 1)
+    else:
+        tbl, col = _measure_physical_ref(src, model_tml)
     return _column_dtype(tbl, col, table_tmls) if col else None
 
 
@@ -138,7 +146,7 @@ def build_aggregate_table_spec(candidate: dict, plans: dict, model_tml: dict,
             if comp["func"] == "COUNT":
                 dtype = "INT64"
             else:
-                src = _measure_source_type(m_name, model_tml, table_tmls)
+                src = _component_source_type(comp, model_tml, table_tmls)
                 dtype = src if src in _NUMERIC_DTYPES else "DOUBLE"
             columns.append({"name": comp["alias"], "data_type": dtype,
                             "column_type": "MEASURE", "aggregation": comp["reagg"]})

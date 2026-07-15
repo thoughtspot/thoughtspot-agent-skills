@@ -385,3 +385,32 @@ def test_ratio_measure_flows_through_generate_end_to_end():
                                     model_name="T (M)", connection_name="C")
     arpu_formula = [f for f in tml["model"]["formulas"] if f["name"] == "ARPU"][0]
     assert arpu_formula["expr"].startswith("safe_divide (")
+
+
+def test_ratio_components_typed_per_source_column_not_first_ref():
+    # F8 refinement: a ratio's numerator and denominator reference DIFFERENT
+    # columns; each component must be typed from its OWN source_column
+    # (num=DOUBLE from a float col, den=INT64 from an int col), not both from
+    # the measure's first ref (which would type the int den as DOUBLE and fail
+    # `ts tables create`).
+    model = {"model": {"name": "M", "columns": [
+        {"name": "Category", "column_id": "DIM::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "ARPU", "formula_id": "f",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f", "name": "ARPU",
+                      "expr": "safe_divide ( sum ( [FACT::AMOUNT] ) , sum ( [FACT::QTY] ) )"}]}}
+    tables = {"FACT": {"table": {"columns": [
+        {"name": "AMOUNT", "db_column_name": "AMOUNT",
+         "db_column_properties": {"data_type": "DOUBLE"}},
+        {"name": "QTY", "db_column_name": "QTY",
+         "db_column_properties": {"data_type": "INT64"}}]}}}
+    cand = {"id": "c", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["ARPU"], "covered": [0], "flags": []}
+    plans = {"ARPU": classify_measure(
+        "ARPU", expr="safe_divide ( sum ( [FACT::AMOUNT] ) , sum ( [FACT::QTY] ) )")}
+    spec = build_aggregate_table_spec(cand, plans, model, db="D", schema="S",
+                                      table_name="T", connection_name="C",
+                                      table_tmls=tables)
+    by = {c["name"]: c["data_type"] for c in spec["columns"]}
+    assert by["arpu_num"] == "DOUBLE" and by["arpu_den"] == "INT64"
