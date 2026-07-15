@@ -297,6 +297,15 @@ same name/synonyms/description (a semantic no-op that flips routing on). Back up
 measure still listed here — they would be inert. (Verified live 2026-07-15: promoting the
 primary's plain `Amount`/`Quantity` to formulas is what made routing fire.)
 
+**Semi-additive measures.** `recommend` also reports any `last_value`/`first_value`
+period-end snapshot measures (e.g. an inventory/account balance) under
+`semiadditive_measures`. The advisor does NOT auto-generate an aggregate for these — a
+correct snapshot needs a windowed `last_value OVER (…)` DDL out of scope for the generator,
+and flat-summing it would give wrong numbers. If any are listed and the user wants them
+aggregated, hand-build a period-end snapshot aggregate following
+[references/semiadditive-recipe.md](references/semiadditive-recipe.md) (verified live —
+month-end pattern + a mandatory numeric gate before import).
+
 ### 5b. Profile — connected or manual mode
 
 Ask:

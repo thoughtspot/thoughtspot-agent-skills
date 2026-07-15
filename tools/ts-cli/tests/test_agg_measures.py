@@ -181,3 +181,30 @@ def test_safe_divide_ratio_decomposes_like_division():
     # model_expr preserves safe_divide so the aggregate matches the primary's null handling
     assert p["model_expr"].startswith("safe_divide (")
     assert all(c["reagg"] == "SUM" for c in p["components"])
+
+
+def test_semiadditive_last_value_recognized_not_decomposed():
+    # F5-semiadditive (safe slice): a last_value snapshot is RECOGNIZED as
+    # SEMIADDITIVE but NOT auto-decomposed (a correct period-end aggregate
+    # needs a windowed DDL out of scope) — so it stays excluded from candidates
+    # (same as before) but is now identifiable for surfacing, not UNKNOWN.
+    p = classify_measure(
+        "Inventory Balance",
+        expr="last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , "
+             "query_groups ( ) , { [DM_DATE_DIM::DATE] } )")
+    assert p["class"] == "SEMIADDITIVE"
+    assert p["decomposable"] is False
+    assert p["requires_grain_column"] == "DM_DATE_DIM::DATE"
+
+
+def test_semiadditive_first_value_also_recognized():
+    p = classify_measure("Opening Balance",
+                         expr="first_value ( sum ( [T::BAL] ) , query_groups ( ) , { [T::D] } )")
+    assert p["class"] == "SEMIADDITIVE" and p["decomposable"] is False
+
+
+def test_sum_of_last_value_is_not_semiadditive():
+    # Outer op is sum(), not last_value — a normal additive aggregate, not a
+    # snapshot; must NOT be misclassified as SEMIADDITIVE.
+    p = classify_measure("X", expr="sum ( [T::C] )")
+    assert p["class"] != "SEMIADDITIVE"
