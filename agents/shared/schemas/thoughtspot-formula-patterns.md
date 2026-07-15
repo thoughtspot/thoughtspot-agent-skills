@@ -557,6 +557,31 @@ sql_string_aggregate_op ( "listagg({0}, ' | ') within group (order by {0})" , [P
 
 **If any argument is a parameter reference (`[Param Name]`), the formula is untranslatable.**
 
+### JSON / VARIANT path access — bracket notation only
+
+ThoughtSpot's `sql_*_op` template parser **rejects colon-and-dot path syntax** for
+navigating semi-structured (JSON / VARIANT) columns, even though that syntax is valid
+SQL in the source warehouse. The template imports/validates only when every path
+segment is written in `['segment']` **bracket notation**.
+
+| Warehouse SQL — valid, but REJECTED inside a TS template | ThoughtSpot pass-through — bracket notation |
+|---|---|
+| `PARSE_JSON({0}):address` | `sql_string_op ( "PARSE_JSON({0})['address']" , [T::JSON_STRING] )` |
+| `PARSE_JSON({0}):address.city::STRING` | `sql_string_op ( "PARSE_JSON({0})['address']['city']" , [T::JSON_STRING] )` |
+
+**Conversion rule:** replace the leading `:` and every `.` separator in the path with
+its own bracketed key — `:a.b.c` → `['a']['b']['c']`. Bracket notation is also valid
+SQL in the source warehouse, so the emitted template both passes the TS parser and
+executes correctly. The `sql_string_op` return type supplies STRING typing, so a
+trailing `::STRING` cast is optional — keep it only if the warehouse needs the explicit
+VARIANT→scalar cast.
+
+This is a **ThoughtSpot formula-parser constraint, not a warehouse constraint** — it
+applies to any pass-through carrying a JSON path regardless of source platform
+(Snowflake `PARSE_JSON`/`GET_PATH`, Databricks `:` path access, etc.). Verified on
+Snowflake 2026-07-15; confirm the bracket form is valid warehouse SQL before relying on
+it for a non-Snowflake source.
+
 ### Window functions inside `sql_*_aggregate_op`
 
 `sql_*_aggregate_op` can embed SQL window functions (`LAG`, `LEAD`, `ROW_NUMBER`,

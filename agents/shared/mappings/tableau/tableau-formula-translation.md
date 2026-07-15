@@ -1011,6 +1011,11 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
 5. **Pass-through is enabled by default** — only a limitation if an admin has explicitly
    turned it off via Admin > Search & SpotIQ > SQL Passthrough Functions. Document
    usage in `MIGRATION_LIMITATIONS.md`
+6. **JSON / VARIANT path access — bracket notation only** — if a pass-through carries a
+   warehouse JSON path (e.g. via `RAWSQL_*` using Snowflake `PARSE_JSON(...):key.subkey`),
+   ThoughtSpot's parser rejects the colon-and-dot syntax. Convert each segment to
+   `['key']` bracket notation. See `thoughtspot-formula-patterns.md` →
+   "JSON / VARIANT path access — bracket notation only".
 
 ### Translation priority order
 

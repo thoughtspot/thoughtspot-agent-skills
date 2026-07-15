@@ -256,6 +256,21 @@ The inner expression is already valid SQL. Strip the wrapper function and emit
 the contents. If the SQL uses Snowflake-specific syntax, translate it to
 Databricks SQL equivalents.
 
+### JSON / VARIANT path access — bracket notation in the TS template
+
+Databricks colon-path access for semi-structured columns (`col:field.subfield`) is
+valid Databricks SQL but **fails ThoughtSpot's `sql_*_op` template parser**. When a
+`sql_*_op` pass-through carries a JSON path, convert each segment to `['field']`
+bracket notation in the ThoughtSpot template (`col:field.subfield` →
+`{0}['field']['subfield']`). Canonical rule:
+[../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#json--variant-path-access--bracket-notation-only).
+`get_json_object(col, '$.field')` and `from_json(...)` have no colon-path syntax and
+pass through unchanged.
+
+> Same ThoughtSpot-side parser constraint verified on Snowflake (2026-07-15); not yet
+> live-verified on Databricks. Confirm the bracket form is valid Databricks SQL for the
+> specific column type before relying on it.
+
 ---
 
 ## Window Functions

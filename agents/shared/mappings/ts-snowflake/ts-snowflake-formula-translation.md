@@ -342,6 +342,24 @@ Replace each column reference with `{0}`, `{1}`, ... positional placeholders.
 function is a ThoughtSpot parameter (e.g. `[locale]`), the formula is
 **untranslatable** because the parameter cannot be resolved to a static column.
 
+### JSON / VARIANT path access — emit bracket notation
+
+Snowflake's colon-and-dot path syntax for semi-structured access
+(`PARSE_JSON(...):key.subkey`, `col:key`, `GET_PATH(...)`) is valid in a Semantic View
+`expr`, but **fails ThoughtSpot's `sql_*_op` template parser**. When wrapping such an
+expression in a pass-through, convert the path to `['key']['subkey']` bracket notation.
+Bracket notation is equally valid Snowflake SQL, so the emitted template both imports
+into ThoughtSpot and executes on Snowflake. Canonical rule:
+[../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#json--variant-path-access--bracket-notation-only).
+
+| Snowflake SV `expr` (colon path) | ThoughtSpot formula (bracket notation) |
+|---|---|
+| `PARSE_JSON(t.JSON_STRING):address` | `sql_string_op ( "PARSE_JSON({0})['address']" , [T::JSON_STRING] )` |
+| `PARSE_JSON(t.JSON_STRING):address.city::STRING` | `sql_string_op ( "PARSE_JSON({0})['address']['city']" , [T::JSON_STRING] )` |
+
+The `::STRING` cast is optional — `sql_string_op` returns VARCHAR. Verified on Snowflake
+2026-07-15.
+
 ---
 
 ## Window and Analytical Functions

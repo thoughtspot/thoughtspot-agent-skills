@@ -1829,5 +1829,6 @@ to the user and ask them to provide the resolved database/schema string.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.2 | 2026-07-15 | JSON/VARIANT path access: emit `['key']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects warehouse colon-and-dot path syntax (e.g. Snowflake `PARSE_JSON(...):a.b`) carried in a LookML `sql:`. Verified for Snowflake 2026-07-15. |
 | 1.0.1 | 2026-07-11 | Migrate `ts tml import`/`lint` calls from the stdin JSON-array boilerplate to `--file`/`--dir` (ts-cli ≥ v0.27.0); remove the obsolete "does not accept a file path" note (audit 5.1). |
 | 1.0.0 | 2026-07-09 | Initial release (community contribution, PR #201) — LookML → ThoughtSpot conversion pipeline: parses `.model.lkml`/`.view.lkml` into Table TML and a Model TML per explore, translates LookML measure/dimension expressions to ThoughtSpot formulas, generates SQL View TML for `derived_table` views, validates against the shared model-conversion invariants, and optionally migrates LookML dashboards to Liveboards (chart-type mapping, 24→12-column layout conversion, filter translation). |
