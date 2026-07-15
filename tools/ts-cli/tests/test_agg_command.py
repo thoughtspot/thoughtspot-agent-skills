@@ -3,9 +3,33 @@ import yaml
 from typer.testing import CliRunner
 from ts_cli.cli import app
 from ts_cli.commands.aggregate import (_candidate_key, _merge_prior_agg_rows,
-                                       _signatures_summary, flag_suspect_base_rows)
+                                       _signatures_summary, flag_suspect_base_rows,
+                                       routing_ineligible_measures)
 
 runner = CliRunner()
+
+
+def test_routing_ineligible_flags_only_plain_measure_columns():
+    # F9: aggregate-aware routing fires only for formula measures. A plain
+    # measure column (Amount) is flagged; a formula measure (Revenue) is not.
+    model = {"model": {"columns": [
+        {"name": "Amount", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Revenue", "formula_id": "f_r",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_r", "name": "Revenue", "expr": "sum ( [FACT::AMOUNT] )"}]}}
+    cands = [{"id": "c1", "measure_columns": ["Amount", "Revenue"]}]
+    out = routing_ineligible_measures(model, cands)
+    assert [o["measure"] for o in out] == ["Amount"]
+    assert "promote" in out[0]["remedy"]
+
+
+def test_routing_ineligible_empty_when_all_measures_are_formulas():
+    model = {"model": {"columns": [
+        {"name": "Revenue", "formula_id": "f_r",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_r", "name": "Revenue", "expr": "sum ( [FACT::AMOUNT] )"}]}}
+    assert routing_ineligible_measures(model, [{"id": "c", "measure_columns": ["Revenue"]}]) == []
 
 
 def test_flag_suspect_base_rows_fires_when_base_below_max_agg():

@@ -279,8 +279,23 @@ source ~/.zshenv && ts aggregate recommend --dir "{workdir}" \
 ```
 
 Writes/updates `{workdir}/candidates.json`. Stdout:
-`{"mode", "selected", "curve", "candidates", "excluded_unprofiled"}` — `mode` will be
-`"coverage"` on this first pass (no profiling data yet).
+`{"mode", "selected", "curve", "candidates", "excluded_unprofiled",
+"rls_conflicts", "routing_ineligible_measures"}` — `mode` will be `"coverage"` on this
+first pass (no profiling data yet).
+
+**Routing-eligibility preflight (do this before profiling — a load-bearing gate).**
+Aggregate-aware routing on this product fires ONLY for **formula** measures — a plain
+measure column produces an aggregate that queries never route to
+([open-items.md #0](references/open-items.md)). `recommend` reports every targeted plain
+measure in `routing_ineligible_measures` (`[{measure, reason, remedy}]`, via
+`ts spotql classify-columns`). **If it is non-empty, stop and resolve it before Step 6:**
+tell the user which measures won't route, and offer to **promote** each to a formula
+measure on the primary Model — redefine e.g. `Amount` from a plain `SUM` measure column
+(`column_id: <T>::<col>`) to a formula measure `Amount = sum ( [<T>::<col>] )`, keeping the
+same name/synonyms/description (a semantic no-op that flips routing on). Back up the primary
+(`ts dependency backup`) before importing the promoted TML. Do not build aggregates over a
+measure still listed here — they would be inert. (Verified live 2026-07-15: promoting the
+primary's plain `Amount`/`Quantity` to formulas is what made routing fire.)
 
 ### 5b. Profile — connected or manual mode
 

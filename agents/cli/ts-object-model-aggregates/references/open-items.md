@@ -1093,10 +1093,12 @@ Summary of tracked items:
   `uv tool install thoughtspot-cli --with snowflake-connector-python` form.
 
 **Verification (Phase 1):**
-- **F9** — routing fires ONLY for formula measures on the primary (open-item #0); the skill
-  builds aggregates over plain measure columns that can never route, with no warning. Add a
-  recommend-time preflight (`classify-columns`) that flags raw measures + offers the
-  promotion transform (plain measure column → `sum([physical])` formula).
+- **F9 — ADDRESSED.** Routing fires ONLY for formula measures (open-item #0); the skill built
+  aggregates over plain measure columns that can never route. `recommend` now emits
+  `routing_ineligible_measures` (`commands/aggregate.routing_ineligible_measures` over
+  `spotql_ops.classify_model_columns`) and SKILL.md Step 5a gates on it, offering the
+  promotion (plain measure → `sum([physical])` formula, backup first). Unit-tested. Optional
+  follow-up: codify the promotion as a `ts` command.
 - **F10/F11/F13 — CORRECTED (earlier claim was wrong).** `ts spotql generate-sql` DOES
   reflect routing for ALL measure kinds incl. semi-additive; the earlier failures were
   query-construction errors. Step 7 must pick the wrapper via `ts spotql classify-columns`:

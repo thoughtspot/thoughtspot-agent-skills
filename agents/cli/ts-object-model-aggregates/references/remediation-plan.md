@@ -18,7 +18,7 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 | F1 | HIGH | correctness | Base row count came from `model_tables[0]` (a dim, no fact join) → garbage compression. **Fixed (part a: fact-anchored base_rows + tests)**; sanity-guard + internal-SpotQL fix remain |
 | F6 | LOW (was HIGH) | robustness | INVALIDATED as a bug — the crash was a malformed test candidate (`date_grains` as strings); real bucketed candidates work. Residual: add input-shape validation |
 | F8 | MED | correctness | Hard-coded `DOUBLE` for every sum; `SUM(int)`=INT64 → registration failed. **FIXED** — component types now read from base Table TMLs (+ tests) |
-| F9 | CRITICAL | capability+UX | Aggregates never route unless the PRIMARY's measures are formulas; skill doesn't detect/warn |
+| F9 | CRITICAL | capability+UX | Aggregates inert unless PRIMARY measures are formulas. **ADDRESSED** — `recommend` now emits `routing_ineligible_measures`; SKILL.md 5a preflight gate + promotion instructions (optional: codify promotion as a CLI cmd) |
 | F3 | HIGH | capability | Candidate generator only emits single-dimension additive grains |
 | F5 | HIGH | capability (reuse) | Semi-additive & ratio measures silently dropped, though `measures.py`/`classify-columns` already classify them |
 | F12 | HIGH | capability | Role-playing date columns + column-name routing: date aggregates must key on the column users query (or the conformed shared date) |
@@ -81,18 +81,18 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 
 ### Theme B — Verification is trustworthy  [F9, F10/11/13, F14]
 
-**F9 — primary measures must be formulas (CRITICAL).**
-- *Root cause:* routing fires only for formula measures (open-item #0); the skill builds
-  aggregates over plain measure columns that can never be routed to, and never says so.
-- *Fix (SKILL.md + a preflight in `commands/aggregate.py`):* at `recommend`, classify each
-  target measure on the primary via `spotql classify-columns`; if a targeted measure is a
-  `raw_measure` (plain column, no aggregating formula), FLAG it and offer the promotion
-  transform (plain measure column → formula measure `sum([physical])`, preserving name /
-  synonyms / description). Add a `ts aggregate preflight` (or fold into recommend) that reports
-  routing-eligibility per measure. Document the promotion as a required step with a backup.
-- *Tests:* classifier flags a raw measure; promotion transform round-trips (same values,
-  formula measure out).
-- *Verify live:* already proven this run — promoting Amount/Quantity flipped routing on.
+**F9 — primary measures must be formulas (CRITICAL). ADDRESSED this branch.**
+- *Root cause:* routing fires only for formula measures (open-item #0); the skill built
+  aggregates over plain measure columns that can never be routed to, and never said so.
+- *Fix (DONE):* `recommend` now folds in `commands/aggregate.routing_ineligible_measures`
+  (reuses `spotql_ops.classify_model_columns`) and emits `routing_ineligible_measures`
+  `[{measure, reason, remedy}]` in candidates.json + stdout. SKILL.md Step 5a adds a
+  preflight GATE: if non-empty, stop and promote each plain measure to a formula
+  (`sum([physical])`, same name/synonyms) with a backup, before generating. Unit-tested
+  (flags only raw_measure; empty when all formulas).
+- *Optional follow-up:* codify the promotion transform as a `ts` command (done by hand /
+  SKILL.md prose for now).
+- *Verified live:* promoting Amount/Quantity flipped routing on (2026-07-15).
 
 **F10/11/13 — Step 7 verification method (CORRECTED).**
 - *Truth:* `ts spotql generate-sql` DOES reflect routing, including semi-additive, when the
