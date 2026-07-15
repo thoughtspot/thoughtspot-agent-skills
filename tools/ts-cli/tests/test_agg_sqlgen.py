@@ -655,3 +655,32 @@ def test_databricks_bigquery_mview_unaffected_by_snowflake_guard():
     assert dbx.startswith("CREATE OR REPLACE MATERIALIZED VIEW cat.sch.agg")
     bq = build_ddl("SELECT 1", "proj.ds.agg", "bigquery", materialization="auto")
     assert bq.startswith("CREATE MATERIALIZED VIEW proj.ds.agg")
+
+
+def test_resolve_accepts_physical_table_col_path():
+    # F5 regression fix: a measure component whose source_column is a physical
+    # TABLE::COL path (any formula measure — ratio num/den, sum([T::c])) must
+    # resolve directly, not KeyError out of _col_map and skip the candidate.
+    from ts_cli.aggregate.sqlgen import _resolve
+    sql, table = _resolve(MODEL, TABLES, "snowflake", "FACT::AMOUNT")
+    assert table == "FACT"
+    assert sql == '"FACT"."AMOUNT"'
+
+
+def test_build_select_ratio_measure_emits_both_component_sums():
+    # A ratio candidate must emit numerator + denominator sums (walker path,
+    # since SpotQL rejects multi-component measures).
+    from ts_cli.aggregate.sqlgen import build_select
+    from ts_cli.aggregate.measures import classify_measure
+    model = {"model": {"model_tables": [
+        {"name": "FACT", "joins": [{"with": "DIM",
+            "on": "[FACT::CAT_ID] = [DIM::CAT_ID]", "type": "INNER",
+            "cardinality": "MANY_TO_ONE"}]}, {"name": "DIM"}],
+        "columns": [{"name": "Category", "column_id": "DIM::CATEGORY",
+                     "properties": {"column_type": "ATTRIBUTE"}}]}}
+    plans = {"ARPU": classify_measure(
+        "ARPU", expr="safe_divide ( sum ( [FACT::AMOUNT] ) , sum ( [FACT::CAT_ID] ) )")}
+    cand = {"id": "c", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["ARPU"], "covered": [0], "flags": []}
+    sql = build_select(model, TABLES, cand, plans, dialect="snowflake")
+    assert "arpu_num" in sql and "arpu_den" in sql

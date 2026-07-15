@@ -67,6 +67,17 @@ def _col_map(model_tml: dict) -> dict:
 
 
 def _resolve(model_tml, table_tmls, dialect, display_name):
+    # A measure component's source_column is often already a physical
+    # `TABLE::COL` path (any formula measure — sum([T::c]), a ratio's
+    # numerator/denominator, etc.), not a model column display name. Resolve
+    # that directly when the referenced table is a known model_table; only fall
+    # back to the display-name map otherwise. (Before this, physical-path
+    # source_columns KeyError'd out — every candidate that covered a formula
+    # measure was skipped during profiling.)
+    if "::" in display_name:
+        table, col = display_name.split("::", 1)
+        if table in table_tmls:
+            return f"{_q(dialect, table)}.{_q(dialect, _db_col(table_tmls, table, col))}", table
     try:
         table, col = _col_map(model_tml)[display_name]
     except KeyError:
