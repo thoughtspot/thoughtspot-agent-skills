@@ -14,8 +14,10 @@ Tables and Models, remapping the content onto those published objects and
 reconciling any differing column names. The routine runs as a two-phase
 `ts migrate` CLI command group (`audit` then `apply`), orchestrated by a
 `ts-org-migrate` skill. It must be safe (backup + rollback), reviewable (a
-human-approved column mapping gates every write), and resumable/idempotent at a
-scale of ~2000 Orgs and thousands of objects.
+human-approved column mapping gates every write), and — the primary constraint —
+**efficient and resumable per tenant**: one `(source Org → clean Org)` run must be
+fast and API-frugal even for a tenant with thousands of objects, and trivially
+repeatable across ~2000 Orgs on a few clusters, migrated per-tenant on demand.
 
 ## Context & Terminology
 
@@ -82,7 +84,10 @@ content to the newly-created scaffolding Models without manual GUID surgery. Thi
 cannot be fully exercised without a clean target Org, so it is the first
 implementation task and gates the exact import batching/ordering. Fallback if it
 misbehaves: import in dependency tiers with an explicit source→target GUID map
-threaded through references (still no name-level rewriting).
+threaded through references (still no name-level rewriting). The spike also
+**measures throughput** — API calls and wall-clock per object — so a large tenant's
+run time can be predicted and the batching validated against the round-trip budget
+(see *Efficiency & Scale*).
 
 ## CLI Surface
 
@@ -228,17 +233,57 @@ Reuse `ts_cli/client.py` (profile resolution, keyring credentials, token cache,
 New code is the `ts_cli/migrate/` package: orchestration, name-based matching,
 column-mapping IO, the state ledger, batch lift-and-shift, and the rename step.
 
-## Scale (~2000 Orgs)
+## Efficiency & Scale
 
-- Each pair is independent → the driver processes pairs sequentially or in bounded
-  parallel, each with its own `--plan` dir and ledger.
-- Per-pair, per-object idempotency via the ledger makes runs **resumable** after
-  interruption or rate-limiting.
-- Respect `client.py` backoff on 5xx; surface a per-pair summary (migrated /
-  skipped / blocked / failed) and a machine-readable run manifest for fleet-level
-  reporting.
-- Browser/bearer tokens are short-lived (per memory `reference_ts_skills_smoke_profile`);
-  long fleet runs must handle mid-run token refresh.
+Efficiency is the primary non-functional requirement. Execution is **per-tenant on
+demand** across ~2000 Orgs on a few clusters, so the strategy is *not* a distributed
+fleet engine — it is a tight, API-frugal single-tenant run plus a thin wrapper for
+running a wave. Deliberately **not** building a queue/worker system.
+
+### The real lever — minimise API round-trips within one run
+
+Deterministic Python transforms (matching, TML rewriting, mapping) are CPU-cheap; the
+cost that scales is **ThoughtSpot API calls**. Every step is designed to batch:
+
+- **Export in bulk** — one `ts tml export` call with many GUIDs and `--associated`,
+  not one call per object. One dependents walk per Model (cached), not per object.
+- **Import in bulk** — array/`--dir` import grouped by dependency tier (tables+models,
+  then views+sets, then answers, then liveboards), so each tier is a few calls, not one
+  per object.
+- **Repoint in bulk** — a single `ts dependency apply-change` plan per Model covers all
+  its dependents in one pass.
+- **No obj_id read-back per object** — avoid the known anti-pattern (repo-audit angle
+  14); resolve target references once into an in-memory map and reuse it.
+- **Reuse the token cache** — one authenticated session per side per run.
+
+The design carries an explicit **round-trip budget**: API calls per run should scale
+with *tiers × models*, not with *object count*. The spike (below) measures actual
+calls-per-object and wall-clock-per-object on a real tenant so a large tenant's run
+time can be predicted before the fleet rollout.
+
+### Known cost — the scaffolding double-import
+
+The lift-and-shift + rename + repoint path imports bespoke content **twice** (once on
+lift-shift, once on repoint) plus the scaffolding create/delete lifecycle. This is the
+price of robustness (it avoids fragile per-object formula/column-name rewriting). It is
+mitigated by batching both imports, but if the spike shows imports dominate wall-clock
+for large tenants, the fallback is to fold the column rename into the repoint so content
+imports once — recorded as a tunable, not a v1 default.
+
+### Resumability & re-runs
+
+- Per-object idempotency via the state ledger: an interrupted run resumes exactly where
+  it stopped; a completed run re-invoked is a near-no-op (delta only).
+- `client.py` 5xx backoff is respected; a per-run summary (migrated / skipped / blocked
+  / failed) plus a machine-readable manifest supports per-tenant reporting.
+- Browser/bearer tokens are short-lived (memory `reference_ts_skills_smoke_profile`);
+  a long single-tenant run must refresh mid-run.
+
+### Running a wave
+
+A thin batch wrapper (a loop over a tenant-pair list, sharded per cluster with bounded
+concurrency and per-tenant `--plan` dirs) covers "migrate N tenants tonight" without a
+bespoke orchestrator. Concurrency is a knob, tuned to each cluster's headroom.
 
 ## File Layout
 
@@ -289,8 +334,10 @@ agents/cli/ts-org-migrate/SKILL.md        # orchestration skill (+ references/)
 
 1. **Batch-import reference remapping into a fresh Org** — the spike above;
    confirms exact import batching/ordering (§*Remaining spike*).
-2. **Same-cluster org-scoped auth** — confirm the `org_identifier` mechanism on
-   the token exchange during implementation.
+2. **Same-cluster org-scoped auth** — with ~2000 Orgs on a few clusters, source and
+   clean Orgs are frequently on the *same* cluster, so org-scoped auth is **likely
+   required, not deferrable**. Confirm the `org_identifier` mechanism on the token
+   exchange early (candidate for the same spike).
 3. **Connection binding of scaffolding Tables in the clean Org** — confirm tenant
    scaffolding Tables can bind to the clean Org's published connection (same
    physical warehouse) so the rename→repoint path holds.
