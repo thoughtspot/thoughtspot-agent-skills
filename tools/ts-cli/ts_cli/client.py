@@ -128,7 +128,7 @@ class ThoughtSpotClient:
     or refresh credentials, which stores them in the OS credential store.
     """
 
-    def __init__(self, profile_name: str):
+    def __init__(self, profile_name: str, org_id: Optional[int] = None):
         profiles = load_profiles()
         if profile_name not in profiles:
             available = ", ".join(profiles.keys()) or "(none)"
@@ -140,6 +140,7 @@ class ThoughtSpotClient:
         self._profile = profiles[profile_name]
         self._profile_name = profile_name
         self._slug = _slugify(profile_name)
+        self._org_id = org_id
         self._base_url = self._profile["base_url"].rstrip("/")
         self._verify_ssl: bool = self._profile.get("verify_ssl", True)
         self._token: Optional[str] = None
@@ -150,11 +151,18 @@ class ThoughtSpotClient:
     # Token caching
     # ------------------------------------------------------------------
 
+    def _cache_slug(self) -> str:
+        # Fold the org into the slug so a same-cluster different-Org session
+        # never shares a cached token (or its expiry) with another Org.
+        if self._org_id is None:
+            return self._slug
+        return f"{self._slug}-org{self._org_id}"
+
     def _token_path(self) -> Path:
-        return Path(tempfile.gettempdir()) / f"ts_token_{self._slug}.txt"
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_slug()}.txt"
 
     def _expiry_path(self) -> Path:
-        return Path(tempfile.gettempdir()) / f"ts_token_{self._slug}_expiry.txt"
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_slug()}_expiry.txt"
 
     def _read_cached_token(self) -> Optional[str]:
         token_path = self._token_path()
@@ -237,13 +245,16 @@ class ThoughtSpotClient:
 
         if p.get("password_env"):
             password = self._get_credential(p["password_env"])
+            body = {
+                "username": p["username"],
+                "password": password,
+                "validity_time_in_sec": 3600,
+            }
+            if self._org_id is not None:
+                body["org_id"] = self._org_id
             resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
-                json={
-                    "username": p["username"],
-                    "password": password,
-                    "validity_time_in_sec": 3600,
-                },
+                json=body,
                 headers={"Content-Type": "application/json"},
                 timeout=30,
             )
@@ -259,13 +270,16 @@ class ThoughtSpotClient:
 
         if p.get("secret_key_env"):
             secret_key = self._get_credential(p["secret_key_env"])
+            body = {
+                "username": p["username"],
+                "secret_key": secret_key,
+                "validity_time_in_sec": 3600,
+            }
+            if self._org_id is not None:
+                body["org_id"] = self._org_id
             resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
-                json={
-                    "username": p["username"],
-                    "secret_key": secret_key,
-                    "validity_time_in_sec": 3600,
-                },
+                json=body,
                 headers={"Content-Type": "application/json"},
                 timeout=30,
             )
