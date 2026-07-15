@@ -711,11 +711,13 @@ def _fallback_ddl_or_exit(model_tml: dict, table_tmls: dict, cand: dict, plans: 
 
 def _write_table_artifacts(outdir: Path, cand: dict, plans: dict, model_tml: dict,
                           db: str, schema: str, name: str, connection_name: str,
-                          rls_rules: Optional[dict] = None) -> None:
+                          rls_rules: Optional[dict] = None,
+                          table_tmls: Optional[dict] = None) -> None:
     from ts_cli.aggregate.generate import build_aggregate_table_spec
     from ts_cli.commands.tables import _build_table_tml
     spec = build_aggregate_table_spec(cand, plans, model_tml, db=db, schema=schema,
-                                      table_name=name, connection_name=connection_name)
+                                      table_name=name, connection_name=connection_name,
+                                      table_tmls=table_tmls)
     if rls_rules:
         spec["rls_rules"] = rls_rules
     (outdir / "table_spec.json").write_text(json.dumps(spec, indent=2))
@@ -894,7 +896,7 @@ def generate(
                                          target, materialization, warehouse, candidate)
     (outdir / "ddl.sql").write_text(ddl_text + ";\n")
     _write_table_artifacts(outdir, cand, plans, model_tml, db, schema, name,
-                           connection_name, rls_rules)
+                           connection_name, rls_rules, table_tmls=table_tmls)
     model_name = _write_model_artifact(outdir, cand, plans, model_tml, name, connection_name)
     _patch_and_write_primary(outdir, model_guid, profile, model_name, cand, agg_model_guid)
 

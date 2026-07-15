@@ -1081,10 +1081,12 @@ Summary of tracked items:
   the `date_column`/`bucket` compat shim both work in `generate._grain_columns`. Residual
   (LOW): the tool raises a bare `TypeError`/`AttributeError` on a malformed candidate dict —
   add input-shape validation with a clear message. NOT a blocker for the monthly use case.
-- **F8** — component column types hardcoded (`INT64` only for COUNT, else `DOUBLE`);
-  `SUM(int)` is INT64 → `ts tables create` fails `DataType DOUBLE does not match CDW`.
-  Model TML lacks measure types, so the robust fix is type reconciliation at
-  registration (DESC/adapt), not the pure generate helper.
+- **F8 — FIXED.** Component types were hardcoded (`INT64` for COUNT else `DOUBLE`), so
+  `SUM(int)` emitted DOUBLE and `ts tables create` failed the CDW type check. Model TML lacks
+  measure types, but the base Table TMLs carry them — `generate._measure_source_type()` now
+  resolves each component's source column (via `column_id` or the formula's `[TABLE::col]`
+  ref) and preserves its type (SUM/MIN/MAX), COUNT→INT64, DOUBLE fallback. `table_tmls`
+  threaded through `_write_table_artifacts`. Unit-tested.
 - **F2** — `ts aggregate profile` (via `commands/load._connect`) died with a bare
   "install snowflake-connector-python". **FIXED this PR:** added `[snowflake]` extra +
   a remedy message covering `pip install 'thoughtspot-cli[snowflake]'` and the uv-tool

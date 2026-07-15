@@ -17,7 +17,7 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 |----|----------|----------|----------|
 | F1 | HIGH | correctness | Base row count came from `model_tables[0]` (a dim, no fact join) → garbage compression. **Fixed (part a: fact-anchored base_rows + tests)**; sanity-guard + internal-SpotQL fix remain |
 | F6 | LOW (was HIGH) | robustness | INVALIDATED as a bug — the crash was a malformed test candidate (`date_grains` as strings); real bucketed candidates work. Residual: add input-shape validation |
-| F8 | MED | correctness | Hard-codes `DOUBLE` for every sum; `SUM(int)`=INT64 → table registration fails |
+| F8 | MED | correctness | Hard-coded `DOUBLE` for every sum; `SUM(int)`=INT64 → registration failed. **FIXED** — component types now read from base Table TMLs (+ tests) |
 | F9 | CRITICAL | capability+UX | Aggregates never route unless the PRIMARY's measures are formulas; skill doesn't detect/warn |
 | F3 | HIGH | capability | Candidate generator only emits single-dimension additive grains |
 | F5 | HIGH | capability (reuse) | Semi-additive & ratio measures silently dropped, though `measures.py`/`classify-columns` already classify them |
@@ -62,13 +62,19 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
   entry and raise a clear `ValueError` naming the offending candidate.
 - *Tests:* a malformed-shape candidate raises a clear validation error, not a bare TypeError.
 
-**F8 — measure sum types.**
-- *Root cause:* `generate` defaults every emitted measure component to `DOUBLE`.
-- *Fix (`aggregate/generate.py` + `tables.py`):* map each component's type from its source
-  column (SUM(int)→INT64, SUM(numeric,scale>0)→DOUBLE); or DESC the created table and reconcile
-  types before emitting `table_spec.json`.
-- *Tests:* SUM over an INT column yields INT64 in the spec.
-- *Verify live:* register a table with an integer measure with no manual type patch.
+**F8 — measure sum types. FIXED this branch.**
+- *Root cause:* `generate` hard-coded `DOUBLE` for every SUM/MIN/MAX component (only COUNT
+  was INT64), but `SUM(integer)` stays integer in the warehouse → `ts tables create` failed
+  the CDW type check (`DataType DOUBLE does not match ... quantity_sum`).
+- *Fix (DONE, `aggregate/generate.py` + threaded `table_tmls` through `commands/aggregate.py`):*
+  model MEASURE columns carry no `data_type`, but the base Table TMLs do — new
+  `_measure_source_type()` resolves each component's source physical column (plain measure
+  `column_id`, or a formula measure's `[TABLE::col]` ref) and reads its type from the base
+  Table TML. SUM/MIN/MAX preserve the source type; COUNT stays INT64; DOUBLE fallback when
+  `table_tmls` is absent (backward compatible).
+- *Tests (DONE):* SUM(int)→INT64, SUM(double)→DOUBLE, formula-measure source resolution, and
+  the no-table_tmls fallback.
+- *Verify live (on skill re-run):* register a table with an integer measure, no manual patch.
 
 ### Theme B — Verification is trustworthy  [F9, F10/11/13, F14]
 

@@ -15,6 +15,8 @@ functions actually consume (Step 3b of the task-6 brief).
 from __future__ import annotations
 
 import copy
+import re
+from typing import Optional
 
 
 def _sql_type(display_name: str, model_tml: dict, default: str = "DOUBLE") -> str:
@@ -61,9 +63,54 @@ def _component_columns(candidate: dict, plans: dict):
     return out
 
 
+_MEASURE_SRC_REF = re.compile(r"\[([^\]:]+)::([^\]]+)\]")
+_NUMERIC_DTYPES = {"INT32", "INT64", "DOUBLE", "FLOAT"}
+
+
+def _measure_physical_ref(measure_name: str, model_tml: dict):
+    """(table, physical_col) the measure aggregates over, or (None, None).
+
+    Plain measure → its `column_id` (`TABLE::COL`); formula measure → the first
+    `[TABLE::COL]` ref in its expr (model MEASURE columns carry no data_type)."""
+    m = model_tml["model"]
+    for c in m.get("columns", []) or []:
+        if c.get("name") != measure_name:
+            continue
+        cid = c.get("column_id")
+        if cid and "::" in cid:
+            tbl, col = cid.split("::", 1)
+            return tbl, col
+        expr = next((f.get("expr", "") for f in m.get("formulas", []) or []
+                     if f.get("id") == c.get("formula_id")), "")
+        mo = _MEASURE_SRC_REF.search(expr)
+        return (mo.group(1), mo.group(2)) if mo else (None, None)
+    return None, None
+
+
+def _column_dtype(tbl: Optional[str], col: Optional[str],
+                  table_tmls: dict) -> Optional[str]:
+    """The base Table TML's `db_column_properties.data_type` for (tbl, col)."""
+    tdoc = (table_tmls.get(tbl) or {}).get("table", {}) if tbl else {}
+    for cc in tdoc.get("columns", []) or []:
+        if col in (cc.get("name"), cc.get("db_column_name")):
+            return (cc.get("db_column_properties") or {}).get("data_type")
+    return None
+
+
+def _measure_source_type(measure_name: str, model_tml: dict,
+                         table_tmls: Optional[dict]) -> Optional[str]:
+    """TS data_type of the physical column a measure sums over, from the base
+    Table TMLs. None when unresolvable (caller falls back to DOUBLE)."""
+    if not table_tmls:
+        return None
+    tbl, col = _measure_physical_ref(measure_name, model_tml)
+    return _column_dtype(tbl, col, table_tmls) if col else None
+
+
 def build_aggregate_table_spec(candidate: dict, plans: dict, model_tml: dict,
                                db: str, schema: str, table_name: str,
-                               connection_name: str) -> dict:
+                               connection_name: str,
+                               table_tmls: Optional[dict] = None) -> dict:
     """Spec dict for ts_cli.commands.tables._build_table_tml / `ts tables create`.
 
     Grain columns (dimensions + date) are ATTRIBUTE; each stored component of a
@@ -72,15 +119,29 @@ def build_aggregate_table_spec(candidate: dict, plans: dict, model_tml: dict,
     grain — e.g. SUM over a pre-summed column, SUM over a pre-counted column
     for COUNT/AVG components). Keys match `_build_table_tml`'s spec contract
     exactly: name/data_type/column_type/aggregation.
+
+    Component column types: COUNT components are INT64; SUM/MIN/MAX preserve the
+    source column's type (SUM of an integer stays integer in the warehouse, so
+    emitting DOUBLE makes `ts tables create` fail the CDW type check). The
+    source type is read from `table_tmls` when provided; without it (older
+    callers/tests) SUM/MIN/MAX fall back to DOUBLE as before.
     """
     columns = []
     for name, dtype, _ in _grain_columns(candidate, model_tml):
         columns.append({"name": name, "data_type": dtype,
                         "column_type": "ATTRIBUTE"})
-    for alias, _plan, comp in _component_columns(candidate, plans):
-        dtype = "INT64" if comp["func"] == "COUNT" else "DOUBLE"
-        columns.append({"name": alias, "data_type": dtype,
-                        "column_type": "MEASURE", "aggregation": comp["reagg"]})
+    for m_name in candidate.get("measure_columns", []):
+        plan = plans.get(m_name)
+        if not (plan and plan["decomposable"]):
+            continue
+        for comp in plan["components"]:
+            if comp["func"] == "COUNT":
+                dtype = "INT64"
+            else:
+                src = _measure_source_type(m_name, model_tml, table_tmls)
+                dtype = src if src in _NUMERIC_DTYPES else "DOUBLE"
+            columns.append({"name": comp["alias"], "data_type": dtype,
+                            "column_type": "MEASURE", "aggregation": comp["reagg"]})
     return {"name": table_name, "db": db, "schema": schema,
             "db_table": table_name, "connection_name": connection_name,
             "columns": columns}
