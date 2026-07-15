@@ -368,6 +368,50 @@ def test_profile_and_base_sql():
     assert base == 'SELECT COUNT(*) AS base_rows FROM "SALESDB"."PUBLIC"."FACT_SALES"'
 
 
+def test_base_count_anchors_on_fact_not_first_model_table():
+    # F1 regression: base_rows must count the measure-owning FACT, not whatever
+    # table is listed first. Real case: a tiny dimension (8-row DM_CATEGORY) was
+    # model_tables[0], so `COUNT(*) FROM DM_CATEGORY` returned 8 and every
+    # compression ratio was garbage.
+    dim_first = {"model": {
+        "model_tables": [
+            {"name": "DIM"},   # dimension listed FIRST (arbitrary export order)
+            {"name": "FACT", "joins": [
+                {"with": "DIM", "on": "[FACT::CAT_ID] = [DIM::CAT_ID]",
+                 "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+        ],
+        "columns": [
+            {"name": "Category", "column_id": "DIM::CATEGORY",
+             "properties": {"column_type": "ATTRIBUTE"}},
+            {"name": "Sales", "column_id": "FACT::AMOUNT",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        ],
+    }}
+    base = build_base_count_sql(dim_first, TABLES)
+    assert base == 'SELECT COUNT(*) AS base_rows FROM "SALESDB"."PUBLIC"."FACT_SALES"'
+    assert "DIM_CATEGORY" not in base
+
+
+def test_base_count_resolves_fact_from_formula_measure():
+    # A formula measure (no column_id) resolves its fact via the [TABLE::col]
+    # ref in its expr — mirrors a promoted `Amount = sum([FACT::AMOUNT])`.
+    formula_model = {"model": {
+        "model_tables": [{"name": "DIM"}, {"name": "FACT", "joins": [
+            {"with": "DIM", "on": "[FACT::CAT_ID] = [DIM::CAT_ID]",
+             "type": "INNER", "cardinality": "MANY_TO_ONE"}]}],
+        "columns": [
+            {"name": "Category", "column_id": "DIM::CATEGORY",
+             "properties": {"column_type": "ATTRIBUTE"}},
+            {"name": "Sales", "formula_id": "f_sales",
+             "properties": {"column_type": "MEASURE"}},
+        ],
+        "formulas": [{"id": "f_sales", "name": "Sales",
+                      "expr": "sum ( [FACT::AMOUNT] )"}],
+    }}
+    base = build_base_count_sql(formula_model, TABLES)
+    assert base == 'SELECT COUNT(*) AS base_rows FROM "SALESDB"."PUBLIC"."FACT_SALES"'
+
+
 def test_star_join_pruned_to_needed_tables():
     # Fix 1 (CRITICAL, original intent): star FACT->{DIM, DIM2} with a
     # candidate needing only DIM must not emit an unnecessary DIM2 join.

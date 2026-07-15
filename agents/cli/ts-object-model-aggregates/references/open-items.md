@@ -1069,13 +1069,18 @@ PROCESS_FINDINGS.md). Full design + phased plan: [remediation-plan.md](remediati
 Summary of tracked items:
 
 **Correctness bugs (Phase 0):**
-- **F1** — `profile` misattributes the base row count to a small dim table when internal
-  SpotQL fails (walker anchors FROM on wrong table) → garbage compression ratios. Needs a
-  fact-anchored baseline + a sanity guard (`base_rows` < max(agg_rows) → warn/suspect).
-- **F6** — `generate` reported crashing on a `bucket=MONTHLY` candidate
-  (`AttributeError` near `rls.py:_normalize_rls_block`); current code looks defensive, so
-  reproduce with the exact injected-candidate inputs before fixing. Needs a
-  bucket≠None × base-table-with-RLS regression test.
+- **F1 — part (a) FIXED.** `build_base_count_sql` counted `model_tables[0]` (a dim, no fact
+  join) → `base_rows=8`. Now `sqlgen.base_table_name` anchors the count on the measure-owning
+  fact (unit-tested: dim-first + formula-measure cases). Remaining: (b) sanity guard
+  (`base_rows` < max(agg_rows) → warn/mark suspect); (c) fix internal SpotQL so profiling
+  stops falling back to the walker.
+- **F6 — INVALIDATED (operator error, not a tool bug).** The reported crash on a
+  `bucket=MONTHLY` candidate was caused by a malformed injected candidate
+  (`date_grains: ['MONTHLY']` — list of strings — instead of the real
+  `[{'column','bucket'}]` shape). Verified offline: correctly-shaped bucketed candidates and
+  the `date_column`/`bucket` compat shim both work in `generate._grain_columns`. Residual
+  (LOW): the tool raises a bare `TypeError`/`AttributeError` on a malformed candidate dict —
+  add input-shape validation with a clear message. NOT a blocker for the monthly use case.
 - **F8** — component column types hardcoded (`INT64` only for COUNT, else `DOUBLE`);
   `SUM(int)` is INT64 → `ts tables create` fails `DataType DOUBLE does not match CDW`.
   Model TML lacks measure types, so the robust fix is type reconciliation at

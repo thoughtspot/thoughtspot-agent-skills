@@ -15,8 +15,8 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 
 | ID | Severity | Category | One-line |
 |----|----------|----------|----------|
-| F1 | HIGH | correctness | Profiler baseline misattributed to an 8-row dim table when internal SpotQL fails → garbage compression |
-| F6 | HIGH | correctness | `generate` crashes (`_normalize_rls_block`) on any date-bucketed candidate |
+| F1 | HIGH | correctness | Base row count came from `model_tables[0]` (a dim, no fact join) → garbage compression. **Fixed (part a: fact-anchored base_rows + tests)**; sanity-guard + internal-SpotQL fix remain |
+| F6 | LOW (was HIGH) | robustness | INVALIDATED as a bug — the crash was a malformed test candidate (`date_grains` as strings); real bucketed candidates work. Residual: add input-shape validation |
 | F8 | MED | correctness | Hard-codes `DOUBLE` for every sum; `SUM(int)`=INT64 → table registration fails |
 | F9 | CRITICAL | capability+UX | Aggregates never route unless the PRIMARY's measures are formulas; skill doesn't detect/warn |
 | F3 | HIGH | capability | Candidate generator only emits single-dimension additive grains |
@@ -37,26 +37,30 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 
 ### Theme A — Correctness bugs (unblock the tool)  [F1, F6, F8]
 
-**F1 — profiler baseline misattribution.**
-- *Root cause:* when internal SpotQL generation fails, `sqlgen.build_select`'s walker anchors
-  the `__base__` count on the first/wrong table (a dim), not the measure's fact.
-- *Fix (`aggregate/sqlgen.py`, `spotql_aggregate.py`, `commands/aggregate.py`):* (a) derive the
-  base row count from the fact table(s) that actually carry the candidate's measures, not the
-  walker's FROM anchor; (b) add a guardrail — if `base_rows` < max(agg_rows) or < a sanity
-  floor, emit a loud stderr warning and mark the profile result `suspect: true` in
-  `candidates.json`; (c) fix the internal SpotQL construction so it stops falling back.
-- *Tests:* unit test that `base_rows` for a star-schema candidate equals the fact rowcount, not
-  the smallest dim; regression fixture reproducing the DM_CATEGORY(8-row) misattribution.
-- *Verify live:* re-profile Dunder Mifflin; base must be ~1.2M, not 8.
+**F1 — base row count misattributed to `model_tables[0]`. Part (a) FIXED this branch.**
+- *Root cause:* `sqlgen.build_base_count_sql` did `COUNT(*) FROM model_tables[0]` with NO
+  fact join — arbitrary export order put an 8-row dimension (DM_CATEGORY) first, so
+  `base_rows=8` and every compression ratio was garbage.
+- *Fix (DONE):* new `sqlgen.base_table_name(model_tml)` resolves the measure-owning fact
+  (plain measure `column_id` table, or formula measure's `[TABLE::col]` ref; most measures
+  wins; falls back to `model_tables[0]`). `build_base_count_sql` now anchors on it. Unit
+  tests: dim-listed-first and formula-measure cases both assert the fact, not the dim.
+- *Remaining:* (b) sanity guard — warn + mark `suspect` when `base_rows` < max(agg_rows);
+  (c) fix the internal SpotQL construction so profiling stops falling back to the walker.
+- *Verify live (on skill re-run):* re-profile; base must be ~1.2M, not 8.
 
-**F6 — `generate` crash on bucketed candidate.**
-- *Root cause:* `_normalize_rls_block` (in `aggregate_rls.py`/`rls.py`) receives a str where it
-  expects a dict when `bucket != None`; the date-bucket and RLS code paths don't compose.
-- *Fix:* make `_normalize_rls_block` tolerate the bucketed-candidate shape; add the missing
-  normalization. `spotql_aggregate.wrap_as_ddl` already handles the bucket DDL, so this is
-  purely the RLS-composition bug.
-- *Tests:* `bucket=MONTHLY` × base-table-with-RLS generate → produces artifacts, no crash.
-- *Verify live:* generate a MONTHLY candidate on Dunder Mifflin end to end.
+**F6 — INVALIDATED (operator error, not a tool bug). Downgraded HIGH → LOW.**
+- *What actually happened:* the crash came from a malformed injected candidate —
+  `date_grains: ['MONTHLY']` (list of strings) instead of the real
+  `[{'column','bucket'}]` shape `recommend` emits. `generate._grain_columns` does
+  `g['column']`, so a bare string raised `TypeError: string indices must be integers`
+  (and the RLS path likewise choked on the malformed shape).
+- *Verified offline:* correctly-shaped bucketed candidates AND the `date_column`/`bucket`
+  compat shim both pass `_grain_columns` cleanly. The monthly path is not blocked.
+- *Residual (LOW):* the tool raises a bare `TypeError`/`AttributeError` on a malformed
+  candidate dict. Optional hardening: validate `date_grains` shape at the `generate`
+  entry and raise a clear `ValueError` naming the offending candidate.
+- *Tests:* a malformed-shape candidate raises a clear validation error, not a bare TypeError.
 
 **F8 — measure sum types.**
 - *Root cause:* `generate` defaults every emitted measure component to `DOUBLE`.
