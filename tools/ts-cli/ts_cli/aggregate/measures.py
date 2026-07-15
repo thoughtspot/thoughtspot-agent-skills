@@ -26,6 +26,19 @@ _SAFE_DIVIDE = re.compile(
     r"\s*(sum|count)\s*\(\s*\[([^\]]+)\]\s*\)\s*\)\s*$",
     re.I,
 )
+# Semi-additive snapshot: last_value/first_value(sum([col]), query_groups(),
+# {[date]}) — the classic period-end stock/balance form. Sums across
+# non-date dims but takes the period-end (last/first) value across the date
+# dimension, so it can NEVER be flat-summed across periods. Decomposes to a
+# single stored period-end-snapshot component; the aggregate model re-applies
+# last_value/first_value over the aggregate's own (bucketed) date column,
+# which is candidate-specific — so model_expr carries the `__AGG_DATE__`
+# placeholder that generate.build_aggregate_model_tml substitutes.
+_SEMIADD = re.compile(
+    r"^\s*(last_value|first_value)\s*\(\s*sum\s*\(\s*\[([^\]]+)\]\s*\)\s*,"
+    r"\s*query_groups\s*\(\s*\)\s*,\s*\{\s*\[([^\]]+)\]\s*\}\s*\)\s*$",
+    re.I,
+)
 
 
 def _slug(name: str) -> str:
@@ -124,6 +137,21 @@ def classify_measure(name: str, aggregation: Optional[str] = None,
         ]
         return _plan(name, "RATIO", True, comps,
                      model_expr=f"safe_divide ( sum ( [{slug}_num] ) , sum ( [{slug}_den] ) )")
+
+    m = _SEMIADD.match(expr)
+    if m:
+        # Recognized but NOT auto-decomposed (decomposable=False): a correct
+        # period-end snapshot aggregate needs a windowed `last_value OVER
+        # (PARTITION BY grain ORDER BY date)` DDL that the flat-SUM/positional
+        # generators can't emit, so auto-generation is deliberately out of
+        # scope (would risk wrong snapshot numbers). Classifying it as
+        # SEMIADDITIVE (vs UNKNOWN) lets `recommend` surface it and point the
+        # user at the hand-build recipe; `requires_grain_column` records the
+        # date column the snapshot is taken over. Same coverage behaviour as
+        # before (a date-column requirement in dims is never met, so
+        # semi-additive signatures stay excluded from candidates).
+        datecol = m.group(3)
+        return _plan(name, "SEMIADDITIVE", False, requires=datecol)
 
     return _plan(name, "UNKNOWN", False)
 

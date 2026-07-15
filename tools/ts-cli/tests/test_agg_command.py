@@ -1717,3 +1717,18 @@ def test_load_tables_dir_matches_yml_and_json(tmp_path):
     (tmp_path / "GEO.json").write_text(json.dumps({"table": {"name": "GEO"}}))
     loaded = _load_tables_dir(str(tmp_path))
     assert set(loaded) == {"FACT", "DIM", "GEO"}
+
+
+def test_semiadditive_measures_surfaced():
+    from ts_cli.commands.aggregate import semiadditive_measures
+    from ts_cli.aggregate.measures import classify_measure
+    plans = {
+        "Inventory Balance": classify_measure(
+            "Inventory Balance",
+            expr="last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , "
+                 "query_groups ( ) , { [DM_DATE_DIM::DATE] } )"),
+        "Amount": classify_measure("Amount", aggregation="SUM"),
+    }
+    out = semiadditive_measures(plans)
+    assert [o["measure"] for o in out] == ["Inventory Balance"]
+    assert "recipe" in out[0]["remedy"]

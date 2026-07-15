@@ -218,14 +218,17 @@ route re-run of Dunder Mifflin):
   automatically.
 
 **REMAINING (not done — deferred as higher-risk / needs careful supervised work):**
-- **F5-semi-additive** (`last_value(sum(col),query_groups(),{date})`, e.g. Inventory Balance):
-  measures.classify_measure still returns UNKNOWN. *Promising low-risk path:* don't hand-roll the
-  windowed month-end SELECT — reuse ThoughtSpot's own SpotQL compiler. Make classify_measure emit
-  a SEMIADDITIVE decomposable plan; make `spotql_aggregate.build_spotql` emit `SUM("<measure>")`
-  for it (the classify-columns wrapper) instead of raising UnsupportedMeasureError; ThoughtSpot
-  compiles that to the verified-correct `last_value() OVER (PARTITION BY grain ORDER BY date)`
-  SQL, which `wrap_as_ddl` stores; generate emits a `last_value(sum([component]),query_groups(),
-  {[bucketed date]})` model formula. Gate on the live 3,828 month-end total.
+- **F5-semi-additive** (`last_value(...)`, e.g. Inventory Balance) — **SAFE SLICE DONE
+  (recognize + surface + recipe); full auto-generation DEFERRED.** measures.classify_measure now
+  classifies it `SEMIADDITIVE` (decomposable=False → stays correctly excluded from candidates, no
+  wrong-number risk); `recommend` surfaces it under `semiadditive_measures` with a pointer to the
+  hand-build recipe (`references/semiadditive-recipe.md`, verified live: month-end pattern +
+  mandatory 3,828 numeric gate). **Why auto-gen is deferred:** the SpotQL-compiler-reuse shortcut
+  does NOT work — SpotQL has no date-bucket fn (build_spotql groups by raw date) and
+  `wrap_as_ddl` buckets with a PLAIN re-aggregation, but a period-end snapshot needs a *window*
+  (`last_value OVER (PARTITION BY grain ORDER BY date)`) neither layer emits. Full auto-generation
+  therefore requires a new windowed-DDL generator — real, wrong-numbers-sensitive work, left as a
+  backlog item to do only if it recurs enough to justify the risk.
 - **F3 multi-dim** — `lattice._merge_similar_dimsets` only unions dim-sets with jaccard≥0.5
   (overlap); disjoint single-dims never combine. Add a consolidated-union candidate per date-col
   group, BUT guard multi-fact join feasibility (a naive union can mix facts with no join path,
