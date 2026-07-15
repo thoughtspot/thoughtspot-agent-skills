@@ -1060,3 +1060,63 @@ clarification:**
    `table_paths`, resolved via the own-table-name fallback) is still unverified against
    a real flat-shape TML export — see `rls.py`'s module docstring. Re-check the first
    time a live table export actually shows this shape.
+
+## #18 — End-to-end build findings (2026-07-15, nebula-aggregate-aware) — OPEN, plan in references/remediation-plan.md
+
+First full manual build of two aggregates (dimensional + monthly semi-additive) on
+"Dunder Mifflin Sales & Inventory" surfaced 14 findings (F1–F17 in the run's
+PROCESS_FINDINGS.md). Full design + phased plan: [remediation-plan.md](remediation-plan.md).
+Summary of tracked items:
+
+**Correctness bugs (Phase 0):**
+- **F1 — part (a) FIXED.** `build_base_count_sql` counted `model_tables[0]` (a dim, no fact
+  join) → `base_rows=8`. Now `sqlgen.base_table_name` anchors the count on the measure-owning
+  fact (unit-tested). (b) DONE — `flag_suspect_base_rows` warns + sets `base_rows_suspect`
+  when `base_rows` < max(agg_rows), both profile paths. Remaining (c): fix internal SpotQL
+  so profiling stops falling back to the walker (needs live repro).
+- **F6 — INVALIDATED (operator error, not a tool bug).** The reported crash on a
+  `bucket=MONTHLY` candidate was caused by a malformed injected candidate
+  (`date_grains: ['MONTHLY']` — list of strings — instead of the real
+  `[{'column','bucket'}]` shape). Verified offline: correctly-shaped bucketed candidates and
+  the `date_column`/`bucket` compat shim both work in `generate._grain_columns`. Residual
+  (LOW): the tool raises a bare `TypeError`/`AttributeError` on a malformed candidate dict —
+  add input-shape validation with a clear message. NOT a blocker for the monthly use case.
+- **F8 — FIXED.** Component types were hardcoded (`INT64` for COUNT else `DOUBLE`), so
+  `SUM(int)` emitted DOUBLE and `ts tables create` failed the CDW type check. Model TML lacks
+  measure types, but the base Table TMLs carry them — `generate._measure_source_type()` now
+  resolves each component's source column (via `column_id` or the formula's `[TABLE::col]`
+  ref) and preserves its type (SUM/MIN/MAX), COUNT→INT64, DOUBLE fallback. `table_tmls`
+  threaded through `_write_table_artifacts`. Unit-tested.
+- **F2** — `ts aggregate profile` (via `commands/load._connect`) died with a bare
+  "install snowflake-connector-python". **FIXED this PR:** added `[snowflake]` extra +
+  a remedy message covering `pip install 'thoughtspot-cli[snowflake]'` and the uv-tool
+  `uv tool install thoughtspot-cli --with snowflake-connector-python` form.
+
+**Verification (Phase 1):**
+- **F9 — ADDRESSED.** Routing fires ONLY for formula measures (open-item #0); the skill built
+  aggregates over plain measure columns that can never route. `recommend` now emits
+  `routing_ineligible_measures` (`commands/aggregate.routing_ineligible_measures` over
+  `spotql_ops.classify_model_columns`) and SKILL.md Step 5a gates on it, offering the
+  promotion (plain measure → `sum([physical])` formula, backup first). Unit-tested. Optional
+  follow-up: codify the promotion as a `ts` command.
+- **F10/F11/F13 — CORRECTED (earlier claim was wrong).** `ts spotql generate-sql` DOES
+  reflect routing for ALL measure kinds incl. semi-additive; the earlier failures were
+  query-construction errors. Step 7 must pick the wrapper via `ts spotql classify-columns`:
+  raw→`SUM`, aggregate-formula→`AGG` (SUM nests → NESTED_AGGREGATE), semi-additive
+  last_value→`SUM` (AGG → NON_CONVERTIBLE_FUNCTION). Re-verified live: `SUM("Inventory
+  Balance")`→monthly agg, `AGG("Amount")`→dimensional agg. Step 7's hardcoded `SUM("Sales")`
+  example is wrong for aggregate-formula measures and must be replaced.
+- **F14** — RLS leak-test still owed (routed queries so far ran as bypass admin); see #17.
+
+**Capability (Phase 2) — mostly wiring existing engine pieces:**
+- **F3** multi-dimension candidates; **F5** wire `measures.py`/`classify-columns`
+  (semi-additive + ratio) into `lattice` candidate generation (knowledge exists, not wired);
+  **F12** role-playing/conformed date columns (key date aggregates on the column users query,
+  or the shared conformed date); **F4** combine-vs-split analysis; **F15** emit formula-only
+  aggregate models (formulas over physical component cols, no hidden component model columns —
+  also unblocks in-place editing).
+
+**UX (Phase 3) — DONE:** **F16** model name now aggregate-first `<aggregate> (<source>)`;
+**F17** `generate` auto-writes a description (grain/measures/routing/RLS). Both unit-tested.
+
+**Positive (keep):** **F7** RLS fail-closed guard + rule remap worked correctly end to end.

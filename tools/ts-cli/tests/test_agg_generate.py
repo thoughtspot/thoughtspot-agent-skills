@@ -36,6 +36,70 @@ def test_table_spec_feeds_ts_tables_create():
     assert "db_column_name" in tml_yaml and "SF Prod" in tml_yaml
 
 
+def test_component_types_follow_source_column_types():
+    # F8: SUM over an INT column must be INT64, not DOUBLE — else `ts tables
+    # create` fails the CDW type check ("DataType DOUBLE does not match ...").
+    # Component types are read from the base Table TMLs, not guessed.
+    model = {"model": {"name": "M", "columns": [
+        {"name": "Category", "column_id": "DIM::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Sales", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Units", "column_id": "FACT::QTY",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+    ]}}
+    tables = {
+        "FACT": {"table": {"columns": [
+            {"name": "AMOUNT", "db_column_name": "AMOUNT",
+             "db_column_properties": {"data_type": "DOUBLE"}},
+            {"name": "QTY", "db_column_name": "QTY",
+             "db_column_properties": {"data_type": "INT64"}}]}},
+        "DIM": {"table": {"columns": [
+            {"name": "CATEGORY", "db_column_name": "CATEGORY",
+             "db_column_properties": {"data_type": "VARCHAR"}}]}},
+    }
+    cand = {"id": "c", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["Sales", "Units"],
+            "covered": [0], "flags": []}
+    plans = {"Sales": classify_measure("Sales", aggregation="SUM"),
+             "Units": classify_measure("Units", aggregation="SUM")}
+    spec = build_aggregate_table_spec(cand, plans, model, db="D", schema="S",
+                                      table_name="T", connection_name="C",
+                                      table_tmls=tables)
+    by = {c["name"]: c for c in spec["columns"]}
+    assert by["units_sum"]["data_type"] == "INT64"   # SUM(int) stays integer
+    assert by["sales_sum"]["data_type"] == "DOUBLE"   # SUM(double) stays double
+
+
+def test_component_type_resolves_from_formula_measure_source():
+    # Formula measure (no column_id) — type resolved via the [TABLE::col] ref.
+    model = {"model": {"name": "M", "columns": [
+        {"name": "Category", "column_id": "DIM::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Units", "formula_id": "f_u",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_u", "name": "Units", "expr": "sum ( [FACT::QTY] )"}]}}
+    tables = {"FACT": {"table": {"columns": [
+        {"name": "QTY", "db_column_name": "QTY",
+         "db_column_properties": {"data_type": "INT64"}}]}}}
+    cand = {"id": "c", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["Units"], "covered": [0], "flags": []}
+    plans = {"Units": classify_measure("Units", expr="sum ( [FACT::QTY] )")}
+    spec = build_aggregate_table_spec(cand, plans, model, db="D", schema="S",
+                                      table_name="T", connection_name="C",
+                                      table_tmls=tables)
+    comp = [c for c in spec["columns"] if c["name"].endswith("_sum")][0]
+    assert comp["data_type"] == "INT64"
+
+
+def test_component_type_falls_back_to_double_without_table_tmls():
+    # Backward compat: no table_tmls → SUM/MIN/MAX default to DOUBLE as before.
+    spec = build_aggregate_table_spec(CAND, PLANS, MODEL, db="D", schema="S",
+                                      table_name="T", connection_name="C")
+    assert [c for c in spec["columns"]
+            if c["name"] == "sales_sum"][0]["data_type"] == "DOUBLE"
+
+
 def test_model_tml_names_match_primary_exactly_and_spotter_enabled():
     tml = build_aggregate_model_tml(CAND, PLANS, MODEL,
                                     agg_table_name="SALES_AGG_MONTH_CATEGORY",

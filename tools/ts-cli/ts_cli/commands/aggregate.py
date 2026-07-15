@@ -265,6 +265,7 @@ def recommend(
     from ts_cli.commands.aggregate_rls import _attach_rls_conflicts
     table_tmls = _load_tables_dir(tables_dir or str(d / "tables"))
     rls_conflicts = _attach_rls_conflicts(candidates, plans, model_tml, table_tmls)
+    ineligible = routing_ineligible_measures(model_tml, candidates)
 
     prior_path = d / "candidates.json"
     base_rows = _merge_prior_agg_rows(candidates, prior_path, base_rows)
@@ -272,7 +273,8 @@ def recommend(
     result = greedy_select(candidates, sigs, base_rows=base_rows, max_select=max_select)
     excluded = _excluded_unprofiled(candidates, result["mode"])
 
-    payload = {"base_rows": base_rows, "candidates": candidates, "selection": result}
+    payload = {"base_rows": base_rows, "candidates": candidates, "selection": result,
+               "routing_ineligible_measures": ineligible}
     prior_path.write_text(json.dumps(payload, indent=2))
 
     print(json.dumps({
@@ -282,6 +284,7 @@ def recommend(
         "candidates": len(candidates),
         "excluded_unprofiled": excluded,
         "rls_conflicts": rls_conflicts,
+        "routing_ineligible_measures": ineligible,
     }, indent=2))
 
 
@@ -355,6 +358,53 @@ def _ingest_profile_results(payload: dict, results_path: str) -> dict:
         if c["id"] in r["candidates"]:
             c["agg_rows"] = int(r["candidates"][c["id"]])
     return {"ingested": len(r["candidates"])}
+
+
+def routing_ineligible_measures(model_tml: dict, candidates: list) -> list:
+    """F9: measures targeted by candidates that are plain measure columns and so
+    will NOT be routed to until promoted to formula measures.
+
+    Aggregate-aware routing on this product fires only for FORMULA measures
+    (open-item #0); a plain measure column (`kind == 'raw_measure'`) yields an
+    aggregate nothing ever routes to. Reuses `spotql_ops.classify_model_columns`
+    (the same classifier `ts spotql classify-columns` exposes) so the skill can
+    surface the gap and offer the promotion (plain measure -> `sum([physical])`)
+    before generating anything."""
+    from ts_cli.spotql_ops import classify_model_columns
+    kinds = {c["name"]: c.get("kind") for c in classify_model_columns(model_tml)}
+    targeted = {m for c in candidates for m in c.get("measure_columns", []) or []}
+    out = []
+    for name in sorted(targeted):
+        if kinds.get(name) == "raw_measure":
+            out.append({
+                "measure": name,
+                "reason": "plain measure column — aggregate-aware routing fires "
+                          "only for formula measures",
+                "remedy": f"promote '{name}' to a formula measure "
+                          f"(e.g. sum([<physical column>])) on the primary Model "
+                          f"before generating aggregates",
+            })
+    return out
+
+
+def flag_suspect_base_rows(payload: dict) -> bool:
+    """Guard against a bogus `base_rows` (F1). An aggregate can never have more
+    rows than the base grain it rolls up, so `base_rows < max(agg_rows)` means
+    the base count is wrong (e.g. anchored on a tiny dimension instead of the
+    fact). Sets `payload["base_rows_suspect"] = True`, warns on stderr, and
+    returns whether it fired — so compression ratios are flagged, not trusted."""
+    base = payload.get("base_rows")
+    aggs = [c["agg_rows"] for c in payload.get("candidates", [])
+            if isinstance(c.get("agg_rows"), int)]
+    if base is None or not aggs or base >= max(aggs):
+        return False
+    payload["base_rows_suspect"] = True
+    _err(f"WARNING: base_rows ({base:,}) is smaller than the largest aggregate "
+         f"row count ({max(aggs):,}). An aggregate cannot exceed its base grain, "
+         f"so the base count is almost certainly wrong (commonly anchored on a "
+         f"dimension, not the fact). Compression ratios are unreliable — verify "
+         f"the base table before trusting the ranking.")
+    return True
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -549,6 +599,7 @@ def profile(
 
     if results:
         summary = _ingest_profile_results(payload, results)
+        summary["base_rows_suspect"] = flag_suspect_base_rows(payload)
         (d / "candidates.json").write_text(json.dumps(payload, indent=2))
         print(json.dumps(summary))
         return
@@ -572,9 +623,10 @@ def profile(
     for c in payload["candidates"]:
         if c["id"] in counts:
             c["agg_rows"] = counts[c["id"]]
+    suspect = flag_suspect_base_rows(payload)
     (d / "candidates.json").write_text(json.dumps(payload, indent=2))
     print(json.dumps({"base_rows": payload["base_rows"], "profiled": len(counts),
-                      "skipped": skipped}, indent=2))
+                      "skipped": skipped, "base_rows_suspect": suspect}, indent=2))
 
 
 def _colmap_from_model(model_tml: dict) -> dict:
@@ -711,24 +763,55 @@ def _fallback_ddl_or_exit(model_tml: dict, table_tmls: dict, cand: dict, plans: 
 
 def _write_table_artifacts(outdir: Path, cand: dict, plans: dict, model_tml: dict,
                           db: str, schema: str, name: str, connection_name: str,
-                          rls_rules: Optional[dict] = None) -> None:
+                          rls_rules: Optional[dict] = None,
+                          table_tmls: Optional[dict] = None) -> None:
     from ts_cli.aggregate.generate import build_aggregate_table_spec
     from ts_cli.commands.tables import _build_table_tml
     spec = build_aggregate_table_spec(cand, plans, model_tml, db=db, schema=schema,
-                                      table_name=name, connection_name=connection_name)
+                                      table_name=name, connection_name=connection_name,
+                                      table_tmls=table_tmls)
     if rls_rules:
         spec["rls_rules"] = rls_rules
     (outdir / "table_spec.json").write_text(json.dumps(spec, indent=2))
     (outdir / "table.tml.yaml").write_text(_build_table_tml(spec))
 
 
+def _grain_summary(cand: dict) -> str:
+    """Human grain string for a candidate: 'Dim A x Dim B x Date (monthly)' or
+    'grand total'. Tolerant of both the `date_grains` list and the
+    `date_column`/`bucket` compat shim; ignores malformed date-grain entries."""
+    parts = list(cand.get("dimensions") or [])
+    grains = cand.get("date_grains")
+    if grains is None and cand.get("date_column"):
+        grains = [{"column": cand["date_column"], "bucket": cand.get("bucket")}]
+    for g in grains or []:
+        if not isinstance(g, dict) or not g.get("column"):
+            continue
+        bucket = (g.get("bucket") or "").upper()
+        suffix = f" ({bucket.lower()})" if bucket and bucket != "NO_BUCKET" else ""
+        parts.append(f"{g['column']}{suffix}")
+    return " x ".join(parts) if parts else "grand total"
+
+
+def _aggregate_description(cand: dict, model_tml: dict) -> str:
+    """F17: a self-describing model description — grain, measures, routing behaviour."""
+    src = model_tml["model"].get("name", "the primary Model")
+    measures = ", ".join(cand.get("measure_columns") or []) or "(none)"
+    return (f'Pre-aggregated Model of "{src}": {measures} by {_grain_summary(cand)}. '
+            f"Aggregate-aware routing uses it automatically for matching queries at or "
+            f"above this grain; finer or out-of-grain queries fall back to the primary Model. "
+            f"Any base-table row-level security is propagated onto this aggregate.")
+
+
 def _write_model_artifact(outdir: Path, cand: dict, plans: dict, model_tml: dict,
                          name: str, connection_name: str) -> str:
     from ts_cli.aggregate.generate import build_aggregate_model_tml
-    model_name = f"{model_tml['model']['name']} ({name})"
+    # F16: aggregate-first so the distinguishing token survives UI name truncation.
+    model_name = f"{name} ({model_tml['model']['name']})"
     agg_model = build_aggregate_model_tml(cand, plans, model_tml, agg_table_name=name,
                                           model_name=model_name,
-                                          connection_name=connection_name)
+                                          connection_name=connection_name,
+                                          description=_aggregate_description(cand, model_tml))
     (outdir / "agg_model.tml.yaml").write_text(dump_tml_yaml(agg_model))
     return model_name
 
@@ -894,7 +977,7 @@ def generate(
                                          target, materialization, warehouse, candidate)
     (outdir / "ddl.sql").write_text(ddl_text + ";\n")
     _write_table_artifacts(outdir, cand, plans, model_tml, db, schema, name,
-                           connection_name, rls_rules)
+                           connection_name, rls_rules, table_tmls=table_tmls)
     model_name = _write_model_artifact(outdir, cand, plans, model_tml, name, connection_name)
     _patch_and_write_primary(outdir, model_guid, profile, model_name, cand, agg_model_guid)
 

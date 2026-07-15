@@ -530,7 +530,10 @@ def _connect_python(profile: dict, warehouse: str, role: str):
     except ImportError:
         raise SystemExit(
             "snowflake-connector-python is required for method:python profiles.\n"
-            "Install it: pip install snowflake-connector-python"
+            "Install it with the snowflake extra:\n"
+            "  pip install 'thoughtspot-cli[snowflake]'\n"
+            "If ts was installed as an isolated uv tool, inject it into that env:\n"
+            "  uv tool install thoughtspot-cli --with snowflake-connector-python"
         )
 
     account = profile["account"]

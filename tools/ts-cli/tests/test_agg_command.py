@@ -2,9 +2,79 @@ import json
 import yaml
 from typer.testing import CliRunner
 from ts_cli.cli import app
-from ts_cli.commands.aggregate import _candidate_key, _merge_prior_agg_rows, _signatures_summary
+from ts_cli.commands.aggregate import (_candidate_key, _merge_prior_agg_rows,
+                                       _signatures_summary, flag_suspect_base_rows,
+                                       routing_ineligible_measures, _grain_summary,
+                                       _aggregate_description)
 
 runner = CliRunner()
+
+
+def test_grain_summary_dims_and_bucketed_date():
+    cand = {"dimensions": ["Customer State", "Product Category"],
+            "date_grains": [{"column": "Transaction Date", "bucket": "MONTHLY"}],
+            "measure_columns": ["Amount"]}
+    gs = _grain_summary(cand)
+    assert gs == "Customer State x Product Category x Transaction Date (monthly)"
+
+
+def test_grain_summary_grand_total_and_malformed_date_grain():
+    assert _grain_summary({"dimensions": [], "measure_columns": ["Amount"]}) == "grand total"
+    # F6 lesson: a malformed date_grains (list of strings) must not crash
+    assert _grain_summary({"dimensions": ["A"], "date_grains": ["MONTHLY"],
+                           "measure_columns": ["X"]}) == "A"
+
+
+def test_aggregate_description_names_source_grain_measures_and_routing():
+    cand = {"dimensions": ["Product Category"], "date_column": None, "bucket": None,
+            "measure_columns": ["Amount", "Quantity"]}
+    d = _aggregate_description(cand, {"model": {"name": "Dunder Mifflin Sales & Inventory"}})
+    assert "Dunder Mifflin Sales & Inventory" in d
+    assert "Amount, Quantity" in d and "Product Category" in d
+    assert "routing" in d.lower() and "fall back" in d.lower()
+
+
+def test_routing_ineligible_flags_only_plain_measure_columns():
+    # F9: aggregate-aware routing fires only for formula measures. A plain
+    # measure column (Amount) is flagged; a formula measure (Revenue) is not.
+    model = {"model": {"columns": [
+        {"name": "Amount", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Revenue", "formula_id": "f_r",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_r", "name": "Revenue", "expr": "sum ( [FACT::AMOUNT] )"}]}}
+    cands = [{"id": "c1", "measure_columns": ["Amount", "Revenue"]}]
+    out = routing_ineligible_measures(model, cands)
+    assert [o["measure"] for o in out] == ["Amount"]
+    assert "promote" in out[0]["remedy"]
+
+
+def test_routing_ineligible_empty_when_all_measures_are_formulas():
+    model = {"model": {"columns": [
+        {"name": "Revenue", "formula_id": "f_r",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_r", "name": "Revenue", "expr": "sum ( [FACT::AMOUNT] )"}]}}
+    assert routing_ineligible_measures(model, [{"id": "c", "measure_columns": ["Revenue"]}]) == []
+
+
+def test_flag_suspect_base_rows_fires_when_base_below_max_agg():
+    # F1(b): base_rows=8 (a dim) but an aggregate has 14 rows — impossible, so flag it.
+    payload = {"base_rows": 8, "candidates": [
+        {"id": "c1", "agg_rows": 14}, {"id": "c2", "agg_rows": 8}]}
+    assert flag_suspect_base_rows(payload) is True
+    assert payload["base_rows_suspect"] is True
+
+
+def test_flag_suspect_base_rows_silent_when_base_is_largest():
+    payload = {"base_rows": 1_208_243, "candidates": [
+        {"id": "c1", "agg_rows": 14}, {"id": "c2", "agg_rows": 8798}]}
+    assert flag_suspect_base_rows(payload) is False
+    assert "base_rows_suspect" not in payload
+
+
+def test_flag_suspect_base_rows_noop_without_profiled_candidates():
+    payload = {"base_rows": 8, "candidates": [{"id": "c1"}]}  # no agg_rows yet
+    assert flag_suspect_base_rows(payload) is False
 
 
 def test_aggregate_group_registered():
@@ -680,8 +750,10 @@ def test_generate_falls_back_to_name_id_with_warning_when_no_agg_model_guid(
     out = json.loads(result.stdout)
     outdir = tmp_path / "cand_1"
     patched = yaml.safe_load((outdir / "primary_patched.tml.yaml").read_text())
+    # F16: model name is aggregate-first (<aggregate> (<source>)) so the
+    # distinguishing token survives UI name truncation.
     assert (patched["model"]["aggregated_models"][0]["id"]
-            == f"Sales Model ({out['aggregate_name']})")
+            == f"{out['aggregate_name']} (Sales Model)")
 
 
 def test_generate_idempotent_multi_date_preserves_existing_and_new(tmp_path, monkeypatch):
