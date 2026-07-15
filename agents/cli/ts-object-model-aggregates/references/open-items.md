@@ -1060,3 +1060,54 @@ clarification:**
    `table_paths`, resolved via the own-table-name fallback) is still unverified against
    a real flat-shape TML export — see `rls.py`'s module docstring. Re-check the first
    time a live table export actually shows this shape.
+
+## #18 — End-to-end build findings (2026-07-15, nebula-aggregate-aware) — OPEN, plan in references/remediation-plan.md
+
+First full manual build of two aggregates (dimensional + monthly semi-additive) on
+"Dunder Mifflin Sales & Inventory" surfaced 14 findings (F1–F17 in the run's
+PROCESS_FINDINGS.md). Full design + phased plan: [remediation-plan.md](remediation-plan.md).
+Summary of tracked items:
+
+**Correctness bugs (Phase 0):**
+- **F1** — `profile` misattributes the base row count to a small dim table when internal
+  SpotQL fails (walker anchors FROM on wrong table) → garbage compression ratios. Needs a
+  fact-anchored baseline + a sanity guard (`base_rows` < max(agg_rows) → warn/suspect).
+- **F6** — `generate` reported crashing on a `bucket=MONTHLY` candidate
+  (`AttributeError` near `rls.py:_normalize_rls_block`); current code looks defensive, so
+  reproduce with the exact injected-candidate inputs before fixing. Needs a
+  bucket≠None × base-table-with-RLS regression test.
+- **F8** — component column types hardcoded (`INT64` only for COUNT, else `DOUBLE`);
+  `SUM(int)` is INT64 → `ts tables create` fails `DataType DOUBLE does not match CDW`.
+  Model TML lacks measure types, so the robust fix is type reconciliation at
+  registration (DESC/adapt), not the pure generate helper.
+- **F2** — `ts aggregate profile` (via `commands/load._connect`) died with a bare
+  "install snowflake-connector-python". **FIXED this PR:** added `[snowflake]` extra +
+  a remedy message covering `pip install 'thoughtspot-cli[snowflake]'` and the uv-tool
+  `uv tool install thoughtspot-cli --with snowflake-connector-python` form.
+
+**Verification (Phase 1):**
+- **F9** — routing fires ONLY for formula measures on the primary (open-item #0); the skill
+  builds aggregates over plain measure columns that can never route, with no warning. Add a
+  recommend-time preflight (`classify-columns`) that flags raw measures + offers the
+  promotion transform (plain measure column → `sum([physical])` formula).
+- **F10/F11/F13 — CORRECTED (earlier claim was wrong).** `ts spotql generate-sql` DOES
+  reflect routing for ALL measure kinds incl. semi-additive; the earlier failures were
+  query-construction errors. Step 7 must pick the wrapper via `ts spotql classify-columns`:
+  raw→`SUM`, aggregate-formula→`AGG` (SUM nests → NESTED_AGGREGATE), semi-additive
+  last_value→`SUM` (AGG → NON_CONVERTIBLE_FUNCTION). Re-verified live: `SUM("Inventory
+  Balance")`→monthly agg, `AGG("Amount")`→dimensional agg. Step 7's hardcoded `SUM("Sales")`
+  example is wrong for aggregate-formula measures and must be replaced.
+- **F14** — RLS leak-test still owed (routed queries so far ran as bypass admin); see #17.
+
+**Capability (Phase 2) — mostly wiring existing engine pieces:**
+- **F3** multi-dimension candidates; **F5** wire `measures.py`/`classify-columns`
+  (semi-additive + ratio) into `lattice` candidate generation (knowledge exists, not wired);
+  **F12** role-playing/conformed date columns (key date aggregates on the column users query,
+  or the shared conformed date); **F4** combine-vs-split analysis; **F15** emit formula-only
+  aggregate models (formulas over physical component cols, no hidden component model columns —
+  also unblocks in-place editing).
+
+**UX (Phase 3):** **F16** name aggregate-first `<Aggregate> (<Source>)`; **F17** auto-generate
+model descriptions.
+
+**Positive (keep):** **F7** RLS fail-closed guard + rule remap worked correctly end to end.

@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-15
+- chore: ts-cli — add a `[snowflake]` optional-dependency extra and a clearer remedy message when `snowflake-connector-python` is missing for `method:python` profiles (covers `pip install 'thoughtspot-cli[snowflake]'` and the isolated `uv tool install ... --with` form). Aggregate advisor F2.
+- docs: add ts-object-model-aggregates `references/remediation-plan.md` (phased plan from the first end-to-end aggregate build) and route findings into open-items.md #18.
 - chore: bump ts-cli to v0.54.0 — `ts databricks translate-formulas` now rewrites Databricks JSON colon-path access (`col:a.b`, `parse_json(col):a.b`) to a `get_json_object` pass-through, since ThoughtSpot's `sql_*_op` parser rejects the colon syntax and bracket notation fails on Databricks VARIANT (live-verified 2026-07-15).
 - docs: record the JSON-path pass-through rule across the formula-translation references (Snowflake→bracket, Databricks→get_json_object, Looker/Tableau cross-refs).
 
