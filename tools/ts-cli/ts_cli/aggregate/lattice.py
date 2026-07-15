@@ -135,13 +135,42 @@ def _cover_candidate(cand: dict, usable: list, plans: dict) -> None:
     cand["measure_columns"] = sorted(measures)
 
 
+def _consolidated_dimsets(base: set, consolidatable: set, max_width: int) -> set:
+    """One consolidated dim-set per date-column group: the union of all base
+    dims that are **safe to consolidate** (F3).
+
+    `_merge_similar_dimsets` only unions dim-sets that already OVERLAP (Jaccard
+    >= threshold), so a model whose dependents each group by a *different*
+    single dimension never yields the combined ("one wide table") grain — the
+    highest-value aggregate. This adds it: per date-column set, union the base
+    dims restricted to `consolidatable` (the caller passes the model's PHYSICAL
+    attribute columns — column_id-backed — so formula dimensions like a
+    concat(...) employee name, which can't be stored/joined in an aggregate,
+    and date columns are excluded). Capped at `max_width`. Cross-fact
+    infeasible grains are not special-cased here — the join walker / SpotQL
+    generation fails closed on them downstream (never a silent wrong number).
+    Only emits a set when it actually combines >1 dim."""
+    from collections import defaultdict
+    by_date: dict = defaultdict(set)
+    for dset, date_cols in base:
+        by_date[date_cols] |= (set(dset) & consolidatable)
+    out = set()
+    for date_cols, dims in by_date.items():
+        if 1 < len(dims) <= max_width:
+            out.add((frozenset(dims), date_cols))
+    return out
+
+
 def generate_candidates(signatures: list, plans: dict,
                         jaccard_threshold: float = 0.5,
-                        max_width: int = 8) -> list:
+                        max_width: int = 8,
+                        consolidatable_dims: Optional[set] = None) -> list:
     usable = [(i, s) for i, s in enumerate(signatures)
               if s.get("parse_status") == "full"]
     base = _base_dimsets(usable)
     merged = _merge_similar_dimsets(base, jaccard_threshold)
+    if consolidatable_dims:
+        merged |= _consolidated_dimsets(base, consolidatable_dims, max_width)
     candidates = []
     for n, (dims, date_cols) in enumerate(sorted(
             merged, key=lambda x: (len(x[0]), sorted(x[0]), sorted(x[1])))):
