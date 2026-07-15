@@ -275,6 +275,12 @@ form both return the value; `parse_json(...)['...']` fails; colon-path executes 
 Databricks but is rejected by ThoughtSpot). Canonical constraint:
 [../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#json--variant-path-access--bracket-notation-only).
 
+**Codified (ts-cli ≥ v0.54.0):** `ts databricks translate-formulas` rewrites a
+whole-expression colon path (`col:a.b`, `parse_json(col):a.b`, optional trailing
+`::string` cast) to `get_json_object({0}, '$.a.b')` automatically. Non-string casts
+(`::int`, …) and array indices (`items[0]`) are not codified — they route to
+`skipped[]` with a reason rather than emitting a wrong translation.
+
 ---
 
 ## Window Functions

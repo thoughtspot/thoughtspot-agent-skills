@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ts_cli.databricks.mv_sql import UntranslatableError
+from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 from ts_cli.databricks.mv_translate import (
     make_resolver,
     resolve_parts,
@@ -999,3 +999,57 @@ class TestGoldenSqlView:
         ta = next(e for e in out["translated"] if e["name"] == "total_amount")
         assert ta["output_kind"] == "column"
         assert ta["aggregation"] == "SUM"
+
+
+class TestJsonPathAccess:
+    """Databricks colon-path JSON access -> get_json_object pass-through.
+
+    ThoughtSpot's sql_*_op parser rejects the colon-and-dot syntax; bracket
+    notation on parse_json fails on Databricks (VARIANT is not a complex
+    type), so get_json_object is the colon-free form. Verified live
+    2026-07-15 (ts-databricks-formula-translation.md)."""
+
+    def _t(self, expr):
+        return translate_sql_expr(expr, make_resolver(TABLES))
+
+    def test_nested_path(self):
+        assert self._t("json_string:address.city") == (
+            "sql_string_op ( \"get_json_object({0}, '$.address.city')\" , "
+            "[TRANSACTIONS::json_string] )")
+
+    def test_single_key(self):
+        assert self._t("json_string:city") == (
+            "sql_string_op ( \"get_json_object({0}, '$.city')\" , "
+            "[TRANSACTIONS::json_string] )")
+
+    def test_parse_json_wrapper_is_stripped(self):
+        # parse_json(col):a.b and col:a.b translate identically —
+        # get_json_object takes the raw string column either way.
+        assert self._t("parse_json(json_string):address.city") == (
+            "sql_string_op ( \"get_json_object({0}, '$.address.city')\" , "
+            "[TRANSACTIONS::json_string] )")
+
+    def test_alias_path_column(self):
+        assert self._t("orders.raw_json:a.b") == (
+            "sql_string_op ( \"get_json_object({0}, '$.a.b')\" , "
+            "[DM_ORDER::raw_json] )")
+
+    def test_redundant_string_cast_stripped(self):
+        assert self._t("json_string:address.city::string") == (
+            "sql_string_op ( \"get_json_object({0}, '$.address.city')\" , "
+            "[TRANSACTIONS::json_string] )")
+
+    def test_non_string_cast_raises(self):
+        with pytest.raises(UntranslatableError, match="cast"):
+            self._t("json_string:amount::int")
+
+    def test_array_index_raises(self):
+        with pytest.raises(UntranslatableError):
+            self._t("json_string:items[0].sku")
+
+    def test_computed_dimension_uses_get_json_object(self):
+        dim = _dim("City", "json_string:address.city", "computed")
+        out = translate_dimension(dim, TABLES)
+        assert out["ts_expr"] == (
+            "sql_string_op ( \"get_json_object({0}, '$.address.city')\" , "
+            "[TRANSACTIONS::json_string] )")

@@ -99,9 +99,47 @@ class _Cursor:
         self.advance()
 
 
+# Databricks colon-path JSON access, e.g. `col:a.b`, `parse_json(col):a.b`,
+# `col:a.b::string`. ThoughtSpot's sql_*_op parser rejects the colon syntax and
+# bracket notation fails on Databricks VARIANT, so the colon-free form is
+# get_json_object (ts-databricks-formula-translation.md, verified 2026-07-15).
+_JSON_IDENT = r"(?:`[^`]+`|[A-Za-z_][\w$]*)"
+_JSON_PATH_RE = re.compile(
+    r"^\s*(?:parse_json\s*\(\s*(?P<pj>.+?)\s*\)"
+    rf"|(?P<bare>{_JSON_IDENT}(?:\.{_JSON_IDENT})*))"
+    r"\s*:\s*(?P<path>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)"
+    r"(?:\s*::\s*(?P<cast>[A-Za-z_]\w*))?\s*$",
+    re.IGNORECASE)
+_JSON_STRING_CASTS = frozenset({"string", "varchar", "text", "char"})
+
+
+def _try_json_path(sql: str, resolver: Callable[[str], str]) -> str | None:
+    """Whole-expression Databricks JSON colon-path -> get_json_object.
+
+    Returns a `sql_string_op` pass-through, or None if `sql` is not a JSON
+    path access (caller falls through to the normal tokenizer). A non-string
+    cast raises UntranslatableError; an array index in the path does not match
+    (falls through, then the ':' fails to tokenize -> skipped)."""
+    m = _JSON_PATH_RE.match(sql)
+    if m is None:
+        return None
+    cast = m.group("cast")
+    if cast is not None and cast.lower() not in _JSON_STRING_CASTS:
+        raise UntranslatableError(
+            f"JSON path cast '::{cast}' is not codified — only string casts map "
+            f"to get_json_object (ts-databricks-formula-translation.md)")
+    ref = (m.group("pj") or m.group("bare")).strip()
+    path = m.group("path")
+    return (f"sql_string_op ( \"get_json_object({{0}}, '$.{path}')\" , "
+            f"{resolver(ref)} )")
+
+
 def translate_sql_expr(sql: str, resolver: Callable[[str], str]) -> str:
     """Translate one Databricks SQL expression to ThoughtSpot formula text."""
     cleaned = strip_sql_comments(sql)
+    json_out = _try_json_path(cleaned, resolver)
+    if json_out is not None:
+        return json_out
     cur = _Cursor(tokenize(cleaned))
     out = _expr(cur, resolver)
     kind, text = cur.peek()

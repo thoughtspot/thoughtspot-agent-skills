@@ -1973,8 +1973,10 @@ Translate a `parse-mv` result into ThoughtSpot formula text for the
 dot-path column resolution, the `ts-databricks-formula-translation.md`
 function map, conditional (`FILTER (WHERE …)`) aggregates, LOD `group_aggregate`
 windows, the full window decision tree (trailing/leading/cumulative/current,
-post-PR-1 corrected forms), and cross-measure (`MEASURE()`/`ANY_VALUE()`)
-inlining in dependency order (Databricks needs no phased import).
+post-PR-1 corrected forms), cross-measure (`MEASURE()`/`ANY_VALUE()`)
+inlining in dependency order (Databricks needs no phased import), and
+JSON colon-path access (`col:a.b`, `parse_json(col):a.b`) rewritten to a
+`get_json_object` pass-through (ThoughtSpot rejects the colon syntax).
 
 ```bash
 ts databricks translate-formulas \
