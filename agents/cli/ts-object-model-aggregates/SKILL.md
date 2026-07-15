@@ -862,25 +862,44 @@ later candidate.
 ## Step 7 — Verify Routing
 
 For each candidate imported in Step 6, spot-check that a query which should route
-does, and one that shouldn't, doesn't. Use
-[ts-object-model-spotql-query](../ts-object-model-spotql-query/SKILL.md), or directly:
+does, and one that shouldn't, doesn't, via
+[ts-object-model-spotql-query](../ts-object-model-spotql-query/SKILL.md) or directly.
+
+**First get the correct SpotQL wrapper per measure — do NOT guess.** `ts spotql
+generate-sql` DOES reflect aggregate-aware routing (including for semi-additive
+measures — this was verified live 2026-07-15), but only when each measure is referenced
+with the right aggregation wrapper, and the wrong one errors instead of routing:
+
+```bash
+source ~/.zshenv && ts spotql classify-columns --model {model_guid} --profile "{profile_name}"
+```
+
+Each measure's `kind`/`wrapper` tells you how to reference it in the SELECT:
+- `raw_measure` → `SUM("<m>")` (a plain measure column — but see Step 5a; you should have
+  promoted these to formulas already, else they won't route at all)
+- `aggregate_measure` (formula whose expr already aggregates, e.g. a promoted
+  `Amount = sum(...)`) → **`AGG("<m>")`** — `SUM(...)` errors `NESTED_AGGREGATE_NOT_SUPPORTED`
+- `semiadditive_measure` (outermost op `last_value`/`first_value`, e.g. `Inventory Balance`)
+  → **`SUM("<m>")`** — `AGG(...)` errors `NON_CONVERTIBLE_FUNCTION`
+
+Then build the routing check at the candidate's exact grain (double-quoted identifiers,
+a `FROM "<model>" AS "t1"` alias, dimension columns in `GROUP BY`), e.g. for an
+aggregate-formula measure:
 
 ```bash
 source ~/.zshenv && ts spotql generate-sql \
-  'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' \
+  'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{profile_name}"
 ```
 
-SpotQL requires double-quoted identifiers, a table alias, and quoted column
-references (see the worked example in `tools/ts-cli/README.md`'s `ts spotql` section).
-Build the SELECT to match the candidate's exact grain — swap the illustrative
-`"Region"`/`"Sales"`/`"ORDERS"` above for this candidate's dimension columns, bucketed
-date column, and the measures it covers, keeping every identifier quoted and the
-`FROM "…" AS "t1"` alias in place. Inspect the returned `executable_sql` for the
-**aggregate table's physical name** (`table_spec.json`'s `db_table`). If present,
-routing worked. Then run a **detail-grain** query (one that needs a column outside
-the aggregate's grain) and confirm `executable_sql` references the **primary's**
-table(s) instead — the fallback path.
+Inspect the returned `executable_sql` for the **aggregate table's physical name**
+(`table_spec.json`'s `db_table`). If present, routing worked. Then run a **detail-grain**
+query (one that needs a column outside the aggregate's grain — e.g. a raw/daily date) and
+confirm `executable_sql` references the **primary's** table(s) instead — the fallback path.
+(A deeper cross-check — run the query through the Search Data API and inspect Snowflake
+`QUERY_HISTORY` for the scanned table — is optional; the aggregate table's columns
+(`amount_sum`, the bucketed date) appear only in the aggregate, so their presence in the
+scanned SQL is definitive.)
 
 If the candidate covers a NONADDITIVE measure at all (per
 [measure-decomposition-rules.md](references/measure-decomposition-rules.md)), also
@@ -890,12 +909,14 @@ primary rather than silently returning a wrong number from the aggregate (see
 
 **RLS leak-test — the live gate for propagated security (Task 23).** If 6e showed a
 propagated `rls_rules` block for this candidate, it is provisional until this test
-passes. Re-run the same aggregate-hit query above, but authenticated as a user who is
-actually subject to the base table's RLS rule instead of `{profile_name}`:
+passes. Re-run the same aggregate-hit query above (same wrapper per `classify-columns` —
+`AGG(...)` for an aggregate-formula measure, `SUM(...)` for a semi-additive one), but
+authenticated as a user who is actually subject to the base table's RLS rule instead of
+`{profile_name}`:
 
 ```bash
 source ~/.zshenv && ts spotql generate-sql \
-  'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' \
+  'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{restricted_user_profile}"
 ```
 

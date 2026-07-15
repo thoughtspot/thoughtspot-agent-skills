@@ -98,17 +98,18 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 - *Truth:* `ts spotql generate-sql` DOES reflect routing, including semi-additive, when the
   measure is referenced with the right wrapper. `classify-columns` returns it:
   `raw→SUM`, `aggregate_measure→AGG`, `semiadditive_measure→SUM`.
-- *Fix (SKILL.md Step 7):* (1) replace the hardcoded `SUM("Sales")` example with a
-  classify-columns-driven wrapper choice per measure; (2) give worked examples for all three
-  kinds; (3) keep Search Data API + QUERY_HISTORY as an optional deeper check, not the primary.
+- *Fix (DONE, SKILL.md Step 7 rewritten):* Step 7 now runs `ts spotql classify-columns`
+  first and references each measure with the right wrapper (raw→SUM, aggregate_measure→AGG,
+  semiadditive→SUM); the wrong `SUM("Sales")` example is gone; Search Data API +
+  QUERY_HISTORY noted as an optional deeper check.
 - *Tests:* Step-7 helper picks `AGG` for an aggregate-formula measure, `SUM` for semi-additive.
 - *Verify live:* done — `SUM("Inventory Balance")`→B, `AGG("Amount")`→A, both SUCCESS.
 
-**F14 — RLS leak-test.**
-- *Fix (SKILL.md Step 7 + open-item #17):* require a routed query as a restricted (non-bypass)
-  user and confirm returned rows obey the rule; only then mark RLS "enforced", else report
-  "attached but unverified". Needs a `{restricted_user_profile}`.
-- *Verify live:* outstanding for this deployment (see §4).
+**F14 — RLS leak-test. Procedure DONE; live run still owed.**
+- *Fix (DONE, SKILL.md Step 7):* the leak-test query now uses the correct wrapper; procedure
+  requires a routed query as a restricted (non-bypass) user, confirming rows obey the rule
+  before marking RLS "enforced" (else "attached but unverified"). Needs `{restricted_user_profile}`.
+- *Verify live:* still owed on the skill re-run (open-item #17).
 
 ### Theme C — Capability (the value gap; all designs done by hand this run)  [F3, F5, F12, F4, F15]
 
