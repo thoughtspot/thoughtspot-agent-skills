@@ -88,6 +88,49 @@ def _curve_entry(candidate: dict, gain: float, covered_set: set,
     }
 
 
+def _combined_subsumes(combined: dict, single: dict) -> bool:
+    """A single-dimension candidate is genuinely consolidated by `combined` only
+    when its dimension is actually IN the combined grain AND its covered
+    signatures are a subset — otherwise a date-grain candidate that merely
+    covers the grand-total signatures (its own date-specific query uncovered)
+    would show as subsumed by a dimension-grain table that doesn't serve it."""
+    return (set(single["dimensions"]) <= set(combined.get("dimensions") or [])
+            and set(single["covered"]) <= set(combined.get("covered") or []))
+
+
+def consolidation_analysis(candidates: list) -> list:
+    """Combine-vs-split (F4): for each multi-dimension (consolidated) candidate,
+    the single-dimension candidates whose coverage it SUBSUMES (covers a
+    superset of their signatures) plus the row-count trade-off — so `recommend`
+    can show "one wide table vs N narrow ones" explicitly instead of leaving the
+    user to work it out (the analysis done by hand on the first build).
+
+    Only emitted when a combined candidate subsumes >= 2 narrow grains.
+    `narrow_total_rows` sums the narrow grains' rows (what N separate aggregates
+    would cost to store); compare against `combined_agg_rows` (one object, but a
+    query that would hit a tiny narrow grain now scans the wider combined one).
+    Row fields are None until candidates are profiled (`agg_rows`)."""
+    singles = [c for c in candidates if len(c.get("dimensions") or []) == 1
+               and c.get("covered")]
+    out = []
+    for c in candidates:
+        if len(c.get("dimensions") or []) <= 1:
+            continue
+        subsumed = [s for s in singles if _combined_subsumes(c, s)]
+        if len(subsumed) < 2:
+            continue
+        rows = [s.get("agg_rows") for s in subsumed]
+        out.append({
+            "combined": c["id"],
+            "combined_dimensions": c.get("dimensions"),
+            "combined_agg_rows": c.get("agg_rows"),
+            "subsumes": [{"id": s["id"], "dimensions": s.get("dimensions"),
+                          "agg_rows": s.get("agg_rows")} for s in subsumed],
+            "narrow_total_rows": sum(rows) if all(r is not None for r in rows) else None,
+        })
+    return out
+
+
 def greedy_select(candidates: list, signatures: list,
                   base_rows: Optional[int] = None,
                   max_select: int = 10) -> dict:

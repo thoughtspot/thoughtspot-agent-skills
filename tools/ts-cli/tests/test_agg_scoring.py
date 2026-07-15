@@ -50,3 +50,61 @@ def test_curve_reports_cumulative_coverage_pct():
     result = greedy_select(cands, sigs)
     assert result["curve"][0]["cumulative_coverage_pct"] == 50.0
     assert result["curve"][1]["cumulative_coverage_pct"] == 100.0
+
+
+def test_consolidation_analysis_reports_combined_vs_narrow():
+    from ts_cli.aggregate.scoring import consolidation_analysis
+    candidates = [
+        {"id": "c_state", "dimensions": ["State"], "covered": [0], "agg_rows": 14},
+        {"id": "c_cat", "dimensions": ["Category"], "covered": [1], "agg_rows": 8},
+        {"id": "c_prod", "dimensions": ["Product"], "covered": [2], "agg_rows": 77},
+        {"id": "c_combined", "dimensions": ["State", "Category", "Product"],
+         "covered": [0, 1, 2], "agg_rows": 6776},
+    ]
+    out = consolidation_analysis(candidates)
+    assert len(out) == 1
+    a = out[0]
+    assert a["combined"] == "c_combined" and a["combined_agg_rows"] == 6776
+    assert {s["id"] for s in a["subsumes"]} == {"c_state", "c_cat", "c_prod"}
+    assert a["narrow_total_rows"] == 14 + 8 + 77   # what N separate aggregates cost
+
+
+def test_consolidation_analysis_skips_when_fewer_than_two_subsumed():
+    from ts_cli.aggregate.scoring import consolidation_analysis
+    # A combined grain that only subsumes one narrow grain isn't a meaningful
+    # combine-vs-split trade-off.
+    candidates = [
+        {"id": "c_state", "dimensions": ["State"], "covered": [0], "agg_rows": 14},
+        {"id": "c_two", "dimensions": ["State", "Region"], "covered": [0], "agg_rows": 50},
+    ]
+    assert consolidation_analysis(candidates) == []
+
+
+def test_consolidation_analysis_rows_none_until_profiled():
+    from ts_cli.aggregate.scoring import consolidation_analysis
+    candidates = [
+        {"id": "a", "dimensions": ["A"], "covered": [0]},
+        {"id": "b", "dimensions": ["B"], "covered": [1]},
+        {"id": "ab", "dimensions": ["A", "B"], "covered": [0, 1]},
+    ]
+    out = consolidation_analysis(candidates)
+    assert out[0]["narrow_total_rows"] is None      # unprofiled -> no row total
+    assert out[0]["combined_agg_rows"] is None
+
+
+def test_consolidation_analysis_excludes_narrow_dim_not_in_combined():
+    from ts_cli.aggregate.scoring import consolidation_analysis
+    # cand_date covers only the grand-total sig (0) — a subset of the combined's
+    # coverage — but its dim ("Balance Date") is NOT in the combined grain, so
+    # it must NOT be reported as subsumed (the combined table doesn't serve
+    # Balance-Date-grouped queries).
+    candidates = [
+        {"id": "c_state", "dimensions": ["State"], "covered": [0, 1], "agg_rows": 14},
+        {"id": "c_cat", "dimensions": ["Category"], "covered": [0, 2], "agg_rows": 8},
+        {"id": "c_date", "dimensions": ["Balance Date"], "covered": [0], "agg_rows": 300},
+        {"id": "c_combined", "dimensions": ["State", "Category"],
+         "covered": [0, 1, 2], "agg_rows": 100},
+    ]
+    out = consolidation_analysis(candidates)
+    assert {s["id"] for s in out[0]["subsumes"]} == {"c_state", "c_cat"}
+    assert "c_date" not in {s["id"] for s in out[0]["subsumes"]}

@@ -57,3 +57,35 @@ def semiadditive_measures(plans: dict) -> list:
             })
     return out
 
+
+_DATE_DTYPES = {"DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"}
+
+
+def _physical_attribute_dims(model_tml: dict, table_tmls: dict) -> set:
+    """Physical (column_id-backed) non-date ATTRIBUTE columns — the dims safe to
+    consolidate into a combined-grain candidate (F3, `lattice._consolidated_dimsets`).
+
+    Excludes MEASURE columns and formula-backed columns (a `formula_id` with no
+    `column_id` — e.g. a `concat(...)` employee-name dimension that can't be
+    stored/joined in an aggregate table). Date columns are excluded too, but the
+    type must be read from the TABLE TML: Model attribute columns frequently
+    carry no `data_type` (so a role-playing date like "Order Date" reads as a
+    plain attribute at the Model level and would otherwise be consolidated as a
+    raw-date dim, exploding the grain). Resolve each column's physical type via
+    its `column_id` (TABLE::COL) against `table_tmls` and drop the date ones."""
+    out = set()
+    for c in model_tml.get("model", {}).get("columns", []) or []:
+        props = c.get("properties", {}) or {}
+        cid = c.get("column_id")
+        if props.get("column_type") == "MEASURE" or not cid or "::" not in cid:
+            continue
+        tbl, col = cid.split("::", 1)
+        tdoc = (table_tmls.get(tbl) or {}).get("table", {})
+        dtype = next(((tc.get("db_column_properties") or {}).get("data_type", "")
+                      for tc in tdoc.get("columns", []) or []
+                      if col in (tc.get("name"), tc.get("db_column_name"))), "")
+        if (dtype or "").upper() in _DATE_DTYPES:
+            continue
+        out.add(c["name"])
+    return out
+
