@@ -24,7 +24,10 @@ from typer.testing import CliRunner
 import ts_cli.commands.tables as tables_mod
 from ts_cli.cli import app
 
-runner = CliRunner(mix_stderr=False)
+try:
+    runner = CliRunner(mix_stderr=False)
+except TypeError:  # Click >= 8.2 removed mix_stderr (stderr separated by default)
+    runner = CliRunner()
 
 _RLS_SPEC = {
     "name": "SALES_AGG",
