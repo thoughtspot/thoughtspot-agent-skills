@@ -3,7 +3,7 @@
 Format per [.claude/rules/api-research.md](../../../../.claude/rules/api-research.md).
 
 **Status (updated 2026-07-14):** the core behaviours have been VERIFIED live on the
-aggregate-aware cluster (172.32.87.7): **#0, #1, #2, #6, #7, #8, #10** verified, and the
+aggregate-aware cluster: **#0, #1, #2, #6, #7, #8, #10** verified, and the
 DDL-from-SpotQL path (#14) proven end-to-end (a generated aggregate matched the detail
 total exactly). **#11, #12, #14, #15** are IMPLEMENTED + unit-tested with a live re-check
 pending; **#13** is DEFERRED (explicit non-v1). The remaining OPEN items — **#3** (model
@@ -23,7 +23,7 @@ check pending) | **DEFERRED** (explicit non-v1 decision, tracked as a follow-up)
 
 ---
 
-## #0 — Does routing fire + trigger condition — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+## #0 — Does routing fire + trigger condition — VERIFIED 2026-07-13 (aggregate-aware cluster)
 
 **RESULT: routing works, and fires ONLY for FORMULA measures — not plain
 measure columns.** A `[Agg Test Sales] [Product Category]` query (where
@@ -106,7 +106,7 @@ scanned physical table is the aggregate, not the detail fact.
    how the skill's **Step 7 routing-verification** must observe routing —
    currently Step 7 inspects SpotQL SQL, which may not surface routing.
 
-## #1 — Date re-aggregation — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+## #1 — Date re-aggregation — VERIFIED 2026-07-13 (aggregate-aware cluster)
 
 **RESULT: finer-serves-coarser confirmed — `bucket_covers` is correct as written.**
 Against a MONTHLY aggregate (`DM_AGG_CAT_MONTHLY`): a **monthly** query routed to
@@ -319,7 +319,7 @@ a routed query to confirm it resolves.
 
 ---
 
-## #6 — Multi-aggregate precedence — VERIFIED 2026-07-13 (aggregate-aware cluster 172.32.87.7)
+## #6 — Multi-aggregate precedence — VERIFIED 2026-07-13 (aggregate-aware cluster)
 
 **RESULT: first-match by `aggregated_models` definition order — NOT auto-smallest.**
 With two aggregates both able to serve a category query (`DM_AGG_CAT`, 8 rows, and
@@ -457,7 +457,7 @@ the org's week start isn't Monday).
 
 ---
 
-## #10 — Filter-precision-vs-bucket — VERIFIED SAFE 2026-07-14 (aggregate-aware cluster 172.32.87.7)
+## #10 — Filter-precision-vs-bucket — VERIFIED SAFE 2026-07-14 (aggregate-aware cluster)
 
 **RESULT: the engine self-protects — no wrong/empty results.** A MONTHLY-grain
 query filtered at DAY precision (`[Transaction Date] = '01/15/2024'`) against a
