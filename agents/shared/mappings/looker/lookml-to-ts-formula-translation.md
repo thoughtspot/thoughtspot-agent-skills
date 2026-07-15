@@ -137,8 +137,11 @@ notation:
 
 Canonical rule:
 [../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#json--variant-path-access--bracket-notation-only).
-The bracket form must be valid SQL for the explore's warehouse dialect — verified for
-Snowflake (2026-07-15); confirm for BigQuery/Redshift/etc. before relying on it.
+The colon-free replacement must be valid SQL for the explore's warehouse dialect —
+bracket notation is verified for Snowflake (2026-07-15) but is **not** valid on
+Databricks (use `get_json_object` there — see
+[../ts-databricks/ts-databricks-formula-translation.md](../ts-databricks/ts-databricks-formula-translation.md)).
+Confirm the form for BigQuery/Redshift/etc. before relying on it.
 
 ---
 

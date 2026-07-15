@@ -577,10 +577,14 @@ trailing `::STRING` cast is optional — keep it only if the warehouse needs the
 VARIANT→scalar cast.
 
 This is a **ThoughtSpot formula-parser constraint, not a warehouse constraint** — it
-applies to any pass-through carrying a JSON path regardless of source platform
-(Snowflake `PARSE_JSON`/`GET_PATH`, Databricks `:` path access, etc.). Verified on
-Snowflake 2026-07-15; confirm the bracket form is valid warehouse SQL before relying on
-it for a non-Snowflake source.
+applies to any pass-through carrying a JSON path regardless of source platform. The
+colon-free *replacement*, however, is platform-specific — the bracket form above is
+valid on **Snowflake** (verified 2026-07-15) but **not on Databricks**, where
+`parse_json(col)['key']` errors (`VARIANT` is not a bracket-extractable type) and the
+correct colon-free form is `get_json_object(col, '$.key')`. Use the per-platform
+mapping for the right replacement:
+[Snowflake](../mappings/ts-snowflake/ts-snowflake-formula-translation.md),
+[Databricks](../mappings/ts-databricks/ts-databricks-formula-translation.md).
 
 ### Window functions inside `sql_*_aggregate_op`
 

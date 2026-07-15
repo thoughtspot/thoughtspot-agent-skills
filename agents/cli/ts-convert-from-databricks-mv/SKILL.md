@@ -1035,7 +1035,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.8.3 | 2026-07-15 | JSON/VARIANT path access: emit `['key']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects colon-and-dot path syntax (`col:field.subfield`). Same ThoughtSpot-side constraint verified on Snowflake; not yet Databricks-live-verified. |
+| 1.8.3 | 2026-07-15 | JSON path access: ThoughtSpot's formula parser rejects Databricks colon-path syntax (`col:field.subfield`) in `sql_*_op` pass-throughs. Emit `get_json_object({0}, '$.field.subfield')` — bracket notation on `parse_json` FAILS on Databricks (`VARIANT` is not a complex type). Live-verified on Databricks 2026-07-15. |
 | 1.8.2 | 2026-07-11 | Databricks MV schema: `parameters:` GA + tiered runtime requirement (16.4/17.3/18.1/18.2) documented (audit 13.1/13.10). |
 | 1.8.1 | 2026-07-10 | Pre-import lint gate extracted to shared `ts-tml-import-gate.md` (BL-063 PR5) — content unchanged, now linked. |
 | 1.8.0 | 2026-07-10 | Steps 5/6/9/9.5/10/11 rewired onto ts databricks parse-mv / translate-formulas / build-model; tables.json v2 |

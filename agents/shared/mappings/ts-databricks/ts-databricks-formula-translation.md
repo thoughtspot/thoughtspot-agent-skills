@@ -256,20 +256,24 @@ The inner expression is already valid SQL. Strip the wrapper function and emit
 the contents. If the SQL uses Snowflake-specific syntax, translate it to
 Databricks SQL equivalents.
 
-### JSON / VARIANT path access — bracket notation in the TS template
+### JSON path access — use `get_json_object`, NOT bracket notation
 
 Databricks colon-path access for semi-structured columns (`col:field.subfield`) is
-valid Databricks SQL but **fails ThoughtSpot's `sql_*_op` template parser**. When a
-`sql_*_op` pass-through carries a JSON path, convert each segment to `['field']`
-bracket notation in the ThoughtSpot template (`col:field.subfield` →
-`{0}['field']['subfield']`). Canonical rule:
-[../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#json--variant-path-access--bracket-notation-only).
-`get_json_object(col, '$.field')` and `from_json(...)` have no colon-path syntax and
-pass through unchanged.
+valid Databricks SQL but **fails ThoughtSpot's `sql_*_op` template parser**. The
+Snowflake fix — bracket notation on the parsed value — **does not work on Databricks**:
+`parse_json(col)['field']` errors with `INVALID_EXTRACT_BASE_FIELD_TYPE` because `[...]`
+extraction requires a complex type (`STRUCT`/`ARRAY`/`MAP`), and `parse_json` returns
+`VARIANT`. Use one of these colon-free forms instead:
 
-> Same ThoughtSpot-side parser constraint verified on Snowflake (2026-07-15); not yet
-> live-verified on Databricks. Confirm the bracket form is valid Databricks SQL for the
-> specific column type before relying on it.
+| Databricks JSON access | ThoughtSpot pass-through | Notes |
+|---|---|---|
+| `col:field.subfield` (rejected by TS) | `sql_string_op ( "get_json_object({0}, '$.field.subfield')" , [T::COL] )` | **Preferred.** No colon, no schema needed. The `'$.path'` is a quoted string literal, so the TS parser accepts it. |
+| — | `sql_string_op ( "from_json({0}, 'field struct<subfield:string>')['field']['subfield']" , [T::COL] )` | Bracket extraction is valid here because `from_json` returns `STRUCT`. Requires declaring the JSON schema in the template — more verbose; use when you need typed nested extraction. |
+
+Verified live on Databricks 2026-07-15 (`get_json_object` and the `from_json`+bracket
+form both return the value; `parse_json(...)['...']` fails; colon-path executes on
+Databricks but is rejected by ThoughtSpot). Canonical constraint:
+[../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#json--variant-path-access--bracket-notation-only).
 
 ---
 
