@@ -17,6 +17,15 @@ _RATIO = re.compile(
     r"^\s*(sum|count)\s*\(\s*\[([^\]]+)\]\s*\)\s*/\s*(sum|count)\s*\(\s*\[([^\]]+)\]\s*\)\s*$",
     re.I,
 )
+# safe_divide(sum([a]), sum([b])) — ThoughtSpot's null-safe division; decomposes
+# exactly like the `a/b` ratio above (store both component sums, re-divide at the
+# aggregate grain), but the model_expr keeps safe_divide so the aggregate matches
+# the primary's own null-handling.
+_SAFE_DIVIDE = re.compile(
+    r"^\s*safe_divide\s*\(\s*(sum|count)\s*\(\s*\[([^\]]+)\]\s*\)\s*,"
+    r"\s*(sum|count)\s*\(\s*\[([^\]]+)\]\s*\)\s*\)\s*$",
+    re.I,
+)
 
 
 def _slug(name: str) -> str:
@@ -105,6 +114,16 @@ def classify_measure(name: str, aggregation: Optional[str] = None,
         ]
         return _plan(name, "RATIO", True, comps,
                      model_expr=f"sum ( [{slug}_num] ) / sum ( [{slug}_den] )")
+
+    m = _SAFE_DIVIDE.match(expr)
+    if m:
+        nfn, ncol, dfn, dcol = m.group(1).upper(), m.group(2), m.group(3).upper(), m.group(4)
+        comps = [
+            {"alias": f"{slug}_num", "source_column": ncol, "func": nfn, "reagg": "SUM"},
+            {"alias": f"{slug}_den", "source_column": dcol, "func": dfn, "reagg": "SUM"},
+        ]
+        return _plan(name, "RATIO", True, comps,
+                     model_expr=f"safe_divide ( sum ( [{slug}_num] ) , sum ( [{slug}_den] ) )")
 
     return _plan(name, "UNKNOWN", False)
 

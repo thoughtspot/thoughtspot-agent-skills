@@ -165,3 +165,19 @@ def test_build_rewrite_plans_reads_model_tml():
     plans = build_rewrite_plans(model_tml)
     assert set(plans) == {"Sales", "Avg Sale"}
     assert plans["Avg Sale"]["class"] == "AVG"
+
+
+def test_safe_divide_ratio_decomposes_like_division():
+    # F5: safe_divide(sum(a), sum(b)) (ThoughtSpot null-safe division, e.g.
+    # "Average Revenue Per Unit") must decompose to two component sums so the
+    # ratio is routable — previously fell through to UNKNOWN/non-decomposable.
+    p = classify_measure(
+        "Average Revenue Per Unit",
+        expr="safe_divide ( sum ( [DM_ORDER_DETAIL::LINE_TOTAL] ) , "
+             "sum ( [DM_ORDER_DETAIL::QUANTITY] ) )")
+    assert p["class"] == "RATIO" and p["decomposable"] is True
+    aliases = {c["alias"] for c in p["components"]}
+    assert aliases == {"average_revenue_per_unit_num", "average_revenue_per_unit_den"}
+    # model_expr preserves safe_divide so the aggregate matches the primary's null handling
+    assert p["model_expr"].startswith("safe_divide (")
+    assert all(c["reagg"] == "SUM" for c in p["components"])

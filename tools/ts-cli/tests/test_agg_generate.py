@@ -359,3 +359,29 @@ def test_min_max_primary_measure_becomes_formula_over_reagg_component():
                                       table_name="AGG_T", connection_name="SF Prod")
     scols = {c["name"]: c for c in spec["columns"]}
     assert scols["peak_price_max"]["aggregation"] == "MAX"
+
+
+def test_ratio_measure_flows_through_generate_end_to_end():
+    # F5: a safe_divide ratio must produce two hidden component sums in the
+    # table spec AND a safe_divide formula in the model (routable aggregate
+    # measure) — the walker handles the multi-component SELECT (SpotQL rejects
+    # it and falls back).
+    model = {"model": {"name": "M", "columns": [
+        {"name": "Category", "column_id": "FACT::CATEGORY",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "ARPU", "formula_id": "f_arpu",
+         "properties": {"column_type": "MEASURE"}}],
+        "formulas": [{"id": "f_arpu", "name": "ARPU",
+                      "expr": "safe_divide ( sum ( [FACT::AMOUNT] ) , sum ( [FACT::QTY] ) )"}]}}
+    cand = {"id": "c", "dimensions": ["Category"], "date_column": None,
+            "bucket": None, "measure_columns": ["ARPU"], "covered": [0], "flags": []}
+    plans = {"ARPU": classify_measure(
+        "ARPU", expr="safe_divide ( sum ( [FACT::AMOUNT] ) , sum ( [FACT::QTY] ) )")}
+    spec = build_aggregate_table_spec(cand, plans, model, db="D", schema="S",
+                                      table_name="T", connection_name="C")
+    names = {c["name"] for c in spec["columns"]}
+    assert "arpu_num" in names and "arpu_den" in names
+    tml = build_aggregate_model_tml(cand, plans, model, agg_table_name="T",
+                                    model_name="T (M)", connection_name="C")
+    arpu_formula = [f for f in tml["model"]["formulas"] if f["name"] == "ARPU"][0]
+    assert arpu_formula["expr"].startswith("safe_divide (")
