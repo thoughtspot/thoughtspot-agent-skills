@@ -197,3 +197,38 @@ The two aggregates are built and routing-verified, but to match the three refine
    "Monthly Sales & Inventory (Dunder Mifflin Sales & Inventory)".
 3. **Apply descriptions** (F17).
 4. **RLS leak-test** (F14): run a routed query as a restricted user; confirm row filtering.
+
+---
+
+## 5. Phase 2 progress (branch feat/agg-advisor-phase2 — live-validated 2026-07-15)
+
+**DONE + LIVE-VALIDATED** on the aggregate-aware cluster (full recommend→profile→generate→
+route re-run of Dunder Mifflin):
+- **F5-ratio** — `safe_divide(sum,sum)` now decomposed; the ratio measure generates a routable
+  `safe_divide(sum([num]),sum([den]))` aggregate. Live: Average Revenue Per Unit routes to the
+  aggregate with exact numbers.
+- **_resolve physical-path fix** — a measure component's `source_column` is often a physical
+  `TABLE::COL` path (any formula measure; a ratio's num/den); `_resolve` now accepts it. Without
+  this every candidate covering a formula measure was skipped during profiling.
+- **F8 per-component typing** — each component typed from its OWN `source_column` (ratio den of
+  an int column → INT64), not the measure's first ref. Live: table registered with no manual patch.
+- **Re-validated live** (all already merged via #244): F1(a) base_rows=1,208,243 not 8; F1(b)
+  guard; F2 connector; F9 routing_ineligible; F16 naming; F17 description; F10/11/13 generate-sql
+  routing via classify-columns wrappers. Profiler now yields the correct compression ranking
+  automatically.
+
+**REMAINING (not done — deferred as higher-risk / needs careful supervised work):**
+- **F5-semi-additive** (`last_value(sum(col),query_groups(),{date})`, e.g. Inventory Balance):
+  measures.classify_measure still returns UNKNOWN. *Promising low-risk path:* don't hand-roll the
+  windowed month-end SELECT — reuse ThoughtSpot's own SpotQL compiler. Make classify_measure emit
+  a SEMIADDITIVE decomposable plan; make `spotql_aggregate.build_spotql` emit `SUM("<measure>")`
+  for it (the classify-columns wrapper) instead of raising UnsupportedMeasureError; ThoughtSpot
+  compiles that to the verified-correct `last_value() OVER (PARTITION BY grain ORDER BY date)`
+  SQL, which `wrap_as_ddl` stores; generate emits a `last_value(sum([component]),query_groups(),
+  {[bucketed date]})` model formula. Gate on the live 3,828 month-end total.
+- **F3 multi-dim** — `lattice._merge_similar_dimsets` only unions dim-sets with jaccard≥0.5
+  (overlap); disjoint single-dims never combine. Add a consolidated-union candidate per date-col
+  group, BUT guard multi-fact join feasibility (a naive union can mix facts with no join path,
+  e.g. Amount×BalanceDate) — cap to dims reachable from the measures' fact.
+- **F12 conformed date**, **F4 combine-vs-split**, **F1(c)** SpotQL fallback root cause,
+  **F14** restricted-user RLS leak-test (needs a non-bypass profile).
