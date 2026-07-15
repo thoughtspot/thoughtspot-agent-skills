@@ -150,8 +150,12 @@ def test_recommend_cost_mode_reports_excluded_unprofiled(tmp_path):
     assert result.exit_code == 0, result.output
     out = json.loads(result.stdout)
     assert out["mode"] == "cost"
-    region_ids = [c["id"] for c in saved["candidates"] if c["dimensions"] == ["Region"]]
-    assert out["excluded_unprofiled"] == region_ids
+    # The profiled Category candidate is NOT excluded; every other (unprofiled)
+    # candidate is surfaced — the single Region grain and the F3-added combined
+    # Category x Region grain (also unprofiled).
+    profiled = {c["id"] for c in saved["candidates"] if c["dimensions"] == ["Category"]}
+    all_ids = {c["id"] for c in saved["candidates"]}
+    assert set(out["excluded_unprofiled"]) == all_ids - profiled
 
 
 def test_candidate_key_distinguishes_single_vs_multi_date_grains():
@@ -1732,3 +1736,27 @@ def test_semiadditive_measures_surfaced():
     out = semiadditive_measures(plans)
     assert [o["measure"] for o in out] == ["Inventory Balance"]
     assert "recipe" in out[0]["remedy"]
+
+
+def test_physical_attribute_dims_excludes_measures_formulas_dates():
+    from ts_cli.commands.aggregate import _physical_attribute_dims
+    # Order Date carries NO data_type on the Model column (common for role-playing
+    # dates) — the DATE type must be read from the TABLE TML, else it would be
+    # consolidated as a raw-date dim.
+    model = {"model": {"columns": [
+        {"name": "State", "column_id": "C::STATE",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Employee", "formula_id": "f",           # formula dim -> excluded
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Order Date", "column_id": "O::DT",       # date (per table TML) -> excluded
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Amount", "column_id": "O::AMT",          # measure -> excluded
+         "properties": {"column_type": "MEASURE"}}]}}
+    tables = {
+        "C": {"table": {"columns": [{"name": "STATE", "db_column_name": "STATE",
+              "db_column_properties": {"data_type": "VARCHAR"}}]}},
+        "O": {"table": {"columns": [
+            {"name": "DT", "db_column_name": "DT", "db_column_properties": {"data_type": "DATE"}},
+            {"name": "AMT", "db_column_name": "AMT", "db_column_properties": {"data_type": "DOUBLE"}}]}},
+    }
+    assert _physical_attribute_dims(model, tables) == {"State"}
