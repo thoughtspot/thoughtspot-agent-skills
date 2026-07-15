@@ -91,7 +91,62 @@ def auto_name(cols: list[str], measure_names: set) -> Optional[str]:
 
 
 _CARTESIAN = ("COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN", "STACKED_BAR",
-              "LINE_COLUMN", "LINE_STACKED_COLUMN")
+              "LINE_COLUMN", "LINE_STACKED_COLUMN",
+              # Muze (ADVANCED_*) cartesian types accept axis_configs by display name on a
+              # fresh import (live-verified) — they auto-resolve line-vs-column for combos.
+              "ADVANCED_COLUMN", "ADVANCED_BAR", "ADVANCED_LINE", "ADVANCED_AREA",
+              "ADVANCED_STACKED_COLUMN", "ADVANCED_LINE_COLUMN", "ADVANCED_LINE_STACKED_COLUMN")
+
+# Date/time bucket keyword (in a `[Col].<bucket>` search token) → the label ThoughtSpot
+# renames the output column to (e.g. `[Order Date].monthly` → output column `Month(Order Date)`).
+# A bucketed column MUST be referenced by this resolved name in chart_columns / axis_configs /
+# table — the raw name won't match the search output (live-verified on ps-internal).
+_BUCKET_LABEL = {
+    "monthly": "Month", "quarterly": "Quarter", "yearly": "Year", "annual": "Year",
+    "weekly": "Week", "daily": "Day", "hourly": "Hour",
+    "monthofyear": "Month", "dayofweek": "Day", "monthly_bucket": "Month",
+}
+
+
+def _bucket_label(token: Optional[str]) -> Optional[str]:
+    """`[Order Date].monthly` → `Month`; None if the token carries no known bucket."""
+    if not token:
+        return None
+    m = re.search(r"\]\.(\w+)\s*$", token)
+    return _BUCKET_LABEL.get(m.group(1).lower()) if m else None
+
+
+def _output_name(col: str, bucket_tokens: dict) -> str:
+    """Resolved output-column name: `Month(Order Date)` for a bucketed date, else the raw name."""
+    lbl = _bucket_label(bucket_tokens.get(col))
+    return f"{lbl}({col})" if lbl else col
+
+
+_GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                      r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _custom_chart_config_is_guid_based(ccc: Any) -> bool:
+    """True iff every column reference in a custom_chart_config is a GUID.
+
+    custom_chart_config axes reference columns by GUID (assigned when an answer is created),
+    NOT by display name — a fresh import with display names errors `Invalid GUID string`
+    (live-verified). So a hand-authored, display-name config is invalid; only a captured
+    (exported) config with real GUIDs is replayable. Returns False for the display-name case
+    so the emitter can drop it and fall back to auto-resolution.
+    """
+    if not isinstance(ccc, list):
+        return False
+    seen = False
+    for cfg in ccc:
+        for dim in (cfg or {}).get("dimensions", []):
+            for ax in (dim or {}).get("axes", []):
+                refs = ([ax["column"]] if ax.get("column") else []) + list(ax.get("columns") or [])
+                for r in refs:
+                    seen = True
+                    if not _GUID_RE.match(str(r)):
+                        return False
+    return seen
 
 
 def _first(*groups: list) -> list:
@@ -135,6 +190,23 @@ def _axis_configs(chart_type: str, cols: list[str], xs: list[str], ys: list[str]
     return {}
 
 
+def _resolve_outputs(cols: list[str], roles: list[str], measure_names: set,
+                     bucket_tokens: dict) -> tuple:
+    """(cols, roles) → (out_cols, xs, ys, role_of, search_query).
+
+    `out[c]` is the OUTPUT column name — the resolved bucket name (`Month(Date)`) for a
+    bucketed column, else the raw name. Everything that references a column as output uses
+    out[c]; `search_query` uses the bucket token. Measures go to ys, non-measures to xs.
+    """
+    out = {c: _output_name(c, bucket_tokens) for c in cols}
+    out_cols = [out[c] for c in cols]
+    role_of = {out[c]: r for c, r in zip(cols, roles)}
+    ys = [out[c] for c in cols if c in measure_names]
+    xs = [out[c] for c in cols if c not in measure_names]
+    search = " ".join(bucket_tokens.get(c, f"[{c}]") for c in cols)
+    return out_cols, xs, ys, role_of, search
+
+
 def build_answer(name: str, obj_key: str, model_name: str, model_fqn: Optional[str],
                  cols: list[str], chart_type: str, measure_names: set,
                  roles: Optional[list[str]] = None,
@@ -144,18 +216,19 @@ def build_answer(name: str, obj_key: str, model_name: str, model_fqn: Optional[s
     Measures go on y; non-measures are placed by role — Category/Axis/X → x,
     Series/Legend/Group → color, Rows/Columns → the pivot axes. A PIVOT_TABLE without
     `axis_configs` renders blank, so rows→x / values→y / columns→color is emitted explicitly.
-    `bucket_tokens` overrides a column's search token (e.g. a monthly date bucket).
+
+    `bucket_tokens` maps a column → its search token (e.g. `{"Order Date": "[Order Date].monthly"}`).
+    The search_query uses the token, but everything that references the column as an OUTPUT
+    column (chart_columns, answer_columns, table, axis_configs) uses the **resolved** name the
+    bucket produces (`Month(Order Date)`), because a bucketed column's output isn't named the
+    raw name — referencing the raw name errors `Invalid GUID string` on import (live-verified).
     """
-    roles = roles or [""] * len(cols)
-    bucket_tokens = bucket_tokens or {}
-    role_of = {c: r for c, r in zip(cols, roles)}
-    ys = [c for c in cols if c in measure_names]
-    xs = [c for c in cols if c not in measure_names]
-    search = " ".join(bucket_tokens.get(c, f"[{c}]") for c in cols)
+    out_cols, xs, ys, role_of, search = _resolve_outputs(
+        cols, roles or [""] * len(cols), measure_names, bucket_tokens or {})
 
     chart: dict[str, Any] = {"type": chart_type,
-                             "chart_columns": [{"column_id": c} for c in cols]}
-    ax = _axis_configs(chart_type, cols, xs, ys, role_of)
+                             "chart_columns": [{"column_id": c} for c in out_cols]}
+    ax = _axis_configs(chart_type, out_cols, xs, ys, role_of)
     if ax:
         chart["axis_configs"] = [ax]
 
@@ -169,9 +242,9 @@ def build_answer(name: str, obj_key: str, model_name: str, model_fqn: Optional[s
             "display_mode": "CHART_MODE",
             "tables": [tables_ref],
             "search_query": search,
-            "answer_columns": [{"name": c} for c in cols],
-            "table": {"table_columns": [{"column_id": c} for c in cols],
-                      "ordered_column_ids": list(cols)},
+            "answer_columns": [{"name": c} for c in out_cols],
+            "table": {"table_columns": [{"column_id": c} for c in out_cols],
+                      "ordered_column_ids": list(out_cols)},
             "chart": chart,
         },
     }
@@ -184,8 +257,14 @@ def build_answer_explicit(name: str, obj_key: str, model_name: str,
     Capture-and-replay of manual UI polish for visuals the auto-builder can't express:
     `ov['columns']` (ordered column ids), `ov['search']`, `ov['ts_chart']`, optional
     `ov['axis']`, and the round-trip-safe presentation blobs `formats` (per-column format),
-    `client_state_v2`, `custom_chart_config` (the AUTHORITATIVE combo/dual-axis config —
-    persists where client_state_v2 decays), `custom_visual_props`, `viz_style`.
+    `client_state_v2`, `custom_chart_config`, `custom_visual_props`, `viz_style`.
+
+    `custom_chart_config` is a genuine **capture-and-replay** artifact: its axes reference
+    columns by GUID (assigned when the source answer was created), so it is only valid when
+    lifted verbatim from an *exported* answer. A hand-authored, display-name config errors
+    `Invalid GUID string` on a fresh import (live-verified), so we DROP it in that case and let
+    the ADVANCED_* type auto-resolve line-vs-column instead. To durably pin a combo's split,
+    tune it once in the UI, export, and pass the exported (GUID-bearing) config here.
     """
     cols = list(ov["columns"])
     fmts = ov.get("formats") or {}
@@ -195,7 +274,11 @@ def build_answer_explicit(name: str, obj_key: str, model_name: str,
         chart["axis_configs"] = [ov["axis"]]
     if ov.get("client_state_v2"):
         chart["client_state_v2"] = ov["client_state_v2"]
-    for k in ("custom_chart_config", "custom_visual_props", "viz_style"):
+    # Replay custom_chart_config ONLY when it is GUID-based (a real captured config); a
+    # display-name config would fail import, so drop it and rely on auto-resolution.
+    if _custom_chart_config_is_guid_based(ov.get("custom_chart_config")):
+        chart["custom_chart_config"] = ov["custom_chart_config"]
+    for k in ("custom_visual_props", "viz_style"):
         if ov.get(k) is not None:
             chart[k] = ov[k]
     tables_ref = {"name": model_name}

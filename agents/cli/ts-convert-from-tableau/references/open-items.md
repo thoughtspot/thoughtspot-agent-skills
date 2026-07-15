@@ -227,8 +227,23 @@ extract per-visual shelves + roles (Columns/Rows/Color) and dashboard zones, so 
 produced by the parser with no hand-assembly. Emission engine + command are done and
 unit-tested (`test_tableau_liveboard.py`, 21 cases); this is the remaining parser half.
 
-Also pending: **live import** of a build-liveboard-emitted liveboard on a real instance
-(the emission is ported from the verified Power BI converter, but not yet round-tripped
-through `ts tml import` from this command specifically).
+**Live import — VERIFIED 2026-07-15 on ps-internal.** Built a spec from the real
+"Retail Sales - Classic" model's columns, emitted via `ts tableau build-liveboard`, and
+imported it live: a 4-viz liveboard persisted + re-exported clean (real round-trip), and the
+full 5-viz spec passes `--policy VALIDATE_ONLY` (guid assigned, all bindings resolve). Two
+emitter bugs the live import caught (lint did NOT) — both **FIXED in ts-cli v0.55.0**:
+- **custom_chart_config** column refs are GUIDs, not display names — a hand-authored
+  display-name config errors `Invalid GUID string` on fresh import. `build_answer_explicit`
+  now drops a display-name `custom_chart_config` (keeps a genuine GUID-based captured one) and
+  lets `ADVANCED_LINE_COLUMN` auto-resolve the line/column. Docs corrected (worked example,
+  `thoughtspot-chart-types.md`, Step 10a).
+- **bucketed dates** are renamed in the output (`[Date].monthly` → column `Month(Date)`);
+  `build_answer` now references the resolved name in chart/axis/table (search still uses the
+  token). Bare (unbucketed) dates were never a problem.
 
-Status: FOLLOW-ON — parser role extraction + one live import round-trip
+**Still FOLLOW-ON:** parser role extraction — `ts tableau parse` does not yet emit
+dashboards/visuals/shelves, so the build-liveboard spec is still assembled by the skill from
+the Step 9 parse rather than produced end-to-end by the parser.
+
+Status: LIVE-VERIFIED (emission + import) 2026-07-15; two fixes applied; parser role
+extraction remains the open follow-on.

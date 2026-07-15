@@ -40,7 +40,7 @@ ts_cli/
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
     classify.py            — formula tier classification behind `ts tableau classify-formulas` (classify_formulas/TRANSLATABLE_TIERS/UNTRANSLATABLE_TIERS; delegates the translatable verdict to tableau_translate.py so audit and migrate agree)
     build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
-    liveboard.py          — pure Answer + tabbed-Liveboard emission behind `ts tableau build-liveboard` (role-aware axis layout, chart-needs floor, overrides replay); ThoughtSpot-side logic ported from the standalone Power BI converter's generate_tml.py (_answer_tml/_answer_tml_explicit/_liveboard_tml)
+    liveboard.py          — pure Answer + tabbed-Liveboard emission behind `ts tableau build-liveboard` (role-aware axis layout, chart-needs floor, overrides replay); ThoughtSpot-side logic ported from the standalone Power BI converter's generate_tml.py (_answer_tml/_answer_tml_explicit/_liveboard_tml). Live-verified fixes (v0.55.0): bucketed dates use the resolved output name (`Month(Date)`) not the raw name; a hand-authored (display-name) `custom_chart_config` is DROPPED (its refs must be GUIDs — fresh import else errors `Invalid GUID string`), keeping only genuine captured GUID-based configs
     client.py             — TableauClient (HTTP) + profile resolution; the package's one I/O module
   databricks/
     __init__.py         — package marker (stdlib + PyYAML only — Genie-vendorable, no HTTP/auth deps)
@@ -87,7 +87,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.54.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.55.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

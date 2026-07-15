@@ -91,22 +91,75 @@ def test_build_answer_fqn_tables_ref():
 
 # ── build_answer_explicit: overrides capture-and-replay ─────────────────────
 
-def test_build_answer_explicit_replays_custom_chart_config_and_format():
+_GUID_CCC = [{"key": "basic", "dimensions": [
+    {"key": "x-axis", "axes": [{"type": "FLAT", "column": "11111111-1111-1111-1111-111111111111"}]},
+    {"key": "y-axis-column", "axes": [{"type": "MERGED", "columns": ["22222222-2222-2222-2222-222222222222"]}]},
+]}]
+
+_NAME_CCC = [{"key": "basic", "dimensions": [
+    {"key": "x-axis", "axes": [{"type": "FLAT", "column": "Order Date"}]},
+    {"key": "y-axis-column", "axes": [{"type": "MERGED", "columns": ["Total Sales"]}]},
+]}]
+
+
+def test_build_answer_explicit_format_and_viz_style_always_pass_through():
     ov = {
-        "search": "[Order Date].MONTHLY [Total Sales] [Profit Ratio]",
+        "search": "[Order Date] [Total Sales] [Profit Ratio]",
         "columns": ["Order Date", "Total Sales", "Profit Ratio"],
         "ts_chart": "ADVANCED_LINE_COLUMN",
         "formats": {"Profit Ratio": {"category": "PERCENTAGE"}},
-        "custom_chart_config": [{"key": "basic", "dimensions": []}],
         "viz_style": '{"overrides": {}}',
     }
     a = lb.build_answer_explicit("Combo", "v6", "M", None, ov)
     chart = a["answer"]["chart"]
     assert chart["type"] == "ADVANCED_LINE_COLUMN"
-    assert chart["custom_chart_config"] == [{"key": "basic", "dimensions": []}]
     assert chart["viz_style"] == '{"overrides": {}}'
     pr = [c for c in a["answer"]["answer_columns"] if c["name"] == "Profit Ratio"][0]
     assert pr["format"] == {"category": "PERCENTAGE"}
+
+
+def test_guid_based_custom_chart_config_is_replayed():
+    ov = {"search": "[x]", "columns": ["x"], "ts_chart": "ADVANCED_LINE_COLUMN",
+          "custom_chart_config": _GUID_CCC}
+    chart = lb.build_answer_explicit("c", "v", "M", None, ov)["answer"]["chart"]
+    assert chart["custom_chart_config"] == _GUID_CCC  # real captured config → replayed
+
+
+def test_display_name_custom_chart_config_is_dropped():
+    # display-name config would error `Invalid GUID string` on import → drop it, keep the type
+    ov = {"search": "[x]", "columns": ["x"], "ts_chart": "ADVANCED_LINE_COLUMN",
+          "custom_chart_config": _NAME_CCC}
+    chart = lb.build_answer_explicit("c", "v", "M", None, ov)["answer"]["chart"]
+    assert "custom_chart_config" not in chart
+    assert chart["type"] == "ADVANCED_LINE_COLUMN"  # auto-resolves line vs column
+
+
+def test_bucketed_date_uses_resolved_output_name():
+    # [Date].monthly → the OUTPUT column is Month(Date); refs must use that, search uses token
+    a = lb.build_answer("Trend", "v", "M", None,
+                        cols=["Date", "Sales"], chart_type="LINE",
+                        measure_names={"Sales"}, roles=["Category", "Values"],
+                        bucket_tokens={"Date": "[Date].monthly"})
+    ans = a["answer"]
+    assert ans["search_query"] == "[Date].monthly [Sales]"
+    assert {c["column_id"] for c in ans["chart"]["chart_columns"]} == {"Month(Date)", "Sales"}
+    assert ans["chart"]["axis_configs"][0]["x"] == ["Month(Date)"]
+    assert ans["table"]["ordered_column_ids"] == ["Month(Date)", "Sales"]
+
+
+def test_advanced_line_column_gets_axis_configs():
+    a = lb.build_answer("Combo", "v", "M", None,
+                        cols=["Region", "Sales", "Margin"], chart_type="ADVANCED_LINE_COLUMN",
+                        measure_names={"Sales", "Margin"}, roles=["Category", "Values", "Values"])
+    ax = a["answer"]["chart"]["axis_configs"][0]
+    assert ax["x"] == ["Region"] and ax["y"] == ["Sales", "Margin"]
+
+
+def test_bucket_label_mapping():
+    assert lb._bucket_label("[Order Date].monthly") == "Month"
+    assert lb._bucket_label("[d].quarterly") == "Quarter"
+    assert lb._bucket_label("[d]") is None
+    assert lb._output_name("Order Date", {"Order Date": "[Order Date].yearly"}) == "Year(Order Date)"
 
 
 # ── build_liveboard: tab assembly + tile layout ─────────────────────────────

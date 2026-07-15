@@ -1598,9 +1598,20 @@ ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
   canonical role — or an explicit `role` that wins over the shelf. `measure: true`
   columns always land on y.
 - A visual may carry an `override` (verbatim answer spec) for anything the auto-builder
-  can't express (e.g. a hand-tuned combo — put its `custom_chart_config` here). `tile`
-  is the Step 9c grid placement; omit it to fall back to a two-per-row layout.
+  can't express. `tile` is the Step 9c grid placement; omit it for a two-per-row layout.
 - `extra_visuals[]` (top level) adds tiles that have no Tableau source visual.
+
+**Two live-verified emission rules (v0.55.0):**
+- **Bucketed dates** — a `bucket_tokens` entry like `{"Order Date": "[Order Date].monthly"}`
+  puts the token in `search_query` but references the **resolved** output column
+  (`Month(Order Date)`) in chart/axis/table — the raw name won't match the search output and
+  errors `Invalid GUID string` on import. Bare (unbucketed) dates are fine by their raw name.
+- **Combos** — emit `ADVANCED_LINE_COLUMN` + both measures on `axis`; ThoughtSpot auto-resolves
+  line vs column. **Do not hand-author `custom_chart_config`** — its column refs are GUIDs
+  (assigned after an answer exists), so a display-name config fails a fresh import. The command
+  **drops** a display-name `custom_chart_config` and replays only a genuine captured
+  (GUID-based) one. To pin an exact split: import → tune in UI → export → replay the exported
+  config via the visual's `override`.
 
 **Output:** writes `{report}.liveboard.tml` (with every answer embedded) to `--output-dir`.
 Stdout: JSON `{report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows}` —
