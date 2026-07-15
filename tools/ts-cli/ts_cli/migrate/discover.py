@@ -21,9 +21,10 @@ def export_parsed(client, guid: str) -> dict:
     return parse_edoc(resp.json()[0]["edoc"], "YAML")
 
 
-def model_columns(client, model_guid: str) -> List[ColumnInfo]:
+def model_columns(client, model_guid: str, doc: Optional[dict] = None) -> List[ColumnInfo]:
     from ts_cli.commands.tml import detect_tml_type
-    doc = export_parsed(client, model_guid)
+    if doc is None:
+        doc = export_parsed(client, model_guid)
     section = doc.get(detect_tml_type(doc)) or {}
     out: List[ColumnInfo] = []
     for c in section.get("columns", []) or []:
