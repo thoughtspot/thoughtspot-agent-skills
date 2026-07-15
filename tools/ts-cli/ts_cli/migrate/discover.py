@@ -47,7 +47,12 @@ def _search(client, meta_filter: dict) -> list:
 
 
 def find_model_by_name(client, name: str) -> Optional[str]:
-    for item in _search(client, {"type": "LOGICAL_TABLE", "name_pattern": name}):
+    meta_filter = {
+        "type": "LOGICAL_TABLE",
+        "name_pattern": name,
+        "subtypes": ["WORKSHEET", "AGGR_WORKSHEET"],
+    }
+    for item in _search(client, meta_filter):
         if (item.get("metadata_name") or "").lower() == name.lower():
             return item.get("metadata_id")
     return None
@@ -64,10 +69,27 @@ def list_dependents(client, model_guid: str) -> List[dict]:
 
 
 def used_column_names(client, dependents: List[dict], source_col_names: Set[str]) -> Set[str]:
+    """Scan all dependents' TML for bracketed column-name tokens, in ONE export call.
+
+    API calls must scale with tiers x models, not object count -- so every
+    dependent GUID is exported in a single metadata/tml/export request rather
+    than one request per dependent.
+    """
+    if not dependents:
+        return set()
+
+    from ts_cli.commands.tml import parse_edoc
+
     lower_to_orig = {n.lower(): n for n in source_col_names}
     used: Set[str] = set()
-    for dep in dependents:
-        doc = export_parsed(client, dep["guid"])
+    resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+        "metadata": [{"identifier": d["guid"]} for d in dependents],
+        "export_associated": False,
+        "export_fqn": True,
+        "formattype": "YAML",
+    })
+    for item in resp.json():
+        doc = parse_edoc(item["edoc"], "YAML")
         for tok in _TOKEN_RE.findall(json.dumps(doc)):
             key = tok.strip().lower()
             if key in lower_to_orig:

@@ -39,6 +39,8 @@ def test_find_model_by_name_matches_case_insensitively():
         {"metadata_id": "tgt-1", "metadata_name": "Sales", "metadata_type": "LOGICAL_TABLE"},
     ])
     assert discover.find_model_by_name(client, "sales") == "tgt-1"
+    posted_filter = client.post.call_args.kwargs["json"]["metadata"][0]
+    assert posted_filter["subtypes"] == ["WORKSHEET", "AGGR_WORKSHEET"]
 
 
 def test_find_model_by_name_returns_none_when_absent():
@@ -48,8 +50,18 @@ def test_find_model_by_name_returns_none_when_absent():
 
 
 def test_used_column_names_finds_referenced_columns_only():
-    client = _client_returning(ANSWER_EDOC)
+    # Batched contract: ONE export call returns a list of edoc entries, one per dependent.
+    client = MagicMock()
+    client.post.return_value = MagicMock(json=lambda: [{"edoc": ANSWER_EDOC}])
     used = discover.used_column_names(
         client, dependents=[{"guid": "ans-1"}], source_col_names={"Amount", "Department", "Notes"}
     )
     assert used == {"Amount", "Department"}
+    assert client.post.call_count == 1
+
+
+def test_used_column_names_empty_dependents_makes_no_api_call():
+    client = MagicMock()
+    used = discover.used_column_names(client, dependents=[], source_col_names={"Amount"})
+    assert used == set()
+    assert client.post.call_count == 0

@@ -33,8 +33,8 @@ def test_audit_writes_mapping_and_flags_blocker(mock_cls, _rp, _deps, tmp_path):
     # source client export: model, then the dependent answer (for used-column scan)
     src = MagicMock()
     src.post.side_effect = [
-        MagicMock(json=lambda: [{"edoc": MODEL_EDOC}]),   # model_columns
-        MagicMock(json=lambda: [{"edoc": ANSWER_EDOC}]),  # used_column_names -> dependent export
+        MagicMock(json=lambda: [{"edoc": MODEL_EDOC}]),   # export_parsed(mg) -- reused by model_columns via doc=
+        MagicMock(json=lambda: [{"edoc": ANSWER_EDOC}]),  # used_column_names -> single batched dependent export
     ]
     # target client: find_model_by_name (search), then model_columns export
     tgt = MagicMock()
