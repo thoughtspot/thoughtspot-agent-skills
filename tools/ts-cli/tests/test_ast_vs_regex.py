@@ -69,7 +69,7 @@ def _passes(out, err, case):
 CORE = [
     {"f": "COUNTD([Customer ID])", "contains": ["unique count("], "tag": "rename"},
     {"f": "STR([Amount])", "contains": ["to_string("], "tag": "rename"},
-    {"f": "INT([Price])", "contains": ["to_integer("], "tag": "rename"},
+    {"f": "INT([Price])", "contains": ["floor", "ceil"], "excludes": ["to_integer"], "tag": "int-trunc"},
     {"f": "AVG([x])", "contains": ["average("], "tag": "rename"},
     {"f": "CASE WHEN [Status] = 'A' THEN 'Active' ELSE 'Inactive' END",
      "contains": ["if", "="], "excludes": ["CASE", "WHEN", "END"], "tag": "case"},
@@ -83,7 +83,7 @@ CORE = [
      "contains": ["in {", "'Active'", "'Pending'"], "excludes": ["IN ("], "tag": "in"},
     {"f": "[Status] NOT IN ('Active', 'Pending')",
      "contains": ["not in {"], "excludes": ["NOT IN ("], "tag": "not-in"},
-    {"f": "DATEDIFF('day', [a], [b])", "contains": ["diff_days"], "tag": "datediff"},
+    {"f": "DATEDIFF('day', [a], [b])", "expect": "diff_days ( [b] , [a] )", "tag": "datediff-reversed"},
     {"f": "DATEADD('month', 3, [d])", "contains": ["add_months"], "tag": "dateadd"},
     {"f": "CAST([Order Date] AS DATE)", "expect": "[Order Date]", "tag": "cast-date-col"},
     {"f": "CAST('2024-01-15' AS DATE)", "contains": ["to_date", "'%Y-%m-%d'"], "tag": "cast-date-str"},
@@ -94,6 +94,9 @@ CORE = [
     {"f": "'A' + 'B'", "contains": ["concat("], "tag": "concat"},
     {"f": "{FIXED [Region] : SUM([Sales])}",
      "contains": ["group_aggregate", "{[Region]}"], "tag": "lod-fixed"},
+    {"f": "DAY([Order Date])", "expect": "day ( [Order Date] )", "tag": "day-func"},
+    {"f": "SIGN([x])", "contains": ["if", "> 0", "< 0", "-1"], "excludes": ["sign("], "tag": "sign-ifelse"},
+    {"f": "{SUM([Sales])}", "contains": ["group_aggregate", "query_filters"], "tag": "lod-bare-qf"},
 ]
 
 
@@ -135,7 +138,7 @@ HARD = [
     },
     {
         "f": "DATEDIFF('day', [a], DATEADD('month', 1, [b]))",
-        "expect": "diff_days ( [a] , add_months ( [b] , 1 ) )",
+        "expect": "diff_days ( add_months ( [b] , 1 ) , [a] )",
         "tag": "nested-date-fns",
     },
     {

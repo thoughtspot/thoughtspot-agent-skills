@@ -183,15 +183,13 @@ _SIMPLE_RENAME = {
     "POWER": "pow",
     "MONTH": "month_number",
     "YEAR": "year",
-    "DAY": "day_of_month",
+    "DAY": "day",
     "WEEK": "week_number_of_year",
     "ISNULL": "isnull",
     "IFNULL": "ifnull",
     "CONTAINS": "contains",
     "STARTSWITH": "starts_with",
     "ENDSWITH": "ends_with",
-    "INT": "to_integer",
-    "INTEGER": "to_integer",
     "FLOAT": "to_double",
     "WINDOW_AVG": "moving_average",
     "WINDOW_SUM": "moving_sum",
@@ -214,7 +212,6 @@ _SIMPLE_RENAME = {
     "SQRT": "sqrt",
     "EXP": "exp",
     "LN": "ln",
-    "SIGN": "sign",
     "TODAY": "today",
     "NOW": "now",
 }
@@ -470,8 +467,8 @@ class TableauToTS(Transformer):
             fn = _DATEDIFF_MAP.get(unit) or _DATEDIFF_TIME.get(unit)
             if fn:
                 if unit == "week":
-                    return f"floor ( {fn} ( {args[1]} , {args[2]} ) / 7 )"
-                return _call(fn, [args[1], args[2]])
+                    return f"floor ( {fn} ( {args[2]} , {args[1]} ) / 7 )"
+                return _call(fn, [args[2], args[1]])
         if up == "DATETRUNC" and len(args) >= 2:
             fn = _DATETRUNC_MAP.get(_strip_q(args[0]).lower())
             if fn:
@@ -532,6 +529,10 @@ class TableauToTS(Transformer):
             return f"if ( {args[0]} ) then {args[1]} else {args[2]}"
         if up == "TOTAL" and len(args) == 1:
             return f"group_aggregate({args[0]}, {{}}, query_filters())"
+        if up in ("INT", "INTEGER") and len(args) == 1:
+            return f"if ( {args[0]} >= 0 ) then floor ( {args[0]} ) else ceil ( {args[0]} )"
+        if up == "SIGN" and len(args) == 1:
+            return f"if ( {args[0]} > 0 ) then 1 else if ( {args[0]} < 0 ) then -1 else 0"
 
         # rank family — ThoughtSpot rank/rank_percentile take EXACTLY two args:
         # an aggregate expression and a direction ('asc' | 'desc'). Tableau's
@@ -616,7 +617,7 @@ class TableauToTS(Transformer):
         return f"group_aggregate({expr}, query_groups() - {dimstr}, query_filters())"
 
     def lod_bare(self, expr):
-        return f"group_aggregate({expr}, {{}}, {{}})"
+        return f"group_aggregate({expr}, {{}}, query_filters())"
 
 
 def _strip_q(s: str) -> str:
