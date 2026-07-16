@@ -1,125 +1,6 @@
-<!-- currency: tableau — 2026-07 (v0.28.1 spatial + user-attribute fail-loud) -->
-
 # Tableau → ThoughtSpot Formula Translation
 
 Reference for converting Tableau calculated field expressions to ThoughtSpot TML formula expressions.
-
----
-
-## Translation Pipeline — Mandatory Execution Order
-
-Apply these transforms in sequence. Each step's output feeds the next. Skipping a step
-or reordering causes the errors documented in parentheses. The `ts tableau translate-formulas`
-CLI command implements this pipeline automatically.
-
-| Step | Transform | Error if skipped |
-|---|---|---|
-| P0 | **Comment stripping** (BL-056): remove `//` line comments (preserve `//` inside string literals — e.g. URLs) | `//` misidentified as an operator; formulas excluded unnecessarily |
-| P1 | **Custom SQL Query alias resolution** (BL-057): `[COL (Custom SQL Query N)]` → `[TABLE::COL]` using column-overlap mapping | Formulas referencing CSQ aliases excluded as untranslatable |
-| P2 | **No-keyword LOD conversion** (BL-052): `{AGG([col])}` → `group_aggregate(ts_agg([col]), {}, query_filters())` — must run before keyword LOD step | No-keyword LODs excluded as "raw LOD braces" |
-| P3 | **Scalar MAX/MIN detection** (BL-055): 2-arg `MAX(a, b)` → `greatest ( a , b )`; `MIN(a, b)` → `least ( a , b )`; 1-arg aggregate preserved | Scalar MAX/MIN misclassified as aggregate or untranslatable |
-| P4 | **Date arithmetic rewrite** (BL-054): `DATE([col]) + N` → `add_days(date([col]), N)` | Date ± integer fails — ThoughtSpot does not support arithmetic on dates |
-| 1 | **Parameter prefix strip**: `[Parameters].[X]` → `[X]` | "Search did not find 'Parameters'" |
-| 2 | **Internal parameter name mapping**: `[Parameter 6]` → `[Engagement Type]` (build mapping from TWB parse: internal name → caption) | Formula references invisible internal names |
-| 3 | **Cross-reference resolution**: `[Calculation_*]` → inline expression or display name (via dependency DAG — see tableau-tml-rules.md) | "Search did not find 'Calculation_...'" |
-| 3b | **Parameter-name sanitisation** (BL-050 #6): strip characters ThoughtSpot forbids in parameter names (`/ \ : * ? " < > \|`) from parameter captions and rewrite formula references to match — e.g. `[Platform/Placement]` → `[Platform Placement]`. Batch-level: applied right after cross-reference resolution, before the per-formula pipeline runs | Parameter creation fails on forbidden characters; formula references to the un-sanitised name break once the parameter exists under its new name |
-| 4 | **LOD conversion**: `{FIXED ...}` → `group_aggregate()` (see LOD section below) | Raw `{FIXED}` syntax fails parse |
-| 5 | **TOTAL() conversion**: `TOTAL(SUM([x]))` → `group_aggregate(sum([x]), {}, query_filters())` | "Search did not find 'TOTAL'" |
-| 6 | **CASE/WHEN conversion**: `CASE [f] WHEN 'a' THEN x ... END` → `if ([f] = 'a') then x else if ...` | "Search did not find case" — ThoughtSpot has NO native CASE |
-| 7 | **IIF conversion**: `IIF(test,a,b)` → `if (test) then a else b` | "Search did not find 'IIF'" |
-| 8 | **IF/END conversion**: strip `END` keyword; `ELSEIF` → `else if`; wrap conditions in parens | "Search did not find end" — ThoughtSpot has NO `end` keyword |
-| 9 | **INT() conversion**: `INT(x)` → `if (x >= 0) then floor(x) else ceil(x)` | INT truncates toward zero; TS `to_integer` rounds to nearest |
-| 10 | **Function mapping**: apply the full function table below (ZN→ifnull, COUNTD→unique count, etc.) | Wrong function names fail |
-| 11 | **Date function mapping**: DATETRUNC→start_of_*, DATEDIFF→diff_* (reversed args), DATEADD→add_*, DATEPART→unit functions | Wrong function names + incorrect argument order |
-| 12 | **String concatenation**: `[a] + [b]` (string context) → `concat([a], [b])` | TS `+` is numeric-only — "Search did not find '+ ...'" |
-| 12b | **Operator-spacing normalization** (BL-046 #4): insert spaces around binary operators — `[A]-[B]` → `[A] - [B]` | ThoughtSpot's parser requires spaces around operators — "Search did not find ..." |
-| 12c | **rank() argument completion** (BL-046 #3): `rank(expr)` (1 arg) → `rank ( expr , 'desc' )` — defaults to Tableau's descending order when unspecified | "Function rank expects 2 arguments, found 1" |
-| 13 | **Column scoping**: `[COL]` → `[TABLE::COL]` per model's table set | "Search did not find 'col'" — unscoped refs fail |
-| 13b | **ifnull(X, 0) stripping** (BL-046 #1): strip `ifnull(X, 0)` for measures — TS handles NULL aggregation automatically | Unnecessary wrapping; can change AVG semantics (zeros vs excluded NULLs) |
-| 13c | **agg_if conversion** (BL-046 #2): `sum(if(cond) then expr [else 0/null])` → `sum_if(cond, expr)` — also count_if, average_if | Missing-else errors; more complex formula than needed |
-| 14 | **Mandatory else clause**: every remaining `if/then` MUST have an `else` (type-matched: `else 0` for measures, `else ''` for attributes) | "Unknown data type" or "Expecting a Numeric token" |
-| 14b | **`IN (...)` → `in { }`**: rewrite Tableau set-membership `IN (a, b, c)` to ThoughtSpot's curly-brace form; `NOT IN (...)` is left untouched (unsupported — flagged at validation, see below) | "Search did not find 'in ( ...'" — ThoughtSpot requires `in { a , b , c }` |
-
-After all steps, **validate** (`validate_output`): reject any formula still containing
-`END`, `CASE`, `WHEN`, `unique_count` (underscore), `date_trunc`, `ELSEIF`, or
-`NOT IN (...)` (unsupported — rewrite as negated conditions), plus any surviving call to
-an unmapped Tableau function (the unmapped-function list — see "CLI implementation
-status" below: `SPLIT`, `REGEXP_*`, `PROPER`, etc., and any `DATEPART`/`DATENAME`/
-`DATETRUNC`/`DATEDIFF`/`DATEADD` call whose unit wasn't recognized). There is **no**
-"bare `+` on strings" validation rule — Step 12 rewrites string `+` into `concat()` before
-validation runs; a residual, un-rewritten `+` (e.g. a concat operand that is itself a
-function call — the operand grammar doesn't yet accept those) surfaces as an import error,
-not a validator rejection. Tracked in `docs/backlog.md` (BL-069 follow-ups, "String-concat
-operand grammar").
-
-Finally, **after** a formula passes validation, batch-level **formula/column name-clash
-renaming** (BL-046 #7 / BL-050 #9) runs: if the formula's display name case-insensitively
-collides with a physical column name, it is renamed (`Formula {name}`) and any surviving
-cross-references to renamed formulas are rewritten (`apply_name_clash_renames`). Skipping
-this causes import failures or a column and formula silently shadowing each other.
-
-### CLI implementation status (v0.26.0)
-
-As of ts-cli **v0.26.0**, the `ts tableau translate-formulas` command implements Step 10's
-function table directly (not just documents it) for: `LEFT`, `RIGHT`, `MID`, `UPPER`, `LOWER`,
-`STARTSWITH`, `ENDSWITH`, `SQUARE`, `SIGN`, `SIN`, `COS`, `TAN`, `PI`, `RADIANS`, `DEGREES`,
-and `DATEPARSE`. Before v0.26.0 these were silent pass-throughs — the Tableau syntax was left
-untranslated in the output with no error. Nested same-function calls inside these functions'
-arguments (e.g. `UPPER(LEFT(s, 3))`) are translated recursively.
-
-Functions with no CLI implementation are **rejected at translate time** instead of being
-passed through untranslated: `SPLIT`, `FINDNTH`, `PROPER`, `ASCII`, `CHAR`, `REGEXP_MATCH`,
-`REGEXP_EXTRACT`, `REGEXP_EXTRACT_NTH`, `REGEXP_REPLACE`, `MAKEDATE`, `MAKETIME`,
-`MAKEDATETIME`, `ISDATE`, `USERNAME`, `FULLNAME`, `ISUSERNAME`, `ISFULLNAME`, `USERDOMAIN`.
-The same fail-loud treatment applies to all five date converters (`DATEPART`, `DATENAME`,
-`DATETRUNC`, `DATEDIFF`, `DATEADD`) when the unit isn't in that function's unit map — the
-call is left in place rather than mapped to a fabricated ThoughtSpot function name (e.g.
-`minute()`, `diff_fortnights()`, `add_quarters()`, `start_of_hour()` do not exist). In every
-case, `validate_output` flags the surviving call as `unmapped Tableau function: X` and the
-formula is skipped with that reason instead of failing import with an opaque TML error.
-
-As of ts-cli **v0.28.1**, the full 13-function Tableau spatial set (`MAKEPOINT`, `MAKELINE`,
-`DISTANCE`, `BUFFER`, `AREA`, `INTERSECTS`, `LENGTH`, `SHAPETYPE`, `OUTLINE`, `DIFFERENCE`,
-`INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE` — see "Geospatial Policy" below) and the
-embedded-RLS user-attribute family (`USERATTRIBUTE`, `USERATTRIBUTEINCLUDES`) are also
-rejected at translate time. Previously only the classic 5 spatial functions were documented
-here as untranslatable and none of the 13 was actually enforced in `_UNMAPPED_FUNCTIONS` —
-the other 8 silently passed through untranslated and failed import opaquely. `USERATTRIBUTE`/
-`USERATTRIBUTEINCLUDES` were not handled anywhere before v0.28.1. See BL-071 for the
-ABAC `ts_var()` translation candidate for the user-attribute family.
-
-### CLI command
-
-```bash
-ts tableau translate-formulas \
-  --input classification.json \
-  --output formulas_translated.json \
-  --datasource prod_ds \
-  --table-columns table_columns.json \
-  --parameters parameters.json \
-  --param-map param_map.json \
-  --calc-map calc_map.json \
-  --csq-map csq_to_table.json \
-  --date-columns START_DATE,END_DATE,SHIP_DATE
-```
-
-See `tools/ts-cli/README.md` for full option reference.
-
----
-
-## Parameter Name Conflicts
-
-A ThoughtSpot model parameter name MUST NOT collide with any formula column name.
-When a parameter and formula share the same name (e.g., both called "Metric"):
-
-- If the formula is a **pass-through** (just returns the parameter value: `[Metric]`),
-  **omit the formula entirely** — consumers can reference the parameter directly.
-- If the formula is **substantive** (uses the parameter in a computation), **rename the
-  formula** by appending a suffix: `Metric Selection` or `Selected Metric`.
-
-Detect conflicts before TML generation and resolve them. An unresolved collision
-causes import failure with no clear error message. The `ts tableau translate-formulas`
-command detects pass-through conflicts automatically and skips them.
 
 ---
 
@@ -127,7 +8,7 @@ command detects pass-through conflicts automatically and skips them.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `IF cond THEN a ELSE b END` | `if ( cond ) then a else b` | Parentheses required around condition |
+| `IF cond THEN a ELSE b END` | `if ( cond ) then a else b` | Parentheses required around condition. **A final `else` clause is mandatory** — omitting it causes "Unknown data type" errors. Use `else null` or a type-appropriate default. |
 | `ELSEIF` | `else if` | Two words in ThoughtSpot |
 | `CASE [f] WHEN 'a' THEN 1 ... END` | `if ( [f] = 'a' ) then 1 else if ...` | No native CASE; expand to if/else chain |
 | `IFNULL(a, b)` | `ifnull ( a , b )` | Direct mapping |
@@ -138,17 +19,16 @@ command detects pass-through conflicts automatically and skips them.
 | `RIGHT(s, n)` | `substr ( s , strlen ( s ) - n , n )` | |
 | `MID(s, start, len)` | `substr ( s , start - 1 , len )` | Adjust for 0-based indexing |
 | `LEN(s)` | `strlen ( s )` | |
-| `FIND(s, sub)` | `strpos ( s , sub )` | 1-based, returns 0 when absent — identical contract to Tableau FIND, so `FIND(...) > 0` idioms translate unchanged (live-verified 2026-06-13, se-thoughtspot: strpos('needle_haystack','needle')=1, not-found=0). NOTE: official TS docs describe strpos as 0-based/−1 — live behavior differs; trust this entry. |
-| `REPLACE(s, old, new)` | `replace ( s , old , new )` | |
-| `UPPER(s)` | `sql_string_op ( "UPPER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
-| `LOWER(s)` | `sql_string_op ( "LOWER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
-| `TRIM(s)` | `trim ( s )` | |
+| `FIND(s, sub)` | `strpos ( s , sub )` | 1-based, returns 0 when absent — identical contract to Tableau FIND, so `FIND(...) > 0` idioms translate unchanged (live-verified 2026-06-13: strpos('needle_haystack','needle')=1, not-found=0). NOTE: official TS docs describe strpos as 0-based/−1 — live behavior differs; trust this entry. |
+| `REPLACE(s, old, new)` | `sql_string_op ( "replace({0}, old, new)" , s )` | No native `replace()`; use SQL passthrough. Verified live (VALIDATE_ONLY 2026-07-03). |
+| `UPPER(s)` | `sql_string_op ( "upper({0})" , s )` | No native `upper()`; use SQL passthrough. Verified live (VALIDATE_ONLY 2026-07-03). |
+| `LOWER(s)` | `sql_string_op ( "lower({0})" , s )` | No native `lower()`; use SQL passthrough. Verified live (VALIDATE_ONLY 2026-07-03). |
+| `TRIM(s)` | `sql_string_op ( "trim({0})" , s )` | No native `trim()`; use SQL passthrough. Verified live (VALIDATE_ONLY 2026-07-03). |
 | `SPLIT(s, delim, n)` | Use `substr`/`strpos` combination | No direct equivalent; chain: Tableau `SPLIT` → Snowflake `SPLIT_PART` → ThoughtSpot `substr`/`strpos` |
-| `DATEDIFF('day', a, b)` | `diff_days ( b , a )` | **Arg order reversed vs Tableau.** TS `diff_*` takes `(end, start)` (see formula-patterns.md "Argument order note"); Tableau `DATEDIFF(unit, start, end)` returns end−start. Same flip for `diff_months`, `diff_years`, `diff_time` (seconds). `'hour'`/`'minute'` → `diff_time ( b , a ) / 3600` / `/ 60`. `'week'` → `diff_days ( b , a ) / 7` ⚠ flag: boundary-crossing + week-start semantics differ from Tableau — verify per workbook. |
+| `DATEDIFF('day', a, b)` | `diff_days ( b , a )` | **Arg order reversed vs Tableau.** TS `diff_*` takes `(end, start)` (see formula-patterns.md "Argument order note"); Tableau `DATEDIFF(unit, start, end)` returns end−start. Same flip for `diff_months`, `diff_years`, `diff_time` (seconds). `'hour'`/`'minute'` → `diff_time ( b , a ) / 3600` / `/ 60`. `'week'` → `diff_days ( b , a ) / 7` — boundary-crossing + week-start semantics differ from Tableau — verify per workbook. |
 | `DATETRUNC('month', d)` | `start_of_month ( d )` | Also `start_of_quarter`, `start_of_week`, `start_of_year` |
-| `DATETRUNC('day', d)` | `date ( d )` | Truncating to day is just the date part — ThoughtSpot has no separate `start_of_day` function |
 | `DATETRUNC('week', TODAY()) + 1` | `add_days ( start_of_week ( today () ) , 1 )` | Do NOT use + operator on dates |
-| `DATEADD('day', n, d)` | `add_days ( d , n )` | Also `add_months`, `add_years` |
+| `DATEADD('day', n, d)` | `add_days ( d , n )` | Also `add_months`, `add_years`, `add_weeks`, and (verified live) `add_minutes ( d , n )` / `add_seconds ( d , n )`. **`add_hours` is NOT a valid function** — it fails parsing ("Search did not find"). For hour arithmetic use `add_minutes ( d , n * 60 )`. |
 | `DATEPART('month', d)` | `month_number ( d )` | Also `day()` (day of month), `year`, `quarter_number`, `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` |
 | `DATENAME('month', d)` | `month ( d )` | Returns month name (e.g. "January"). Use `month_number()` if numeric value needed |
 | `TODAY()` | `today ()` | |
@@ -157,10 +37,11 @@ command detects pass-through conflicts automatically and skips them.
 | `YEAR(d)` | `year ( d )` | |
 | `MONTH(d)` | `month_number ( d )` | |
 | `DAY(d)` | `day ( d )` | **`day_number_of_month` does not exist** (verified 2026-06-13). `day()` extracts day-of-month. Related: `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` do exist. |
-| `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. ⚠ floor/ceil names pending live verification (P11/P12) — flag on first use. |
+| `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Tableau INT truncates toward zero; `to_integer`/`round` round to nearest (live-verified 2026-06-13: to_integer(8.6)=9, to_integer(-9.7)=-10) so a composite is required. |
 | `FLOAT(x)` | `to_double ( x )` | See formula-patterns.md (to_double). `x * 1.0` breaks for string inputs Tableau accepts. |
-| `STR(x)` | `to_string ( x )` | |
-| `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot uses `concat()` for strings — the `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 2 ) ) , '%' )`. |
+| `STR(x)` | `to_string ( x )` | Tableau's `'#'` number format is **not valid** in TS — strip it. Only strftime formats (`%m/%d/%y`) are valid for dates. |
+| `[a] + [b]` (string concat) | `concat ( [a] , [b] )` | ThoughtSpot `concat()` accepts **2 or more** arguments — `concat ( a , ' - ' , b )` is valid, no nesting needed. The `+` operator is numeric-only and **fails on strings** (*"Search did not find '+ ...'"*). Tableau overloads `+` for both; rewrite every string `+` as `concat()`. E.g. `STR(ROUND(x,2)) + '%'` → `concat ( to_string ( round ( x , 2 ) ) , '%' )`. |
+| `x IN ('a', 'b')` | `x in { 'a' , 'b' }` | ThoughtSpot uses **curly braces**, not parentheses. Also supports `not in { }`. |
 | `ABS(x)` | `abs ( x )` | |
 | `ROUND(x, n)` | `round ( x , n )` | |
 | `CEILING(x)` | `ceil ( x )` | |
@@ -169,66 +50,22 @@ command detects pass-through conflicts automatically and skips them.
 | `LN(x)` | `ln ( x )` | |
 | `POWER(x, n)` | `pow ( x , n )` | |
 | `SQRT(x)` | `sqrt ( x )` | |
-| `MIN(a, b)` (scalar, 2-arg) | `least ( a , b )` | ThoughtSpot `min` is aggregate-only; `least()` is the direct scalar two-value equivalent. See "Scalar MAX/MIN detection" below |
-| `MAX(a, b)` (scalar, 2-arg) | `greatest ( a , b )` | ThoughtSpot `max` is aggregate-only; `greatest()` is the direct scalar two-value equivalent. See "Scalar MAX/MIN detection" below |
-| `MAX(expr, 0)` (clamp to zero) | `greatest ( expr , 0 )` | Common shorthand — defensive null/negative guard. `greatest()` handles this directly; no `if/then/else` rewrite needed, even when `expr` is a CASE/IF (the pipeline translates `expr` in place, inside the `greatest(...)` call) |
+| `MIN(a, b)` (scalar) | `if ( a < b ) then a else b` | ThoughtSpot `min` is aggregate-only |
+| `MAX(a, b)` (scalar) | `if ( a > b ) then a else b` | ThoughtSpot `max` is aggregate-only |
 | `COUNTD(x)` | `unique count ( x )` | Aggregate only |
 | `AVG(x)` | `average ( x )` | Aggregate only |
 | `ATTR(x)` | `x` | No equivalent; just reference the column |
 | `IIF(test, a, b)` | `if ( test ) then a else b` | Tableau's inline if; chain: Tableau `IIF` → Snowflake `IFF` → ThoughtSpot `if/then/else` |
 | `SIGN(x)` | `if ( x > 0 ) then 1 else if ( x < 0 ) then -1 else 0` | No direct `sign()` in ThoughtSpot |
-| `SQUARE(x)` | `pow ( x , 2 )` | |
+| `SQUARE(x)` | `pow ( x , 2 )` | `sq ( x )` is also valid (verified live) — the native single-argument square. |
 | `STDEV(x)` | `stddev ( x )` | Aggregate only |
 | `MEDIAN(x)` | `median ( x )` | Aggregate only |
+| `PERCENTILE(x, k)` | `percentile ( x , k , 'asc' )` | **3 arguments, verified live** — `(measure, fraction 0–1, 'asc'\|'desc')`. The first arg is the **raw measure column**, NOT a nested aggregate: `percentile ( sum ( [m] ) , ... )` fails. The 3rd arg is **required and must be text** `'asc'` or `'desc'` (a numeric 3rd arg errors "expects 3rd argument to be Text"). Use `'asc'` to match Tableau's default ascending percentile. |
 | `DATEPART('dayofyear', d)` | `day_number_of_year ( d )` | |
 | `DATEPART('weekday', d)` | `day_of_week ( d )` | |
 | `DATEPART('hour', d)` | `hour_of_day ( d )` | |
 | `DATEPART('quarter', d)` | `quarter_number ( d )` | |
 | `DATEPART('week', d)` | `week_number_of_year ( d )` | |
-| `EXP(n)` | `exp ( n )` | |
-| `SIN(n)` / `COS(n)` / `TAN(n)` | `sin ( n * 180 / 3.14159265358979 )` / `cos ( n * 180 / 3.14159265358979 )` / `tan ( n * 180 / 3.14159265358979 )` | Tableau trig is in radians; ThoughtSpot trig is in degrees — convert. (Inverse trig `acos/asin/atan` also return degrees in ThoughtSpot vs radians in Tableau.) |
-| `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
-| `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, se-thoughtspot). |
-| `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with`; mirrors the `RIGHT(s, n)` idiom above |
-| `PI()` | `3.14159265358979` | No native `pi()` — use the literal (dialect-free). (alternatively `sql_double_op ( "pi()" )` — documented pass-through) |
-| `RADIANS(n)` | `n * 3.14159265358979 / 180` | No native `radians()` — use the literal composite. (alternatively `sql_double_op ( "radians({0})" , n )` — documented pass-through) |
-| `DEGREES(n)` | `n * 180 / 3.14159265358979` | No native `degrees()` — use the literal composite. (alternatively `sql_double_op ( "degrees({0})" , n )` — documented pass-through) |
-
-### Scalar MAX/MIN detection
-
-Tableau's `MAX()` and `MIN()` are **overloaded** — one-arg is aggregate (`MAX([col])`),
-two-arg is scalar (`MAX(a, b)` — returns the greater of two values). ThoughtSpot's `max()`
-and `min()` are aggregate-only, but ThoughtSpot has direct scalar equivalents —
-`greatest()` and `least()`. The pipeline must distinguish the two forms:
-
-**Detection:** count the top-level arguments (commas not inside nested parentheses). If
-exactly 2 arguments → scalar → rewrite `MAX(a, b)` to `greatest ( a , b )` and `MIN(a, b)`
-to `least ( a , b )`. If 1 argument → aggregate → translate to `max()` / `min()` as normal.
-
-**Common shorthand — `MAX(expr, 0)` / `MIN(expr, 0)`** (clamp to zero) needs **no special
-case** — `greatest ( expr , 0 )` / `least ( expr , 0 )` handles it directly. `expr` is
-translated in place by the rest of the pipeline (CASE/WHEN → if/else-if, mandatory `else`
-clause, etc.) exactly as it would be on its own — no manual rewrite or duplicated
-expression tree is needed:
-
-```
-# Tableau — defensive guard: never return negative / null
-MAX(CASE [Param] WHEN 'Sales' THEN [SALES_FORECAST]
-                 WHEN 'Revenue' THEN [REVENUE_FORECAST] END, 0)
-
-# ThoughtSpot — greatest() wraps the CASE→if/else-if chain; the mandatory
-# else-clause step (Step 14) supplies "else 0" on the inner chain automatically
-greatest ( if ( [Param] = 'Sales' ) then [t::SALES_FORECAST]
-           else if ( [Param] = 'Revenue' ) then [t::REVENUE_FORECAST]
-           else 0 , 0 )
-```
-
-⚠ live-verify: `greatest()`/`least()` are documented ThoughtSpot functions (see
-`thoughtspot-formula-patterns.md`) and the CLI has emitted this rewrite since ts-cli
-v0.17.0 with unit-test coverage (`test_tableau_translate.py::TestConvertScalarMaxMin`),
-but no `open-items.md` or backlog entry records a **live-instance** import/query check of
-this specific Tableau-scalar-MAX/MIN-to-`greatest`/`least` rewrite — verify on the next
-live Tableau migration run.
 
 ### Year-over-year / period comparisons — make them dynamic, don't copy hardcoded years
 
@@ -249,36 +86,6 @@ reach the current year, tell the user and offer: (a) keep dynamic (correct for p
 on this demo), or (b) anchor to the dataset's actual latest year so it demos now. Note that
 `max([date])` is **not** allowed inside a formula filter, so "latest year in data" can't be
 expressed as `year(max([d]))` in the conditional — anchoring means a literal year.
-
-### NULL in IF/THEN/ELSE conditions — matches Tableau, don't auto-guard
-
-ThoughtSpot compiles `if ( cond ) then a else b` to a SQL `CASE WHEN cond THEN a ELSE b END`
-pushed down to the warehouse. When the condition references a NULL (e.g. `[x] >= 5000` where
-`[x]` is NULL), the comparison is unknown — not TRUE — so the row falls into the **ELSE**
-branch. This is standard SQL `CASE` semantics, consistent across warehouses (Snowflake,
-BigQuery, Databricks, Redshift). *(Confirmed live 2026-06-12: the generated SQL is
-`CASE WHEN NULL >= 5E3 THEN 'High' ELSE 'Low' END` → returns the ELSE value.)*
-
-**Tableau behaves identically** — `IF [x] >= 5000 THEN a ELSE b END` also routes NULL rows to
-ELSE. So a **literal translation is faithful** and preserves the workbook's original behavior.
-**Do not auto-insert a NULL guard** — adding `if ( isnull([x]) ) then ... else ...` would
-*change* the result relative to the source workbook.
-
-Treat NULL-guarding as an **opt-in correction**: only add it when the user explicitly wants to
-fix latent NULL mis-classification in the original (e.g. keep NULLs as NULL rather than 'Bronze').
-This is warehouse-`CASE` behavior, so the same reasoning applies to the SV/MV converters.
-
----
-
-## Division-by-zero (MANDATORY for every translated ratio)
-
-Tableau returns NULL on division by zero; raw `/` pushed to the warehouse errors the whole
-answer (Snowflake: "Division by zero"). Every translated division gets one of:
-
-| Fidelity | Form | Caveat |
-|---|---|---|
-| Closest to Tableau | `if ( [b] = 0 ) then null else [a] / [b]` | Exact NULL semantics |
-| Shorter | `safe_divide ( [a] , [b] )` | Function live-verified 2026-06-13 (se-thoughtspot). Returns **0**, not NULL, on zero divisor (formula-patterns.md) — flag if downstream logic distinguishes 0 from NULL. |
 
 ---
 
@@ -321,15 +128,15 @@ Functions" for the full `group_aggregate` reference.
 
 | Tableau LOD | ThoughtSpot | Notes |
 |---|---|---|
-| `{FIXED [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , { dim } , {} )` | Fixed grain — partitions by the listed dimension(s) |
-| `{FIXED [d1], [d2] : AVG([col])}` | `group_aggregate ( average ( [table::col] ) , { d1 , d2 } , {} )` | Multiple dimensions in partition |
-| `{INCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () + { dim } , query_filters () )` | Adds dimension to whatever the query already groups by |
-| `{EXCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () - { dim } , query_filters () )` | Removes dimension from the query's grouping |
+| `{FIXED [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , { [dim] } , {} )` | Fixed grain — dimension refs **must use brackets** `[dim]` inside `{ }` |
+| `{FIXED [d1], [d2] : AVG([col])}` | `group_aggregate ( average ( [table::col] ) , { [d1] , [d2] } , {} )` | Multiple dimensions in partition |
+| `{INCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () + { [dim] } , query_filters () )` | Adds dimension to whatever the query already groups by |
+| `{EXCLUDE [dim] : SUM([col])}` | `group_aggregate ( sum ( [table::col] ) , query_groups () - { [dim] } , query_filters () )` | Removes dimension from the query's grouping |
 | `{FIXED : MAX([col])}` (no dims) | `group_aggregate ( max ( [table::col] ) , { } , { } )` | Grand FIXED — single scalar across entire dataset (e.g. global max date). Same as no-keyword form below. |
-| `{SUM([col])}` (no LOD keyword) | `group_aggregate ( sum ( [table::col] ) , {} , query_filters () )` | Grand total — no partitioning. **Default to `query_filters()`** so the result respects the user's search filters (see "No-keyword LOD filter context" below). Use `{}` only when the formula must ignore filters (rare). ⚑ **Flag for user review in migration report.** |
-| `{COUNTD([col])}` (no LOD keyword) | `group_aggregate ( unique count ( [table::col] ) , {} , query_filters () )` | Grand distinct count. Same `query_filters()` default. Common pattern: `{COUNTD([ID])} = 1` to detect single-record context (e.g. one promotion selected). ⚑ **Flag for user review.** |
-| `{MEDIAN([col])}` (no LOD keyword) | `group_aggregate ( median ( [table::col] ) , {} , query_filters () )` | Grand median. Same `query_filters()` default as the other no-keyword LODs. |
-| `{ATTR([col])}` (no LOD keyword) | `group_aggregate ( max ( [table::col] ) , {} , query_filters () )` | ATTR has no ThoughtSpot equivalent inside a no-keyword LOD; the pipeline approximates it with `max` (consistent with the bare `ATTR(x)` → `x` mapping above, which is only correct when the value is already constant within scope). ⚑ **Flag for user review** — verify the column is actually constant within the implied grand-total grain. |
+| `{SUM([col])}` (no LOD keyword) | `group_aggregate ( sum ( [table::col] ) , {} , query_filters () )` | Grand total — no partitioning. **Default to `query_filters()`** so the result respects the user's search filters (see "No-keyword LOD filter context" below). Use `{}` only when the formula must ignore filters (rare). |
+| `{COUNTD([col])}` (no LOD keyword) | `group_aggregate ( unique count ( [table::col] ) , {} , query_filters () )` | Grand distinct count. Same `query_filters()` default. Common pattern: `{COUNTD([ID])} = 1` to detect single-record context. |
+| `{MEDIAN([col])}` (no LOD keyword) | `group_aggregate ( median ( [table::col] ) , {} , query_filters () )` | Grand median. Same `query_filters()` default. |
+| `{ATTR([col])}` (no LOD keyword) | `group_aggregate ( max ( [table::col] ) , {} , query_filters () )` | ATTR approximated with `max` — verify the column is constant within the grand-total grain. |
 | `TOTAL(SUM([col]))` | `group_aggregate ( sum ( [table::col] ) , {} , query_filters () )` | Table-calc grand total that **respects filters** — `{}` grouping (whole table) + `query_filters()`. Use this as the denominator for percent-of-total. |
 | `SUM([x]) / TOTAL(SUM([x]))` (percent of total) | `sum ( [table::x] ) / group_aggregate ( sum ( [table::x] ) , {} , query_filters () )` | Common idiom: row/group value ÷ filtered grand total |
 
@@ -337,6 +144,120 @@ Functions" for the full `group_aggregate` reference.
 case has a clean LOD translation (above) — same `group_aggregate` family Snowflake/Databricks
 use. Other `TOTAL()` partitionings (e.g. along a specific pane direction) may still need
 pass-through.
+
+### Compound LOD patterns (from production workbooks)
+
+These patterns appear frequently in real Tableau workbooks and must be converted
+correctly. They combine FIXED with conditionals, nesting, or shorthand syntax.
+
+**1. Table-scoped shorthand `{AGG([col])}` — passthrough, no conversion needed**
+
+ThoughtSpot supports `{agg([col])}` natively (grand aggregate over the entire table).
+Do NOT convert to `group_aggregate` — leave as-is with lowercase function name.
+
+| Tableau | ThoughtSpot |
+|---|---|
+| `{MAX([SEND_DATE])}` | `{max([SEND_DATE])}` |
+| `{MIN([SEND_DATE])}` | `{min([SEND_DATE])}` |
+| `{MAX([RUN_DATE])}` | `{MAX([RUN_DATE])}` |
+
+**2. Global FIXED (no dimensions) `{ FIXED : AGG(...) }` → `group_aggregate(..., {}, {})`**
+
+When FIXED has no dimension list (just `: AGG(...)`), it computes a global aggregate
+across all rows, ignoring the viz's grouping. Map to `group_aggregate` with empty
+dimension and filter args.
+
+| Tableau | ThoughtSpot |
+|---|---|
+| `{ FIXED : MAX([FISCAL_YEAR_NUM]) }` | `group_aggregate(max([FISCAL_YEAR_NUM]), {}, {})` |
+
+**3. Conditional FIXED `{ FIXED : AGG(IF ... THEN ... END) }`**
+
+FIXED with an inner IF/CASE filters which rows contribute to the aggregate.
+Convert the inner IF to ThoughtSpot syntax, wrap in `group_aggregate`. The inner
+`END` becomes `else null` (ThoughtSpot requires an explicit else).
+
+| Tableau | ThoughtSpot |
+|---|---|
+| `{ FIXED : MAX(IF [YEAR] = [calc] THEN [MONTH] END) }` | `group_aggregate(max(if ([YEAR] = [formula_calc]) then [MONTH] else null), {}, {})` |
+| `{ FIXED : MIN(IF [YEAR] = INT(LEFT([Param], 4)) AND [WEEK] = INT(RIGHT([Param], 2)) THEN [DATE] END) }` | `group_aggregate(min(if ([YEAR] = to_integer(LEFT([Param Name], 4)) and [WEEK] = to_integer(RIGHT([Param Name], 2))) then [DATE] else null), {}, {})` |
+
+**4. Multi-branch conditional FIXED**
+
+FIXED with a multi-branch IF inside (e.g. fiscal MTD vs YTD vs YoY). Convert
+each branch, chain with `else if`, close with `else null`.
+
+```
+Tableau:
+{ FIXED : MIN(
+    IF [Parameters].[Time Frame] = 'Fiscal MTD'
+       AND [FISCAL_YEAR] = [Max Year] AND [FISCAL_MONTH] = [Max Month]
+    THEN [SEND_DATE]
+    ELSEIF [Parameters].[Time Frame] = 'Fiscal YTD'
+       AND [FISCAL_YEAR] = [Max Year]
+    THEN [SEND_DATE]
+    END
+) }
+
+ThoughtSpot:
+group_aggregate(min(
+    if ([Time Frame] = 'Fiscal MTD'
+        and [FISCAL_YEAR] = [formula_Max Year] and [FISCAL_MONTH] = [formula_Max Month])
+    then [SEND_DATE]
+    else if ([Time Frame] = 'Fiscal YTD'
+        and [FISCAL_YEAR] = [formula_Max Year])
+    then [SEND_DATE]
+    else null), {}, {})
+```
+
+**5. Nested FIXED — one FIXED inside another**
+
+The inner FIXED becomes a nested `group_aggregate` call. Both levels convert
+independently.
+
+| Tableau | ThoughtSpot |
+|---|---|
+| `{ FIXED : MAX(IF [X] < { FIXED : MAX([X]) } THEN [X] END) }` | `group_aggregate(max(if ([X] < group_aggregate(max([X]), {}, {})) then [X] else null), {}, {})` |
+
+This pattern computes "second-to-max" — the largest value below the global max.
+
+**6. Dimensioned FIXED with conditional branches**
+
+FIXED with explicit dimensions and an outer CASE/IF that dispatches based on
+a parameter. Each branch contains its own `{ FIXED [dims] : AGG(...) }`.
+Convert each FIXED independently; wrap the dispatch in `if/else if`.
+
+```
+Tableau:
+CASE [Parameters].[Metric]
+WHEN 'Engagement' THEN
+    { FIXED [METRO], [CHANNEL] : SUM([CLICKS]) } /
+    { FIXED [METRO], [CHANNEL] : SUM([DELIVERED]) }
+WHEN 'Orders' THEN
+    { FIXED [METRO], [CHANNEL] : SUM([ORDERS]) } /
+    { FIXED [METRO], [CHANNEL] : SUM([DELIVERED]) }
+END
+
+ThoughtSpot:
+if ([Metric] = 'Engagement') then
+    group_aggregate(sum([CLICKS]), {[METRO], [CHANNEL]}, {}) /
+    group_aggregate(sum([DELIVERED]), {[METRO], [CHANNEL]}, {})
+else if ([Metric] = 'Orders') then
+    group_aggregate(sum([ORDERS]), {[METRO], [CHANNEL]}, {}) /
+    group_aggregate(sum([DELIVERED]), {[METRO], [CHANNEL]}, {})
+else null
+```
+
+**7. Calculation ID references inside FIXED → formula references**
+
+Tableau calculation IDs inside FIXED (e.g. `[Calculation_4007288936723431471]`)
+must be resolved to the corresponding ThoughtSpot formula name using the
+`[formula_<Name>]` convention, same as any other calc-field cross-reference.
+
+| Tableau | ThoughtSpot |
+|---|---|
+| `[Calculation_6698611864531566593]` (= "Max Fiscal Year") | `[formula_Max Fiscal Year]` |
+| `[Calculation_4007288936723316781]` (= "Reporting Max Fiscal Month") | `[formula_Reporting Max Fiscal Month]` |
 
 ### No-keyword LOD filter context — `query_filters()` vs `{}`
 
@@ -361,22 +282,12 @@ formula that checks whether the user is looking at one record or many. With
 it always sees the full dataset (likely wrong for this use case). But edge cases exist —
 particularly when the Tableau workbook relies on the specific filter ordering.
 
-**⚑ Always flag for user review — audit AND migration report.** These formulas are
-translatable but the semantic equivalence is not guaranteed. The user must verify that:
-1. The formula produces the expected values when filters are applied
-2. The formula produces the expected values when no filters are applied
-3. The context-detection behaviour (e.g. single vs multi promotion) works correctly
-
-Do NOT silently translate and move on. The audit (Step A4) should call out no-keyword LOD
-formulas as a separate "Needs Review" category alongside the translation tiers. The
-migration report (Step 12) should list each one with the original Tableau expression and
-the ThoughtSpot translation so the user can compare.
-
 **Syntax rules for `group_aggregate`:**
-- Dimensions use curly braces: `{ dim1 , dim2 }`
+- Dimensions use curly braces with **bracket-enclosed** column names: `{ [dim1] , [dim2] }` — bare names without brackets fail validation
 - `query_groups()` and `query_filters()` are ThoughtSpot keywords, not column references
 - The inner aggregate (`sum`, `average`, `max`, `min`, `unique count`) follows standard ThoughtSpot formula syntax
 - Column references inside `group_aggregate` use `[table::column]` format
+- The inner conditional's `END` must become `else null` — omitting it causes "Unknown data type" errors
 
 ### Platform limitation: nested `group_aggregate` not supported
 
@@ -691,34 +602,26 @@ Tableau running table calculations map to ThoughtSpot cumulative functions. Chai
 Tableau `RUNNING_*` → Snowflake `SUM/AVG/etc OVER (... ROWS BETWEEN UNBOUNDED PRECEDING
 AND CURRENT ROW)` → ThoughtSpot `cumulative_*()`.
 
-> ⚠️ **`cumulative_*` (and `moving_*`) ARE valid as model formulas when the first arg is an
-> unaggregated `[table::col]` reference** — verified 2026-06-13 on se-thoughtspot (see EXC1 in
-> `ts-model-conversion-invariants.md`). They fail ONLY when the first arg is already aggregated
-> (`sum([col])`) or a display-name ref (`[Sales]`). For Tableau conversion: strip the Tableau
-> `SUM()`/`AVG()` wrapper and use the raw column ref → valid model formula. Fall back to
-> answer-level only when the sort dimension cannot be determined from the workbook.
+> ⚠️ **`cumulative_*` (and `moving_*`) are query-time functions — they CANNOT be stored as
+> model/worksheet formula columns.** Adding one to `model.formulas[]` fails validation with
+> *"Search did not find …"* (in any form — `cumulative_sum(sum([col]))`, `cumulative_sum([formula_measure])`,
+> etc.). They are only valid **inside an answer's `search_query`** (the live query context that
+> supplies the sort order). So: do **not** emit a model formula for a `RUNNING_*`/`WINDOW_*`
+> field — instead realize it on the **viz that uses it** (Step 10b) via the search keyword
+> (`cumulative …`, `moving average of …`) or an answer-level formula. Log it in the Migration
+> Summary as "realized at the answer level, not the model."
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( [table::col] , [sort attr] )` | **Model formula valid** with unaggregated `[table::col]` ref (verified 2026-06-13, EXC1). Strip Tableau's `SUM()` wrapper. Fall back to answer-level (`[Measure]` display name) only when sort dimension is undetermined. |
-| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( [table::col] , [sort attr] )` | Same — strip `AVG()` wrapper, use unaggregated ref. |
-| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( [table::col] , [sort attr] )` | Same — strip `MAX()` wrapper. |
-| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( [table::col] , [sort attr] )` | Same — strip `MIN()` wrapper. |
-
-**Aggregate-inside-cumulative pattern:** When the Tableau source nests an aggregate
-that can't simply be stripped (e.g. `RUNNING_SUM(MAX([col]))` where you need the MAX
-semantics, not a raw SUM), wrap it in `group_aggregate()`:
-```
-cumulative_sum ( group_aggregate ( max ( [table::col] ) , query_groups ( ) , query_filters ( ) ) )
-```
-Direct nesting like `cumulative_sum ( max ( [col] ) , [date] )` is rejected — the first
-arg must be unaggregated OR wrapped in `group_aggregate()`.
+| `RUNNING_SUM(SUM([col]))` | `cumulative_sum ( sum ( [table::col] ) )` | Optional partition/sort args: `cumulative_sum ( measure , attr1 , attr2 )` |
+| `RUNNING_AVG(AVG([col]))` | `cumulative_average ( average ( [table::col] ) )` | |
+| `RUNNING_MAX(MAX([col]))` | `cumulative_max ( max ( [table::col] ) )` | |
+| `RUNNING_MIN(MIN([col]))` | `cumulative_min ( min ( [table::col] ) )` | |
 
 **Limitations:**
 - ThoughtSpot cumulative functions use the query's natural sort order — there is no
   explicit `ORDER BY` parameter like Snowflake window functions
 - Partition dimensions are optional trailing arguments, not a separate `PARTITION BY`
-- `RUNNING_COUNT(expr)` — no `cumulative_count`. Approximate with `cumulative_sum ( 1 , [sort_attr] )` at answer level, or omit + log if the sort attribute can't be determined.
 
 ---
 
@@ -729,29 +632,29 @@ Tableau `WINDOW_SUM` → Snowflake `SUM() OVER (... ROWS BETWEEN ...)` → Thoug
 `moving_sum()`. See `ts-snowflake-formula-translation.md` "Moving / Sliding Window
 Functions" for the full reference.
 
-> ⚠️ Like `cumulative_*`, `moving_*` **are valid as model formulas when the first arg is an
-> unaggregated `[table::col]` reference** (see EXC1 in `ts-model-conversion-invariants.md`).
-> Strip the Tableau `SUM()`/`AVG()` wrapper and use the raw column ref. A composite like
-> `EXP(WINDOW_AVG(LOG([m]), -2, 0))` (a geometric moving average) should be built as an
-> answer-level formula if the nesting (`exp`/`log10` around `moving_average`) is rejected
-> at model level.
+> ⚠️ Like `cumulative_*`, **`moving_*` are query-time only — not valid in model formulas**
+> (same *"Search did not find …"* failure). Realize them on the viz (answer `search_query`),
+> not in `model.formulas[]`. A composite like `EXP(WINDOW_AVG(LOG([m]), -2, 0))` (a geometric
+> moving average) therefore can't be a model column at all — build it as an answer-level
+> formula on the one viz that needs it, or flag it as a placeholder if the answer-formula
+> nesting (`exp`/`log10` around `moving_average`) is also rejected.
 
-> 🔑 **First arg must be unaggregated. For model formulas use `[table::col]`; for answer-level
-> use the measure display name `[Sales]`.** Strip Tableau's outer `SUM()`/`AVG()` wrapper — 
-> `cumulative_*`/`moving_*` reject an already-aggregated arg (*"expects 1st argument to be not
-> aggregated"*). Pass the worksheet's shelf attribute(s) as trailing sort args. Verified
-> 2026-06-13: `cumulative_sum ( [DM_ORDER_DETAIL::QUANTITY] , [DM_ORDER::ORDER_DATE] )` imports
-> as a model formula (GUID `889a704f`, model `TEST_SV_DMSI_AI_CONTEXT`). So:
-> `RUNNING_SUM(SUM([Sales]))` along `[Month]` → model: `cumulative_sum ( [t::Sales] , [t::Month] )`;
-> answer: `cumulative_sum ( [Sales] , [Month of order date] )`.
-> `EXP(WINDOW_AVG(LOG([Sales]),-2,0))` along `[Order Date]` → `exp ( moving_average ( log10 ( [t::Sales] ) , 2 , 0 , [t::Order Date] ) )`.
+> 🔑 **Pass the worksheet's shelf attribute(s) as the trailing sort args — and reference the
+> MEASURE COLUMN by name, not `sum()`.** A running/moving total is meaningless without an order.
+> Take the dimension(s) the Tableau worksheet lays the calc *along* (its Rows/Columns shelf —
+> e.g. `Month of order date`, `Order Date`) and append them as sort args. The first argument is
+> the **measure column by display name** (`[Sales]`), **not** `sum([t::Sales])`: `cumulative_*`/
+> `moving_*` reject an already-aggregated arg (*"expects 1st argument to be not aggregated"*) and
+> can't resolve a `[t::col]` ref in answer context. So:
+> `RUNNING_SUM(SUM([Sales]))` along `[Month]` → `cumulative_sum ( [Sales] , [Month of order date] )`;
+> `EXP(WINDOW_AVG(LOG([Sales]),-2,0))` along `[Order Date]` → `exp ( moving_average ( log10 ( [Sales] ) , 2 , 0 , [Order Date] ) )`.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( [table::col] , 3 , 0 , [sort attr] )` | 3-row lookback. **Model formula valid** with unaggregated `[table::col]` ref (verified 2026-06-13, EXC1). Strip Tableau's `SUM()` wrapper. |
-| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper, use unaggregated ref. |
-| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper. |
-| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( [table::col] , 3 , 0 , [sort attr] )` | Same — strip `SUM()` wrapper. |
+| `WINDOW_SUM(SUM([col]), -3, 0)` | `moving_sum ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | 3-row lookback |
+| `WINDOW_AVG(SUM([col]), -3, 0)` | `moving_average ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
+| `WINDOW_MAX(SUM([col]), -3, 0)` | `moving_max ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
+| `WINDOW_MIN(SUM([col]), -3, 0)` | `moving_min ( sum ( [table::col] ) , 3 , 0 , [table::sort_attr] )` | |
 
 ### Syntax
 
@@ -791,9 +694,6 @@ partition arguments — partitioning is determined dynamically by which attribut
 appear in the search query. If explicit partitioning is required, use a pass-through
 function with `PARTITION BY` in the SQL string instead.
 
-**Extended windowed variants with no model-formula equivalent:**
-- `WINDOW_STDEV`, `WINDOW_PERCENTILE`, `WINDOW_COUNT`, `WINDOW_MEDIAN` — no windowed model-formula equivalent (table calculations, answer-level per EXC1). If the viz uses them as a plain aggregate over the whole partition (not a sliding window), use `stddev()`, `percentile(measure, p)`, `count()`, `median()` respectively. Otherwise realize answer-level or omit + log.
-
 ---
 
 ## Rank Functions
@@ -802,142 +702,32 @@ function with `PARTITION BY` in the SQL string instead.
 |---|---|---|
 | `RANK(SUM([col]))` | `rank ( sum ( [table::col] ) , 'desc' )` | **Direction arg is required** — `rank(measure)` with one arg fails validation (*"Function rank expects 2 arguments, found 1"*). Pass `'desc'` explicitly for Tableau's default. |
 | `RANK(SUM([col]), 'asc')` | `rank ( sum ( [table::col] ) , 'asc' )` | |
-| `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` uses **competition ranking** (ties share a rank, next rank is skipped: 1,1,3 — verified 2026-06-13, generates `RANK() OVER (ORDER BY ...)`). No RANK_UNIQUE equivalent — document the tie-handling difference. |
+| `RANK_UNIQUE(SUM([col]), 'desc')` | `rank ( sum ( [table::col] ) , 'desc' )` | ThoughtSpot `rank` is always dense; no RANK_UNIQUE equivalent — document the tie-handling difference. |
 
 **Partitioned rank** — ThoughtSpot's native `rank()` has no partition support. For
-partitioned rank, use a pass-through function **wrapped in `group_aggregate()`** — the
-wrap is mandatory (see "Pass-Through Fallback" → "Wrap pass-through window functions in
-`group_aggregate()`" below):
+partitioned rank, use a pass-through function (see "Pass-Through Fallback" below):
 ```
-group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::region] , [table::revenue] ) , query_groups () + { [table::region] } , query_filters () )
+sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::region] , [table::revenue] )
 ```
-⚑ flag for review — aggregate pass-through (PT1)
 
 **Limitations:**
-- `RANK_MODIFIED` has no native equivalent; `RANK_DENSE` → use `sql_int_aggregate_op ( "dense_rank() over (...)" )` pass-through (native `rank()` is competition, not dense — verified 2026-06-13)
+- `RANK_MODIFIED`, `RANK_DENSE` have no exact native equivalents; use `rank()` as an approximation and document the difference
 
 ---
 
-## Row-Offset Table Calculations
+## Aggregate Formulas: Row-Level Conversion
 
-Tableau's row-offset table calculations (`INDEX`, `LOOKUP`, `FIRST`, `LAST`, `SIZE`) were
-previously classified as Untranslatable because they derive their `ORDER BY`/`PARTITION BY`
-from the visualization layout. With the `<table-calc>` addressing extraction (SKILL.md
-Step 3f), the sort/partition context is now recoverable for most cases.
+Tableau calculated fields that use aggregation functions (`COUNTD`, `SUM`, `COUNT`) are aggregate formulas. ThoughtSpot **model formulas must be row-level**. Convert them to row-level expressions; the aggregation is applied at the search/answer level.
 
-### Decision tree (per detected table-calc formula)
-
-Apply in order — stop at the first match:
-
-| # | Condition | Action | Tier |
-|---|---|---|---|
-| 1 | `INDEX() <= N` or `INDEX() = N` used as a **filter** (inside an IF/CASE that gates row visibility, or a set filter) | Route to existing Top-N / query-set machinery (SKILL.md Step 5b). Use `rank ( [measure] , 'desc' )` + filter `[rank] <= N`. | **Native** |
-| 2 | `INDEX()` used for **display row numbering** (standalone on a shelf, not filtering) AND `ordering_type` is `Rows` or `Field` with a known sort column | Emit answer-level: `rank ( sum ( [measure] ) , 'asc' )`. Note: ranks by measure value, not row position — acceptable for display numbering. | **Native** |
-| 3 | `LOOKUP(agg, N)` where N > 0 (forward offset = LEAD) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , -N , N , [sort_col] )` | **Native** |
-| 4 | `LOOKUP(agg, N)` where N < 0 (backward offset = LAG) AND sort column is known | Emit answer-level: `moving_sum ( [measure] , abs(N) , -abs(N) , [sort_col] )` | **Native** |
-| 5a | `LOOKUP(agg, FIRST())` — "get value at first row" AND sort column is known | Emit answer-level: `first_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
-| 5b | `LOOKUP(agg, LAST())` — "get value at last row" AND sort column is known | Emit answer-level: `last_value ( sum ( [measure] ) , query_groups ( ) , { [sort_col] } )` | **Native** |
-| 6a | Bare `FIRST()` used as a **filter condition** (e.g. `IF FIRST() == 0 THEN`) — "am I the first row?" | No direct equivalent. Omit + log: `"FIRST() as row-position filter — no TS equivalent; consider rank()-based alternative."` | **Omit** |
-| 6b | Bare `FIRST()` used for **row numbering** or arithmetic (e.g. `FIRST() + 1`) | Route to tier 2 (rank-based numbering). `rank ( sum ( [measure] ) , 'asc' )` approximates position. | **Native (approx)** |
-| 6c | Bare `LAST()` standalone (e.g. `LAST() == 0`, `LAST()` on a shelf) | No direct equivalent. Omit + log: `"LAST() returns offset-to-end — no TS equivalent."` | **Omit** |
-| 7 | `SIZE()` (unpartitioned) | Emit answer-level: `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` ⚑ flag PT1 | **Pass-through (SIZE only)** |
-| 8 | Any of the above but sort/partition is **not** recoverable (`ordering_type='CellInPane'`, or `ordering_type='Rows'`/`'Columns'` with no deterministic shelf sort, or `ordering_type='Table'` spanning multiple dims) | **Omit + log** (current behavior). Log message: `"[func]() — addressing context is ambiguous (ordering_type={type}); omit + log."` | **Omit** |
-
-### Resolving the sort column from `<table-calc>` addressing
-
-Given the `table_calc_addressing` entry (from Step 3f) and the worksheet shelf data
-(from Step 9b), resolve the sort column:
-
-| `ordering_type` | Sort column resolution |
-|---|---|
-| `Field` (with `ordering_field`) | The named field — resolve through the calc_id → display_name map |
-| `Field` (with `<order>` children) | The first `<order field='...'>` child — resolve through the map. Additional `<order>` fields become `PARTITION BY` dimensions. |
-| `Rows` | The first date/continuous dimension on the Rows shelf (from Step 9b). If no date on Rows, fall through to Tier 8 (ambiguous). |
-| `Columns` | The first date/continuous dimension on the Columns shelf (from Step 9b). If none, Tier 8. |
-| `Table` | Both Rows + Columns shelf dims in sequence. Only unambiguous for simple layouts (one dim on each); for complex multi-dim, Tier 8. |
-| `CellInPane` | Always ambiguous → Tier 8. |
-
-### Native ThoughtSpot formula templates
-
-These are answer-level formulas. Use display-name column references (`[Sales]`), not
-`[TABLE::col]` model references.
-
-The `moving_sum` offset convention: positive start = preceding (backward), negative
-start = following (forward). The end offset uses opposite sign to select a single row:
-`(N, -N)` = exactly the row N positions back, `(-N, N)` = exactly N positions forward.
-
+**Tableau (aggregate):**
 ```
-# INDEX() → rank (ranks by measure value — approximates row numbering)
-rank ( sum ( [Sales] ) , 'asc' )
-
-# LOOKUP(SUM([Sales]), -1) → LAG(1)
-moving_sum ( [Sales] , 1 , -1 , [Order Date] )
-
-# LOOKUP(SUM([Sales]), -3) → LAG(3)
-moving_sum ( [Sales] , 3 , -3 , [Order Date] )
-
-# LOOKUP(SUM([Sales]), 1) → LEAD(1)
-moving_sum ( [Sales] , -1 , 1 , [Order Date] )
-
-# LOOKUP(SUM([Sales]), 2) → LEAD(2)
-moving_sum ( [Sales] , -2 , 2 , [Order Date] )
-
-# LOOKUP(SUM([Sales]), FIRST()) → "get value at first row" → first_value
-first_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
-
-# LOOKUP(SUM([Sales]), LAST()) → "get value at last row" → last_value
-last_value ( sum ( [Sales] ) , query_groups ( ) , { [Order Date] } )
-
-# Bare FIRST() / LAST() — these return OFFSETS in Tableau, not values:
-#   FIRST() = rows-back-to-first (0 at row 1, -1 at row 2, -2 at row 3, ...)
-#   LAST()  = rows-forward-to-last (4 at row 1, 3 at row 2, ..., 0 at last row)
-# Common composed patterns:
-#   LOOKUP(agg, FIRST()) → first_value  (tiers 5a)
-#   LOOKUP(agg, LAST())  → last_value   (tier 5b)
-#   IF FIRST() == 0      → omit + log   (tier 6a — row-position filter)
-#   FIRST() + 1           → rank approx  (tier 6b — row numbering)
-#   Bare LAST()           → omit + log   (tier 6c — no TS equivalent)
-
-# SIZE() → COUNT(*) OVER (pass-through — only row-offset that still uses sql_*_aggregate_op)
-sql_int_aggregate_op ( "COUNT(*) OVER ()" )
+COUNTD(if [source_table] = 'terminations' then [employee_id] end)
 ```
 
-### Why native functions over SQL pass-through (default)
-
-Native ThoughtSpot functions (`moving_sum`, `first_value`, `last_value`, `rank`) handle
-all column types correctly, require no admin enablement, and are validated at import
-time — verified with DATE, VARCHAR, and INT64 columns (se-thoughtspot, 2026-06-15).
-
-For `moving_sum` offset semantics (LAG/LEAD single-row patterns) and SQL pass-through
-window function rules (ORDER BY must match GROUP BY, all search dimensions in PARTITION
-BY), see `thoughtspot-formula-patterns.md` — "Moving Functions" and "Window functions
-inside `sql_*_aggregate_op`" sections. Those rules are platform-agnostic and apply to
-all converters, not just Tableau.
-
-### Caveats for row-offset formulas
-
-1. **`rank()` is not `ROW_NUMBER()`** — ties share a rank and the next rank is skipped
-   (1,1,3 not 1,2,3). Acceptable for display numbering; document the difference.
-2. **Answer-level only** — these are viz-scoped formulas, not model formulas; they
-   don't participate in search/Spotter discovery.
-3. **SIZE() only** uses `sql_int_aggregate_op` — requires admin enablement for SQL
-   pass-through functions. All other native row-offset formulas are fully native.
-4. **SQL pass-through** (when used) requires admin enablement, is dialect-specific
-   (Snowflake), and is not validated at import time — verify values post-import.
-
----
-
-## Conditional aggregates (Tableau `AGG(IF cond THEN x END)`)
-
-ThoughtSpot model formulas MAY be aggregate (see invariants I5 and ts-model-conversion-invariants.md:33). Do NOT convert to row-level with `else ''` — empty string becomes a countable distinct value (COUNTD off by one) and changes SUM/AVG denominators. Use the `*_if` family; the bare `IF` with no ELSE is NULL in Tableau, which aggregates ignore — `else null` preserves that exactly.
-
-| Tableau | ThoughtSpot |
-|---|---|
-| `COUNTD(IF c THEN x END)` | `unique_count_if ( c , [x] )` |
-| `SUM(IF c THEN x END)` | `sum_if ( c , [x] )` |
-| `COUNT(IF c THEN x END)` | `count_if ( c , [x] )` |
-| `AVG(IF c THEN x END)` | `average_if ( c , [x] )` |
-| other agg / complex | `agg ( if ( c ) then [x] else null )` — `else null` is live-verified (static-set-to-column-set.md:107) |
+**ThoughtSpot model formula (row-level):**
+```
+if ( [table::source_table] = 'terminations' ) then [table::employee_id] else ''
+```
 
 ---
 
@@ -946,8 +736,6 @@ ThoughtSpot model formulas MAY be aggregate (see invariants I5 and ts-model-conv
 When a Tableau formula has a valid Snowflake SQL equivalent but no native ThoughtSpot
 function, use a **pass-through function** to embed the raw SQL. Pass-through functions
 are a last resort — always prefer native ThoughtSpot functions first.
-
-Pass-through policy: scalar reliable, aggregate flag for review — see PT1 in ../../schemas/ts-model-conversion-invariants.md
 
 See `ts-snowflake-formula-translation.md` "Pass-Through Functions" for the full
 reference. Summary below.
@@ -979,20 +767,8 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
 
 | Tableau | Pass-through ThoughtSpot formula | Notes |
 |---|---|---|
-| `RANK(SUM([col]))` partitioned | `group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] ) , query_groups ( ) + { [table::dim] } , query_filters ( ) )` | Native `rank()` has no partition support. Always wrap in `group_aggregate` — see `thoughtspot-formula-patterns.md` "`group_aggregate` wrapping" section. ⚑ flag for review (PT1) |
-| `DENSE_RANK(SUM([col]))` | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [table::col] )` | ⚑ flag for review (PT1) |
-
-### Functions with no native ThoughtSpot equivalent — pass-through
-
-| Tableau | Pass-through ThoughtSpot formula | Notes |
-|---|---|---|
-| `PROPER(s)` | `sql_string_op ( "INITCAP({0})" , s )` | No native title-case. Dialect: Snowflake/most use `INITCAP`. |
-| `ASCII(s)` | `sql_int_op ( "ASCII({0})" , s )` | No native `ascii()`. Dialect-specific. |
-| `CHAR(n)` | `sql_string_op ( "CHR({0})" , n )` | Snowflake uses `CHR`; SQL Server uses `CHAR`. |
-| `REGEXP_EXTRACT(s, pat)` | `sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , s , pat )` | No native regex. Snowflake `REGEXP_SUBSTR`. |
-| `REGEXP_MATCH(s, pat)` | `sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , s , pat )` | No native regex; returns boolean. |
-| `REGEXP_REPLACE(s, pat, r)` | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , s , pat , r )` | No native regex. |
-| `FINDNTH(s, sub, n)` | `sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , s , sub , n )` | No native nth-occurrence; else omit + log. |
+| `RANK(SUM([col]))` partitioned | `sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] )` | Native `rank()` has no partition support |
+| `DENSE_RANK(SUM([col]))` | `sql_int_aggregate_op ( "dense_rank() over (order by sum({0}) desc)" , [table::col] )` | |
 
 ### Rules
 
@@ -1000,22 +776,15 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
    running → `cumulative_*`, rank → `rank()`) before falling back to pass-through
 2. **Aggregation inside the SQL string** — ThoughtSpot adds columns to GROUP BY; bare
    column references without aggregation cause errors
-3. **Wrap pass-through window functions in `group_aggregate()`** — resolves partition
-   column conflicts, aggregate function errors, HAVING clause issues, and drill-down
-   support. See `thoughtspot-formula-patterns.md` → "`group_aggregate` wrapping for
-   pass-through window functions" for the full pattern and benefits. Always use this
-   wrapping for partitioned pass-through functions (rank, dense_rank, row_number, etc.).
-   ⚑ flag for review — aggregate pass-through (PT1)
+3. **Wrap complex window functions in `group_aggregate()`** — prevents query generation
+   errors when partition columns or date parts are involved:
+   ```
+   group_aggregate ( sql_int_aggregate_op ( "rank() over (partition by {0} order by sum({1}) desc)" , [table::dim] , [table::measure] ) , query_groups () + { dim } , query_filters () )
+   ```
 4. **No validation** — ThoughtSpot does not validate the SQL string; errors surface at
    query time from the warehouse
-5. **Pass-through is enabled by default** — only a limitation if an admin has explicitly
-   turned it off via Admin > Search & SpotIQ > SQL Passthrough Functions. Document
-   usage in `MIGRATION_LIMITATIONS.md`
-6. **JSON / VARIANT path access — bracket notation only** — if a pass-through carries a
-   warehouse JSON path (e.g. via `RAWSQL_*` using Snowflake `PARSE_JSON(...):key.subkey`),
-   ThoughtSpot's parser rejects the colon-and-dot syntax. Convert each segment to
-   `['key']` bracket notation. See `thoughtspot-formula-patterns.md` →
-   "JSON / VARIANT path access — bracket notation only".
+5. **Pass-through must be enabled** — admins can disable via Admin > Search & SpotIQ >
+   SQL Passthrough Functions. Document usage in `MIGRATION_LIMITATIONS.md`
 
 ### Translation priority order
 
@@ -1023,9 +792,8 @@ When converting a Tableau formula, try in this order:
 
 1. **Native ThoughtSpot function** — direct mapping from the Function Mapping table
 2. **LOD / cumulative / rank** — sections above
-3. **Row-offset table calcs** — tiered decision tree (native Top-N, native rank, or gated pass-through)
-4. **Pass-through function** — this section (embed valid Snowflake SQL)
-5. **Omit and log** — truly untranslatable (next section)
+3. **Pass-through function** — this section (embed valid Snowflake SQL)
+4. **Omit and log** — truly untranslatable (next section)
 
 ---
 
@@ -1043,105 +811,25 @@ model import. A missing formula produces a functional model with reduced coverag
 
 | Tableau Feature | Reason |
 |---|---|
-| `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent (but see the string-aggregation note below, and the **Row-Offset Table Calculations** section for `FIRST()`/`LAST()` as standalone window-bound functions). |
+| `LOOKUP()` | Table calculation — references rows by offset; no SQL equivalent |
+| `INDEX()` | Table calculation — row numbering without aggregation context |
+| `ISMEMBEROF()` | User-specific function — no equivalent |
+| `SIZE()`, `FIRST()`, `LAST()` | Table calculations — partition-aware row addressing; no SQL equivalent |
+| `PREVIOUS_VALUE()` | Recursive table calculation — no SQL equivalent |
 | `RAWSQL_*()` | Direct SQL passthrough — not portable across warehouses |
 | True **statistical clustering** (k-means; the analytics-engine "Clusters" calc — **not** `categorical-bin`) | No ThoughtSpot equivalent. NB: `categorical-bin` (manual groups, even when named "… clusters") **is** translatable → `GROUP_BASED` cohort |
-| `MAKEPOINT(lat, lon)` | Geospatial point constructor — no ThoughtSpot formula equivalent. **Do not silently drop.** If the underlying lat/lon columns exist, migrate them as individual `ATTRIBUTE` columns (latitude + longitude are useful filter/display dimensions); omit the `MAKEPOINT` formula + log. See "Geospatial policy" below. |
-| `MAKELINE(point1, point2)` | Geospatial line constructor — no ThoughtSpot equivalent. Omit + log. The endpoint lat/lon columns are migrated individually if present. |
-| `DISTANCE(point1, point2, unit)` | Geospatial distance — no ThoughtSpot equivalent. Omit + log. |
-| `BUFFER(geom, distance, unit)` | Geospatial buffer — no ThoughtSpot equivalent. Omit + log. |
-| `AREA(geom, unit)` | Geospatial area — no ThoughtSpot equivalent. Omit + log. |
-| `INTERSECTS(geom1, geom2)` | Geospatial overlap test (boolean) — no ThoughtSpot equivalent. Omit + log. |
-| `LENGTH(geom, unit)` | Geospatial line length — no ThoughtSpot equivalent. Distinct from the string function `LEN(s)` (see Function Mapping table), which IS translatable → `strlen(s)`. Omit + log. |
-| `SHAPETYPE(geom)` | Geospatial geometry-type introspection (returns Point/LineString/Polygon/etc.) — no ThoughtSpot equivalent. Omit + log. |
-| `OUTLINE(geom)` | Geospatial polygon → linestring constructor — no ThoughtSpot equivalent. Omit + log. |
-| `DIFFERENCE(geom1, geom2)` | Geospatial set difference — no ThoughtSpot equivalent. Omit + log. |
-| `INTERSECTION(geom1, geom2)` | Geospatial set intersection — no ThoughtSpot equivalent. Omit + log. |
-| `SYMDIFFERENCE(geom1, geom2)` | Geospatial symmetric difference — no ThoughtSpot equivalent. Omit + log. |
-| `VALIDATE(geom)` | Geospatial geometry validation (boolean) — no ThoughtSpot equivalent. Omit + log. |
-| `USERATTRIBUTE(attr)` | Embedded-RLS custom user attribute — no CLI translation yet. **Plausible native translation:** ABAC `ts_var(attr_var)` referencing an admin-created formula variable (same JWT user-attribute mechanism as `ISMEMBEROF`→`ts_groups`, reclassified 2026-06-28) — needs live verification against a Model formula/RLS context before wiring in. See BL-071. |
-| `USERATTRIBUTEINCLUDES(attr, val)` | Embedded-RLS multi-value attribute membership test — same disposition as `USERATTRIBUTE` above. See BL-071. |
+| References to SQL-lookup Tableau Parameters | ThoughtSpot `list_config` only supports static values; SQL-populated parameter lists need manual recreation |
 
 **Formerly untranslatable, now mapped:**
-- `ISMEMBEROF("group")` → `ts_groups = 'group'` — multi-value list membership handled natively with `=` (reclassified 2026-06-28)
-- `DATETIME(expr)` → `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp; if the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15 (reclassified 2026-06-28)
-- SQL-lookup Tableau Parameters → query the warehouse at migration time and populate `list_choice[]` with a point-in-time snapshot. See "SQL-lookup parameters (query at migration time)" section below (reclassified 2026-06-28)
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
 - `TOTAL(SUM(...))` / percent-of-total → `group_aggregate(..., {}, query_filters())` (see LOD section)
 - Tableau **bins** (`class='bin'`) → `floor([x]/size)*size` bucketing formula (see Tableau Bins section)
-- `Number of Records` (`= 1`) → `count([column])` — a user-prompted column choice, **not** `sum(1)` (see "`Number of Records` / row counts" section above)
+- `Number of Records` (`= 1`) → `sum(1)`
 - `RUNNING_SUM`, `RUNNING_AVG`, etc. → `cumulative_sum()`, `cumulative_average()`, etc. (see Running/Cumulative section)
 - `RANK()` → `rank()` (see Rank section)
-- `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined (⚑ flag for review if using `sql_*_aggregate_op` — PT1)
-- `RANK_MODIFIED`, `RANK_DENSE` → `sql_int_aggregate_op()` pass-through ⚑ flag for review (PT1)
-- Partitioned `RANK` → `group_aggregate`-wrapped `sql_int_aggregate_op()` with `partition by` (see Rank Functions section) ⚑ flag for review (PT1)
-- **Comma-separated list of values** (Tableau's `FIRST`/`LAST`/`LOOKUP`/`PREVIOUS_VALUE` CSV technique) →
-  string aggregation, see below
-- `INDEX()` → `rank()` (Top-N filter intent) or `sql_int_aggregate_op("ROW_NUMBER() OVER (...)")` (display row number, answer-level, gated) — see Row-Offset Table Calculations section
-- `LOOKUP(agg, ±n)` → `sql_*_aggregate_op("LAG/LEAD(...) OVER (...)")` (answer-level, gated) — see Row-Offset Table Calculations section
-- `FIRST()`, `LAST()` (standalone) → `sql_*_aggregate_op("FIRST_VALUE/LAST_VALUE(...) OVER (...)")` (answer-level, gated) — see Row-Offset Table Calculations section
-- `SIZE()` → `sql_int_aggregate_op("COUNT(*) OVER (PARTITION BY ...)")` (answer-level, gated) — see Row-Offset Table Calculations section
-
----
-
-## String aggregation — comma-separated list of values
-
-Tableau workbooks concatenate a column's values into one string via a row-walking **table-calc
-technique** (`FIRST()`/`LAST()`/`LOOKUP()`/`PREVIOUS_VALUE()` building up a string — e.g. Jonathan
-Drummey's "comma-separated list" / set-member-list dashboards). The *implementation* is untranslatable,
-but the *intent* (one delimited string of the values) maps to **`LISTAGG` via a string-aggregate
-pass-through** (live-verified 2026-06-12 as an answer-level formula):
-
-```
-sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [Category] )
-```
-
-- It is an **aggregate pass-through** → **⚑ flag for review** (PT1).
-- Make it an **answer-level** formula (`answer.formulas[]`) on the viz that needs it (it's viz-specific,
-  not a reusable model column), rendered `display_mode: TABLE_MODE`. The Tableau feeder/`Last`
-  scaffolding calcs collapse into this single formula — do **not** migrate them individually.
-- **Scope to a set's in/out members** by applying the migrated column set / a filter on the answer
-  (LISTAGG over the in-set rows = the "in list"; over the out-set rows = the "out list").
-- **Often a plain table of the values is the better ThoughtSpot UX** than a pre-concatenated string —
-  offer both.
-
----
-
-## Geospatial Policy
-
-Tableau's spatial function set is **13 functions** (help.tableau.com Spatial Functions,
-verified 2026-07-03): `MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE` (construct spatial
-objects); `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE` (derive information from
-spatial objects); `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE` (set operations
-on spatial objects). ThoughtSpot has no spatial data type, constructors, or set operations —
-all 13 are untranslatable.
-
-**Policy — detect, decompose, log (never silent):**
-
-1. **Detect** all 13 function calls in calculated fields (use the same `FUNCTION\s*\(`
-   pattern as other untranslatable functions — see the classifier patterns below).
-2. **Decompose `MAKEPOINT(lat, lon)`:** if the two arguments resolve to physical columns (latitude
-   and longitude), ensure those columns are migrated as individual `ATTRIBUTE` columns on the model.
-   They are useful as filter and display dimensions even without a map visualization. Omit the
-   `MAKEPOINT` wrapper formula.
-3. **Omit the geospatial formula** from the model TML — do not generate a stub or placeholder.
-4. **Log** each omission:
-   `"Geospatial: '<calc name>' uses <function> — no ThoughtSpot equivalent. Underlying lat/lon columns migrated as individual attributes where applicable. Omitted the spatial formula."`
-5. **Surface in the audit report** under a dedicated "Geospatial" row (see Tier table note below).
-
-**Calcs that ONLY wrap `MAKEPOINT`** (e.g. `MAKEPOINT([Latitude], [Longitude])`) are pure spatial
-constructors — their underlying columns carry all the analytical value. Calcs that use `DISTANCE`,
-`BUFFER`, `AREA`, `LENGTH`, `INTERSECTS`, `DIFFERENCE`, `INTERSECTION`, or `SYMDIFFERENCE` lose the
-spatial computation entirely; flag these more prominently:
-`"Geospatial: '<calc name>' computes <function> — spatial calculation lost; lat/lon columns available for filtering but the computation needs manual recreation."`
-
-**Classifier detection patterns** (add to the existing regex list — all 13, live-checked
-against `_UNMAPPED_FUNCTIONS` in `tools/ts-cli/ts_cli/tableau/validate.py`):
-```
-MAKEPOINT\s*\(   MAKELINE\s*\(   DISTANCE\s*\(   BUFFER\s*\(   AREA\s*\(
-INTERSECTS\s*\(  LENGTH\s*\(     SHAPETYPE\s*\(  OUTLINE\s*\(
-DIFFERENCE\s*\(  INTERSECTION\s*\(  SYMDIFFERENCE\s*\(  VALIDATE\s*\(
-```
+- `WINDOW_SUM`, `WINDOW_AVG`, etc. → `moving_sum()`, `moving_average()`, etc. (see Window / Moving section); fall back to pass-through when sort dimension cannot be determined
+- `RANK_MODIFIED`, `RANK_DENSE` → `sql_int_aggregate_op()` pass-through
+- Partitioned `RANK` → `sql_int_aggregate_op()` with `partition by`
 
 ---
 

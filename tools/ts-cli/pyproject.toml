@@ -12,6 +12,7 @@ dependencies = [
     "requests>=2.33.0",
     "PyYAML>=6.0",
     "keyring>=24.0",
+    "lark>=1.1",
 ]
 
 [project.optional-dependencies]

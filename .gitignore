@@ -69,3 +69,10 @@ agents/databricks/notebooks/databricks_mv_lib.py
 # Implementation plans — local working artifacts, not part of the published repo
 # (design specs under docs/superpowers/specs/ ARE tracked; plans are not)
 docs/superpowers/plans/
+
+# Local-only docs and design artifacts
+docs/design/
+docs/migration-runs/
+
+# TokenSave code-graph cache
+.tokensave/

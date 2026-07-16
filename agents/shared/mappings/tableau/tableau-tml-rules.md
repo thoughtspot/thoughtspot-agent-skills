@@ -1,5 +1,3 @@
-<!-- currency: tableau — 2026-07 (external sweep: all TWB facts hold; corrected custom-SQL relation attribute to type="text") -->
-
 # Tableau → ThoughtSpot TML Generation Rules
 
 Critical invariants for producing valid ThoughtSpot TML from a Tableau TWB. Every rule here has been verified against a live ThoughtSpot import.
@@ -96,23 +94,51 @@ collapse multiple datasources into a single model** just because they share tabl
 at the same database — each has its own join topology, calculated fields, and column aliases,
 and merging them indiscriminately produces wrong joins and broken formula references.
 
-**Three deliberate exceptions:**
+**Two deliberate exceptions:**
 - **COLLECTION datasources** → one model per underlying table.
-- **Blend-connected datasources** → datasources linked by `<datasource-relationships>` in the
-  workbook XML produce a single merged model. The primary datasource's tables and columns
-  form the base; secondary datasources' tables join in via `LEFT_OUTER` inline joins derived
-  from the blend's `<column-mapping>` link fields. **Join placement:** the join is declared on
-  the **secondary** table's `model_tables[]` entry, with `with:` pointing to the primary.
-  This is the standard blend-to-model mapping; see SKILL.md Step 3e (extraction) and Step 5b
-  (model generation).
-  - A datasource with no worksheet of its own (e.g. a targets source that exists only to feed
-    a blend) folds into the model that uses it rather than becoming a standalone, unused model.
-- **A cross-datasource formula** that references another datasource resolves within the
-  merged model — no separate SQL view is needed when both datasources are already in the
-  same model via blending.
+- **A genuine cross-datasource blend** (a calculated field that references *another*
+  datasource, e.g. `SUM([Sales]) - SUM([Targets].[Target])`) is *meant* to combine the two.
+  Realize it as **one model** by co-locating the blend's link keys into a single relation
+  (a SQL view spanning the needed tables) and joining the other datasource in — see
+  "Join keys must be physical" / "Cross-datasource formulas" in `tableau-formula-translation.md`.
+  This is an intentional, key-aligned merge, not the accidental collapse the rule guards against.
 
 **Build only the models the workbook actually uses.** Map models to what the worksheets and
-dashboards reference — don't materialize a model for every datasource speculatively.
+dashboards reference — don't materialize a model for every datasource speculatively. A
+datasource with no worksheet of its own (e.g. a targets source that exists only to feed a
+blend) folds into the model that uses it rather than becoming a standalone, unused model.
+
+### Formula scoping — each model gets ONLY its own datasource's formulas
+
+When populating `model.formulas[]`, pull calculated fields **only** from the
+datasource that corresponds to this model — `parsed.datasources[i].calculated_fields`.
+Never search across datasources by formula name.
+
+**Why this matters:** Multiple Tableau datasources can have calculated fields with
+the same caption (e.g. "Graph Metric", "Membership Status", "Max Fiscal Year")
+but completely different expressions. A Customer Segments datasource might have
+`Graph Metric = IF [Segment Metric] = 'Customer Count' THEN COUNTD([CUSTOMER_ID]) ...`
+while an Insights Campaign datasource has
+`Graph Metric = IF [Insight Graph Metric] = 'Engagement' THEN [Unique Clicks / Delivered] ...`.
+Using the wrong body produces a model that references columns that don't exist in
+its tables — silent breakage at query time.
+
+**Rules:**
+
+1. **Scope by datasource index** — for each model, iterate only over
+   `parsed.datasources[N].calculated_fields` where `N` is the datasource that
+   produced this model. Do not search other datasources.
+2. **Never use a flat formula-name dict** — if an intermediate structure keys
+   formulas by `caption` alone (no datasource qualifier), the last datasource
+   processed wins and earlier entries are silently overwritten. Key by
+   `(datasource_name, caption)` or process one datasource at a time.
+3. **`formula_column_map` (Calculation_ID → caption) is safe to share globally**
+   because Tableau Calculation IDs are unique per workbook. But the formula
+   **body** (the `formula` / `expr` field) must come from the datasource-specific
+   `calculated_fields` list, never from a cross-datasource lookup.
+4. **Same-name formulas get independent `formula_` IDs per model** — each model's
+   `formula_Graph Metric` contains its own datasource's expression. They don't
+   collide because they live in separate TML files.
 
 ### model_tables entries
 
@@ -125,6 +151,38 @@ model_tables:
   `obj_id` only when repointing an existing model to a different table (see
   `thoughtspot-model-tml.md` lines 98-99 for the authoritative rule).
 - **No `fqn` in `model_tables` entries** — causes import failures.
+
+### Column references use display `name`, not physical `db_column_name`
+
+All model TML references — `model_tables[].name`, `column_id`, join `on` clauses,
+and `joins[].with` — use the **display `name`** field from the table/sql_view TML,
+never the physical `db_table` or `db_column_name`.
+
+```yaml
+# Table TML (fragment — {db}/{schema}/{connection_name} as in the full template)
+table:
+  name: CHOCOLATE_SALES_2
+  db: "{db}"
+  schema: "{schema}"
+  db_table: CHOCOLATE_SALES_2
+  connection:
+    name: "{connection_name}"
+  columns:
+  - name: Sales Person          # ← display name
+    db_column_name: SALES_PERSON # ← physical warehouse column
+
+# Model TML — references display name
+columns:
+- column_id: CHOCOLATE_SALES_2::Sales Person    # ✓ correct — uses `name`
+- column_id: CHOCOLATE_SALES_2::SALES_PERSON    # ✗ wrong — uses `db_column_name`
+```
+
+When `name` and `db_column_name` happen to be identical (common when tables are
+auto-created), the distinction is invisible. It matters when the table was created
+with display-friendly names (spaces, mixed case) that differ from the physical
+column. Always export the Table TML and use its `name` values — never assume they
+match the warehouse schema. See `thoughtspot-model-tml.md` lines 631-640 for the
+authoritative rule.
 
 ### Joins — inline syntax only
 
@@ -147,6 +205,13 @@ model_tables:
 
 **`FULL_OUTER` is invalid** — use `OUTER` instead.
 
+**All tables must be connected — no islands.** Every table in `model_tables` must be
+reachable from every other table through the join graph. A table with no `joins:` entry
+that isn't the target of another table's `with:` is a disconnected island — ThoughtSpot
+rejects the model with `Schema validation failed` (error 13122). If a model has three
+tables A, B, C where B→C is joined but A is unconnected, add a join from A to B (or C)
+to complete the graph. Verified against live instance 2026-07-01.
+
 ### Formula ordering — dependency order required
 
 Write formulas in dependency order: Level 0 (no formula references) first, then formulas that depend on Level 0, etc.
@@ -158,118 +223,8 @@ formulas:
   expr: "[TABLE_A::sales_amount] * [TABLE_A::quantity]"
 - id: formula_Adjusted Metric  # Level 1 — references formula_Base Metric
   name: Adjusted Metric
-  expr: "[Base Metric] * 1.1"
+  expr: "[formula_Base Metric] * 1.1"
 ```
-
-### Formula cross-references during import — inline the expression
-
-**Formula-to-formula bracket references (`[Other Formula Name]`) fail during TML
-import** with "Search did not find 'other formula name'". ThoughtSpot resolves formula
-references by display name at import time, but the referenced formula may not yet exist
-in the object when the referencing formula is being validated.
-
-**Workaround:** inline the referenced formula's expression directly into the referencing
-formula. For example, if formula B references formula A:
-
-```yaml
-# WRONG — fails with "Search did not find 'Total Sales'"
-- id: formula_Total Sales
-  name: Total Sales
-  expr: "group_aggregate ( sum ( [TABLE::AMOUNT] ) , { [TABLE::REGION] } , {} )"
-- id: formula_Above Threshold
-  name: Above Threshold
-  expr: "if ( [Total Sales] >= [Min Amount] ) then true else false"
-
-# CORRECT — inline the group_aggregate expression
-- id: formula_Total Sales
-  name: Total Sales
-  expr: "group_aggregate ( sum ( [TABLE::AMOUNT] ) , { [TABLE::REGION] } , {} )"
-- id: formula_Above Threshold
-  name: Above Threshold
-  expr: >-
-    if ( group_aggregate ( sum ( [TABLE::AMOUNT] ) , { [TABLE::REGION] } , {} ) >= [Min Amount] ) then true else false
-```
-
-**Alternative:** import base formulas first, export the model to get GUIDs assigned,
-then add dependent formulas via a second import with the exported JSON format. This is
-slower but avoids expression duplication.
-
-### Cross-reference resolution (formula dependency graph)
-
-Tableau formulas reference other calculated fields by internal ID
-(`[Calculation_6076974422807080981]`). These must be resolved before TML generation.
-
-**Resolution algorithm:**
-1. Build a map: internal_id → {display_name, translated_expression, dependencies[]}
-2. Topological sort by dependency depth:
-   - Level 0: no cross-references (translate directly)
-   - Level 1: references only Level 0 formulas
-   - Level N: references Level N-1 formulas
-3. For each level, resolve references by inlining:
-   - Replace `[Calculation_*]` with the referenced formula's translated expression
-   - Or replace with `[Display Name]` if using multi-pass import
-4. Circular dependencies → skip and log
-
-The `ts tableau translate-formulas` CLI command implements this automatically when given
-a `--calc-map` file (mapping `[Calculation_NNN]` → caption).
-
-**Multi-pass import alternative:**
-Import Level 0 formulas first. Export the model to get server-assigned names. Then
-import Level 1 formulas with bracket references to Level 0 by display name. Continue
-for each level. Slower but avoids expression inlining.
-
-### Column scoping — per-model table set only
-
-When scoping column references (`[COL]` → `[TABLE::COL]`), resolve against ONLY the
-tables in the specific model being built. A workbook with two datasources (prod: 9
-tables, tentpole: 3 tables) produces two models — each formula must reference columns
-from its own model's tables only.
-
-Build a per-model `scoped_columns` map:
-
-```json
-{ "COLUMN_NAME": "TABLE_NAME" }
-```
-
-Feed this to `ts tableau translate-formulas --table-columns`. When a column name exists
-in multiple tables within the same model, disambiguate by Tableau's `parent-name`
-metadata (which table the field belongs to in Tableau).
-
-### Two-phase model import (recommended)
-
-**Phase 1 — Base model (no formulas):**
-Import `model_tables[]`, physical `columns[]`, `joins[]`, and `parameters[]` only.
-No `formulas[]` section. This is guaranteed to succeed if table TMLs are clean.
-Record the returned GUID.
-
-**Phase 2 — Add formulas:**
-Pin the GUID from Phase 1. Add `formulas[]` and formula `columns[]` entries.
-Import with `--no-create-new`. If import fails, parse the error to identify the
-failing formula(s), remove them, and retry (up to 5 cycles).
-
-This pattern ensures the model always exists and formula errors are isolated rather
-than blocking the entire import. It replaces the previous all-at-once approach that
-required 20+ import attempts in the CPG Merch migration.
-
-### Range join alternative for date-range filter patterns
-
-When detected: a Tableau workbook has calculated fields implementing date-range
-membership tests (`[DATE] >= [START_DATE] AND [DATE] <= [END_DATE]`) used as boolean
-filters, and separate fact and dimension tables with start/end date columns.
-
-ThoughtSpot model TML supports range/inequality joins natively:
-
-```yaml
-joins:
-- with: DIM_PERIOD
-  on: "[FACT::EVENT_DATE] >= [DIM_PERIOD::START_DATE] and [FACT::EVENT_DATE] < [DIM_PERIOD::END_DATE]"
-  type: LEFT_OUTER
-  cardinality: MANY_TO_ONE
-```
-
-**Recommendation:** surface this as an option during join confirmation (Step 3.6). A
-range join is more efficient than a filter formula and produces cleaner query semantics.
-Tableau does not support range joins natively — it uses calculated field filters instead.
 
 ### Formula ID convention
 
@@ -278,7 +233,7 @@ Tableau does not support range joins natively — it uses calculated field filte
 ### Column references in formulas
 
 - Physical columns: `[table_name::column_name]`
-- Formula columns (post-import): `[Formula Display Name]` (by display name, no table prefix)
+- Other formulas: `[formula_<display_name>]` (by their `id`)
 - Parameters: `[Parameter Name]` (no table prefix, no `::` separator)
 
 ### Parameter migration (Tableau `Parameters` datasource → `model.parameters[]`)
@@ -286,35 +241,16 @@ Tableau does not support range joins natively — it uses calculated field filte
 Tableau parameters from the `Parameters` datasource are created as ThoughtSpot model
 parameters. Omit `id` on first import — ThoughtSpot assigns it.
 
-**`data_type` for list parameters must be `CHAR`** — `VARCHAR` is listed in the schema
-but fails on import for list parameters. Use `CHAR` for all string-typed list parameters.
-(`INT64`, `DOUBLE`, `DATE`, `BOOL` are valid for non-string types.)
-
-**`list_choice` entries require `value:` and `display_name:` sub-keys** — bare string
-values are rejected. Every entry must be an object with at least `value:`.
-
 ```yaml
 parameters:
 - name: Currency
-  data_type: CHAR
+  data_type: CHAR              # CHAR for strings — not VARCHAR (parameters only)
   default_value: "USD"
   list_config:
     list_choice:
     - value: USD
-      display_name: USD
     - value: CAD
-      display_name: CAD
     - value: GBP
-      display_name: GBP
-
-- name: Threshold
-  data_type: DOUBLE
-  default_value: "500"
-  range_config:
-    range_min: "0"
-    range_max: "10000"
-    include_min: true
-    include_max: true
 ```
 
 **Formula references:** Tableau `[Parameters].[Currency]` → ThoughtSpot `[Currency]`.
@@ -341,9 +277,9 @@ reduced coverage, which the user can then address manually.
 
 ## SQL View TML Rules (Custom SQL Datasources)
 
-When a Tableau `<relation>` has `type="text"` (the custom-SQL indicator in TWB XML), the
-SQL text is the datasource's query — it does NOT map to a physical table. Generate a
-`sql_view:` TML instead of a `table:` TML.
+When a Tableau `<relation>` has `type="custom-sql"`, the SQL text is the datasource's
+query — it does NOT map to a physical table. Generate a `sql_view:` TML instead of a
+`table:` TML.
 
 ### When to generate a SQL View
 
@@ -396,59 +332,79 @@ model_tables:
 
 Column references use the same `[sql_view_name::column]` syntax.
 
+### Formula fallback — omit and log untranslatable formulas
+
+When a Tableau calculated field cannot be translated to a native ThoughtSpot function
+or a pass-through fallback (LOOKUP, INDEX, SIZE, PREVIOUS_VALUE, or any pattern listed
+in `tableau-formula-translation.md` "Untranslatable Patterns"):
+
+1. **Omit the formula** from the model TML `formulas[]` section entirely
+2. **Omit the corresponding `columns[]` entry** that would reference the formula via `formula_id`
+3. **Log the omission** — add a row to the `MIGRATION_LIMITATIONS.md` report with the
+   formula name, datasource, reason, and Tableau expression excerpt
+
+Never generate a placeholder or stub formula — a formula with incorrect syntax causes
+the entire model import to fail. A missing formula produces a functional model with
+reduced coverage, which the user can then address manually.
+
 ---
 
-## Date Column Rules — full date required
+## SQL View TML Rules (Custom SQL Datasources)
 
-Any column intended as a DATE in ThoughtSpot must resolve to a full `YYYY-MM-DD` date,
-never a bare year or partial string. ThoughtSpot requires a complete date for:
+When a Tableau `<relation>` has `type="custom-sql"`, the SQL text is the datasource's
+query — it does NOT map to a physical table. Generate a `sql_view:` TML instead of a
+`table:` TML.
 
-- **Date bucketing** — `.yearly`, `.monthly`, `.quarterly` in search queries
-- **KPI sparklines** — period-over-period comparison needs actual date arithmetic
-- **Filters** — date-range filters expect a real date type
+### When to generate a SQL View
 
-### The rule
+- The `<relation>` element has `type="text"` (custom SQL indicator in TWB XML)
+- The element contains a raw SQL query in its text content
 
-When converting a string that represents a year (e.g. `_2016_17`, `FY2016`, `2016`) to
-a date column, always produce a full date by appending a month and day:
+### Required structure
 
-```sql
--- Correct: full date — ThoughtSpot can bucket, compare, and sparkline
-TO_DATE(SUBSTRING(YEAR_PERIOD, 2, 4) || '-01-01', 'YYYY-MM-DD')
-
--- Wrong: bare year — renders as a number, not a date; sparklines fail
-TO_DATE(SUBSTRING(YEAR_PERIOD, 2, 4), 'YYYY')
+```yaml
+sql_view:
+  name: "Datasource Custom SQL"
+  connection:
+    name: "Connection Display Name"      # exact name from ts connections list — case-sensitive
+  sql_query: |
+    SELECT col1, col2, col3
+    FROM catalog.schema.table_name
+    WHERE condition = 'value'
+  sql_view_columns:
+  - name: COL1
+    sql_output_column: col1              # must match a column/alias in the SQL output
+    data_type: VARCHAR
+    properties:
+      column_type: ATTRIBUTE
+  - name: COL2
+    sql_output_column: col2
+    data_type: DOUBLE
+    properties:
+      column_type: MEASURE
+      aggregation: SUM
 ```
 
-The same applies in ThoughtSpot formulas:
+### Key differences from table TML
 
+- **No `db`, `schema`, or `db_table`** — the SQL query defines the data source
+- **`connection.name` is required** — SQL Views must reference a named connection
+- **`sql_output_column`** replaces `db_column_name` — must match a column/alias in the SQL
+- **`db_column_properties` is NOT used** — `data_type` goes at the column level
+- **File extension**: `*.sql_view.tml` (not `*.table.tml`)
+
+See `thoughtspot-sql-view-tml.md` for the full schema reference.
+
+### Model references to SQL Views
+
+A SQL View is referenced in `model_tables[]` by name, just like a regular table:
+
+```yaml
+model_tables:
+- name: "Datasource Custom SQL"
 ```
-// Correct
-to_date ( concat ( substr ( [YEAR_PERIOD] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )
 
-// Wrong — produces an ambiguous value ThoughtSpot can't reliably bucket
-to_date ( substr ( [YEAR_PERIOD] , 1 , 4 ) , 'yyyy' )
-```
-
-### Where to apply the conversion
-
-**If the datasource already uses a SQL View** (custom SQL or UNPIVOT), apply the
-conversion in the SQL query itself — this produces a native DATE column at the source.
-The model then references it directly via `column_id` instead of needing a formula.
-
-**If the datasource uses a regular table**, apply the conversion as a model formula —
-a formula like `to_date ( concat ( substr ( [col] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )` works correctly
-and keeps the date logic visible in the model. Either approach is fine as long as the
-result is a full `YYYY-MM-DD` date.
-
-### Common patterns
-
-| Source pattern | SQL (in SQL View) | ThoughtSpot formula (in model) | Result |
-|---|---|---|---|
-| `_2016_17` (UNPIVOT) | `TO_DATE(SUBSTRING(col, 2, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date ( concat ( substr ( [col] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )` | `2016-01-01` |
-| `FY2016` | `TO_DATE(SUBSTRING(col, 3, 4) \|\| '-01-01', 'YYYY-MM-DD')` | `to_date ( concat ( substr ( [col] , 2 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )` | `2016-01-01` |
-| `2016` (bare year) | `TO_DATE(col \|\| '-01-01', 'YYYY-MM-DD')` | `to_date ( concat ( [col] , '-01-01' ) , 'yyyy-MM-dd' )` | `2016-01-01` |
-| `2016-03` (year-month) | `TO_DATE(col \|\| '-01', 'YYYY-MM-DD')` | `to_date ( concat ( [col] , '-01' ) , 'yyyy-MM-dd' )` | `2016-03-01` |
+Column references use the same `[sql_view_name::column]` syntax.
 
 ---
 
