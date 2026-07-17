@@ -107,3 +107,52 @@ class TestScalarEmit:
             {"node": "lit", "kind": "number", "value": "10"},
         ]}
         assert emit_sql(node, _res) == "source.x BETWEEN 1 AND 10"
+
+    def test_strlen(self):
+        # FIX 4: strlen(s) -> LENGTH(s)
+        assert e("strlen ( [T::s] )") == "LENGTH(source.s)"
+
+
+class TestPrecedenceParens:
+    # FIX 1: precedence-aware parenthesization -- a child expression must be
+    # wrapped in parens exactly when its precedence would otherwise be lost.
+    def test_paren_group_times_col(self):
+        assert e("( [T::a] + [T::b] ) * [T::c]") == "(source.a + source.b) * source.c"
+
+    def test_unary_minus_over_binop(self):
+        assert e("- ( [T::a] + [T::b] )") == "-(source.a + source.b)"
+
+    def test_safe_divide_numerator_binop(self):
+        assert e("safe_divide ( [T::a] + [T::b] , [T::c] )") == \
+            "COALESCE((source.a + source.b) / NULLIF(source.c, 0), 0)"
+
+    def test_or_group_and_cmp(self):
+        assert e("( [T::x] = 1 or [T::y] = 2 ) and [T::z] = 3") == \
+            "(source.x = 1 OR source.y = 2) AND source.z = 3"
+
+    def test_arithmetic_unchanged(self):
+        # re-confirm existing precedence-correct output is unaffected
+        assert e("[T::a] + [T::b] * [T::c]") == "source.a + source.b * source.c"
+
+    def test_safe_divide_unchanged(self):
+        # re-confirm existing safe_divide output (non-binop numerator) is unaffected
+        assert e("safe_divide ( sum ( [T::a] ) , sum ( [T::b] ) )") == \
+            "COALESCE(SUM(source.a) / NULLIF(SUM(source.b), 0), 0)"
+
+
+class TestPassthroughArity:
+    # FIX 2: a sql_*_op pass-through call with anything other than exactly
+    # one argument must raise, never emit the un-substituted `{0}` template.
+    def test_two_arg_passthrough_raises(self):
+        with pytest.raises(UntranslatableError, match=r"exactly one argument"):
+            e("sql_str_op ( 'LOWER({0})' , [T::s] )")
+
+
+class TestInBetweenParse:
+    # FIX 3 (cross-task): mv_emit_expr now parses TS's real infix `in`/`between`
+    # syntax, so these go end-to-end through parse_formula -> emit_sql.
+    def test_in_infix(self):
+        assert e("[T::s] in ( 'A' , 'B' )") == "source.s IN ('A', 'B')"
+
+    def test_between_infix(self):
+        assert e("[T::x] between 1 and 10") == "source.x BETWEEN 1 AND 10"

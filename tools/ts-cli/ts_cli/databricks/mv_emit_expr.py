@@ -102,7 +102,29 @@ def _parse_cmp(p):
     k, t = p.peek()
     if k == "op" and t in _CMP:
         p.next(); return {"node": "binop", "op": t, "left": left, "right": _parse_add(p)}
+    if (k, t) == ("kw", "in"):
+        return _parse_in(p, left)
+    if (k, t) == ("kw", "between"):
+        return _parse_between(p, left)
     return left
+
+
+def _parse_in(p, left):
+    p.eat("kw", "in")
+    p.eat("op", "(")
+    args = [left, _parse_or(p)]
+    while p.peek() == ("op", ","):
+        p.next(); args.append(_parse_or(p))
+    p.eat("op", ")")
+    return {"node": "call", "fn": "in", "args": args}
+
+
+def _parse_between(p, left):
+    p.eat("kw", "between")
+    lo = _parse_add(p)
+    p.eat("kw", "and")
+    hi = _parse_add(p)
+    return {"node": "call", "fn": "between", "args": [left, lo, hi]}
 
 
 def _parse_add(p):

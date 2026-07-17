@@ -18,7 +18,7 @@ AGG_MAP = {
 SCALAR_FN_MAP = {
     "concat": "CONCAT", "greatest": "GREATEST", "least": "LEAST",
     "upper": "UPPER", "lower": "LOWER", "abs": "ABS", "round": "ROUND",
-    "length": "LENGTH", "trim": "TRIM",
+    "length": "LENGTH", "trim": "TRIM", "strlen": "LENGTH",
 }
 # TS sql_*_op pass-through wrappers -> unwrap, emit inner as raw SQL string literal arg
 PASSTHROUGH_FN = {"sql_int_op", "sql_bool_op", "sql_str_op", "sql_string_op",
@@ -32,6 +32,13 @@ COND_AGG = {
 }
 _OP_SQL = {"=": "=", "!=": "!=", "<": "<", "<=": "<=", ">": ">", ">=": ">=",
            "+": "+", "-": "-", "*": "*", "/": "/", "and": "AND", "or": "OR"}
+# operator precedence, low -> high (used to decide when a child expression
+# needs re-parenthesizing so the emitted SQL preserves the AST's semantics)
+_PREC = {"or": 1, "and": 2,
+         "=": 3, "!=": 3, "<": 3, "<=": 3, ">": 3, ">=": 3,
+         "+": 4, "-": 4, "*": 5, "/": 5}
+_UNARY_PREC = 6
+_ATOMIC_PREC = 7  # col/ref/lit/call/ifelse: self-delimiting, never wrapped
 
 
 def emit_sql(node: dict, resolver: Callable[[dict], str]) -> str:
@@ -43,8 +50,7 @@ def emit_sql(node: dict, resolver: Callable[[dict], str]) -> str:
     if kind == "lit":
         return _emit_lit(node)
     if kind == "unop":
-        inner = emit_sql(node["operand"], resolver)
-        return f"NOT {inner}" if node["op"] == "not" else f"-{inner}"
+        return _emit_unop(node, resolver)
     if kind == "binop":
         return _emit_binop(node, resolver)
     if kind == "ifelse":
@@ -52,6 +58,22 @@ def emit_sql(node: dict, resolver: Callable[[dict], str]) -> str:
     if kind == "call":
         return _emit_call(node, resolver)
     raise UntranslatableError(f"cannot emit node {kind!r}")
+
+
+def _precedence(node: dict) -> int:
+    kind = node["node"]
+    if kind == "binop":
+        return _PREC[node["op"]]
+    if kind == "unop":
+        return _UNARY_PREC
+    return _ATOMIC_PREC  # col, ref, lit, call, ifelse are atomic
+
+
+def _emit_unop(node: dict, resolver) -> str:
+    inner = emit_sql(node["operand"], resolver)
+    if node["operand"]["node"] == "binop":
+        inner = f"({inner})"
+    return f"NOT {inner}" if node["op"] == "not" else f"-{inner}"
 
 
 def _emit_lit(node: dict) -> str:
@@ -68,9 +90,21 @@ def _emit_binop(node: dict, resolver) -> str:
     if op in ("=", "!=") and node["right"].get("node") == "lit" and node["right"]["kind"] == "null":
         left = emit_sql(node["left"], resolver)
         return f"{left} IS NULL" if op == "=" else f"{left} IS NOT NULL"
-    left = emit_sql(node["left"], resolver)
-    right = emit_sql(node["right"], resolver)
+    parent_prec = _PREC[op]
+    left = _emit_child(node["left"], resolver, parent_prec, is_right=False)
+    right = _emit_child(node["right"], resolver, parent_prec, is_right=True, parent_op=op)
     return f"{left} {_OP_SQL[op]} {right}"
+
+
+def _emit_child(node: dict, resolver, parent_prec: int, is_right: bool, parent_op: str = "") -> str:
+    sql = emit_sql(node, resolver)
+    child_prec = _precedence(node)
+    needs_wrap = child_prec < parent_prec
+    if is_right and not needs_wrap:
+        # left-associative, non-commutative parent ops (- and /) must
+        # re-parenthesize an equal-precedence right child: a - (b - c) != a - b - c
+        needs_wrap = child_prec == parent_prec and parent_op in ("-", "/")
+    return f"({sql})" if needs_wrap else sql
 
 
 def _emit_case(node: dict, resolver) -> str:
@@ -118,6 +152,9 @@ def _emit_cond_agg(fn: str, args: list, resolver) -> str:
 
 
 def _emit_passthrough(fn: str, args: list) -> str:
+    if len(args) != 1:
+        raise UntranslatableError(
+            f"{fn} pass-through expects exactly one argument, got {len(args)}")
     raw = args[0]
     if raw.get("node") != "lit" or raw["kind"] != "string":
         raise UntranslatableError(f"{fn} pass-through expects a string literal")
@@ -125,7 +162,13 @@ def _emit_passthrough(fn: str, args: list) -> str:
 
 
 def _emit_safe_divide(args: list, resolver) -> str:
-    return f"COALESCE({emit_sql(args[0], resolver)} / NULLIF({emit_sql(args[1], resolver)}, 0), 0)"
+    numerator = emit_sql(args[0], resolver)
+    # numerator sits left of the implicit `/` -> wrap if it's a binop
+    # (precedence <= 5, i.e. any binop); the denominator is inside
+    # NULLIF(x, 0), a function-arg context that needs no extra wrapping.
+    if args[0]["node"] == "binop":
+        numerator = f"({numerator})"
+    return f"COALESCE({numerator} / NULLIF({emit_sql(args[1], resolver)}, 0), 0)"
 
 
 def _emit_if_null(args: list, resolver) -> str:
