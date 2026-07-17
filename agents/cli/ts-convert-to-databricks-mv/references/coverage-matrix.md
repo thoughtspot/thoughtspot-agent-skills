@@ -20,7 +20,7 @@ for the full bidirectional translation reference.
 |---|---|---|---|
 | 1 | Model `description` | Top-level `comment:` | |
 | 2 | `model_tables[]` fact + dimension structure | Nested `joins:` (v1.1 star schema) | `build_joins` walks breadth-first from the source table |
-| 3 | Join `on:` (inline equality, `AND`-joined conjuncts) | Dot-path equality in the nested join's `on:` | Only simple `a.COL = b.COL [AND ...]` — no `<`/`>`/`!=` conjuncts |
+| 3 | Join `on:` (inline equality or comparison, `AND`-joined conjuncts) | Dot-path condition in the nested join's `on:` | `_translate_join_on` routes through the general `emit_sql` expression emitter, so `=`/`!=`/`<`/`<=`/`>`/`>=` conjuncts joined with `AND` all translate — not just equality |
 | 4 | Join `using:` (column list) | Dot-path equality generated from the shared column names | |
 | 5 | `referencing_join` | Resolved via the source table's `joins_with[]` `on:` clause | Falls back to `joins[]` defensively; raises if not found |
 | 6 | Join `cardinality: MANY_TO_ONE` | `cardinality: many_to_one` on the MV join node | `ONE_TO_MANY` and unset both fall through with no `cardinality:` key |
@@ -153,12 +153,13 @@ for the full bidirectional translation reference.
 | L6 | `group_aggregate(...)` with a `query_groups()` third argument | Cannot be expressed as a dimension window function — no Databricks analogue for the query-group-aware LOD variant | Omit or rewrite as `query_filters()`-based `group_aggregate` if the query-group semantics aren't load-bearing |
 | L7 | Worksheet input | `ts databricks build-mv` reads Model TML (`model_tables[]`/`columns[]`) only — a Worksheet's `worksheet_columns[]` shape is not understood | Convert/promote the Worksheet to a Model in ThoughtSpot first, then re-run against the Model GUID |
 | L8 | A fact table whose *only* measures are condition-first formulas (e.g. a lone `sum_if(diff_months(...), [FACT::v])` with no physical `MEASURE` column) | `detect_fact_tables`'s attribution walk can resolve such a formula to the *condition's* table rather than the fact, under-detecting the fact | Pass `--source-table` explicitly to `build-mv` rather than relying on auto-detection |
-| L9 | Complex `group_aggregate`/window shapes: ordered-set aggregates, running/frame windows (`ORDER BY`/`ROWS`/`RANGE`/`GROUPS` inside the window), or a formula spanning multiple `OVER (...)` clauses | No dimension-window-function analogue on the ThoughtSpot side | Not translatable — log in the Unmapped Report and handle manually |
+| L9 | An LOD `{}` partition column, or a window measure's sort/order `[date]` argument, that is itself an expression rather than a direct `[TABLE::COLUMN]` reference (e.g. `group_aggregate(sum(x), {upper([Region])}, query_filters())`, or `moving_sum([m], 7, -1, [Some Derived Date Formula])`) | `_lod_partition_cols` (LOD) and `_raw_date_dim` (moving/cumulative/semi-additive windows) both require a direct column node in that argument position — an expression raises `UntranslatableError` | Reference the underlying physical/model date or dimension column directly in the LOD set or window sort argument, rather than a derived formula |
+| L11 | `rank(...)` | `_WINDOW_MEASURE_FNS` classifies it as a window-measure formula, but `emit_window_measure` has no dispatch branch for `rank` — falls through to `raise UntranslatableError(f"{fn!r} is not a supported window measure function")` | Fails loud — lands in `skipped[]`, not silently dropped or mis-mapped; rewrite as a supported window/LOD shape (or a plain aggregate), or omit the column |
 
 ### Notes on limitations
 
-**L1, L2, L6, L9** are structural — no automated fallback exists today. They are
-logged in `skipped[]`/the Unmapped Report at build time rather than silently
+**L1, L2, L6, L9, L11** are structural — no automated fallback exists today. They
+are logged in `skipped[]`/the Unmapped Report at build time rather than silently
 dropped.
 
 **L3** is the most consequential limitation in the codified emit path — it produces

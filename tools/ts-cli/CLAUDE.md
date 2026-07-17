@@ -61,6 +61,11 @@ ts_cli/
     mv_sql_constructs.py — CASE/CAST/NOT/IS/IN/BETWEEN keyword-construct handlers split out of mv_sql.py under the file-size warn line; late-imports mv_sql's expression primitives to avoid a circular import (pure functions, no I/O; BL-063 PR3)
     mv_translate.py     — parsed Metric View -> translated ThoughtSpot formulas behind `ts databricks translate-formulas`: dot-path resolution, LOD windows, conditional aggregates, cross-measure inlining via dependency DAG; re-exports translate_window_measure from mv_window_translate.py (pure functions, no I/O; BL-063 PR3)
     mv_window_translate.py — windowed-measure translation (trailing/leading/cumulative/current decision tree, BL-098 sparse-data-risk annotations) split out of mv_translate.py under the file-size warn line; late-imports mv_translate's make_resolver/_formula_measure to avoid a circular import (pure functions, no I/O; BL-063 PR3)
+    mv_emit_expr.py     — TS-formula tokenizer + recursive-descent parser -> dict-AST (reverse direction) behind `ts databricks build-mv`; re-exports UntranslatableError from formula_common.py (pure functions, no I/O; Genie-vendorable)
+    mv_emit_sql.py      — dict-AST -> Databricks-SQL string (reverse direction): AGG_MAP/SCALAR_FN_MAP/COND_AGG/PASSTHROUGH_FN dicts, operator-precedence-aware emit_sql, plus the raw-measure aggregation wrapper (is_aggregate_present/wrap_measure_if_needed, Task 18 Finding 1) that matches ThoughtSpot's own SUM-at-query-time semantics for a no-aggregate formula measure (pure functions, no I/O; Genie-vendorable)
+    mv_emit.py          — ThoughtSpot Model TML -> Databricks Metric View YAML orchestrator (reverse direction) behind `ts databricks build-mv`: column classification/routing, join assembly (build_joins), LOD dimension emission, cross-measure/LOD reference resolution + dangling-ref cascade, detect_fact_tables, build_metric_view top-level entry point; re-exports the window-measure API from mv_emit_window.py (pure functions, no I/O; at the 1000-line file-size cap — any further growth needs a split, not an in-place addition)
+    mv_emit_window.py   — window-measure emission (moving/cumulative/semi-additive/period-offset), split out of mv_emit.py under the file-size gate; mirrors the mv_translate.py/mv_window_translate.py split for the reverse direction (pure functions, no I/O; Genie-vendorable)
+    mv_build_view.py    — Metric View YAML doc -> `CREATE VIEW ... WITH METRICS LANGUAGE YAML AS $$...$$` DDL + build_summary (the `ts databricks build-mv` stdout JSON contract) + default_view_name; the one place an MV YAML body is dumped via `yaml.safe_dump` directly, with a fail-loud guard against a literal `$$` inside the body (pure + PyYAML only, no HTTP/auth/typer deps; Genie-vendorable)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
@@ -75,7 +80,7 @@ ts_cli/
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
-    databricks.py — ts databricks (parse-mv, translate-formulas, build-model) — BL-063 PR2/PR3/PR4
+    databricks.py — ts databricks (parse-mv, translate-formulas, build-model, build-mv) — BL-063 PR2/PR3/PR4; build-mv is the reverse (TS Model -> Databricks Metric View) deterministic emitter over mv_emit.py/mv_build_view.py, emit-only (no --profile, no ThoughtSpot/Databricks connection)
     aggregate.py  — ts aggregate (signatures, recommend, profile, history, generate) — aggregate-model advisor engine
     aggregate_rls.py — RLS command-layer wiring for `ts aggregate` (Task 23): _attach_rls_conflicts (recommend advisory surfacing) + _propagate_rls_or_fail_closed (generate security gate — fails closed on incomplete tables-dir or grain missing an RLS filter column) over the pure aggregate/rls.py engine; split out of aggregate.py to stay under the file-size gate, imported lazily from recommend/generate
   audit/
@@ -98,7 +103,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.53.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.55.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
