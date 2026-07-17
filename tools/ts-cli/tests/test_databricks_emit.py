@@ -3,6 +3,7 @@ from ts_cli.databricks.mv_emit import (
     build_column_index, make_col_resolver, classify_column,
     emit_dimension, emit_measure, emit_filter,
     emit_lod_dimension, emit_window_measure, synthesize_period_dim,
+    _moving_range,
 )
 from ts_cli.databricks.mv_emit_expr import parse_formula, UntranslatableError
 from ts_cli.databricks.mv_emit_sql import emit_sql
@@ -421,6 +422,37 @@ class TestEmitLodDimension:
             emit_lod_dimension(col, lambda n: f"source.{n['column']}", model=model)
 
 
+class TestMovingRangeUnit:
+    """Unit-level coverage of `_moving_range` itself -- the four canonical
+    shapes it must keep mapping exactly, plus the review-finding reproduction:
+    pairs that match an anchor condition (end==-1, end==0, start==-1,
+    start==0) but derive a non-positive day count N, which must raise rather
+    than emit a garbage 'trailing/leading -N day' range string."""
+
+    def test_trailing_exclusive_canonical(self):
+        assert _moving_range(7, -1) == "trailing 7 day"
+
+    def test_trailing_inclusive_canonical(self):
+        assert _moving_range(6, 0) == "trailing 7 day inclusive"
+
+    def test_leading_exclusive_canonical(self):
+        assert _moving_range(-1, 7) == "leading 7 day"
+
+    def test_leading_inclusive_canonical(self):
+        assert _moving_range(0, 6) == "leading 7 day inclusive"
+
+    @pytest.mark.parametrize("start,end", [
+        (-1, -1),
+        (-2, -1),
+        (-5, 0),
+        (-1, -5),
+        (0, -5),
+    ])
+    def test_non_positive_n_raises(self, start, end):
+        with pytest.raises(UntranslatableError):
+            _moving_range(start, end)
+
+
 class TestEmitWindowMeasureMoving:
     """Synthetic moving_sum shapes -- the four live-verified range forms plus
     the unmapped-shape UntranslatableError, per ts-databricks-formula-translation.md
@@ -441,26 +473,45 @@ class TestEmitWindowMeasureMoving:
         model = self._model("moving_sum ( [FACT::AMOUNT] , 7 , -1 , [FACT::ORDER_DATE] )")
         measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
         assert measure["expr"] == "SUM(source.AMOUNT)"
-        assert measure["window"][0]["range"] == "trailing 7 day"
-        assert measure["window"][0]["semiadditive"] == "last"
+        assert measure["window"] == [
+            {"order": "fact_order_date", "range": "trailing 7 day", "semiadditive": "last"}]
 
     def test_trailing_inclusive(self):
         model = self._model("moving_sum ( [FACT::AMOUNT] , 6 , 0 , [FACT::ORDER_DATE] )")
         measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
-        assert measure["window"][0]["range"] == "trailing 7 day inclusive"
+        assert measure["window"] == [
+            {"order": "fact_order_date", "range": "trailing 7 day inclusive", "semiadditive": "last"}]
 
     def test_leading_exclusive(self):
         model = self._model("moving_sum ( [FACT::AMOUNT] , -1 , 7 , [FACT::ORDER_DATE] )")
         measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
-        assert measure["window"][0]["range"] == "leading 7 day"
+        assert measure["window"] == [
+            {"order": "fact_order_date", "range": "leading 7 day", "semiadditive": "last"}]
 
     def test_leading_inclusive(self):
         model = self._model("moving_sum ( [FACT::AMOUNT] , 0 , 6 , [FACT::ORDER_DATE] )")
         measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
-        assert measure["window"][0]["range"] == "leading 7 day inclusive"
+        assert measure["window"] == [
+            {"order": "fact_order_date", "range": "leading 7 day inclusive", "semiadditive": "last"}]
 
     def test_unmapped_shape_raises(self):
         model = self._model("moving_sum ( [FACT::AMOUNT] , -2 , 3 , [FACT::ORDER_DATE] )")
+        with pytest.raises(UntranslatableError):
+            emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
+
+    @pytest.mark.parametrize("start,end", [
+        (-1, -1),  # end==-1 anchor -> N=start=-1 (non-positive)
+        (-2, -1),  # end==-1 anchor -> N=start=-2 (non-positive)
+        (-5, 0),   # end==0 anchor -> N=start+1=-4 (non-positive)
+        (-1, -5),  # start==-1 anchor -> N=end=-5 (non-positive)
+        (0, -5),   # start==0 anchor -> N=end+1=-4 (non-positive)
+    ])
+    def test_anchor_matches_but_non_positive_n_raises(self, start, end):
+        # These pairs each match one of the four anchor conditions (end==-1,
+        # end==0, start==-1, start==0) but derive a non-positive day count --
+        # previously silently emitted a garbage "trailing/leading -N day"
+        # range string instead of raising. See Task 9 review finding.
+        model = self._model(f"moving_sum ( [FACT::AMOUNT] , {start} , {end} , [FACT::ORDER_DATE] )")
         with pytest.raises(UntranslatableError):
             emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
 
@@ -468,13 +519,15 @@ class TestEmitWindowMeasureMoving:
         model = self._model("moving_average ( [FACT::AMOUNT] , 30 , -1 , [FACT::ORDER_DATE] )")
         measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
         assert measure["expr"] == "AVG(source.AMOUNT)"
-        assert measure["window"][0]["range"] == "trailing 30 day"
+        assert measure["window"] == [
+            {"order": "fact_order_date", "range": "trailing 30 day", "semiadditive": "last"}]
 
     def test_order_dim_reused_when_already_present(self):
         model = self._model("moving_sum ( [FACT::AMOUNT] , 7 , -1 , [FACT::ORDER_DATE] )")
         existing = [{"name": "order_date", "expr": "source.ORDER_DATE", "display_name": "Order Date"}]
         measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=existing)
-        assert measure["window"][0]["order"] == "order_date"
+        assert measure["window"] == [
+            {"order": "order_date", "range": "trailing 7 day", "semiadditive": "last"}]
         assert extra == []
 
 
@@ -547,8 +600,8 @@ class TestEmitWindowMeasureSemiAdditive:
         col = {"name": "Opening Balance", "formula_id": "f", "properties": {"column_type": "MEASURE"}}
         measure, extra = emit_window_measure(
             col, lambda n: f"source.{n['column']}", model=model, existing_dims=[])
-        assert measure["window"][0]["semiadditive"] == "first"
-        assert measure["window"][0]["range"] == "current"
+        assert measure["window"] == [
+            {"order": "fact_order_date", "semiadditive": "first", "range": "current"}]
 
 
 class TestEmitWindowMeasurePeriodOffset:

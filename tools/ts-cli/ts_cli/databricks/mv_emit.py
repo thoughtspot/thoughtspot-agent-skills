@@ -585,20 +585,30 @@ def _extract_int(node: dict) -> int:
 def _moving_range(start_val: int, end_val: int) -> str:
     """Classify a moving_sum/moving_average (start, end) row-offset pair into
     one of the four live-verified range shapes (ts-databricks-formula-translation.md
-    "Rolling Window Functions" / "Leading Window"). Any other pair is a manual-
-    review case -- raise rather than guess.
+    "Rolling Window Functions" / "Leading Window"). Any other pair -- including a
+    pair that matches a shape's anchor but derives a non-positive day count N
+    (e.g. (-1, -1), (-2, -1), (-5, 0), (-1, -5), (0, -5)) -- is a manual-review
+    case -- raise rather than emit a guessed range that would fail cryptically
+    as invalid MV YAML at DDL time.
     """
     if end_val == -1:
-        return f"trailing {start_val} day"
-    if end_val == 0:
-        return f"trailing {start_val + 1} day inclusive"
-    if start_val == -1:
-        return f"leading {end_val} day"
-    if start_val == 0:
-        return f"leading {end_val + 1} day inclusive"
-    raise UntranslatableError(
-        f"moving_sum/moving_average start={start_val} end={end_val} does not match "
-        "a known trailing/leading shape (manual review)")
+        n, label = start_val, f"trailing {start_val} day"
+    elif end_val == 0:
+        n, label = start_val + 1, f"trailing {start_val + 1} day inclusive"
+    elif start_val == -1:
+        n, label = end_val, f"leading {end_val} day"
+    elif start_val == 0:
+        n, label = end_val + 1, f"leading {end_val + 1} day inclusive"
+    else:
+        raise UntranslatableError(
+            f"moving_sum/moving_average start={start_val} end={end_val} does not match "
+            "a known trailing/leading shape (manual review)")
+    if n < 1:
+        raise UntranslatableError(
+            f"moving_sum/moving_average start={start_val} end={end_val} derives a "
+            f"non-positive day count (N={n}) -- not a valid trailing/leading window "
+            "shape (manual review)")
+    return label
 
 
 def _match_dim(expr: str, existing_dims: list[dict]) -> str | None:
