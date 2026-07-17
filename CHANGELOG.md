@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-18
+- feat: codify ts-convert-to-databricks-mv emission (ts databricks build-mv, deterministic, both runtimes)
+- chore: bump ts-cli to v0.55.0
+
 ## 2026-07-15
 - chore: ts-cli — add a `[snowflake]` optional-dependency extra and a clearer remedy message when `snowflake-connector-python` is missing for `method:python` profiles (covers `pip install 'thoughtspot-cli[snowflake]'` and the isolated `uv tool install ... --with` form). Aggregate advisor F2.
 - docs: add ts-object-model-aggregates `references/remediation-plan.md` (phased plan from the first end-to-end aggregate build) and route findings into open-items.md #18.

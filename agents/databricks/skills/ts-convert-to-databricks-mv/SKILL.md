@@ -170,4 +170,5 @@ review step as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-18 | Rewire Genie skill to call the vendored `build_metric_view`/`build_view_ddl` (deterministic emit) instead of agentic mapping. |
 | 1.0.0 | 2026-06-15 | Initial release — Genie Code runtime |
