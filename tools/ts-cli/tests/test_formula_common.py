@@ -24,3 +24,25 @@ def test_old_paths_are_same_objects():
     assert mb.fix_double_aggregation is fc.fix_double_aggregation
     assert mb.resolve_name_collisions is fc.resolve_name_collisions
     assert naming.resolve_name_collisions is fc.resolve_name_collisions
+
+
+def test_untranslatable_error_is_single_canonical_class():
+    """Locks in the hoist: mv_sql.py (from-direction) and mv_emit_expr.py
+    (to-direction) both re-export ts_cli.formula_common.UntranslatableError
+    rather than defining their own class. Cross-direction `except
+    UntranslatableError` handling only works if all three names refer to the
+    same class object — this guards against that ever silently diverging
+    again."""
+    from ts_cli.formula_common import UntranslatableError as fc_err
+    from ts_cli.databricks.mv_sql import UntranslatableError as sql_err
+    from ts_cli.databricks.mv_emit_expr import UntranslatableError as expr_err
+    assert fc_err is sql_err is expr_err
+
+    # Cross-direction catchability: an error raised via one module's import
+    # path must be catchable via another module's import path.
+    try:
+        raise expr_err("x")
+    except sql_err:
+        pass
+    else:
+        raise AssertionError("cross-direction except did not catch")
