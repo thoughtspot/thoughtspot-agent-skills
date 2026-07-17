@@ -2,6 +2,7 @@ import pytest
 from ts_cli.databricks.mv_emit import (
     build_column_index, make_col_resolver, classify_column,
     emit_dimension, emit_measure, emit_filter,
+    emit_lod_dimension, emit_window_measure, synthesize_period_dim,
 )
 from ts_cli.databricks.mv_emit_expr import parse_formula, UntranslatableError
 from ts_cli.databricks.mv_emit_sql import emit_sql
@@ -188,6 +189,19 @@ class TestClassifyColumn:
         result = classify_column(col, model)
         assert result["role"] == "measure"
 
+    @pytest.mark.parametrize("fn", ["group_max", "group_min", "group_unique_count"])
+    def test_extended_group_fns_route_to_window(self, fn):
+        # Task 9 review: group_max/group_min/group_unique_count join the
+        # original 4 group_* fns as LOD -> window routes.
+        model = {"name": "M", "model_tables": [{"name": "FACT"}],
+            "columns": [], "formulas": [
+                {"id": "formula_lod", "name": "X",
+                 "expr": f"{fn} ( [FACT::QTY] , [FACT::CATEGORY] )"}]}
+        col = {"name": "X", "formula_id": "formula_lod",
+               "properties": {"column_type": "ATTRIBUTE"}}
+        result = classify_column(col, model)
+        assert result["role"] == "window"
+
     def test_non_boolean_attribute_formula_is_dimension(self):
         model = {"name": "M", "model_tables": [{"name": "FACT"}],
             "columns": [], "formulas": [
@@ -337,3 +351,296 @@ class TestColumnMetadata:
         result = emit_measure(col, resolver)
         assert result["format"] == {"type": "currency", "currency_code": "USD"}
         assert list(result.keys()) == ["name", "expr", "display_name", "format"]
+
+
+# --- Task 9: window classification (LOD, moving/cumulative, semi-additive, ---
+# period-offset). Golden contracts are worked-example formulas 3/5/6/7 from
+# agents/shared/worked-examples/databricks/ts-to-databricks.md.
+
+class TestEmitLodDimension:
+    def test_worked_example_formula_3_category_quantity(self):
+        # group_aggregate ( sum ( [DM_ORDER_DETAIL::QUANTITY] ) ,
+        #   { [DM_CATEGORY::CATEGORY_NAME] } , query_filters ( ) )
+        # -> SUM(source.QUANTITY) OVER (PARTITION BY products.category.CATEGORY_NAME)
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "formula_cat_qty", "name": "Category Quantity",
+             "expr": "group_aggregate ( sum ( [DM_ORDER_DETAIL::QUANTITY] ) , "
+                     "{ [DM_CATEGORY::CATEGORY_NAME] } , query_filters ( ) )"}]}
+        col = {"name": "Category Quantity", "formula_id": "formula_cat_qty",
+               "properties": {"column_type": "MEASURE"}}
+
+        def col_resolver(node):
+            if node["table"] == "DM_ORDER_DETAIL":
+                return f"source.{node['column']}"
+            if node["table"] == "DM_CATEGORY":
+                return f"products.category.{node['column']}"
+            raise UntranslatableError(f"unexpected table {node['table']!r}")
+
+        result = emit_lod_dimension(col, col_resolver, model=model)
+        assert result["expr"] == "SUM(source.QUANTITY) OVER (PARTITION BY products.category.CATEGORY_NAME)"
+        assert result["name"] == "category_quantity"
+        assert result["display_name"] == "Category Quantity"
+
+    def test_group_sum_two_arg_form(self):
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "Region Total", "expr": "group_sum ( [FACT::AMOUNT] , [FACT::REGION] )"}]}
+        col = {"name": "Region Total", "formula_id": "f", "properties": {"column_type": "ATTRIBUTE"}}
+        result = emit_lod_dimension(col, lambda n: f"source.{n['column']}", model=model)
+        assert result["expr"] == "SUM(source.AMOUNT) OVER (PARTITION BY source.REGION)"
+
+    def test_multiple_partition_cols_comma_joined(self):
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "Multi Partition",
+             "expr": "group_aggregate ( sum ( [FACT::AMOUNT] ) , "
+                     "{ [FACT::A] , [FACT::B] } , query_filters ( ) )"}]}
+        col = {"name": "Multi Partition", "formula_id": "f", "properties": {"column_type": "ATTRIBUTE"}}
+        result = emit_lod_dimension(col, lambda n: f"source.{n['column']}", model=model)
+        assert result["expr"] == "SUM(source.AMOUNT) OVER (PARTITION BY source.A, source.B)"
+
+    def test_group_max(self):
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "Max Amount", "expr": "group_max ( [FACT::AMOUNT] , [FACT::CATEGORY] )"}]}
+        col = {"name": "Max Amount", "formula_id": "f", "properties": {"column_type": "ATTRIBUTE"}}
+        result = emit_lod_dimension(col, lambda n: f"source.{n['column']}", model=model)
+        assert result["expr"] == "MAX(source.AMOUNT) OVER (PARTITION BY source.CATEGORY)"
+
+    def test_group_unique_count(self):
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "Distinct Customers",
+             "expr": "group_unique_count ( [FACT::CUSTOMER_ID] , [FACT::CATEGORY] )"}]}
+        col = {"name": "Distinct Customers", "formula_id": "f", "properties": {"column_type": "ATTRIBUTE"}}
+        result = emit_lod_dimension(col, lambda n: f"source.{n['column']}", model=model)
+        assert result["expr"] == "COUNT(DISTINCT source.CUSTOMER_ID) OVER (PARTITION BY source.CATEGORY)"
+
+    def test_group_aggregate_with_query_groups_raises(self):
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "X",
+             "expr": "group_aggregate ( sum ( [FACT::AMOUNT] ) , { [FACT::CATEGORY] } , query_groups ( ) )"}]}
+        col = {"name": "X", "formula_id": "f", "properties": {"column_type": "ATTRIBUTE"}}
+        with pytest.raises(UntranslatableError):
+            emit_lod_dimension(col, lambda n: f"source.{n['column']}", model=model)
+
+
+class TestEmitWindowMeasureMoving:
+    """Synthetic moving_sum shapes -- the four live-verified range forms plus
+    the unmapped-shape UntranslatableError, per ts-databricks-formula-translation.md
+    "Rolling Window Functions" / "Leading Window"."""
+
+    @staticmethod
+    def _col_resolver(node):
+        return f"source.{node['column']}"
+
+    @staticmethod
+    def _model(expr):
+        return {"model_tables": [], "columns": [],
+                "formulas": [{"id": "f", "name": "X", "expr": expr}]}
+
+    COL = {"name": "X", "formula_id": "f", "properties": {"column_type": "MEASURE"}}
+
+    def test_trailing_exclusive(self):
+        model = self._model("moving_sum ( [FACT::AMOUNT] , 7 , -1 , [FACT::ORDER_DATE] )")
+        measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
+        assert measure["expr"] == "SUM(source.AMOUNT)"
+        assert measure["window"][0]["range"] == "trailing 7 day"
+        assert measure["window"][0]["semiadditive"] == "last"
+
+    def test_trailing_inclusive(self):
+        model = self._model("moving_sum ( [FACT::AMOUNT] , 6 , 0 , [FACT::ORDER_DATE] )")
+        measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
+        assert measure["window"][0]["range"] == "trailing 7 day inclusive"
+
+    def test_leading_exclusive(self):
+        model = self._model("moving_sum ( [FACT::AMOUNT] , -1 , 7 , [FACT::ORDER_DATE] )")
+        measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
+        assert measure["window"][0]["range"] == "leading 7 day"
+
+    def test_leading_inclusive(self):
+        model = self._model("moving_sum ( [FACT::AMOUNT] , 0 , 6 , [FACT::ORDER_DATE] )")
+        measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
+        assert measure["window"][0]["range"] == "leading 7 day inclusive"
+
+    def test_unmapped_shape_raises(self):
+        model = self._model("moving_sum ( [FACT::AMOUNT] , -2 , 3 , [FACT::ORDER_DATE] )")
+        with pytest.raises(UntranslatableError):
+            emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
+
+    def test_moving_average(self):
+        model = self._model("moving_average ( [FACT::AMOUNT] , 30 , -1 , [FACT::ORDER_DATE] )")
+        measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=[])
+        assert measure["expr"] == "AVG(source.AMOUNT)"
+        assert measure["window"][0]["range"] == "trailing 30 day"
+
+    def test_order_dim_reused_when_already_present(self):
+        model = self._model("moving_sum ( [FACT::AMOUNT] , 7 , -1 , [FACT::ORDER_DATE] )")
+        existing = [{"name": "order_date", "expr": "source.ORDER_DATE", "display_name": "Order Date"}]
+        measure, extra = emit_window_measure(self.COL, self._col_resolver, model=model, existing_dims=existing)
+        assert measure["window"][0]["order"] == "order_date"
+        assert extra == []
+
+
+class TestEmitWindowMeasureCumulative:
+    def test_cumulative_sum(self):
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "Running Total",
+             "expr": "cumulative_sum ( [FACT::AMOUNT] , [FACT::ORDER_DATE] )"}]}
+        col = {"name": "Running Total", "formula_id": "f", "properties": {"column_type": "MEASURE"}}
+        measure, extra = emit_window_measure(
+            col, lambda n: f"source.{n['column']}", model=model, existing_dims=[])
+        assert measure["expr"] == "SUM(source.AMOUNT)"
+        assert measure["window"][0]["range"] == "cumulative"
+        assert measure["window"][0]["semiadditive"] == "last"
+
+
+class TestEmitWindowMeasureSemiAdditive:
+    def test_worked_example_formula_7_inventory_balance(self):
+        # last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) ,
+        #   { [DM_DATE_DIM::DATE_VALUE] } )
+        # The formula's ordering date, [DM_DATE_DIM::DATE_VALUE], is join-equal
+        # (per the model's own join predicate) to the fact table's own
+        # DM_INVENTORY::BALANCE_DATE column, which already has an existing
+        # "balance_date" dimension -- the worked example's documented answer
+        # reuses that dimension rather than the joined-through dot-path
+        # ("dates.DATE_VALUE"), which has no dimension of its own in this MV.
+        model = {
+            "model_tables": [
+                {"name": "DM_INVENTORY", "joins": [
+                    {"with": "DM_DATE_DIM",
+                     "on": "[DM_INVENTORY::BALANCE_DATE] = [DM_DATE_DIM::DATE_VALUE]"},
+                ]},
+                {"name": "DM_DATE_DIM"},
+            ],
+            "columns": [
+                {"name": "Balance Date", "column_id": "DM_INVENTORY::BALANCE_DATE",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+            ],
+            "formulas": [
+                {"id": "formula_inv_bal", "name": "Inventory Balance",
+                 "expr": "last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , "
+                         "{ [DM_DATE_DIM::DATE_VALUE] } )"},
+            ],
+        }
+        col = {"name": "Inventory Balance", "formula_id": "formula_inv_bal",
+               "properties": {"column_type": "MEASURE"}}
+
+        def col_resolver(node):
+            if node["table"] == "DM_INVENTORY":
+                return f"source.{node['column']}"
+            if node["table"] == "DM_DATE_DIM":
+                return f"dates.{node['column']}"
+            raise UntranslatableError(f"unexpected table {node['table']!r}")
+
+        existing_dims = [
+            {"name": "balance_date", "expr": "source.BALANCE_DATE", "display_name": "Balance Date"},
+        ]
+
+        measure, extra_dims = emit_window_measure(
+            col, col_resolver, model=model, existing_dims=existing_dims)
+
+        assert measure["expr"] == "SUM(source.FILLED_INVENTORY)"
+        assert measure["window"] == [{"order": "balance_date", "semiadditive": "last", "range": "current"}]
+        assert extra_dims == []
+
+    def test_first_value_semiadditive_first(self):
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "Opening Balance",
+             "expr": "first_value ( sum ( [FACT::AMOUNT] ) , query_groups ( ) , { [FACT::ORDER_DATE] } )"}]}
+        col = {"name": "Opening Balance", "formula_id": "f", "properties": {"column_type": "MEASURE"}}
+        measure, extra = emit_window_measure(
+            col, lambda n: f"source.{n['column']}", model=model, existing_dims=[])
+        assert measure["window"][0]["semiadditive"] == "first"
+        assert measure["window"][0]["range"] == "current"
+
+
+class TestEmitWindowMeasurePeriodOffset:
+    SALES_MODEL = {"model_tables": [], "columns": [], "formulas": [
+        {"id": "formula_monthly", "name": "Monthly Revenue",
+         "expr": "sum_if ( diff_months ( [DM_DATE_DIM::DATE_VALUE] , today ( ) ) = 0 , "
+                 "[DM_ORDER_DETAIL::LINE_TOTAL] )"},
+        {"id": "formula_prior_month", "name": "Prior Month Revenue",
+         "expr": "sum_if ( diff_months ( [DM_DATE_DIM::DATE_VALUE] , today ( ) ) = -1 , "
+                 "[DM_ORDER_DETAIL::LINE_TOTAL] )"},
+        {"id": "formula_last_year", "name": "Same Month Last Year",
+         "expr": "sum_if ( diff_months ( [DM_DATE_DIM::DATE_VALUE] , today ( ) ) = -12 , "
+                 "[DM_ORDER_DETAIL::LINE_TOTAL] )"},
+        {"id": "formula_prior_quarter", "name": "Prior Quarter Revenue",
+         "expr": "sum_if ( diff_quarters ( [DM_DATE_DIM::DATE_VALUE] , today ( ) ) = -1 , "
+                 "[DM_ORDER_DETAIL::LINE_TOTAL] )"},
+    ]}
+
+    @staticmethod
+    def _col_resolver(node):
+        if node["table"] == "DM_ORDER_DETAIL":
+            return f"source.{node['column']}"
+        if node["table"] == "DM_DATE_DIM":
+            return f"orders.dates.{node['column']}"
+        raise UntranslatableError(f"unexpected table {node['table']!r}")
+
+    def test_worked_example_formulas_5_and_6_monthly_and_prior_month(self):
+        # Formula 5: sum_if(diff_months([DATE_VALUE], today()) = 0, [LINE_TOTAL])
+        #   -> window: [{order: order_month, semiadditive: last, range: current}]
+        #   + synthesized order_month dim: DATE_TRUNC('MONTH', orders.dates.DATE_VALUE)
+        # Formula 6: same condition = -1 -> adds offset: -1 month, REUSING the
+        #   same synthesized order_month dim (no duplicate).
+        monthly_col = {"name": "Monthly Revenue", "formula_id": "formula_monthly",
+                        "properties": {"column_type": "MEASURE"}}
+        existing_dims: list = []
+        monthly_measure, monthly_extra = emit_window_measure(
+            monthly_col, self._col_resolver, model=self.SALES_MODEL, existing_dims=existing_dims)
+
+        assert monthly_measure["expr"] == "SUM(source.LINE_TOTAL)"
+        assert "offset" not in monthly_measure["window"][0]
+        assert monthly_measure["window"][0]["range"] == "current"
+        assert monthly_measure["window"][0]["semiadditive"] == "last"
+        assert len(monthly_extra) == 1
+        assert monthly_extra[0]["expr"] == "DATE_TRUNC('MONTH', orders.dates.DATE_VALUE)"
+        month_dim_name = monthly_extra[0]["name"]
+        assert monthly_measure["window"][0]["order"] == month_dim_name
+
+        existing_dims = existing_dims + monthly_extra  # simulate Task 10 merging it in
+
+        prior_col = {"name": "Prior Month Revenue", "formula_id": "formula_prior_month",
+                     "properties": {"column_type": "MEASURE"}}
+        prior_measure, prior_extra = emit_window_measure(
+            prior_col, self._col_resolver, model=self.SALES_MODEL, existing_dims=existing_dims)
+
+        assert prior_measure["expr"] == "SUM(source.LINE_TOTAL)"
+        assert prior_measure["window"] == [
+            {"order": month_dim_name, "range": "current",
+             "semiadditive": "last", "offset": "-1 month"}]
+        assert prior_extra == []  # reused the existing month dim, no duplicate synthesized
+
+    def test_diff_months_minus_12_gives_offset_minus_1_year(self):
+        col = {"name": "Same Month Last Year", "formula_id": "formula_last_year",
+               "properties": {"column_type": "MEASURE"}}
+        measure, extra = emit_window_measure(
+            col, self._col_resolver, model=self.SALES_MODEL, existing_dims=[])
+        assert measure["window"][0]["offset"] == "-1 year"
+
+    def test_diff_quarters_minus_1_gives_offset_minus_3_month(self):
+        col = {"name": "Prior Quarter Revenue", "formula_id": "formula_prior_quarter",
+               "properties": {"column_type": "MEASURE"}}
+        measure, extra = emit_window_measure(
+            col, self._col_resolver, model=self.SALES_MODEL, existing_dims=[])
+        assert measure["window"][0]["offset"] == "-3 month"
+
+    def test_count_if_family_period_offset(self):
+        # Any *_if family fn works, not just sum_if (classify_column routes all
+        # 8 the same way when their condition contains diff_months/quarters/years).
+        model = {"model_tables": [], "columns": [], "formulas": [
+            {"id": "f", "name": "Distinct Buyers This Month",
+             "expr": "unique_count_if ( diff_months ( [DM_DATE_DIM::DATE_VALUE] , today ( ) ) = 0 , "
+                     "[DM_ORDER_DETAIL::CUSTOMER_ID] )"}]}
+        col = {"name": "Distinct Buyers This Month", "formula_id": "f",
+               "properties": {"column_type": "MEASURE"}}
+        measure, extra = emit_window_measure(
+            col, self._col_resolver, model=model, existing_dims=[])
+        assert measure["expr"] == "COUNT(DISTINCT source.CUSTOMER_ID)"
+
+
+class TestSynthesizePeriodDim:
+    def test_month_grain(self):
+        node = {"node": "col", "table": "DM_DATE_DIM", "column": "DATE_VALUE"}
+        dim = synthesize_period_dim(node, "month", lambda n: f"orders.dates.{n['column']}")
+        assert dim["expr"] == "DATE_TRUNC('MONTH', orders.dates.DATE_VALUE)"
+        assert dim["name"]
+        assert dim["display_name"]
