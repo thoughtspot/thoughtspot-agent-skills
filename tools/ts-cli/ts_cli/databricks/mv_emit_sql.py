@@ -1,0 +1,175 @@
+"""dict-AST -> Databricks-SQL string (reverse direction). Pure: stdlib only.
+
+Authoritative mapping source:
+  agents/shared/mappings/ts-databricks/ts-databricks-formula-translation.md
+"""
+from __future__ import annotations
+from typing import Callable
+
+from ts_cli.databricks.mv_emit_expr import UntranslatableError
+
+# TS aggregate fn -> Databricks aggregate fn
+AGG_MAP = {
+    "sum": "SUM", "average": "AVG", "avg": "AVG", "count": "COUNT",
+    "min": "MIN", "max": "MAX", "stddev": "STDDEV", "variance": "VARIANCE",
+}
+# unique count -> COUNT(DISTINCT ...) handled specially (two-word fn tokenised as one ident "unique count")
+# TS scalar fn -> Databricks scalar fn (direct rename, same arg order)
+SCALAR_FN_MAP = {
+    "concat": "CONCAT", "greatest": "GREATEST", "least": "LEAST",
+    "upper": "UPPER", "lower": "LOWER", "abs": "ABS", "round": "ROUND",
+    "length": "LENGTH", "trim": "TRIM",
+}
+# TS sql_*_op pass-through wrappers -> unwrap, emit inner as raw SQL string literal arg
+PASSTHROUGH_FN = {"sql_int_op", "sql_bool_op", "sql_str_op", "sql_string_op",
+                  "sql_number_op", "sql_date_op", "sql_datetime_op"}
+# TS conditional-aggregate fns -> (dbx agg, is_distinct)
+COND_AGG = {
+    "sum_if": ("SUM", False), "count_if": ("COUNT", False),
+    "unique_count_if": ("COUNT", True), "average_if": ("AVG", False),
+    "min_if": ("MIN", False), "max_if": ("MAX", False),
+    "stddev_if": ("STDDEV", False), "variance_if": ("VARIANCE", False),
+}
+_OP_SQL = {"=": "=", "!=": "!=", "<": "<", "<=": "<=", ">": ">", ">=": ">=",
+           "+": "+", "-": "-", "*": "*", "/": "/", "and": "AND", "or": "OR"}
+
+
+def emit_sql(node: dict, resolver: Callable[[dict], str]) -> str:
+    kind = node["node"]
+    if kind == "col":
+        return resolver(node)
+    if kind == "ref":
+        raise UntranslatableError(f"unresolved reference [{node['name']}]")
+    if kind == "lit":
+        return _emit_lit(node)
+    if kind == "unop":
+        inner = emit_sql(node["operand"], resolver)
+        return f"NOT {inner}" if node["op"] == "not" else f"-{inner}"
+    if kind == "binop":
+        return _emit_binop(node, resolver)
+    if kind == "ifelse":
+        return _emit_case(node, resolver)
+    if kind == "call":
+        return _emit_call(node, resolver)
+    raise UntranslatableError(f"cannot emit node {kind!r}")
+
+
+def _emit_lit(node: dict) -> str:
+    if node["kind"] == "null":
+        return "NULL"
+    if node["kind"] == "bool":
+        return node["value"].upper()
+    return node["value"]  # string keeps single quotes; number verbatim
+
+
+def _emit_binop(node: dict, resolver) -> str:
+    op = node["op"]
+    # null comparison -> IS [NOT] NULL
+    if op in ("=", "!=") and node["right"].get("node") == "lit" and node["right"]["kind"] == "null":
+        left = emit_sql(node["left"], resolver)
+        return f"{left} IS NULL" if op == "=" else f"{left} IS NOT NULL"
+    left = emit_sql(node["left"], resolver)
+    right = emit_sql(node["right"], resolver)
+    return f"{left} {_OP_SQL[op]} {right}"
+
+
+def _emit_case(node: dict, resolver) -> str:
+    parts = ["CASE"]
+    for cond, val in node["branches"]:
+        parts.append(f"WHEN {emit_sql(cond, resolver)} THEN {emit_sql(val, resolver)}")
+    if node["else"] is not None:
+        parts.append(f"ELSE {emit_sql(node['else'], resolver)}")
+    parts.append("END")
+    return " ".join(parts)
+
+
+def _emit_call(node: dict, resolver) -> str:
+    fn = node["fn"]
+    args = node["args"]
+    if fn == "unique count":
+        return f"COUNT(DISTINCT {emit_sql(args[0], resolver)})"
+    if fn == "count" and _is_count_star(args):
+        return "COUNT(*)"
+    if fn in AGG_MAP:
+        return f"{AGG_MAP[fn]}({emit_sql(args[0], resolver)})"
+    if fn in COND_AGG:
+        return _emit_cond_agg(fn, args, resolver)
+    if fn in PASSTHROUGH_FN:
+        return _emit_passthrough(fn, args)
+    if fn in SCALAR_FN_MAP:
+        inner = ", ".join(emit_sql(a, resolver) for a in args)
+        return f"{SCALAR_FN_MAP[fn]}({inner})"
+    handler = _SIMPLE_FN.get(fn)
+    if handler is not None:
+        return handler(args, resolver)
+    raise UntranslatableError(f"no Databricks translation for function {fn!r}")
+
+
+def _is_count_star(args: list) -> bool:
+    return len(args) == 1 and args[0].get("node") == "lit" and args[0]["value"] == "1"
+
+
+def _emit_cond_agg(fn: str, args: list, resolver) -> str:
+    agg, distinct = COND_AGG[fn]
+    cond, measure = args[0], args[1]
+    inner = emit_sql(measure, resolver)
+    body = f"DISTINCT {inner}" if distinct else inner
+    return f"{agg}({body}) FILTER (WHERE {emit_sql(cond, resolver)})"
+
+
+def _emit_passthrough(fn: str, args: list) -> str:
+    raw = args[0]
+    if raw.get("node") != "lit" or raw["kind"] != "string":
+        raise UntranslatableError(f"{fn} pass-through expects a string literal")
+    return raw["value"][1:-1].replace("''", "'")  # unwrap the SQL string
+
+
+def _emit_safe_divide(args: list, resolver) -> str:
+    return f"COALESCE({emit_sql(args[0], resolver)} / NULLIF({emit_sql(args[1], resolver)}, 0), 0)"
+
+
+def _emit_if_null(args: list, resolver) -> str:
+    return f"COALESCE({emit_sql(args[0], resolver)}, {emit_sql(args[1], resolver)})"
+
+
+def _emit_zero_if_null(args: list, resolver) -> str:
+    return f"COALESCE({emit_sql(args[0], resolver)}, 0)"
+
+
+def _emit_null_if_zero(args: list, resolver) -> str:
+    return f"NULLIF({emit_sql(args[0], resolver)}, 0)"
+
+
+def _emit_isnull(args: list, resolver) -> str:
+    return f"{emit_sql(args[0], resolver)} IS NULL"
+
+
+def _emit_if_fn(args: list, resolver) -> str:
+    # if(cond, then, else) function form
+    return _emit_case({"node": "ifelse", "branches": [[args[0], args[1]]],
+                       "else": args[2] if len(args) > 2 else None}, resolver)
+
+
+def _emit_in(args: list, resolver) -> str:
+    head = emit_sql(args[0], resolver)
+    vals = ", ".join(emit_sql(a, resolver) for a in args[1:])
+    return f"{head} IN ({vals})"
+
+
+def _emit_between(args: list, resolver) -> str:
+    return f"{emit_sql(args[0], resolver)} BETWEEN {emit_sql(args[1], resolver)} AND {emit_sql(args[2], resolver)}"
+
+
+# fns with a single fixed-shape translation, dispatched by name (keeps
+# _emit_call's cyclomatic complexity under the repo's module-health CAP)
+_SIMPLE_FN: dict = {
+    "safe_divide": _emit_safe_divide,
+    "if_null": _emit_if_null,
+    "ifnull": _emit_if_null,
+    "zero_if_null": _emit_zero_if_null,
+    "null_if_zero": _emit_null_if_zero,
+    "isnull": _emit_isnull,
+    "if": _emit_if_fn,
+    "in": _emit_in,
+    "between": _emit_between,
+}
