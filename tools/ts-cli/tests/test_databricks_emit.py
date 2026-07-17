@@ -765,6 +765,31 @@ class TestDetectFactTables:
         }
         assert detect_fact_tables(model) == ["FACT"]
 
+    def test_join_target_dimension_with_own_formula_measure_is_excluded(self):
+        # A dimension table that is a join TARGET (named as a `with` value on
+        # another table's joins[]) can still carry a formula MEASURE that
+        # resolves (via the first-physical-column-ref DFS) to its OWN table --
+        # e.g. a plain count() over one of its own columns, no cross-table
+        # condition involved at all. It must NOT be returned as a fact table:
+        # measure-attribution alone is not sufficient, join-root-ness is also
+        # required. Regression guard for the Dunder Mifflin golden-test bug
+        # (detect_fact_tables previously returned any measure-bearing table
+        # regardless of whether it was itself a join target).
+        model = {
+            "model_tables": [
+                {"name": "FACT", "joins": [{"with": "DIM"}]},
+                {"name": "DIM"},
+            ],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Dim Count", "formula_id": "f",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+            "formulas": [{"id": "f", "name": "Dim Count", "expr": "count ( [DIM::VALUE] )"}],
+        }
+        assert detect_fact_tables(model) == ["FACT"]
+
 
 class TestMakeRefResolver:
     def test_measure_role_ref(self):

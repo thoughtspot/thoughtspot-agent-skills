@@ -2080,7 +2080,7 @@ ts databricks build-mv \
 | `--catalog` | yes | Databricks catalog for the MV's source table and the view itself |
 | `--schema` | yes | Databricks schema for the MV's source table and the view itself |
 | `--output-dir` / `-o` | yes | Directory for the generated `.sql` file(s) |
-| `--source-table` | no | Fact table to build the MV for; omit to emit one MV per fact table `mv_emit.detect_fact_tables` finds (a table carrying ≥1 MEASURE column) |
+| `--source-table` | no | Fact table to build the MV for; omit to emit one MV per fact table `mv_emit.detect_fact_tables` finds (a table carrying ≥1 MEASURE column that is not itself the join target of another table) |
 | `--view-name` | no | Override the generated view name — only honoured when exactly one MV is being emitted (a single `--source-table`, or a model with exactly one detected fact) |
 
 Each fact produces one `{view_name}.sql` file in `--output-dir` (default name

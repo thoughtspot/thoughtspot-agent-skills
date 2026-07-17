@@ -20,20 +20,22 @@ abbreviated excerpt, not deviating from the fixture's fidelity.
 Divergences from the oracle found while building this test (full detail in
 .superpowers/sdd/task-13-report.md) are called out inline at the point they
 surface, per the task's divergence-handling rule: report precisely, do not
-weaken assertions or patch the emitter to force a match. Two are load-bearing
-for how this file is structured:
+weaken assertions or patch the emitter to force a match.
 
-1. ``detect_fact_tables`` returns FOUR tables for this model, not the
-   oracle's two (``DM_ORDER_DETAIL``, ``DM_ORDER``, ``DM_INVENTORY``,
-   ``DM_DATE_DIM``) — ``DM_ORDER`` and ``DM_DATE_DIM`` are pulled in because
-   the "# Employees", "Monthly Revenue", and "Prior Month Revenue" formulas'
-   FIRST physical column reference (found via a plain left-to-right AST walk)
-   lands on a foreign-table column embedded in a condition/count argument,
-   not the table the formula is conceptually "about". This test therefore
-   builds the two MVs the oracle actually specifies (DM_ORDER_DETAIL,
-   DM_INVENTORY) directly by name rather than looping over
-   ``detect_fact_tables``'s raw output.
-2. The semi-additive Inventory Balance measure's window ``order:`` reuses the
+``detect_fact_tables`` over-detection (originally Divergence 1 here) has
+since been FIXED — see ``.superpowers/sdd/task-13-report.md`` "Fix:
+detect_fact_tables join-root heuristic". It now returns exactly the oracle's
+two facts (``DM_ORDER_DETAIL``, ``DM_INVENTORY``): a fact table is a
+MEASURE-bearing table that is also a join ROOT (never itself the `with`
+target of another table's join), which excludes ``DM_ORDER`` and
+``DM_DATE_DIM`` (both join targets / dimensions) regardless of the
+measure-attribution DFS's foreign-table mis-attribution quirk (still present,
+still documented on ``_measure_column_table``, but no longer consequential
+for detection).
+
+One divergence remains load-bearing for how this file is structured:
+
+1. The semi-additive Inventory Balance measure's window ``order:`` reuses the
    dimension named ``transaction_date`` (dot-path ``dates.DATE_VALUE``,
    matched directly), not ``balance_date`` as the oracle documents — the
    join-predicate-alias fallback that would find ``balance_date`` only
@@ -277,21 +279,15 @@ def _by_name(items: list) -> dict:
 
 
 class TestDetectFactTables:
-    def test_returns_all_four_measure_owning_tables_in_model_order(self):
+    def test_returns_exactly_the_oracles_two_fact_tables(self):
         # Oracle (worked example "Split Decision") documents exactly TWO fact
-        # tables: DM_ORDER_DETAIL and DM_INVENTORY. The real function returns
-        # FOUR here — see module docstring divergence #1 and
-        # .superpowers/sdd/task-13-report.md for the full analysis. Asserting
-        # the true output (rather than the oracle's two) keeps this a
-        # regression guard on ACTUAL behavior; the two MVs below are built by
-        # explicit source_table name, matching what the oracle specifies.
-        assert detect_fact_tables(MODEL) == [
-            "DM_ORDER_DETAIL", "DM_ORDER", "DM_INVENTORY", "DM_DATE_DIM"]
-
-    def test_the_oracles_two_real_facts_are_a_subset(self):
-        facts = detect_fact_tables(MODEL)
-        assert "DM_ORDER_DETAIL" in facts
-        assert "DM_INVENTORY" in facts
+        # tables: DM_ORDER_DETAIL and DM_INVENTORY. detect_fact_tables now
+        # matches this exactly: DM_ORDER and DM_DATE_DIM are excluded because
+        # both are join TARGETS (`with` values in model_tables[].joins[]),
+        # never join roots — see mv_emit.detect_fact_tables and
+        # .superpowers/sdd/task-13-report.md "Fix: detect_fact_tables
+        # join-root heuristic".
+        assert detect_fact_tables(MODEL) == ["DM_ORDER_DETAIL", "DM_INVENTORY"]
 
 
 class TestSalesMetricView:

@@ -15,7 +15,7 @@ from ts_cli.databricks.mv_tml import ts_type_to_dbx
 # late-imports the mv_emit internals it needs to avoid a circular import
 # (mirrors the mv_translate.py / mv_window_translate.py split).
 from ts_cli.databricks.mv_emit_window import (
-    emit_window_measure, synthesize_period_dim, _moving_range)
+    emit_window_measure, synthesize_period_dim, _moving_range, _join_target_tables)
 
 
 def to_snake(name: str) -> str:
@@ -626,14 +626,23 @@ def _measure_column_table(col: dict, model: dict) -> str | None:
 
 
 def detect_fact_tables(model: dict) -> list[str]:
-    """Tables carrying >= 1 MEASURE column, in `model_tables` order.
+    """Tables carrying >= 1 MEASURE column that are also join ROOTS -- i.e.
+    NOT the join target of any other table (`_join_target_tables`) -- in
+    `model_tables` order.
 
     A physical column's table is its `column_id` prefix; a formula column's
-    table is the table its first physical `[T::col]` ref resolves to. Used by
-    the multi-fact split: the command calls this once, then calls
-    `build_metric_view` once per returned table as `source_table`.
+    table is the table its first physical `[T::col]` ref resolves to (that
+    DFS can mis-attribute a measure to a foreign table referenced only inside
+    a filter/condition argument -- see `_measure_column_table`'s docstring --
+    but the join-root filter below neutralizes this: a mis-attributed table
+    is, by construction, some OTHER table's join target, so it's excluded
+    here regardless of the attribution quirk). Used by the multi-fact split:
+    the command calls this once, then calls `build_metric_view` once per
+    returned table as `source_table`.
     """
     table_order = [mt["name"] for mt in model.get("model_tables", [])]
+    join_targets = _join_target_tables(model)
+
     found: list[str] = []
     for col in model.get("columns", []):
         props = col.get("properties") or {}
@@ -642,8 +651,10 @@ def detect_fact_tables(model: dict) -> list[str]:
         table = _measure_column_table(col, model)
         if table and table not in found:
             found.append(table)
-    ordered = [t for t in table_order if t in found]
-    ordered += [t for t in found if t not in table_order]
+
+    roots = [t for t in found if t not in join_targets]
+    ordered = [t for t in table_order if t in roots]
+    ordered += [t for t in roots if t not in table_order]
     return ordered
 
 

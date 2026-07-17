@@ -307,3 +307,24 @@ def emit_window_measure(col: dict, col_resolver: Callable[[dict], str],
     measure = _finalize_column(col, measure_expr)
     measure["window"] = [window]
     return measure, extra_dims
+
+
+# --- detect_fact_tables helper (Task 13 fix) -------------------------------
+# Not window-measure logic -- placed here (rather than mv_emit.py) purely to
+# stay under mv_emit.py's file-size cap; mv_emit.py imports it alongside this
+# module's other re-exports.
+
+def _join_target_tables(model: dict) -> set:
+    """Every table named as a `with` value across every `model_tables[].joins[]`
+    entry -- i.e. every table that is a JOIN TARGET (a dimension joined TO),
+    never a join root. Used by `mv_emit.detect_fact_tables` to exclude
+    dimensions from the fact-table result: a real fact table is never itself
+    the target of another table's join.
+    """
+    targets: set = set()
+    for mt in model.get("model_tables", []):
+        for join in mt.get("joins", []):
+            target = join.get("with")
+            if target:
+                targets.add(target)
+    return targets
