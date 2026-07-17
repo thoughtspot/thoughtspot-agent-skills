@@ -82,6 +82,45 @@ TABLES_ZERO_MEASURE = [
                "columns": [{"name": "REGION", "db_column_properties": {"data_type": "VARCHAR"}}]}},
 ]
 
+# A 2-table joined model (FACT --[inline `on`]--> DIM) used by two tests below:
+# one where both tables are present in tables.json (happy path through
+# mv_emit.build_joins) and one where DIM is absent (build_joins raises
+# UntranslatableError -- the Task 12 review-fix case: that error must surface
+# as a clean stderr message + exit 1, not a raw Python traceback).
+MODEL_JOINED = {
+    "name": "Joined Model",
+    "model_tables": [
+        {"name": "FACT", "joins": [{"with": "DIM", "on": "[FACT::DIM_ID] = [DIM::ID]"}]},
+        {"name": "DIM"},
+    ],
+    "columns": [
+        {"name": "Amount", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE"}},
+        {"name": "Dim Name", "column_id": "DIM::NAME",
+         "properties": {"column_type": "ATTRIBUTE"}},
+    ],
+    "formulas": [],
+}
+TABLES_JOINED_COMPLETE = [
+    {"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+               "columns": [
+                   {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+                   {"name": "DIM_ID", "db_column_properties": {"data_type": "VARCHAR"}},
+               ]}},
+    {"table": {"name": "DIM", "db": "c", "schema": "s", "db_table": "dim",
+               "columns": [
+                   {"name": "ID", "db_column_properties": {"data_type": "VARCHAR"}},
+                   {"name": "NAME", "db_column_properties": {"data_type": "VARCHAR"}},
+               ]}},
+]
+TABLES_JOINED_MISSING_DIM = [
+    {"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+               "columns": [
+                   {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+                   {"name": "DIM_ID", "db_column_properties": {"data_type": "VARCHAR"}},
+               ]}},
+]
+
 
 def _write_build_mv_inputs(tmp_path, model=None, tables=None):
     """Write model.json + tables.json into tmp_path; return tmp_path."""
@@ -186,3 +225,33 @@ class TestBuildMvCommand:
         summary = json.loads(result.stdout)  # summary still printed before the exit
         assert summary["metric_views"][0]["measures"] == 0
         assert summary["metric_views"][0]["dimensions"] == 1
+
+    def test_joined_model_complete_tables(self, tmp_path):
+        # Proves build-mv works end-to-end on a joined model (mv_emit.build_joins
+        # actually walking a join), which no prior test in this file covered --
+        # every other fixture here is a single, unjoined fact table.
+        result = self._run(_write_build_mv_inputs(
+            tmp_path, model=MODEL_JOINED, tables=TABLES_JOINED_COMPLETE))
+        assert result.exit_code == 0, result.output
+        summary = json.loads(result.stdout)
+        assert len(summary["metric_views"]) == 1
+        view_name = summary["metric_views"][0]["view_name"]
+        sql_file = tmp_path / "out" / f"{view_name}.sql"
+        assert sql_file.exists()
+        ddl = sql_file.read_text()
+        assert "CREATE OR REPLACE VIEW" in ddl
+        assert "joins:" in ddl
+
+    def test_joined_model_missing_joined_table_clean_error(self, tmp_path):
+        # DIM is referenced by FACT's join but absent from tables.json --
+        # mv_emit.build_joins raises UntranslatableError (a plain Exception
+        # subclass, not ValueError). Before the fix, _build_one_mv's
+        # `except ValueError` didn't catch it, so it escaped as a raw
+        # traceback instead of the clean stderr message + exit 1 every other
+        # failure path gives.
+        result = self._run(_write_build_mv_inputs(
+            tmp_path, model=MODEL_JOINED, tables=TABLES_JOINED_MISSING_DIM))
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "Traceback" not in result.stderr
+        assert "cannot build metric view for fact table 'FACT'" in result.stderr

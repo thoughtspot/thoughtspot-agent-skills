@@ -282,17 +282,20 @@ def _build_one_mv(model: dict, tables: list, fact: str, *, catalog: str, schema:
                   model_name: str, out_dir: Path, override_name: Optional[str]) -> dict:
     """Build + write one Metric View .sql for `fact`. Exits 1 (stderr) on a
     structural ValueError from build_metric_view (e.g. a duplicate emitted
-    name) or build_view_ddl (the `$$`-collision guard) -- before any file is
-    written for this fact.
+    name) or build_view_ddl (the `$$`-collision guard), or on an
+    UntranslatableError from build_metric_view/build_joins (e.g. a joined
+    table referenced by the model but absent from `--tables`) -- before any
+    file is written for this fact.
     """
     from ts_cli.databricks.mv_build_view import build_view_ddl, default_view_name
     from ts_cli.databricks.mv_emit import build_metric_view
+    from ts_cli.databricks.mv_emit_expr import UntranslatableError
 
     try:
         result = build_metric_view(model, tables, fact, catalog=catalog, schema=schema)
         vn = override_name or default_view_name(model_name, fact)
         ddl = build_view_ddl(result["yaml_doc"], catalog=catalog, schema=schema, view_name=vn)
-    except ValueError as exc:
+    except (ValueError, UntranslatableError) as exc:
         typer.echo(f"cannot build metric view for fact table '{fact}': {exc}", err=True)
         raise SystemExit(1)
 
