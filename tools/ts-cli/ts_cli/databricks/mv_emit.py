@@ -366,11 +366,19 @@ def classify_column(col: dict, model: dict) -> dict:
     column_type = props.get("column_type")
     formula_id = col.get("formula_id")
 
+    if column_type == "UNKNOWN":
+        # Applies to BOTH physical and formula-backed columns -- a formula
+        # whose own column_type is UNKNOWN previously fell through to the
+        # final `dimension` branch below with a misleading "ATTRIBUTE" reason
+        # (column_type is UNKNOWN, not ATTRIBUTE). Checked before the
+        # formula_id branch so a formula-backed UNKNOWN column is omitted
+        # without even attempting to parse its expr.
+        kind = "formula-backed" if formula_id else "physical"
+        return {"role": "unknown",
+                "reason": f"{kind} column with column_type UNKNOWN — cannot classify "
+                          "(ts-to-databricks-rules.md 'Unmapped ThoughtSpot Properties')"}
+
     if not formula_id:
-        if column_type == "UNKNOWN":
-            return {"role": "unknown",
-                    "reason": "physical column with column_type UNKNOWN — cannot classify "
-                              "(ts-to-databricks-rules.md 'Unmapped ThoughtSpot Properties')"}
         if column_type == "MEASURE":
             return {"role": "measure", "reason": "physical column with column_type MEASURE"}
         return {"role": "dimension", "reason": "physical column (non-MEASURE column_type)"}
@@ -781,16 +789,88 @@ def _combine_filters(filter_exprs: list) -> str | None:
     return " AND ".join(f"({e})" for e in filter_exprs)
 
 
-def _check_duplicate_display_names(dimensions: list, measures: list) -> None:
-    seen: dict = {}
+_MEASURE_REF_RE = re.compile(r"MEASURE\(([A-Za-z0-9_]+)\)")
+_ANY_VALUE_REF_RE = re.compile(r"ANY_VALUE\(([A-Za-z0-9_]+)\)")
+
+
+def _referenced_names(expr: str) -> set:
+    """Every MEASURE(name)/ANY_VALUE(name) machine-name reference inside an
+    already-emitted `expr` string (the raw-SQL shape `make_ref_resolver`
+    substitutes in -- see `resolve_refs`'s docstring)."""
+    text = expr or ""
+    return set(_MEASURE_REF_RE.findall(text)) | set(_ANY_VALUE_REF_RE.findall(text))
+
+
+def _cascade_skip_dangling_refs(dimensions: list, measures: list,
+                                 skipped: list, warnings: list) -> None:
+    """Remove any emitted dimension/measure whose `expr` references a
+    MEASURE()/ANY_VALUE() machine name that is not ITSELF among the emitted
+    columns, repeating to a fixed point.
+
+    `_build_ref_roles` classifies every column's ref-target role BEFORE any
+    expr is emitted (required so formulas can forward/back-reference each
+    other), so a formula can classify as measure/lod_dimension yet still fail
+    during its OWN emission (emit_sql raises UntranslatableError) and land in
+    `skipped` -- a sibling formula referencing that name by
+    MEASURE()/ANY_VALUE() has already resolved and emitted successfully by
+    that point, leaving a reference to a name in neither `dimensions:` nor
+    `measures:` (a silently invalid MV). This must run AFTER both emission
+    passes, once the full dimensions/measures lists are known.
+
+    Runs to a fixed point because removing one dangling column can itself
+    dangle another that referenced IT (a transitive chain, e.g. C references
+    B references A where A failed emission) -- a pass that removes nothing
+    terminates the loop, so this can never spin forever.
+    """
+    while True:
+        emitted = {d["name"] for d in dimensions} | {m["name"] for m in measures}
+        removed_any = False
+        for coll_name, items in (("dimension", dimensions), ("measure", measures)):
+            for item in list(items):
+                missing = _referenced_names(item.get("expr", "")) - emitted
+                if not missing:
+                    continue
+                items.remove(item)
+                missing_list = ", ".join(repr(n) for n in sorted(missing))
+                reason = (f"references missing dependency {missing_list} "
+                          "(that column failed emission or was itself skipped)")
+                _record_skip(skipped, warnings, item.get("display_name"), coll_name, reason)
+                removed_any = True
+        if not removed_any:
+            break
+
+
+def _check_duplicate_names(dimensions: list, measures: list) -> None:
+    """Raise ValueError on a duplicate emitted `display_name` OR a duplicate
+    emitted machine `name:` across all dimensions+measures.
+
+    The original display_name-only check misses a real failure mode: two
+    distinct display names can collapse to the SAME `to_snake()` machine name
+    (e.g. "Order-ID" and "Order ID" both -> "order_id"), silently producing
+    two MV columns sharing one `name:` key -- an invalid Metric View that
+    imports without error but only exposes one of the two columns. Checked in
+    the same pass as the display_name check (not a separate loop) so both
+    collisions are caught with one walk of dimensions+measures.
+    """
+    seen_display: dict = {}
+    seen_name: dict = {}  # machine name -> (coll_name, display_name) that claimed it
     for coll_name, items in (("dimension", dimensions), ("measure", measures)):
         for item in items:
             dn = item.get("display_name")
-            if dn in seen:
+            if dn in seen_display:
                 raise ValueError(
                     f"duplicate display_name {dn!r} across emitted columns "
-                    f"({seen[dn]} and {coll_name})")
-            seen[dn] = coll_name
+                    f"({seen_display[dn]} and {coll_name})")
+            seen_display[dn] = coll_name
+
+            name = item.get("name")
+            if name in seen_name:
+                prev_coll, prev_dn = seen_name[name]
+                raise ValueError(
+                    f"duplicate machine name {name!r} across emitted columns: "
+                    f"display_name {prev_dn!r} ({prev_coll}) and {dn!r} ({coll_name}) "
+                    "both collapse to the same snake_case name")
+            seen_name[name] = (coll_name, dn)
 
 
 def _source_db_table(tables: list[dict], source_table: str) -> str:
@@ -863,7 +943,9 @@ def build_metric_view(model: dict, tables: list[dict], source_table: str, *,
     """Assemble one Databricks Metric View YAML doc for `source_table`,
     orchestrating Tasks 6-9: column index + joins (Task 6/7) -> classify
     every model column (Task 8/9) -> role-aware ref resolver (this task) ->
-    route each column to its emitter -> assemble the MV dict in schema key
+    route each column to its emitter -> cascade-skip any column left with a
+    dangling MEASURE()/ANY_VALUE() reference (review fix wave, see
+    `_cascade_skip_dangling_refs`) -> assemble the MV dict in schema key
     order. Returns `{"yaml_doc": dict, "skipped": list[dict], "warnings": list[str]}`.
 
     A column belonging to a different fact table's join tree (relevant only
@@ -886,7 +968,8 @@ def build_metric_view(model: dict, tables: list[dict], source_table: str, *,
     measures = _emit_measures_pass(
         classified, model, col_resolver, ref_resolver, dimensions, skipped, warnings)
 
-    _check_duplicate_display_names(dimensions, measures)
+    _cascade_skip_dangling_refs(dimensions, measures, skipped, warnings)
+    _check_duplicate_names(dimensions, measures)
 
     yaml_doc: dict = {"version": "1.1"}
     comment = model.get("description")

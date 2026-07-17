@@ -204,6 +204,23 @@ class TestClassifyColumn:
         result = classify_column(col, model)
         assert result["role"] == "window"
 
+    def test_formula_backed_unknown_column_type_is_unknown_role(self):
+        # Review fix wave FIX 3: a formula-backed column whose OWN column_type
+        # is UNKNOWN previously fell through to the final `dimension` branch
+        # with a misleading "formula-backed ATTRIBUTE ..." reason (column_type
+        # is UNKNOWN, not ATTRIBUTE) -- must instead route to role=="unknown"
+        # (omit+skip), matching the physical-column UNKNOWN behavior.
+        model = {"name": "M", "model_tables": [{"name": "FACT"}],
+            "columns": [], "formulas": [
+                {"id": "formula_mystery", "name": "Mystery Formula",
+                 "expr": "concat ( [FACT::A] , [FACT::B] )"}]}
+        col = {"name": "Mystery Formula", "formula_id": "formula_mystery",
+               "properties": {"column_type": "UNKNOWN"}}
+        result = classify_column(col, model)
+        assert result["role"] == "unknown"
+        assert "UNKNOWN" in result["reason"]
+        assert "ATTRIBUTE" not in result["reason"]
+
     def test_non_boolean_attribute_formula_is_dimension(self):
         model = {"name": "M", "model_tables": [{"name": "FACT"}],
             "columns": [], "formulas": [
@@ -925,6 +942,53 @@ class TestBuildMetricView:
         with pytest.raises(ValueError):
             build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
 
+    def test_duplicate_machine_name_raises(self):
+        # Review fix wave FIX 2: two DISTINCT display names ("Order-ID" and
+        # "Order ID") both collapse to the same to_snake() machine name
+        # ("order_id") -- the display_name-only check misses this. Must raise
+        # ValueError naming the collision even though display_name differs.
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Order-ID", "column_id": "FACT::ORDER_ID_A",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+                {"name": "Order ID", "column_id": "FACT::ORDER_ID_B",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+            ],
+            "formulas": []}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [
+                {"name": "ORDER_ID_A", "db_column_properties": {"data_type": "VARCHAR"}},
+                {"name": "ORDER_ID_B", "db_column_properties": {"data_type": "VARCHAR"}}]}}]
+        with pytest.raises(ValueError, match="order_id"):
+            build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+
+    def test_formula_backed_unknown_column_skipped_not_emitted(self):
+        # Review fix wave FIX 3, integration-level: a formula-backed UNKNOWN
+        # column must be skipped by build_metric_view, not emitted as a
+        # dimension.
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Mystery Formula", "formula_id": "formula_mystery",
+                 "properties": {"column_type": "UNKNOWN"}},
+            ],
+            "formulas": [
+                {"id": "formula_mystery", "name": "Mystery Formula",
+                 "expr": "concat ( [FACT::A] , [FACT::B] )"},
+            ]}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [
+                {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+                {"name": "A", "db_column_properties": {"data_type": "VARCHAR"}},
+                {"name": "B", "db_column_properties": {"data_type": "VARCHAR"}}]}}]
+        result = build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+        doc = result["yaml_doc"]
+        dim_names = [d["name"] for d in doc["dimensions"]]
+        assert "mystery_formula" not in dim_names
+        assert any(s["name"] == "Mystery Formula" for s in result["skipped"])
+        assert any("Mystery Formula" in w for w in result["warnings"])
+
     def test_semiadditive_order_dim_reused_end_to_end(self):
         # Required follow-up #4: build_metric_view must thread `tables` +
         # resolved join predicates through so a window measure's order: dim
@@ -970,3 +1034,105 @@ class TestBuildMetricView:
         assert inv_balance["expr"] == "SUM(source.FILLED_INVENTORY)"
         assert inv_balance["window"] == [
             {"order": "balance_date", "semiadditive": "last", "range": "current"}]
+
+
+# --- Review fix wave: FIX 1 -- cascade-skip dangling MEASURE()/ANY_VALUE() ---
+# references. A formula can CLASSIFY as measure/lod_dimension (so
+# `_build_ref_roles` treats it as a valid ref target) yet FAIL during its own
+# EMISSION (emit_sql raises UntranslatableError) and land in `skipped`. A
+# sibling formula referencing it by name has already resolved to
+# MEASURE(<name>)/ANY_VALUE(<name>) and emits successfully -- without the
+# cascade, that reference would point at a name in neither `dimensions:` nor
+# `measures:`: a silently invalid Metric View.
+
+class TestCascadeSkipDanglingRefs:
+    def test_direct_dangling_measure_ref_cascades_to_skip(self):
+        # Amount's own formula uses a function with no Databricks translation
+        # -> fails emission, lands in skipped. Double Amount references
+        # [Amount] -- classification alone makes it a valid ref target, so
+        # Double Amount itself emits fine as "MEASURE(amount) * 2" ... except
+        # "amount" never actually makes it into measures:. The cascade must
+        # catch this and skip Double Amount too.
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "formula_id": "formula_amount",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Double Amount", "formula_id": "formula_double",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+            "formulas": [
+                {"id": "formula_amount", "name": "Amount",
+                 "expr": "totally_unsupported_fn ( [FACT::X] )"},
+                {"id": "formula_double", "name": "Double Amount", "expr": "[Amount] * 2"},
+            ]}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [{"name": "X", "db_column_properties": {"data_type": "DOUBLE"}}]}}]
+
+        result = build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+
+        measure_names = {m["name"] for m in result["yaml_doc"]["measures"]}
+        assert "amount" not in measure_names
+        assert "double_amount" not in measure_names
+
+        skipped_names = {s["name"] for s in result["skipped"]}
+        assert "Amount" in skipped_names
+        assert "Double Amount" in skipped_names
+
+        # A warning must name the missing dependency ("amount", the machine
+        # name Double Amount's expr referenced via MEASURE(amount)).
+        assert any("amount" in w for w in result["warnings"])
+
+    def test_transitive_dangling_chain_all_skipped(self):
+        # C references B references A; A fails emission. The cascade must
+        # remove B (dangling ref to "a") on one pass, THEN remove C (now
+        # dangling on "b", only detectable once B is actually gone) on the
+        # next pass -- exercising the fixed-point repeat, not just one pass.
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "A", "formula_id": "formula_a",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "B", "formula_id": "formula_b",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "C", "formula_id": "formula_c",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+            "formulas": [
+                {"id": "formula_a", "name": "A", "expr": "totally_unsupported_fn ( [FACT::X] )"},
+                {"id": "formula_b", "name": "B", "expr": "[A] * 2"},
+                {"id": "formula_c", "name": "C", "expr": "[B] * 3"},
+            ]}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [{"name": "X", "db_column_properties": {"data_type": "DOUBLE"}}]}}]
+
+        result = build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+
+        assert result["yaml_doc"]["measures"] == []
+        skipped_names = {s["name"] for s in result["skipped"]}
+        assert skipped_names == {"A", "B", "C"}
+
+    def test_dangling_ref_does_not_affect_healthy_siblings(self):
+        # A dangling formula's removal must not disturb an unrelated, fully
+        # healthy measure in the same MV.
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "formula_id": "formula_amount",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Double Amount", "formula_id": "formula_double",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Quantity", "column_id": "FACT::QTY",
+                 "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+            ],
+            "formulas": [
+                {"id": "formula_amount", "name": "Amount",
+                 "expr": "totally_unsupported_fn ( [FACT::X] )"},
+                {"id": "formula_double", "name": "Double Amount", "expr": "[Amount] * 2"},
+            ]}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [
+                {"name": "X", "db_column_properties": {"data_type": "DOUBLE"}},
+                {"name": "QTY", "db_column_properties": {"data_type": "DOUBLE"}}]}}]
+
+        result = build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+
+        measure_names = {m["name"] for m in result["yaml_doc"]["measures"]}
+        assert measure_names == {"quantity"}
