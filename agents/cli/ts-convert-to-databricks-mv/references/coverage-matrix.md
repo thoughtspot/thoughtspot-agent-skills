@@ -115,7 +115,7 @@ for the full bidirectional translation reference.
 
 | # | ThoughtSpot Construct | Databricks Metric View Equivalent | Notes |
 |---|---|---|---|
-| 58 | `[measure_name]` referenced inside another measure's formula | `MEASURE(measure_name)` | Resolved from this MV's own column classification (`make_ref_resolver`). **Caveat:** only correct when the *outer* formula (e.g. a ratio of two such refs) is itself an aggregate call — see L10 |
+| 58 | `[measure_name]` referenced inside another measure's formula | `MEASURE(measure_name)` | Resolved from this MV's own column classification (`make_ref_resolver`). If the *outer* formula (e.g. a ratio of two such refs) is itself already an aggregate expression (as when both operands resolve to `MEASURE()`/`ANY_VALUE()`), left as-is; otherwise wrapped in the column's own declared aggregation — see row 65 (fixed 2026-07-18, Task 18 Finding 1; previously an unmapped limitation, L10) |
 | 59 | `[lod_dimension]` referenced inside a measure's formula | `ANY_VALUE(lod_dimension)` | |
 | 60 | A sibling formula's `MEASURE()`/`ANY_VALUE()` ref where the referenced column itself failed emission | Cascade-removed from `dimensions[]`/`measures[]`, logged in `skipped[]` | Runs to a fixed point (transitive chain); does **not** scan the top-level `filter:` string — see Unmapped L4 |
 
@@ -133,6 +133,12 @@ for the full bidirectional translation reference.
 | 63 | `sql_int_op`/`sql_bool_op`/`sql_str_op`/`sql_string_op`/`sql_number_op`/`sql_date_op`/`sql_datetime_op` — single string-literal argument | Unwrapped — the inner SQL text is emitted raw | Raises if the wrapper has more than one argument or a non-literal argument |
 | 64 | 2-argument `{0}`-template pass-through form (e.g. `sql_string_op("LOWER({0})", [col])`) | **Not implemented** — raises | See Unmapped L5 |
 
+### Formula Measure Aggregation Wrapping
+
+| # | ThoughtSpot Construct | Databricks Metric View Equivalent | Notes |
+|---|---|---|---|
+| 65 | A formula-backed `MEASURE` column whose translated SQL contains **no aggregate anywhere** (e.g. `safe_divide([Amount], [Qty])` over two RAW physical-measure column refs, or `[Amount] * 1.1`) | Wrapped in the column's declared `aggregation` (default `SUM`) — `mv_emit_sql.wrap_measure_if_needed`, via `is_aggregate_present` (presence check: `SUM(`/`COUNT(`/`AVG(`/`MIN(`/`MAX(`/`STDDEV(`/`VARIANCE(`/`MEDIAN(`/`MEASURE(`/`ANY_VALUE(`/window `OVER` anywhere in the emitted SQL) + `wrap_in_aggregation` | **Fixed 2026-07-18** (Task 18 Finding 1, previously limitation L10) — matches ThoughtSpot's own live-confirmed `raw_measure` + SUM-at-query-time semantics. Presence-based, not "outermost AST node is a call": a cross-measure ratio whose operands resolve to `MEASURE()`/`ANY_VALUE()` (row 58) already contains an aggregate and is left unwrapped, matching the Dunder golden test's `Category Contribution Ratio`. An already-aggregated formula (e.g. `sum([Amount])`, emits `SUM(source.amount)`) is also left as-is — never double-wrapped |
+
 ---
 
 ## Unmapped Constructs (Limitations)
@@ -148,7 +154,6 @@ for the full bidirectional translation reference.
 | L7 | Worksheet input | `ts databricks build-mv` reads Model TML (`model_tables[]`/`columns[]`) only — a Worksheet's `worksheet_columns[]` shape is not understood | Convert/promote the Worksheet to a Model in ThoughtSpot first, then re-run against the Model GUID |
 | L8 | A fact table whose *only* measures are condition-first formulas (e.g. a lone `sum_if(diff_months(...), [FACT::v])` with no physical `MEASURE` column) | `detect_fact_tables`'s attribution walk can resolve such a formula to the *condition's* table rather than the fact, under-detecting the fact | Pass `--source-table` explicitly to `build-mv` rather than relying on auto-detection |
 | L9 | Complex `group_aggregate`/window shapes: ordered-set aggregates, running/frame windows (`ORDER BY`/`ROWS`/`RANGE`/`GROUPS` inside the window), or a formula spanning multiple `OVER (...)` clauses | No dimension-window-function analogue on the ThoughtSpot side | Not translatable — log in the Unmapped Report and handle manually |
-| L10 | A formula-backed `MEASURE` column whose top-level parsed expression is **not itself an aggregate call** (e.g. `safe_divide([PhysicalMeasureA], [PhysicalMeasureB])` — a ratio of two plain measures, no LOD/formula operand) | `mv_emit.emit_measure`'s formula branch (`_formula_sql`) emits the translated SQL **without** wrapping it in the column's declared `aggregation` (SUM by default) the way the physical-column branch does — the emitted `expr` is a bare per-row expression with no aggregate function at all, which Databricks rejects at `CREATE VIEW` time with `[MISSING_AGGREGATION]` (**live-verified 2026-07-18**, `docs/audit/2026-07-18-dbx-to-fidelity-matrix.md` Finding 1) — a hard DDL failure for the whole MV, not just a wrong number. `ts spotql classify-columns` already flags this exact case (`"kind": "raw_measure"`, `"wrapper": "SUM"`) but the Databricks emitter does not consult it | Rewrite the source formula to make the aggregation explicit and self-contained, e.g. `safe_divide(sum([A]), sum([B]))` inlined directly (not via a `[Name]` cross-reference to another plain-measure column) before running `build-mv` |
 
 ### Notes on limitations
 
@@ -170,8 +175,9 @@ form) is the supported input shape.
 for L8; L4 is benign because a `filter:` string can never validly contain a
 `MEASURE()`/`ANY_VALUE()` reference in the first place).
 
-**L10** is a live-verified emitter bug (Task 18, `docs/audit/2026-07-18-dbx-to-fidelity-matrix.md`
-Finding 1), not merely a theoretical gap — it produces a hard `CREATE VIEW` failure, so a
-model with even one "raw measure" ratio/arithmetic formula among its MEASURE columns
-cannot have its MV created at all until the formula is rewritten (workaround above) or the
-emitter is fixed to consult the classifier logic `ts_cli/spotql_ops.py` already has.
+**Former L10** (formula-backed `MEASURE` with no aggregate anywhere in its translated
+SQL, e.g. `safe_divide([Amount], [Qty])` over two RAW physical measures) was a
+live-verified emitter bug (Task 18, `docs/audit/2026-07-18-dbx-to-fidelity-matrix.md`
+Finding 1) that produced a hard `CREATE VIEW` failure (`MISSING_AGGREGATION`) for the
+whole MV. **Fixed 2026-07-18** — see Mapped row 65 and `references/open-items.md` #9;
+no longer a limitation.

@@ -201,6 +201,15 @@ the physical-column branch's own default) before assigning it to `expr`. `mv_emi
 in `ts_cli/spotql_ops.py` (`is_aggregate_expr`/`classify_expr`) may also be directly
 reusable rather than re-deriving an equivalent check in the Databricks emitter.
 
+**Fixed post-gate (2026-07-18):** `mv_emit.emit_measure` now wraps a no-aggregate
+formula-measure SQL in the column's declared aggregation via
+`mv_emit_sql.is_aggregate_present`/`wrap_in_aggregation`/`wrap_measure_if_needed`
+(offline unit-tested — `test_databricks_emit.py`'s `TestEmitMeasureRawMeasureWrap`/
+`TestIsAggregatePresent`, plus a clean re-run of the Dunder golden test); the
+mechanism this fix relies on — ThoughtSpot's own `raw_measure` + SUM-at-query-time
+wrapping — was already live-confirmed above, so the fix was not re-verified against a
+live Databricks warehouse. See `references/open-items.md` #9.
+
 ## Finding 2 — Period-offset construct: live confirmation of the row-relative-vs-wall-clock divergence (open-items.md #3)
 
 Resolves open-items.md #3's outstanding requirement for "at least one multi-period query"

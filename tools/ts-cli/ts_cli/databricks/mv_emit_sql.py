@@ -218,3 +218,75 @@ _SIMPLE_FN: dict = {
     "in": _emit_in,
     "between": _emit_between,
 }
+
+
+# --- Raw-measure aggregation wrapper (Task 18 Finding 1 fix) ---------------
+# A formula-backed MEASURE whose translated SQL contains no aggregate at all
+# (e.g. safe_divide over two RAW physical-column refs) is what
+# `ts spotql classify-columns` calls a "raw_measure": ThoughtSpot itself
+# treats it as an unaggregated per-row expression and applies the column's
+# declared aggregation (SUM by default) at query time. Databricks has no such
+# implicit behavior -- CREATE VIEW rejects the un-aggregated expression with
+# MISSING_AGGREGATION. mv_emit.emit_measure calls these two helpers to match
+# ThoughtSpot's own semantics; kept here (not in mv_emit.py) because this
+# module already owns AGG_MAP/the aggregate-keyword knowledge.
+_AGG_PRESENCE_TOKENS = (
+    "SUM(", "COUNT(", "AVG(", "MIN(", "MAX(", "STDDEV(", "VARIANCE(",
+    "MEDIAN(", "MEASURE(", "ANY_VALUE(",
+)
+
+
+def is_aggregate_present(sql: str) -> bool:
+    """True if an aggregate function call or window `OVER` clause appears
+    ANYWHERE in `sql` -- presence-based, not "the outermost AST node is an
+    aggregate call". A cross-measure ref like
+    `COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)`
+    already aggregates via its resolved MEASURE()/ANY_VALUE() refs even
+    though its own outermost call is `safe_divide`/`COALESCE`, neither of
+    which is itself an aggregate function -- this distinguishes that case
+    (already aggregated, leave as-is) from a bare `safe_divide` over two
+    RAW physical-column refs (no aggregate anywhere, must be wrapped).
+    """
+    if not sql:
+        return False
+    if " OVER " in sql or "OVER(" in sql:
+        return True
+    return any(token in sql for token in _AGG_PRESENCE_TOKENS)
+
+
+# aggregation property -> Databricks aggregate keyword, for wrapping a
+# no-aggregate formula-measure expr. Mirrors mv_emit.py's own
+# `_PROP_AGG_TO_DBX` (kept as a separate copy here, not imported, to avoid a
+# mv_emit_sql.py -> mv_emit.py dependency; both derive from this module's own
+# AGG_MAP, the shared source of truth).
+_WRAP_AGG_TO_DBX = {
+    "SUM": AGG_MAP["sum"], "COUNT": AGG_MAP["count"], "AVERAGE": AGG_MAP["average"],
+    "AVG": AGG_MAP["avg"], "MIN": AGG_MAP["min"], "MAX": AGG_MAP["max"],
+    "STD_DEVIATION": AGG_MAP["stddev"], "STDDEV": AGG_MAP["stddev"],
+    "VARIANCE": AGG_MAP["variance"],
+}
+
+
+def wrap_in_aggregation(sql: str, aggregation: str | None) -> str:
+    """Wrap `sql` in the Databricks aggregate keyword for `aggregation`
+    (ThoughtSpot's `properties.aggregation`, default SUM) -- the same AGG
+    semantics `mv_emit._physical_measure_expr` applies to a physical column's
+    dot-path, generalized here to any already-translated SQL string.
+    """
+    agg = (aggregation or "SUM").upper()
+    if agg == "COUNT_DISTINCT":
+        return f"COUNT(DISTINCT {sql})"
+    dbx_agg = _WRAP_AGG_TO_DBX.get(agg)
+    if dbx_agg is None:
+        raise UntranslatableError(f"unknown aggregation {aggregation!r} on formula measure")
+    return f"{dbx_agg}({sql})"
+
+
+def wrap_measure_if_needed(sql: str, aggregation: str | None) -> str:
+    """Convenience combinator over the two helpers above: wrap `sql` in
+    `aggregation` only when it has no aggregate present already; otherwise
+    return it unchanged. Lets mv_emit.emit_measure's formula branch stay a
+    single call while `is_aggregate_present`/`wrap_in_aggregation` remain
+    independently unit-testable.
+    """
+    return sql if is_aggregate_present(sql) else wrap_in_aggregation(sql, aggregation)

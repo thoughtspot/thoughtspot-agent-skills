@@ -7,7 +7,7 @@ from ts_cli.databricks.mv_emit import (
     detect_fact_tables, make_ref_resolver, build_metric_view,
 )
 from ts_cli.databricks.mv_emit_expr import parse_formula, UntranslatableError
-from ts_cli.databricks.mv_emit_sql import emit_sql
+from ts_cli.databricks.mv_emit_sql import emit_sql, is_aggregate_present
 
 MODEL = {"model": {"name": "M",
     "model_tables": [{"name": "FACT"}],
@@ -298,6 +298,116 @@ class TestEmitMeasure:
                "properties": {"column_type": "MEASURE"}}
         result = emit_measure(col, resolver, model=model)
         assert result["expr"] == "SUM(source.AMOUNT)"
+
+
+class TestEmitMeasureRawMeasureWrap:
+    """Task 18 Finding 1 fix: a formula-backed MEASURE whose translated SQL
+    has no aggregate anywhere (raw physical-column refs, not cross-measure
+    MEASURE()/ANY_VALUE() refs) must be wrapped in the column's own declared
+    aggregation -- matching ThoughtSpot's own raw_measure + SUM-at-query-time
+    semantics (live-verified 2026-07-18) and avoiding Databricks'
+    MISSING_AGGREGATION CREATE VIEW failure.
+    """
+
+    @staticmethod
+    def _amount_qty_model(formula_expr: str, aggregation: str = "SUM"):
+        model = {"name": "M", "model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::amount",
+                 "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+                {"name": "Qty", "column_id": "FACT::qty",
+                 "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}],
+            "formulas": [{"id": "formula_x", "name": "X", "expr": formula_expr}]}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [
+                {"name": "amount", "db_column_properties": {"data_type": "DOUBLE"}},
+                {"name": "qty", "db_column_properties": {"data_type": "DOUBLE"}}]}}]
+        idx = build_column_index(model, tables)
+        resolver = make_col_resolver(idx, source_table="FACT")
+        col = {"name": "X", "formula_id": "formula_x",
+               "properties": {"column_type": "MEASURE", "aggregation": aggregation}}
+        return model, resolver, col
+
+    def test_safe_divide_of_two_raw_physical_measures_gets_wrapped(self):
+        # safe_divide([Amount], [Qty]) referenced RAW ([TABLE::col], not a
+        # [Name] ref to another measure) -- no aggregate anywhere in the
+        # translated SQL, so it must be wrapped in the column's own SUM
+        # aggregation.
+        model, resolver, col = self._amount_qty_model(
+            "safe_divide ( [FACT::amount] , [FACT::qty] )")
+        result = emit_measure(col, resolver, model=model)
+        assert result["expr"] == "SUM(COALESCE(source.amount / NULLIF(source.qty, 0), 0))"
+
+    def test_arithmetic_over_raw_physical_measure_gets_wrapped(self):
+        # [Amount] * 1.1 -- arithmetic over a single raw physical measure,
+        # still no aggregate present, still must be wrapped.
+        model, resolver, col = self._amount_qty_model("[FACT::amount] * 1.1")
+        result = emit_measure(col, resolver, model=model)
+        assert result["expr"] == "SUM(source.amount * 1.1)"
+
+    def test_wraps_in_the_columns_declared_aggregation_not_always_sum(self):
+        # aggregation: AVG on the formula column -- must wrap in AVG(...),
+        # not blindly default to SUM.
+        model, resolver, col = self._amount_qty_model(
+            "[FACT::amount] * 1.1", aggregation="AVG")
+        result = emit_measure(col, resolver, model=model)
+        assert result["expr"] == "AVG(source.amount * 1.1)"
+
+    def test_cross_measure_ratio_is_not_wrapped(self):
+        # safe_divide([Quantity], [Category Quantity]) -- both operands are
+        # [Name] refs resolved via ref_resolver into MEASURE()/ANY_VALUE();
+        # the translated SQL already contains an aggregate (via the resolved
+        # refs), so it must be left exactly as emitted -- NOT wrapped in an
+        # outer SUM (mirrors the Dunder golden test's Category Contribution
+        # Ratio assertion in test_databricks_to_golden.py).
+        model = {"name": "M", "model_tables": [{"name": "FACT"}],
+            "columns": [], "formulas": [
+                {"id": "formula_ratio", "name": "Category Contribution Ratio",
+                 "expr": "safe_divide ( [Quantity] , [Category Quantity] )"}]}
+        col = {"name": "Category Contribution Ratio", "formula_id": "formula_ratio",
+               "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}
+        idx = build_column_index(model, [])
+        resolver = make_col_resolver(idx, source_table="FACT")
+
+        def ref_resolver(node):
+            if node["name"] == "Quantity":
+                return "MEASURE(quantity)"
+            if node["name"] == "Category Quantity":
+                return "ANY_VALUE(category_quantity)"
+            raise UntranslatableError(f"unexpected ref {node['name']!r}")
+
+        result = emit_measure(col, resolver, ref_resolver, model=model)
+        assert result["expr"] == (
+            "COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)")
+
+    def test_already_aggregated_formula_measure_not_double_wrapped(self):
+        # sum([Amount]) already contains SUM(...) -- must stay exactly as
+        # emitted, never become SUM(SUM(...)).
+        model, resolver, col = self._amount_qty_model("sum ( [FACT::amount] )")
+        result = emit_measure(col, resolver, model=model)
+        assert result["expr"] == "SUM(source.amount)"
+
+
+class TestIsAggregatePresent:
+    """Unit coverage for the presence-based aggregate detector
+    mv_emit.emit_measure's formula branch relies on (via
+    mv_emit_sql.wrap_measure_if_needed) -- presence ANYWHERE in the SQL
+    string, not "outermost AST node is a call".
+    """
+
+    @pytest.mark.parametrize("sql", [
+        "SUM(source.amount)",
+        "COUNT(DISTINCT source.id)",
+        "COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)",
+        "SUM(source.amount) OVER (PARTITION BY source.category)",
+        "AVG(x) OVER(PARTITION BY y)",
+    ])
+    def test_true_when_an_aggregate_or_window_is_present(self, sql):
+        assert is_aggregate_present(sql) is True
+
+    def test_false_for_a_bare_arithmetic_expression(self):
+        assert is_aggregate_present(
+            "COALESCE(source.amount / NULLIF(source.qty, 0), 0)") is False
 
 
 class TestEmitDimension:

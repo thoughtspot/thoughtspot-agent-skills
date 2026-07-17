@@ -267,7 +267,7 @@ surfaced.
 
 ---
 
-## #9 — Formula-backed "raw measure" ratios emit without their aggregation wrapper — OPEN (live bug, found by Task 18)
+## #9 — Formula-backed "raw measure" ratios emit without their aggregation wrapper — RESOLVED/VERIFIED 2026-07-18
 
 **Finding (Task 18, live-verified 2026-07-18):** a MEASURE-type ThoughtSpot
 formula built from a scalar function (`safe_divide`, but the gap is general —
@@ -314,14 +314,40 @@ SQL in `{aggregation}(...)` from `col["properties"]["aggregation"]` (default
 existing `is_aggregate_expr`/`classify_expr` may be directly reusable rather
 than re-deriving an equivalent check inside the Databricks emitter.
 
-**Workaround today:** rewrite the source formula so the aggregation is
+**Workaround (pre-fix):** rewrite the source formula so the aggregation is
 explicit and self-contained before running `build-mv`, e.g.
 `safe_divide(sum([Amount]), sum([Qty]))` rather than referencing two
 already-aggregated measure columns by name — the `sum(...)` wrapping does get
 correctly emitted as `SUM(source.amount)` since it's a recognized top-level
-aggregate call, not a bare column/ref.
+aggregate call, not a bare column/ref. No longer required now that the fix
+below ships, but harmless to keep doing.
 
-Status: OPEN — real, live-reproduced emitter bug with a documented workaround.
-Not a merge blocker for this gate (the brief scopes Task 18 as report-only for
-emitter bugs), but should be fixed before the next release that touches
-`mv_emit.py`'s measure-emission path.
+**Fix applied (2026-07-18):** `mv_emit.emit_measure`'s formula-backed branch
+now calls `mv_emit_sql.wrap_measure_if_needed(expr, aggregation)` on the
+translated SQL before assigning it to `expr`. That combinator checks
+`is_aggregate_present(expr)` — true if `SUM(`/`COUNT(`/`AVG(`/`MIN(`/`MAX(`/
+`STDDEV(`/`VARIANCE(`/`MEDIAN(`/`MEASURE(`/`ANY_VALUE(` or a window `OVER`
+appears ANYWHERE in the emitted SQL string (presence-based, not "outermost
+AST node is a call") — and only wraps in `{aggregation}(...)` (via
+`wrap_in_aggregation`, same `AGG_MAP`-derived keyword set the physical-column
+branch's `_PROP_AGG_TO_DBX` uses, default `SUM`) when no aggregate is present.
+This is exactly why `safe_divide([Amount],[Qty])` over two RAW physical-column
+refs gets wrapped (`COALESCE(source.amount / NULLIF(source.qty, 0), 0)` has no
+aggregate anywhere → `SUM(COALESCE(...))`) while the cross-measure form
+`safe_divide([Quantity],[Category Quantity])` — whose operands resolve via
+`ref_resolver` into `MEASURE(quantity)`/`ANY_VALUE(category_quantity)` — is
+left unwrapped, matching the Dunder golden test's `Category Contribution
+Ratio` assertion (`COALESCE(MEASURE(quantity) / NULLIF(ANY_VALUE(category_quantity), 0), 0)`,
+no outer `SUM`). The wrap matches ThoughtSpot's own live-confirmed
+`raw_measure` + SUM-at-query-time semantics (this open item's original
+finding). Unit-tested in `tools/ts-cli/tests/test_databricks_emit.py`
+(`TestEmitMeasureRawMeasureWrap`, `TestIsAggregatePresent`); the Dunder golden
+test (`test_databricks_to_golden.py`) re-run clean, confirming the
+cross-measure case is still not double-wrapped. Not re-verified live against
+Databricks post-fix — the mechanism (ThoughtSpot's `raw_measure`+SUM wrapper)
+was already live-confirmed during the Task 18 gate; this fix only makes the
+emitter match that already-confirmed semantics, offline unit-tested.
+
+Status: RESOLVED/VERIFIED 2026-07-18 — see
+`mv_emit_sql.is_aggregate_present`/`wrap_in_aggregation`/`wrap_measure_if_needed`
+and `mv_emit.emit_measure`.

@@ -7,7 +7,7 @@ from collections import deque
 from typing import Callable
 
 from ts_cli.databricks.mv_emit_expr import parse_formula, UntranslatableError
-from ts_cli.databricks.mv_emit_sql import emit_sql, AGG_MAP, COND_AGG
+from ts_cli.databricks.mv_emit_sql import emit_sql, AGG_MAP, COND_AGG, wrap_measure_if_needed
 from ts_cli.databricks.mv_tml import ts_type_to_dbx
 # Window-measure emission (Task 9) lives in mv_emit_window.py -- split out
 # under the file-size gate (tools/validate/check_file_size.py). Re-exported
@@ -478,7 +478,7 @@ def emit_measure(col: dict, col_resolver: Callable[[dict], str],
                   model: dict | None = None) -> dict:
     """Emit a non-window measure fragment: AGG(dot-path) for a physical
     column (using properties.aggregation, default SUM; COUNT_DISTINCT ->
-    COUNT(DISTINCT ...)), translated SQL for a formula-backed measure.
+    COUNT(DISTINCT ...)); formula SQL wrapped in its own AGG if absent (Finding 1).
     """
     ref_resolver = ref_resolver or _raise_unresolved_ref
     if col.get("column_id"):
@@ -487,6 +487,7 @@ def emit_measure(col: dict, col_resolver: Callable[[dict], str],
         expr = _physical_measure_expr(dot_path, props.get("aggregation"))
     else:
         expr = _formula_sql(col, col_resolver, ref_resolver, model)
+        expr = wrap_measure_if_needed(expr, (col.get("properties") or {}).get("aggregation"))
     return _finalize_column(col, expr)
 
 
