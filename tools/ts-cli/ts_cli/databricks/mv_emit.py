@@ -799,8 +799,9 @@ def _combine_filters(filter_exprs: list) -> str | None:
     return " AND ".join(f"({e})" for e in filter_exprs)
 
 
-_MEASURE_REF_RE = re.compile(r"MEASURE\(([A-Za-z0-9_]+)\)")
-_ANY_VALUE_REF_RE = re.compile(r"ANY_VALUE\(([A-Za-z0-9_]+)\)")
+# _EMITTED_* avoids a vendoring name clash with mv_expr.py's own _MEASURE_REF_RE (BL-063 PR 14).
+_EMITTED_MEASURE_REF_RE = re.compile(r"MEASURE\(([A-Za-z0-9_]+)\)")
+_EMITTED_ANY_VALUE_REF_RE = re.compile(r"ANY_VALUE\(([A-Za-z0-9_]+)\)")
 
 
 def _referenced_names(expr: str) -> set:
@@ -808,7 +809,7 @@ def _referenced_names(expr: str) -> set:
     already-emitted `expr` string (the raw-SQL shape `make_ref_resolver`
     substitutes in -- see `resolve_refs`'s docstring)."""
     text = expr or ""
-    return set(_MEASURE_REF_RE.findall(text)) | set(_ANY_VALUE_REF_RE.findall(text))
+    return set(_EMITTED_MEASURE_REF_RE.findall(text)) | set(_EMITTED_ANY_VALUE_REF_RE.findall(text))
 
 
 def _cascade_skip_dangling_refs(dimensions: list, measures: list,

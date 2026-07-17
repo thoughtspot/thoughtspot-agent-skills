@@ -1,4 +1,4 @@
-from ts_cli.databricks.mv_emit_expr import tokenize, UntranslatableError, parse_formula
+from ts_cli.databricks.mv_emit_expr import tokenize_formula, UntranslatableError, parse_formula
 import pytest
 
 
@@ -9,32 +9,32 @@ class TestModuleContract:
 
 class TestTokenize:
     def test_bracket_column_ref(self):
-        assert tokenize("[FACT::AMOUNT]") == [("bracket", "[FACT::AMOUNT]")]
+        assert tokenize_formula("[FACT::AMOUNT]") == [("bracket", "[FACT::AMOUNT]")]
 
     def test_agg_call(self):
-        assert tokenize("sum ( [T::a] )") == [
+        assert tokenize_formula("sum ( [T::a] )") == [
             ("ident", "sum"), ("op", "("), ("bracket", "[T::a]"), ("op", ")")]
 
     def test_string_and_number_and_ops(self):
-        assert tokenize("[T::x] = 'Active'") == [
+        assert tokenize_formula("[T::x] = 'Active'") == [
             ("bracket", "[T::x]"), ("op", "="), ("string", "'Active'")]
-        assert tokenize("[T::x] >= 10") == [
+        assert tokenize_formula("[T::x] >= 10") == [
             ("bracket", "[T::x]"), ("op", ">="), ("number", "10")]
 
     def test_keywords_and_lodset(self):
-        assert tokenize("if ( [T::x] != null ) then 1 else 0") == [
+        assert tokenize_formula("if ( [T::x] != null ) then 1 else 0") == [
             ("kw", "if"), ("op", "("), ("bracket", "[T::x]"), ("op", "!="),
             ("kw", "null"), ("op", ")"), ("kw", "then"), ("number", "1"),
             ("kw", "else"), ("number", "0")]
-        assert tokenize("{ [A::x] , [B::y] }") == [
+        assert tokenize_formula("{ [A::x] , [B::y] }") == [
             ("op", "{"), ("bracket", "[A::x]"), ("op", ","), ("bracket", "[B::y]"), ("op", "}")]
 
     def test_unrecognized_char_raises(self):
         with pytest.raises(UntranslatableError, match=r"unrecognized"):
-            tokenize("[T::x] @ 1")
+            tokenize_formula("[T::x] @ 1")
 
     def test_multiword_function_ident(self):
-        assert tokenize("unique count ( [T::a] )") == [
+        assert tokenize_formula("unique count ( [T::a] )") == [
             ("ident", "unique count"), ("op", "("), ("bracket", "[T::a]"), ("op", ")")]
 
 

@@ -6,16 +6,25 @@ from __future__ import annotations
 
 import re
 
-
-class UntranslatableError(Exception):
-    """A ThoughtSpot formula construct has no deterministic Databricks-SQL translation."""
+# UntranslatableError's canonical home is ts_cli/formula_common.py (BL-063
+# PR 14) — mv_sql.py (the forward direction) raises the same exception for
+# the same concept, and vendoring both into one Genie-notebook namespace
+# would otherwise define the class twice under one name. Re-exported here so
+# existing `from ts_cli.databricks.mv_emit_expr import UntranslatableError`
+# call sites are unaffected.
+from ts_cli.formula_common import UntranslatableError
 
 
 _KW = {"if", "then", "else", "and", "or", "not", "in", "between",
        "null", "true", "false"}
 
-# order matters: multi-char ops before single-char
-_TOKEN_RE = re.compile(r"""
+# order matters: multi-char ops before single-char. Named _FORMULA_TOKEN_RE
+# (not _TOKEN_RE) to avoid an accidental top-level name clash with
+# mv_sql.py's own (differently-shaped, SQL-grammar) _TOKEN_RE when both
+# modules are vendored into one Genie-notebook namespace (BL-063 PR 14) —
+# these tokenize two different grammars and are not the same concept, unlike
+# UntranslatableError above, so they are renamed rather than unified.
+_FORMULA_TOKEN_RE = re.compile(r"""
     (?P<ws>\s+)
   | (?P<bracket>\[[^\]]*\])
   | (?P<string>'(?:[^']|'')*')
@@ -26,12 +35,16 @@ _TOKEN_RE = re.compile(r"""
 """, re.VERBOSE)
 
 
-def tokenize(expr: str) -> list[tuple[str, str]]:
+def tokenize_formula(expr: str) -> list[tuple[str, str]]:
+    """Tokenize ThoughtSpot formula text. Named `tokenize_formula` (not
+    `tokenize`) to avoid an accidental top-level name clash with mv_sql.py's
+    own `tokenize` (SQL grammar) when both modules are vendored into one
+    Genie-notebook namespace (BL-063 PR 14) — see `_FORMULA_TOKEN_RE`."""
     toks: list[tuple[str, str]] = []
     i = 0
     n = len(expr)
     while i < n:
-        m = _TOKEN_RE.match(expr, i)
+        m = _FORMULA_TOKEN_RE.match(expr, i)
         if not m or m.end() == i:
             raise UntranslatableError(f"unrecognized character at {i!r}: {expr[i:i+8]!r}")
         i = m.end()
@@ -73,7 +86,7 @@ class _P:
 
 
 def parse_formula(expr: str) -> dict:
-    p = _P(tokenize(expr))
+    p = _P(tokenize_formula(expr))
     node = _parse_or(p)
     if p.i != len(p.toks):
         raise UntranslatableError(f"trailing tokens: {p.toks[p.i:]!r}")
