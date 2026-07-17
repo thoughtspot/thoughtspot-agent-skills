@@ -113,23 +113,33 @@ def _translate_join_on(on_str: str, source_table: str, alias_by_table: dict[str,
     return emit_sql(ast, resolver)
 
 
-def _resolve_referencing_join(join: dict, target: str, tbl_by_name: dict) -> str:
-    """Resolve a `referencing_join` name against the target Table TML's join defs.
+def _resolve_referencing_join(join: dict, source: str, target: str, tbl_by_name: dict) -> str:
+    """Resolve a `referencing_join` name against the SOURCE (FK) table's join defs.
 
-    Table TMLs store pre-defined joins under `joins_with[]` or `joins[]` depending on
-    the export path — check both defensively. Raise UntranslatableError naming the
-    join if it (or its `on` clause) cannot be found.
+    Per the ThoughtSpot Model TML schema (agents/shared/schemas/thoughtspot-model-tml.md
+    "Join Scenarios" / Scenario A, and thoughtspot-table-tml.md `joins_with[]` field
+    reference), a `referencing_join` names a `joins_with[]` entry defined on the table
+    that OWNS the model's `joins[]` array — the source/FK table currently being walked
+    — never the join target. Real ThoughtSpot exports (Scenario A) always define the
+    join there. Table TMLs store pre-defined joins under `joins_with[]`; defensively
+    also check `joins[]` in case of an unusual export shape. Raise UntranslatableError
+    naming the join and the source table if it (or its `on` clause) cannot be found.
     """
     ref_name = join.get("referencing_join")
-    target_table = tbl_by_name.get(target) or {}
-    candidates = list(target_table.get("joins_with") or []) + list(target_table.get("joins") or [])
+    source_table = tbl_by_name.get(source) or {}
+    candidates = list(source_table.get("joins_with") or []) + list(source_table.get("joins") or [])
     for candidate in candidates:
-        if candidate.get("name") == ref_name:
-            on_str = candidate.get("on")
-            if not on_str:
-                raise UntranslatableError(f"referencing_join {ref_name!r} has no 'on' clause")
-            return on_str
-    raise UntranslatableError(f"referencing_join {ref_name!r} not found for table {target}")
+        if candidate.get("name") != ref_name:
+            continue
+        destination = candidate.get("destination") or {}
+        dest_name = destination.get("name")
+        if dest_name is not None and dest_name != target:
+            continue  # name collision with a different destination — keep looking
+        on_str = candidate.get("on")
+        if not on_str:
+            raise UntranslatableError(f"referencing_join {ref_name!r} has no 'on' clause")
+        return on_str
+    raise UntranslatableError(f"referencing_join {ref_name!r} not found on source table {source!r}")
 
 
 def build_joins(model: dict, tables: list[dict], source_table: str) -> tuple[list[dict], dict[str, str]]:
@@ -181,7 +191,7 @@ def build_joins(model: dict, tables: list[dict], source_table: str) -> tuple[lis
                 if "referencing_join" not in join:
                     raise UntranslatableError(
                         f"join with {target!r} has neither 'on' nor 'referencing_join'")
-                on_str = _resolve_referencing_join(join, target, tbl_by_name)
+                on_str = _resolve_referencing_join(join, current, target, tbl_by_name)
             on_sql = _translate_join_on(on_str, source_table, alias_by_table)
 
             join_node = {

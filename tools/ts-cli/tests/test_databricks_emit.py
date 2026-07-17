@@ -87,3 +87,30 @@ class TestJoins:
         from ts_cli.databricks.mv_emit import build_joins
         with pytest.raises(Exception):
             build_joins(model, tables, source_table="FACT")
+
+    def test_referencing_join_resolved_from_source_table(self):
+        # Scenario A happy path: the model's join only carries `with` +
+        # `referencing_join` (no inline `on`). Per the schema
+        # (thoughtspot-model-tml.md "Join Scenarios" Scenario A;
+        # thoughtspot-table-tml.md `joins_with[]` field reference), the named
+        # join is defined on the SOURCE (FK) table's own Table TML
+        # `joins_with[]` — not on the target table's TML.
+        model = {"name": "M",
+            "model_tables": [
+                {"name": "FACT", "joins": [
+                    {"with": "DIM", "referencing_join": "FACT_to_DIM", "cardinality": "MANY_TO_ONE"}]},
+                {"name": "DIM"}],
+            "columns": [], "formulas": []}
+        tables = [
+            {"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact", "columns": [],
+                "joins_with": [
+                    {"name": "FACT_to_DIM", "destination": {"name": "DIM"},
+                     "on": "[FACT::DIM_ID] = [DIM::ID]", "type": "INNER", "cardinality": "MANY_TO_ONE"}]}},
+            {"table": {"name": "DIM", "db": "c", "schema": "s", "db_table": "dim", "columns": []}}]
+        from ts_cli.databricks.mv_emit import build_joins
+        joins, dot = build_joins(model, tables, source_table="FACT")
+        assert joins == [{"name": "dim", "source": "c.s.dim",
+                          "on": "source.DIM_ID = dim.ID",
+                          "rely": {"at_most_one_match": True},
+                          "cardinality": "many_to_one"}]
+        assert dot == {"FACT": "source", "DIM": "dim"}
