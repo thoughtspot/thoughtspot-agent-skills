@@ -2057,3 +2057,45 @@ skipped import); `1` — a builder `ValueError` (bad alias, duplicate formula
 title, unsupported join), the zero-column-table guard, non-empty
 `invariant_findings`/`lint_findings`, an unreadable/invalid input file, or an
 import failure.
+
+### `ts databricks build-mv`
+
+Emit Databricks Metric View `.sql` file(s) (`CREATE OR REPLACE VIEW ... WITH
+METRICS`) from an exported ThoughtSpot Model, for the `ts-convert-to-databricks-mv`
+skill. Emit-only — no ThoughtSpot or Databricks profile is used or needed, and
+no DDL is ever executed; it reads local Model/Table TML JSON and writes local
+`.sql` files.
+
+```bash
+ts databricks build-mv \
+  --model model.json --tables tables.json \
+  --catalog analytics --schema sales \
+  --output-dir out/
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--model` / `-m` | yes | Exported Model TML JSON (`{"model": {...}}`, or a bare model dict) |
+| `--tables` | yes | Associated Table TML JSON list (`[{"table": {...}}, ...]`) |
+| `--catalog` | yes | Databricks catalog for the MV's source table and the view itself |
+| `--schema` | yes | Databricks schema for the MV's source table and the view itself |
+| `--output-dir` / `-o` | yes | Directory for the generated `.sql` file(s) |
+| `--source-table` | no | Fact table to build the MV for; omit to emit one MV per fact table `mv_emit.detect_fact_tables` finds (a table carrying ≥1 MEASURE column) |
+| `--view-name` | no | Override the generated view name — only honoured when exactly one MV is being emitted (a single `--source-table`, or a model with exactly one detected fact) |
+
+Each fact produces one `{view_name}.sql` file in `--output-dir` (default name
+`{model}_{fact}_mv`, via `mv_build_view.default_view_name`). A fact table this
+model has no MEASURE column for, or that a formula fails to translate for,
+naturally lands in that MV's `skipped[]` rather than aborting the whole run.
+
+**Output:** a summary JSON on stdout (the only stdout output — diagnostics are
+on stderr): `model_name`, `metric_views[]` (`view_name`, `source`, `dimensions`,
+`measures`, `filter_applied`, `file`), `skipped[]`, `warnings[]` — the
+`mv_build_view.build_summary` shape.
+
+Exit codes: `0` — every produced MV has at least one measure; `1` — no fact
+table could be found (no `--source-table` and no MEASURE column anywhere in
+the model), an unreadable/invalid `--model`/`--tables` file, a structural
+`ValueError` while building an MV (e.g. a duplicate emitted column name, or
+the `build_view_ddl` `$$`-collision guard), or any produced MV ends up with
+zero measures.
