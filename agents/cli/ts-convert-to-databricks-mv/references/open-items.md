@@ -79,9 +79,24 @@ matrix C8, deferred).
 least one multi-period query against this construct to confirm the divergence
 is understood and acceptable, not just theoretically documented.
 
+**Task 18 (2026-07-18) recorded the live multi-period check** — see
+`docs/audit/2026-07-18-dbx-to-fidelity-matrix.md` Finding 2. A two-month fixture
+(Electronics spanning June/July, Furniture July-only) confirmed live: ThoughtSpot
+computes `Monthly Amount`/`Prior Month Amount` as wall-clock-scoped scalars
+(current = 1000/550, prior = 500/0, invariant of how many periods exist);
+Databricks computes the same-named measures as row-relative, per-period-bucket
+values (`GROUP BY category, month_txn_date` returns one row per existing
+period, `prior_month_amount` a `LAG(1)` over that category's own sequence).
+The numbers happened to coincide at the current-period row in this fixture (a
+coincidence of having only two adjacent periods), but the shape (full per-month
+trend table vs. one wall-clock snapshot per category) and edge-case
+representation (`NULL` vs `0` for "no such period") both diverge. Confirmed
+understood and acceptable, not a translation-fidelity blocker.
+
 Status: OPEN — known, structurally unavoidable limitation of the `offset:`
-primitive; not a bug in the emitter, but must stay visible until Task 18
-records a live multi-period fidelity check.
+primitive; not a bug in the emitter. The Task 18 live multi-period check this
+item was waiting on is now recorded above; remains OPEN as a documented,
+accepted approximation with no code fix scheduled.
 
 ---
 
@@ -164,8 +179,20 @@ is either (a) `make_col_resolver` should omit the `source.` prefix when
 `dot_path_by_table` has no join entries, or (b) the schema doc's "Direct
 column name" row should be corrected to `source.column` for single-source too.
 
-Status: OPEN — verification gate, resolved by Task 18's live fidelity matrix
-(flips to VERIFIED there, with the matrix's date and finding).
+**VERIFIED 2026-07-18** — `docs/audit/2026-07-18-dbx-to-fidelity-matrix.md`.
+The entire fidelity-gate model was single-source, no-`joins:` (one physical
+table, `SALES_FIXTURE`/`sales_fixture`, zero joins in `model_tables[]`), and
+the emitted MV used `source.`-prefixed column references throughout
+(`source.category`, `source.amount`, `source.txn_date`, etc. — 14 such
+references across 6 dimensions and 8 measures). The DDL created successfully
+on a live Databricks warehouse (statement 5) and every query in the battery
+(statements 6–10) returned correct values. `make_col_resolver`'s
+always-`source.`-prefix behavior is correct for single-source MVs; no emitter
+change needed. The schema doc's "Direct column name" row for single-source MVs
+should be corrected to reflect `source.column`, not a bare column name (Task 20
+version-bump pass, or opportunistic fix on next touch of that file).
+
+Status: VERIFIED 2026-07-18 — resolved by Task 18's live fidelity matrix.
 
 ---
 
@@ -210,14 +237,91 @@ semi-additive, cross-measure, plus the single-source `source.`-prefix case
 from #6 and a multi-period query against the period-offset lossy mapping from
 #3) against both the ThoughtSpot Model and the Databricks MV side-by-side,
 recording actual numbers and marking each row CONFIRMED or DIVERGENCE (with
-caveat) in `docs/audit/2026-07-17-dbx-to-fidelity-matrix.md`.
+caveat) in `docs/audit/2026-07-18-dbx-to-fidelity-matrix.md`.
 
 **Action on completion:** flip this item to VERIFIED with the matrix's date and
 a one-line summary of the result; fold any DIVERGENCE findings into
 `coverage-matrix.md` as new Notes/Limitations rows rather than leaving them
 only in the audit doc.
 
-Status: OPEN — this is the merge gate for the `wip/to-databricks-mv-codify`
-branch (per `.claude/rules/branching.md` merge criteria: "all
-`references/open-items.md` items in changed skills are VERIFIED... before
-opening a PR"). Flips to VERIFIED in Task 18.
+**VERIFIED 2026-07-18** — `docs/audit/2026-07-18-dbx-to-fidelity-matrix.md`.
+Ran the full forward gate: seeded a 20-row single-source fixture on Databricks,
+built a ThoughtSpot Model over it (8 formulas covering plain SUM, COUNT
+DISTINCT, filtered/conditional aggregate, an LOD partition, a cumulative
+window, a trailing-3-day window, period-offset current/prior month, and a
+cross-measure ratio), ran the worktree's `ts databricks build-mv`, created the
+emitted MV on Databricks, and ran a query battery of 8 constructs against both
+platforms. **Result: 7/8 CONFIRMED, 2 expected DIVERGENCEs** (gapped
+trailing-window row-positional-vs-date-interval, mirroring the reverse-
+direction E1 finding; period-offset row-relative-vs-wall-clock, resolving #3
+above), **and 1 live emitter bug found** — see new item #9 below and
+`coverage-matrix.md` L10. Also resolved #6 above (VERIFIED). Full teardown
+confirmed (Databricks schema dropped, ThoughtSpot model+table deleted, both
+independently verified empty).
+
+Status: VERIFIED 2026-07-18 — this was the merge gate for the
+`wip/to-databricks-mv-codify` branch (per `.claude/rules/branching.md` merge
+criteria). All other open items in this file are VERIFIED or documented,
+known, accepted limitations — see #9 below for the one new item this gate
+surfaced.
+
+---
+
+## #9 — Formula-backed "raw measure" ratios emit without their aggregation wrapper — OPEN (live bug, found by Task 18)
+
+**Finding (Task 18, live-verified 2026-07-18):** a MEASURE-type ThoughtSpot
+formula built from a scalar function (`safe_divide`, but the gap is general —
+see below) over two **plain physical** MEASURE columns — e.g.
+`safe_divide([Amount], [Qty])`, both `Amount`/`Qty` plain `aggregation: SUM`
+columns, no LOD/formula operand on either side — is emitted by
+`mv_emit.emit_measure`'s formula-backed branch **without** wrapping the result
+in the column's declared `aggregation` property. The physical-column branch of
+the same function does this correctly (`_physical_measure_expr(dot_path,
+props.get("aggregation"))`); the formula-backed branch calls `_formula_sql` →
+`emit_sql` directly and assigns the raw result as `expr`, with no equivalent
+wrapping step.
+
+**Live reproduction:**
+- `ts spotql classify-columns --model <guid>` classifies this exact formula as
+  `"kind": "raw_measure"`, `"aggregation": "SUM"`, `"wrapper": "SUM"` —
+  ThoughtSpot's own query engine treats it as an unaggregated per-row
+  expression and applies `SUM(...)` at query time. Confirmed via `searchdata`:
+  the live TS number is `Σ(amount_i / qty_i)` (sum-of-ratios: 1300 / 100 on the
+  Task 18 fixture), not `Σamount / Σqty` (ratio-of-sums: 115.38 / 10.0).
+- The emitted Databricks DDL for the same formula:
+  `expr: COALESCE(source.amount / NULLIF(source.qty, 0), 0)` — no `SUM(...)`,
+  no `window:` block, not an aggregate expression at all.
+- Creating the MV with this measure included fails on a live Databricks
+  warehouse: `[MISSING_AGGREGATION] The non-aggregating expression "..." is
+  based on columns which are not participating in the GROUP BY clause. ...
+  SQLSTATE: 42803`. This is a **hard failure for the entire `CREATE OR REPLACE
+  VIEW` statement** — every dimension/measure in the same MV, not just the one
+  bad formula.
+
+Full write-up: `docs/audit/2026-07-18-dbx-to-fidelity-matrix.md` Finding 1;
+tracked in `coverage-matrix.md` as L10 (row 58 cross-referenced).
+
+**Scope:** not specific to `safe_divide` — any formula-backed MEASURE column
+whose top-level parsed AST is not itself an aggregate call (arithmetic over
+two or more physical measures: `[Amount] - [Qty]`, `[Amount] * 1.1`, etc.)
+would hit the same gap.
+
+**Recommended fix (not applied — this task reports bugs, it does not patch the
+emitter):** in `mv_emit.emit_measure`'s formula-backed branch, when the parsed
+formula's outermost node is not already an aggregate call, wrap the translated
+SQL in `{aggregation}(...)` from `col["properties"]["aggregation"]` (default
+`SUM`, matching the physical-column branch's own default). `spotql_ops.py`'s
+existing `is_aggregate_expr`/`classify_expr` may be directly reusable rather
+than re-deriving an equivalent check inside the Databricks emitter.
+
+**Workaround today:** rewrite the source formula so the aggregation is
+explicit and self-contained before running `build-mv`, e.g.
+`safe_divide(sum([Amount]), sum([Qty]))` rather than referencing two
+already-aggregated measure columns by name — the `sum(...)` wrapping does get
+correctly emitted as `SUM(source.amount)` since it's a recognized top-level
+aggregate call, not a bare column/ref.
+
+Status: OPEN — real, live-reproduced emitter bug with a documented workaround.
+Not a merge blocker for this gate (the brief scopes Task 18 as report-only for
+emitter bugs), but should be fixed before the next release that touches
+`mv_emit.py`'s measure-emission path.
