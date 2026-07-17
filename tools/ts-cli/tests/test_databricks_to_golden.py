@@ -408,6 +408,16 @@ class TestInventoryMetricView:
         dims = _by_name(doc["dimensions"])
         order_name = measures["inventory_balance"]["window"][0]["order"]
         assert order_name in dims, "order: dim must be one of this MV's own emitted dimensions"
+        # Pin the reuse to a DATE-valued dim, not just any already-emitted
+        # dimension -- a regression that picked e.g. product_name would still
+        # pass the membership check above. The two candidates are the join-
+        # equal pair DM_INVENTORY::BALANCE_DATE = DM_DATE_DIM::DATE_VALUE;
+        # either is oracle-valid (see the divergence note above), so assert
+        # on the dim's expr rather than hardcoding which NAME won.
+        order_expr = dims[order_name]["expr"]
+        assert order_expr in ("source.BALANCE_DATE", "dates.DATE_VALUE"), (
+            f"order: dim {order_name!r} must resolve to one of the join-equal "
+            f"date exprs, got expr={order_expr!r}")
         # no NEW dimension should have been synthesized beyond the 4 plain
         # ones (product_name, product_category, transaction_date, balance_date)
         assert len(doc["dimensions"]) == 4

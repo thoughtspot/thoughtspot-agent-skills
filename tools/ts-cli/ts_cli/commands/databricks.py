@@ -255,8 +255,10 @@ def build_mv_cmd(
     facts = [source_table] if source_table else detect_fact_tables(model)
     if not facts:
         typer.echo(
-            "no fact table detected: pass --source-table explicitly, or ensure "
-            "the model has at least one MEASURE column", err=True)
+            "no fact table detected: ensure the model has at least one MEASURE "
+            "column, or pass --source-table explicitly for models where fact "
+            "detection can't infer the fact (e.g. a lone condition-first formula "
+            "measure with no physical measure)", err=True)
         raise SystemExit(1)
 
     model_name = model.get("name", "model")
