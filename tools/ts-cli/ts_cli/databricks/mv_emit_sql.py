@@ -73,7 +73,15 @@ def _emit_unop(node: dict, resolver) -> str:
     inner = emit_sql(node["operand"], resolver)
     if node["operand"]["node"] == "binop":
         inner = f"({inner})"
-    return f"NOT {inner}" if node["op"] == "not" else f"-{inner}"
+    if node["op"] == "not":
+        return f"NOT {inner}"
+    # Nested unary minus (double negation, e.g. `-(-[T::x])` or `- -[T::x]`)
+    # would otherwise concatenate to `--source.x`, which Databricks SQL parses
+    # as a line comment and silently corrupts the expression. Separate with a
+    # space so it reads as `- -source.x` instead.
+    if inner.startswith("-"):
+        return f"- {inner}"
+    return f"-{inner}"
 
 
 def _emit_lit(node: dict) -> str:

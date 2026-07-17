@@ -134,6 +134,22 @@ class TestPrecedenceParens:
     def test_unary_minus_over_binop(self):
         assert e("- ( [T::a] + [T::b] )") == "-(source.a + source.b)"
 
+    def test_unary_minus_single_unchanged(self):
+        # confirm single negation still emits `-source.x` with no separator
+        assert e("-[T::x]") == "-source.x"
+
+    def test_double_negation_no_line_comment_parens(self):
+        # FINAL REVIEW FIX 1: nested unary minus must never concatenate to
+        # `--`, which Databricks SQL reads as a line comment.
+        result = e("-(-[T::x])")
+        assert "--" not in result
+        assert result == "- -source.x"
+
+    def test_double_negation_no_line_comment_spaced(self):
+        result = e("- -[T::x]")
+        assert "--" not in result
+        assert result == "- -source.x"
+
     def test_safe_divide_numerator_binop(self):
         assert e("safe_divide ( [T::a] + [T::b] , [T::c] )") == \
             "COALESCE((source.a + source.b) / NULLIF(source.c, 0), 0)"

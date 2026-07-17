@@ -120,6 +120,15 @@ for fact in detect_fact_tables(model):
     mvs.append({**result, "view_name": view_name, "file": f"{view_name}.sql", "ddl": ddl})
 ```
 
+**Catalog/schema and the `source:` FQN.** The `catalog`/`schema` passed here become the FQN
+of the fact/source table in the emitted `source:` field — `build_metric_view` does not read
+the fact table's own `db`/`schema` from Table TML for this purpose, even though joined
+dimension tables do use their own TML `db`/`schema` for their `source:` entries. Default
+`catalog`/`schema` to the fact table's own `db`/`schema` (from its Table TML) rather than the
+first values that come to mind; overriding them changes where `source:` points, and passing a
+`catalog`/`schema` that doesn't match the fact table's real location produces a `source:` FQN
+for a table that doesn't exist there.
+
 `detect_fact_tables` returns one fact table per independent Metric View — a multi-fact model
 produces multiple entries in `mvs`, matching the CLI skill's "one MV per detected fact table"
 behavior. To pin a single fact instead of auto-detecting, skip the loop and call
