@@ -9,6 +9,13 @@ from typing import Callable
 from ts_cli.databricks.mv_emit_expr import parse_formula, UntranslatableError
 from ts_cli.databricks.mv_emit_sql import emit_sql, AGG_MAP, COND_AGG
 from ts_cli.databricks.mv_tml import ts_type_to_dbx
+# Window-measure emission (Task 9) lives in mv_emit_window.py -- split out
+# under the file-size gate (tools/validate/check_file_size.py). Re-exported
+# here so existing callers/tests keep importing from mv_emit; that module
+# late-imports the mv_emit internals it needs to avoid a circular import
+# (mirrors the mv_translate.py / mv_window_translate.py split).
+from ts_cli.databricks.mv_emit_window import (
+    emit_window_measure, synthesize_period_dim, _moving_range)
 
 
 def to_snake(name: str) -> str:
@@ -17,25 +24,31 @@ def to_snake(name: str) -> str:
 
 
 def build_column_index(model: dict, tables: list[dict]) -> dict:
-    type_by_ref: dict[str, str] = {}
+    """Index every physical column of every table in `tables` by its
+    `TABLE::COLUMN` id.
+
+    Sourced from the physical schema (`tables`), not from `model.get("columns")`
+    — real ThoughtSpot Models commonly reference a physical column inside a
+    formula (e.g. an LOD partition column, a semi-additive order column, a
+    conditional-aggregate's filter column) WITHOUT that column also being its
+    own separately-declared model column (see the Dunder Mifflin worked
+    example: `DM_INVENTORY::FILLED_INVENTORY`, `DM_EMPLOYEE::LAST_NAME`, and
+    `DM_ORDER::EMPLOYEE_ID` are all formula-only references, never their own
+    `columns[]` entry). Indexing from `tables` makes every such reference
+    resolvable; `model` is kept as a parameter for interface stability but is
+    no longer consulted here.
+    """
+    idx: dict = {}
     for t in tables:
         tname = t["table"]["name"]
         for c in t["table"].get("columns", []):
-            dt = (c.get("db_column_properties") or {}).get("data_type")
-            if dt:
-                type_by_ref[f"{tname}::{c['name']}"] = dt
-    idx: dict = {}
-    for col in model.get("columns", []):
-        cid = col.get("column_id")
-        if not cid:
-            continue
-        table, column = cid.split("::", 1)
-        ts_type = type_by_ref.get(cid, "VARCHAR")
-        try:
-            dbx_type = ts_type_to_dbx(ts_type)
-        except ValueError:
-            dbx_type = "string"
-        idx[cid] = {"table": table, "column": column, "dbx_type": dbx_type, "dot_path": None}
+            ts_type = (c.get("db_column_properties") or {}).get("data_type") or "VARCHAR"
+            try:
+                dbx_type = ts_type_to_dbx(ts_type)
+            except ValueError:
+                dbx_type = "string"
+            idx[f"{tname}::{c['name']}"] = {
+                "table": tname, "column": c["name"], "dbx_type": dbx_type, "dot_path": None}
     return idx
 
 
@@ -354,6 +367,10 @@ def classify_column(col: dict, model: dict) -> dict:
     formula_id = col.get("formula_id")
 
     if not formula_id:
+        if column_type == "UNKNOWN":
+            return {"role": "unknown",
+                    "reason": "physical column with column_type UNKNOWN — cannot classify "
+                              "(ts-to-databricks-rules.md 'Unmapped ThoughtSpot Properties')"}
         if column_type == "MEASURE":
             return {"role": "measure", "reason": "physical column with column_type MEASURE"}
         return {"role": "dimension", "reason": "physical column (non-MEASURE column_type)"}
@@ -554,279 +571,334 @@ def emit_lod_dimension(col: dict, col_resolver: Callable[[dict], str],
     return _finalize_column(col, expr)
 
 
-# --- Window measure emission (Task 9) -------------------------------------
-# moving_sum/moving_average (4-arg trailing/leading shapes), cumulative_sum/
-# cumulative_average, last_value/first_value (true semi-additive), and
-# *_if(diff_months|diff_quarters(...) = N, [m]) (period-offset) all become a
-# MEASURE carrying a `window: [...]` block. `semiadditive` is always present
-# (Metric View requirement -- omitting it fails with "Missing required
-# creator property 'semiadditive'", per the mapping doc's Key rules).
+# --- Task 10: fact-table detection + cross-reference resolver + -----------
+# build_metric_view assembly. Wires Tasks 6-9 into one MV yaml_doc for a
+# single fact table (the multi-fact split loops over detect_fact_tables'
+# result, calling build_metric_view once per fact).
 
-_MOVING_FNS = {"moving_sum": "SUM", "moving_average": "AVG"}
-_CUMULATIVE_FNS = {"cumulative_sum": "SUM", "cumulative_average": "AVG"}
-# diff_months(...)=N -> N month-units of offset; diff_quarters(...)=N -> N
-# quarter-units, each worth 3 offset-months (ts-databricks-formula-translation.md
-# Semi-Additive/Period Filter section; Task 9 brief embeds this verbatim).
-# diff_years is not in the brief's mapping table -- left unmapped (raises
-# UntranslatableError below) rather than guessed at.
-_PERIOD_OFFSET_GRAIN = {"diff_months": ("month", 1), "diff_quarters": ("month", 3)}
-
-
-def _extract_int(node: dict) -> int:
-    """Read an integer literal, allowing a unary-minus-wrapped literal (how the
-    parser represents e.g. `-1` -- see mv_emit_expr._parse_unary)."""
-    if node.get("node") == "lit" and node.get("kind") == "number":
-        return int(node["value"])
-    if node.get("node") == "unop" and node.get("op") == "-":
-        return -_extract_int(node["operand"])
-    raise UntranslatableError("expected an integer literal in a window function argument")
-
-
-def _moving_range(start_val: int, end_val: int) -> str:
-    """Classify a moving_sum/moving_average (start, end) row-offset pair into
-    one of the four live-verified range shapes (ts-databricks-formula-translation.md
-    "Rolling Window Functions" / "Leading Window"). Any other pair -- including a
-    pair that matches a shape's anchor but derives a non-positive day count N
-    (e.g. (-1, -1), (-2, -1), (-5, 0), (-1, -5), (0, -5)) -- is a manual-review
-    case -- raise rather than emit a guessed range that would fail cryptically
-    as invalid MV YAML at DDL time.
+def _first_col_ref_table(node) -> str | None:
+    """DFS a formula AST for the first {'node':'col'} reference's table,
+    walking children in the same order as `_child_nodes` (mirrors how a
+    ThoughtSpot formula reads left-to-right). Returns None if the AST has no
+    direct physical column reference (e.g. it only chains through other
+    formulas via [ref] nodes).
     """
-    if end_val == -1:
-        n, label = start_val, f"trailing {start_val} day"
-    elif end_val == 0:
-        n, label = start_val + 1, f"trailing {start_val + 1} day inclusive"
-    elif start_val == -1:
-        n, label = end_val, f"leading {end_val} day"
-    elif start_val == 0:
-        n, label = end_val + 1, f"leading {end_val + 1} day inclusive"
-    else:
-        raise UntranslatableError(
-            f"moving_sum/moving_average start={start_val} end={end_val} does not match "
-            "a known trailing/leading shape (manual review)")
-    if n < 1:
-        raise UntranslatableError(
-            f"moving_sum/moving_average start={start_val} end={end_val} derives a "
-            f"non-positive day count (N={n}) -- not a valid trailing/leading window "
-            "shape (manual review)")
-    return label
-
-
-def _match_dim(expr: str, existing_dims: list[dict]) -> str | None:
-    for d in existing_dims:
-        if d.get("expr") == expr:
-            return d["name"]
+    if not isinstance(node, dict):
+        return None
+    if node.get("node") == "col":
+        return node["table"]
+    for child in _child_nodes(node):
+        table = _first_col_ref_table(child)
+        if table is not None:
+            return table
     return None
 
 
-def _find_join_predicate_alias(model: dict | None, target_table: str, target_column: str):
-    """If `model.model_tables[].joins[]` has an INLINE `on:` join naming
-    target_table as its `with`, and that `on` equates target_table::target_column
-    to a column on the other side of the join, return (other_table, other_column).
-
-    Only inline `on:` is resolvable here -- a `referencing_join`-only join's
-    condition lives in Table TML `joins_with[]`, which isn't part of this
-    function's inputs (documented limitation -- see Task 9 report).
+def _measure_column_table(col: dict, model: dict) -> str | None:
+    """A MEASURE column's owning table: its own column_id prefix if physical,
+    else the table its formula's first physical [T::col] ref resolves to
+    (per the Task 10 brief's 'primary/first' rule). Returns None if neither
+    is available (e.g. an untranslatable or all-cross-reference formula) --
+    such a column simply contributes no table to detect_fact_tables.
     """
-    if model is None:
+    cid = col.get("column_id")
+    if cid:
+        return cid.split("::", 1)[0]
+    formula_id = col.get("formula_id")
+    if not formula_id:
         return None
-    for mt in model.get("model_tables", []):
-        for join in mt.get("joins", []):
-            if join.get("with") != target_table:
-                continue
-            on_str = join.get("on")
-            if not on_str:
-                continue
-            try:
-                ast = parse_formula(on_str)
-            except UntranslatableError:
-                continue
-            if ast.get("node") != "binop" or ast.get("op") != "=":
-                continue
-            left, right = ast["left"], ast["right"]
-            if left.get("node") != "col" or right.get("node") != "col":
-                continue
-            for a, b in ((left, right), (right, left)):
-                if a["table"] == target_table and a["column"] == target_column:
-                    return b["table"], b["column"]
-    return None
-
-
-def _raw_date_dim(date_node: dict, col_resolver: Callable[[dict], str], existing_dims: list[dict],
-                   model: dict | None = None) -> tuple[str, list[dict]]:
-    """Resolve a raw (non-truncated) date column reference used as a window
-    `order:` to a dimension NAME -- reusing an existing dimension with a
-    matching `expr`, else falling back through the column's join-predicate
-    alias (see `_find_join_predicate_alias`), else synthesizing a brand-new
-    plain dot-path dimension (returned as the sole entry of `extra_dims`).
-    """
-    if date_node.get("node") != "col":
-        raise UntranslatableError("window order column must be a direct [TABLE::COL] reference")
-    dot_path = col_resolver(date_node)
-    match = _match_dim(dot_path, existing_dims)
-    if match is not None:
-        return match, []
-
-    alias = _find_join_predicate_alias(model, date_node["table"], date_node["column"])
-    if alias is not None:
-        alias_dot = col_resolver({"node": "col", "table": alias[0], "column": alias[1]})
-        alias_match = _match_dim(alias_dot, existing_dims)
-        if alias_match is not None:
-            return alias_match, []
-
-    name = to_snake(f"{date_node['table']}_{date_node['column']}")
-    display = date_node["column"].replace("_", " ").title()
-    new_dim = {"name": name, "expr": dot_path, "display_name": display}
-    return name, [new_dim]
-
-
-def synthesize_period_dim(date_col_node: dict, grain: str,
-                           col_resolver: Callable[[dict], str]) -> dict:
-    """Build a truncated-period dimension (e.g. `DATE_TRUNC('MONTH', ...)`) for
-    a period-offset window measure's `order:`. Returned as a plain dict -- the
-    caller (`_period_dim` here, or build_metric_view in Task 10) is responsible
-    for adding it to the MV's dimensions[] only if an equivalent one doesn't
-    already exist.
-    """
-    dot_path = col_resolver(date_col_node)
-    name = to_snake(f"{grain}_{date_col_node['column']}")
-    display = f"{grain.title()} ({date_col_node['column'].replace('_', ' ').title()})"
-    return {"name": name, "expr": f"DATE_TRUNC('{grain.upper()}', {dot_path})", "display_name": display}
-
-
-def _period_dim(date_node: dict, grain: str, col_resolver: Callable[[dict], str],
-                 existing_dims: list[dict]) -> tuple[str, list[dict]]:
-    synthesized = synthesize_period_dim(date_node, grain, col_resolver)
-    match = _match_dim(synthesized["expr"], existing_dims)
-    if match is not None:
-        return match, []
-    return synthesized["name"], [synthesized]
-
-
-def _emit_moving_window(fn: str, args: list[dict], col_resolver, ref_resolver,
-                         existing_dims: list[dict], model: dict | None) -> tuple[str, dict, list[dict]]:
-    if len(args) != 4:
-        raise UntranslatableError(
-            f"{fn} expects 4 arguments (measure, start, end, sort_col), got {len(args)}")
-    measure_node, start_node, end_node, sort_node = args
-    range_str = _moving_range(_extract_int(start_node), _extract_int(end_node))
-    inner = emit_sql(resolve_refs(measure_node, ref_resolver), col_resolver)
-    measure_expr = f"{_MOVING_FNS[fn]}({inner})"
-    order_name, extra = _raw_date_dim(sort_node, col_resolver, existing_dims, model)
-    window = {"order": order_name, "range": range_str, "semiadditive": "last"}
-    return measure_expr, window, extra
-
-
-def _emit_cumulative_window(fn: str, args: list[dict], col_resolver, ref_resolver,
-                             existing_dims: list[dict], model: dict | None) -> tuple[str, dict, list[dict]]:
-    if len(args) != 2:
-        raise UntranslatableError(
-            f"{fn} expects 2 arguments (measure, sort_col), got {len(args)}")
-    measure_node, sort_node = args
-    inner = emit_sql(resolve_refs(measure_node, ref_resolver), col_resolver)
-    measure_expr = f"{_CUMULATIVE_FNS[fn]}({inner})"
-    order_name, extra = _raw_date_dim(sort_node, col_resolver, existing_dims, model)
-    window = {"order": order_name, "range": "cumulative", "semiadditive": "last"}
-    return measure_expr, window, extra
-
-
-def _emit_semiadditive_window(fn: str, args: list[dict], col_resolver, ref_resolver,
-                               existing_dims: list[dict],
-                               model: dict | None) -> tuple[str, dict, list[dict]]:
-    if len(args) != 3:
-        raise UntranslatableError(
-            f"{fn} expects 3 arguments (agg, query_groups(), {{date}}), got {len(args)}")
-    inner_agg, groups_node, dateset_node = args
-    if not (groups_node.get("node") == "call" and groups_node.get("fn") == "query_groups"):
-        raise UntranslatableError(f"{fn}'s second argument must be query_groups()")
-    if dateset_node.get("node") != "lodset" or len(dateset_node.get("cols") or []) != 1:
-        raise UntranslatableError(f"{fn}'s third argument must be a single-column {{[date]}} set")
-    date_node = dateset_node["cols"][0]
-    measure_expr = emit_sql(resolve_refs(inner_agg, ref_resolver), col_resolver)
-    order_name, extra = _raw_date_dim(date_node, col_resolver, existing_dims, model)
-    semi = "last" if fn == "last_value" else "first"
-    window = {"order": order_name, "semiadditive": semi, "range": "current"}
-    return measure_expr, window, extra
-
-
-def _period_offset_condition_parts(cond_node: dict) -> tuple[dict, dict, int]:
-    """Validate + unpack a period-offset condition: `diff_months|diff_quarters
-    ([date], today()) = N`. Returns (diff_call_node, date_node, N)."""
-    if cond_node.get("node") != "binop" or cond_node.get("op") != "=":
-        raise UntranslatableError(
-            "period-offset condition must be diff_months/diff_quarters(...) = N")
-    diff_call, n_node = cond_node["left"], cond_node["right"]
-    if diff_call.get("node") != "call" or diff_call.get("fn") not in _PERIOD_OFFSET_GRAIN:
-        raise UntranslatableError(
-            "period-offset condition's left side must be diff_months(...)/diff_quarters(...)")
-    diff_args = diff_call.get("args") or []
-    if len(diff_args) != 2:
-        raise UntranslatableError(f"{diff_call['fn']} expects 2 arguments (date, today())")
-    date_node, today_node = diff_args
-    if today_node.get("node") != "call" or today_node.get("fn") != "today":
-        raise UntranslatableError(f"{diff_call['fn']}'s second argument must be today()")
-    return diff_call, date_node, _extract_int(n_node)
-
-
-def _period_offset_value(n_val: int, month_units_per_period: int) -> str | None:
-    if n_val == 0:
+    formula = _find_formula(model, formula_id)
+    if formula is None:
         return None
-    offset_months = n_val * month_units_per_period
-    if offset_months != 0 and offset_months % 12 == 0:
-        return f"{offset_months // 12} year"
-    return f"{offset_months} month"
+    try:
+        ast = parse_formula(formula["expr"])
+    except UntranslatableError:
+        return None
+    return _first_col_ref_table(ast)
 
 
-def _emit_period_offset_window(fn: str, args: list[dict], col_resolver, ref_resolver,
-                                existing_dims: list[dict]) -> tuple[str, dict, list[dict]]:
-    if len(args) != 2:
-        raise UntranslatableError(f"{fn} expects 2 arguments (condition, measure), got {len(args)}")
-    cond_node, measure_node = args
-    diff_call, date_node, n_val = _period_offset_condition_parts(cond_node)
-    grain, month_units_per_period = _PERIOD_OFFSET_GRAIN[diff_call["fn"]]
+def detect_fact_tables(model: dict) -> list[str]:
+    """Tables carrying >= 1 MEASURE column, in `model_tables` order.
 
-    order_name, extra = _period_dim(date_node, grain, col_resolver, existing_dims)
-
-    agg, distinct = COND_AGG[fn]
-    inner = emit_sql(resolve_refs(measure_node, ref_resolver), col_resolver)
-    measure_expr = f"{agg}(DISTINCT {inner})" if distinct else f"{agg}({inner})"
-
-    window = {"order": order_name, "range": "current", "semiadditive": "last"}
-    offset = _period_offset_value(n_val, month_units_per_period)
-    if offset is not None:
-        window["offset"] = offset
-    return measure_expr, window, extra
-
-
-def emit_window_measure(col: dict, col_resolver: Callable[[dict], str],
-                         ref_resolver: Callable[[dict], str] | None = None,
-                         model: dict | None = None,
-                         existing_dims: list[dict] | None = None) -> tuple[dict, list[dict]]:
-    """Emit a window-measure formula (moving_sum/moving_average, cumulative_sum/
-    cumulative_average, last_value/first_value, or a period-offset *_if) as a
-    measure dict carrying a `window: [...]` block, plus any newly-synthesized
-    dimension(s) the window's `order:` needed (empty when reused/not needed).
+    A physical column's table is its `column_id` prefix; a formula column's
+    table is the table its first physical `[T::col]` ref resolves to. Used by
+    the multi-fact split: the command calls this once, then calls
+    `build_metric_view` once per returned table as `source_table`.
     """
-    ref_resolver = ref_resolver or _raise_unresolved_ref
-    existing_dims = existing_dims if existing_dims is not None else []
+    table_order = [mt["name"] for mt in model.get("model_tables", [])]
+    found: list[str] = []
+    for col in model.get("columns", []):
+        props = col.get("properties") or {}
+        if props.get("column_type") != "MEASURE":
+            continue
+        table = _measure_column_table(col, model)
+        if table and table not in found:
+            found.append(table)
+    ordered = [t for t in table_order if t in found]
+    ordered += [t for t in found if t not in table_order]
+    return ordered
+
+
+# `formula_roles` (despite the name, kept for interface stability per the
+# Task 10 brief) actually maps ANY emitted column's display name -> its final
+# MV role, not just formula-backed ones -- a ThoughtSpot [ref] can point at a
+# physical MEASURE column just as easily as a formula (see the worked
+# example's `safe_divide([Quantity], [Category Quantity])`, where `Quantity`
+# is a physical column). Only two target roles are supported, matching the
+# brief's stated scope: "measure" -> MEASURE(x), "lod_dimension" -> ANY_VALUE(y).
+# A plain (non-LOD) dimension is not yet a valid ref target here -- omitted
+# from the map, so referencing one raises UntranslatableError (fail loud
+# rather than silently wrong); see the Task 10 report for this scope note.
+_REF_ROLE_FN = {"measure": "MEASURE", "lod_dimension": "ANY_VALUE"}
+
+
+def make_ref_resolver(formula_roles: dict) -> Callable[[dict], str]:
+    """Build a ref_resolver for `resolve_refs`/emit_* from this MV's own
+    column classification. A ref to a name classified "measure" emits
+    `MEASURE(<snake>)`; "lod_dimension" emits `ANY_VALUE(<snake>)`; any other
+    (or missing) name raises UntranslatableError.
+    """
+    def resolver(node: dict) -> str:
+        name = node["name"]
+        fn = _REF_ROLE_FN.get(formula_roles.get(name))
+        if fn is None:
+            raise UntranslatableError(
+                f"unresolved reference [{name}]: no measure or LOD dimension named "
+                f"{name!r} among this Metric View's classified columns")
+        return f"{fn}({to_snake(name)})"
+    return resolver
+
+
+def _window_kind(col: dict, model: dict) -> str:
+    """"lod" (dimension window function) or "measure" (window: measure) for
+    a role=="window" classified column -- classify_column routes both to the
+    same "window" role (Task 9), so build_metric_view needs this finer split
+    to know whether to emit_lod_dimension or emit_window_measure.
+    """
     ast = parse_formula(_formula_expr(col, model))
-    fn = ast.get("fn")
-    args = ast.get("args") or []
+    fn = ast.get("fn") if ast.get("node") == "call" else None
+    return "lod" if fn in _LOD_FNS else "measure"
 
-    if fn in _MOVING_FNS:
-        measure_expr, window, extra_dims = _emit_moving_window(
-            fn, args, col_resolver, ref_resolver, existing_dims, model)
-    elif fn in _CUMULATIVE_FNS:
-        measure_expr, window, extra_dims = _emit_cumulative_window(
-            fn, args, col_resolver, ref_resolver, existing_dims, model)
-    elif fn in ("last_value", "first_value"):
-        measure_expr, window, extra_dims = _emit_semiadditive_window(
-            fn, args, col_resolver, ref_resolver, existing_dims, model)
-    elif fn in _IF_FAMILY_FNS:
-        measure_expr, window, extra_dims = _emit_period_offset_window(
-            fn, args, col_resolver, ref_resolver, existing_dims)
+
+def _classify_all_columns(model: dict) -> list[tuple[dict, dict]]:
+    """Classify every model column, catching classify-time UntranslatableError
+    (bad/unparseable formula) as a role=="error" entry rather than aborting --
+    per-formula errors must not abort the whole MV.
+    """
+    classified: list[tuple[dict, dict]] = []
+    for col in model.get("columns", []):
+        try:
+            result = classify_column(col, model)
+            if result["role"] == "window":
+                result = dict(result)
+                result["window_kind"] = _window_kind(col, model)
+        except UntranslatableError as exc:
+            result = {"role": "error", "reason": str(exc)}
+        classified.append((col, result))
+    return classified
+
+
+def _build_ref_roles(classified: list[tuple[dict, dict]]) -> dict:
+    """Build the name -> role map `make_ref_resolver` needs, from every
+    column's FINAL routed kind (not just formula columns -- see the
+    `_REF_ROLE_FN` docstring above): "measure" for a plain or window measure,
+    "lod_dimension" for an LOD-formula dimension. Must be built from ALL
+    classified columns before any expr is emitted, so a formula can forward-
+    or back-reference any other column in this MV.
+    """
+    roles: dict = {}
+    for col, result in classified:
+        name = col.get("name")
+        role = result.get("role")
+        if role == "measure" or (role == "window" and result.get("window_kind") == "measure"):
+            roles[name] = "measure"
+        elif role == "window" and result.get("window_kind") == "lod":
+            roles[name] = "lod_dimension"
+    return roles
+
+
+def _record_skip(skipped: list, warnings: list, name, role: str, reason: str) -> None:
+    """Record a per-formula/per-column omission uniformly: every skip gets
+    BOTH a structured skipped[] entry and a human-readable warning (required
+    follow-up: "every skipped column" must surface in warnings for the
+    SKILL's checkpoint).
+    """
+    skipped.append({"name": name, "role": role, "reason": reason})
+    warnings.append(f"skipped {role} column {name!r}: {reason}")
+
+
+def _route_filter(col: dict, model: dict, col_resolver, ref_resolver,
+                   dimensions: list, filter_exprs: list, warnings: list) -> None:
+    """Route a role=="filter" classified column. classify_column's filter
+    detection accepts EITHER a boolean-shaped expr OR a name containing
+    "filter" (ts-to-databricks-rules.md "Filter Generation" > Detection) --
+    but only a genuinely boolean expr may land in the MV's `filter:` field
+    (required follow-up #1). A name-only match that isn't boolean is
+    rerouted to a dimension (always a dimension, never a measure -- filter
+    classification only ever fires on ATTRIBUTE columns) instead of being
+    silently dropped or wrongly emitted as a global filter. Either path
+    surfaces a warning (required follow-up #3) so the SKILL checkpoint can
+    ask the user to confirm the routing. Raises UntranslatableError on
+    failure -- caller records the skip.
+    """
+    name = col.get("name")
+    ast = parse_formula(_formula_expr(col, model))
+    if _is_boolean_top(ast):
+        filter_exprs.append(emit_filter(col, col_resolver, ref_resolver, model))
+        warnings.append(
+            f"formula {name!r} classified as a row filter (boolean) — confirm this is "
+            "intended as a global MV filter rather than a dimension")
     else:
-        raise UntranslatableError(f"{fn!r} is not a supported window measure function")
+        dimensions.append(emit_dimension(col, col_resolver, ref_resolver, model))
+        warnings.append(
+            f"formula {name!r} name suggests a filter but is not boolean-shaped — "
+            "emitted as a dimension instead; confirm this routing")
 
-    measure = _finalize_column(col, measure_expr)
-    measure["window"] = [window]
-    return measure, extra_dims
+
+def _merge_extra_dims(dimensions: list, extra_dims: list) -> None:
+    """Append a window measure's synthesized order-dim(s) to `dimensions`,
+    deduped by name -- emit_window_measure already prefers reusing a matching
+    existing dim over synthesizing a new one (required follow-up #4), so
+    `extra_dims` here is only ever genuinely-new dims; this guards against
+    re-adding the same synthesized dim twice across multiple window measures.
+    """
+    existing_names = {d["name"] for d in dimensions}
+    for d in extra_dims:
+        if d["name"] not in existing_names:
+            dimensions.append(d)
+            existing_names.add(d["name"])
+
+
+def _combine_filters(filter_exprs: list) -> str | None:
+    """AND-join multiple filter formulas into the MV's single `filter:`
+    string, parenthesizing each when there's more than one (so a top-level
+    OR inside any individual filter can't leak across the AND join).
+    """
+    if not filter_exprs:
+        return None
+    if len(filter_exprs) == 1:
+        return filter_exprs[0]
+    return " AND ".join(f"({e})" for e in filter_exprs)
+
+
+def _check_duplicate_display_names(dimensions: list, measures: list) -> None:
+    seen: dict = {}
+    for coll_name, items in (("dimension", dimensions), ("measure", measures)):
+        for item in items:
+            dn = item.get("display_name")
+            if dn in seen:
+                raise ValueError(
+                    f"duplicate display_name {dn!r} across emitted columns "
+                    f"({seen[dn]} and {coll_name})")
+            seen[dn] = coll_name
+
+
+def _source_db_table(tables: list[dict], source_table: str) -> str:
+    for t in tables:
+        if t["table"]["name"] == source_table:
+            return t["table"]["db_table"]
+    raise ValueError(f"source_table {source_table!r} not found in tables")
+
+
+def _emit_dimensions_pass(classified: list[tuple[dict, dict]], model: dict,
+                           col_resolver, ref_resolver,
+                           skipped: list, warnings: list) -> tuple[list[dict], list[str]]:
+    """Pass 1 of 2: plain dimensions, LOD dimensions, filter routing (which
+    may itself append a dimension), and unknown/error omission -- everything
+    that does NOT need the full dimensions list up front. Must run to
+    completion before the measures pass, since window measures need this
+    pass's dims available for order-dim reuse (required follow-up #4).
+    """
+    dimensions: list = []
+    filter_exprs: list = []
+    for col, result in classified:
+        role = result.get("role")
+        name = col.get("name")
+        try:
+            if role == "dimension":
+                dimensions.append(emit_dimension(col, col_resolver, ref_resolver, model))
+            elif role == "unknown":
+                _record_skip(skipped, warnings, name, role, result.get("reason", ""))
+            elif role == "error":
+                _record_skip(skipped, warnings, name, role, result.get("reason", ""))
+            elif role == "filter":
+                _route_filter(col, model, col_resolver, ref_resolver,
+                               dimensions, filter_exprs, warnings)
+            elif role == "window" and result.get("window_kind") == "lod":
+                dimensions.append(emit_lod_dimension(col, col_resolver, ref_resolver, model))
+        except UntranslatableError as exc:
+            _record_skip(skipped, warnings, name, role, str(exc))
+    return dimensions, filter_exprs
+
+
+def _emit_measures_pass(classified: list[tuple[dict, dict]], model: dict,
+                         col_resolver, ref_resolver, dimensions: list,
+                         skipped: list, warnings: list) -> list[dict]:
+    """Pass 2 of 2: plain measures and window measures, using the fully-built
+    `dimensions` list (from the dimensions pass) for order-dim reuse. Grows
+    `dimensions` in place as window measures synthesize new order dims, so
+    later window measures in this same pass can reuse earlier ones (matches
+    the worked example's Monthly/Prior Month Revenue sharing one order_month
+    dim).
+    """
+    measures: list = []
+    for col, result in classified:
+        role = result.get("role")
+        name = col.get("name")
+        try:
+            if role == "measure":
+                measures.append(emit_measure(col, col_resolver, ref_resolver, model))
+            elif role == "window" and result.get("window_kind") == "measure":
+                measure, extra_dims = emit_window_measure(
+                    col, col_resolver, ref_resolver, model, existing_dims=dimensions)
+                measures.append(measure)
+                _merge_extra_dims(dimensions, extra_dims)
+        except UntranslatableError as exc:
+            _record_skip(skipped, warnings, name, role, str(exc))
+    return measures
+
+
+def build_metric_view(model: dict, tables: list[dict], source_table: str, *,
+                       catalog: str, schema: str) -> dict:
+    """Assemble one Databricks Metric View YAML doc for `source_table`,
+    orchestrating Tasks 6-9: column index + joins (Task 6/7) -> classify
+    every model column (Task 8/9) -> role-aware ref resolver (this task) ->
+    route each column to its emitter -> assemble the MV dict in schema key
+    order. Returns `{"yaml_doc": dict, "skipped": list[dict], "warnings": list[str]}`.
+
+    A column belonging to a different fact table's join tree (relevant only
+    in a multi-fact model) has no resolvable dot-path here and naturally
+    lands in `skipped` via its own UntranslatableError -- callers looping
+    over `detect_fact_tables` don't need to pre-filter `model["columns"]`.
+    """
+    skipped: list = []
+    warnings: list = []
+
+    col_index = build_column_index(model, tables)
+    mv_joins, dot_path_by_table = build_joins(model, tables, source_table)
+    col_resolver = make_col_resolver(col_index, source_table, dot_path_by_table)
+
+    classified = _classify_all_columns(model)
+    ref_resolver = make_ref_resolver(_build_ref_roles(classified))
+
+    dimensions, filter_exprs = _emit_dimensions_pass(
+        classified, model, col_resolver, ref_resolver, skipped, warnings)
+    measures = _emit_measures_pass(
+        classified, model, col_resolver, ref_resolver, dimensions, skipped, warnings)
+
+    _check_duplicate_display_names(dimensions, measures)
+
+    yaml_doc: dict = {"version": "1.1"}
+    comment = model.get("description")
+    if comment:
+        yaml_doc["comment"] = comment
+    yaml_doc["source"] = f"{catalog}.{schema}.{_source_db_table(tables, source_table)}"
+    if mv_joins:
+        yaml_doc["joins"] = mv_joins
+    yaml_doc["dimensions"] = dimensions
+    yaml_doc["measures"] = measures
+    combined_filter = _combine_filters(filter_exprs)
+    if combined_filter:
+        yaml_doc["filter"] = combined_filter
+
+    return {"yaml_doc": yaml_doc, "skipped": skipped, "warnings": warnings}

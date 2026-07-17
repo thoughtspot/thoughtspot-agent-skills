@@ -4,6 +4,7 @@ from ts_cli.databricks.mv_emit import (
     emit_dimension, emit_measure, emit_filter,
     emit_lod_dimension, emit_window_measure, synthesize_period_dim,
     _moving_range,
+    detect_fact_tables, make_ref_resolver, build_metric_view,
 )
 from ts_cli.databricks.mv_emit_expr import parse_formula, UntranslatableError
 from ts_cli.databricks.mv_emit_sql import emit_sql
@@ -697,3 +698,275 @@ class TestSynthesizePeriodDim:
         assert dim["expr"] == "DATE_TRUNC('MONTH', orders.dates.DATE_VALUE)"
         assert dim["name"]
         assert dim["display_name"]
+
+
+# --- Task 10: build_metric_view assembly + detect_fact_tables + ------------
+# make_ref_resolver. Wires Tasks 6-9 together into one MV yaml_doc per fact
+# table, and absorbs 4 required follow-ups from earlier task reviews (T8
+# filter-boolean guard, T8 UNKNOWN-column omission, T8 filter-ambiguity
+# warnings, T9 semi-additive order-dim reuse).
+
+class TestDetectFactTables:
+    def test_two_fact_model_returns_both_in_model_order(self):
+        model = {
+            "model_tables": [{"name": "FACT_A"}, {"name": "DIM"}, {"name": "FACT_B"}],
+            "columns": [
+                {"name": "Amount A", "column_id": "FACT_A::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Region", "column_id": "DIM::REGION",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+                {"name": "Amount B", "column_id": "FACT_B::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+            "formulas": [],
+        }
+        assert detect_fact_tables(model) == ["FACT_A", "FACT_B"]
+
+    def test_single_fact_model_returns_one(self):
+        model = {
+            "model_tables": [{"name": "FACT"}, {"name": "DIM"}],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Region", "column_id": "DIM::REGION",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+            ],
+            "formulas": [],
+        }
+        assert detect_fact_tables(model) == ["FACT"]
+
+    def test_formula_measure_table_resolved_via_first_col_ref(self):
+        # A formula-backed MEASURE column carries no column_id -- its table is
+        # the table its first physical [T::col] ref resolves to.
+        model = {
+            "model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Double Amount", "formula_id": "f",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+            "formulas": [{"id": "f", "name": "Double Amount", "expr": "[FACT::AMOUNT] * 2"}],
+        }
+        assert detect_fact_tables(model) == ["FACT"]
+
+
+class TestMakeRefResolver:
+    def test_measure_role_ref(self):
+        resolver = make_ref_resolver({"Quantity": "measure"})
+        assert resolver({"node": "ref", "name": "Quantity"}) == "MEASURE(quantity)"
+
+    def test_lod_dimension_role_ref(self):
+        resolver = make_ref_resolver({"Category Quantity": "lod_dimension"})
+        assert resolver({"node": "ref", "name": "Category Quantity"}) == "ANY_VALUE(category_quantity)"
+
+    def test_unknown_ref_raises(self):
+        resolver = make_ref_resolver({"Quantity": "measure"})
+        with pytest.raises(UntranslatableError):
+            resolver({"node": "ref", "name": "Something Else"})
+
+
+# A compact 2-table model exercising every routing path build_metric_view has
+# to wire together: 1 plain dimension (Region), 1 plain measure (Amount), 1
+# LOD dimension formula (Category Quantity, reusing Amount/Region so no extra
+# physical columns are needed), 1 boolean filter formula (reusing Amount), 1
+# join. Mirrors the real-world pattern from the Dunder Mifflin worked example
+# where a physical column doubles as both its own dimension/measure AND an
+# LOD/filter formula's input.
+COMPACT_MODEL = {
+    "model_tables": [
+        {"name": "FACT", "joins": [
+            {"with": "DIM", "on": "[FACT::DIM_ID] = [DIM::ID]",
+             "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "DIM"},
+    ],
+    "description": "Compact test MV",
+    "columns": [
+        {"name": "Region", "column_id": "DIM::REGION",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "Amount", "column_id": "FACT::AMOUNT",
+         "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        {"name": "Category Quantity", "formula_id": "formula_lod",
+         "properties": {"column_type": "ATTRIBUTE"}},
+        {"name": "MV Filter", "formula_id": "formula_filter",
+         "properties": {"column_type": "ATTRIBUTE"}},
+    ],
+    "formulas": [
+        {"id": "formula_lod", "name": "Category Quantity",
+         "expr": "group_aggregate ( sum ( [FACT::AMOUNT] ) , { [DIM::REGION] } , query_filters ( ) )"},
+        {"id": "formula_filter", "name": "MV Filter", "expr": "[FACT::AMOUNT] > 100"},
+    ],
+}
+COMPACT_TABLES = [
+    {"table": {"name": "FACT", "db": "cat", "schema": "sch", "db_table": "fact_tbl",
+        "columns": [
+            {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+            {"name": "DIM_ID", "db_column_properties": {"data_type": "VARCHAR"}},
+        ]}},
+    {"table": {"name": "DIM", "db": "cat", "schema": "sch", "db_table": "dim_tbl",
+        "columns": [
+            {"name": "REGION", "db_column_properties": {"data_type": "VARCHAR"}},
+            {"name": "ID", "db_column_properties": {"data_type": "VARCHAR"}},
+        ]}},
+]
+
+
+class TestBuildMetricView:
+    def test_compact_model_full_yaml_doc(self):
+        result = build_metric_view(
+            COMPACT_MODEL, COMPACT_TABLES, source_table="FACT", catalog="cat", schema="sch")
+        assert result["skipped"] == []
+        doc = result["yaml_doc"]
+        assert list(doc.keys()) == [
+            "version", "comment", "source", "joins", "dimensions", "measures", "filter"]
+        assert doc == {
+            "version": "1.1",
+            "comment": "Compact test MV",
+            "source": "cat.sch.fact_tbl",
+            "joins": [{
+                "name": "dim", "source": "cat.sch.dim_tbl",
+                "on": "source.DIM_ID = dim.ID",
+                "rely": {"at_most_one_match": True},
+                "cardinality": "many_to_one",
+            }],
+            "dimensions": [
+                {"name": "region", "expr": "dim.REGION", "display_name": "Region"},
+                {"name": "category_quantity",
+                 "expr": "SUM(source.AMOUNT) OVER (PARTITION BY dim.REGION)",
+                 "display_name": "Category Quantity"},
+            ],
+            "measures": [
+                {"name": "amount", "expr": "SUM(source.AMOUNT)", "display_name": "Amount"},
+            ],
+            "filter": "source.AMOUNT > 100",
+        }
+
+    def test_unknown_column_type_omitted(self):
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Mystery", "column_id": "FACT::MYSTERY",
+                 "properties": {"column_type": "UNKNOWN"}},
+            ],
+            "formulas": []}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [
+                {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+                {"name": "MYSTERY", "db_column_properties": {"data_type": "VARCHAR"}}]}}]
+        result = build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+        doc = result["yaml_doc"]
+        dim_names = [d["name"] for d in doc["dimensions"]]
+        assert "mystery" not in dim_names
+        assert any(s["name"] == "Mystery" for s in result["skipped"])
+        assert any("Mystery" in w for w in result["warnings"])
+
+    def test_non_boolean_named_filter_rerouted_to_dimension(self):
+        # "Double Filter" matches the filter-detection name heuristic but its
+        # expr is arithmetic, not boolean -- required follow-up #1: must NOT
+        # land in filter:, and required follow-up #3: must be warned about.
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Double Filter", "formula_id": "formula_df",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+            ],
+            "formulas": [
+                {"id": "formula_df", "name": "Double Filter", "expr": "[FACT::AMOUNT] * 2"},
+            ]}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [{"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}}]}}]
+        result = build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+        doc = result["yaml_doc"]
+        assert "filter" not in doc
+        dim_names = [d["name"] for d in doc["dimensions"]]
+        assert "double_filter" in dim_names
+        double = next(d for d in doc["dimensions"] if d["name"] == "double_filter")
+        assert double["expr"] == "source.AMOUNT * 2"
+        assert any("Double Filter" in w for w in result["warnings"])
+
+    def test_boolean_filter_gets_a_confirmation_warning(self):
+        # Required follow-up #3: every boolean-ATTRIBUTE formula routed to
+        # filter: must also surface a warning for the checkpoint to confirm.
+        result = build_metric_view(
+            COMPACT_MODEL, COMPACT_TABLES, source_table="FACT", catalog="cat", schema="sch")
+        assert any("MV Filter" in w for w in result["warnings"])
+
+    def test_measure_referencing_another_measure_uses_measure_ref(self):
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::AMOUNT",
+                 "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+                {"name": "Double Amount", "formula_id": "formula_double",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+            "formulas": [
+                {"id": "formula_double", "name": "Double Amount", "expr": "[Amount] * 2"},
+            ]}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [{"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}}]}}]
+        result = build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+        assert result["skipped"] == []
+        double = next(m for m in result["yaml_doc"]["measures"] if m["name"] == "double_amount")
+        assert double["expr"] == "MEASURE(amount) * 2"
+
+    def test_duplicate_display_name_raises(self):
+        model = {"model_tables": [{"name": "FACT"}],
+            "columns": [
+                {"name": "Amount", "column_id": "FACT::AMOUNT",
+                 "properties": {"column_type": "MEASURE"}},
+                {"name": "Amount", "column_id": "FACT::AMOUNT2",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+            ],
+            "formulas": []}
+        tables = [{"table": {"name": "FACT", "db": "c", "schema": "s", "db_table": "fact",
+            "columns": [
+                {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+                {"name": "AMOUNT2", "db_column_properties": {"data_type": "DOUBLE"}}]}}]
+        with pytest.raises(ValueError):
+            build_metric_view(model, tables, source_table="FACT", catalog="c", schema="s")
+
+    def test_semiadditive_order_dim_reused_end_to_end(self):
+        # Required follow-up #4: build_metric_view must thread `tables` +
+        # resolved join predicates through so a window measure's order: dim
+        # reuses an already-emitted date dimension (matched via the join-
+        # equal column) instead of synthesizing a redundant duplicate.
+        model = {
+            "model_tables": [
+                {"name": "DM_INVENTORY", "joins": [
+                    {"with": "DM_DATE_DIM",
+                     "on": "[DM_INVENTORY::BALANCE_DATE] = [DM_DATE_DIM::DATE_VALUE]",
+                     "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+                {"name": "DM_DATE_DIM"},
+            ],
+            "columns": [
+                {"name": "Balance Date", "column_id": "DM_INVENTORY::BALANCE_DATE",
+                 "properties": {"column_type": "ATTRIBUTE"}},
+                {"name": "Inventory Balance", "formula_id": "formula_inv_bal",
+                 "properties": {"column_type": "MEASURE"}},
+            ],
+            "formulas": [
+                {"id": "formula_inv_bal", "name": "Inventory Balance",
+                 "expr": "last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , "
+                         "query_groups ( ) , { [DM_DATE_DIM::DATE_VALUE] } )"},
+            ],
+        }
+        tables = [
+            {"table": {"name": "DM_INVENTORY", "db": "c", "schema": "s",
+                "db_table": "dm_inventory", "columns": [
+                    {"name": "BALANCE_DATE", "db_column_properties": {"data_type": "DATE"}},
+                    {"name": "FILLED_INVENTORY", "db_column_properties": {"data_type": "DOUBLE"}},
+                ]}},
+            {"table": {"name": "DM_DATE_DIM", "db": "c", "schema": "s",
+                "db_table": "dm_date_dim", "columns": [
+                    {"name": "DATE_VALUE", "db_column_properties": {"data_type": "DATE"}},
+                ]}},
+        ]
+        result = build_metric_view(
+            model, tables, source_table="DM_INVENTORY", catalog="c", schema="s")
+        assert result["skipped"] == []
+        doc = result["yaml_doc"]
+        assert [d["name"] for d in doc["dimensions"]] == ["balance_date"]
+        inv_balance = next(m for m in doc["measures"] if m["name"] == "inventory_balance")
+        assert inv_balance["expr"] == "SUM(source.FILLED_INVENTORY)"
+        assert inv_balance["window"] == [
+            {"order": "balance_date", "semiadditive": "last", "range": "current"}]
