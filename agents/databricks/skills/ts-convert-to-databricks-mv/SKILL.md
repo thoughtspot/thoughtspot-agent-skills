@@ -125,11 +125,19 @@ produces multiple entries in `mvs`, matching the CLI skill's "one MV per detecte
 behavior. To pin a single fact instead of auto-detecting, skip the loop and call
 `build_metric_view(model, tables, "<fact_table_name>", catalog=catalog, schema=schema)` directly.
 
+**Multi-catalog caveat:** the single `catalog`/`schema` pair set above applies to **every**
+fact in a multi-fact loop — `build_metric_view` has no per-fact catalog/schema override. If
+the model's fact tables genuinely live in different catalogs/schemas, call
+`build_metric_view` once per fact (skip the loop) with that fact's own `catalog`/`schema`,
+mirroring the CLI skill's Step 5 guidance.
+
 **Unmapped Report — review before executing.** Each `result["skipped"]` / `result["warnings"]`
 lists untranslatable formulas, dangling cross-references, and filter-classification
 advisories. For a multi-fact model, aggregate them across all `mvs` with:
 
 ```python
+import json
+
 summary = build_summary(model.get("name", "model"), mvs)
 print(json.dumps(summary, indent=2))   # summary["skipped"] / summary["warnings"] = the Unmapped Report
 ```

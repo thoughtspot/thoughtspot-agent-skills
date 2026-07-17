@@ -648,6 +648,13 @@ ts databricks build-mv \
 
 - Omit `--source-table` to let `build-mv` split a multi-fact model into one MV per
   detected fact table automatically.
+- **`--view-name` is silently ignored on a multi-fact split** — it only applies when
+  exactly one fact table is being emitted (either `--source-table` was given, or the
+  model has just one detected fact). On a multi-fact split, every MV keeps its
+  `default_view_name(model_name, fact)` name; there is no per-fact override flag today.
+  If a custom name is needed for one MV in a multi-fact model, rename it manually after
+  Step 5 (in the `.sql` file and its `CREATE OR REPLACE VIEW` line) or re-run with
+  `--source-table` scoped to that one fact.
 - `--output-dir`: use the same location Step 12-FILE would otherwise pick — a
   `metric-views/` or `output/` subdirectory of the current working directory if one
   exists, else the current directory. The `.sql` file(s) are written here now, at
@@ -741,7 +748,12 @@ Shall I create this Metric View in Databricks?
 
 If the user selects **EDIT**, apply the requested change directly to the `.sql` file(s)
 `build-mv` wrote in Step 5 (e.g. rename the view, add a synonym, adjust a comment) —
-there is no YAML to regenerate; edit the text in place.
+there is no YAML to regenerate; edit the text in place. After any manual edit, re-check
+that the YAML body between the `$$ ... $$` markers still parses as valid YAML and
+contains no literal `$$` substring — `build-mv`'s own `$$`-collision guard
+(`mv_build_view.build_view_ddl`) only runs at generation time, so a hand-edit that
+introduces a stray `$$` or breaks YAML indentation/quoting would silently corrupt or
+truncate the dollar-quoted DDL at execution time and isn't caught automatically.
 
 If the user selects **NO**, stop. No cleanup needed — the CLI manages its own token
 cache, and the `.sql` file(s) remain on disk for later use.
@@ -765,16 +777,20 @@ not write anything new; it only reports what is already on disk.
 Metric View DDL written to: {metric_views[0].file}
 {...one line per entry, if the model split into multiple MVs...}
 
-To create it in Databricks when you have access:
+To create it in Databricks when you have access, repeat the following once per
+`metric_views[]` entry, using that entry's own `file` path — not a guessed
+`{view_name}.sql` in the current directory (a multi-fact split, or a non-default
+`--output-dir`, means the real path may differ):
+
   1. In Databricks SQL editor, set the catalog and schema context,
-     and paste + run the contents of {view_name}.sql.
+     and paste + run the contents of {metric_views[i].file}.
 
   2. Or via Databricks CLI:
        databricks api post /api/2.0/sql/statements \
          --profile {dbx_profile} \
          --json "$(python3 -c "
 import json
-ddl = open('{view_name}.sql').read()
+ddl = open('{metric_views[i].file}').read()
 print(json.dumps({'warehouse_id': '{warehouse_id}', 'statement': ddl, 'wait_timeout': '50s'}))
 ")"
 ```

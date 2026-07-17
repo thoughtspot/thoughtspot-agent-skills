@@ -39,7 +39,6 @@ from pathlib import Path
 # _bad_backlog_justifications() below.
 BACKLOG: dict[str, str] = {
     "ts-convert-to-snowflake-sv": "needs matrix — target 2026-08-31 (BL-029)",
-    "ts-convert-to-databricks-mv": "needs matrix — target 2026-08-31 (BL-029)",
 }
 
 # A valid justification mentions an ISO date or a #NNN / BL-NNN reference.
