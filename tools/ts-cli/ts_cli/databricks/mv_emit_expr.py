@@ -21,7 +21,7 @@ _TOKEN_RE = re.compile(r"""
   | (?P<string>'(?:[^']|'')*')
   | (?P<number>\d+\.\d+|\d+)
   | (?P<op>!=|<=|>=|[(),+\-*/=<>{}])
-  | (?P<ident>[A-Za-z_][A-Za-z0-9_ ]*?(?=\s*\(|\b))
+  | (?P<ident>[A-Za-z_][A-Za-z0-9_ ]*?(?=\s*\())
   | (?P<bareident>[A-Za-z_][A-Za-z0-9_]*)
 """, re.VERBOSE)
 

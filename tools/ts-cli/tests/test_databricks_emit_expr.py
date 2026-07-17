@@ -32,3 +32,7 @@ class TestTokenize:
     def test_unrecognized_char_raises(self):
         with pytest.raises(UntranslatableError, match=r"unrecognized"):
             tokenize("[T::x] @ 1")
+
+    def test_multiword_function_ident(self):
+        assert tokenize("unique count ( [T::a] )") == [
+            ("ident", "unique count"), ("op", "("), ("bracket", "[T::a]"), ("op", ")")]
