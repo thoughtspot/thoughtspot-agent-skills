@@ -81,6 +81,8 @@ def _emit_lit(node: dict) -> str:
         return "NULL"
     if node["kind"] == "bool":
         return node["value"].upper()
+    if node["kind"] == "raw":
+        return node["value"]
     return node["value"]  # string keeps single quotes; number verbatim
 
 

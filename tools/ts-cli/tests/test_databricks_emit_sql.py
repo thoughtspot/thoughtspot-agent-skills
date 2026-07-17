@@ -112,6 +112,18 @@ class TestScalarEmit:
         # FIX 4: strlen(s) -> LENGTH(s)
         assert e("strlen ( [T::s] )") == "LENGTH(source.s)"
 
+    def test_raw_literal_passthrough(self):
+        # Task 6: {"node":"lit","kind":"raw","value": X} emits X verbatim.
+        # Used by mv_emit.resolve_refs, which substitutes a resolved `ref`
+        # node with a raw-SQL literal so emit_sql never meets a bare ref.
+        # Constructed as a raw AST dict -- parse_formula never produces
+        # kind == "raw" (it's a post-parse substitution), same pattern as
+        # test_in/test_between above.
+        node = {"node": "call", "fn": "sum", "args": [
+            {"node": "lit", "kind": "raw", "value": "MEASURE(net_amount)"},
+        ]}
+        assert emit_sql(node, _res) == "SUM(MEASURE(net_amount))"
+
 
 class TestPrecedenceParens:
     # FIX 1: precedence-aware parenthesization -- a child expression must be
