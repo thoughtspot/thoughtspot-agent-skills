@@ -48,3 +48,144 @@ def tokenize(expr: str) -> list[tuple[str, str]]:
         else:
             toks.append((kind, text))
     return toks
+
+
+class _P:
+    def __init__(self, toks: list[tuple[str, str]]):
+        self.toks = toks
+        self.i = 0
+
+    def peek(self) -> tuple[str | None, str | None]:
+        return self.toks[self.i] if self.i < len(self.toks) else (None, None)
+
+    def next(self) -> tuple[str, str]:
+        if self.i >= len(self.toks):
+            raise UntranslatableError("unexpected end of formula")
+        t = self.toks[self.i]
+        self.i += 1
+        return t
+
+    def eat(self, kind: str, text: str | None = None) -> tuple[str, str]:
+        k, t = self.next()
+        if k != kind or (text is not None and t != text):
+            raise UntranslatableError(f"expected {kind} {text!r}, got {k} {t!r}")
+        return k, t
+
+
+def parse_formula(expr: str) -> dict:
+    p = _P(tokenize(expr))
+    node = _parse_or(p)
+    if p.i != len(p.toks):
+        raise UntranslatableError(f"trailing tokens: {p.toks[p.i:]!r}")
+    return node
+
+
+_CMP = {"=", "!=", "<", "<=", ">", ">="}
+
+
+def _parse_or(p):
+    left = _parse_and(p)
+    while p.peek() == ("kw", "or"):
+        p.next(); left = {"node": "binop", "op": "or", "left": left, "right": _parse_and(p)}
+    return left
+
+
+def _parse_and(p):
+    left = _parse_cmp(p)
+    while p.peek() == ("kw", "and"):
+        p.next(); left = {"node": "binop", "op": "and", "left": left, "right": _parse_cmp(p)}
+    return left
+
+
+def _parse_cmp(p):
+    left = _parse_add(p)
+    k, t = p.peek()
+    if k == "op" and t in _CMP:
+        p.next(); return {"node": "binop", "op": t, "left": left, "right": _parse_add(p)}
+    return left
+
+
+def _parse_add(p):
+    left = _parse_mul(p)
+    while p.peek()[0] == "op" and p.peek()[1] in ("+", "-"):
+        op = p.next()[1]; left = {"node": "binop", "op": op, "left": left, "right": _parse_mul(p)}
+    return left
+
+
+def _parse_mul(p):
+    left = _parse_unary(p)
+    while p.peek()[0] == "op" and p.peek()[1] in ("*", "/"):
+        op = p.next()[1]; left = {"node": "binop", "op": op, "left": left, "right": _parse_unary(p)}
+    return left
+
+
+def _parse_unary(p):
+    k, t = p.peek()
+    if (k, t) == ("kw", "not"):
+        p.next(); return {"node": "unop", "op": "not", "operand": _parse_unary(p)}
+    if (k, t) == ("op", "-"):
+        p.next(); return {"node": "unop", "op": "-", "operand": _parse_unary(p)}
+    return _parse_primary(p)
+
+
+def _parse_primary(p):
+    k, t = p.peek()
+    if (k, t) == ("kw", "if"):
+        return _parse_ifelse(p)
+    if k == "op" and t == "(":
+        p.next(); node = _parse_or(p); p.eat("op", ")"); return node
+    if k == "op" and t == "{":
+        return _parse_lodset(p)
+    if k == "bracket":
+        p.next(); return _bracket_node(t)
+    if k == "string":
+        p.next(); return {"node": "lit", "kind": "string", "value": t}
+    if k == "number":
+        p.next(); return {"node": "lit", "kind": "number", "value": t}
+    if (k, t) == ("kw", "null"):
+        p.next(); return {"node": "lit", "kind": "null", "value": "null"}
+    if (k, t) in (("kw", "true"), ("kw", "false")):
+        p.next(); return {"node": "lit", "kind": "bool", "value": t}
+    if k == "ident":
+        return _parse_call(p)
+    raise UntranslatableError(f"unexpected token {k} {t!r}")
+
+
+def _parse_call(p):
+    name = p.next()[1].lower()
+    p.eat("op", "(")
+    args = []
+    if p.peek() != ("op", ")"):
+        args.append(_parse_or(p))
+        while p.peek() == ("op", ","):
+            p.next(); args.append(_parse_or(p))
+    p.eat("op", ")")
+    return {"node": "call", "fn": name, "args": args}
+
+
+def _parse_ifelse(p):
+    branches = []
+    p.eat("kw", "if")
+    cond = _parse_or(p); p.eat("kw", "then"); val = _parse_or(p)
+    branches.append([cond, val])
+    els = None
+    if p.peek() == ("kw", "else"):
+        p.next(); els = _parse_or(p)
+    return {"node": "ifelse", "branches": branches, "else": els}
+
+
+def _parse_lodset(p):
+    p.eat("op", "{")
+    cols = [_parse_or(p)]
+    while p.peek() == ("op", ","):
+        p.next(); cols.append(_parse_or(p))
+    p.eat("op", "}")
+    return {"node": "lodset", "cols": cols}
+
+
+def _bracket_node(text: str) -> dict:
+    inner = text[1:-1]
+    if "::" in inner:
+        table, col = inner.split("::", 1)
+        return {"node": "col", "table": table.strip(), "column": col.strip()}
+    return {"node": "ref", "name": inner.strip()}
