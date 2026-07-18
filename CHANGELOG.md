@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-18
+- feat: `ts tml lint` cross-reference (XREF) check — catches a model referencing a table/column no batch TML generates, when table + model are linted together; also runs as a pre-flight warning in `ts tableau build-model`
+- chore: bump ts-cli to v0.61.0
 - feat: codify ts-convert-to-databricks-mv emission (ts databricks build-mv, deterministic, both runtimes)
 - chore: bump ts-cli to v0.55.0
 

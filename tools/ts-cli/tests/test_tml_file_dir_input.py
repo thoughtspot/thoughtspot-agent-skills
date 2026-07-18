@@ -404,6 +404,96 @@ class TestLintCliFileOption:
         result = runner.invoke(app, ["tml", "lint", "--dir", str(tmp_path / "nope")])
         assert result.exit_code != 0
 
+    def test_lint_single_model_file_skips_cross_ref_check(self, tmp_path):
+        # No table/sql_view TML in the batch — nothing to validate model_tables
+        # against, so a model referencing an ungenerated table must NOT be flagged.
+        f = tmp_path / "model.tml"
+        f.write_text(
+            "model:\n"
+            "  name: MyModel\n"
+            "  model_tables:\n"
+            "  - name: SOME_TABLE\n"
+        )
+        result = runner.invoke(app, ["tml", "lint", "--file", str(f)])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["results"][0]["findings"] == []
+
+    def test_lint_dir_catches_dangling_cross_reference(self, tmp_path):
+        # A table.tml + a model.tml that references a table never generated —
+        # the batch-level XREF check must catch it even though I1/I2/I4/I5/I8
+        # (lint_tml) alone would not.
+        (tmp_path / "orders.table.tml").write_text(
+            "table:\n"
+            "  name: ORDERS\n"
+            "  columns:\n"
+            "  - name: AMOUNT\n"
+        )
+        (tmp_path / "sales.model.tml").write_text(
+            "model:\n"
+            "  name: Sales\n"
+            "  model_tables:\n"
+            "  - name: ORDERS\n"
+            "  - name: MISSING_TABLE\n"
+            "  columns:\n"
+            "  - name: Amount\n"
+            "    column_id: ORDERS::AMOUNT\n"
+        )
+        result = runner.invoke(app, ["tml", "lint", "--dir", str(tmp_path)])
+        assert result.exit_code != 0
+        payload = json.loads(result.stdout)
+        model_result = next(r for r in payload["results"] if r["name"] == "Sales")
+        assert any(
+            f.startswith("XREF:") and "MISSING_TABLE" in f
+            for f in model_result["findings"]
+        )
+
+    def test_lint_dir_clean_model_and_table_together(self, tmp_path):
+        (tmp_path / "orders.table.tml").write_text(
+            "table:\n"
+            "  name: ORDERS\n"
+            "  columns:\n"
+            "  - name: AMOUNT\n"
+        )
+        (tmp_path / "sales.model.tml").write_text(
+            "model:\n"
+            "  name: Sales\n"
+            "  model_tables:\n"
+            "  - name: ORDERS\n"
+            "  columns:\n"
+            "  - name: Amount\n"
+            "    column_id: ORDERS::AMOUNT\n"
+        )
+        result = runner.invoke(app, ["tml", "lint", "--dir", str(tmp_path)])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["clean"] is True
+
+    def test_lint_dir_renamed_column_resolves_via_db_column_name(self, tmp_path):
+        # A model's physical column_id is TABLE::db_column_name, which can differ
+        # from the display alias. The XREF check must index the table's
+        # db_column_name too, else a renamed column trips a false finding.
+        (tmp_path / "orders.table.tml").write_text(
+            "table:\n"
+            "  name: ORDERS\n"
+            "  columns:\n"
+            "  - name: Customer Name\n"
+            "    db_column_name: CUST_NM\n"
+        )
+        (tmp_path / "sales.model.tml").write_text(
+            "model:\n"
+            "  name: Sales\n"
+            "  model_tables:\n"
+            "  - name: ORDERS\n"
+            "  columns:\n"
+            "  - name: Customer\n"
+            "    column_id: ORDERS::CUST_NM\n"
+        )
+        result = runner.invoke(app, ["tml", "lint", "--dir", str(tmp_path)])
+        assert result.exit_code == 0, result.stdout
+        payload = json.loads(result.stdout)
+        assert payload["clean"] is True
+
 
 # ---------------------------------------------------------------------------
 # order_and_filter_tml_paths + collect_tml_paths(patterns=...) (Task 9:
