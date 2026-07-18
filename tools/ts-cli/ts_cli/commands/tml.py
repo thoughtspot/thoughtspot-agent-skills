@@ -524,6 +524,84 @@ def import_tml(
     print(json.dumps(data))
 
 
+def _parse_tml_docs(tmls: List[str]) -> tuple[list, dict[int, str]]:
+    """Pass 1 — parse every doc up front (tracking per-index YAML errors without
+    aborting the batch) so the generated-tables map can see every table/sql_view
+    TML in the batch before any model is linted.
+    """
+    parsed: list = []
+    parse_errors: dict[int, str] = {}
+    for i, edoc in enumerate(tmls):
+        try:
+            parsed.append(parse_edoc(edoc))
+        except yaml.YAMLError as e:
+            parsed.append(None)
+            parse_errors[i] = f"YAML parse error: {e}"
+    return parsed, parse_errors
+
+
+def _table_column_names(table: dict) -> set:
+    """Column names contributed by one parsed table TML doc.
+
+    A model's physical column_id is TABLE::db_column_name (see
+    model_builder._build_model_columns), but a display alias may differ from
+    db_column_name — index BOTH so a renamed column doesn't trip a false XREF finding.
+    """
+    col_names: set = set()
+    for c in table.get("columns") or []:
+        if not isinstance(c, dict):
+            continue
+        if c.get("name"):
+            col_names.add(c["name"])
+        if c.get("db_column_name"):
+            col_names.add(c["db_column_name"])
+    return col_names
+
+
+def _sql_view_column_names(sql_view: dict) -> set:
+    """Column names contributed by one parsed sql_view TML doc."""
+    return {
+        c.get("name") for c in (sql_view.get("sql_view_columns") or [])
+        if isinstance(c, dict) and c.get("name")
+    }
+
+
+def _build_generated_tables_map(parsed: list) -> dict[str, set]:
+    """Generated table/sql_view name -> column-name set, built from this batch only."""
+    tables: dict[str, set] = {}
+    for data in parsed:
+        if not isinstance(data, dict):
+            continue
+        table = data.get("table")
+        sql_view = data.get("sql_view")
+        if isinstance(table, dict) and table.get("name"):
+            tables[table["name"]] = _table_column_names(table)
+        elif isinstance(sql_view, dict) and sql_view.get("name"):
+            tables[sql_view["name"]] = _sql_view_column_names(sql_view)
+    return tables
+
+
+def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, set]) -> dict:
+    """Lint pass 2 — lint one already-parsed doc (lint_tml + optional cross-reference
+    check against the batch's generated-tables map). Returns the result entry
+    ``{index, type, name, findings}``.
+    """
+    from ts_cli.tml_lint import lint_cross_references, lint_tml
+
+    if i in parse_errors:
+        return {"index": i, "type": "?", "name": None, "findings": [parse_errors[i]]}
+    findings = lint_tml(data) if isinstance(data, dict) else ["TML is not a mapping"]
+    if tables and isinstance(data, dict) and isinstance(data.get("model"), dict):
+        findings = findings + lint_cross_references(data, tables)
+    inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
+    return {
+        "index": i,
+        "type": detect_tml_type(data) if isinstance(data, dict) else "?",
+        "name": inner.get("name") if isinstance(inner, dict) else None,
+        "findings": findings,
+    }
+
+
 @app.command("lint")
 def lint_tml_cmd(
     file: List[str] = _file_option,
@@ -549,6 +627,14 @@ def lint_tml_cmd(
     connection needed; pure local structural check. Run it before import to fail loud on
     issues the server accepts silently.
 
+    When the input batch includes at least one table/sql_view TML alongside a model TML
+    (e.g. linting a whole `ts tableau build-model` output directory via --dir), each model
+    is ADDITIONALLY checked for dangling cross-references (XREF findings) against the
+    table/sql_view TMLs generated in the same batch — a model_tables/column_id/join
+    reference to a table or column that was never generated. Linting a single model file
+    on its own (the common case) skips this check — there is no ground truth for what
+    tables already exist in ThoughtSpot from a model file alone.
+
     Output: JSON {"clean": bool, "results": [{index, type, name, findings: [...]}]}.
     Exit code 1 if any document has findings, else 0.
 
@@ -556,31 +642,22 @@ def lint_tml_cmd(
       ts tml lint --file model.tml
       ts tml lint --dir ./tml_out
       ts tml lint --dir ./tml_out --order tableau --model-phase base
+      ts tml lint --file table.tml --file model.tml   # also runs the XREF cross-ref check
       cat payload.json | ts tml lint
     """
     tmls = load_input_tmls(file, directory, patterns=(pattern or None), order=order, model_phase=model_phase)
 
-    from ts_cli.tml_lint import lint_tml
+    # Pass 1 — parse every doc up front, then build the generated-tables map
+    # from this batch's table/sql_view docs before linting any model.
+    parsed, parse_errors = _parse_tml_docs(tmls)
+    tables = _build_generated_tables_map(parsed)
 
     results = []
     any_findings = False
-    for i, edoc in enumerate(tmls):
-        try:
-            data = parse_edoc(edoc)
-        except yaml.YAMLError as e:
-            results.append({"index": i, "type": "?", "name": None,
-                            "findings": [f"YAML parse error: {e}"]})
-            any_findings = True
-            continue
-        findings = lint_tml(data) if isinstance(data, dict) else ["TML is not a mapping"]
-        inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
-        results.append({
-            "index": i,
-            "type": detect_tml_type(data) if isinstance(data, dict) else "?",
-            "name": inner.get("name") if isinstance(inner, dict) else None,
-            "findings": findings,
-        })
-        any_findings = any_findings or bool(findings)
+    for i in range(len(tmls)):
+        entry = _lint_one_doc(i, parsed[i], parse_errors, tables)
+        results.append(entry)
+        any_findings = any_findings or bool(entry["findings"])
 
     print(json.dumps({"clean": not any_findings, "results": results}))
     raise SystemExit(1 if any_findings else 0)

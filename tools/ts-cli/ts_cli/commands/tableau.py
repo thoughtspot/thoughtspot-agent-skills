@@ -670,6 +670,59 @@ def _write_sql_view_files(sql_views: list, connection_name: str, out_path, slug:
     return paths
 
 
+def _apply_reconcile_tier(
+    cleaned_cols: list,
+    cleaned_formulas: list[dict],
+    reconcile_table: Optional[str],
+    reconcile_plan_mode: bool,
+    column_name_map: Optional[dict],
+    profile: Optional[str],
+) -> tuple[list, list, Optional[dict], Optional[dict]]:
+    """Tier-2: reconcile emitted columns against a real target table's schema
+    (consultant/stand-in-view case, where the .twb's column names don't match
+    the ThoughtSpot table that will actually back this model).
+
+    Returns ``(cleaned_cols, cleaned_formulas, result_reconcile_dropped, early_result)``.
+    ``early_result`` is non-None only in ``--reconcile-plan`` mode, signalling the
+    caller must return it immediately without building any TML.
+    """
+    if not reconcile_table:
+        return cleaned_cols, cleaned_formulas, None, None
+
+    target_cols = _fetch_target_columns(reconcile_table, profile)
+    if reconcile_plan_mode:
+        print(json.dumps(_reconcile_plan(cleaned_cols, target_cols), indent=2))
+        return cleaned_cols, cleaned_formulas, None, {"reconcile_plan": True}
+
+    from ts_cli.tableau.reconcile import apply_reconciliation
+
+    cleaned_cols, cleaned_formulas, result_reconcile_dropped = apply_reconciliation(
+        cleaned_cols, cleaned_formulas, target_cols, column_name_map or {},
+    )
+    typer.echo(
+        f"  Reconcile: {len(result_reconcile_dropped['columns'])} column(s) dropped, "
+        f"{len(result_reconcile_dropped['formulas'])} formula(s) dropped",
+        err=True,
+    )
+    return cleaned_cols, cleaned_formulas, result_reconcile_dropped, None
+
+
+def _emit_xref_warnings(model_tml: dict, tables: list, columns: list, sql_views: list) -> None:
+    """Pre-flight dangling cross-reference check (BL-cross-ref-check): catches a
+    model_tables/column_id/join reference to a table or column that was never
+    generated — a class of import rejection that otherwise only surfaces after a
+    round trip to the server. Non-fatal — warnings only, printed to stderr (never
+    stdout, which carries this command's JSON result). See build_generated_tables_map
+    for why the table/column map here is an approximation, not read Table TML.
+    """
+    from ts_cli.tableau.build_model import build_generated_tables_map
+    from ts_cli.tml_lint import lint_cross_references
+
+    generated_tables = build_generated_tables_map(tables, columns, sql_views)
+    for finding in lint_cross_references(model_tml, generated_tables):
+        typer.echo(f"  WARNING: {finding}", err=True)
+
+
 def _generate_flow(
     ds: dict,
     name: str,
@@ -716,25 +769,11 @@ def _generate_flow(
     # must run unconditionally, not just under --reconcile-table.
     cleaned_formulas, _junk_dropped = drop_junk_formulas(cleaned_formulas)
 
-    # Tier-2: reconcile emitted columns against a real target table's schema
-    # (consultant/stand-in-view case, where the .twb's column names don't
-    # match the ThoughtSpot table that will actually back this model).
-    result_reconcile_dropped: Optional[dict] = None
-    if reconcile_table:
-        target_cols = _fetch_target_columns(reconcile_table, profile)
-        if reconcile_plan_mode:
-            print(json.dumps(_reconcile_plan(cleaned_cols, target_cols), indent=2))
-            return {"reconcile_plan": True}
-        from ts_cli.tableau.reconcile import apply_reconciliation
-
-        cleaned_cols, cleaned_formulas, result_reconcile_dropped = apply_reconciliation(
-            cleaned_cols, cleaned_formulas, target_cols, column_name_map or {},
-        )
-        typer.echo(
-            f"  Reconcile: {len(result_reconcile_dropped['columns'])} column(s) dropped, "
-            f"{len(result_reconcile_dropped['formulas'])} formula(s) dropped",
-            err=True,
-        )
+    cleaned_cols, cleaned_formulas, result_reconcile_dropped, _early_result = _apply_reconcile_tier(
+        cleaned_cols, cleaned_formulas, reconcile_table, reconcile_plan_mode, column_name_map, profile,
+    )
+    if _early_result is not None:
+        return _early_result
 
     gen_formula_names = {f["name"] for f in cleaned_formulas}
     gen_param_names = {p["name"] for p in parsed["parameters"]}
@@ -753,6 +792,8 @@ def _generate_flow(
         formula_rename_map=rename_map,
         sql_views=sql_views,
     )
+
+    _emit_xref_warnings(model_tml, ds["tables"], cleaned_cols, sql_views)
 
     levels = {}
     for f in cleaned_formulas:

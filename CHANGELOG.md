@@ -8,6 +8,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ## 2026-07-18
 - feat: `ts tableau verify` — source↔output migration-fidelity gate diffing a `ts tableau parse` output against generated Model TML for silent formula/table/join drops + LCS formula-equivalence (reuses `classify.py` tier split + `tml_lint`)
 - chore: bump ts-cli to v0.62.0
+- feat: `ts tml lint` cross-reference (XREF) check — catches a model referencing a table/column no batch TML generates, when table + model are linted together; also runs as a pre-flight warning in `ts tableau build-model`
+- chore: bump ts-cli to v0.61.0
 - fix: Tableau formula translator no longer corrupts string/date literals that contain reserved keywords (e.g. `IF [x]="END"`); adds `tableau/literals.py` masking, double-quote to single-quote normalisation, and `#...#` to `to_date()`
 - fix: stop flagging valid `add_years()`/`add_weeks()` as non-existent in Tableau formula validation
 - chore: bump ts-cli to v0.60.1

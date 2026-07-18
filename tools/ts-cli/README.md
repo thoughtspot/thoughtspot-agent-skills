@@ -567,12 +567,14 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I4 | `model_tables[].id` != `name` — joins silently fail at query time |
 | I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE |
 | I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
+| XREF | a model `model_tables`/`column_id`/join reference to a table or column that no batch TML generates — surfaces only when a table/sql_view TML is linted **alongside** the model (e.g. `--dir`); a lone model file skips it (no ground truth for what tables exist) |
 
 ```bash
-# Lint a single file
+# Lint a single file (model invariants only)
 ts tml lint --file model.tml
 
-# Lint every TML file in a directory
+# Lint every TML file in a directory — also runs the XREF cross-reference
+# check, since tables + model are present together
 ts tml lint --dir ./tml_out
 
 # Tableau-order directory lint, base model only
