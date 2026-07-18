@@ -140,6 +140,11 @@ class ThoughtSpotClient:
         self._profile = profiles[profile_name]
         self._profile_name = profile_name
         self._slug = _slugify(profile_name)
+        # Optional org context: TS_ORG env var (or profile `org_id`/`org`) scopes the minted
+        # token to a non-default org. Passed as `org_identifier` to auth/token/full (accepts
+        # an org id or name). Without it, calls run in the user's default org.
+        self._org = (os.environ.get("TS_ORG") or self._profile.get("org_id")
+                     or self._profile.get("org") or "")
         self._base_url = self._profile["base_url"].rstrip("/")
         self._verify_ssl: bool = self._profile.get("verify_ssl", True)
         self._token: Optional[str] = None
@@ -150,11 +155,26 @@ class ThoughtSpotClient:
     # Token caching
     # ------------------------------------------------------------------
 
+    def _org_auth_fields(self) -> Dict[str, Any]:
+        """Org-scoping fields for auth/token/full. Verified: the API takes `org_id` (int) —
+        `org_identifier` is silently ignored. Falls back to a string identifier only for a
+        non-numeric org value."""
+        if not self._org:
+            return {}
+        try:
+            return {"org_id": int(self._org)}
+        except (ValueError, TypeError):
+            return {"org_identifier": str(self._org)}
+
+    def _cache_key(self) -> str:
+        # Org-aware so switching TS_ORG doesn't reuse a token minted for another org.
+        return f"{self._slug}_org{_slugify(str(self._org))}" if self._org else self._slug
+
     def _token_path(self) -> Path:
-        return Path(tempfile.gettempdir()) / f"ts_token_{self._slug}.txt"
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_key()}.txt"
 
     def _expiry_path(self) -> Path:
-        return Path(tempfile.gettempdir()) / f"ts_token_{self._slug}_expiry.txt"
+        return Path(tempfile.gettempdir()) / f"ts_token_{self._cache_key()}_expiry.txt"
 
     def _read_cached_token(self) -> Optional[str]:
         token_path = self._token_path()
@@ -237,13 +257,11 @@ class ThoughtSpotClient:
 
         if p.get("password_env"):
             password = self._get_credential(p["password_env"])
+            body = {"username": p["username"], "password": password, "validity_time_in_sec": 3600,
+                    **self._org_auth_fields()}
             resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
-                json={
-                    "username": p["username"],
-                    "password": password,
-                    "validity_time_in_sec": 3600,
-                },
+                json=body,
                 headers={"Content-Type": "application/json"},
                 timeout=30,
             )
@@ -259,13 +277,11 @@ class ThoughtSpotClient:
 
         if p.get("secret_key_env"):
             secret_key = self._get_credential(p["secret_key_env"])
+            body = {"username": p["username"], "secret_key": secret_key, "validity_time_in_sec": 3600,
+                    **self._org_auth_fields()}
             resp = self._session.post(
                 f"{self._base_url}/api/rest/2.0/auth/token/full",
-                json={
-                    "username": p["username"],
-                    "secret_key": secret_key,
-                    "validity_time_in_sec": 3600,
-                },
+                json=body,
                 headers={"Content-Type": "application/json"},
                 timeout=30,
             )

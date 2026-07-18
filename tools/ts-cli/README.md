@@ -750,11 +750,12 @@ source drift.
 ### `ts connections list`
 
 List all available data connections. Results are auto-paginated — all connections
-are returned regardless of how many exist on the instance.
+are returned regardless of how many exist on the instance. **Lists every warehouse type
+by default** (Snowflake, Databricks, BigQuery, …); pass `--type` to filter to one.
 
 ```bash
-ts connections list
-ts connections list --type BIGQUERY
+ts connections list                      # ALL types
+ts connections list --type DATABRICKS    # filter to one type
 ```
 
 **Options:**
@@ -762,7 +763,12 @@ ts connections list --type BIGQUERY
 | Flag | Default | Description |
 |---|---|---|
 | `--profile`, `-p` | first profile | Profile to use |
-| `--type`, `-t` | `SNOWFLAKE` | Data warehouse type filter |
+| `--type`, `-t` | _(none — all types)_ | Optional data warehouse type filter (e.g. `SNOWFLAKE`, `DATABRICKS`) |
+
+> **Org scope:** connections (and metadata) are org-scoped. To operate in a non-default
+> org, set `TS_ORG=<org_id>` (integer org id) — the CLI mints an org-scoped token
+> (`org_id` on `auth/token/full`) with an org-keyed token cache. Without it, calls run in
+> your default org.
 
 **Output:** JSON array of connection objects.
 
@@ -1031,6 +1037,36 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql cla
 Diagnostic counts go to stderr. The canonical aggregate-function list lives in
 `ts_cli.spotql_ops.AGGREGATE_FUNCS` — a single source of truth, not duplicated in either
 skill's SKILL.md.
+
+---
+
+### `ts spotter answer`
+
+Ask Spotter (ThoughtSpot AI) a single natural-language question over a Model and return
+its answer — crucially the **search tokens** Spotter chose. Wraps the V2 endpoint
+`POST /api/rest/2.0/ai/answer/create` (`singleAnswer`, Beta / 10.4.0.cl+). This is the
+"Spotter last-mile" the conversion skills use: after a model is built, a measure that
+could not be translated deterministically is phrased in plain English, handed to Spotter,
+and the returned tokens are shown to a human to verify against the source numbers before
+being flagged or adopted.
+
+```bash
+ts spotter answer "total sales by region last quarter" --model <model-guid> --profile <name>
+ts spotter answer "count of distinct customers this year" -m <model-guid>
+```
+
+**Output (JSON to stdout):** `{status, message_type, visualization_type,
+session_identifier, generation_number, tokens, display_tokens, errors}`.
+
+- `tokens` / `display_tokens` — the ThoughtSpot Search expression Spotter produced (the
+  field the last-mile workflow inspects). `display_tokens` is the human-friendly form.
+- `status` is `SUCCESS` when an answer was returned, else an error code with a populated
+  `errors[]`: `FORBIDDEN` (missing `CAN_USE_SPOTTER` privilege or no view access to the
+  Model), `UNAUTHORIZED` (bad/expired token), or `SPOTTER_ERROR` (Spotter could not answer,
+  or is not enabled on the cluster).
+
+Requires `CAN_USE_SPOTTER` and view access to the target Model, and Spotter enabled on the
+cluster. Diagnostics go to stderr; the JSON goes to stdout.
 
 ---
 
@@ -1716,6 +1752,62 @@ ts aggregate generate --dir /tmp/agg --candidate cand_3 \
 `agg_model.tml.yaml`, and `primary_patched.tml.yaml` (the primary Model TML with the
 new `aggregated_models` entry patched in) to `--out-dir`. Stdout: `{"candidate",
 "aggregate_name", "files"}`.
+### `ts tableau build-liveboard`
+
+Emit Answer + tabbed-Liveboard TML deterministically from a parsed Tableau dashboard
+spec — the codified replacement for the LLM-executed chart/liveboard prose templates
+(SKILL.md Step 10). Role-aware axis layout (Columns→x, Color→series/color, Rows→pivot
+rows, measures→y), a chart-type requirement floor (flags a chart that lacks the measures
+it needs — never silently downgrades it), and overrides capture-and-replay (per-column
+`format`, `client_state_v2`, the authoritative `custom_chart_config` for combos, and
+`viz_style`). The ThoughtSpot-side emission is ported from the verified standalone Power BI
+converter (`_answer_tml`/`_answer_tml_explicit`/`_liveboard_tml`).
+
+```bash
+ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
+```
+
+**Input** (`--input`): a JSON dashboard spec — see `build_from_spec` in
+`ts_cli/tableau/liveboard.py` for the full shape:
+
+```json
+{
+  "report_name": "Sales Report", "model_name": "Sales Model", "model_fqn": null,
+  "measure_names": ["Total Sales"],
+  "dashboards": [
+    {"name": "Overview", "visuals": [
+      {"title": "Sales by Region", "mark": "bar",
+       "fields": [{"name": "Region", "shelf": "columns", "measure": false},
+                  {"name": "Total Sales", "measure": true},
+                  {"name": "Segment", "role": "Series"}],
+       "tile": {"x": 0, "y": 0, "width": 6, "height": 8}}
+    ]}
+  ]
+}
+```
+
+- Each field carries a Tableau `shelf` (`columns`/`rows`/`color`) — mapped to a
+  canonical role — or an explicit `role` that wins over the shelf. `measure: true`
+  columns always land on y.
+- A visual may carry an `override` (verbatim answer spec) for anything the auto-builder
+  can't express. `tile` is the Step 9c grid placement; omit it for a two-per-row layout.
+- `extra_visuals[]` (top level) adds tiles that have no Tableau source visual.
+
+**Two live-verified emission rules (v0.55.0):**
+- **Bucketed dates** — a `bucket_tokens` entry like `{"Order Date": "[Order Date].monthly"}`
+  puts the token in `search_query` but references the **resolved** output column
+  (`Month(Order Date)`) in chart/axis/table — the raw name won't match the search output and
+  errors `Invalid GUID string` on import. Bare (unbucketed) dates are fine by their raw name.
+- **Combos** — emit `ADVANCED_LINE_COLUMN` + both measures on `axis`; ThoughtSpot auto-resolves
+  line vs column. **Do not hand-author `custom_chart_config`** — its column refs are GUIDs
+  (assigned after an answer exists), so a display-name config fails a fresh import. The command
+  **drops** a display-name `custom_chart_config` and replays only a genuine captured
+  (GUID-based) one. To pin an exact split: import → tune in UI → export → replay the exported
+  config via the visual's `override`.
+
+**Output:** writes `{report}.liveboard.tml` (with every answer embedded) to `--output-dir`.
+Stdout: JSON `{report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows}` —
+`visual_rows`/`page_rows` feed the Step 12 migration report.
 
 ---
 
@@ -1803,6 +1895,36 @@ ts load snowflake --source ./csvs/ --profile Production \
 | `--rows` | `100` | Rows to generate (with `--generate-sample`) |
 
 **Output:** JSON with `database`, `schema`, `profile`, and `tables[]` array containing `table_name`, `status`, `rows_loaded`, `columns`, `source_file`.
+
+### `ts load databricks`
+
+Provision table(s) + synthetic data into a Databricks `catalog.schema` (Unity Catalog), so a
+ThoughtSpot Databricks connection can bind a model over them. Auth via a Databricks profile in
+`~/.claude/databricks-profiles.json` (`dbx_profile`, `sql_warehouse_http_path`, `catalog`,
+`schema`); the token lives in `~/.databrickscfg` (`databricks auth login`), never in the
+profile file. Execution goes through the `databricks` CLI's SQL Statement Execution API.
+
+```
+ts load databricks --source ./orders_demo_schema.json --profile sisense-dbx --rows 200
+```
+
+Infers the schema from `--source` (manifest / schema JSON / CSV dir), generates deterministic
+synthetic rows, then `CREATE TABLE` (Delta **column mapping** enabled — preserves column names
+with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source`, `-s` | — | Schema/manifest JSON or CSV dir (required) |
+| `--profile`, `-p` | — | Databricks profile name (required) |
+| `--catalog` / `--schema` | from profile | Override target catalog/schema |
+| `--rows`, `-r` | `100` | Synthetic rows per table |
+| `--batch` | `200` | Rows per `INSERT` statement |
+
+> **Connection caveat (live-verified):** for a ThoughtSpot model to bind to the new table, the
+> connection must expose it. A **SERVICE_ACCOUNT** Databricks connection introspects it
+> automatically; an **OAuth/PKCE** connection returns an empty API hierarchy (a ThoughtSpot
+> limitation), so the new table must be **selected in the ThoughtSpot connection editor (UI)**
+> before `ts tables create` / model build can reference it.
 
 ### `ts snowflake diff`
 

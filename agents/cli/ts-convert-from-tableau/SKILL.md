@@ -30,7 +30,9 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 | [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure reference |
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
 | [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (44 values) + analytical-intent → chart-type mapping |
+| [../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md](../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md) | Step 10a — durable dual-axis combo (line+column) via `custom_chart_config` |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
+| [../../../tools/ts-cli/README.md](../../../tools/ts-cli/README.md) | `ts spotter answer` — the Spotter last-mile command (Step 12.6) |
 | [references/open-items.md](references/open-items.md) | Known validation quirks and workarounds |
 | [references/coverage-matrix.md](references/coverage-matrix.md) | Canonical mapped/unmapped construct matrix — cite in Audit mode (A4) and the migration report (Step 12) |
 | [references/liveboard-style-themes.md](references/liveboard-style-themes.md) | Step 10.5 curated themes — brand tokens + per-chart `viz_style` color palettes |
@@ -67,6 +69,8 @@ export/merge/import TML, iterate over formula failures, or assemble model JSON.
 | Build/merge model + formulas | `ts tableau build-model --existing-guid` | Manual export → JSON merge → import loop |
 | Create tables | `ts tables create` | Raw HTTP calls to the TML import endpoint |
 | Export/import TML | `ts tml export` / `ts tml import` | Manual curl or HTTP library calls |
+| Ask Spotter to express a parked formula (Step 12.6) | `ts spotter answer` | Raw `requests` to `ai/answer/create` |
+| Emit answer + liveboard TML (Step 10c) | `ts tableau build-liveboard` | Hand-writing answer/liveboard YAML per viz |
 
 If a CLI command fails or produces wrong results, **fix the CLI** (`tools/ts-cli/`) and
 re-run — do not work around it with manual scripting. The CLI encodes months of
@@ -3244,6 +3248,8 @@ recursively. For each leaf zone, extract:
 | `worksheet_name` | `name` attribute (for `viz` zones) |
 | `x`, `y`, `w`, `h` | `x`, `y`, `w`, `h` attributes (Tableau uses 0–100,000 coordinate space) |
 | `text_content` | `<formatted-text>` child text (for `text` / `title` zones) |
+| `parent_zone` + `param` | the enclosing `<zone>`'s `id` and its `param` (`vert` = vertical container / stacks children top-to-bottom; `horz` = horizontal container / places children left-to-right). **Keep the nesting** — don't flatten to a coordinate list; the container tree is the layout's real structure (9c). |
+| `floating` | `floating="true"` on the zone — a free-positioned overlay, not part of a container. Handle separately in 9c. |
 
 Classify each zone:
 - **Chart zones**: a worksheet viz — a leaf zone carrying a `name` (worksheet name) and no
@@ -3274,26 +3280,43 @@ in the TWB. Extract:
 - Size encoding: column on `size` shelf
 - Aggregation: from column `caption` prefix (`SUM(...)`, `AVG(...)`, etc.)
 
-### 9c. Map coordinates to ThoughtSpot 12-column grid
+### 9c. Map the dashboard to the ThoughtSpot 12-column grid
 
-ThoughtSpot liveboards use a **12-column responsive grid**. Tableau dashboards use
-absolute pixel coordinates (0–100,000 range).
+ThoughtSpot liveboards use a **12-column responsive grid** (`layout.tiles[]` with
+`x`/`y`/`width`/`height` in grid units). Tableau dashboards are a **tree of horizontal and
+vertical layout containers** (with absolute 0–100,000 coords as a fallback). Map the **tree**,
+not the raw coordinates — the container structure is what makes the migrated board look like
+the source; a flat y-band scan misgroups zones whenever two containers share a y range.
 
-Use a band-based approach:
+**Container-tree walk (primary method):**
 
-1. **Group zones by y-band** — zones within 2,000 units of each other vertically are
-   in the same row band.
-2. **Sort bands** from smallest y to largest y (top to bottom).
-3. **Within each band**, sort zones by x (left to right).
-4. **Assign columns**: divide 12 columns proportionally by each zone's `w` relative to
-   the total dashboard width. Round to nearest integer; ensure columns sum to 12.
-5. **Assign height**: convert Tableau `h` to ThoughtSpot height units (1 unit ≈ 1/20th
-   of the dashboard height; minimum 4 units).
-6. **Assign y position**: start from 0; each new row band starts at the bottom of the
-   previous band.
+1. **Walk the `<zones>` tree** from 9a. A **`vert`** container stacks its children into
+   successive **rows**; a **`horz`** container lays its children **side-by-side within one
+   row**. Recurse: a `horz` inside a `vert` is one row split into columns; a `vert` inside a
+   `horz` is a column split into stacked rows.
+2. **Columns within a horizontal container** — split 12 columns **proportionally to each
+   child's `w` relative to its siblings' total `w`** (not the whole dashboard). Normalize with
+   **largest-remainder** so `col_span`s sum to **exactly 12** with no slivers: floor each
+   share, then hand the leftover columns to the zones with the largest fractional remainders.
+   Enforce a **minimum `col_span` of 2** (merge or bump anything smaller) so no tile is an
+   unreadable sliver.
+3. **Rows / height** — give each row a `row_span` from the zone's **aspect ratio**, so charts
+   keep roughly their source shape: `row_span ≈ round(col_span × (h/w) × 0.5)`, clamped to a
+   per-type floor — **KPI/number ≥ 3, note/text ≥ 2, chart ≥ 6, table ≥ 8**. Stack rows top to
+   bottom, each starting at the previous row's bottom (`y += prev row_span`).
+4. **Fallback to the band method** only when the tree is unavailable (rare — e.g. a
+   hand-edited TWB with flat zones): group zones within ~2,000 y-units into a band, sort bands
+   top-to-bottom and zones left-to-right within a band, then apply the same proportional
+   column split + aspect-ratio height as above.
+
+**Floating zones** (`floating="true"`) overlap the tiled layout and have no grid equivalent.
+Don't try to reproduce the overlap: place each floating zone as its **own full-or-partial-width
+tile** in reading order (by y then x) after the tiled zones, and **note in the Migration
+Summary** that it was a floating overlay flattened into the flow.
 
 Save the grid layout as a list of tiles with `zone_id`, `zone_type`, `worksheet_name`,
-`col`, `col_span`, `row_span`, `y`.
+`col` (x), `col_span` (width), `row_span` (height), `y` — ready for Step 10c. Column spans in
+each row must sum to 12; keep a stable left-to-right order matching the source.
 
 ### 9d. Orphan worksheets — surface and prompt to include
 
@@ -3398,6 +3421,21 @@ in the description — never fall back to TABLE_MODE as a lazy alternative.
 | `text` (crosstab) | `TABLE` (display_mode `TABLE_MODE`) |
 | Map (lat/long generated + geo role) | `GEO_BUBBLE` (or `GEO_AREA` for a filled/choropleth map) |
 | "Measure Names / Measure Values" KPI block | `KPI` — **one tile per measure** (see KPI rule below) |
+| **dual-axis combo** (two mark classes, e.g. `Bar` + `Line`, on a synchronized/secondary axis) | `ADVANCED_LINE_COLUMN` (Muze) — see the combo rule below |
+
+**Combo / dual-axis rule (Muze path only).** A Tableau **dual-axis** worksheet — two `<pane>`
+marks with different mark classes (typically `Bar` + `Line`) and a secondary/synchronized
+axis — is a combo chart. On the **Muze** path (Step 10-charts = M) emit `ADVANCED_LINE_COLUMN`
+with both measures on `axis_configs.y` and let ThoughtSpot **auto-resolve** the line vs the
+column — this imports cleanly. **Do NOT hand-author `chart.custom_chart_config`:** its column
+refs are **GUIDs** assigned only after an answer exists, so a fresh import with display names
+fails with `Invalid GUID string` (live-verified; `ts tml lint` does not catch it — a real /
+`VALIDATE_ONLY` import does). To durably pin the exact line-vs-column split + dual axis, use
+capture-and-replay: import the auto-resolved combo, set it in the UI, **export** (the exported
+`custom_chart_config` now has real GUIDs), and replay that config on re-import. On the
+**Legacy** path (or an older cluster without Muze) split it into a separate COLUMN tile and
+LINE tile and flag the merged axis as a migration gap. Full detail + both paths:
+[`../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md`](../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md).
 
 For the **authoritative `answer.chart.type` enum (44 valid values)**, per-type shelf shapes,
 the geo/candlestick caveats, and a full **analytical-intent → chart-type** mapping (for
@@ -3493,11 +3531,40 @@ a "sum sales" phrase. Build it from the worksheet shelves:
 - Date on a shelf → **dotted** bucket from the TWB `datetrunc`/`datepart`:
   `[Ship Date].yearly`, `[Order Date].monthly`. A bare `monthly` token is rejected.
 - Top-N (Tableau Top filter) → append `top N`, e.g. `[Item Type] [Total Revenue] top 5`.
-- **Percentage format for ratio measures.** A contribution / percent-of-total / growth-rate
-  measure should display as a percent, not `0.07`. Set `format` on its `answer_columns[]` entry
-  (`category: PERCENTAGE`, `percentageFormatConfig.decimals`) — see
-  `../../shared/schemas/thoughtspot-answer-tml.md` "answer_columns[] fields". Detect from the
-  formula (`/ TOTAL(...)`, `/ {FIXED ...}`, `growth of`) or the Tableau column's own % format.
+- **Sort fidelity.** Carry the worksheet's sort. A Tableau **Top/Bottom-N** sort → the `top N`
+  / `bottom N` keyword above. A plain **descending/ascending sort on a measure** → append
+  `sorted by [Measure] descending` / `ascending` to the `search_query` (`top N` already
+  implies a descending sort, so don't stack both; confirm the token renders as expected on
+  your build — see open item #19). A manual (hand-ordered) sort has no search equivalent —
+  note it as a minor migration gap.
+- **Column display format (currency / number / percent).** Carry the Tableau column's number
+  format so a tile reads like the source — `$1,240`, `12.3%`, `1.2K` — not a raw `1240` /
+  `0.123`. Set `format` on the measure's `answer_columns[]` entry:
+  - **Percent** — a contribution / percent-of-total / growth-rate measure (detect from the
+    formula: `/ TOTAL(...)`, `/ {FIXED ...}`, `growth of`, `pcdf`, or the Tableau column's own
+    `%` format) → `category: PERCENTAGE`, `percentageFormatConfig.decimals`. **Verified** —
+    see `../../shared/schemas/thoughtspot-answer-tml.md` "answer_columns[] fields".
+  - **Currency** — Tableau format is a currency (`$`, `€`, custom currency string) →
+    `category: CURRENCY` with the parallel `currencyFormatConfig` (currency code + decimals).
+  - **Plain number** — thousands separator, fixed decimals, or a K/M/B unit →
+    `category: NUMBER` with the parallel `numberFormatConfig` (decimals, thousands separator,
+    negative-value form).
+  Map the Tableau `<format>`'s decimal count and separators across. **Caveat:** only the
+  PERCENTAGE shape is live-verified in the schema; confirm the exact `currencyFormatConfig` /
+  `numberFormatConfig` field names against a live export before relying on them (tracked as an
+  open item) — when unsure, ship the numeric measure unformatted rather than an invalid
+  `format` block that could fail the import.
+- **Color / series fidelity.** Carry the worksheet's Color shelf (9b) into the chart encoding,
+  don't drop it:
+  - **Muze path** — a dimension on the Color shelf → the **`slice-with-color`** shelf of
+    `custom_chart_config` (series/color split); a **row/column small-multiples** (trellis)
+    encoding → the **`trellis-by`** shelf. This is the faithful mapping (see
+    `../../shared/schemas/thoughtspot-chart-types.md` "Tableau alignment").
+  - **Legacy path** — a color dimension becomes a **second column in `chart_columns`**
+    (implicit series); small multiples are **not expressible** on Legacy — note the gap.
+  - **Specific series colors** — when the Tableau color palette is meaningful (brand hues,
+    a fixed category→color map), carry it into the tile's `viz_style` per-series palette
+    (same mechanism Step 10.5 themes use), rather than letting ThoughtSpot auto-assign.
 - **Cumulative / moving measures** → reference the **measure column** by name with the
   worksheet's shelf attribute as the trailing sort arg: `cumulative_sum ( [Sales] , [Month] )`,
   `moving_average ( [Sales] , 2 , 0 , [Order Date] )` — these are **answer-level** formulas (not
@@ -3537,8 +3604,38 @@ a "sum sales" phrase. Build it from the worksheet shelves:
 
 ### 10c. Build liveboard TML
 
-Follow `../../shared/schemas/thoughtspot-liveboard-tml.md` exactly — the structure below
-is what actually imports and renders (an earlier `fqn`-based, minimal-chart form did not).
+**Emit the base Answer + Liveboard TML deterministically — don't hand-write it.** Assemble a
+dashboard spec from Steps 9/9b/9c and run:
+
+```bash
+ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
+```
+
+The spec is one object per dashboard → visuals → fields, each field tagged with its Tableau
+`shelf` (`columns`/`rows`/`color`) or an explicit `role`, plus `measure: true/false`; carry
+the Step 9c grid placement as each visual's `tile`. The command does the role-aware axis
+layout (Columns→x, Color→series/color, Rows→pivot rows, measures→y — a `PIVOT_TABLE` gets
+`axis_configs` or it renders blank), applies the chart-type requirement floor (flags a chart
+short of the measures it needs — never silently downgrades), and assembles one tabbed
+liveboard with every answer embedded. Full spec shape: `tools/ts-cli/README.md`
+(`ts tableau build-liveboard`) / `ts_cli/tableau/liveboard.py`.
+
+**Presentation polish rides in the spec, not a second hand-edit pass.** Anything the
+auto-builder can't express — a hand-tuned **combo/dual-axis** (`custom_chart_config`, Step
+10a), a **KPI sparkline** (`client_state_v2`, Step 10a), per-column **`format`** (Step 10b),
+or a **theme** `viz_style` (Step 10.5) — goes on that visual's `override` (verbatim answer
+spec) or `formats`/`client_state_v2`/`custom_chart_config`/`viz_style` keys, which the
+command replays into the emitted TML. Add tiles with no Tableau source visual via
+`extra_visuals[]`.
+
+> The command consumes a spec you assemble from the Step 9 parse; fully **extracting** the
+> per-visual shelves/roles inside `ts tableau parse` (so the spec is produced end-to-end with
+> no hand-assembly) is a tracked follow-on — see open item #20.
+
+The YAML below is the **reference for what the command emits** (and the shape to match when
+hand-tuning an `override`). Follow `../../shared/schemas/thoughtspot-liveboard-tml.md` exactly
+— the structure below is what actually imports and renders (an earlier `fqn`-based,
+minimal-chart form did not).
 
 ```yaml
 liveboard:
@@ -3941,6 +4038,11 @@ the charted tiles, and let table tiles render via `display_mode` with no chart b
 
 This is the safety net that makes a migration verifiable: no formula is migrated "blind."
 
+> **Spotter-seeded coverage tiles.** Step 12.6 can build coverage tiles here too — seeding
+> `search_query` from Spotter's returned `tokens` and the chart type from its
+> `visualization_type` — for measures Spotter expressed and you verified. Same tile shape and
+> `ALL_OR_NONE` re-import rules; the only difference is where the search came from.
+
 ---
 
 ## Step 12 — Migration Report
@@ -4130,10 +4232,103 @@ shrinks or disappears.
 
 ---
 
+## Step 12.6 — Spotter Last-Mile (Parked Formulas)
+
+> **Scope gate:** runs for scopes **1, 2, 4** (wherever formulas are imported).
+> **Condition:** only runs when `{parked_formulas}` is still non-empty *after* Step 12.5,
+> **and** Spotter is enabled on the model (Step 5.5 = Y). Requires **ts-cli ≥ v0.53.0**.
+> **Optional** — offer it; never run it silently.
+
+Deterministic rewriting (Step 12.5) fixes formulas whose ThoughtSpot equivalent is
+*syntactically* derivable from the Tableau expression. What remains parked is usually a
+measure whose *intent* is clear in English ("year-over-year growth of profit", "distinct
+customers this quarter") even though no mechanical translation exists. Spotter — the
+model's own AI — can often express that intent as a valid ThoughtSpot Search. This step
+asks Spotter, shows you what it produced, and lets you **verify then adopt or leave
+parked**. It never auto-adopts: Spotter's answer is a *suggestion to check against the
+source numbers*, exactly like every other non-1:1 resolution in this skill (see the
+**surface, recommend, resolve** principle at the top).
+
+Prompt:
+
+```
+{N} formula(s) are still parked and Spotter is enabled on the model.
+Ask Spotter to express each as a ThoughtSpot Search? [Y / n] (default: Y)
+
+  Y  Yes    — ask Spotter per formula, show its tokens, you verify + adopt/park
+  N  No     — leave them parked; the Step 12 report stands
+```
+
+**If N:** end here; the report is unchanged.
+
+**If Y:** for each parked measure that is *expressible as a plain-English question* (skip
+structural / table-addressing artifacts — Spotter answers questions about data, not
+row-offset window mechanics):
+
+1. **Phrase the intent** as a natural-language question from the parked record's
+   `original_tableau` expression and name — e.g. `SUM([Profit])` growth-vs-prior-year →
+   `"year over year growth of profit by month"`.
+2. **Ask Spotter** (CLI-first — never a raw `requests` call):
+
+   ```bash
+   ts spotter answer "year over year growth of profit by month" \
+     --model {model_guid} --profile {profile_name}
+   ```
+
+   Output is JSON: `{status, tokens, display_tokens, visualization_type, errors}`.
+   - `status: SUCCESS` → `display_tokens` is the human-readable Search Spotter chose
+     (e.g. `Profit growth of Profit by Order Date monthly`); `tokens` is the raw form.
+   - `status: FORBIDDEN` → the profile's user lacks `CAN_USE_SPOTTER` or view access to
+     the model. Stop the step, tell the user, and leave the formulas parked (this is an
+     entitlement issue, not a translation failure).
+   - `status: SPOTTER_ERROR` → Spotter could not answer (or is not enabled). Leave that
+     formula parked; continue with the rest.
+3. **Verify the numbers — do not trust the tokens blind.** Present Spotter's
+   `display_tokens` next to the original Tableau expression, then confirm the result
+   matches the source. Reuse the existing verification paths rather than eyeballing:
+   run the tokens as a coverage answer (Step 11.5) or fetch the value with
+   `ts spotql fetch-data` against the model and compare to the Tableau workbook's number.
+4. **Adopt or park (user decides):**
+   - **Match + user approves** → adopt. If Spotter's expression maps cleanly to a model
+     formula, add it via the Step 12.5 fix cycle (or `ts model promote-formula` if it was
+     built as an answer formula), so it becomes a first-class ✅ Migrated formula. Move it
+     out of ⏸ Parked.
+   - **Mismatch, or user unsure** → leave parked. Record Spotter's suggested tokens in the
+     parked record so a human can pick it up later — but it stays ⏸, not ✅.
+
+5. **Materialize a coverage viz from Spotter's answer (opt-in, human-approved).** For each
+   adopted measure, offer to build a **Step 11.5 coverage tile** directly from Spotter's
+   answer so the number is visible in-product, not just in the report:
+   - `search_query` ← Spotter's returned **`tokens`** (the raw Search expression it produced;
+     `display_tokens` is the human-readable form to show in the confirm prompt).
+   - `display_mode` / chart type ← Spotter's **`visualization_type`**:
+     `Table` → `TABLE_MODE` (omit the `chart:` block); `Chart` → `CHART_MODE` with the
+     chart type chosen from the Step 10a intent mapping (a single measure by a date → `KPI`
+     or `LINE`; by a dimension → `BAR`); `Undefined` → default to a `KPI`/`BAR`.
+   - `description` ← the original Tableau expression + `via Spotter last-mile` (same
+     convention as Step 11.5), so a reviewer sees source ↔ migrated side by side.
+   - **Show the tile spec and ask before adding it** — never auto-append to the liveboard.
+     On approval, add it to the "Formula coverage" tab (or as a standalone answer for a
+     model-only workbook) and re-import in place with `ALL_OR_NONE` (Step 11.5 rules).
+   This reuses the Step 11.5 machinery — it just seeds the tile from Spotter's answer instead
+   of a hand-built search. A tile is only ever added for a measure whose number you verified
+   in step 3 and the user approved; an unverified Spotter suggestion never becomes a tile.
+
+**Never** promote a Spotter suggestion to ✅ without a confirmed number match — an
+AI-generated Search that *looks* right but returns different numbers is worse than an
+honestly-parked formula. When in doubt, park it and say so in the report.
+
+After the step, **regenerate the Step 12 report**: adopted formulas move to ✅ (note
+"via Spotter last-mile" in the mapping table); the ⏸ Parked section lists any that Spotter
+suggested-but-unverified with its tokens for manual follow-up.
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.28.0 | 2026-07-15 | **Spotter last-mile + chart/layout fidelity.** (1) **New Step 12.6 — Spotter Last-Mile:** after Step 12.5 leaves a measure parked, optionally ask Spotter to express its intent as a ThoughtSpot Search via the new `ts spotter answer` command (wraps `POST /api/rest/2.0/ai/answer/create`; returns `tokens`/`display_tokens`). Opt-in, gated on Spotter enablement (Step 5.5) + `CAN_USE_SPOTTER`; **surfaces** the suggested Search, requires a **verified number match** (Step 11.5 coverage answer or `ts spotql fetch-data`) before adopting, else leaves it ⏸ Parked. Never auto-adopts. Can materialize an adopted measure as a Step 11.5 coverage tile seeded from Spotter's `tokens` + `visualization_type` (human-approved). (2) **Step 10a combo/dual-axis fidelity:** a Tableau dual-axis (Bar + Line) viz → `ADVANCED_LINE_COLUMN` + both measures on `axis_configs.y`, which ThoughtSpot auto-resolves; the exact split is pinned via capture-and-replay of an exported (GUID-based) `custom_chart_config` (hand-authored display-name configs error `Invalid GUID string` on fresh import — live-verified); new shared worked example. (3) **Step 9c layout fidelity:** container-tree walk (horz/vert) with proportional column split (largest-remainder → sum 12) + aspect-ratio height + floating-zone handling, replacing the flat y-band heuristic. (4) **Step 10b format + color/mark fidelity:** currency/number/decimal formats → `answer_columns[].format`; Color shelf → Muze `slice-with-color`; small multiples → `trellis-by`; series palettes → `viz_style`; measure sort → `sorted by`. (5) **Step 10c now emits answer + liveboard TML deterministically** via the new `ts tableau build-liveboard` command — role-aware axis layout (Columns→x, Color→series, Rows→pivot, measures→y; pivot gets `axis_configs` or renders blank), a chart-type requirement floor (flags, never downgrades), and overrides capture-and-replay (`format`/`client_state_v2`/`custom_chart_config`/`viz_style`), replacing the hand-written per-viz YAML. ThoughtSpot-side emission ported from the verified standalone Power BI converter; 26 unit tests. **Live-verified on ps-internal 2026-07-15** (real model round-trip): fixed two bugs the live import caught that lint did not — bucketed dates now use the resolved output name (`Month(Date)`), and a display-name `custom_chart_config` is dropped in favour of `ADVANCED_LINE_COLUMN` auto-resolution (its refs must be GUIDs). Open item #20 (build-liveboard live-verified; parser role-extraction is the remaining follow-on); #17–#19 track the other live gaps (Spotter call, currency/number format sub-config, sort token). Prereq ts-cli v0.55.0. |
 | 1.27.1 | 2026-07-15 | JSON/VARIANT path access: emit `['key']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects warehouse colon-and-dot path syntax (e.g. Snowflake `PARSE_JSON(...):a.b`) carried via `RAWSQL_*`. Verified for Snowflake 2026-07-15. |
 | 1.27.0 | 2026-07-08 | **Parse published-datasource `.tds`/`.tdsx` for the physical model (BL-089 M8).** `ts tableau parse` and `ts tableau build-model` now accept a `.tds`/`.tdsx` (root *is* `<datasource>`) — extracting its real tables/joins/columns/calcs — so a multi-query published datasource builds a multi-table model **automatically via GENERATE mode, no hand-assembly**. Get the `.tds` via `ts tableau download {id}` (the `.tds` inside the `.tdsx`) or a user-supplied file. Step 3.5 corrected: the field API (VizQL `read-metadata`) returns **columns/calcs only, not tables/joins** — the physical model lives in the `.tds`. Step 5b "Multi-query datasources" now leads with the `.tds` path; hand-assembly is the fallback for when only the `.twb` is available. Prereq ts-cli v0.38.0. |
 | 1.26.0 | 2026-07-06 | **Custom SQL → SQL View is now automated in `build-model`** (Step 5a/5c), realizing what the skill documented since 1.1.0. `ts tableau build-model` extracts `<relation type='text'>` Custom SQL (SQL + columns from `metadata-record` `parent-name`/`remote-name`, decoding `<<`/`>>`/`==`), emits a `.sql_view.tml` per relation, and references it by name in `model_tables[]` (no GUID at emit time). Physical/SQL-View column dedup prevents duplicate-name import failures; formula resolvability no longer blanket-drops qualified `[SQL View::col]` refs. Verified end-to-end live on ps-internal (parse → emit → import → searchdata returns correct numbers) and against real workbooks (single-CTE + Tableau's 6-query ts_users). Known follow-ons: drop the extract table when its Custom SQL becomes a view; substitute/flag Tableau params embedded in SQL. Prereq ts-cli v0.37.0. |
