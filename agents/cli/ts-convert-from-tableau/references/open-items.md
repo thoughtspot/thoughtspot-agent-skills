@@ -256,3 +256,41 @@ wants a measure); (c) container-tree tile layout (currently coord-proportional).
 
 Status: RESOLVED (parser extraction + end-to-end parse→build-liveboard) 2026-07-16; fidelity
 follow-ons tracked above.
+
+---
+
+## #21 — Deterministic import-error classification + lock registry — DEFERRED (needs live cluster)
+
+Harvested idea from the closed parallel converter (PR #252, `tableau_validate.py`): replace the
+Step 6 `VALIDATE_ONLY` fix loop's *memoryless* retry with a deterministic classifier that buckets
+each per-object import error as **fixable / locked / warning** by error code + message, backed by a
+persisted **lock registry** (a model depending on a locked sql_view cascade-locks), a hard
+**attempt cap**, and an auto-written **`MIGRATION_LIMITATIONS.md`**. Today our loop re-hands every
+error to the LLM each cycle with no memory, so it can retry an unfixable error up to 10 times.
+
+The mechanism is portable and unit-testable with synthetic responses, BUT it keys on specific
+ThoughtSpot import error **codes** (e.g. 14540 / 14516 / 14537, the "invalid identifier" nuance on
+14537, QUALIFY/LOOKUP/INDEX/SIZE/PREVIOUS_VALUE → locked). Those must be confirmed against a live
+cluster before shipping — coding them from the (unverified) reference converter would violate the
+repo "no shipped-unverified assumptions" rule. Path: MCP first
+(`get-rest-api-reference` for `importMetadataTML` error shapes), then live-verify the codes on a
+real failing import, record the finding here, then codify into `ts_cli/tableau/` + wire into Step 6.
+
+Status: DEFERRED — needs a live instance to confirm the import error codes.
+
+---
+
+## #22 — `<object-graph>` (Tableau 2020.2+ relationship) join extraction — DEFERRED (needs a modern .twb)
+
+The closed converter (PR #252) extracted joins from the Tableau 2020.2+ `<object-graph>` /
+`<relationships>` object model (mapping relationship endpoints back to relation names via
+metadata-record object-id hashes). Our `ts_cli/tableau/twb.py` handles classic `<relation join=…>`
+**and** a `datasource-relationships` block, so we are **not** blind to the modern model — but
+whether the specific `<object-graph>` element variant is a real gap (a modern single-datasource
+multi-table workbook parsing with **zero** joins) is unconfirmed.
+
+Needs a real 2020.2+ relationship-based `.twb` fixture: parse it, check the join count, and only
+add `<object-graph>` handling if joins are genuinely missing. Do **not** port speculatively — our
+existing relationship parsing may already cover it.
+
+Status: DEFERRED — needs a modern relationship-based .twb to confirm whether a gap exists.
