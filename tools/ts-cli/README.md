@@ -1809,6 +1809,51 @@ ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
 Stdout: JSON `{report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows}` —
 `visual_rows`/`page_rows` feed the Step 12 migration report.
 
+### `ts tableau verify`
+
+Source↔output migration-fidelity gate: diffs the *parsed* Tableau workbook against the
+*generated* Model TML to catch silent drops (a table/join/translatable formula the
+workbook had but the TML doesn't) and mistranslations (a TML formula that barely
+resembles its Tableau source) — the two failure classes a coverage count computed from
+the TWB alone, or a server-side `VALIDATE_ONLY` import, cannot see (an import gate only
+sees what was emitted; it has no idea what the source contained).
+
+```bash
+ts tableau verify --parse parsed.json --model out/orders.model.tml
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--parse`, `--input`, `-i` | yes | `ts tableau parse` output JSON (`--input` accepted as an alias, matching `build-liveboard`'s convention) |
+| `--model`, `-m` | yes | The generated `*.model.tml` file to verify |
+
+Runs four checks (implemented in `ts_cli/tableau/verify.py::verify_conversion`, pure —
+no Tableau/ThoughtSpot connection):
+
+1. **structural** — datasources→model, physical tables/custom-SQL→`model_tables`, join
+   counts, and a translatable/untranslatable formula split via
+   `ts_cli/tableau/classify.py::classify_formulas` (so this can never disagree with
+   `classify-formulas`/`build-model`). ERROR when a translatable formula, physical
+   table, or custom-SQL relation is missing from the generated TML.
+2. **formula_equivalence** — for each translatable formula, token-normalizes both the
+   raw Tableau expression and its TML translation and scores an LCS-based similarity
+   (MATCH ≥85%, PARTIAL 50–84%, LOW <50%, MISSING). PARTIAL/LOW are candidate
+   mistranslations flagged for manual review.
+3. **validity** — reuses `ts_cli/tml_lint.py::lint_tml` (I1/I2/I4/I5/I8) — no invariant
+   logic is re-implemented here. Model↔table-TML dangling-reference checking (a
+   `columns[].column_id` that no longer resolves on its table TML) is a separate concern,
+   covered by `ts tml lint --dir`.
+4. **limitation_coverage** — reports how many untranslatable formulas were detected.
+   Advisory only (`ts tableau verify` has no `--limitations`/report-list input today).
+
+A formula tiered `UNTRANSLATABLE` by `classify_formulas` (geospatial, circular, orphan,
+parameter-query, or genuinely untranslatable) is *expected* to be absent from
+`model.formulas` and is never counted as a drop.
+
+**Output:** the full report as JSON to stdout (`{"ok", "checks": [{"name", "severity",
+"findings"}], "summary"}`); a human-readable summary to stderr. Exit code is non-zero if
+any check carries an ERROR-severity finding.
+
 ---
 
 ## Piping and scripting

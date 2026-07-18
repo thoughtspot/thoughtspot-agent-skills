@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import yaml
 
 from ts_cli.tableau.client import TableauClient, _resolve_tableau_profile
 
@@ -1176,3 +1177,86 @@ def build_liveboard_cmd(
         "visual_rows": result["visual_rows"],
         "page_rows": result["page_rows"],
     }, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# ts tableau verify
+# ---------------------------------------------------------------------------
+
+def _load_json(path: Path, label: str) -> dict:
+    if not path.is_file():
+        typer.echo(f"{label} not found: {path}", err=True)
+        raise SystemExit(1)
+    try:
+        return json.loads(path.read_text())
+    except ValueError as exc:
+        typer.echo(f"Invalid JSON in {label.lower()} ({path}): {exc}", err=True)
+        raise SystemExit(1)
+
+
+def _load_yaml_tml(path: Path, label: str) -> dict:
+    if not path.is_file():
+        typer.echo(f"{label} not found: {path}", err=True)
+        raise SystemExit(1)
+    try:
+        return yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        typer.echo(f"Invalid YAML in {label.lower()} ({path}): {exc}", err=True)
+        raise SystemExit(1)
+
+
+def _print_verify_summary(report: dict) -> None:
+    summary = report["summary"]
+    typer.echo(
+        f"Verify: datasource '{summary.get('datasource', '?')}' -> model "
+        f"'{summary.get('model', '?')}' — {summary.get('errors', 0)} error(s), "
+        f"{summary.get('warnings', 0)} warning(s)",
+        err=True,
+    )
+    for check in report["checks"]:
+        typer.echo(f"  [{check['severity']}] {check['name']}", err=True)
+        for f in check["findings"]:
+            typer.echo(f"    - [{f['severity']}] {f['message']}", err=True)
+
+
+@app.command("verify")
+def verify_cmd(
+    input_file: str = typer.Option(
+        ..., "--parse", "--input", "-i",
+        help="`ts tableau parse` output JSON (also accepted as --input, matching "
+             "build-liveboard's convention)"),
+    model_file: str = typer.Option(..., "--model", "-m",
+                                    help="Generated Model TML file to verify against"),
+) -> None:
+    """Diff a parsed Tableau workbook against its generated Model TML.
+
+    Catches silent drops (a table/join/translatable formula the workbook had
+    but the TML doesn't) and mistranslations (a TML formula that barely
+    resembles its Tableau source) that a coverage count computed from the TWB
+    alone — or a server-side VALIDATE_ONLY import — cannot see. Four checks:
+    structural completeness, formula equivalence (token-level LCS similarity),
+    TML validity (delegates to `ts_cli/tml_lint.py`), and limitation coverage
+    (advisory — see `ts_cli/tableau/verify.py`). Formula-tier classification
+    is delegated to `ts_cli/tableau/classify.py`, so an untranslatable formula
+    correctly absent from the model is never flagged as a drop.
+
+    Model<->table-TML dangling-reference checking is provided separately by
+    `ts tml lint --dir` and is intentionally out of scope here.
+
+    Emits the full report as JSON to stdout; a human-readable summary to
+    stderr. Exit code is non-zero if any check carries an ERROR finding.
+
+    \\b
+      ts tableau verify --parse parsed.json --model out/orders.model.tml
+    """
+    from ts_cli.tableau.verify import verify_conversion
+
+    parsed = _load_json(Path(input_file), "Parse file")
+    model_tml = _load_yaml_tml(Path(model_file), "Model TML file")
+
+    report = verify_conversion(parsed, model_tml)
+    _print_verify_summary(report)
+
+    print(json.dumps(report, indent=2))
+    if not report["ok"]:
+        raise SystemExit(1)

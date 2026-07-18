@@ -9,7 +9,7 @@ and the extension pattern.
 ts_cli/
   cli.py              — Typer app entry point; registers command groups
   client.py           — ThoughtSpotClient REST wrapper; handles token caching and auth
-  tml_lint.py         — Pre-import TML linter (pure functions, no I/O)
+  tml_lint.py         — Pre-import TML linter: lint_tml (single-document I1/I2/I4/I5/I8 + guid-placement invariants) (pure functions, no I/O)
   tml_common.py       — platform-neutral TML YAML serialization (dump_tml_yaml) + import-response GUID parsing (extract_imported_guid) — relocated from tableau/ (BL-063 PR5); pure functions, Genie-vendorable
   formula_common.py   — platform-neutral formula/name transforms (resolve_name_collisions, add_formula_prefix, expr_is_aggregated, fix_double_aggregation) — relocated from model_builder.py/tableau/naming.py (BL-063 PR5); pure functions, Genie-vendorable
   model_builder.py     — Tableau TML assembly + phased-import orchestration facade (pure functions, no I/O; TWB parsing lives in ts_cli/tableau/twb.py)
@@ -50,6 +50,7 @@ ts_cli/
     yaml_out.py           — shim — dump_tml_yaml relocated to ts_cli/tml_common.py (BL-063 PR5); re-exported here for backward compat
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
     classify.py            — formula tier classification behind `ts tableau classify-formulas` (classify_formulas/TRANSLATABLE_TIERS/UNTRANSLATABLE_TIERS; delegates the translatable verdict to tableau_translate.py so audit and migrate agree)
+    verify.py              — source↔output migration-fidelity gate behind `ts tableau verify` (verify_conversion: structural/formula_equivalence/validity/limitation_coverage checks, diffing a `ts tableau parse` output against the generated Model TML; reuses classify.py's tier split — so an untranslatable formula's absence from model.formulas is never flagged as a drop — and tml_lint.py's lint_tml for validity, never re-implementing invariant logic. Model↔table-TML dangling-reference checking is a separate concern, covered by `ts tml lint --dir`) (pure functions, no I/O)
     build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
     dashboards.py         — pure dashboard/visual extraction (open item #20): `<dashboard>` zones → build_from_spec visuals (mark + fields by shelf/role/measure + calc-id→caption resolution + date buckets + grid tiles). Emitted by `ts tableau parse` (`dashboards` key); consumed by `ts tableau build-liveboard --input <parse.json> --model-name ...` so parse→liveboard runs with no hand-assembled spec
     liveboard.py          — pure Answer + tabbed-Liveboard emission behind `ts tableau build-liveboard` (role-aware axis layout, chart-needs floor, overrides replay); ThoughtSpot-side logic ported from the standalone Power BI converter's generate_tml.py (_answer_tml/_answer_tml_explicit/_liveboard_tml). Live-verified fixes (v0.55.0): bucketed dates use the resolved output name (`Month(Date)`) not the raw name; a hand-authored (display-name) `custom_chart_config` is DROPPED (its refs must be GUIDs — fresh import else errors `Invalid GUID string`), keeping only genuine captured GUID-based configs
@@ -79,7 +80,7 @@ ts_cli/
     tml.py        — ts tml export / import / lint
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
-    tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model, build-liveboard)
+    tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model, build-liveboard, verify)
     snowflake.py  — ts snowflake (diff, lint-ddl, exec)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
