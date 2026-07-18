@@ -61,6 +61,7 @@ worked-examples/tableau/
   static-set-to-column-set.md         — Tableau static set → ThoughtSpot column set: worksheet binding, EQ-list, {Null}, NE/except, formula-col anchor, live-verified (2026-06-12)
   topn-set-to-query-set.md            — Tableau Top-N/Bottom-N set → ThoughtSpot query set (ADVANCED/COLUMN_BASED): dynamic (rank + parameter-filter formula, model param) vs static (top N keyword) forms, live-verified (2026-06-12)
   data-blend-to-model.md             — two-datasource blend → single ThoughtSpot model with LEFT_OUTER inline join; cross-ds formula translation, join-on-secondary pattern, date-grain caveats (2026-06-14)
+  combo-dual-axis-custom-chart-config.md — Tableau dual-axis combo (line+column) → ADVANCED_LINE_COLUMN with durable custom_chart_config (y-axis-column/y-axis-line MERGED shelves); client_state_v2 decays (2026-07-15)
 
 worked-examples/snowflake/
   ts-to-snowflake.md                  — end-to-end TS → SV conversion (verified against live instance)

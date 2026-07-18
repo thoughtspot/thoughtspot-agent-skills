@@ -129,13 +129,17 @@ def parse_cmd(
     for ds in parsed["datasources"]:
         ds["orphan_calcs"] = detect_orphan_calcs(ds)
     parsed["blend_plan"] = build_blend_plan(parsed["blends"], parsed["datasources"])
+    from ts_cli.tableau.dashboards import extract_dashboards
+    parsed["dashboards"] = extract_dashboards(root)
 
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     Path(output_file).write_text(json.dumps(parsed, indent=2))
 
+    n_viz = sum(len(d.get("visuals", [])) for d in parsed["dashboards"])
     typer.echo(
         f"Parsed {len(parsed['datasources'])} datasource(s), "
-        f"{len(parsed['blends'])} blend edge-set(s) -> {output_file}",
+        f"{len(parsed['blends'])} blend edge-set(s), "
+        f"{len(parsed['dashboards'])} dashboard(s)/{n_viz} viz -> {output_file}",
         err=True,
     )
 
@@ -1089,3 +1093,86 @@ def build_model_cmd(
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))
+
+
+def _resolve_lb_spec(data: dict, model_name, model_fqn, report_name) -> dict:
+    """A full build_from_spec spec (has 'model_name'), or a `ts tableau parse` output
+    (has 'dashboards') → assembled into a spec with --model-name + derived measures."""
+    if data.get("model_name"):
+        return data
+    if "dashboards" not in data:
+        raise SystemExit("Input must be a parse output ('dashboards') or a full spec ('model_name').")
+    if not model_name:
+        raise SystemExit("--model-name is required when --input is a parse output.")
+    measures = sorted({f["name"] for d in data["dashboards"]
+                       for v in d.get("visuals", []) for f in v.get("fields", [])
+                       if f.get("measure")})
+    return {"report_name": report_name or model_name, "model_name": model_name,
+            "model_fqn": model_fqn, "measure_names": measures, "dashboards": data["dashboards"]}
+
+
+@app.command("build-liveboard")
+def build_liveboard_cmd(
+    input_file: str = typer.Option(..., "--input", "-i",
+                                   help="A `ts tableau parse` output (has 'dashboards') OR a full spec (has 'model_name')"),
+    output_dir: str = typer.Option(".", "--output-dir", "-o",
+                                   help="Directory for the emitted .liveboard.tml"),
+    model_name: Optional[str] = typer.Option(None, "--model-name",
+                                             help="Model/table name to bind to (required with a parse-output input)"),
+    model_fqn: Optional[str] = typer.Option(None, "--model-fqn",
+                                            help="Model/table GUID to bind to (optional; more robust than name)"),
+    report_name: Optional[str] = typer.Option(None, "--report-name",
+                                              help="Liveboard name (default: the model name)"),
+) -> None:
+    """Emit Answer + tabbed-Liveboard TML from a parsed Tableau dashboard spec.
+
+    Deterministic replacement for the Step 10 prose templates: role-aware axis layout
+    (Columns→x, Color→series/color, Rows→pivot rows, measures→y), a chart-type requirement
+    floor (flag, don't downgrade), and overrides capture-and-replay (formats /
+    client_state_v2 / custom_chart_config / viz_style). Writes `{report}.liveboard.tml`
+    (full answers embedded) to --output-dir and prints a JSON summary
+    {report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows} to stdout —
+    visual_rows/page_rows feed the Step 12 migration report.
+
+    Example:
+
+    \\b
+      ts tableau build-liveboard -i dashboard_spec.json -o out/
+    """
+    from ts_cli.tableau import liveboard as lb
+    from ts_cli.tml_common import dump_tml_yaml
+
+    p = Path(input_file)
+    if not p.is_file():
+        typer.echo(f"Spec file not found: {input_file}", err=True)
+        raise SystemExit(1)
+    try:
+        data = json.loads(p.read_text())
+    except ValueError as exc:
+        typer.echo(f"Invalid JSON: {exc}", err=True)
+        raise SystemExit(1)
+
+    spec = _resolve_lb_spec(data, model_name, model_fqn, report_name)
+    result = lb.build_from_spec(spec)
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    liveboard_file = None
+    if result["liveboard"]:
+        slug = lb.slugify(spec.get("report_name") or spec["model_name"])
+        liveboard_file = str(out_path / f"{slug}.liveboard.tml")
+        Path(liveboard_file).write_text(dump_tml_yaml(result["liveboard"]))
+
+    n_tabs = len(result["liveboard"]["liveboard"]["layout"]["tabs"]) if result["liveboard"] else 0
+    typer.echo(
+        f"{len(result['answers'])} answer(s), {n_tabs} tab(s) -> {liveboard_file or '(no liveboard)'}",
+        err=True,
+    )
+    print(json.dumps({
+        "report_name": spec.get("report_name") or spec["model_name"],
+        "n_answers": len(result["answers"]),
+        "n_tabs": n_tabs,
+        "liveboard_file": liveboard_file,
+        "visual_rows": result["visual_rows"],
+        "page_rows": result["page_rows"],
+    }, indent=2))
