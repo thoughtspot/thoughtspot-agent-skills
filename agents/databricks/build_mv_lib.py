@@ -40,6 +40,18 @@ CLOSURE = [
     # assert_no_duplicate_top_level_names would otherwise raise.
     "ts_cli/databricks/mv_emit_expr.py",
     "ts_cli/databricks/mv_emit_sql.py",
+    # mv_emit.py's own former Foundation/Joins/Classify+LOD clusters, split
+    # into their own modules under the file-size gate (mirrors the
+    # mv_translate.py / mv_window_translate.py and mv_sql.py / mv_sql_constructs.py
+    # splits above). mv_emit_base.py has no ts_cli.databricks.mv_emit*
+    # dependency of its own; mv_emit_joins.py and mv_emit_classify.py both
+    # import Foundation from mv_emit_base.py (never from mv_emit.py) to avoid
+    # a circular import. mv_emit_classify.py's own top-level _PROP_AGG_TO_DBX
+    # dict references mv_emit_sql.AGG_MAP at module-execution time, so it
+    # must be vendored after mv_emit_sql.py (already true here).
+    "ts_cli/databricks/mv_emit_base.py",
+    "ts_cli/databricks/mv_emit_joins.py",
+    "ts_cli/databricks/mv_emit_classify.py",
     "ts_cli/databricks/mv_emit_window.py",
     "ts_cli/databricks/mv_emit.py",
     "ts_cli/databricks/mv_build_view.py",
