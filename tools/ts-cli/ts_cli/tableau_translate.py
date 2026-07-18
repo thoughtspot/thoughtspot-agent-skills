@@ -8,6 +8,12 @@ Reordering or skipping steps produces the errors documented inline.
 
 Pre-transform order (runs before the main pipeline on each formula):
   0. Strip Tableau // line comments (BL-056)
+  0b. Mask string/date literals into opaque placeholders (see tableau/literals.py)
+      so every later pass — THEN-folding, bare END/CASE/WHEN stripping, keyword
+      validation — never sees literal *content* and can't corrupt or
+      misclassify it (e.g. IF [x] = "END" THEN ... losing the literal "END").
+      Unmasked back to ThoughtSpot's final literal syntax at the very end,
+      after validate_output.
   1. Rewrite Custom SQL Query aliases → table-qualified refs (BL-057)
   2. Convert no-keyword LOD {AGG([col])} → group_aggregate (BL-052)
   3. Detect and rewrite scalar MAX(a,b) / MIN(a,b) (BL-055)
@@ -84,6 +90,13 @@ from ts_cli.tableau.lod import (  # noqa: F401
     convert_lod,
     convert_total,
 )
+from ts_cli.tableau.literals import (  # noqa: F401
+    PLACEHOLDER_RE,
+    is_string_placeholder,
+    literal_value,
+    mask_literals,
+    unmask_literals,
+)
 from ts_cli.tableau.cleanup import (  # noqa: F401
     complete_rank_args,
     normalize_operator_spacing,
@@ -140,6 +153,11 @@ def translate_single(
     # Pre-0. Strip // line comments (BL-056)
     expr = strip_comments(expr)
 
+    # Pre-0b. Mask string/date literals (see tableau/literals.py docstring) —
+    # must run before every other pass so THEN-folding / bare END-CASE-WHEN
+    # stripping / keyword validation never see literal content.
+    expr, literal_registry = mask_literals(expr)
+
     # Pre-1. Rewrite Custom SQL Query aliases (BL-057)
     if csq_to_table:
         expr = rewrite_csq_aliases(expr, csq_to_table)
@@ -182,13 +200,13 @@ def translate_single(
     expr = map_functions(expr)
 
     # 10. Date function mapping
-    expr = map_date_functions(expr)
+    expr = map_date_functions(expr, literal_registry)
 
     # 10d. Boolean aggregation: MAX/MIN/SUM(<comparison>) → agg(if <cmp> then 1 else 0)
     expr = convert_boolean_aggregate(expr)
 
     # 11. String concatenation
-    expr = convert_string_concat(expr, role)
+    expr = convert_string_concat(expr, role, literal_registry)
 
     # 11b. Operator spacing (BL-046 #4)
     expr = normalize_operator_spacing(expr)
@@ -231,8 +249,13 @@ def translate_single(
     # 14b. Clean up whitespace
     expr = re.sub(r"\s+", " ", expr).strip()
 
-    # 15. Validate
+    # 15. Validate — runs on the still-masked expr, so its bare-keyword
+    # checks (END/CASE/WHEN) never fire on a literal's content.
     errors = validate_output(expr)
+
+    # 16. Unmask literals into their final ThoughtSpot form (single-quoted
+    # string, or to_date(...) for a date literal).
+    expr = unmask_literals(expr, literal_registry)
 
     return expr, errors, notes
 

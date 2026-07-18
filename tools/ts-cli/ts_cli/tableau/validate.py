@@ -154,8 +154,9 @@ def validate_pre_import(
         # Non-existent ThoughtSpot functions
         if re.search(r'\badd_quarters\s*\(', expr, re.IGNORECASE):
             warnings.append("add_quarters() does not exist — use add_months(expr, N*3)")
-        if re.search(r'\badd_years\s*\(', expr, re.IGNORECASE):
-            warnings.append("add_years() does not exist — use add_months(expr, N*12)")
+        # NOTE: add_years / add_weeks ARE valid ThoughtSpot functions (see
+        # thoughtspot-formula-patterns.md and tableau-formula-translation.md) — do
+        # not flag them. Only add_quarters is unsupported.
 
         # Bare date literal not wrapped in to_date()
         bare_date = re.search(r"'(\d{4}-\d{2}-\d{2})'", expr)
