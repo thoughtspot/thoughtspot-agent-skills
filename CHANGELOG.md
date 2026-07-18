@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-18
+- feat: ts-convert-from-tableau Step 6 now runs `ts tableau verify` as a migration-fidelity gate (silent-drop + mistranslation detection) — skill v1.29.0
 - feat: `ts tableau verify` — source↔output migration-fidelity gate diffing a `ts tableau parse` output against generated Model TML for silent formula/table/join drops + LCS formula-equivalence (reuses `classify.py` tier split + `tml_lint`)
 - chore: bump ts-cli to v0.62.0
 - feat: `ts tml lint` cross-reference (XREF) check — catches a model referencing a table/column no batch TML generates, when table + model are linted together; also runs as a pre-flight warning in `ts tableau build-model`

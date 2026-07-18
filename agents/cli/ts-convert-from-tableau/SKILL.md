@@ -71,6 +71,7 @@ export/merge/import TML, iterate over formula failures, or assemble model JSON.
 | Export/import TML | `ts tml export` / `ts tml import` | Manual curl or HTTP library calls |
 | Ask Spotter to express a parked formula (Step 12.6) | `ts spotter answer` | Raw `requests` to `ai/answer/create` |
 | Emit answer + liveboard TML (Step 10c) | `ts tableau build-liveboard` | Hand-writing answer/liveboard YAML per viz |
+| Verify the model faithfully copied the workbook (Step 6) | `ts tableau verify` | Eyeballing the diff or trusting the TWB-only coverage count |
 
 If a CLI command fails or produces wrong results, **fix the CLI** (`tools/ts-cli/`) and
 re-run — do not work around it with manual scripting. The CLI encodes months of
@@ -2738,6 +2739,45 @@ ts tml lint --dir /tmp/ts_tableau_mig/output/{workbook_name} --order tableau --m
 
 Do not import until it reports `"clean": true`. Fix any finding and re-lint.
 
+#### Migration-fidelity gate (`ts tableau verify` — silent drops + mistranslations)
+
+`ts tml lint` proves the TML is *structurally* valid; it does not prove the model is a
+faithful copy of the workbook. Run **`ts tableau verify`** to diff the parsed TWB
+(Step 3's `{workbook_name}_parsed.json`) against each generated **base** Model TML. It
+catches what a TWB-only coverage count and a server-side `VALIDATE_ONLY` import both miss:
+
+- **Silent drops** — a table, join, or *translatable* formula the workbook had but the
+  generated model does not. An untranslatable formula's absence is **not** flagged: tier
+  classification is shared with `classify-formulas`, so only a formula that *should* have
+  been carried across counts as a drop.
+- **Mistranslations** — a formula whose TML translation barely resembles its Tableau
+  source (token-level similarity buckets: MATCH / PARTIAL / LOW / MISSING).
+
+```bash
+ts tableau verify \
+  --parse /tmp/ts_tableau_mig/{workbook_name}_parsed.json \
+  --model /tmp/ts_tableau_mig/output/{workbook_name}/{model_slug}.model.tml
+```
+
+Run once per base model in a multi-model migration — one `--model` file per call. It prints
+a JSON report to stdout, a human summary to stderr, and exits non-zero when any check has an
+**ERROR**. How to act on it:
+
+- **structural ERROR** (a translatable formula / table / join dropped) — a blocker to a
+  *faithful* migration. Investigate before importing: fix the build, or confirm the drop is
+  expected (e.g. an orphan calc carved out in Step 3g) and proceed knowingly.
+- **formula_equivalence PARTIAL / LOW** (WARNING) — spot-check those formulas' TML against
+  the source. A low score is often a legitimate rewrite (e.g. a `DATEDIFF`/`DATEADD` unit
+  function whose ThoughtSpot name can't be statically token-matched), not a bug — confirm,
+  don't blindly "fix".
+- **limitation_coverage** (advisory) — reports how many untranslatable formulas exist; it
+  echoes, and does not replace, the Step 11.5 / Step 12 coverage report, which stays the
+  authoritative gap list.
+
+Treat a `structural` ERROR as the gate; PARTIAL/LOW and advisory findings are review
+prompts. (Cross-reference dangling-ref checking is `ts tml lint --dir`'s job, above — verify
+is about source-vs-output fidelity, not TML internal consistency.)
+
 Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisting:
 
 ```bash
@@ -4328,6 +4368,7 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.29.0 | 2026-07-18 | **Step 6 migration-fidelity gate — `ts tableau verify`.** After the `ts tml lint` structural gate, diff the Step 3 parse output (`{workbook}_parsed.json`) against each generated base Model TML to catch what a TWB-only coverage count and a server-side `VALIDATE_ONLY` import both miss: **silent drops** (a translatable formula / table / join the workbook had but the model doesn't — untranslatable formulas correctly excluded via the shared `classify-formulas` tiers) and **mistranslations** (token-level LCS similarity buckets MATCH/PARTIAL/LOW/MISSING). A `structural` ERROR gates a faithful migration; PARTIAL/LOW + limitation-coverage are review prompts, not blocks. Complements (does not replace) the Step 11.5 / Step 12 coverage report; cross-reference dangling-ref checking stays `ts tml lint --dir`'s job. Prereq ts-cli v0.62.0. |
 | 1.28.0 | 2026-07-15 | **Spotter last-mile + chart/layout fidelity.** (1) **New Step 12.6 — Spotter Last-Mile:** after Step 12.5 leaves a measure parked, optionally ask Spotter to express its intent as a ThoughtSpot Search via the new `ts spotter answer` command (wraps `POST /api/rest/2.0/ai/answer/create`; returns `tokens`/`display_tokens`). Opt-in, gated on Spotter enablement (Step 5.5) + `CAN_USE_SPOTTER`; **surfaces** the suggested Search, requires a **verified number match** (Step 11.5 coverage answer or `ts spotql fetch-data`) before adopting, else leaves it ⏸ Parked. Never auto-adopts. Can materialize an adopted measure as a Step 11.5 coverage tile seeded from Spotter's `tokens` + `visualization_type` (human-approved). (2) **Step 10a combo/dual-axis fidelity:** a Tableau dual-axis (Bar + Line) viz → `ADVANCED_LINE_COLUMN` + both measures on `axis_configs.y`, which ThoughtSpot auto-resolves; the exact split is pinned via capture-and-replay of an exported (GUID-based) `custom_chart_config` (hand-authored display-name configs error `Invalid GUID string` on fresh import — live-verified); new shared worked example. (3) **Step 9c layout fidelity:** container-tree walk (horz/vert) with proportional column split (largest-remainder → sum 12) + aspect-ratio height + floating-zone handling, replacing the flat y-band heuristic. (4) **Step 10b format + color/mark fidelity:** currency/number/decimal formats → `answer_columns[].format`; Color shelf → Muze `slice-with-color`; small multiples → `trellis-by`; series palettes → `viz_style`; measure sort → `sorted by`. (5) **Step 10c now emits answer + liveboard TML deterministically** via the new `ts tableau build-liveboard` command — role-aware axis layout (Columns→x, Color→series, Rows→pivot, measures→y; pivot gets `axis_configs` or renders blank), a chart-type requirement floor (flags, never downgrades), and overrides capture-and-replay (`format`/`client_state_v2`/`custom_chart_config`/`viz_style`), replacing the hand-written per-viz YAML. ThoughtSpot-side emission ported from the verified standalone Power BI converter; 26 unit tests. **Live-verified on ps-internal 2026-07-15** (real model round-trip): fixed two bugs the live import caught that lint did not — bucketed dates now use the resolved output name (`Month(Date)`), and a display-name `custom_chart_config` is dropped in favour of `ADVANCED_LINE_COLUMN` auto-resolution (its refs must be GUIDs). Open item #20 (build-liveboard live-verified; parser role-extraction is the remaining follow-on); #17–#19 track the other live gaps (Spotter call, currency/number format sub-config, sort token). Prereq ts-cli v0.55.0. |
 | 1.27.1 | 2026-07-15 | JSON/VARIANT path access: emit `['key']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects warehouse colon-and-dot path syntax (e.g. Snowflake `PARSE_JSON(...):a.b`) carried via `RAWSQL_*`. Verified for Snowflake 2026-07-15. |
 | 1.27.0 | 2026-07-08 | **Parse published-datasource `.tds`/`.tdsx` for the physical model (BL-089 M8).** `ts tableau parse` and `ts tableau build-model` now accept a `.tds`/`.tdsx` (root *is* `<datasource>`) — extracting its real tables/joins/columns/calcs — so a multi-query published datasource builds a multi-table model **automatically via GENERATE mode, no hand-assembly**. Get the `.tds` via `ts tableau download {id}` (the `.tds` inside the `.tdsx`) or a user-supplied file. Step 3.5 corrected: the field API (VizQL `read-metadata`) returns **columns/calcs only, not tables/joins** — the physical model lives in the `.tds`. Step 5b "Multi-query datasources" now leads with the `.tds` path; hand-assembly is the fallback for when only the `.twb` is available. Prereq ts-cli v0.38.0. |
