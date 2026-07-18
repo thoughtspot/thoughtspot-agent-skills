@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ts_cli.tableau.literals import literal_value
 from ts_cli.tableau.parsing import _extract_function_args
 
 
@@ -229,29 +230,51 @@ _DATEADD_UNIT_MAP = {
 }
 
 
-def map_date_functions(expr: str) -> str:
-    """Convert Tableau date functions to ThoughtSpot equivalents."""
+def _resolve_unit(arg: str, registry: dict | None) -> str:
+    """Resolve a date-function's unit argument to its lowercased text.
+
+    `arg` is normally a quoted literal ('month', 'day', ...). When the
+    pipeline has masked literals into placeholders (see literals.py), `arg`
+    is the placeholder token instead — resolve it via `registry` first. Falls
+    back to the old direct quote-strip when there's no registry (e.g. these
+    functions are still unit-tested by calling them directly with real quotes).
+    """
+    arg = arg.strip()
+    if registry:
+        lit = literal_value(arg, registry)
+        if lit is not None:
+            return lit.lower()
+    return arg.strip("'\"").lower()
+
+
+def map_date_functions(expr: str, registry: dict | None = None) -> str:
+    """Convert Tableau date functions to ThoughtSpot equivalents.
+
+    `registry` is the literal-masking registry from literals.mask_literals
+    (see translate_single) — needed to resolve a masked unit argument
+    ('month', 'day', ...) back to its text for the unit-name lookups below.
+    """
     result = expr
 
     # DATETRUNC('unit', date) → start_of_unit ( date )
-    result = _convert_datetrunc(result)
+    result = _convert_datetrunc(result, registry)
 
     # DATEDIFF('unit', start, end) → diff_unit ( end , start )  [reversed args]
-    result = _convert_datediff(result)
+    result = _convert_datediff(result, registry)
 
     # DATEADD('unit', n, date) → add_unit ( date , n )  [reordered]
-    result = _convert_dateadd(result)
+    result = _convert_dateadd(result, registry)
 
     # DATEPART('unit', date) → unit_func ( date )
-    result = _convert_datepart(result)
+    result = _convert_datepart(result, registry)
 
     # DATENAME('month', date) → month ( date )
-    result = _convert_datename(result)
+    result = _convert_datename(result, registry)
 
     return result
 
 
-def _convert_datetrunc(expr: str) -> str:
+def _convert_datetrunc(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATETRUNC\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -267,7 +290,7 @@ def _convert_datetrunc(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 2:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             date_expr = args[1].strip()
             ts_func = _DATETRUNC_UNIT_MAP.get(unit)
             if ts_func is None:
@@ -285,7 +308,7 @@ def _convert_datetrunc(expr: str) -> str:
     return result
 
 
-def _convert_datediff(expr: str) -> str:
+def _convert_datediff(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEDIFF\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -301,7 +324,7 @@ def _convert_datediff(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 3:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             start_date = args[1].strip()
             end_date = args[2].strip()
             ts_func = _DATEDIFF_UNIT_MAP.get(unit)
@@ -328,7 +351,7 @@ def _convert_datediff(expr: str) -> str:
     return result
 
 
-def _convert_dateadd(expr: str) -> str:
+def _convert_dateadd(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEADD\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -344,7 +367,7 @@ def _convert_dateadd(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 3:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             n = args[1].strip()
             date_expr = args[2].strip()
             ts_func = _DATEADD_UNIT_MAP.get(unit)
@@ -364,7 +387,7 @@ def _convert_dateadd(expr: str) -> str:
     return result
 
 
-def _convert_datepart(expr: str) -> str:
+def _convert_datepart(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATEPART\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -380,7 +403,7 @@ def _convert_datepart(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 2:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             date_expr = args[1].strip()
             ts_func = _DATEPART_UNIT_MAP.get(unit)
             if ts_func is None:
@@ -398,7 +421,7 @@ def _convert_datepart(expr: str) -> str:
     return result
 
 
-def _convert_datename(expr: str) -> str:
+def _convert_datename(expr: str, registry: dict | None = None) -> str:
     _PAT = re.compile(r"\bDATENAME\s*\(", re.IGNORECASE)
     result = expr
     search_start = 0
@@ -414,7 +437,7 @@ def _convert_datename(expr: str) -> str:
             continue
         args, end_pos = extracted
         if len(args) >= 2:
-            unit = args[0].strip().strip("'\"").lower()
+            unit = _resolve_unit(args[0], registry)
             date_expr = args[1].strip()
             if unit == "month":
                 replacement = f"month ( {date_expr} )"

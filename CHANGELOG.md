@@ -6,6 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-18
+- fix: Tableau formula translator no longer corrupts string/date literals that contain reserved keywords (e.g. `IF [x]="END"`); adds `tableau/literals.py` masking, double-quote to single-quote normalisation, and `#...#` to `to_date()`
+- fix: stop flagging valid `add_years()`/`add_weeks()` as non-existent in Tableau formula validation
+- chore: bump ts-cli to v0.60.1
 - feat: codify ts-convert-to-databricks-mv emission (ts databricks build-mv, deterministic, both runtimes)
 - chore: bump ts-cli to v0.55.0
 
