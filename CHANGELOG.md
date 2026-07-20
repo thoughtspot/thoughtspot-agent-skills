@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-20
+- fix: `ts profiles add`/`update` now coerce `true`/`false` `--field` values to JSON booleans — previously `--field verify_ssl=false` was stored as the string `"false"`, which `requests` treats as a CA-bundle path, breaking every call to a self-signed/private cluster
+- chore: bump ts-cli to v0.62.1
+
 ## 2026-07-18
 - feat: ts-convert-from-tableau Step 6 now runs `ts tableau verify` as a migration-fidelity gate (silent-drop + mistranslation detection) — skill v1.29.0
 - feat: `ts tableau verify` — source↔output migration-fidelity gate diffing a `ts tableau parse` output against generated Model TML for silent formula/table/join drops + LCS formula-equivalence (reuses `classify.py` tier split + `tml_lint`)
