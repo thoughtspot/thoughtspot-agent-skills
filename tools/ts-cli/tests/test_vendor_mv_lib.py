@@ -59,3 +59,21 @@ def test_end_to_end_parse_translate_build_lint():
     # import-response parsing is vendored too
     assert ns["extract_imported_guid"](
         [{"response": {"header": {"id_guid": "g"}}}]) == "g"
+
+
+def test_reverse_emit_vendored_and_self_contained():
+    """The to-direction (ThoughtSpot -> Databricks) public functions must be
+    vendored into the same Genie notebook as the from-direction ones, so the
+    Genie skill can run either direction from one source of truth (Task 14)."""
+    src = build_source(TS_CLI_ROOT)
+    for name in ("def build_metric_view", "def build_view_ddl", "def parse_formula",
+                 "def emit_sql", "def ts_type_to_dbx"):
+        assert name in src
+    ns: dict = {}
+    exec(compile(src, "databricks_mv_lib", "exec"), ns)  # must run with no ts_cli imports
+    assert "build_view_ddl" in ns
+    assert "build_metric_view" in ns
+    assert "detect_fact_tables" in ns
+    assert "make_ref_resolver" in ns
+    assert "default_view_name" in ns
+    assert "build_summary" in ns

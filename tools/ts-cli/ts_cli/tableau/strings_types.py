@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.tableau.literals import PLACEHOLDER_RE, is_string_placeholder
 from ts_cli.tableau.parsing import _extract_function_args
 
 
@@ -16,7 +17,9 @@ from ts_cli.tableau.parsing import _extract_function_args
 # 8. String concatenation: + on strings → concat()
 # ---------------------------------------------------------------------------
 
-def convert_string_concat(expr: str, role: str = "dimension") -> str:
+def convert_string_concat(
+    expr: str, role: str = "dimension", registry: dict | None = None,
+) -> str:
     """Convert string + concatenation to concat().
 
     Only applies when the formula role is 'dimension' (string context)
@@ -25,6 +28,13 @@ def convert_string_concat(expr: str, role: str = "dimension") -> str:
     Works at any nesting depth: finds contiguous chains of
     ``operand + operand`` where at least one operand is a string literal,
     and wraps the chain in ``concat()``.
+
+    `registry` is the literal-masking registry from literals.mask_literals
+    (see translate_single) — by the time this runs, a real quoted string
+    literal like '%' has already been replaced by an opaque placeholder
+    token, so "is this operand a string?" is decided by looking the
+    placeholder up in `registry` rather than searching for a literal quote
+    character.
     """
     if role == "measure" and "to_string" not in expr.lower() and "str(" not in expr.lower():
         return expr
@@ -32,7 +42,7 @@ def convert_string_concat(expr: str, role: str = "dimension") -> str:
     if "+" not in expr:
         return expr
 
-    return _replace_string_plus_chains(expr, role)
+    return _replace_string_plus_chains(expr, role, registry)
 
 
 _CONCAT_OPERAND = (
@@ -40,6 +50,7 @@ _CONCAT_OPERAND = (
     r"\[[^\]]+\]"                   # [column ref]
     r"|'[^']*'"                     # 'string literal'
     r"|to_string\s*\([^)]*\)"       # to_string(...)
+    rf"|{PLACEHOLDER_RE}"           # masked string/date literal placeholder
     r")"
 )
 
@@ -49,7 +60,9 @@ _CONCAT_PAIR = re.compile(
 )
 
 
-def _replace_string_plus_chains(expr: str, role: str) -> str:
+def _replace_string_plus_chains(
+    expr: str, role: str, registry: dict | None = None,
+) -> str:
     """Replace ``a + 'x' + b`` chains with ``concat(a, 'x', b)`` at any depth.
 
     Uses iterative regex matching: finds pairs of operands around ``+`` where
@@ -64,7 +77,14 @@ def _replace_string_plus_chains(expr: str, role: str) -> str:
         if not m:
             break
         left, right = m.group(1).strip(), m.group(2).strip()
-        has_string = role == "dimension" or "'" in left or "'" in right
+        has_string = (
+            role == "dimension"
+            or "'" in left or "'" in right
+            or (registry is not None and (
+                is_string_placeholder(left, registry)
+                or is_string_placeholder(right, registry)
+            ))
+        )
         if not has_string:
             break
         safety += 1

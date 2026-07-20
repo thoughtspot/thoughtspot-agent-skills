@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import yaml
 
 from ts_cli.tableau.client import TableauClient, _resolve_tableau_profile
 
@@ -129,13 +130,17 @@ def parse_cmd(
     for ds in parsed["datasources"]:
         ds["orphan_calcs"] = detect_orphan_calcs(ds)
     parsed["blend_plan"] = build_blend_plan(parsed["blends"], parsed["datasources"])
+    from ts_cli.tableau.dashboards import extract_dashboards
+    parsed["dashboards"] = extract_dashboards(root)
 
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     Path(output_file).write_text(json.dumps(parsed, indent=2))
 
+    n_viz = sum(len(d.get("visuals", [])) for d in parsed["dashboards"])
     typer.echo(
         f"Parsed {len(parsed['datasources'])} datasource(s), "
-        f"{len(parsed['blends'])} blend edge-set(s) -> {output_file}",
+        f"{len(parsed['blends'])} blend edge-set(s), "
+        f"{len(parsed['dashboards'])} dashboard(s)/{n_viz} viz -> {output_file}",
         err=True,
     )
 
@@ -665,6 +670,59 @@ def _write_sql_view_files(sql_views: list, connection_name: str, out_path, slug:
     return paths
 
 
+def _apply_reconcile_tier(
+    cleaned_cols: list,
+    cleaned_formulas: list[dict],
+    reconcile_table: Optional[str],
+    reconcile_plan_mode: bool,
+    column_name_map: Optional[dict],
+    profile: Optional[str],
+) -> tuple[list, list, Optional[dict], Optional[dict]]:
+    """Tier-2: reconcile emitted columns against a real target table's schema
+    (consultant/stand-in-view case, where the .twb's column names don't match
+    the ThoughtSpot table that will actually back this model).
+
+    Returns ``(cleaned_cols, cleaned_formulas, result_reconcile_dropped, early_result)``.
+    ``early_result`` is non-None only in ``--reconcile-plan`` mode, signalling the
+    caller must return it immediately without building any TML.
+    """
+    if not reconcile_table:
+        return cleaned_cols, cleaned_formulas, None, None
+
+    target_cols = _fetch_target_columns(reconcile_table, profile)
+    if reconcile_plan_mode:
+        print(json.dumps(_reconcile_plan(cleaned_cols, target_cols), indent=2))
+        return cleaned_cols, cleaned_formulas, None, {"reconcile_plan": True}
+
+    from ts_cli.tableau.reconcile import apply_reconciliation
+
+    cleaned_cols, cleaned_formulas, result_reconcile_dropped = apply_reconciliation(
+        cleaned_cols, cleaned_formulas, target_cols, column_name_map or {},
+    )
+    typer.echo(
+        f"  Reconcile: {len(result_reconcile_dropped['columns'])} column(s) dropped, "
+        f"{len(result_reconcile_dropped['formulas'])} formula(s) dropped",
+        err=True,
+    )
+    return cleaned_cols, cleaned_formulas, result_reconcile_dropped, None
+
+
+def _emit_xref_warnings(model_tml: dict, tables: list, columns: list, sql_views: list) -> None:
+    """Pre-flight dangling cross-reference check (BL-cross-ref-check): catches a
+    model_tables/column_id/join reference to a table or column that was never
+    generated — a class of import rejection that otherwise only surfaces after a
+    round trip to the server. Non-fatal — warnings only, printed to stderr (never
+    stdout, which carries this command's JSON result). See build_generated_tables_map
+    for why the table/column map here is an approximation, not read Table TML.
+    """
+    from ts_cli.tableau.build_model import build_generated_tables_map
+    from ts_cli.tml_lint import lint_cross_references
+
+    generated_tables = build_generated_tables_map(tables, columns, sql_views)
+    for finding in lint_cross_references(model_tml, generated_tables):
+        typer.echo(f"  WARNING: {finding}", err=True)
+
+
 def _generate_flow(
     ds: dict,
     name: str,
@@ -711,25 +769,11 @@ def _generate_flow(
     # must run unconditionally, not just under --reconcile-table.
     cleaned_formulas, _junk_dropped = drop_junk_formulas(cleaned_formulas)
 
-    # Tier-2: reconcile emitted columns against a real target table's schema
-    # (consultant/stand-in-view case, where the .twb's column names don't
-    # match the ThoughtSpot table that will actually back this model).
-    result_reconcile_dropped: Optional[dict] = None
-    if reconcile_table:
-        target_cols = _fetch_target_columns(reconcile_table, profile)
-        if reconcile_plan_mode:
-            print(json.dumps(_reconcile_plan(cleaned_cols, target_cols), indent=2))
-            return {"reconcile_plan": True}
-        from ts_cli.tableau.reconcile import apply_reconciliation
-
-        cleaned_cols, cleaned_formulas, result_reconcile_dropped = apply_reconciliation(
-            cleaned_cols, cleaned_formulas, target_cols, column_name_map or {},
-        )
-        typer.echo(
-            f"  Reconcile: {len(result_reconcile_dropped['columns'])} column(s) dropped, "
-            f"{len(result_reconcile_dropped['formulas'])} formula(s) dropped",
-            err=True,
-        )
+    cleaned_cols, cleaned_formulas, result_reconcile_dropped, _early_result = _apply_reconcile_tier(
+        cleaned_cols, cleaned_formulas, reconcile_table, reconcile_plan_mode, column_name_map, profile,
+    )
+    if _early_result is not None:
+        return _early_result
 
     gen_formula_names = {f["name"] for f in cleaned_formulas}
     gen_param_names = {p["name"] for p in parsed["parameters"]}
@@ -748,6 +792,8 @@ def _generate_flow(
         formula_rename_map=rename_map,
         sql_views=sql_views,
     )
+
+    _emit_xref_warnings(model_tml, ds["tables"], cleaned_cols, sql_views)
 
     levels = {}
     for f in cleaned_formulas:
@@ -1089,3 +1135,169 @@ def build_model_cmd(
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))
+
+
+def _resolve_lb_spec(data: dict, model_name, model_fqn, report_name) -> dict:
+    """A full build_from_spec spec (has 'model_name'), or a `ts tableau parse` output
+    (has 'dashboards') → assembled into a spec with --model-name + derived measures."""
+    if data.get("model_name"):
+        return data
+    if "dashboards" not in data:
+        raise SystemExit("Input must be a parse output ('dashboards') or a full spec ('model_name').")
+    if not model_name:
+        raise SystemExit("--model-name is required when --input is a parse output.")
+    measures = sorted({f["name"] for d in data["dashboards"]
+                       for v in d.get("visuals", []) for f in v.get("fields", [])
+                       if f.get("measure")})
+    return {"report_name": report_name or model_name, "model_name": model_name,
+            "model_fqn": model_fqn, "measure_names": measures, "dashboards": data["dashboards"]}
+
+
+@app.command("build-liveboard")
+def build_liveboard_cmd(
+    input_file: str = typer.Option(..., "--input", "-i",
+                                   help="A `ts tableau parse` output (has 'dashboards') OR a full spec (has 'model_name')"),
+    output_dir: str = typer.Option(".", "--output-dir", "-o",
+                                   help="Directory for the emitted .liveboard.tml"),
+    model_name: Optional[str] = typer.Option(None, "--model-name",
+                                             help="Model/table name to bind to (required with a parse-output input)"),
+    model_fqn: Optional[str] = typer.Option(None, "--model-fqn",
+                                            help="Model/table GUID to bind to (optional; more robust than name)"),
+    report_name: Optional[str] = typer.Option(None, "--report-name",
+                                              help="Liveboard name (default: the model name)"),
+) -> None:
+    """Emit Answer + tabbed-Liveboard TML from a parsed Tableau dashboard spec.
+
+    Deterministic replacement for the Step 10 prose templates: role-aware axis layout
+    (Columns→x, Color→series/color, Rows→pivot rows, measures→y), a chart-type requirement
+    floor (flag, don't downgrade), and overrides capture-and-replay (formats /
+    client_state_v2 / custom_chart_config / viz_style). Writes `{report}.liveboard.tml`
+    (full answers embedded) to --output-dir and prints a JSON summary
+    {report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows} to stdout —
+    visual_rows/page_rows feed the Step 12 migration report.
+
+    Example:
+
+    \\b
+      ts tableau build-liveboard -i dashboard_spec.json -o out/
+    """
+    from ts_cli.tableau import liveboard as lb
+    from ts_cli.tml_common import dump_tml_yaml
+
+    p = Path(input_file)
+    if not p.is_file():
+        typer.echo(f"Spec file not found: {input_file}", err=True)
+        raise SystemExit(1)
+    try:
+        data = json.loads(p.read_text())
+    except ValueError as exc:
+        typer.echo(f"Invalid JSON: {exc}", err=True)
+        raise SystemExit(1)
+
+    spec = _resolve_lb_spec(data, model_name, model_fqn, report_name)
+    result = lb.build_from_spec(spec)
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    liveboard_file = None
+    if result["liveboard"]:
+        slug = lb.slugify(spec.get("report_name") or spec["model_name"])
+        liveboard_file = str(out_path / f"{slug}.liveboard.tml")
+        Path(liveboard_file).write_text(dump_tml_yaml(result["liveboard"]))
+
+    n_tabs = len(result["liveboard"]["liveboard"]["layout"]["tabs"]) if result["liveboard"] else 0
+    typer.echo(
+        f"{len(result['answers'])} answer(s), {n_tabs} tab(s) -> {liveboard_file or '(no liveboard)'}",
+        err=True,
+    )
+    print(json.dumps({
+        "report_name": spec.get("report_name") or spec["model_name"],
+        "n_answers": len(result["answers"]),
+        "n_tabs": n_tabs,
+        "liveboard_file": liveboard_file,
+        "visual_rows": result["visual_rows"],
+        "page_rows": result["page_rows"],
+    }, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# ts tableau verify
+# ---------------------------------------------------------------------------
+
+def _load_json(path: Path, label: str) -> dict:
+    if not path.is_file():
+        typer.echo(f"{label} not found: {path}", err=True)
+        raise SystemExit(1)
+    try:
+        return json.loads(path.read_text())
+    except ValueError as exc:
+        typer.echo(f"Invalid JSON in {label.lower()} ({path}): {exc}", err=True)
+        raise SystemExit(1)
+
+
+def _load_yaml_tml(path: Path, label: str) -> dict:
+    if not path.is_file():
+        typer.echo(f"{label} not found: {path}", err=True)
+        raise SystemExit(1)
+    try:
+        return yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        typer.echo(f"Invalid YAML in {label.lower()} ({path}): {exc}", err=True)
+        raise SystemExit(1)
+
+
+def _print_verify_summary(report: dict) -> None:
+    summary = report["summary"]
+    typer.echo(
+        f"Verify: datasource '{summary.get('datasource', '?')}' -> model "
+        f"'{summary.get('model', '?')}' — {summary.get('errors', 0)} error(s), "
+        f"{summary.get('warnings', 0)} warning(s)",
+        err=True,
+    )
+    for check in report["checks"]:
+        typer.echo(f"  [{check['severity']}] {check['name']}", err=True)
+        for f in check["findings"]:
+            typer.echo(f"    - [{f['severity']}] {f['message']}", err=True)
+
+
+@app.command("verify")
+def verify_cmd(
+    input_file: str = typer.Option(
+        ..., "--parse", "--input", "-i",
+        help="`ts tableau parse` output JSON (also accepted as --input, matching "
+             "build-liveboard's convention)"),
+    model_file: str = typer.Option(..., "--model", "-m",
+                                    help="Generated Model TML file to verify against"),
+) -> None:
+    """Diff a parsed Tableau workbook against its generated Model TML.
+
+    Catches silent drops (a table/join/translatable formula the workbook had
+    but the TML doesn't) and mistranslations (a TML formula that barely
+    resembles its Tableau source) that a coverage count computed from the TWB
+    alone — or a server-side VALIDATE_ONLY import — cannot see. Four checks:
+    structural completeness, formula equivalence (token-level LCS similarity),
+    TML validity (delegates to `ts_cli/tml_lint.py`), and limitation coverage
+    (advisory — see `ts_cli/tableau/verify.py`). Formula-tier classification
+    is delegated to `ts_cli/tableau/classify.py`, so an untranslatable formula
+    correctly absent from the model is never flagged as a drop.
+
+    Model<->table-TML dangling-reference checking is provided separately by
+    `ts tml lint --dir` and is intentionally out of scope here.
+
+    Emits the full report as JSON to stdout; a human-readable summary to
+    stderr. Exit code is non-zero if any check carries an ERROR finding.
+
+    \\b
+      ts tableau verify --parse parsed.json --model out/orders.model.tml
+    """
+    from ts_cli.tableau.verify import verify_conversion
+
+    parsed = _load_json(Path(input_file), "Parse file")
+    model_tml = _load_yaml_tml(Path(model_file), "Model TML file")
+
+    report = verify_conversion(parsed, model_tml)
+    _print_verify_summary(report)
+
+    print(json.dumps(report, indent=2))
+    if not report["ok"]:
+        raise SystemExit(1)

@@ -567,12 +567,14 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I4 | `model_tables[].id` != `name` — joins silently fail at query time |
 | I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE |
 | I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
+| XREF | a model `model_tables`/`column_id`/join reference to a table or column that no batch TML generates — surfaces only when a table/sql_view TML is linted **alongside** the model (e.g. `--dir`); a lone model file skips it (no ground truth for what tables exist) |
 
 ```bash
-# Lint a single file
+# Lint a single file (model invariants only)
 ts tml lint --file model.tml
 
-# Lint every TML file in a directory
+# Lint every TML file in a directory — also runs the XREF cross-reference
+# check, since tables + model are present together
 ts tml lint --dir ./tml_out
 
 # Tableau-order directory lint, base model only
@@ -750,11 +752,12 @@ source drift.
 ### `ts connections list`
 
 List all available data connections. Results are auto-paginated — all connections
-are returned regardless of how many exist on the instance.
+are returned regardless of how many exist on the instance. **Lists every warehouse type
+by default** (Snowflake, Databricks, BigQuery, …); pass `--type` to filter to one.
 
 ```bash
-ts connections list
-ts connections list --type BIGQUERY
+ts connections list                      # ALL types
+ts connections list --type DATABRICKS    # filter to one type
 ```
 
 **Options:**
@@ -762,7 +765,12 @@ ts connections list --type BIGQUERY
 | Flag | Default | Description |
 |---|---|---|
 | `--profile`, `-p` | first profile | Profile to use |
-| `--type`, `-t` | `SNOWFLAKE` | Data warehouse type filter |
+| `--type`, `-t` | _(none — all types)_ | Optional data warehouse type filter (e.g. `SNOWFLAKE`, `DATABRICKS`) |
+
+> **Org scope:** connections (and metadata) are org-scoped. To operate in a non-default
+> org, set `TS_ORG=<org_id>` (integer org id) — the CLI mints an org-scoped token
+> (`org_id` on `auth/token/full`) with an org-keyed token cache. Without it, calls run in
+> your default org.
 
 **Output:** JSON array of connection objects.
 
@@ -1031,6 +1039,36 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql cla
 Diagnostic counts go to stderr. The canonical aggregate-function list lives in
 `ts_cli.spotql_ops.AGGREGATE_FUNCS` — a single source of truth, not duplicated in either
 skill's SKILL.md.
+
+---
+
+### `ts spotter answer`
+
+Ask Spotter (ThoughtSpot AI) a single natural-language question over a Model and return
+its answer — crucially the **search tokens** Spotter chose. Wraps the V2 endpoint
+`POST /api/rest/2.0/ai/answer/create` (`singleAnswer`, Beta / 10.4.0.cl+). This is the
+"Spotter last-mile" the conversion skills use: after a model is built, a measure that
+could not be translated deterministically is phrased in plain English, handed to Spotter,
+and the returned tokens are shown to a human to verify against the source numbers before
+being flagged or adopted.
+
+```bash
+ts spotter answer "total sales by region last quarter" --model <model-guid> --profile <name>
+ts spotter answer "count of distinct customers this year" -m <model-guid>
+```
+
+**Output (JSON to stdout):** `{status, message_type, visualization_type,
+session_identifier, generation_number, tokens, display_tokens, errors}`.
+
+- `tokens` / `display_tokens` — the ThoughtSpot Search expression Spotter produced (the
+  field the last-mile workflow inspects). `display_tokens` is the human-friendly form.
+- `status` is `SUCCESS` when an answer was returned, else an error code with a populated
+  `errors[]`: `FORBIDDEN` (missing `CAN_USE_SPOTTER` privilege or no view access to the
+  Model), `UNAUTHORIZED` (bad/expired token), or `SPOTTER_ERROR` (Spotter could not answer,
+  or is not enabled on the cluster).
+
+Requires `CAN_USE_SPOTTER` and view access to the target Model, and Spotter enabled on the
+cluster. Diagnostics go to stderr; the JSON goes to stdout.
 
 ---
 
@@ -1716,6 +1754,107 @@ ts aggregate generate --dir /tmp/agg --candidate cand_3 \
 `agg_model.tml.yaml`, and `primary_patched.tml.yaml` (the primary Model TML with the
 new `aggregated_models` entry patched in) to `--out-dir`. Stdout: `{"candidate",
 "aggregate_name", "files"}`.
+### `ts tableau build-liveboard`
+
+Emit Answer + tabbed-Liveboard TML deterministically from a parsed Tableau dashboard
+spec — the codified replacement for the LLM-executed chart/liveboard prose templates
+(SKILL.md Step 10). Role-aware axis layout (Columns→x, Color→series/color, Rows→pivot
+rows, measures→y), a chart-type requirement floor (flags a chart that lacks the measures
+it needs — never silently downgrades it), and overrides capture-and-replay (per-column
+`format`, `client_state_v2`, the authoritative `custom_chart_config` for combos, and
+`viz_style`). The ThoughtSpot-side emission is ported from the verified standalone Power BI
+converter (`_answer_tml`/`_answer_tml_explicit`/`_liveboard_tml`).
+
+```bash
+ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
+```
+
+**Input** (`--input`): a JSON dashboard spec — see `build_from_spec` in
+`ts_cli/tableau/liveboard.py` for the full shape:
+
+```json
+{
+  "report_name": "Sales Report", "model_name": "Sales Model", "model_fqn": null,
+  "measure_names": ["Total Sales"],
+  "dashboards": [
+    {"name": "Overview", "visuals": [
+      {"title": "Sales by Region", "mark": "bar",
+       "fields": [{"name": "Region", "shelf": "columns", "measure": false},
+                  {"name": "Total Sales", "measure": true},
+                  {"name": "Segment", "role": "Series"}],
+       "tile": {"x": 0, "y": 0, "width": 6, "height": 8}}
+    ]}
+  ]
+}
+```
+
+- Each field carries a Tableau `shelf` (`columns`/`rows`/`color`) — mapped to a
+  canonical role — or an explicit `role` that wins over the shelf. `measure: true`
+  columns always land on y.
+- A visual may carry an `override` (verbatim answer spec) for anything the auto-builder
+  can't express. `tile` is the Step 9c grid placement; omit it for a two-per-row layout.
+- `extra_visuals[]` (top level) adds tiles that have no Tableau source visual.
+
+**Two live-verified emission rules (v0.55.0):**
+- **Bucketed dates** — a `bucket_tokens` entry like `{"Order Date": "[Order Date].monthly"}`
+  puts the token in `search_query` but references the **resolved** output column
+  (`Month(Order Date)`) in chart/axis/table — the raw name won't match the search output and
+  errors `Invalid GUID string` on import. Bare (unbucketed) dates are fine by their raw name.
+- **Combos** — emit `ADVANCED_LINE_COLUMN` + both measures on `axis`; ThoughtSpot auto-resolves
+  line vs column. **Do not hand-author `custom_chart_config`** — its column refs are GUIDs
+  (assigned after an answer exists), so a display-name config fails a fresh import. The command
+  **drops** a display-name `custom_chart_config` and replays only a genuine captured
+  (GUID-based) one. To pin an exact split: import → tune in UI → export → replay the exported
+  config via the visual's `override`.
+
+**Output:** writes `{report}.liveboard.tml` (with every answer embedded) to `--output-dir`.
+Stdout: JSON `{report_name, n_answers, n_tabs, liveboard_file, visual_rows, page_rows}` —
+`visual_rows`/`page_rows` feed the Step 12 migration report.
+
+### `ts tableau verify`
+
+Source↔output migration-fidelity gate: diffs the *parsed* Tableau workbook against the
+*generated* Model TML to catch silent drops (a table/join/translatable formula the
+workbook had but the TML doesn't) and mistranslations (a TML formula that barely
+resembles its Tableau source) — the two failure classes a coverage count computed from
+the TWB alone, or a server-side `VALIDATE_ONLY` import, cannot see (an import gate only
+sees what was emitted; it has no idea what the source contained).
+
+```bash
+ts tableau verify --parse parsed.json --model out/orders.model.tml
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--parse`, `--input`, `-i` | yes | `ts tableau parse` output JSON (`--input` accepted as an alias, matching `build-liveboard`'s convention) |
+| `--model`, `-m` | yes | The generated `*.model.tml` file to verify |
+
+Runs four checks (implemented in `ts_cli/tableau/verify.py::verify_conversion`, pure —
+no Tableau/ThoughtSpot connection):
+
+1. **structural** — datasources→model, physical tables/custom-SQL→`model_tables`, join
+   counts, and a translatable/untranslatable formula split via
+   `ts_cli/tableau/classify.py::classify_formulas` (so this can never disagree with
+   `classify-formulas`/`build-model`). ERROR when a translatable formula, physical
+   table, or custom-SQL relation is missing from the generated TML.
+2. **formula_equivalence** — for each translatable formula, token-normalizes both the
+   raw Tableau expression and its TML translation and scores an LCS-based similarity
+   (MATCH ≥85%, PARTIAL 50–84%, LOW <50%, MISSING). PARTIAL/LOW are candidate
+   mistranslations flagged for manual review.
+3. **validity** — reuses `ts_cli/tml_lint.py::lint_tml` (I1/I2/I4/I5/I8) — no invariant
+   logic is re-implemented here. Model↔table-TML dangling-reference checking (a
+   `columns[].column_id` that no longer resolves on its table TML) is a separate concern,
+   covered by `ts tml lint --dir`.
+4. **limitation_coverage** — reports how many untranslatable formulas were detected.
+   Advisory only (`ts tableau verify` has no `--limitations`/report-list input today).
+
+A formula tiered `UNTRANSLATABLE` by `classify_formulas` (geospatial, circular, orphan,
+parameter-query, or genuinely untranslatable) is *expected* to be absent from
+`model.formulas` and is never counted as a drop.
+
+**Output:** the full report as JSON to stdout (`{"ok", "checks": [{"name", "severity",
+"findings"}], "summary"}`); a human-readable summary to stderr. Exit code is non-zero if
+any check carries an ERROR-severity finding.
 
 ---
 
@@ -1803,6 +1942,36 @@ ts load snowflake --source ./csvs/ --profile Production \
 | `--rows` | `100` | Rows to generate (with `--generate-sample`) |
 
 **Output:** JSON with `database`, `schema`, `profile`, and `tables[]` array containing `table_name`, `status`, `rows_loaded`, `columns`, `source_file`.
+
+### `ts load databricks`
+
+Provision table(s) + synthetic data into a Databricks `catalog.schema` (Unity Catalog), so a
+ThoughtSpot Databricks connection can bind a model over them. Auth via a Databricks profile in
+`~/.claude/databricks-profiles.json` (`dbx_profile`, `sql_warehouse_http_path`, `catalog`,
+`schema`); the token lives in `~/.databrickscfg` (`databricks auth login`), never in the
+profile file. Execution goes through the `databricks` CLI's SQL Statement Execution API.
+
+```
+ts load databricks --source ./orders_demo_schema.json --profile sisense-dbx --rows 200
+```
+
+Infers the schema from `--source` (manifest / schema JSON / CSV dir), generates deterministic
+synthetic rows, then `CREATE TABLE` (Delta **column mapping** enabled — preserves column names
+with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source`, `-s` | — | Schema/manifest JSON or CSV dir (required) |
+| `--profile`, `-p` | — | Databricks profile name (required) |
+| `--catalog` / `--schema` | from profile | Override target catalog/schema |
+| `--rows`, `-r` | `100` | Synthetic rows per table |
+| `--batch` | `200` | Rows per `INSERT` statement |
+
+> **Connection caveat (live-verified):** for a ThoughtSpot model to bind to the new table, the
+> connection must expose it. A **SERVICE_ACCOUNT** Databricks connection introspects it
+> automatically; an **OAuth/PKCE** connection returns an empty API hierarchy (a ThoughtSpot
+> limitation), so the new table must be **selected in the ThoughtSpot connection editor (UI)**
+> before `ts tables create` / model build can reference it.
 
 ### `ts snowflake diff`
 
@@ -2057,3 +2226,45 @@ skipped import); `1` — a builder `ValueError` (bad alias, duplicate formula
 title, unsupported join), the zero-column-table guard, non-empty
 `invariant_findings`/`lint_findings`, an unreadable/invalid input file, or an
 import failure.
+
+### `ts databricks build-mv`
+
+Emit Databricks Metric View `.sql` file(s) (`CREATE OR REPLACE VIEW ... WITH
+METRICS`) from an exported ThoughtSpot Model, for the `ts-convert-to-databricks-mv`
+skill. Emit-only — no ThoughtSpot or Databricks profile is used or needed, and
+no DDL is ever executed; it reads local Model/Table TML JSON and writes local
+`.sql` files.
+
+```bash
+ts databricks build-mv \
+  --model model.json --tables tables.json \
+  --catalog analytics --schema sales \
+  --output-dir out/
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--model` / `-m` | yes | Exported Model TML JSON (`{"model": {...}}`, or a bare model dict) |
+| `--tables` | yes | Associated Table TML JSON list (`[{"table": {...}}, ...]`) |
+| `--catalog` | yes | Databricks catalog for the MV's source table and the view itself |
+| `--schema` | yes | Databricks schema for the MV's source table and the view itself |
+| `--output-dir` / `-o` | yes | Directory for the generated `.sql` file(s) |
+| `--source-table` | no | Fact table to build the MV for; omit to emit one MV per fact table `mv_emit.detect_fact_tables` finds (a table carrying ≥1 MEASURE column that is not itself the join target of another table) |
+| `--view-name` | no | Override the generated view name — only honoured when exactly one MV is being emitted (a single `--source-table`, or a model with exactly one detected fact) |
+
+Each fact produces one `{view_name}.sql` file in `--output-dir` (default name
+`{model}_{fact}_mv`, via `mv_build_view.default_view_name`). A fact table this
+model has no MEASURE column for, or that a formula fails to translate for,
+naturally lands in that MV's `skipped[]` rather than aborting the whole run.
+
+**Output:** a summary JSON on stdout (the only stdout output — diagnostics are
+on stderr): `model_name`, `metric_views[]` (`view_name`, `source`, `dimensions`,
+`measures`, `filter_applied`, `file`), `skipped[]`, `warnings[]` — the
+`mv_build_view.build_summary` shape.
+
+Exit codes: `0` — every produced MV has at least one measure; `1` — no fact
+table could be found (no `--source-table` and no MEASURE column anywhere in
+the model), an unreadable/invalid `--model`/`--tables` file, a structural
+`ValueError` while building an MV (e.g. a duplicate emitted column name, or
+the `build_view_ddl` `$$`-collision guard), or any produced MV ends up with
+zero measures.

@@ -13,6 +13,31 @@ import re
 
 
 # ---------------------------------------------------------------------------
+# Shared translation-failure exception
+# ---------------------------------------------------------------------------
+
+class UntranslatableError(Exception):
+    """A formula/expression construct has no deterministic translation to the
+    other platform's syntax.
+
+    Canonical home (BL-063 PR 14 — Genie vendor wiring): both the reverse
+    (Databricks-SQL -> ThoughtSpot formula, `mv_sql.py`) and forward
+    (ThoughtSpot formula -> Databricks-SQL, `mv_emit_expr.py`) directions
+    raise this SAME exception type for the same concept — "no documented
+    deterministic mapping exists" — so a single `except UntranslatableError`
+    catches either direction's failures. Concatenating both modules into one
+    vendored Genie notebook namespace (`agents/databricks/build_mv_lib.py`)
+    would otherwise define the class twice under one name, which
+    `assert_no_duplicate_top_level_names` rejects. `mv_sql.py` and
+    `mv_emit_expr.py` both re-export this name (`from ts_cli.formula_common
+    import UntranslatableError`) so existing `from
+    ts_cli.databricks.mv_sql import UntranslatableError` / `from
+    ts_cli.databricks.mv_emit_expr import UntranslatableError` call sites are
+    unaffected.
+    """
+
+
+# ---------------------------------------------------------------------------
 # Name collision resolution
 # ---------------------------------------------------------------------------
 

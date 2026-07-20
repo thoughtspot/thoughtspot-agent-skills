@@ -9,7 +9,7 @@ and the extension pattern.
 ts_cli/
   cli.py              — Typer app entry point; registers command groups
   client.py           — ThoughtSpotClient REST wrapper; handles token caching and auth
-  tml_lint.py         — Pre-import TML linter (pure functions, no I/O)
+  tml_lint.py         — Pre-import TML linter: lint_tml (single-document I1/I2/I4/I5/I8 + guid-placement invariants) (pure functions, no I/O)
   tml_common.py       — platform-neutral TML YAML serialization (dump_tml_yaml) + import-response GUID parsing (extract_imported_guid) — relocated from tableau/ (BL-063 PR5); pure functions, Genie-vendorable
   formula_common.py   — platform-neutral formula/name transforms (resolve_name_collisions, add_formula_prefix, expr_is_aggregated, fix_double_aggregation) — relocated from model_builder.py/tableau/naming.py (BL-063 PR5); pure functions, Genie-vendorable
   model_builder.py     — Tableau TML assembly + phased-import orchestration facade (pure functions, no I/O; TWB parsing lives in ts_cli/tableau/twb.py)
@@ -50,7 +50,10 @@ ts_cli/
     yaml_out.py           — shim — dump_tml_yaml relocated to ts_cli/tml_common.py (BL-063 PR5); re-exported here for backward compat
     twb.py                — TWB/TWBX XML parsing (tables, columns, joins, calcs, params)
     classify.py            — formula tier classification behind `ts tableau classify-formulas` (classify_formulas/TRANSLATABLE_TIERS/UNTRANSLATABLE_TIERS; delegates the translatable verdict to tableau_translate.py so audit and migrate agree)
+    verify.py              — source↔output migration-fidelity gate behind `ts tableau verify` (verify_conversion: structural/formula_equivalence/validity/limitation_coverage checks, diffing a `ts tableau parse` output against the generated Model TML; reuses classify.py's tier split — so an untranslatable formula's absence from model.formulas is never flagged as a drop — and tml_lint.py's lint_tml for validity, never re-implementing invariant logic. Model↔table-TML dangling-reference checking is a separate concern, covered by `ts tml lint --dir`) (pure functions, no I/O)
     build_model.py        — pure helpers behind `ts tableau build-model` (sqlproxy scoping, merge prep, import-error parsing)
+    dashboards.py         — pure dashboard/visual extraction (open item #20): `<dashboard>` zones → build_from_spec visuals (mark + fields by shelf/role/measure + calc-id→caption resolution + date buckets + grid tiles). Emitted by `ts tableau parse` (`dashboards` key); consumed by `ts tableau build-liveboard --input <parse.json> --model-name ...` so parse→liveboard runs with no hand-assembled spec
+    liveboard.py          — pure Answer + tabbed-Liveboard emission behind `ts tableau build-liveboard` (role-aware axis layout, chart-needs floor, overrides replay); ThoughtSpot-side logic ported from the standalone Power BI converter's generate_tml.py (_answer_tml/_answer_tml_explicit/_liveboard_tml). Live-verified fixes (v0.55.0): bucketed dates use the resolved output name (`Month(Date)`) not the raw name; a hand-authored (display-name) `custom_chart_config` is DROPPED (its refs must be GUIDs — fresh import else errors `Invalid GUID string`), keeping only genuine captured GUID-based configs
     client.py             — TableauClient (HTTP) + profile resolution; the package's one I/O module
   databricks/
     __init__.py         — package marker (stdlib + PyYAML only — Genie-vendorable, no HTTP/auth deps)
@@ -61,6 +64,14 @@ ts_cli/
     mv_sql_constructs.py — CASE/CAST/NOT/IS/IN/BETWEEN keyword-construct handlers split out of mv_sql.py under the file-size warn line; late-imports mv_sql's expression primitives to avoid a circular import (pure functions, no I/O; BL-063 PR3)
     mv_translate.py     — parsed Metric View -> translated ThoughtSpot formulas behind `ts databricks translate-formulas`: dot-path resolution, LOD windows, conditional aggregates, cross-measure inlining via dependency DAG; re-exports translate_window_measure from mv_window_translate.py (pure functions, no I/O; BL-063 PR3)
     mv_window_translate.py — windowed-measure translation (trailing/leading/cumulative/current decision tree, BL-098 sparse-data-risk annotations) split out of mv_translate.py under the file-size warn line; late-imports mv_translate's make_resolver/_formula_measure to avoid a circular import (pure functions, no I/O; BL-063 PR3)
+    mv_emit_expr.py     — TS-formula tokenizer + recursive-descent parser -> dict-AST (reverse direction) behind `ts databricks build-mv`; re-exports UntranslatableError from formula_common.py (pure functions, no I/O; Genie-vendorable)
+    mv_emit_sql.py      — dict-AST -> Databricks-SQL string (reverse direction): AGG_MAP/SCALAR_FN_MAP/COND_AGG/PASSTHROUGH_FN dicts, operator-precedence-aware emit_sql, plus the raw-measure aggregation wrapper (is_aggregate_present/wrap_measure_if_needed, Task 18 Finding 1) that matches ThoughtSpot's own SUM-at-query-time semantics for a no-aggregate formula measure (pure functions, no I/O; Genie-vendorable)
+    mv_emit_base.py     — Foundation helpers for the reverse direction: physical-column indexing (build_column_index), column resolvers (make_col_resolver), and formula-AST [ref] resolution (resolve_refs), plus to_snake; split out of mv_emit.py so mv_emit_joins.py/mv_emit_classify.py can both depend on it without a cycle back through mv_emit.py (pure functions, no I/O; Genie-vendorable)
+    mv_emit_joins.py    — join assembly (reverse direction): build_joins walks model_tables[].joins[] breadth-first from the fact table emitting nested Metric View join nodes + dot-paths; split out of mv_emit.py under the file-size gate; imports Foundation from mv_emit_base.py, never from mv_emit.py (pure functions, no I/O; Genie-vendorable)
+    mv_emit_classify.py — column classification (classify_column) + non-window dimension/measure/filter emitters + LOD dimension-window emission (emit_lod_dimension), split out of mv_emit.py under the file-size gate; imports Foundation from mv_emit_base.py, never from mv_emit.py; does not depend on mv_emit_joins.py (pure functions, no I/O; Genie-vendorable)
+    mv_emit.py          — ThoughtSpot Model TML -> Databricks Metric View YAML orchestrator (reverse direction) behind `ts databricks build-mv`: fact-table detection, cross-reference role resolution, the two emission passes, dangling-ref cascade, build_metric_view top-level entry point; re-exports Foundation (mv_emit_base.py), join assembly (mv_emit_joins.py), classification/LOD emitters (mv_emit_classify.py), and the window-measure API (mv_emit_window.py) so existing callers/tests keep importing from mv_emit unchanged (pure functions, no I/O)
+    mv_emit_window.py   — window-measure emission (moving/cumulative/semi-additive/period-offset), split out of mv_emit.py under the file-size gate; mirrors the mv_translate.py/mv_window_translate.py split for the reverse direction (pure functions, no I/O; Genie-vendorable)
+    mv_build_view.py    — Metric View YAML doc -> `CREATE VIEW ... WITH METRICS LANGUAGE YAML AS $$...$$` DDL + build_summary (the `ts databricks build-mv` stdout JSON contract) + default_view_name; the one place an MV YAML body is dumped via `yaml.safe_dump` directly, with a fail-loud guard against a literal `$$` inside the body (pure + PyYAML only, no HTTP/auth/typer deps; Genie-vendorable)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
@@ -69,13 +80,14 @@ ts_cli/
     tml.py        — ts tml export / import / lint
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
-    tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model)
+    tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model, build-liveboard, verify)
     snowflake.py  — ts snowflake (diff, lint-ddl, exec)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
+    spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
-    databricks.py — ts databricks (parse-mv, translate-formulas, build-model) — BL-063 PR2/PR3/PR4
+    databricks.py — ts databricks (parse-mv, translate-formulas, build-model, build-mv) — BL-063 PR2/PR3/PR4; build-mv is the reverse (TS Model -> Databricks Metric View) deterministic emitter over mv_emit.py/mv_build_view.py, emit-only (no --profile, no ThoughtSpot/Databricks connection)
     aggregate.py  — ts aggregate (signatures, recommend, profile, history, generate) — aggregate-model advisor engine
     aggregate_rls.py — RLS command-layer wiring for `ts aggregate` (Task 23): _attach_rls_conflicts (recommend advisory surfacing) + _propagate_rls_or_fail_closed (generate security gate — fails closed on incomplete tables-dir or grain missing an RLS filter column) over the pure aggregate/rls.py engine; split out of aggregate.py to stay under the file-size gate, imported lazily from recommend/generate
   audit/
@@ -98,7 +110,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.53.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.62.1**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

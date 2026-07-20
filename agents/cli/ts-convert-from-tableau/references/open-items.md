@@ -162,3 +162,135 @@ Not yet determined whether this is a YAML escaping issue or a ThoughtSpot valida
 restriction. If YAML escaping, quoting the values may work — not tested.
 
 Status: VERIFIED — workaround is to avoid special characters in parameter values
+
+---
+
+## #17 — Spotter last-mile (`ts spotter answer`, Step 12.6) — SPEC-VERIFIED, LIVE-VERIFICATION PENDING
+
+Step 12.6 calls `ts spotter answer` (ts-cli v0.53.0), which wraps
+`POST /api/rest/2.0/ai/answer/create` (`singleAnswer`).
+
+**Spec verified 2026-07-15** via `get-rest-api-reference(apiName: "singleAnswer")`:
+request body `{query, metadata_identifier}` (both required); 200 success returns
+`{message_type, visualization_type, session_identifier, generation_number, tokens,
+display_tokens}`; requires `CAN_USE_SPOTTER` + view access to the model; Beta (10.4.0.cl+),
+needs Spotter enabled on the cluster. The command's `normalise_answer_response` is
+unit-tested (10 cases) for SUCCESS / FORBIDDEN / UNAUTHORIZED / SPOTTER_ERROR / 201-error /
+empty-body / parse-error.
+
+**Not yet live-verified.** No live call has been made: the local `ps-internal` profile
+has no cached credential in this environment, and it is not confirmed Spotter-enabled. To
+close: run against a Spotter-enabled instance (ideally the customer's own model, since the
+value depends on that model's data) and confirm (a) `tokens`/`display_tokens` come back
+non-empty for a real question, (b) the returned Search reproduces the source measure's
+number when run via `ts spotql fetch-data` or a coverage answer, and (c) the FORBIDDEN
+path fires cleanly for a user without `CAN_USE_SPOTTER`.
+
+Status: SPEC-VERIFIED via MCP 2026-07-15; LIVE-VERIFICATION PENDING (run on a
+Spotter-enabled instance before relying on Step 12.6 output)
+
+---
+
+## #18 — CURRENCY / NUMBER answer_columns format sub-config — TO VERIFY
+
+Step 10b now carries Tableau currency/number/decimal formats to `answer_columns[].format`.
+Only `category: PERCENTAGE` (`percentageFormatConfig.decimals`) is live-verified in
+`thoughtspot-answer-tml.md`. The CURRENCY (`currencyFormatConfig`) and NUMBER
+(`numberFormatConfig`) shapes are documented by parallel structure but **not** verified —
+confirm the exact field names against a live Answer export (edit a currency + a
+thousands-separated number column in the UI, export the answer TML, read the `format` block)
+before relying on them. Until verified, the skill's guidance is to ship the numeric measure
+unformatted rather than emit a `format` block that could fail import.
+
+Status: TO VERIFY — capture a live Answer export with currency + number formats
+
+---
+
+## #19 — `sorted by … descending/ascending` search token — TO VERIFY
+
+Step 10b carries a plain measure sort as `sorted by [Measure] descending`/`ascending` in the
+`search_query`. `top N` / `bottom N` are verified (open items in the Top-N set work); the bare
+`sorted by … descending` token has not been round-tripped here. Confirm it parses and renders
+on the target build; if the exact keyword differs, correct Step 10b.
+
+Status: TO VERIFY — round-trip a sorted (non-Top-N) viz on a live instance
+
+---
+
+## #20 — `ts tableau build-liveboard` spec extraction from the parser — FOLLOW-ON
+
+`ts tableau build-liveboard` (ts-cli v0.54.0) emits the base answer/liveboard TML
+deterministically from a dashboard spec (role-aware axes, chart-needs floor, overrides
+replay — Step 10c). The spec is currently **assembled by the skill** from the Step 9 parse.
+To make Step 10 fully deterministic end-to-end, extend `ts tableau parse` (`twb.py`) to
+extract per-visual shelves + roles (Columns/Rows/Color) and dashboard zones, so the spec is
+produced by the parser with no hand-assembly. Emission engine + command are done and
+unit-tested (`test_tableau_liveboard.py`, 21 cases); this is the remaining parser half.
+
+**Live import — VERIFIED 2026-07-15 on ps-internal.** Built a spec from the real
+"Retail Sales - Classic" model's columns, emitted via `ts tableau build-liveboard`, and
+imported it live: a 4-viz liveboard persisted + re-exported clean (real round-trip), and the
+full 5-viz spec passes `--policy VALIDATE_ONLY` (guid assigned, all bindings resolve). Two
+emitter bugs the live import caught (lint did NOT) — both **FIXED in ts-cli v0.55.0**:
+- **custom_chart_config** column refs are GUIDs, not display names — a hand-authored
+  display-name config errors `Invalid GUID string` on fresh import. `build_answer_explicit`
+  now drops a display-name `custom_chart_config` (keeps a genuine GUID-based captured one) and
+  lets `ADVANCED_LINE_COLUMN` auto-resolve the line/column. Docs corrected (worked example,
+  `thoughtspot-chart-types.md`, Step 10a).
+- **bucketed dates** are renamed in the output (`[Date].monthly` → column `Month(Date)`);
+  `build_answer` now references the resolved name in chart/axis/table (search still uses the
+  token). Bare (unbucketed) dates were never a problem.
+
+**Parser dashboard/role extraction — DONE 2026-07-16 (ts-cli v0.59.0).** `ts tableau parse`
+now emits a `dashboards` key (each `<dashboard>` → visuals with mark + fields tagged by
+shelf/role/measure, calc-id→caption resolution, date buckets, grid tiles) via
+`ts_cli/tableau/dashboards.py`. `ts tableau build-liveboard --input <parse.json> --model-name
+<model>` consumes it directly — **parse→build-liveboard now runs with no hand-assembled spec**.
+Live-verified on the FedEx VEDR workbook: parse → 18 auto-extracted visuals → build-liveboard
+emitted a clean-linting 18-tile liveboard bound to the model (vs the prior hand-picked subset).
+
+Remaining fidelity follow-ons (not blockers): (a) caption↔model-formula-name reconciliation
+when binding to a pre-existing model whose formula names differ from the workbook captions;
+(b) KPI-on-attribute-grade handling (a PASS/FAIL grade KPI is flagged NEEDS REVIEW since a KPI
+wants a measure); (c) container-tree tile layout (currently coord-proportional).
+
+Status: RESOLVED (parser extraction + end-to-end parse→build-liveboard) 2026-07-16; fidelity
+follow-ons tracked above.
+
+---
+
+## #21 — Deterministic import-error classification + lock registry — DEFERRED (needs live cluster)
+
+Harvested idea from the closed parallel converter (PR #252, `tableau_validate.py`): replace the
+Step 6 `VALIDATE_ONLY` fix loop's *memoryless* retry with a deterministic classifier that buckets
+each per-object import error as **fixable / locked / warning** by error code + message, backed by a
+persisted **lock registry** (a model depending on a locked sql_view cascade-locks), a hard
+**attempt cap**, and an auto-written **`MIGRATION_LIMITATIONS.md`**. Today our loop re-hands every
+error to the LLM each cycle with no memory, so it can retry an unfixable error up to 10 times.
+
+The mechanism is portable and unit-testable with synthetic responses, BUT it keys on specific
+ThoughtSpot import error **codes** (e.g. 14540 / 14516 / 14537, the "invalid identifier" nuance on
+14537, QUALIFY/LOOKUP/INDEX/SIZE/PREVIOUS_VALUE → locked). Those must be confirmed against a live
+cluster before shipping — coding them from the (unverified) reference converter would violate the
+repo "no shipped-unverified assumptions" rule. Path: MCP first
+(`get-rest-api-reference` for `importMetadataTML` error shapes), then live-verify the codes on a
+real failing import, record the finding here, then codify into `ts_cli/tableau/` + wire into Step 6.
+
+Status: DEFERRED — needs a live instance to confirm the import error codes.
+
+---
+
+## #22 — `<object-graph>` (Tableau 2020.2+ relationship) join extraction — DEFERRED (needs a modern .twb)
+
+The closed converter (PR #252) extracted joins from the Tableau 2020.2+ `<object-graph>` /
+`<relationships>` object model (mapping relationship endpoints back to relation names via
+metadata-record object-id hashes). Our `ts_cli/tableau/twb.py` handles classic `<relation join=…>`
+**and** a `datasource-relationships` block, so we are **not** blind to the modern model — but
+whether the specific `<object-graph>` element variant is a real gap (a modern single-datasource
+multi-table workbook parsing with **zero** joins) is unconfirmed.
+
+Needs a real 2020.2+ relationship-based `.twb` fixture: parse it, check the join count, and only
+add `<object-graph>` handling if joins are genuinely missing. Do **not** port speculatively — our
+existing relationship parsing may already cover it.
+
+Status: DEFERRED — needs a modern relationship-based .twb to confirm whether a gap exists.

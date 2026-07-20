@@ -217,6 +217,151 @@ def build_model_cmd(
         raise SystemExit(1)
 
 
+@app.command("build-mv")
+def build_mv_cmd(
+    model_path: str = typer.Option(
+        ..., "--model", "-m", help="Exported Model TML JSON ({model: ...})"),
+    tables_path: str = typer.Option(
+        ..., "--tables", help="Associated Table TML JSON list"),
+    catalog: str = typer.Option(
+        ..., "--catalog", help="Databricks catalog for source + view"),
+    schema: str = typer.Option(
+        ..., "--schema", help="Databricks schema for source + view"),
+    output_dir: str = typer.Option(
+        ..., "--output-dir", "-o", help="Directory for generated .sql files"),
+    source_table: Optional[str] = typer.Option(
+        None, "--source-table",
+        help="Fact table for the MV; omit to emit one MV per detected fact"),
+    view_name: Optional[str] = typer.Option(
+        None, "--view-name", help="Override the view name (single-source only)"),
+) -> None:
+    """Emit Databricks Metric View .sql file(s) from an exported ThoughtSpot Model.
+
+    Emit-only: reads local Model/Table TML JSON and writes local
+    `CREATE OR REPLACE VIEW ... WITH METRICS` .sql files. No ThoughtSpot or
+    Databricks profile is used or needed, and no DDL is ever executed here.
+    One MV per `--source-table` when given, else one per fact table from
+    `mv_emit.detect_fact_tables`. Summary JSON (the `mv_build_view.build_summary`
+    shape) on stdout; diagnostics on stderr. Exit 1 if any produced MV has
+    zero measures, if no fact table can be found, or on a structural
+    `ValueError` while building/writing an MV.
+    """
+    from ts_cli.databricks.mv_build_view import build_summary
+    from ts_cli.databricks.mv_emit import detect_fact_tables
+
+    model = _load_model_json(model_path)
+    tables = _load_tables_json(tables_path)
+
+    facts = [source_table] if source_table else detect_fact_tables(model)
+    if not facts:
+        typer.echo(
+            "no fact table detected: ensure the model has at least one MEASURE "
+            "column, or pass --source-table explicitly for models where fact "
+            "detection can't infer the fact (e.g. a lone condition-first formula "
+            "measure with no physical measure)", err=True)
+        raise SystemExit(1)
+
+    model_name = model.get("name", "model")
+    override_name = view_name if len(facts) == 1 else None
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    mvs = [_build_one_mv(model, tables, fact, catalog=catalog, schema=schema,
+                        model_name=model_name, out_dir=out_dir,
+                        override_name=override_name) for fact in facts]
+
+    for mv in mvs:
+        _echo_build_mv_diagnostics(mv["view_name"], mv.get("warnings") or [],
+                                   mv.get("skipped") or [])
+
+    summary = build_summary(model_name, mvs)
+    typer.echo(json.dumps(summary))
+    if any(mv["measures"] == 0 for mv in summary["metric_views"]):
+        raise SystemExit(1)
+
+
+def _build_one_mv(model: dict, tables: list, fact: str, *, catalog: str, schema: str,
+                  model_name: str, out_dir: Path, override_name: Optional[str]) -> dict:
+    """Build + write one Metric View .sql for `fact`. Exits 1 (stderr) on a
+    structural ValueError from build_metric_view (e.g. a duplicate emitted
+    name) or build_view_ddl (the `$$`-collision guard), or on an
+    UntranslatableError from build_metric_view/build_joins (e.g. a joined
+    table referenced by the model but absent from `--tables`) -- before any
+    file is written for this fact.
+    """
+    from ts_cli.databricks.mv_build_view import build_view_ddl, default_view_name
+    from ts_cli.databricks.mv_emit import build_metric_view
+    from ts_cli.databricks.mv_emit_expr import UntranslatableError
+
+    try:
+        result = build_metric_view(model, tables, fact, catalog=catalog, schema=schema)
+        vn = override_name or default_view_name(model_name, fact)
+        ddl = build_view_ddl(result["yaml_doc"], catalog=catalog, schema=schema, view_name=vn)
+    except (ValueError, UntranslatableError) as exc:
+        typer.echo(f"cannot build metric view for fact table '{fact}': {exc}", err=True)
+        raise SystemExit(1)
+
+    file_path = out_dir / f"{vn}.sql"
+    file_path.write_text(ddl)
+
+    mv_entry = dict(result)
+    mv_entry["view_name"] = vn
+    mv_entry["file"] = str(file_path)
+    return mv_entry
+
+
+def _echo_build_mv_diagnostics(view_name: str, warnings: list[str], skipped: list[dict]) -> None:
+    """WARNING per genuine mv_emit advisory, SKIPPED per skipped entry (stderr).
+
+    `mv_emit.build_metric_view`'s own `warnings[]` embeds a duplicate
+    "skipped ... column ...: reason" string for every `skipped[]` entry by
+    design (see `mv_emit._record_skip`'s docstring). Those duplicates are
+    filtered out here and re-derived as SKIPPED lines in the same format
+    `_echo_translate_diagnostics` uses below, so only the genuinely distinct
+    advisories (e.g. filter-routing confirmations) print as WARNING --
+    avoiding printing the same finding twice per MV.
+    """
+    skip_texts = {f"skipped {s['role']} column {s['name']!r}: {s['reason']}" for s in skipped}
+    for warning in warnings:
+        if warning in skip_texts:
+            continue
+        typer.echo(f"WARNING [{view_name}]: {warning}", err=True)
+    for skip in skipped:
+        typer.echo(f"SKIPPED [{view_name}] {skip['role']} '{skip['name']}': {skip['reason']}",
+                   err=True)
+
+
+def _load_model_json(path_str: str) -> dict:
+    """Load the exported Model TML JSON, unwrapping a top-level `{"model": {...}}`
+    envelope (the standard TML-export shape) or accepting a bare model dict."""
+    data = _load_json(path_str, "model")
+    inner = data.get("model")
+    return inner if isinstance(inner, dict) else data
+
+
+def _load_tables_json(path_str: str) -> list:
+    """Load the associated Table TML JSON list (`[{"table": {...}}, ...]`).
+
+    Distinct from `_load_json` (which requires a JSON object) because
+    `mv_emit.build_metric_view`'s `tables` parameter is a list, not a dict --
+    the `ts databricks build-model` command's `--tables` shape (an
+    alias-keyed dict) is unrelated to this one.
+    """
+    path = Path(path_str)
+    if not path.exists():
+        typer.echo(f"tables file not found: {path_str}", err=True)
+        raise SystemExit(1)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        typer.echo(f"cannot read tables {path_str}: {exc}", err=True)
+        raise SystemExit(1)
+    if not isinstance(data, list):
+        typer.echo(f"tables must be a JSON list: {path_str}", err=True)
+        raise SystemExit(1)
+    return data
+
+
 def _echo_translate_diagnostics(build_info: dict, skipped: list[dict]) -> None:
     """WARNING per sparse_data_risk annotation, SKIPPED per skipped entry (stderr)."""
     for wm in build_info["window_measures"]:

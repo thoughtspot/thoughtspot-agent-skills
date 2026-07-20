@@ -61,6 +61,8 @@ def semiadditive_measures(plans: dict) -> list:
     return out
 
 
+import re
+
 _DATE_DTYPES = {"DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"}
 _DATE_JOIN_RE = re.compile(r"\[([^\]:]+::[^\]]+)\]\s*=\s*\[([^\]:]+::[^\]]+)\]")
 

@@ -67,6 +67,23 @@ class TestMapDbxType:
         assert "ts-from-databricks-rules.md" in str(exc.value)
 
 
+class TestTsTypeToDbx:
+    def test_canonical(self):
+        from ts_cli.databricks.mv_tml import ts_type_to_dbx
+        assert ts_type_to_dbx("VARCHAR") == "string"
+        assert ts_type_to_dbx("INT64") == "bigint"
+        assert ts_type_to_dbx("DOUBLE") == "double"
+        assert ts_type_to_dbx("BOOL") == "boolean"
+        assert ts_type_to_dbx("DATE") == "date"
+        assert ts_type_to_dbx("DATETIME") == "timestamp"
+
+    def test_unknown_raises(self):
+        import pytest
+        from ts_cli.databricks.mv_tml import ts_type_to_dbx
+        with pytest.raises(ValueError):
+            ts_type_to_dbx("GEO_POINT")
+
+
 class TestBuildTableTml:
     INFO = {"name": "TRANSACTIONS", "create": True,
             "db": "analytics", "schema": "ecommerce", "db_table": "transactions",

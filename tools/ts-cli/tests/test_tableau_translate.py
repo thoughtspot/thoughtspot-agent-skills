@@ -1416,6 +1416,99 @@ class TestTranslateSingle:
 
 
 # ---------------------------------------------------------------------------
+# Literal masking — string/date literals must survive keyword-cleanup passes
+# (THEN-folding, bare END/CASE/WHEN strip, keyword validation) untouched.
+# ---------------------------------------------------------------------------
+
+class TestTranslateSingleLiteralMasking:
+    def test_double_quoted_end_literal_survives(self):
+        expr, errors, _ = translate_single(
+            'IF [Status] = "END" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert expr == "if ( [Status] = 'END' ) then 1 else 0"
+        assert errors == []
+
+    def test_double_quoted_then_literal_survives(self):
+        expr, errors, _ = translate_single(
+            'IF [x] = "THEN" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert expr == "if ( [x] = 'THEN' ) then 1 else 0"
+        assert errors == []
+
+    def test_double_quoted_when_literal_survives_and_no_false_error(self):
+        expr, errors, _ = translate_single(
+            'IF [x] = "WHEN" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert expr == "if ( [x] = 'WHEN' ) then 1 else 0"
+        assert errors == []
+
+    def test_single_quoted_end_literal_survives(self):
+        expr, errors, _ = translate_single(
+            "IF [x] = 'END' THEN 1 ELSE 0 END",
+            role="measure",
+        )
+        assert expr == "if ( [x] = 'END' ) then 1 else 0"
+        assert errors == []
+
+    def test_double_quoted_literal_normalized_to_single_quotes(self):
+        expr, errors, _ = translate_single(
+            'IF [Status] = "Closed" THEN 1 ELSE 0 END',
+            role="measure",
+        )
+        assert "'Closed'" in expr
+        assert '"Closed"' not in expr
+        assert errors == []
+
+    def test_date_literal_converted_to_to_date(self):
+        expr, errors, _ = translate_single(
+            "IF [Date] > #2024-01-01# THEN 1 ELSE 0 END",
+            role="measure",
+        )
+        assert "to_date ( '2024-01-01' , 'yyyy-MM-dd' )" in expr
+        assert errors == []
+
+    def test_dimension_concat_single_quoted(self):
+        expr, errors, _ = translate_single(
+            "[First] + ' ' + [Last]",
+            role="dimension",
+        )
+        assert expr == "concat ( [First] , ' ' , [Last] )"
+        assert errors == []
+
+    def test_dimension_concat_double_quoted(self):
+        expr, errors, _ = translate_single(
+            '[First] + " " + [Last]',
+            role="dimension",
+        )
+        assert expr == "concat ( [First] , ' ' , [Last] )"
+        assert errors == []
+
+    def test_literal_with_plus_survives_intact(self):
+        expr, errors, _ = translate_single(
+            "[Label] + 'a+b' + [Suffix]",
+            role="dimension",
+        )
+        assert "'a+b'" in expr
+        assert expr == "concat ( [Label] , 'a+b' , [Suffix] )"
+        assert errors == []
+
+    def test_literal_with_brackets_survives_intact_not_scoped(self):
+        expr, errors, _ = translate_single(
+            "[Label] + '[x]' + [Suffix]",
+            role="dimension",
+            scoped_columns={"Label": "T", "Suffix": "T"},
+        )
+        # Real columns get scoped; the literal's own "[x]" must not be
+        # mistaken for a third bare column reference.
+        assert expr == "concat ( [T::Label] , '[x]' , [T::Suffix] )"
+        assert "[T::x]" not in expr
+        assert errors == []
+
+
+# ---------------------------------------------------------------------------
 # Full pipeline: translate_formulas batch
 # ---------------------------------------------------------------------------
 
@@ -1755,12 +1848,14 @@ class TestValidatePreImportNewChecks:
         assert len(issues) == 1
         assert any("add_quarters" in w for w in issues[0]["warnings"])
 
-    def test_add_years_flagged(self):
+    def test_add_years_passes(self):
+        # add_years() is a valid ThoughtSpot function (see
+        # thoughtspot-formula-patterns.md / tableau-formula-translation.md) —
+        # must not be flagged. Only add_quarters() is unsupported.
         from ts_cli.tableau_translate import validate_pre_import
         formulas = [{"name": "F1", "expr": "add_years ( [T::Date] , 2 )"}]
         issues = validate_pre_import(formulas)
-        assert len(issues) == 1
-        assert any("add_years" in w for w in issues[0]["warnings"])
+        assert len(issues) == 0
 
     def test_add_months_passes(self):
         from ts_cli.tableau_translate import validate_pre_import

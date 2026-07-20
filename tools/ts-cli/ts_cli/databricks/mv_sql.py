@@ -33,10 +33,13 @@ from ts_cli.databricks.mv_sql_constructs import (
     _construct_is,
     _construct_not,
 )
-
-
-class UntranslatableError(Exception):
-    """Expression has no documented deterministic translation."""
+# UntranslatableError's canonical home is ts_cli/formula_common.py (BL-063
+# PR 14) — mv_emit_expr.py (the reverse direction) raises the same exception
+# for the same concept, and vendoring both into one Genie-notebook namespace
+# would otherwise define the class twice under one name. Re-exported here so
+# existing `from ts_cli.databricks.mv_sql import UntranslatableError` call
+# sites are unaffected.
+from ts_cli.formula_common import UntranslatableError
 
 
 _TOKEN_RE = re.compile(

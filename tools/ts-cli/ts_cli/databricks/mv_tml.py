@@ -32,6 +32,19 @@ def map_dbx_type(dbx_type: str) -> str | None:
         f"_DBX_TYPE_MAP together")
 
 
+_TS_TO_DBX_TYPE = {
+    "VARCHAR": "string", "INT64": "bigint", "DOUBLE": "double",
+    "BOOL": "boolean", "DATE": "date", "DATETIME": "timestamp",
+}
+
+
+def ts_type_to_dbx(ts_type: str) -> str:
+    key = (ts_type or "").strip().upper()
+    if key not in _TS_TO_DBX_TYPE:
+        raise ValueError(f"no Databricks type for ThoughtSpot type {ts_type!r}")
+    return _TS_TO_DBX_TYPE[key]
+
+
 def build_table_tml(alias_info: dict, connection_name: str) -> tuple[dict, list[str]]:
     for field in ("name", "db", "schema", "db_table", "columns"):
         if not alias_info.get(field):

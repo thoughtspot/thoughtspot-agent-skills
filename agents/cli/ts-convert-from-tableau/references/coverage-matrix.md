@@ -161,7 +161,7 @@ Use this as the canonical limitations reference.
 
 | # | Tableau Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
-| 93 | Dashboard zones → layout | 12-column responsive grid | Band-based coordinate mapping |
+| 93 | Dashboard zones → layout | 12-column responsive grid | Container-tree walk (horz/vert) with proportional column split (largest-remainder → sum 12) + aspect-ratio height; band-based coordinate mapping is the fallback (Step 9c) |
 | 94 | Chart zones → visualization tiles | Answer TML with `search_query`, chart type, axis configs | |
 | 95 | Text/title zones | Note tiles (`note_tile.html_parsed_string`) | |
 | 96 | Mark types (bar/line/circle/pie/area/text) | BAR/LINE/SCATTER/PIE/AREA/TABLE | |
@@ -174,6 +174,14 @@ Use this as the canonical limitations reference.
 | 103 | Formula coverage answers | Every uncovered formula gets a testable answer | |
 | 104 | Migration Summary tab | Note tile tab | Documents items migrated, decisions, partial/omitted |
 | 117 | Multiple dashboards → single liveboard with tabs (Step 8 option **T**) | `layout.tabs[]` — one tab per dashboard + the Migration Summary tab | Implemented v1.5.20–v1.5.24; verified against `thoughtspot-liveboard-tml.md` schema (`layout.tabs[]`: `name`, `description`, `tiles[]`) |
+| 118 | Dual-axis combo (two mark classes, e.g. Bar + Line, secondary axis) | `ADVANCED_LINE_COLUMN` (Muze) with durable `custom_chart_config` (`y-axis-column` / `y-axis-line`, `type: MERGED`) | Step 10a; `client_state_v2` split decays on re-render. Legacy path: split into separate COLUMN + LINE tiles + flag |
+| 119 | Color shelf (dimension) → series/color split | Muze `slice-with-color` shelf (or a 2nd `chart_columns` entry on Legacy) | Step 10b/10a; supersedes the old "color zones skipped" (L21 was legend zones only) |
+| 120 | Small multiples (row/col trellis) | Muze `trellis-by` shelf | Step 10b; **not expressible** on Legacy — flag |
+| 121 | Specific series color palette | Per-tile `viz_style` per-series palette | Step 10b/10.5; carries brand/fixed category colors instead of auto-assign |
+| 122 | Column display format — percent | `answer_columns[].format` `category: PERCENTAGE` | Verified (Step 10b) |
+| 123 | Column display format — currency / number / decimals / thousands | `answer_columns[].format` `category: CURRENCY` / `NUMBER` (parallel `*FormatConfig`) | Step 10b; exact sub-config field names unverified — open item #18 |
+| 124 | Measure/dimension sort (asc/desc, non-Top-N) | `sorted by [col] descending`/`ascending` in `search_query` | Step 10b; token unverified — open item #19; manual sort has no equivalent |
+| 125 | Spotter last-mile coverage tile (Step 12.6) | Coverage tile seeded from Spotter `tokens` + `visualization_type` | Human-verified number match required before adopting; opt-in |
 
 ### Operational Modes
 
@@ -244,7 +252,7 @@ through untranslated.
 | L18 | Bitmap/image zones | Images not migratable to liveboard tiles | Skipped |
 | L19 | Web/extension zones | No equivalent | Skipped |
 | L20 | Flipboard/Story interaction | Flip navigation lost | Content salvaged; interaction dropped |
-| L21 | Legend/color zones | TS draws its own legends | Skipped |
+| L21 | Legend zones (the legend UI element) | TS draws its own legends | Skipped. NB: this is the legend *zone* only — a Color *shelf encoding* IS migrated (mapped #119/#121) |
 | L22 | `DATEDIFF('week', ...)` boundary semantics | Week-start semantics differ between Tableau and TS | Flag per workbook for manual verification |
 | L23 | Manual group value snapshot | `categorical-bin` values from TWB authoring time may not exist in current data | Flag as data-fidelity limitation |
 
