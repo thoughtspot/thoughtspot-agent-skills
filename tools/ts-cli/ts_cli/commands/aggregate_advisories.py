@@ -8,6 +8,9 @@ until promoted to formulas, F9) and `semiadditive_measures` (last_value/
 first_value period-end snapshots the advisor does not auto-generate, F5).
 """
 
+import re
+
+
 def routing_ineligible_measures(model_tml: dict, candidates: list) -> list:
     """F9: measures targeted by candidates that are plain measure columns and so
     will NOT be routed to until promoted to formula measures.
@@ -57,8 +60,6 @@ def semiadditive_measures(plans: dict) -> list:
             })
     return out
 
-
-import re
 
 _DATE_DTYPES = {"DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"}
 _DATE_JOIN_RE = re.compile(r"\[([^\]:]+::[^\]]+)\]\s*=\s*\[([^\]:]+::[^\]]+)\]")
