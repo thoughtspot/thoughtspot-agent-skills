@@ -104,6 +104,7 @@ fi
 # Open-items tracking — warn only (don't block commits on pre-existing UNTESTED items)
 if echo "$STAGED" | grep -q 'open-items\.md'; then
   run_check "open items"         "tools/validate/check_open_items.py --root $REPO_ROOT --warn"
+  run_check "open items index"   "tools/validate/generate_open_items_index.py --root $REPO_ROOT --check"
 fi
 
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
