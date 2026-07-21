@@ -16,6 +16,8 @@ ts_cli/
   tableau_translate.py — Tableau → ThoughtSpot formula translation entry point + orchestrator facade over ts_cli/tableau/ (pure functions, no I/O)
   snowflake_ops.py     — Semantic View diff (normalise_expr/exprs_differ/compute_change_set) + DDL lint (lint_sv_ddl) + SQL var substitution (parse_var_assignment/substitute_sql_vars, behind `ts snowflake exec` — BL-079) behind `ts snowflake` (pure functions, no I/O)
   sv_parse.py          — Semantic View DDL → structured dict (parse_sv_ddl) behind `ts snowflake parse-sv` — tables/relationships/dimensions/metrics/facts/custom_instructions/verified_queries/extension extraction (BL-100; pure functions, no I/O; reuses snowflake_ops clause-extraction helpers)
+  sv_sql.py            — Snowflake SQL expression → ThoughtSpot formula text (translate_sql_expr); tokenizer + recursive descent + Snowflake function map (ts-snowflake-formula-translation.md as data) behind `ts snowflake translate-formulas` (BL-100; pure functions, no I/O)
+  sv_translate.py      — Parsed SV → translated ThoughtSpot formulas (translate_sv_formulas); identifier resolution, column classification, window/LOD/semi-additive/USING handling behind `ts snowflake translate-formulas` (BL-100; pure functions, no I/O)
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts spotql classify-columns` (pure functions, no I/O)
   promote.py           — Formula promotion merge (extract_answer_formulas/detect_duplicates/map_references/build_merged_model) behind `ts model promote-formula` (pure functions, no I/O; BL-066)
   aggregate/
@@ -82,7 +84,7 @@ ts_cli/
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
     tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model, build-liveboard, verify)
-    snowflake.py  — ts snowflake (diff, lint-ddl, exec, parse-sv)
+    snowflake.py  — ts snowflake (diff, lint-ddl, exec, parse-sv, translate-formulas)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083

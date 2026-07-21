@@ -411,3 +411,43 @@ def parse_sv_cmd(
         f"Parsed SV '{parsed['name']}': {dim_count} dimension(s), "
         f"{met_count} metric(s), {fact_count} fact(s), "
         f"{rel_count} relationship(s) -> {output_file}", err=True)
+
+
+@app.command("translate-formulas")
+def translate_formulas_cmd(
+    input_file: str = typer.Option(
+        ..., "--input", "-i", help="Parsed SV JSON from parse-sv"),
+    output_file: str = typer.Option(
+        ..., "--output", "-o", help="Output translated JSON path"),
+) -> None:
+    """Translate Snowflake SQL formulas from parsed SV to ThoughtSpot syntax.
+
+    Takes the JSON output of `ts snowflake parse-sv` and translates all
+    dimension, fact, and metric expressions from Snowflake SQL to
+    ThoughtSpot formula syntax. Codifies ts-convert-from-snowflake-sv
+    SKILL.md Step 9 (formula translation).
+    """
+    from ts_cli.sv_translate import translate_sv_formulas
+
+    path = Path(input_file)
+    if not path.exists():
+        typer.echo(f"File not found: {input_file}", err=True)
+        raise SystemExit(1)
+    parsed = json.loads(path.read_text())
+
+    result = translate_sv_formulas(parsed)
+
+    out = Path(output_file)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=2))
+
+    stats = result["stats"]
+    typer.echo(
+        f"Translated {stats['translated']}/{stats['total']} formulas "
+        f"({stats['skipped']} skipped) -> {output_file}", err=True)
+    if result["skipped"]:
+        typer.echo("Skipped:", err=True)
+        for s in result["skipped"]:
+            typer.echo(f"  - {s['name']} ({s['block']}): {s['reason']}",
+                       err=True)
+    print(json.dumps(stats, indent=2))

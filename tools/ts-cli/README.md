@@ -2135,6 +2135,32 @@ shape unverified against live `GET_DDL`).
 
 ---
 
+### `ts snowflake translate-formulas`
+
+Translate Snowflake SQL formulas from a parsed Semantic View (output of
+`ts snowflake parse-sv`) into ThoughtSpot formula syntax. Codifies
+ts-convert-from-snowflake-sv SKILL.md Step 9: identifier resolution,
+function mapping (DATEDIFF/DATEADD/CASE/CAST/DIV0/COUNT_IF/window functions),
+column classification (ATTRIBUTE/MEASURE, column/formula), semi-additive
+wrapping (last_value/first_value), and USING relationship group_aggregate.
+
+```bash
+ts snowflake translate-formulas --input parsed.json --output translated.json
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--input` / `-i` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--output` / `-o` | *(required)* | Output translated JSON path |
+
+**Output:** JSON to the `--output` file — `{"translated": [...],
+"skipped": [...], "stats": {"total", "translated", "skipped"}}`.
+Each translated entry: `{name, role, output_kind, column_type, table,
+column, ts_expr, aggregation, comment, synonyms, is_private, annotations}`.
+Stats JSON to stdout; skipped entries and diagnostics to stderr.
+
+---
+
 ### `ts databricks parse-mv`
 
 Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured
