@@ -309,6 +309,7 @@ def _parse_table_entry(raw: str) -> dict[str, Any]:
     if m_subq:
         alias = m_subq.group(1)
         result["alias"] = alias
+        result["name"] = alias
         result["is_subquery"] = True
         paren_content = entry[m_subq.end() - 1:]
         depth = 0
@@ -335,9 +336,11 @@ def _parse_table_entry(raw: str) -> dict[str, Any]:
     fqn = fqn.strip()
     result["fqn"] = fqn
 
+    parts = fqn.split(".")
+    last = parts[-1].strip('"')
+    result["name"] = last
+
     if not result["alias"]:
-        parts = fqn.split(".")
-        last = parts[-1].strip('"')
         result["alias"] = last
 
     return result

@@ -451,3 +451,218 @@ def translate_formulas_cmd(
             typer.echo(f"  - {s['name']} ({s['block']}): {s['reason']}",
                        err=True)
     print(json.dumps(stats, indent=2))
+
+
+@app.command("build-model")
+def build_model_cmd(
+    parsed_path: str = typer.Option(
+        ..., "--parsed", "-p", help="parse-sv output JSON"),
+    translated_path: str = typer.Option(
+        ..., "--translated", "-t", help="translate-formulas output JSON"),
+    tables_path: str = typer.Option(
+        ..., "--tables", help="JSON object mapping SV alias -> TS table name/info"),
+    model_name: str = typer.Option(
+        ..., "--model-name", "-n", help="Model TML name"),
+    output_dir: str = typer.Option(
+        ..., "--output-dir", "-o",
+        help="Directory for the generated .model.tml file"),
+    sv_fqn: Optional[str] = typer.Option(
+        None, "--sv-fqn", help="Source SV FQN for the model description"),
+    spotter_enabled: Optional[bool] = typer.Option(
+        None, "--spotter-enabled/--no-spotter-enabled",
+        help="Stamp spotter_config; omit for no spotter_config block"),
+    existing_guid: Optional[str] = typer.Option(
+        None, "--existing-guid",
+        help="Stamp guid: at the document root (update-in-place; skips phase 1)"),
+    profile: Optional[str] = typer.Option(
+        None, "--profile", help="Import the model TML after a clean lint"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="With --profile: assemble+lint but skip the import"),
+) -> None:
+    """Assemble ThoughtSpot Model TML from parse-sv/translate-formulas JSON.
+
+    Validates TML invariants + lints before any import. With --profile,
+    imports the model via a two-pass flow: phase 1 imports structure only
+    (no formulas), captures the GUID, then phase 2 imports the full model
+    with formulas using the captured GUID. If --existing-guid is provided,
+    skips phase 1 (update-in-place). Summary JSON on stdout, diagnostics
+    on stderr. Exit 1 on findings or import failure.
+    """
+    from ts_cli.sv_build_model import build_model_tml_sv, strip_formulas
+    from ts_cli.tml_common import dump_tml_yaml
+    from ts_cli.tml_lint import lint_tml
+
+    parsed = _read_json_file(parsed_path, "--parsed")
+    translated_doc = _read_json_file(translated_path, "--translated")
+    tables = _read_json_file(tables_path, "--tables")
+
+    try:
+        model_doc, build_info = build_model_tml_sv(
+            model_name=model_name, parsed=parsed, translated_doc=translated_doc,
+            tables=tables, sv_fqn=sv_fqn, spotter_enabled=spotter_enabled,
+            existing_guid=existing_guid)
+    except ValueError as exc:
+        typer.echo(f"cannot build model TML: {exc}", err=True)
+        raise SystemExit(1)
+
+    skipped = translated_doc.get("skipped") or []
+    for skip in skipped:
+        typer.echo(f"SKIPPED {skip.get('block', '?')} '{skip['name']}': "
+                   f"{skip['reason']}", err=True)
+
+    lint_findings: list[str] = lint_tml(model_doc)
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model_file = out_dir / f"{model_name}.model.tml"
+    model_file.write_text(dump_tml_yaml(model_doc))
+
+    if lint_findings:
+        for f in lint_findings:
+            typer.echo(f"LINT: {f}", err=True)
+        summary = _build_model_summary(
+            model_name=model_name, model_file=str(model_file),
+            build_info=build_info, skipped=skipped,
+            spotter_enabled=spotter_enabled, existing_guid=existing_guid,
+            lint_findings=lint_findings, import_status="not_imported",
+            model_guid=None)
+        print(json.dumps(summary))
+        raise SystemExit(1)
+
+    import_status, model_guid, import_error = _run_sv_import(
+        profile, dry_run, model_doc, build_info, existing_guid)
+
+    summary = _build_model_summary(
+        model_name=model_name, model_file=str(model_file),
+        build_info=build_info, skipped=skipped,
+        spotter_enabled=spotter_enabled, existing_guid=existing_guid,
+        lint_findings=lint_findings, import_status=import_status,
+        model_guid=model_guid, import_error=import_error)
+    print(json.dumps(summary))
+    if import_status == "failed":
+        raise SystemExit(1)
+
+
+def _run_sv_import(
+    profile: Optional[str], dry_run: bool, model_doc: dict,
+    build_info: dict, existing_guid: Optional[str],
+) -> tuple[str, Optional[str], Optional[str]]:
+    """Two-pass import for SV models.
+
+    Phase 1: structure only (no formulas) → captures GUID.
+    Phase 2: full model with formulas + captured GUID.
+    Skips phase 1 when --existing-guid is provided or the model has no formulas.
+    """
+    if not profile:
+        return "not_requested", None, None
+    if dry_run:
+        return "dry_run", None, None
+
+    from ts_cli.sv_build_model import strip_formulas
+
+    has_formulas = bool(build_info["formula_count"])
+    guid = existing_guid
+
+    if has_formulas and not guid:
+        phase1_doc = strip_formulas(model_doc)
+        status, guid, error = _import_one(profile, phase1_doc, phase=1)
+        if status == "failed":
+            return status, None, error
+        if not guid:
+            return "failed", None, "phase 1 import returned no GUID"
+        typer.echo(f"Phase 1 imported (structure): guid={guid}", err=True)
+
+    if has_formulas and guid:
+        import copy
+        phase2_doc = copy.deepcopy(model_doc)
+        phase2_doc.pop("guid", None)
+        phase2_doc = {"guid": guid, **phase2_doc}
+        status, final_guid, error = _import_one(
+            profile, phase2_doc, phase=2, no_create_new=True)
+        if status == "failed":
+            return status, guid, error
+        return "imported", guid, None
+
+    status, guid, error = _import_one(profile, model_doc, phase=0)
+    return status, guid, error
+
+
+def _import_one(
+    profile: str, doc: dict, *, phase: int,
+    no_create_new: bool = False,
+) -> tuple[str, Optional[str], Optional[str]]:
+    """Run a single `ts tml import` invocation. Returns (status, guid, error)."""
+    import shlex
+    import subprocess
+
+    from ts_cli.tml_common import extract_imported_guid
+
+    model_tml_str = json.dumps(doc)
+    cmd = (f"source ~/.zshenv && ts tml import --policy PARTIAL "
+           f"--profile {shlex.quote(profile)}")
+    if no_create_new:
+        cmd += " --no-create-new"
+
+    label = f"phase {phase}" if phase else "import"
+    typer.echo(f"  Running {label}...", err=True)
+
+    completed = subprocess.run(
+        ["bash", "-c", cmd],
+        input=json.dumps([model_tml_str]), capture_output=True, text=True)
+    stderr_tail = (completed.stderr or "")[-500:]
+
+    try:
+        import_result = json.loads(completed.stdout)
+    except Exception:
+        import_result = None
+
+    if completed.returncode != 0:
+        return "failed", None, stderr_tail
+
+    if import_result is None:
+        tail = (completed.stdout or "")[-500:]
+        return "failed", None, f"import response unparseable — response tail: {tail}"
+
+    if isinstance(import_result, list):
+        status = ((import_result[0].get("response") or {})
+                  .get("status") or {})
+        if status.get("status_code") == "ERROR":
+            import re
+            msg = status.get("error_message", "")
+            cleaned = re.sub(r"<[^>]+>", " ", msg or "")
+            cleaned = " ".join(cleaned.split())[:1000]
+            return "failed", None, cleaned
+
+    model_guid = extract_imported_guid(import_result)
+    if model_guid is None:
+        tail = (completed.stdout or "")[-500:]
+        return "failed", None, (
+            f"import OK but no GUID found — response tail: {tail}")
+    return "imported", model_guid, None
+
+
+def _build_model_summary(
+    *, model_name: str, model_file: str, build_info: dict,
+    skipped: list[dict], spotter_enabled: Optional[bool],
+    existing_guid: Optional[str], lint_findings: list[str],
+    import_status: str, model_guid: Optional[str],
+    import_error: Optional[str] = None,
+) -> dict:
+    summary = {
+        "model_name": model_name,
+        "model_file": model_file,
+        "columns": {"attributes": build_info["attributes"],
+                     "measures": build_info["measures"]},
+        "formula_count": build_info["formula_count"],
+        "skipped": skipped,
+        "name_renames": build_info["rename_map"],
+        "spotter_enabled": spotter_enabled,
+        "existing_guid": existing_guid,
+        "lint_findings": lint_findings,
+        "import_status": import_status,
+        "model_guid": model_guid,
+    }
+    if import_error is not None:
+        summary["import_error"] = import_error
+    return summary

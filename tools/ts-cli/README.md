@@ -2161,6 +2161,43 @@ Stats JSON to stdout; skipped entries and diagnostics to stderr.
 
 ---
 
+### `ts snowflake build-model`
+
+Assemble a ThoughtSpot Model TML from the outputs of `ts snowflake parse-sv` and
+`ts snowflake translate-formulas`, then import it via two-pass import. Codifies
+ts-convert-from-snowflake-sv SKILL.md Steps 10–11: inline Scenario B joins
+(equi/range/ASOF), SV synonym→display name, private column handling, fact table
+detection, and the two-pass import flow (structure-only → GUID capture → full
+model with formulas + `--no-create-new`).
+
+```bash
+ts snowflake build-model \
+  --parsed parsed.json --translated translated.json \
+  --tables tables.json --model-name "Sales Model" \
+  --sv-fqn DB.SCHEMA.SALES_SV --profile my-ts \
+  --output-dir ./output
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--parsed` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--translated` | *(required)* | Path to translated JSON from `translate-formulas` |
+| `--tables` | *(required)* | Path to tables JSON map (`{alias: {name, fqn}}` or `{alias: name}`) |
+| `--model-name` | *(required)* | Display name for the ThoughtSpot model |
+| `--output-dir` | *(required)* | Directory to write the model TML YAML file |
+| `--sv-fqn` | — | Fully-qualified SV name for the model description |
+| `--spotter-enabled` / `--no-spotter-enabled` | enabled | Enable/disable Spotter (AI search) on the model |
+| `--existing-guid` | — | GUID of an existing model to update (skips phase 1 create) |
+| `--profile` | — | ThoughtSpot profile for import |
+| `--dry-run` | `false` | Write TML files only, skip import |
+
+**Output:** JSON summary to stdout — `{model_name, model_guid, formula_count,
+attribute_count, measure_count, phase1, phase2, tml_path, build_info}`.
+Phase 1 is skipped when `--existing-guid` is supplied or when the model has no
+formulas.
+
+---
+
 ### `ts databricks parse-mv`
 
 Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured
