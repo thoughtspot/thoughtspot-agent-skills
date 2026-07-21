@@ -2232,6 +2232,41 @@ formulas.
 
 ---
 
+### `ts snowflake build-sv`
+
+Build a Snowflake Semantic View DDL from exported ThoughtSpot Model + Table TMLs.
+Codifies ts-convert-to-snowflake-sv Steps 5–8: column_id resolution to physical
+column names, classification (dimension/metric/time_dimension), `to_snake`
+aliasing, relationship naming with collision avoidance, metric topological
+ordering, DDL assembly with tables/relationships/dimensions/metrics clauses, and
+Cortex Analyst extension JSON.
+
+```bash
+ts tml export {model_guid} --parse --associated --output-dir ./export
+ts snowflake build-sv --model export/model.json \
+  --tables-dir export/ --sv-name DB.SCHEMA.MY_SV \
+  --output my_sv.sql
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Path to Model TML JSON (from `ts tml export --parse`) |
+| `--tables-dir` | *(required)* | Directory with Table TML JSON files |
+| `--sv-name` | *(required)* | Fully-qualified SV name (e.g. `DB.SCHEMA.MY_SV`) |
+| `--output` | *(required)* | Output `.sql` file path |
+| `--formulas` | — | Pre-translated formulas JSON (`{formula_id: {expr, kind}}`) |
+
+Formulas without a matching entry in `--formulas` are omitted from the DDL
+and logged as skipped. Join type/cardinality attributes are dropped (logged as
+unmapped). Pipe the output to `ts snowflake lint-ddl` for validation, then
+`ts snowflake exec` to create the view.
+
+**Output (stdout):** JSON summary — `{sv_name, ddl_file, dimensions,
+time_dimensions, metrics, relationship_count, skipped_formulas,
+dropped_join_attrs, unmapped_properties}`.
+
+---
+
 ### `ts databricks parse-mv`
 
 Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured

@@ -777,3 +777,100 @@ def introspect_cmd(
     typer.echo(f"  {len(specs)} table(s), {total_cols} column(s) → "
                f"{spec_file}", err=True)
     print(json.dumps(summary, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# ts snowflake build-sv
+# ---------------------------------------------------------------------------
+
+@app.command("build-sv")
+def build_sv_cmd(
+    model_path: str = typer.Option(
+        ..., "--model", "-m",
+        help="Path to the Model TML JSON (from `ts tml export --parse`)"),
+    tables_dir: str = typer.Option(
+        ..., "--tables-dir", "-t",
+        help="Directory containing Table TML JSON files (from `ts tml export`)"),
+    sv_name: str = typer.Option(
+        ..., "--sv-name", "-n",
+        help="Fully-qualified SV name (e.g. DB.SCHEMA.MY_SV)"),
+    output: str = typer.Option(
+        ..., "--output", "-o", help="Output .sql file path for the DDL"),
+    formulas_path: Optional[str] = typer.Option(
+        None, "--formulas",
+        help="Pre-translated formulas JSON: {formula_id: {expr, kind}}"),
+) -> None:
+    """Build a Snowflake Semantic View DDL from ThoughtSpot Model + Table TMLs.
+
+    Reads the exported Model TML and its associated Table TMLs, resolves
+    column_ids to physical column names, classifies columns as dimensions/
+    metrics/time_dimensions, builds relationships, orders metrics
+    topologically, and emits the DDL + CA extension JSON.
+
+    \\b
+    Example:
+      ts tml export {model_guid} --parse --associated --output-dir ./export
+      ts snowflake build-sv --model export/model.json \\
+        --tables-dir export/ --sv-name DB.SCHEMA.MY_SV \\
+        --output my_sv.sql
+    """
+    from ts_cli.sv_build_sv import build_sv_ddl
+
+    model_tml = _read_json_file(model_path, "--model")
+
+    table_tmls: dict[str, dict] = {}
+    tables_path = Path(tables_dir)
+    if not tables_path.is_dir():
+        typer.echo(f"--tables-dir is not a directory: {tables_dir}", err=True)
+        raise SystemExit(1)
+
+    for f in tables_path.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if "table" in data:
+            tname = data["table"].get("name", f.stem)
+            table_tmls[tname] = data
+
+    if not table_tmls:
+        typer.echo("no Table TML JSON files found in --tables-dir", err=True)
+        raise SystemExit(1)
+
+    translated = None
+    if formulas_path:
+        translated = _read_json_file(formulas_path, "--formulas")
+
+    try:
+        ddl, build_info = build_sv_ddl(
+            model_tml=model_tml, table_tmls=table_tmls,
+            sv_name=sv_name, translated_formulas=translated)
+    except ValueError as exc:
+        typer.echo(f"cannot build SV DDL: {exc}", err=True)
+        raise SystemExit(1)
+
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(ddl, encoding="utf-8")
+    typer.echo(f"  DDL written to {out_path}", err=True)
+
+    for sf in build_info.get("skipped_formulas", []):
+        typer.echo(f"  SKIPPED formula '{sf['name']}': {sf['reason']}",
+                   err=True)
+    for dj in build_info.get("dropped_joins", []):
+        typer.echo(f"  DROPPED join attrs on {dj['relationship']}: "
+                   f"type={dj['join_type']}, cardinality={dj['cardinality']}",
+                   err=True)
+
+    summary = {
+        "sv_name": sv_name,
+        "ddl_file": str(out_path),
+        "dimensions": build_info["dimensions"],
+        "time_dimensions": build_info["time_dimensions"],
+        "metrics": build_info["metrics"],
+        "relationship_count": build_info["relationship_count"],
+        "skipped_formulas": len(build_info["skipped_formulas"]),
+        "dropped_join_attrs": len(build_info["dropped_joins"]),
+        "unmapped_properties": len(build_info["unmapped_properties"]),
+    }
+    print(json.dumps(summary, indent=2))
