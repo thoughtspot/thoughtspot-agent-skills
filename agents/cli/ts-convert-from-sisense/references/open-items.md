@@ -14,17 +14,17 @@ creates clean (with the prune step removing any engine-rejected formula), and a 
 measure returns faithful numbers (grouped sum equals the ungrouped total, so a `MANY_TO_ONE`
 join does not fan out). This is the blocking item for shipping live.
 
-## #2 — Shared liveboard emitter (`build_from_spec`) not yet on main — KNOWN / DEFERRED
+## #2 — Chart-type fidelity via the shared emitter — VERIFIED (design)
 
-`build-liveboard` computes the full `build_from_spec` spec + the extracted Sisense filter chips
-today, but the final Answer/Liveboard **TML emission** is gated on the shared emitter
-`ts_cli.tableau.liveboard.build_from_spec`, which is not yet on this branch. The injection code
-is already in place: `ts_cli/commands/sisense.py` guards the import and, when the emitter is
-absent, emits `{"status": "spec_only", "spec": ..., "filter_chips": ...}` to stdout and exits 0
-(a valid partial). Everything behind the `if build_from_spec is not None` branch — Answer/
-Liveboard TML file-writes + chip injection into `liveboard.filters` — auto-activates the moment
-the emitter merges to main. No skill or CLI change is required when it lands; re-run
-`build-liveboard` and the TML is written. Deferred until the emitter branch merges.
+The shared emitter (`ts_cli.tableau.liveboard`) is on `main` (merged in #253). `build-liveboard`
+emits Answer + tabbed-Liveboard TML directly via the emitter's `build_answer`, passing the
+**Sisense-resolved `ts_chart`** (COLUMN/PIE/KPI/…) and status per widget (`answers.build_liveboard_result`).
+It deliberately does NOT go through `build_from_spec`'s mark path: main's `build_from_spec`
+`_resolve_ct` **re-infers** the chart from a mark and hardcodes `Migrated` (the `ts_chart`-aware
+variant is only on the unmerged #255), which would silently mis-type KPIs/pies and hide the
+review signal. Driving `build_answer` directly makes the chart mapping correct on today's `main`,
+**independent of #255**. The Sisense dashboard filter bar is injected as `liveboard.filters`
+chips after emission. Live-render fidelity of the emitted TML is covered by #1 / #5.
 
 ## #3 — Live Sisense REST fetch not built — DEFERRED
 
@@ -50,4 +50,8 @@ The dashboard-filter → Liveboard-chip mapping (member→`IN`, exclude→`NOT_I
 `GE`/`GT`/`LE`/`LT`/`BW_INC`/`BW`/`EQ`; date `level`→`HOURLY…YEARLY`) is derived from the
 standalone converter and the worked examples, not yet round-tripped through a live Liveboard
 import. Confirm the chip operators and bucket tokens render and filter correctly on a real
-Liveboard once the emitter (#2) lands.
+Liveboard. **Specifically verify the two-sided range boundary:** ThoughtSpot exposes `BW_INC`
+(both-inclusive) and `BW` (both-exclusive); a **mixed** inclusive/exclusive Sisense range
+(e.g. `from:10, toNotEqual:100`) keeps both bounds but is emitted as `BW_INC`, so the exact
+open/closed boundary is approximate — confirm whether a mixed-bound operator exists on the
+target build and tighten if so.

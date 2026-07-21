@@ -18,11 +18,17 @@ from __future__ import annotations
 import re
 
 # Sisense JAQL `agg` -> TML aggregation property (for SIMPLE measures, no formula).
+# NOTE on count semantics (verified against Sisense docs): Sisense `count` returns the
+# number of *unique* values (distinct), while `dupCount`/`countduplicates` returns the
+# *total* item count including duplicates. So they map OPPOSITE to the intuitive reading:
+#   count           -> COUNT_DISTINCT  (unique)
+#   countduplicates -> COUNT           (exact total; NOT approximate)
 AGG_MAP: dict[str, str] = {
     "sum": "SUM",
     "avg": "AVERAGE",
-    "count": "COUNT",
-    "countduplicates": "COUNT",   # approx (DupCount); flag PARTIAL
+    "count": "COUNT_DISTINCT",    # Sisense count == distinct/unique count
+    "countduplicates": "COUNT",   # Sisense dupCount == exact total count (incl. duplicates)
+    "dupcount": "COUNT",          # JAQL sometimes spells it `dupCount`
     "min": "MIN",
     "max": "MAX",
     "stdev": "STD_DEVIATION",
@@ -32,11 +38,13 @@ AGG_MAP: dict[str, str] = {
 
 # Sisense formula function -> TML formula function (deterministic 1:1 subset only).
 FUNCTION_MAP: dict[str, str] = {
-    # aggregation
+    # aggregation (see AGG_MAP note: Sisense count == distinct; dupCount == total)
     "sum": "sum",
     "avg": "average",
     "average": "average",
-    "count": "count",
+    "count": "unique count",    # Sisense count is distinct -> TS `unique count`
+    "dupcount": "count",         # Sisense dupCount is total -> TS `count`
+    "countduplicates": "count",
     "min": "min",
     "max": "max",
     # mathematical
@@ -59,10 +67,11 @@ FUNCTION_MAP: dict[str, str] = {
     "var": "variance",
     "median": "median",
     # logical / conditional
-    "if": "if",
+    # `if` is handled structurally (functional if(c,a,b) -> `if (c) then a else b`),
+    # NOT via a name rename — see _rewrite_conditionals. `case` is NEEDS REVIEW (its
+    # multi-branch shape has no safe deterministic 1:1 — rebuild as nested if manually).
     "isnull": "isnull",    # TS spells it `isnull` (NOT `is_null`)
     "ifnull": "ifnull",
-    # "case" -> handled specially (maps to nested if) -> PARTIAL; see _PARTIAL_FUNCS
 }
 
 # Functions we will NOT auto-translate. Presence => NEEDS REVIEW. Unknown functions are
@@ -85,11 +94,23 @@ UNSUPPORTED: frozenset = frozenset({
     "rdouble", "rint",
 })
 
-# Functions that translate but with a caveat worth a human review -> PARTIAL.
-_PARTIAL_FUNCS: frozenset = frozenset({"case"})
+# `if` is a supported conditional but is rewritten structurally, not renamed.
+_CONDITIONAL: frozenset = frozenset({"if"})
 
 # identifier immediately followed by "(" -> a function call in the expression.
 _FUNC_CALL = re.compile(r"([A-Za-z_]\w*)\s*\(")
+
+# Trailing date-hierarchy tag on a Sisense dim (e.g. "Date (Calendar)", "Order Date (Months)").
+# Only these known level/hierarchy labels are stripped — a legitimate name like
+# "Profit (Adjusted)" must be preserved (finding: over-eager paren strip corrupts names).
+_DATE_LEVEL_WORDS = frozenset({
+    "calendar", "fiscal",
+    "year", "years", "quarter", "quarters", "month", "months",
+    "week", "weeks", "day", "days", "date", "hour", "hours",
+    "minute", "minutes", "second", "seconds",
+    "day of week", "week of year", "day of month", "day of year",
+    "quarter of year", "month of year",
+})
 
 # Coverage levels used internally; mapped to status strings on the way out.
 _AUTO, _PARTIAL, _MANUAL = "AUTO", "PARTIAL", "MANUAL"
@@ -108,17 +129,23 @@ def _column_from_dim(dim: str | None) -> str | None:
     s = dim.strip()
     if s.startswith("[") and s.endswith("]"):
         s = s[1:-1]
-    s = s.split(".")[-1]
-    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    s = s.split(".")[-1].strip()
+    # Drop a trailing parenthesized tag ONLY when it is a known date-hierarchy level, so
+    # "Date (Calendar)" -> "Date" but a real name like "Profit (Adjusted)" is left intact.
+    m = re.search(r"^(.*?)\s*\(([^)]*)\)\s*$", s)
+    if m and m.group(2).strip().lower() in _DATE_LEVEL_WORDS:
+        s = m.group(1).strip()
     return "[" + s + "]"
 
 
 def _agg_to_func(agg: str) -> tuple:
-    """A JAQL agg used as a formula wrapper -> (tml_func|None, coverage, note)."""
+    """A JAQL agg used as a formula wrapper -> (tml_func|None, coverage, note).
+
+    count -> `unique count` (distinct) and dupCount/countduplicates -> `count` (exact total)
+    both come straight from FUNCTION_MAP; neither is approximate (see AGG_MAP note).
+    """
     key = (agg or "").lower()
-    if key == "countduplicates":
-        return "count", _PARTIAL, "countduplicates approximated as count"
-    if key in FUNCTION_MAP:           # sum, avg->average, count, min, max
+    if key in FUNCTION_MAP:           # sum, avg->average, count->unique count, dupCount->count, min, max
         return FUNCTION_MAP[key], _AUTO, ""
     return None, _MANUAL, f"no TML function for agg '{agg}'"
 
@@ -196,24 +223,104 @@ def _inspect_functions(source: str, coverage: str, notes: list) -> tuple:
     """
     for name in _FUNC_CALL.findall(source):
         low = name.lower()
+        if low == "case":
+            return coverage, (None, "NEEDS REVIEW",
+                              "Sisense case(): multi-branch conditional has no safe 1:1 "
+                              "translation — rebuild as nested if() manually")
         if low in UNSUPPORTED:
             return coverage, (None, "NEEDS REVIEW", f"unsupported function '{name}'")
-        if low in FUNCTION_MAP:
-            continue
-        if low in _PARTIAL_FUNCS:
-            coverage = _apply_downgrade(coverage, notes, _PARTIAL,
-                                        f"'{name}' mapped with a caveat (review)")
+        if low in FUNCTION_MAP or low in _CONDITIONAL:
             continue
         return coverage, (None, "NEEDS REVIEW", f"unknown function '{name}'")
     return coverage, None
 
 
 def _rename_func(m: "re.Match") -> str:
-    """Rename a mapped function call in the resolved expression (ceiling->ceil, case->if)."""
+    """Rename a mapped function call in the resolved expression (ceiling->ceil, count->unique count).
+
+    `if` is intentionally NOT renamed here — it is rewritten structurally afterwards by
+    _rewrite_conditionals into ThoughtSpot's `if (cond) then a else b` form.
+    """
     low = m.group(1).lower()
-    if low == "case":
-        return "if("
     return FUNCTION_MAP.get(low, m.group(1)) + "("
+
+
+_IF_CALL = re.compile(r"(?<![A-Za-z0-9_])if\s*\(", re.IGNORECASE)
+
+
+def _split_top_level_args(s: str) -> list:
+    """Split ``s`` on top-level commas, respecting (), [] nesting and quoted strings."""
+    args, depth, buf, quote = [], 0, [], None
+    for ch in s:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            buf.append(ch)
+        elif ch in "([":
+            depth += 1
+            buf.append(ch)
+        elif ch in ")]":
+            depth -= 1
+            buf.append(ch)
+        elif ch == "," and depth == 0:
+            args.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    args.append("".join(buf))
+    return [a.strip() for a in args]
+
+
+def _match_paren(s: str, open_idx: int) -> int:
+    """Index of the ')' matching the '(' at ``open_idx`` (respecting [] and ()), or -1."""
+    depth = 0
+    for i in range(open_idx, len(s)):
+        if s[i] in "([":
+            depth += 1
+        elif s[i] in ")]":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _rewrite_conditionals(expr: str) -> tuple:
+    """Rewrite functional ``if(cond, then, else)`` -> ThoughtSpot ``if (cond) then <> else <>``.
+
+    Recurses into each argument (nested if) and into the tail (sibling if). Returns
+    ``(new_expr, error_note|None)``; a non-3-arg ``if()`` cannot be expressed in
+    ThoughtSpot's if/then/else and yields an error note (the caller flags NEEDS REVIEW).
+    """
+    m = _IF_CALL.search(expr)
+    if not m:
+        return expr, None
+    open_idx = expr.index("(", m.start())
+    close_idx = _match_paren(expr, open_idx)
+    if close_idx == -1:
+        return expr, "malformed if(): unbalanced parentheses"
+    args = _split_top_level_args(expr[open_idx + 1:close_idx])
+    if len(args) != 3:
+        # An already-rewritten `if (cond) then ... else ...` (from a nested formula) has a
+        # single-arg paren followed by ` then ` — leave it intact and rewrite only the tail.
+        if len(args) == 1 and expr[close_idx + 1:].lstrip().startswith("then "):
+            tail_rw, err = _rewrite_conditionals(expr[close_idx + 1:])
+            return (expr[:close_idx + 1] + tail_rw, None) if not err else (expr, err)
+        return expr, (f"if() has {len(args)} argument(s); ThoughtSpot if/then/else needs "
+                      "exactly 3 (condition, then, else)")
+    rewritten = []
+    for a in args:
+        ra, err = _rewrite_conditionals(a)
+        if err:
+            return expr, err
+        rewritten.append(ra)
+    cond, then_v, else_v = rewritten
+    tail_rw, err = _rewrite_conditionals(expr[close_idx + 1:])
+    if err:
+        return expr, err
+    return f"{expr[:m.start()]}if ({cond}) then {then_v} else {else_v}{tail_rw}", None
 
 
 def translate_jaql(expr, context: dict | None = None) -> tuple:
@@ -225,39 +332,47 @@ def translate_jaql(expr, context: dict | None = None) -> tuple:
          aggregation, or `agg([Column])` when it appears bare. Nested `formula`
          fragments recurse.
       2. Map function names via FUNCTION_MAP.
-      3. Any function in UNSUPPORTED (or unknown), or an unresolvable placeholder, makes
-         the whole formula NEEDS REVIEW (expr None) with the offender noted.
-      4. `case` / `countduplicates` / 2-arg `round` -> Approximated with a caveat.
+      3. Any function in UNSUPPORTED (or unknown), `case`, a non-3-arg `if`, or an
+         unresolvable placeholder makes the whole formula NEEDS REVIEW (expr None).
+      4. Functional `if(c,a,b)` -> `if (c) then a else b`; 2-arg `round` -> Approximated.
 
     Returns (expr_out, status, note); expr_out is None when status == "NEEDS REVIEW".
     """
     source = expr or ""
-    out = source
     context = context or {}
     coverage = _AUTO
     notes: list = []
 
-    # 1. Resolve context placeholders.
-    for raw_key, frag in context.items():
-        out, coverage, terminal = _resolve_placeholder(raw_key, frag, source, out,
-                                                        coverage, notes)
-        if terminal is not None:
-            return terminal
-
-    # 2/3. Inspect every function call in the (original) expression.
+    # 1. Validate every function call in the ORIGINAL source (unsupported/unknown/case -> abort).
     coverage, terminal = _inspect_functions(source, coverage, notes)
     if terminal is not None:
         return terminal
 
-    # 3b. round() arg semantics diverge: TS's 2nd arg is a rounding INCREMENT
+    # 2. round() arg semantics diverge: TS's 2nd arg is a rounding INCREMENT
     # (round(x, .01) for 2 decimals), not Sisense's decimal-place COUNT (Round(x, 2)).
     if re.search(r"\bround\s*\([^()]*,", source, re.IGNORECASE):
         coverage = _apply_downgrade(coverage, notes, _PARTIAL,
                                     "TS round() 2nd arg is a rounding increment, "
                                     "not a decimal-place count")
 
-    # 4. Rename mapped functions in the resolved expression (ceiling->ceil, case->if).
-    out = _FUNC_CALL.sub(_rename_func, out)
+    # 3. Rename source function names to TS (ceiling->ceil, count->unique count) BEFORE
+    #    interpolating resolved content — so TS aggregation names and real column display
+    #    names (e.g. "[Profit (Adjusted)]") introduced in step 4 are never re-scanned/mangled.
+    out = _FUNC_CALL.sub(_rename_func, source)
+
+    # 4. Resolve context placeholders into the renamed skeleton. A `{dim, agg}` fragment
+    #    becomes a bare column ref when already wrapped, or `agg([Column])` (agg already TS)
+    #    when bare; a nested `formula` fragment recurses (returns fully-translated text).
+    for raw_key, frag in context.items():
+        out, coverage, terminal = _resolve_placeholder(raw_key, frag, source, out,
+                                                        coverage, notes)
+        if terminal is not None:
+            return terminal
+
+    # 5. Rewrite the functional if(c,a,b) into ThoughtSpot's `if (c) then a else b`.
+    out, cond_err = _rewrite_conditionals(out)
+    if cond_err:
+        return None, "NEEDS REVIEW", cond_err
     out = re.sub(r"\s+", " ", out).strip()
 
     return out, _STATUS[coverage], "; ".join(notes)
@@ -270,7 +385,6 @@ def translate_agg(agg) -> tuple:
     """
     key = (agg or "").lower()
     if key in AGG_MAP:
-        status = "Approximated" if key == "countduplicates" else "Migrated"
-        note = "countduplicates approximated as COUNT" if key == "countduplicates" else ""
-        return AGG_MAP[key], status, note
+        # count->COUNT_DISTINCT and dupCount->COUNT are both exact (see AGG_MAP note) — no caveat.
+        return AGG_MAP[key], "Migrated", ""
     return None, "NEEDS REVIEW", f"no TML aggregation for Sisense agg '{agg}'"

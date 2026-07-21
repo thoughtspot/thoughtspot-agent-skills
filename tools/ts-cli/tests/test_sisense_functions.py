@@ -13,6 +13,15 @@ def test_maps_present():
     assert "rank" in UNSUPPORTED
 
 
+def test_count_is_distinct_dupcount_is_total():
+    # Sisense count == unique/distinct; dupCount/countduplicates == exact total (verified vs docs)
+    assert AGG_MAP["count"] == "COUNT_DISTINCT"
+    assert AGG_MAP["countduplicates"] == "COUNT"
+    assert AGG_MAP["dupcount"] == "COUNT"
+    assert translate_agg("count") == ("COUNT_DISTINCT", "Migrated", "")
+    assert translate_agg("countduplicates") == ("COUNT", "Migrated", "")
+
+
 def test_simple_agg_wrapped_placeholder():
     # sum([rev]) with rev already wrapped -> substitute bare column, map sum
     expr, status, _ = translate_jaql("sum([rev])", {"rev": {"dim": "[Commerce.Revenue]"}})
@@ -40,18 +49,54 @@ def test_ddiff_to_diff_days():
     assert expr == "diff_days([Start], [End])"
 
 
-def test_countduplicates_agg_is_partial():
-    expr, status, note = translate_jaql("[v]", {"v": {"dim": "[T.Visit ID]", "agg": "countduplicates"}})
-    assert status == "Approximated"
+def test_countduplicates_agg_is_exact_count():
+    # Sisense dupCount == exact total count -> TS count(), Migrated (NOT approximate)
+    expr, status, _ = translate_jaql("[v]", {"v": {"dim": "[T.Visit ID]", "agg": "countduplicates"}})
+    assert status == "Migrated"
     assert expr == "count([Visit ID])"
-    assert "countduplicates" in note
 
 
-def test_case_maps_to_if_partial():
+def test_count_agg_is_unique_count():
+    # Sisense count == distinct -> TS `unique count`
+    expr, status, _ = translate_jaql("[c]", {"c": {"dim": "[T.Customer]", "agg": "count"}})
+    assert status == "Migrated"
+    assert expr == "unique count([Customer])"
+
+
+def test_if_maps_to_then_else():
+    # Functional if(cond, a, b) -> ThoughtSpot `if (cond) then a else b`, not if(cond, a, b)
+    expr, status, _ = translate_jaql("if([q] > 0, 1, 0)", {"q": {"dim": "[T.Qty]"}})
+    assert status == "Migrated"
+    assert expr == "if ([Qty] > 0) then 1 else 0"
+
+
+def test_nested_if_maps_to_nested_then_else():
+    expr, status, _ = translate_jaql(
+        "if([q] > 0, 1, if([q] < 0, -1, 0))", {"q": {"dim": "[T.Qty]"}})
+    assert status == "Migrated"
+    assert expr == "if ([Qty] > 0) then 1 else if ([Qty] < 0) then -1 else 0"
+
+
+def test_case_needs_review():
+    # `case` multi-branch has no safe 1:1 -> flagged, never emitted as invalid syntax
     expr, status, note = translate_jaql("case([x])", {"x": {"dim": "[T.Cost]"}})
-    assert status == "Approximated"
-    assert expr == "if([Cost])"
-    assert "caveat" in note
+    assert expr is None
+    assert status == "NEEDS REVIEW"
+    assert "case" in note.lower()
+
+
+def test_non_3arg_if_needs_review():
+    expr, status, _ = translate_jaql("if([q] > 0, 1)", {"q": {"dim": "[T.Qty]"}})
+    assert expr is None
+    assert status == "NEEDS REVIEW"
+
+
+def test_paren_strip_only_date_levels():
+    # A date-hierarchy tag is stripped, a real parenthetical name is preserved
+    e1, _, _ = translate_jaql("[d]", {"d": {"dim": "[T.Order Date (Calendar)]", "agg": "max"}})
+    assert e1 == "max([Order Date])"
+    e2, _, _ = translate_jaql("[p]", {"p": {"dim": "[T.Profit (Adjusted)]", "agg": "sum"}})
+    assert e2 == "sum([Profit (Adjusted)])"
 
 
 def test_round_two_arg_partial():
@@ -84,7 +129,5 @@ def test_nested_formula_recurses():
 
 def test_translate_agg_simple_and_review():
     assert translate_agg("sum") == ("SUM", "Migrated", "")
-    kw, status, _ = translate_agg("countduplicates")
-    assert (kw, status) == ("COUNT", "Approximated")
     kw, status, note = translate_agg("median")
     assert kw is None and status == "NEEDS REVIEW" and "median" in note

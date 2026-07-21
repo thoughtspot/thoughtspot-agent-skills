@@ -5,10 +5,10 @@ Conventions (.claude/rules/ts-cli.md): structured JSON to stdout, diagnostics to
 connection by display name (never GUID). Consumes the offline bundle JSON
 ``{dashboard, widgets, datamodel}`` — no live Sisense/ThoughtSpot connection required.
 
-The MODEL path (parse, build-model) is complete. The LIVEBOARD path (build-liveboard)
-computes the full build_from_spec spec + Sisense-local filter chips; its final TML emission
-is gated on the shared emitter ``ts_cli.tableau.liveboard.build_from_spec``, which is not yet
-on this branch — see the guarded import below.
+Both paths are complete. build-liveboard emits Answer + tabbed-Liveboard TML via the shared
+emitter's ``build_answer`` using the Sisense-resolved ts_chart per widget (see
+``ts_cli.sisense.answers.build_liveboard_result``), then injects the dashboard filter bar as
+Liveboard filter chips.
 """
 from __future__ import annotations
 
@@ -16,13 +16,6 @@ import json
 from pathlib import Path
 
 import typer
-
-# The shared Answer/Liveboard emitter lives on unmerged branches. Guard the import so the
-# liveboard path degrades to emitting the computed spec (a valid partial) until it lands.
-try:
-    from ts_cli.tableau.liveboard import build_from_spec  # type: ignore
-except ImportError:  # pragma: no cover - exercised only once the emitter lands on main
-    build_from_spec = None
 
 app = typer.Typer(help="Sisense (offline bundle) -> ThoughtSpot conversion commands.")
 
@@ -153,48 +146,33 @@ def build_liveboard_cmd(
     overrides: str = typer.Option(None, "--overrides",
                                   help="overrides.json (report_name / extra_visuals)"),
 ) -> None:
-    """Emit Answer + tabbed-Liveboard TML from a Sisense dashboard's widgets, reusing the shared
-    build_from_spec (role-aware axes; per-widget ts_chart wins; date buckets; top-N), then inject
-    the Sisense dashboard filter bar as Liveboard filter chips.
+    """Emit Answer + tabbed-Liveboard TML from a Sisense dashboard's widgets, then inject the
+    Sisense dashboard filter bar as cross-viz Liveboard filter chips.
 
-    NOTE: the shared emitter (ts_cli.tableau.liveboard.build_from_spec) is not yet on this
-    branch. Until it lands, this command still computes and emits the full build_from_spec spec
-    and the extracted filter chips (JSON to stdout) and exits 0 — a valid partial. Everything
-    behind the `if build_from_spec is not None` branch (Answer/Liveboard TML emission + chip
-    injection + file writes) auto-activates when the emitter merges to main.
+    Each widget's Answer is emitted via the shared emitter's ``build_answer`` using the
+    Sisense-resolved ``ts_chart`` (COLUMN/PIE/KPI/…) directly, so the widget-type mapping and
+    the Approximated/NEEDS-REVIEW signal are honoured (main's build_from_spec would otherwise
+    re-infer the chart from a mark and report everything as Migrated).
     """
     from ts_cli.sisense.parsing import parse_inventory
-    from ts_cli.sisense.answers import spec_from_parse, extract_liveboard_filters
+    from ts_cli.sisense.answers import build_liveboard_result, extract_liveboard_filters
     from ts_cli.sisense.tables import _slug
+    from ts_cli.tml_common import dump_tml_yaml
 
     bundle = _load_bundle(input_file)
     inv = parse_inventory(bundle)
     ov = json.loads(Path(overrides).read_text(encoding="utf-8")) if overrides else {}
+    if report_name:
+        ov["report_name"] = report_name
 
     column_names, measure_names = _model_names(inv, ov, connection, database, schema,
                                                join_type, lower_db_table, model_name)
-    spec = spec_from_parse(inv, model_name, model_fqn, column_names, measure_names, ov)
-    if report_name:
-        spec["report_name"] = report_name
+    result = build_liveboard_result(inv, model_name, model_fqn, column_names, measure_names, ov)
     chips = extract_liveboard_filters(inv, column_names, measure_names)
 
     for w in inv.get("warnings", []):
         typer.echo(f"warning: {w}", err=True)
 
-    if build_from_spec is None:
-        # Emitter absent (unmerged): emit the computed spec + chips, note the pending item, exit 0.
-        typer.echo(json.dumps({"status": "spec_only", "spec": spec, "filter_chips": chips}))
-        typer.echo(
-            "note: final liveboard TML emission is pending the shared emitter "
-            "(ts_cli.tableau.liveboard.build_from_spec) landing on main. Emitted the computed "
-            "build_from_spec spec + Sisense filter chips only (a valid partial). See "
-            "references/open-items.md.", err=True)
-        return
-
-    # --- Auto-activates when the emitter lands on main ---------------------------------- #
-    from ts_cli.tml_common import dump_tml_yaml
-
-    result = build_from_spec(spec)
     lb_tml = result.get("liveboard")
     if lb_tml and chips:  # inject the Sisense dashboard filter bar as cross-viz chips
         lb_tml["liveboard"]["filters"] = chips
@@ -208,7 +186,7 @@ def build_liveboard_cmd(
         (out_dir / f"{_slug(a['answer']['name'])}.answer.tml").write_text(
             dump_tml_yaml(a), encoding="utf-8")
     if lb_tml:
-        (out_dir / f"{_slug(spec['report_name'])}.liveboard.tml").write_text(
+        (out_dir / f"{_slug(result['report_name'])}.liveboard.tml").write_text(
             dump_tml_yaml(lb_tml), encoding="utf-8")
 
     vr = result["visual_rows"]
@@ -216,7 +194,7 @@ def build_liveboard_cmd(
     def _c(rows, s):
         return sum(1 for r in rows if r.get("status") == s)
     typer.echo(json.dumps({
-        "report_name": spec["report_name"], "answers": len(result["answers"]),
+        "report_name": result["report_name"], "answers": len(result["answers"]),
         "visuals_migrated": _c(vr, "Migrated"), "approximated": _c(vr, "Approximated"),
         "needs_review": _c(vr, "NEEDS REVIEW"), "filter_chips": len(chips),
         "liveboard": bool(lb_tml)}))

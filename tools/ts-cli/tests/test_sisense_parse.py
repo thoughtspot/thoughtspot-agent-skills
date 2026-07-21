@@ -7,6 +7,25 @@ and graceful handling of a missing datamodel (warning, no crash).
 from ts_cli.sisense.parsing import parse_inventory
 
 
+def test_dashboard_filter_classification():
+    # The dashboard filter bar -> classified SourceFilters (member/exclude/range/top_n),
+    # each carrying `raw` so the chip extractor can reconstruct numeric-range presets.
+    bundle = {"dashboard": {"title": "D", "filters": [
+        {"jaql": {"dim": "[t.Country]", "filter": {"members": ["US", "CA"]}}},
+        {"jaql": {"dim": "[t.Region]", "filter": {"exclude": {"members": ["XX"]}}}},
+        {"jaql": {"dim": "[t.Revenue]", "filter": {"from": 10, "toNotEqual": 100}}},
+        {"jaql": {"dim": "[t.Category]", "filter": {"top": 5, "by": {}}}},
+        {"jaql": {"dim": "[t.Weird]", "filter": {"someUnknownOp": 1}}},
+    ]}}
+    fils = parse_inventory(bundle)["dashboard"]["filters"]
+    kinds = [f["kind"] for f in fils]
+    assert kinds == ["member", "exclude", "range", "top_n", "unknown"]
+    assert fils[0]["values"] == ["US", "CA"]
+    assert fils[1]["values"] == ["XX"]
+    assert fils[2]["raw"] == {"from": 10, "toNotEqual": 100}   # raw preserved for chip presets
+    assert fils[4]["kind"] == "unknown"                        # nothing silently dropped
+
+
 def _bundle():
     return {
         "datamodel": {

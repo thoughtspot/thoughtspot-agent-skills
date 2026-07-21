@@ -93,13 +93,10 @@ Widgets become Answers on the tabbed Liveboard: the Sisense widget type picks th
 widget answer. The dashboard filter bar becomes cross-viz Liveboard filter chips (member→IN,
 exclude→NOT_IN, numeric range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked example).
 
-**IMPORTANT — liveboard emission is currently partial.** The final Answer/Liveboard TML
-emission is gated on the shared emitter `ts_cli.tableau.liveboard.build_from_spec`, which has
-not yet landed on `main`. Until it does, `build-liveboard` computes and emits the full
-`build_from_spec` spec **plus the extracted filter chips** (JSON to stdout) and exits 0 — a
-valid partial, not a failure. The Answer/Liveboard TML file-writes + chip injection
-auto-activate the moment the emitter merges. See open-item #2. Once it lands, import the
-emitted TML:
+Each Answer is emitted via the shared emitter's `build_answer` using the Sisense-resolved
+chart type directly, so the widget-type mapping wins and the Approximated / NEEDS REVIEW
+signal survives into the report (a widget that can't be mapped is flagged, never silently
+downgraded). Import the emitted TML:
 ```bash
 ts tml import --dir out/ --order tableau --policy ALL_OR_NONE --profile <name>
 ```

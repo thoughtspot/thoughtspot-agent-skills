@@ -164,55 +164,76 @@ def _widget_top_n(widget: dict) -> int | None:
     return None
 
 
-def _spec_visual(widget: dict, norm: dict) -> dict | None:
-    """One Sisense widget -> a build_from_spec visual dict, or None to skip (text widget)."""
-    ct, _status, _note = chart_type_for(widget.get("wtype"), widget.get("subtype"))
-    if ct is None:
-        return None
-    fields, bucket_tokens, _missing = _resolve_fields(widget, norm)
-    # mark must be non-empty (build_from_spec treats "" as a non-visual and skips before the
-    # ts_chart passthrough); "automatic" is benign — ts_chart still wins in _resolve_ct.
-    sv: dict = {"title": widget.get("title") or "", "mark": "automatic",
-                "ts_chart": ct, "fields": fields}
-    if bucket_tokens:
-        sv["bucket_tokens"] = bucket_tokens
-    top_n = _widget_top_n(widget)
-    if top_n:
-        sv["top_n"] = top_n
-    return sv
+# Chart types valid with no measure; anything else with zero measures -> NEEDS REVIEW.
+_NO_MEASURE_OK = frozenset({"GRID_TABLE", "PIVOT_TABLE", "KPI"})
 
 
-def spec_from_parse(inv: dict, model_name: str, model_fqn=None, column_names=None,
-                    measure_names=None, overrides=None) -> dict:
-    """Parsed Sisense inventory -> a build_from_spec spec.
+def _note_join(note: str, msg: str) -> str:
+    return (note + "; " + msg) if note else msg
 
-    The single Sisense dashboard becomes one dashboard entry whose visuals are the widgets;
-    fields resolve to the model's column display names (``column_names``), each tagged with a
-    canonical role and a ``measure`` flag. ``measure_names`` is the model's MEASURE columns.
+
+def _widget_answer(widget, idx, tab, model_name, model_fqn, norm, measures, build_answer):
+    """One Sisense widget -> (answer_obj|None, tile_item|None, report_row).
+
+    Drives the shared emitter's ``build_answer`` with OUR resolved ``ts_chart`` and status,
+    rather than letting build_from_spec re-infer the chart from a mark (main's emitter ignores
+    a per-visual ts_chart and hardcodes "Migrated"). So the Sisense widget-type mapping and the
+    Approximated / NEEDS REVIEW signal both survive into the migration report.
     """
+    title = widget.get("title") or f"Visual {idx + 1}"
+    ct, status, note = chart_type_for(widget.get("wtype"), widget.get("subtype"))
+    if ct is None:                                    # text/no-chart widget -> skip
+        return None, None, {"page": tab, "visual": title, "ts_chart": "(skipped)",
+                            "status": "Skipped", "note": note}
+    fields, bucket_tokens, missing = _resolve_fields(widget, norm)
+    cols = [f["name"] for f in fields]
+    if not cols:
+        return None, None, {"page": tab, "visual": title, "ts_chart": ct,
+                            "status": "NEEDS REVIEW",
+                            "note": _note_join(note, "no fields mapped to model columns")}
+    roles = [f["role"] for f in fields]
+    n_meas = sum(1 for c in cols if c in measures)
+    if ct not in _NO_MEASURE_OK and n_meas == 0:      # flag, don't downgrade
+        status = "NEEDS REVIEW"
+        note = _note_join(note, f"{ct} needs a measure but none mapped")
+    if missing:
+        note = _note_join(note, "unmapped field(s): " + ", ".join(missing))
+    a_obj = build_answer(title, f"{tab}-{idx}", model_name, model_fqn, cols, ct,
+                         measures, roles, bucket_tokens, _widget_top_n(widget))
+    return a_obj, {"answer": a_obj["answer"], "tile": None}, \
+        {"page": tab, "visual": title, "ts_chart": ct, "status": status, "note": note}
+
+
+def build_liveboard_result(inv: dict, model_name: str, model_fqn=None, column_names=None,
+                           measure_names=None, overrides=None) -> dict:
+    """Parsed Sisense inventory -> ``{answers, liveboard, visual_rows, report_name}``.
+
+    Mirrors the shared ``build_from_spec`` output contract, but emits each widget's Answer via
+    the emitter's ``build_answer`` using the Sisense-resolved ``ts_chart`` (COLUMN/PIE/KPI/…)
+    directly, so the chart type and the Approximated/NEEDS-REVIEW status are honoured on the
+    current ``main`` emitter without depending on the (unmerged) ts_chart-aware variant.
+    """
+    from ts_cli.tableau.liveboard import build_answer, build_liveboard
+
     overrides = overrides or {}
-    column_names = column_names or []
-    measure_names = set(measure_names or [])
-    norm = {n.lower(): n for n in column_names}
-
+    measures = set(measure_names or [])
+    norm = {n.lower(): n for n in (column_names or [])}
     dash = inv.get("dashboard") or {}
-    report_name = (overrides.get("report_name") or dash.get("title") or model_name)
+    report_name = overrides.get("report_name") or dash.get("title") or model_name
+    tab = dash.get("title") or report_name
 
-    visuals = []
-    for w in inv.get("widgets", []) or []:
-        sv = _spec_visual(w, norm)
-        if sv is not None:
-            visuals.append(sv)
-
-    dashboards = [{"name": dash.get("title") or report_name, "tooltip": False, "visuals": visuals}]
-    return {
-        "report_name": report_name,
-        "model_name": model_name,
-        "model_fqn": model_fqn,
-        "measure_names": sorted(measure_names),
-        "dashboards": dashboards,
-        "extra_visuals": overrides.get("extra_visuals") or [],
-    }
+    answers, items, rows = [], [], []
+    for i, w in enumerate(inv.get("widgets", []) or []):
+        a_obj, item, row = _widget_answer(w, i, tab, model_name, model_fqn, norm,
+                                          measures, build_answer)
+        if a_obj:
+            answers.append(a_obj)
+        if item:
+            items.append(item)
+        rows.append(row)
+    liveboard = build_liveboard(report_name, [(tab, items)]) if items else None
+    return {"answers": answers, "liveboard": liveboard, "visual_rows": rows,
+            "report_name": report_name}
 
 
 # --------------------------------------------------------------------------- #
@@ -226,14 +247,19 @@ def _range_generic_filter(raw: dict):
     Ported verbatim from map/content.py._range_generic_filter.
     """
     r = raw or {}
-    lo, lo_ex = r.get("from"), r.get("fromNotEqual")
-    hi, hi_ex = r.get("to"), r.get("toNotEqual")
     if r.get("equals") is not None:
         return {"oper": "EQ", "values": [r["equals"]]}
-    if lo is not None and hi is not None:
-        return {"oper": "BW_INC", "values": [lo, hi]}          # between, inclusive
-    if lo_ex is not None and hi_ex is not None:
-        return {"oper": "BW", "values": [lo_ex, hi_ex]}        # between, exclusive
+    lo, lo_ex = r.get("from"), r.get("fromNotEqual")
+    hi, hi_ex = r.get("to"), r.get("toNotEqual")
+    lo_val = lo if lo is not None else lo_ex        # lower bound present (either inclusivity)
+    hi_val = hi if hi is not None else hi_ex        # upper bound present (either inclusivity)
+    # Two-sided: keep BOTH bounds — never drop one (a mixed inclusive/exclusive range must
+    # not silently collapse to an open-ended single bound). ThoughtSpot exposes BW_INC
+    # (both-inclusive) and BW (both-exclusive); a mixed range uses BW_INC and the exact
+    # boundary inclusivity is a known fidelity gap tracked in open-items (verify live).
+    if lo_val is not None and hi_val is not None:
+        both_exclusive = lo is None and hi is None
+        return {"oper": "BW" if both_exclusive else "BW_INC", "values": [lo_val, hi_val]}
     for val, op in ((lo, "GE"), (lo_ex, "GT"), (hi, "LE"), (hi_ex, "LT")):
         if val is not None:
             return {"oper": op, "values": [val]}

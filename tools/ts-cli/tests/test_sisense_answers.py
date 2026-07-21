@@ -1,10 +1,11 @@
-"""Unit tests for ts_cli.sisense.answers — Sisense widgets/dashboard -> build_from_spec spec.
+"""Unit tests for ts_cli.sisense.answers.
 
 Pure functions, no live cluster. Synthetic inventories via `_inv()`. Covers widget->chart-type
-mapping, spec_from_parse shape (role-tagged fields, bucket_tokens, ts_chart passthrough, top_n),
-and the Sisense-local filter-chip extraction (member IN, exclude NOT_IN, numeric-range presets).
+mapping, build_liveboard_result (Answers emitted with the Sisense-resolved ts_chart + status,
+carried into visual_rows), and the Sisense-local filter-chip extraction (member IN, exclude
+NOT_IN, numeric-range presets incl. the mixed inclusive/exclusive two-sided range).
 """
-from ts_cli.sisense.answers import (chart_type_for, spec_from_parse,
+from ts_cli.sisense.answers import (chart_type_for, build_liveboard_result,
                                      extract_liveboard_filters)
 
 
@@ -53,34 +54,35 @@ COLS = ["Category", "Revenue", "Date"]
 MEAS = {"Revenue"}
 
 
-def test_spec_shape():
-    spec = spec_from_parse(_inv(), "Sample ECommerce", None, COLS, MEAS, {})
-    assert spec["model_name"] == "Sample ECommerce"
-    assert spec["report_name"] == "Sales"                 # dashboard title
-    assert spec["measure_names"] == ["Revenue"]
-    assert len(spec["dashboards"]) == 1
-    visuals = spec["dashboards"][0]["visuals"]
-    assert len(visuals) == 2                              # richtext widget skipped
-
-    v0 = visuals[0]
-    assert v0["ts_chart"] == "COLUMN" and v0["mark"] == "automatic"   # ts_chart passthrough
-    by_name = {f["name"]: f for f in v0["fields"]}
-    assert by_name["Category"]["role"] == "Category" and by_name["Category"]["measure"] is False
-    assert by_name["Revenue"]["role"] == "Values" and by_name["Revenue"]["measure"] is True
-
-    v1 = visuals[1]
-    assert v1["ts_chart"] == "LINE"
-    # date level 'months' -> a monthly bucket token on the RAW base date column (Date (Calendar)
-    # -> Date); the shared emitter resolves the output name once.
-    assert v1["bucket_tokens"] == {"Date": "[Date].MONTHLY"}
-    assert v1["top_n"] == 5                               # per-attribute top-N carried
+def test_build_liveboard_result_uses_resolved_chart_and_status():
+    res = build_liveboard_result(_inv(), "Sample ECommerce", None, COLS, MEAS, {})
+    assert res["report_name"] == "Sales"                       # dashboard title
+    assert len(res["answers"]) == 2                            # richtext widget skipped
+    assert res["liveboard"] is not None
+    # Our resolved ts_chart wins (COLUMN / LINE), NOT re-inferred by the emitter's mark path.
+    types = [a["answer"]["chart"]["type"] for a in res["answers"]]
+    assert types == ["COLUMN", "LINE"]
+    rows = res["visual_rows"]
+    assert [r["ts_chart"] for r in rows] == ["COLUMN", "LINE", "(skipped)"]
+    assert [r["status"] for r in rows] == ["Migrated", "Migrated", "Skipped"]
 
 
-def test_spec_default_report_name_from_model():
+def test_chart_missing_measure_flagged_needs_review():
+    inv = _dash([])
+    inv["widgets"] = [{"oid": "w", "title": "Cats only", "wtype": "chart/column",
+                       "subtype": "", "filters": [],
+                       "fields": [_field("[Commerce.Category]", "categories")]}]
+    inv["dashboard"]["title"] = "D"
+    res = build_liveboard_result(inv, "M", None, ["Category"], set(), {})
+    row = res["visual_rows"][0]
+    assert row["status"] == "NEEDS REVIEW" and "measure" in row["note"]
+
+
+def test_default_report_name_from_model():
     inv = _inv()
     inv["dashboard"]["title"] = ""
-    spec = spec_from_parse(inv, "Fallback Model", None, COLS, MEAS, {})
-    assert spec["report_name"] == "Fallback Model"
+    res = build_liveboard_result(inv, "Fallback Model", None, COLS, MEAS, {})
+    assert res["report_name"] == "Fallback Model"
 
 
 def _dash(filters):
@@ -129,6 +131,22 @@ def test_filter_exclusive_single_sided():
                   "values": [0], "raw": {"fromNotEqual": 0}}])           # -> GT (exclusive)
     chips = extract_liveboard_filters(inv)
     assert chips[0]["generic_filter"] == {"oper": "GT", "values": [0]}
+
+
+def test_filter_mixed_two_sided_range_keeps_both_bounds():
+    # [10, 100): a mixed inclusive/exclusive range must NOT collapse to an open-ended GE 10.
+    inv = _dash([{"kind": "range", "dim": "[Commerce.Revenue]", "operator": "range",
+                  "values": [10, 100], "raw": {"from": 10, "toNotEqual": 100}}])
+    gf = extract_liveboard_filters(inv)[0]["generic_filter"]
+    assert gf["values"] == [10, 100]                 # both bounds retained (no silent drop)
+    assert gf["oper"] in ("BW_INC", "BW")
+
+
+def test_filter_both_exclusive_two_sided():
+    inv = _dash([{"kind": "range", "dim": "[Commerce.Revenue]", "operator": "range",
+                  "values": [10, 100], "raw": {"fromNotEqual": 10, "toNotEqual": 100}}])
+    gf = extract_liveboard_filters(inv)[0]["generic_filter"]
+    assert gf == {"oper": "BW", "values": [10, 100]}
 
 
 def test_filter_top_n_skipped_and_exposure_check():
