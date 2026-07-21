@@ -35,8 +35,8 @@ in the Snowflake Semantic View schema — the aggregation is embedded in the `ex
 | `AVG` / `AVERAGE` | `AVG(expr)` |
 | `MIN` | `MIN(expr)` |
 | `MAX` | `MAX(expr)` |
-| `STD_DEVIATION` | `STDDEV(expr)` *(flag for review — no direct match)* |
-| `VARIANCE` | `VARIANCE(expr)` *(flag for review — no direct match)* |
+| `STD_DEVIATION` | `STDDEV(expr)` — direct match, see ts-snowflake-formula-translation.md. Snowflake `STDDEV` is sample stddev (`STDDEV_SAMP`) by default; use `STDDEV_POP(expr)` if population semantics are required. |
+| `VARIANCE` | `VARIANCE(expr)` — direct match, see ts-snowflake-formula-translation.md. Snowflake `VARIANCE` is sample variance (`VAR_SAMP`) by default; use `VAR_POP(expr)` if population semantics are required. |
 | *(not set on MEASURE)* | `SUM(expr)` *(default)* |
 
 ---
@@ -99,7 +99,14 @@ def to_snake(name):
 
 ---
 
-## Snowflake Field Entry Templates
+## Snowflake Field Entry Templates — YAML path (alternate format)
+
+**Primary emission target is DDL.** `ts-convert-to-snowflake-sv` emits
+`CREATE OR REPLACE SEMANTIC VIEW` DDL (see the DDL Format Reference and DDL rules in
+`ts-convert-to-snowflake-sv/SKILL.md`) — that is the live-verified path. The templates
+below describe the alternate `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` YAML dialect, kept
+here because it remains a valid way to create a Semantic View and shares most field
+semantics with the DDL. Do not treat this section as the current converter output format.
 
 Fields are **nested under their owning table** in the output YAML, not at the top level.
 Do not include `default_aggregation` — it is not supported. `sample_values` IS valid and Snowflake recommends it for Cortex Analyst accuracy.
@@ -215,7 +222,12 @@ The Formula Translation Log entry should capture:
 
 ---
 
-## Relationship Entry Template
+## Relationship Entry Template — YAML path (alternate format)
+
+**Primary emission target is DDL** (see note above) — the DDL relationship syntax is
+`rel_name as LEFT(col) references RIGHT(col)`, documented in
+`ts-convert-to-snowflake-sv/SKILL.md`. The template below is the equivalent shape for
+the alternate `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` YAML path.
 
 ```yaml
 - name: "{LEFT_TABLE}_to_{RIGHT_TABLE}"    # append _{LEFT_COL} if name already used

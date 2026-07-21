@@ -62,12 +62,15 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         -- Filter-labeled dimension (boolean expr, available as WHERE clause)
         TABLE_REF.DIM_NAME labels = (filter) as BOOLEAN_EXPR [comment='...'],
         -- Sample values (Snowflake best practice; improves Cortex Analyst accuracy) —
-        -- DDL clause form not yet confirmed against a live GET_DDL round-trip; expected
-        -- to parallel `with synonyms=(...)`. → ThoughtSpot: no equivalent; see note below.
+        -- PARSER PREREQUISITE: this DDL clause shape is assumed from the YAML spec
+        -- (expected to parallel `with synonyms=(...)`), not yet confirmed against a
+        -- live GET_DDL round-trip — verify before freezing parser grammar (BL-100).
+        -- → ThoughtSpot: no equivalent; see note below.
         TABLE_REF.VIEW_COL as view_alias.DIM_NAME with sample values ('val1', 'val2', ...),
-        -- is_enum indicator (GA 2026-06-25; marks dimension as enumerable) — DDL clause
-        -- form not yet confirmed against a live GET_DDL round-trip. → ThoughtSpot: no
-        -- equivalent; see note below.
+        -- is_enum indicator (GA 2026-06-25; marks dimension as enumerable) —
+        -- PARSER PREREQUISITE: DDL clause shape assumed from the YAML spec, not yet
+        -- confirmed against a live GET_DDL round-trip — verify before freezing parser
+        -- grammar (BL-100). → ThoughtSpot: no equivalent; see note below.
         TABLE_REF.VIEW_COL as view_alias.DIM_NAME is_enum,
         ...
     )
@@ -156,6 +159,11 @@ create or replace semantic view BIRD_FINANCIAL_SV
   dimension entry — Cortex-Analyst-only NL-parsing aids with no ThoughtSpot equivalent.
   → ThoughtSpot: parse but do not attempt to emit; `sample_values` improves NL parsing,
   `is_enum` marks the dimension as enumerable — both are informational only.
+  **Verification status:** the DDL clause shape for both is assumed from the YAML spec
+  (`snowflake-schema.md`), not yet confirmed against a live `GET_DDL` round-trip. This
+  is a parser prerequisite for BL-100 codification — verify the actual DDL token shape
+  against a live semantic view carrying `sample values`/`is_enum` before freezing the
+  parser grammar.
 
 ---
 
@@ -579,9 +587,12 @@ correct ThoughtSpot construct. This decision tree defines the resolution order.
          The referenced metric becomes an inner formula; the current metric wraps it.
    NO  → step 4
 
-4. FAIL — the identifier cannot be resolved. Log it as an unresolved reference
-   in the Formula Translation Log and emit a placeholder comment in the formula:
-   /* UNRESOLVED: table_alias.name */
+4. FAIL — the identifier cannot be resolved. Omit and log: skip the formula
+   entirely (do not emit a partial or placeholder formula) and record it in the
+   Formula Translation Log's skipped/omitted output with the reason
+   `UNRESOLVED: table_alias.name`. This matches the SKILL.md and both
+   to-/from-direction untranslatable policies (PT1) — never emit a placeholder
+   comment in generated TML.
 ```
 
 **Cross-table resolution:** when `table_alias` in the metric expression differs

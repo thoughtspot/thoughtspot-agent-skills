@@ -89,7 +89,6 @@ Use this as the canonical limitations reference.
 | L2 | Table-level `with synonyms=('...')` on `tables()` entries | No ThoughtSpot table-level synonym concept | Add table synonyms to `model.description` or `data_model_instructions` for Spotter context |
 | L3 | `ACCESS_MODIFIER: PRIVATE` on facts/metrics | No "private column" concept in ThoughtSpot models | Omit private facts/metrics; or include with `index_type: DONT_INDEX` so Spotter ignores them |
 | L4 | `unique_keys` declarations on table entries | No key declarations in ThoughtSpot models | Not needed — ThoughtSpot does not use key metadata |
-| L5 | Subquery-backed sources (`FROM (<subquery>)` in tables block) | N/A — Snowflake `tables()` does not support subquery sources | If a future SV version adds subquery support, implement using the pattern from `ts-convert-from-databricks-mv` (Step 2c) |
 | L6 | BOOL columns in `if` expressions require parentheses | `if [TABLE::BOOL_COL] then...` fails. Must use `if ( [TABLE::BOOL_COL] ) then...` with parentheses around the condition. `count_if` and `sum_if` also work without this issue. | Use `if ( [T::BOOL] ) then 1 else 0` (parens required) or prefer `count_if([T::BOOL], [T::PK])` / `sum_if([T::BOOL], [T::MEASURE])` which don't need the workaround. |
 | L7 | Formula import on initial model CREATE | Formulas referencing `[TABLE::COL]` fail during initial `ts tml import` (CREATE) but succeed on UPDATE (`--no-create-new`) | Always import model structure first (no formulas), then update with formulas in a second pass |
 | L8 | `is_enum` dimension property (GA 2026-06-25) | No ThoughtSpot enum/categorical-dimension concept | Informational Cortex-Analyst-only aid — parsed but not carried to TML; no action needed |
@@ -101,10 +100,6 @@ Use this as the canonical limitations reference.
 equivalent is easily achieved via post-conversion coaching (`/ts-object-model-coach`).
 These are cosmetic/metadata features that do not affect the structural correctness of
 the converted model.
-
-**L5** is N/A — Snowflake's `tables()` block does not support subquery sources. Only named
-database objects (tables and views) are valid. If a future SV version adds subquery support,
-this limitation would need to be reopened.
 
 **L6** is LOW severity — purely a syntax quirk. BOOL columns work in all formula contexts;
 the `if` construct just requires parentheses around BOOL conditions: `if ( [T::BOOL] ) then`.

@@ -269,6 +269,24 @@ changes how Cortex Analyst reasons about date grouping in natural-language queri
 does not restore a fiscal `expr` for the omitted column. Adjust the month boundary in
 the snippet to match the model's actual fiscal calendar before emitting it.
 
+### A note on `ts_first_day_of_week` / `last_n_days` (not real TS function names)
+
+Neither `ts_first_day_of_week(...)` nor `last_n_days(...)` appears in ThoughtSpot's
+formula function set (see
+[thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md)) —
+they are not confirmed-untranslatable ThoughtSpot functions and must not be cited as
+such. They are candidates for future translation, not hard blockers:
+
+- **`start_of_week([date])`** is the real ThoughtSpot function in this space (see
+  thoughtspot-formula-patterns.md). It is structurally identical to `start_of_month`
+  above and a plausible candidate for `DATE_TRUNC('WEEK', date)` — not yet added to
+  the verified table above; verify week-start-day alignment (ISO Monday-start vs.
+  ThoughtSpot's configured week start) before adding it as a confirmed rule.
+- A "last N days" filter has no single matching TS function name, but a boolean
+  formula expressing it (e.g. `[date] >= add_days(today(), -n)`) is a plausible
+  candidate for `col >= DATEADD('day', -n, CURRENT_DATE())` — not yet verified against
+  a live instance.
+
 ---
 
 ## SQL Pass-Through Functions

@@ -37,9 +37,7 @@ from pathlib import Path
 # so the exemption is traceable and can be chased down — a dateless "backlog"
 # note never expires and quietly rots (repo audit finding). Enforced by
 # _bad_backlog_justifications() below.
-BACKLOG: dict[str, str] = {
-    "ts-convert-to-snowflake-sv": "needs matrix — target 2026-08-31 (BL-029)",
-}
+BACKLOG: dict[str, str] = {}
 
 # A valid justification mentions an ISO date or a #NNN / BL-NNN reference.
 _BACKLOG_REF_RE = re.compile(r"\d{4}-\d{2}-\d{2}|#\d+|BL-\d+")

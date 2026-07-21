@@ -960,12 +960,14 @@ Tableau "enhance instead of mirror" hand-off. Phase 6: domain-library growth + e
 
 ### Problem
 
-~~Three~~ Two `ts-convert-*` skills still lack a `references/coverage-matrix.md` and are exempted in
-the validator's `BACKLOG` set: `ts-convert-to-snowflake-sv`,
-`ts-convert-to-databricks-mv`. `ts-convert-from-databricks-mv` shipped its coverage matrix
-in PR #232 (74 mapped constructs, 10 limitations). The validator now requires every BACKLOG
-justification to carry a target date or a `#NNN`/`BL-NNN` reference; the remaining two point
-here with a target of **2026-08-31**.
+~~Three~~ ~~Two~~ One `ts-convert-*` skill still lacks a `references/coverage-matrix.md` and is
+exempted in the validator's `BACKLOG` set: `ts-convert-to-databricks-mv`.
+`ts-convert-from-databricks-mv` shipped its coverage matrix in PR #232 (74 mapped
+constructs, 10 limitations). `ts-convert-to-snowflake-sv` shipped its coverage matrix
+(24 mapped constructs, 13 limitations) as part of BL-100 Phase 0 doc reconciliation and
+is removed from the `BACKLOG` set. The validator requires every remaining BACKLOG
+justification to carry a target date or a `#NNN`/`BL-NNN` reference; the remaining skill
+points here with a target of **2026-08-31**.
 
 ### Proposed approach
 
