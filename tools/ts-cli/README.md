@@ -2161,6 +2161,40 @@ Stats JSON to stdout; skipped entries and diagnostics to stderr.
 
 ---
 
+### `ts snowflake introspect`
+
+Query Snowflake INFORMATION_SCHEMA for the source tables referenced by a parsed
+Semantic View and build the artifacts the downstream pipeline needs. Codifies
+ts-convert-from-snowflake-sv Steps 6A–6C: Snowflake type → ThoughtSpot type
+mapping, tables-spec assembly for `ts tables create`, and a tables map for
+`ts snowflake build-model`.
+
+```bash
+ts snowflake introspect --parsed parsed.json --sf-profile PROD \
+  --connection-name "My Snowflake" --output-dir ./output
+cat output/tables-spec.json | ts tables create --profile my-ts
+ts snowflake build-model --tables output/tables.json ...
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--parsed` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--sf-profile` | *(required)* | Snowflake profile name |
+| `--connection-name` | *(required)* | ThoughtSpot connection display name (stamped on every table spec) |
+| `--output-dir` | *(required)* | Directory for `tables-spec.json` and `tables.json` |
+| `--warehouse` | profile default | Warehouse override |
+| `--role` | profile default | Role override |
+
+**Outputs:**
+- `tables-spec.json` — JSON array for `ts tables create` stdin
+- `tables.json` — `{alias: {name}}` map for `ts snowflake build-model --tables`
+  (enrich with GUIDs from `ts tables create` output before calling build-model)
+
+**Output (stdout):** JSON summary — `{tables, total_columns, warnings,
+tables_spec_file, tables_map_file, connection_name}`.
+
+---
+
 ### `ts snowflake build-model`
 
 Assemble a ThoughtSpot Model TML from the outputs of `ts snowflake parse-sv` and

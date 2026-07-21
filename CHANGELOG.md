@@ -9,7 +9,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - feat: `ts snowflake parse-sv` — deterministic Semantic View DDL parser (BL-100 PR1); extracts tables, relationships, dimensions, metrics (semi-additive, window, USING), facts, custom instructions, verified queries, extension JSON
 - feat: `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formula translator (BL-100 PR2); function mapping, identifier resolution, column classification, window/LOD/semi-additive/USING handling
 - feat: `ts snowflake build-model` — Semantic View → ThoughtSpot Model TML assembly + two-pass import (BL-100 PR3); inline Scenario B joins (equi/range/ASOF), SV synonym→display name, private columns, fact table detection; fixes latent `name` field bug in parse-sv table entries
-- chore: bump ts-cli to v0.65.0
+- feat: `ts snowflake introspect` — INFORMATION_SCHEMA query + Snowflake→ThoughtSpot type mapping + tables-spec/tables-map assembly (BL-100 PR4); codifies Steps 6A–6C of ts-convert-from-snowflake-sv
+- chore: bump ts-cli to v0.66.0
 
 ## 2026-07-20
 - fix: `ts profiles add`/`update` now coerce `true`/`false` `--field` values to JSON booleans — previously `--field verify_ssl=false` was stored as the string `"false"`, which `requests` treats as a CA-bundle path, breaking every call to a self-signed/private cluster
