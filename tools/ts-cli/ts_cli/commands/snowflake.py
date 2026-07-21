@@ -358,3 +358,56 @@ def exec_cmd(
     # default=json_safe_value coerces Decimal/datetime/bytes the connector returns
     # for NUMBER/temporal/BINARY columns (native JSON types never reach it).
     print(json.dumps(output, indent=2, default=json_safe_value))
+
+
+@app.command("parse-sv")
+def parse_sv_cmd(
+    ddl_file: str = typer.Argument(
+        ..., help="Path to a Semantic View DDL file, or '-' to read stdin"),
+    output_file: str = typer.Option(
+        ..., "--output", "-o", help="Output parsed JSON path"),
+) -> None:
+    """Parse Snowflake Semantic View DDL into structured JSON.
+
+    Codifies ts-convert-from-snowflake-sv SKILL.md Step 4: view identity,
+    tables (aliases, PKs, range constraints, subqueries), relationships
+    (equi/range/asof), dimensions, metrics (semi-additive, window, USING),
+    facts, custom instructions, verified queries, extension JSON.
+    Exits 1 when unsupported[] is non-empty (list on stderr; JSON still
+    written). Emits BL-100 prerequisite warnings for sample_values/is_enum.
+    """
+    from ts_cli.sv_parse import parse_sv_ddl
+
+    if ddl_file == "-":
+        ddl_text = sys.stdin.read()
+    else:
+        path = Path(ddl_file)
+        if not path.exists():
+            typer.echo(f"File not found: {ddl_file}", err=True)
+            raise SystemExit(1)
+        ddl_text = path.read_text()
+
+    parsed = parse_sv_ddl(ddl_text)
+
+    out = Path(output_file)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(parsed, indent=2))
+
+    for warning in parsed["warnings"]:
+        typer.echo(f"WARNING: {warning}", err=True)
+    if parsed["unsupported"]:
+        typer.echo(
+            f"UNSUPPORTED constructs ({len(parsed['unsupported'])}) — "
+            f"parse incomplete:", err=True)
+        for entry in parsed["unsupported"]:
+            typer.echo(f"  - {json.dumps(entry)}", err=True)
+        raise SystemExit(1)
+
+    dim_count = len(parsed["dimensions"])
+    met_count = len(parsed["metrics"])
+    fact_count = len(parsed["facts"])
+    rel_count = len(parsed["relationships"])
+    typer.echo(
+        f"Parsed SV '{parsed['name']}': {dim_count} dimension(s), "
+        f"{met_count} metric(s), {fact_count} fact(s), "
+        f"{rel_count} relationship(s) -> {output_file}", err=True)

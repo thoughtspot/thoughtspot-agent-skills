@@ -2106,6 +2106,35 @@ failed).
 top-level `rows` is a convenience for single-query verifies. Diagnostics go to
 stderr.
 
+### `ts snowflake parse-sv`
+
+Parse a Snowflake Semantic View DDL string (from `GET_DDL('SEMANTIC_VIEW', ...)`)
+into structured JSON for the `ts-convert-from-snowflake-sv` skill. Codifies
+Step 4: tables (aliases, PKs, range constraints, subquery sources), relationships
+(equi/range/asof), dimensions, metrics (semi-additive, window, USING), facts,
+custom instructions, verified queries, and extension JSON.
+
+```bash
+ts snowflake parse-sv sv.sql --output parsed.json
+cat sv.sql | ts snowflake parse-sv - --output parsed.json
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `ddl_file` | *(required)* | Path to a DDL file, or `-` for stdin |
+| `--output` / `-o` | *(required)* | Output JSON path |
+
+Exits 1 when `unsupported[]` is non-empty (list on stderr; JSON still written).
+Emits BL-100 prerequisite warnings for `sample_values`/`is_enum` (DDL clause
+shape unverified against live `GET_DDL`).
+
+**Output:** JSON to the `--output` file — `{"view_name", "database", "schema",
+"name", "comment", "tables", "relationships", "dimensions", "metrics", "facts",
+"custom_instructions", "verified_queries", "extension", "warnings",
+"unsupported"}`. Summary line to stderr.
+
+---
+
 ### `ts databricks parse-mv`
 
 Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured
