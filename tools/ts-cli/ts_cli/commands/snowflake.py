@@ -666,3 +666,114 @@ def _build_model_summary(
     if import_error is not None:
         summary["import_error"] = import_error
     return summary
+
+
+# ---------------------------------------------------------------------------
+# ts snowflake introspect
+# ---------------------------------------------------------------------------
+
+@app.command("introspect")
+def introspect_cmd(
+    parsed_path: str = typer.Option(
+        ..., "--parsed", "-p", help="parse-sv output JSON"),
+    sf_profile: str = typer.Option(
+        ..., "--sf-profile",
+        help="Snowflake profile name from ~/.claude/snowflake-profiles.json"),
+    connection_name: str = typer.Option(
+        ..., "--connection-name", "-c",
+        help="ThoughtSpot connection display name (for the tables-spec)"),
+    output_dir: str = typer.Option(
+        ..., "--output-dir", "-o",
+        help="Directory for tables-spec.json and tables.json"),
+    warehouse: Optional[str] = typer.Option(
+        None, "--warehouse", "-w", help="Warehouse override"),
+    role: Optional[str] = typer.Option(
+        None, "--role", "-r", help="Role override"),
+) -> None:
+    """Query INFORMATION_SCHEMA for SV source tables and build a tables-spec.
+
+    Reads the parsed SV JSON (from `ts snowflake parse-sv`) to extract table
+    FQNs, queries Snowflake INFORMATION_SCHEMA.COLUMNS for their schemas,
+    maps Snowflake types to ThoughtSpot types, and outputs:
+
+    \\b
+    - tables-spec.json: array for `ts tables create` (pipe via stdin)
+    - tables.json: alias→{name} map for `ts snowflake build-model --tables`
+
+    Summary JSON on stdout, diagnostics on stderr.
+
+    \\b
+    Example:
+      ts snowflake introspect --parsed parsed.json --sf-profile PROD \\
+        --connection-name "My Snowflake" --output-dir ./output
+      cat output/tables-spec.json | ts tables create --profile my-ts
+    """
+    from ts_cli.sv_introspect import (
+        build_info_schema_query,
+        build_tables_map,
+        build_tables_spec,
+        extract_table_locations,
+    )
+
+    parsed = _read_json_file(parsed_path, "--parsed")
+    locations = extract_table_locations(parsed)
+    if not locations:
+        typer.echo("no tables found in parsed SV — nothing to introspect",
+                   err=True)
+        raise SystemExit(1)
+
+    query = build_info_schema_query(locations)
+    typer.echo(f"querying INFORMATION_SCHEMA for {len(locations)} table(s)...",
+               err=True)
+
+    from ts_cli.commands.load import load_snowflake_profile
+    profile = load_snowflake_profile(sf_profile)
+    method = profile.get("method", "python")
+
+    if method == "cli":
+        cli_conn = profile.get("cli_connection")
+        if not cli_conn:
+            raise SystemExit(
+                f"Profile '{sf_profile}' has method: cli but no 'cli_connection' field.")
+        results = _exec_cli(cli_conn, query)
+    else:
+        wh = warehouse or profile.get("default_warehouse")
+        rl = role or profile.get("default_role")
+        results = _exec_python(profile, query, wh, rl)
+
+    rows: list[dict] = []
+    for r in results:
+        rows.extend(r.get("rows", []))
+
+    if not rows:
+        typer.echo("INFORMATION_SCHEMA returned no rows — check table names "
+                   "and permissions", err=True)
+        raise SystemExit(1)
+
+    specs, warnings = build_tables_spec(rows, locations, connection_name)
+    tables_map = build_tables_map(locations)
+
+    for w in warnings:
+        typer.echo(f"  WARNING: {w}", err=True)
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    spec_file = out_dir / "tables-spec.json"
+    spec_file.write_text(json.dumps(specs, indent=2))
+
+    map_file = out_dir / "tables.json"
+    map_file.write_text(json.dumps(tables_map, indent=2))
+
+    total_cols = sum(len(s["columns"]) for s in specs)
+    summary = {
+        "tables": len(specs),
+        "total_columns": total_cols,
+        "warnings": warnings,
+        "tables_spec_file": str(spec_file),
+        "tables_map_file": str(map_file),
+        "connection_name": connection_name,
+    }
+    typer.echo(f"  {len(specs)} table(s), {total_cols} column(s) → "
+               f"{spec_file}", err=True)
+    print(json.dumps(summary, indent=2))

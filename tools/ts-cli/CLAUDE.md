@@ -19,6 +19,7 @@ ts_cli/
   sv_sql.py            — Snowflake SQL expression → ThoughtSpot formula text (translate_sql_expr); tokenizer + recursive descent + Snowflake function map (ts-snowflake-formula-translation.md as data) behind `ts snowflake translate-formulas` (BL-100; pure functions, no I/O)
   sv_translate.py      — Parsed SV → translated ThoughtSpot formulas (translate_sv_formulas); identifier resolution, column classification, window/LOD/semi-additive/USING handling behind `ts snowflake translate-formulas` (BL-100; pure functions, no I/O)
   sv_build_model.py    — Snowflake SV → ThoughtSpot Model TML assembly (build_model_tml_sv); inline Scenario B joins (equi/range/ASOF), SV synonym→display name, private columns, fact table detection, strip_formulas for two-pass import; imports formula_common shared transforms (BL-100 PR3; pure functions, no I/O)
+  sv_introspect.py     — INFORMATION_SCHEMA → tables-spec + tables map (map_snowflake_type, build_tables_spec, build_tables_map, detect_column_gaps); Snowflake type → ThoughtSpot type mapping, cross-schema query building, column gap detection against existing TS tables (BL-100 PR4; pure functions, no I/O)
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts spotql classify-columns` (pure functions, no I/O)
   promote.py           — Formula promotion merge (extract_answer_formulas/detect_duplicates/map_references/build_merged_model) behind `ts model promote-formula` (pure functions, no I/O; BL-066)
   aggregate/
@@ -85,7 +86,7 @@ ts_cli/
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
     tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model, build-liveboard, verify)
-    snowflake.py  — ts snowflake (diff, lint-ddl, exec, parse-sv, translate-formulas, build-model)
+    snowflake.py  — ts snowflake (diff, lint-ddl, exec, parse-sv, translate-formulas, build-model, introspect)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
@@ -114,7 +115,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.65.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.66.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
