@@ -1236,6 +1236,7 @@ poll are the highest-value. The three codification-sweep commands (`strip-column
 ## BL-035 — Test-suite integrity gaps
 
 **Source:** full audit sweep 2026-06-17 (angle 6).
+**Status:** DONE (final items PR #292).
 
 ### Problem
 
