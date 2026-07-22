@@ -1,5 +1,11 @@
 # Semantic View → ThoughtSpot Model: Gap Analysis
 
+> **Status: STALE (2026-06-14).** Written before BL-100 (Snowflake SV converter
+> substrate), which closed many of the gaps listed below. Do not rely on the gap
+> statuses — consult the current
+> [`coverage-matrix.md`](../agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md)
+> instead.
+
 Exhaustive review of Snowflake Semantic View constructs vs what `ts-convert-from-snowflake-sv`
 currently handles. Each gap includes severity, examples, and proposed ThoughtSpot mapping.
 

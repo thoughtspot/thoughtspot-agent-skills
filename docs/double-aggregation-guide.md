@@ -1,5 +1,7 @@
 # Double Aggregation in Snowflake Semantic Views
 
+> **Status: REFERENCE.** Evergreen guide — not tied to a specific skill version.
+
 ## Overview
 
 Double aggregation (also called "nested aggregation" or "metric-on-metric") is when a metric applies an aggregate function to the result of another metric. For example: the **average number of locations per company** requires first counting locations per company, then averaging those counts.

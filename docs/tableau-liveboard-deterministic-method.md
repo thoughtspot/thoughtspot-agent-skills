@@ -1,5 +1,9 @@
 # Tableau → ThoughtSpot: the deterministic dashboard method (and the gap)
 
+> **Status: IMPLEMENTED (2026-07-20).** The core gap (agentic liveboard step) was
+> closed by `ts tableau build-liveboard` (v0.55.0+) and `ts tableau parse` dashboard
+> extraction (v0.60.0). This document is retained as the design rationale.
+
 Reverse-engineered from the FedEx Ground VEDR KI Dashboard migration (session
 `local_54c74f74`, board `f6d7f50b` — 22 tiles, model `fedex_vedr_sample_model`), whose
 harness lives (un-versioned) at `~/projects/tableau-published-ds-repro/`
