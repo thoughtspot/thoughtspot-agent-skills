@@ -9,6 +9,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - feat: add `ts-convert-from-powerbi` skill + `ts powerbi` command group (parse / build-model / build-liveboard) — Power BI (`.pbip`: TMDL semantic model + PBIR report) → ThoughtSpot converter; DAX translated to `[formula_<name>]` id-refs (topo-sorted + dangling-ref cascade), joins with real relationship cardinality, AVG-vs-SUM from `summarizeBy`, Spotter enabled; time-intelligence (SAMEPERIODLASTYEAR / YoY) flagged NEEDS REVIEW and recovered via the Spotter last-mile. Reuses the shared `dump_tml_yaml` + `tableau.liveboard.build_from_spec` emitter.
 - docs: add `agents/shared/mappings/powerbi/powerbi-formula-translation.md` (DAX→TS formula map) + `worked-examples/powerbi/` (SPLY parameter, CALCULATE→group_aggregate, dual-axis combo)
 - chore: bump ts-cli to v0.71.0 — `ts powerbi` command group
+- fix: raise snowflake-connector-python floor to >=3.13.1 (CVE-2024-49750, CVE-2025-2479x) and setuptools to >=78.2 (path-traversal CVE)
 - feat: add quality gates catalog generator (`generate_quality_gates.py`); auto-generates `docs/quality-gates.md` from pre-commit.sh, validate.yml, and validator docstrings
 
 ## 2026-07-21
