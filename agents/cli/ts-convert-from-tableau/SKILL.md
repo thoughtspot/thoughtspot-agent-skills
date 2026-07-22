@@ -1424,7 +1424,7 @@ mkdir -p /tmp/ts_tableau_mig/output/{workbook_name}
 > **Scope gate:** runs for scopes 1, 2, 5. **Skip for scope 3** (LB only — no tables)
 > and **scope 4** (Models only — tables already exist; use GUIDs from Step 4).
 
-> **Prerequisite:** ts-cli v0.75.0+.
+> **Prerequisite:** ts-cli v0.76.0+.
 
 `ts tableau build-model` (GENERATE mode, no `--existing-guid`) emits Table TML
 automatically — **no hand-assembly**. It writes one `.table.tml` per physical table
