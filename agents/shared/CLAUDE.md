@@ -34,6 +34,9 @@ mappings/looker/
   lookml-to-ts-formula-translation.md — LookML measure/dimension expressions → ThoughtSpot formula mapping
   lookml-tml-rules.md                 — verified TML generation rules for LookML → ThoughtSpot conversion (joins, key dedup, batch import)
 
+mappings/qlik/
+  qlik-thoughtspot-formula-translation.md — Qlik Sense expressions → ThoughtSpot formula and function mapping (199 rows, 17 categories)
+
 schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
   thoughtspot-table-tml.md            — table TML construction reference
@@ -52,6 +55,7 @@ schemas/
   thoughtspot-connection.md           — connection object structure
   snowflake-schema.md                 — Snowflake Semantic View YAML reference
   databricks-metric-view.md           — Databricks Metric View YAML schema (v0.1/v1.1)
+  qlik-app-ir.md                      — Qlik App IR: the extract↔transform contract for the ts qlik converter
 
 references/
   profile-select-and-authenticate.md  — canonical profile select + verify flow for conversion skills

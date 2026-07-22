@@ -1,0 +1,1992 @@
+[
+  {
+    "#": "A01",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Sum(expr)",
+    "Qlik Example": "Sum(Revenue)",
+    "ThoughtSpot Equivalent": "sum(col)",
+    "ThoughtSpot Example": "sum(revenue)",
+    "Comments / Context": "Direct equivalent. Sums all values of a measure column.",
+    "status": "ok"
+  },
+  {
+    "#": "A02",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Avg(expr)",
+    "Qlik Example": "Avg(Revenue)",
+    "ThoughtSpot Equivalent": "average(col)",
+    "ThoughtSpot Example": "average(revenue)",
+    "Comments / Context": "ThoughtSpot uses the full word 'average'; Qlik uses the abbreviation 'Avg'.",
+    "status": "ok"
+  },
+  {
+    "#": "A03",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Count(expr)",
+    "Qlik Example": "Count(OrderID)",
+    "ThoughtSpot Equivalent": "count(col)",
+    "ThoughtSpot Example": "count(order_id)",
+    "Comments / Context": "Counts total rows. Both include NULLs in count unless DISTINCT is used.",
+    "status": "ok"
+  },
+  {
+    "#": "A04",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Count(DISTINCT expr)",
+    "Qlik Example": "Count(DISTINCT CustomerID)",
+    "ThoughtSpot Equivalent": "unique count(col)",
+    "ThoughtSpot Example": "unique count(customer_id)",
+    "Comments / Context": "ThoughtSpot uses 'unique count' as a single keyword instead of a DISTINCT modifier.",
+    "status": "ok"
+  },
+  {
+    "#": "A05",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Min(expr)",
+    "Qlik Example": "Min(Price)",
+    "ThoughtSpot Equivalent": "min(col)",
+    "ThoughtSpot Example": "min(price)",
+    "Comments / Context": "Direct equivalent. Returns the smallest value in the aggregated set.",
+    "status": "ok"
+  },
+  {
+    "#": "A06",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Max(expr)",
+    "Qlik Example": "Max(Price)",
+    "ThoughtSpot Equivalent": "max(col)",
+    "ThoughtSpot Example": "max(price)",
+    "Comments / Context": "Direct equivalent. Returns the largest value in the aggregated set.",
+    "status": "ok"
+  },
+  {
+    "#": "A07",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Stdev(expr)",
+    "Qlik Example": "Stdev(Revenue)",
+    "ThoughtSpot Equivalent": "stddev(col)",
+    "ThoughtSpot Example": "stddev(revenue)",
+    "Comments / Context": "Standard deviation. ThoughtSpot spells it 'stddev'; Qlik uses 'Stdev'.",
+    "status": "ok"
+  },
+  {
+    "#": "A08",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Median(expr)",
+    "Qlik Example": "Median(Sales)",
+    "ThoughtSpot Equivalent": "median(col)",
+    "ThoughtSpot Example": "median(sales)",
+    "Comments / Context": "Direct equivalent. Both return the statistical middle value.",
+    "status": "ok"
+  },
+  {
+    "#": "A09",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Mode(expr)",
+    "Qlik Example": "Mode(Category)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use a workaround with group_count and conditional logic",
+    "Comments / Context": "Qlik returns the most frequent value. ThoughtSpot has no built-in mode() function.",
+    "status": "ok"
+  },
+  {
+    "#": "A10",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Only(expr)",
+    "Qlik Example": "Only(Region)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use if(unique count(col)=1, col, null) as a workaround",
+    "Comments / Context": "Qlik returns a value only if all rows in the group share one value, else NULL. ThoughtSpot has no direct equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "A11",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Sum(TOTAL expr)",
+    "Qlik Example": "Sum(TOTAL Revenue)",
+    "ThoughtSpot Equivalent": "group_aggregate(sum(col), {}, {})",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), {}, {})",
+    "Comments / Context": "TOTAL in Qlik ignores all chart dimensions to give a grand total. ThoughtSpot achieves this with group_aggregate using empty groupings and filters.",
+    "status": "ok"
+  },
+  {
+    "#": "A12",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Sum(TOTAL <dim> expr)",
+    "Qlik Example": "Sum(TOTAL <Region> Revenue)",
+    "ThoughtSpot Equivalent": "group_aggregate(sum(col), {dim}, {})",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), {region}, {})",
+    "Comments / Context": "Qlik TOTAL <dim> ignores all dims except the specified one. ThoughtSpot uses group_aggregate with that dim in the groupings list.",
+    "status": "ok"
+  },
+  {
+    "#": "A13",
+    "Category": "Aggregation",
+    "Qlik Sense Formula": "Variance(expr)",
+    "Qlik Example": "Variance(Revenue)",
+    "ThoughtSpot Equivalent": "variance(col)",
+    "ThoughtSpot Example": "variance(revenue)",
+    "Comments / Context": "Direct equivalent. Returns the statistical variance of a measure column.",
+    "status": "ok"
+  },
+  {
+    "#": "CA01",
+    "Category": "Conditional Aggregation",
+    "Qlik Sense Formula": "Sum(If(cond, expr))",
+    "Qlik Example": "Sum(If(Region='West', Revenue))",
+    "ThoughtSpot Equivalent": "sum_if(condition, col)",
+    "ThoughtSpot Example": "sum_if(region = 'West', revenue)",
+    "Comments / Context": "ThoughtSpot has a dedicated sum_if(). Qlik nests If() inside Sum() to achieve conditional summing.",
+    "status": "ok"
+  },
+  {
+    "#": "CA02",
+    "Category": "Conditional Aggregation",
+    "Qlik Sense Formula": "Avg(If(cond, expr))",
+    "Qlik Example": "Avg(If(Region='West', Revenue))",
+    "ThoughtSpot Equivalent": "average_if(condition, col)",
+    "ThoughtSpot Example": "average_if(region = 'West', revenue)",
+    "Comments / Context": "ThoughtSpot provides average_if() natively. In Qlik, nest If() inside Avg().",
+    "status": "ok"
+  },
+  {
+    "#": "CA03",
+    "Category": "Conditional Aggregation",
+    "Qlik Sense Formula": "Count(If(cond, expr))",
+    "Qlik Example": "Count(If(Status='Active', CustomerID))",
+    "ThoughtSpot Equivalent": "count_if(condition, col)",
+    "ThoughtSpot Example": "count_if(status = 'Active', customer_id)",
+    "Comments / Context": "ThoughtSpot has a built-in count_if(). Qlik achieves this by nesting If() inside Count().",
+    "status": "ok"
+  },
+  {
+    "#": "CA04",
+    "Category": "Conditional Aggregation",
+    "Qlik Sense Formula": "Count(DISTINCT If(cond,expr))",
+    "Qlik Example": "Count(DISTINCT If(Status='Active',CustomerID))",
+    "ThoughtSpot Equivalent": "unique_count_if(condition, col)",
+    "ThoughtSpot Example": "unique_count_if(status = 'Active', customer_id)",
+    "Comments / Context": "ThoughtSpot has unique_count_if(). Qlik uses Count(DISTINCT If(...)).",
+    "status": "ok"
+  },
+  {
+    "#": "CA05",
+    "Category": "Conditional Aggregation",
+    "Qlik Sense Formula": "Stdev(If(cond, expr))",
+    "Qlik Example": "Stdev(If(Region='West', Revenue))",
+    "ThoughtSpot Equivalent": "stddev_if(condition, col)",
+    "ThoughtSpot Example": "stddev_if(region = 'West', revenue)",
+    "Comments / Context": "ThoughtSpot has stddev_if() for conditional standard deviation. Qlik nests If() inside Stdev().",
+    "status": "ok"
+  },
+  {
+    "#": "CA06",
+    "Category": "Conditional Aggregation",
+    "Qlik Sense Formula": "Variance(If(cond, expr))",
+    "Qlik Example": "Variance(If(Region='West', Revenue))",
+    "ThoughtSpot Equivalent": "variance_if(condition, col)",
+    "ThoughtSpot Example": "variance_if(region = 'West', revenue)",
+    "Comments / Context": "ThoughtSpot has variance_if() natively. Qlik nests If() inside Variance().",
+    "status": "ok"
+  },
+  {
+    "#": "CL01",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "If(cond, then, else)",
+    "Qlik Example": "If(Revenue > 1000, 'High', 'Low')",
+    "ThoughtSpot Equivalent": "if condition then val1 else val2",
+    "ThoughtSpot Example": "if revenue > 1000 then 'High' else 'Low'",
+    "Comments / Context": "ThoughtSpot uses keyword syntax (if/then/else). Qlik uses a function call If(). Both support chained else-if.",
+    "status": "ok"
+  },
+  {
+    "#": "CL02",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "If(c1,v1, If(c2,v2, v3))",
+    "Qlik Example": "If(Rev>100000,'Plat', If(Rev>50000,'Gold','Silver'))",
+    "ThoughtSpot Equivalent": "if c1 then v1 else if c2 then v2 else v3",
+    "ThoughtSpot Example": "if revenue>100000 then 'Platinum' else if revenue>50000 then 'Gold' else 'Silver'",
+    "Comments / Context": "Nested conditionals. ThoughtSpot uses chained else-if keywords; Qlik nests If() calls.",
+    "status": "ok"
+  },
+  {
+    "#": "CL03",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "If(IsNull(expr), fallback, expr)",
+    "Qlik Example": "If(IsNull(Discount), 0, Discount)",
+    "ThoughtSpot Equivalent": "ifnull(col, fallback)",
+    "ThoughtSpot Example": "ifnull(discount, 0)",
+    "Comments / Context": "ThoughtSpot has a dedicated ifnull() for null replacement in one call. Qlik requires wrapping IsNull() inside If().",
+    "status": "ok"
+  },
+  {
+    "#": "CL04",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "IsNull(expr)",
+    "Qlik Example": "IsNull(Discount)",
+    "ThoughtSpot Equivalent": "isnull(col)",
+    "ThoughtSpot Example": "isnull(discount)",
+    "Comments / Context": "Direct equivalent. Both return true/1 when the value is null.",
+    "status": "ok"
+  },
+  {
+    "#": "CL05",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "Not IsNull(expr)",
+    "Qlik Example": "Not IsNull(Discount)",
+    "ThoughtSpot Equivalent": "not isnull(col)",
+    "ThoughtSpot Example": "not isnull(discount)",
+    "Comments / Context": "Direct equivalent. Both check for non-null values using a not prefix.",
+    "status": "ok"
+  },
+  {
+    "#": "CL06",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "Match(expr, val1, val2, ...)",
+    "Qlik Example": "Match(Region, 'West', 'East')",
+    "ThoughtSpot Equivalent": "col in (val1, val2, ...)",
+    "ThoughtSpot Example": "region in ('West', 'East')",
+    "Comments / Context": "Qlik Match() returns position of match (1-based). ThoughtSpot uses the 'in' operator for membership testing — simpler and more readable.",
+    "status": "ok"
+  },
+  {
+    "#": "CL07",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "Not Match(expr, val1, val2)",
+    "Qlik Example": "Not Match(Region, 'West', 'East')",
+    "ThoughtSpot Equivalent": "col not in (val1, val2, ...)",
+    "ThoughtSpot Example": "region not in ('West', 'East')",
+    "Comments / Context": "ThoughtSpot uses 'not in' operator directly. Qlik uses Not around Match().",
+    "status": "ok"
+  },
+  {
+    "#": "CL08",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "Mixmatch(expr, val1, val2)",
+    "Qlik Example": "Mixmatch(region, 'west', 'WEST')",
+    "ThoughtSpot Equivalent": "lower(col) in (lower(val1), ...)",
+    "ThoughtSpot Example": "lower(region) in ('west')",
+    "Comments / Context": "Qlik Mixmatch is case-insensitive Match. ThoughtSpot uses lower() on both sides to simulate.",
+    "status": "ok"
+  },
+  {
+    "#": "CL09",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "WildMatch(expr, pattern)",
+    "Qlik Example": "WildMatch(ProductName, 'Pro*')",
+    "ThoughtSpot Equivalent": "contains(col, substr)",
+    "ThoughtSpot Example": "contains(product_name, 'Pro')",
+    "Comments / Context": "Qlik supports wildcard patterns with *. ThoughtSpot uses contains() for substring checks — no wildcard syntax in formulas.",
+    "status": "ok"
+  },
+  {
+    "#": "CL10",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "Pick(n, val1, val2, ...)",
+    "Qlik Example": "Pick(2, 'Low', 'Mid', 'High')",
+    "ThoughtSpot Equivalent": "if n=1 then val1 else if n=2 then val2 ...",
+    "ThoughtSpot Example": "if tier=1 then 'Low' else if tier=2 then 'Mid' else 'High'",
+    "Comments / Context": "Qlik Pick() selects the nth value from a list. ThoughtSpot has no Pick() — replicate with chained if/then/else.",
+    "status": "ok"
+  },
+  {
+    "#": "CL11",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "and",
+    "Qlik Example": "Region='West' and Revenue > 1000",
+    "ThoughtSpot Equivalent": "and",
+    "ThoughtSpot Example": "region = 'West' and revenue > 1000",
+    "Comments / Context": "Direct equivalent. Boolean AND operator — both conditions must be true.",
+    "status": "ok"
+  },
+  {
+    "#": "CL12",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "or",
+    "Qlik Example": "Region='West' or Region='East'",
+    "ThoughtSpot Equivalent": "or",
+    "ThoughtSpot Example": "region = 'West' or region = 'East'",
+    "Comments / Context": "Direct equivalent. Boolean OR operator — at least one condition must be true.",
+    "status": "ok"
+  },
+  {
+    "#": "CL13",
+    "Category": "Conditional / Logical",
+    "Qlik Sense Formula": "not",
+    "Qlik Example": "not (Region='West')",
+    "ThoughtSpot Equivalent": "not",
+    "ThoughtSpot Example": "not (region = 'West')",
+    "Comments / Context": "Direct equivalent. Negates a boolean condition.",
+    "status": "ok"
+  },
+  {
+    "#": "SA01",
+    "Category": "Set Analysis",
+    "Qlik Sense Formula": "Sum({1} expr)",
+    "Qlik Example": "Sum({1} Revenue)",
+    "ThoughtSpot Equivalent": "group_aggregate(sum(col), {}, {})",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), {}, {})",
+    "Comments / Context": "Qlik {1} ignores ALL user selections (grand total). ThoughtSpot group_aggregate with empty groupings/filters achieves the same result.",
+    "status": "ok"
+  },
+  {
+    "#": "SA02",
+    "Category": "Set Analysis",
+    "Qlik Sense Formula": "Sum({$} expr)",
+    "Qlik Example": "Sum({$} Revenue)",
+    "ThoughtSpot Equivalent": "sum(col)",
+    "ThoughtSpot Example": "sum(revenue)",
+    "Comments / Context": "Qlik {$} is the current selection — the default. ThoughtSpot always uses the current filter context by default.",
+    "status": "ok"
+  },
+  {
+    "#": "SA03",
+    "Category": "Set Analysis",
+    "Qlik Sense Formula": "Sum({<Field={'Val'}>} expr)",
+    "Qlik Example": "Sum({<Region={'West'}>} Revenue)",
+    "ThoughtSpot Equivalent": "group_aggregate(sum(col), {dim}, {col='val'})",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), {region}, {region = 'West'})",
+    "Comments / Context": "Both allow hardcoded filter overrides. Qlik uses Set Expression {}. ThoughtSpot uses group_aggregate's third filter argument.",
+    "status": "ok"
+  },
+  {
+    "#": "SA04",
+    "Category": "Set Analysis",
+    "Qlik Sense Formula": "Sum({<Field -= {'Val'}>} expr)",
+    "Qlik Example": "Sum({<Region -= {'South'}>} Revenue)",
+    "ThoughtSpot Equivalent": "group_aggregate(sum(col), query_groups(), query_filters() - {filter})",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups(), query_filters())",
+    "Comments / Context": "Qlik -= removes a value from the current selection set. ThoughtSpot has no exact -= syntax but query_filters() can be combined to control filter scope.",
+    "status": "ok"
+  },
+  {
+    "#": "SA05",
+    "Category": "Set Analysis",
+    "Qlik Sense Formula": "Sum({<Field += {'Val'}>} expr)",
+    "Qlik Example": "Sum({<Region += {'Central'}>} Revenue)",
+    "ThoughtSpot Equivalent": "group_aggregate(sum(col), query_groups() + {dim}, query_filters())",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups() + {region}, query_filters())",
+    "Comments / Context": "Qlik += adds a value to the current selection. ThoughtSpot uses query_groups() + {attr} to extend grouping scope.",
+    "status": "ok"
+  },
+  {
+    "#": "SA06",
+    "Category": "Set Analysis",
+    "Qlik Sense Formula": "Sum({$<Field={'Val'}>} expr)",
+    "Qlik Example": "Sum({$<Year={2024}>} Revenue)",
+    "ThoughtSpot Equivalent": "group_aggregate(sum(col), query_groups(), {col = val})",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups(), {year = 2024})",
+    "Comments / Context": "Qlik {$<>} applies an override on top of current selections. ThoughtSpot uses group_aggregate with query_groups() to inherit dims and a custom filter.",
+    "status": "ok"
+  },
+  {
+    "#": "SA07",
+    "Category": "Set Analysis",
+    "Qlik Sense Formula": "group_aggregate with query_groups()",
+    "Qlik Example": "N/A (ThoughtSpot concept)",
+    "ThoughtSpot Equivalent": "group_aggregate(agg, query_groups(), query_filters())",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups(), query_filters())",
+    "Comments / Context": "ThoughtSpot-specific. query_groups() and query_filters() inherit the current search's dimensions and filters. No direct Qlik equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "GA01",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Aggr(Sum(measure), attr)",
+    "Qlik Example": "Aggr(Sum(Revenue), CustomerID)",
+    "ThoughtSpot Equivalent": "group_sum(measure, attr)",
+    "ThoughtSpot Example": "group_sum(revenue, customer_id)",
+    "Comments / Context": "Both compute aggregation at a different grain. Qlik creates a virtual table with Aggr(); ThoughtSpot uses group_sum() directly.",
+    "status": "ok"
+  },
+  {
+    "#": "GA02",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Aggr(Avg(measure), attr)",
+    "Qlik Example": "Aggr(Avg(Revenue), Region)",
+    "ThoughtSpot Equivalent": "group_average(measure, attr)",
+    "ThoughtSpot Example": "group_average(revenue, region)",
+    "Comments / Context": "Qlik uses Aggr() wrapper around Avg(). ThoughtSpot has a dedicated group_average() function.",
+    "status": "ok"
+  },
+  {
+    "#": "GA03",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Aggr(Count(measure), attr)",
+    "Qlik Example": "Aggr(Count(OrderID), Region)",
+    "ThoughtSpot Equivalent": "group_count(measure, attr)",
+    "ThoughtSpot Example": "group_count(order_id, region)",
+    "Comments / Context": "Qlik uses Aggr() wrapper around Count(). ThoughtSpot has a dedicated group_count() function.",
+    "status": "ok"
+  },
+  {
+    "#": "GA04",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Aggr(Max(measure), attr)",
+    "Qlik Example": "Aggr(Max(Revenue), Region)",
+    "ThoughtSpot Equivalent": "group_max(measure, attr)",
+    "ThoughtSpot Example": "group_max(revenue, region)",
+    "Comments / Context": "Qlik uses Aggr() wrapper around Max(). ThoughtSpot has a dedicated group_max() function.",
+    "status": "ok"
+  },
+  {
+    "#": "GA05",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Aggr(Min(measure), attr)",
+    "Qlik Example": "Aggr(Min(Revenue), Region)",
+    "ThoughtSpot Equivalent": "group_min(measure, attr)",
+    "ThoughtSpot Example": "group_min(revenue, region)",
+    "Comments / Context": "Qlik uses Aggr() wrapper around Min(). ThoughtSpot has a dedicated group_min() function.",
+    "status": "ok"
+  },
+  {
+    "#": "GA06",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Aggr(Stdev(measure), attr)",
+    "Qlik Example": "Aggr(Stdev(Revenue), Region)",
+    "ThoughtSpot Equivalent": "group_stddev(measure, attr)",
+    "ThoughtSpot Example": "group_stddev(revenue, region)",
+    "Comments / Context": "Qlik uses Aggr() around Stdev(). ThoughtSpot has group_stddev() as a direct function.",
+    "status": "ok"
+  },
+  {
+    "#": "GA07",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Aggr(Count(DISTINCT m), attr)",
+    "Qlik Example": "Aggr(Count(DISTINCT CustomerID), Region)",
+    "ThoughtSpot Equivalent": "group_unique_count(measure, attr)",
+    "ThoughtSpot Example": "group_unique_count(customer_id, region)",
+    "Comments / Context": "ThoughtSpot has group_unique_count() natively. Qlik wraps Count(DISTINCT ...) inside Aggr().",
+    "status": "ok"
+  },
+  {
+    "#": "GA08",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Max(Aggr(Sum(m), attr))",
+    "Qlik Example": "Max(Aggr(Sum(Revenue), CustomerID))",
+    "ThoughtSpot Equivalent": "max(group_sum(measure, attr))",
+    "ThoughtSpot Example": "max(group_sum(revenue, customer_id))",
+    "Comments / Context": "Nested aggregation — find max across customer totals. ThoughtSpot supports direct nesting; Qlik wraps Aggr() inside outer aggregation.",
+    "status": "ok"
+  },
+  {
+    "#": "GA09",
+    "Category": "Cross-Level Aggregation",
+    "Qlik Sense Formula": "Avg(Aggr(Count(m), attr))",
+    "Qlik Example": "Avg(Aggr(Count(OrderID), CustomerID))",
+    "ThoughtSpot Equivalent": "average(group_count(measure, attr))",
+    "ThoughtSpot Example": "average(group_count(order_id, customer_id))",
+    "Comments / Context": "Average orders per customer. ThoughtSpot nests group_count() inside average(); Qlik wraps Aggr() inside Avg().",
+    "status": "ok"
+  },
+  {
+    "#": "CU01",
+    "Category": "Cumulative",
+    "Qlik Sense Formula": "RangeSum(Above(Sum(expr),0,RowNo()))",
+    "Qlik Example": "RangeSum(Above(Sum(Revenue),0,RowNo()))",
+    "ThoughtSpot Equivalent": "cumulative_sum(measure, attr)",
+    "ThoughtSpot Example": "cumulative_sum(revenue, order_date)",
+    "Comments / Context": "Running total. ThoughtSpot has dedicated cumulative_sum(). Qlik combines RangeSum() + Above().",
+    "status": "ok"
+  },
+  {
+    "#": "CU02",
+    "Category": "Cumulative",
+    "Qlik Sense Formula": "RangeAvg(Above(Avg(expr),0,RowNo()))",
+    "Qlik Example": "RangeAvg(Above(Avg(Revenue),0,RowNo()))",
+    "ThoughtSpot Equivalent": "cumulative_average(measure, attr)",
+    "ThoughtSpot Example": "cumulative_average(revenue, order_date)",
+    "Comments / Context": "Running average. ThoughtSpot provides cumulative_average() natively. Qlik builds it with RangeAvg() + Above().",
+    "status": "ok"
+  },
+  {
+    "#": "CU03",
+    "Category": "Cumulative",
+    "Qlik Sense Formula": "RangeMax(Above(Max(expr),0,RowNo()))",
+    "Qlik Example": "RangeMax(Above(Max(Revenue),0,RowNo()))",
+    "ThoughtSpot Equivalent": "cumulative_max(measure, attr)",
+    "ThoughtSpot Example": "cumulative_max(revenue, order_date)",
+    "Comments / Context": "Running maximum. ThoughtSpot has cumulative_max() natively. Qlik uses RangeMax() + Above().",
+    "status": "ok"
+  },
+  {
+    "#": "CU04",
+    "Category": "Cumulative",
+    "Qlik Sense Formula": "RangeMin(Above(Min(expr),0,RowNo()))",
+    "Qlik Example": "RangeMin(Above(Min(Revenue),0,RowNo()))",
+    "ThoughtSpot Equivalent": "cumulative_min(measure, attr)",
+    "ThoughtSpot Example": "cumulative_min(revenue, order_date)",
+    "Comments / Context": "Running minimum. ThoughtSpot has cumulative_min() natively. Qlik uses RangeMin() + Above().",
+    "status": "ok"
+  },
+  {
+    "#": "IR01",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "Above(expr, offset)",
+    "Qlik Example": "Above(Sum(Sales), 1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use period-over-period formulas or date_diff workarounds",
+    "Comments / Context": "Qlik returns value from N rows above current row. ThoughtSpot has no row-reference function — use date-based period comparisons.",
+    "status": "ok"
+  },
+  {
+    "#": "IR02",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "Below(expr, offset)",
+    "Qlik Example": "Below(Sum(Sales), 1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik returns value from N rows below current row. ThoughtSpot has no row-level reference function.",
+    "status": "ok"
+  },
+  {
+    "#": "IR03",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "Top(expr, offset)",
+    "Qlik Example": "Top(Sum(Sales))",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use group_min or group_max as approximation",
+    "Comments / Context": "Qlik returns value from the top (first) row of the current column segment. No direct ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "IR04",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "Bottom(expr, offset)",
+    "Qlik Example": "Bottom(Sum(Sales))",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use group_max or ranking as approximation",
+    "Comments / Context": "Qlik returns value from the bottom (last) row. No direct ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "IR05",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "Before(expr)",
+    "Qlik Example": "Before(Sum(Sales))",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik pivot-only — returns value from previous column in pivot table. ThoughtSpot has no column-reference inter-record function.",
+    "status": "ok"
+  },
+  {
+    "#": "IR06",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "After(expr)",
+    "Qlik Example": "After(Sum(Sales))",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik pivot-only — returns value from next column. No ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "IR07",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "First(expr)",
+    "Qlik Example": "First(Sum(Sales))",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use group_min with date ordering as approximation",
+    "Comments / Context": "Qlik returns value from the first column of current pivot row segment. No ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "IR08",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "Last(expr)",
+    "Qlik Example": "Last(Sum(Sales))",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use group_max with date ordering as approximation",
+    "Comments / Context": "Qlik returns value from last column of current pivot row. No ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "IR09",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "Column(n)",
+    "Qlik Example": "Column(2)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Reference the measure column by name directly",
+    "Comments / Context": "Qlik returns value of the nth measure column in a straight table. ThoughtSpot has no column-index reference — use named columns.",
+    "status": "ok"
+  },
+  {
+    "#": "IR10",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "RowNo()",
+    "Qlik Example": "RowNo()",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik returns current row number in chart table. ThoughtSpot has no RowNo() concept in formula context.",
+    "status": "ok"
+  },
+  {
+    "#": "IR11",
+    "Category": "Inter-Record (Qlik-specific)",
+    "Qlik Sense Formula": "NoOfRows()",
+    "Qlik Example": "NoOfRows()",
+    "ThoughtSpot Equivalent": "count(col)",
+    "ThoughtSpot Example": "count(order_id)",
+    "Comments / Context": "Qlik returns total row count of current chart segment. ThoughtSpot's count() on a key column approximates total row count.",
+    "status": "ok"
+  },
+  {
+    "#": "SC01",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "Peek(field, row, table)",
+    "Qlik Example": "Peek('Balance', -1, 'Transactions')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in data pipeline/ETL layer before loading into ThoughtSpot",
+    "Comments / Context": "Qlik script function that looks up a previously loaded row's value. ThoughtSpot formulas operate on already-loaded data — handle row-lookups in ETL.",
+    "status": "ok"
+  },
+  {
+    "#": "SC02",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "Lookup(ret_fld, match_fld, match_val, table)",
+    "Qlik Example": "Lookup('Price', 'ProductID', ProductID, 'Products')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Join tables in the data model layer instead",
+    "Comments / Context": "Qlik script VLOOKUP across tables. ThoughtSpot handles multi-table lookups through data model/worksheet joins — not in formula syntax.",
+    "status": "ok"
+  },
+  {
+    "#": "SC03",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "Previous(expr)",
+    "Qlik Example": "Previous(Revenue)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle sequential row logic in ETL before loading",
+    "Comments / Context": "Qlik script function returning previous row's value during data load. ThoughtSpot has no sequential row reference in formula context.",
+    "status": "ok"
+  },
+  {
+    "#": "SC04",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "Exists(field, expr)",
+    "Qlik Example": "Exists(CustomerID, CustomerID)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in data model — use JOINs or filters",
+    "Comments / Context": "Qlik script checks if a value exists in a previously loaded field. In ThoughtSpot, use data model joins or worksheet-level filters.",
+    "status": "ok"
+  },
+  {
+    "#": "SC05",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "ApplyMap(mapname, expr, default)",
+    "Qlik Example": "ApplyMap('CountryMap', CountryCode, 'Unknown')",
+    "ThoughtSpot Equivalent": "if col = 'val1' then 'mapped1' else if ...",
+    "ThoughtSpot Example": "if country_code = 'US' then 'United States' else 'Other'",
+    "Comments / Context": "Qlik script maps values using a mapping table. ThoughtSpot replicates with if/then/else chains or pre-maps in the data pipeline.",
+    "status": "ok"
+  },
+  {
+    "#": "SC06",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "MapSubString(mapname, expr)",
+    "Qlik Example": "MapSubString('CodeMap', ProductCode)",
+    "ThoughtSpot Equivalent": "replace(col, old, new)",
+    "ThoughtSpot Example": "replace(product_code, 'OLD', 'NEW')",
+    "Comments / Context": "Qlik replaces substrings using a mapping table. ThoughtSpot's replace() substitutes fixed values; for complex mappings use ETL.",
+    "status": "ok"
+  },
+  {
+    "#": "SC07",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "FieldValue(field, n)",
+    "Qlik Example": "FieldValue('Region', 1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot formulas",
+    "Comments / Context": "Qlik returns the nth distinct value of a field. ThoughtSpot has no field-enumeration function in formula context.",
+    "status": "ok"
+  },
+  {
+    "#": "SC08",
+    "Category": "Script / Load (Qlik-specific)",
+    "Qlik Sense Formula": "FieldIndex(field, value)",
+    "Qlik Example": "FieldIndex('Region', 'West')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot formulas",
+    "Comments / Context": "Qlik returns the position of a value in a field's value list. No ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "D01",
+    "Category": "Date",
+    "Qlik Sense Formula": "Year(date)",
+    "Qlik Example": "Year(OrderDate)",
+    "ThoughtSpot Equivalent": "year(date_col)",
+    "ThoughtSpot Example": "year(order_date)",
+    "Comments / Context": "Direct equivalent. Both extract the 4-digit year from a date column.",
+    "status": "ok"
+  },
+  {
+    "#": "D02",
+    "Category": "Date",
+    "Qlik Sense Formula": "Month(date)",
+    "Qlik Example": "Month(OrderDate)",
+    "ThoughtSpot Equivalent": "month(date_col)",
+    "ThoughtSpot Example": "month(order_date)",
+    "Comments / Context": "Qlik returns month name (e.g. 'Jan'). ThoughtSpot returns numeric month (1-12) by default.",
+    "status": "ok"
+  },
+  {
+    "#": "D03",
+    "Category": "Date",
+    "Qlik Sense Formula": "Day(date)",
+    "Qlik Example": "Day(OrderDate)",
+    "ThoughtSpot Equivalent": "day(date_col)",
+    "ThoughtSpot Example": "day(order_date)",
+    "Comments / Context": "Direct equivalent. Both extract the day of month (1-31).",
+    "status": "ok"
+  },
+  {
+    "#": "D04",
+    "Category": "Date",
+    "Qlik Sense Formula": "Quarter(date)",
+    "Qlik Example": "Quarter(OrderDate)",
+    "ThoughtSpot Equivalent": "quarter(date_col)",
+    "ThoughtSpot Example": "quarter(order_date)",
+    "Comments / Context": "Direct equivalent. Both return quarter number (1-4).",
+    "status": "ok"
+  },
+  {
+    "#": "D05",
+    "Category": "Date",
+    "Qlik Sense Formula": "Week(date)",
+    "Qlik Example": "Week(OrderDate)",
+    "ThoughtSpot Equivalent": "week_number_of_year(date_col)",
+    "ThoughtSpot Example": "week_number_of_year(order_date)",
+    "Comments / Context": "Both return ISO week number. Naming differs: Qlik uses Week(); ThoughtSpot uses week_number_of_year().",
+    "status": "ok"
+  },
+  {
+    "#": "D06",
+    "Category": "Date",
+    "Qlik Sense Formula": "Weekday(date)",
+    "Qlik Example": "Weekday(OrderDate)",
+    "ThoughtSpot Equivalent": "day_of_week(date_col)",
+    "ThoughtSpot Example": "day_of_week(order_date)",
+    "Comments / Context": "Qlik returns a number (0=Mon, 6=Sun). ThoughtSpot returns the day name (e.g. 'Monday').",
+    "status": "ok"
+  },
+  {
+    "#": "D07",
+    "Category": "Date",
+    "Qlik Sense Formula": "WeekYear(date)",
+    "Qlik Example": "WeekYear(OrderDate)",
+    "ThoughtSpot Equivalent": "year(date_col)",
+    "ThoughtSpot Example": "year(order_date)",
+    "Comments / Context": "Qlik returns the year the ISO week belongs to (can differ near year boundaries). ThoughtSpot year() returns calendar year — may differ for week 53.",
+    "status": "ok"
+  },
+  {
+    "#": "D08",
+    "Category": "Date",
+    "Qlik Sense Formula": "Hour(time)",
+    "Qlik Example": "Hour(Timestamp)",
+    "ThoughtSpot Equivalent": "hour(date_col)",
+    "ThoughtSpot Example": "hour(order_timestamp)",
+    "Comments / Context": "Direct equivalent. Both extract the hour (0-23) from a datetime column.",
+    "status": "ok"
+  },
+  {
+    "#": "D09",
+    "Category": "Date",
+    "Qlik Sense Formula": "Minute(time)",
+    "Qlik Example": "Minute(Timestamp)",
+    "ThoughtSpot Equivalent": "minute(date_col)",
+    "ThoughtSpot Example": "minute(order_timestamp)",
+    "Comments / Context": "Direct equivalent. Both extract the minute (0-59).",
+    "status": "ok"
+  },
+  {
+    "#": "D10",
+    "Category": "Date",
+    "Qlik Sense Formula": "Second(time)",
+    "Qlik Example": "Second(Timestamp)",
+    "ThoughtSpot Equivalent": "second(date_col)",
+    "ThoughtSpot Example": "second(order_timestamp)",
+    "Comments / Context": "Direct equivalent. Both extract seconds (0-59).",
+    "status": "ok"
+  },
+  {
+    "#": "D11",
+    "Category": "Date",
+    "Qlik Sense Formula": "Today()",
+    "Qlik Example": "Today()",
+    "ThoughtSpot Equivalent": "today()",
+    "ThoughtSpot Example": "today()",
+    "Comments / Context": "Direct equivalent. Both return today's date with no time component.",
+    "status": "ok"
+  },
+  {
+    "#": "D12",
+    "Category": "Date",
+    "Qlik Sense Formula": "Now()",
+    "Qlik Example": "Now()",
+    "ThoughtSpot Equivalent": "now()",
+    "ThoughtSpot Example": "now()",
+    "Comments / Context": "Direct equivalent. Both return the current date and time as a timestamp.",
+    "status": "ok"
+  },
+  {
+    "#": "D13",
+    "Category": "Date",
+    "Qlik Sense Formula": "MonthStart(date)",
+    "Qlik Example": "MonthStart(OrderDate)",
+    "ThoughtSpot Equivalent": "start_of_month(date_col)",
+    "ThoughtSpot Example": "start_of_month(order_date)",
+    "Comments / Context": "Both return the first day of the month. Different naming but identical behavior.",
+    "status": "ok"
+  },
+  {
+    "#": "D14",
+    "Category": "Date",
+    "Qlik Sense Formula": "MonthEnd(date)",
+    "Qlik Example": "MonthEnd(OrderDate)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "add_days(add_months(start_of_month(date), 1), -1)",
+    "Comments / Context": "Qlik has built-in MonthEnd(). ThoughtSpot has no end-of-month function — workaround: start of next month minus 1 day.",
+    "status": "ok"
+  },
+  {
+    "#": "D15",
+    "Category": "Date",
+    "Qlik Sense Formula": "QuarterStart(date)",
+    "Qlik Example": "QuarterStart(OrderDate)",
+    "ThoughtSpot Equivalent": "start_of_quarter(date_col)",
+    "ThoughtSpot Example": "start_of_quarter(order_date)",
+    "Comments / Context": "Direct equivalent behavior. Naming convention differs.",
+    "status": "ok"
+  },
+  {
+    "#": "D16",
+    "Category": "Date",
+    "Qlik Sense Formula": "QuarterEnd(date)",
+    "Qlik Example": "QuarterEnd(OrderDate)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "add_days(add_months(start_of_quarter(date), 3), -1)",
+    "Comments / Context": "Qlik has QuarterEnd(). ThoughtSpot has no equivalent — workaround: start of next quarter minus 1 day.",
+    "status": "ok"
+  },
+  {
+    "#": "D17",
+    "Category": "Date",
+    "Qlik Sense Formula": "YearStart(date)",
+    "Qlik Example": "YearStart(OrderDate)",
+    "ThoughtSpot Equivalent": "start_of_year(date_col)",
+    "ThoughtSpot Example": "start_of_year(order_date)",
+    "Comments / Context": "Direct equivalent behavior. Different naming convention only.",
+    "status": "ok"
+  },
+  {
+    "#": "D18",
+    "Category": "Date",
+    "Qlik Sense Formula": "YearEnd(date)",
+    "Qlik Example": "YearEnd(OrderDate)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "add_days(add_months(start_of_year(date), 12), -1)",
+    "Comments / Context": "Qlik has YearEnd(). ThoughtSpot has no equivalent — workaround: start of next year minus 1 day.",
+    "status": "ok"
+  },
+  {
+    "#": "D19",
+    "Category": "Date",
+    "Qlik Sense Formula": "WeekStart(date)",
+    "Qlik Example": "WeekStart(OrderDate)",
+    "ThoughtSpot Equivalent": "start_of_week(date_col)",
+    "ThoughtSpot Example": "start_of_week(order_date)",
+    "Comments / Context": "Both return the start of the week. Naming differs; behavior is equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "D20",
+    "Category": "Date",
+    "Qlik Sense Formula": "WeekEnd(date)",
+    "Qlik Example": "WeekEnd(OrderDate)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "add_days(start_of_week(date), 6)",
+    "Comments / Context": "Qlik has WeekEnd(). ThoughtSpot workaround: add 6 days to start_of_week().",
+    "status": "ok"
+  },
+  {
+    "#": "D21",
+    "Category": "Date",
+    "Qlik Sense Formula": "AddMonths(date, n)",
+    "Qlik Example": "AddMonths(Today(), -3)",
+    "ThoughtSpot Equivalent": "add_months(date_col, n)",
+    "ThoughtSpot Example": "add_months(today(), -3)",
+    "Comments / Context": "Direct equivalent. Both add or subtract months. Use negative n to go backward.",
+    "status": "ok"
+  },
+  {
+    "#": "D22",
+    "Category": "Date",
+    "Qlik Sense Formula": "AddYears(date, n)",
+    "Qlik Example": "AddYears(OrderDate, 1)",
+    "ThoughtSpot Equivalent": "add_years(date_col, n)",
+    "ThoughtSpot Example": "add_years(order_date, 1)",
+    "Comments / Context": "ThoughtSpot has a native add_years(). No add_months(date,12) workaround needed.",
+    "status": "corrected"
+  },
+  {
+    "#": "D23",
+    "Category": "Date",
+    "Qlik Sense Formula": "Age(date, ref_date)",
+    "Qlik Example": "Age(BirthDate, Today())",
+    "ThoughtSpot Equivalent": "(today() - date_col) / 365",
+    "ThoughtSpot Example": "(today() - birth_date) / 365",
+    "Comments / Context": "Qlik Age() returns exact age in years. ThoughtSpot approximates age via date subtraction divided by 365.",
+    "status": "ok"
+  },
+  {
+    "#": "D24",
+    "Category": "Date",
+    "Qlik Sense Formula": "NetworkDays(start, end)",
+    "Qlik Example": "NetworkDays(StartDate, EndDate)",
+    "ThoughtSpot Equivalent": "diff_days(date1, date2)",
+    "ThoughtSpot Example": "diff_days(ship_date, order_date)",
+    "Comments / Context": "Qlik NetworkDays() excludes weekends and optionally holidays. ThoughtSpot date_diff() returns total calendar days only — no business day logic.",
+    "status": "corrected"
+  },
+  {
+    "#": "D25",
+    "Category": "Date",
+    "Qlik Sense Formula": "Date(expr, format)",
+    "Qlik Example": "Date(OrderDate, 'YYYY-MM-DD')",
+    "ThoughtSpot Equivalent": "to_date(col, format)",
+    "ThoughtSpot Example": "to_date(date_string, '%Y-%m-%d')",
+    "Comments / Context": "Both convert a value to a date. Format strings differ: Qlik uses 'YYYY-MM-DD'; ThoughtSpot uses strftime '%Y-%m-%d'.",
+    "status": "ok"
+  },
+  {
+    "#": "D26",
+    "Category": "Date",
+    "Qlik Sense Formula": "Timestamp(expr, format)",
+    "Qlik Example": "Timestamp(Now(), 'YYYY-MM-DD hh:mm')",
+    "ThoughtSpot Equivalent": "to_date(col, format)",
+    "ThoughtSpot Example": "to_date(ts_string, '%Y-%m-%d %H:%M')",
+    "Comments / Context": "Qlik Timestamp() formats a datetime as a string. ThoughtSpot uses to_date() for parsing strings into dates.",
+    "status": "ok"
+  },
+  {
+    "#": "D27",
+    "Category": "Date",
+    "Qlik Sense Formula": "DayStart(date)",
+    "Qlik Example": "DayStart(OrderDate)",
+    "ThoughtSpot Equivalent": "date_trunc(date_col, 'day')",
+    "ThoughtSpot Example": "date_trunc(order_date, 'day')",
+    "Comments / Context": "Qlik DayStart() returns midnight of the given date. ThoughtSpot date_trunc to 'day' is the equivalent.",
+    "status": "verify"
+  },
+  {
+    "#": "D28",
+    "Category": "Date",
+    "Qlik Sense Formula": "MakeDate(year, month, day)",
+    "Qlik Example": "MakeDate(2024, 1, 15)",
+    "ThoughtSpot Equivalent": "to_date(concat(to_string(y),'-',to_string(m),'-',to_string(d)), '%Y-%m-%d')",
+    "ThoughtSpot Example": "to_date(concat(to_string(2024),'-01-15'), '%Y-%m-%d')",
+    "Comments / Context": "Qlik has dedicated MakeDate() to construct a date from parts. ThoughtSpot workaround uses concat + to_date.",
+    "status": "ok"
+  },
+  {
+    "#": "D29",
+    "Category": "Date",
+    "Qlik Sense Formula": "InYear(date, base_date, year_offset)",
+    "Qlik Example": "InYear(OrderDate, Today(), 0)",
+    "ThoughtSpot Equivalent": "year(date_col) = year(today())",
+    "ThoughtSpot Example": "year(order_date) = year(today())",
+    "Comments / Context": "Qlik InYear() checks if a date falls in a relative year. ThoughtSpot replicates by comparing year() extractions.",
+    "status": "ok"
+  },
+  {
+    "#": "D30",
+    "Category": "Date",
+    "Qlik Sense Formula": "InMonth(date, base_date, month_offset)",
+    "Qlik Example": "InMonth(OrderDate, Today(), 0)",
+    "ThoughtSpot Equivalent": "year(date_col) = year(today()) and month(date_col) = month(today())",
+    "ThoughtSpot Example": "year(order_date)=year(today()) and month(order_date)=month(today())",
+    "Comments / Context": "Qlik InMonth() checks if a date is in the same month as the base. ThoughtSpot matches both year and month components.",
+    "status": "ok"
+  },
+  {
+    "#": "D31",
+    "Category": "Date",
+    "Qlik Sense Formula": "InWeek(date, base_date, week_offset)",
+    "Qlik Example": "InWeek(OrderDate, Today(), 0)",
+    "ThoughtSpot Equivalent": "start_of_week(date_col) = start_of_week(today())",
+    "ThoughtSpot Example": "start_of_week(order_date) = start_of_week(today())",
+    "Comments / Context": "Qlik InWeek() checks if a date is in the same week as the base. ThoughtSpot compares start_of_week() values.",
+    "status": "ok"
+  },
+  {
+    "#": "D32",
+    "Category": "Date",
+    "Qlik Sense Formula": "InQuarter(date, base_date, qtr_offset)",
+    "Qlik Example": "InQuarter(OrderDate, Today(), 0)",
+    "ThoughtSpot Equivalent": "start_of_quarter(date_col) = start_of_quarter(today())",
+    "ThoughtSpot Example": "start_of_quarter(order_date) = start_of_quarter(today())",
+    "Comments / Context": "Qlik InQuarter() checks if a date falls in the same quarter. ThoughtSpot compares start_of_quarter() values.",
+    "status": "ok"
+  },
+  {
+    "#": "D33",
+    "Category": "Date",
+    "Qlik Sense Formula": "InYearToDate(date, base_date, year_offset)",
+    "Qlik Example": "InYearToDate(OrderDate, Today(), 0)",
+    "ThoughtSpot Equivalent": "date_col >= start_of_year(today()) and date_col <= today()",
+    "ThoughtSpot Example": "order_date >= start_of_year(today()) and order_date <= today()",
+    "Comments / Context": "Qlik InYearToDate() checks if a date falls within the YTD window. ThoughtSpot uses a range comparison from start_of_year to today.",
+    "status": "ok"
+  },
+  {
+    "#": "D34",
+    "Category": "Date",
+    "Qlik Sense Formula": "date_diff (subtraction)",
+    "Qlik Example": "Date(ShipDate) - Date(OrderDate)",
+    "ThoughtSpot Equivalent": "diff_days(date1, date2)",
+    "ThoughtSpot Example": "diff_days(ship_date, order_date)",
+    "Comments / Context": "Qlik computes date difference by simple subtraction. ThoughtSpot uses the explicit date_diff() function. Both return days.",
+    "status": "corrected"
+  },
+  {
+    "#": "D35",
+    "Category": "Date",
+    "Qlik Sense Formula": "MakeTime(h, m, s)",
+    "Qlik Example": "MakeTime(14, 30, 0)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Construct timestamp string and convert with to_date()",
+    "Comments / Context": "Qlik constructs a time value from hours/minutes/seconds. ThoughtSpot has no MakeTime() — build a string and parse with to_date().",
+    "status": "ok"
+  },
+  {
+    "#": "D36",
+    "Category": "Date",
+    "Qlik Sense Formula": "AddDays (via arithmetic)",
+    "Qlik Example": "Date(OrderDate + 30)",
+    "ThoughtSpot Equivalent": "add_days(date_col, n)",
+    "ThoughtSpot Example": "add_days(order_date, 30)",
+    "Comments / Context": "Qlik adds days via arithmetic (date + n). ThoughtSpot uses the explicit add_days() function.",
+    "status": "ok"
+  },
+  {
+    "#": "S01",
+    "Category": "String",
+    "Qlik Sense Formula": "Len(str)",
+    "Qlik Example": "Len(ProductName)",
+    "ThoughtSpot Equivalent": "len(col)",
+    "ThoughtSpot Example": "len(product_name)",
+    "Comments / Context": "Direct equivalent. Both return the character length of the string.",
+    "status": "ok"
+  },
+  {
+    "#": "S02",
+    "Category": "String",
+    "Qlik Sense Formula": "Upper(str)",
+    "Qlik Example": "Upper(Region)",
+    "ThoughtSpot Equivalent": "sql_string_op('UPPER({0})', col)",
+    "ThoughtSpot Example": "sql_string_op('UPPER({0})', region)",
+    "Comments / Context": "ThoughtSpot has no native upper() in formula context; use sql_string_op to push UPPER to the warehouse (matches the Tableau converter).",
+    "status": "corrected"
+  },
+  {
+    "#": "S03",
+    "Category": "String",
+    "Qlik Sense Formula": "Lower(str)",
+    "Qlik Example": "Lower(Region)",
+    "ThoughtSpot Equivalent": "sql_string_op('LOWER({0})', col)",
+    "ThoughtSpot Example": "sql_string_op('LOWER({0})', region)",
+    "Comments / Context": "ThoughtSpot has no native lower() in formula context; use sql_string_op to push LOWER to the warehouse (matches the Tableau converter).",
+    "status": "corrected"
+  },
+  {
+    "#": "S04",
+    "Category": "String",
+    "Qlik Sense Formula": "Capitalize(str)",
+    "Qlik Example": "Capitalize(name)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "concat(upper(substr(name,1,1)), lower(substr(name,2,len(name)-1)))",
+    "Comments / Context": "Qlik Capitalize() converts to title case. ThoughtSpot has no built-in capitalize — combine upper() on first char and lower() on the rest.",
+    "status": "ok"
+  },
+  {
+    "#": "S05",
+    "Category": "String",
+    "Qlik Sense Formula": "Trim(str)",
+    "Qlik Example": "Trim(CustomerName)",
+    "ThoughtSpot Equivalent": "trim(col)",
+    "ThoughtSpot Example": "trim(customer_name)",
+    "Comments / Context": "Direct equivalent. Removes leading and trailing whitespace.",
+    "status": "ok"
+  },
+  {
+    "#": "S06",
+    "Category": "String",
+    "Qlik Sense Formula": "LTrim(str)",
+    "Qlik Example": "LTrim(text)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No left-only trim in ThoughtSpot — use trim() for both sides",
+    "Comments / Context": "Qlik LTrim() removes only leading spaces. ThoughtSpot trim() removes both sides — no left-only trim available.",
+    "status": "ok"
+  },
+  {
+    "#": "S07",
+    "Category": "String",
+    "Qlik Sense Formula": "RTrim(str)",
+    "Qlik Example": "RTrim(text)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No right-only trim in ThoughtSpot — use trim() for both sides",
+    "Comments / Context": "Qlik RTrim() removes only trailing spaces. ThoughtSpot trim() removes both sides — no right-only trim available.",
+    "status": "ok"
+  },
+  {
+    "#": "S08",
+    "Category": "String",
+    "Qlik Sense Formula": "Left(str, n)",
+    "Qlik Example": "Left(SKU, 4)",
+    "ThoughtSpot Equivalent": "substr(col, 1, n)",
+    "ThoughtSpot Example": "substr(sku, 1, 4)",
+    "Comments / Context": "Qlik has dedicated Left(). ThoughtSpot uses substr() starting at position 1 to replicate Left().",
+    "status": "ok"
+  },
+  {
+    "#": "S09",
+    "Category": "String",
+    "Qlik Sense Formula": "Right(str, n)",
+    "Qlik Example": "Right(Code, 3)",
+    "ThoughtSpot Equivalent": "substr(col, len(col)-n+1, n)",
+    "ThoughtSpot Example": "substr(code, len(code)-2, 3)",
+    "Comments / Context": "Qlik has dedicated Right(). ThoughtSpot combines substr() and len() to extract trailing characters.",
+    "status": "ok"
+  },
+  {
+    "#": "S10",
+    "Category": "String",
+    "Qlik Sense Formula": "Mid(str, start, n)",
+    "Qlik Example": "Mid(Name, 2, 5)",
+    "ThoughtSpot Equivalent": "substr(col, start, n)",
+    "ThoughtSpot Example": "substr(name, 2, 5)",
+    "Comments / Context": "Direct equivalent (different name). Qlik Mid() maps exactly to ThoughtSpot substr(). Both are 1-indexed.",
+    "status": "ok"
+  },
+  {
+    "#": "S11",
+    "Category": "String",
+    "Qlik Sense Formula": "Replace(str, old, new)",
+    "Qlik Example": "Replace(Name, 'Inc', 'LLC')",
+    "ThoughtSpot Equivalent": "replace(col, old, new)",
+    "ThoughtSpot Example": "replace(name, 'Inc', 'LLC')",
+    "Comments / Context": "Direct equivalent. Both replace all occurrences of a substring.",
+    "status": "ok"
+  },
+  {
+    "#": "S12",
+    "Category": "String",
+    "Qlik Sense Formula": "Index(str, substr, n)",
+    "Qlik Example": "Index(Email, '@')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use contains() to check existence; no position function in ThoughtSpot",
+    "Comments / Context": "Qlik returns position of nth occurrence of a substring. ThoughtSpot has no substring-position function.",
+    "status": "verify"
+  },
+  {
+    "#": "S13",
+    "Category": "String",
+    "Qlik Sense Formula": "SubField(str, delim, n)",
+    "Qlik Example": "SubField(FullName, ' ', 1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Complex substr/len workaround required",
+    "Comments / Context": "Qlik splits a string on a delimiter and returns the nth token. ThoughtSpot has no token-split function.",
+    "status": "ok"
+  },
+  {
+    "#": "S14",
+    "Category": "String",
+    "Qlik Sense Formula": "Concat(expr, delimiter) [aggregating]",
+    "Qlik Example": "Concat(ProductName, ', ')",
+    "ThoughtSpot Equivalent": "concat(str1, str2, ...) [row-level]",
+    "ThoughtSpot Example": "concat(first_name, ' ', last_name)",
+    "Comments / Context": "DIFFERENT behavior: Qlik Concat() aggregates many row values into one string (like GROUP_CONCAT). ThoughtSpot concat() joins values within the same row — different use case.",
+    "status": "ok"
+  },
+  {
+    "#": "S15",
+    "Category": "String",
+    "Qlik Sense Formula": "PurgeChar(str, chars)",
+    "Qlik Example": "PurgeChar(Phone, '()-')",
+    "ThoughtSpot Equivalent": "replace(replace(replace(col,'(',''),')',''),'-','')",
+    "ThoughtSpot Example": "replace(replace(replace(phone,'(',''),')',''),'-','')",
+    "Comments / Context": "Qlik PurgeChar() removes a set of specified characters in one call. ThoughtSpot requires chained replace() calls — one per character.",
+    "status": "ok"
+  },
+  {
+    "#": "S16",
+    "Category": "String",
+    "Qlik Sense Formula": "KeepChar(str, chars)",
+    "Qlik Example": "KeepChar(Phone, '0123456789')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Requires ETL/data prep to strip non-numeric characters",
+    "Comments / Context": "Qlik KeepChar() retains only specified characters. ThoughtSpot has no equivalent — handle in ETL.",
+    "status": "ok"
+  },
+  {
+    "#": "S17",
+    "Category": "String",
+    "Qlik Sense Formula": "Repeat(str, n)",
+    "Qlik Example": "Repeat('*', 5)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik repeats a string n times. ThoughtSpot has no Repeat() function.",
+    "status": "ok"
+  },
+  {
+    "#": "S18",
+    "Category": "String",
+    "Qlik Sense Formula": "Ord(str)",
+    "Qlik Example": "Ord('A')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik returns the ASCII code of the first character. ThoughtSpot has no Ord()/ASCII() function.",
+    "status": "ok"
+  },
+  {
+    "#": "S19",
+    "Category": "String",
+    "Qlik Sense Formula": "Chr(n)",
+    "Qlik Example": "Chr(65)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik converts an ASCII code to a character. ThoughtSpot has no Chr() function.",
+    "status": "ok"
+  },
+  {
+    "#": "S20",
+    "Category": "String",
+    "Qlik Sense Formula": "Hash128(expr)",
+    "Qlik Example": "Hash128(CustomerID)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle hashing in the ETL/data layer",
+    "Comments / Context": "Qlik generates a 128-bit hash of a value. ThoughtSpot has no hash function in formula context.",
+    "status": "ok"
+  },
+  {
+    "#": "S21",
+    "Category": "String",
+    "Qlik Sense Formula": "Hash256(expr)",
+    "Qlik Example": "Hash256(CustomerID)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle hashing in the ETL/data layer",
+    "Comments / Context": "Qlik generates a 256-bit hash (SHA-256). ThoughtSpot has no hash function in formulas.",
+    "status": "ok"
+  },
+  {
+    "#": "S22",
+    "Category": "String",
+    "Qlik Sense Formula": "TextBetween(str, start_delim, end_delim)",
+    "Qlik Example": "TextBetween('[Hello]', '[', ']')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Complex substr/index workaround required",
+    "Comments / Context": "Qlik extracts text between two delimiter strings. ThoughtSpot requires complex substr logic.",
+    "status": "ok"
+  },
+  {
+    "#": "S23",
+    "Category": "String",
+    "Qlik Sense Formula": "N/A — use WildMatch(str, 'prefix*')",
+    "Qlik Example": "WildMatch(Email, 'user*')",
+    "ThoughtSpot Equivalent": "starts_with(col, prefix)",
+    "ThoughtSpot Example": "starts_with(email, 'user')",
+    "Comments / Context": "ThoughtSpot has dedicated starts_with(). Qlik uses WildMatch with * at end: WildMatch(str, 'prefix*').",
+    "status": "ok"
+  },
+  {
+    "#": "S24",
+    "Category": "String",
+    "Qlik Sense Formula": "N/A — use WildMatch(str, '*.suffix')",
+    "Qlik Example": "WildMatch(Email, '*.com')",
+    "ThoughtSpot Equivalent": "ends_with(col, suffix)",
+    "ThoughtSpot Example": "ends_with(email, '.com')",
+    "Comments / Context": "ThoughtSpot has dedicated ends_with(). Qlik uses WildMatch with * at start: WildMatch(str, '*.suffix').",
+    "status": "ok"
+  },
+  {
+    "#": "S25",
+    "Category": "String",
+    "Qlik Sense Formula": "WildMatch(str, '*substr*')",
+    "Qlik Example": "WildMatch(Name, '*Pro*')",
+    "ThoughtSpot Equivalent": "contains(col, substr)",
+    "ThoughtSpot Example": "contains(product_name, 'Pro')",
+    "Comments / Context": "ThoughtSpot has dedicated contains(). Qlik uses WildMatch with * on both sides for substring checking.",
+    "status": "ok"
+  },
+  {
+    "#": "S26",
+    "Category": "String",
+    "Qlik Sense Formula": "Evaluate(expr_string)",
+    "Qlik Example": "Evaluate('1+1')",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No equivalent — ThoughtSpot does not evaluate string expressions dynamically",
+    "Comments / Context": "Qlik Evaluate() parses and executes a string as an expression at runtime. ThoughtSpot has no dynamic expression evaluation.",
+    "status": "ok"
+  },
+  {
+    "#": "S27",
+    "Category": "String",
+    "Qlik Sense Formula": "Num(expr, format) [display]",
+    "Qlik Example": "Num(Revenue, '#,##0.00')",
+    "ThoughtSpot Equivalent": "to_string(col)",
+    "ThoughtSpot Example": "to_string(revenue)",
+    "Comments / Context": "Qlik Num() formats a number as a display string. ThoughtSpot to_string() converts to string — control display formatting in visualization settings.",
+    "status": "ok"
+  },
+  {
+    "#": "N01",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Abs(x)",
+    "Qlik Example": "Abs(Profit)",
+    "ThoughtSpot Equivalent": "abs(col)",
+    "ThoughtSpot Example": "abs(profit)",
+    "Comments / Context": "Direct equivalent. Returns the absolute (non-negative) value.",
+    "status": "ok"
+  },
+  {
+    "#": "N02",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Round(x, n)",
+    "Qlik Example": "Round(Revenue, 0.01)",
+    "ThoughtSpot Equivalent": "round(col, n)",
+    "ThoughtSpot Example": "round(revenue, 2)",
+    "Comments / Context": "Qlik second arg is rounding interval (0.01 = 2 decimals). ThoughtSpot uses the number of decimal places directly.",
+    "status": "ok"
+  },
+  {
+    "#": "N03",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Floor(x)",
+    "Qlik Example": "Floor(Score)",
+    "ThoughtSpot Equivalent": "floor(col)",
+    "ThoughtSpot Example": "floor(score)",
+    "Comments / Context": "Direct equivalent. Rounds down to the nearest integer.",
+    "status": "ok"
+  },
+  {
+    "#": "N04",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Ceil(x)",
+    "Qlik Example": "Ceil(Score)",
+    "ThoughtSpot Equivalent": "ceil(col)",
+    "ThoughtSpot Example": "ceil(score)",
+    "Comments / Context": "Direct equivalent. Rounds up to the nearest integer.",
+    "status": "ok"
+  },
+  {
+    "#": "N05",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Pow(base, exp)",
+    "Qlik Example": "Pow(Rate, 2)",
+    "ThoughtSpot Equivalent": "pow(base, exp)",
+    "ThoughtSpot Example": "pow(rate, 2)",
+    "Comments / Context": "Direct equivalent. Raises base to the power of exponent.",
+    "status": "ok"
+  },
+  {
+    "#": "N06",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Sqrt(x)",
+    "Qlik Example": "Sqrt(Variance)",
+    "ThoughtSpot Equivalent": "sqrt(col)",
+    "ThoughtSpot Example": "sqrt(variance)",
+    "Comments / Context": "Direct equivalent. Returns the square root.",
+    "status": "ok"
+  },
+  {
+    "#": "N07",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Log(x)",
+    "Qlik Example": "Log(Revenue)",
+    "ThoughtSpot Equivalent": "ln(col)",
+    "ThoughtSpot Example": "ln(revenue)",
+    "Comments / Context": "Qlik Log() is natural log (base e). ThoughtSpot names it ln(). ThoughtSpot also has log10() for base-10.",
+    "status": "ok"
+  },
+  {
+    "#": "N08",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Log10(x)",
+    "Qlik Example": "Log10(Revenue)",
+    "ThoughtSpot Equivalent": "log10(col)",
+    "ThoughtSpot Example": "log10(revenue)",
+    "Comments / Context": "Direct equivalent. Both return the base-10 logarithm.",
+    "status": "ok"
+  },
+  {
+    "#": "N09",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Exp(x)",
+    "Qlik Example": "Exp(1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Use pow(2.71828, x) as approximation",
+    "Comments / Context": "Qlik Exp() returns e raised to the power of x. ThoughtSpot has no Exp() — approximate with pow(2.71828, x).",
+    "status": "verify"
+  },
+  {
+    "#": "N10",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Mod(x, y)",
+    "Qlik Example": "Mod(RowNo(), 2)",
+    "ThoughtSpot Equivalent": "mod(col, divisor)",
+    "ThoughtSpot Example": "mod(row_number, 2)",
+    "Comments / Context": "Direct equivalent. Returns remainder after division — useful for alternating row logic.",
+    "status": "ok"
+  },
+  {
+    "#": "N11",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Div(x, y)",
+    "Qlik Example": "Div(10, 3)",
+    "ThoughtSpot Equivalent": "floor(col / divisor)",
+    "ThoughtSpot Example": "floor(10 / 3)",
+    "Comments / Context": "Qlik Div() returns integer quotient. ThoughtSpot uses floor(x/y) to replicate integer division.",
+    "status": "ok"
+  },
+  {
+    "#": "N12",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Frac(x)",
+    "Qlik Example": "Frac(3.75)",
+    "ThoughtSpot Equivalent": "col - floor(col)",
+    "ThoughtSpot Example": "revenue - floor(revenue)",
+    "Comments / Context": "Qlik Frac() returns fractional part (3.75 → 0.75). ThoughtSpot workaround: subtract floor() from the value.",
+    "status": "ok"
+  },
+  {
+    "#": "N13",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Sign(x)",
+    "Qlik Example": "Sign(Profit)",
+    "ThoughtSpot Equivalent": "if col > 0 then 1 else if col < 0 then -1 else 0",
+    "ThoughtSpot Example": "if profit > 0 then 1 else if profit < 0 then -1 else 0",
+    "Comments / Context": "Qlik Sign() returns -1, 0, or 1. ThoughtSpot has no Sign() — replicate with if/then/else.",
+    "status": "ok"
+  },
+  {
+    "#": "N14",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Odd(x)",
+    "Qlik Example": "Odd(5)",
+    "ThoughtSpot Equivalent": "mod(col, 2) != 0",
+    "ThoughtSpot Example": "mod(value, 2) != 0",
+    "Comments / Context": "Qlik Odd() returns true if integer is odd. ThoughtSpot replicates with mod(x,2) != 0.",
+    "status": "ok"
+  },
+  {
+    "#": "N15",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Even(x)",
+    "Qlik Example": "Even(4)",
+    "ThoughtSpot Equivalent": "mod(col, 2) = 0",
+    "ThoughtSpot Example": "mod(value, 2) = 0",
+    "Comments / Context": "Qlik Even() returns true if integer is even. ThoughtSpot replicates with mod(x,2) = 0.",
+    "status": "ok"
+  },
+  {
+    "#": "N16",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "RangeSum(v1, v2, ...)",
+    "Qlik Example": "RangeSum(Q1, Q2, Q3, Q4)",
+    "ThoughtSpot Equivalent": "col1 + col2 + col3 + col4",
+    "ThoughtSpot Example": "q1 + q2 + q3 + q4",
+    "Comments / Context": "Qlik RangeSum() sums arguments (NULLs treated as 0). ThoughtSpot uses direct arithmetic — wrap with ifnull(col,0) to handle NULLs.",
+    "status": "ok"
+  },
+  {
+    "#": "N17",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "RangeMax(v1, v2, ...)",
+    "Qlik Example": "RangeMax(Q1, Q2, Q3, Q4)",
+    "ThoughtSpot Equivalent": "if Q1>=Q2 and Q1>=Q3 ... then Q1 ...",
+    "ThoughtSpot Example": "No direct equivalent — use nested if or ETL",
+    "Comments / Context": "Qlik RangeMax() finds max across a list of arguments (row-level). ThoughtSpot max() is an aggregate — use nested if/then/else for row-level multi-column max.",
+    "status": "ok"
+  },
+  {
+    "#": "N18",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "RangeMin(v1, v2, ...)",
+    "Qlik Example": "RangeMin(Q1, Q2, Q3)",
+    "ThoughtSpot Equivalent": "if Q1<=Q2 and Q1<=Q3 then Q1 ...",
+    "ThoughtSpot Example": "No direct equivalent — use nested if or ETL",
+    "Comments / Context": "Qlik RangeMin() finds min across a list of arguments (row-level). ThoughtSpot min() is an aggregate — use if/then/else for row-level minimum.",
+    "status": "ok"
+  },
+  {
+    "#": "N19",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "RangeAvg(v1, v2, ...)",
+    "Qlik Example": "RangeAvg(Q1, Q2, Q3, Q4)",
+    "ThoughtSpot Equivalent": "(col1 + col2 + col3 + col4) / 4",
+    "ThoughtSpot Example": "(q1 + q2 + q3 + q4) / 4",
+    "Comments / Context": "Qlik RangeAvg() averages a list. ThoughtSpot: sum divided by count — wrap each with ifnull(col,0).",
+    "status": "ok"
+  },
+  {
+    "#": "N20",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Combination(n, k)",
+    "Qlik Example": "Combination(10, 3)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle combinatorial math in ETL or SQL layer",
+    "Comments / Context": "Qlik computes combinations (n choose k). ThoughtSpot has no combinatorial math functions.",
+    "status": "ok"
+  },
+  {
+    "#": "N21",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Permutation(n, k)",
+    "Qlik Example": "Permutation(10, 3)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in ETL or SQL layer",
+    "Comments / Context": "Qlik computes permutations. ThoughtSpot has no permutation function.",
+    "status": "ok"
+  },
+  {
+    "#": "N22",
+    "Category": "Numeric / Math",
+    "Qlik Sense Formula": "Fabs(x)",
+    "Qlik Example": "Fabs(Diff)",
+    "ThoughtSpot Equivalent": "abs(col)",
+    "ThoughtSpot Example": "abs(diff)",
+    "Comments / Context": "Qlik Fabs() is float absolute value. ThoughtSpot abs() works on both integers and floats — direct equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "ST01",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "Fractile(expr, fraction)",
+    "Qlik Example": "Fractile(Revenue, 0.9)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No built-in percentile formula in ThoughtSpot",
+    "Comments / Context": "Qlik Fractile() returns a percentile (0.9 = 90th percentile). ThoughtSpot has no built-in percentile in formula context — use SQL passthrough or ETL.",
+    "status": "ok"
+  },
+  {
+    "#": "ST02",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "Correl(x, y)",
+    "Qlik Example": "Correl(Price, Sales)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No built-in correlation function in ThoughtSpot",
+    "Comments / Context": "Qlik Correl() returns the Pearson correlation coefficient. ThoughtSpot has no built-in correlation in formulas.",
+    "status": "ok"
+  },
+  {
+    "#": "ST03",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "Kurtosis(expr)",
+    "Qlik Example": "Kurtosis(Revenue)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in SQL/ETL layer",
+    "Comments / Context": "Qlik returns statistical kurtosis. ThoughtSpot has no kurtosis function in formula context.",
+    "status": "ok"
+  },
+  {
+    "#": "ST04",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "Skew(expr)",
+    "Qlik Example": "Skew(Revenue)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in SQL/ETL layer",
+    "Comments / Context": "Qlik returns statistical skewness. ThoughtSpot has no skewness formula function.",
+    "status": "ok"
+  },
+  {
+    "#": "ST05",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "NormDist(x, mean, stdev, cumulative)",
+    "Qlik Example": "NormDist(1.5, 0, 1, true())",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in SQL layer via passthrough",
+    "Comments / Context": "Qlik calculates normal distribution CDF/PDF. ThoughtSpot has no statistical distribution functions in formulas.",
+    "status": "ok"
+  },
+  {
+    "#": "ST06",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "NormInv(p, mean, stdev)",
+    "Qlik Example": "NormInv(0.95, 0, 1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in SQL layer",
+    "Comments / Context": "Qlik returns the inverse normal distribution. ThoughtSpot has no equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "ST07",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "ChiDist(x, df)",
+    "Qlik Example": "ChiDist(3.84, 1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in SQL/ETL layer",
+    "Comments / Context": "Qlik chi-square distribution function. ThoughtSpot has no statistical distribution functions.",
+    "status": "ok"
+  },
+  {
+    "#": "ST08",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "TDist(x, df, tails)",
+    "Qlik Example": "TDist(1.96, 30, 2)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in SQL layer",
+    "Comments / Context": "Qlik Student's t-distribution function. ThoughtSpot has no equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "ST09",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "FDist(x, df1, df2)",
+    "Qlik Example": "FDist(2.5, 3, 10)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Handle in SQL layer",
+    "Comments / Context": "Qlik F-distribution function. ThoughtSpot has no statistical distribution functions.",
+    "status": "ok"
+  },
+  {
+    "#": "ST10",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "Rank(expr)",
+    "Qlik Example": "Rank(Sum(Revenue))",
+    "ThoughtSpot Equivalent": "rank(col)",
+    "ThoughtSpot Example": "rank(sum(revenue))",
+    "Comments / Context": "Both rank current value relative to peers in the chart. Minor syntax difference — functionally equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "ST11",
+    "Category": "Statistical",
+    "Qlik Sense Formula": "HRank(expr)",
+    "Qlik Example": "HRank(Sum(Sales))",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "No direct equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik HRank() ranks values horizontally in pivot tables. ThoughtSpot has no horizontal rank concept.",
+    "status": "ok"
+  },
+  {
+    "#": "TC01",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Num#(str, format)",
+    "Qlik Example": "Num#('1,234.56', '#,##0.00')",
+    "ThoughtSpot Equivalent": "to_double(col)",
+    "ThoughtSpot Example": "to_double(price_string)",
+    "Comments / Context": "Qlik Num#() parses a formatted string into a number. ThoughtSpot uses to_double() or to_integer() to cast string to numeric.",
+    "status": "ok"
+  },
+  {
+    "#": "TC02",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Text(expr)",
+    "Qlik Example": "Text(OrderDate)",
+    "ThoughtSpot Equivalent": "to_string(col)",
+    "ThoughtSpot Example": "to_string(order_date)",
+    "Comments / Context": "Both convert a value to its string representation. Useful for concatenation with date or numeric fields.",
+    "status": "ok"
+  },
+  {
+    "#": "TC03",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Date(expr, format)",
+    "Qlik Example": "Date(OrderDate, 'YYYY-MM-DD')",
+    "ThoughtSpot Equivalent": "to_date(col, format)",
+    "ThoughtSpot Example": "to_date(date_string, '%Y-%m-%d')",
+    "Comments / Context": "Both convert/format values as dates. Format strings differ: Qlik 'YYYY-MM-DD' vs ThoughtSpot strftime '%Y-%m-%d'.",
+    "status": "ok"
+  },
+  {
+    "#": "TC04",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Date#(str, format)",
+    "Qlik Example": "Date#('20240115', 'YYYYMMDD')",
+    "ThoughtSpot Equivalent": "to_date(col, format)",
+    "ThoughtSpot Example": "to_date(date_str, '%Y%m%d')",
+    "Comments / Context": "Qlik Date#() interprets a string as a date. ThoughtSpot uses to_date() for the same purpose.",
+    "status": "ok"
+  },
+  {
+    "#": "TC05",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Int(x)",
+    "Qlik Example": "Int(3.7)",
+    "ThoughtSpot Equivalent": "to_integer(col)",
+    "ThoughtSpot Example": "to_integer(3.7)",
+    "Comments / Context": "Qlik Int() truncates to integer. ThoughtSpot to_integer() converts to integer type — behavior may differ for negative numbers.",
+    "status": "ok"
+  },
+  {
+    "#": "TC06",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Money(expr, format)",
+    "Qlik Example": "Money(Revenue, '$#,##0')",
+    "ThoughtSpot Equivalent": "to_string(col)",
+    "ThoughtSpot Example": "to_string(revenue)",
+    "Comments / Context": "Qlik Money() formats as currency string. ThoughtSpot has no currency formatter — use to_string() and control display in visualization settings.",
+    "status": "ok"
+  },
+  {
+    "#": "TC07",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Bool(x)",
+    "Qlik Example": "Bool(IsActive)",
+    "ThoughtSpot Equivalent": "to_bool(col)",
+    "ThoughtSpot Example": "to_bool(is_active)",
+    "Comments / Context": "Both convert a value to boolean. Qlik Bool() and ThoughtSpot to_bool() are functionally equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "TC08",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Dual(str, num)",
+    "Qlik Example": "Dual('Low', 1)",
+    "ThoughtSpot Equivalent": "No direct equivalent",
+    "ThoughtSpot Example": "Store both text and number as separate columns",
+    "Comments / Context": "Qlik Dual() creates a value with both text and numeric representations. ThoughtSpot has no dual-type concept — store as separate columns.",
+    "status": "ok"
+  },
+  {
+    "#": "TC09",
+    "Category": "Type Conversion",
+    "Qlik Sense Formula": "Num(expr, format) [to_double path]",
+    "Qlik Example": "Num(Revenue, '#,##0.00')",
+    "ThoughtSpot Equivalent": "to_double(col)",
+    "ThoughtSpot Example": "to_double(revenue_string)",
+    "Comments / Context": "Qlik Num() formats a number as display string. ThoughtSpot to_double() converts string to numeric for calculations — different primary purpose.",
+    "status": "ok"
+  },
+  {
+    "#": "CO01",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "RGB(r, g, b)",
+    "Qlik Example": "RGB(255, 0, 0)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Set color via chart visualization properties, not formulas",
+    "Comments / Context": "Qlik RGB() returns a color value for conditional coloring in charts. ThoughtSpot does not expose color functions in formula context — colors are set via chart config.",
+    "status": "ok"
+  },
+  {
+    "#": "CO02",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "ARGB(a, r, g, b)",
+    "Qlik Example": "ARGB(128, 255, 0, 0)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Handle in chart styling/theming settings",
+    "Comments / Context": "Qlik ARGB() creates a color with transparency (alpha channel). No ThoughtSpot formula equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "CO03",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "HSL(h, s, l)",
+    "Qlik Example": "HSL(0, 1, 0.5)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Handle in chart styling/theming settings",
+    "Comments / Context": "Qlik HSL() creates a color from hue/saturation/lightness. No ThoughtSpot formula equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "CO04",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "ColorMix1(weight, col1, col2)",
+    "Qlik Example": "ColorMix1(Revenue/MaxRev, RGB(255,0,0), RGB(0,255,0))",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Use conditional formatting in ThoughtSpot visualization settings",
+    "Comments / Context": "Qlik blends two colors based on a weight (0-1). ThoughtSpot achieves conditional coloring through visualization-level settings only.",
+    "status": "ok"
+  },
+  {
+    "#": "CO05",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "ColorMix2(weight, col1, col2, col3)",
+    "Qlik Example": "ColorMix2(0.5, RGB(255,0,0), RGB(0,255,0), RGB(0,0,255))",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Use conditional formatting in ThoughtSpot visualization settings",
+    "Comments / Context": "Qlik blends three colors. No ThoughtSpot formula equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "CO06",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "Red(color)",
+    "Qlik Example": "Red(RGB(200, 100, 50))",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "No equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik extracts the red component of a color value. No ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "CO07",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "Green(color)",
+    "Qlik Example": "Green(RGB(200, 100, 50))",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "No equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik extracts the green component of a color value. No ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "CO08",
+    "Category": "Color (Qlik-specific)",
+    "Qlik Sense Formula": "Blue(color)",
+    "Qlik Example": "Blue(RGB(200, 100, 50))",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "No equivalent in ThoughtSpot",
+    "Comments / Context": "Qlik extracts the blue component of a color value. No ThoughtSpot equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "FI01",
+    "Category": "Financial (Qlik-specific)",
+    "Qlik Sense Formula": "BlackAndScholes(s, x, r, t, sigma, type)",
+    "Qlik Example": "BlackAndScholes(100, 105, 0.05, 0.5, 0.2, 'c')",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Implement in SQL passthrough or ETL layer",
+    "Comments / Context": "Qlik provides a built-in Black-Scholes option pricing formula. ThoughtSpot has no financial modeling functions — use sql_float() passthrough or pre-compute in ETL.",
+    "status": "ok"
+  },
+  {
+    "#": "FI02",
+    "Category": "Financial (Qlik-specific)",
+    "Qlik Sense Formula": "FV(rate, nper, pmt, pv, type)",
+    "Qlik Example": "FV(0.05/12, 60, -200, 0, 0)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Pre-compute in ETL or use SQL passthrough",
+    "Comments / Context": "Qlik FV() calculates Future Value of an investment. ThoughtSpot has no financial calculation functions in formulas.",
+    "status": "ok"
+  },
+  {
+    "#": "FI03",
+    "Category": "Financial (Qlik-specific)",
+    "Qlik Sense Formula": "PV(rate, nper, pmt, fv, type)",
+    "Qlik Example": "PV(0.05/12, 60, -200, 0, 0)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Pre-compute in ETL or use SQL passthrough",
+    "Comments / Context": "Qlik PV() calculates Present Value. ThoughtSpot has no financial functions in formula context.",
+    "status": "ok"
+  },
+  {
+    "#": "FI04",
+    "Category": "Financial (Qlik-specific)",
+    "Qlik Sense Formula": "NPV(discount, val1, val2, ...)",
+    "Qlik Example": "NPV(0.1, CF1, CF2, CF3)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Pre-compute in ETL or use SQL passthrough",
+    "Comments / Context": "Qlik NPV() calculates Net Present Value. ThoughtSpot has no NPV function — pre-compute or use passthrough SQL.",
+    "status": "ok"
+  },
+  {
+    "#": "FI05",
+    "Category": "Financial (Qlik-specific)",
+    "Qlik Sense Formula": "IRR(values)",
+    "Qlik Example": "IRR(-100, 30, 40, 50, 30)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Pre-compute in ETL",
+    "Comments / Context": "Qlik IRR() calculates Internal Rate of Return. ThoughtSpot has no financial functions.",
+    "status": "ok"
+  },
+  {
+    "#": "FI06",
+    "Category": "Financial (Qlik-specific)",
+    "Qlik Sense Formula": "Rate(nper, pmt, pv, fv, type, guess)",
+    "Qlik Example": "Rate(60, -200, 10000, 0, 0, 0.05)",
+    "ThoughtSpot Equivalent": "No equivalent",
+    "ThoughtSpot Example": "Pre-compute in ETL",
+    "Comments / Context": "Qlik Rate() calculates the interest rate per period. ThoughtSpot has no financial formula functions.",
+    "status": "ok"
+  },
+  {
+    "#": "PT01",
+    "Category": "Passthrough SQL (ThoughtSpot-specific)",
+    "Qlik Sense Formula": "No equivalent (Qlik uses native script)",
+    "Qlik Example": "Use Qlik's native script or connector expressions",
+    "ThoughtSpot Equivalent": "sql_string_op('expression')",
+    "ThoughtSpot Example": "sql_string_op('REGEXP_REPLACE(product_name, \"[^a-zA-Z]\", \"\")')",
+    "Comments / Context": "ThoughtSpot sql_string() passes raw SQL to the underlying database and returns a string. Qlik handles this via data load script. Use when ThoughtSpot native functions are insufficient.",
+    "status": "corrected"
+  },
+  {
+    "#": "PT02",
+    "Category": "Passthrough SQL (ThoughtSpot-specific)",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Use Qlik script for numeric SQL expressions",
+    "ThoughtSpot Equivalent": "sql_int_op('expression')",
+    "ThoughtSpot Example": "sql_int_op('DATEDIFF(day, order_date, ship_date)')",
+    "Comments / Context": "ThoughtSpot sql_int() passes a SQL expression to the database and returns an integer. Useful for database-specific functions not available natively.",
+    "status": "corrected"
+  },
+  {
+    "#": "PT03",
+    "Category": "Passthrough SQL (ThoughtSpot-specific)",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Use Qlik script for float SQL expressions",
+    "ThoughtSpot Equivalent": "sql_double_op('expression')",
+    "ThoughtSpot Example": "sql_double_op('PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY revenue)')",
+    "Comments / Context": "ThoughtSpot sql_float() passes a SQL expression returning a float. Useful for percentiles and complex math not available in native ThoughtSpot formulas.",
+    "status": "corrected"
+  },
+  {
+    "#": "PT04",
+    "Category": "Passthrough SQL (ThoughtSpot-specific)",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Use Qlik script for date SQL expressions",
+    "ThoughtSpot Equivalent": "sql_date_op('expression')",
+    "ThoughtSpot Example": "sql_date_op('DATE_TRUNC(\\'month\\', order_date)')",
+    "Comments / Context": "ThoughtSpot sql_date() passes a SQL expression returning a date. Use when ThoughtSpot date functions do not cover a specific database function.",
+    "status": "corrected"
+  },
+  {
+    "#": "PT05",
+    "Category": "Passthrough SQL (ThoughtSpot-specific)",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Use Qlik script for boolean SQL expressions",
+    "ThoughtSpot Equivalent": "sql_bool_op('expression')",
+    "ThoughtSpot Example": "sql_bool_op('order_amount > 1000 AND region = \\'West\\'')",
+    "Comments / Context": "ThoughtSpot sql_bool() passes a SQL expression returning a boolean. Use for complex conditions not expressible in native ThoughtSpot formula syntax.",
+    "status": "corrected"
+  },
+  {
+    "#": "TS01",
+    "Category": "ThoughtSpot-Specific",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Closest: Qlik {$} set identifier (current selection)",
+    "ThoughtSpot Equivalent": "query_groups()",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups(), query_filters())",
+    "Comments / Context": "ThoughtSpot-only. query_groups() inherits the current search's dimension groupings dynamically inside group_aggregate(). Adapts as users change their search.",
+    "status": "ok"
+  },
+  {
+    "#": "TS02",
+    "Category": "ThoughtSpot-Specific",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Closest: Qlik {$} set identifier",
+    "ThoughtSpot Equivalent": "query_filters()",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups(), query_filters())",
+    "Comments / Context": "ThoughtSpot-only. query_filters() inherits the current search's applied filters inside group_aggregate(). No Qlik formula equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "TS03",
+    "Category": "ThoughtSpot-Specific",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Closest: Qlik {$<...>} set expression override",
+    "ThoughtSpot Equivalent": "query_groups() + {attr}",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups() + {region}, query_filters())",
+    "Comments / Context": "ThoughtSpot-only. Extends current search groupings by adding an extra dimension to scope. No direct Qlik equivalent.",
+    "status": "ok"
+  },
+  {
+    "#": "TS04",
+    "Category": "ThoughtSpot-Specific",
+    "Qlik Sense Formula": "No equivalent",
+    "Qlik Example": "Closest: Qlik set expression with exclusion",
+    "ThoughtSpot Equivalent": "query_groups() - {attr}",
+    "ThoughtSpot Example": "group_aggregate(sum(revenue), query_groups() - {date}, query_filters())",
+    "Comments / Context": "ThoughtSpot-only. Removes a specific dimension from inherited search groupings inside group_aggregate(). Allows finer control of aggregation scope.",
+    "status": "ok"
+  }
+]

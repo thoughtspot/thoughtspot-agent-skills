@@ -9,6 +9,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - feat: add quality gates catalog generator (`generate_quality_gates.py`); auto-generates `docs/quality-gates.md` from pre-commit.sh, validate.yml, and validator docstrings
 
 ## 2026-07-21
+- feat: add `ts-convert-from-qlik` skill + `ts qlik` command group (parse / build-model / build-liveboard) — Qlik Sense → ThoughtSpot converter across four sources (`--mode offline|engine-artifacts|qlik-cloud|engine`; qlik-cloud/engine are live SOURCE-provenance paths behind the `[qlik]` extra); flags Set Analysis `$`-context, variables, and no-equivalent functions NEEDS REVIEW rather than downgrading
+- docs: add `agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md` (199-row Qlik→TS formula map) + `schemas/qlik-app-ir.md`; fixed Upper/Lower → `sql_string_op` passthrough (no native TS `upper()`/`lower()`)
+- chore: bump ts-cli to v0.69.0 — `ts qlik` command group + live Qlik Cloud/Engine extraction
 - feat: `ts snowflake parse-sv` — deterministic Semantic View DDL parser (BL-100 PR1); extracts tables, relationships, dimensions, metrics (semi-additive, window, USING), facts, custom instructions, verified queries, extension JSON
 - feat: `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formula translator (BL-100 PR2); function mapping, identifier resolution, column classification, window/LOD/semi-additive/USING handling
 - feat: `ts snowflake build-model` — Semantic View → ThoughtSpot Model TML assembly + two-pass import (BL-100 PR3); inline Scenario B joins (equi/range/ASOF), SV synonym→display name, private columns, fact table detection; fixes latent `name` field bug in parse-sv table entries

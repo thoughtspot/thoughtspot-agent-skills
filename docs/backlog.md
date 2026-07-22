@@ -3185,3 +3185,22 @@ This carries the CLAUDE.md change-impact fan-out, which is why it was scoped out
 validators PR rather than bundled.
 
 **Target:** next converter/codification pass (fold into BL-100 sequencing if convenient).
+
+---
+
+## BL-118 — Live end-to-end verification for `ts-convert-from-qlik`
+
+**Filed:** 2026-07-21.
+**Source:** initial `ts-convert-from-qlik` release (PR #254).
+**Affects:** `agents/cli/ts-convert-from-qlik/references/open-items.md` (#1, #2, #6).
+**Status:** OPEN.
+
+ts-convert-from-qlik shipped code-backed (`ts qlik`, 58 unit tests + an **offline smoke test**
+`tools/smoke-tests/smoke_ts_convert_from_qlik.py` — no longer on the ALLOWLIST). Still needs
+verification against real infrastructure: (a) live import on a ThoughtSpot cluster —
+parse→build-model→import→build-liveboard→import + a numbers/double-count check (open-items #1);
+(b) chart-type enum validity on the target build (open-items #2); (c) the live Qlik Cloud/Engine
+extraction paths against a real tenant/engine (open-items #6) — currently mocked-only. Also
+recover table joins/associations from engine-artifacts mode (open-items #3).
+
+**Target:** first live-verification pass against a real Qlik app + ThoughtSpot instance.

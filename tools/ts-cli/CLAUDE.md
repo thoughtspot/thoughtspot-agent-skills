@@ -78,6 +78,17 @@ ts_cli/
     mv_emit.py          — ThoughtSpot Model TML -> Databricks Metric View YAML orchestrator (reverse direction) behind `ts databricks build-mv`: fact-table detection, cross-reference role resolution, the two emission passes, dangling-ref cascade, build_metric_view top-level entry point; re-exports Foundation (mv_emit_base.py), join assembly (mv_emit_joins.py), classification/LOD emitters (mv_emit_classify.py), and the window-measure API (mv_emit_window.py) so existing callers/tests keep importing from mv_emit unchanged (pure functions, no I/O)
     mv_emit_window.py   — window-measure emission (moving/cumulative/semi-additive/period-offset), split out of mv_emit.py under the file-size gate; mirrors the mv_translate.py/mv_window_translate.py split for the reverse direction (pure functions, no I/O; Genie-vendorable)
     mv_build_view.py    — Metric View YAML doc -> `CREATE VIEW ... WITH METRICS LANGUAGE YAML AS $$...$$` DDL + build_summary (the `ts databricks build-mv` stdout JSON contract) + default_view_name; the one place an MV YAML body is dumped via `yaml.safe_dump` directly, with a fail-loud guard against a literal `$$` inside the body (pure + PyYAML only, no HTTP/auth/typer deps; Genie-vendorable)
+  qlik/
+    __init__.py         — package marker
+    ir.py               — normalized Qlik-app IR dataclasses (QlikApp/Table/Column/MasterMeasure/Sheet/Chart) — the extract↔transform contract (pure, JSON-serializable)
+    parsing.py          — offline .qvf inventory extraction (SQLite-embedded path + byte-scan fallback) behind `ts qlik parse --mode offline` (pure functions, no I/O; degrades to warnings on an opaque .qvf, never crashes)
+    engine.py           — engine-artifacts inventory extraction (Qlik Engine export dir) behind `ts qlik parse --mode engine-artifacts` (pure functions, no I/O)
+    live_engine.py      — LIVE Qlik Engine JSON-RPC-over-websocket extraction behind `ts qlik parse --mode engine` (one of the package's two I/O modules, mirrors tableau/client.py); `websocket` imported lazily in QlikEngine.__init__ so the package imports without the `[qlik]` extra — missing extra raises a clear `pip install 'thoughtspot-cli[qlik]'` RuntimeError
+    cloud.py            — LIVE Qlik Cloud (SaaS) extraction behind `ts qlik parse --mode qlik-cloud`: REST (/api/v1 items + data-connections) + Engine (QIX via live_engine); the package's other I/O module. Api key from --api-key/QLIK_API_KEY only, never printed/written. `requests` is a base dep; websocket comes via live_engine + the `[qlik]` extra
+    functions.py        — Qlik expression → ThoughtSpot formula translation + the 199-row qlik_ts_formula_map (data/); flags Set Analysis `$`-selection and no-equivalent functions NEEDS REVIEW rather than downgrading (pure functions, no I/O)
+    build_model.py      — Table + Model TML assembly + mapping.json behind `ts qlik build-model`; reuses model_builder + formula_common (add_formula_prefix id-refs) + tml_common.dump_tml_yaml (pure functions, no I/O)
+    answers.py          — Answer + tabbed-Liveboard emission behind `ts qlik build-liveboard` (one tab per Qlik sheet; each chart → embedded Answer) (pure functions, no I/O)
+    data/               — qlik_ts_formula_map.{json,csv} (packaged via package-data)
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles list
@@ -87,6 +98,7 @@ ts_cli/
     connections.py — ts connections list / get / add-tables
     tables.py     — ts tables create
     tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model, build-liveboard, verify)
+    qlik.py       — ts qlik (parse, build-model, build-liveboard) — Qlik Sense → ThoughtSpot converter (I/O only; logic in ts_cli/qlik/). `--mode` selects the extractor: offline / engine-artifacts (positional <source>) or the live qlik-cloud (--tenant/--app-id/--api-key) / engine (--engine/--app-id/--header) paths; live modes need the `[qlik]` extra
     snowflake.py  — ts snowflake (diff, lint-ddl, exec, parse-sv, translate-formulas, build-model, introspect, build-sv)
     spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
     spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
@@ -116,7 +128,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.67.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.69.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
