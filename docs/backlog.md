@@ -41,6 +41,56 @@ Done items have moved to [`backlog-archive.md`](backlog-archive.md):
 
 ---
 
+## BL-118 — Codify SpotQL semantic-view / metric-view backing behaviour into `ts-object-model-spotql-query`
+
+**Why it matters.** SpotQL/Semantic-SQL behaviour differs materially when a Model is backed by a
+Snowflake Semantic View (SV) or a Databricks Metric View (MV) rather than regular tables. These
+behaviours were characterised live (2026-07-21) across three Models holding identical Dunder Mifflin
+data, but the findings are not yet reflected in the skill's reference files. An earlier session
+created `references/snowflake-sv-backing.md`, but it was never committed and no longer exists in any
+tree, so `main` carries none of this.
+
+**What to codify (all live-verified):**
+- **Null-key `100072`** on an SV: a raw PK-backed dimension key materialised in a CTE then transformed
+  throws `100072 NULL result in a non-nullable column`. Fix: CASE-wrap the key
+  (`CASE WHEN k IS NOT NULL THEN k END`; also `IFF`/`NVL2`; not a plain cast or `+0`), in SELECT/GROUP BY
+  only, never WHERE. The MV tolerates NULL grouping keys, so this is SV-only.
+- **No inline window on an SV**: a window function in a query that references an SV errors
+  `Unsupported feature 'WINDOW FUNCTIONS'`; author as aggregate-in-CTE then window-in-outer. The MV runs
+  windows inline.
+- **Measure-statistics trap (all backings)**: a secondary aggregate on an already-aggregated measure is
+  invalid everywhere. The regular Model hard-errors (`NESTED_AGGREGATE_NOT_SUPPORTED`); the SV/MV
+  **silently drop** the outer aggregate and return the measure's native aggregation (`AVG` returns the
+  SUM); `MEDIAN`/`STDDEV` fail as nested aggregates. Fix on all backings: the CTE statistics pattern
+  (materialise the measure at a grain, apply the statistic in the outer SELECT).
+- **`AGG()` (Snowflake) ≡ `MEASURE()` (Databricks)** for pre-aggregated measures; ThoughtSpot emits these
+  automatically for SV/MV-backed Models.
+
+**Approach.**
+1. Recreate + extend `agents/cli/ts-object-model-spotql-query/references/snowflake-sv-backing.md`
+   (rules R1–R7 from the prior draft + the measure-statistics trap + a Databricks MV sibling note).
+2. Add a `references/limitations.md` ⚠️ silent-wrong-answer row: `AVG`/`MIN`/`MAX` on a measure over an
+   SV/MV backing is silently dropped and returns the native aggregation (regular Model hard-errors);
+   cross-link to the CTE statistics pattern in `patterns.md`.
+3. Cross-link from the `SKILL.md` references table and `limitations.md`; bump skill version + changelog (MINOR).
+4. Consider an xModel cross-model stitching section once the fan-out analysis lands (see reference docs).
+
+**Reference docs (merged / available):**
+- `djwaldo/spotql-testing` `main`: `docs/spotql-backing-comparison.md` (three-way matrix + actual SQL +
+  both SV fixes), `docs/spotql-snowflake-sv-findings.md`, `docs/spotql-sv-backing-rules-PLAN.md`,
+  `docs/search-data-probe-findings.md`, `docs/spotql-limitations.md`.
+- Shareable artifact: https://claude.ai/code/artifact/b0d02cee-19d3-4967-ae0c-59001a668f44
+- In flight: `docs/cross-model-stitching-analysis.md` (xModel fan-out avoidance in author-written SpotQL;
+  no engine-level chasm protection) — feeds the xModel stitching guidance in step 4.
+
+**Branch.** A worktree branch `feat/spotql-measure-statistics-trap` (off `main`) was staged for this work
+but only used to raise this backlog item; it can be reused for the codification or discarded and the work
+redone from the reference docs above.
+
+**Date raised:** 2026-07-21.
+
+---
+
 ## BL-005 — Databricks runtime: ThoughtSpot client + conversion skills
 
 **Source:** Design spec `docs/superpowers/specs/2026-06-11-databricks-ts-client-design.md`
