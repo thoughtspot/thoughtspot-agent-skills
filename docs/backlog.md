@@ -1982,9 +1982,9 @@ docs and the current product state.
 
 ### ThoughtSpot medium-severity (separate, lower urgency)
 
-14. RLS rules ARE in table TML — schemas say they are not
-15. New TML export options (`export_column_security_rules`, `export_with_column_aliases`)
-16. `PARTIAL_OBJECT` import policy + async TML import endpoint undocumented
+14. ~~RLS rules ARE in table TML — schemas say they are not~~ **FIXED** (2026-07-23). Added `rls_rules` to `thoughtspot-table-tml.md` (structure + field reference).
+15. ~~New TML export options (`export_column_security_rules`, `export_with_column_aliases`)~~ **FIXED** (2026-07-23). Added export_options table to `thoughtspot-tml.md`.
+16. ~~`PARTIAL_OBJECT` import policy~~ **FIXED** (2026-07-23, via BL-123 item 13.1). Added to `ts-tml-import-gate.md` §3.
 
 ### Approach
 
