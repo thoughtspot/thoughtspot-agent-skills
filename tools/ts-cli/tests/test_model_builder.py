@@ -20,6 +20,7 @@ from ts_cli.model_builder import (
     fix_bare_refs,
     fix_double_aggregation,
     merge_formulas_into_model,
+    resolve_all_internal_refs,
     resolve_name_collisions,
     split_for_phased_import,
 )
@@ -334,6 +335,56 @@ class TestFormulaLevels:
         assert levels["B"] == 1
         assert levels["C"] == 1
         assert levels["A"] == 2
+
+    def test_circular_dependency_defaults_to_level_zero(self):
+        """A and B depend on each other — the fixpoint loop never resolves
+        either, so both fall through to the level-0 default rather than
+        looping forever or raising."""
+        calcs = [
+            {"caption": "A", "formula": "[Calculation_2]"},
+            {"caption": "B", "formula": "[Calculation_1]"},
+        ]
+        calc_map = {
+            "Calculation_1": "A", "[Calculation_1]": "A",
+            "Calculation_2": "B", "[Calculation_2]": "B",
+        }
+        levels = build_formula_levels(calcs, calc_map)
+        assert levels["A"] == 0
+        assert levels["B"] == 0
+
+
+# ===================================================================
+# Resolve ALL internal refs (pre-translation)
+# ===================================================================
+
+class TestResolveAllInternalRefs:
+    """resolve_all_internal_refs replaces [Calculation_NNN] and copy-style
+    refs with their captions, ahead of the main translate pipeline."""
+
+    def test_replaces_calculation_ref_with_caption(self):
+        calcs = [{"caption": "Derived", "formula": "[Calculation_1] + 1"}]
+        calc_map = {"Calculation_1": "Base"}
+        resolved = resolve_all_internal_refs(calcs, calc_map)
+        assert resolved[0]["formula"] == "[Base] + 1"
+        assert resolved[0]["caption"] == "Derived"
+
+    def test_copy_style_ref_also_resolved(self):
+        calcs = [{"caption": "Consumer", "formula": "[Source (copy)_999] * 2"}]
+        calc_map = {"Source (copy)_999": "Source"}
+        resolved = resolve_all_internal_refs(calcs, calc_map)
+        assert resolved[0]["formula"] == "[Source] * 2"
+
+    def test_no_matching_ref_leaves_formula_unchanged(self):
+        calcs = [{"caption": "Standalone", "formula": "[COL1] + 1"}]
+        calc_map = {"Calculation_1": "Base"}
+        resolved = resolve_all_internal_refs(calcs, calc_map)
+        assert resolved[0]["formula"] == "[COL1] + 1"
+
+    def test_does_not_mutate_input_list(self):
+        calcs = [{"caption": "Derived", "formula": "[Calculation_1] + 1"}]
+        calc_map = {"Calculation_1": "Base"}
+        resolve_all_internal_refs(calcs, calc_map)
+        assert calcs[0]["formula"] == "[Calculation_1] + 1"
 
 
 # ===================================================================
