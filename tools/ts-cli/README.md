@@ -2096,6 +2096,96 @@ with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
 > limitation), so the new table must be **selected in the ThoughtSpot connection editor (UI)**
 > before `ts tables create` / model build can reference it.
 
+### `ts powerbi parse` / `build-model` / `build-liveboard`
+
+The Power BI (`.pbip`) to ThoughtSpot converter for the `ts-convert-from-powerbi` skill.
+Mirrors the Tableau converter: `parse` reads the project into structured JSON, `build-model`
+emits import-ready Table + Model TML (DAX translated to ThoughtSpot formulas), and
+`build-liveboard` emits Answer + tabbed-Liveboard TML from the report pages. The
+ThoughtSpot-side emission reuses the shared `dump_tml_yaml` and `tableau.liveboard.build_from_spec`,
+so both BI converters produce identical TML shapes. Pure conversion logic lives in
+`ts_cli/powerbi/*`; only I/O and typer wiring live in `commands/powerbi.py`.
+
+#### `ts powerbi parse`
+
+Parse a `.pbip` project (TMDL semantic model + PBIR report) into structured JSON:
+tables/columns/measures/relationships and pages/visuals. Anything the parser cannot
+confidently read is listed under `warnings` rather than guessed.
+
+```bash
+ts powerbi parse ./MyReport.pbip --output parsed.json
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `pbip_dir` (arg) | yes | Path to the `.pbip` project folder |
+| `--output`, `-o` | yes | Output parsed JSON path |
+
+Stdout: JSON `counts` object (pipeable). Warnings go to stderr.
+
+#### `ts powerbi build-model`
+
+Build Table + Model TML (and `mapping.json`) from a `.pbip`. Parses the project, translates
+DAX to ThoughtSpot formulas (`[formula_<name>]` id-refs, topo-sorted), emits joins with the
+real relationship cardinality, honours `summarizeBy` for AVG-vs-SUM, and enables Spotter.
+The connection block carries `name:` only (never `fqn:`).
+
+```bash
+ts powerbi build-model ./MyReport.pbip \
+  --connection "MY_CONNECTION" \
+  --db WAREHOUSE_DB --schema WAREHOUSE_SCHEMA \
+  --output ./tml_out \
+  --model-name "My Model"
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `pbip_dir` (arg) | yes | Path to the `.pbip` project folder |
+| `--connection`, `-c` | yes | ThoughtSpot connection display name the tables bind to |
+| `--db` | yes | Warehouse database |
+| `--schema` | yes | Warehouse schema |
+| `--output`, `-o` | yes | Output dir for `.tml` + `mapping.json` |
+| `--model-name` | no | Name for the generated Model (default: derived) |
+| `--join-type` | no | Join type for relationships (default: `LEFT_OUTER`, keeps fact rows) |
+| `--overrides` | no | `overrides.json` (hand-authored `ts_formula` / connection / `table_map` / parameters) |
+| `--lower-db-table` | no | Lowercase `db_table` (Databricks folds unquoted names) |
+
+Stdout: JSON counts (`tables`, `model`, `measures`, `migrated`, `approximated`,
+`needs_review`). A measure whose DAX cannot be translated is flagged `NEEDS REVIEW`
+(never silently downgraded). `mapping.json` records per-object status + notes.
+
+#### `ts powerbi build-liveboard`
+
+Emit Answer + tabbed-Liveboard TML from a `.pbip`'s report pages, reusing the shared
+`build_from_spec` (role-aware axes: Category to x, Series to color, Rows/Columns to pivot,
+measures to y; chart-needs floor; override capture-and-replay). Report pages become tabs in
+PBI `pageOrder`; a Tooltip page is dropped, not a tab.
+
+```bash
+ts powerbi build-liveboard ./MyReport.pbip \
+  --output ./tml_out \
+  --model-name "My Model" \
+  --model-fqn <model-guid>
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `pbip_dir` (arg) | yes | Path to the `.pbip` project folder |
+| `--output`, `-o` | yes | Directory for the emitted `.liveboard.tml` |
+| `--model-name` | yes | Model name the answers bind to (must match `build-model`) |
+| `--model-fqn` | no | Model GUID to bind to (optional; more robust than name) |
+| `--report-name` | no | Liveboard name (default: derived from model) |
+| `--connection`, `-c` | no | Connection name (for the in-memory model build) |
+| `--db` / `--schema` | no | Warehouse db/schema (for the in-memory model build) |
+| `--overrides` | no | `overrides.json` (explicit answers / extra_visuals) |
+
+Stdout: JSON counts (`report_name`, `answers`, `tabs`, `visuals_migrated`,
+`approximated`, `needs_review`, `liveboard`). A chart type with no faithful ThoughtSpot
+equivalent is emitted as its nearest approximation and flagged `Approximated` or
+`NEEDS REVIEW`, matching the Tableau path's "flag, never downgrade" contract.
+
+---
+
 ### `ts snowflake diff`
 
 Diff two Semantic-View-adjacent column maps and print a change set. Codifies the

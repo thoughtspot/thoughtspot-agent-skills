@@ -86,6 +86,9 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- Qlik migration (CLI skill; no CoCo equivalent — .qvf parsing needs shell + ts CLI) ---
     ("ts-convert-from-qlik", "coco-snowsight"):
         "Qlik .qvf/engine-artifacts parsing and the ts qlik CLI require shell access; not supported in Snowsight stored-proc runtime",
+    # --- Power BI migration (CLI skill; no CoCo equivalent — .pbip parsing needs shell + ts CLI) ---
+    ("ts-convert-from-powerbi", "coco-snowsight"):
+        "Power BI .pbip (TMDL + PBIR) parsing and the ts powerbi CLI require shell access; not supported in Snowsight stored-proc runtime",
     ("ts-profile-tableau", "coco-snowsight"):
         "Tableau Server not accessible from Snowsight stored-proc runtime",
     ("ts-load-source-data", "coco-snowsight"):

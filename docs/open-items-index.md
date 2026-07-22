@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**122 total items** across 15 skills — **61 open**, 53 verified, 8 deferred
+**127 total items** across 16 skills — **62 open**, 56 verified, 9 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -21,10 +21,11 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-load-source-data | 3 | **3** | 0 | 0 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-convert-from-tableau | 16 | **2** | 11 | 3 |
+| ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-spotql-query | 4 | **0** | 4 | 0 |
-### Untagged (61 items)
+### Untagged (62 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -41,6 +42,7 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-from-looker | #7 | `extends:` circular extension detection | OPEN |
 | ts-convert-from-looker | #8 | `explore: name { from: other_view }` aliasing | OPEN |
 | ts-convert-from-looker | #10 | `type: list` workaround via SQL | OPEN |
+| ts-convert-from-powerbi | #3 | Combo `custom_chart_config` GUID requirement | OPEN |
 | ts-convert-from-qlik | #1 | End-to-end import against a live ThoughtSpot instance | OPEN |
 | ts-convert-from-qlik | #2 | Chart-type enum validity | OPEN |
 | ts-convert-from-qlik | #4 | Promote the formula-translation reference to a shared mapping | OPEN |
