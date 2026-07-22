@@ -3,6 +3,8 @@
 | ts-audit | Y | — | — | — |
 | ts-convert-from-databricks-mv | Y | — | — | Y |
 | ts-convert-from-looker | Y | — | — | — |
+| ts-convert-from-sisense | Y | — | — | — |
+| ts-convert-from-qlik | Y | — | — | — |
 | ts-convert-from-snowflake-sv | Y | — | Y | — |
 | ts-convert-from-tableau | Y | — | — | — |
 | ts-convert-to-databricks-mv | Y | — | — | Y |

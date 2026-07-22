@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**111 total items** across 13 skills — **54 open**, 51 verified, 6 deferred
+**122 total items** across 15 skills — **61 open**, 53 verified, 8 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -15,14 +15,16 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
+| ts-convert-from-qlik | 6 | **5** | 0 | 1 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
+| ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-convert-from-tableau | 16 | **2** | 11 | 3 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-spotql-query | 4 | **0** | 4 | 0 |
-### Untagged (54 items)
+### Untagged (61 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -39,6 +41,13 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-from-looker | #7 | `extends:` circular extension detection | OPEN |
 | ts-convert-from-looker | #8 | `explore: name { from: other_view }` aliasing | OPEN |
 | ts-convert-from-looker | #10 | `type: list` workaround via SQL | OPEN |
+| ts-convert-from-qlik | #1 | End-to-end import against a live ThoughtSpot instance | OPEN |
+| ts-convert-from-qlik | #2 | Chart-type enum validity | OPEN |
+| ts-convert-from-qlik | #4 | Promote the formula-translation reference to a shared mapping | OPEN |
+| ts-convert-from-qlik | #5 | Skill-level smoke test | OPEN |
+| ts-convert-from-qlik | #6 | Live Qlik Cloud / Engine extraction verified only against mocks | OPEN |
+| ts-convert-from-sisense | #4 | JAQL formula subset breadth | TO VERIFY |
+| ts-convert-from-sisense | #5 | Numeric-range / date-bucket filter-chip fidelity | TO VERIFY |
 | ts-convert-from-snowflake-sv | #2 | Custom instructions mapping | PARTIALLY IMPLEMENTED |
 | ts-convert-from-snowflake-sv | #3 | Table-level synonyms | NOT IMPLEMENTED |
 | ts-convert-from-snowflake-sv | #4 | Private facts and metrics (`ACCESS_MODIFIER: PRIVATE`) | NOT IMPLEMENTED |

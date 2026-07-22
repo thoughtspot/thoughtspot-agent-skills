@@ -3235,3 +3235,38 @@ This carries the CLAUDE.md change-impact fan-out, which is why it was scoped out
 validators PR rather than bundled.
 
 **Target:** next converter/codification pass (fold into BL-100 sequencing if convenient).
+
+---
+
+## BL-118 — Write a smoke test for `ts-convert-from-sisense`
+
+**Filed:** 2026-07-17.
+**Source:** new wip skill `ts-convert-from-sisense` (Sisense offline-bundle → ThoughtSpot).
+**Affects:** `tools/smoke-tests/smoke_ts_convert_from_sisense.py` (new);
+`tools/validate/check_smoke_tests.py` (ALLOWLIST entry).
+**Status:** OPEN.
+
+`ts-convert-from-sisense` (wip) has an `ALLOWLIST` exemption in check_smoke_tests.py; this
+backlog item is the dated exit that exemption's comment references. Author
+`tools/smoke-tests/smoke_ts_convert_from_sisense.py` once a captured Sisense bundle fixture
+(`{dashboard, widgets, datamodel}`) exists and the shared liveboard emitter
+(`ts_cli.tableau.liveboard.build_from_spec`, open-item #2) has landed so the full
+`parse → build-model → build-liveboard` chain can be exercised end-to-end.
+
+**Target:** first live end-to-end verification against a captured Sisense bundle (open-item #1).
+## BL-118 — Live end-to-end verification for `ts-convert-from-qlik`
+
+**Filed:** 2026-07-21.
+**Source:** initial `ts-convert-from-qlik` release (PR #254).
+**Affects:** `agents/cli/ts-convert-from-qlik/references/open-items.md` (#1, #2, #6).
+**Status:** OPEN.
+
+ts-convert-from-qlik shipped code-backed (`ts qlik`, 58 unit tests + an **offline smoke test**
+`tools/smoke-tests/smoke_ts_convert_from_qlik.py` — no longer on the ALLOWLIST). Still needs
+verification against real infrastructure: (a) live import on a ThoughtSpot cluster —
+parse→build-model→import→build-liveboard→import + a numbers/double-count check (open-items #1);
+(b) chart-type enum validity on the target build (open-items #2); (c) the live Qlik Cloud/Engine
+extraction paths against a real tenant/engine (open-items #6) — currently mocked-only. Also
+recover table joins/associations from engine-artifacts mode (open-items #3).
+
+**Target:** first live-verification pass against a real Qlik app + ThoughtSpot instance.

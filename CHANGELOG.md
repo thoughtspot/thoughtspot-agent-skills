@@ -9,6 +9,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - feat: add quality gates catalog generator (`generate_quality_gates.py`); auto-generates `docs/quality-gates.md` from pre-commit.sh, validate.yml, and validator docstrings
 
 ## 2026-07-21
+- feat: add `ts-convert-from-qlik` skill + `ts qlik` command group (parse / build-model / build-liveboard) — Qlik Sense → ThoughtSpot converter across four sources (`--mode offline|engine-artifacts|qlik-cloud|engine`; qlik-cloud/engine are live SOURCE-provenance paths behind the `[qlik]` extra); flags Set Analysis `$`-context, variables, and no-equivalent functions NEEDS REVIEW rather than downgrading
+- docs: add `agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md` (199-row Qlik→TS formula map) + `schemas/qlik-app-ir.md`; fixed Upper/Lower → `sql_string_op` passthrough (no native TS `upper()`/`lower()`)
+- chore: bump ts-cli to v0.69.0 — `ts qlik` command group + live Qlik Cloud/Engine extraction
 - feat: `ts snowflake parse-sv` — deterministic Semantic View DDL parser (BL-100 PR1); extracts tables, relationships, dimensions, metrics (semi-additive, window, USING), facts, custom instructions, verified queries, extension JSON
 - feat: `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formula translator (BL-100 PR2); function mapping, identifier resolution, column classification, window/LOD/semi-additive/USING handling
 - feat: `ts snowflake build-model` — Semantic View → ThoughtSpot Model TML assembly + two-pass import (BL-100 PR3); inline Scenario B joins (equi/range/ASOF), SV synonym→display name, private columns, fact table detection; fixes latent `name` field bug in parse-sv table entries
@@ -40,6 +43,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - fix(ts-cli): `ts connections add-tables` accepts `db`|`database` and errors cleanly instead of a raw `KeyError` traceback when a key is missing
 - fix(ts-cli): `ts connections list` v0.56.0 — no longer defaults `--type` to `SNOWFLAKE` (which silently hid Databricks/BigQuery/etc. connections despite the "list all" docstring); now lists **every** warehouse type by default, `--type` filters. Caught live: the command was reporting only Snowflake connections on a multi-warehouse org
 - feat(ts-cli): org support (v0.56.0) — `export TS_ORG=<org_id>` scopes CLI calls to a non-default ThoughtSpot org (passed as `org_id` int to `auth/token/full`; `org_identifier` is silently ignored by that endpoint — verified empirically), with an org-keyed token cache. Enables reaching org-scoped connections/metadata (e.g. an AnujSeth-org Databricks connection). 5 new unit tests
+## 2026-07-17
+- feat: add ts-convert-from-sisense skill + `ts sisense` command group (parse / build-model / build-liveboard)
+- chore: bump ts-cli to v0.68.0
 
 ## 2026-07-15
 - chore: ts-cli — add a `[snowflake]` optional-dependency extra and a clearer remedy message when `snowflake-connector-python` is missing for `method:python` profiles (covers `pip install 'thoughtspot-cli[snowflake]'` and the isolated `uv tool install ... --with` form). Aggregate advisor F2.

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import aggregate, audit, auth, connections, databricks, dependency, dependency_apply, load, metadata, model, orgs, profiles, snowflake, spotql, spotter, tables, tableau, tml, users, variables  # noqa: F401 — dependency_apply registers `apply-change` on dependency.app at import
+from ts_cli.commands import aggregate, audit, auth, connections, databricks, dependency, dependency_apply, load, metadata, model, orgs, profiles, qlik, sisense, snowflake, spotql, spotter, tables, tableau, tml, users, variables  # noqa: F401 — dependency_apply registers `apply-change` on dependency.app at import
 
 app = typer.Typer(
     name="ts",
@@ -28,6 +28,8 @@ app.add_typer(spotter.app, name="spotter")
 app.add_typer(users.app, name="users")
 app.add_typer(variables.app, name="variables")
 app.add_typer(tableau.app, name="tableau")
+app.add_typer(sisense.app, name="sisense")
+app.add_typer(qlik.app, name="qlik")
 app.add_typer(load.app, name="load")
 app.add_typer(snowflake.app, name="snowflake")
 

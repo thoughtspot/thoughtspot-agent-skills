@@ -1858,6 +1858,129 @@ any check carries an ERROR-severity finding.
 
 ---
 
+## `ts qlik` — Qlik Sense → ThoughtSpot converter
+
+Converts a Qlik Sense app into ThoughtSpot Table + Model TML and a tabbed
+Liveboard. Mirrors the `ts tableau` converter's conventions: structured JSON to
+stdout, diagnostics to stderr, pure conversion logic in `ts_cli.qlik`. Four
+extraction modes, all producing the same IR that `build-model` / `build-liveboard`
+consume:
+
+| `--mode` | `<source>` | Live? | Options |
+|---|---|---|---|
+| `offline` (default) | a `.qvf` file (SQLite layout when present, else best-effort byte-scan) | no | — |
+| `engine-artifacts` | a directory of JSON dumped by the headless-engine extractor | no | — |
+| `qlik-cloud` | *(omit)* | yes | `--tenant <url>` + `--app-id <guid|name>` + `--api-key` (or `QLIK_API_KEY`) |
+| `engine` | *(omit)* | yes | `--engine <ws-url>` + `--app-id <guid>` + optional repeatable `--header k=v` |
+
+Offline extraction degrades gracefully — an opaque `.qvf` yields warnings,
+never a crash. The two **live** modes (`qlik-cloud` REST + QIX, `engine`
+JSON-RPC over websocket) require the optional extra:
+
+```bash
+pip install 'thoughtspot-cli[qlik]'    # adds websocket-client
+```
+
+Invoking a live mode without it fails with that exact remediation message. The
+Qlik Cloud API key is read from `--api-key` or `QLIK_API_KEY` only — it is never
+printed, echoed, or written to a file. For the live modes the positional
+`<source>` is omitted; `qlik-cloud` requires `--tenant` + `--app-id`, `engine`
+requires `--engine` + `--app-id`.
+
+### `ts qlik parse`
+
+Parse a Qlik app into a structured inventory JSON.
+
+```bash
+ts qlik parse App.qvf -o app.inventory.json
+ts qlik parse ./engine-output -o app.inventory.json --mode engine-artifacts
+ts qlik parse -o app.inventory.json --mode qlik-cloud \
+  --tenant https://acme.us.qlikcloud.com --app-id <guid>   # QLIK_API_KEY in env
+ts qlik parse -o app.inventory.json --mode engine \
+  --engine wss://host/app --app-id <guid> --header "Authorization=Bearer <t>"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output`, `-o` | — | Output inventory JSON path (required) |
+| `--mode` | `offline` | `offline` \| `engine-artifacts` \| `qlik-cloud` \| `engine` |
+| `--tenant` | — | Qlik Cloud tenant URL (`qlik-cloud` mode) |
+| `--app-id` | — | Qlik app GUID (`qlik-cloud`/`engine`); `qlik-cloud` also accepts an app name |
+| `--api-key` | env `QLIK_API_KEY` | Qlik Cloud API key (`qlik-cloud` mode); never printed |
+| `--engine` | — | Qlik Engine websocket URL, e.g. `wss://host/app` (`engine` mode) |
+| `--header` | — | Extra websocket header `k=v` (`engine` mode); repeatable |
+
+The `--mode` / `--tenant` / `--app-id` / `--api-key` / `--engine` / `--header`
+flags apply identically to `build-model` and `build-liveboard` below.
+
+**Output:** writes `{app_name, extraction_mode, connections, tables, columns,
+measures, dimensions, variables, sheets, charts, counts, warnings}` to the
+output file; prints the `counts` object to stdout, warnings to stderr.
+
+### `ts qlik build-model`
+
+Build import-ready Table TML(s) + Model TML + `mapping.json` from a Qlik app.
+Translates Qlik master-measure expressions to ThoughtSpot formulas
+(`[formula_<name>]` id-refs), honours the TML invariants (`db_column_name` on
+every column, connection `name:` only, `formula_id` linkage, `aggregation:` in
+`columns[]` only). Anything not faithfully translatable is flagged
+`NEEDS REVIEW` in `mapping.json` with the original Qlik expression retained —
+never silently downgraded.
+
+```bash
+ts qlik build-model App.qvf -c "Snowflake_Sales" --db SALES_DB --schema PUBLIC -o ./tml_out
+ts qlik build-model App.qvf -c "Snowflake_Sales" --db DB --schema SCH -o ./tml_out \
+  --model-name "Sales" --types wh_types.json
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--connection`, `-c` | — | ThoughtSpot connection display NAME, never a GUID (required) |
+| `--db` | — | Warehouse database for the table TML(s) (required) |
+| `--schema` | — | Warehouse schema for the table TML(s) (required) |
+| `--output`, `-o` | — | Output directory for TML + `mapping.json` (required) |
+| `--model-name` | Qlik app name | Model name |
+| `--overrides` | — | JSON file whose top-level keys replace parsed IR values (hand-edited IR) |
+| `--types` | — | JSON `{TABLE:{COLUMN:ts_type}}` of real warehouse types to avoid type guessing |
+| `--mode` | `offline` | `offline` \| `engine-artifacts` \| `qlik-cloud` \| `engine` (+ the live-mode flags above) |
+
+**Output:** writes `table.<name>.tml` (one per table), `model.<name>.tml`, and
+`mapping.json` to the output directory; prints a counts summary JSON to stdout.
+
+### `ts qlik build-liveboard`
+
+Build an Answer + tabbed Liveboard from a Qlik app's sheets/charts — one tab per
+Qlik sheet, each chart an embedded Answer whose search query is assembled from
+its dimensions + measures. A Qlik viz type with no ThoughtSpot equivalent
+defaults to a table and is flagged `NEEDS REVIEW`.
+
+```bash
+ts qlik build-liveboard App.qvf -o ./tml_out --model-name "Sales"
+ts qlik build-liveboard App.qvf -o ./tml_out --model-name "Sales" \
+  --model-fqn <model-guid> --report-name "Exec Dashboard"
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output`, `-o` | — | Output directory for the Liveboard TML + `liveboard_mapping.json` (required) |
+| `--model-name` | — | Name of the ThoughtSpot model the Answers query (required) |
+| `--model-fqn` | — | GUID of the model (added as `fqn` on the Answer table refs) |
+| `--report-name` | model name | Liveboard name |
+| `--overrides` | — | JSON file whose top-level keys replace parsed IR values (hand-edited IR) |
+| `--mode` | `offline` | `offline` \| `engine-artifacts` \| `qlik-cloud` \| `engine` (+ the live-mode flags above) |
+
+**Output:** writes `liveboard.<name>.tml` and `liveboard_mapping.json` to the
+output directory; prints a counts summary JSON to stdout.
+
+---
+
+
 ## Piping and scripting
 
 All commands write JSON to stdout, making them easy to pipe into `jq` or Python:

@@ -79,6 +79,13 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- Looker migration (CLI skill; no CoCo equivalent — LookML parsing needs shell + LLM) ---
     ("ts-convert-from-looker", "coco-snowsight"):
         "LookML parsing and TML generation require shell access and LLM reasoning; not supported in stored-proc runtime",
+
+    # --- Sisense migration (CLI-only; Sisense conversion needs the `ts` CLI, not available in Snowsight) ---
+    ("ts-convert-from-sisense", "coco-snowsight"):
+        "CLI-only: Sisense bundle parsing + `ts sisense`/`ts tml` CLI orchestration not available in Snowsight stored-proc runtime",
+    # --- Qlik migration (CLI skill; no CoCo equivalent — .qvf parsing needs shell + ts CLI) ---
+    ("ts-convert-from-qlik", "coco-snowsight"):
+        "Qlik .qvf/engine-artifacts parsing and the ts qlik CLI require shell access; not supported in Snowsight stored-proc runtime",
     ("ts-profile-tableau", "coco-snowsight"):
         "Tableau Server not accessible from Snowsight stored-proc runtime",
     ("ts-load-source-data", "coco-snowsight"):
