@@ -16,11 +16,11 @@ import re
 from ts_cli.tableau_translate import translate_formulas
 
 TRANSLATABLE_TIERS = {
-    "native", "lod", "cumulative", "moving",
+    "native", "lod", "cumulative",
     "pass_through", "row_offset_native", "parameter_ref",
 }
 UNTRANSLATABLE_TIERS = {
-    "untranslatable", "row_offset_ambiguous", "geospatial",
+    "untranslatable", "row_offset_ambiguous", "window_ambiguous", "geospatial",
     "circular", "orphan", "parameter_query",
 }
 
@@ -40,9 +40,10 @@ def _translatable_tier(expr: str) -> str:
         return "lod"
     if _RUNNING_RE.search(expr):
         return "cumulative"
-    if _WINDOW_RE.search(expr):
-        return "moving"
     if _ROWOFFSET_RE.search(expr):
+        # Only SIZE() reaches here translated — LOOKUP/INDEX/FIRST/LAST are
+        # rejected by validate_output (see tableau/validate.py) and are
+        # tiered "row_offset_ambiguous" via _untranslatable_tier below.
         return "row_offset_native"
     if _RANK_RE.search(expr):
         return "pass_through"
@@ -59,6 +60,12 @@ def _untranslatable_tier(expr: str, reason: str) -> str:
         return "circular"
     if "parameter" in low:
         return "parameter_query"
+    if _WINDOW_RE.search(expr):
+        # WINDOW_* needs a sort/partition attribute from worksheet addressing
+        # this pipeline doesn't resolve (see validate.py's
+        # _WINDOW_TABLECALC_RE) — distinct from row_offset_ambiguous since
+        # it's a different Tableau function family (window, not row-offset).
+        return "window_ambiguous"
     if _ROWOFFSET_RE.search(expr):
         return "row_offset_ambiguous"
     return "untranslatable"

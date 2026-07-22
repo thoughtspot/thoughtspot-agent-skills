@@ -71,6 +71,13 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         (r"\bSQUARE\s*\(", "_SQUARE_HANDLER"),
         (r"\bPI\s*\(\s*\)", "3.14159265358979"),
 
+        # Row-offset table calc — SIZE() is the one member of that family
+        # (see tableau/validate.py's _TABLE_CALC_NO_EQUIVALENT for the rest)
+        # with a context-free translation: unpartitioned row count, no
+        # sort/partition attribute needed. Tier 7 of the Row-Offset Table
+        # Calculations decision tree in tableau-formula-translation.md.
+        (r"\bSIZE\s*\(\s*\)", 'sql_int_aggregate_op ( "COUNT(*) OVER ()" )'),
+
         # Type conversion
         (r"\bFLOAT\s*\(", "to_double ( "),
         (r"\bSTR\s*\(", "to_string ( "),

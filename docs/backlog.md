@@ -2326,7 +2326,7 @@ independent fix worth bundling here rather than opening a third backlog item for
    tolerance, matching the answer export pattern. (ts-cli v0.76.0)
 2. ~~**14.3:** `ts tables create` costs up to 2N round-trips (per-table singleton import +
    per-table GUID search)~~ **DONE** — tables now imported in batches of 50 with `PARTIAL`
-   policy; JDBC failures retried individually; pass 2 (RLS) also batched. (ts-cli v0.78.0)
+   policy; JDBC failures retried individually; pass 2 (RLS) also batched. (ts-cli v0.79.0)
 3. ~~**14.4:** the audit AI-instructions fetch records failed fetches as `{}`, so errors read
    as "missing AI instructions" in A-angle findings.~~ **DONE** — failed fetches now
    recorded in `AuditContext.warnings` (not as `{}`); A3 skips models whose fetch failed
