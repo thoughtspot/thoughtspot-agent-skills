@@ -951,6 +951,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.8.5 | 2026-07-23 | Data Type Mapping fix: `timestamp`/`timestamp_ntz` → ThoughtSpot `DATE_TIME` (was invalid `DATETIME` — a live `VALIDATE_ONLY` import confirmed ThoughtSpot rejects `DATETIME`). Fixed in `ts-from-databricks-rules.md` (§Data Type Mapping) and `mv_tml.py`'s `map_dbx_type`/`ts_type_to_dbx` together (BL-X4). |
 | 1.8.4 | 2026-07-22 | Import error table + post-import verification extracted to shared `ts-tml-import-gate.md` §4/§5 (BL-063 phase 1c) |
 | 1.8.3 | 2026-07-15 | JSON path access: ThoughtSpot's formula parser rejects Databricks colon-path syntax (`col:field.subfield`) in `sql_*_op` pass-throughs. Emit `get_json_object({0}, '$.field.subfield')` — bracket notation on `parse_json` FAILS on Databricks (`VARIANT` is not a complex type). Live-verified on Databricks 2026-07-15. |
 | 1.8.2 | 2026-07-11 | Databricks MV schema: `parameters:` GA + tiered runtime requirement (16.4/17.3/18.1/18.2) documented (audit 13.1/13.10). |

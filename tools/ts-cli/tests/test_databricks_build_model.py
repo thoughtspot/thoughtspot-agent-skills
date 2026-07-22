@@ -49,8 +49,10 @@ class TestMapDbxType:
     def test_bool_date_time(self):
         assert map_dbx_type("boolean") == "BOOL"
         assert map_dbx_type("date") == "DATE"
-        assert map_dbx_type("timestamp") == "DATETIME"
-        assert map_dbx_type("timestamp_ntz") == "DATETIME"
+        # DATE_TIME (not DATETIME) is the canonical ThoughtSpot type — a live
+        # VALIDATE_ONLY import confirmed ThoughtSpot rejects "DATETIME".
+        assert map_dbx_type("timestamp") == "DATE_TIME"
+        assert map_dbx_type("timestamp_ntz") == "DATE_TIME"
 
     def test_case_and_whitespace_insensitive(self):
         assert map_dbx_type("  STRING ") == "VARCHAR"
@@ -75,7 +77,9 @@ class TestTsTypeToDbx:
         assert ts_type_to_dbx("DOUBLE") == "double"
         assert ts_type_to_dbx("BOOL") == "boolean"
         assert ts_type_to_dbx("DATE") == "date"
-        assert ts_type_to_dbx("DATETIME") == "timestamp"
+        # DATE_TIME is the canonical ThoughtSpot key — DATETIME is rejected by
+        # the API (live-confirmed), so the reverse map keys on DATE_TIME.
+        assert ts_type_to_dbx("DATE_TIME") == "timestamp"
 
     def test_unknown_raises(self):
         import pytest
