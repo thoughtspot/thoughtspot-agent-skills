@@ -55,7 +55,7 @@ def test_a2_passes_high_coverage():
 
 
 def test_a3_flags_missing_instructions():
-    ctx = make_context(models=[_model(guid="m-1")], ai_instructions={})
+    ctx = make_context(models=[_model(guid="m-1")], ai_instructions={"m-1": {}})
     findings = check_a3(ctx)
     assert len(findings) == 1
     assert findings[0].severity == "HIGH"
@@ -66,6 +66,11 @@ def test_a3_passes_with_instructions():
         models=[_model(guid="m-1")],
         ai_instructions={"m-1": {"instructions": "Some coaching text"}},
     )
+    assert check_a3(ctx) == []
+
+
+def test_a3_skips_model_when_fetch_failed():
+    ctx = make_context(models=[_model(guid="m-1")], ai_instructions={})
     assert check_a3(ctx) == []
 
 
