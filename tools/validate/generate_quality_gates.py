@@ -423,6 +423,28 @@ def generate_catalog(repo_root: Path) -> str:
 
     lines.append("")
 
+    # Enforcement model section (audit finding 7.3)
+    lines.extend([
+        "## Enforcement model",
+        "",
+        "Gates run in two environments with deliberately different strictness:",
+        "",
+        "| Environment | Behaviour | Rationale |",
+        "|---|---|---|",
+        "| **Pre-commit (local)** | Hard gate — blocks the commit on failure | "
+        "The author is present and can fix immediately; fast feedback prevents bad commits from reaching the remote |",
+        "| **CI (`validate.yml`)** | Runs the same checks but **cannot block a merge on its own** — "
+        "branch protection requires the `validate` status check to pass, yet `--admin` merges bypass it | "
+        "CI is the safety net, not the primary gate; the tradeoff avoids blocking contributors who lack local tooling |",
+        "",
+        "This means enforcement is **inverted from most repos** (which gate hard in CI "
+        "and soft locally). The accepted tradeoff: a contributor who commits with "
+        "`--no-verify` can push code that fails CI, but cannot merge to `main` without "
+        "`--admin` — and `--admin` merges are limited to maintainers who are expected "
+        "to have run pre-commit locally.",
+        "",
+    ])
+
     # Audit review section
     lines.extend([
         "## Audit review checklist (angle 7)",
