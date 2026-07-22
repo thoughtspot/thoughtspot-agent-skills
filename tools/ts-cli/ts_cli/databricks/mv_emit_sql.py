@@ -12,6 +12,7 @@ from ts_cli.databricks.mv_emit_expr import UntranslatableError
 AGG_MAP = {
     "sum": "SUM", "average": "AVG", "avg": "AVG", "count": "COUNT",
     "min": "MIN", "max": "MAX", "stddev": "STDDEV", "variance": "VARIANCE",
+    "median": "MEDIAN",
 }
 # unique count -> COUNT(DISTINCT ...) handled specially (two-word fn tokenised as one ident "unique count")
 # TS scalar fn -> Databricks scalar fn (direct rename, same arg order)

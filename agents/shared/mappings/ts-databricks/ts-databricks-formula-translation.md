@@ -171,6 +171,7 @@ Resolution:
 | `max(x)` | `MAX(x)` | |
 | `stddev(x)` | `STDDEV(x)` | |
 | `variance(x)` | `VARIANCE(x)` | |
+| `median(x)` | `MEDIAN(x)` | |
 | `sum_if(cond, x)` | `SUM(x) FILTER (WHERE cond)` | Conditional aggregate |
 | `count_if(cond, x)` | `COUNT(x) FILTER (WHERE cond)` | Conditional aggregate |
 | `unique_count_if(cond, x)` | `COUNT(DISTINCT x) FILTER (WHERE cond)` | Conditional aggregate |

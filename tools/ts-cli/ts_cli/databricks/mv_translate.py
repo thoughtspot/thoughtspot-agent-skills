@@ -56,7 +56,7 @@ def make_resolver(tables: dict) -> Callable[[str], str]:
 
 
 _LOD_AGG = {"SUM": "sum", "COUNT": "count", "AVG": "average",
-            "MIN": "min", "MAX": "max"}
+            "MIN": "min", "MAX": "max", "MEDIAN": "median"}
 
 _LOD_ASYMMETRY_NOTE = (
     "group_aggregate(..., query_filters()) reproduces a Databricks MV's own "
@@ -103,7 +103,7 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
     if agg is None:
         raise UntranslatableError(
             f"LOD aggregate '{dim['inner_agg']}' not mapped "
-            f"(SUM|COUNT|AVG|MIN|MAX — ts-databricks-formula-translation.md)")
+            f"(SUM|COUNT|AVG|MIN|MAX|MEDIAN — ts-databricks-formula-translation.md)")
     resolver = make_resolver(tables)
     inner = translate_sql_expr(dim["inner_expr"], resolver)
     dims = " , ".join(resolver(p) for p in dim["partition_by"])

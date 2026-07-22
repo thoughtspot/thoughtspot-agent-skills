@@ -263,6 +263,7 @@ _RENAME = {
     "DATE_ADD": "add_days", "ADD_MONTHS": "add_months",
     "SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
     "COUNT": "count", "STDDEV": "stddev", "VARIANCE": "variance",
+    "MEDIAN": "median",
 }
 _PASS_THROUGH_HINT = {"LOWER": "sql_string_op", "UPPER": "sql_string_op",
                       "MINUTE": "sql_int_op", "SECOND": "sql_int_op",
