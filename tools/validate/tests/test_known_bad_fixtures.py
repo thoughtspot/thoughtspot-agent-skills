@@ -134,3 +134,98 @@ def test_check_skill_flag_usage_flags_bad_fixture(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "SKIP" not in out, out  # import must succeed in-process — SKIP would mask the rule
     assert rc != 0, out
+
+
+# ---- BL-077 wave 2: remaining uncovered validators ---
+
+
+def test_check_coverage_matrix_flags_missing_matrix(tmp_path):
+    fixture = FIXTURES / "bad_coverage_matrix"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    res = _run([str(VALIDATE / "check_coverage_matrix.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "ts-convert-from-badformat" in (res.stdout + res.stderr), res.stdout
+
+
+def test_check_file_size_flags_large_module(tmp_path):
+    # Copy fixture to tmp_path (not under tests/) to avoid the /tests/ exclusion
+    # in check_file_size._scan_files.
+    fixture = FIXTURES / "bad_file_size"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    res = _run([str(VALIDATE / "check_file_size.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "bigmodule.py" in res.stdout, res.stdout
+
+
+def test_check_sv_yaml_flags_bad_name(tmp_path):
+    # Generated at test time — storing a bad YAML fixture triggers check_sv_yaml
+    # in pre-commit on staged files.
+    bad = tmp_path / "bad.yaml"
+    bad.write_text('name: "1bad-name"\ntables: []\n')
+    res = _run([str(VALIDATE / "check_sv_yaml.py"), "--file", str(bad)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "1bad-name" in (res.stdout + res.stderr), res.stdout + res.stderr
+
+
+def test_check_version_sync_flags_mismatch(tmp_path):
+    fixture = FIXTURES / "bad_version_sync"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    res = _run([str(VALIDATE / "check_version_sync.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "mismatch" in res.stdout.lower(), res.stdout
+
+
+def test_check_yaml_flags_bad_block(tmp_path):
+    # Generated at test time — storing a broken-YAML .md fixture triggers
+    # check_yaml in pre-commit on staged files.
+    bad = tmp_path / "broken.md"
+    bad.write_text("# Broken\n\n```yaml\nname: valid\n  bad: [\n  unclosed\n```\n")
+    res = _run([str(VALIDATE / "check_yaml.py"), "--path", str(bad)])
+    assert res.returncode != 0, res.stdout + res.stderr
+
+
+def test_check_formula_catalog_flags_nonexistent_func(tmp_path):
+    fixture = FIXTURES / "bad_formula_catalog"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    res = _run([str(VALIDATE / "check_formula_catalog.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "fake_removed_func" in (res.stdout + res.stderr), res.stdout + res.stderr
+
+
+def _init_git(path):
+    """Initialise a bare git repo in *path* with an initial commit."""
+    subprocess.run(["git", "init", str(path)], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test"],
+                   capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "test"],
+                   capture_output=True, check=True)
+
+
+def test_check_consistency_flags_missing_readme_entry(tmp_path):
+    # check_consistency uses git ls-files — need a real git repo.
+    _init_git(tmp_path)
+    skill_dir = tmp_path / "agents" / "cli" / "ts-audit"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# ts-audit\n")
+    # README that deliberately omits ts-audit
+    (tmp_path / "README.md").write_text("# Skills\nNothing here.\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "init"],
+                   capture_output=True, check=True)
+    res = _run([str(VALIDATE / "check_consistency.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "ts-audit" in (res.stdout + res.stderr), res.stdout + res.stderr
+
+
+def test_check_secrets_flags_pem_header(tmp_path):
+    # check_secrets uses git — need a real repo with a staged file.
+    # PEM header assembled at runtime so the literal doesn't trigger
+    # check_secrets on THIS file during pre-commit.
+    _init_git(tmp_path)
+    pem = "-----BEGIN " + "RSA PRIVATE KEY-----"
+    bad = tmp_path / "leak.py"
+    bad.write_text(f'key = """{pem}\nMIIE..."""\n')
+    subprocess.run(["git", "-C", str(tmp_path), "add", "leak.py"],
+                   capture_output=True, check=True)
+    res = _run([str(VALIDATE / "check_secrets.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr

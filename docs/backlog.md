@@ -2295,16 +2295,16 @@ backfilled. Remove both ALLOWLIST entries when the smokes land.
 
 **Source:** 2026-07-03 full audit, finding 6.5.
 **Affects:** `tools/validate/tests/`.
-**Status:** PARTIAL — 3 highest-priority fixtures added (PR #296, 2026-07-22); 9 remaining.
+**Status:** DONE (PR #296 wave 1, PR #297 wave 2 — 2026-07-22).
 
-The three constants/regex-driven validators most prone to vacuous-pass rot now have
-known-bad fixtures: `check_skill_naming` (FAMILY_PATTERNS), `check_runtime_coverage`
-(EXPECTED_DIVERGENCES), `check_skill_versions` (changelog format). 9 validators remain
-without self-tests: `check_consistency`, `check_coverage_matrix`, `check_file_size`,
-`check_formula_catalog`, `check_no_inline_requests`, `check_secrets`, `check_sv_yaml`,
-`check_version_sync`, `check_yaml`.
-
-**Target:** 2026-09-30.
+All 18 validators now have known-bad fixture self-tests in
+`test_known_bad_fixtures.py`. Wave 1 (PR #296): `check_skill_naming`,
+`check_runtime_coverage`, `check_skill_versions`. Wave 2 (PR #297):
+`check_coverage_matrix`, `check_file_size`, `check_sv_yaml`,
+`check_version_sync`, `check_yaml`, `check_formula_catalog`,
+`check_consistency` (git-initialised tmp repo), `check_secrets`
+(staged PEM header). Git-dependent validators use `_init_git()` helper to
+create a real repo in `tmp_path`.
 
 ---
 
