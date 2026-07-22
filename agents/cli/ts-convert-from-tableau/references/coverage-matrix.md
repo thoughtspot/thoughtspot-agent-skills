@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.28.1 spatial + user-attribute fail-loud) -->
+<!-- currency: tableau — 2026-07 (v0.75.0 table-calc honesty — WINDOW_*/LOOKUP/INDEX/FIRST/LAST/PREVIOUS_VALUE rejected at translate time) -->
 
 # Coverage Matrix: Tableau Workbook → ThoughtSpot Model + Liveboard
 
@@ -90,14 +90,6 @@ Use this as the canonical limitations reference.
 | 55 | `RUNNING_SUM/AVG/MAX/MIN` | `cumulative_sum/average/max/min ( [t::col] , [sort_attr] )` | |
 | 56 | `RUNNING_COUNT` | `cumulative_sum ( 1 , [sort_attr] )` | Answer-level only; approximate; Not verified as of 2026-07-03 |
 
-### Formula Translation — Moving / Window
-
-| # | Tableau Function(s) | ThoughtSpot Equivalent | Notes |
-|---|---|---|---|
-| 57 | `WINDOW_SUM/AVG/MAX/MIN` | `moving_sum/average/max/min ( [t::col] , start , end , [sort_attr] )` | |
-| 58 | `WINDOW_STDEV/WINDOW_COUNT` (sliding window) | `sql_*_aggregate_op("STDDEV_POP/COUNT(...) OVER (...)")` | Pass-through — no native `moving_stdev`/`moving_count` (`moving_*` is sum/average/max/min only, per `tableau-formula-translation.md`). If used as a plain aggregate over the whole partition (not a sliding window), use `stddev()`/`count()` instead |
-| 59 | `WINDOW_PERCENTILE/WINDOW_MEDIAN` (sliding window) | `sql_*_aggregate_op("PERCENTILE_CONT/MEDIAN(...) OVER (...)")` | Pass-through |
-
 ### Formula Translation — Rank
 
 | # | Tableau Function(s) | ThoughtSpot Equivalent | Notes |
@@ -112,15 +104,9 @@ Use this as the canonical limitations reference.
 
 | # | Tableau Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
-| 64 | `INDEX() <= N` (Top-N filter intent) | `rank ( [m] , 'desc' )` + query set | |
-| 65 | `INDEX()` (display row numbering, sort recoverable) | `rank ( sum ( [m] ) , 'asc' )` | |
-| 66 | `LOOKUP(agg, N)` where N < 0 (LAG) | `moving_sum ( [m] , abs(N) , -abs(N) , [sort] )` | |
-| 67 | `LOOKUP(agg, N)` where N > 0 (LEAD) | `moving_sum ( [m] , -N , N , [sort] )` | |
-| 68 | `LOOKUP(agg, FIRST())` — "get value at first row" | `first_value ( sum ( [m] ) , query_groups() , { [sort] } )` | |
-| 69 | `LOOKUP(agg, LAST())` — "get value at last row" | `last_value ( sum ( [m] ) , query_groups() , { [sort] } )` | |
-| 70 | `SIZE()` (unpartitioned) | `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` | Pass-through |
+| 70 | `SIZE()` (unpartitioned) | `sql_int_aggregate_op ( "COUNT(*) OVER ()" )` | Pass-through — context-free (no sort/partition attribute needed), so this is the one row-offset function `ts tableau build-model` actually translates (ts-cli v0.75.0). CLI-implemented in `functions.py::map_functions` |
 | 71 | String-aggregation CSV technique | `sql_string_aggregate_op("LISTAGG(...)")` | |
-| 72 | `<table-calc>` addressing extraction (Step 3f) | Sort/partition context recovery from TWB XML | `ordering-type`, `ordering-field`, `<order>` |
+| 72 | `<table-calc>` addressing extraction (Step 3f) | Sort/partition context recovery from TWB XML | `ordering-type`, `ordering-field`, `<order>` — extracted into `parse` output (`table_calc_addressing`) for SKILL.md's manual per-formula reasoning; NOT wired into `translate_formulas()`/`build-model`'s automated pipeline (see U10/U11) |
 
 ### Sets
 
@@ -217,16 +203,18 @@ through untranslated.
 | U7 | `USERNAME()` / `FULLNAME()` / `ISUSERNAME(s)` / `ISFULLNAME(s)` / `USERDOMAIN()` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U8 | `ACOS(x)` / `ASIN(x)` / `ATAN(x)` / `COT(x)` | Rejected with reason at translate time (ts-cli v0.26.5) — `* pi/180` composites / `1/tan()` tracked in BL-072, pending live degree-vs-radian verification |
 | U9 | `USERATTRIBUTE(attr)` / `USERATTRIBUTEINCLUDES(attr, val)` | Rejected with reason at translate time (ts-cli v0.28.1) — sibling of U7; ABAC `ts_var()` referencing a formula variable is a plausible native translation pending live verification. Tracked in BL-071 |
+| U10 | `WINDOW_SUM/AVG/MAX/MIN/STDEV/VAR/MEDIAN/PERCENTILE/COUNT` | Rejected with reason at translate time (ts-cli v0.75.0). Live-confirmed hard-fail otherwise (error 14516, "Search did not find '<FUNC> ( ... )'") — `translate_formulas()` was not actually converting these (former #57-59 rows here mistiered them `moving`/Mapped) even though `moving_sum/average/max/min` are architecturally the right ThoughtSpot equivalent (see `tableau-formula-translation.md` "Window / Moving Functions"). The blocker is the required sort attribute: Tableau encodes it as worksheet "Compute Using" addressing, which `ts tableau parse` already extracts (`table_calc_addressing` — #72) but `build-model`'s automated pipeline has no wiring to consume. Tracked as a follow-on to actually wire that context through |
+| U11 | `LOOKUP(agg, N)` / `INDEX()` / `FIRST()` / `LAST()` (standalone row-offset, not as `WINDOW_*`/`RUNNING_*` offset args) | Rejected with reason at translate time (ts-cli v0.75.0). Same addressing-context gap as U10 — `first_value()`/`last_value()`/`moving_sum()`/`rank()` are the architecturally-correct native equivalents per the tiered decision tree (`tableau-formula-translation.md` "Row-Offset Table Calculations"), but `build-model` can't resolve the sort column automatically today. Formerly mistiered `row_offset_native` (Mapped, former #64-69) though never actually converted — live-confirmed hard-fail (error 14516) |
 
 ### HIGH — Functionality loss, no workaround
 
 | # | Tableau Construct | Reason | Workaround |
 |---|---|---|---|
-| L1 | `PREVIOUS_VALUE()` (true recursion) | Recursive table calc; no SQL equivalent | Omit + log. String-aggregation CSV technique IS handled separately (#71) |
+| L1 | `PREVIOUS_VALUE()` (true recursion) | Recursive table calc; no SQL equivalent | Omit + log. Enforced at translate time as of ts-cli v0.75.0 (previously passed through unrejected — a formula containing bare `PREVIOUS_VALUE(...)` was silently emitted verbatim into `model.formulas` and hard-failed import, error 14516). String-aggregation CSV technique IS handled separately (#71) |
 | L2 | True statistical clustering (k-means — analytics-engine "Clusters" calc) | No ThoughtSpot equivalent | Omit + log. Note: `categorical-bin` (manual groups) IS translatable (#92) |
 | L3 | `RAWSQL_*()` functions | Direct SQL passthrough; not portable | Omit + log |
 | L4 | COLLECTION datasources (multiple primary data sources combined) | Not implemented | Deferred (open-items #3) |
-| L5 | Row-offset table calcs with ambiguous addressing (`CellInPane`, multi-dim `Table`) | Sort/partition context unrecoverable | Omit + log |
+| L5 | Row-offset table calcs with ambiguous addressing (`CellInPane`, multi-dim `Table`) | Sort/partition context unrecoverable | Omit + log. As of ts-cli v0.75.0 this is the *only* outcome `build-model` produces for LOOKUP/INDEX/FIRST/LAST/WINDOW_* (U10/U11) — the addressing recoverability distinction this row describes is not yet automated (`table_calc_addressing` is parsed but not consumed by `translate_formulas()`), so every occurrence is currently "ambiguous" from the CLI's point of view regardless of whether a human could resolve the sort column from the TWB |
 | L6 | Bare `FIRST()` as filter (e.g. `IF FIRST() == 0`) | Row-position test; no TS equivalent. `FIRST()` returns offset, not value | Omit + log |
 | L7 | Bare `LAST()` standalone | Returns offset-to-end; no TS equivalent | Omit + log |
 
