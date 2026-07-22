@@ -419,9 +419,8 @@ Omit `--name` if no keyword was supplied. The `--all` flag auto-paginates.
 **Zero results fallback:** If the search returns zero results, retry without `--name`
 and apply case-insensitive substring filtering against `metadata_name` client-side.
 
-**Tags** are not directly supported as a CLI filter — if the user supplies tags,
-run without `--name`, collect all results, and filter client-side by tag name
-in each result's `metadata_header.tags[]`.
+**Tags** are supported via `--tag <name-or-guid>` (repeatable). If the user
+supplies tags, add `--tag "<tag_name>"` for each one.
 
 ---
 

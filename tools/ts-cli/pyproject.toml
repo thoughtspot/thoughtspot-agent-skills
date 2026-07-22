@@ -37,4 +37,4 @@ where = ["."]
 include = ["ts_cli*"]
 
 [tool.setuptools.package-data]
-"ts_cli" = ["audit/report_template.html", "qlik/data/qlik_ts_formula_map.json", "qlik/data/qlik_ts_formula_map.csv"]
+"ts_cli" = ["audit/report_template.html", "qlik/data/qlik_ts_formula_map.json"]

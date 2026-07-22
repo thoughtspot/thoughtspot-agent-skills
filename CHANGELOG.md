@@ -10,6 +10,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - docs: add `agents/shared/mappings/powerbi/powerbi-formula-translation.md` (DAX→TS formula map) + `worked-examples/powerbi/` (SPLY parameter, CALCULATE→group_aggregate, dual-axis combo)
 - chore: bump ts-cli to v0.71.0 — `ts powerbi` command group
 - fix: raise snowflake-connector-python floor to >=3.13.1 (CVE-2024-49750, CVE-2025-2479x) and setuptools to >=78.2 (path-traversal CVE)
+- fix: metadata search page_size 50 → 500, correct `--tag` docs in 2 skills, remove dead Qlik CSV (audit findings 14.1, 5.1, 1.2)
 - feat: add quality gates catalog generator (`generate_quality_gates.py`); auto-generates `docs/quality-gates.md` from pre-commit.sh, validate.yml, and validator docstrings
 
 ## 2026-07-21
