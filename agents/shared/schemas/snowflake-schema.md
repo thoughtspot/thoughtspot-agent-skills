@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7) -->
+<!-- currency: snowflake — 2026-07 (derived metrics + named filters + custom_instructions; correction 2026-07: base_table.definition: SQL-query logical-table alternative added to Complete Schema, GA 2026-06-26 — finding 13.4; is_enum dimension property added, GA 2026-06-25 — finding 13.7; BL-064: sample_values blockquote removed from NOT-supported section, verified_queries/unique_keys/relationship type+right_range added to Complete Schema) -->
 
 # Snowflake Semantic View YAML Schema
 
@@ -47,6 +47,10 @@ tables:                           # Required. At least one entry.
 
   primary_key:                    # Required on tables that appear as right_table
     columns:                      # in any relationship. List of physical column names.
+    - string
+
+  unique_keys:                    # Optional. Additional uniqueness constraints beyond PK.
+  - columns:                      # Each entry is one unique-key constraint.
     - string
 
   tags:                            # Optional. GA 2026-05-05. Same fully-qualified
@@ -147,6 +151,16 @@ relationships:                    # Optional. Defined at the top level (not unde
   relationship_columns:           # At least one entry.
   - left_column: string           # Physical column name on left_table.
     right_column: string          # Physical column name on right_table.
+    type: string                  # Optional. "asof" or "range" for non-equi joins.
+    right_range: string           # Optional. Required when type is "range".
+
+verified_queries:                 # Optional. Verified Q&A pairs for Cortex Analyst accuracy.
+- name: string                    # Query identifier (DDL: QUERY_NAME).
+  question: string                # Natural-language question.
+  sql: string                     # Expected SQL using SV logical names.
+  verified_at: integer            # Optional. Unix epoch seconds.
+  verified_by: string             # Optional. Contact/purpose, e.g. "(PURPOSE = data_engineer)".
+  onboarding_question: boolean    # Optional. Surface as an onboarding suggestion.
 
 variables:                        # Optional. GA June 2026. Top-level session/bind variables.
 - name: string                    # Variable identifier.
@@ -192,11 +206,6 @@ The following fields are **not** part of the YAML schema. Including them causes 
 | `relationship_type` | Not supported — omit entirely (verified still-correct 2026-06-17: the spec states semantic views don't use it) |
 | `join_type` | Not supported — omit entirely (verified still-correct 2026-06-17) |
 | `default_aggregation` | Not supported in `metrics` — omit entirely |
-
-> **Now supported (was listed here as a parse error):** `sample_values` **is** a valid
-> `dimensions` property and Snowflake **recommends** it to improve Cortex Analyst accuracy
-> (verified 2026-06-17 against the YAML spec + Cortex Analyst best-practices). Do not strip
-> it. Populating it from the converter is tracked in **BL-031**.
 
 ---
 

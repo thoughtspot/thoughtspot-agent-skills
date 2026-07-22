@@ -364,8 +364,8 @@ ThoughtSpot:    [TABLE_ID::col_name]
 | `a * b` | `[a] * [b]` |
 | `a + b` | `[a] + [b]` |
 | `a - b` | `[a] - [b]` |
-| `(a) / NULLIF(b, 0)` | `safe_divide ( [a] , [b] )` |
-| `a / b` | `[a] / [b]` *(warn: no null guard)* |
+| `DIV0(a, b)` | `safe_divide ( [a] , [b] )` |
+| `a / b` | `[a] / [b]` *(warn: no divide-by-zero guard)* |
 | `CASE WHEN c THEN a ELSE b END` | `if ( [c] ) then [a] else [b]` |
 | `x IS NULL` | `isnull ( [x] )` |
 | `x IS NOT NULL` | `isnotnull ( [x] )` |
