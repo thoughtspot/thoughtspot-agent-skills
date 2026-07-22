@@ -670,6 +670,109 @@ def _write_sql_view_files(sql_views: list, connection_name: str, out_path, slug:
     return paths
 
 
+def _resolve_table_columns(
+    tables: list, columns: list, col_table_map: dict,
+) -> tuple[dict, list]:
+    """Partition physical columns across tables for the multi-table case.
+
+    Ownership is resolved, in priority order, from: an explicit ``table`` key
+    already on the column, then ``col_table_map`` (keyed by db_column_name,
+    then by display name) — the same column->table map
+    ``ts_cli.tableau.twb._build_column_table_map`` builds from datasource
+    metadata-records. A column whose owner can't be resolved this way, or
+    resolves to a table this datasource doesn't have, is left out of every
+    table entirely (never guessed onto an arbitrary one) and reported back so
+    the caller can warn instead of silently mis-scoping it — see the
+    MULTI-table limitation note in ``_write_table_tml_files``.
+    """
+    table_names = {t["name"] for t in tables}
+    by_table: dict = {t["name"]: [] for t in tables}
+    unassigned: list = []
+    for c in columns:
+        owner = (
+            c.get("table")
+            or col_table_map.get(c.get("db_column_name"))
+            or col_table_map.get(c.get("name"))
+        )
+        if owner in table_names:
+            by_table[owner].append(c)
+        else:
+            unassigned.append(c["name"])
+    return by_table, unassigned
+
+
+def _write_table_tml_files(
+    tables: list,
+    columns: list,
+    connection_name: str,
+    database: str,
+    schema: str,
+    out_path,
+    col_table_map: Optional[dict] = None,
+) -> dict:
+    """Write one ``{table_slug}.table.tml`` per physical table via the pure
+    ``ts_cli.tableau.tables.build_table_tml`` (Task A1) — call it, don't
+    reimplement its invariants/type-mapping.
+
+    Single-table datasources (the common case) get every column in
+    ``columns``. Multi-table datasources only get columns whose owning table
+    is resolvable (``_resolve_table_columns``) — on a federated multi-table
+    source, per-column ownership is often absent from the parse
+    (``col_table_map`` doesn't cover every column). That is a known
+    upstream-parse limitation this function does not attempt to fix: an
+    unresolvable column is collected into ``table_columns_unassigned`` and
+    warned about, never dumped onto an arbitrary table (which would silently
+    corrupt that table's schema).
+
+    A ``column_map`` override is always passed to ``build_table_tml`` so the
+    emitted db_column_name is byte-identical to the db_column_name the
+    model's own ``column_id`` was built from (see
+    ``ts_cli/model_builder.py::_build_model_columns``) — a Tableau column's
+    internal/raw name can differ from its display caption, and re-deriving
+    db_column_name from the display name (build_table_tml's un-mapped
+    default) would silently diverge from what the model references, breaking
+    ``ts tml lint --dir``'s cross-reference check.
+
+    Returns ``{"table_files": [...], "tables_written": N,
+    "table_columns_unassigned": [...]}`` — the last key only for multi-table.
+    """
+    from ts_cli.tableau.tables import build_table_tml
+    from ts_cli.tableau_translate import dump_tml_yaml
+
+    result: dict = {}
+    if len(tables) == 1:
+        by_table = {tables[0]["name"]: list(columns)}
+    else:
+        by_table, unassigned = _resolve_table_columns(tables, columns, col_table_map or {})
+        result["table_columns_unassigned"] = unassigned
+        if unassigned:
+            typer.echo(
+                f"  WARNING: {len(unassigned)} column(s) have no resolvable "
+                f"table ownership on this multi-table datasource — excluded "
+                f"from Table TML (col_table_map upstream-parse limitation).",
+                err=True,
+            )
+
+    paths: list = []
+    for t in tables:
+        t_cols = by_table.get(t["name"], [])
+        table_dict = {"name": t["name"], "columns": t_cols}
+        cmap = {c["name"]: c.get("db_column_name", c["name"]) for c in t_cols}
+        obj, _dropped = build_table_tml(
+            table_dict, connection_name, database, schema,
+            column_map={t["name"]: cmap},
+        )
+        table_slug = re.sub(r"[^a-z0-9]+", "_", t["name"].lower()).strip("_") or "table"
+        t_path = out_path / f"{table_slug}.table.tml"
+        t_path.write_text(dump_tml_yaml(obj))
+        typer.echo(f"  Wrote Table: {t_path}", err=True)
+        paths.append(str(t_path))
+
+    result["table_files"] = paths
+    result["tables_written"] = len(paths)
+    return result
+
+
 def _apply_reconcile_tier(
     cleaned_cols: list,
     cleaned_formulas: list[dict],
@@ -738,6 +841,8 @@ def _generate_flow(
     validation_issues: list,
     out_path: Path,
     dry_run: bool,
+    database: str = "",
+    schema: str = "",
     reconcile_table: Optional[str] = None,
     reconcile_plan_mode: bool = False,
     column_name_map: Optional[dict] = None,
@@ -837,6 +942,13 @@ def _generate_flow(
         typer.echo(f"  Wrote: {full_path}", err=True)
         result["model_file"] = str(full_path)
 
+        # SPEED GUARDRAIL: reuses ds/cleaned_cols already parsed/assembled
+        # above — no TWB re-parse, no whole-corpus YAML load/dump pass.
+        result.update(_write_table_tml_files(
+            ds["tables"], cleaned_cols, connection_name, database, schema, out_path,
+            col_table_map=ds.get("col_table_map"),
+        ))
+
     return result
 
 
@@ -879,6 +991,8 @@ def _process_datasource(
     out_path: Path,
     reconcile_table: Optional[str],
     reconcile_plan_mode: bool,
+    database: str = "",
+    schema: str = "",
 ) -> Optional[dict]:
     """Run the full per-datasource pipeline (translate, merge-or-generate) for
     one TWB datasource. Returns None to signal --reconcile-plan already
@@ -976,6 +1090,8 @@ def _process_datasource(
         validation_issues=validation_issues,
         out_path=out_path,
         dry_run=dry_run,
+        database=database,
+        schema=schema,
         reconcile_table=reconcile_table,
         reconcile_plan_mode=reconcile_plan_mode,
         column_name_map=col_name_map,
@@ -1023,6 +1139,19 @@ def build_model_cmd(
                                               help="Model name (default: derived from TWB)"),
     datasource_name: Optional[str] = typer.Option(None, "--datasource", "-d",
                                                     help="Filter to a single datasource"),
+    database: str = typer.Option(
+        "", "--database", "-D",
+        help="GENERATE mode only. Warehouse database for the emitted Table "
+             "TML(s) `db` field. Empty is fine for offline emission + local "
+             "`ts tml lint`; a later live import would supply the real value. "
+             "(Short flag is -D, not -d — -d is already --datasource.)",
+    ),
+    schema: str = typer.Option(
+        "", "--schema", "-s",
+        help="GENERATE mode only. Warehouse schema for the emitted Table "
+             "TML(s) `schema` field. Empty is fine for offline emission + "
+             "local `ts tml lint`; a later live import would supply the real value.",
+    ),
     existing_guid: Optional[str] = typer.Option(None, "--existing-guid",
                                                   help="GUID of existing model to merge formulas into"),
     profile: Optional[str] = typer.Option(None, "--profile", "-p",
@@ -1063,7 +1192,10 @@ def build_model_cmd(
     Extracts tables, columns, joins, parameters, and calculated fields from
     the TWB XML, translates formulas, resolves name collisions, applies
     formula_ prefix for cross-references, detects double aggregation, and
-    outputs phased model TML files ready for ts tml import.
+    outputs phased model TML files ready for ts tml import. In GENERATE mode
+    (no --existing-guid) also emits one `.table.tml` per physical table
+    referenced by the model, so the output directory is import-ready and
+    `ts tml lint --dir` can check model<->table cross-references.
 
     With --existing-guid: exports the existing model, merges new formulas
     into it (skipping existing), filters unresolvable references, and
@@ -1125,6 +1257,8 @@ def build_model_cmd(
             out_path=out_path,
             reconcile_table=reconcile_table,
             reconcile_plan_mode=reconcile_plan,
+            database=database,
+            schema=schema,
         )
         if result is None:
             # --reconcile-plan already printed its JSON — stop without

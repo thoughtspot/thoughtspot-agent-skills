@@ -878,18 +878,27 @@ echo '[{"db":"MY_DB","schema":"MY_SCHEMA","table":"MY_TABLE","type":"TABLE","col
 ]
 ```
 
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--auth-type` | Connection authentication type (e.g. `SERVICE_ACCOUNT`, `KEY_PAIR`, `OAUTH`). Auto-detected from the connection when possible; use this flag to override or when auto-detection fails. |
+
 **How it works:**
 
-1. Fetches the current connection state via `fetchConnection` (v1)
+1. Fetches the current connection state via v2 `connection/search`
 2. Merges the new tables in — existing tables and columns are preserved
 3. New columns are appended to existing tables; existing columns are left unchanged
-4. Posts the merged result to `POST /api/rest/2.0/connections/{id}/update`
+4. Includes `authenticationType` in the update payload (auto-detected or via `--auth-type`)
+5. Posts the merged result to `POST /api/rest/2.0/connections/{id}/update`
 
 **Output:** JSON response from the update call.
 
-> **Note:** Inherits the same v1 fetch limitation as `ts connections get` — may
-> fail with a 500 on some instances. Requires `CAN_CREATE_OR_EDIT_CONNECTIONS`
-> privilege.
+> **Note:** The v2 update endpoint defaults to `SERVICE_ACCOUNT` if
+> `authenticationType` is omitted — silently breaking non-SERVICE_ACCOUNT
+> connections (e.g. KEY_PAIR, OAUTH). Pass `--auth-type` explicitly if
+> auto-detection does not work for your connection. Requires
+> `CAN_CREATE_OR_EDIT_CONNECTIONS` privilege.
 
 ---
 
@@ -1478,6 +1487,8 @@ ts tableau build-model "workbook.twbx" \
 | `--datasource`, `-d` | no | Filter to a single datasource |
 | `--dry-run` | no | Report stats only — don't write files |
 | `--table-name-map` | no | GENERATE mode only (no `--existing-guid`). Path to a JSON file mapping TWB physical table name → ThoughtSpot table TML `name`, for when they differ (warehouse-normalized names, sqlproxy/published-datasource scoping). Ignored (with a stderr note) when `--existing-guid` is set. |
+| `--database`, `-D` | no | GENERATE mode only. Warehouse database for the emitted Table TML(s) `db` field. Empty is fine for offline emission + local `ts tml lint`. (Short flag is `-D`, not `-d` — `-d` is already `--datasource`.) |
+| `--schema`, `-s` | no | GENERATE mode only. Warehouse schema for the emitted Table TML(s) `schema` field. Empty is fine for offline emission + local `ts tml lint`. |
 | `--reconcile-table` | no | GUID of an existing ThoughtSpot table to reconcile emitted columns against (consultant/stand-in-view case). Requires `--profile`. |
 | `--reconcile-plan` | no | With `--reconcile-table`: print the reconcile plan (suggested mappings + drops) as JSON and exit without writing TML. |
 | `--column-name-map` | no | JSON file mapping datasource column → target column name (from the confirmed reconcile plan). Applies in GENERATE mode (with `--reconcile-table`, apply mode) and in MERGE mode (`--existing-guid`), where it rewrites re-derived formula refs so renamed columns resolve against the existing model. |
@@ -1495,6 +1506,7 @@ against a real target schema.
 5. Resolve name collisions (formula/param clashes → rename; column/formula clashes → drop column)
 6. Build model TML with `formula_` prefix for cross-references and double-aggregation fix; **emit a `.sql_view.tml` per Custom SQL relation and reference it by name in `model_tables[]`** (physical/SQL-View column dedup applied)
 7. Split into phased import files — **SQL Views first** (they must exist before the model), then phase 0 = base, then per dependency level
+8. **GENERATE mode only** — emit one `.table.tml` per physical table (see "Table TML emission" below)
 
 **Merge mode** (`--existing-guid`): merge translated formulas into an already-imported
 model. This is the Phase 2 flow used by the Tableau migration skill:
@@ -1553,7 +1565,25 @@ endpoints, `columns[].column_id` table prefixes, and any `[TABLE::COL]` refs for
 translation embeds via column scoping. Tables absent from the map pass through
 unchanged. Implemented by `apply_table_name_map()` in `ts_cli/tableau/build_model.py`.
 
-**Output:** One set of phased TML files per datasource:
+**Table TML emission (GENERATE mode only):** alongside the phased model TML,
+`build-model` also writes a `.table.tml` per physical table, so the output directory
+is import-ready and `ts tml lint --dir` can check model↔table cross-references — no
+hand-assembly needed. `--database`/`-D` and `--schema`/`-s` set the emitted table(s)'
+`db`/`schema` fields (empty is fine for offline emission + local lint; a later live
+import supplies the real values).
+
+- **Single-table datasources** (the common case): one `.table.tml` carrying every
+  physical column.
+- **Multi-table datasources**: one `.table.tml` per table, with columns assigned to
+  their owning table. A column whose table ownership can't be resolved from the parse
+  is left off every table and reported in the result JSON's `table_columns_unassigned`
+  (plus a stderr warning) rather than guessed onto an arbitrary table — reconcile these
+  manually before import.
+
+Not emitted in `--dry-run` (stats only, no files written) or `--existing-guid` merge mode.
+
+**Output:** One set of phased TML files per datasource, plus one `.table.tml` per
+physical table (GENERATE mode):
 
 ```
 output/
@@ -1561,10 +1591,14 @@ output/
   my_model.phase_1.model.tml    # Level 0 formulas (no cross-refs)
   my_model.phase_2.model.tml    # + Level 1 formulas (reference level 0)
   ...
+  orders.table.tml              # GENERATE mode: one per physical table
+  customers.table.tml
 ```
 
 Stdout: JSON array with per-datasource stats (tables, columns, translated/skipped
-formulas, rename map, phase count).
+formulas, rename map, phase count) plus, in GENERATE mode, `table_files` (paths
+written), `tables_written` (count), and — for multi-table datasources only —
+`table_columns_unassigned` (columns whose owning table couldn't be resolved).
 
 ---
 

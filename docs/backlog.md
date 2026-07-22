@@ -2317,28 +2317,29 @@ independent fix worth bundling here rather than opening a third backlog item for
 
 **Source:** 2026-07-03 full audit, findings 14.1 / 14.3 / 14.4.
 **Affects:** `tools/ts-cli/ts_cli/audit/context.py`, `commands/tables.py`.
-**Status:** OPEN.
+**Status:** 14.1 DONE, 14.4 DONE; 14.3 OPEN.
 
 ### Problem
 
-1. **14.1:** `build_context` exports ALL model TMLs (with `export_associated=True`) in ONE
-   unbatched call (`audit/context.py:67-73`, 300s timeout) while the same function batches
-   search at 50 and dependents at 15 — cluster-wide audits funnel the heaviest call into a
-   single request (timeout / oversized-payload risk).
+1. ~~**14.1:** `build_context` exports ALL model TMLs in ONE unbatched call.~~ **DONE** —
+   model TML export now batched at 50 with `raise_for_status=False` and per-batch error
+   tolerance, matching the answer export pattern. (ts-cli v0.76.0)
 2. **14.3:** `ts tables create` costs up to 2N round-trips (per-table singleton import +
    per-table GUID search, `tables.py:132-161`); the import API accepts a list with PARTIAL
    + per-object statuses. Keep individual re-drive on JDBC errors.
-3. **14.4:** the audit AI-instructions fetch is N+1 AND records a failed fetch as `{}`,
-   so errors read as "missing AI instructions" in A-angle findings — record failures in a
-   context warnings list (batch only if the spec allows; verify via MCP first).
+3. ~~**14.4:** the audit AI-instructions fetch records failed fetches as `{}`, so errors read
+   as "missing AI instructions" in A-angle findings.~~ **DONE** — failed fetches now
+   recorded in `AuditContext.warnings` (not as `{}`); A3 skips models whose fetch failed
+   instead of flagging false positives; A5 scoring unaffected (falls back to TML-embedded
+   instructions). (ts-cli v0.76.0)
 
 ### Approach
 
-Batch the model export like the answer export (50 per batch, per-batch failure tolerance);
-first-pass batched import for tables create with individual retry on error; warnings list
-for AI-instructions fetch failures.
+~~Batch the model export like the answer export;~~ ~~warnings list for AI-instructions
+fetch failures;~~ first-pass batched import for tables create with individual retry on
+error.
 
-**Target:** 2026-09-30.
+**Target:** 14.3 by 2026-09-30.
 
 ---
 
@@ -2798,16 +2799,15 @@ in #188 and overlaps the deferred "logical-relationship → join cardinality" ga
 
 **Source:** 2026-07-08 BL-063 PR1 Task 5 live run against se-thoughtspot (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, Task-5 BLOCKED subsections, incl. incident GUIDs for a support ticket).
 **Affects:** `tools/ts-cli/ts_cli/commands/connections.py::add_tables()`; any skill relying on `ts connections add-tables`.
-**Status:** OPEN.
+**Status:** (1) DONE (ts-cli v0.75.0); (2) OPEN — re-verify on a newer build.
 
 Two distinct findings:
 
-1. **ts-cli bug (fix in ts-cli):** `add_tables()` never sends `authenticationType` on
-   `POST /api/rest/2.0/connections/{id}/update`. Confirmed via
-   `get-rest-api-reference(apiName: "updateConnection")`: for any connection whose
-   `authentication_type` ≠ SERVICE_ACCOUNT the field is required, otherwise the backend
-   silently treats the payload as SERVICE_ACCOUNT. Fix: read the target connection's auth
-   type and include it in the update payload; unit-test the payload shape.
+1. ~~**ts-cli bug (fix in ts-cli):** `add_tables()` never sends `authenticationType` on
+   `POST /api/rest/2.0/connections/{id}/update`.~~ **DONE** — `add_tables()` now auto-detects
+   `authenticationType` from the `connection/search` response and includes it in the update
+   payload. A `--auth-type` CLI option provides an explicit override when auto-detection
+   fails. 22 unit tests cover extraction and payload shape. (ts-cli v0.75.0)
 2. **Probable build defect (verify on a newer build / support ticket):** even with a
    corrected payload, `updateConnectionV2` returned a uniform generic 500
    (`code: 10000`, `debug: "[null]"`) across 4 payload variants and 2 independently
@@ -2815,7 +2815,7 @@ Two distinct findings:
    2026-07-08. Re-verify after the fix in (1) lands and on a newer cloud build before
    assuming the CLI fix alone resolves it; incident GUIDs are in the claim matrix.
 
-**Target:** fix (1) opportunistically with the next ts-cli connections work or by 2026-08-31; (2) re-check when (1) ships.
+**Target:** (2) re-check on next se-thoughtspot build update.
 
 ---
 

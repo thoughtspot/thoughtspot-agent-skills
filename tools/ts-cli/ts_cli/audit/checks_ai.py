@@ -65,7 +65,9 @@ def check_a3(ctx: AuditContext) -> list:
     for model in ctx.models:
         m = model.get("model", {})
         guid = ctx.guid_for(model)
-        instr = ctx.ai_instructions.get(guid, {})
+        if guid not in ctx.ai_instructions:
+            continue
+        instr = ctx.ai_instructions[guid]
         has_instructions = bool(
             instr.get("instructions")
             or (m.get("model_instructions", {}).get("data_model_instructions") or "").strip()
@@ -103,8 +105,10 @@ def check_a5(ctx: AuditContext) -> list:
         total = len(cols) if cols else 1
         desc_pct = (sum(1 for c in cols if (c.get("description") or "").strip()) / total) * 100
         syn_pct = (sum(1 for c in cols if (c.get("synonyms") or [])) / total) * 100
+        guid = ctx.guid_for(model)
+        ai_instr = ctx.ai_instructions.get(guid, {}) if guid in ctx.ai_instructions else {}
         has_ai = bool(
-            ctx.ai_instructions.get(ctx.guid_for(model), {}).get("instructions")
+            ai_instr.get("instructions")
             or (m.get("model_instructions", {}).get("data_model_instructions") or "").strip()
         )
         has_desc = bool((m.get("description") or "").strip())

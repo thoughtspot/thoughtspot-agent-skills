@@ -7,7 +7,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-07-23
 - fix: `ts tableau build-model` no longer emits raw Tableau table-calc/window functions (`WINDOW_*`, `LOOKUP`, `INDEX`, `FIRST`, `LAST`, `PREVIOUS_VALUE`) verbatim into ThoughtSpot formulas — live-confirmed hard-fail on import (error 14516, "Search did not find '<FUNC> ( ... )'"). These are now rejected at translate time with a table-calc-specific reason and land in the skipped/omitted count instead; `classify.py`'s audit tiers corrected to match (`window_ambiguous` added, `moving` retired as dead/wrong). `SIZE()` — the one row-offset function with a context-free translation — is now genuinely translated to `sql_int_aggregate_op("COUNT(*) OVER ()")` rather than omitted. `references/coverage-matrix.md` (ts-convert-from-tableau) updated to move these out of Mapped into Unmapped (U10/U11)
-- chore: bump ts-cli to v0.75.0 — table-calc translate-time honesty fix (see above)
+- chore: bump ts-cli to v0.78.0 — table-calc translate-time honesty fix (see above)
+- feat: ts tableau build-model emits Table TML
+- chore: bump ts-cli to v0.77.0
+- perf: bump ts-cli to v0.76.0 — batch model TML export + fix AI-instructions false positives in audit (BL-073 items 14.1/14.4)
+- fix: bump ts-cli to v0.75.0 — `connections add-tables` now includes `authenticationType` in the update payload (BL-095)
 - chore: bump ts-cli to v0.74.0 — add `median()` mapping for Databricks formula translation (BL-123 item 13.7)
 
 ## 2026-07-22
