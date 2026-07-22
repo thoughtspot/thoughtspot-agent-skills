@@ -252,6 +252,12 @@ run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root 
 # sweep or a full audit is due by time or by accumulated work (.claude/rules/repo-audit.md).
 "$PYTHON_BIN" tools/validate/check_audit_freshness.py --root "$REPO_ROOT" || true
 
+# Quality gates catalog — re-generated from pre-commit.sh + validate.yml +
+# validator docstrings. Staleness check when any source of truth changes.
+if echo "$STAGED" | grep -qE '(^scripts/pre-commit\.sh$|^\.github/workflows/validate\.yml$|^tools/validate/.*\.py$|^docs/quality-gates\.md$)'; then
+  run_check "quality gates catalog" "tools/validate/generate_quality_gates.py --root $REPO_ROOT --check"
+fi
+
 # Only run unit tests if Python source files are staged.
 #
 # Three separate pytest invocations, not one combined command: ts-object-model-erd/tests

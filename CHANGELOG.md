@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-07-22
+- feat: add quality gates catalog generator (`generate_quality_gates.py`); auto-generates `docs/quality-gates.md` from pre-commit.sh, validate.yml, and validator docstrings
+
 ## 2026-07-21
 - feat: `ts snowflake parse-sv` — deterministic Semantic View DDL parser (BL-100 PR1); extracts tables, relationships, dimensions, metrics (semi-additive, window, USING), facts, custom instructions, verified queries, extension JSON
 - feat: `ts snowflake translate-formulas` — Snowflake SQL → ThoughtSpot formula translator (BL-100 PR2); function mapping, identifier resolution, column classification, window/LOD/semi-additive/USING handling
