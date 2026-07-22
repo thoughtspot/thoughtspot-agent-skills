@@ -82,7 +82,7 @@ are roughly ordered by value÷effort.
 | BL-019 | Databricks MV: audit mapping gaps (SV parity) | — |
 | BL-020 | Tableau: audit mapping gaps (SV parity) | — |
 | BL-021 | Delta sync mode for SV and MV converters | — |
-| BL-023 | Coverage matrices for DBX MV and Tableau converters | — |
+| ~~BL-023~~ | ~~Coverage matrices for DBX MV and Tableau converters~~ | DONE |
 | BL-024 | Close row-offset table-calc gap with window functions | — |
 | BL-026 | ts-object-liveboard-builder skill | — |
 | BL-027 | Explicit table→ThoughtSpot binding | — |
@@ -779,11 +779,13 @@ When a table has no declared relationship in the source, the converter should:
 
 ---
 
-## BL-023 — Coverage matrix reference docs for Databricks MV and Tableau converters `Tier 2`
+## BL-023 — Coverage matrix reference docs for Databricks MV and Tableau converters — DONE `Tier 2`
 
 **Source:** BL-018 completion — SV converter now has `references/coverage-matrix.md` (2026-06-14)
 **Affects:** ts-convert-from-databricks-mv, ts-convert-from-tableau
-**Status:** Not started
+**Status:** DONE — both converters have coverage matrices. from-databricks-mv shipped in PR #232;
+from-tableau has had one since the skill shipped. The `check_coverage_matrix.py` BACKLOG set is
+empty — all 9 conversion skills have coverage matrices. Closed 2026-07-23.
 **Related:** BL-014 (DBX MV coverage review), BL-009 (Tableau mapping gaps)
 
 ### Problem
@@ -3411,7 +3413,7 @@ Platform-specific documentation gaps identified by the product-currency speciali
   (available since 10.5.0.cl; ts-cli README lists it)
 - **13.5** `cortex_search_service` is an object, not a string in `snowflake-schema.md`
   (low converter impact — neither direction emits this field)
-- **13.7** Missing `median()` mapping for Databricks formula translation
+- **13.7** ~~Missing `median()` mapping for Databricks formula translation~~ DONE (ts-cli v0.74.0, 2026-07-23)
 - **13.8** Wildcard field expressions (`source.*`, `EXCEPT`) undocumented in MV schema
 - **13.9** 6 Tableau date functions missing from mapping (ISOYEAR/ISOQUARTER/ISOWEEK/
   ISOWEEKDAY → reject; standalone QUARTER/WEEK → map)
