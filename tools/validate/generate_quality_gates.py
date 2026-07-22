@@ -219,8 +219,8 @@ def _parse_ci(path: Path) -> list[dict]:
             })
             continue
 
-        # pip-audit
-        if stripped == "pip-audit":
+        # pip-audit (standalone or as YAML run: value)
+        if stripped in ("pip-audit", "run: pip-audit"):
             entries.append({
                 "validator": "_pip_audit",
                 "comment": "Dependency vulnerability scan against PyPI/OSV advisory database",
@@ -310,9 +310,23 @@ def generate_catalog(repo_root: Path) -> str:
                 "mode": entry["mode"],
             })
 
+    ci_synthetic_labels = {
+        "_pytest_ci": "unit tests (CI)",
+        "_pip_audit": "pip-audit",
+    }
+
     for entry in ci_entries:
         v = entry["validator"]
         if v.startswith("_"):
+            label = ci_synthetic_labels.get(v, v.lstrip("_"))
+            all_validators[v] = {
+                "label": label,
+                "pre_commit": v == "_pytest_ci",
+                "ci": True,
+                "trigger": "every PR",
+                "comment": entry.get("comment", ""),
+                "mode": "gate",
+            }
             continue
         if v in all_validators:
             all_validators[v]["ci"] = True
