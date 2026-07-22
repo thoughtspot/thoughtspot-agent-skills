@@ -292,8 +292,8 @@ create-with-tables) and the convert-from skills (cross-link as the "create one f
 
 ### Problem
 
-There is a systematic mapping-coverage review for **Snowflake SV** (`docs/sv-to-ts-gap-analysis.md`,
-13 gaps, BL-003 umbrella) and for **Tableau** (127-workbook audit, BL-009), but **none for
+There is a systematic mapping-coverage review for **Snowflake SV** (BL-003 umbrella,
+now tracked in the skill's `references/coverage-matrix.md`) and for **Tableau** (127-workbook audit, BL-009), but **none for
 Databricks Metric Views**. The DBX converter is the youngest (1.0.0 — 2026-05-22, single mode) and
 has never been audited against real MVs, so the true unmapped surface is unknown.
 
