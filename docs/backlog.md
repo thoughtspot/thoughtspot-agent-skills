@@ -71,7 +71,7 @@ are roughly ordered by value÷effort.
 | BL-076 | Smoke test backfills: answer-promote + from-tableau | 2026-09-30 |
 | BL-084 | Codify profile substrate as `ts profiles add/update/remove` | 2026-10-31 |
 | BL-071 | Tableau user-function → ThoughtSpot RLS variables | 2026-09-30 |
-| BL-073 | ts-audit / ts-cli round-trip batching (perf) | 2026-09-30 |
+| BL-073 | ~~ts-audit / ts-cli round-trip batching (perf)~~ | DONE |
 | BL-030 | Model-coach: migrate to `ai/instructions` API | 2026-09-30 |
 | BL-032 | Databricks MV: parser for GA constructs (`materialization:`, `fields:`) | 2026-09-30 |
 | BL-031 | Snowflake to-SV: emit `facts[]` / `sample_values` / filter-labels | 2026-09-30 |
@@ -2317,16 +2317,16 @@ independent fix worth bundling here rather than opening a third backlog item for
 
 **Source:** 2026-07-03 full audit, findings 14.1 / 14.3 / 14.4.
 **Affects:** `tools/ts-cli/ts_cli/audit/context.py`, `commands/tables.py`.
-**Status:** 14.1 DONE, 14.4 DONE; 14.3 OPEN.
+**Status:** DONE (14.1/14.3/14.4 all closed).
 
 ### Problem
 
 1. ~~**14.1:** `build_context` exports ALL model TMLs in ONE unbatched call.~~ **DONE** —
    model TML export now batched at 50 with `raise_for_status=False` and per-batch error
    tolerance, matching the answer export pattern. (ts-cli v0.76.0)
-2. **14.3:** `ts tables create` costs up to 2N round-trips (per-table singleton import +
-   per-table GUID search, `tables.py:132-161`); the import API accepts a list with PARTIAL
-   + per-object statuses. Keep individual re-drive on JDBC errors.
+2. ~~**14.3:** `ts tables create` costs up to 2N round-trips (per-table singleton import +
+   per-table GUID search)~~ **DONE** — tables now imported in batches of 50 with `PARTIAL`
+   policy; JDBC failures retried individually; pass 2 (RLS) also batched. (ts-cli v0.79.0)
 3. ~~**14.4:** the audit AI-instructions fetch records failed fetches as `{}`, so errors read
    as "missing AI instructions" in A-angle findings.~~ **DONE** — failed fetches now
    recorded in `AuditContext.warnings` (not as `{}`); A3 skips models whose fetch failed
@@ -2335,11 +2335,8 @@ independent fix worth bundling here rather than opening a third backlog item for
 
 ### Approach
 
-~~Batch the model export like the answer export;~~ ~~warnings list for AI-instructions
-fetch failures;~~ first-pass batched import for tables create with individual retry on
-error.
-
-**Target:** 14.3 by 2026-09-30.
+All three findings closed: model export batched (v0.76.0), AI-instructions
+false positives fixed (v0.76.0), tables create batched (v0.78.0).
 
 ---
 
