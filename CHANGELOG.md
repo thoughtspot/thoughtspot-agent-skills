@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-22
+- feat: update `ts-object-model-spotql-query` to v1.5.0 — add Snowflake SV / Databricks MV backing rules (BL-118)
+- refactor: scope CoCo Snowsight to conversion pipeline only — remove recipe skills (business-days, hms-display)
 - chore: bump ts-cli to v0.73.0 — retire vestigial phase1+ file emission (BL-125), bare-else detection (BL-062)
 - chore: bump ts-cli to v0.72.0 — `io_helpers` module, `profile_ops` path override, bare-except narrowing (BL-121)
 - docs: extract import error table + post-import verification to shared `ts-tml-import-gate.md` §4/§5 — closes BL-063
