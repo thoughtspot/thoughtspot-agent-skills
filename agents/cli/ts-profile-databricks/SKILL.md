@@ -708,7 +708,7 @@ Show numbered profile list (if more than one) and ask which to test. If only one
 ### Test Step 1 — Auth Check
 
 ```bash
-source ~/.zshenv && databricks auth describe --profile {dbx_profile} 2>&1
+databricks auth describe --profile {dbx_profile} 2>&1
 ```
 
 Check that the output shows a valid `auth_type` and no authentication errors.

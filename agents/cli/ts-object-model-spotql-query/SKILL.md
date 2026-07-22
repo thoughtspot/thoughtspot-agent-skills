@@ -73,8 +73,7 @@ The one requirement is below: the Model must be backed by an external cloud data
 - The target Model is backed by an **external cloud data warehouse** (see the note above).
 
 All ThoughtSpot calls go through the `ts` CLI, which handles auth, token caching, and the
-keychain — never construct API requests directly. Prefix `ts` calls with
-`source ~/.zshenv &&` so environment variables resolve.
+keychain — never construct API requests directly.
 
 ---
 
@@ -94,7 +93,7 @@ If multiple profiles exist in `~/.claude/thoughtspot-profiles.json`, ask which t
 confirm it authenticates:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile}"
+ts auth whoami --profile "{profile}"
 ```
 
 **Always ask the user which Model to query.** Accept any of these — you do not need a name
@@ -107,7 +106,7 @@ to search for if you already have an identifier:
 - **A name, or nothing** — fall back to search and let the user pick:
 
   ```bash
-  source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{search}%" --profile "{profile}"
+  ts metadata search --subtype WORKSHEET --name "%{search}%" --profile "{profile}"
   ```
 
   Present matches with **name + GUID + owner + modified date** so the user can disambiguate.
@@ -121,7 +120,7 @@ clause in Step 3.
 Export the Model's TML to see its columns:
 
 ```bash
-source ~/.zshenv && ts tml export {model_guid} --profile "{profile}"
+ts tml export {model_guid} --profile "{profile}"
 ```
 
 The TML body is in the `edoc` field. It is a structured document — JSON or YAML depending on
@@ -139,7 +138,7 @@ For a Model it is rooted at `model:` with these parts:
 eyeball the TML for this: run
 
 ```bash
-source ~/.zshenv && ts spotql classify-columns --model {model_guid} --profile "{profile}"
+ts spotql classify-columns --model {model_guid} --profile "{profile}"
 ```
 
 This calls the same aggregate-function detector `ts-object-answer-promote` uses (BL-087 —
@@ -193,7 +192,7 @@ question. The essentials (full list in the rules file):
 ### Step 4 — Validate and get the warehouse SQL
 
 ```bash
-source ~/.zshenv && ts spotql generate-sql '{spotql}' --model {model_guid} --profile "{profile}"
+ts spotql generate-sql '{spotql}' --model {model_guid} --profile "{profile}"
 ```
 
 Returns JSON `{status, executable_sql, errors}`. If `status` is `SUCCESS`, `executable_sql`
@@ -204,7 +203,7 @@ against the rules, and retry. Do not execute a statement that failed validation.
 ### Step 5 — Execute
 
 ```bash
-source ~/.zshenv && ts spotql fetch-data '{spotql}' --model {model_guid} --profile "{profile}"
+ts spotql fetch-data '{spotql}' --model {model_guid} --profile "{profile}"
 ```
 
 Returns JSON `{status, columns, rows, errors}`. `columns` are `{index, type}` — SpotQL

@@ -96,7 +96,7 @@ If exactly one profile exists, show it and ask the user to confirm.
 Authenticate:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
@@ -120,7 +120,7 @@ Which saved Answer contains the formula(s) you want to promote?
 **If the user enters a search term:**
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --type ANSWER \
   --name "%{search_term}%" \
   --profile "{profile_name}" \
@@ -142,7 +142,7 @@ Enter number, or type a different search term:
 **If the user pastes a GUID:**
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --type ANSWER \
   --guid "{guid}" \
   --profile "{profile_name}"
@@ -163,7 +163,7 @@ The data source GUID is extracted from the Answer TML in Step 3 (`answer.tables[
 Export the Answer TML:
 
 ```bash
-source ~/.zshenv && ts tml export {answer_guid} \
+ts tml export {answer_guid} \
   --profile "{profile_name}" \
   --fqn \
   --parse
@@ -177,7 +177,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml export {answer_guid} --profile '{profile_name}' --fqn --parse"],
+     f"ts tml export {answer_guid} --profile '{profile_name}' --fqn --parse"],
     capture_output=True, text=True,
 )
 export_json = json.loads(result.stdout)
@@ -373,7 +373,7 @@ Enter A or S:
 Use `ts metadata get` for a targeted single-object lookup — no pagination, no `--all`:
 
 ```bash
-source ~/.zshenv && ts metadata get {data_source_guid} \
+ts metadata get {data_source_guid} \
   --profile "{profile_name}" 2>/dev/null || echo "NOT_FOUND"
 ```
 
@@ -405,7 +405,7 @@ Search for the target Model by name:
 ```
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET \
   --name "%{search_term}%" \
   --profile "{profile_name}"
@@ -480,7 +480,7 @@ Map: `S` → `--duplicates skip`, `O` → `--duplicates overwrite`.
 ### Build and run the command
 
 ```bash
-source ~/.zshenv && ts model promote-formula \
+ts model promote-formula \
   --answer {answer_guid} \
   --model {model_guid} \
   --profile "{profile_name}" \
@@ -501,7 +501,7 @@ The command returns JSON to stdout:
 import json, subprocess
 
 result = subprocess.run(
-    ["bash", "-c", f"source ~/.zshenv && ts model promote-formula "
+    ["bash", "-c", f"ts model promote-formula "
      f"--answer {answer_guid} --model {model_guid} --profile '{profile_name}' "
      f"--duplicates {dup_policy} " +
      " ".join(f'--formula "{name}"' for name in selected_names)],
@@ -603,7 +603,7 @@ payload = json.dumps([updated_yaml])
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml import --profile '{profile_name}' --policy ALL_OR_NONE --no-create-new"],
+     f"ts tml import --profile '{profile_name}' --policy ALL_OR_NONE --no-create-new"],
     input=payload,
     capture_output=True,
     text=True,

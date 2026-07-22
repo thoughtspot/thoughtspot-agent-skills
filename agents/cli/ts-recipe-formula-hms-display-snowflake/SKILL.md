@@ -170,7 +170,7 @@ Would you like help adding one of these formulas to a specific ThoughtSpot Model
 
 If Y:
 1. Check `~/.claude/thoughtspot-profiles.json` — if missing, ask user to run `/ts-profile-thoughtspot` first
-2. Verify: `source ~/.zshenv && ts auth whoami --profile "{ts_profile_name}"`
+2. Verify: `ts auth whoami --profile "{ts_profile_name}"`
 3. Ask: which model, what to name the formula (e.g. `Call Duration`), which UDF to use, and which integer column to pass as argument
 4. Export TML: `ts tml export {model_guid} --profile {ts_profile_name} --fqn --parse`
 5. Add **both** entries to the TML — a formula entry alone is hidden from users; the `columns[]` entry is what makes it visible:

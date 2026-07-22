@@ -307,7 +307,7 @@ except Exception as e:
     sys.exit(1)
 ```
 
-**macOS / Linux:** `source ~/.zshenv && python3 /tmp/sf_verify.py 2>/dev/null`
+**macOS / Linux:** `python3 /tmp/sf_verify.py 2>/dev/null`
 **Windows:** `python /tmp/sf_verify.py 2>/dev/null`
 Remove: `rm -f /tmp/sf_verify.py` (macOS/Linux) or `del /tmp/sf_verify.py` (Windows)
 
@@ -665,7 +665,7 @@ Show numbered profile list (if more than one) and ask which to test. If only one
 
 Write to `/tmp/sf_verify.py` (same script as A4, with values filled in for the selected profile).
 
-**macOS / Linux:** `source ~/.zshenv && python3 /tmp/sf_verify.py 2>/dev/null`
+**macOS / Linux:** `python3 /tmp/sf_verify.py 2>/dev/null`
 **Windows:** `python /tmp/sf_verify.py 2>/dev/null`
 Remove: `rm -f /tmp/sf_verify.py` (macOS/Linux) or `del /tmp/sf_verify.py` (Windows)
 

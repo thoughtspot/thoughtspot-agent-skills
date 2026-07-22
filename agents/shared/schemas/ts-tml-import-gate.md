@@ -83,7 +83,7 @@ expected shape — not just that the API returned 200.
 **1. Search for the model by GUID:**
 
 ```bash
-source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{model_name}%" --profile {profile}
+ts metadata search --subtype WORKSHEET --name "%{model_name}%" --profile {profile}
 ```
 
 The GUID returned by the import response must appear in the results. If it is
@@ -93,7 +93,7 @@ absent, the import succeeded at the API level but indexing is delayed — wait
 **2. Export the imported model and count columns:**
 
 ```bash
-source ~/.zshenv && ts tml export {created_guid} --fqn --profile {profile}
+ts tml export {created_guid} --fqn --profile {profile}
 ```
 
 Parse the returned TML and count `model.columns[]` entries. This count must be

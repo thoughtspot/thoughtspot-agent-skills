@@ -546,7 +546,7 @@ ts profiles list
 Then verify the chosen profile:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 Save `{base_url}` and `{profile_name}` for all subsequent steps.
@@ -631,13 +631,13 @@ Resolve the choice:
 
 - **G (GUID)** — fetch directly and confirm it's a model:
   ```bash
-  source ~/.zshenv && ts metadata search --guid {model_guid} --profile {profile_name}
+  ts metadata search --guid {model_guid} --profile {profile_name}
   ```
   Verify `metadata_type == "LOGICAL_TABLE"` and `metadata_header.worksheetVersion == "V2"`.
   If V1 (a classic worksheet) or not found, say so and re-ask.
 - **N (name it)** — exact-name search, filter to V2:
   ```bash
-  source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "{model_name}" --profile {profile_name}
+  ts metadata search --subtype WORKSHEET --name "{model_name}" --profile {profile_name}
   ```
   Exactly one V2 match → use it; none/ambiguous → show closest and re-ask.
 - **F (filter)** — `--name "%{partial}%"`, keep V2 matches, show a short numbered list
@@ -647,7 +647,7 @@ Resolve the choice:
 
 ```bash
 # F / L pattern (filter applied client-side to V2 only)
-source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{partial}%" --profile {profile_name}
+ts metadata search --subtype WORKSHEET --name "%{partial}%" --profile {profile_name}
 ```
 
 From the chosen model capture and save: `{model_guid}` (`metadata_id`), **`{model_obj_id}`**
@@ -1209,7 +1209,7 @@ Enter C / I :
 
 ```bash
 # Targeted by name — both scopes start here (NOT `--all`)
-source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile_name}
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile_name}
 ```
 
 - **C (within a connection)** → **first identify the connection using the
@@ -1279,7 +1279,7 @@ auth. Collect the connection name, Snowflake account identifier, user, role, war
 and the path to the **unencrypted PKCS#8 private key** (`.p8`), then run:
 
 ```bash
-source ~/.zshenv && ts connections create \
+ts connections create \
   --name "{connection_name}" \
   --account "{account}" --user "{user}" --role "{role}" --warehouse "{warehouse}" \
   --database "{database}" \
@@ -1329,7 +1329,7 @@ all three in one response.
 For N/F/L, fetch the connections once (auto-paginated, returns all):
 
 ```bash
-source ~/.zshenv && ts connections list --profile {profile_name}
+ts connections list --profile {profile_name}
 ```
 
 Resolve the user's choice against that result:
@@ -1389,7 +1389,7 @@ If the user doesn't know the correct paths:
    usually instant, and they know it.
 2. **Only if they're unsure**, fetch the connection schema to resolve names:
    ```bash
-   source ~/.zshenv && ts connections get {connection_id} --profile {profile_name}
+   ts connections get {connection_id} --profile {profile_name}
    ```
    This uses the v1 `fetchConnection` endpoint — it can be slow and returns 404 on some
    connection types, so treat it as the **fallback, not the default**. If it returns no
@@ -3367,7 +3367,7 @@ view (a different aggregation, a different dimension breakdown) — the user can
 the liveboard gives you everything the tiles need — do it once and reuse:
 
 ```bash
-source ~/.zshenv && ts tml export {model_guid} --profile {profile_name}
+ts tml export {model_guid} --profile {profile_name}
 ```
 
 From the export (and/or `ts metadata search --guid {model_guid}`) record:

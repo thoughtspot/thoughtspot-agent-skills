@@ -175,7 +175,7 @@ Would you like help adding one of these formulas to a specific ThoughtSpot Model
 
 If Y:
 1. Check `~/.claude/thoughtspot-profiles.json` — if missing, ask user to run `/ts-profile-thoughtspot` first
-2. Verify: `source ~/.zshenv && ts auth whoami --profile "{ts_profile_name}"`
+2. Verify: `ts auth whoami --profile "{ts_profile_name}"`
 3. Ask: which model, what to name the formula (e.g. `Business Days Open`), which UDF to use, and which date column(s) to pass as arguments
 4. Export TML: `ts tml export {model_guid} --profile {ts_profile_name} --fqn --parse`
 5. Add **both** of the following to the TML — a formula alone is not enough; without the `columns[]` entry the formula is hidden from users:

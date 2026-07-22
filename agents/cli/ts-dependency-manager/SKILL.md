@@ -179,7 +179,7 @@ If exactly one profile exists, show it and ask the user to confirm.
 Authenticate:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, the token may be expired. Refer to
@@ -284,14 +284,14 @@ Search for the object — run both queries and combine results:
 
 ```bash
 # Models and Worksheets
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET \
   --name "%{search_term}%" \
   --profile "{profile_name}" \
   --all
 
 # Connection tables
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype ONE_TO_ONE_LOGICAL \
   --name "%{search_term}%" \
   --profile "{profile_name}" \
@@ -306,7 +306,7 @@ Save `{source_guid}`, `{source_name}`, `{source_type}` (`MODEL` / `WORKSHEET` / 
 Export the source TML to get the column list:
 
 ```bash
-source ~/.zshenv && ts tml export {source_guid} \
+ts tml export {source_guid} \
   --profile "{profile_name}" \
   --fqn \
   --parse
@@ -317,7 +317,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts tml export {source_guid} "
+     f"ts tml export {source_guid} "
      f"--profile '{profile_name}' --fqn --parse"],
     capture_output=True, text=True,
 )
@@ -399,7 +399,7 @@ Export both source and target TMLs to identify the column gap:
 def export_columns(guid, profile_name):
     result = subprocess.run(
         ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {guid} "
+         f"ts tml export {guid} "
          f"--profile '{profile_name}' --fqn --parse"],
         capture_output=True, text=True,
     )
@@ -797,7 +797,7 @@ plan = {
 }
 
 result = subprocess.run(
-    ["bash", "-c", f"source ~/.zshenv && ts dependency backup --profile '{profile_name}'"],
+    ["bash", "-c", f"ts dependency backup --profile '{profile_name}'"],
     input=json.dumps(plan), capture_output=True, text=True,
 )
 if result.returncode != 0:
@@ -1129,7 +1129,7 @@ elif choice == "S": flags = " ".join(f"--guid {g}" for g in selected_rollback_gu
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts dependency rollback --backup-dir '{backup_dir}' "
+     f"ts dependency rollback --backup-dir '{backup_dir}' "
      f"{flags} --profile '{profile_name}'"],
     capture_output=True, text=True,
 )

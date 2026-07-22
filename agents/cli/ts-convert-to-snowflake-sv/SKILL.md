@@ -198,7 +198,7 @@ Select a profile (or press Enter to use #1):
 After the profile is confirmed, verify the connection:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile {profile_name}
+ts auth whoami --profile {profile_name}
 ```
 
 The CLI handles token caching, Keychain access, and expiry automatically.
@@ -209,8 +209,8 @@ If `ts auth whoami` returns 401, the token is expired. Direct the user to
 cross-platform refresh procedure. Then clear the stale cache and retry:
 
 ```bash
-source ~/.zshenv && ts auth logout --profile {profile_name}
-source ~/.zshenv && ts auth whoami --profile {profile_name}
+ts auth logout --profile {profile_name}
+ts auth whoami --profile {profile_name}
 ```
 
 ---
@@ -275,7 +275,7 @@ Enter search criteria (leave blank to skip):
 Run the search using the CLI:
 
 ```bash
-source ~/.zshenv && ts metadata search --profile {profile_name} \
+ts metadata search --profile {profile_name} \
   --subtype WORKSHEET \
   --name "%{name_keyword}%" \
   --all
@@ -295,7 +295,7 @@ supplies tags, add `--tag "<tag_name>"` for each one.
 #### Option B — Browse All
 
 ```bash
-source ~/.zshenv && ts metadata search --profile {profile_name} --subtype WORKSHEET --all
+ts metadata search --profile {profile_name} --subtype WORKSHEET --all
 ```
 
 ---
@@ -330,7 +330,7 @@ SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{existing_sv_name}');
 Store the result as `{existing_sv_ddl}` — used in Step 9.5C.
 
 ```bash
-source ~/.zshenv && ts tml export {selected_model_id} --profile {profile_name} --fqn --associated
+ts tml export {selected_model_id} --profile {profile_name} --fqn --associated
 ```
 
 **Batch mode — export all models in one call:**
@@ -339,7 +339,7 @@ When the user has selected multiple models for conversion (e.g. "convert all BIR
 models"), pass all GUIDs to a single export call:
 
 ```bash
-source ~/.zshenv && ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated --parse
+ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated --parse
 ```
 
 `--parse` returns structured JSON directly — non-printable character stripping and
@@ -393,7 +393,7 @@ genuinely absent.
 If `db` or `schema` is confirmed absent after inspection, ask the user to provide them.
 If a table has no associated TML, fetch it separately using its FQN GUID:
 ```bash
-source ~/.zshenv && ts tml export {fqn_guid} --profile {profile_name} --fqn
+ts tml export {fqn_guid} --profile {profile_name} --fqn
 ```
 
 Use `TODO_DATABASE` / `TODO_SCHEMA` placeholders for unresolved tables and flag them.
@@ -768,7 +768,7 @@ Write the filtered TML to a separate JSON file before running `build-sv`.
 **Model format — use `ts snowflake build-sv`:**
 
 ```bash
-source ~/.zshenv && ts snowflake build-sv \
+ts snowflake build-sv \
   --model {export_dir}/model.json \
   --tables-dir {export_dir}/ \
   --sv-name {target_database}.{target_schema}.{sv_name} \

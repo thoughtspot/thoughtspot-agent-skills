@@ -2393,15 +2393,16 @@ requires querying the TS: BI Server system model — a `ts data search` command 
 ## BL-082 — Drop the `source ~/.zshenv &&` prefix repo-wide (after Linux keyring verify)
 
 **Source:** 2026-07-03 full audit, finding 11.5.
-**Affects:** 15 SKILL.md files (~130 occurrences), `agents/cli/CLAUDE.md`.
-**Status:** OPEN — blocked on a Linux verification.
+**Affects:** 18 SKILL.md / shared files (~134 occurrences), `agents/cli/CLAUDE.md`.
+**Status:** DONE (PR #298, 2026-07-22).
 
-`client.py` already falls back to the OS credential store via keyring (a hard dep), making
-the prefix redundant on macOS/Windows. Verify the Linux/no-secretstorage-backend path
-degrades with a clear error, then drop the prefix repo-wide and document the requirement
-once in `agents/cli/CLAUDE.md`.
-
-**Target:** 2026-10-31.
+Dropped `source ~/.zshenv && ` prefix from 134 bash command examples across 18 files.
+`client.py` falls back to the OS credential store via `keyring`, making the prefix
+redundant — the `ts` CLI resolves credentials from Keychain/Credential Manager/Secret
+Service without needing env vars sourced. Standalone `source ~/.zshenv` instructions
+(after credential setup) and changelog entries preserved. Linux degradation:
+`_get_credential()` catches `keyring` import/call failures and raises a clear
+`SystemExit` with remediation instructions — no silent failure path.
 
 ---
 

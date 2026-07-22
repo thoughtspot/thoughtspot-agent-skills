@@ -195,7 +195,7 @@ warehouse_id = warehouse_path.rstrip("/").split("/")[-1] if warehouse_path else 
 Verify connectivity:
 
 ```bash
-source ~/.zshenv && databricks auth describe --profile {dbx_profile}
+databricks auth describe --profile {dbx_profile}
 ```
 
 Store `dbx_profile`, `catalog`, and `warehouse_id` for use in subsequent steps.
@@ -207,7 +207,7 @@ Store `dbx_profile`, `catalog`, and `warehouse_id` for use in subsequent steps.
 All Databricks SQL in this skill uses the Statement Execution API:
 
 ```bash
-source ~/.zshenv && databricks api post /api/2.0/sql/statements \
+databricks api post /api/2.0/sql/statements \
   --profile {dbx_profile} \
   --json '{"warehouse_id": "{warehouse_id}", "statement": "{sql}", "wait_timeout": "50s"}'
 ```
@@ -223,7 +223,7 @@ The response contains:
 
 If `status.state` is `PENDING`, poll the statement ID:
 ```bash
-source ~/.zshenv && databricks api get /api/2.0/sql/statements/{statement_id} --profile {dbx_profile}
+databricks api get /api/2.0/sql/statements/{statement_id} --profile {dbx_profile}
 ```
 
 ---
@@ -295,7 +295,7 @@ Parse the YAML string extracted in Step 4 with the deterministic parser (schema:
 
 ```bash
 printf '%s' "$MV_YAML" > mv.yaml
-source ~/.zshenv && ts databricks parse-mv mv.yaml --output parsed.json
+ts databricks parse-mv mv.yaml --output parsed.json
 ```
 
 The command handles version routing (0.1 / 1.1), `fields:`/`dimensions:` aliasing,
@@ -428,7 +428,7 @@ semantics `parse-mv` implements.
 **2. Translate:**
 
 ```bash
-source ~/.zshenv && ts databricks translate-formulas \
+ts databricks translate-formulas \
   --input parsed.json --tables tables.json --output translated.json
 ```
 
@@ -534,7 +534,7 @@ Enter C / I :
 **Search by name (both scopes start here):**
 
 ```bash
-source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
 ```
 
 - **C (within a connection)** → **first identify the connection using the
@@ -557,7 +557,7 @@ same-named tables. Build a map: `physical_table_name -> {metadata_id, metadata_n
 **Export TMLs for found tables to verify columns:**
 
 ```bash
-source ~/.zshenv && ts tml export {guid1} {guid2} ... --profile {profile} --parse
+ts tml export {guid1} {guid2} ... --profile {profile} --parse
 ```
 
 `--parse` returns structured JSON — access columns via `item["tml"]["table"]["columns"]`
@@ -626,7 +626,7 @@ Enter N / F / L:
 Then fetch the connections once (auto-paginated, returns all of the specified type):
 
 ```bash
-source ~/.zshenv && ts connections list --type DATABRICKS --profile {profile}
+ts connections list --type DATABRICKS --profile {profile}
 ```
 
 Resolve the user's choice against that result:
@@ -655,7 +655,7 @@ Use the exact `name` value from the API response in the table TML.
 Create the ThoughtSpot Table object:
 
 ```bash
-cat tables-spec.json | source ~/.zshenv && ts tables create --profile {profile}
+cat tables-spec.json | ts tables create --profile {profile}
 ```
 
 Where `tables-spec.json` is a JSON array built from the column data. See
@@ -694,13 +694,13 @@ types using [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](..
 
 Find the ThoughtSpot connection for the table:
 ```bash
-source ~/.zshenv && ts connections list --type DATABRICKS --profile {profile}
+ts connections list --type DATABRICKS --profile {profile}
 ```
 
 Add the missing columns to the connection, then re-import the updated Table TML
 (batch all imports in one call):
 ```bash
-source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile {profile}
+ts tml import --policy ALL_OR_NONE --profile {profile}
 ```
 
 After import, re-export the updated TMLs to refresh the column map before Step 9.
@@ -714,7 +714,7 @@ Ask the user if they want a different name. Do not add a `TEST_MV_` or other
 prefix — see [../../shared/schemas/ts-model-conversion-invariants.md](../../shared/schemas/ts-model-conversion-invariants.md) (N1).
 
 ```bash
-source ~/.zshenv && ts databricks build-model \
+ts databricks build-model \
   --parsed parsed.json --translated translated.json --tables tables.json \
   --connection "{connection_name}" --model-name "{model_name}" \
   --mv-fqn "{catalog}.{schema}.{view_name}" --output-dir ./tml_out
@@ -882,7 +882,7 @@ silently ignored). On first import omit it; record the returned GUID.
 
 ```bash
 # First import (new model):
-source ~/.zshenv && ts databricks build-model \
+ts databricks build-model \
   --parsed parsed.json --translated translated.json --tables tables.json \
   --connection "{connection_name}" --model-name "{model_name}" \
   --mv-fqn "{catalog}.{schema}.{view_name}" --output-dir ./tml_out \

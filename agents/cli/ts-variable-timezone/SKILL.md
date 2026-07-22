@@ -50,7 +50,7 @@ If exactly one profile exists, show it and ask the user to confirm.
 Authenticate:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 If the command fails, refer to
@@ -90,7 +90,7 @@ Otherwise continue with Step 3.
 ## Search Flow
 
 ```bash
-source ~/.zshenv && ts variables search ts_user_timezone --profile "{profile_name}"
+ts variables search ts_user_timezone --profile "{profile_name}"
 ```
 
 Parse the JSON response. The response is an array; the first element's `values` array
@@ -157,7 +157,7 @@ Save `{timezone_value}`.
 Fetch all active orgs:
 
 ```bash
-source ~/.zshenv && ts orgs search --status ACTIVE --profile "{profile_name}"
+ts orgs search --status ACTIVE --profile "{profile_name}"
 ```
 
 Parse the JSON array. Each element has an `orgName` field. Save all names as
@@ -214,7 +214,7 @@ If 1: set `{level}` to `"org"`, leave `{principal_identifiers}` empty.
 Ask: `Search for user (name or email pattern):` Save as `{user_search_term}`.
 
 ```bash
-source ~/.zshenv && ts users search \
+ts users search \
   --name "{user_search_term}" \
   $(printf -- '--org "%s" ' {org_identifiers}) \
   --account-status ACTIVE \
@@ -232,7 +232,7 @@ Display results as a numbered list: `# | Display Name | Username (email)`.
 Ask: `Search for group (name pattern):` Save as `{group_search_term}`.
 
 ```bash
-source ~/.zshenv && ts users groups \
+ts users groups \
   --name "{group_search_term}" \
   $(printf -- '--org "%s" ' {org_identifiers}) \
   --include-users \
@@ -286,7 +286,7 @@ Build the `ts variables set` command with one `--org` flag per org, and one `--u
 per user (if user-level). The CLI builds the cross-product internally:
 
 ```bash
-source ~/.zshenv && ts variables set ts_user_timezone "{timezone_value}" \
+ts variables set ts_user_timezone "{timezone_value}" \
   --org "{org1}" [--org "{org2}" ...] \
   [--user "{user1}" [--user "{user2}" ...]] \
   --profile "{profile_name}"
@@ -299,7 +299,7 @@ import subprocess, json
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts variables search ts_user_timezone --profile '{profile_name}'"],
+     f"ts variables search ts_user_timezone --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
 data = json.loads(result.stdout)
@@ -322,7 +322,7 @@ If `current_value` is `None`, report that no assignment exists for any selected 
 Then remove:
 
 ```bash
-source ~/.zshenv && ts variables remove ts_user_timezone "{current_value}" \
+ts variables remove ts_user_timezone "{current_value}" \
   --org "{org1}" [--org "{org2}" ...] \
   [--user "{user1}" [--user "{user2}" ...]] \
   --profile "{profile_name}"
