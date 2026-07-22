@@ -7,6 +7,11 @@ What SpotQL can't do, and what fails *silently* (wrong numbers, no error).
 dated snapshot, not gospel. When in doubt, probe with `ts spotql generate-sql` /
 `fetch-data` (see the retest use case in `use-cases.md`).
 
+> **Backing-store-specific:** if the Model is backed by a **Snowflake Semantic
+> View**, also read [snowflake-sv-backing.md](snowflake-sv-backing.md)
+> (EXPERIMENTAL) — the `100072` NULL-key bug, window-via-CTE, no `FROM`-subqueries,
+> and non-additive-metric behaviour are characterised there.
+
 **Authoritative source — two ThoughtSpot Jira epics (review these for live status):**
 - **[SCAL-306544](https://thoughtspot.atlassian.net/browse/SCAL-306544)** — *[GA] Support
   Semantic SQL in QueryGen — rollout*. The bug-fix epic: its mostly-**Closed** children are
@@ -56,6 +61,7 @@ SpotQL UDFs (`udf-reference.md`), not `TRUNC`/`TO_DATE`/`CURRENT_DATE`.
 | `TO_NUMBER(x)` | silently dropped (no-op) | [SCAL-319336](https://thoughtspot.atlassian.net/browse/SCAL-319336) |
 | `SUM(CASE WHEN <raw-date '>=' literal> …)` | aggregate returns type-UNKNOWN, all zeros — use integer date-parts inside CASE | [SCAL-319329](https://thoughtspot.atlassian.net/browse/SCAL-319329) |
 | `ROUND(x, N)` | rounds to the nearest **multiple of N**, not N decimal places | [SCAL-319323](https://thoughtspot.atlassian.net/browse/SCAL-319323) |
+| `AVG`/`MIN`/`MAX` on a measure over an **SV or MV backing** | outer aggregate silently dropped — returns the measure's native aggregation (e.g. `AVG` of a `SUM` measure returns the `SUM`). Regular Models hard-error (`NESTED_AGGREGATE_NOT_SUPPORTED`). `MEDIAN`/`STDDEV` fail as nested aggregates on all backings. **Fix:** the CTE statistics pattern — materialise at a grain, apply the statistic in the outer SELECT (`patterns.md` § Statistics). | ✓ live 2026-07-21 · [snowflake-sv-backing.md](snowflake-sv-backing.md) |
 
 ## 🔧 In flight — open bugs (behaviour may change; treat results with care)
 
