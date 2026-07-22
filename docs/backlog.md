@@ -52,7 +52,7 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | BL-100 | Bring remaining converters to DBX-from standard (Snowflake pipeline first) | post-audit |
 | BL-090 | Document multi-table / multi-query Tableau migration | 2026-08-31 |
-| BL-064 | External audit product-currency fixes (medium-severity residuals) | 2026-09-30 |
+| ~~BL-064~~ | ~~External audit product-currency fixes (medium-severity residuals)~~ | DONE |
 | ~~BL-118~~ | ~~Codify SpotQL SV/MV backing behaviour~~ | DONE (PR #301) |
 | ~~BL-063~~ | ~~Extract CLI formula translation~~ | DONE |
 | ~~BL-029~~ | ~~Coverage matrix for ts-convert-to-databricks-mv~~ | DONE |
@@ -1948,7 +1948,7 @@ remain OPEN and unscheduled.
 
 **Source:** External audit sweep 2026-06-28 (angle 13 — product currency)
 **Affects:** agents/shared/schemas/databricks-metric-view.md, agents/shared/schemas/snowflake-schema.md, agents/shared/mappings/ts-databricks/, agents/shared/mappings/ts-snowflake/
-**Status:** Open
+**Status:** DONE — all 16 items fixed. Item 9 residual (cross-entity-type fields on time_dimensions/facts/filters) deferred to next Snowflake spec sweep; items 14-16 closed 2026-07-23.
 **Related:** BL-032 (Databricks parser support — overlapping scope)
 
 ### Problem
@@ -3406,7 +3406,7 @@ Three near-identical prose blocks duplicated across 4+ conversion skills:
 
 **Filed:** 2026-07-22.
 **Source:** 2026-07-22 full audit, findings 13.1, 13.5, 13.7–13.10.
-**Status:** OPEN.
+**Status:** Non-Tableau items DONE (13.1, 13.5, 13.7, 13.8 — PRs #304/#305, 2026-07-23). Remaining: 13.9 + 13.10 (Tableau — tracked separately).
 
 Platform-specific documentation gaps identified by the product-currency specialists:
 - **13.1** ~~`PARTIAL_OBJECT` import policy undocumented in authoritative schema docs~~ DONE (added to ts-tml-import-gate.md §3, 2026-07-23)
