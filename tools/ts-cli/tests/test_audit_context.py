@@ -24,6 +24,7 @@ def test_make_context_defaults():
     assert ctx.ai_instructions == {}
     assert ctx.answers == []
     assert ctx.model_guids == []
+    assert ctx.warnings == []
 
 
 def test_make_context_with_model():

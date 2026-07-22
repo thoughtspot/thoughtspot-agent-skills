@@ -2317,28 +2317,29 @@ independent fix worth bundling here rather than opening a third backlog item for
 
 **Source:** 2026-07-03 full audit, findings 14.1 / 14.3 / 14.4.
 **Affects:** `tools/ts-cli/ts_cli/audit/context.py`, `commands/tables.py`.
-**Status:** OPEN.
+**Status:** 14.1 DONE, 14.4 DONE; 14.3 OPEN.
 
 ### Problem
 
-1. **14.1:** `build_context` exports ALL model TMLs (with `export_associated=True`) in ONE
-   unbatched call (`audit/context.py:67-73`, 300s timeout) while the same function batches
-   search at 50 and dependents at 15 — cluster-wide audits funnel the heaviest call into a
-   single request (timeout / oversized-payload risk).
+1. ~~**14.1:** `build_context` exports ALL model TMLs in ONE unbatched call.~~ **DONE** —
+   model TML export now batched at 50 with `raise_for_status=False` and per-batch error
+   tolerance, matching the answer export pattern. (ts-cli v0.76.0)
 2. **14.3:** `ts tables create` costs up to 2N round-trips (per-table singleton import +
    per-table GUID search, `tables.py:132-161`); the import API accepts a list with PARTIAL
    + per-object statuses. Keep individual re-drive on JDBC errors.
-3. **14.4:** the audit AI-instructions fetch is N+1 AND records a failed fetch as `{}`,
-   so errors read as "missing AI instructions" in A-angle findings — record failures in a
-   context warnings list (batch only if the spec allows; verify via MCP first).
+3. ~~**14.4:** the audit AI-instructions fetch records failed fetches as `{}`, so errors read
+   as "missing AI instructions" in A-angle findings.~~ **DONE** — failed fetches now
+   recorded in `AuditContext.warnings` (not as `{}`); A3 skips models whose fetch failed
+   instead of flagging false positives; A5 scoring unaffected (falls back to TML-embedded
+   instructions). (ts-cli v0.76.0)
 
 ### Approach
 
-Batch the model export like the answer export (50 per batch, per-batch failure tolerance);
-first-pass batched import for tables create with individual retry on error; warnings list
-for AI-instructions fetch failures.
+~~Batch the model export like the answer export;~~ ~~warnings list for AI-instructions
+fetch failures;~~ first-pass batched import for tables create with individual retry on
+error.
 
-**Target:** 2026-09-30.
+**Target:** 14.3 by 2026-09-30.
 
 ---
 
