@@ -611,37 +611,10 @@ Execute via the SQL execution pattern. The response `data_array` contains rows
 the data type mapping in
 [../../shared/mappings/ts-databricks/ts-from-databricks-rules.md](../../shared/mappings/ts-databricks/ts-from-databricks-rules.md).
 
-**Choose how to identify the connection — don't dump the full list by default.** A long
-connection list is noise when the user already knows the one they want. Ask first:
-
-```
-How would you like to choose the ThoughtSpot connection?
-  N  Name it     — type the exact connection name; I'll use it directly
-  F  Filter      — give a partial string; I'll list only connections that match
-  L  List all    — show every connection and pick by number
-
-Enter N / F / L:
-```
-
-Then fetch the connections once (auto-paginated, returns all of the specified type):
-
-```bash
-ts connections list --type DATABRICKS --profile {profile}
-```
-
-Resolve the user's choice against that result:
-
-- **N (name it)** — match the typed name against the returned `name` values
-  (case-sensitive). Exactly one match → use it. No match → show the closest names and
-  re-ask. Don't fabricate a name the list doesn't contain — the table TML needs the exact,
-  case-sensitive connection name.
-- **F (filter)** — keep connections whose `name` contains the string (case-insensitive),
-  show them as a short numbered list (name, type, database), and pick from that. One match
-  → auto-select and confirm; none → widen the string or switch to **L**.
-- **L (list all)** — show the full numbered list and pick by number.
-
-If only one connection exists in total, auto-select it and confirm regardless of the choice.
-Use the exact `name` value from the API response in the table TML.
+**Choose the ThoughtSpot connection** using the **N/F/L connection selection** flow in
+[../../shared/references/connection-select.md](../../shared/references/connection-select.md),
+with `--type DATABRICKS` on the `ts connections list` call. No E/C prompt — Databricks
+connection creation is out of this skill's scope (see note below).
 
 > **No suitable connection?** A ThoughtSpot connection only sees catalogs its Databricks
 > credentials are granted. If no existing connection can see the source catalog, table
