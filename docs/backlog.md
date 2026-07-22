@@ -3238,7 +3238,7 @@ validators PR rather than bundled.
 
 ---
 
-## BL-118 — Write a smoke test for `ts-convert-from-sisense`
+## BL-119 — Write a smoke test for `ts-convert-from-sisense`
 
 **Filed:** 2026-07-17.
 **Source:** new wip skill `ts-convert-from-sisense` (Sisense offline-bundle → ThoughtSpot).
@@ -3254,7 +3254,7 @@ backlog item is the dated exit that exemption's comment references. Author
 `parse → build-model → build-liveboard` chain can be exercised end-to-end.
 
 **Target:** first live end-to-end verification against a captured Sisense bundle (open-item #1).
-## BL-118 — Live end-to-end verification for `ts-convert-from-qlik`
+## BL-120 — Live end-to-end verification for `ts-convert-from-qlik`
 
 **Filed:** 2026-07-21.
 **Source:** initial `ts-convert-from-qlik` release (PR #254).
@@ -3270,3 +3270,75 @@ extraction paths against a real tenant/engine (open-items #6) — currently mock
 recover table joins/associations from engine-artifacts mode (open-items #3).
 
 **Target:** first live-verification pass against a real Qlik app + ThoughtSpot instance.
+
+## BL-121 — ts-cli code dedup: profile loading, JSON helpers, bare-except, stdin import
+
+**Filed:** 2026-07-22.
+**Source:** 2026-07-22 full audit, findings 4.1–4.5.
+**Status:** OPEN.
+
+Five ts-cli code-quality items from the audit:
+- **4.1** Profile loading duplicated across 4 call sites (Snowflake/Databricks `load.py` x2,
+  `_common.py` x2) — consolidate onto `profile_ops.load_platform_profiles`
+- **4.2** JSON file-load helpers duplicated across 4 modules (snowflake.py, databricks.py,
+  tableau.py, sisense.py) — extract to shared utility
+- **4.3** Bare `except Exception` in `_find_guid_by_name` silently swallows errors — RLS
+  two-pass import pass 2 silently skips; same pattern in connections.py and snowflake.py
+- **4.4** Smoke tests duplicate Snowflake connector logic from `load.py` — `_common.py`
+  re-implements with different credential resolution
+- **4.5** `snowflake.py` uses superseded stdin JSON-array import pattern
+
+**Target:** batch refactor PR when next touching these modules.
+
+## BL-122 — Cross-skill prompt/discovery extraction (connection, tables, import errors)
+
+**Filed:** 2026-07-22.
+**Source:** 2026-07-22 full audit, findings 11.3–11.5.
+**Status:** OPEN.
+
+Three near-identical prose blocks duplicated across 4+ conversion skills:
+- **11.3** Connection selection prompt (N/F/L + E/C) — near-verbatim in from-snowflake-sv,
+  from-databricks-mv, from-tableau, model-aggregates. Already shipped as
+  `agents/shared/references/profile-select-and-authenticate.md` for auth; the connection
+  prompt needs a similar shared reference or a `ts connections pick` command
+- **11.4** Table discovery pattern (C/I scope + metadata search + column verification +
+  Table Plan summary) — duplicated with identical logic, already patched skill-by-skill
+  once (2026-06-16). See also BL-111 (`--connection` filter on `ts metadata search`)
+- **11.5** Post-import verification + import error table — 8 of 10 error-table rows
+  identical between from-snowflake-sv and from-databricks-mv. Extract error table to
+  `agents/shared/schemas/ts-tml-import-gate.md` (already exists but lacks the error table)
+
+**Target:** extract shared references when next editing the conversion skills.
+
+## BL-123 — Product currency gaps from 2026-07-22 audit
+
+**Filed:** 2026-07-22.
+**Source:** 2026-07-22 full audit, findings 13.1, 13.5, 13.7–13.10.
+**Status:** OPEN.
+
+Platform-specific documentation gaps identified by the product-currency specialists:
+- **13.1** `PARTIAL_OBJECT` import policy undocumented in authoritative schema docs
+  (available since 10.5.0.cl; ts-cli README lists it)
+- **13.5** `cortex_search_service` is an object, not a string in `snowflake-schema.md`
+  (low converter impact — neither direction emits this field)
+- **13.7** Missing `median()` mapping for Databricks formula translation
+- **13.8** Wildcard field expressions (`source.*`, `EXCEPT`) undocumented in MV schema
+- **13.9** 6 Tableau date functions missing from mapping (ISOYEAR/ISOQUARTER/ISOWEEK/
+  ISOWEEKDAY → reject; standalone QUARTER/WEEK → map)
+- **13.10** 7 Tableau window/rank variants missing (WINDOW_CORR/COVAR/COVARP/STDEVP/
+  VAR/VARP + RANK_PERCENTILE → reject list)
+
+**Target:** address per-platform as part of the weekly external sweep.
+
+## BL-124 — Orphaned proposal doc and quality gates enforcement
+
+**Filed:** 2026-07-22.
+**Source:** 2026-07-22 full audit, findings 1.5, 7.3.
+**Status:** OPEN.
+
+- **1.5** `docs/single-pass-formula-cross-ref-import.md` has no BL-NNN entry; two action
+  items untracked
+- **7.3** Quality gates enforcement is inverted (hard local, soft CI) — accepted tradeoff
+  for contributor-friendliness, but should be documented in `docs/quality-gates.md`
+
+**Target:** address when next editing docs/ or quality gates infrastructure.
