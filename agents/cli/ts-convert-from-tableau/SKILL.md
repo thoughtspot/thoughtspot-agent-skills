@@ -1424,74 +1424,39 @@ mkdir -p /tmp/ts_tableau_mig/output/{workbook_name}
 > **Scope gate:** runs for scopes 1, 2, 5. **Skip for scope 3** (LB only — no tables)
 > and **scope 4** (Models only — tables already exist; use GUIDs from Step 4).
 
-For each physical table identified in Step 3 with `type="table"`, generate a
-`.table.tml` file. **Skip custom SQL relations** — those are handled in Step 5c.
+> **Prerequisite:** ts-cli v0.77.0+.
 
-Follow all rules in `tableau-tml-rules.md`.
+`ts tableau build-model` (GENERATE mode, no `--existing-guid`) emits Table TML
+automatically — **no hand-assembly**. It writes one `.table.tml` per physical table
+identified in Step 3 with `type="table"` to `{output_dir}/{TABLE_NAME}.table.tml`.
+**Custom SQL relations are excluded** — those are handled in Step 5c.
 
-**Template:**
-
-```yaml
-table:
-  name: TABLE_NAME
-  db: RESOLVED_DATABASE
-  schema: RESOLVED_SCHEMA
-  db_table: physical_table_name
-  connection:
-    name: "{connection_name}"       # exact ThoughtSpot connection name, case-sensitive — NOT a GUID
-  columns:
-  - name: COLUMN_NAME
-    db_column_name: COLUMN_NAME
-    data_type: VARCHAR              # VARCHAR | INT64 | DOUBLE | FLOAT | BOOL | DATE | DATETIME
-    properties:
-      column_type: ATTRIBUTE        # or MEASURE
-      aggregation: SUM              # only if MEASURE — SUM | AVERAGE | COUNT
-    db_column_properties:
-      data_type: VARCHAR            # must match data_type above
+```bash
+ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+  --datasource "{datasource_name}" --output-dir {output_dir} \
+  --database "{database}" --schema "{schema}"
 ```
 
-Key rules:
-- `connection.name` is **required** — a ThoughtSpot logical table must sit on a connection
-  that already exposes the physical table and its columns. Use the connection **name**
-  directly (case-sensitive); never look up a GUID — the v2 API cannot search connections
-  by name, and the name is what the TML needs. See `../../shared/schemas/thoughtspot-table-tml.md`
-  "Connection Reference".
-- Use the `db`, `schema` values resolved from Step 4.5 (the connection is required, so these
-  are always real).
-- **`db_column_name` must match the physical column the connection exposes — not the
-  Tableau name.** When a file source (CSV/Excel) was loaded into the warehouse, the loader
-  usually normalizes names (`Item Type` → `ITEM_TYPE`: spaces→`_`, upper-cased). Use the
-  warehouse column name for `db_column_name` (and the friendly Tableau caption for the
-  model column's display `name`). If unsure, the connection schema from Step 4.5
-  (`externalDatabases`) lists the real column names; validation reports
-  `column not found in connection` when they don't match.
-- **Date stored as VARCHAR — flag it.** If the Tableau column is typed `date`/`datetime`
-  but the warehouse column is **VARCHAR** (common when a CSV date loaded as text), binding
-  it as VARCHAR loses all date capability (no buckets/trends/relative-date filters; Spotter
-  won't read it as time). The TS column `data_type` must match the physical column, so you
-  can't just declare `DATE`. Surface it and offer: **(a)** retype at the source (warehouse
-  `ALTER`/reload to a real `DATE` — outside this skill; needs the user) then bind as `DATE`,
-  or **(b)** keep VARCHAR and add a `to_date([col])` **derived formula column** for
-  date analytics. Don't silently bind a date as a string.
-- **Partial date strings must produce a full `YYYY-MM-DD` date.** When a source column
-  contains a year-only value (e.g. `_2016_17`, `FY2016`, `2016`) and needs to become a
-  DATE, always append `-01-01` (or `-01` for year-month) to produce a complete date.
-  A bare-year conversion like `to_date('2016', 'yyyy')` produces an ambiguous value that
-  ThoughtSpot cannot bucket (`.yearly`, `.monthly`), use for KPI sparklines, or filter as
-  a date range. If the datasource already uses a **SQL View**, apply the conversion in the
-  SQL query (`TO_DATE(SUBSTRING(col, 2, 4) || '-01-01', 'YYYY-MM-DD')`). If it uses a
-  **regular table**, apply it as a model formula
-  (`to_date ( concat ( substr ( [col] , 1 , 4 ) , '-01-01' ) , 'yyyy-MM-dd' )`). See `tableau-tml-rules.md`
-  "Date Column Rules" for the full pattern table.
-- Use `INT64` for Tableau `integer` — **never `INT`**
-- `db_column_properties` is **required** on every column
-- No `guid` or `fqn` sections
-- If validation (Step 6) returns `connection not found`, the name/case is wrong; if it
-  returns `column not found in connection`, the physical table/column the connection sees
-  doesn't match `db_table`/`db_column_name` — both are surfaced there, so a wrong binding
-  fails loudly rather than silently.
+Pass `--database`/`-D` and `--schema`/`-s` with the `db`/`schema` values resolved in
+Step 4.5, so the emitted table(s) bind to the real physical location.
 
-Write each file to `/tmp/ts_tableau_mig/output/{workbook_name}/{TABLE_NAME}.table.tml`.
+- **Single-table datasources** (the common case): one `.table.tml` with every
+  physical column.
+- **Multi-table datasources**: one `.table.tml` per table, columns assigned to their
+  owning table. A column whose owning table can't be resolved from the parse is left
+  off every table (never guessed onto one) and reported in the result JSON's
+  `table_columns_unassigned` — **reconcile these with the user before import** (confirm
+  the correct table and add the column by hand, or fix the mismatch upstream via
+  `--table-name-map` if it's really a table-naming issue).
+
+Follow all rules in `tableau-tml-rules.md` when reviewing the emitted file — in
+particular **db_column_name accuracy** (a warehouse loader can normalize names
+differently than the TWB), **date-stored-as-VARCHAR** detection, and the
+**partial-date-string** pattern (`tableau-tml-rules.md` "Date Column Rules"):
+`build-model` carries over the TWB's own type/name metadata and has no live-schema
+visibility, so these are still worth a human check before import. Validation
+(Step 6) surfaces a wrong binding as `connection not found` or
+`column not found in connection`.
 
 ### 5b. Model TML — one per datasource (strict separation)
 
@@ -4339,6 +4304,7 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.30.0 | 2026-07-23 | build-model emits Table TML per physical table (parity with other converters). |
 | 1.29.1 | 2026-07-22 | Stop emitting vestigial `*.phase1+.model.tml` files in GENERATE mode — only `*.phase0.model.tml` (base) and `*.model.tml` (full) are written. `--model-phase base` no longer needed in lint/import commands. Prereq ts-cli v0.73.0. |
 | 1.29.0 | 2026-07-18 | **Step 6 migration-fidelity gate — `ts tableau verify`.** After the `ts tml lint` structural gate, diff the Step 3 parse output (`{workbook}_parsed.json`) against each generated base Model TML to catch what a TWB-only coverage count and a server-side `VALIDATE_ONLY` import both miss: **silent drops** (a translatable formula / table / join the workbook had but the model doesn't — untranslatable formulas correctly excluded via the shared `classify-formulas` tiers) and **mistranslations** (token-level LCS similarity buckets MATCH/PARTIAL/LOW/MISSING). A `structural` ERROR gates a faithful migration; PARTIAL/LOW + limitation-coverage are review prompts, not blocks. Complements (does not replace) the Step 11.5 / Step 12 coverage report; cross-reference dangling-ref checking stays `ts tml lint --dir`'s job. Prereq ts-cli v0.62.0. |
 | 1.28.0 | 2026-07-15 | **Spotter last-mile + chart/layout fidelity.** (1) **New Step 12.6 — Spotter Last-Mile:** after Step 12.5 leaves a measure parked, optionally ask Spotter to express its intent as a ThoughtSpot Search via the new `ts spotter answer` command (wraps `POST /api/rest/2.0/ai/answer/create`; returns `tokens`/`display_tokens`). Opt-in, gated on Spotter enablement (Step 5.5) + `CAN_USE_SPOTTER`; **surfaces** the suggested Search, requires a **verified number match** (Step 11.5 coverage answer or `ts spotql fetch-data`) before adopting, else leaves it ⏸ Parked. Never auto-adopts. Can materialize an adopted measure as a Step 11.5 coverage tile seeded from Spotter's `tokens` + `visualization_type` (human-approved). (2) **Step 10a combo/dual-axis fidelity:** a Tableau dual-axis (Bar + Line) viz → `ADVANCED_LINE_COLUMN` + both measures on `axis_configs.y`, which ThoughtSpot auto-resolves; the exact split is pinned via capture-and-replay of an exported (GUID-based) `custom_chart_config` (hand-authored display-name configs error `Invalid GUID string` on fresh import — live-verified); new shared worked example. (3) **Step 9c layout fidelity:** container-tree walk (horz/vert) with proportional column split (largest-remainder → sum 12) + aspect-ratio height + floating-zone handling, replacing the flat y-band heuristic. (4) **Step 10b format + color/mark fidelity:** currency/number/decimal formats → `answer_columns[].format`; Color shelf → Muze `slice-with-color`; small multiples → `trellis-by`; series palettes → `viz_style`; measure sort → `sorted by`. (5) **Step 10c now emits answer + liveboard TML deterministically** via the new `ts tableau build-liveboard` command — role-aware axis layout (Columns→x, Color→series, Rows→pivot, measures→y; pivot gets `axis_configs` or renders blank), a chart-type requirement floor (flags, never downgrades), and overrides capture-and-replay (`format`/`client_state_v2`/`custom_chart_config`/`viz_style`), replacing the hand-written per-viz YAML. ThoughtSpot-side emission ported from the verified standalone Power BI converter; 26 unit tests. **Live-verified on ps-internal 2026-07-15** (real model round-trip): fixed two bugs the live import caught that lint did not — bucketed dates now use the resolved output name (`Month(Date)`), and a display-name `custom_chart_config` is dropped in favour of `ADVANCED_LINE_COLUMN` auto-resolution (its refs must be GUIDs). Open item #20 (build-liveboard live-verified; parser role-extraction is the remaining follow-on); #17–#19 track the other live gaps (Spotter call, currency/number format sub-config, sort token). Prereq ts-cli v0.55.0. |
