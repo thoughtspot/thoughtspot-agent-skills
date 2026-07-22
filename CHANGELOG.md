@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-23
+- perf: bump ts-cli to v0.78.0 — batch `ts tables create` imports (50 per call), individual JDBC retry (BL-073 item 14.3)
 - docs: add connection-select shared reference — extract N/F/L + E/C prompt from conversion skills (BL-122 item 11.3)
 - feat: ts tableau build-model emits Table TML
 - chore: bump ts-cli to v0.77.0
