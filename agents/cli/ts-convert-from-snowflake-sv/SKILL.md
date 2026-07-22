@@ -1182,62 +1182,14 @@ The command handles:
 Parse the **summary JSON from stdout** — it includes `import_status` and `model_guid`.
 On `import_status: "failed"`, `import_error` gives the error details.
 
-**Common import errors:**
-
-| Error | Likely cause | Fix |
-|---|---|---|
-| `referencing_join not found` | Join name is wrong or join doesn't exist at table level | Export table TML again and verify join name |
-| `column_id not found` | Column name is wrong — left-hand side of semantic view dimension used instead of ThoughtSpot Table TML column name | Check Table TML for the correct column name |
-| `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on an inline join | Add `with: {target_id}` to every inline join entry |
-| `{table_name} does not exist in schema` (on `with` field) | `with` value is wrong case or doesn't match any `id` | Ensure `with` matches the target's `id` exactly — same case as `name` |
-| `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` in model_tables | Check that both `[table1::col]` refs in `on` use `id` values, not Snowflake table names |
-| `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — if two aliases map to the same Snowflake object, keep only one entry |
-| `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-run Step 6A to get fresh GUIDs |
-| `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
-| YAML mapping error on formula with `{` | `last_value` or similar formula with `{ [col] }` emitted as inline YAML string | Use `>-` block scalar for `expr` — see Step 9 for pattern |
-| YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |
+**Common import errors:** see
+[`ts-tml-import-gate.md` § 4](../../shared/schemas/ts-tml-import-gate.md#4-common-import-errors).
 
 ---
 
 ### Step 11b: Verify Import
 
-After a successful import response, confirm the model was indexed and has the expected
-shape — not just that the API returned 200.
-
-**1. Search for the model by GUID:**
-
-```bash
-source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{view_name}%" --profile {profile}
-```
-
-The GUID returned by the import response must appear in the results. If it is absent,
-the import succeeded at the API level but indexing is delayed — wait 5 seconds and
-retry once.
-
-**2. Export the imported model and count columns:**
-
-```bash
-source ~/.zshenv && ts tml export {created_guid} --fqn --profile {profile}
-```
-
-Parse the returned TML and count `model.columns[]` entries. This count must be ≥ the
-number of translatable fields from the semantic view (i.e. total dimensions + metrics,
-minus any omitted from the untranslatable list in Step 9).
-
-If the column count is lower than expected: compare the exported TML against the TML
-sent in Step 11 to identify which columns ThoughtSpot silently dropped, and investigate.
-
-**3. Report the model URL:**
-
-```
-Model imported successfully.
-
-  Name:    {view_name}
-  GUID:    {created_guid}
-  URL:     {base_url}/#/model/{created_guid}
-
-Open the URL in a browser to verify the model appears in the ThoughtSpot Data panel.
-```
+Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md#5-post-import-verification).
 
 ---
 
@@ -1361,6 +1313,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.17.1 | 2026-07-22 | Import error table + post-import verification extracted to shared `ts-tml-import-gate.md` §4/§5 (BL-063 phase 1c) |
 | 1.17.0 | 2026-07-22 | Rewire onto deterministic CLI commands: Step 4 → `ts snowflake parse-sv`, Step 9 → `ts snowflake translate-formulas`, Steps 8/10-FILE/11 → `ts snowflake build-model`. Removes 8 inline Python code blocks — DDL parsing, formula translation, model TML assembly, YAML serialization, and import are all deterministic. Step 6B adds `ts snowflake introspect` for Scenario B table creation. Mode C updated to use CLI commands. Step 8 becomes "Assemble tables map". (BL-063 phase 1a) |
 | 1.16.2 | 2026-07-15 | JSON/VARIANT path access: emit `['key']['subkey']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects Snowflake colon-and-dot path syntax (`PARSE_JSON(x):a.b`) even though it is valid Snowflake SQL. Verified 2026-07-15. |
 | 1.16.1 | 2026-07-11 | Remove the dead `direct-api-auth.md` reference-table row (the doc taught a curl + `/tmp/ts_token.txt` fallback now prohibited by `ts-cli.md`/`security.md`, with no step logic using it); doc retired repo-wide (BL-109). |

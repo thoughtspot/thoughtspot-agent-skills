@@ -896,63 +896,16 @@ With `--profile`, the command imports the model TML via
 `ts tml import --policy PARTIAL` after a clean lint, and reports
 `import_status` and `model_guid` in the summary JSON. **Save the GUID** —
 required for any future update import. On `import_status: "failed"` read
-`import_error` and consult the table below.
+`import_error` and consult the common error table.
 
-**Common import errors:**
-
-| Error | Likely cause | Fix |
-|---|---|---|
-| `column_id not found` | Column name is wrong — MV dimension name used instead of ThoughtSpot Table TML column name | Export Table TML and verify column names |
-| `Compulsory Field ... joins(N)->with is not populated` | Missing `with` field on an inline join | Add `with: {target_id}` to every inline join entry |
-| `{table_name} does not exist in schema` (on `with` field) | `with` value doesn't match any `id` in model_tables | Ensure `with` matches the target's `id` exactly — same case as `name` |
-| `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` | Check that both `[table::col]` refs in `on` use `id` values |
-| `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — keep only one entry |
-| `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-run Step 8A to get fresh GUIDs |
-| `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
-| YAML mapping error on formula with `{` | Formula with `{ [col] }` emitted as inline YAML string | The CLI's YAML emitter quotes `{` correctly; this arises only in hand-edited TML |
-| YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |
+**Common import errors:** see
+[`ts-tml-import-gate.md` § 4](../../shared/schemas/ts-tml-import-gate.md#4-common-import-errors).
 
 ---
 
 ### Step 11b: Verify Import
 
-After a successful import response, confirm the model was indexed and has the expected
-shape — not just that the API returned 200.
-
-**1. Search for the model by GUID:**
-
-```bash
-source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{view_name}%" --profile {profile}
-```
-
-The GUID returned by the import response must appear in the results. If it is absent,
-the import succeeded at the API level but indexing is delayed — wait 5 seconds and
-retry once.
-
-**2. Export the imported model and count columns:**
-
-```bash
-source ~/.zshenv && ts tml export {created_guid} --fqn --profile {profile}
-```
-
-Parse the returned TML and count `model.columns[]` entries. This count must be >= the
-number of translatable fields from the MV (total dimensions + measures, minus any
-entries in translated.json's `skipped[]`).
-
-If the column count is lower than expected: compare the exported TML against the TML
-sent in Step 11 to identify which columns ThoughtSpot silently dropped, and investigate.
-
-**3. Report the model URL:**
-
-```
-Model imported successfully.
-
-  Name:    {view_name}
-  GUID:    {created_guid}
-  URL:     {base_url}/#/model/{created_guid}
-
-Open the URL in a browser to verify the model appears in the ThoughtSpot Data panel.
-```
+Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md#5-post-import-verification).
 
 ---
 
@@ -1025,6 +978,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.8.4 | 2026-07-22 | Import error table + post-import verification extracted to shared `ts-tml-import-gate.md` §4/§5 (BL-063 phase 1c) |
 | 1.8.3 | 2026-07-15 | JSON path access: ThoughtSpot's formula parser rejects Databricks colon-path syntax (`col:field.subfield`) in `sql_*_op` pass-throughs. Emit `get_json_object({0}, '$.field.subfield')` — bracket notation on `parse_json` FAILS on Databricks (`VARIANT` is not a complex type). Live-verified on Databricks 2026-07-15. |
 | 1.8.2 | 2026-07-11 | Databricks MV schema: `parameters:` GA + tiered runtime requirement (16.4/17.3/18.1/18.2) documented (audit 13.1/13.10). |
 | 1.8.1 | 2026-07-10 | Pre-import lint gate extracted to shared `ts-tml-import-gate.md` (BL-063 PR5) — content unchanged, now linked. |

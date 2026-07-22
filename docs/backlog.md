@@ -1716,16 +1716,13 @@ expression ends with `)` after `else`, but rare enough to be acceptable as a war
 
 **Source:** Architectural comparison of conversion skill implementations (2026-06-28)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, tools/ts-cli
-**Status:** PARTIALLY DONE — the two Snowflake quick wins (`ts snowflake diff` +
-`ts snowflake lint-ddl`) shipped 2026-07-03 (ts-cli v0.30.0; see the Scope extension
-section below). The Databricks track is now DONE through phases 2a/2b/2c + the
-Databricks half of Phase 4: `ts databricks parse-mv` (PR #200, ts-cli v0.42.0),
-`ts databricks translate-formulas` (PR #202, ts-cli v0.43.0), and `ts databricks
-build-model` + `ts-convert-from-databricks-mv` SKILL.md rewiring (PR4, ts-cli v0.44.0,
-2026-07-10 — see Update below), pending only PR 5 (shared lint+import extraction +
-Genie-vendoring surface widening). Snowflake phases 1a-1c, `build-sv`, the Snowflake
-half of Phase 4, and the shared lint+import procedure remain OPEN — assess feasibility
-before scheduling those.
+**Status:** DONE — all phases complete. Databricks track (2a/2b/2c + Phase 4 Databricks
+half) shipped earlier. Snowflake SKILL.md rewiring: `ts-convert-from-snowflake-sv` rewired
+onto `parse-sv` / `translate-formulas` / `build-model` (PR #286, 2026-07-22);
+`ts-convert-to-snowflake-sv` rewired onto `build-sv` (PR #287, 2026-07-22). Phase 1c
+(shared import error table + post-import verification extracted to `ts-tml-import-gate.md`
+§4/§5, replacing ~100 lines of near-verbatim duplication across from-snowflake-sv and
+from-databricks-mv) completed PR #288, 2026-07-22.
 **Related:** BL-032 (Databricks parser support), BL-014 (Databricks coverage review)
 
 ### Problem
