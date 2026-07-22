@@ -6,9 +6,10 @@ description: Convert or import a Snowflake Semantic View into ThoughtSpot as a M
 # Snowflake Semantic View → ThoughtSpot Model
 
 Converts a Snowflake Semantic View into a ThoughtSpot Model. Reads the semantic
-view DDL via `GET_DDL`, maps tables, relationships, dimensions, and metrics to
-ThoughtSpot TML, translates SQL expressions to ThoughtSpot formulas, and imports
-the result via `ts tml import`.
+view DDL via `GET_DDL`, then uses three deterministic CLI commands —
+`ts snowflake parse-sv` (DDL → structured JSON), `ts snowflake translate-formulas`
+(SQL → ThoughtSpot formulas), and `ts snowflake build-model` (JSON → Model TML +
+import) — to map tables, relationships, dimensions, and metrics to ThoughtSpot TML.
 
 Two scenarios are supported:
 - **Scenario A (existing tables):** ThoughtSpot Table objects already exist for the
@@ -100,17 +101,16 @@ Steps:
   1.5. Choose session mode (A: single / B: merge / C: update) . you choose
   2.   Identify the semantic view ......................... you choose
   3.   Get the semantic view DDL .......................... auto
-  4.   Parse the DDL (synonyms, descriptions, range joins,
-       filter labels, verified queries) .................... auto
+  4.   Parse the DDL ..................................... auto (ts snowflake parse-sv)
   5.   Table registration question (reuse or create) ...... you choose
   6.   Discover / create ThoughtSpot Table objects ........ auto (may ask for clarification)
   6D.  Apply SV table descriptions to TS Table TMLs ....... auto (when SV has table comments)
   7.   Find join names (Scenario A) ...................... auto
-  8.   Build the model TML (incl. column synonyms/desc) ... auto
-  9.   Translate SQL expressions → ThoughtSpot formulas ... auto
+  8.   Assemble tables map ............................... auto
+  9.   Translate SQL expressions → ThoughtSpot formulas ... auto (ts snowflake translate-formulas)
   9.5. Confirm Spotter enablement (default: enabled) ...... you choose
  10.   Review checkpoint — inspect TML before import ...... you confirm
- 11.   Import the model into ThoughtSpot .................. auto
+ 11.   Import the model into ThoughtSpot .................. auto (ts snowflake build-model)
  12.   Verify import and produce summary report ........... auto
  12.5. Import verified queries as NLS Feedback ............ auto (when SV has verified queries)
 
@@ -196,32 +196,24 @@ do not attempt to auto-match by name.
 
 Run simultaneously:
 
+**SV side** — fetch and parse the DDL:
 ```sql
 SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{sv_name}');
 ```
+```bash
+printf '%s' "$DDL" > sv_ddl.sql
+source ~/.zshenv && ts snowflake parse-sv sv_ddl.sql --output parsed.json
+source ~/.zshenv && ts snowflake translate-formulas --input parsed.json --output translated.json
+```
 
+**ThoughtSpot side** — export the existing model:
 ```bash
 source ~/.zshenv && ts tml export {model_guid} --profile {profile} --fqn --associated --parse
 ```
 
-Parse the SV DDL using the existing Step 4 logic. Extract from the Model bundle:
-
-```python
-model_tml   = next(i["tml"]["model"] for i in bundle if i["type"] == "model")
-existing = {}
-for col in model_tml.get("columns", []):
-    existing[col["name"]] = {
-        "description":  col.get("description", ""),
-        "synonyms":     col.get("properties", {}).get("synonyms", []),
-        "ai_context":   col.get("properties", {}).get("ai_context"),   # read-only
-        "formula_id":   col.get("formula_id"),
-        "column_id":    col.get("column_id"),
-    }
-existing_formulas = {
-    f["id"]: f.get("expr", "")
-    for f in model_tml.get("formulas", [])
-}
-```
+Extract from the Model bundle: the `model` TML dict, its `columns[]` (with description,
+synonyms, ai_context, formula_id, column_id per column), and its `formulas[]` (keyed
+by `id` → `expr`). These are used by `ts snowflake diff` in Step C3.
 
 ---
 
@@ -233,41 +225,12 @@ parser-based check, same rationale as the `ts tml lint` pre-import gate. Join-gr
 comparison stays a separate, skill-local step (below) since it needs the model's
 join shape, not just column text — `ts snowflake diff` only compares columns.
 
-**IMPORTANT:** translate each SV formula expression through the formula translation
-reference FIRST (Step 9 resolution) before writing the "new" map below, THEN this
-compares TS-formula-to-TS-formula. Comparing raw SQL to TS formula text flags every
-formula column as modified.
+**IMPORTANT:** the SV side was already translated via `ts snowflake translate-formulas`
+in Step C2 — the comparison is TS-formula-to-TS-formula, not raw SQL to TS formula.
 
-Build the two column maps and write them to temp JSON files:
-
-```python
-import json
-
-current_cols = {}
-for col_name, ts_col in existing.items():
-    entry = {
-        "description": ts_col.get("description", ""),
-        "synonyms": ts_col.get("synonyms", []),
-    }
-    if ts_col.get("formula_id"):
-        entry["expr"] = existing_formulas.get(ts_col["formula_id"], "")
-    current_cols[col_name] = entry
-
-new_cols = {}
-for col_name, sv_col in sv_parse["columns"].items():
-    entry = {
-        "description": sv_col.get("description", ""),
-        "synonyms": sv_col.get("synonyms", []),
-    }
-    if col_name in sv_formulas:
-        entry["expr"] = translate_sv_to_ts(sv_formulas[col_name])  # Step 9 resolution
-    new_cols[col_name] = entry
-
-with open("/tmp/ts_sv_diff_model.json", "w") as f:
-    json.dump(current_cols, f)
-with open("/tmp/ts_sv_diff_sv.json", "w") as f:
-    json.dump(new_cols, f)
-```
+Build the two column maps and write them to temp JSON files. The "current" map comes
+from the exported Model TML (description, synonyms, formula expr per column). The "new"
+map comes from `translated.json` (description, synonyms, `ts_expr` per translated entry).
 
 ```bash
 ts snowflake diff --current /tmp/ts_sv_diff_model.json --new /tmp/ts_sv_diff_sv.json \
@@ -284,11 +247,9 @@ Parse the printed `change_set` JSON from stdout — `new_columns`, `removed_colu
 `removed`), `modified_expressions` — then add the join comparison, which is not
 part of `ts snowflake diff`'s output:
 
-```python
-change_set["join_changes"] = []
-# Join changes: compare sv_parse["relationships"] vs model join graph
-# Flag any relationship not present in the existing model (name or endpoint differs)
-```
+Add the join comparison (not part of `ts snowflake diff`'s column-only output):
+compare `parsed.json`'s `relationships[]` vs the existing model's join graph.
+Flag any relationship not present in the existing model (name or endpoint differs).
 
 ---
 
@@ -361,22 +322,20 @@ Deep-copy the existing Model TML. Apply only the confirmed changes:
 | Data Model Instructions | **Never touch** |
 | Removed columns | **Never touch** |
 
-Place `guid` at the document root (not nested under `model:`) and import with
-`--no-create-new` to update the existing model in place. The import will fail if
-the GUID is not found — surface the error clearly and stop.
+Build `tables.json` from the existing model's table GUIDs (same format as Step 8), then
+import with `build-model --existing-guid`:
 
-```python
-top_level = {"guid": model_guid, "model": model_dict}
-model_tml_str = yaml.dump(top_level, default_flow_style=False, allow_unicode=True)
-
-result = subprocess.run(
-    ["bash", "-c",
-     f"source ~/.zshenv && ts tml import --policy ALL_OR_NONE "
-     f"--no-create-new --profile '{profile_name}'"],
-    input=json.dumps([model_tml_str]),
-    capture_output=True, text=True,
-)
+```bash
+source ~/.zshenv && ts snowflake build-model \
+  --parsed parsed.json --translated translated.json --tables tables.json \
+  --model-name "{model_name}" --output-dir ./tml_out \
+  --existing-guid {model_guid} \
+  --profile {profile}
 ```
+
+The `--existing-guid` flag stamps `guid` at the document root and skips the two-pass
+phase 1 (update-in-place). The import will fail if the GUID is not found — surface the
+error from the summary JSON's `import_error` field.
 
 ---
 
@@ -530,96 +489,35 @@ After confirmation, continue with Step 4 using the merged result.
 
 ### Step 4: Parse the DDL
 
-Read and parse the DDL returned in Step 3. The DDL is a SQL `CREATE OR REPLACE
-SEMANTIC VIEW` statement. See [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md)
-for the full format — it is NOT the hypothetical nested format; the real format has flat
-`dimensions` and `metrics` sections at the view level.
+Write the DDL from Step 3 to a file and parse it with `ts snowflake parse-sv`:
 
-Extract the following:
+```bash
+printf '%s' "$DDL" > sv_ddl.sql
+source ~/.zshenv && ts snowflake parse-sv sv_ddl.sql --output parsed.json
+```
 
-1. **View identity:** database, schema, view name.
-   - Top-level `comment='...'` (after the metrics block, before `with extension`) → Model description.
-2. **Tables block:** for each table entry, record:
-   - Fully-qualified table reference (`DB.SCHEMA.TABLE`) — this is the Snowflake view/table
-   - Table alias (explicit `ALIAS as DB.SCHEMA.TABLE`, or defaults to last segment of the name)
-   - Primary key column(s) (if present — marks this as a join target)
-   - **Range constraint** (if present): `constraint <NAME> distinct range between <START> and <END> exclusive`
-     — extract constraint name, start column, end column. Stored in `range_constraints` map
-     keyed by table alias. Used in Step 8 to generate range join `on` expressions.
-   - **Table-level `comment='...'`** if present → maps to TS Table TML `table.description`.
-3. **Relationships block:** for each relationship, record name, from table alias, from
-   column(s), to table alias, to column(s), and **join style**:
-   - **Equi-join (standard):** `REL_NAME as FROM(COL) references TO(COL)` — record as
-     `join_style: "equi"`.
-   - **Composite equi-join:** `REL_NAME as FROM(COL1, COL2) references TO(COL1, COL2)` —
-     multiple column pairs. Record as `join_style: "equi"` with parallel column lists.
-   - **Range join (BETWEEN):** `REL_NAME as FROM(COL) references TO(between START and END exclusive)` —
-     record as `join_style: "range"`, with `to_start` and `to_end` columns from the
-     BETWEEN clause. The `exclusive` keyword means half-open interval (`>=` start, `<` end).
-   - **ASOF join:** `REL_NAME as FROM(COL1, COL2) references TO(COL1, ASOF COL2)` —
-     record as `join_style: "asof"`. The equi-join columns pair normally; the ASOF column
-     generates a `>=` predicate.
-4. **Dimensions block** (flat, all tables): for each entry (`TABLE.COL as view_alias.NAME [with synonyms=(...)] [comment='...']`), record:
-   - Source: TABLE alias + VIEW column name (column in the Snowflake view layer)
-   - Semantic alias: `view_alias.NAME`
-   - **Synonyms** list from `with synonyms=(...)` — first → display name, rest → `properties.synonyms`
-   - **Description** from `comment='...'` → column `description`
-   - **Filter label**: if the entry contains `labels = (filter)` before the `as` keyword,
-     set `is_filter: true`. The expression after `as` is a BOOLEAN expression. See
-     `ts-from-snowflake-rules.md` "Filter Labels → ThoughtSpot" for the full mapping.
-   - If no synonyms: title-cased NAME → display name
-5. **Metrics block** (flat): for each entry, record:
-   - Simple: `TABLE.COL as AGG(view_alias.NAME)` — extract source column + aggregation
-   - **Semi-additive**: `TABLE.COL non additive by (DATE.col asc|desc nulls last) as SUM(view_alias.col)`
-     — translates to a `last_value` (asc) or `first_value` (desc) formula. See the
-     formula reference's Semi-additive section for the full DDL → TS mapping.
-   - **Window function**: `... OVER (PARTITION BY ...)` — translates to `group_sum`,
-     `safe_divide(..., group_sum(...))` for contribution ratios, etc.
-   - **Synonyms** + **description** mapping: same rule as dimensions.
-6. **Facts block** (if present): for each entry (`TABLE.FACT_NAME as EXPR [comment='...'] [with synonyms=(...)]`), record:
-   - Source: TABLE alias + fact name
-   - Expression (SQL): the right-hand side
-   - **Synonyms** + **description**: same mapping as dimensions
-   - **Filter label**: `labels = (filter)` before `as` → set `is_filter: true` (same rule as dimensions)
-   - **Visibility**: `PRIVATE` modifier if present
-7. **Extension JSON** (`with extension (CA='...')`): parse for column type confirmation
-   (dimensions / time_dimensions / metrics per table). Do not map to ThoughtSpot.
-8. **Verified queries** (`ai_verified_queries (...)`): if present after the `comment=`
-   clause, parse each query entry. Format:
-   ```
-   QUERY_NAME AS (QUESTION 'text' [VERIFIED_AT epoch] [ONBOARDING_QUESTION TRUE|FALSE] SQL 'select ...')
-   ```
-   Extract: name, question text, SQL string, verified_at timestamp, onboarding flag.
-   Store in `verified_queries` list. These are emitted as NLS Feedback TML after Model
-   import (Step 12). See `ts-from-snowflake-rules.md` "Verified Queries → NLS Feedback TML".
+The command extracts all SV constructs deterministically: tables (with aliases, primary
+keys, range constraints, table comments), relationships (equi/range/ASOF/composite),
+dimensions, metrics (simple, semi-additive, window), facts (with filter labels and
+private visibility), verified queries, extension JSON, custom instructions, synonyms,
+and descriptions. See [ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md)
+for the underlying rules (codified in `sv_parse.py`).
 
-Build an internal map:
-- `tables`: alias → fully-qualified ref, primary key, range_constraint (if any), **table description**
-- `relationships`: list of (name, from_alias, from_cols[], to_alias, to_cols[], **join_style** — one of `equi`, `range`, `asof`)
-- `columns` (flat): all dimensions and metrics, keyed by (table_alias, view_col), with
-  display name, synonyms[], description, and **is_filter** fields populated.
-- `facts`: keyed by (table_alias, fact_name) → {expression, comment, synonyms[], visibility, **is_filter**}
-- `verified_queries`: list of {name, question, sql, verified_at, onboarding}
-- `model_description`: from the top-level `comment='...'` clause
+Exit code 1 means unsupported constructs were found — the JSON is still written.
 
-**4x. Unrecognized-construct scan (MANDATORY — do not skip).** After extracting the known
-blocks, scan the remaining DDL text for these tokens (case-insensitive). Each hit is a
-construct this skill cannot yet convert. NEVER silently drop one:
+**Review the output:**
 
-| Token | Construct | Action |
-|---|---|---|
-| `facts (` | FACTS block (row-level expressions metrics may reference) | Extract into the `facts` map (see item 6 above). Each fact becomes a `formulas[]` entry in Step 8 (see ts-from-snowflake-rules.md "Facts Block → ThoughtSpot"). Step 9's identifier resolution uses this map to resolve metric references to facts. If a metric references a fact name that was not successfully parsed → FAIL that column loudly with the fact name. |
-| `ai_sql_generation` / `ai_question_categorization` | CA custom instructions | Add Unmapped Report row: "Custom instructions present — review for ThoughtSpot data_model_instructions equivalent (GAP-06)" |
-| `ai_verified_queries` | CA verified queries | Parse into `verified_queries` list (see item 8 above). Emitted as NLS Feedback TML after Model import in Step 12 |
-| `with cortex search service` | dimension search service | Unmapped Report row naming the dimension |
-| `private` (as visibility modifier) | private dims/metrics | Convert but set `index_type: DONT_INDEX` + report |
-| `unique (` | uniqueness constraints | Record for join cardinality inference (see Task 1.4) |
-| `range between` (NOT inside a `constraint` clause) | stray range token | STOP — likely an unsupported DDL variant; show user the unconsumed text |
-| anything else unparsed (non-whitespace remains after extraction) | unknown grammar | STOP and show the user the unconsumed text — the SV spec evolves; do not guess |
+1. **`warnings[]`** — informational notes (logged in the report).
+2. **`unsupported[]`** — constructs the parser could not handle. Display each to the
+   user and stop if any are critical (unknown grammar, stray range tokens).
+3. **`custom_instructions`** — if `ai_sql_generation` or `ai_question_categorization`
+   are present, log as "Custom instructions present — review for ThoughtSpot
+   data_model_instructions equivalent (GAP-06)" in the report.
+4. **`verified_queries[]`** — stored for Step 12.5 (NLS Feedback TML import).
 
-**Top-level COMMENT extraction fix:** the `comment '...'` clause is no longer guaranteed to
-be the last clause — `AI_*` clauses may follow it. Anchor on the `comment '...'` token
-pattern, not on position relative to the end of the DDL.
+The parsed output contains: `tables[]`, `relationships[]`, `dimensions[]`, `metrics[]`,
+`facts[]`, `verified_queries[]`, `extension`, `custom_instructions`, `comment` (model
+description), and `view_name`/`database`/`schema` identity fields.
 
 ---
 
@@ -779,16 +677,31 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
 
 ### Step 6B: Create ThoughtSpot Table objects for views (Scenario B) — also the connection picker for the Step 6A connection-scoped search
 
-**Do all Snowflake introspection in a batch query — not per-table calls.**
+**Use `ts snowflake introspect` to query Snowflake and build the table spec:**
 
-1. **Batch: get all column names and types for the entire schema in one query:**
+1. First, choose the ThoughtSpot connection (step 2 below), then run:
+
+   ```bash
+   source ~/.zshenv && ts snowflake introspect \
+     --parsed parsed.json --sf-profile {sf_profile} \
+     --connection-name "{connection_name}" --output-dir ./introspect_out
+   ```
+
+   This queries `INFORMATION_SCHEMA.COLUMNS` for all SV source tables in one batch,
+   maps Snowflake types to ThoughtSpot types, and produces:
+   - `introspect_out/tables-spec.json` — input for `ts tables create`
+   - `introspect_out/tables.json` — input for `ts snowflake build-model --tables`
+
+   The summary JSON on stdout includes `{tables, total_columns, warnings}`.
+
+   If `ts snowflake introspect` is not available or the Snowflake profile is not set up,
+   fall back to the manual batch query:
    ```sql
    SELECT table_name, column_name, data_type
    FROM {database}.information_schema.columns
    WHERE table_schema = '{SCHEMA}'
    ORDER BY table_name, ordinal_position;
    ```
-   This returns every column for every table/view in the schema in one round-trip.
 
 2. Choose which ThoughtSpot connection to use — **use an existing one or create a new
    one**. Use the connection **name** directly in table TML — no GUID lookup is needed
@@ -868,11 +781,12 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
 
 3. Create ThoughtSpot Table objects for all tables in one command:
    ```bash
-   cat tables-spec.json | ts tables create --profile {profile}
+   cat introspect_out/tables-spec.json | ts tables create --profile {profile}
    ```
-   Where `tables-spec.json` is a JSON array built from the column data above.
-   See `ts tables create --help` for the spec format. This command handles
-   JDBC retry and GUID resolution automatically, and outputs `{name: guid}`.
+   The `tables-spec.json` from `ts snowflake introspect` is ready to use. This command
+   handles JDBC retry and GUID resolution automatically, and outputs `{name: guid}`.
+   The `introspect_out/tables.json` is the tables map for `ts snowflake build-model`
+   in Step 8 — use it directly.
 
 4. Inline joins will be defined directly in the model TML (no `referencing_join`).
 
@@ -1040,10 +954,11 @@ If no matching join is found:
 
 ---
 
-### Step 8: Build the model TML
+### Step 8: Assemble the tables map
 
-Construct the model TML as a YAML string. Use the templates in
-[../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md).
+Build `tables.json` — a JSON object mapping each SV table alias to its ThoughtSpot
+table identity. `ts snowflake build-model` uses this to resolve column references,
+build joins, and assemble the model TML.
 
 **Model name:** `{view_name_title_case}` — derived from the Snowflake Semantic View name.
 Ask the user if they want a different name. Do not add a `TEST_SV_` or other prefix —
@@ -1052,429 +967,108 @@ see `../../shared/schemas/ts-model-conversion-invariants.md` (N1).
 **CRITICAL — Never normalise names from API responses.** Names that came from
 `ts tml export` (join names, column names, table names) or from import response GUIDs
 must be used **exactly as returned** — no `.lower()`, no `.upper()`, no title-casing,
-no whitespace trimming. Any silent transformation will cause a lookup failure in the
-model TML (wrong `referencing_join`, wrong `table.name`, wrong `column_id`). When in
-doubt, copy the string character-for-character from the API response.
+no whitespace trimming. The `name` value in `tables.json` must match the ThoughtSpot
+Table object name character-for-character.
 
-**Identify the fact table** (the table that is never on the "TO" side of any relationship)
-— it gets no `referencing_join` and no `joins[]`.
+**Format:**
 
-**Joinless models (user chose Option 4 in Step 7):** create a **separate model per
-table**. Each model contains only columns and formulas that reference that table.
-Name each model `{view_name} — {TABLE_NAME}` (or let the user choose). Import each
-independently. Report all created models in Step 12.
-
-**Discovered joins (Options 1–3 in Step 7):** joins discovered via PK/FK constraints,
-column overlap analysis, or user specification are treated identically to SV-declared
-relationships — use inline `joins[]` on the FROM table entry (Scenario B pattern).
-
-**Critical `id` rules (applies to all scenarios):**
-- **`id` must equal `name` exactly** (same case, same characters). ThoughtSpot resolves
-  `with` and `on` join references against the table's actual `name` — if `id` differs
-  in case (e.g. `id: dm_order` with `name: DM_ORDER`), joins fail with
-  "{table_name} does not exist in schema". Use the exact ThoughtSpot table object name
-  for both `id` and `name` (often uppercase for newly-created tables).
-- `id` values must be **unique** across all `model_tables` entries
-- `name` values must also be **unique** — ThoughtSpot rejects models where two tables
-  share the same `name` value ("Multiple tables have same alias")
-- If two semantic view tables map to the same ThoughtSpot table (same GUID), include
-  it only ONCE and use ONE `id`/`name`
-
-**Model TML skeleton (Scenario A — pre-defined joins exist in table TML):**
-
-```yaml
-model:
-  name: "{view_name}"
-  model_tables:
-  - id: FACT_TABLE          # MUST equal name exactly (copy verbatim — often uppercase)
-    name: FACT_TABLE        # exact ThoughtSpot table object name — FK side, joins go here
-    fqn: "{fact_guid}"      # GUID from Step 6A
-    joins:
-    - with: DIM_TABLE       # must equal the target entry's name exactly
-      referencing_join: "{join_name}"   # from Step 7
-  - id: DIM_TABLE           # MUST equal name exactly — PK side, no joins
-    name: DIM_TABLE         # exact ThoughtSpot table object name
-    fqn: "{dim_guid}"       # GUID from Step 6A
-  columns:
-  - name: "{display_name}"
-    column_id: fact_table::{col_name}  # col_name from ThoughtSpot Table TML
-    properties:
-      column_type: ATTRIBUTE
-  - name: "{display_name}"
-    column_id: fact_table::{col_name}
-    properties:
-      column_type: MEASURE
-      aggregation: SUM
-  formulas:
-  - name: "{display_name}"
-    expr: "{thoughtspot_formula}"
-    properties:
-      column_type: MEASURE
+```json
+{
+  "ALIAS_1": {"name": "TS_TABLE_NAME", "fqn": "guid_from_step_6"},
+  "ALIAS_2": {"name": "TS_TABLE_NAME", "fqn": "guid_from_step_6"}
+}
 ```
 
-**Join type and cardinality defaults:**
+- `ALIAS` is the SV table alias from `parsed.json` (the `alias` field in each
+  `tables[]` entry).
+- `name` is the exact ThoughtSpot Table object name (from `ts tml export` in Step 6A,
+  or from `ts tables create` response in Step 6B).
+- `fqn` is the ThoughtSpot Table GUID.
 
-SV relationships carry no join type — they define foreign key paths only. Use these defaults:
-- **`type: LEFT_OUTER`** — preserves fact rows with NULL FKs, matching SV query semantics
-  where unmatched facts still aggregate. State the assumption in the conversion report.
-- **`cardinality: MANY_TO_ONE`** — default for FK→PK relationships. If the target table's
-  key carries a `UNIQUE` constraint (detected in Step 4x scan), use `ONE_TO_ONE` instead.
+**Scenario B** (new tables created via `ts snowflake introspect` in Step 6B):
+the `introspect` command produces `tables.json` directly — use it as-is.
 
-**Model TML skeleton (Scenario B / Hybrid — inline joins, or no pre-defined table joins):**
+**Scenario A** (existing tables from Step 6A): build the map manually from the
+Step 6A discovery results.
 
-Use this when ThoughtSpot Table objects have no `joins_with` entries, or when creating
-new Table objects for views. Inline joins live on the **source (FROM) table** entry.
+**Joinless models (user chose Option 4 in Step 7):** create a separate `tables.json`
+per table. Each will produce a separate model via `build-model`.
+Name each model `{view_name} — {TABLE_NAME}` (or let the user choose).
 
-```yaml
-model:
-  name: "{view_name}"
-  model_tables:
-  - id: FROM_TABLE          # MUST equal name exactly (copy verbatim from import response)
-    name: FROM_TABLE        # exact ThoughtSpot table object name — never lowercase or transform
-    fqn: "{from_guid}"
-    joins:
-    - name: "{join_name}"
-      with: TO_TABLE        # REQUIRED — must equal `id` (= `name`) of the target entry exactly
-      on: "[FROM_TABLE::{fk_col}] = [TO_TABLE::{pk_col}]"  # uses id values (= name values)
-      type: LEFT_OUTER
-      cardinality: MANY_TO_ONE   # or ONE_TO_ONE if target key has UNIQUE constraint
-  - id: TO_TABLE            # matches `with` value above — same case
-    name: TO_TABLE
-    fqn: "{to_guid}"
-  columns:
-  # ... same pattern as Scenario A ...
-```
+Write the result to `tables.json`.
 
-**Range joins (Scenario B / Hybrid — `join_style: "range"`):**
+**What `build-model` handles from here:**
 
-When a relationship has `join_style: "range"`, the `on` expression uses `>=` and `<`
-instead of `=`. The `exclusive` keyword in the DDL means half-open interval:
-
-```yaml
-joins:
-- name: "{rel_name}"
-  with: PERIOD_TABLE
-  on: "[FROM_TABLE::{col}] >= [PERIOD_TABLE::{start_col}] and [FROM_TABLE::{col}] < [PERIOD_TABLE::{end_col}]"
-  type: LEFT_OUTER
-  cardinality: MANY_TO_ONE
-```
-
-**ASOF joins (Scenario B / Hybrid — `join_style: "asof"`):**
-
-Equi-join columns pair with `=`; the ASOF column generates `>=`:
-
-```yaml
-joins:
-- name: "{rel_name}"
-  with: TO_TABLE
-  on: "[FROM_TABLE::{equi_col}] = [TO_TABLE::{equi_col}] and [FROM_TABLE::{asof_col}] >= [TO_TABLE::{asof_col}]"
-  type: LEFT_OUTER
-  cardinality: MANY_TO_ONE
-```
-
-**Composite equi-joins (multiple column pairs):**
-
-```yaml
-joins:
-- name: "{rel_name}"
-  with: TO_TABLE
-  on: "[FROM_TABLE::{col1}] = [TO_TABLE::{col1}] and [FROM_TABLE::{col2}] = [TO_TABLE::{col2}]"
-  type: LEFT_OUTER
-  cardinality: MANY_TO_ONE
-```
-
-**Filter labels → boolean formula columns:**
-
-For any dimension or fact with `is_filter: true`, create a boolean formula column
-(ATTRIBUTE, not MEASURE) regardless of whether the expression is numeric:
-
-```yaml
-formulas:
-- id: "formula_{display_name}"
-  name: "{display_name}"
-  expr: "if ( [TABLE::{col}] >= 90000 ) then true else false"   # translated from SV BOOLEAN_EXPR
-  properties:
-    column_type: ATTRIBUTE
-
-columns:
-- name: "{display_name}"
-  formula_id: "formula_{display_name}"
-  properties:
-    column_type: ATTRIBUTE
-```
-
-At the Step 10 review checkpoint, note which columns are filter-derived and offer
-the user the option to add them as model filters (default: column only).
-
-**Duplicate `column_id` detection (I8):**
-
-After assembling all `columns[]` entries, scan for duplicate `column_id` values.
-When two metrics reference the same physical column with different aggregations
-(e.g. `SUM(SALARY)` and `AVG(SALARY)`), keep only the first as a `column_id`-based
-entry (prefer SUM). Express all others as `formulas[]` entries:
-
-```yaml
-# First metric keeps column_id
-columns:
-- name: "Total Salary"
-  column_id: EMPLOYEES::SALARY
-  properties:
-    column_type: MEASURE
-    aggregation: SUM
-
-# Second metric becomes a formula
-formulas:
-- id: "formula_Avg Salary"
-  name: "Avg Salary"
-  expr: "average ( [EMPLOYEES::SALARY] )"
-  properties:
-    column_type: MEASURE
-```
-
-See `../../shared/schemas/ts-model-conversion-invariants.md` (I8).
-
-**Column entries — display name, synonyms, description:**
-
-For each dimension or metric in the semantic view, populate metadata as follows:
-
-| SV DDL field | TS column field |
-|---|---|
-| `with synonyms=('Display Name','Alt 1','Alt 2',...)` (1st value) | `name` |
-| `with synonyms=(...)` (remaining values) | `properties.synonyms` (with `properties.synonym_type: USER_DEFINED`) |
-| `comment='...'` | `description` (at column root) |
-| (no synonyms clause) | `name` = title-cased SV alias (LHS) |
-
-**Critical placement:** synonyms live under `properties.synonyms`, NOT at column root.
-A top-level `synonyms:` field is silently dropped on import. Always pair with
-`properties.synonym_type: USER_DEFINED`.
-
-For each dimension:
-- `column_id`: `{id}::{col_name}` — where `id` is the model_tables `id` for that
-  table, and `col_name` is from the ThoughtSpot Table TML
-- `properties.column_type: ATTRIBUTE`
-
-For each simple metric (`AGG(view_alias.metric_name)`):
-- `column_id`: `{id}::{col_name}`
-- `properties.column_type: MEASURE`
-- `aggregation`: mapped from the SQL aggregate function (see ts-from-snowflake-rules.md)
-
-**`COUNT(DISTINCT col)` metrics — use a formula, not `aggregation: COUNT_DISTINCT` (I5):**
-`COUNT(DISTINCT col)` must be expressed as a `formulas[]` entry with `unique count ( [TABLE::col] )`.
-Never use `aggregation: COUNT_DISTINCT` on a `column_id` entry — ThoughtSpot silently overrides
-`column_type: MEASURE` → `ATTRIBUTE` when `COUNT_DISTINCT` is used this way.
-See `../../shared/schemas/ts-model-conversion-invariants.md` (I5).
-
-For each complex metric (formula expression):
-- See Step 9 for translation. Results go into `formulas[]`.
-
-For each **public fact** in the `facts` map:
-- Create a `formulas[]` entry with the translated expression (apply the same SQL →
-  ThoughtSpot formula rules as metrics). Use `column_type: MEASURE` for numeric
-  expressions and `column_type: ATTRIBUTE` for string/date expressions.
-- Create a paired `columns[]` entry with `formula_id` matching the formula's `id`.
-- For **private facts** referenced by at least one metric: create the formula with
-  `index_type: DONT_INDEX` on the `columns[]` entry. For private facts not referenced
-  by any metric: skip entirely.
-- Fact formulas are emitted **before** metric formulas in the `formulas[]` array
-  so that `[formula_<id>]` references resolve correctly. Metric formulas reference
-  facts by their formula `id` (e.g. `[formula_Tenure Months]`), NOT display name.
-
-See `../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md` "Facts Block →
-ThoughtSpot" for the full mapping pattern and examples.
-
-- **Never add `aggregation:` to a `formulas[]` entry** — formulas are self-contained
-  via their `expr`. ThoughtSpot rejects TML with `FORMULA is not a valid aggregation type`.
-
-**Every formula must have a `columns[]` entry.** Add a `columns[]` entry with
-`formula_id:` for every entry in `formulas[]`:
-
-```yaml
-formulas:
-- id: formula_Inventory Balance   # id: "formula_" + name (spaces preserved)
-  name: "Inventory Balance"
-  expr: >-
-    last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_DATE_DIM::DATE_VALUE] } )
-  properties:
-    column_type: MEASURE
-
-columns:
-# ... physical columns ...
-- name: "Inventory Balance"
-  formula_id: formula_Inventory Balance   # must match the formula's `id` exactly
-  properties:
-    column_type: MEASURE
-    aggregation: SUM
-    index_type: DONT_INDEX   # recommended for computed numeric measures
-```
-
-`aggregation:` on a `columns[]` formula entry is allowed (unlike in `formulas[]` entries
-where it causes an import error).
+`ts snowflake build-model` (Steps 10-FILE / 11) takes `parsed.json`, `translated.json`,
+and `tables.json` and deterministically assembles the model TML. It handles:
+- Fact table detection (tables never on the TO side of a relationship)
+- Inline join assembly (equi, range, ASOF, composite) with `LEFT_OUTER` / `MANY_TO_ONE` defaults
+- Column classification (ATTRIBUTE / MEASURE), `column_id` resolution
+- Formula entries with `formula_id` pairing, `id`-based cross-references
+- Synonym mapping (first → display name, rest → `properties.synonyms`)
+- Description mapping, filter labels, private columns (`index_type: DONT_INDEX`)
+- Duplicate `column_id` detection (I8) — promotes duplicates to formulas
+- `COUNT(DISTINCT)` → `unique count(...)` formula (I5)
+- Name collision resolution, `formula_` prefix for cross-references
+- YAML block scalar encoding for `{ }` formulas
 
 ---
 
 ### Step 9: Translate SQL expressions → ThoughtSpot formulas
 
-> **MANDATORY — read the reference before assessing any expression:**
-> Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
-> and use its **Reverse translation** sections for each SQL pattern. Do **not** classify
-> an expression as untranslatable based on SQL syntax recognition alone. Patterns that
-> appear Snowflake-specific have documented ThoughtSpot equivalents — for example:
->
-> | Looks untranslatable | Actually translatable as |
-> |---|---|
-> | `SUM(col)` + `NON ADDITIVE BY (date ASC NULLS LAST)` | `last_value ( sum ( [col] ) , query_groups ( ) , { [date_col] } )` |
-> | `SUM(m) OVER (PARTITION BY dim1, dim2)` | `group_sum ( [T::col] , [T::dim1] , [T::dim2] )` — column ref only, no nested aggregates |
-> | `SUM(m) OVER (PARTITION BY EXCLUDING dim1)` | `group_aggregate ( sum([T::col]), query_groups()-{[T::dim1]}, query_filters() )` |
-> | `DIV0(tbl.metric, SUM(tbl.metric) OVER (PARTITION BY dim.COL))` | `safe_divide ( sum([T::col]), group_sum([T::col], [T::dim]) )` — contribution ratio |
-> | `SUM(m) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` | `moving_sum ( group_aggregate(sum([T::col]), {[T::PK]}, query_filters()) , -1 , 0 , [T::order_col] )` |
-> | Same — simple column, no inner aggregate | `cumulative_sum ( [T::col] , [T::order_col] )` — when source is a raw column |
->
-> **ThoughtSpot formula function nesting rules (CRITICAL):**
-> - **Group functions** (`group_sum`, `group_count`, `group_average`, `group_max`, `group_min`, `group_unique_count`) are **shorthand** for `group_aggregate`:
->   - `group_sum(sales, category)` = `group_aggregate(sum(sales), {category}, query_filters())`
->   - `group_max(orderDate, dim)` = `group_aggregate(max(orderDate), {dim}, query_filters())`
-> - All group functions return a **row-level scalar**. They CANNOT be nested inside each other.
-> - **Window functions** (`cumulative_sum`, `cumulative_average`, `moving_sum`, `moving_average`, etc.) accept group function output as their input (scalar in → windowed scalar out).
-> - You CANNOT place raw aggregates (`sum(...)`, `count(...)`) directly inside window functions — wrap in `group_aggregate` first.
-> - All `if()` conditions require parentheses: `if ( condition ) then ... else ...`
->
-> Consult the reference. Never reason from first principles about SQL window functions.
+Run the deterministic formula translator:
 
-**9a. Identifier resolution (MANDATORY pre-pass).**
-
-Before translating any metric expression, resolve every `table_alias.name` reference
-in the expression. Use the Identifier Resolution Algorithm in
-[../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md):
-
-1. **Physical column?** Check the ThoughtSpot Table TML columns for `table_alias`.
-   If `name` matches a column → use `[TABLE::col]` reference. No further resolution needed.
-
-2. **Fact?** Check the `facts` map for `(table_alias, name)`.
-   If found → use formula reference `[formula_<id>]` where `<id>` is the fact's
-   `id` value from its `formulas[]` entry (e.g. `formula_Tenure Months`). The
-   reference must use the formula `id`, NOT the display name — `[Tenure Months]`
-   fails during TML import; `[formula_Tenure Months]` succeeds. No `TABLE::` prefix.
-
-3. **Metric?** Check the `metrics` map for `(table_alias, name)`.
-   If found → this is **double aggregation**. Apply the Double Aggregation rules from
-   [../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-from-snowflake-rules.md):
-
-   a. Find the relationship connecting the inner metric's table to the outer metric's
-      table. If the DDL uses `USING REL_NAME`, use that relationship. Otherwise, find
-      the relationship where one endpoint is the inner metric's table alias and the
-      other is the outer metric's table alias.
-
-   b. Identify the inner metric's aggregation function and column:
-      `INNER_AGG(inner_col)`.
-
-   c. Build the ThoughtSpot formula:
-      ```
-      outer_agg ( group_inner_agg ( [CHILD_TABLE::inner_col] , [PARENT_TABLE::pk_col] ) )
-      ```
-      Use `group_*` shorthand when one exists for the inner aggregation (`group_count`,
-      `group_sum`, `group_average`, `group_unique_count`, `group_min`, `group_max`).
-      Fall back to full `group_aggregate(inner_agg(...), {[PARENT::pk]}, query_filters())`
-      for other aggregation types.
-
-   d. If the inner metric itself references another metric (triple aggregation),
-      FAIL with: "Triple aggregation detected — `{outer}` → `{middle}` → `{inner}`.
-      This skill supports one level of metric-on-metric nesting."
-
-4. **None of the above?** FAIL the column loudly: "Metric references
-   `{table_alias}.{name}` which is not a physical column, fact, or metric."
-
-**Window metrics referencing metrics (GAP-13):** when a window function metric
-(e.g. `SUM(...) OVER (ORDER BY ... ROWS BETWEEN ...)`) references another metric
-in its base expression, resolve the inner metric first:
-- If the inner metric is a simple `AGG(col)`: wrap in `group_aggregate` and pass to
-  the window function:
-  `moving_sum(group_aggregate(count([TABLE::col]), {[TABLE::PK]}, query_filters()), -1, 0, [TABLE::order_col])`
-- You CANNOT place aggregates directly inside `moving_sum` / `cumulative_sum` —
-  always use `group_aggregate` as the bridge.
-- For raw columns (no aggregation needed): `cumulative_sum([TABLE::col], [TABLE::order_col])`
-
-For each metric whose `EXPR` is not a simple `AGG(table.col)` (after applying identifier resolution above — references have been resolved or the metric has been translated via double aggregation):
-
-1. Apply the SQL → ThoughtSpot formula translation rules in
-   [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
-   (bidirectional reference — use the **Snowflake → ThoughtSpot** direction).
-2. Replace column references: `table.COLUMN` → `[TABLE_ALIAS::COLUMN]`
-3. If the expression translates successfully → add a `formulas[]` entry.
-4. If the expression is confirmed untranslatable after consulting the reference →
-   omit the column and log it in the Formula Translation Log (for the summary report in Step 12).
-
-**Column references in translated formulas:**
-
-Use the `name:` from the corresponding `model_tables[]` entry (which matches the semantic
-view table alias). Column name is the column name from the ThoughtSpot Table TML.
-
-Example:
-- Semantic view EXPR: `SUM(DM_ORDERDETAILS.UNIT_PRICE * DM_ORDERDETAILS.QUANTITY)`
-- ThoughtSpot formula: `sum ( [DM_ORDERDETAILS::UNIT_PRICE] * [DM_ORDERDETAILS::QUANTITY] )`
-- Add as `formulas[]` entry with `column_type: MEASURE`
-
-**`last_value` / curly brace formulas — YAML block scalar required:**
-
-When the translated formula contains `{ [col] }` (curly braces), use a `>-` block scalar
-for the `expr` field. Inline YAML string assignment fails because `{` is a flow mapping
-start character:
-
-```yaml
-formulas:
-- name: "Inventory Balance"
-  expr: >-
-    last_value ( sum ( [DM_INVENTORY::FILLED_INVENTORY] ) , query_groups ( ) , { [DM_DATE_DIM::DATE_VALUE] } )
-  properties:
-    column_type: MEASURE
+```bash
+source ~/.zshenv && ts snowflake translate-formulas --input parsed.json --output translated.json
 ```
 
-In Python, set the formula string in the dict as a plain string — `yaml.dump` will emit
-it as a block scalar automatically when the string contains `{`. If it doesn't, force it:
+The command translates all dimension, fact, and metric SQL expressions from Snowflake
+SQL into ThoughtSpot formula syntax. It handles:
+- Identifier resolution (physical columns → `[TABLE::col]`, facts → `[formula_<id>]`,
+  metrics → double aggregation via `group_aggregate`)
+- Window functions (`PARTITION BY` → `group_sum`/`group_aggregate`;
+  `ORDER BY ROWS BETWEEN` → `moving_sum`/`cumulative_sum`)
+- Semi-additive patterns (`NON ADDITIVE BY` → `last_value`/`first_value`)
+- LOD expressions, contribution ratios, `COUNT_IF`, `COALESCE`/`NULLIF`
+- YAML block scalar encoding for `{ }` formulas
 
-```python
-from yaml.representer import SafeRepresenter
+All translation rules come from
+[ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
+(codified in `sv_sql.py` + `sv_translate.py`).
 
-def literal_representer(dumper, data):
-    if '{' in data or '\n' in data:
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='>')
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+**Review the output stats** (printed to stdout):
 
-yaml.add_representer(str, literal_representer)
+```json
+{"total": N, "translated": M, "skipped": K}
 ```
+
+**Surface `skipped[]` entries to the user** — each has a `name`, `block`, and `reason`.
+These are formulas the translator could not handle (unsupported SQL constructs, triple
+aggregation, etc.). Ask whether to proceed without them or address manually.
 
 ---
 
 ### Step 9.5: Spotter enablement
 
-Before assembling the final TML, ask whether Spotter (AI search) should be enabled
-for this model. Default is **yes** — Spotter is the primary natural-language
-interface for Models, and a converted SV usually exists to be queried this way.
+Ask whether Spotter (AI search) should be enabled. Default is **yes**.
 
 ```
 Enable Spotter (AI search) for this model? [Y / n] (default: Y)
 ```
 
-Apply the answer to the model TML's properties block:
-
-```yaml
-model:
-  name: {view_name}
-  # ... model_tables, columns, formulas, etc.
-  properties:
-    spotter_config:
-      is_spotter_enabled: true   # or false based on answer
-```
-
-If the user answers `n` or `no`, set `is_spotter_enabled: false`. Pre-existing
-models being updated in place (Step 11): if the user does not explicitly answer,
-preserve the existing setting from the previously-exported model TML rather than
-overwriting it with a default.
+Store the answer as a flag for `ts snowflake build-model`:
+- **Y** → pass `--spotter-enabled`
+- **n** → pass `--no-spotter-enabled`
+- Omit the flag entirely to leave the spotter_config block absent (pre-existing
+  models being updated in place: if the user does not explicitly answer, omit the
+  flag to preserve the existing setting).
 
 ---
 
 ### Step 10: Review checkpoint
 
-Before importing, show the user a summary:
+Before importing, show the user a summary assembled from `parsed.json`,
+`translated.json`, and `tables.json`:
 
 ```
 Model to import: {view_name}
@@ -1520,121 +1114,73 @@ If the user selects **file**, skip to [Step 10-FILE](#step-10-file-output-tml-fi
 This path is used when the user selected **file** at the Step 10 checkpoint, explicitly
 said "file only", or has no ThoughtSpot `DATAMANAGEMENT` access.
 
-**1. Determine output filenames:**
+Run `ts snowflake build-model` without `--profile` — it generates the TML files to
+`--output-dir` without importing:
 
-- Model TML: `{model_name}.model.tml`
-- Any new Table TMLs created in Step 6B (Scenario B): `{table_name}.table.tml`
-
-**2. Write the files:**
-
-```python
-from pathlib import Path
-import yaml
-
-# Model TML
-model_tml_str = yaml.dump(
-    {"model": model_dict}, default_flow_style=False, allow_unicode=True
-)
-Path(f"{model_name}.model.tml").write_text(model_tml_str, encoding="utf-8")
-
-# Table TMLs (Scenario B only)
-for tbl_name, tbl_dict in new_table_tmls.items():
-    tbl_str = yaml.dump(
-        {"table": tbl_dict}, default_flow_style=False, allow_unicode=True
-    )
-    Path(f"{tbl_name}.table.tml").write_text(tbl_str, encoding="utf-8")
+```bash
+source ~/.zshenv && ts snowflake build-model \
+  --parsed parsed.json --translated translated.json --tables tables.json \
+  --model-name "{model_name}" --output-dir ./tml_out \
+  --sv-fqn "{database}.{schema}.{view_name}" \
+  {--spotter-enabled|--no-spotter-enabled}
 ```
 
-**3. Report:**
+The command writes `{model_name}.model.tml` to the output directory, validates TML
+invariants, and prints a summary JSON to stdout. Exit code 1 on lint findings.
+
+**Report to the user:**
 
 ```
-TML files written:
+TML files written to ./tml_out/:
   {model_name}.model.tml    — ThoughtSpot Model TML
-  {table_name}.table.tml   — ThoughtSpot Table TML (if new tables were needed)
 
 To import to ThoughtSpot when you have access:
-
-  1. Package all .tml files into a zip:
-       zip {model_name}_tml.zip *.tml
-
-  2. In ThoughtSpot: Data → TML Import → upload the zip
-     (table TMLs will import first, then the model)
-
-  3. Or import via CLI:
-       ts tml import --file {model_name}.model.tml --policy ALL_OR_NONE --profile {profile}
+  ts tml import --file ./tml_out/{model_name}.model.tml --policy ALL_OR_NONE --profile {profile}
 
   Note: On first import, omit `guid` from the TML (already omitted here). ThoughtSpot
   will assign a GUID — save it from the import response if you need to update the model later.
 ```
 
-**4. Proceed to Step 12** (Produce summary report) — include the formula translation log
-and column summary so the user has the full picture before importing.
+**Proceed to Step 12** — include the formula translation log and column summary from
+the `build-model` summary JSON.
 
 ---
 
 #### Pre-import validation gate
 
-Before any `ts tml import`, run the mandatory lint gate — see
+`ts snowflake build-model` runs `ts tml lint` internally before any import — the
+command exits 1 on lint findings. See
 [`../../shared/schemas/ts-tml-import-gate.md`](../../shared/schemas/ts-tml-import-gate.md)
-for the invariant list (I1/I2/I4/I5/I8), the stdin command, and the
-update-vs-create `guid` and import-policy rules. Do not import until
-`ts tml lint` reports `"clean": true`.
+for the invariant list (I1/I2/I4/I5/I8) and import-policy rules. No separate lint
+step is needed.
 
 ---
 
 ### Step 11: Import the model
 
-**IMPORTANT — Updating vs creating:** Without a `guid` field in the TML, ThoughtSpot
-always creates a **new** object, even if a model with the same name already exists.
-To update an existing model in-place, add `guid` at the **document root** — as a
-top-level key alongside `model:`, NOT nested inside `model:`:
+Re-run `ts snowflake build-model` with `--profile` to import:
 
-```python
-# CORRECT — guid at document root
-top_level = {"guid": "{existing_model_guid}", "model": model_dict}
-
-# WRONG — guid nested under model (silently ignored by ThoughtSpot)
-# model_dict["guid"] = "..."   ← do NOT do this
+```bash
+source ~/.zshenv && ts snowflake build-model \
+  --parsed parsed.json --translated translated.json --tables tables.json \
+  --model-name "{model_name}" --output-dir ./tml_out \
+  --sv-fqn "{database}.{schema}.{view_name}" \
+  {--spotter-enabled|--no-spotter-enabled} \
+  --profile {profile}
 ```
 
-On the first import (new model), omit `guid`. After import, record the GUID from the
-response — you will need it if you reimport to fix any errors.
+For updating an existing model, add `--existing-guid {guid}`.
 
-**Two-pass import (L7):** Formulas that reference `[TABLE::COL]` fail during initial
-model creation but succeed when updating an existing model with `--no-create-new`.
-Always use a **two-pass** approach:
-1. First import: model structure only (columns, joins) — no formulas
-2. Second import: add `guid` at root, include all formulas, use `--no-create-new`
+The command handles:
+- **Two-pass import (L7):** phase 1 imports structure only (no formulas) to capture
+  the GUID; phase 2 imports the full model with formulas using the captured GUID.
+  With `--existing-guid`, phase 1 is skipped (update-in-place).
+- **GUID placement:** always at the document root, never nested under `model:`.
+- **Pre-import lint:** `ts tml lint` runs internally — the command exits 1 on findings.
+- **YAML serialization:** block scalars for `{ }` formulas, Unicode support.
 
-This is a ThoughtSpot platform behaviour — the formula parser cannot resolve column
-references until the model's table bindings are committed.
-
-Serialize the top-level dict to a YAML string, then import:
-
-```python
-import yaml, json, subprocess
-
-# First import (new model):
-top_level = {"model": model_dict}
-# Update existing model:
-top_level = {"guid": existing_guid, "model": model_dict}
-
-model_tml = yaml.dump(top_level, default_flow_style=False, allow_unicode=True)
-payload = json.dumps([model_tml])
-
-result = subprocess.run(
-    ["bash", "-c",
-     f"source ~/.zshenv && ts tml import --policy PARTIAL --profile '{profile_name}'"],
-    input=payload,
-    capture_output=True, text=True,
-)
-print(result.stdout)
-if result.returncode != 0:
-    print(result.stderr)
-```
-
-On success, parse the response JSON to extract the created model's GUID. **Save it** —
-required for any future reimports to update the model without creating a duplicate.
+Parse the **summary JSON from stdout** — it includes `import_status` and `model_guid`.
+On `import_status: "failed"`, `import_error` gives the error details.
 
 **Common import errors:**
 
@@ -1815,6 +1361,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.17.0 | 2026-07-22 | Rewire onto deterministic CLI commands: Step 4 → `ts snowflake parse-sv`, Step 9 → `ts snowflake translate-formulas`, Steps 8/10-FILE/11 → `ts snowflake build-model`. Removes 8 inline Python code blocks — DDL parsing, formula translation, model TML assembly, YAML serialization, and import are all deterministic. Step 6B adds `ts snowflake introspect` for Scenario B table creation. Mode C updated to use CLI commands. Step 8 becomes "Assemble tables map". (BL-063 phase 1a) |
 | 1.16.2 | 2026-07-15 | JSON/VARIANT path access: emit `['key']['subkey']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects Snowflake colon-and-dot path syntax (`PARSE_JSON(x):a.b`) even though it is valid Snowflake SQL. Verified 2026-07-15. |
 | 1.16.1 | 2026-07-11 | Remove the dead `direct-api-auth.md` reference-table row (the doc taught a curl + `/tmp/ts_token.txt` fallback now prohibited by `ts-cli.md`/`security.md`, with no step logic using it); doc retired repo-wide (BL-109). |
 | 1.16.0 | 2026-07-11 | Recognize SQL-query logical tables (`base_table.definition:` → SQL View TML), `is_enum`/`sample_values` dimension clauses, and free-text `ai_sql_generation`/`ai_question_categorization` instructions (audit 13.5/13.6/13.7). |
