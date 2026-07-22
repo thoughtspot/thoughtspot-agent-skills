@@ -75,7 +75,11 @@ tables:                           # Required. At least one entry.
     access_modifier: string       # Optional. "private_access" | "public_access"
     labels:                       # Optional. e.g. [filter] — marks dimension as a filter.
     - string
-    cortex_search_service: string # Optional. Links dimension to a Cortex Search service.
+    cortex_search_service:        # Optional. Links dimension to a Cortex Search service.
+      service: string             #   Required. Name of the Cortex Search Service.
+      literal_column: string      #   Optional. Column in the search service containing literal values.
+      database: string            #   Optional. Defaults to the base table's database.
+      schema: string              #   Optional. Defaults to the base table's schema.
     tags:                          # Optional. GA 2026-05-05. Same fully-qualified
                                   # tag name → value form as the root-level `tags:`.
       <db>.<schema>.<tag_name>: value
@@ -187,7 +191,7 @@ variables:                        # Optional. GA June 2026. Top-level session/bi
 | `unique` | `unique (TABLE.COL)` | ✅ now — `unique: <bool>` | Dimension property |
 | `range between` | `... range between X and Y` | ✅ now — `relationship_columns[].type` (`asof` / `range`) + `right_range` | Range and ASOF joins supported via type and right_range keys |
 | filter labels | `labels = (filter)` | ✅ now — `labels: [filter]` | Marks a dimension/fact as a filter |
-| `with cortex search service` | on dimensions | ✅ now — `cortex_search_service:` | Links a dimension to a Cortex Search service |
+| `with cortex search service` | on dimensions | ✅ now — `cortex_search_service:` (object) | Links a dimension to a Cortex Search service. Object with `service` (required), `literal_column`, `database`, `schema` sub-fields. |
 | `CUSTOM_INSTRUCTIONS` | `CUSTOM_INSTRUCTIONS = '<free-text instructions>'` | ✅ now — top-level `custom_instructions` | **Free-text instruction string, NOT an ON/OFF toggle.** Corrected 2026-07: `ai_sql_generation` / `ai_question_categorization` do **not** exist as YAML key names — see the two rows below. |
 | `AI_SQL_GENERATION` | `AI_SQL_GENERATION = '<free-text instructions>'` | ✅ now — `module_custom_instructions.sql_generation` | Free-text instruction string (Jan 12 2026 "custom instructions" release), scoped to SQL generation only |
 | `AI_QUESTION_CATEGORIZATION` | `AI_QUESTION_CATEGORIZATION = '<free-text instructions>'` | ✅ now — `module_custom_instructions.question_categorization` | Free-text instruction string, scoped to question categorization only |
