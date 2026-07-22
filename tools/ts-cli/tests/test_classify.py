@@ -4,6 +4,7 @@ from ts_cli.tableau.classify import (
     classify_formulas,
     classify_workbook,
     TRANSLATABLE_TIERS,
+    UNTRANSLATABLE_TIERS,
 )
 from ts_cli.tableau_translate import translate_formulas
 
@@ -61,13 +62,31 @@ def test_tiers_assigned_by_family():
         _mk("LOD1", "{FIXED [Region] : SUM([Sales])}"),
         _mk("Run1", "RUNNING_SUM(SUM([Sales]))"),
         _mk("Win1", "WINDOW_SUM(SUM([Sales]))"),
+        _mk("Size1", "SIZE()"),
+        _mk("Look1", "LOOKUP(SUM([Sales]), -1)"),
+        _mk("Prev1", "PREVIOUS_VALUE(0) + 1"),
     ]
     out = classify_formulas(formulas)
     by = {f["name"]: f["tier"] for f in out["formulas"]}
     assert by["Rev"] == "native"
     assert by["LOD1"] == "lod"
     assert by["Run1"] == "cumulative"
-    assert by["Win1"] == "moving"
+    # WINDOW_* has no faithful ThoughtSpot equivalent build-model can resolve
+    # (needs a sort attribute from worksheet addressing this pipeline doesn't
+    # have) — live-confirmed hard-fail (error 14516) proved "moving" (a
+    # TRANSLATABLE tier) was the wrong classification.
+    assert by["Win1"] == "window_ambiguous"
+    assert by["Win1"] in UNTRANSLATABLE_TIERS
+    # SIZE() is the one row-offset function with a context-free translation
+    # (COUNT(*) OVER () pass-through) — it IS genuinely translatable.
+    assert by["Size1"] == "row_offset_native"
+    assert by["Size1"] in TRANSLATABLE_TIERS
+    # LOOKUP/INDEX/FIRST/LAST need addressing this pipeline can't resolve.
+    assert by["Look1"] == "row_offset_ambiguous"
+    assert by["Look1"] in UNTRANSLATABLE_TIERS
+    # PREVIOUS_VALUE is flatly untranslatable (recursive, no SQL equivalent) —
+    # no ambiguity condition, unlike the addressing-dependent families above.
+    assert by["Prev1"] == "untranslatable"
     assert out["tier_counts"]["native"] == 1
 
 

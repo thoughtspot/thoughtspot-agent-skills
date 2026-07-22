@@ -677,6 +677,17 @@ class TestMapFunctions:
         assert map_functions("DATEPARSE('yyyy-MM-dd', [DateStr])") == \
             "to_date ( [DateStr] , 'yyyy-MM-dd' )"
 
+    def test_size_table_calc_to_count_over_passthrough(self):
+        # Tier 7 of the Row-Offset Table Calculations decision tree
+        # (tableau-formula-translation.md): SIZE() is unpartitioned and needs
+        # no sort/partition context, so — unlike LOOKUP/INDEX/FIRST/LAST — it
+        # has a context-free translation and is rewritten here rather than
+        # rejected at validate time.
+        assert map_functions("SIZE()") == 'sql_int_aggregate_op ( "COUNT(*) OVER ()" )'
+
+    def test_size_table_calc_case_insensitive_and_whitespace(self):
+        assert map_functions("size ( )") == 'sql_int_aggregate_op ( "COUNT(*) OVER ()" )'
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
@@ -1123,6 +1134,39 @@ class TestValidateOutput:
             errors = validate_output(f"{fn} ( 'region' )")
             assert errors, f"{fn} should be rejected as unmapped"
             assert any(fn in e for e in errors)
+
+    def test_row_offset_table_calcs_rejected(self):
+        # Live-confirmed (error 14516, "Search did not find '<FUNC> ( ... )'"):
+        # these Tableau row-offset table calcs have no faithful ThoughtSpot
+        # formula equivalent when the sort/partition addressing (Tableau's
+        # worksheet "Compute Using" shelf metadata) isn't resolvable from the
+        # formula text alone — build-model has no such wiring today, so they
+        # must be rejected at translate time instead of emitted verbatim.
+        for fn in ("LOOKUP", "INDEX", "FIRST", "LAST", "PREVIOUS_VALUE"):
+            errors = validate_output(f"{fn} ( [X] )")
+            assert errors, f"{fn} should be rejected — no ThoughtSpot table-calc equivalent"
+            assert any(fn in e for e in errors)
+
+    def test_window_table_calcs_rejected(self):
+        # Same disposition as the row-offset family above — WINDOW_* needs a
+        # sort attribute ThoughtSpot's moving_*() would require but which
+        # isn't available from the formula text.
+        for fn in (
+            "WINDOW_SUM", "WINDOW_AVG", "WINDOW_MAX", "WINDOW_MIN",
+            "WINDOW_STDEV", "WINDOW_VAR", "WINDOW_MEDIAN",
+            "WINDOW_PERCENTILE", "WINDOW_COUNT",
+        ):
+            errors = validate_output(f"{fn} ( [X] , -3 , 0 )")
+            assert errors, f"{fn} should be rejected — sort attribute unresolvable"
+            assert any(fn in e for e in errors)
+
+    def test_size_passthrough_not_rejected(self):
+        # SIZE() is the one row-offset function with a context-free
+        # translation (see TestConvertSizeTableCalc) — map_functions() rewrites
+        # it to this pass-through BEFORE validate_output runs, so the rewritten
+        # form must NOT trip any rejection check.
+        errors = validate_output('sql_int_aggregate_op ( "COUNT(*) OVER ()" )')
+        assert errors == []
 
     def test_untranslated_datetrunc_flagged(self):
         errors = validate_output("DATETRUNC ( 'hour' , [TS] )")
@@ -1605,6 +1649,103 @@ class TestTranslateFormulas:
         ]
         result = translate_formulas(formulas)
         assert 0 in result["stats"]["levels"]
+
+    def test_window_max_omitted_not_emitted_verbatim(self):
+        """Live-confirmed (error 14516): WINDOW_MAX must never reach
+        model.formulas verbatim — it must be skipped with a reason instead."""
+        formulas = [{
+            "caption": "3wk Moving Max",
+            "name": "Calculation_1",
+            "formula": "WINDOW_MAX(SUM([x]), -3, 0)",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 0
+        assert result["stats"]["skipped"] == 1
+        assert not any("WINDOW_MAX" in t["expr"] for t in result["translated"])
+        skipped = result["skipped"][0]
+        assert skipped["name"] == "3wk Moving Max"
+        assert "WINDOW_MAX" in skipped["reason"]
+
+    def test_lookup_omitted_not_emitted_verbatim(self):
+        formulas = [{
+            "caption": "Prior Week Sales",
+            "name": "Calculation_2",
+            "formula": "LOOKUP(SUM([Sales]), -1)",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 0
+        assert result["stats"]["skipped"] == 1
+        assert not any("LOOKUP" in t["expr"] for t in result["translated"])
+        assert "LOOKUP" in result["skipped"][0]["reason"]
+
+    def test_previous_value_omitted_not_emitted_verbatim(self):
+        formulas = [{
+            "caption": "Running Total String",
+            "name": "Calculation_3",
+            "formula": "PREVIOUS_VALUE(0) + 1",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 0
+        assert result["stats"]["skipped"] == 1
+        assert "PREVIOUS_VALUE" in result["skipped"][0]["reason"]
+
+    def test_size_still_translated_to_passthrough(self):
+        """Regression: SIZE() IS translatable (context-free) — must keep working."""
+        formulas = [{
+            "caption": "Partition Size",
+            "name": "Calculation_4",
+            "formula": "SIZE()",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 1
+        assert result["stats"]["skipped"] == 0
+        assert "sql_int_aggregate_op" in result["translated"][0]["expr"]
+        assert "SIZE" not in result["translated"][0]["expr"].upper()
+
+    def test_rank_still_translated_regression(self):
+        """Regression: RANK() has a real native equivalent and must keep
+        translating (not swept up by the new table-calc rejection list)."""
+        formulas = [{
+            "caption": "Sales Rank",
+            "name": "Calculation_5",
+            "formula": "RANK(SUM([Sales]))",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 1
+        assert result["stats"]["skipped"] == 0
+        assert "rank (" in result["translated"][0]["expr"]
+        assert "'desc'" in result["translated"][0]["expr"]
+
+    def test_total_still_translated_regression(self):
+        """Regression: TOTAL(agg) has a real group_aggregate() equivalent and
+        must keep translating."""
+        formulas = [{
+            "caption": "Pct of Total",
+            "name": "Calculation_6",
+            "formula": "SUM([Sales]) / TOTAL(SUM([Sales]))",
+            "role": "measure",
+            "datatype": "real",
+            "datasource": "test",
+        }]
+        result = translate_formulas(formulas)
+        assert result["stats"]["translated"] == 1
+        assert result["stats"]["skipped"] == 0
+        assert "group_aggregate" in result["translated"][0]["expr"]
 
 
 # ---------------------------------------------------------------------------

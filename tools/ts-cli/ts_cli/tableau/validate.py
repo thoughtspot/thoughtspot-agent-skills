@@ -49,6 +49,29 @@ _UNMAPPED_RE = [
     (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _UNMAPPED_FUNCTIONS
 ]
 
+# Tableau table-calculation / window functions live-confirmed (error 14516,
+# "Search did not find '<FUNC> ( ... )'") to have NO valid ThoughtSpot formula
+# syntax. Per tableau-formula-translation.md ("Row-Offset Table Calculations",
+# "Window / Moving Functions", "Untranslatable Patterns"), each of these
+# either has no ThoughtSpot equivalent at all (PREVIOUS_VALUE — recursive, no
+# SQL form) or needs a sort/partition attribute Tableau encodes as worksheet
+# "Compute Using" addressing metadata — NOT present in the formula text
+# itself. `translate_formulas()` has no wiring today from that worksheet
+# context into this translator, so rather than emit the raw (invalid) Tableau
+# syntax into a Model formula, these are rejected at translate time and the
+# formula is skipped with a table-calc-specific reason (same "skip, don't
+# fabricate" convention as `_UNMAPPED_FUNCTIONS` above).
+#
+# `SIZE()` is deliberately NOT in this list: it is the one row-offset
+# function with a context-free translation (unpartitioned COUNT(*) OVER ()),
+# converted earlier in the pipeline by `map_functions()` — see
+# `ts_cli/tableau/functions.py`.
+_TABLE_CALC_NO_EQUIVALENT = ["LOOKUP", "INDEX", "FIRST", "LAST", "PREVIOUS_VALUE"]
+_TABLE_CALC_RE = [
+    (re.compile(rf"\b{fn}\s*\(", re.IGNORECASE), fn) for fn in _TABLE_CALC_NO_EQUIVALENT
+]
+_WINDOW_TABLECALC_RE = re.compile(r"\b(WINDOW_[A-Z]+)\s*\(", re.IGNORECASE)
+
 
 def validate_output(expr: str) -> list[str]:
     """Check for forbidden patterns in a translated expression.
@@ -62,6 +85,12 @@ def validate_output(expr: str) -> list[str]:
     for pattern, fn in _UNMAPPED_RE:
         if pattern.search(expr):
             errors.append(f"unmapped Tableau function: {fn}")
+    for pattern, fn in _TABLE_CALC_RE:
+        if pattern.search(expr):
+            errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
+    window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(expr)}
+    for fn in sorted(window_fns):
+        errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
     return errors
 
 

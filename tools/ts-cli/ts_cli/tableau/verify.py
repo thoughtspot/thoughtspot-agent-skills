@@ -18,19 +18,35 @@ a wholesale port. In particular:
     :mod:`ts_cli.tableau.classify` (``classify_formulas``), so this module
     NEVER re-implements the translatable/untranslatable verdict. A formula
     tiered into ``classify.UNTRANSLATABLE_TIERS`` (untranslatable, geospatial,
-    circular, orphan, parameter_query, row_offset_ambiguous) is *expected* to
-    be absent from ``model.formulas`` and is never counted as a drop.
+    circular, orphan, parameter_query, row_offset_ambiguous,
+    window_ambiguous) is *expected* to be absent from ``model.formulas`` and
+    is never counted as a drop.
 
     Note: unlike the reference implementation, our ``classify.py`` has no
-    separate "query-time" tier. Its ``TRANSLATABLE_TIERS`` already includes
-    the tiers matching Tableau's WINDOW_*/RUNNING_*/RANK/TOTAL functions
-    (``cumulative``, ``moving``, ``pass_through``) — our translator emits
-    real ThoughtSpot ``cumulative_sum``/``moving_average``/``rank`` formulas
+    separate "query-time" tier. Its ``TRANSLATABLE_TIERS`` includes the tiers
+    matching Tableau's RANK/TOTAL functions (``pass_through``) — our
+    translator emits real ThoughtSpot ``rank``/``group_aggregate`` formulas
     for these into ``model.formulas`` (ThoughtSpot's formula language
     supports them as genuine stored Model formulas, unlike Tableau's
-    answer/table-calc-only equivalents). So the "legitimately absent" set
-    here is exactly ``classify.UNTRANSLATABLE_TIERS`` — nothing more was
-    needed.
+    answer/table-calc-only equivalents).
+
+    WINDOW_* (moving) and the row-offset family (LOOKUP/INDEX/FIRST/LAST)
+    were formerly mistiered as translatable too, but ``translate_formulas()``
+    never actually converted them — they passed straight through as raw
+    Tableau syntax and hard-failed ThoughtSpot import (error 14516, "Search
+    did not find '<FUNC> ( ... )'"). Fixed: these now reject at translate
+    time (``validate.py``) and tier ``window_ambiguous``/
+    ``row_offset_ambiguous`` — both are genuinely translatable in the
+    abstract (``moving_*``/``first_value``/``last_value`` exist), but need a
+    sort/partition attribute from the worksheet's "Compute Using" addressing
+    that this pipeline has no wiring to resolve automatically; see
+    tableau-formula-translation.md. ``SIZE()`` is the one row-offset function
+    with a context-free translation and is tiered ``row_offset_native``
+    (genuinely translated, not omitted).
+
+    RUNNING_* (cumulative) has the identical latent defect — classified
+    "cumulative" (translatable) but not actually converted by
+    ``translate_formulas()`` today — tracked separately, out of scope here.
 
   - TML validity is delegated entirely to :mod:`ts_cli.tml_lint`
     (``lint_tml`` for the I1/I2/I4/I5/I8 invariants). This module never
