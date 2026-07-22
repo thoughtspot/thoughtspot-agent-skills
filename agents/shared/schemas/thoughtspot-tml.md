@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-23: added export_options table; prior: validated in 2026-07-11 external sweep) -->
 
 # ThoughtSpot TML Parsing Reference
 
@@ -58,6 +58,21 @@ The `/api/rest/2.0/metadata/tml/export` endpoint with `export_fqn: true` and
 set in ThoughtSpot. Do **not** prompt the user for the schema value unless:
 - The `schema` key is genuinely absent from the parsed dict, **and**
 - You have printed `tbl.keys()` to confirm it is not just a parsing artefact.
+
+---
+
+## Export Options (v2 API)
+
+The v2 export endpoint accepts an `export_options` object with additional flags:
+
+| Option | Default | Since | Notes |
+|---|---|---|---|
+| `include_obj_id_ref` | false | 10.6.0.cl | Export `obj_id` of referenced objects (requires feature enablement) |
+| `include_guid` | true | 10.6.0.cl | Export `guid` of the object |
+| `include_obj_id` | false | 10.6.0.cl | Export `obj_id` of the object (requires feature enablement) |
+| `export_with_associated_feedbacks` | false | 10.7.0.cl | Export associated NLS feedback TMLs |
+| `export_column_security_rules` | false | 10.12.0.cl (Beta) | Export column security rules (only when `export_associated: true`) |
+| `export_with_column_aliases` | false | 10.13.0.cl (Beta) | Export column aliases on Models |
 
 ---
 

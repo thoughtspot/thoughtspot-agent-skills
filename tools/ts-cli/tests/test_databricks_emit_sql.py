@@ -20,6 +20,9 @@ class TestScalarEmit:
     def test_unique_count(self):
         assert e("unique count ( [T::id] )") == "COUNT(DISTINCT source.id)"
 
+    def test_median(self):
+        assert e("median ( [T::a] )") == "MEDIAN(source.a)"
+
     def test_arithmetic(self):
         assert e("[T::a] + [T::b] * [T::c]") == "source.a + source.b * source.c"
 

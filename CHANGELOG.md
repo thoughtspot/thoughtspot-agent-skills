@@ -8,6 +8,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ## 2026-07-23
 - feat: ts tableau build-model emits Table TML
 - chore: bump ts-cli to v0.75.0
+- chore: bump ts-cli to v0.74.0 — add `median()` mapping for Databricks formula translation (BL-123 item 13.7)
 
 ## 2026-07-22
 - feat: update `ts-object-model-spotql-query` to v1.5.0 — add Snowflake SV / Databricks MV backing rules (BL-118)
