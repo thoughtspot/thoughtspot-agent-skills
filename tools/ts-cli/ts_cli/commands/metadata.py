@@ -154,7 +154,7 @@ def search(
     # Default: auto-paginate and collect the full result set. --all_pages is
     # accepted but unused — this branch now runs whenever --limit is omitted,
     # whether or not the caller also passed --all.
-    page_size = 50
+    page_size = 500
     all_results: List[dict] = []
     current_offset = offset
     while True:
