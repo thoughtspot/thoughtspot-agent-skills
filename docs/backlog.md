@@ -67,6 +67,7 @@ are roughly ordered by value÷effort.
 | BL-085 | Tableau build-model: TWB parse codification (Part 2) | 2026-08-31 |
 | BL-120 | Live e2e verification for ts-convert-from-qlik | first live pass |
 | BL-115 | Smoke test for ts-convert-from-looker | first live pass |
+| BL-126 | Migrate SpotQL smoke test from champ-staging to se-thoughtspot | blocked on instance |
 | BL-076 | Smoke test backfills: answer-promote + from-tableau | 2026-09-30 |
 | BL-084 | Codify profile substrate as `ts profiles add/update/remove` | 2026-10-31 |
 | BL-071 | Tableau user-function → ThoughtSpot RLS variables | 2026-09-30 |
@@ -1967,14 +1968,14 @@ docs and the current product state.
 
 ### Medium-severity (stale claims, schema gaps)
 
-5. `sample_values` listed as both supported and unsupported in snowflake-schema.md
-6. `verified_queries` now YAML-supported; schema marks it DDL-only
-7. `custom_instructions`/`module_custom_instructions` YAML fields not documented
-8. `unique_keys` shown with wrong YAML structure in properties file
-9. Complete Schema block missing ~15 now-supported YAML fields
+5. `sample_values` listed as both supported and unsupported in snowflake-schema.md — **FIXED** (2026-07-23). Removed residual blockquote from "NOT supported" section; `sample_values` is correctly shown in the Complete Schema.
+6. `verified_queries` now YAML-supported; schema marks it DDL-only — **FIXED** (2026-07-23). Added `verified_queries[]` to Complete Schema with sub-fields (name, question, sql, verified_at, verified_by, onboarding_question).
+7. `custom_instructions`/`module_custom_instructions` YAML fields not documented — **FIXED** (prior to this audit — already in Complete Schema at 2026-07 currency correction).
+8. `unique_keys` shown with wrong YAML structure in properties file — **FIXED** (2026-07-23). Added `unique_keys[]` to Complete Schema under `tables[]`; properties file structure was correct (list-of-objects with `columns[]`).
+9. Complete Schema block missing ~15 now-supported YAML fields — **PARTIALLY FIXED** (2026-07-23). Added `verified_queries`, `unique_keys`, `relationship_columns[].type`, `relationship_columns[].right_range`. Remaining gaps: cross-entity-type fields (e.g. `tags`/`is_enum`/`cortex_search_service` on `time_dimensions`/`facts`/`filters`) need Snowflake YAML spec verification before adding — deferred to next currency sweep.
 10. Three new Databricks window range types undocumented (`leading`, `all`, inclusive/exclusive) — **FIXED** (PR1, 2026-07-09). leading/all/inclusive-exclusive now documented in databricks-metric-view.md + both mapping files with live-verification citations — see the PR1 window-claim matrix.
 11. Phantom `entities:`/`db_connection:` syntax in ts-to-databricks-rules.md — **RESOLVED — verified absent 2026-07-09.** No entities:/db_connection: syntax found in ts-to-databricks-rules.md or ts-databricks-properties.md as of this check; likely fixed silently in an earlier PR (#136/#137 touched adjacent Databricks fixes). No action taken.
-12. `safe_divide` "No DIV0" comment is wrong; comparison table still says "Preview required" — **Partially fixed** — "Preview required" claim confirmed already corrected (verified 2026-07-09). The safe_divide/try_divide comment fix remains open (does not intersect PR1's window/materialization/fields scope) — deferred to the existing medium-severity target 2026-09-30.
+12. `safe_divide` "No DIV0" comment is wrong; comparison table still says "Preview required" — **FIXED** (2026-07-23). Quick-reference in `ts-from-snowflake-rules.md` updated: `(a) / NULLIF(b, 0)` → `DIV0(a, b)` to match authoritative formula-translation.md; "no null guard" comment corrected to "no divide-by-zero guard".
 13. `materialization:` block not documented — **FIXED** (PR1, 2026-07-09). Materialization block documented in databricks-metric-view.md (new section) and ts-databricks-properties.md — see Task 1 docs-research findings.
 
 ### ThoughtSpot medium-severity (separate, lower urgency)
@@ -3451,3 +3452,34 @@ documents them as unused and filters them out.
 Stop emitting phase1+ files. Emit base + one ordered formulas artifact. Keep
 `_import_with_retry` and `build_formula_levels` unchanged. Minor version bump.
 Full scope in the proposal doc.
+
+---
+
+## BL-126 — Migrate SpotQL smoke test from `champ-staging` to `se-thoughtspot` profile `Tier 2`
+
+**Filed:** 2026-07-22.
+**Source:** Pre-push smoke failure — `champ-staging` token expired; SE profile uses
+username/password (more resilient).
+**Affects:** `tools/smoke-tests/smoke_ts_object_model_spotql_query.py`,
+`tools/smoke-tests/smoke-config.local.json`
+**Status:** OPEN — blocked until `se-thoughtspot` instance is reachable.
+
+### Problem
+
+The SpotQL smoke test (`smoke_ts_object_model_spotql_query.py`) hard-references
+`champ-staging` in its docstring and `smoke-config.local.json` overrides the default
+profile to `champ-staging` for this skill. That profile uses token auth which expires
+and requires manual refresh. The `se-thoughtspot` profile uses username/password auth
+which is more resilient to expiry.
+
+### Proposed fix
+
+1. Find or create a SpotQL-capable Model on `se-thoughtspot` (must be backed by
+   Snowflake, not Falcon — SpotQL requires an external warehouse).
+2. Write a simple SpotQL query for it.
+3. Update `smoke-config.local.json` to remove the `champ-staging` override (the
+   `default_ts_profile` is already `se-thoughtspot`).
+4. Update the docstring in `smoke_ts_object_model_spotql_query.py`.
+
+**Blocked on:** `se-thoughtspot` instance being reachable (returning 404 as of
+2026-07-22).
