@@ -31,11 +31,14 @@ jobs:
           pip install pytest pyyaml radon pip-audit
           pip install -e tools/ts-cli
 
+      - name: Install optional extras for audit coverage
+        # Core deps are installed above; extras pull in snowflake-connector-python,
+        # websocket-client, cryptography, etc. that also need CVE coverage.
+        run: pip install -e "tools/ts-cli[snowflake,qlik]"
+
       - name: Dependency vulnerability scan (pip-audit)
-        # Audits the environment just installed above (ts-cli + its runtime deps:
-        # requests, PyYAML, keyring, typer) against the PyPI/OSV advisory database.
-        # Fails the job on any known vulnerability (angle 16.1 — nothing previously
-        # prevented a vulnerable resolution from landing silently).
+        # Audits the full environment (core + optional extras) against the
+        # PyPI/OSV advisory database. Fails on any known vulnerability.
         run: pip-audit
 
       - name: Run validators (full-repo mode)
@@ -77,6 +80,7 @@ jobs:
           # Presence gate: every shared mapping/schema must carry a currency anchor
           # (staleness is soft and never fails — only missing/malformed anchors do).
           python3 tools/validate/check_mapping_currency.py --root . --check
+          python3 tools/validate/generate_open_items_index.py --root . --check
           python3 tools/validate/check_mirror_sync.py
           python3 tools/validate/generate_parity.py --check
           # Quality gates catalog — soft check in CI. The catalog includes git-log
@@ -160,7 +164,7 @@ jobs:
       - name: Install runtime deps + pip-audit
         run: |
           pip install pip-audit
-          pip install -e tools/ts-cli
+          pip install -e "tools/ts-cli[snowflake,qlik]"
 
       - name: Dependency vulnerability scan (pip-audit)
         run: pip-audit
