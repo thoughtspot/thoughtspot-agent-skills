@@ -1225,6 +1225,19 @@ class TestValidatePreImport:
         ])
         assert len(issues) == 0
 
+    def test_bare_else_in_aggregate(self):
+        issues = validate_pre_import([
+            {"name": "BareElse", "expr": "sum(if [X] > 0 then [Y] else) + sum(if [A] then [B] else)"},
+        ])
+        assert len(issues) == 1
+        assert "else)" in issues[0]["warnings"][0].lower()
+
+    def test_else_with_value_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "ElseOK", "expr": "sum(if [X] > 0 then [Y] else 0)"},
+        ])
+        assert len(issues) == 0
+
 
 # ---------------------------------------------------------------------------
 # Strip ifnull(X, 0) (BL-046 #1)

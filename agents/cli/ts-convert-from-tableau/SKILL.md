@@ -1065,8 +1065,8 @@ This means **formula extraction and translation work without the physical model*
 ### Prerequisites
 
 - Tableau profile configured via `/ts-profile-tableau` (optional — skill degrades gracefully)
-- `ts` CLI v0.29.0+ (includes `ts tableau build-model` with `--max-retries`, enriched error
-  reporting, GENERATE mode phased output, and `--table-name-map`)
+- `ts` CLI v0.73.0+ (includes `ts tableau build-model` with `--max-retries`, enriched error
+  reporting, GENERATE mode output, and `--table-name-map`)
 
 ---
 
@@ -1524,13 +1524,12 @@ ts tableau build-model {workdir}/{workbook}.twb \
 ```
 
 This runs the same TWB-parse → translate → assemble pipeline described below and writes
-**phased** model TML files: `{slug}.phase0.model.tml` (base — `model_tables`, physical
-`columns`, `joins`, `parameters`; **no formulas**), then `{slug}.phase1.model.tml`,
-`{slug}.phase2.model.tml`, … (one phase per formula dependency level). **This step (5b)
-only needs `*.phase0.model.tml`** — that file is the Phase-1 base model built in Step 7.
-The `.phase1+` files are not consumed anywhere in this skill's import flow: formulas are
-added independently in Step 7 Phase 2, via a separate `build-model --existing-guid` call
-that re-derives them from the TWB against the live, already-imported model.
+two model TML files: `{slug}.phase0.model.tml` (base — `model_tables`, physical
+`columns`, `joins`, `parameters`; **no formulas**) and `{slug}.model.tml` (full model
+with all formulas, topologically ordered). Step 5b uses `*.phase0.model.tml` — that file
+is the Phase-1 base model imported in Step 7. Formulas are added independently in Step 7
+Phase 2, via a separate `build-model --existing-guid` call that re-derives them from the
+TWB against the live, already-imported model.
 
 `--table-name-map` (optional): a JSON file `{"twb_table_name": "thoughtspot_table_name"}`.
 Supply it **only** when the ThoughtSpot table's TML `name` (from Step 5a) differs from the
@@ -2687,11 +2686,7 @@ asks to change it. Default new models to enabled.
 
 `ts tml import`/`ts tml lint` read a directory of TML files directly via `--dir`, ordered
 tables first, then SQL views, then models (so a model's tables are validated alongside
-it), via `--order tableau`. **Base model selection:** GENERATE mode (Step 5b) writes
-phased files `{slug}.phase0.model.tml`, `{slug}.phase1.model.tml`, … — this pre-import
-validation only wants the base, so pass `--model-phase base` to drop every
-`*.phase1.model.tml`+ file (unused by this skill) while keeping bare `*.model.tml`
-(hand-assembled, blend-merged) and `*.phase0.model.tml` (GENERATE-mode base):
+it), via `--order tableau`:
 
 #### Pre-import validation gate (`ts tml lint` — I1 / I2 / I4 / I5 / I8)
 
@@ -2707,11 +2702,11 @@ behaves wrong, or rejects it on import):
 - **I5** — no physical-column `aggregation: COUNT_DISTINCT`; use a `unique count ( [TABLE::col] )` formula. *(Silently flips MEASURE → ATTRIBUTE.)*
 - **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 
-`ts tml lint` reads the same `--dir`/`--order`/`--model-phase` input as `ts tml import`
+`ts tml lint` reads the same `--dir`/`--order` input as `ts tml import`
 and exits non-zero on any finding, so it gates the import:
 
 ```bash
-ts tml lint --dir /tmp/ts_tableau_mig/output/{workbook_name} --order tableau --model-phase base
+ts tml lint --dir /tmp/ts_tableau_mig/output/{workbook_name} --order tableau
 ```
 
 Do not import until it reports `"clean": true`. Fix any finding and re-lint.
@@ -2759,7 +2754,7 @@ Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisti
 
 ```bash
 ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
-  --order tableau --model-phase base --policy VALIDATE_ONLY --profile {profile_name}
+  --order tableau --policy VALIDATE_ONLY --profile {profile_name}
 ```
 
 For each cycle:
@@ -2902,10 +2897,9 @@ GENERATE-mode model (Step 5b), this is exactly the `*.phase0.model.tml` file —
 has no formulas. For a blend-merged model, it's the hand-assembled `.model.tml` file.
 
 The Phase 1 payload is tables + sql_views + base model + cohorts, in that order —
-`--order tableau --model-phase base` selects **only** `*.phase0.model.tml` from
-GENERATE-mode output (the `.phase1+` files are cumulative formula layers not used by
-this skill; Phase 2 below re-derives formulas independently) and passes blend-merged
-`.model.tml` files (no "phase" in the name) through unaffected.
+`--order tableau` sorts by TML type (table → sql_view → model → cohort → liveboard).
+GENERATE-mode output contains `*.phase0.model.tml` (base) and `*.model.tml` (full);
+blend-merged output contains bare `.model.tml` files. Both pass through unchanged.
 
 **Before importing, check for duplicates** — if Phase 1 has already been imported (e.g.
 from a retry or previous attempt), search for existing models by name before importing.
@@ -2916,7 +2910,7 @@ Import with `--create-new`:
 
 ```bash
 ts tml import --dir /tmp/ts_tableau_mig/output/{workbook_name} \
-  --order tableau --model-phase base --policy ALL_OR_NONE --create-new --profile {profile_name}
+  --order tableau --policy ALL_OR_NONE --create-new --profile {profile_name}
 ```
 
 Parse the response. Extract the GUID for each imported object. **Capture the model GUID
@@ -4345,6 +4339,7 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.29.1 | 2026-07-22 | Stop emitting vestigial `*.phase1+.model.tml` files in GENERATE mode — only `*.phase0.model.tml` (base) and `*.model.tml` (full) are written. `--model-phase base` no longer needed in lint/import commands. Prereq ts-cli v0.73.0. |
 | 1.29.0 | 2026-07-18 | **Step 6 migration-fidelity gate — `ts tableau verify`.** After the `ts tml lint` structural gate, diff the Step 3 parse output (`{workbook}_parsed.json`) against each generated base Model TML to catch what a TWB-only coverage count and a server-side `VALIDATE_ONLY` import both miss: **silent drops** (a translatable formula / table / join the workbook had but the model doesn't — untranslatable formulas correctly excluded via the shared `classify-formulas` tiers) and **mistranslations** (token-level LCS similarity buckets MATCH/PARTIAL/LOW/MISSING). A `structural` ERROR gates a faithful migration; PARTIAL/LOW + limitation-coverage are review prompts, not blocks. Complements (does not replace) the Step 11.5 / Step 12 coverage report; cross-reference dangling-ref checking stays `ts tml lint --dir`'s job. Prereq ts-cli v0.62.0. |
 | 1.28.0 | 2026-07-15 | **Spotter last-mile + chart/layout fidelity.** (1) **New Step 12.6 — Spotter Last-Mile:** after Step 12.5 leaves a measure parked, optionally ask Spotter to express its intent as a ThoughtSpot Search via the new `ts spotter answer` command (wraps `POST /api/rest/2.0/ai/answer/create`; returns `tokens`/`display_tokens`). Opt-in, gated on Spotter enablement (Step 5.5) + `CAN_USE_SPOTTER`; **surfaces** the suggested Search, requires a **verified number match** (Step 11.5 coverage answer or `ts spotql fetch-data`) before adopting, else leaves it ⏸ Parked. Never auto-adopts. Can materialize an adopted measure as a Step 11.5 coverage tile seeded from Spotter's `tokens` + `visualization_type` (human-approved). (2) **Step 10a combo/dual-axis fidelity:** a Tableau dual-axis (Bar + Line) viz → `ADVANCED_LINE_COLUMN` + both measures on `axis_configs.y`, which ThoughtSpot auto-resolves; the exact split is pinned via capture-and-replay of an exported (GUID-based) `custom_chart_config` (hand-authored display-name configs error `Invalid GUID string` on fresh import — live-verified); new shared worked example. (3) **Step 9c layout fidelity:** container-tree walk (horz/vert) with proportional column split (largest-remainder → sum 12) + aspect-ratio height + floating-zone handling, replacing the flat y-band heuristic. (4) **Step 10b format + color/mark fidelity:** currency/number/decimal formats → `answer_columns[].format`; Color shelf → Muze `slice-with-color`; small multiples → `trellis-by`; series palettes → `viz_style`; measure sort → `sorted by`. (5) **Step 10c now emits answer + liveboard TML deterministically** via the new `ts tableau build-liveboard` command — role-aware axis layout (Columns→x, Color→series, Rows→pivot, measures→y; pivot gets `axis_configs` or renders blank), a chart-type requirement floor (flags, never downgrades), and overrides capture-and-replay (`format`/`client_state_v2`/`custom_chart_config`/`viz_style`), replacing the hand-written per-viz YAML. ThoughtSpot-side emission ported from the verified standalone Power BI converter; 26 unit tests. **Live-verified on ps-internal 2026-07-15** (real model round-trip): fixed two bugs the live import caught that lint did not — bucketed dates now use the resolved output name (`Month(Date)`), and a display-name `custom_chart_config` is dropped in favour of `ADVANCED_LINE_COLUMN` auto-resolution (its refs must be GUIDs). Open item #20 (build-liveboard live-verified; parser role-extraction is the remaining follow-on); #17–#19 track the other live gaps (Spotter call, currency/number format sub-config, sort token). Prereq ts-cli v0.55.0. |
 | 1.27.1 | 2026-07-15 | JSON/VARIANT path access: emit `['key']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects warehouse colon-and-dot path syntax (e.g. Snowflake `PARSE_JSON(...):a.b`) carried via `RAWSQL_*`. Verified for Snowflake 2026-07-15. |

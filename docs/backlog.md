@@ -1418,7 +1418,9 @@ weighted-average asks are recurring. No date set.
 
 **Source:** 2026-06-19 — discovered `agents/databricks/shared/schemas/` is a stale snapshot of `agents/shared/schemas/`, gitignored and drifting (missing range join docs, currency anchors, I11 invariant).
 **Affects:** `agents/databricks/deploy.sh`, `agents/databricks/shared/schemas/`
-**Status:** Open
+**Status:** DONE — `deploy.sh` already copies fresh from `agents/shared/` on every deploy
+(`rm -rf` + `cp`); the gitignored local `agents/databricks/shared/` is a deploy artifact,
+not a source of truth.
 
 ### Problem
 
@@ -1685,7 +1687,7 @@ Do not block the import — let the retry loop handle actual failures.
 
 **Source:** Ads Commercial Dashboard migration (2026-06-27) — 1 formula hit this pattern
 **Affects:** `tools/ts-cli/ts_cli/tableau_translate.py` (`validate_pre_import()`)
-**Status:** Open — deferred from the build-model pipeline work
+**Status:** DONE (PR #291) — `else\s*\)` regex check added to `validate_pre_import()`.
 
 ### Problem
 
@@ -3342,7 +3344,7 @@ Platform-specific documentation gaps identified by the product-currency speciali
 **Source:** `docs/proposals/single-pass-formula-cross-ref-import.md` (action item 2).
 **Affects:** `ts_cli/model_builder.py`, `ts_cli/commands/tableau.py`,
 `agents/cli/ts-convert-from-tableau/SKILL.md`
-**Status:** OPEN.
+**Status:** DONE (PR #291).
 **Related:** BL-124 (parent audit finding 1.5); PR #247 (I9 refinement, merged).
 
 ### Problem
