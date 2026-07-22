@@ -208,16 +208,6 @@ Step 12.
 
 ---
 
-## CLI-first rule — no inline Python for TML operations
-
-**Every** ThoughtSpot API call, TML generation, and model import in this skill **must** go
-through a `ts` CLI command. Do not write inline Python scripts to export/merge/import TML,
-iterate over formula failures, or assemble model JSON. If a CLI command fails or produces
-wrong results, **fix the CLI** (`tools/ts-cli/`) and re-run — do not work around it with
-manual scripting.
-
----
-
 ## Step 0 — Overview
 
 On skill invocation, display this plan before doing any work:
@@ -687,7 +677,7 @@ the Step 10 review. `skipped[]` and `warnings[]` are shared across the whole mod
 Show the stderr message verbatim and ask the user how to proceed (re-export with the
 missing table, fix the model in ThoughtSpot, or supply `--source-table`) — do not
 retry automatically and do not attempt to patch the JSON inputs by hand to work
-around a structural error; fix the root cause (see the CLI-first rule above).
+around a structural error; fix the root cause (see `.claude/rules/ts-cli.md`).
 
 **6. Clean up the input JSON files** (they contain sensitive schema metadata —
 table names, column descriptions, join conditions, AI context — and are not needed
@@ -890,7 +880,7 @@ Common errors at this stage and their causes:
 | Error | Cause | Fix |
 |---|---|---|
 | `PARSE_SYNTAX_ERROR` naming `display_name`, `synonyms`, `comment`, `offset`, or `cardinality` | Warehouse's Databricks Runtime is below the tier that field needs (see the tiered table in Prerequisites) | Upgrade the warehouse's Runtime to at least 17.3 (metadata) / 18.1 (offset or cardinality) |
-| Syntax error near `WITH METRICS` for another reason | Malformed DDL — unexpected on `build-mv` output; treat as a CLI bug, not a manual fix | Fix `tools/ts-cli/` and re-run `build-mv` (CLI-first rule above) — do not hand-patch the `.sql` file |
+| Syntax error near `WITH METRICS` for another reason | Malformed DDL — unexpected on `build-mv` output; treat as a CLI bug, not a manual fix | Fix `tools/ts-cli/` and re-run `build-mv` (see `.claude/rules/ts-cli.md`) — do not hand-patch the `.sql` file |
 | Table or view not found | Source table FQN is incorrect | Verify the `source:` value against Unity Catalog — was the wrong `--catalog`/`--schema` passed in Step 5? |
 | Column not found | Physical column name mismatch | Check `db_column_name` vs actual column in source table |
 
