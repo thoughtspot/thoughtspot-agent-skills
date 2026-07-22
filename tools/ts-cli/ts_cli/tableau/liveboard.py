@@ -378,7 +378,11 @@ def _infer_chart_type(cols: list[str], measure_names: set, buckets: dict,
 
 
 def _resolve_ct(mk: str, cols: list[str], vis: dict, measure_names: set) -> tuple:
-    """(ct, status, note) for a visible mark — infer when 'Automatic', else map the mark."""
+    """(ct, status, note) for a visible mark. A source-resolved ``ts_chart`` on the visual
+    wins (Power BI maps its own visualType -> chart type + status); otherwise infer when the
+    mark is 'Automatic', else map the Tableau mark class."""
+    if vis.get("ts_chart"):
+        return vis["ts_chart"], vis.get("ts_chart_status", "Migrated"), vis.get("ts_chart_note", "")
     if mk in ("automatic", ""):
         ct = _infer_chart_type(cols, measure_names, vis.get("bucket_tokens") or {}, vis.get("top_n"))
         return ct, "Migrated", ""

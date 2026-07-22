@@ -125,6 +125,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-sisense \
       ~/.snowflake/cortex/skills/ts-convert-from-sisense
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-qlik \
       ~/.snowflake/cortex/skills/ts-convert-from-qlik
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-powerbi \
+      ~/.snowflake/cortex/skills/ts-convert-from-powerbi
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
       ~/.snowflake/cortex/skills/ts-convert-from-tableau
@@ -201,6 +203,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-sisense \
       ~/.claude/skills/ts-convert-from-sisense
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-qlik \
       ~/.claude/skills/ts-convert-from-qlik
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-powerbi \
+      ~/.claude/skills/ts-convert-from-powerbi
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-convert-from-tableau \
       ~/.claude/skills/ts-convert-from-tableau

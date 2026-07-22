@@ -76,6 +76,7 @@ snow stage copy agents/shared/mappings/looker/lookml-tml-rules.md @SKILLS.PUBLIC
 snow stage copy agents/shared/mappings/sisense/sisense-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/sisense/ --overwrite
 snow stage copy agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/qlik/ --overwrite
 snow stage copy agents/shared/schemas/qlik-app-ir.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/schemas/ --overwrite
+snow stage copy agents/shared/mappings/powerbi/powerbi-formula-translation.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/mappings/powerbi/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-from-snowflake-dunder.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
 snow stage copy agents/shared/worked-examples/snowflake/ts-to-snowflake.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/snowflake/ --overwrite
@@ -91,6 +92,9 @@ snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks.md @
 snow stage copy agents/shared/worked-examples/databricks/ts-from-databricks-sql-view.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/databricks/ --overwrite
 snow stage copy agents/shared/worked-examples/sisense/numeric-range-filter-to-chip.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/sisense/ --overwrite
 snow stage copy agents/shared/worked-examples/sisense/date-bucket-granularity.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/sisense/ --overwrite
+snow stage copy agents/shared/worked-examples/powerbi/calculate-all-to-group-aggregate.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
+snow stage copy agents/shared/worked-examples/powerbi/combo-dual-axis-custom-chart-config.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
+snow stage copy agents/shared/worked-examples/powerbi/sply-parameter.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
 snow stage copy agents/shared/references/profile-select-and-authenticate.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/references/ --overwrite
 ```
 

@@ -38,6 +38,8 @@ mappings/sisense/
   sisense-formula-translation.md      — Sisense JAQL → ThoughtSpot formula and function mapping (AGG_MAP/FUNCTION_MAP/UNSUPPORTED, mirrors ts_cli/sisense/functions.py)
 mappings/qlik/
   qlik-thoughtspot-formula-translation.md — Qlik Sense expressions → ThoughtSpot formula and function mapping (199 rows, 17 categories)
+mappings/powerbi/
+  powerbi-formula-translation.md      — Power BI DAX → ThoughtSpot formula and function mapping (aggregations, scalar/date functions, CALCULATE/time-intelligence flagged; mirrors ts_cli/powerbi/functions.py)
 
 schemas/
   thoughtspot-tml.md                  — TML export parsing (PyYAML pitfalls, type detection)
@@ -78,6 +80,11 @@ worked-examples/snowflake/
 worked-examples/sisense/
   numeric-range-filter-to-chip.md     — Sisense dashboard numeric-range filter → ThoughtSpot Liveboard filter chip preset (from/to/NotEqual/equals → GE/GT/LE/LT/BW_INC/BW/EQ)
   date-bucket-granularity.md          — Sisense date `level` → ThoughtSpot date bucket (hours…years → HOURLY…YEARLY; cyclic parts dropped)
+
+worked-examples/powerbi/
+  sply-parameter.md                   — DAX SAMEPERIODLASTYEAR / time-intelligence measure → ThoughtSpot Spotter period-comparison (flagged NEEDS REVIEW, recovered via Spotter last-mile)
+  calculate-all-to-group-aggregate.md — DAX CALCULATE(..., ALL(...)) → ThoughtSpot group_aggregate (percent-of-total pattern)
+  combo-dual-axis-custom-chart-config.md — Power BI line-and-clustered-column visual → ADVANCED_LINE_COLUMN combo with custom_chart_config
 
 worked-examples/databricks/
   ts-to-databricks.md                 — end-to-end TS → MV conversion — DUNDER_MIFFLIN (multi-fact split, flattened views, LOD dimensions, semi-additive, MEASURE()/ANY_VALUE() cross-refs; verified against live instance 2026-05-25)

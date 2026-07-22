@@ -62,6 +62,7 @@ ALLOWLIST = {
     "ts-convert-from-tableau",  # requires .twb fixture file; BL-076 (filed 2026-07-03, target 2026-09-30)
     "ts-convert-from-looker",   # community contribution PR #201; smoke test deferred — BL-115 (filed 2026-07-11)
     "ts-convert-from-sisense",  # requires a captured Sisense bundle fixture; smoke test deferred — wip skill, BL-118 (filed 2026-07-17)
+    "ts-convert-from-powerbi",  # requires a .pbip project fixture (TMDL + PBIR); smoke test deferred — BL-076 (filed 2026-07-03, target 2026-09-30)
 }
 
 # Skills whose smoke test uses an abbreviated filename rather than the default convention.
