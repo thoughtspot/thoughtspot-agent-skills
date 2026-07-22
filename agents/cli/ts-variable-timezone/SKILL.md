@@ -8,7 +8,8 @@ description: Manage the ts_user_timezone variable in ThoughtSpot — search curr
 Manage values for the `ts_user_timezone` template variable, which controls the timezone
 applied to date/time calculations per org or per user.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -381,6 +382,7 @@ Common causes:
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 2.0.0 | 2026-05-11 | Refactor to use `ts` CLI commands: `ts variables search/set/remove`, `ts orgs search`, `ts users search`, `ts users groups` — removes all curl boilerplate |
 | 1.5.0 | 2026-05-11 | Step 5: user search (by name/email) and group-based user selection; multi-user scope support |
 | 1.4.0 | 2026-05-11 | Step 4: adaptive UX — numbered checklist for ≤20 orgs, name entry with validation for >20 |

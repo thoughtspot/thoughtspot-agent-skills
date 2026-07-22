@@ -7,7 +7,9 @@ description: Set up and manage ThoughtSpot connection profiles. Use when configu
 
 Manage ThoughtSpot connection profiles stored in `~/.claude/thoughtspot-profiles.json`.
 
-Ask one question at a time. Wait for each answer before moving on.
+Ask one question at a time for **dependent** decisions (credential flows are mostly
+sequential). Batch **independent** questions when possible — e.g. profile name + URL +
+auth method can be collected together.
 
 ---
 
@@ -484,6 +486,7 @@ need to manage this file.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.1 | 2026-07-22 | Relax prompt-batching: credential flows are mostly sequential, but independent inputs (name + URL + auth method) can now be batched (BL-074) |
 | 1.2.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |
 | 1.1.0 | 2026-05-11 | Add Step 0 orientation paragraph shown before the mode-selection menu |
 | 1.0.0 | 2026-05-06 | Initial CoCo CLI version (adapted from Claude Code skill) |

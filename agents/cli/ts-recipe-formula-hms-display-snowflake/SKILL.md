@@ -20,7 +20,8 @@ The UDF DDL lives in [references/duration-udfs.sql](references/duration-udfs.sql
 
 In the commands below, `{skill_dir}` is the absolute path of the directory containing this SKILL.md (e.g. `~/.claude/skills/ts-recipe-formula-hms-display-snowflake` in Claude Code, `~/.snowflake/cortex/skills/...` in Cortex Code CLI). Substitute the real path when running.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -219,5 +220,6 @@ If N → done.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.1.0 | 2026-07-12 | Codify UDF DDL as `references/duration-udfs.sql` deployed via `ts snowflake exec` (ts-cli ≥ 0.48.0); Steps 1/3/4 no longer inline `snowflake.connector` connect blocks or transcribe SQL (BL-079) |
 | 1.0.0 | 2026-05-13 | Initial release — deploy four Snowflake duration-display UDFs and show ThoughtSpot formula syntax |

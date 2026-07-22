@@ -2249,18 +2249,12 @@ for AI-instructions fetch failures.
 ts-object-model-erd, ts-profile-tableau, both ts-recipe-* skills, `ts-profile-thoughtspot:10`,
 `ts-profile-databricks:10`, `ts-variable-timezone:11` (strict serial-prompt wording; per-skill
 judgment needed for the partly-sequential credential flows).
-**Status:** OPEN.
+**Status:** DONE (PR #293, 2026-07-22).
 
-ts-convert-from-tableau 1.13.0 relaxed "Ask one question at a time" to dependent/independent
-wording (independent questions may be batched); the strict wording remains verbatim in the
-8 skills above, serialising independent prompts. Apply the same boilerplate update (PATCH
-bump each).
-
-**Note (2026-07-11 full audit finding 14.1):** this Affects line was incomplete — the three
-credential-flow skills above also carry the strict wording; their flows are only partly
-sequential, so apply per-skill judgment rather than a blanket copy of the Tableau relaxation.
-
-**Target:** 2026-08-31.
+All 13 remaining skills updated: 9 non-credential skills received the concise
+dependent/independent wording; 4 credential-flow skills (`ts-profile-*`) received a
+tailored version acknowledging their mostly-sequential nature while allowing independent
+inputs (name + URL + auth method) to be batched. Each skill received a PATCH bump.
 
 ---
 
