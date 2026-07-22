@@ -3331,11 +3331,31 @@ Platform-specific documentation gaps identified by the product-currency speciali
 
 **Filed:** 2026-07-22.
 **Source:** 2026-07-22 full audit, findings 1.5, 7.3.
+**Status:** DONE (PR #289, 2026-07-22).
+
+- **1.5** Proposal doc now has a status header; remaining code action tracked as BL-125
+- **7.3** Enforcement model section added to `docs/quality-gates.md` (via generator)
+
+---
+
+## BL-125 — Retire vestigial phased-formula emission in `ts tableau build-model`
+
+**Filed:** 2026-07-22.
+**Source:** `docs/proposals/single-pass-formula-cross-ref-import.md` (action item 2).
+**Affects:** `ts_cli/model_builder.py`, `ts_cli/commands/tableau.py`,
+`agents/cli/ts-convert-from-tableau/SKILL.md`
 **Status:** OPEN.
+**Related:** BL-124 (parent audit finding 1.5); PR #247 (I9 refinement, merged).
 
-- **1.5** `docs/single-pass-formula-cross-ref-import.md` has no BL-NNN entry; two action
-  items untracked
-- **7.3** Quality gates enforcement is inverted (hard local, soft CI) — accepted tradeoff
-  for contributor-friendliness, but should be documented in `docs/quality-gates.md`
+### Problem
 
-**Target:** address when next editing docs/ or quality gates infrastructure.
+`ts tableau build-model` in GENERATE mode emits `{slug}.phase1.model.tml` …
+`{slug}.phaseN.model.tml` (one per dependency level). Nothing imports them — the
+runtime uses a single merged import with `_import_with_retry`. The skill already
+documents them as unused and filters them out.
+
+### Proposed fix
+
+Stop emitting phase1+ files. Emit base + one ordered formulas artifact. Keep
+`_import_with_retry` and `build_formula_levels` unchanged. Minor version bump.
+Full scope in the proposal doc.
