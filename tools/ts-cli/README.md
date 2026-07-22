@@ -952,12 +952,14 @@ Tables that failed after all retries are included with `null` as the GUID.
 {"FACT_SALES": "b1e360c4-d571-490f-bae2-e8dc7443c9fa"}
 ```
 
-Auto-retries transient JDBC errors. After each successful import, resolves the GUID via
-metadata search if not already returned in the import response — the search is
-**connection-scoped**: it filters candidates on `metadata_header.dataSourceName ==
-connection_name`, so a same-named table registered on a different connection is never
-returned (live finding, BL-063 PR4, 2026-07-10 — see `_find_guid_by_name` in
-`ts_cli/commands/tables.py`).
+**How it works:**
+1. Tables are imported in batches of up to 50 per API call (`PARTIAL` policy)
+2. Tables that fail with transient JDBC errors are retried individually
+3. GUIDs are resolved from the import response, falling back to a connection-scoped
+   metadata search (`metadata_header.dataSourceName == connection_name`) when absent
+4. Specs with `rls_rules` are handled in two passes: pass 1 creates the table without
+   RLS; pass 2 re-imports with RLS rules + GUID (self-referencing rules can't resolve
+   before the table exists)
 
 ---
 
