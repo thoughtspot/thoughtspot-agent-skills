@@ -103,7 +103,7 @@ Read `~/.claude/thoughtspot-profiles.json`. Prompt for profile if multiple exist
 the single profile if exactly one.
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 Save `{base_url}` (strip trailing slash) and `{profile_name}`.
@@ -111,7 +111,7 @@ Save `{base_url}` (strip trailing slash) and `{profile_name}`.
 Pick the Model — accept `--guid` or prompt to search:
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET --name "%{search_term}%" --profile "{profile_name}"
 ```
 
@@ -154,7 +154,7 @@ run_dir.mkdir(parents=True, exist_ok=True)
 Export the Model bundle:
 
 ```bash
-source ~/.zshenv && ts tml export {model_guid} \
+ts tml export {model_guid} \
   --profile "{profile_name}" --fqn --associated --parse > {run_dir}/model_bundle.json
 ```
 
@@ -218,7 +218,7 @@ import json, subprocess
 # Step 1: find the feedback object GUID via dependents
 dep_result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
+     f"ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
 dep_body = json.loads(dep_result.stdout) if dep_result.stdout.strip() else []
@@ -234,7 +234,7 @@ all_fb_entries = []
 for fb_guid in feedback_guids:
     fb_result = subprocess.run(
         ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {fb_guid} --parse --profile '{profile_name}'"],
+         f"ts tml export {fb_guid} --parse --profile '{profile_name}'"],
         capture_output=True, text=True,
     )
     fb_body = json.loads(fb_result.stdout) if fb_result.stdout.strip() else []
@@ -289,7 +289,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
+     f"ts metadata dependents {model_guid} --raw --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
 body = json.loads(result.stdout)
@@ -1478,7 +1478,7 @@ If N, exit gracefully — leave the run dir in place so the user can re-run or h
 ### 9a. Import patched Model TML (if any of surfaces 1, 2, 6 are non-empty)
 
 ```bash
-source ~/.zshenv && ts tml import --file {run_dir}/after/model.tml \
+ts tml import --file {run_dir}/after/model.tml \
   --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
@@ -1488,7 +1488,7 @@ source ~/.zshenv && ts tml import --file {run_dir}/after/model.tml \
 ### 9b. Import feedback TML (if any of surfaces 3, 4 are non-empty)
 
 ```bash
-source ~/.zshenv && ts tml import --file {run_dir}/after/feedback.tml \
+ts tml import --file {run_dir}/after/feedback.tml \
   --profile "{profile_name}" --policy ALL_OR_NONE --no-create-new
 ```
 
@@ -1503,7 +1503,7 @@ feedback entries even when they exist (verified [open-items.md #2](references/op
 **For Model TML changes (surfaces 1, 2, 6) — use `--associated`:**
 
 ```bash
-source ~/.zshenv && ts tml export {model_guid} \
+ts tml export {model_guid} \
   --profile "{profile_name}" --fqn --associated --parse
 ```
 
@@ -1521,7 +1521,7 @@ import json, subprocess
 
 result = subprocess.run(
     ["bash", "-c",
-     f"source ~/.zshenv && ts metadata dependents {model_guid} --profile '{profile_name}'"],
+     f"ts metadata dependents {model_guid} --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
 deps = json.loads(result.stdout)

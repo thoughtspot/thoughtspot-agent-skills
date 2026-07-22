@@ -338,7 +338,7 @@ Credential updated. Run this in your terminal to apply:
 
 Also clear the stale token cache:
 ```bash
-source ~/.zshenv && ts auth logout --profile {profile_name}
+ts auth logout --profile {profile_name}
 ```
 
 ### U4 — Change Auth Method
@@ -416,7 +416,7 @@ Run this in your terminal to apply the ~/.zshenv change:
 Show numbered profile list (if more than one) and ask which to test. If only one, confirm and test it directly.
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile {profile_name}
+ts auth whoami --profile {profile_name}
 ```
 
 On success: `Profile '{name}' — connection verified.` Return to menu.

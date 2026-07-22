@@ -27,7 +27,7 @@ of hand-coding profile JSON reads or bare `ts auth whoami` calls.
 1. Run `ts profiles list --databricks --json` and parse the output.
 2. Same selection logic as ThoughtSpot (zero/one/multiple).
 3. Extract `dbx_profile` from the selected profile.
-4. Verify: `source ~/.zshenv && databricks auth describe --profile {dbx_profile}`
+4. Verify: `databricks auth describe --profile {dbx_profile}`
 
 ## Tableau profile
 

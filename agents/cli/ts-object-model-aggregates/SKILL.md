@@ -130,7 +130,7 @@ Read `~/.claude/thoughtspot-profiles.json`. If missing or empty, tell the user t
 use; if exactly one, confirm it.
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile "{profile_name}"
+ts auth whoami --profile "{profile_name}"
 ```
 
 If this fails, the token may be expired — see `/ts-profile-thoughtspot`'s refresh
@@ -145,7 +145,7 @@ This skill targets **Models only** (mirrors
 directly, or search:
 
 ```bash
-source ~/.zshenv && ts metadata search \
+ts metadata search \
   --subtype WORKSHEET --name "%{search_term}%" --profile "{profile_name}"
 ```
 
@@ -176,7 +176,7 @@ workdir.mkdir(parents=True, exist_ok=True)
 ## Step 3 — Extract Query Signatures
 
 ```bash
-source ~/.zshenv && ts aggregate signatures \
+ts aggregate signatures \
   --model {model_guid} --profile "{profile_name}" --out "{workdir}"
 ```
 
@@ -213,7 +213,7 @@ for entry in model_tml["model"]["model_tables"]:
     table_name, table_fqn = entry["name"], entry["fqn"]
     result = subprocess.run(
         ["bash", "-c",
-         f"source ~/.zshenv && ts tml export {table_fqn} "
+         f"ts tml export {table_fqn} "
          f"--profile '{profile_name}' --fqn --parse"],
         capture_output=True, text=True,
     )
@@ -253,7 +253,7 @@ for this Model's source and skip straight to Step 5.
 If Y, prompt for the Snowflake profile name (`{sf_profile_name}`) and run:
 
 ```bash
-source ~/.zshenv && ts aggregate history \
+ts aggregate history \
   --dir "{workdir}" --snowflake-profile "{sf_profile_name}" \
   --tables "{comma_separated_db_table_names}" --days 30
 ```
@@ -275,7 +275,7 @@ reflected real usage.
 ### 5a. Pass 1 — coverage-mode recommend
 
 ```bash
-source ~/.zshenv && ts aggregate recommend --dir "{workdir}" \
+ts aggregate recommend --dir "{workdir}" \
   $([ -f "{workdir}/weights.json" ] && echo --weights "{workdir}/weights.json")
 ```
 
@@ -325,7 +325,7 @@ Enter C / M / S:
 **C — connected mode** (reuse `{sf_profile_name}` from Step 4 if set, else ask):
 
 ```bash
-source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
+ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
   --snowflake-profile "{sf_profile_name}" --top-k 10 \
   --model-guid "{model_guid}" --profile "{profile_name}"
 ```
@@ -333,7 +333,7 @@ source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdi
 **M — manual mode:**
 
 ```bash
-source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
+ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
   --emit-sql "{workdir}/profile.sql" \
   --model-guid "{model_guid}" --profile "{profile_name}"
 ```
@@ -351,7 +351,7 @@ result goes to `base_rows`), then tell me when it's ready."* When ready, ask for
 results file path and run:
 
 ```bash
-source ~/.zshenv && ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
+ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
   --results "{results_path}"
 ```
 
@@ -364,7 +364,7 @@ Candidates whose SELECT can't be built deterministically are reported as `skippe
 ### 5c. Re-run recommend for the cost-mode curve
 
 ```bash
-source ~/.zshenv && ts aggregate recommend --dir "{workdir}" \
+ts aggregate recommend --dir "{workdir}" \
   $([ -f "{workdir}/weights.json" ] && echo --weights "{workdir}/weights.json")
 ```
 
@@ -497,7 +497,7 @@ Enter E / C:
 **E — use an existing connection:**
 
 ```bash
-source ~/.zshenv && ts connections list --profile "{profile_name}" --type {dialect_upper}
+ts connections list --profile "{profile_name}" --type {dialect_upper}
 ```
 
 Ask how to identify it — name it exactly, filter by a partial string, or list all —
@@ -508,7 +508,7 @@ Save the exact `name` value from the response as `{connection_name}`.
 **C — create a new connection (Snowflake only in v1):**
 
 ```bash
-source ~/.zshenv && ts connections create \
+ts connections create \
   --name "{connection_name}" --account "{account}" --user "{user}" \
   --role "{role}" --warehouse "{warehouse}" --database "{database}" \
   --private-key-path "{key_path}" --profile "{profile_name}"
@@ -580,7 +580,7 @@ in 6a.1 — `dynamic` requires a non-empty `{warehouse}` (Snowflake only); `ctas
 `mview` need none:
 
 ```bash
-source ~/.zshenv && ts aggregate generate \
+ts aggregate generate \
   --dir "{workdir}" --candidate {candidate_id} --model-guid {model_guid} \
   --tables-dir "{workdir}/tables" --db "{db}" --schema "{schema}" \
   --connection-name "{connection_name}" --profile "{profile_name}" \
@@ -729,7 +729,7 @@ of pass 1 (the table exists either way), so a non-null GUID in 6d's output is no
 proof RLS is in effect. Export the live object and compare:
 
 ```bash
-source ~/.zshenv && ts tml export {aggregate_table_guid} --profile "{profile_name}" --parse
+ts tml export {aggregate_table_guid} --profile "{profile_name}" --parse
 ```
 
 Check the returned `table.rls_rules` is present and matches `rls` above (same
@@ -787,7 +787,7 @@ gate on an unconfirmed "I'm not sure."
 ### 6f. Import the aggregate Model
 
 ```bash
-source ~/.zshenv && ts tml import --file "{workdir}/{candidate_id}/agg_model.tml.yaml" \
+ts tml import --file "{workdir}/{candidate_id}/agg_model.tml.yaml" \
   --profile "{profile_name}" --policy ALL_OR_NONE --create-new
 ```
 
@@ -813,7 +813,7 @@ does, before 6g imports it. Re-run the exact same `ts aggregate generate` call f
 adding `--agg-model-guid {agg_model_guid}`:
 
 ```bash
-source ~/.zshenv && ts aggregate generate \
+ts aggregate generate \
   --dir "{workdir}" --candidate {candidate_id} --model-guid {model_guid} \
   --tables-dir "{workdir}/tables" --db "{db}" --schema "{schema}" \
   --connection-name "{connection_name}" --profile "{profile_name}" \
@@ -841,7 +841,7 @@ import json, subprocess
 plan = {"operation": "REMOVE", "source": {"guid": model_guid, "type": "MODEL", "name": model_name},
         "fix": [], "delete": [], "out_dir": str(workdir)}
 result = subprocess.run(
-    ["bash", "-c", f"source ~/.zshenv && ts dependency backup --profile '{profile_name}'"],
+    ["bash", "-c", f"ts dependency backup --profile '{profile_name}'"],
     input=json.dumps(plan), capture_output=True, text=True,
 )
 if result.returncode != 0:
@@ -856,7 +856,7 @@ the user the backup location and that it's required for Step 7's rollback path i
 routing verification fails. Then import the patched primary:
 
 ```bash
-source ~/.zshenv && ts tml import --file "{workdir}/{candidate_id}/primary_patched.tml.yaml" \
+ts tml import --file "{workdir}/{candidate_id}/primary_patched.tml.yaml" \
   --profile "{profile_name}" --policy ALL_OR_NONE
 ```
 
@@ -881,7 +881,7 @@ measures — this was verified live 2026-07-15), but only when each measure is r
 with the right aggregation wrapper, and the wrong one errors instead of routing:
 
 ```bash
-source ~/.zshenv && ts spotql classify-columns --model {model_guid} --profile "{profile_name}"
+ts spotql classify-columns --model {model_guid} --profile "{profile_name}"
 ```
 
 Each measure's `kind`/`wrapper` tells you how to reference it in the SELECT:
@@ -897,7 +897,7 @@ a `FROM "<model>" AS "t1"` alias, dimension columns in `GROUP BY`), e.g. for an
 aggregate-formula measure:
 
 ```bash
-source ~/.zshenv && ts spotql generate-sql \
+ts spotql generate-sql \
   'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{profile_name}"
 ```
@@ -925,7 +925,7 @@ authenticated as a user who is actually subject to the base table's RLS rule ins
 `{profile_name}`:
 
 ```bash
-source ~/.zshenv && ts spotql generate-sql \
+ts spotql generate-sql \
   'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{restricted_user_profile}"
 ```
@@ -966,7 +966,7 @@ Roll back the aggregated_models association on {model_name}? (Y / N)
 If Y:
 
 ```bash
-source ~/.zshenv && ts dependency rollback --backup-dir "{backup_dir}" \
+ts dependency rollback --backup-dir "{backup_dir}" \
   --only updates --profile "{profile_name}"
 ```
 

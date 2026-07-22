@@ -202,13 +202,13 @@ SELECT GET_DDL('SEMANTIC_VIEW', '{database}.{schema}.{sv_name}');
 ```
 ```bash
 printf '%s' "$DDL" > sv_ddl.sql
-source ~/.zshenv && ts snowflake parse-sv sv_ddl.sql --output parsed.json
-source ~/.zshenv && ts snowflake translate-formulas --input parsed.json --output translated.json
+ts snowflake parse-sv sv_ddl.sql --output parsed.json
+ts snowflake translate-formulas --input parsed.json --output translated.json
 ```
 
 **ThoughtSpot side** — export the existing model:
 ```bash
-source ~/.zshenv && ts tml export {model_guid} --profile {profile} --fqn --associated --parse
+ts tml export {model_guid} --profile {profile} --fqn --associated --parse
 ```
 
 Extract from the Model bundle: the `model` TML dict, its `columns[]` (with description,
@@ -326,7 +326,7 @@ Build `tables.json` from the existing model's table GUIDs (same format as Step 8
 import with `build-model --existing-guid`:
 
 ```bash
-source ~/.zshenv && ts snowflake build-model \
+ts snowflake build-model \
   --parsed parsed.json --translated translated.json --tables tables.json \
   --model-name "{model_name}" --output-dir ./tml_out \
   --existing-guid {model_guid} \
@@ -493,7 +493,7 @@ Write the DDL from Step 3 to a file and parse it with `ts snowflake parse-sv`:
 
 ```bash
 printf '%s' "$DDL" > sv_ddl.sql
-source ~/.zshenv && ts snowflake parse-sv sv_ddl.sql --output parsed.json
+ts snowflake parse-sv sv_ddl.sql --output parsed.json
 ```
 
 The command extracts all SV constructs deterministically: tables (with aliases, primary
@@ -564,7 +564,7 @@ Enter C / I :
 **Search by name (both scopes start here):**
 
 ```bash
-source ~/.zshenv && ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --name "%{table_name}%" --profile {profile}
 ```
 
 - **C (within a connection)** → **first identify the connection using the
@@ -587,7 +587,7 @@ same-named tables. Build a map: `physical_table_name → {metadata_id, metadata_
 **Export TMLs for all found tables in one call to verify columns:**
 
 ```bash
-source ~/.zshenv && ts tml export {guid1} {guid2} ... --profile {profile} --parse
+ts tml export {guid1} {guid2} ... --profile {profile} --parse
 ```
 
 `--parse` returns structured JSON — access columns via `item["tml"]["table"]["columns"]`
@@ -661,14 +661,14 @@ Map Snowflake types to ThoughtSpot types using `../../shared/mappings/ts-snowfla
 
 Find the ThoughtSpot connection for those tables:
 ```bash
-source ~/.zshenv && ts connections list --profile {profile}
+ts connections list --profile {profile}
 ```
 **Note:** `ts connections list` auto-paginates and returns all connections.
 
 Add the missing columns to the connection, then re-import the updated Table TML
 for each affected table (batch all imports in one call):
 ```bash
-source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile {profile}
+ts tml import --policy ALL_OR_NONE --profile {profile}
 ```
 
 After import, re-export the updated TMLs to refresh the column map before Step 8.
@@ -682,7 +682,7 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
 1. First, choose the ThoughtSpot connection (step 2 below), then run:
 
    ```bash
-   source ~/.zshenv && ts snowflake introspect \
+   ts snowflake introspect \
      --parsed parsed.json --sf-profile {sf_profile} \
      --connection-name "{connection_name}" --output-dir ./introspect_out
    ```
@@ -737,7 +737,7 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    Then fetch the connections once (auto-paginated, returns all):
 
    ```bash
-   source ~/.zshenv && ts connections list --profile {profile}
+   ts connections list --profile {profile}
    ```
 
    Resolve the user's choice against that result:
@@ -760,7 +760,7 @@ After import, re-export the updated TMLs to refresh the column map before Step 8
    **unencrypted PKCS#8 private key** (`.p8`), then run:
 
    ```bash
-   source ~/.zshenv && ts connections create \
+   ts connections create \
      --name "{connection_name}" \
      --account "{account}" --user "{user}" --role "{role}" --warehouse "{warehouse}" \
      --database "{database}" \
@@ -1019,7 +1019,7 @@ and `tables.json` and deterministically assembles the model TML. It handles:
 Run the deterministic formula translator:
 
 ```bash
-source ~/.zshenv && ts snowflake translate-formulas --input parsed.json --output translated.json
+ts snowflake translate-formulas --input parsed.json --output translated.json
 ```
 
 The command translates all dimension, fact, and metric SQL expressions from Snowflake
@@ -1118,7 +1118,7 @@ Run `ts snowflake build-model` without `--profile` — it generates the TML file
 `--output-dir` without importing:
 
 ```bash
-source ~/.zshenv && ts snowflake build-model \
+ts snowflake build-model \
   --parsed parsed.json --translated translated.json --tables tables.json \
   --model-name "{model_name}" --output-dir ./tml_out \
   --sv-fqn "{database}.{schema}.{view_name}" \
@@ -1161,7 +1161,7 @@ step is needed.
 Re-run `ts snowflake build-model` with `--profile` to import:
 
 ```bash
-source ~/.zshenv && ts snowflake build-model \
+ts snowflake build-model \
   --parsed parsed.json --translated translated.json --tables tables.json \
   --model-name "{model_name}" --output-dir ./tml_out \
   --sv-fqn "{database}.{schema}.{view_name}" \
@@ -1276,7 +1276,7 @@ nls_feedback:
     chart_type: KPI
 ```
 
-Import with: `source ~/.zshenv && ts tml import --policy ALL_OR_NONE --profile {profile}`
+Import with: `ts tml import --policy ALL_OR_NONE --profile {profile}`
 
 **Complex SQL** (subqueries, CTEs, CASE, window functions) cannot be faithfully
 converted to search tokens. Log these in the report as "manual review needed" — do

@@ -275,7 +275,7 @@ Select a profile (or press Enter to use #1):
 After the profile is confirmed, verify the connection:
 
 ```bash
-source ~/.zshenv && ts auth whoami --profile {profile_name}
+ts auth whoami --profile {profile_name}
 ```
 
 The CLI handles token caching, Keychain access, and expiry automatically.
@@ -286,8 +286,8 @@ If `ts auth whoami` returns 401, the token is expired. Direct the user to
 cross-platform refresh procedure. Then clear the stale cache and retry:
 
 ```bash
-source ~/.zshenv && ts auth logout --profile {profile_name}
-source ~/.zshenv && ts auth whoami --profile {profile_name}
+ts auth logout --profile {profile_name}
+ts auth whoami --profile {profile_name}
 ```
 
 ---
@@ -314,7 +314,7 @@ Select a profile (or press Enter to use #1):
 After the profile is confirmed, verify the connection:
 
 ```bash
-source ~/.zshenv && databricks auth describe --profile {dbx_profile}
+databricks auth describe --profile {dbx_profile}
 ```
 
 If authentication fails, direct the user to run `/ts-profile-databricks` to configure
@@ -325,7 +325,7 @@ their credentials.
 The user must provide a SQL warehouse ID. If not already known:
 
 ```bash
-source ~/.zshenv && databricks api get /api/2.0/sql/warehouses \
+databricks api get /api/2.0/sql/warehouses \
   --profile {dbx_profile} | python3 -c "
 import sys, json
 whs = json.load(sys.stdin).get('warehouses', [])
@@ -397,7 +397,7 @@ Enter search criteria (leave blank to skip):
 Run the search using the CLI:
 
 ```bash
-source ~/.zshenv && ts metadata search --profile {profile_name} \
+ts metadata search --profile {profile_name} \
   --subtype WORKSHEET \
   --name "%{name_keyword}%" \
   --all
@@ -417,7 +417,7 @@ supplies tags, add `--tag "<tag_name>"` for each one.
 #### Option B — Browse All
 
 ```bash
-source ~/.zshenv && ts metadata search --profile {profile_name} --subtype WORKSHEET --all
+ts metadata search --profile {profile_name} --subtype WORKSHEET --all
 ```
 
 ---
@@ -443,7 +443,7 @@ Store `metadata_id` as `{selected_model_id}` and `metadata_name` as
 ### Step 3: Export the TML
 
 ```bash
-source ~/.zshenv && ts tml export {selected_model_id} --profile {profile_name} --fqn --associated
+ts tml export {selected_model_id} --profile {profile_name} --fqn --associated
 ```
 
 **Batch mode — export all models in one call:**
@@ -452,7 +452,7 @@ When the user has selected multiple models for conversion, pass all GUIDs to a s
 export call:
 
 ```bash
-source ~/.zshenv && ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated --parse
+ts tml export {guid_1} {guid_2} --profile {profile_name} --fqn --associated --parse
 ```
 
 `--parse` returns structured JSON directly — non-printable character stripping and
@@ -802,7 +802,7 @@ know what to verify once they create the view.
 **Execute the DDL via the Statement Execution API, once per `metric_views[]` entry:**
 
 ```bash
-source ~/.zshenv && databricks api post /api/2.0/sql/statements \
+databricks api post /api/2.0/sql/statements \
   --profile {dbx_profile} \
   --json "$(python3 -c "
 import json
@@ -825,7 +825,7 @@ Check the `status.state` field in the response:
   `.sql` file to work around it, direct the user to upgrade the warehouse's Runtime instead.
 - `PENDING` / `RUNNING` → poll with:
   ```bash
-  source ~/.zshenv && databricks api get /api/2.0/sql/statements/{statement_id} \
+  databricks api get /api/2.0/sql/statements/{statement_id} \
     --profile {dbx_profile}
   ```
 
@@ -848,7 +848,7 @@ this whole step once per `metric_views[]` entry created in Step 12.
 **1. Verify the view exists:**
 
 ```bash
-source ~/.zshenv && databricks api post /api/2.0/sql/statements \
+databricks api post /api/2.0/sql/statements \
   --profile {dbx_profile} \
   --json '{
     "warehouse_id": "{warehouse_id}",
@@ -863,7 +863,7 @@ report the error verbatim — do not proceed to test questions.
 **2. Spot-check — SELECT the first measure:**
 
 ```bash
-source ~/.zshenv && databricks api post /api/2.0/sql/statements \
+databricks api post /api/2.0/sql/statements \
   --profile {dbx_profile} \
   --json '{
     "warehouse_id": "{warehouse_id}",
