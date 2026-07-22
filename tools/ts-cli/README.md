@@ -878,18 +878,27 @@ echo '[{"db":"MY_DB","schema":"MY_SCHEMA","table":"MY_TABLE","type":"TABLE","col
 ]
 ```
 
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--auth-type` | Connection authentication type (e.g. `SERVICE_ACCOUNT`, `KEY_PAIR`, `OAUTH`). Auto-detected from the connection when possible; use this flag to override or when auto-detection fails. |
+
 **How it works:**
 
-1. Fetches the current connection state via `fetchConnection` (v1)
+1. Fetches the current connection state via v2 `connection/search`
 2. Merges the new tables in — existing tables and columns are preserved
 3. New columns are appended to existing tables; existing columns are left unchanged
-4. Posts the merged result to `POST /api/rest/2.0/connections/{id}/update`
+4. Includes `authenticationType` in the update payload (auto-detected or via `--auth-type`)
+5. Posts the merged result to `POST /api/rest/2.0/connections/{id}/update`
 
 **Output:** JSON response from the update call.
 
-> **Note:** Inherits the same v1 fetch limitation as `ts connections get` — may
-> fail with a 500 on some instances. Requires `CAN_CREATE_OR_EDIT_CONNECTIONS`
-> privilege.
+> **Note:** The v2 update endpoint defaults to `SERVICE_ACCOUNT` if
+> `authenticationType` is omitted — silently breaking non-SERVICE_ACCOUNT
+> connections (e.g. KEY_PAIR, OAUTH). Pass `--auth-type` explicitly if
+> auto-detection does not work for your connection. Requires
+> `CAN_CREATE_OR_EDIT_CONNECTIONS` privilege.
 
 ---
 
