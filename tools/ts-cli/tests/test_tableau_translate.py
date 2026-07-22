@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 
 from ts_cli.tableau_translate import (
+    _lod_to_group_aggregate,
+    _looks_like_string_concat,
     apply_name_clash_renames,
     build_calc_id_map,
     build_csq_column_map,
@@ -688,6 +690,27 @@ class TestMapFunctions:
     def test_size_table_calc_case_insensitive_and_whitespace(self):
         assert map_functions("size ( )") == 'sql_int_aggregate_op ( "COUNT(*) OVER ()" )'
 
+    def test_left_missing_closing_paren_left_untranslated(self):
+        # Unbalanced parens: _extract_function_args can't find the close, so
+        # the arg-handler skips past the call and leaves it as-is.
+        expr = "LEFT([X]"
+        assert map_functions(expr) == expr
+
+    def test_left_wrong_arg_count_left_untranslated(self):
+        # LEFT needs exactly 2 args — the render lambda returns None for any
+        # other count, and the call is left untranslated.
+        expr = "LEFT([Name])"
+        assert map_functions(expr) == expr
+
+    def test_zn_nested_parens_preserved(self):
+        # _convert_zn's paren-depth counter must not stop at the first ')'
+        # when the inner expression itself contains parens.
+        assert map_functions("ZN((1))") == "ifnull ( (1) , 0 )"
+
+    def test_zn_missing_closing_paren_left_untranslated(self):
+        expr = "ZN(1"
+        assert map_functions(expr) == expr
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
@@ -751,6 +774,65 @@ class TestMapDateFunctions:
         result = map_date_functions("DATETRUNC('hour', [TS])")
         assert "start_of_hour" not in result and "DATETRUNC" in result
 
+    def test_datetrunc_missing_closing_paren_left_untranslated(self):
+        expr = "DATETRUNC('month', [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_datetrunc_too_few_args_left_untranslated(self):
+        expr = "DATETRUNC('month')"
+        assert map_date_functions(expr) == expr
+
+    def test_datediff_missing_closing_paren_left_untranslated(self):
+        expr = "DATEDIFF('day', [A], [B]"
+        assert map_date_functions(expr) == expr
+
+    def test_datediff_too_few_args_left_untranslated(self):
+        expr = "DATEDIFF('day', [A])"
+        assert map_date_functions(expr) == expr
+
+    def test_datediff_minute(self):
+        result = map_date_functions("DATEDIFF('minute', [A], [B])")
+        assert "diff_time ( [B] , [A] ) / 60" in result
+
+    def test_datediff_week(self):
+        result = map_date_functions("DATEDIFF('week', [A], [B])")
+        assert "diff_days ( [B] , [A] ) / 7" in result
+
+    def test_dateadd_missing_closing_paren_left_untranslated(self):
+        expr = "DATEADD('day', 1, [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_dateadd_too_few_args_left_untranslated(self):
+        expr = "DATEADD('day', 1)"
+        assert map_date_functions(expr) == expr
+
+    def test_datepart_missing_closing_paren_left_untranslated(self):
+        expr = "DATEPART('month', [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_datepart_too_few_args_left_untranslated(self):
+        expr = "DATEPART('month')"
+        assert map_date_functions(expr) == expr
+
+    def test_datename_missing_closing_paren_left_untranslated(self):
+        expr = "DATENAME('month', [D]"
+        assert map_date_functions(expr) == expr
+
+    def test_datename_too_few_args_left_untranslated(self):
+        expr = "DATENAME('year')"
+        assert map_date_functions(expr) == expr
+
+    def test_datename_month(self):
+        result = map_date_functions("DATENAME('month', [D])")
+        assert "month ( [D] )" in result
+
+    def test_datename_unknown_unit_left_untranslated(self):
+        # Only 'month' has a ThoughtSpot equivalent (month(...)) — any other
+        # unit (e.g. 'year') has no DATENAME-style extractor and must be
+        # left untranslated rather than fabricate a function.
+        result = map_date_functions("DATENAME('year', [D])")
+        assert "DATENAME" in result and "year (" not in result
+
 
 # ---------------------------------------------------------------------------
 # INT conversion
@@ -762,6 +844,10 @@ class TestConvertInt:
         assert "floor" in result
         assert "ceil" in result
         assert ">= 0" in result
+
+    def test_missing_closing_paren_left_untranslated(self):
+        expr = "INT([X]"
+        assert convert_int(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +876,33 @@ class TestConvertStringConcat:
         assert "then concat ( [A] , ' : ' , [B] )" in result
         assert "then concat ( [A] , ' : ' , [B] , ' : ' , [C] )" in result
 
+    def test_measure_role_plain_column_plus_not_concatenated(self):
+        # 'to_string' appears in the expr (so the role=='measure' early-exit
+        # gate doesn't fire), but the matched + pair itself is two bare
+        # column refs with no quote/placeholder — this must NOT be treated
+        # as string concatenation and the chain-builder must bail out.
+        expr = "to_string ( [A] ) [junk] [B] + [C]"
+        result = convert_string_concat(expr, role="measure")
+        assert result == expr
+
+
+class TestLooksLikeStringConcat:
+    """`_looks_like_string_concat` — heuristic classifier (currently unused by
+    the active pipeline, but a real, directly-testable function kept for
+    back-compat; see strings_types.py)."""
+
+    def test_dimension_role_always_true(self):
+        assert _looks_like_string_concat(["[A]", "[B]"], "dimension") is True
+
+    def test_measure_role_with_quoted_literal_true(self):
+        assert _looks_like_string_concat(["'x'", "[B]"], "measure") is True
+
+    def test_measure_role_with_to_string_true(self):
+        assert _looks_like_string_concat(["to_string([A])", "[B]"], "measure") is True
+
+    def test_measure_role_plain_columns_false(self):
+        assert _looks_like_string_concat(["[A]", "[B]"], "measure") is False
+
 
 # ---------------------------------------------------------------------------
 # IN (...) -> in {...}
@@ -811,6 +924,10 @@ class TestFixInParentheses:
 
     def test_no_in_unchanged(self):
         assert fix_in_parentheses("[A] + [B]") == "[A] + [B]"
+
+    def test_missing_closing_paren_left_unchanged(self):
+        expr = "[Region] IN ('East'"
+        assert fix_in_parentheses(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -882,6 +999,12 @@ class TestScopeColumns:
         assert "[PROMO::CAMPAIGN_ID]" in result
         assert "[PROMO::CAMPAIGN_NAME]" in result
         assert "'['" in result  # literal preserved, not scoped
+
+    def test_unknown_column_left_unscoped(self):
+        # A bracket ref that isn't in scoped_columns, formula_names, or
+        # parameter_names is left exactly as-is (final fallthrough).
+        result = scope_columns("[UNKNOWN_COL]", {"SALES": "ORDERS"})
+        assert result == "[UNKNOWN_COL]"
 
 
 class TestConvertBooleanAggregate:
@@ -1058,6 +1181,42 @@ class TestConvertLod:
         expr = "SUM([Sales]) / SUM([Cost])"
         assert convert_lod(expr) == expr
 
+    def test_include_no_dims(self):
+        """INCLUDE with no dimension list falls back to bare query_groups()."""
+        result = convert_lod("{INCLUDE : SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_exclude_no_dims(self):
+        """EXCLUDE with no dimension list falls back to bare query_groups()."""
+        result = convert_lod("{EXCLUDE : SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_empty_aggregate_expr_returns_none_and_is_left_unchanged(self):
+        """A colon with nothing after it isn't a valid LOD — left as-is."""
+        expr = "{FIXED [Region] : }"
+        assert convert_lod(expr) == expr
+
+    def test_missing_closing_brace_left_unchanged(self):
+        """No '}' anywhere after the '{' — unbalanced, left untranslated."""
+        expr = "{FIXED [Region] : SUM([Sales])"
+        assert convert_lod(expr) == expr
+
+    def test_brace_char_inside_quoted_string_does_not_fake_a_close(self):
+        """A '}' inside a string literal can fool the crude open-brace scan
+        into thinking it found the closer; the quote-aware matcher then
+        correctly reports no real closing brace, and the malformed
+        expression is left untranslated rather than mistranslated."""
+        expr = "{FIXED 'abc}' : SUM([Sales])"
+        assert convert_lod(expr) == expr
+
+    def test_lod_to_group_aggregate_unknown_keyword_defaults_to_bare_form(self):
+        # _lod_to_group_aggregate is only ever called by convert_lod with a
+        # keyword resolved from _parse_lod_content, which can only produce
+        # "", "FIXED", "INCLUDE", or "EXCLUDE" — so the trailing fallback for
+        # any other keyword is exercised here directly.
+        result = _lod_to_group_aggregate("BOGUS", "[A] , [B]", "SUM([X])")
+        assert result == "group_aggregate ( SUM([X]) , {} , {} )"
+
 
 # ---------------------------------------------------------------------------
 # TOTAL conversion
@@ -1067,6 +1226,10 @@ class TestConvertTotal:
     def test_basic(self):
         result = convert_total("TOTAL(SUM([Sales]))")
         assert "group_aggregate ( SUM([Sales]) , {} , query_filters () )" in result
+
+    def test_missing_closing_paren_left_untranslated(self):
+        expr = "TOTAL(SUM([Sales])"
+        assert convert_total(expr) == expr
 
 
 # ---------------------------------------------------------------------------
@@ -1407,6 +1570,72 @@ class TestBuildDependencyDag:
         ]
         dag = build_dependency_dag(formulas)
         assert dag["Simple"]["level"] == 0
+
+    def test_reference_to_unknown_calc_id_recorded_as_unresolved(self):
+        # [Calculation_999] isn't any formula's 'name' in the input list, so
+        # it can't be resolved to a caption — it's recorded as an
+        # unresolvable dependency (the literal ref text) rather than dropped.
+        formulas = [
+            {"caption": "Derived", "name": "Calculation_2", "formula": "[Calculation_999] * 2"},
+        ]
+        dag = build_dependency_dag(formulas)
+        assert dag["Derived"]["deps"] == {"[Calculation_999]"}
+        # Unresolvable [Calculation_NNN] deps are excluded from the "all
+        # deps resolved" gate (vacuously true) and from the max-level scan,
+        # so the entry still gets a level — defaulting to 1.
+        assert dag["Derived"]["level"] == 1
+
+    def test_circular_dependency_level_is_negative_one(self):
+        formulas = [
+            {"caption": "A", "name": "Calculation_1", "formula": "[Calculation_2] + 1"},
+            {"caption": "B", "name": "Calculation_2", "formula": "[Calculation_1] + 1"},
+        ]
+        dag = build_dependency_dag(formulas)
+        assert dag["A"]["level"] == -1
+        assert dag["B"]["level"] == -1
+
+
+class TestResolveCrossReferences:
+    def test_fully_unresolvable_ref_left_in_place(self):
+        # by_calc_id has no entry at all for this ref (direct lookup fails,
+        # and the normalized-case fallback lookup also fails) — nothing
+        # gets replaced and the loop bails out on the first pass.
+        expr = "[Calculation_999] + 1"
+        assert resolve_cross_references(expr, {}, {}) == expr
+
+    def test_partial_replacement_when_dependency_itself_unresolved(self):
+        # The referenced entry's raw text still contains an inner
+        # [Calculation_NNN] ref (it wasn't resolved first) — the outer ref
+        # is still substituted in (a "partial" substitution), rather than
+        # left untouched.
+        dag = {"Outer": {"raw": "[Calculation_500] + 1", "resolved_expr": None}}
+        by_calc_id = {"[Calculation_100]": "Outer"}
+        result = resolve_cross_references("[Calculation_100] * 2", dag, by_calc_id)
+        assert result == "([Calculation_500] + 1) * 2"
+
+    def test_caption_resolved_but_missing_from_dag_falls_back_to_display_name(self):
+        # by_calc_id resolves the ref to a caption, but that caption has no
+        # entry in `dag` (e.g. dag was built from a different formula set) —
+        # falls back to substituting the bracketed display name.
+        by_calc_id = {"[Calculation_200]": "NotInDag"}
+        result = resolve_cross_references("[Calculation_200] + 1", {}, by_calc_id)
+        assert result == "[NotInDag] + 1"
+
+
+class TestBuildCalcIdMap:
+    def test_irregular_whitespace_gets_additional_normalized_key(self):
+        # When collapsing whitespace changes the key text, a second
+        # (normalized, lowercased) entry is stored so later lookups tolerant
+        # of whitespace variance still resolve.
+        calc_map = build_calc_id_map(
+            [{"name": "Calculation_1  23", "caption": "Weird"}],
+        )
+        assert calc_map["[Calculation_1  23]"] == "Weird"
+        assert calc_map["[calculation_1 23]"] == "Weird"
+
+    def test_regular_name_gets_single_key_only(self):
+        calc_map = build_calc_id_map([{"name": "Calculation_123", "caption": "Base"}])
+        assert calc_map == {"[Calculation_123]": "Base"}
 
 
 # ---------------------------------------------------------------------------
