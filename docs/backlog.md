@@ -1177,6 +1177,11 @@ underpins a large translation block but is marked **Experimental** in current do
 ## BL-033 — Dependency & CI supply-chain hygiene
 
 **Source:** full audit sweep 2026-06-17 (angle 16), findings #16–#19.
+**Status:** DONE — all three items completed across later PRs.
+
+1. `pip-audit` in CI — done (validate.yml `pip-audit` step, PR #173).
+2. Python floor raised to `>=3.10`, cap lifted to `<3.15`, 3.14 in CI matrix — done (BL-106, BL-107).
+3. `requests` floor bumped to `>=2.33.0` — done (BL-105). Lock file decision deferred (BL-075).
 
 ### Problem
 
@@ -1190,8 +1195,6 @@ unpinned tooling (`pip install pytest pyyaml`).
 1. Add a `pip-audit` job to `validate.yml` + a `.github/dependabot.yml` (pip + github-actions).
 2. Raise the Python floor to `>=3.10` (or add 3.10/3.11 to a CI matrix if the floor is kept).
 3. Add a constraints/lockfile; bump the `requests` floor to `>=2.32.0`; pin or extras-ify CI tooling deps.
-
-**Target:** 2026-08-31.
 
 ---
 
@@ -2263,13 +2266,12 @@ inputs (name + URL + auth method) to be batched. Each skill received a PATCH bum
 **Source:** 2026-07-03 full audit, findings 16.2 (residual) / 16.3. The `typer<1` cap and
 `dev` extra shipped in PR #173.
 **Affects:** `tools/ts-cli/pyproject.toml`, install docs.
-**Status:** OPEN.
+**Status:** DONE — Python 3.14 cap lifted (BL-106, ts-cli v0.46.0); lock file deferred.
 
-Decide whether to check in a `uv.lock` (reproducible installs; every `uv tool install
---force` currently re-resolves fresh), and test on Python 3.14 then raise or document the
-`requires-python "<3.14"` cap (3.14 has been stable since Oct 2025).
-
-**Target:** 2026-08-31.
+The Python 3.14 cap was lifted to `<3.15` and 3.14 added to the CI pytest matrix (BL-106).
+The lock file question (whether to check in `uv.lock` for reproducible installs) is
+deliberately deferred — `uv tool install --force` re-resolves fresh, but `pip-audit` in CI
+(BL-033) catches CVE-affected resolutions, which was the motivating risk.
 
 ---
 
