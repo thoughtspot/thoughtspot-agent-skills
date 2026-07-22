@@ -892,7 +892,7 @@ Map Databricks types from `DESCRIBE TABLE` output to ThoughtSpot types:
 | `double`, `float`, `decimal` | `DOUBLE` |
 | `boolean` | `BOOL` |
 | `date` | `DATE` |
-| `timestamp`, `timestamp_ntz` | `DATETIME` |
+| `timestamp`, `timestamp_ntz` | `DATE_TIME` |
 | `binary`, `array`, `map`, `struct` | **Omit** — not supported in TS |
 
 > **Casing convention for Databricks connections.** Unity Catalog uses **lowercase**

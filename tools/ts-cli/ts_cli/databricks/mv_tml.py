@@ -14,7 +14,7 @@ _DBX_TYPE_MAP = {
     "double": "DOUBLE", "float": "DOUBLE", "decimal": "DOUBLE",
     "boolean": "BOOL",
     "date": "DATE",
-    "timestamp": "DATETIME", "timestamp_ntz": "DATETIME",
+    "timestamp": "DATE_TIME", "timestamp_ntz": "DATE_TIME",
 }
 _DBX_OMIT_TYPES = {"binary", "array", "map", "struct"}
 _NUMERIC_TS_TYPES = {"INT64", "DOUBLE"}
@@ -34,7 +34,7 @@ def map_dbx_type(dbx_type: str) -> str | None:
 
 _TS_TO_DBX_TYPE = {
     "VARCHAR": "string", "INT64": "bigint", "DOUBLE": "double",
-    "BOOL": "boolean", "DATE": "date", "DATETIME": "timestamp",
+    "BOOL": "boolean", "DATE": "date", "DATE_TIME": "timestamp",
 }
 
 
