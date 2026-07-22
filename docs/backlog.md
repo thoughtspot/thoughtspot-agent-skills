@@ -50,12 +50,12 @@ are roughly ordered by value÷effort.
 
 | Item | Summary | Target |
 |---|---|---|
-| BL-118 | Codify SpotQL SV/MV backing behaviour | — |
 | BL-100 | Bring remaining converters to DBX-from standard (Snowflake pipeline first) | post-audit |
-| BL-063 | Extract CLI formula translation — Snowflake phases remain | 2026-09-30 |
-| BL-029 | Coverage matrix for ts-convert-to-databricks-mv | 2026-08-31 |
 | BL-090 | Document multi-table / multi-query Tableau migration | 2026-08-31 |
 | BL-064 | External audit product-currency fixes (medium-severity residuals) | 2026-09-30 |
+| ~~BL-118~~ | ~~Codify SpotQL SV/MV backing behaviour~~ | DONE (PR #301) |
+| ~~BL-063~~ | ~~Extract CLI formula translation~~ | DONE |
+| ~~BL-029~~ | ~~Coverage matrix for ts-convert-to-databricks-mv~~ | DONE |
 
 ### Tier 2 — Schedule soon
 
@@ -139,14 +139,16 @@ are roughly ordered by value÷effort.
 
 ---
 
-## BL-118 — Codify SpotQL semantic-view / metric-view backing behaviour into `ts-object-model-spotql-query` `Tier 1`
+## BL-118 — Codify SpotQL semantic-view / metric-view backing behaviour into `ts-object-model-spotql-query` — DONE `Tier 1`
+
+**Status:** DONE — PR #301 (2026-07-22). `references/snowflake-sv-backing.md` (R1–R7 + Databricks MV comparison)
+committed; `limitations.md` updated with the measure-statistics silent-wrong-answer trap; SKILL.md references
+table cross-linked; skill bumped to v1.5.0.
 
 **Why it matters.** SpotQL/Semantic-SQL behaviour differs materially when a Model is backed by a
 Snowflake Semantic View (SV) or a Databricks Metric View (MV) rather than regular tables. These
 behaviours were characterised live (2026-07-21) across three Models holding identical Dunder Mifflin
-data, but the findings are not yet reflected in the skill's reference files. An earlier session
-created `references/snowflake-sv-backing.md`, but it was never committed and no longer exists in any
-tree, so `main` carries none of this.
+data.
 
 **What to codify (all live-verified):**
 - **Null-key `100072`** on an SV: a raw PK-backed dimension key materialised in a CTE then transformed
@@ -1102,29 +1104,23 @@ Tableau "enhance instead of mirror" hand-off. Phase 6: domain-library growth + e
 
 ---
 
-## BL-029 — Coverage matrices for the remaining three conversion skills `Tier 1`
+## BL-029 — Coverage matrices for the remaining three conversion skills — DONE `Tier 1`
 
 **Related:** `tools/validate/check_coverage_matrix.py` BACKLOG set; repo quality audit (codification follow-up)
+**Status:** DONE — all 9 conversion skills now have coverage matrices. The last one
+(`ts-convert-to-databricks-mv`) shipped in PR #257; the `BACKLOG` set in
+`check_coverage_matrix.py` is empty. Closed 2026-07-22.
 
 ### Problem
 
-~~Three~~ ~~Two~~ One `ts-convert-*` skill still lacks a `references/coverage-matrix.md` and is
-exempted in the validator's `BACKLOG` set: `ts-convert-to-databricks-mv`.
+~~Three~~ ~~Two~~ ~~One~~ Zero `ts-convert-*` skills lack a `references/coverage-matrix.md`.
 `ts-convert-from-databricks-mv` shipped its coverage matrix in PR #232 (74 mapped
 constructs, 10 limitations). `ts-convert-to-snowflake-sv` shipped its coverage matrix
-(24 mapped constructs, 13 limitations) as part of BL-100 Phase 0 doc reconciliation and
-is removed from the `BACKLOG` set. The validator requires every remaining BACKLOG
-justification to carry a target date or a `#NNN`/`BL-NNN` reference; the remaining skill
-points here with a target of **2026-08-31**.
+(24 mapped constructs, 13 limitations) as part of BL-100 Phase 0 doc reconciliation.
+`ts-convert-to-databricks-mv` shipped its coverage matrix (65 mapped constructs, 11
+limitations) in PR #257.
 
-### Proposed approach
-
-Author a coverage matrix for each, mirroring the structure of the shipped
-`ts-convert-from-snowflake-sv` and `ts-convert-from-tableau` matrices (Mapped Constructs +
-Unmapped Constructs/Limitations, `Notes` as the last column, no `Last verified:` line). Then
-remove each skill from the `BACKLOG` set in `check_coverage_matrix.py` as its matrix lands.
-
-**Target:** 2026-08-31.
+**Target:** ~~2026-08-31~~ Completed 2026-07-22.
 
 ---
 
