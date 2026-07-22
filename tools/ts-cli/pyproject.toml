@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=78.2", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -16,7 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 snowflake = [
-    "snowflake-connector-python>=3.0",
+    "snowflake-connector-python>=3.13.1",
 ]
 qlik = [
     "websocket-client>=1.6",
