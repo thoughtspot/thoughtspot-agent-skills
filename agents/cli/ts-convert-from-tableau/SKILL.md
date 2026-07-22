@@ -57,29 +57,6 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 
 ---
 
-## CLI-first rule — no inline Python for TML operations
-
-**Every** ThoughtSpot API call, TML generation, formula translation, and model import in
-this skill **must** go through a `ts` CLI command. Do not write inline Python scripts to
-export/merge/import TML, iterate over formula failures, or assemble model JSON.
-
-| Operation | Use this | NOT this |
-|---|---|---|
-| Translate formulas | `ts tableau translate-formulas` | Inline Python calling `tableau_translate.py` / the `ts_cli/tableau/` package modules |
-| Build/merge model + formulas | `ts tableau build-model --existing-guid` | Manual export → JSON merge → import loop |
-| Create tables | `ts tables create` | Raw HTTP calls to the TML import endpoint |
-| Export/import TML | `ts tml export` / `ts tml import` | Manual curl or HTTP library calls |
-| Ask Spotter to express a parked formula (Step 12.6) | `ts spotter answer` | Raw `requests` to `ai/answer/create` |
-| Emit answer + liveboard TML (Step 10c) | `ts tableau build-liveboard` | Hand-writing answer/liveboard YAML per viz |
-| Verify the model faithfully copied the workbook (Step 6) | `ts tableau verify` | Eyeballing the diff or trusting the TWB-only coverage count |
-
-If a CLI command fails or produces wrong results, **fix the CLI** (`tools/ts-cli/`) and
-re-run — do not work around it with manual scripting. The CLI encodes months of
-edge-case fixes (parameter conflict renaming, cross-reference resolution, iterative
-retry, double-aggregation detection) that inline scripts will miss.
-
----
-
 ## Working principle — surface, recommend, resolve
 
 Whenever the parse or generation hits a situation that has no clean 1:1 automatic
