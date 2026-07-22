@@ -57,3 +57,61 @@ rolls back the **entire** batch if any single TML fails — including objects th
 imported successfully — and the response still returns success GUIDs for the
 rolled-back objects, making the failure silent. Use `ALL_OR_NONE` only for atomic
 pairs (one table + one model that references it).
+
+## 4. Common import errors
+
+On `import_status: "failed"`, read `import_error` and consult this table:
+
+| Error | Likely cause | Fix |
+|---|---|---|
+| `referencing_join not found` | Join name is wrong or join doesn't exist at table level | Export Table TML and verify join name |
+| `column_id not found` | Column name in model TML doesn't match any column in the referenced Table TML (e.g. source dimension name used instead of ThoughtSpot column name) | Export Table TML and verify column names |
+| `Compulsory Field … joins(N)->with is not populated` | Missing `with` field on an inline join | Add `with: {target_id}` to every inline join entry |
+| `{table_name} does not exist in schema` (on `with` field) | `with` value doesn't match any `id` in model_tables | Ensure `with` matches the target's `id` exactly — same case as `name` |
+| `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` in model_tables | Check that both `[table::col]` refs in `on` use `id` values |
+| `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — keep only one entry |
+| `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-fetch GUIDs from the current instance |
+| `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
+| YAML mapping error on formula with `{` | Formula with `{ [col] }` emitted as inline YAML string | Use block scalar (`>-`) for formula expressions containing `{`; CLI YAML emitters handle this automatically — arises in hand-edited TML |
+| YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |
+
+## 5. Post-import verification
+
+After a successful import response, confirm the model was indexed and has the
+expected shape — not just that the API returned 200.
+
+**1. Search for the model by GUID:**
+
+```bash
+source ~/.zshenv && ts metadata search --subtype WORKSHEET --name "%{model_name}%" --profile {profile}
+```
+
+The GUID returned by the import response must appear in the results. If it is
+absent, the import succeeded at the API level but indexing is delayed — wait
+5 seconds and retry once.
+
+**2. Export the imported model and count columns:**
+
+```bash
+source ~/.zshenv && ts tml export {created_guid} --fqn --profile {profile}
+```
+
+Parse the returned TML and count `model.columns[]` entries. This count must be
+>= the number of translatable fields from the source (total dimensions + measures,
+minus any entries skipped during translation).
+
+If the column count is lower than expected: compare the exported TML against the
+TML sent at import time to identify which columns ThoughtSpot silently dropped,
+and investigate.
+
+**3. Report the model URL:**
+
+```
+Model imported successfully.
+
+  Name:    {model_name}
+  GUID:    {created_guid}
+  URL:     {base_url}/#/model/{created_guid}
+
+Open the URL in a browser to verify the model appears in the ThoughtSpot Data panel.
+```
