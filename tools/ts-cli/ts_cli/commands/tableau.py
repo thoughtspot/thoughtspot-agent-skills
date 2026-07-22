@@ -801,10 +801,9 @@ def _generate_flow(
         levels[fname] = raw_levels.get(fname, 0)
     phases = split_for_phased_import(model_tml, levels)
 
-    typer.echo(f"  Phases: {len(phases)} (phase 0 = base, then per dependency level)", err=True)
-    for i, phase in enumerate(phases):
-        fc = len(phase["model"].get("formulas", []))
-        typer.echo(f"    Phase {i}: {fc} formulas", err=True)
+    base_model = phases[0]
+    fc_total = len(model_tml["model"].get("formulas", []))
+    typer.echo(f"  Base model: 0 formulas; full model: {fc_total} formulas", err=True)
 
     result = {
         "datasource": ds["name"],
@@ -817,7 +816,6 @@ def _generate_flow(
         "parameters": len(parsed["parameters"]),
         "name_renames": rename_map,
         "sql_views": len(sql_views),
-        "phases": len(phases),
     }
     if validation_issues:
         result["validation_warnings"] = validation_issues
@@ -827,17 +825,17 @@ def _generate_flow(
         result["reconcile_dropped"] = result_reconcile_dropped
 
     if not dry_run:
-        # SQL Views first — they must exist before the model that references them.
-        # (empty list when the datasource has no Custom SQL relations)
         result["sql_view_files"] = _write_sql_view_files(sql_views, connection_name, out_path, slug)
 
-        for i, phase in enumerate(phases):
-            fname = f"{slug}.phase{i}.model.tml"
-            fpath = out_path / fname
-            yaml_str = dump_tml_yaml(phase)
-            fpath.write_text(yaml_str)
-            typer.echo(f"  Wrote: {fpath}", err=True)
-            result[f"phase_{i}_file"] = str(fpath)
+        base_path = out_path / f"{slug}.phase0.model.tml"
+        base_path.write_text(dump_tml_yaml(base_model))
+        typer.echo(f"  Wrote: {base_path}", err=True)
+        result["phase_0_file"] = str(base_path)
+
+        full_path = out_path / f"{slug}.model.tml"
+        full_path.write_text(dump_tml_yaml(model_tml))
+        typer.echo(f"  Wrote: {full_path}", err=True)
+        result["model_file"] = str(full_path)
 
     return result
 

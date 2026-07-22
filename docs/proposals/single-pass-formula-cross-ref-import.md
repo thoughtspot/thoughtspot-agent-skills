@@ -1,4 +1,4 @@
-<!-- status: PARTIALLY IMPLEMENTED — I9 refinement landed (PR #247); vestigial phase-file cleanup tracked as BL-125 -->
+<!-- status: IMPLEMENTED — I9 refinement (PR #247); phase-file cleanup (BL-125) -->
 
 # Proposal: retire the vestigial phased-import emission in `ts tableau build-model`
 

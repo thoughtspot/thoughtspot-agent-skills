@@ -128,7 +128,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.69.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.73.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

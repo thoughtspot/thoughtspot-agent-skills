@@ -175,6 +175,13 @@ def validate_pre_import(
                 "count_if([col] != 'value') = 0 or similar"
             )
 
+        # Bare else) — missing default value in aggregate context
+        if re.search(r'\belse\s*\)', expr, re.IGNORECASE):
+            warnings.append(
+                "Bare 'else)' — missing default value after else "
+                "(likely needs 'else 0)' or 'else null)')"
+            )
+
         # Name clash with existing column
         if name.upper() in col_upper:
             warnings.append(f"Formula name '{name}' clashes with column name")
