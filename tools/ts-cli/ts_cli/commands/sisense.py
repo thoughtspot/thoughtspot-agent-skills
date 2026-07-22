@@ -21,14 +21,11 @@ app = typer.Typer(help="Sisense (offline bundle) -> ThoughtSpot conversion comma
 
 
 def _load_bundle(input_file: str) -> dict:
-    p = Path(input_file)
-    if not p.is_file():
-        typer.echo(f"Not a file: {input_file}", err=True)
-        raise SystemExit(1)
+    from ts_cli.io_helpers import load_json_file
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:  # malformed JSON -> clear diagnostic, non-zero exit
-        typer.echo(f"Could not read bundle JSON: {e}", err=True)
+        return load_json_file(input_file, "bundle")
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
         raise SystemExit(1)
 
 

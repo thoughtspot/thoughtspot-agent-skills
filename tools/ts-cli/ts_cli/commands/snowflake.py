@@ -28,16 +28,11 @@ app = typer.Typer(help="Snowflake Semantic View conversion helper commands.")
 
 
 def _read_json_file(path_str: str, flag: str) -> dict:
-    p = Path(path_str)
-    if not p.is_file():
-        raise SystemExit(f"{flag} path does not exist or is not a file: {path_str}")
+    from ts_cli.io_helpers import load_json_file
     try:
-        data = json.loads(p.read_text())
-    except json.JSONDecodeError as e:
-        raise SystemExit(f"Invalid JSON in {flag} file '{path_str}': {e}")
-    if not isinstance(data, dict):
-        raise SystemExit(f"{flag} file '{path_str}' must contain a JSON object.")
-    return data
+        return load_json_file(path_str, flag, expect_dict=True)
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        raise SystemExit(str(exc))
 
 
 @app.command("diff")
@@ -593,53 +588,11 @@ def _import_one(
     no_create_new: bool = False,
 ) -> tuple[str, Optional[str], Optional[str]]:
     """Run a single `ts tml import` invocation. Returns (status, guid, error)."""
-    import shlex
-    import subprocess
-
-    from ts_cli.tml_common import extract_imported_guid
-
-    model_tml_str = json.dumps(doc)
-    cmd = (f"source ~/.zshenv && ts tml import --policy PARTIAL "
-           f"--profile {shlex.quote(profile)}")
-    if no_create_new:
-        cmd += " --no-create-new"
+    from ts_cli.io_helpers import run_tml_import
 
     label = f"phase {phase}" if phase else "import"
-    typer.echo(f"  Running {label}...", err=True)
-
-    completed = subprocess.run(
-        ["bash", "-c", cmd],
-        input=json.dumps([model_tml_str]), capture_output=True, text=True)
-    stderr_tail = (completed.stderr or "")[-500:]
-
-    try:
-        import_result = json.loads(completed.stdout)
-    except Exception:
-        import_result = None
-
-    if completed.returncode != 0:
-        return "failed", None, stderr_tail
-
-    if import_result is None:
-        tail = (completed.stdout or "")[-500:]
-        return "failed", None, f"import response unparseable — response tail: {tail}"
-
-    if isinstance(import_result, list):
-        status = ((import_result[0].get("response") or {})
-                  .get("status") or {})
-        if status.get("status_code") == "ERROR":
-            import re
-            msg = status.get("error_message", "")
-            cleaned = re.sub(r"<[^>]+>", " ", msg or "")
-            cleaned = " ".join(cleaned.split())[:1000]
-            return "failed", None, cleaned
-
-    model_guid = extract_imported_guid(import_result)
-    if model_guid is None:
-        tail = (completed.stdout or "")[-500:]
-        return "failed", None, (
-            f"import OK but no GUID found — response tail: {tail}")
-    return "imported", model_guid, None
+    return run_tml_import(
+        profile, doc, no_create_new=no_create_new, label=label)
 
 
 def _build_model_summary(

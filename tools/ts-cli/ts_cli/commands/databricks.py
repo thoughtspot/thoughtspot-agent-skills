@@ -8,7 +8,7 @@ ts-cli. Pure logic lives in ts_cli/databricks/ (stdlib + PyYAML only).
 from __future__ import annotations
 
 import json
-import re
+
 import sys
 from pathlib import Path
 from typing import Optional
@@ -17,7 +17,7 @@ import typer
 
 app = typer.Typer(help="Databricks Metric View conversion commands (offline file transforms).")
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
 
 
 @app.command("parse-mv")
@@ -419,96 +419,22 @@ def _write_tml_files(output_dir: str, model_name: str, model_doc: dict,
     return str(model_file), table_files
 
 
-def _clean_error_message(msg: str) -> str:
-    """Strip HTML tags, collapse whitespace, and cap at ~1000 chars."""
-    cleaned = _HTML_TAG_RE.sub(" ", msg or "")
-    cleaned = " ".join(cleaned.split())
-    return cleaned[:1000]
-
-
 def _extract_status_error(import_result: list) -> Optional[str]:
-    """If the parsed import response carries an in-band ERROR status, return
-    a cleaned error message. Returns None for OK status, an unrecognized
-    shape, or an empty response list.
-
-    Live finding, BL-063 PR4 (2026-07-10, se-thoughtspot): `ts tml import`
-    can return returncode 0 with a response body carrying
-    `status.status_code == "ERROR"` and a rich (HTML-laden) `error_message`
-    — that error was previously swallowed, surfacing only as
-    `import_status: "failed"`, `import_error: ""`.
-    """
-    if not import_result or not isinstance(import_result, list):
-        return None
-    first = import_result[0]
-    if not isinstance(first, dict):
-        return None
-    status = (first.get("response") or {}).get("status") or {}
-    if status.get("status_code") != "ERROR":
-        return None
-    return _clean_error_message(status.get("error_message", ""))
+    from ts_cli.io_helpers import _extract_status_error as _shared
+    return _shared(import_result)
 
 
 def _run_import(
     profile: Optional[str], dry_run: bool, model_doc: dict,
 ) -> tuple[str, Optional[str], Optional[str]]:
-    """Run `ts tml import` for the model TML only. Returns (status, guid, error).
-
-    stdin is always provided (BL-097: `ts tml import` hangs waiting on an open
-    non-TTY stdin when no input is passed). No retry loop — a single import
-    attempt.
-
-    Error surfacing (BL-063 PR4 live e2e fix, 2026-07-10): every `failed`
-    outcome now carries a non-empty `import_error` —
-      (a) an in-band ERROR status (see _extract_status_error) wins first,
-          even when the subprocess itself exited 0;
-      (b) rc != 0 with stdout that didn't parse as JSON falls back to the
-          existing stderr tail;
-      (c) rc == 0 with an OK-shaped response but no extractable GUID (should
-          be rare now that extract_imported_guid handles the flat response
-          shape) gets a synthesized message naming the problem, with a
-          response-tail excerpt for diagnosis.
-    """
+    """Run `ts tml import` for the model TML only. Returns (status, guid, error)."""
     if not profile:
         return "not_requested", None, None
     if dry_run:
         return "dry_run", None, None
 
-    import shlex
-    import subprocess
-
-    from ts_cli.tml_common import extract_imported_guid
-
-    model_tml_str = json.dumps(model_doc)
-    completed = subprocess.run(
-        ["bash", "-c",
-         f"source ~/.zshenv && ts tml import --policy PARTIAL --profile {shlex.quote(profile)}"],
-        input=json.dumps([model_tml_str]), capture_output=True, text=True)
-    stderr_tail = (completed.stderr or "")[-500:]
-
-    try:
-        import_result = json.loads(completed.stdout)
-    except Exception:
-        import_result = None
-
-    if import_result is not None:
-        status_error = _extract_status_error(import_result)
-        if status_error is not None:
-            return "failed", None, status_error
-
-    if completed.returncode != 0:
-        return "failed", None, stderr_tail
-
-    if import_result is None:
-        tail = (completed.stdout or "")[-500:]
-        return "failed", None, f"import response unparseable — response tail: {tail}"
-
-    model_guid = extract_imported_guid(import_result)
-    if model_guid is None:
-        tail = (completed.stdout or "")[-500:]
-        return "failed", None, (
-            f"import response OK but no GUID found — response tail: {tail}"
-        )
-    return "imported", model_guid, None
+    from ts_cli.io_helpers import run_tml_import
+    return run_tml_import(profile, model_doc)
 
 
 def _table_alias_entries(tables: dict) -> list[dict]:
@@ -564,16 +490,9 @@ def _build_summary(
 
 
 def _load_json(path_str: str, label: str) -> dict:
-    path = Path(path_str)
-    if not path.exists():
-        typer.echo(f"{label} file not found: {path_str}", err=True)
-        raise SystemExit(1)
+    from ts_cli.io_helpers import load_json_file
     try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        typer.echo(f"cannot read {label} {path_str}: {exc}", err=True)
+        return load_json_file(path_str, label, expect_dict=True)
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        typer.echo(str(exc), err=True)
         raise SystemExit(1)
-    if not isinstance(data, dict):
-        typer.echo(f"{label} must be a JSON object: {path_str}", err=True)
-        raise SystemExit(1)
-    return data
