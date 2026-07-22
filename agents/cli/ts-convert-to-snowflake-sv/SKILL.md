@@ -149,7 +149,10 @@ Steps:
   1.5.  Choose session mode (A: single / B: split / C: update) . you choose
   2.    Find and select the model / worksheet .............. you choose
   3.    Export and parse the TML ........................... auto
-  4–9.  Map columns, joins, and formulas → DDL ............. auto
+  4–6.  Resolve physical tables + case sensitivity ......... auto
+  7.    (Mode B only) Multi-domain analysis ................ you choose
+  8.    Translate formulas ................................. auto
+  9.    Build DDL via `ts snowflake build-sv` .............. auto
   9.5C. (Mode C only) Diff against existing SV + confirm changes . you confirm
  10.    Checkpoint — review DDL before Snowflake execution .. you confirm
  11.    Validate the generated DDL ......................... auto
@@ -221,10 +224,10 @@ Choose a conversion mode:
   C — Update an EXISTING Snowflake Semantic View from a changed Model
 ```
 
-**Mode A** (or press Enter): set `session_mode = "single"`. Step 7.5 is skipped —
+**Mode A** (or press Enter): set `session_mode = "single"`. Step 7 is skipped —
 the skill produces one SV regardless of how many domains are detected.
 
-**Mode B**: set `session_mode = "split"`. Step 7.5 runs automatically in SPLIT mode —
+**Mode B**: set `session_mode = "split"`. Step 7 runs automatically in SPLIT mode —
 the SPLIT/SINGLE/CUSTOM choice prompt is suppressed since the user already chose here.
 
 **Mode C**: set `session_mode = "update"`. After confirming the model in Step 2, also
@@ -362,24 +365,11 @@ Separate into:
 
 ### Step 5: Resolve Physical Table Names
 
-**`to_snake(name)` — used throughout this step and Step 7:**
-Convert a display name to a valid Snowflake identifier:
-1. Lowercase the string
-2. Replace any run of non-alphanumeric characters with `_`
-3. Strip leading/trailing underscores
-
-```python
-import re
-def to_snake(name):
-    s = re.sub(r'_+', '_', re.sub(r'[^a-z0-9]', '_', name.lower())).strip('_')
-    if not s:
-        s = 'field'
-    elif s[0].isdigit():
-        s = 'field_' + s
-    return s
-# Examples: "eye colour" → "eye_colour", "# of Products" → "of_products"
-#           "1st Quarter" → "field_1st_quarter", "$" → "field"
-```
+**`to_snake(name)` — naming convention used by `ts snowflake build-sv`:**
+Lowercase, replace non-alphanumeric chars with `_`, strip leading/trailing `_`.
+Examples: `"eye colour"` → `eye_colour`, `"# of Products"` → `of_products`,
+`"1st Quarter"` → `field_1st_quarter`. The wrapper view naming in this step
+follows the same convention.
 
 Build a map: `logical_table_name → { database, schema, physical_table }`.
 
@@ -632,83 +622,7 @@ table_paths:
 
 ---
 
-### Step 7: Build Relationships
-
-For each join, obtain the `on` condition and produce a Snowflake relationship.
-
-**Scope filter — Model format only:** A model's `model_tables[]` is the authoritative
-list of tables in scope. Table TML `joins_with[]` entries may reference tables that
-are **not** in `model_tables` (e.g. a supplier or status lookup table that exists
-in Snowflake but was excluded from the model). Skip any join where either
-`left_table` or `right_table` is not in `model_tables`. Only emit relationships
-for joins where **both** tables are present in `model_tables`.
-
-**Table aliases in Model format:** `model_tables[]` entries can have an `alias` field:
-```yaml
-model_tables:
-- name: colour
-  alias: eye colour      # ← this is the identifier used in column_id references
-- name: colour
-  alias: hair colour
-- name: colour
-  alias: skin colour
-```
-When `alias` is present:
-- Use `to_snake(alias)` as the Snowflake table `name` (e.g. `eye_colour`)
-- Use the physical `db_table` as `base_table.table` (e.g. `colour`)
-- Build an `alias_to_sf_name` map for column_id resolution
-- Column references in `model.columns` use the alias: `column_id: eye colour::colour`
-- Relationship `with:` field also uses the alias: `with: eye colour`
-
-Deduplicate Snowflake table names if the same alias appears twice (append `_2`, `_3`).
-
-**Worksheet format:** Join `on` conditions are in Table TML `joins_with[]`. Match
-by `name` field across all Table TML objects.
-
-**Model format — two join patterns:**
-
-*Inline `on`:*
-```yaml
-joins:
-- with: DM_LOCALE_COUNTRY
-  "on": "[DM_CUSTOMER::COUNTRY] = [DM_LOCALE_COUNTRY::COUNTRY_KEY]"
-  type: INNER
-  cardinality: ONE_TO_ONE
-```
-
-*`referencing_join` (most common in real models):*
-```yaml
-joins:
-- with: DM_CUSTOMER
-  referencing_join: DM_ORDER_to_DM_CUSTOMER
-```
-Search all Table TML `joins_with[]` for `name: DM_ORDER_to_DM_CUSTOMER`.
-Note: `destination` in Table TML may be an object (`destination.name`) — handle both.
-
-**Parse `on` condition:** regex `\[([^\]:]+)::([^\]]+)\]\s*=\s*\[([^\]:]+)::([^\]]+)\]`
-→ left_table, left_column, right_table, right_column.
-
-**Relationship naming — collision avoidance:**
-
-Generate the base name as `{left_table}_to_{right_table}`. If that name is already
-taken by a previously emitted relationship (two different join paths between the same
-table pair), append the left join column to disambiguate:
-
-```python
-base_name = f"{left_tbl}_to_{right_tbl}"
-if base_name in used_rel_names:
-    base_name = f"{left_tbl}_{to_snake(left_col)}_to_{right_tbl}"
-used_rel_names.add(base_name)
-```
-
-Initialise `used_rel_names = set()` before the relationship loop.
-
-For join type and cardinality mappings, see
-[../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md).
-
----
-
-### Step 7.5: Multi-Domain Analysis
+### Step 7: Multi-Domain Analysis
 
 **Mode gate:**
 - **Mode A** (`session_mode = "single"`) — skip this step entirely. Proceed to Step 8.
@@ -717,14 +631,14 @@ For join type and cardinality mappings, see
   Set `split_mode = True` immediately; suppress the SPLIT/SINGLE/CUSTOM choice prompt
   since the user already chose Mode B at Step 1.5.
 
-**Trigger (Mode B only):** Run whenever `model_tables[]` contains ≥2 tables and Step 7
-produced at least one join. Skip (proceed to Step 8) if the model has 0 or 1 fact tables.
+**Trigger (Mode B only):** Run whenever `model_tables[]` contains ≥2 tables and at
+least one join exists. Skip (proceed to Step 8) if the model has 0 or 1 fact tables.
 
 **Algorithm:**
 
-**1. Build a directed join graph** from the joins resolved in Step 7:
+**1. Build a directed join graph** from `model_tables[].joins[]`:
 - Nodes: every table in `model_tables[]`
-- Directed edges: one edge per resolved join, pointing from the FK table (source —
+- Directed edges: one edge per join, pointing from the FK table (source —
   the table whose `joins[]` array declared the join) to the PK table (target)
 
 **2. Identify fact tables and dimension tables:**
@@ -769,8 +683,6 @@ How would you like to proceed?
 **7b. SPLIT:** Set `split_mode = True`. For each domain:
 - `domain.tables` = fact table(s) + all reachable dimensions (including shared ones,
   duplicated into every domain that reaches them)
-- `domain.joins` = all relationships where **both** left_table and right_table are in
-  `domain.tables`
 - Default `domain.sv_name` = `{model_name}_{snake_case(primary_fact_table)}`
   (e.g. model `sales_inventory`, fact `DM_ORDER` → `sales_inventory_dm_order`).
   User may rename at the Step 10 checkpoint.
@@ -797,139 +709,7 @@ tables. Log it in the Unmapped Properties Report under a new section:
 
 ---
 
-### Step 8: Map Columns
-
-**Split mode:** If `split_mode = True` (set in Step 7.5), run this entire step once per
-domain. On each pass, restrict scope to the current domain:
-- Only include columns whose `column_id` prefix (the `TABLE_NAME::` part) is a table
-  in `domain.tables`
-- Only use `domain.joins` as the relationship set (already scoped in Step 7.5)
-- Use `domain.sv_name` as the output view name
-
-If `split_mode = False`, run once with the full scope as normal.
-
-**Source of truth — hierarchy:**
-
-| Layer | Used for |
-|---|---|
-| `model.columns[]` | All Semantic View field definitions — name, description, type, aggregation, synonyms, ai_context, formula_id, column_id |
-| Table TML `columns[]` | Resolving `column_id` → `db_column_name` and `db_column_properties.data_type` |
-| Table TML root (`db`, `schema`, `db_table`) | Physical table location for `base_table` entries |
-| `connections.yaml` | Fallback only — if Snowflake reports column not found, `external_column` overrides `db_column_name` |
-
-The model is the semantic layer and the single source of truth for what appears in
-the Semantic View. Never derive the column list from Table TML.
-
-**Column ID resolution:**
-
-`column_id` format: `TABLE_NAME::LOGICAL_COLUMN_NAME`
-
-1. Split on `::` → `table_name`, `logical_col_name`
-2. Find the Table TML for `table_name`
-3. Find the column in Table TML `columns[]` where `name == logical_col_name`
-4. That column's `db_column_name` is the physical Snowflake column name (in the
-   vast majority of cases — it is the actual DB column name)
-5. Build `expr` as `table_name.DB_COLUMN_NAME`
-   - If `DB_COLUMN_NAME` is a SQL reserved word (e.g. `date`, `time`, `schema`),
-     double-quote it: `table_name."date"`
-   - If `DB_COLUMN_NAME` is case-sensitive (lowercase in `SHOW COLUMNS` output from
-     Step 5), double-quote it: `table_name."column_name"`
-   - Both rules may apply simultaneously: `table_name."date"` (reserved + lowercase)
-6. Use `db_column_properties.data_type` for date/time classification. If the
-   `col_types` map built in Step 5 (from `INFORMATION_SCHEMA.COLUMNS`) already
-   has the data type for this column, prefer it — it comes directly from Snowflake
-   and is authoritative. Fall back to `db_column_properties.data_type` from the
-   Table TML only when `col_types` doesn't have an entry (e.g. a sql_view column).
-
-**`connections.yaml` — do not consult proactively.** Only if Snowflake returns a
-column-not-found error after execution should you check `connections.yaml`, where
-`external_column` may override `db_column_name` for a given column:
-```yaml
-column:
-- name: CATEGORY_ID           # = db_column_name in Table TML
-  external_column: CATEGORY_ID  # = actual physical column in Snowflake (may differ)
-```
-
-**Output structure — DDL clauses:**
-
-Accumulate four lists as you iterate columns: `tables_clause`, `relationships_clause`,
-`dimensions_clause`, `metrics_clause`. Then emit them in order as the final DDL.
-
-**`tables()` clause — primary key for join target tables:**
-
-After building all relationships, identify every table that appears on the right side
-of a relationship. That table's entry in `tables()` must declare its PK:
-```sql
-DB.SCHEMA.DM_ORDER primary key (ORDER_ID),
-DB.SCHEMA.DM_ORDER_DETAIL,   -- no PK: left-side only, nothing joins to it
-```
-
-**`dimensions()` clause — all non-metric columns including dates and FK columns:**
-
-Every column that is not a metric goes here — including date/timestamp columns (which
-are distinguished as time_dimensions only in the CA extension JSON, not in the DDL).
-Format: `TABLE.ALIAS as table_lower.PHYSICAL_COL [with synonyms=('display_name')]`
-
-FK columns (join keys) must also appear in `dimensions()` so Cortex Analyst can
-resolve relationships. Alias names must be globally unique across the entire view.
-
-When FK and PK columns share the same physical name (e.g. `TRANS.ACCOUNT_ID →
-ACCOUNT.ACCOUNT_ID`), they would collide as dimension aliases. Fix by renaming FK
-columns in wrapper views with a table-specific prefix:
-
-```sql
--- Wrapper view renames the FK to avoid alias collision
-CREATE OR REPLACE VIEW DB.SCHEMA_SV.TRANS AS
-SELECT "account_id" AS TRANS_ACCOUNT_ID, ...
-FROM DB.SCHEMA.TRANS;
-
--- dimensions() entries — now globally unique
-TRANS.TRANS_ACCOUNT_ID as trans.TRANS_ACCOUNT_ID,  -- FK dim
-ACCOUNT.ACCOUNT_ID as account.ACCOUNT_ID,           -- PK dim
-
--- relationships() entry uses the renamed physical column
-trans_to_account as TRANS(TRANS_ACCOUNT_ID) references ACCOUNT(ACCOUNT_ID)
-```
-
-When a physical table is aliased multiple times, create separate wrapper views for
-each alias with distinct PK column names so each satisfies the unique-name requirement.
-
-**`metrics()` clause — ordering matters:**
-
-Metrics are evaluated in order. A metric that references another metric's alias (e.g.
-a ratio `DIV0(tbl.amount, tbl.quantity)`) must appear **after** the metrics it
-references. Always emit base aggregate metrics before derived/ratio metrics for the
-same table.
-
-**For each model column:**
-
-1. If `formula_id` set → translate formula in Step 9; if untranslatable, omit the
-   column and log it; do not include placeholder `expr` values
-2. If `column_id` set → resolve physical column name as above
-3. Classify as dimension / time_dimension / metric using the decision tree in
-   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
-4. Merge `ai_context` into `description` with prefix `[TS AI Context]` if present
-5. Record unmapped properties (format_pattern, default_date_bucket, custom_order,
-   data_panel_column_groups, geo_config) for the Unmapped Properties Report
-6. Build the Snowflake field entry using the templates in
-   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
-7. Append the field to the field list for its owning table
-
----
-
-**TML temp file cleanup — do this now, before Step 9:**
-
-The exported TML files contain sensitive schema metadata (table names, column
-descriptions, join conditions, AI context). Delete them as soon as column mapping
-is complete — they are not needed after this point:
-
-```bash
-rm -f /tmp/ts_tml_*.json
-```
-
----
-
-### Step 9: Translate Formulas
+### Step 8: Translate Formulas
 
 > **MANDATORY — read the reference before assessing any formula:**
 > Open [../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
@@ -946,7 +726,7 @@ rm -f /tmp/ts_tml_*.json
 >
 > Consult the reference. Never reason from first principles about ThoughtSpot functions.
 
-For each formula column (`formula_id` is set):
+For each formula column (`formula_id` is set in `model.columns[]`):
 
 1. Look up formula expression from `formulas[]` by `id` or `name`
 2. Resolve column references using the syntax rules for the TML format (Worksheet uses
@@ -955,18 +735,19 @@ For each formula column (`formula_id` is set):
    translate using the rules in that file
 4. Handle nested references up to 3 levels deep
 
-**Untranslatable formulas — omit entirely:**
+Write the translated formulas to a JSON file for `ts snowflake build-sv`:
 
-For formulas confirmed untranslatable after consulting the reference, **do not emit
-the column** in the DDL. Do NOT use `-- TODO`, `CAST(NULL AS TEXT)`, or any placeholder
-`expr` — these cause Snowflake parse errors or silent failures.
+```json
+{
+  "formula_id_1": {"expr": "SUM(table.col)", "kind": "metric"},
+  "formula_id_2": {"expr": "CONCAT(t.first, ' ', t.last)", "kind": "dimension"}
+}
+```
 
-Instead:
-- Skip the column in the output DDL
-- Add an entry to the Formula Translation Log in the Unmapped Properties Report:
-  ```
-  | {display_name} | OMITTED | {reason} | {original_expr} |
-  ```
+Each entry: `formula_id` (matching the `formulas[].id` in the TML) → `{expr, kind}`.
+`kind` is `"metric"` or `"dimension"` based on the column's `properties.column_type`.
+Untranslatable formulas are omitted from this file — `build-sv` skips any formula
+column whose `formula_id` is not in the translated map and reports it as skipped.
 
 **Confirmed untranslatable patterns:** do not maintain a static list here — the set of
 untranslatable patterns evolves independently of this skill. Consult the "Untranslatable
@@ -974,6 +755,82 @@ Patterns", "Untranslatable LOD Patterns", and "Untranslatable Semi-Additive Patt
 sections of
 [ts-snowflake-formula-translation.md](../../shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md)
 for the current, authoritative list before omitting any column.
+
+---
+
+### Step 9: Build Semantic View DDL (`ts snowflake build-sv`)
+
+**Split mode:** If `split_mode = True` (set in Step 7), run this step once per domain.
+For each domain, filter the exported Model TML to include only the domain's tables
+in `model_tables[]` and only columns whose `column_id` prefix is in `domain.tables`.
+Write the filtered TML to a separate JSON file before running `build-sv`.
+
+**Model format — use `ts snowflake build-sv`:**
+
+```bash
+source ~/.zshenv && ts snowflake build-sv \
+  --model {export_dir}/model.json \
+  --tables-dir {export_dir}/ \
+  --sv-name {target_database}.{target_schema}.{sv_name} \
+  --output {sv_name}.sql \
+  --formulas {formulas.json}
+```
+
+Omit `--formulas` if the model has no formula columns (or all formulas are
+untranslatable).
+
+**What `build-sv` handles** (codified in `sv_build_sv.py`):
+- `column_id` resolution → physical column names via Table TML
+- Column classification (dimension / time_dimension / metric) using data type and
+  column_type properties
+- Relationship parsing (`on` expressions) and naming with collision avoidance
+- Aggregation mapping (SUM, COUNT, COUNT_DISTINCT, AVG, MIN, MAX, etc.)
+- Metric topological ordering (derived metrics after their dependencies)
+- Alias deduplication across the entire view
+- Synonym and comment emission
+- CA extension JSON generation (dimensions, time_dimensions, metrics per table)
+- Full DDL assembly (`CREATE OR REPLACE SEMANTIC VIEW`)
+
+The command writes the DDL to `--output` and prints a JSON summary to stdout:
+
+```json
+{
+  "sv_name": "DB.SCHEMA.MY_SV",
+  "ddl_file": "my_sv.sql",
+  "dimensions": 12,
+  "time_dimensions": 3,
+  "metrics": 8,
+  "relationship_count": 4,
+  "skipped_formulas": 1,
+  "dropped_join_attrs": 2,
+  "unmapped_properties": 5
+}
+```
+
+Capture this summary for the Step 10 conversion summary. Skipped formulas and
+dropped join attributes are also reported on stderr.
+
+**Worksheet format — `build-sv` does not yet support worksheet TML:**
+
+If the exported TML is worksheet format (top-level key `worksheet`), `build-sv`
+cannot process it. Follow the manual procedure:
+
+1. Build a `path_id → table_alias` map from `worksheet.table_paths[]`
+2. Resolve joins from Table TML `joins_with[]` entries
+3. For each `worksheet_columns[]` entry, resolve `column_id` via the path map,
+   classify as dimension/time_dimension/metric using
+   [../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md](../../shared/mappings/ts-snowflake/ts-to-snowflake-rules.md)
+4. Assemble the DDL manually following the DDL Format Reference at the top of this file
+
+**`connections.yaml` — do not consult proactively.** Only if Snowflake returns a
+column-not-found error after execution should you check `connections.yaml`, where
+`external_column` may override `db_column_name` for a given column.
+
+**TML temp file cleanup — do this after build-sv completes:**
+
+```bash
+rm -f /tmp/ts_tml_*.json {formulas.json}
+```
 
 ---
 
@@ -1434,6 +1291,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.0 | 2026-07-22 | Steps 7–9 rewired onto `ts snowflake build-sv`: relationship building, column classification, DDL assembly now deterministic CLI (model format). Formula translation (Step 8) reordered before build-sv. Inline `to_snake()` code block removed. Worksheet format retains manual DDL assembly path. (BL-063 phase 1b) |
 | 1.3.2 | 2026-07-11 | Remove the dead `direct-api-auth.md` reference-table row (retired repo-wide — curl + `/tmp/ts_token.txt` fallback now prohibited by `ts-cli.md`/`security.md`, no step logic used it) (BL-109). |
 | 1.3.1 | 2026-07-11 | Document `sql_view` → `base_table.definition:` (D-Direct) auto-map option; emission deferred to BL-031 (audit 13.4). |
 | 1.3.0 | 2026-07-03 | Step 9.5C diff + Step 11 mechanical DDL checks now delegate to `ts snowflake diff` / `ts snowflake lint-ddl` (BL-063 quick wins); semantic checks remain manual. Prereq ts-cli v0.30.0. |

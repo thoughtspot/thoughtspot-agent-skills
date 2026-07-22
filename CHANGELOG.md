@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-22
+- refactor: rewire `ts-convert-to-snowflake-sv` Steps 7-9 onto `ts snowflake build-sv` — relationship building, column classification, DDL assembly now deterministic CLI for model format (BL-063 phase 1b)
 - refactor: rewire `ts-convert-from-snowflake-sv` onto deterministic CLI commands — `ts snowflake parse-sv`, `translate-formulas`, `build-model` replace 8 inline Python blocks (BL-063 phase 1a)
 - feat: add `ts-convert-from-powerbi` skill + `ts powerbi` command group (parse / build-model / build-liveboard) — Power BI (`.pbip`: TMDL semantic model + PBIR report) → ThoughtSpot converter; DAX translated to `[formula_<name>]` id-refs (topo-sorted + dangling-ref cascade), joins with real relationship cardinality, AVG-vs-SUM from `summarizeBy`, Spotter enabled; time-intelligence (SAMEPERIODLASTYEAR / YoY) flagged NEEDS REVIEW and recovered via the Spotter last-mile. Reuses the shared `dump_tml_yaml` + `tableau.liveboard.build_from_spec` emitter.
 - docs: add `agents/shared/mappings/powerbi/powerbi-formula-translation.md` (DAX→TS formula map) + `worked-examples/powerbi/` (SPLY parameter, CALCULATE→group_aggregate, dual-axis combo)
