@@ -2309,14 +2309,13 @@ validators added in PR #176 ship with theirs).
 
 **Source:** 2026-07-03 full audit, finding 7.2.
 **Affects:** `tools/validate/check_open_items.py`, `.github/workflows/validate.yml`.
-**Status:** OPEN.
+**Status:** DONE (PR #294, 2026-07-22).
 
-`check_open_items` runs `--warn` in both pre-commit and CI — warn mode never exits nonzero,
-so angle 3 (open-items truthfulness) has no blocking gate anywhere. Add a scoped hard mode
-in CI: fail only on open-items entries added/modified in the PR diff (analogous to the
-changelog gate's `--base`).
-
-**Target:** 2026-08-31.
+Added `--base` flag to `check_open_items.py`: when provided, only open-items.md files
+changed in the PR diff (`git diff <base>...HEAD`) are checked in hard mode (exit nonzero).
+Pre-existing unresolved items in unchanged files are WARN-only. CI wired as a new
+"Open-items gate (PR only)" step in `validate.yml`, analogous to the changelog gate.
+Pre-commit still uses `--warn` (unchanged).
 
 ---
 

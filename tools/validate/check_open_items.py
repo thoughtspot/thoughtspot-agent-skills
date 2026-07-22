@@ -9,11 +9,13 @@ Usage:
     python tools/validate/check_open_items.py
     python tools/validate/check_open_items.py --root /path/to/repo
     python tools/validate/check_open_items.py --warn  # exit 0 but report (pre-commit safe)
+    python tools/validate/check_open_items.py --base origin/main  # CI: hard-fail only on PR-changed files
 """
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -102,6 +104,15 @@ def check_open_items_file(path: Path) -> list[tuple[str, str]]:
     return unresolved
 
 
+def _changed_files(base: str, repo_root: Path) -> set[str]:
+    """Return repo-relative paths changed between ``base`` and HEAD."""
+    result = subprocess.run(
+        ["git", "diff", f"{base}...HEAD", "--name-only"],
+        capture_output=True, text=True, cwd=repo_root,
+    )
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Flag unresolved items in references/open-items.md files."
@@ -113,9 +124,19 @@ def main() -> int:
         help="Exit 0 even if unresolved items found (prints WARN, not FAIL). "
              "Use in pre-commit so pre-existing items don't block commits.",
     )
+    parser.add_argument(
+        "--base", default=None,
+        help="Scoped hard mode: only hard-fail on open-items.md files changed in "
+             "the PR diff (<base>...HEAD). Unchanged files are reported as WARN. "
+             "Use in CI (e.g. --base origin/main).",
+    )
     args = parser.parse_args()
 
     repo_root = Path(args.root).resolve()
+
+    changed: set[str] | None = None
+    if args.base:
+        changed = _changed_files(args.base, repo_root)
 
     open_items_files: list[Path] = []
     for runtime in ALL_RUNTIMES:
@@ -127,36 +148,45 @@ def main() -> int:
         print("No open-items.md files found.")
         return 0
 
-    total_unresolved = 0
+    total_fail = 0
+    total_warn = 0
 
     for f in open_items_files:
         rel = f.relative_to(repo_root)
         unresolved = check_open_items_file(f)
-        if unresolved:
-            level = "WARN" if args.warn else "FAIL"
-            for title, reason in unresolved:
-                print(f"{level}  {rel}  →  {title}  [{reason}]")
-            total_unresolved += len(unresolved)
-        else:
+        if not unresolved:
             print(f"PASS  {rel}  (all items resolved)")
+            continue
+
+        is_changed = changed is not None and str(rel) in changed
+        if args.warn or (changed is not None and not is_changed):
+            level = "WARN"
+            total_warn += len(unresolved)
+        else:
+            level = "FAIL"
+            total_fail += len(unresolved)
+
+        for title, reason in unresolved:
+            print(f"{level}  {rel}  →  {title}  [{reason}]")
 
     print()
-    if total_unresolved:
-        msg = f"{total_unresolved} unresolved open item(s) found."
-        if args.warn:
-            print(f"WARN: {msg}")
-            print(
-                "These items require live-instance verification before the skill ships. "
-                "See references/open-items.md for test procedures."
-            )
-            return 0
-        else:
-            print(msg)
-            print(
-                "Resolve items by running the test procedures and recording findings "
-                "in the 'Finding:' section, then change Status from UNTESTED to VERIFIED."
-            )
-            return 1
+    if total_fail:
+        print(f"{total_fail} unresolved open item(s) in PR-changed files.")
+        print(
+            "Resolve items by running the test procedures and recording findings "
+            "in the 'Finding:' section, then change Status from UNTESTED to VERIFIED."
+        )
+        if total_warn:
+            print(f"({total_warn} pre-existing item(s) in unchanged files — WARN only.)")
+        return 1
+
+    if total_warn:
+        print(f"WARN: {total_warn} unresolved open item(s) found (not in PR scope).")
+        print(
+            "These items require live-instance verification before the skill ships. "
+            "See references/open-items.md for test procedures."
+        )
+        return 0
 
     print("All open items resolved.")
     return 0

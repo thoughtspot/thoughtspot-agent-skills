@@ -89,6 +89,16 @@ jobs:
           # regenerates at merge time; pre-commit catches local staleness.
           python3 tools/validate/generate_quality_gates.py --root . --check || echo "WARN  quality-gates.md is stale (non-blocking in CI)"
 
+      - name: Open-items gate (PR only)
+        # Scoped hard mode: only fails on unresolved items in open-items.md files
+        # that this PR actually changed. Pre-existing items in untouched files are
+        # WARN-only. Analogous to the changelog gate's --base scoping.
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          python3 tools/validate/check_open_items.py --root . \
+            --base "origin/${{ github.base_ref }}"
+
       - name: Changelog gate (PR only)
         # The repo-changelog gate is staged-diff-based in pre-commit (empty in a CI
         # checkout). --base diffs the PR's commits against the target branch so it

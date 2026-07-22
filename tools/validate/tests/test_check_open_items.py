@@ -106,3 +106,23 @@ def test_marker_not_matched_as_substring(tmp_path):
     f = _write(tmp_path, "## #9 — Notes\n\nThis is verified and shipped.\n")
     res = check_open_items.check_open_items_file(f)
     assert res == []
+
+
+# ── --base scoped-hard-mode tests ─────────────────────────────────────────────
+
+def test_changed_files_parsing(tmp_path, monkeypatch):
+    """_changed_files parses git diff --name-only output into a set."""
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        result = subprocess.CompletedProcess(cmd, 0)
+        result.stdout = "agents/cli/skill-a/references/open-items.md\nagents/cli/skill-b/SKILL.md\n"
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    got = check_open_items._changed_files("origin/main", tmp_path)
+    assert got == {
+        "agents/cli/skill-a/references/open-items.md",
+        "agents/cli/skill-b/SKILL.md",
+    }
