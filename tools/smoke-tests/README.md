@@ -6,11 +6,24 @@ effects and require live credentials.
 
 ## Scripts
 
-| Script | Tests |
-|---|---|
-| `smoke_ts_to_snowflake.py` | SV YAML validation → dry-run → create → SHOW → SELECT → cleanup |
-| `smoke_ts_from_snowflake.py` | GET_DDL → parse DDL → find TS tables → import model → verify → cleanup |
-| `smoke_ts_dependency_manager.py` | auth → resolve model → `ts dependency backup` → (opt-in) `ts dependency apply-change` → `ts dependency rollback --only updates` → cleanup |
+| Script | Skill | Live? |
+|---|---|---|
+| `smoke_ts_to_snowflake.py` | ts-convert-to-snowflake-sv | Yes (TS + SF) |
+| `smoke_ts_from_snowflake.py` | ts-convert-from-snowflake-sv | Yes (TS + SF) |
+| `smoke_ts_to_databricks.py` | ts-convert-to-databricks-mv | Yes (TS + DBX) |
+| `smoke_ts_from_databricks.py` | ts-convert-from-databricks-mv | Yes (TS + DBX) |
+| `smoke_ts-convert-to-databricks-mv.py` | ts-convert-to-databricks-mv (codified) | Yes (TS + DBX) |
+| `smoke_ts_convert_from_qlik.py` | ts-convert-from-qlik | Offline |
+| `smoke_ts_dependency_manager.py` | ts-dependency-manager | Yes (TS) |
+| `smoke_ts_audit.py` | ts-audit | Yes (TS) |
+| `smoke_ts_object_model_coach.py` | ts-object-model-coach | Yes (TS) |
+| `smoke_ts_object_model_aggregates.py` | ts-object-model-aggregates | Yes (TS + SF) |
+| `smoke_ts_object_model_erd.py` | ts-object-model-erd | Yes (TS) |
+| `smoke_ts_object_model_spotql_query.py` | ts-object-model-spotql-query | Yes (TS) |
+| `smoke_ts_load_source_data.py` | ts-load-source-data | Offline |
+| `smoke_ts_recipe_formula_business_days_snowflake.py` | ts-recipe-formula-business-days-snowflake | Yes (SF) |
+| `smoke_ts_recipe_formula_hms_display_snowflake.py` | ts-recipe-formula-hms-display-snowflake | Yes (SF) |
+| `smoke_ts_variable_timezone.py` | ts-variable-timezone | Yes (TS) |
 
 ## Prerequisites
 
