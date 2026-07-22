@@ -1225,13 +1225,11 @@ def build_liveboard_cmd(
 # ---------------------------------------------------------------------------
 
 def _load_json(path: Path, label: str) -> dict:
-    if not path.is_file():
-        typer.echo(f"{label} not found: {path}", err=True)
-        raise SystemExit(1)
+    from ts_cli.io_helpers import load_json_file
     try:
-        return json.loads(path.read_text())
-    except ValueError as exc:
-        typer.echo(f"Invalid JSON in {label.lower()} ({path}): {exc}", err=True)
+        return load_json_file(path, label)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
         raise SystemExit(1)
 
 

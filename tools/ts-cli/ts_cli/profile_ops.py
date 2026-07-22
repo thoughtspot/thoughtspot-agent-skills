@@ -196,7 +196,7 @@ PROFILE_PATHS: dict[str, Path] = {
 }
 
 
-def load_platform_profiles(platform: str) -> list[dict]:
+def load_platform_profiles(platform: str, *, path: Path | None = None) -> list[dict]:
     """Load profiles from the platform's JSON file.
 
     Handles three documented file shapes (ThoughtSpot legacy):
@@ -204,8 +204,11 @@ def load_platform_profiles(platform: str) -> list[dict]:
       {"profiles": [...]}      — wrapped list
       {"name": {...}, ...}     — name-keyed dict
     All are normalised to a flat list of profile dicts.
+
+    Args:
+        path: Override the default file path (useful for testing).
     """
-    path = PROFILE_PATHS[platform]
+    path = path or PROFILE_PATHS[platform]
     if not path.exists():
         return []
     raw = json.loads(path.read_text())
@@ -246,9 +249,9 @@ def remove_profile(platform: str, name: str) -> dict | None:
     return removed[0]
 
 
-def get_profile(platform: str, name: str) -> dict | None:
+def get_profile(platform: str, name: str, *, path: Path | None = None) -> dict | None:
     """Find a profile by name."""
-    for p in load_platform_profiles(platform):
+    for p in load_platform_profiles(platform, path=path):
         if p.get("name") == name:
             return p
     return None

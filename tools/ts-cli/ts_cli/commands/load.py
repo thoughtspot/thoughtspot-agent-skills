@@ -451,25 +451,17 @@ SF_PROFILES_PATH = Path.home() / ".claude" / "snowflake-profiles.json"
 
 
 def load_snowflake_profile(profile_name: str) -> dict:
-    """Load a Snowflake profile from ~/.claude/snowflake-profiles.json."""
-    if not SF_PROFILES_PATH.exists():
+    """Load a Snowflake profile by name, raising SystemExit if not found."""
+    from ts_cli.profile_ops import get_profile, load_platform_profiles
+    profile = get_profile("snowflake", profile_name, path=SF_PROFILES_PATH)
+    if profile is not None:
+        return profile
+    available = [p.get("name") for p in load_platform_profiles("snowflake", path=SF_PROFILES_PATH)]
+    if not available:
         raise SystemExit(
             f"No Snowflake profiles found at {SF_PROFILES_PATH}.\n"
             "Run /ts-profile-snowflake to create one."
         )
-    raw = json.loads(SF_PROFILES_PATH.read_text(encoding="utf-8"))
-    if isinstance(raw, dict) and "profiles" in raw:
-        profiles = raw["profiles"]
-    elif isinstance(raw, list):
-        profiles = raw
-    else:
-        raise SystemExit(f"Unexpected format in {SF_PROFILES_PATH}")
-
-    for p in profiles:
-        if p.get("name") == profile_name:
-            return p
-
-    available = [p.get("name") for p in profiles]
     raise SystemExit(
         f"Profile '{profile_name}' not found. Available: {', '.join(str(n) for n in available)}"
     )
@@ -753,17 +745,16 @@ _DBX_PROFILES_PATH = Path.home() / ".claude" / "databricks-profiles.json"
 
 
 def _load_dbx_profile(profile_name: str) -> dict:
-    if not _DBX_PROFILES_PATH.exists():
+    from ts_cli.profile_ops import get_profile, load_platform_profiles
+    profile = get_profile("databricks", profile_name, path=_DBX_PROFILES_PATH)
+    if profile is not None:
+        return profile
+    available = [p.get("name") for p in load_platform_profiles("databricks", path=_DBX_PROFILES_PATH)]
+    if not available:
         raise SystemExit(f"No Databricks profiles file at {_DBX_PROFILES_PATH}. "
                          "Run /ts-profile-databricks or create it.")
-    data = json.loads(_DBX_PROFILES_PATH.read_text(encoding="utf-8"))
-    profiles = data.get("profiles", data) if isinstance(data, dict) else data
-    items = profiles if isinstance(profiles, list) else list(profiles.values())
-    for p in items:
-        if p.get("name") == profile_name:
-            return p
     raise SystemExit(f"Databricks profile '{profile_name}' not found. "
-                     f"Available: {[p.get('name') for p in items]}")
+                     f"Available: {[p.get('name') for p in available]}")
 
 
 def dbx_type(src_type: str) -> str:

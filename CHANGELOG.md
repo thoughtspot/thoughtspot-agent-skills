@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-22
+- chore: bump ts-cli to v0.72.0 — `io_helpers` module, `profile_ops` path override, bare-except narrowing (BL-121)
 - docs: extract import error table + post-import verification to shared `ts-tml-import-gate.md` §4/§5 — closes BL-063
 - refactor: rewire `ts-convert-to-snowflake-sv` Steps 7-9 onto `ts snowflake build-sv` — relationship building, column classification, DDL assembly now deterministic CLI for model format (BL-063 phase 1b)
 - refactor: rewire `ts-convert-from-snowflake-sv` onto deterministic CLI commands — `ts snowflake parse-sv`, `translate-formulas`, `build-model` replace 8 inline Python blocks (BL-063 phase 1a)

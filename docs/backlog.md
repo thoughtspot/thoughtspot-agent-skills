@@ -3272,20 +3272,19 @@ recover table joins/associations from engine-artifacts mode (open-items #3).
 
 **Filed:** 2026-07-22.
 **Source:** 2026-07-22 full audit, findings 4.1–4.5.
-**Status:** OPEN.
+**Status:** DONE (PR #290).
 
-Five ts-cli code-quality items from the audit:
-- **4.1** Profile loading duplicated across 4 call sites (Snowflake/Databricks `load.py` x2,
-  `_common.py` x2) — consolidate onto `profile_ops.load_platform_profiles`
-- **4.2** JSON file-load helpers duplicated across 4 modules (snowflake.py, databricks.py,
-  tableau.py, sisense.py) — extract to shared utility
-- **4.3** Bare `except Exception` in `_find_guid_by_name` silently swallows errors — RLS
-  two-pass import pass 2 silently skips; same pattern in connections.py and snowflake.py
-- **4.4** Smoke tests duplicate Snowflake connector logic from `load.py` — `_common.py`
-  re-implements with different credential resolution
-- **4.5** `snowflake.py` uses superseded stdin JSON-array import pattern
-
-**Target:** batch refactor PR when next touching these modules.
+Five ts-cli code-quality items from the audit — all resolved:
+- **4.1** Profile loading → delegates to `profile_ops.get_profile` (with `path` override
+  for testability) across `load.py` and `_common.py`
+- **4.2** JSON file-load → extracted to `io_helpers.load_json_file`; thin wrappers in
+  snowflake.py, databricks.py, tableau.py, sisense.py
+- **4.3** Bare `except Exception` → narrowed to `except (json.JSONDecodeError, ValueError)`
+  in snowflake.py and databricks.py
+- **4.4** Smoke tests `_common.py` → delegates to `profile_ops.get_profile`; dead
+  `sf_connect_python` removed (42 lines)
+- **4.5** stdin import → extracted to `io_helpers.run_tml_import`; databricks.py and
+  snowflake.py use thin wrappers
 
 ## BL-122 — Cross-skill prompt/discovery extraction (connection, tables, import errors)
 
@@ -3301,9 +3300,8 @@ Three near-identical prose blocks duplicated across 4+ conversion skills:
 - **11.4** Table discovery pattern (C/I scope + metadata search + column verification +
   Table Plan summary) — duplicated with identical logic, already patched skill-by-skill
   once (2026-06-16). See also BL-111 (`--connection` filter on `ts metadata search`)
-- **11.5** Post-import verification + import error table — 8 of 10 error-table rows
-  identical between from-snowflake-sv and from-databricks-mv. Extract error table to
-  `agents/shared/schemas/ts-tml-import-gate.md` (already exists but lacks the error table)
+- **11.5** ~~Post-import verification + import error table~~ — DONE (BL-063 phase 1c,
+  PR #288: extracted to `ts-tml-import-gate.md` §4/§5)
 
 **Target:** extract shared references when next editing the conversion skills.
 

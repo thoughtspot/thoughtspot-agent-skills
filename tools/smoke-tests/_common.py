@@ -110,32 +110,17 @@ _SF_PROFILES_PATH = Path.home() / ".claude" / "snowflake-profiles.json"
 
 
 def load_sf_profile(profile_name: str) -> dict:
-    """
-    Load a Snowflake profile from ~/.claude/snowflake-profiles.json.
-
-    Supports both the list format and the wrapped {'profiles': [...]} format
-    written by the snowflake-profile-setup skill.
-    """
-    if not _SF_PROFILES_PATH.exists():
+    """Load a Snowflake profile by name, raising RuntimeError if not found."""
+    from ts_cli.profile_ops import get_profile, load_platform_profiles
+    profile = get_profile("snowflake", profile_name)
+    if profile is not None:
+        return profile
+    available = [p.get("name") for p in load_platform_profiles("snowflake")]
+    if not available:
         raise RuntimeError(
             f"No Snowflake profiles file found at {_SF_PROFILES_PATH}. "
             "Run /ts-profile-snowflake to create a profile."
         )
-
-    raw = json.loads(_SF_PROFILES_PATH.read_text(encoding="utf-8"))
-
-    if isinstance(raw, dict) and "profiles" in raw:
-        profiles = raw["profiles"]
-    elif isinstance(raw, list):
-        profiles = raw
-    else:
-        raise RuntimeError(f"Unexpected format in {_SF_PROFILES_PATH}")
-
-    for p in profiles:
-        if p.get("name") == profile_name:
-            return p
-
-    available = [p.get("name") for p in profiles]
     raise RuntimeError(
         f"Snowflake profile '{profile_name}' not found. "
         f"Available profiles: {available}"
@@ -325,50 +310,6 @@ def recipe_arg_parser(description: str):
     return parser
 
 
-def sf_connect_python(profile: dict) -> Any:
-    """
-    Return a snowflake.connector connection for a 'python' method profile.
-    Falls back if snowflake-connector-python is not installed.
-    """
-    try:
-        import snowflake.connector
-    except ImportError:
-        raise RuntimeError(
-            "snowflake-connector-python is required for Python-method Snowflake profiles. "
-            "Install with: pip install snowflake-connector-python"
-        )
-
-    kwargs = {
-        "account": profile["account"],
-        "user": profile["user"],
-        "warehouse": profile.get("warehouse"),
-        "role": profile.get("role"),
-        "database": profile.get("database"),
-        "schema": profile.get("schema"),
-    }
-
-    # Resolve credential from env var
-    import os
-    cred_env = profile.get("password_env") or profile.get("token_env") or profile.get("secret_key_env")
-    if cred_env:
-        cred_value = os.environ.get(cred_env)
-        if not cred_value:
-            raise RuntimeError(
-                f"Environment variable '{cred_env}' is not set. "
-                "Check your ~/.zshenv export and ensure it is sourced."
-            )
-        if profile.get("password_env"):
-            kwargs["password"] = cred_value
-        elif profile.get("token_env"):
-            kwargs["token"] = cred_value
-        elif profile.get("secret_key_env"):
-            kwargs["private_key_path"] = profile.get("private_key_path")
-            kwargs["private_key_passphrase"] = cred_value
-
-    kwargs = {k: v for k, v in kwargs.items() if v is not None}
-    return snowflake.connector.connect(**kwargs)
-
-
 # ---------------------------------------------------------------------------
 # Databricks connection helpers
 # ---------------------------------------------------------------------------
@@ -377,22 +318,17 @@ _DBX_PROFILES_PATH = Path.home() / ".claude" / "databricks-profiles.json"
 
 
 def load_dbx_profile(profile_name: str) -> dict:
-    """Load a Databricks profile from ~/.claude/databricks-profiles.json."""
-    if not _DBX_PROFILES_PATH.exists():
+    """Load a Databricks profile by name, raising RuntimeError if not found."""
+    from ts_cli.profile_ops import get_profile, load_platform_profiles
+    profile = get_profile("databricks", profile_name)
+    if profile is not None:
+        return profile
+    available = [p.get("name") for p in load_platform_profiles("databricks")]
+    if not available:
         raise RuntimeError(
             f"No Databricks profiles file found at {_DBX_PROFILES_PATH}. "
             "Run /ts-profile-databricks to create a profile."
         )
-
-    profiles = json.loads(_DBX_PROFILES_PATH.read_text(encoding="utf-8"))
-    if isinstance(profiles, dict) and "profiles" in profiles:
-        profiles = profiles["profiles"]
-
-    for p in profiles:
-        if p.get("name") == profile_name:
-            return p
-
-    available = [p.get("name") for p in profiles]
     raise RuntimeError(
         f"Databricks profile '{profile_name}' not found. "
         f"Available profiles: {available}"
