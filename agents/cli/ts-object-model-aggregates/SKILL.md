@@ -52,7 +52,8 @@ as provisional until Step 7's routing verification (and, when RLS was propagated
 leak-test) passes, and read the open items before trusting a candidate the classifier or
 lattice flagged as ambiguous.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -1042,4 +1043,5 @@ Remove once you're confident every generated aggregate is correct: rm -rf {workd
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.0.0 | 2026-07-11 | Initial release. Audits a Model's dependent Liveboards/Answers into query signatures (`ts aggregate signatures`), generalizes them into ranked candidate grains with a cost-based marginal-gain curve (`ts aggregate recommend`, optionally reweighted by Snowflake query history via `ts aggregate history`), profiles candidates in connected or manual mode (`ts aggregate profile`), and generates the warehouse DDL + aggregate Table/Model TML + `aggregated_models` association patch per approved candidate (`ts aggregate generate`) — gated at every artifact by a confirmation step, an RLS/CLS parity hard gate, and a post-import routing verification with rollback via `ts dependency backup`/`rollback`. Ships with eleven OPEN items in `references/open-items.md` covering routing semantics, `aggregated_models` TML shape, multi-aggregate precedence, and join-pruning fidelity — all must be VERIFIED against a live 26.6+ instance before this skill is considered merge-ready (tracked as Task 11 on `wip/ts-object-model-aggregates`). |

@@ -29,7 +29,8 @@ content critically rather than blindly adding more.
 - Existing AI assets are critiqued + improved, **never silently overwritten**.
 - The user picks which surfaces to generate via a single up-front menu.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -1602,6 +1603,7 @@ find ~/Dev/coaching-runs -maxdepth 1 -mtime +30 -type d -exec rm -rf {} \;
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.3.3 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 2.3.2 | 2026-07-11 | Migrate Step 9a/9b/rollback imports to `ts tml import --file` (removes a broken `\| source ~/.zshenv &&` pipe that discarded the piped TML) (audit 5.1). |
 | 2.3.1 | 2026-07-03 | Audit fixes: soften phantom `/ts-object-model-builder` recommendations (Step 1 and Error Handling) to "no skill for this yet — planned"; remove stale "CLI does not yet expose `--include-dependent-objects`" framing in Step 3a (it never did — `ts metadata dependents` is the command used). Same phantom-skill fix applied to `references/ai-asset-review-rules.md`. |
 | 2.3.0 | 2026-05-19 | **`column_metadata` + `hierarchies` categories added to `model_instructions`.** Two new structured categories for agent disambiguation: `column_metadata` (cardinality tier, sample values, usage hint, value format per dimension column — requires Snowflake profile) and `hierarchies` (ordered drill-path declarations from coarse to fine grain). Allowed-key list updated (5 → 7 categories). Budget-trim order updated: `output_formatting` → `samples` → `value_format` → `note:/reason:` → `aggregation_defaults`; mandatory tier now includes `hierarchies`. Step 5 adds scope menu option 8; Step 6.5 adds generation algorithms (PII-gated cardinality queries, functional dependency validation for hierarchies, date-dim auto-detection); Step 7 adds `column_metadata.md` review file (Block 9 in review-explainers); Step 8b adds deploy-time validation for new enums/refs. Smoke test updated with structural validation steps for both categories. |

@@ -7,7 +7,9 @@ description: Set up and manage Tableau Server/Cloud connection profiles. Use whe
 
 Manage Tableau Server/Cloud connection profiles stored in `~/.claude/tableau-profiles.json`.
 
-Ask one question at a time. Wait for each answer before moving on.
+Ask one question at a time for **dependent** decisions (credential flows are mostly
+sequential). Batch **independent** questions when possible — e.g. profile name + server
+URL can be collected together.
 
 ---
 
@@ -165,5 +167,6 @@ filter out the line starting with `export {env_var_to_remove}=`, write back).
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-07-22 | Relax prompt-batching: credential flows are mostly sequential, but independent inputs can now be batched (BL-074) |
 | 1.1.0 | 2026-07-13 | Adopt `ts profiles add/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, and profile JSON I/O; fixes append-only zshenv bug |
 | 1.0.0 | 2026-06-26 | Initial release — password and PAT auth |

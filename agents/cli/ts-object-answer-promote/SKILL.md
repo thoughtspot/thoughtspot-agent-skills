@@ -13,7 +13,8 @@ Model, they appear in the search bar for everyone who has access to the Model.
 in a saved Answer — a calculated ratio, a conditional flag, a YoY comparison — and now wants it
 available to the whole team via the Model.
 
-Ask one question at a time. Wait for each answer before proceeding.
+Ask one question at a time for **dependent** decisions. Batch **independent** questions
+into a single prompt to cut round-trips.
 
 ---
 
@@ -679,6 +680,7 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.4.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.4.0 | 2026-07-13 | Steps 7–10 delegate to `ts model promote-formula` CLI command (BL-066): duplicate detection, reference mapping, column_type inference, and TML merge are now deterministic. Prereq ts-cli v0.51.0. |
 | 1.3.0 | 2026-07-03 | MEASURE/ATTRIBUTE + aggregation inference delegates to `ts spotql classify-columns` (BL-087), replacing the drifted inline keyword list. Prereq ts-cli v0.31.0. |
 | 1.2.2 | 2026-07-03 | Soften phantom `/ts-object-model-builder` recommendation in Step 5 and Error Handling to "no skill for this yet — migrate in the ThoughtSpot UI" (audit finding 1.1 — that skill was never shipped). |

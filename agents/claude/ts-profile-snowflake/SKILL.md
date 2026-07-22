@@ -7,7 +7,9 @@ description: Set up and manage Snowflake connection profiles. Use when configuri
 
 Manage Snowflake connection profiles stored in `~/.claude/snowflake-profiles.json`.
 
-Ask one question at a time. Wait for each answer before moving on.
+Ask one question at a time for **dependent** decisions (credential flows are mostly
+sequential). Batch **independent** questions when possible — e.g. profile name +
+connection method can be collected together.
 
 ---
 
@@ -819,6 +821,7 @@ Lowercase in `SHOW` output = case-sensitive identifier = must be quoted in SQL.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-07-22 | Relax prompt-batching: credential flows are mostly sequential, but independent inputs can now be batched (BL-074) |
 | 1.1.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |
 | 1.0.1 | 2026-04-24 | Add one-line context before menu |
 | 1.0.0 | 2026-04-24 | Initial versioned release |
