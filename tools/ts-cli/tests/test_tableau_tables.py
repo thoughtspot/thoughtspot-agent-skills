@@ -143,3 +143,23 @@ def test_build_table_tml_obj_id_slugifies_name():
     ]}
     obj, _ = build_table_tml(table, "CONN", "DB", "SCHEMA")
     assert obj["obj_id"] == "sales-orders-tableau"
+
+
+def test_canonical_ts_data_types_pass_through():
+    """Canonical TS data types (emitted by real parse output) should pass through unchanged."""
+    table = {"name": "Orders", "columns": [
+        {"name": "ID", "data_type": "INT64", "column_type": "ATTRIBUTE"},
+        {"name": "Amount", "data_type": "DOUBLE", "column_type": "ATTRIBUTE"},
+        {"name": "Active", "data_type": "BOOL", "column_type": "ATTRIBUTE"},
+        {"name": "Birth Date", "data_type": "DATE", "column_type": "ATTRIBUTE"},
+        {"name": "Created At", "data_type": "DATE_TIME", "column_type": "ATTRIBUTE"},
+        {"name": "Description", "data_type": "VARCHAR", "column_type": "ATTRIBUTE"},
+    ]}
+    obj, _ = build_table_tml(table, "CONN", "DB", "SCHEMA")
+    dt = {c["name"]: c["db_column_properties"]["data_type"] for c in obj["table"]["columns"]}
+    assert dt["ID"] == "INT64"
+    assert dt["Amount"] == "DOUBLE"
+    assert dt["Active"] == "BOOL"
+    assert dt["Birth Date"] == "DATE"
+    assert dt["Created At"] == "DATE_TIME"
+    assert dt["Description"] == "VARCHAR"

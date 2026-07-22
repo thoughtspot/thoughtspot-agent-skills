@@ -37,7 +37,22 @@ def _dbname(name):
 
 
 def _tml_type(data_type):
-    return _TML_TYPE.get((data_type or "").strip().lower(), "VARCHAR")
+    """Map a data type to canonical ThoughtSpot db_column_properties.data_type.
+
+    Handles both:
+    1. Canonical TS types (INT64, DOUBLE, BOOL, DATE, DATE_TIME, VARCHAR) — pass through.
+    2. Raw Tableau names (integer, datetime, etc.) — map via _TML_TYPE dict.
+    """
+    raw = (data_type or "").strip()
+    normalized = raw.upper()
+
+    # Canonical TS types: pass through (check upper-cased form)
+    canonical_types = ("INT64", "DOUBLE", "BOOL", "DATE", "DATE_TIME", "VARCHAR")
+    if normalized in canonical_types:
+        return normalized
+
+    # Raw Tableau names: lowercase and map
+    return _TML_TYPE.get(raw.lower(), "VARCHAR")
 
 
 def _col_role(col):
