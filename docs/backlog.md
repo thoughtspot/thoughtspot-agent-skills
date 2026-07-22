@@ -3387,13 +3387,14 @@ Five ts-cli code-quality items from the audit — all resolved:
 
 **Filed:** 2026-07-22.
 **Source:** 2026-07-22 full audit, findings 11.3–11.5.
-**Status:** OPEN.
+**Status:** 11.3 PARTIAL, 11.4 OPEN, 11.5 DONE.
 
 Three near-identical prose blocks duplicated across 4+ conversion skills:
-- **11.3** Connection selection prompt (N/F/L + E/C) — near-verbatim in from-snowflake-sv,
-  from-databricks-mv, from-tableau, model-aggregates. Already shipped as
-  `agents/shared/references/profile-select-and-authenticate.md` for auth; the connection
-  prompt needs a similar shared reference or a `ts connections pick` command
+- **11.3** Connection selection prompt (N/F/L + E/C) — extracted to
+  `agents/shared/references/connection-select.md`; from-snowflake-sv and
+  from-databricks-mv updated to link. from-tableau not yet updated (Tableau
+  changes tracked separately). model-aggregates doesn't use this prompt
+  (confirmed — no connection selection in that skill)
 - **11.4** Table discovery pattern (C/I scope + metadata search + column verification +
   Table Plan summary) — duplicated with identical logic, already patched skill-by-skill
   once (2026-06-16). See also BL-111 (`--connection` filter on `ts metadata search`)

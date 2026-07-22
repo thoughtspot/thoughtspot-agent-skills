@@ -63,6 +63,7 @@ schemas/
 
 references/
   profile-select-and-authenticate.md  — canonical profile select + verify flow for conversion skills
+  connection-select.md                — canonical N/F/L connection selection + E/C (existing/create) prompt for conversion skills
 
 worked-examples/tableau/
   liveboard-kpi-sparkline.md          — KPI viz with sparkline: client_state_v2 requirement, before/after, verified template (2026-06-11)

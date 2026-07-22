@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-23
+- docs: add connection-select shared reference — extract N/F/L + E/C prompt from conversion skills (BL-122 item 11.3)
 - feat: ts tableau build-model emits Table TML
 - chore: bump ts-cli to v0.77.0
 - perf: bump ts-cli to v0.76.0 — batch model TML export + fix AI-instructions false positives in audit (BL-073 items 14.1/14.4)

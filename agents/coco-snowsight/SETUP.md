@@ -94,6 +94,7 @@ snow stage copy agents/shared/worked-examples/powerbi/calculate-all-to-group-agg
 snow stage copy agents/shared/worked-examples/powerbi/combo-dual-axis-custom-chart-config.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
 snow stage copy agents/shared/worked-examples/powerbi/sply-parameter.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/worked-examples/powerbi/ --overwrite
 snow stage copy agents/shared/references/profile-select-and-authenticate.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/references/ --overwrite
+snow stage copy agents/shared/references/connection-select.md @SKILLS.PUBLIC.SHARED/skills/.snowflake/cortex/shared/references/ --overwrite
 ```
 
 Or use the sync script (only uploads changed files):
