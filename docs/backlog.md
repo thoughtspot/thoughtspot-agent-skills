@@ -41,7 +41,105 @@ Done items have moved to [`backlog-archive.md`](backlog-archive.md):
 
 ---
 
-## BL-118 — Codify SpotQL semantic-view / metric-view backing behaviour into `ts-object-model-spotql-query`
+## Priority index
+
+Open items classified by tier. Work top-down within each tier; items within a tier
+are roughly ordered by value÷effort.
+
+### Tier 1 — Tackle next
+
+| Item | Summary | Target |
+|---|---|---|
+| BL-118 | Codify SpotQL SV/MV backing behaviour | — |
+| BL-100 | Bring remaining converters to DBX-from standard (Snowflake pipeline first) | post-audit |
+| BL-063 | Extract CLI formula translation — Snowflake phases remain | 2026-09-30 |
+| BL-029 | Coverage matrix for ts-convert-to-databricks-mv | 2026-08-31 |
+| BL-090 | Document multi-table / multi-query Tableau migration | 2026-08-31 |
+| BL-064 | External audit product-currency fixes (medium-severity residuals) | 2026-09-30 |
+
+### Tier 2 — Schedule soon
+
+| Item | Summary | Target |
+|---|---|---|
+| BL-123 | Product currency gaps (2026-07-22 audit) | weekly sweep |
+| BL-122 | Cross-skill prompt/discovery extraction | next converter edit |
+| BL-095 | connections add-tables missing authenticationType | 2026-08-31 |
+| BL-085 | Tableau build-model: TWB parse codification (Part 2) | 2026-08-31 |
+| BL-120 | Live e2e verification for ts-convert-from-qlik | first live pass |
+| BL-115 | Smoke test for ts-convert-from-looker | first live pass |
+| BL-076 | Smoke test backfills: answer-promote + from-tableau | 2026-09-30 |
+| BL-084 | Codify profile substrate as `ts profiles add/update/remove` | 2026-10-31 |
+| BL-071 | Tableau user-function → ThoughtSpot RLS variables | 2026-09-30 |
+| BL-073 | ts-audit / ts-cli round-trip batching (perf) | 2026-09-30 |
+| BL-030 | Model-coach: migrate to `ai/instructions` API | 2026-09-30 |
+| BL-032 | Databricks MV: parser for GA constructs (`materialization:`, `fields:`) | 2026-09-30 |
+| BL-031 | Snowflake to-SV: emit `facts[]` / `sample_values` / filter-labels | 2026-09-30 |
+| BL-005 | Databricks runtime: ThoughtSpot client + conversion skills | — |
+| BL-011 | ts-object-connection-create skill + `ts connections create` CLI | — |
+| BL-014 | Databricks MV → ThoughtSpot mapping coverage review | — |
+| BL-015 | Pre-conversion audit/feasibility mode for SF SV and DBX MV | — |
+| BL-019 | Databricks MV: audit mapping gaps (SV parity) | — |
+| BL-020 | Tableau: audit mapping gaps (SV parity) | — |
+| BL-021 | Delta sync mode for SV and MV converters | — |
+| BL-023 | Coverage matrices for DBX MV and Tableau converters | — |
+| BL-024 | Close row-offset table-calc gap with window functions | — |
+| BL-026 | ts-object-liveboard-builder skill | — |
+| BL-027 | Explicit table→ThoughtSpot binding | — |
+| BL-028 | Audit mode: assess visualization layer | — |
+| BL-094 | Joins between SQL Views (multi-query Custom SQL) | — |
+
+### Tier 3 — Opportunistic
+
+| Item | Summary | Target |
+|---|---|---|
+| BL-034 | tools/ & ts-cli quality polish | 2026-10-31 |
+| BL-036 | Databricks-native connection creation | 2026-10-31 |
+| BL-066 | Codify formula promotion as `ts model promote-formula` | 2026-10-31 |
+| BL-080 | `ts metadata permissions` + answer-promote pre-flight | 2026-09-30 |
+| BL-081 | `ts data search` for ts-audit Phase 2 | 2026-10-31 |
+| BL-086 | Model-coach: codify deterministic substrate | 2026-11-30 |
+| BL-007 | Array/VARIANT column handling pattern | — |
+| BL-008 | Soft/overridable exclusion rules in model-instructions-schema | — |
+| BL-022 | Unjoined table suggestion pattern (cross-converter) | — |
+| BL-043 | Evaluate two-phase import for other converters | — |
+| BL-059 | ts-audit: set (cohort) usage analysis checks | — |
+| BL-067 | Codify Tableau set/cohort detection and TML generation | 2026-10-31 |
+| BL-068 | Codify Tableau dashboard-to-liveboard conversion | 2026-12-31 |
+| BL-072 | Tableau hierarchies and value aliases (+ inverse-trig) | 2026-12-31 |
+| BL-088 | Audit mode: classify Tableau Sets | 2026-09-30 |
+| BL-092 | Drop extract table for SQL View | — |
+| BL-093 | Substitute or flag Tableau parameters in Custom SQL | — |
+| BL-101 | Chart-axis-role in `ts metadata report` | — |
+| BL-102 | Databricks MV `parameters:` parse + emit | — |
+| BL-111 | `--connection` filter: converter rewiring (remaining) | — |
+| BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | — |
+| BL-116 | Live destructive dependency-manager smoke | — |
+
+### Tier 4 — Deferred
+
+| Item | Summary | Trigger |
+|---|---|---|
+| BL-016 | Conversion mapping-file naming consistency | cosmetic, low priority |
+| BL-025 | DBX Genie connection-selection parity | next Genie skill touch |
+| BL-037 | Recipe skills for investigation patterns | demand-driven |
+| BL-038 | ts-recipe-formula-weighted-average | demand-driven |
+| BL-039 | ts-object-answer-promote: embedded Answers + sets | demand-driven |
+| BL-041 | ts-recipe-model-timezone-bridge-snowflake | demand-driven |
+| BL-060 | Tableau: nested-if-in-comparison detection | if pattern recurs |
+| BL-061 | Integrate tml_lint() into build-model | next build-model touch |
+| BL-091 | Multi-table model grain semantics verification | when data access available |
+| BL-096 | se-thoughtspot SpotQL endpoints 500 | next build re-verify |
+| BL-098 | DBX trailing/leading sparse data (item 3 only) | next DBX live-verify |
+| BL-103 | searchConnection with OAuth hierarchy | next OAuth connection |
+| BL-104 | Evaluate DBX BI compatibility mode | evaluation item |
+| BL-106 | Python 3.11 floor bump (remaining) | after 2026-10 |
+| BL-113 | Live provisioning step for load smoke | next SF live session |
+| BL-114 | Document export_with_column_aliases | GA or skill need |
+| BL-119 | Smoke test for ts-convert-from-sisense | first Sisense bundle |
+
+---
+
+## BL-118 — Codify SpotQL semantic-view / metric-view backing behaviour into `ts-object-model-spotql-query` `Tier 1`
 
 **Why it matters.** SpotQL/Semantic-SQL behaviour differs materially when a Model is backed by a
 Snowflake Semantic View (SV) or a Databricks Metric View (MV) rather than regular tables. These
@@ -91,7 +189,7 @@ redone from the reference docs above.
 
 ---
 
-## BL-005 — Databricks runtime: ThoughtSpot client + conversion skills
+## BL-005 — Databricks runtime: ThoughtSpot client + conversion skills `Tier 2`
 
 **Source:** Design spec `docs/superpowers/specs/2026-06-11-databricks-ts-client-design.md`
 **Affects:** All Databricks-related skills; future Genie Code skill runtime
@@ -154,7 +252,7 @@ Full architecture, auth design, command mapping, test cases, and SETUP.md outlin
 
 ---
 
-## BL-007 — Array/VARIANT column handling pattern for model coaching
+## BL-007 — Array/VARIANT column handling pattern for model coaching `Tier 3`
 
 **Source:** Live coaching of AGENT_SKILLS.BOOKINGS.BOOKINGS_WITH_ARRAY (2026-06-11)
 **Affects:** ts-object-model-coach (Step 6.1), ts-from-snowflake-rules.md
@@ -209,7 +307,7 @@ Add a new **Array column pattern** section to `ts-from-snowflake-rules.md` cover
 
 ---
 
-## BL-008 — Soft/overridable exclusion rules in model-instructions-schema
+## BL-008 — Soft/overridable exclusion rules in model-instructions-schema `Tier 3`
 
 **Source:** Live coaching of AGENT_SKILLS.BOOKINGS.BOOKINGS_WITH_ARRAY (2026-06-11)
 **Affects:** ts-object-model-coach (Step 6.5)
@@ -253,7 +351,7 @@ Add a **Soft exclusion** subsection to the `exclusion_rules` category in
 - `agents/cli/ts-object-model-coach/references/model-instructions-schema.md` — new Hard vs Soft subsection under `exclusion_rules`
 - `agents/cli/ts-object-model-coach/SKILL.md` — Step 6.5 `exclusion_rules` bootstrapping logic (detect soft candidates: IS_BOT, IS_INTERNAL, IS_TEST etc.)
 
-## BL-011 — `ts-object-connection-create` skill + `ts connections create` CLI
+## BL-011 — `ts-object-connection-create` skill + `ts connections create` CLI `Tier 2`
 
 **Source:** Smoke test of `connection/create` on se-thoughtspot (2026-06-11)
 **Affects:** NEW skill `agents/cli/ts-object-connection-create`; `tools/ts-cli` (`connections create`)
@@ -284,7 +382,7 @@ a dedicated least-privilege service account. KEY_PAIR field discovery is a gated
 least-privilege SF service account. Hands off to/from BL-010 (loader emits a tables.json for
 create-with-tables) and the convert-from skills (cross-link as the "create one first" path).
 
-## BL-014 — Databricks MV → ThoughtSpot mapping coverage review (parallel to SV gap analysis + Tableau audit)
+## BL-014 — Databricks MV → ThoughtSpot mapping coverage review (parallel to SV gap analysis + Tableau audit) `Tier 2`
 
 **Source:** Coverage-review gap identified 2026-06-12 (SF has one, DBX does not)
 **Affects:** ts-convert-from-databricks-mv
@@ -315,7 +413,7 @@ Run a gap analysis against one or more production Databricks Metric Views (MV YA
 
 ---
 
-## BL-015 — Pre-conversion Audit/feasibility mode for SF SV and DBX MV (parity with Tableau Audit mode)
+## BL-015 — Pre-conversion Audit/feasibility mode for SF SV and DBX MV (parity with Tableau Audit mode) `Tier 2`
 
 **Source:** Feature request (2026-06-12) — "assess how much the routine can map; is it worth attempting"
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv
@@ -361,7 +459,7 @@ Add an **Audit mode** to both converters, mirroring the Tableau pattern:
 
 ---
 
-## BL-016 — Conversion mapping-file naming/structure consistency
+## BL-016 — Conversion mapping-file naming/structure consistency `Tier 4`
 
 **Source:** Observed during BL-009 Phase 1 (2026-06-12)
 **Affects:** agents/shared/mappings/tableau/, ts-snowflake/, ts-databricks/
@@ -391,7 +489,7 @@ conversion-consistency-auditor could then assert the naming convention.
 
 ---
 
-## BL-019 — Databricks MV: audit mapping gaps equivalent to BL-018 (SV parity)
+## BL-019 — Databricks MV: audit mapping gaps equivalent to BL-018 (SV parity) `Tier 2`
 
 **Source:** BL-018 parity review (2026-06-13)
 **Affects:** ts-convert-from-databricks-mv, ts-from-databricks-rules.md
@@ -437,7 +535,7 @@ does the converter handle them?
 
 ---
 
-## BL-020 — Tableau: audit mapping gaps equivalent to BL-018 (SV parity)
+## BL-020 — Tableau: audit mapping gaps equivalent to BL-018 (SV parity) `Tier 2`
 
 **Source:** BL-018 parity review (2026-06-13)
 **Affects:** ts-convert-from-tableau, tableau-tml-rules.md
@@ -491,7 +589,7 @@ parallel assessment for equivalent concepts in Tableau workbooks.
 
 ---
 
-## BL-021 — Delta sync mode for SV and MV converters (selective, additive, TS-side-preserving)
+## BL-021 — Delta sync mode for SV and MV converters (selective, additive, TS-side-preserving) `Tier 2`
 
 **Source:** Feature request (2026-06-14)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv
@@ -609,7 +707,7 @@ category and skip all others).
 
 ---
 
-## BL-022 — Unjoined table suggestion pattern (cross-converter)
+## BL-022 — Unjoined table suggestion pattern (cross-converter) `Tier 3`
 
 **Source:** BL-018 live testing — EMPLOYEE_SUMMARY_VW had no declared relationship in the SV (2026-06-13)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, ts-convert-from-tableau
@@ -678,7 +776,7 @@ When a table has no declared relationship in the source, the converter should:
 
 ---
 
-## BL-023 — Coverage matrix reference docs for Databricks MV and Tableau converters
+## BL-023 — Coverage matrix reference docs for Databricks MV and Tableau converters `Tier 2`
 
 **Source:** BL-018 completion — SV converter now has `references/coverage-matrix.md` (2026-06-14)
 **Affects:** ts-convert-from-databricks-mv, ts-convert-from-tableau
@@ -724,7 +822,7 @@ as the SV coverage matrix:
 
 ---
 
-## BL-024 — Close the row-offset table-calc gap with window functions (INDEX/LOOKUP/FIRST/LAST/SIZE)
+## BL-024 — Close the row-offset table-calc gap with window functions (INDEX/LOOKUP/FIRST/LAST/SIZE) `Tier 2`
 
 **Source:** Sigma-vs-ThoughtSpot Tableau-migration comparison over a 140-workbook corpus (2026-06-14)
 **Affects:** ts-convert-from-tableau (primarily); pattern applies to any converter that translates table calcs
@@ -814,7 +912,7 @@ pass-through. Note as a product input; not implementable in the skill.
 
 ---
 
-## BL-025 — Review connection-selection parity for the Databricks Genie agent skill
+## BL-025 — Review connection-selection parity for the Databricks Genie agent skill `Tier 4`
 
 **Source:** Live Tableau migration session (2026-06-16) — connection-identification feature (PR #88)
 **Affects:** agents/databricks/skills/ts-convert-from-databricks-mv (Genie Code runtime)
@@ -854,7 +952,7 @@ analogous list-pick UX that should match.
 
 ---
 
-## BL-027 — Explicit table→ThoughtSpot binding (user-supplied GUID / db.schema.table) instead of search-and-guess
+## BL-027 — Explicit table→ThoughtSpot binding (user-supplied GUID / db.schema.table) instead of search-and-guess `Tier 2`
 
 **Source:** Live Catalog Health Workbook migration session (2026-06-17)
 **Affects:** ts-convert-from-tableau (Step 4 / 4.5 — physical table resolution)
@@ -911,7 +1009,7 @@ real ThoughtSpot/warehouse object rather than relying on inference:
 
 ---
 
-## BL-028 — Audit mode: assess the visualization layer (chart types + dashboard→liveboard), not just the data layer
+## BL-028 — Audit mode: assess the visualization layer (chart types + dashboard→liveboard), not just the data layer `Tier 2`
 
 **Source:** Live Catalog Health Workbook migration session (2026-06-17)
 **Affects:** ts-convert-from-tableau (Audit mode, Steps A1–A4 / Migration Coverage Report)
@@ -955,7 +1053,7 @@ Extend Audit mode to classify the viz layer alongside the data layer:
 - `agents/shared/schemas/thoughtspot-chart-types.md` — reuse/extend the chart-type + intent mapping for the classifier
 - `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md` (from BL-023) — add visualization-layer rows
 
-## BL-026 — `ts-object-liveboard-builder` skill: build the best liveboard for a domain + suggest KPIs
+## BL-026 — `ts-object-liveboard-builder` skill: build the best liveboard for a domain + suggest KPIs `Tier 2`
 
 **Source:** Live chart-type testing + design session (2026-06-16)
 **Affects:** new skill `agents/cli/ts-object-liveboard-builder`; shared analytics references; `ts-convert-from-tableau` (optional hand-off)
@@ -1004,7 +1102,7 @@ Tableau "enhance instead of mirror" hand-off. Phase 6: domain-library growth + e
 
 ---
 
-## BL-029 — Coverage matrices for the remaining three conversion skills
+## BL-029 — Coverage matrices for the remaining three conversion skills `Tier 1`
 
 **Related:** `tools/validate/check_coverage_matrix.py` BACKLOG set; repo quality audit (codification follow-up)
 
@@ -1030,7 +1128,7 @@ remove each skill from the `BACKLOG` set in `check_coverage_matrix.py` as its ma
 
 ---
 
-## BL-030 — ThoughtSpot model-level NL instructions: migrate model-coach off manual paste to the `ai/instructions` API
+## BL-030 — ThoughtSpot model-level NL instructions: migrate model-coach off manual paste to the `ai/instructions` API `Tier 2`
 
 **Source:** first full audit sweep, 2026-06-17 (angle 13). See `docs/audit/2026-06-17-full.md` findings #1–#3.
 
@@ -1055,7 +1153,7 @@ requiring `CAN_USE_SPOTTER` + `SPOTTER_COACHING_PRIVILEGE`.
 
 ---
 
-## BL-031 — Snowflake to-SV converter: emit `facts[]` / `sample_values` / filter-labels in YAML mode
+## BL-031 — Snowflake to-SV converter: emit `facts[]` / `sample_values` / filter-labels in YAML mode `Tier 2`
 
 **Source:** full audit sweep 2026-06-17 (angle 13), findings #4–#6. Referenced from `agents/shared/schemas/snowflake-schema.md`.
 
@@ -1080,7 +1178,7 @@ behaviour has deliberately not changed** pending verification.
 
 ---
 
-## BL-032 — Databricks Metric Views: parser support for GA constructs (`materialization:`, `fields:`), retire v0.1 framing
+## BL-032 — Databricks Metric Views: parser support for GA constructs (`materialization:`, `fields:`), retire v0.1 framing `Tier 2`
 
 **Source:** full audit sweep 2026-06-17 (angle 13), findings #8–#10. Referenced from `agents/shared/schemas/databricks-metric-view.md`.
 
@@ -1198,7 +1296,7 @@ unpinned tooling (`pip install pytest pyyaml`).
 
 ---
 
-## BL-034 — tools/ & ts-cli quality polish
+## BL-034 — tools/ & ts-cli quality polish `Tier 3`
 
 **Source:** full audit sweep 2026-06-17 (angles 4, 5, 14), findings across tools-quality / ts-cli-gaps / performance.
 
@@ -1264,7 +1362,7 @@ or delete them as part of this item.
 
 ---
 
-## BL-036 — Databricks-native connection creation
+## BL-036 — Databricks-native connection creation `Tier 3`
 
 **Source:** create-connection feature work 2026-06-17 (`ts connections create` + convert-from connection step).
 **Affects:** ts-cli (`connections create`), ts-convert-from-databricks-mv
@@ -1291,7 +1389,7 @@ ThoughtSpot UI, then resume). This is path A, chosen deliberately for the initia
 
 ---
 
-## BL-037 — Recipe skills for common data investigation patterns (cohort, funnel, segmentation, time-series, A/B, RCA)
+## BL-037 — Recipe skills for common data investigation patterns (cohort, funnel, segmentation, time-series, A/B, RCA) `Tier 4`
 
 **Source:** Review of `nimrodfisher/data-analytics-skills` repo, `03-data-analysis-investigation/` (2026-06-18)
 **Affects:** New `ts-recipe-*` skills under `agents/cli/`
@@ -1346,7 +1444,7 @@ funnel drop-off, parameters for A/B date ranges, etc.).
 
 ---
 
-## BL-039 — `ts-object-answer-promote`: support embedded Answers and set/cohort promotion
+## BL-039 — `ts-object-answer-promote`: support embedded Answers and set/cohort promotion `Tier 4`
 
 **Source:** Resolving `ts-object-answer-promote` open items 4 & 5 (2026-06-19). Both were `UNTESTED`; on inspection neither is a shipped-unverified path — the skill handles **standalone Answers, formulas + parameters only** — so they were re-dispositioned as deferred scope and the open items closed.
 **Affects:** `agents/cli/ts-object-answer-promote/` (Steps 2, 3, 4); `references/open-items.md` Items 4 & 5
@@ -1378,7 +1476,7 @@ the old open-items entries, and record findings. When built, re-open concrete op
 the specific API behaviours rather than carrying the broad gaps here.
 
 **Target:** No date — schedule when embedded-Answer or set-promotion demand is confirmed.
-## BL-038 — `ts-recipe-formula-weighted-average` skill
+## BL-038 — `ts-recipe-formula-weighted-average` skill `Tier 4`
 
 **Source:** Tableau migration sessions (`tableau-migration-testing/twb/test/Weighted Usage.twb`) + production weighted-cost formulas (Albertsons / JD Power). Spun out of the weighted-average mapping work (`feat/weighted-average-mapping`, 2026-06-19).
 **Affects:** New `ts-recipe-formula-weighted-average` skill under `agents/cli/` (pure-ThoughtSpot — no platform suffix); family 7 (`ts-recipe-*`)
@@ -1438,7 +1536,7 @@ Make `agents/databricks/deploy.sh` copy the relevant files from `agents/shared/`
 
 ---
 
-## BL-041 — `ts-recipe-model-timezone-bridge-snowflake` skill
+## BL-041 — `ts-recipe-model-timezone-bridge-snowflake` skill `Tier 4`
 
 **Source:** 2026-06-19 — built and verified a timezone-aware model on champ-staging (model `f9ce44d9`). Pattern documented in [Google Doc](https://docs.google.com/document/d/1ouU8TW2EU18DUk1gScGHna1IAK4CzVHKj429YQjPXpo/edit).
 **Affects:** New skill under `agents/cli/ts-recipe-model-timezone-bridge-snowflake/`; family 7 (`ts-recipe-*`)
@@ -1476,7 +1574,7 @@ Interactive recipe that collects inputs and generates all artifacts:
 
 ---
 
-## BL-043 — Evaluate two-phase import and formula translation pipeline for other conversion skills
+## BL-043 — Evaluate two-phase import and formula translation pipeline for other conversion skills `Tier 3`
 
 **Source:** `ts-convert-from-tableau` v1.16.0 (feat/tableau-translate-formulas)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, ts-convert-to-snowflake-sv, ts-convert-to-databricks-mv
@@ -1575,7 +1673,7 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 
 ---
 
-## BL-059 — ts-audit: set (cohort) usage analysis checks
+## BL-059 — ts-audit: set (cohort) usage analysis checks `Tier 3`
 
 **Source:** Live testing on champ-staging (2026-06-26) — Dunder Mifflin Sales model (`0e4406c7-d978-4be7-abd7-c34e8f7da835`, 44 reusable cohorts)
 **Affects:** `tools/ts-cli/ts_cli/audit/checks_data.py` (new checks), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
@@ -1624,7 +1722,7 @@ Consumer counting for individual sets: `ts metadata dependents <set-guid> --type
 
 ---
 
-## BL-060 — Tableau: detect nested-if-in-comparison formula pattern
+## BL-060 — Tableau: detect nested-if-in-comparison formula pattern `Tier 4`
 
 **Source:** Ads Commercial Dashboard migration (2026-06-27) — 1 formula hit this pattern
 **Affects:** `tools/ts-cli/ts_cli/tableau_translate.py` (`validate_pre_import()`)
@@ -1655,7 +1753,7 @@ of comparisons in parentheses during the translation step.
 
 ---
 
-## BL-061 — Tableau: integrate `tml_lint()` into `build-model` command
+## BL-061 — Tableau: integrate `tml_lint()` into `build-model` command `Tier 4`
 
 **Source:** Build-model pipeline design (2026-06-27)
 **Affects:** `tools/ts-cli/ts_cli/commands/tableau.py` (`build_model` command)
@@ -1718,7 +1816,7 @@ expression ends with `)` after `else`, but rare enough to be acceptable as a war
 
 ---
 
-## BL-063 — Extract CLI-based formula translation for Snowflake and Databricks converters
+## BL-063 — Extract CLI-based formula translation for Snowflake and Databricks converters `Tier 1`
 
 **Source:** Architectural comparison of conversion skill implementations (2026-06-28)
 **Affects:** ts-convert-from-snowflake-sv, ts-convert-from-databricks-mv, tools/ts-cli
@@ -1847,7 +1945,7 @@ remain OPEN and unscheduled.
 
 ---
 
-## BL-064 — External audit 2026-06-28: Databricks + Snowflake product-currency fixes
+## BL-064 — External audit 2026-06-28: Databricks + Snowflake product-currency fixes `Tier 1`
 
 **Source:** External audit sweep 2026-06-28 (angle 13 — product currency)
 **Affects:** agents/shared/schemas/databricks-metric-view.md, agents/shared/schemas/snowflake-schema.md, agents/shared/mappings/ts-databricks/, agents/shared/mappings/ts-snowflake/
@@ -1901,7 +1999,7 @@ duplicating work. BL-032's target (2026-09-30) applies.
 
 ---
 
-## BL-066 — Codify formula promotion as `ts model promote-formula`
+## BL-066 — Codify formula promotion as `ts model promote-formula` `Tier 3`
 
 **Source:** codification sweep 2026-06-29 (angle #11b), priority #4.
 **Affects:** `agents/cli/ts-object-answer-promote/`, `tools/ts-cli/`.
@@ -1926,7 +2024,7 @@ Build `ts model promote-formula` in ts-cli:
 
 ---
 
-## BL-067 — Codify Tableau set/cohort detection and TML generation
+## BL-067 — Codify Tableau set/cohort detection and TML generation `Tier 3`
 
 **Source:** codification sweep 2026-06-29 (angle #11b), priority #5.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `tools/ts-cli/`.
@@ -1949,7 +2047,7 @@ Extend `model_builder.py` with `extract_sets()` and `build_cohort_tml()`:
 
 ---
 
-## BL-068 — Codify Tableau dashboard-to-liveboard conversion
+## BL-068 — Codify Tableau dashboard-to-liveboard conversion `Tier 3`
 
 **Source:** codification sweep 2026-06-29 (angle #11b), priority #7.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `tools/ts-cli/`.
@@ -2095,7 +2193,7 @@ explicitly include module size / modularity as a check dimension.
 
 ---
 
-## BL-071 — Tableau user-function + user-attribute family → ThoughtSpot RLS variables
+## BL-071 — Tableau user-function + user-attribute family → ThoughtSpot RLS variables `Tier 2`
 
 **Source:** task-21 gap documentation, 2026-07-03 (following ts-cli v0.26.0 / #158's
 fail-loud validation for this function family). Extended 2026-07-03 (audit finding 13.9,
@@ -2166,7 +2264,7 @@ translation exists yet.
 
 ---
 
-## BL-072 — Tableau hierarchies and value aliases (+ inverse-trig disposition)
+## BL-072 — Tableau hierarchies and value aliases (+ inverse-trig disposition) `Tier 3`
 
 **Source:** task-21 gap documentation, 2026-07-03.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `agents/shared/mappings/tableau/`,
@@ -2216,7 +2314,7 @@ independent fix worth bundling here rather than opening a third backlog item for
 
 ---
 
-## BL-073 — ts-audit / ts-cli round-trip batching (perf angle 14)
+## BL-073 — ts-audit / ts-cli round-trip batching (perf angle 14) `Tier 2`
 
 **Source:** 2026-07-03 full audit, findings 14.1 / 14.3 / 14.4.
 **Affects:** `tools/ts-cli/ts_cli/audit/context.py`, `commands/tables.py`.
@@ -2275,7 +2373,7 @@ deliberately deferred — `uv tool install --force` re-resolves fresh, but `pip-
 
 ---
 
-## BL-076 — Smoke-test backfills: ts-object-answer-promote + ts-convert-from-tableau
+## BL-076 — Smoke-test backfills: ts-object-answer-promote + ts-convert-from-tableau `Tier 2`
 
 **Source:** 2026-07-03 full audit, finding 6.3 — both `check_smoke_tests.py` ALLOWLIST
 exemptions were undated two-bucket violations (comments now reference this item).
@@ -2359,7 +2457,7 @@ keeps the ~30-line clone from re-drifting.
 
 ---
 
-## BL-080 — `ts metadata permissions` + answer-promote permission pre-flight
+## BL-080 — `ts metadata permissions` + answer-promote permission pre-flight `Tier 3`
 
 **Source:** 2026-07-03 full audit, finding 5.3.
 **Affects:** `tools/ts-cli/`, ts-object-answer-promote.
@@ -2375,7 +2473,7 @@ Confirm the spec via `get-rest-api-reference(apiName:"fetchPermissionsOnMetadata
 
 ---
 
-## BL-081 — `ts data search` for ts-audit Phase 2 (usage-based checks)
+## BL-081 — `ts data search` for ts-audit Phase 2 (usage-based checks) `Tier 3`
 
 **Source:** 2026-07-03 full audit, finding 5.4 (the capability gap had no dated item —
 two-bucket violation; the stale OI numbering was fixed in PR #168).
@@ -2453,7 +2551,7 @@ drift/obj_id/set-guard paths — **done, open-item #23 VERIFIED**.
 
 ---
 
-## BL-084 — `ts profiles add/update/remove`: codify the profile substrate
+## BL-084 — `ts profiles add/update/remove`: codify the profile substrate `Tier 2`
 
 **Source:** 2026-07-03 codification review row 18.
 **Affects:** all four ts-profile-* skills, `tools/ts-cli/ts_cli/commands/profiles.py`.
@@ -2478,7 +2576,7 @@ ts-profile-databricks. Cross-reference BL-079/11.3 above.
 
 ---
 
-## BL-085 — Tableau: wire build-model generate mode + codify TWB parse
+## BL-085 — Tableau: wire build-model generate mode + codify TWB parse `Tier 2`
 
 **Source:** 2026-07-03 codification review rows 1/15/23.
 **Affects:** ts-convert-from-tableau, `tools/ts-cli/`.
@@ -2501,7 +2599,7 @@ code already exists.
 
 ---
 
-## BL-086 — model-coach: codify the deterministic substrate under the judgment layer
+## BL-086 — model-coach: codify the deterministic substrate under the judgment layer `Tier 3`
 
 **Source:** 2026-07-03 codification review rows 16/17/19/20.
 **Affects:** ts-object-model-coach, `tools/ts-cli/`.
@@ -2538,7 +2636,7 @@ Column classification is duplicated between the two skills with DIFFERENT keywor
 
 ---
 
-## BL-088 — Audit mode doesn't classify Tableau Sets
+## BL-088 — Audit mode doesn't classify Tableau Sets `Tier 3`
 
 **Source:** 2026-07-04 live audit of `CPG+Merch Promotion Performance.twbx`.
 **Affects:** ts-convert-from-tableau (Audit mode, Steps A2–A4), `tools/ts-cli/` (`ts tableau parse` / `classify-formulas`).
@@ -2603,7 +2701,7 @@ import retry).
 
 ---
 
-## BL-090 — ts-convert-from-tableau: document multi-table / multi-query migration
+## BL-090 — ts-convert-from-tableau: document multi-table / multi-query migration `Tier 1`
 
 **Source:** 2026-07-05 live CPG migration.
 **Affects:** `agents/cli/ts-convert-from-tableau/SKILL.md`.
@@ -2630,7 +2728,7 @@ without re-deriving it live:
 
 ---
 
-## BL-091 — Tableau: verify multi-table model grain semantics against data
+## BL-091 — Tableau: verify multi-table model grain semantics against data `Tier 4`
 
 **Source:** 2026-07-05 live CPG migration (schema-only build; no data verification).
 **Affects:** ts-convert-from-tableau, generated multi-table models.
@@ -2648,7 +2746,7 @@ migrate-mode analogue of audit angle #15 (conversion fidelity, parked).
 
 ---
 
-## BL-092 — Tableau: drop the extract table when its Custom SQL is emitted as a SQL View
+## BL-092 — Tableau: drop the extract table when its Custom SQL is emitted as a SQL View `Tier 3`
 
 **Source:** 2026-07-06 PR #188 (Custom SQL → SQL View), validated against `markledwich2/Recfluence` seussrecs.twb.
 **Affects:** ts-convert-from-tableau, `build-model` (twb.py / model_builder.py).
@@ -2665,7 +2763,7 @@ the extract table should be dropped. Not a blocker for live-connection reports (
 
 ---
 
-## BL-093 — Tableau: substitute or flag Tableau parameters embedded in Custom SQL
+## BL-093 — Tableau: substitute or flag Tableau parameters embedded in Custom SQL `Tier 3`
 
 **Source:** 2026-07-06 PR #188, seussrecs.twb (`WHERE rec_date >= <[Parameters].[Parameter 1]>`).
 **Affects:** ts-convert-from-tableau, `build-model` (`_extract_sql_views` / SQL View emission).
@@ -2680,7 +2778,7 @@ NEEDS-REVIEW flag pointing at the token. Currently the SQL is passed through ver
 
 ---
 
-## BL-094 — Tableau: capture joins BETWEEN SQL Views (multi-query Custom SQL datasources)
+## BL-094 — Tableau: capture joins BETWEEN SQL Views (multi-query Custom SQL datasources) `Tier 2`
 
 **Source:** 2026-07-06 PR #188, validated against `tableau/community-tableau-server-insights` ts_users.twb (6 joined Custom SQL Queries).
 **Affects:** ts-convert-from-tableau, `build-model` (`_extract_joins` / model join wiring).
@@ -2697,7 +2795,7 @@ in #188 and overlaps the deferred "logical-relationship → join cardinality" ga
 
 ---
 
-## BL-095 — ts-cli: `connections add-tables` omits required `authenticationType`; instance `updateConnectionV2` 500s
+## BL-095 — ts-cli: `connections add-tables` omits required `authenticationType`; instance `updateConnectionV2` 500s `Tier 2`
 
 **Source:** 2026-07-08 BL-063 PR1 Task 5 live run against se-thoughtspot (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, Task-5 BLOCKED subsections, incl. incident GUIDs for a support ticket).
 **Affects:** `tools/ts-cli/ts_cli/commands/connections.py::add_tables()`; any skill relying on `ts connections add-tables`.
@@ -2722,7 +2820,7 @@ Two distinct findings:
 
 ---
 
-## BL-096 — se-thoughtspot build: SpotQL `generate-sql`/`fetch-data` endpoints return an empty-body 500
+## BL-096 — se-thoughtspot build: SpotQL `generate-sql`/`fetch-data` endpoints return an empty-body 500 `Tier 4`
 
 **Source:** 2026-07-09 BL-063 PR1 Task 5 live TS-side number-match run against se-thoughtspot (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, "TS-side number-match results (Task 5, live 2026-07-09)" execution-path note).
 **Affects:** `ts-object-model-spotql-query` skill; `ts spotql fetch-data` (and any command depending on it).
@@ -2766,7 +2864,7 @@ real-pipe hang guard that fails against the pre-fix code.
 
 ---
 
-## BL-098 — Databricks trailing/leading window translation: date-interval vs row-positional frame semantics diverge on sparse data (E1/C1)
+## BL-098 — Databricks trailing/leading window translation: date-interval vs row-positional frame semantics diverge on sparse data (E1/C1) `Tier 4`
 
 **Source:** 2026-07-09 BL-063 PR1.5 semantic deep-dive, claim IDs E1 (Trailing-window frame
 semantics) and the frame-semantics half of C1's split verdict (Global `filter:` × window
@@ -2857,7 +2955,7 @@ live-verification pass.
 **Target:** fold into BL-063 PR 5, or take as a standalone ts-cli fix — no fixed
 calendar date. **Closed** — all three items shipped in BL-063 PR5 (ts-cli v0.45.0).
 
-## BL-100 — Bring the remaining converters up to the Databricks-from standard
+## BL-100 — Bring the remaining converters up to the Databricks-from standard `Tier 1`
 
 **Filed:** 2026-07-11 (post BL-063 Phase 2 close-out).
 **Source:** user-raised after reviewing what `agents/shared/mappings/` is for now that
@@ -2898,7 +2996,7 @@ Snowflake-from pipeline is the natural first program (BL-063-style phased PRs).
 
 ---
 
-## BL-101 — Surface chart-axis-role classification in `ts metadata report` (schema 1.0 contract change)
+## BL-101 — Surface chart-axis-role classification in `ts metadata report` (schema 1.0 contract change) `Tier 3`
 
 **Filed:** 2026-07-11.
 **Source:** BL-083 PR2 scope decision + `agents/cli/ts-dependency-manager/references/open-items.md`
@@ -2934,7 +3032,7 @@ next touched, or as part of a future ts-dependency-manager UX pass.
 
 ---
 
-## BL-102 — Databricks MV `parameters:` parse + emit support (live-verify on Runtime 18.2)
+## BL-102 — Databricks MV `parameters:` parse + emit support (live-verify on Runtime 18.2) `Tier 3`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 13.2.
@@ -2952,7 +3050,7 @@ batch (PR #213); this is the parser/emitter half. Companion to finding 13.1.
 
 ---
 
-## BL-103 — Retest `searchConnection` with explicit `authentication_type` for OAuth hierarchy
+## BL-103 — Retest `searchConnection` with explicit `authentication_type` for OAuth hierarchy `Tier 4`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 13.3.
@@ -2969,7 +3067,7 @@ fix `_fetch_connection_v2` and soften the "do not rely on connection introspecti
 
 ---
 
-## BL-104 — Evaluate Databricks BI compatibility mode (GA 18.0+) as an alt MV architecture
+## BL-104 — Evaluate Databricks BI compatibility mode (GA 18.0+) as an alt MV architecture `Tier 4`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 13.9.
@@ -3002,7 +3100,7 @@ reintroduce the CVEs. urllib3 is covered transitively — no separate pin needed
 
 ---
 
-## BL-106 — Lift the CPython 3.14 cap; plan the 3.11 floor bump
+## BL-106 — Lift the CPython 3.14 cap; plan the 3.11 floor bump `Tier 4`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 16.2.
@@ -3097,7 +3195,7 @@ resolves in pre-commit, CI, and the test conftest.
 
 ---
 
-## BL-111 — `--connection <name>` filter on `ts metadata search` (optionally `ts tables discover`)
+## BL-111 — `--connection <name>` filter on `ts metadata search` (optionally `ts tables discover`) `Tier 3`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 11.1.
@@ -3119,7 +3217,7 @@ column-gap map. Meets ts-cli.md's "2+ skills duplicate the same raw API call" tr
 
 ---
 
-## BL-112 — Rewire `smoke_ts_audit.py` onto `ts audit run`/`report` + dedup the PII pattern list
+## BL-112 — Rewire `smoke_ts_audit.py` onto `ts audit run`/`report` + dedup the PII pattern list `Tier 3`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.2.
@@ -3136,7 +3234,7 @@ Parallels the 6.1 dependency-manager smoke-test rewire shipped in PR #212.
 
 ---
 
-## BL-113 — Add a live provisioning step to `smoke_ts_load_source_data.py`
+## BL-113 — Add a live provisioning step to `smoke_ts_load_source_data.py` `Tier 4`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.4.
@@ -3151,7 +3249,7 @@ runner already has `--sf-profile` plumbing in place to support one.
 
 ---
 
-## BL-114 — Document `export_with_column_aliases` when it stabilises or a skill needs it
+## BL-114 — Document `export_with_column_aliases` when it stabilises or a skill needs it `Tier 4`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 13.11.
@@ -3168,7 +3266,7 @@ skill needs it before GA.
 
 ---
 
-## BL-115 — Write a smoke test for `ts-convert-from-looker`
+## BL-115 — Write a smoke test for `ts-convert-from-looker` `Tier 2`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.3.
@@ -3185,7 +3283,7 @@ first live LookML verification (needs a LookML fixture project).
 
 ---
 
-## BL-116 — Live destructive run of the rewired `smoke_ts_dependency_manager.py`
+## BL-116 — Live destructive run of the rewired `smoke_ts_dependency_manager.py` `Tier 3`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.1; rewrite shipped in PR #212 — this item
@@ -3235,7 +3333,7 @@ validators PR rather than bundled.
 
 ---
 
-## BL-119 — Write a smoke test for `ts-convert-from-sisense`
+## BL-119 — Write a smoke test for `ts-convert-from-sisense` `Tier 4`
 
 **Filed:** 2026-07-17.
 **Source:** new wip skill `ts-convert-from-sisense` (Sisense offline-bundle → ThoughtSpot).
@@ -3251,7 +3349,7 @@ backlog item is the dated exit that exemption's comment references. Author
 `parse → build-model → build-liveboard` chain can be exercised end-to-end.
 
 **Target:** first live end-to-end verification against a captured Sisense bundle (open-item #1).
-## BL-120 — Live end-to-end verification for `ts-convert-from-qlik`
+## BL-120 — Live end-to-end verification for `ts-convert-from-qlik` `Tier 2`
 
 **Filed:** 2026-07-21.
 **Source:** initial `ts-convert-from-qlik` release (PR #254).
@@ -3286,7 +3384,7 @@ Five ts-cli code-quality items from the audit — all resolved:
 - **4.5** stdin import → extracted to `io_helpers.run_tml_import`; databricks.py and
   snowflake.py use thin wrappers
 
-## BL-122 — Cross-skill prompt/discovery extraction (connection, tables, import errors)
+## BL-122 — Cross-skill prompt/discovery extraction (connection, tables, import errors) `Tier 2`
 
 **Filed:** 2026-07-22.
 **Source:** 2026-07-22 full audit, findings 11.3–11.5.
@@ -3305,7 +3403,7 @@ Three near-identical prose blocks duplicated across 4+ conversion skills:
 
 **Target:** extract shared references when next editing the conversion skills.
 
-## BL-123 — Product currency gaps from 2026-07-22 audit
+## BL-123 — Product currency gaps from 2026-07-22 audit `Tier 2`
 
 **Filed:** 2026-07-22.
 **Source:** 2026-07-22 full audit, findings 13.1, 13.5, 13.7–13.10.
