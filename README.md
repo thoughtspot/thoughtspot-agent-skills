@@ -63,8 +63,8 @@ Pre-built analytical capabilities for ThoughtSpot.
 
 | Skill | What it builds | CLI | Snowsight | DBX |
 |---|---|:-:|:-:|:-:|
-| [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | [✓](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | [✓](agents/coco-snowsight/ts-recipe-formula-business-days-snowflake/SKILL.md) | — |
-| [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | [✓](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | [✓](agents/coco-snowsight/ts-recipe-formula-hms-display-snowflake/SKILL.md) | — |
+| [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | [✓](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | — | — |
+| [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | [✓](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | — | — |
 
 ### Setup & Infrastructure
 

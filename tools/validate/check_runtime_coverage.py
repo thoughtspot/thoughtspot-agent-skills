@@ -93,6 +93,12 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "Tableau Server not accessible from Snowsight stored-proc runtime",
     ("ts-load-source-data", "coco-snowsight"):
         "Warehouse loading requires shell access and external tool orchestration; not supported in Snowsight stored-proc runtime",
+
+    # --- Recipe skills (CLI-only; CoCo runtime simplified to conversion pipeline only) ---
+    ("ts-recipe-formula-business-days-snowflake", "coco-snowsight"):
+        "CLI-only: CoCo runtime scoped to conversion pipeline; recipes run via CLI",
+    ("ts-recipe-formula-hms-display-snowflake", "coco-snowsight"):
+        "CLI-only: CoCo runtime scoped to conversion pipeline; recipes run via CLI",
 }
 
 

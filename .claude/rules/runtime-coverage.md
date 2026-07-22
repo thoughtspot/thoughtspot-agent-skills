@@ -34,9 +34,9 @@ path. It is intentionally **outside** the cli/claude/coco mirror-and-version too
 
 ## The principle
 
-**CoCo legitimately diverges from Claude / CLI** because it runs inside
-Snowsight (no shell, no `ts` CLI, stored-procedure execution model). Some
-skills fit CoCo's environment, others don't.
+**CLI is the primary runtime.** CoCo Snowsight and Databricks Genie exist
+only for conversions to/from their respective databases (plus the auth and
+setup infrastructure those conversions need). All other skills live in CLI only.
 
 ---
 
@@ -81,22 +81,18 @@ In a single PR:
 
 ## Validator output
 
-Today's coverage (verified 2026-06-14):
+Today's coverage (verified 2026-07-22):
+
+CoCo Snowsight carries only the Snowflake conversion pipeline + its auth/setup
+infrastructure. All other skills are CLI-only.
 
 | Skill | Claude/CLI | CoCo | Notes |
 |---|:-:|:-:|---|
-| `ts-convert-from-databricks-mv` | ✓ | — | CoCo: Databricks CLI not available in Snowsight runtime |
-| `ts-convert-from-snowflake-sv` | ✓ | ✓ | Full mirror across all runtimes |
-| `ts-convert-to-databricks-mv` | ✓ | — | CoCo: Databricks CLI not available in Snowsight runtime |
-| `ts-convert-to-snowflake-sv` | ✓ | ✓ | |
-| `ts-audit` | ✓ | — | CoCo: cluster-wide TML scan + analysis too heavy for Snowsight runtime |
-| `ts-dependency-manager` | ✓ | — | CoCo: graph walk too heavy for Snowsight runtime |
-| `ts-object-answer-promote` | ✓ | — | CoCo: complex search-query manipulation not supported |
-| `ts-object-model-coach` | ✓ | — | CoCo: interactive coaching workflow doesn't fit stored-proc model |
-| `ts-profile-databricks` | ✓ | — | CoCo: Snowsight runs inside Snowflake, no Databricks profile needed |
-| `ts-profile-thoughtspot` | ✓ | ✓ | All runtimes need to credentialise to ThoughtSpot |
-| `ts-profile-snowflake` | ✓ | — | CoCo: lives inside Snowflake, no Snowflake profile needed |
+| `ts-convert-from-snowflake-sv` | ✓ | ✓ | Snowflake conversion pipeline |
+| `ts-convert-to-snowflake-sv` | ✓ | ✓ | Snowflake conversion pipeline |
+| `ts-profile-thoughtspot` | ✓ | ✓ | Auth — conversions need ThoughtSpot access |
 | `ts-setup-sv` | — | ✓ | CoCo-only: installs stored procedures CoCo uses |
+| All other skills | ✓ | — | CLI-only: CoCo scoped to conversion pipeline |
 
 ---
 
