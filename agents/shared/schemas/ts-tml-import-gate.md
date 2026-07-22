@@ -52,11 +52,12 @@ ts tml import --file <file> --policy PARTIAL      # one object
 ts tml import --dir <dir> --policy PARTIAL        # a batch
 ```
 
-Use `--policy PARTIAL` when importing multiple objects in a batch. `ALL_OR_NONE`
-rolls back the **entire** batch if any single TML fails — including objects that
-imported successfully — and the response still returns success GUIDs for the
-rolled-back objects, making the failure silent. Use `ALL_OR_NONE` only for atomic
-pairs (one table + one model that references it).
+| Policy | Behaviour |
+|---|---|
+| `PARTIAL` | Imports whole objects that validate; skips entire objects that fail. **Default for batch imports.** |
+| `ALL_OR_NONE` | Rolls back the **entire** batch if any single TML fails — including objects that imported successfully — and the response still returns success GUIDs for the rolled-back objects, making the failure silent. Use only for atomic pairs (one table + one model that references it). |
+| `PARTIAL_OBJECT` | Like `PARTIAL`, but also allows **sub-component** failures within an object. A Liveboard imports even if one visualization fails; a Table imports even if a join/relationship fails. Warnings appear in the API response. REST API v2 only (10.5.0.cl+). |
+| `VALIDATE_ONLY` | Validates the objects but does not import them. Useful for dry-run checks — but does **not** catch the hard invariants in §1–§2 above. |
 
 ## 4. Common import errors
 

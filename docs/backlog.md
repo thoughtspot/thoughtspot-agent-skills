@@ -3409,12 +3409,10 @@ Three near-identical prose blocks duplicated across 4+ conversion skills:
 **Status:** OPEN.
 
 Platform-specific documentation gaps identified by the product-currency specialists:
-- **13.1** `PARTIAL_OBJECT` import policy undocumented in authoritative schema docs
-  (available since 10.5.0.cl; ts-cli README lists it)
-- **13.5** `cortex_search_service` is an object, not a string in `snowflake-schema.md`
-  (low converter impact — neither direction emits this field)
+- **13.1** ~~`PARTIAL_OBJECT` import policy undocumented in authoritative schema docs~~ DONE (added to ts-tml-import-gate.md §3, 2026-07-23)
+- **13.5** ~~`cortex_search_service` is an object, not a string in `snowflake-schema.md`~~ DONE (fixed type + sub-fields, 2026-07-23)
 - **13.7** ~~Missing `median()` mapping for Databricks formula translation~~ DONE (ts-cli v0.74.0, 2026-07-23)
-- **13.8** Wildcard field expressions (`source.*`, `EXCEPT`) undocumented in MV schema
+- **13.8** ~~Wildcard field expressions (`source.*`, `EXCEPT`) undocumented in MV schema~~ DONE (added to databricks-metric-view.md v1.1, 2026-07-23)
 - **13.9** 6 Tableau date functions missing from mapping (ISOYEAR/ISOQUARTER/ISOWEEK/
   ISOWEEKDAY → reject; standalone QUARTER/WEEK → map)
 - **13.10** 7 Tableau window/rank variants missing (WINDOW_CORR/COVAR/COVARP/STDEVP/
