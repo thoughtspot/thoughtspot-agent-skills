@@ -84,6 +84,29 @@ def test_check_slash_command_refs_flags_bad_reference():
     assert rc != 0
 
 
+def test_check_skill_naming_flags_bad_name(tmp_path):
+    fixture = FIXTURES / "bad_skill_naming"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    res = _run([str(VALIDATE / "check_skill_naming.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "ts-wrong-family-name" in res.stdout, res.stdout
+
+
+def test_check_runtime_coverage_flags_missing_mirror(tmp_path):
+    fixture = FIXTURES / "bad_runtime_coverage"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    res = _run([str(VALIDATE / "check_runtime_coverage.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "ts-fake-skill" in res.stdout, res.stdout
+
+
+def test_check_skill_versions_flags_missing_changelog(tmp_path):
+    fixture = FIXTURES / "bad_skill_versions"
+    shutil.copytree(fixture, tmp_path, dirs_exist_ok=True)
+    res = _run([str(VALIDATE / "check_skill_versions.py"), "--root", str(tmp_path)])
+    assert res.returncode != 0, res.stdout + res.stderr
+
+
 def test_check_skill_flag_usage_flags_bad_fixture(tmp_path, capsys):
     # In-process, NOT a subprocess: the validator needs typer/click/ts_cli importable,
     # which is guaranteed for THIS interpreter (the ts-cli suite imports them in the

@@ -2295,13 +2295,14 @@ backfilled. Remove both ALLOWLIST entries when the smokes land.
 
 **Source:** 2026-07-03 full audit, finding 6.5.
 **Affects:** `tools/validate/tests/`.
-**Status:** OPEN.
+**Status:** PARTIAL — 3 highest-priority fixtures added (PR #296, 2026-07-22); 9 remaining.
 
-~13 pre-commit validators have no self-tests, including the constants/regex-driven ones
-most prone to vacuous-pass rot (`check_runtime_coverage` EXPECTED_DIVERGENCES,
-`check_skill_naming` FAMILY_PATTERNS) — the class that produced the C8/F5 drift bugs.
-One known-bad fixture test per validator (`test_known_bad_fixtures.py` pattern; the
-validators added in PR #176 ship with theirs).
+The three constants/regex-driven validators most prone to vacuous-pass rot now have
+known-bad fixtures: `check_skill_naming` (FAMILY_PATTERNS), `check_runtime_coverage`
+(EXPECTED_DIVERGENCES), `check_skill_versions` (changelog format). 9 validators remain
+without self-tests: `check_consistency`, `check_coverage_matrix`, `check_file_size`,
+`check_formula_catalog`, `check_no_inline_requests`, `check_secrets`, `check_sv_yaml`,
+`check_version_sync`, `check_yaml`.
 
 **Target:** 2026-09-30.
 
