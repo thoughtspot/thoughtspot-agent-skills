@@ -41,11 +41,11 @@ for new codification opportunities.
 |---|---|---|---|
 | 1 | Legacy / dead files | Untracked build artifacts, orphaned dirs, stale references, dead code | `check_references` (broken links) + `vulture` (dead-code report, sweep) + MANUAL |
 | 2 | README / SETUP accuracy | Skills table, symlink/stage steps match repo reality | `check_consistency` |
-| 3 | open-items truthfulness | No shipped-unverified assumptions hiding in open-items | `check_open_items` |
+| 3 | open-items truthfulness | No shipped-unverified assumptions hiding in open-items; cross-skill index current | `check_open_items` + `generate_open_items_index --check` |
 | 4 | Tools quality | `tools/` code health, error handling, dead code, function/module complexity | `check_module_health` (complexity ratchet — blocks new/worsening god-functions vs a baseline) + `check_file_size` (line-count gate on ts_cli modules — warn 500 / fail 1000) + MANUAL (error handling, dead code) |
 | 5 | ts-cli gaps | Operations skills need but the CLI lacks; inline `requests` anti-pattern | MANUAL (+ `check_patterns`) |
 | 6 | Testing-framework value | Tests assert behaviour, not just presence; smoke tests are real | `check_smoke_tests` (presence) + MANUAL (value) |
-| 7 | PR-validation effectiveness | CI is not a strict subset of pre-commit; gates actually fire | MANUAL (meta) |
+| 7 | PR-validation effectiveness | CI is not a strict subset of pre-commit; gates actually fire; gate effectiveness review (see `docs/quality-gates.md` audit checklist) | `generate_quality_gates --check` (catalog freshness) + MANUAL (effectiveness review) |
 | 8 | Cross-runtime skill drift | CLI / CoCo / Databricks mirrors in sync; parity matrix current | `check_mirror_sync`, `check_runtime_coverage`, `generate_parity --check`, `check_skill_naming` |
 | 9 | Conversion consistency | The conversion skills agree with each other against the invariants | `conversion-consistency-auditor` agent, `check_coverage_matrix`, `check_formula_catalog` |
 | 10 | Security | No secrets, no v1 endpoints, credential-handling rules honoured | `check_secrets`, `check_no_v1_endpoints` |

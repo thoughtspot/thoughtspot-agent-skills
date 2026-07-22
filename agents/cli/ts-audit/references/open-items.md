@@ -133,14 +133,17 @@ column references), but the optimisation flag cannot be checked via TML.
 
 ---
 
-### #7 — Column Level Security in TML export — UNVERIFIED
+### #7 — Column Level Security in TML export — SPEC-VERIFIED via MCP 2026-07-22
 
-S3 depends on detecting Column Level Security rules. CLS is not in standard TML
-export. A Beta flag `export_column_security_rules` reportedly exists.
+MCP `exportMetadataTML` spec confirms `export_column_security_rules` exists as a boolean
+in `export_options` (Beta, requires 10.12.0.cl+, must be used with `export_associated: true`).
+Additionally, dedicated endpoints exist: `fetchColumnSecurityRules`
+(`POST /api/rest/2.0/security/column/rules/fetch`) and `updateColumnSecurityRules`, both
+Beta 10.12.0.cl+. The fetch endpoint returns per-column rules with group IDs and source
+table details.
 
-**Test:** Export a model with CLS configured using `ts tml export --export-column-security-rules`
-(or equivalent flag) and check if CLS rules appear. If the flag doesn't exist, S3 falls
-back to the masking-formula heuristic.
+**Remaining:** Live-verify the TML shape returned when the flag is set, and wire the
+`--export-column-security-rules` flag into `ts tml export`.
 
 ---
 

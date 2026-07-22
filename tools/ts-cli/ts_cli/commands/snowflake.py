@@ -358,3 +358,519 @@ def exec_cmd(
     # default=json_safe_value coerces Decimal/datetime/bytes the connector returns
     # for NUMBER/temporal/BINARY columns (native JSON types never reach it).
     print(json.dumps(output, indent=2, default=json_safe_value))
+
+
+@app.command("parse-sv")
+def parse_sv_cmd(
+    ddl_file: str = typer.Argument(
+        ..., help="Path to a Semantic View DDL file, or '-' to read stdin"),
+    output_file: str = typer.Option(
+        ..., "--output", "-o", help="Output parsed JSON path"),
+) -> None:
+    """Parse Snowflake Semantic View DDL into structured JSON.
+
+    Codifies ts-convert-from-snowflake-sv SKILL.md Step 4: view identity,
+    tables (aliases, PKs, range constraints, subqueries), relationships
+    (equi/range/asof), dimensions, metrics (semi-additive, window, USING),
+    facts, custom instructions, verified queries, extension JSON.
+    Exits 1 when unsupported[] is non-empty (list on stderr; JSON still
+    written). Emits BL-100 prerequisite warnings for sample_values/is_enum.
+    """
+    from ts_cli.sv_parse import parse_sv_ddl
+
+    if ddl_file == "-":
+        ddl_text = sys.stdin.read()
+    else:
+        path = Path(ddl_file)
+        if not path.exists():
+            typer.echo(f"File not found: {ddl_file}", err=True)
+            raise SystemExit(1)
+        ddl_text = path.read_text()
+
+    parsed = parse_sv_ddl(ddl_text)
+
+    out = Path(output_file)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(parsed, indent=2))
+
+    for warning in parsed["warnings"]:
+        typer.echo(f"WARNING: {warning}", err=True)
+    if parsed["unsupported"]:
+        typer.echo(
+            f"UNSUPPORTED constructs ({len(parsed['unsupported'])}) — "
+            f"parse incomplete:", err=True)
+        for entry in parsed["unsupported"]:
+            typer.echo(f"  - {json.dumps(entry)}", err=True)
+        raise SystemExit(1)
+
+    dim_count = len(parsed["dimensions"])
+    met_count = len(parsed["metrics"])
+    fact_count = len(parsed["facts"])
+    rel_count = len(parsed["relationships"])
+    typer.echo(
+        f"Parsed SV '{parsed['name']}': {dim_count} dimension(s), "
+        f"{met_count} metric(s), {fact_count} fact(s), "
+        f"{rel_count} relationship(s) -> {output_file}", err=True)
+
+
+@app.command("translate-formulas")
+def translate_formulas_cmd(
+    input_file: str = typer.Option(
+        ..., "--input", "-i", help="Parsed SV JSON from parse-sv"),
+    output_file: str = typer.Option(
+        ..., "--output", "-o", help="Output translated JSON path"),
+) -> None:
+    """Translate Snowflake SQL formulas from parsed SV to ThoughtSpot syntax.
+
+    Takes the JSON output of `ts snowflake parse-sv` and translates all
+    dimension, fact, and metric expressions from Snowflake SQL to
+    ThoughtSpot formula syntax. Codifies ts-convert-from-snowflake-sv
+    SKILL.md Step 9 (formula translation).
+    """
+    from ts_cli.sv_translate import translate_sv_formulas
+
+    path = Path(input_file)
+    if not path.exists():
+        typer.echo(f"File not found: {input_file}", err=True)
+        raise SystemExit(1)
+    parsed = json.loads(path.read_text())
+
+    result = translate_sv_formulas(parsed)
+
+    out = Path(output_file)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=2))
+
+    stats = result["stats"]
+    typer.echo(
+        f"Translated {stats['translated']}/{stats['total']} formulas "
+        f"({stats['skipped']} skipped) -> {output_file}", err=True)
+    if result["skipped"]:
+        typer.echo("Skipped:", err=True)
+        for s in result["skipped"]:
+            typer.echo(f"  - {s['name']} ({s['block']}): {s['reason']}",
+                       err=True)
+    print(json.dumps(stats, indent=2))
+
+
+@app.command("build-model")
+def build_model_cmd(
+    parsed_path: str = typer.Option(
+        ..., "--parsed", "-p", help="parse-sv output JSON"),
+    translated_path: str = typer.Option(
+        ..., "--translated", "-t", help="translate-formulas output JSON"),
+    tables_path: str = typer.Option(
+        ..., "--tables", help="JSON object mapping SV alias -> TS table name/info"),
+    model_name: str = typer.Option(
+        ..., "--model-name", "-n", help="Model TML name"),
+    output_dir: str = typer.Option(
+        ..., "--output-dir", "-o",
+        help="Directory for the generated .model.tml file"),
+    sv_fqn: Optional[str] = typer.Option(
+        None, "--sv-fqn", help="Source SV FQN for the model description"),
+    spotter_enabled: Optional[bool] = typer.Option(
+        None, "--spotter-enabled/--no-spotter-enabled",
+        help="Stamp spotter_config; omit for no spotter_config block"),
+    existing_guid: Optional[str] = typer.Option(
+        None, "--existing-guid",
+        help="Stamp guid: at the document root (update-in-place; skips phase 1)"),
+    profile: Optional[str] = typer.Option(
+        None, "--profile", help="Import the model TML after a clean lint"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="With --profile: assemble+lint but skip the import"),
+) -> None:
+    """Assemble ThoughtSpot Model TML from parse-sv/translate-formulas JSON.
+
+    Validates TML invariants + lints before any import. With --profile,
+    imports the model via a two-pass flow: phase 1 imports structure only
+    (no formulas), captures the GUID, then phase 2 imports the full model
+    with formulas using the captured GUID. If --existing-guid is provided,
+    skips phase 1 (update-in-place). Summary JSON on stdout, diagnostics
+    on stderr. Exit 1 on findings or import failure.
+    """
+    from ts_cli.sv_build_model import build_model_tml_sv, strip_formulas
+    from ts_cli.tml_common import dump_tml_yaml
+    from ts_cli.tml_lint import lint_tml
+
+    parsed = _read_json_file(parsed_path, "--parsed")
+    translated_doc = _read_json_file(translated_path, "--translated")
+    tables = _read_json_file(tables_path, "--tables")
+
+    try:
+        model_doc, build_info = build_model_tml_sv(
+            model_name=model_name, parsed=parsed, translated_doc=translated_doc,
+            tables=tables, sv_fqn=sv_fqn, spotter_enabled=spotter_enabled,
+            existing_guid=existing_guid)
+    except ValueError as exc:
+        typer.echo(f"cannot build model TML: {exc}", err=True)
+        raise SystemExit(1)
+
+    skipped = translated_doc.get("skipped") or []
+    for skip in skipped:
+        typer.echo(f"SKIPPED {skip.get('block', '?')} '{skip['name']}': "
+                   f"{skip['reason']}", err=True)
+
+    lint_findings: list[str] = lint_tml(model_doc)
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model_file = out_dir / f"{model_name}.model.tml"
+    model_file.write_text(dump_tml_yaml(model_doc))
+
+    if lint_findings:
+        for f in lint_findings:
+            typer.echo(f"LINT: {f}", err=True)
+        summary = _build_model_summary(
+            model_name=model_name, model_file=str(model_file),
+            build_info=build_info, skipped=skipped,
+            spotter_enabled=spotter_enabled, existing_guid=existing_guid,
+            lint_findings=lint_findings, import_status="not_imported",
+            model_guid=None)
+        print(json.dumps(summary))
+        raise SystemExit(1)
+
+    import_status, model_guid, import_error = _run_sv_import(
+        profile, dry_run, model_doc, build_info, existing_guid)
+
+    summary = _build_model_summary(
+        model_name=model_name, model_file=str(model_file),
+        build_info=build_info, skipped=skipped,
+        spotter_enabled=spotter_enabled, existing_guid=existing_guid,
+        lint_findings=lint_findings, import_status=import_status,
+        model_guid=model_guid, import_error=import_error)
+    print(json.dumps(summary))
+    if import_status == "failed":
+        raise SystemExit(1)
+
+
+def _run_sv_import(
+    profile: Optional[str], dry_run: bool, model_doc: dict,
+    build_info: dict, existing_guid: Optional[str],
+) -> tuple[str, Optional[str], Optional[str]]:
+    """Two-pass import for SV models.
+
+    Phase 1: structure only (no formulas) → captures GUID.
+    Phase 2: full model with formulas + captured GUID.
+    Skips phase 1 when --existing-guid is provided or the model has no formulas.
+    """
+    if not profile:
+        return "not_requested", None, None
+    if dry_run:
+        return "dry_run", None, None
+
+    from ts_cli.sv_build_model import strip_formulas
+
+    has_formulas = bool(build_info["formula_count"])
+    guid = existing_guid
+
+    if has_formulas and not guid:
+        phase1_doc = strip_formulas(model_doc)
+        status, guid, error = _import_one(profile, phase1_doc, phase=1)
+        if status == "failed":
+            return status, None, error
+        if not guid:
+            return "failed", None, "phase 1 import returned no GUID"
+        typer.echo(f"Phase 1 imported (structure): guid={guid}", err=True)
+
+    if has_formulas and guid:
+        import copy
+        phase2_doc = copy.deepcopy(model_doc)
+        phase2_doc.pop("guid", None)
+        phase2_doc = {"guid": guid, **phase2_doc}
+        status, final_guid, error = _import_one(
+            profile, phase2_doc, phase=2, no_create_new=True)
+        if status == "failed":
+            return status, guid, error
+        return "imported", guid, None
+
+    status, guid, error = _import_one(profile, model_doc, phase=0)
+    return status, guid, error
+
+
+def _import_one(
+    profile: str, doc: dict, *, phase: int,
+    no_create_new: bool = False,
+) -> tuple[str, Optional[str], Optional[str]]:
+    """Run a single `ts tml import` invocation. Returns (status, guid, error)."""
+    import shlex
+    import subprocess
+
+    from ts_cli.tml_common import extract_imported_guid
+
+    model_tml_str = json.dumps(doc)
+    cmd = (f"source ~/.zshenv && ts tml import --policy PARTIAL "
+           f"--profile {shlex.quote(profile)}")
+    if no_create_new:
+        cmd += " --no-create-new"
+
+    label = f"phase {phase}" if phase else "import"
+    typer.echo(f"  Running {label}...", err=True)
+
+    completed = subprocess.run(
+        ["bash", "-c", cmd],
+        input=json.dumps([model_tml_str]), capture_output=True, text=True)
+    stderr_tail = (completed.stderr or "")[-500:]
+
+    try:
+        import_result = json.loads(completed.stdout)
+    except Exception:
+        import_result = None
+
+    if completed.returncode != 0:
+        return "failed", None, stderr_tail
+
+    if import_result is None:
+        tail = (completed.stdout or "")[-500:]
+        return "failed", None, f"import response unparseable — response tail: {tail}"
+
+    if isinstance(import_result, list):
+        status = ((import_result[0].get("response") or {})
+                  .get("status") or {})
+        if status.get("status_code") == "ERROR":
+            import re
+            msg = status.get("error_message", "")
+            cleaned = re.sub(r"<[^>]+>", " ", msg or "")
+            cleaned = " ".join(cleaned.split())[:1000]
+            return "failed", None, cleaned
+
+    model_guid = extract_imported_guid(import_result)
+    if model_guid is None:
+        tail = (completed.stdout or "")[-500:]
+        return "failed", None, (
+            f"import OK but no GUID found — response tail: {tail}")
+    return "imported", model_guid, None
+
+
+def _build_model_summary(
+    *, model_name: str, model_file: str, build_info: dict,
+    skipped: list[dict], spotter_enabled: Optional[bool],
+    existing_guid: Optional[str], lint_findings: list[str],
+    import_status: str, model_guid: Optional[str],
+    import_error: Optional[str] = None,
+) -> dict:
+    summary = {
+        "model_name": model_name,
+        "model_file": model_file,
+        "columns": {"attributes": build_info["attributes"],
+                     "measures": build_info["measures"]},
+        "formula_count": build_info["formula_count"],
+        "skipped": skipped,
+        "name_renames": build_info["rename_map"],
+        "spotter_enabled": spotter_enabled,
+        "existing_guid": existing_guid,
+        "lint_findings": lint_findings,
+        "import_status": import_status,
+        "model_guid": model_guid,
+    }
+    if import_error is not None:
+        summary["import_error"] = import_error
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# ts snowflake introspect
+# ---------------------------------------------------------------------------
+
+@app.command("introspect")
+def introspect_cmd(
+    parsed_path: str = typer.Option(
+        ..., "--parsed", "-p", help="parse-sv output JSON"),
+    sf_profile: str = typer.Option(
+        ..., "--sf-profile",
+        help="Snowflake profile name from ~/.claude/snowflake-profiles.json"),
+    connection_name: str = typer.Option(
+        ..., "--connection-name", "-c",
+        help="ThoughtSpot connection display name (for the tables-spec)"),
+    output_dir: str = typer.Option(
+        ..., "--output-dir", "-o",
+        help="Directory for tables-spec.json and tables.json"),
+    warehouse: Optional[str] = typer.Option(
+        None, "--warehouse", "-w", help="Warehouse override"),
+    role: Optional[str] = typer.Option(
+        None, "--role", "-r", help="Role override"),
+) -> None:
+    """Query INFORMATION_SCHEMA for SV source tables and build a tables-spec.
+
+    Reads the parsed SV JSON (from `ts snowflake parse-sv`) to extract table
+    FQNs, queries Snowflake INFORMATION_SCHEMA.COLUMNS for their schemas,
+    maps Snowflake types to ThoughtSpot types, and outputs:
+
+    \\b
+    - tables-spec.json: array for `ts tables create` (pipe via stdin)
+    - tables.json: alias→{name} map for `ts snowflake build-model --tables`
+
+    Summary JSON on stdout, diagnostics on stderr.
+
+    \\b
+    Example:
+      ts snowflake introspect --parsed parsed.json --sf-profile PROD \\
+        --connection-name "My Snowflake" --output-dir ./output
+      cat output/tables-spec.json | ts tables create --profile my-ts
+    """
+    from ts_cli.sv_introspect import (
+        build_info_schema_query,
+        build_tables_map,
+        build_tables_spec,
+        extract_table_locations,
+    )
+
+    parsed = _read_json_file(parsed_path, "--parsed")
+    locations = extract_table_locations(parsed)
+    if not locations:
+        typer.echo("no tables found in parsed SV — nothing to introspect",
+                   err=True)
+        raise SystemExit(1)
+
+    query = build_info_schema_query(locations)
+    typer.echo(f"querying INFORMATION_SCHEMA for {len(locations)} table(s)...",
+               err=True)
+
+    from ts_cli.commands.load import load_snowflake_profile
+    profile = load_snowflake_profile(sf_profile)
+    method = profile.get("method", "python")
+
+    if method == "cli":
+        cli_conn = profile.get("cli_connection")
+        if not cli_conn:
+            raise SystemExit(
+                f"Profile '{sf_profile}' has method: cli but no 'cli_connection' field.")
+        results = _exec_cli(cli_conn, query)
+    else:
+        wh = warehouse or profile.get("default_warehouse")
+        rl = role or profile.get("default_role")
+        results = _exec_python(profile, query, wh, rl)
+
+    rows: list[dict] = []
+    for r in results:
+        rows.extend(r.get("rows", []))
+
+    if not rows:
+        typer.echo("INFORMATION_SCHEMA returned no rows — check table names "
+                   "and permissions", err=True)
+        raise SystemExit(1)
+
+    specs, warnings = build_tables_spec(rows, locations, connection_name)
+    tables_map = build_tables_map(locations)
+
+    for w in warnings:
+        typer.echo(f"  WARNING: {w}", err=True)
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    spec_file = out_dir / "tables-spec.json"
+    spec_file.write_text(json.dumps(specs, indent=2))
+
+    map_file = out_dir / "tables.json"
+    map_file.write_text(json.dumps(tables_map, indent=2))
+
+    total_cols = sum(len(s["columns"]) for s in specs)
+    summary = {
+        "tables": len(specs),
+        "total_columns": total_cols,
+        "warnings": warnings,
+        "tables_spec_file": str(spec_file),
+        "tables_map_file": str(map_file),
+        "connection_name": connection_name,
+    }
+    typer.echo(f"  {len(specs)} table(s), {total_cols} column(s) → "
+               f"{spec_file}", err=True)
+    print(json.dumps(summary, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# ts snowflake build-sv
+# ---------------------------------------------------------------------------
+
+@app.command("build-sv")
+def build_sv_cmd(
+    model_path: str = typer.Option(
+        ..., "--model", "-m",
+        help="Path to the Model TML JSON (from `ts tml export --parse`)"),
+    tables_dir: str = typer.Option(
+        ..., "--tables-dir", "-t",
+        help="Directory containing Table TML JSON files (from `ts tml export`)"),
+    sv_name: str = typer.Option(
+        ..., "--sv-name", "-n",
+        help="Fully-qualified SV name (e.g. DB.SCHEMA.MY_SV)"),
+    output: str = typer.Option(
+        ..., "--output", "-o", help="Output .sql file path for the DDL"),
+    formulas_path: Optional[str] = typer.Option(
+        None, "--formulas",
+        help="Pre-translated formulas JSON: {formula_id: {expr, kind}}"),
+) -> None:
+    """Build a Snowflake Semantic View DDL from ThoughtSpot Model + Table TMLs.
+
+    Reads the exported Model TML and its associated Table TMLs, resolves
+    column_ids to physical column names, classifies columns as dimensions/
+    metrics/time_dimensions, builds relationships, orders metrics
+    topologically, and emits the DDL + CA extension JSON.
+
+    \\b
+    Example:
+      ts tml export {model_guid} --parse --associated --output-dir ./export
+      ts snowflake build-sv --model export/model.json \\
+        --tables-dir export/ --sv-name DB.SCHEMA.MY_SV \\
+        --output my_sv.sql
+    """
+    from ts_cli.sv_build_sv import build_sv_ddl
+
+    model_tml = _read_json_file(model_path, "--model")
+
+    table_tmls: dict[str, dict] = {}
+    tables_path = Path(tables_dir)
+    if not tables_path.is_dir():
+        typer.echo(f"--tables-dir is not a directory: {tables_dir}", err=True)
+        raise SystemExit(1)
+
+    for f in tables_path.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if "table" in data:
+            tname = data["table"].get("name", f.stem)
+            table_tmls[tname] = data
+
+    if not table_tmls:
+        typer.echo("no Table TML JSON files found in --tables-dir", err=True)
+        raise SystemExit(1)
+
+    translated = None
+    if formulas_path:
+        translated = _read_json_file(formulas_path, "--formulas")
+
+    try:
+        ddl, build_info = build_sv_ddl(
+            model_tml=model_tml, table_tmls=table_tmls,
+            sv_name=sv_name, translated_formulas=translated)
+    except ValueError as exc:
+        typer.echo(f"cannot build SV DDL: {exc}", err=True)
+        raise SystemExit(1)
+
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(ddl, encoding="utf-8")
+    typer.echo(f"  DDL written to {out_path}", err=True)
+
+    for sf in build_info.get("skipped_formulas", []):
+        typer.echo(f"  SKIPPED formula '{sf['name']}': {sf['reason']}",
+                   err=True)
+    for dj in build_info.get("dropped_joins", []):
+        typer.echo(f"  DROPPED join attrs on {dj['relationship']}: "
+                   f"type={dj['join_type']}, cardinality={dj['cardinality']}",
+                   err=True)
+
+    summary = {
+        "sv_name": sv_name,
+        "ddl_file": str(out_path),
+        "dimensions": build_info["dimensions"],
+        "time_dimensions": build_info["time_dimensions"],
+        "metrics": build_info["metrics"],
+        "relationship_count": build_info["relationship_count"],
+        "skipped_formulas": len(build_info["skipped_formulas"]),
+        "dropped_join_attrs": len(build_info["dropped_joins"]),
+        "unmapped_properties": len(build_info["unmapped_properties"]),
+    }
+    print(json.dumps(summary, indent=2))

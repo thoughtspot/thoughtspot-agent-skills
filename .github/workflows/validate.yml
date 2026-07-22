@@ -79,6 +79,7 @@ jobs:
           python3 tools/validate/check_mapping_currency.py --root . --check
           python3 tools/validate/check_mirror_sync.py
           python3 tools/validate/generate_parity.py --check
+          python3 tools/validate/generate_quality_gates.py --root . --check
 
       - name: Changelog gate (PR only)
         # The repo-changelog gate is staged-diff-based in pre-commit (empty in a CI

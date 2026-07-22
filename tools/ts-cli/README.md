@@ -2106,6 +2106,167 @@ failed).
 top-level `rows` is a convenience for single-query verifies. Diagnostics go to
 stderr.
 
+### `ts snowflake parse-sv`
+
+Parse a Snowflake Semantic View DDL string (from `GET_DDL('SEMANTIC_VIEW', ...)`)
+into structured JSON for the `ts-convert-from-snowflake-sv` skill. Codifies
+Step 4: tables (aliases, PKs, range constraints, subquery sources), relationships
+(equi/range/asof), dimensions, metrics (semi-additive, window, USING), facts,
+custom instructions, verified queries, and extension JSON.
+
+```bash
+ts snowflake parse-sv sv.sql --output parsed.json
+cat sv.sql | ts snowflake parse-sv - --output parsed.json
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `ddl_file` | *(required)* | Path to a DDL file, or `-` for stdin |
+| `--output` / `-o` | *(required)* | Output JSON path |
+
+Exits 1 when `unsupported[]` is non-empty (list on stderr; JSON still written).
+Emits BL-100 prerequisite warnings for `sample_values`/`is_enum` (DDL clause
+shape unverified against live `GET_DDL`).
+
+**Output:** JSON to the `--output` file — `{"view_name", "database", "schema",
+"name", "comment", "tables", "relationships", "dimensions", "metrics", "facts",
+"custom_instructions", "verified_queries", "extension", "warnings",
+"unsupported"}`. Summary line to stderr.
+
+---
+
+### `ts snowflake translate-formulas`
+
+Translate Snowflake SQL formulas from a parsed Semantic View (output of
+`ts snowflake parse-sv`) into ThoughtSpot formula syntax. Codifies
+ts-convert-from-snowflake-sv SKILL.md Step 9: identifier resolution,
+function mapping (DATEDIFF/DATEADD/CASE/CAST/DIV0/COUNT_IF/window functions),
+column classification (ATTRIBUTE/MEASURE, column/formula), semi-additive
+wrapping (last_value/first_value), and USING relationship group_aggregate.
+
+```bash
+ts snowflake translate-formulas --input parsed.json --output translated.json
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--input` / `-i` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--output` / `-o` | *(required)* | Output translated JSON path |
+
+**Output:** JSON to the `--output` file — `{"translated": [...],
+"skipped": [...], "stats": {"total", "translated", "skipped"}}`.
+Each translated entry: `{name, role, output_kind, column_type, table,
+column, ts_expr, aggregation, comment, synonyms, is_private, annotations}`.
+Stats JSON to stdout; skipped entries and diagnostics to stderr.
+
+---
+
+### `ts snowflake introspect`
+
+Query Snowflake INFORMATION_SCHEMA for the source tables referenced by a parsed
+Semantic View and build the artifacts the downstream pipeline needs. Codifies
+ts-convert-from-snowflake-sv Steps 6A–6C: Snowflake type → ThoughtSpot type
+mapping, tables-spec assembly for `ts tables create`, and a tables map for
+`ts snowflake build-model`.
+
+```bash
+ts snowflake introspect --parsed parsed.json --sf-profile PROD \
+  --connection-name "My Snowflake" --output-dir ./output
+cat output/tables-spec.json | ts tables create --profile my-ts
+ts snowflake build-model --tables output/tables.json ...
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--parsed` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--sf-profile` | *(required)* | Snowflake profile name |
+| `--connection-name` | *(required)* | ThoughtSpot connection display name (stamped on every table spec) |
+| `--output-dir` | *(required)* | Directory for `tables-spec.json` and `tables.json` |
+| `--warehouse` | profile default | Warehouse override |
+| `--role` | profile default | Role override |
+
+**Outputs:**
+- `tables-spec.json` — JSON array for `ts tables create` stdin
+- `tables.json` — `{alias: {name}}` map for `ts snowflake build-model --tables`
+  (enrich with GUIDs from `ts tables create` output before calling build-model)
+
+**Output (stdout):** JSON summary — `{tables, total_columns, warnings,
+tables_spec_file, tables_map_file, connection_name}`.
+
+---
+
+### `ts snowflake build-model`
+
+Assemble a ThoughtSpot Model TML from the outputs of `ts snowflake parse-sv` and
+`ts snowflake translate-formulas`, then import it via two-pass import. Codifies
+ts-convert-from-snowflake-sv SKILL.md Steps 10–11: inline Scenario B joins
+(equi/range/ASOF), SV synonym→display name, private column handling, fact table
+detection, and the two-pass import flow (structure-only → GUID capture → full
+model with formulas + `--no-create-new`).
+
+```bash
+ts snowflake build-model \
+  --parsed parsed.json --translated translated.json \
+  --tables tables.json --model-name "Sales Model" \
+  --sv-fqn DB.SCHEMA.SALES_SV --profile my-ts \
+  --output-dir ./output
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--parsed` | *(required)* | Path to parsed SV JSON from `parse-sv` |
+| `--translated` | *(required)* | Path to translated JSON from `translate-formulas` |
+| `--tables` | *(required)* | Path to tables JSON map (`{alias: {name, fqn}}` or `{alias: name}`) |
+| `--model-name` | *(required)* | Display name for the ThoughtSpot model |
+| `--output-dir` | *(required)* | Directory to write the model TML YAML file |
+| `--sv-fqn` | — | Fully-qualified SV name for the model description |
+| `--spotter-enabled` / `--no-spotter-enabled` | enabled | Enable/disable Spotter (AI search) on the model |
+| `--existing-guid` | — | GUID of an existing model to update (skips phase 1 create) |
+| `--profile` | — | ThoughtSpot profile for import |
+| `--dry-run` | `false` | Write TML files only, skip import |
+
+**Output:** JSON summary to stdout — `{model_name, model_guid, formula_count,
+attribute_count, measure_count, phase1, phase2, tml_path, build_info}`.
+Phase 1 is skipped when `--existing-guid` is supplied or when the model has no
+formulas.
+
+---
+
+### `ts snowflake build-sv`
+
+Build a Snowflake Semantic View DDL from exported ThoughtSpot Model + Table TMLs.
+Codifies ts-convert-to-snowflake-sv Steps 5–8: column_id resolution to physical
+column names, classification (dimension/metric/time_dimension), `to_snake`
+aliasing, relationship naming with collision avoidance, metric topological
+ordering, DDL assembly with tables/relationships/dimensions/metrics clauses, and
+Cortex Analyst extension JSON.
+
+```bash
+ts tml export {model_guid} --parse --associated --output-dir ./export
+ts snowflake build-sv --model export/model.json \
+  --tables-dir export/ --sv-name DB.SCHEMA.MY_SV \
+  --output my_sv.sql
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Path to Model TML JSON (from `ts tml export --parse`) |
+| `--tables-dir` | *(required)* | Directory with Table TML JSON files |
+| `--sv-name` | *(required)* | Fully-qualified SV name (e.g. `DB.SCHEMA.MY_SV`) |
+| `--output` | *(required)* | Output `.sql` file path |
+| `--formulas` | — | Pre-translated formulas JSON (`{formula_id: {expr, kind}}`) |
+
+Formulas without a matching entry in `--formulas` are omitted from the DDL
+and logged as skipped. Join type/cardinality attributes are dropped (logged as
+unmapped). Pipe the output to `ts snowflake lint-ddl` for validation, then
+`ts snowflake exec` to create the view.
+
+**Output (stdout):** JSON summary — `{sv_name, ddl_file, dimensions,
+time_dimensions, metrics, relationship_count, skipped_formulas,
+dropped_join_attrs, unmapped_properties}`.
+
+---
+
 ### `ts databricks parse-mv`
 
 Parse a Databricks Metric View YAML definition (v0.1 or v1.1) into structured

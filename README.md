@@ -157,6 +157,18 @@ thoughtspot-agent-skills/
 
 ---
 
+## Contributing
+
+| Resource | What it covers |
+|---|---|
+| [Quality gates catalog](docs/quality-gates.md) | All 37 validators — what each checks, when it runs, why it exists |
+| [Open items index](docs/open-items-index.md) | Cross-skill tracker of unverified assumptions and pending tests |
+| [Parity matrix](agents/PARITY.md) | Skill coverage across runtimes (CLI / CoCo / Databricks) |
+| [Backlog](docs/backlog.md) | Dated work items (`BL-NNN`) from audits and reviews |
+| [CLAUDE.md](CLAUDE.md) | Repo conventions, change-impact map, commit protocol |
+
+---
+
 ## Troubleshooting
 
 ### `ts` CLI install fails on Python 3.14 (macOS)

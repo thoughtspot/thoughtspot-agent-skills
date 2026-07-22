@@ -7,7 +7,7 @@ Status legend: **CONFIRMED** (direction known, needs live verification) | **VERI
 
 ---
 
-## #2 — Column reference format in chart configs (mutate.py `remove_columns_from_answer`) — OPEN
+## #2 — Column reference format in chart configs (mutate.py `remove_columns_from_answer`) — VERIFIED via MCP 2026-07-22
 
 **Question:** Do `chart_columns[].column_id`, `table.ordered_column_ids`, and
 `table.table_columns[].column_id` in Answer/Liveboard TML use:
@@ -15,11 +15,11 @@ Status legend: **CONFIRMED** (direction known, needs live verification) | **VERI
   - (B) `TABLE::COLUMN_NAME` composite key
   - (C) Opaque internal ID
 
-**Why it matters:** The `remove_columns_from_answer()` and `rename_column_in_answer()`
-helpers compare by display name. If format (B) or (C) is used for some chart types,
-those helpers silently miss chart config entries.
-
-**Finding:** _(not yet tested)_
+**Finding:** MCP `exportMetadataTML` examples confirm format (A) — display names.
+Examples: `"column_id": "store"`, `"column_id": "Total sales"`, `"column_id": "Color"`.
+Model/Worksheet TML uses `TABLE_PATH::Column Name`, but Answer/Liveboard viz TML uses
+bare display names. The `remove_columns_from_answer()` helper comparing by display name
+is correct.
 
 ---
 
@@ -108,11 +108,13 @@ recommended workaround.
 
 ---
 
-## #18 — TML export/import for FEEDBACK objects fails — OPEN
+## #18 — TML export/import for FEEDBACK objects — VERIFIED via MCP 2026-07-22
 
-Spotter feedback objects cannot be exported via `ts tml export <guid>` (returns
-error_code 10002). Correct endpoint for fetching/updating FEEDBACK objects not yet
-discovered.
+MCP `exportMetadataTML` spec confirms `FEEDBACK` is a valid type. The error_code 10002
+was caused by wrong invocation: the identifier must be the **parent object's** GUID with
+`type: FEEDBACK` in the metadata array, not the feedback object's own GUID. For bulk
+export: set the parent's GUID with `type: LOGICAL_TABLE` and
+`export_with_associated_feedbacks: true` in `export_options`.
 
 ---
 
