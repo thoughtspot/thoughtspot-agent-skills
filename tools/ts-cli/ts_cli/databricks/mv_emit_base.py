@@ -45,16 +45,35 @@ def build_column_index(model: dict, tables: list[dict]) -> dict:
     no longer consulted here.
     """
     idx: dict = {}
+    by_table: dict[str, dict] = {}
     for t in tables:
         tname = t["table"]["name"]
+        cols: dict = {}
         for c in t["table"].get("columns", []):
             ts_type = (c.get("db_column_properties") or {}).get("data_type") or "VARCHAR"
             try:
                 dbx_type = ts_type_to_dbx(ts_type)
             except ValueError:
                 dbx_type = "string"
-            idx[f"{tname}::{c['name']}"] = {
-                "table": tname, "column": c["name"], "dbx_type": dbx_type, "dot_path": None}
+            entry = {"table": tname, "column": c["name"],
+                     "dbx_type": dbx_type, "dot_path": None}
+            idx[f"{tname}::{c['name']}"] = entry
+            cols[c["name"]] = entry
+        by_table[tname] = cols
+    # Role-playing (aliased) tables: a reused physical table referenced under an
+    # alias in model_tables gets its columns via `[ALIAS::col]` (e.g.
+    # `[ON_BEHALF_ACCOUNT::NAME]`). The physical index above only holds
+    # `[ACCOUNT::NAME]`, so mirror each physical column under the alias key too —
+    # otherwise the alias's dimensions/measures fail cid lookup and are dropped.
+    for mt in model.get("model_tables", []):
+        alias = mt.get("alias")
+        phys = mt.get("name")
+        if not alias or alias == phys:
+            continue
+        for cname, entry in by_table.get(phys, {}).items():
+            idx.setdefault(f"{alias}::{cname}", {
+                "table": alias, "column": cname,
+                "dbx_type": entry["dbx_type"], "dot_path": None})
     return idx
 
 
