@@ -13,6 +13,7 @@ does with it.
 """
 from __future__ import annotations
 import re
+from ts_cli.tableau.sets import classify_sets
 from ts_cli.tableau_translate import translate_formulas
 
 TRANSLATABLE_TIERS = {
@@ -136,15 +137,25 @@ def classify_workbook(parsed: dict, datasource: str | None = None) -> dict:
 
     Returns::
 
-        {"datasources": [{"name", "formulas", "tier_counts", "translate_stats"}, ...],
-         "tier_counts": <sum of per-datasource tier_counts>}
+        {"datasources": [{"name", "formulas", "tier_counts", "translate_stats",
+                           "sets", "sets_tier_counts"}, ...],
+         "tier_counts": <sum of per-datasource tier_counts>,
+         "sets_tier_counts": <sum of per-datasource sets_tier_counts>}
 
     The top-level `tier_counts` sums per-datasource instance counts — a name
     shared by two datasources is counted once per datasource, matching the two
     models migration produces. Pass `datasource` to limit to one datasource.
+
+    `sets`/`sets_tier_counts` (BL-088) reuse the SAME `set_type` `ts tableau
+    parse` already classified each `<group>` Set into (twb.py's `extract_sets`)
+    — `classify_sets` (ts_cli.tableau.sets) only labels each with the tier
+    Step A4's "Tableau Sets" report needs (`column_set`/`query_set`/`deferred`),
+    never re-deriving the migrate-mode verdict. Same "two paths, one detector"
+    principle as the formula classifier above.
     """
     out_datasources = []
     summed: dict = {}
+    sets_summed: dict = {}
     for ds in parsed.get("datasources", []):
         if datasource and ds.get("name") != datasource:
             continue
@@ -152,12 +163,17 @@ def classify_workbook(parsed: dict, datasource: str | None = None) -> dict:
             ds.get("calculated_fields", []),
             orphan_calcs=set(ds.get("orphan_calcs", [])),
         )
+        sets_result = classify_sets(ds.get("sets", []))
         out_datasources.append({
             "name": ds.get("name"),
             "formulas": r["formulas"],
             "tier_counts": r["tier_counts"],
             "translate_stats": r["translate_stats"],
+            "sets": sets_result["sets"],
+            "sets_tier_counts": sets_result["tier_counts"],
         })
         for tier, n in r["tier_counts"].items():
             summed[tier] = summed.get(tier, 0) + n
-    return {"datasources": out_datasources, "tier_counts": summed}
+        for tier, n in sets_result["tier_counts"].items():
+            sets_summed[tier] = sets_summed.get(tier, 0) + n
+    return {"datasources": out_datasources, "tier_counts": summed, "sets_tier_counts": sets_summed}

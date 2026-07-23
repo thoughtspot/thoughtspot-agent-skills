@@ -536,11 +536,16 @@ def test_build_model_warns_and_reports_sets_detected_when_workbook_has_sets(tmp_
          "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
     )
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "WARNING: 1 Tableau Set(s) detected" in result.stderr
-    assert "Phase-2a/2b/2c set→cohort step" in result.stderr
+    assert "INFO: 1 Tableau Set(s) detected" in result.stderr
+    assert "emitting *.cohort.tml" in result.stderr
 
     payload = json.loads(result.stdout)
     assert payload[0]["sets_detected"] == 1
+    # BL-067: the static set is now auto-converted to a GROUP_BASED cohort.
+    assert payload[0]["cohorts_emitted"] == [{"name": "Customer Group 1", "set_type": "static"}]
+    assert payload[0]["cohorts_deferred"] == []
+    cohort_file = next(out_dir.glob("*.cohort.tml"))
+    assert "GROUP_BASED" in cohort_file.read_text()
 
 
 def test_build_model_no_warning_and_zero_sets_detected_without_sets(tmp_path):
@@ -559,3 +564,8 @@ def test_build_model_no_warning_and_zero_sets_detected_without_sets(tmp_path):
 
     payload = json.loads(result.stdout)
     assert payload[0]["sets_detected"] == 0
+    # BL-067 non-regression: a non-Set workbook emits 0 cohorts, no cohort files.
+    assert payload[0]["cohorts_emitted"] == []
+    assert payload[0]["cohorts_deferred"] == []
+    assert payload[0]["cohort_files"] == []
+    assert list(out_dir.glob("*.cohort.tml")) == []

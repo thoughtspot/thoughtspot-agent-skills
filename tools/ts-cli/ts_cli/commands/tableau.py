@@ -678,6 +678,66 @@ def _write_sql_view_files(sql_views: list, connection_name: str, out_path, slug:
     return paths
 
 
+def _param_display_name_map(param_map: dict) -> dict:
+    """``parsed["param_map"]`` (internal ``"[Parameter 3]"`` -> caption) ->
+    keyed by the RAW ``count='[Parameters].[Parameter 3]'`` reference form a
+    Top-N set's ``count`` attribute actually carries, so
+    ``build_cohort_tml`` can look it up directly."""
+    return {f"[Parameters].{k}": v for k, v in param_map.items()}
+
+
+def _write_cohort_files(
+    sets: list, model_name: str, rename_map: dict, param_map: dict,
+    out_path: Path, slug: str,
+) -> dict:
+    """Build + write one ``*.cohort.tml`` per translatable Set (BL-067 part 2).
+
+    Applies the same formula/column rename_map the model's own formulas went
+    through (a set anchored on a calc whose caption collided and got renamed —
+    e.g. "Formula Region" — must reference the RENAMED display name). Echoes
+    the documented log line for every set (translated or omitted) and returns
+    ``{"cohort_files", "cohorts_emitted", "cohorts_deferred"}`` for the result JSON.
+    """
+    from ts_cli.tableau.sets import build_cohort_tml
+    from ts_cli.tableau_translate import dump_tml_yaml
+
+    param_display_map = _param_display_name_map(param_map)
+    cohort_files: list[str] = []
+    cohorts_emitted: list[dict] = []
+    cohorts_deferred: list[dict] = []
+
+    for spec in sets:
+        remapped = dict(spec)
+        if remapped.get("anchor_name") in rename_map:
+            remapped["anchor_name"] = rename_map[remapped["anchor_name"]]
+
+        cohort_tml, logs = build_cohort_tml(
+            remapped, model_name=model_name, param_display_name_map=param_display_map,
+        )
+        for line in logs:
+            typer.echo(f"  Set: {line}", err=True)
+
+        if cohort_tml is None:
+            cohorts_deferred.append({
+                "name": spec.get("name"), "set_type": spec.get("set_type"),
+                "reason": logs[0] if logs else "omitted",
+            })
+            continue
+
+        cohort_slug = re.sub(r"[^0-9A-Za-z._-]+", "_", spec.get("name", "")).strip("_") or "set"
+        cohort_path = out_path / f"{slug}.{cohort_slug}.cohort.tml"
+        cohort_path.write_text(dump_tml_yaml(cohort_tml))
+        typer.echo(f"  Wrote Cohort: {cohort_path}", err=True)
+        cohort_files.append(str(cohort_path))
+        cohorts_emitted.append({"name": spec.get("name"), "set_type": spec.get("set_type")})
+
+    return {
+        "cohort_files": cohort_files,
+        "cohorts_emitted": cohorts_emitted,
+        "cohorts_deferred": cohorts_deferred,
+    }
+
+
 def _resolve_table_columns(
     tables: list, columns: list, col_table_map: dict,
 ) -> tuple[dict, list]:
@@ -1003,6 +1063,16 @@ def _generate_flow(
         typer.echo(f"  Wrote: {full_path}", err=True)
         result["model_file"] = str(full_path)
 
+        # BL-067: emit one *.cohort.tml per translatable native Tableau Set
+        # (Phase 2a/2b/2c) — import order is model -> cohort (a query set's
+        # formula may reference a model parameter), which the phased-import
+        # payload in Step 5.5 already reflects since cohorts land alongside
+        # the full model file, never the phase-0 base.
+        result.update(_write_cohort_files(
+            ds.get("sets", []), name, rename_map, parsed.get("param_map", {}),
+            out_path, slug,
+        ))
+
         # SPEED GUARDRAIL: reuses ds/cleaned_cols already parsed/assembled
         # above — no TWB re-parse, no whole-corpus YAML load/dump pass.
         result.update(_write_table_tml_files(
@@ -1305,15 +1375,19 @@ def build_model_cmd(
     typer.echo(f"Parsing {twb_path.name}...", err=True)
     parsed = parse_twb(twb_path)
 
-    # BL-131: native Tableau Sets (<group> — static/Top-N/condition-based)
-    # are not auto-converted by this GENERATE pass; set->cohort is an
-    # agent-guided Phase-2a/2b/2c step (SKILL.md Step 5b). Nudge instead of
-    # silently skipping them.
+    # BL-131/BL-067: native Tableau Sets (<group> — static/Top-N/condition-based)
+    # ARE now auto-converted by this GENERATE pass — one *.cohort.tml per
+    # translatable set (Phase 2a/2b/2c), see `_write_cohort_files` below. Nudge
+    # that some sets may still be deferred (Set Controls, unclassified shapes) —
+    # each datasource's result JSON carries the exact `cohorts_emitted`/
+    # `cohorts_deferred` breakdown; per-set "Set: ..." log lines above give the
+    # reason for every one.
     sets_detected = parsed.get("sets_detected", 0)
     if sets_detected > 0:
         typer.echo(
-            f"WARNING: {sets_detected} Tableau Set(s) detected — not auto-converted "
-            "by build-model; run the Phase-2a/2b/2c set→cohort step (SKILL.md Step 5b).",
+            f"INFO: {sets_detected} Tableau Set(s) detected — emitting *.cohort.tml for "
+            "translatable sets (Phase 2a/2b/2c); see cohorts_emitted/cohorts_deferred "
+            "in the result JSON for any set that couldn't be converted.",
             err=True,
         )
 

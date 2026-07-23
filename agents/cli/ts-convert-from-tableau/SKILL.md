@@ -319,6 +319,14 @@ skipped` for that model), and use the top-level `tier_counts` for the workbook t
 per-formula rows (Row-offset detail, Excluded Formulas, "Needing Review") come from each
 `datasources[].formulas[]` entry's `tier`/`level`/`complexity`/`reason` fields.
 
+**Tableau Sets (BL-088) — same rule, a different field.** Each `datasources[]` entry also
+carries `sets[]` (`[{name, set_type, tier}, ...]`) and `sets_tier_counts` (the exact 3 rows
+the "Tableau Sets" table below needs: `column_set`, `query_set`, `deferred`); the top-level
+`sets_tier_counts` sums them for the workbook total — same "source from JSON, don't hand-tally"
+rule as formulas. This reuses `ts tableau build-model`'s own Phase-2a/2b/2c set→cohort
+classification (`set_type`), so audit mode can never disagree with what migrate mode would
+actually do with a given Set.
+
 **Per-file report, per-datasource breakdown, and combined multi-workbook summary:**
 See [references/audit-mode-report.md](references/audit-mode-report.md) for the full
 templates — tier/cross-reference-depth/complexity tables, the coverage-math breakdown,
@@ -1480,23 +1488,55 @@ doesn't physically exist), and cross-datasource (blend) formula reference resolu
 > above as a `GROUP_BASED` cohort). Sets are identified by the `<group>` XML element; manual
 > groups by the calculation `class`. Do NOT confuse the two.
 
-Scan for top-level `<group>` elements and classify each by its `<groupfilter>` tree shape: a
-**static** member list (Phase 2a → `GROUP_BASED` column set), a **Top-N/Bottom-N** set (Phase
-2b → an `ADVANCED`/`COLUMN_BASED` query set, static or parameter-driven), or an
-`except`/`intersect`/condition-based/computed set operation or a dynamic **set control** (Phase
-2c — column set, query set, or a plain interactive filter, depending on shape). See
-[references/step-5-tml-generation.md](references/step-5-tml-generation.md) "Tableau Sets →
-ThoughtSpot column sets (Phase 2a/2b/2c)" for the full per-pattern detection, extraction, and
-TML-emission rules (including the IN/OUT `sum_if` translation patterns, the Column-set and
-Query-set TML templates, and a worked multi-formula example).
+**As of ts-cli v0.87.0, `ts tableau build-model` emits these automatically** — one
+`{model}.{SetName}.cohort.tml` per translatable Set (static/`%null%`/`except`/intersect →
+`GROUP_BASED` column set; Top-N/Bottom-N/all-except-Top-N/condition-based/mixed computed
+ops → `ADVANCED`/`COLUMN_BASED` query set), written alongside the model files in the SAME
+`build-model` call — no separate command, no hand-assembly in the normal flow:
 
-**Emit one `*.cohort.tml` per set** and import cohorts after the model (the payload order in
-Step 5.5 already includes `*.cohort.tml`). **Import order for query sets: model (with
-parameter) → cohort** — the set's formula references the parameter, which must exist on the
-model first.
+```bash
+ts tableau build-model {twb_file} --connection {connection_name} \
+  --output-dir /tmp/ts_tableau_mig/output/{workbook_name} --database {db} --schema {schema}
+```
+
+The result JSON's `cohorts_emitted` (`[{name, set_type}, ...]`) and `cohorts_deferred`
+(`[{name, set_type, reason}, ...]`) report exactly what happened to every Set in that
+datasource; stderr echoes the same documented log line per set (e.g. "Set 'Category Set' is
+an except-of-member-list set -> column set (GROUP_BASED via NE, excluding 1 member(s))"). A
+dynamic **Set Control** (no fixed members) and an unclassifiable `<group>` shape are never
+converted — they land in `cohorts_deferred` with the reason, per the "drop the scaffolding,
+translate the intent" rule below.
+
+Detection + the exact per-type TML shape are documented in full in
+[references/step-5-tml-generation.md](references/step-5-tml-generation.md) "Tableau Sets →
+ThoughtSpot column sets (Phase 2a/2b/2c)" — read it if a `cohorts_deferred` reason needs
+investigating, or to hand-build an edge case the CLI didn't classify (also covers the IN/OUT
+`sum_if` translation patterns for consuming a cohort in a formula, which the CLI does not
+generate on its own).
+
+**Import order for query sets: model (with parameter) → cohort** — the set's formula
+references the parameter, which must exist on the model first; the payload order in
+Step 5.5 already reflects this (cohorts land alongside the full model file, never the
+formula-less phase-0 base).
+
+> **⚠ A freshly generated cohort's `worksheet:` block has NO `obj_id` yet — patch it in
+> after the model's first import, same as the existing obj_id read-back rule (Step 7 note
+> "A requested obj_id on a fresh model is NOT honored").** `build-model` GENERATE mode
+> (no `--existing-guid`) can't know the model's real `obj_id` before the model exists, so
+> the emitted cohort binds by `id`/`name` only. **Live-verified 2026-07-23** (`VALIDATE_ONLY`
+> against se-thoughtspot/APJ_TAB, `TableauSetControlUseCases.twbx`): importing the model +
+> cohort together in one `--dir` batch with no `obj_id` fails every cohort with `"Worksheet
+> not found for referencedObjectId , fqn , and name <Model>"` (error 14500) — confirms the
+> 1.5.3/1.13.0 obj_id-required finding still holds. **Fix:** import the model first, read
+> back its real `obj_id` (import response `objId` / `metadata search --guid` / export —
+> same lookup Step 10-pre already does for liveboard `tables[].obj_id`), rewrite the
+> cohort file's `worksheet.obj_id` to that value, then import the cohort(s). `ts tml lint`
+> does not catch this (it's a live-import-only failure, not a structural TML defect —
+> lint stays clean either way); only a real/`VALIDATE_ONLY` import surfaces it.
 
 > **⚠ MANDATORY — flag every set conversion for the user to review.** Set conversions are
-> *semantic reinterpretations*, not literal 1:1 translations. For **each** set, surface its
+> *semantic reinterpretations*, not literal 1:1 translations, even when the CLI performs
+> them automatically. For **each** entry in `cohorts_emitted`/`cohorts_deferred`, surface its
 > outcome and ask the user to confirm it matches intent, in **both** the Step 7 review
 > checkpoint and the Migration Summary (Step 10g) / Step 12 report — see the reference above
 > for the per-set review-line format and which reinterpretations especially need a human eye.
@@ -1756,6 +1796,13 @@ The Phase 1 payload is tables + sql_views + base model + cohorts, in that order 
 `--order tableau` sorts by TML type (table → sql_view → model → cohort → liveboard).
 GENERATE-mode output contains `*.phase0.model.tml` (base) and `*.model.tml` (full);
 blend-merged output contains bare `.model.tml` files. Both pass through unchanged.
+
+> **Cohorts from a fresh model still need the obj_id read-back (Phase 2a note above)** —
+> a single `--dir` batch import does **not** resolve a cohort's model reference against a
+> model in the *same* batch (live-verified: error 14500 "Worksheet not found", even with
+> the base model included). Import tables + sql_views + base model first (no cohorts in
+> that call), read back the model's real `obj_id`, patch every `*.cohort.tml`'s
+> `worksheet.obj_id`, then import the cohort(s) — before, or interleaved with, Phase 2.
 
 **Before importing, check for duplicates** — if Phase 1 has already been imported (e.g.
 from a retry or previous attempt), search for existing models by name before importing.
@@ -2874,6 +2921,7 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.38.0 | 2026-07-23 | **Codify Tableau Set → cohort detection and TML emission (BL-067) + audit classification (BL-088).** Prereq ts-cli v0.87.0. Set→cohort conversion (Phase 2a/2b/2c) is no longer agent-guided hand-assembly: `ts tableau parse` now extracts + classifies every top-level `<group>` Set (`ts_cli/tableau/twb.py::extract_sets` — static/`%null%`/`except`/intersect/Top-N/Bottom-N/all-except-Top-N/condition-based/mixed-computed/dynamic-Set-Control, matching the documented shape rules verbatim), and `ts tableau build-model` emits one `*.cohort.tml` per translatable Set automatically (`ts_cli/tableau/sets.py::build_cohort_tml`), reporting `cohorts_emitted`/`cohorts_deferred` in its result JSON and echoing the documented log line per set. Step 5b's Sets section rewritten to lead with the automated command (replacing the hand-assembly framing) with a new caveat: a freshly generated cohort's `worksheet:` block has no `obj_id` yet (GENERATE mode can't know it before the model is imported) — **live-verified** (`VALIDATE_ONLY`, se-thoughtspot/`APJ_TAB`, `TableauSetControlUseCases.twbx`) that importing model+cohort together in one batch with no `obj_id` fails every cohort with `"Worksheet not found"` (error 14500), confirming the pre-existing obj_id-read-back rule (1.5.3/1.13.0) still applies to the auto-generated cohort files — patch in the model's real `obj_id` after its first import, same as the existing liveboard-viz rule. **BL-088:** `ts tableau classify-formulas` (`classify_workbook`) now also surfaces a `sets[]`/`sets_tier_counts` breakdown per datasource (reusing the SAME `set_type` `extract_sets` computed — never re-derived), giving Step A4's "Tableau Sets" report table (Native/column set, Query set, Partial/deferred) a real source instead of an unpopulatable placeholder; Step A3/A4 updated to cite it. BL-131's `sets_detected` warning reworded from "not auto-converted" to point at the new automatic emission. Arbiter: `TableauSetControlUseCases.twbx` (10 native Sets) → 9 cohorts emitted (8 static + 1 except-of-member-list `GROUP_BASED`), 1 deferred (dynamic Set Control, no fixed members) — `ts tml lint --dir` clean; `classify-formulas` → `sets_tier_counts: {column_set: 9, query_set: 0, deferred: 1}`; non-Set workbook (Ads Commercial Dashboard) → 0 cohorts, output otherwise byte-identical (regression-checked). `references/coverage-matrix.md` #73-82 now cite the CLI implementation; new L28 documents the dynamic-Set-Control deferral. |
 | 1.37.0 | 2026-07-23 | **Extract-wrapper column ownership fix (col_table_map XREF/dropped columns).** Prereq ts-cli v0.86.0 — no skill-instruction changes, `build-model`'s own output is more correct. On a federated Custom-SQL + hyper-Extract workbook (Tableau writes each column's metadata twice — once under the live connection, once more mirrored under the extract's own connection), column ownership was resolving to the excluded Extract-wrapper relation's internal name instead of the live table, dangling `column_id` (`ts tml lint` XREF) and dropping the column from Table TML. Fixed by reusing the same wrapper-exclusion `_extract_tables` already applies, so the live relation always wins. Also fixed an adjacent bug this exposed — a file-backed relation's own name containing a literal `.` (e.g. a CSV extract's `some_table.csv1`) was truncated to its last dot-segment. Live-confirmed on `Demo WB 3 with SQL join.twbx`: 6 XREF findings → 0, `ts tml lint --dir` clean (was `false`), previously-dropped dim-table columns now emitted on a real table. The same map feeds formula scoping too: `TableauSetControlUseCases.twbx` and a plain single-table workbook each had a formula silently referencing a never-emitted `[Extract::col]` table (invisible to `ts tml lint`, which doesn't parse formula bodies) — now correctly scoped to the real table. No regression: Ads Commercial Dashboard output byte-identical. |
 | 1.36.0 | 2026-07-23 | **Quick closeout — nested-if warning, Custom-SQL param substitution, native-Set nudge (BL-060/093/131).** Prereq ts-cli v0.85.0 — no skill-instruction changes, three small `build-model`/`translate-formulas` output improvements. **BL-060:** a comparison operator binding directly before `if` (e.g. `sum(X) < if(Y) then Z else W` — valid Tableau, fails ThoughtSpot import without explicit parens) now surfaces as a `validate_pre_import()` warning, mirroring the shipped bare-else check. Live-confirmed on Ads Commercial Dashboard's `Dimensions: TrafficLight` formula. **BL-093:** a `<[Parameters].[Name]>` token embedded in Custom SQL (invalid warehouse SQL as-is) is now resolved before SQL View emission — a parsed parameter's default value is substituted in (with a `validation_warnings` note that the value is now static), an unresolved token gets a `NEEDS-REVIEW` warning instead of silently passing through. No `<[Parameters]` token survives into emitted SQL when a default exists. See `references/coverage-matrix.md` #131. **BL-131:** `build-model` now warns (stderr) and reports `sets_detected` in its result JSON when a workbook has native Tableau Sets (`<group>` — static/Top-N/condition-based) — a nudge that the Phase-2a/2b/2c set→cohort step (Step 5b) is still owed on an automated/Stage-1 run, since GENERATE mode doesn't perform that conversion itself. Excludes Tableau's internal `crossjoin` combined-field `<group>`s (auto-named `Action (...)`/`Tooltip (...)`, not user Sets) so the count stays accurate. Live-confirmed: `TableauSetControlUseCases.twbx` → `sets_detected: 10` + warning; a no-Set workbook → 0; Ads Commercial Dashboard (14 crossjoin groups, 0 real Sets) → 0, correctly not warned. |
 | 1.35.0 | 2026-07-23 | **Multi-table quality follow-ups — junk columns, column/formula drops on collision, db_table (BL follow-up: junk cols, Sub-Category XREF, Region drop).** Prereq ts-cli v0.84.0 — no skill-instruction changes, `build-model`'s own output is more correct. **Junk columns:** `__tableau_internal_object_id__` no longer leaks into Model TML on the multi-table path (was only filtered single-table) — Ads Commercial Dashboard: 26 → 0. **Column/formula drops on collision:** (1) a physical column referenced by one datasource but not another sharing the same table name (e.g. `TableauSetControlUseCases.twbx`'s three datasources all declaring a single-table `Orders`) is no longer dropped from Table TML when the last datasource processed is written — Table TML for a shared table name now accumulates the union of every datasource's referenced columns instead of the last write clobbering the rest (`ts tml lint --dir` on Set Control: 1 XREF finding → clean, no hand-editing). (2) a calc field whose caption collides with a physical column's internal name (Ads' `Region`) is still correctly auto-renamed to `"Formula Region"` at generation time, but `ts tableau verify` no longer misreports that as a silent drop (structural ERROR → 0); the rename is also now visible in `build-model`'s `name_renames` result field. **db_table:** Table TML `db_table` now prefers the parser's own extracted `db_table` field over re-slugging the table's display name — fixes a real wrong-output case for a Tableau-assigned alias of a table joined twice (Ads' `d_partner1` aliasing `d_partner`: was emitting `db_table: d_partner1`, a table that doesn't exist in the warehouse; now correctly `d_partner`). |
