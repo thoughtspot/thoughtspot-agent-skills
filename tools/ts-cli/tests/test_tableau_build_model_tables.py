@@ -376,3 +376,60 @@ def test_extract_wrapper_table_not_duplicated_end_to_end(tmp_path):
     lint_result = runner.invoke(app, ["tml", "lint", "--dir", str(out_dir)])
     payload = json.loads(lint_result.stdout)
     assert payload["clean"] is True, payload
+
+
+# ---------------------------------------------------------------------------
+# 7. Fix #B — two datasources sharing a physical table name must not overwrite
+#    each other's Table TML (BL follow-up: Set Control "Sub-Category" XREF).
+#    Reproduces (in miniature) TableauSetControlUseCases.twbx, whose three
+#    datasources (Set Control / Sets / Hex Map) all declare a single-table
+#    relation named "Orders" but each references a different subset of that
+#    table's columns. build-model iterates datasources independently and
+#    writes one `{slug}.table.tml` per table NAME — before this fix, the last
+#    datasource processed silently clobbered the file, dropping any column
+#    only an earlier datasource referenced (there: Sub-Category).
+# ---------------------------------------------------------------------------
+
+TWO_DS_SHARED_TABLE_TWB = """<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.a' caption='DS_A'>
+    <relation name='Orders' type='table' table='[db].[s].[Orders]'/>
+    <column name='[Sales]' datatype='real' role='measure' caption='Sales'/>
+    <column name='[Sub-Category]' datatype='string' role='dimension' caption='Sub-Category'/>
+  </datasource>
+  <datasource name='federated.b' caption='DS_B'>
+    <relation name='Orders' type='table' table='[db].[s].[Orders]'/>
+    <column name='[Sales]' datatype='real' role='measure' caption='Sales'/>
+    <column name='[Customer ID]' datatype='string' role='dimension' caption='Customer ID'/>
+  </datasource>
+</workbook>
+"""
+
+
+def test_shared_table_name_across_datasources_merges_columns_not_overwrites(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(TWO_DS_SHARED_TABLE_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    table_files = list(out_dir.glob("*.table.tml"))
+    assert len(table_files) == 1, [f.name for f in table_files]
+    doc = yaml.safe_load(table_files[0].read_text())
+    col_names = {c["name"] for c in doc["table"]["columns"]}
+    # union of both datasources' columns — DS_B's write must not drop DS_A's
+    # Sub-Category (or vice versa)
+    assert col_names == {"Sales", "Sub-Category", "Customer ID"}
+
+    # the real arbiter: DS_A's model references Orders::Sub-Category, which
+    # must resolve against the (merged) Table TML with no hand-editing.
+    lint_result = runner.invoke(app, ["tml", "lint", "--dir", str(out_dir)])
+    payload = json.loads(lint_result.stdout)
+    assert payload["clean"] is True, payload
+
