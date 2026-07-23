@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.82.0 db_column_name disambig-suffix fix + Extract-wrapper table dedup) -->
+<!-- currency: tableau — 2026-07 (v0.85.0 BL-093 Custom SQL parameter substitution/flag) -->
 
 # Coverage Matrix: Tableau Workbook → ThoughtSpot Model + Liveboard
 
@@ -15,6 +15,7 @@ Use this as the canonical limitations reference.
 |---|---|---|---|
 | 1 | Physical tables (`<relation type="table">`) | Table TML | |
 | 2 | Custom SQL relations (`<relation type="text">`) | SQL View TML | Full SQL preserved in `sql_query` |
+| 131 | `<[Parameters].[Name]>` token embedded in Custom SQL | Parameter default value substituted into `sql_query` + `validation_warnings` note (value now static) | Unresolvable token → `NEEDS-REVIEW` `validation_warnings` entry, left in place (never silently passed through). BL-093, ts-cli v0.85.0 |
 | 3 | Joins (`<relation type="join">` — inner/left/right/full) | Model `joins[]` | `full`→`OUTER`, `left`→`LEFT_OUTER`, etc. |
 | 4 | Data blending (`<datasource-relationships>`) | Merged single model with `LEFT_OUTER` joins | Same connection only — blended tables must exist in the same database connection |
 | 5 | Cross-datasource formula references (blend) | Resolved within merged model | Federated ID/caption prefix stripped, re-prefixed with `TABLE::` |
