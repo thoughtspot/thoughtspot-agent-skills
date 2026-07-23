@@ -5,8 +5,10 @@ from ts_cli.tableau.twb import (
     extract_blends,
     extract_table_calc_addressing,
     detect_orphan_calcs,
+    _extract_columns,
     _extract_sql_views,
     _extract_tables,
+    _build_column_table_map,
     _is_extract_wrapper,
 )
 
@@ -230,3 +232,73 @@ def test_extract_tables_keeps_self_join_alias():
     assert by_name["d_partner1"]["alias_of"] == "d_partner"
 
 
+# ---------------------------------------------------------------------------
+# Fix #2 — Tableau disambiguation suffix must not leak into db_column_name
+# ---------------------------------------------------------------------------
+
+COLLISION_COLUMNS_XML = """
+<datasource caption='Ads'>
+  <connection class='federated'>
+    <relation name='agg_booked_monthly' table='[db].[s].[agg_booked_monthly]' type='table'/>
+    <relation name='v_lineitem_budgetline' table='[db].[s].[v_lineitem_budgetline]' type='table'/>
+    <metadata-records>
+      <metadata-record class='column'>
+        <remote-name>LineItemId</remote-name>
+        <local-name>[LineItemId (agg_booked_monthly)]</local-name>
+        <parent-name>[agg_booked_monthly]</parent-name>
+        <local-type>integer</local-type>
+      </metadata-record>
+      <metadata-record class='column'>
+        <remote-name>LineItemId</remote-name>
+        <local-name>[LineItemId (v_lineitem_budgetline)]</local-name>
+        <parent-name>[v_lineitem_budgetline]</parent-name>
+        <local-type>integer</local-type>
+      </metadata-record>
+    </metadata-records>
+  </connection>
+  <column name='[LineItemId (agg_booked_monthly)]' caption='LineItemId (agg booked monthly)' datatype='integer' role='dimension'/>
+  <column name='[LineItemId (v_lineitem_budgetline)]' caption='LineItemId (v lineitem budgetline)' datatype='integer' role='dimension'/>
+</datasource>
+"""
+
+
+def test_extract_columns_strips_disambiguation_suffix_from_db_column_name():
+    ds = ET.fromstring(COLLISION_COLUMNS_XML)
+    tables = _extract_tables(ds)
+    columns = _extract_columns(ds, tables)
+    by_caption = {c["name"]: c for c in columns}
+
+    agg_col = by_caption["LineItemId (agg booked monthly)"]
+    budget_col = by_caption["LineItemId (v lineitem budgetline)"]
+
+    # db_column_name is the real physical column — no " (table_name)" suffix —
+    # even though the collision leaves it on the display `name` (Tableau's own
+    # disambiguation, harmless as a display string).
+    assert agg_col["db_column_name"] == "LineItemId"
+    assert budget_col["db_column_name"] == "LineItemId"
+
+    # stamped to its owning table (from the metadata-record's parent-name) so
+    # column_id can be TABLE::col-qualified — required once db_column_name is
+    # no longer unique on its own, else the two would collide into one
+    # column_id ("columns should have unique column_id values").
+    assert agg_col["table"] == "agg_booked_monthly"
+    assert budget_col["table"] == "v_lineitem_budgetline"
+
+
+def test_extract_columns_falls_back_to_internal_name_without_metadata_record():
+    ds = ET.fromstring(
+        "<datasource caption='Simple'>"
+        "<column name='[Sales]' caption='Sales' datatype='real' role='measure'/>"
+        "</datasource>"
+    )
+    columns = _extract_columns(ds, [])
+    assert columns[0]["db_column_name"] == "Sales"
+    assert "table" not in columns[0]
+
+
+def test_build_column_table_map_unaffected_by_shared_helper_refactor():
+    ds = ET.fromstring(COLLISION_COLUMNS_XML)
+    tables = _extract_tables(ds)
+    col_map = _build_column_table_map(ds, tables)
+    assert col_map["LineItemId (agg_booked_monthly)"] == "agg_booked_monthly"
+    assert col_map["LineItemId (v_lineitem_budgetline)"] == "v_lineitem_budgetline"

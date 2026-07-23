@@ -212,6 +212,94 @@ def test_multi_table_assigns_owned_columns_and_collects_unowned(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 5. Fix #2 — Tableau disambiguation suffix must not leak into db_column_name
+#    (BL follow-up: regression from the Ads Commercial Dashboard workbook)
+# ---------------------------------------------------------------------------
+
+COLLISION_TWB = """<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.a' caption='Ads'>
+    <connection class='federated'>
+      <relation name='agg_booked_monthly' type='table' table='[db].[s].[agg_booked_monthly]'/>
+      <relation name='v_lineitem_budgetline' type='table' table='[db].[s].[v_lineitem_budgetline]'/>
+      <metadata-records>
+        <metadata-record class='column'>
+          <remote-name>LineItemId</remote-name>
+          <local-name>[LineItemId (agg_booked_monthly)]</local-name>
+          <parent-name>[agg_booked_monthly]</parent-name>
+          <local-type>integer</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>Amount</remote-name>
+          <local-name>[Amount]</local-name>
+          <parent-name>[agg_booked_monthly]</parent-name>
+          <local-type>real</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>LineItemId</remote-name>
+          <local-name>[LineItemId (v_lineitem_budgetline)]</local-name>
+          <parent-name>[v_lineitem_budgetline]</parent-name>
+          <local-type>integer</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>Budget</remote-name>
+          <local-name>[Budget]</local-name>
+          <parent-name>[v_lineitem_budgetline]</parent-name>
+          <local-type>real</local-type>
+        </metadata-record>
+      </metadata-records>
+      <object-graph>
+        <relationships>
+          <relationship>
+            <expression op='='>
+              <expression op='[LineItemId (agg_booked_monthly)]'/>
+              <expression op='[LineItemId (v_lineitem_budgetline)]'/>
+            </expression>
+          </relationship>
+        </relationships>
+      </object-graph>
+    </connection>
+    <column name='[LineItemId (agg_booked_monthly)]' caption='LineItemId (agg booked monthly)' datatype='integer' role='dimension'/>
+    <column name='[Amount]' caption='Amount' datatype='real' role='measure'/>
+    <column name='[LineItemId (v_lineitem_budgetline)]' caption='LineItemId (v lineitem budgetline)' datatype='integer' role='dimension'/>
+    <column name='[Budget]' caption='Budget' datatype='real' role='measure'/>
+  </datasource>
+</workbook>
+"""
+
+
+def test_column_collision_strips_disambiguation_suffix_end_to_end(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(COLLISION_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    by_name = {
+        yaml.safe_load(f.read_text())["table"]["name"]: yaml.safe_load(f.read_text())["table"]
+        for f in out_dir.glob("*.table.tml")
+    }
+    assert set(by_name) == {"agg_booked_monthly", "v_lineitem_budgetline"}
+
+    for name in ("agg_booked_monthly", "v_lineitem_budgetline"):
+        line_item = next(c for c in by_name[name]["columns"] if c["db_column_name"] == "LineItemId")
+        # the physical column is clean — no Tableau disambiguation suffix
+        assert " (" not in line_item["db_column_name"]
+
+    # the join XREF check is the arbiter: the join's `on:` clause references
+    # plain `LineItemId`, which must now resolve against the Table TML.
+    lint_result = runner.invoke(app, ["tml", "lint", "--dir", str(out_dir)])
+    payload = json.loads(lint_result.stdout)
+    assert payload["clean"] is True, payload
+
+
+# ---------------------------------------------------------------------------
 # 6. Fix #4 — hyper Extract wrapper must not be emitted as a duplicate table
 # ---------------------------------------------------------------------------
 

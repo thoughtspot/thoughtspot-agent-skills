@@ -459,8 +459,57 @@ def _extract_sql_views(ds: ET.Element) -> list[dict]:
     return views
 
 
+def _metadata_column_records(ds: ET.Element) -> dict[str, dict[str, str]]:
+    """Index ``<metadata-record class='column'>`` entries by ``local-name``.
+
+    Each entry carries the column's real warehouse identity: ``remote_name``
+    (the physical column name — see agents/cli/ts-convert-from-tableau
+    references/step-3-parse-fields.md "remote-name ... use for db_column_name")
+    and ``table`` (owning table, from ``parent-name``). Shared by
+    ``_extract_columns`` and ``_build_column_table_map`` so both derive
+    physical identity from the same source of truth.
+
+    When a column's display caption collides across tables in one datasource,
+    Tableau disambiguates by baking `` (table_name)`` into BOTH the internal
+    ``<column name=...>`` and the caption (e.g. ``LineItemId (agg_booked_monthly)``)
+    — but ``remote-name`` stays the clean physical name (``LineItemId``) in
+    every case, colliding or not, which is exactly why it — not the internal
+    name — belongs in ``db_column_name``.
+    """
+    idx: dict[str, dict[str, str]] = {}
+    for rec in ds.findall(".//metadata-record[@class='column']"):
+        local_name = (rec.findtext("local-name") or "").strip("[]")
+        if not local_name:
+            continue
+        entry = idx.setdefault(local_name, {})
+        remote_name = (rec.findtext("remote-name") or "").strip()
+        if remote_name:
+            entry["remote_name"] = remote_name
+        parent = (rec.findtext("parent-name") or "").strip("[]")
+        if parent:
+            entry["table"] = parent.split(".")[-1]
+    return idx
+
+
 def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
-    """Extract physical column definitions from a datasource."""
+    """Extract physical column definitions from a datasource.
+
+    ``db_column_name`` comes from the matching metadata-record's ``remote-name``
+    — the real warehouse column — never from the internal Tableau ``<column
+    name=...>`` identifier, which Tableau disambiguates with a `` (table_name)``
+    suffix on any caption collision (see ``_metadata_column_records``). Using
+    that suffixed internal name as db_column_name would bind the Table TML to
+    a column that does not exist in the warehouse ("column not found" at
+    import) and break join cross-references between the colliding tables.
+
+    ``table`` is likewise stamped from the metadata-record's owning table when
+    available, so multi-table ``column_id`` values are ``TABLE::col``-qualified
+    from the source of truth rather than left for (fragile, caption-based)
+    downstream ownership guessing — and so the many-columns-same-clean-name
+    case (the collision above) doesn't collide into duplicate bare
+    ``column_id`` values once the disambiguation suffix is gone.
+    """
+    meta = _metadata_column_records(ds)
     columns = []
     for col in ds.findall("./column"):
         if col.find("calculation") is not None:
@@ -477,12 +526,16 @@ def _extract_columns(ds: ET.Element, tables: list[dict]) -> list[dict]:
         column_type = "MEASURE" if role == "measure" else "ATTRIBUTE"
         ts_type = _tableau_type_to_ts(datatype)
 
-        columns.append({
+        rec = meta.get(name, {})
+        entry: dict[str, Any] = {
             "name": caption,
-            "db_column_name": name,
+            "db_column_name": rec.get("remote_name") or name,
             "column_type": column_type,
             "data_type": ts_type,
-        })
+        }
+        if rec.get("table"):
+            entry["table"] = rec["table"]
+        columns.append(entry)
     return columns
 
 
@@ -631,12 +684,9 @@ def _build_column_table_map(ds: ET.Element, tables: list[dict]) -> dict[str, str
     """
     col_map: dict[str, str] = {}
 
-    for col in ds.findall(".//metadata-record[@class='column']"):
-        local_name = (col.findtext("local-name") or "").strip("[]")
-        parent = (col.findtext("parent-name") or "").strip("[]")
-        if local_name and parent:
-            table = parent.split(".")[-1]
-            col_map[local_name] = table
+    for local_name, rec in _metadata_column_records(ds).items():
+        if rec.get("table"):
+            col_map[local_name] = rec["table"]
 
     for col in ds.findall("./column"):
         name = col.get("name", "").strip("[]")
