@@ -299,6 +299,33 @@ def test_column_collision_strips_disambiguation_suffix_end_to_end(tmp_path):
     assert payload["clean"] is True, payload
 
 
+def test_single_table_model_column_id_is_table_qualified_not_bare(tmp_path):
+    # Fix #3 (BL follow-up): live-verified (se-thoughtspot, 2026-07-23) that a
+    # bare column_id fails import on a single-table model, while TABLE::col
+    # validates. This pins today's GENERATE flow already produces the
+    # qualified form for the common (one physical table) case — a regression
+    # here would only be caught otherwise by a live import.
+    twb = tmp_path / "wb.twb"
+    twb.write_text(LINT_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    model_files = [f for f in out_dir.glob("*.model.tml") if "phase0" not in f.name]
+    assert len(model_files) == 1
+    doc = yaml.safe_load(model_files[0].read_text())
+    column_ids = [c["column_id"] for c in doc["model"]["columns"] if c.get("column_id")]
+    assert column_ids, "expected physical column_id entries"
+    assert all("::" in cid for cid in column_ids), column_ids
+    assert all(cid.startswith("Orders::") for cid in column_ids), column_ids
+
+
 # ---------------------------------------------------------------------------
 # 6. Fix #4 — hyper Extract wrapper must not be emitted as a duplicate table
 # ---------------------------------------------------------------------------

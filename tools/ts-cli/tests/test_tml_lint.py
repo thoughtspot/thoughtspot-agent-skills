@@ -112,6 +112,56 @@ def test_i8_unique_column_ids_pass():
     assert not any(f.startswith("I8:") for f in lint_tml(data))
 
 
+def test_i12_bare_column_id_on_single_table_model_is_flagged():
+    # Live-verified (se-thoughtspot, 2026-07-23): a bare column_id ("REGION") on a
+    # single-table model fails import ("These column_id/formula_id values are
+    # incorrect"); the TABLE::col-qualified form validates. ts tml lint must catch
+    # this locally since --policy VALIDATE_ONLY's own error only surfaces at import.
+    data = _clean_model()
+    data["model"]["columns"] = [
+        {"name": "Region", "column_id": "REGION", "properties": {"column_type": "ATTRIBUTE"}},
+    ]
+    findings = lint_tml(data)
+    assert any(f.startswith("I12:") and "REGION" in f for f in findings)
+
+
+def test_i12_qualified_column_id_on_single_table_model_passes():
+    data = _clean_model()
+    data["model"]["columns"] = [
+        {"name": "Region", "column_id": "ORDERS::REGION", "properties": {"column_type": "ATTRIBUTE"}},
+    ]
+    assert not any(f.startswith("I12:") for f in lint_tml(data))
+
+
+def test_i12_does_not_flag_multi_table_models():
+    # Multi-table ownership resolution is a separate, harder problem (see
+    # BL follow-up #2/#4) — scoping I12 to single-table avoids false positives on
+    # pre-existing, out-of-scope junk columns in real multi-table conversions.
+    data = _clean_model()
+    data["model"]["model_tables"].append({"name": "CUSTOMERS"})
+    data["model"]["columns"] = [
+        {"name": "Region", "column_id": "REGION", "properties": {"column_type": "ATTRIBUTE"}},
+    ]
+    assert not any(f.startswith("I12:") for f in lint_tml(data))
+
+
+def test_i12_does_not_flag_missing_column_id():
+    # A column with neither column_id nor formula_id is out of scope for this
+    # check (it's a different, pre-existing test-fixture shorthand elsewhere in
+    # this suite) — I12 only fires when column_id is present but unqualified.
+    data = _clean_model()
+    assert not any(f.startswith("I12:") for f in lint_tml(data))
+
+
+def test_i12_does_not_flag_formula_columns():
+    data = _clean_model()
+    data["model"]["columns"] = [
+        {"name": "Revenue", "formula_id": "formula_Revenue", "properties": {"column_type": "MEASURE"}},
+    ]
+    data["model"]["formulas"] = [{"id": "formula_Revenue", "name": "Revenue", "expr": "sum([ORDERS::AMOUNT])"}]
+    assert not any(f.startswith("I12:") for f in lint_tml(data))
+
+
 def test_multiple_violations_accumulate():
     data = _clean_model()
     data["model"]["guid"] = "x"

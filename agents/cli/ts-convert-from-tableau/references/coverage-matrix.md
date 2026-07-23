@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.81.0 REGEXP/FINDNTH mapped + REPLACE pass-through + LOD no-space fix) -->
+<!-- currency: tableau — 2026-07 (v0.82.0 db_column_name disambig-suffix fix + Extract-wrapper table dedup) -->
 
 # Coverage Matrix: Tableau Workbook → ThoughtSpot Model + Liveboard
 
@@ -19,10 +19,10 @@ Use this as the canonical limitations reference.
 | 4 | Data blending (`<datasource-relationships>`) | Merged single model with `LEFT_OUTER` joins | Same connection only — blended tables must exist in the same database connection |
 | 5 | Cross-datasource formula references (blend) | Resolved within merged model | Federated ID/caption prefix stripped, re-prefixed with `TABLE::` |
 | 6 | Column data types (string, integer, real, boolean, date, datetime) | VARCHAR, INT64, DOUBLE, BOOL, DATE, DATETIME | |
-| 7 | `db_column_name` from `remote-name` metadata | Physical column name in table TML | |
+| 7 | `db_column_name` from `remote-name` metadata | Physical column name in table TML | v0.82.0: fixed a real leak — a caption-collision column's internal Tableau name (e.g. `LineItemId (agg_booked_monthly)`) was landing in `db_column_name` verbatim instead of the clean `remote-name`; broke join XREFs on multi-table models |
 | 8 | Connection binding by name | `connection.name` on every table/sql_view TML | Never GUID (invariant I6) |
 | 9 | Published datasource (`sqlproxy` connection) | Resolved to `dbname` from connection | |
-| 10 | Extract datasources | Resolved to underlying live source | Skipped if no source resolves |
+| 10 | Extract datasources | Resolved to underlying live source | Skipped if no source resolves. v0.82.0: the hyper `Extract` cache wrapper relation (schema-scoped `[Extract]`) is now excluded from table extraction entirely — was emitting a spurious duplicate Table TML per table alongside the live source |
 | 11 | `.twbx` archive extraction | Unzip to access inner `.twb` | |
 | 12 | Topological sort of calculated fields | Formulas emitted in dependency order | Level 0 first; `ts tableau translate-formulas` resolves cross-references via DAG + inlining |
 
