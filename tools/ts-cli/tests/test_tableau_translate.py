@@ -711,6 +711,35 @@ class TestMapFunctions:
         expr = "ZN(1"
         assert map_functions(expr) == expr
 
+    # -----------------------------------------------------------------------
+    # Fix 2 — REGEXP_*/FINDNTH pass-through mappings (tableau-formula-
+    # translation.md lines ~992-995, used verbatim).
+    # -----------------------------------------------------------------------
+
+    def test_regexp_extract(self):
+        assert map_functions("REGEXP_EXTRACT([x], 'p')") == \
+            'sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , [x] , \'p\' )'
+
+    def test_regexp_match(self):
+        assert map_functions("REGEXP_MATCH([x], 'p')") == \
+            'sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , [x] , \'p\' )'
+
+    def test_regexp_replace(self):
+        assert map_functions("REGEXP_REPLACE([x], 'p', 'r')") == \
+            'sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , [x] , \'p\' , \'r\' )'
+
+    def test_findnth(self):
+        assert map_functions("FINDNTH([x], 'sub', 2)") == \
+            'sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , [x] , \'sub\' , 2 )'
+
+    def test_regexp_extract_wrong_arg_count_left_untranslated(self):
+        expr = "REGEXP_EXTRACT([x])"
+        assert map_functions(expr) == expr
+
+    def test_findnth_wrong_arg_count_left_untranslated(self):
+        expr = "FINDNTH([x], 'sub')"
+        assert map_functions(expr) == expr
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
@@ -1363,6 +1392,27 @@ class TestValidateOutput:
     def test_not_in_flagged(self):
         errors = validate_output("if ( [A] NOT IN ('x') ) then 1 else 0")
         assert any("NOT IN" in e for e in errors)
+
+    def test_regexp_and_findnth_no_longer_flagged(self):
+        # Fix 2: these are now wired to sql_*_op pass-throughs in
+        # map_functions(), so the raw Tableau call should never survive to
+        # validate_output in a real pipeline run — but the fail-loud
+        # unmapped-function check itself must no longer flag them either,
+        # now that they're removed from _UNMAPPED_FUNCTIONS.
+        for fn, args in (
+            ("REGEXP_MATCH", "[x] , 'p'"),
+            ("REGEXP_EXTRACT", "[x] , 'p'"),
+            ("REGEXP_REPLACE", "[x] , 'p' , 'r'"),
+            ("FINDNTH", "[x] , 'sub' , 2"),
+        ):
+            errors = validate_output(f"{fn} ( {args} )")
+            assert not any(fn in e for e in errors), f"{fn} should no longer be flagged as unmapped"
+
+    def test_regexp_extract_nth_still_flagged(self):
+        # REGEXP_EXTRACT_NTH has no documented pass-through template and is
+        # NOT wired — it must remain rejected at translate time.
+        errors = validate_output("REGEXP_EXTRACT_NTH ( [x] , 'p' , 2 )")
+        assert any("REGEXP_EXTRACT_NTH" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

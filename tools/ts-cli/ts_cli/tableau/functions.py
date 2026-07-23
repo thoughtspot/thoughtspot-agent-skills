@@ -166,6 +166,23 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("RADIANS", lambda a: f"( {a[0]} * 3.14159265358979 / 180 )" if len(a) == 1 else None),
     ("DEGREES", lambda a: f"( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
     ("DATEPARSE", lambda a: f"to_date ( {a[1]} , {a[0]} )" if len(a) == 2 else None),
+
+    # Pass-through rescues (tableau-formula-translation.md "Functions with no
+    # native ThoughtSpot equivalent — pass-through", lines ~989-995) — no
+    # native ThoughtSpot function exists for regex/nth-occurrence matching, so
+    # these translate to the documented sql_*_op templates verbatim.
+    ("REGEXP_EXTRACT", lambda a: (
+        f'sql_string_op ( "REGEXP_SUBSTR({{0}}, {{1}})" , {a[0]} , {a[1]} )'
+        if len(a) == 2 else None)),
+    ("REGEXP_MATCH", lambda a: (
+        f'sql_bool_op ( "REGEXP_LIKE ({{0}}, {{1}})" , {a[0]} , {a[1]} )'
+        if len(a) == 2 else None)),
+    ("REGEXP_REPLACE", lambda a: (
+        f'sql_string_op ( "REGEXP_REPLACE({{0}},{{1}},{{2}})" , {a[0]} , {a[1]} , {a[2]} )'
+        if len(a) == 3 else None)),
+    ("FINDNTH", lambda a: (
+        f'sql_int_op ( "REGEXP_INSTR({{0}},{{1}},1,{{2}})" , {a[0]} , {a[1]} , {a[2]} )'
+        if len(a) == 3 else None)),
 ]
 
 

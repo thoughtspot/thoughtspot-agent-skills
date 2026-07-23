@@ -27,8 +27,12 @@ _FORBIDDEN_PATTERNS = [
 # Formulas containing them are skipped with a reason instead of failing at
 # TML import, where the retry loop silently drops them.
 _UNMAPPED_FUNCTIONS = [
-    "SPLIT", "FINDNTH", "PROPER", "ASCII", "CHAR",
-    "REGEXP_MATCH", "REGEXP_EXTRACT", "REGEXP_EXTRACT_NTH", "REGEXP_REPLACE",
+    "SPLIT", "PROPER", "ASCII", "CHAR",
+    # REGEXP_EXTRACT_NTH has no documented pass-through template (unlike its
+    # siblings REGEXP_MATCH/REGEXP_EXTRACT/REGEXP_REPLACE/FINDNTH, wired in
+    # functions.py::_ARG_HANDLERS as of ts-cli v0.81.0 — see
+    # tableau-formula-translation.md lines ~989-996) — still rejected here.
+    "REGEXP_EXTRACT_NTH",
     "MAKEDATE", "MAKETIME", "MAKEDATETIME", "ISDATE",
     "USERNAME", "FULLNAME", "ISUSERNAME", "ISFULLNAME", "USERDOMAIN",
     "ACOS", "ASIN", "ATAN", "COT",  # inverse trig + COT — translations tracked in BL-072 (needs live degree/radian check)
