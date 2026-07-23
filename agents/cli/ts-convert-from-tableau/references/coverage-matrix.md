@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.85.0 BL-093 Custom SQL parameter substitution/flag) -->
+<!-- currency: tableau — 2026-07 (v0.87.0 BL-067/BL-088 Set→cohort codification + audit classification) -->
 
 # Coverage Matrix: Tableau Workbook → ThoughtSpot Model + Liveboard
 
@@ -118,17 +118,17 @@ Use this as the canonical limitations reference.
 
 | # | Tableau Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
-| 73 | Static sets (`<group>` with union/member) | `GROUP_BASED` column set (`cohort_type: SIMPLE`) | |
-| 74 | Static sets with `%null%` member | `{Null}` grouping value in column set | |
-| 75 | `except` member-list sets | `operator: NE` conditions with `combine_type: ALL` | |
-| 76 | Sets anchored on formula columns | Column set with `anchor_column_id` = formula display name | |
-| 77 | Top-N / Bottom-N sets (literal count) | Query set (`ADVANCED/COLUMN_BASED`) with `top N`/`bottom N` keyword | |
-| 78 | Top-N / Bottom-N sets (parameter-driven count) | Query set with rank formula + parameter-filter formula | |
-| 79 | All-except-Top-N (`except` with `end` child) | Query set with inverted rank filter (`[rank] > N`) | |
-| 80 | Condition-based sets (`function='filter'`) | Query set with boolean condition formula | |
-| 81 | Member-list intersect | `GROUP_BASED` column set of computed common members | |
-| 82 | Mixed computed set operations (intersect/except of mixed types) | Multi-formula query set combining filters in `search_query` | |
-| 83 | Set IN/OUT consumption (`IF [Set] THEN x END`) | `sum_if ( [Set] = 'in' , x )` / group by cohort | |
+| 73 | Static sets (`<group>` with union/member) | `GROUP_BASED` column set (`cohort_type: SIMPLE`) | CLI-implemented (BL-067, ts-cli v0.87.0): `ts tableau build-model` classifies + emits `*.cohort.tml` automatically — `ts_cli/tableau/twb.py::extract_sets` (detection/classification) + `ts_cli/tableau/sets.py::build_cohort_tml` (emission). Previously agent-guided hand-assembly |
+| 74 | Static sets with `%null%` member | `{Null}` grouping value in column set | CLI-implemented (BL-067, v0.87.0) — see #73 |
+| 75 | `except` member-list sets | `operator: NE` conditions with `combine_type: ALL` | CLI-implemented (BL-067, v0.87.0) — see #73 |
+| 76 | Sets anchored on formula columns | Column set with `anchor_column_id` = formula display name | CLI-implemented (BL-067, v0.87.0) — `extract_sets` resolves `[Calculation_NNN]` to its caption via the datasource's own `<column>` attributes, never the raw internal id |
+| 77 | Top-N / Bottom-N sets (literal count) | Query set (`ADVANCED/COLUMN_BASED`) with `top N`/`bottom N` keyword | CLI-implemented (BL-067, v0.87.0) — see #73 |
+| 78 | Top-N / Bottom-N sets (parameter-driven count) | Query set with rank formula + parameter-filter formula | CLI-implemented (BL-067, v0.87.0) — see #73 |
+| 79 | All-except-Top-N (`except` with `end` child) | Query set with inverted rank filter (`[rank] > N`) | CLI-implemented (BL-067, v0.87.0) — see #73 |
+| 80 | Condition-based sets (`function='filter'`) | Query set with boolean condition formula | CLI-implemented (BL-067, v0.87.0) — see #73 |
+| 81 | Member-list intersect | `GROUP_BASED` column set of computed common members | CLI-implemented (BL-067, v0.87.0) — see #73; an empty intersection is detected and omitted (deferred), not emitted as an empty cohort |
+| 82 | Mixed computed set operations (intersect/except of mixed types) | Multi-formula query set combining filters in `search_query` | CLI-implemented (BL-067, v0.87.0), one level deep — a side that is itself a nested set-op is flagged for manual review rather than recursively decomposed, per the docs' own "flag deeply nested cases prominently" guidance |
+| 83 | Set IN/OUT consumption (`IF [Set] THEN x END`) | `sum_if ( [Set] = 'in' , x )` / group by cohort | Still agent-guided (formula authoring against an already-emitted cohort) — not part of BL-067's set→cohort emission scope |
 
 ### Parameters
 
@@ -228,6 +228,7 @@ through untranslated.
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
 | L8 | Set actions (`<action>` on a set) | No interactive set membership changes in TS | Omit + log. See L26 for the other `<action>` types (filter/URL/parameter) |
+| L28 | Dynamic Set Control (`<group>` whose groupfilter tree is `level-members` only — no fixed members, e.g. `ui-enumeration="all"`) | No cohort emitted — ThoughtSpot does interactive filtering natively, so the Set + its `IF [Set] THEN measure ELSE NULL` scaffolding calcs are Tableau's way of faking a filter | Migrate the anchor (a formula column, when the control is anchored on a calc); drop the `IF [Set]` scaffolding calcs; the interactive *filter* on that column (Step 10) is the migrated equivalent. `build-model` (BL-067, v0.87.0) detects this shape and reports it in `cohorts_deferred` with the anchor + reason, never emits a cohort for it |
 | L9 | SQL pass-through functions the CLI emits (RANK partitioned, DENSE_RANK, SIZE, UPPER, LOWER, `REGEXP_EXTRACT`, `REGEXP_MATCH`, `REGEXP_REPLACE`, `FINDNTH`, `REPLACE`) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review. `PROPER`/`ASCII`/`CHAR`/`REGEXP_EXTRACT_NTH` are a distinct case — the CLI does not emit a pass-through for them at all; see "Rejected at Translate Time" above |
 | L10 | Geospatial formulas — full 13-function set (`MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`, `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`, `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE`) | No spatial data types, constructors, or set operations. All 13 rejected at translate time as of ts-cli v0.28.1 (previously only the classic 5 were enumerated and none were enforced — the other 8 passed through untranslated) | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
 | L11 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |

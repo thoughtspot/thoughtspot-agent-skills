@@ -108,10 +108,8 @@ are roughly ordered by value÷effort.
 | BL-022 | Unjoined table suggestion pattern (cross-converter) | — |
 | BL-043 | Evaluate two-phase import for other converters | — |
 | BL-059 | ts-audit: set (cohort) usage analysis checks | — |
-| BL-067 | Codify Tableau set/cohort detection and TML generation | 2026-10-31 |
 | BL-068 | Codify Tableau dashboard-to-liveboard conversion | 2026-12-31 |
 | BL-072 | Tableau hierarchies and value aliases (+ inverse-trig) | 2026-12-31 |
-| BL-088 | Audit mode: classify Tableau Sets | 2026-09-30 |
 | BL-092 | Drop extract table for SQL View | — |
 | BL-101 | Chart-axis-role in `ts metadata report` | — |
 | BL-102 | Databricks MV `parameters:` parse + emit | — |
@@ -2031,22 +2029,48 @@ Build `ts model promote-formula` in ts-cli:
 
 **Source:** codification sweep 2026-06-29 (angle #11b), priority #5.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `tools/ts-cli/`.
-**Status:** OPEN.
+**Status:** DONE (ts-cli v0.87.0, `feat/tableau-set-codify`) — the detection rules and target
+TML shapes were already fully documented (`references/step-5-tml-generation.md` "Tableau Sets
+→ ThoughtSpot column sets (Phase 2a/2b/2c)", `agents/shared/schemas/thoughtspot-sets-tml.md`);
+this shipped the CLI implementation, not new design.
 
-### Problem
+### What shipped
 
-ts-convert-from-tableau Step 5b (set/cohort detection + TML generation, ~400 lines of prompt)
-is fully mechanical. Every set type (fixed, dynamic, combined) has a fully specified mapping
-to ThoughtSpot filter/parameter TML. The LLM re-derives this mapping on each invocation.
+- `ts_cli/tableau/twb.py::extract_sets()` — extracts every top-level `<group>` Set from a
+  datasource and classifies it (`static`/`except_members`/`intersect_members`/`topn`/
+  `except_topn`/`condition`/`mixed`/`set_control`/`unclassified`), capturing the fields each
+  emission rule needs (member lists, anchor column + datatype, Top-N count/order, condition
+  expression). Wired into `ts tableau parse`'s per-datasource output as `sets[]`.
+- New `ts_cli/tableau/sets.py::build_cohort_tml()` (pure, mirrors `tables.py`/`liveboard.py`'s
+  style) — per-type builders producing the exact documented `*.cohort.tml` shape for each
+  set type, including the `%null%`→`{Null}` grouping value, `except`→`NE` conditions, the
+  Top-N static (`top N` keyword) vs. dynamic (rank + parameter-filter formula) forms, the
+  inverted-rank all-except-Top-N form, and a (one-level-deep) multi-formula mixed
+  intersect/except composer. Untranslatable forms (dynamic Set Controls, unclassifiable
+  shapes) return `None` + the documented log line, never mis-converted.
+- Wired into `ts tableau build-model`: emits one `*.cohort.tml` per translatable Set
+  alongside the model files, reporting `cohorts_emitted`/`cohorts_deferred`/`cohort_files`
+  in the result JSON and echoing the documented per-set log line to stderr.
+- BL-131's `sets_detected` warning reworded to point at the new automatic emission instead
+  of telling the agent to hand-convert.
 
-### Approach
+### Arbiter
 
-Extend `model_builder.py` with `extract_sets()` and `build_cohort_tml()`:
-- `extract_sets()`: identify Tableau sets in the parsed workbook, classify by type
-- `build_cohort_tml()`: emit the corresponding ThoughtSpot filter/parameter TML
-- Wire into `ts tableau build-model` or as a standalone `ts tableau build-sets` command
+`TableauSetControlUseCases.twbx` (10 native Sets, the arbiter fixture) → 9 cohorts emitted
+(8 static + 1 except-of-member-list, all `GROUP_BASED`), 1 deferred (dynamic Set Control, no
+fixed members) — `ts tml lint --dir` clean. Non-Set workbook (Ads Commercial Dashboard) → 0
+cohorts, output otherwise byte-identical to pre-change (regression-checked). Live
+`VALIDATE_ONLY` (se-thoughtspot/APJ_TAB) confirmed a freshly generated cohort's `worksheet:`
+binding (no `obj_id` yet — the model doesn't exist until its own first import) fails with
+"Worksheet not found" (14500) in a same-batch import, consistent with the pre-existing
+obj_id-read-back rule (BL-067 doesn't change this — it's documented in
+`ts-convert-from-tableau` SKILL.md Step 5b/6 as an existing post-import patch step).
 
-**Target:** 2026-10-31.
+**Deferred within scope:** deeply-nested set operations (a side of a mixed intersect/except
+that is itself another set-op) are flagged for manual review rather than recursively
+decomposed — matches the docs' own "flag deeply nested cases prominently" framing, not a
+mandatory-recurse rule. Set *actions* (`<action>` elements — a different XML construct from
+`<group>` Sets) are unaffected; no workbook in the test corpus exercises one.
 
 ---
 
@@ -2641,7 +2665,9 @@ Column classification is duplicated between the two skills with DIFFERENT keywor
 
 **Source:** 2026-07-04 live audit of `CPG+Merch Promotion Performance.twbx`.
 **Affects:** ts-convert-from-tableau (Audit mode, Steps A2–A4), `tools/ts-cli/` (`ts tableau parse` / `classify-formulas`).
-**Status:** OPEN.
+**Status:** DONE (ts-cli v0.87.0, `feat/tableau-set-codify`) — shipped alongside BL-067
+(same "two paths, one detector" reuse this item asked for: no set-detection logic was
+duplicated).
 
 The audit-mode coverage report (Step A4) has a **Tableau Sets** section, and migrate mode
 (Step 5b) has extensive set→cohort translation (static/Top-N/condition/computed sets). But
@@ -2652,13 +2678,23 @@ the CLI, and the coverage % reflects only calc fields. This is the audit analogu
 audit/migrate divergence BL-fixed for formulas (#181) — the audit under-reports scope for
 set-heavy workbooks.
 
-**Approach:** extend `ts tableau parse` to extract top-level `<group>` sets (caption,
-groupfilter tree, anchor, static-vs-Top-N-vs-condition-vs-computed classification per the
-Step 5b taxonomy), and surface a `sets` block + per-set tier in `classify-formulas` output so
-Step A4 can report a real Sets breakdown. Reuse the migrate-mode set-detection logic rather
-than duplicating it (same "two paths, one detector" principle as the formula classifier).
+### What shipped
 
-**Target:** 2026-09-30.
+- `ts tableau parse` now extracts `sets[]` per datasource (BL-067's `extract_sets()` — the
+  SAME classification migrate mode's `build_cohort_tml()` consumes).
+- `ts_cli/tableau/sets.py::classify_sets()` labels each parsed Set with the audit tier
+  Step A4's "Tableau Sets" table needs: `column_set` (static + member-intersect →
+  `GROUP_BASED`), `query_set` (Top-N/condition/all-except-Top-N/mixed → `ADVANCED`), or
+  `deferred` (dynamic Set Control, or an intersect that computes zero common members —
+  structurally can't emit a cohort either).
+- `classify_workbook()` (`ts tableau classify-formulas`) now returns `sets[]` +
+  `sets_tier_counts` per datasource, plus a summed top-level `sets_tier_counts` — the exact
+  numbers `references/audit-mode-report.md`'s "Tableau Sets" table needs, sourced from JSON
+  like every other tier count (never hand-tallied). SKILL.md Step A3/A4 updated to cite it.
+
+**Arbiter:** `TableauSetControlUseCases.twbx` → `sets_tier_counts: {column_set: 9,
+query_set: 0, deferred: 1}` (matches the BL-067 arbiter's emitted/deferred split exactly,
+since it's the same classification).
 
 ## BL-089 — Tableau multi-table build-model: generate-mode support + PR-prep cleanup
 

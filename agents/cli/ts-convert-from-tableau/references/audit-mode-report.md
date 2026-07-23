@@ -69,7 +69,10 @@ Audit: {workbook_name}
   unresolvable cross-references. A formula classified "Native" may still not
   migrate if it depends on an orphan or circular chain.
 
-  Tableau Sets (top-level <group> elements — separate from calculated fields):
+  Tableau Sets (top-level <group> elements — separate from calculated fields).
+  Source: classification.json's per-datasource `sets_tier_counts`
+  (`column_set`/`query_set`/`deferred` — BL-088; same `set_type` `build-model`'s
+  own Phase-2a/2b/2c cohort emission uses, never hand-tallied):
   ┌──────────────────────────────────────────────────────┐
   │ Set tier                Count    Notes               │
   ├──────────────────────────────────────────────────────┤
