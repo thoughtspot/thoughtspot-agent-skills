@@ -936,6 +936,16 @@ def _generate_flow(
 
     sql_views = ds.get("sql_views", [])
 
+    # BL-093: resolve <[Parameters].[Name]> tokens Tableau lets a Custom SQL
+    # body embed — substitute the parsed parameter's default (SQL is then
+    # valid, value is now static) or flag NEEDS-REVIEW when unresolved.
+    # Mutates sql_views' sql_query in place before it's consumed below.
+    from ts_cli.tableau.params import substitute_sql_view_parameters
+    sql_view_param_warnings = substitute_sql_view_parameters(sql_views, parsed["parameters"])
+    for vi in sql_view_param_warnings:
+        for w in vi["warnings"]:
+            typer.echo(f"  ! SQL View {vi['name']}: {w}", err=True)
+
     model_tml = build_model_tml(
         model_name=name,
         connection_name=connection_name,
@@ -972,8 +982,9 @@ def _generate_flow(
         "name_renames": rename_map,
         "sql_views": len(sql_views),
     }
-    if validation_issues:
-        result["validation_warnings"] = validation_issues
+    all_validation_warnings = list(validation_issues) + sql_view_param_warnings
+    if all_validation_warnings:
+        result["validation_warnings"] = all_validation_warnings
     if _junk_dropped:
         result["junk_formulas_dropped"] = _junk_dropped
     if result_reconcile_dropped is not None:

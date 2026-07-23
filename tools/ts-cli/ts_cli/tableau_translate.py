@@ -115,6 +115,7 @@ from ts_cli.tableau.params import (  # noqa: F401
     sanitise_parameter_name,
     sanitise_parameter_refs,
     strip_parameter_prefix,
+    substitute_sql_view_parameters,
 )
 from ts_cli.tableau.naming import (  # noqa: F401 — re-exported for back-compat
     apply_name_clash_renames,
