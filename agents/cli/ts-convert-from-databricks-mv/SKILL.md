@@ -951,6 +951,7 @@ ThoughtSpot and Databricks profiles. Do not re-authenticate between views.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.9.0 | 2026-07-23 | Role-playing (aliased) dimension support (ts-cli v0.91.0): an MV that joins one physical table under multiple aliases (role-play) now converts to distinct ThoughtSpot role-play tables — `resolve_parts` gives each reused-physical alias path its own node identity, and `build_model_tables` emits `alias:` + alias-referencing joins instead of collapsing to ambiguous duplicate tables. Single-use tables/renames unchanged. Verified via TS→MV→TS round-trip on SUPPORT_CASE (ACCOUNT×2, SUPPORT_PRODUCT__C×2). |
 | 1.8.5 | 2026-07-23 | Data Type Mapping fix: `timestamp`/`timestamp_ntz` → ThoughtSpot `DATE_TIME` (was invalid `DATETIME` — a live `VALIDATE_ONLY` import confirmed ThoughtSpot rejects `DATETIME`). Fixed in `ts-from-databricks-rules.md` (§Data Type Mapping) and `mv_tml.py`'s `map_dbx_type`/`ts_type_to_dbx` together (BL-X4). |
 | 1.8.4 | 2026-07-22 | Import error table + post-import verification extracted to shared `ts-tml-import-gate.md` §4/§5 (BL-063 phase 1c) |
 | 1.8.3 | 2026-07-15 | JSON path access: ThoughtSpot's formula parser rejects Databricks colon-path syntax (`col:field.subfield`) in `sql_*_op` pass-throughs. Emit `get_json_object({0}, '$.field.subfield')` — bracket notation on `parse_json` FAILS on Databricks (`VARIANT` is not a complex type). Live-verified on Databricks 2026-07-15. |

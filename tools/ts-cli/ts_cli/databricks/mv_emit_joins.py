@@ -103,7 +103,27 @@ def build_joins(model: dict, tables: list[dict], source_table: str) -> tuple[lis
     `source`), each possibly carrying a nested `joins:` list of its own children.
     """
     tbl_by_name = {t["table"]["name"]: t["table"] for t in tables}
-    mt_by_name = {mt["name"]: mt for mt in model.get("model_tables", [])}
+
+    # Index model_tables by node identity (alias for a role-play, else id/name) so a
+    # join `with: <alias>` resolves, and track each node's physical table for the
+    # table-definition/column lookups (which are keyed by physical name). A reused
+    # physical table (role-play) has several node ids sharing one physical name.
+    # A join's `with:` may reference the target by its alias (role-play models) or by
+    # its physical name (single-alias renames), so index by both — the alias key wins,
+    # the physical name is a setdefault fallback (ambiguous across role-plays, but only
+    # consulted when `with` names the physical table, which a role-play never does).
+    def _node_id(mt: dict) -> str:
+        return mt.get("alias") or mt.get("id") or mt.get("name", "")
+
+    mt_by_id: dict[str, dict] = {}
+    phys_by_id: dict[str, str] = {}
+    for mt in model.get("model_tables", []):
+        nid = _node_id(mt)
+        phys = mt.get("name", nid)
+        mt_by_id[nid] = mt
+        phys_by_id[nid] = phys
+        mt_by_id.setdefault(phys, mt)
+        phys_by_id.setdefault(phys, phys)
 
     dot_path_by_table: dict[str, str] = {source_table: "source"}
     alias_by_table: dict[str, str] = {source_table: "source"}
@@ -114,18 +134,19 @@ def build_joins(model: dict, tables: list[dict], source_table: str) -> tuple[lis
     seen = {source_table}
     while queue:
         current = queue.popleft()
-        mt = mt_by_name.get(current, {})
+        mt = mt_by_id.get(current, {})
         for join in mt.get("joins", []):
             target = join.get("with")
             if not target or target in seen:
                 continue
             seen.add(target)
 
-            target_table = tbl_by_name.get(target)
+            phys = phys_by_id.get(target, target)
+            target_table = tbl_by_name.get(phys)
             if target_table is None:
                 raise UntranslatableError(f"no table definition found for joined table {target}")
 
-            target_mt = mt_by_name.get(target, {})
+            target_mt = mt_by_id.get(target, {})
             alias = target_mt.get("alias") or to_snake(target)
             alias_by_table[target] = alias
             parent_path = dot_path_by_table[current]
@@ -136,8 +157,19 @@ def build_joins(model: dict, tables: list[dict], source_table: str) -> tuple[lis
                 if "referencing_join" not in join:
                     raise UntranslatableError(
                         f"join with {target!r} has neither 'on' nor 'referencing_join'")
-                on_str = _resolve_referencing_join(join, current, target, tbl_by_name)
-            on_sql = _translate_join_on(on_str, source_table, alias_by_table)
+                on_str = _resolve_referencing_join(
+                    join, phys_by_id.get(current, current), target, tbl_by_name)
+            # The TS model on-clause references PHYSICAL table names; scope them to the
+            # local MV path keyed by physical name. The FROM side (`current`) maps to
+            # its own bare alias/`source`; the target's physical maps to THIS join's
+            # alias — so a role-play's on-clause (which names the shared physical table)
+            # resolves to this instance, not a sibling role-play's.
+            on_scope = {
+                source_table: "source",
+                phys_by_id.get(current, current): alias_by_table.get(current, "source"),
+                phys: alias,
+            }
+            on_sql = _translate_join_on(on_str, source_table, on_scope)
 
             join_node = {
                 "name": alias,

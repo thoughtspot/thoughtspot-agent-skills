@@ -1271,3 +1271,53 @@ class TestCascadeSkipDanglingRefs:
 
         measure_names = {m["name"] for m in result["yaml_doc"]["measures"]}
         assert measure_names == {"quantity"}
+
+
+# ---------------------------------------------------------------------------
+# Role-playing (aliased) dimensions — TO Databricks (build_metric_view)
+# ---------------------------------------------------------------------------
+
+_RP_MODEL = {"model": {"name": "RP", "model_tables": [
+    {"name": "CASE", "joins": [
+        {"name": "j1", "with": "ACCOUNT",
+         "on": "[CASE::ACCT_ID] = [ACCOUNT::ID]", "cardinality": "MANY_TO_ONE"},
+        {"name": "j2", "with": "BILL_TO",
+         "on": "[CASE::BILL_ID] = [ACCOUNT::ID]", "cardinality": "MANY_TO_ONE"}]},
+    {"name": "ACCOUNT"},
+    {"name": "ACCOUNT", "alias": "BILL_TO"},
+], "columns": [
+    {"name": "Amount", "column_id": "CASE::AMOUNT",
+     "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+    {"name": "Acct Name", "column_id": "ACCOUNT::NAME",
+     "properties": {"column_type": "ATTRIBUTE"}},
+    {"name": "Bill To Name", "column_id": "BILL_TO::NAME",
+     "properties": {"column_type": "ATTRIBUTE"}},
+], "formulas": []}}
+
+_RP_TABLES = [
+    {"table": {"name": "CASE", "db": "c", "schema": "s", "db_table": "case", "columns": [
+        {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+        {"name": "ACCT_ID", "db_column_properties": {"data_type": "STRING"}},
+        {"name": "BILL_ID", "db_column_properties": {"data_type": "STRING"}}]}},
+    {"table": {"name": "ACCOUNT", "db": "c", "schema": "s", "db_table": "account", "columns": [
+        {"name": "ID", "db_column_properties": {"data_type": "STRING"}},
+        {"name": "NAME", "db_column_properties": {"data_type": "STRING"}}]}},
+]
+
+
+class TestRolePlayEmit:
+    def test_column_index_mirrors_alias(self):
+        idx = build_column_index(_RP_MODEL["model"], _RP_TABLES)
+        # alias-keyed cid resolves to the same physical column
+        assert "BILL_TO::NAME" in idx
+        assert "ACCOUNT::NAME" in idx
+
+    def test_build_mv_emits_distinct_role_play_joins_and_dims(self):
+        doc = build_metric_view(_RP_MODEL["model"], _RP_TABLES, "CASE",
+                                catalog="c", schema="s")["yaml_doc"]
+        withs = {j["name"] for j in doc["joins"]}
+        assert "account" in withs and "BILL_TO" in withs   # two distinct nodes
+        exprs = {d["expr"] for d in doc["dimensions"]}
+        # both role-play dims survive, each on its own alias path
+        assert "account.NAME" in exprs
+        assert "BILL_TO.NAME" in exprs

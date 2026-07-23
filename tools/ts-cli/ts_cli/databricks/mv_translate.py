@@ -29,23 +29,40 @@ from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 from ts_cli.databricks.mv_window_translate import translate_window_measure
 
 
+def reused_physicals(tables: dict) -> set:
+    """Physical TS tables mapped by more than one alias path (role-plays).
+
+    ``tables`` is the flattened alias-path -> physical-name map. A physical table
+    reached via multiple alias paths is a role-play; each such alias path becomes
+    its own ThoughtSpot model node (identified by the alias path) so the instances
+    don't collapse onto one shared physical name."""
+    from collections import Counter
+    counts = Counter(tables.values())
+    return {name for name, n in counts.items() if n > 1}
+
+
 def resolve_parts(tables: dict, path: str) -> tuple[str, str]:
-    """Resolve a dot-path column ref to (ts_table_name, column_name).
+    """Resolve a dot-path column ref to (node_identity, column_name).
 
     Bare columns resolve through the 'source' alias; `a.b.COL` resolves the
-    alias path 'a.b'. Raises UntranslatableError for an unmapped alias."""
+    alias path 'a.b'. The returned node identity is the **alias path** when the
+    physical table is reused (role-play) so a reused table's columns stay
+    distinct per role; otherwise it is the physical table name (unchanged for
+    single-use tables and single-use renames). Raises UntranslatableError for an
+    unmapped alias."""
     segs = split_dot_path(path.strip())
     if any("." in s for s in segs):
         raise UntranslatableError(
             f"dot inside a backtick-quoted identifier in {path!r}")
     column = segs[-1]
     alias_path = ".".join(segs[:-1]) or "source"
-    table = tables.get(alias_path)
-    if table is None:
+    physical = tables.get(alias_path)
+    if physical is None:
         raise UntranslatableError(
             f"no ThoughtSpot table mapped for alias '{alias_path}' "
             f"(add it to --tables)")
-    return table, column
+    node = alias_path if physical in reused_physicals(tables) else physical
+    return node, column
 
 
 def make_resolver(tables: dict) -> Callable[[str], str]:
