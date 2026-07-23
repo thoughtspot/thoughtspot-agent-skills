@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**127 total items** across 16 skills — **62 open**, 56 verified, 9 deferred
+**128 total items** across 16 skills — **62 open**, 57 verified, 9 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -20,7 +20,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
-| ts-convert-from-tableau | 16 | **2** | 11 | 3 |
+| ts-convert-from-tableau | 17 | **2** | 12 | 3 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |

@@ -45,7 +45,9 @@ def _build_function_map() -> list[tuple[re.Pattern, Any]]:
         (r"\bCONTAINS\s*\(", "contains ( "),
         (r"\bLEN\s*\(", "strlen ( "),
         (r"\bTRIM\s*\(", "trim ( "),
-        (r"\bREPLACE\s*\(", "replace ( "),
+        # REPLACE is handled specially — see _ARG_HANDLERS. `replace(...)` is
+        # NOT a real ThoughtSpot formula function (live-confirmed invalid);
+        # it must go through the sql_string_op pass-through form instead.
 
         # LEFT/RIGHT/MID are handled specially
         (r"\bLEFT\s*\(", "_LEFT_HANDLER"),
@@ -182,6 +184,13 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
         if len(a) == 3 else None)),
     ("FINDNTH", lambda a: (
         f'sql_int_op ( "REGEXP_INSTR({{0}},{{1}},1,{{2}})" , {a[0]} , {a[1]} , {a[2]} )'
+        if len(a) == 3 else None)),
+    # REPLACE: bare `replace(...)` is not a real ThoughtSpot formula function
+    # (live-confirmed invalid) — re-mapped to the sql_string_op pass-through
+    # form. No documented template existed for REPLACE prior to this fix; this
+    # is the form added to tableau-formula-translation.md alongside this change.
+    ("REPLACE", lambda a: (
+        f'sql_string_op ( "REPLACE({{0}}, {{1}}, {{2}})" , {a[0]} , {a[1]} , {a[2]} )'
         if len(a) == 3 else None)),
 ]
 

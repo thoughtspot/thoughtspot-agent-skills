@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.75.0 table-calc honesty — WINDOW_*/LOOKUP/INDEX/FIRST/LAST/PREVIOUS_VALUE rejected at translate time) -->
+<!-- currency: tableau — 2026-07 (v0.81.0 REGEXP/FINDNTH mapped + REPLACE pass-through + LOD no-space fix) -->
 
 # Coverage Matrix: Tableau Workbook → ThoughtSpot Model + Liveboard
 
@@ -35,10 +35,15 @@ Use this as the canonical limitations reference.
 | 15 | `IIF(test, a, b)` | `if ( test ) then a else b` | |
 | 16 | `IFNULL(a, b)`, `ZN(a)` | `ifnull ( a , b )` | |
 | 17 | `ISNULL(a)` | `isnull ( a )` | |
-| 18 | `CONTAINS`, `TRIM`, `REPLACE`, `FIND` | `contains`, `trim`, `replace`, `strpos` | |
+| 18 | `CONTAINS`, `TRIM`, `FIND` | `contains`, `trim`, `strpos` | |
 | 19 | `LEFT/MID/RIGHT/LEN` | `substr()` / `strlen()` | CLI-translated (v0.26.0); index adjustment (Tableau is 1-based) |
 | 20 | `UPPER/LOWER` | `sql_string_op("UPPER/LOWER({0})")` | CLI-translated (v0.26.0) |
 | 21 | `STARTSWITH/ENDSWITH` | `strpos(s,sub) = 1` / `substr` idiom | CLI-translated (v0.26.0) |
+| 126 | `REGEXP_EXTRACT(s, pat)` | `sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , s , pat )` | No native regex — scalar pass-through (PT1), CLI-translated (v0.81.0). Was rejected at translate time before v0.81.0 (former U4) |
+| 127 | `REGEXP_MATCH(s, pat)` | `sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , s , pat )` | No native regex; returns boolean — scalar pass-through (PT1), CLI-translated (v0.81.0). Was rejected at translate time before v0.81.0 (former U4) |
+| 128 | `REGEXP_REPLACE(s, pat, r)` | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , s , pat , r )` | No native regex — scalar pass-through (PT1), CLI-translated (v0.81.0). Was rejected at translate time before v0.81.0 (former U4) |
+| 129 | `FINDNTH(s, sub, n)` | `sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , s , sub , n )` | No native nth-occurrence — scalar pass-through (PT1), CLI-translated (v0.81.0). Was rejected at translate time before v0.81.0 (former U2) |
+| 130 | `REPLACE(s, old, new)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed) — re-mapped to this scalar pass-through (PT1) in v0.81.0. Previously (incorrectly) documented as native `replace(...)` (former #18) |
 | 24 | `DATEDIFF` (all units) | `diff_days`/`diff_months`/`diff_years`/`diff_time` | Args reversed vs Tableau. `day/month/year/hour/minute/week` supported; any other unit (e.g. `quarter`) rejected with reason at translate time (v0.26.0) |
 | 25 | `DATETRUNC` | `start_of_month/quarter/week/year`; `day` → `date()` | `hour`/`minute`/`second` (and any other unit not in the map) rejected with reason at translate time (v0.26.0) |
 | 26 | `DATEADD` | `add_days/add_months/add_years` | Only `day/month/year` supported; other units (e.g. `week`) rejected with reason at translate time (v0.26.0) |
@@ -74,9 +79,9 @@ Use this as the canonical limitations reference.
 
 | # | Tableau Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
-| 50 | `{FIXED [dim] : AGG([col])}` | `group_aggregate ( agg ( [t::col] ) , { dim } , {} )` | |
-| 51 | `{INCLUDE [dim] : AGG([col])}` | `group_aggregate ( ... , query_groups() + { dim } , query_filters() )` | |
-| 52 | `{EXCLUDE [dim] : AGG([col])}` | `group_aggregate ( ... , query_groups() - { dim } , query_filters() )` | |
+| 50 | `{FIXED [dim] : AGG([col])}` | `group_aggregate ( agg ( [t::col] ) , { dim } , {} )` | Grand-total `{FIXED : agg}` / `{FIXED: agg}` (no dim, with or without a space before the colon) also parses correctly — a v0.81.0 fix corrected a whitespace bug where the no-space-before-colon form silently emitted invalid `{ FIXED }` TML |
+| 51 | `{INCLUDE [dim] : AGG([col])}` | `group_aggregate ( ... , query_groups() + { dim } , query_filters() )` | Same no-space-before-colon fix applies (v0.81.0) |
+| 52 | `{EXCLUDE [dim] : AGG([col])}` | `group_aggregate ( ... , query_groups() - { dim } , query_filters() )` | Same no-space-before-colon fix applies (v0.81.0) |
 | 53 | `TOTAL(SUM([col]))` / percent-of-total | `group_aggregate ( ... , {} , query_filters() )` | |
 | 54 | `max([date])` in formula filters | `group_aggregate ( max ( [date] ) , {} , {} )` | Global max date, dynamic |
 | 110 | `{FIXED [d], [boolFlag] : AGG}` where `[boolFlag]` is pinned `=true` on the Filters shelf | `group_aggregate ( agg ( [t::col] ) , { [d] } , { [boolFlag] = true } )` | Boolean predicate inside FIXED is a **filter, not a grain** — move to the filter arg; hard `{...}`, not `query_filters()`. Check the filter shelf before treating a FIXED dim as a grouping key. See formula-translation LOD section. |
@@ -195,9 +200,8 @@ through untranslated.
 | # | Tableau Function(s) | Notes |
 |---|---|---|
 | U1 | `SPLIT(s, delim, n)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
-| U2 | `FINDNTH(s, sub, n)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U3 | `PROPER(s)` / `ASCII(s)` / `CHAR(n)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
-| U4 | `REGEXP_MATCH(s, pat)` / `REGEXP_EXTRACT(s, pat)` / `REGEXP_EXTRACT_NTH(s, pat, n)` / `REGEXP_REPLACE(s, pat, r)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
+| U4 | `REGEXP_EXTRACT_NTH(s, pat, n)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required. Its siblings `REGEXP_MATCH`/`REGEXP_EXTRACT`/`REGEXP_REPLACE` (and `FINDNTH`, formerly U2) were rejected here too before ts-cli v0.81.0 — now mapped to `sql_*_op` pass-throughs, see #126-129 in Mapped Constructs above |
 | U5 | `MAKEDATE(y, m, d)` / `MAKETIME(h, m, s)` / `MAKEDATETIME(date, time)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U6 | `ISDATE(s)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U7 | `USERNAME()` / `FULLNAME()` / `ISUSERNAME(s)` / `ISFULLNAME(s)` / `USERDOMAIN()` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
@@ -223,7 +227,7 @@ through untranslated.
 | # | Tableau Construct | Limitation | Workaround |
 |---|---|---|---|
 | L8 | Set actions (`<action>` on a set) | No interactive set membership changes in TS | Omit + log. See L26 for the other `<action>` types (filter/URL/parameter) |
-| L9 | SQL pass-through functions the CLI emits (RANK partitioned, DENSE_RANK, SIZE, UPPER, LOWER) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review. `PROPER`/`ASCII`/`CHAR`/`REGEXP_*`/`FINDNTH` are a distinct case — the CLI does not emit a pass-through for them at all; see "Rejected at Translate Time" above |
+| L9 | SQL pass-through functions the CLI emits (RANK partitioned, DENSE_RANK, SIZE, UPPER, LOWER, `REGEXP_EXTRACT`, `REGEXP_MATCH`, `REGEXP_REPLACE`, `FINDNTH`, `REPLACE`) | Enabled by default — admin would only need to check if explicitly turned off in Admin > Search & SpotIQ | Flagged with PT1 marker for review. `PROPER`/`ASCII`/`CHAR`/`REGEXP_EXTRACT_NTH` are a distinct case — the CLI does not emit a pass-through for them at all; see "Rejected at Translate Time" above |
 | L10 | Geospatial formulas — full 13-function set (`MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`, `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`, `DIFFERENCE`, `INTERSECTION`, `SYMDIFFERENCE`, `VALIDATE`) | No spatial data types, constructors, or set operations. All 13 rejected at translate time as of ts-cli v0.28.1 (previously only the classic 5 were enumerated and none were enforced — the other 8 passed through untranslated) | Decompose `MAKEPOINT` lat/lon to individual ATTRIBUTE columns; omit spatial formula + log |
 | L11 | Non-warehouse sources (`google-sheets`, `ogrdirect`, `webdata-direct`, `CustomMapbox`) | No ThoughtSpot connection possible | Skip datasource; data must be loaded into a warehouse first |
 | L24 | Tableau hierarchies (`<drill-paths>` in TWB XML) | No TML construct exists to encode a curated drill order (e.g. Region → State → City). Near-universal in production workbooks | Omit + log in the migration report's Limitations section. ThoughtSpot's own ad-hoc drill-down still works without a declared hierarchy, but the authored order/structure from `<drill-paths>` is not preserved. See BL-072 |
@@ -260,7 +264,10 @@ ThoughtSpot. This is only a limitation if an admin has explicitly turned it off 
 Admin > Search & SpotIQ. All pass-through formulas are flagged with `PT1` in the audit
 report for visibility. Native alternatives are used wherever possible — SQL pass-through
 is the last resort (see the translation priority order in `tableau-formula-translation.md`).
-`PROPER`/`ASCII`/`CHAR`/`REGEXP_*`/`FINDNTH` are documented in `tableau-formula-translation.md`
+`REGEXP_EXTRACT`/`REGEXP_MATCH`/`REGEXP_REPLACE`/`FINDNTH`/`REPLACE` are CLI-implemented
+pass-throughs as of ts-cli v0.81.0 (#126-130 above; `REPLACE` was previously mapped to an
+invalid bare `replace(...)` native call — live-confirmed not a real ThoughtSpot function).
+`PROPER`/`ASCII`/`CHAR`/`REGEXP_EXTRACT_NTH` are documented in `tableau-formula-translation.md`
 as pass-through candidates but the CLI does not implement them (v0.26.0) — it rejects the
 formula with a reason instead of emitting the pass-through, so a manual `sql_string_op`/
 `sql_bool_op`/`sql_int_op` formula (per that reference) is required.

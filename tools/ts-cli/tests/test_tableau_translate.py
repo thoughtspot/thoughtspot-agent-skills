@@ -713,7 +713,8 @@ class TestMapFunctions:
 
     # -----------------------------------------------------------------------
     # Fix 2 — REGEXP_*/FINDNTH pass-through mappings (tableau-formula-
-    # translation.md lines ~992-995, used verbatim).
+    # translation.md lines ~992-995, used verbatim) + Fix 3 — REPLACE
+    # re-mapped off the invalid bare `replace(...)` native call.
     # -----------------------------------------------------------------------
 
     def test_regexp_extract(self):
@@ -731,6 +732,12 @@ class TestMapFunctions:
     def test_findnth(self):
         assert map_functions("FINDNTH([x], 'sub', 2)") == \
             'sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , [x] , \'sub\' , 2 )'
+
+    def test_replace_passthrough(self):
+        # Fix 3: bare `replace(...)` is not a valid ThoughtSpot formula function
+        # (live-confirmed). Must re-map to the sql_string_op pass-through form.
+        assert map_functions("REPLACE([x], 'a', 'b')") == \
+            'sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , \'a\' , \'b\' )'
 
     def test_regexp_extract_wrong_arg_count_left_untranslated(self):
         expr = "REGEXP_EXTRACT([x])"
