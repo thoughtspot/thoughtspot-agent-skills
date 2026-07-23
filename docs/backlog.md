@@ -66,7 +66,6 @@ are roughly ordered by value÷effort.
 | BL-127 | Roll out context-budget rule to all conversion skills | next converter edit |
 | BL-129 | One-pass CLI guidance + batch ops across converters | next converter edit |
 | BL-130 | Canonical data-type audit across converters (DATE_TIME) | 2026-09-30 |
-| BL-131 | Tableau native Sets → ThoughtSpot cohorts | 2026-09-30 |
 | BL-095 | connections add-tables missing authenticationType | 2026-08-31 |
 | BL-085 | Tableau build-model: TWB parse codification (Part 2) | 2026-08-31 |
 | BL-120 | Live e2e verification for ts-convert-from-qlik | first live pass |
@@ -99,6 +98,7 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | BL-034 | tools/ & ts-cli quality polish | 2026-10-31 |
 | BL-128 | Skill-size audit: extract detail from heavy converter skills | opportunistic |
+| BL-131 | Tableau Sets: warn when automated run skips Phase-2 set step | opportunistic |
 | BL-036 | Databricks-native connection creation | 2026-10-31 |
 | BL-066 | Codify formula promotion as `ts model promote-formula` | 2026-10-31 |
 | BL-080 | `ts metadata permissions` + answer-promote pre-flight | 2026-09-30 |
@@ -3574,19 +3574,26 @@ per converter asserting each source type → a schema-valid TS type. Consider a 
 
 ---
 
-## BL-131 — Tableau native Sets → ThoughtSpot cohorts `Tier 2`
+## BL-131 — Tableau Sets: warn when an automated/Stage-1 run skips the Phase-2 set→cohort step `Tier 3`
 
-**Filed:** 2026-07-23.
-**Source:** 2026-07-23 benchmark (Set Control workbook).
-**Affects:** `ts-convert-from-tableau` `build-model` / SKILL.md Step 5b.
-**Status:** OPEN.
+**Filed:** 2026-07-23. **Corrected:** 2026-07-23 (original framing was wrong — see below).
+**Source:** 2026-07-23 benchmark (Set Control workbook), Stage-1 non-interactive run.
+**Affects:** `ts-convert-from-tableau` SKILL.md (Step 3/5b) — surfacing only.
+**Status:** OPEN (small; NOT a missing-capability item).
 
-Workbooks built around native Tableau **Sets** (`<group>`/`<groupfilter>` elements — in/out membership) are
-not converted: `build-model` emits no `cohort.tml` for them, and the challenger's parser doesn't extract the
-Set-membership fields at all (silent "column not found" risk at import). Set-referencing *formulas* translate
-as ordinary formulas, but the Sets themselves need mapping to ThoughtSpot cohorts / column sets (currently
-hand-assembly). Both converters share this gap.
+**Correction:** Tableau Sets → ThoughtSpot cohorts **is already supported** (shipped under BL-009) — static
+sets → `GROUP_BASED` column-set cohort (incl. `%null%`, `except` member-lists, formula-anchored); Top-N/Bottom-N
+→ query sets; condition-based/intersect/all-except-Top-N → query sets; one `*.cohort.tml` per set. See
+coverage-matrix rows 73–79 and SKILL.md "Tableau Sets → ThoughtSpot column sets (Phase 2a/2b/2c)". The only
+deferred forms are dynamic *set controls* with no fixed members (→ Liveboard filter) and *set actions* (no TS
+equivalent) — already documented. The benchmark's "Sets not converted" observation was a **scope artifact**:
+Set→cohort is an agent-guided Phase-2a/2b/2c hand-assembly flow, NOT part of `build-model`'s GENERATE pass, so a
+non-interactive Stage-1 (Tables+Models-only) run legitimately skips it.
 
-**Approach:** extract `<group>` Set definitions in parse; emit ThoughtSpot cohort/column-set constructs (or a
-GROUP_BASED formula) per Set; document the mapping in the coverage matrix. Non-trivial — scope a design first.
-**Target:** 2026-09-30.
+**Real (small) residual:** in an automated / Stage-1 / non-interactive run, a workbook's `<group>` Set elements
+are skipped **silently** — no warning that the Phase-2 set step is still owed. Nudge only:
+1. `ts tableau parse` already surfaces enough to detect `<group>` Sets — have `build-model` (or the skill's
+   Step 3 summary) **emit a WARNING** listing detected Sets and pointing to the Phase-2a/2b/2c step, so they're
+   not silently dropped in a pipeline run.
+2. Optionally add the Set count to the migration report's coverage summary.
+**Target:** opportunistic. (Distinct from BL-024 row-offset table-calcs.)
