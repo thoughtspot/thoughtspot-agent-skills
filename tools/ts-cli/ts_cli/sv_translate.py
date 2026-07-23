@@ -420,15 +420,30 @@ def _entry(
 
 # --- per-block translators ---------------------------------------------------
 
+_BARE_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+
+
 def _translate_dimension(
     dim: dict, parsed: dict, alias_map: dict[str, str],
 ) -> dict[str, Any]:
-    """Translate one dimension entry."""
+    """Translate one dimension entry.
+
+    A dimension is emitted as a direct **column** (column_id) — not a formula —
+    both when it has no expression and when its expression is a bare physical
+    column reference (a simple rename such as ``CASE_ID as ID``). Renames are
+    columns in ThoughtSpot, and a table needs at least one real column selected
+    or it imports with a cross-join warning. Only genuine expressions
+    (``STATUS IN (...)``, functions) become formulas."""
     table = alias_map.get(dim["alias_table"].lower(), dim["source_table"])
-    if dim["expr"] is None:
+    expr = dim["expr"]
+    if expr is None:
         return _entry(
             dim["source_column"], "dimension", "column", "ATTRIBUTE", dim,
             table=table, column=dim["alias_name"])
+    if _BARE_COLUMN_RE.match(expr.strip()):
+        return _entry(
+            dim["source_column"], "dimension", "column", "ATTRIBUTE", dim,
+            table=table, column=expr.strip())
     resolver = make_resolver(parsed, dim["alias_table"])
     ts_expr = translate_sql_expr(dim["expr"], resolver)
     return _entry(

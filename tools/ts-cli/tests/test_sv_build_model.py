@@ -388,7 +388,8 @@ class TestRolePlayingAliases:
         # each role-play join targets the alias, never the bare physical name twice
         assert withs == {"ACCOUNT", "ON_BEHALF_ACCOUNT", "OWNER", "RESOLVED_BY"}
         obo = next(j for j in fact["joins"] if j["with"] == "ON_BEHALF_ACCOUNT")
-        assert obo["on"] == "[CASE::ON_BEHALF_OF] = [ON_BEHALF_ACCOUNT::ID]"
+        # `with` carries the alias; the `on` clause uses physical names on both sides
+        assert obo["on"] == "[CASE::ON_BEHALF_OF] = [ACCOUNT::ID]"
 
 
 # ---------------------------------------------------------------------------

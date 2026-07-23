@@ -130,14 +130,17 @@ def _detect_fact_tables(relationships: list[dict]) -> set[str]:
     return all_tables - to_tables
 
 
-def _build_join_on(rel: dict, node_of: dict[str, str]) -> str:
+def _build_join_on(rel: dict, flat: dict[str, str]) -> str:
     """Build the `on` expression for one relationship.
 
-    ``node_of`` maps each SV alias to its model node id, so a role-playing
-    endpoint resolves to its alias node (``[ON_BEHALF_ACCOUNT::ID]``) rather
-    than the shared physical table name."""
-    from_ts = node_of[rel["from_table"]]
-    to_ts = node_of[rel["to_table"]]
+    The join `on` clause describes the *physical* key equality, so both table
+    tokens are the physical ThoughtSpot table name (``flat``), even for a
+    role-playing endpoint — e.g. ``[DM_ORDER::REQUIRED_DATE] = [DM_DATE_DIM::DATE]``.
+    Role-play disambiguation is carried by the join's ``with:`` (the alias), not by
+    the `on` clause. (Column references, by contrast, use the alias prefix — see
+    build_node_id_map.)"""
+    from_ts = flat[rel["from_table"]]
+    to_ts = flat[rel["to_table"]]
     style = rel.get("join_style", "equi")
 
     if style == "range":
@@ -175,8 +178,8 @@ def _collect_joins(
                 f"relationship to_table '{to_alias}' not in tables map")
         join_entry = {
             "name": rel["name"],
-            "with": node_of[to_alias],
-            "on": _build_join_on(rel, node_of),
+            "with": node_of[to_alias],          # alias for a role-play, else the name
+            "on": _build_join_on(rel, flat),     # physical names on both sides
             "type": "LEFT_OUTER",
             "cardinality": "MANY_TO_ONE",
         }
