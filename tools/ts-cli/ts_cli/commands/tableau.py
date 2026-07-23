@@ -791,7 +791,14 @@ def _write_table_tml_files(
                 if key not in merged:
                     merged[key] = c
             t_cols = list(merged.values())
-        table_dict = {"name": t["name"], "columns": t_cols}
+        # Fix #C: forward the parser's own db_table (a dotted db.schema.table
+        # path — see twb.py._extract_tables) so build_table_tml can prefer it
+        # over re-slugging `name`. Matters when the table is a Tableau-
+        # assigned ALIAS for a physical table joined twice (`alias_of`,
+        # e.g. Ads Commercial Dashboard's `d_partner1` aliasing `d_partner`)
+        # — re-deriving from `name` there would slug the alias, a table name
+        # that does not exist in the warehouse.
+        table_dict = {"name": t["name"], "columns": t_cols, "db_table": t.get("db_table")}
         cmap = {c["name"]: c.get("db_column_name", c["name"]) for c in t_cols}
         obj, _dropped = build_table_tml(
             table_dict, connection_name, database, schema,

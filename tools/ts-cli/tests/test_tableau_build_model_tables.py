@@ -433,3 +433,26 @@ def test_shared_table_name_across_datasources_merges_columns_not_overwrites(tmp_
     payload = json.loads(lint_result.stdout)
     assert payload["clean"] is True, payload
 
+
+# ---------------------------------------------------------------------------
+# 8. Fix #C — db_table wiring: `_write_table_tml_files` must forward the
+#    parser's own `db_table` field (see tables.py::_parsed_db_table) through
+#    to build_table_tml, not just carry `name`/`columns`. Live-reproduced on
+#    Ads Commercial Dashboard's aliased `d_partner1` table (joined twice from
+#    the same physical `d_partner`).
+# ---------------------------------------------------------------------------
+
+def test_write_table_tml_files_forwards_parsed_db_table_for_aliased_table(tmp_path):
+    ds = _ds(
+        tables=[{"name": "d_partner1", "db_table": "dev_trusted_gold.bar_media.d_partner",
+                 "alias_of": "d_partner"}],
+        columns=[{"name": "Region", "db_column_name": "Region",
+                  "column_type": "ATTRIBUTE", "data_type": "VARCHAR"}],
+    )
+    result = _run_generate_flow(ds, tmp_path, database="DB", schema="PUBLIC")
+    assert result["tables_written"] == 1
+
+    table_file = next(tmp_path.glob("*.table.tml"))
+    doc = yaml.safe_load(table_file.read_text())
+    assert doc["table"]["name"] == "d_partner1"
+    assert doc["table"]["db_table"] == "d_partner"  # NOT "d_partner1"
