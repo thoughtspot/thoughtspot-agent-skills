@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
                                    resolve_name_collisions)
+from ts_cli.sv_translate import build_node_id_map
 
 
 def display_title(entry: dict) -> str:
@@ -130,7 +131,14 @@ def _detect_fact_tables(relationships: list[dict]) -> set[str]:
 
 
 def _build_join_on(rel: dict, flat: dict[str, str]) -> str:
-    """Build the `on` expression for one relationship."""
+    """Build the `on` expression for one relationship.
+
+    The join `on` clause describes the *physical* key equality, so both table
+    tokens are the physical ThoughtSpot table name (``flat``), even for a
+    role-playing endpoint — e.g. ``[DM_ORDER::REQUIRED_DATE] = [DM_DATE_DIM::DATE]``.
+    Role-play disambiguation is carried by the join's ``with:`` (the alias), not by
+    the `on` clause. (Column references, by contrast, use the alias prefix — see
+    build_node_id_map.)"""
     from_ts = flat[rel["from_table"]]
     to_ts = flat[rel["to_table"]]
     style = rel.get("join_style", "equi")
@@ -154,12 +162,14 @@ def _build_join_on(rel: dict, flat: dict[str, str]) -> str:
 
 
 def _collect_joins(
-    relationships: list[dict], flat: dict[str, str],
+    relationships: list[dict], node_of: dict[str, str], flat: dict[str, str],
 ) -> dict[str, list[dict]]:
     joins_by_from: dict[str, list[dict]] = {}
     for rel in relationships:
         from_alias = rel["from_table"]
         to_alias = rel["to_table"]
+        # Membership is validated against the caller-supplied tables map (tables.json),
+        # not node_of (which is derived from the SV and always complete).
         if from_alias not in flat:
             raise ValueError(
                 f"relationship from_table '{from_alias}' not in tables map")
@@ -168,8 +178,8 @@ def _collect_joins(
                 f"relationship to_table '{to_alias}' not in tables map")
         join_entry = {
             "name": rel["name"],
-            "with": flat[to_alias],
-            "on": _build_join_on(rel, flat),
+            "with": node_of[to_alias],          # alias for a role-play, else the name
+            "on": _build_join_on(rel, flat),     # physical names on both sides
             "type": "LEFT_OUTER",
             "cardinality": "MANY_TO_ONE",
         }
@@ -181,9 +191,10 @@ def build_model_tables(
     parsed: dict, tables: dict,
 ) -> list[dict]:
     flat = normalize_tables(tables)
+    node_of = build_node_id_map(parsed)
     relationships = parsed.get("relationships") or []
     has_joins = bool(relationships)
-    joins_by_from = _collect_joins(relationships, flat)
+    joins_by_from = _collect_joins(relationships, node_of, flat)
 
     fact_aliases = _detect_fact_tables(relationships) if relationships else set()
 
@@ -200,10 +211,22 @@ def build_model_tables(
     model_tables = []
     for alias in order:
         info = tables[alias]
+        phys = flat[alias]
+        # node id: physical name for a single-use table, or the SV alias for a
+        # role-playing instance of a reused physical table.
+        node = node_of.get(alias, phys)
         e: dict = {}
-        if has_joins:
-            e["id"] = flat[alias]
-        e["name"] = flat[alias]
+        if node != phys:
+            # Role-playing instance of a reused physical table. ThoughtSpot
+            # identifies it by `alias` (name stays the physical table); joins and
+            # column_id prefixes reference the alias. Do NOT set `id` to the alias
+            # — I4 requires id == name, and id != name silently breaks joins.
+            e["name"] = phys
+            e["alias"] = node
+        else:
+            if has_joins:
+                e["id"] = phys
+            e["name"] = phys
         fqn = info.get("fqn") if isinstance(info, dict) else None
         if fqn:
             e["fqn"] = fqn

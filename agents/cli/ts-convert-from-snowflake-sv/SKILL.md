@@ -1270,6 +1270,7 @@ Model in one pass through Steps 4–13.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.18.0 | 2026-07-23 | Role-playing (aliased) dimension support (ts-cli v0.89.0): a physical table reused under multiple SV aliases now maps to distinct alias nodes — `model_tables` emit `alias:`, joins carry the alias in `with:` while the `on` clause uses physical names, and column refs use the alias prefix. Bare-column renames emit direct columns, not formulas. Live-verified against se-thoughtspot (SUPPORT_CASE_SV with ACCOUNT/USER/SUPPORT_PRODUCT__C role-plays). |
 | 1.17.1 | 2026-07-22 | Import error table + post-import verification extracted to shared `ts-tml-import-gate.md` §4/§5 (BL-063 phase 1c) |
 | 1.17.0 | 2026-07-22 | Rewire onto deterministic CLI commands: Step 4 → `ts snowflake parse-sv`, Step 9 → `ts snowflake translate-formulas`, Steps 8/10-FILE/11 → `ts snowflake build-model`. Removes 8 inline Python code blocks — DDL parsing, formula translation, model TML assembly, YAML serialization, and import are all deterministic. Step 6B adds `ts snowflake introspect` for Scenario B table creation. Mode C updated to use CLI commands. Step 8 becomes "Assemble tables map". (BL-063 phase 1a) |
 | 1.16.2 | 2026-07-15 | JSON/VARIANT path access: emit `['key']['subkey']` bracket notation in `sql_*_op` pass-throughs — ThoughtSpot's formula parser rejects Snowflake colon-and-dot path syntax (`PARSE_JSON(x):a.b`) even though it is valid Snowflake SQL. Verified 2026-07-15. |

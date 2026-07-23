@@ -366,6 +366,20 @@ class TestResolver:
         with pytest.raises(Exception, match="unknown table alias"):
             resolver("nonexistent.COL")
 
+    def test_roleplay_alias_resolves_to_distinct_nodes(self):
+        # One physical USER table played by two aliases must resolve to distinct
+        # role-play nodes, not collapse onto the shared physical name.
+        parsed = {"tables": [
+            {"alias": "CASE", "name": "CASE"},
+            {"alias": "OWNER", "name": "USER"},
+            {"alias": "RESOLVED_BY", "name": "USER"},
+        ]}
+        resolver = make_resolver(parsed, "case")
+        assert resolver("owner.NAME") == "[OWNER::NAME]"
+        assert resolver("resolved_by.NAME") == "[RESOLVED_BY::NAME]"
+        # single-use physical table keeps its physical name as the node id
+        assert resolver("case.ID") == "[CASE::ID]"
+
 
 # ---------------------------------------------------------------------------
 # Full orchestrator — workforce fixture

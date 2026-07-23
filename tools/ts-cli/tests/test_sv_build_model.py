@@ -322,6 +322,77 @@ class TestBuildModelTables:
 
 
 # ---------------------------------------------------------------------------
+# Role-playing (aliased) dimensions — a reused physical table
+# ---------------------------------------------------------------------------
+
+def _parsed_roleplay():
+    """A fact CASE that joins ACCOUNT twice (base + ON_BEHALF_ACCOUNT role) and
+    USER twice (OWNER + RESOLVED_BY roles) — the physical table is reused."""
+    return {
+        "tables": [
+            {"alias": "CASE", "name": "CASE"},
+            {"alias": "ACCOUNT", "name": "ACCOUNT"},
+            {"alias": "ON_BEHALF_ACCOUNT", "name": "ACCOUNT"},
+            {"alias": "OWNER", "name": "USER"},
+            {"alias": "RESOLVED_BY", "name": "USER"},
+        ],
+        "relationships": [
+            {"name": "C_ACC", "from_table": "CASE", "from_cols": ["ACCOUNTID"],
+             "to_table": "ACCOUNT", "to_cols": ["ID"], "join_style": "equi"},
+            {"name": "C_OBO", "from_table": "CASE", "from_cols": ["ON_BEHALF_OF"],
+             "to_table": "ON_BEHALF_ACCOUNT", "to_cols": ["ID"], "join_style": "equi"},
+            {"name": "C_OWN", "from_table": "CASE", "from_cols": ["OWNERID"],
+             "to_table": "OWNER", "to_cols": ["ID"], "join_style": "equi"},
+            {"name": "C_RES", "from_table": "CASE", "from_cols": ["RESOLVEDBYID"],
+             "to_table": "RESOLVED_BY", "to_cols": ["ID"], "join_style": "equi"},
+        ],
+    }
+
+
+class TestRolePlayingAliases:
+    def test_node_id_map(self):
+        from ts_cli.sv_translate import build_node_id_map
+        node_of = build_node_id_map(_parsed_roleplay())
+        # single-use physical table -> physical name is the node id
+        assert node_of["CASE"] == "CASE"
+        # base instance whose alias equals the physical name -> physical name
+        assert node_of["ACCOUNT"] == "ACCOUNT"
+        # reused physical table, alias differs -> alias is the node id
+        assert node_of["ON_BEHALF_ACCOUNT"] == "ON_BEHALF_ACCOUNT"
+        assert node_of["OWNER"] == "OWNER"
+        assert node_of["RESOLVED_BY"] == "RESOLVED_BY"
+
+    def test_model_tables_emit_alias_not_id(self):
+        parsed = _parsed_roleplay()
+        tables = {t["alias"]: t["name"] for t in parsed["tables"]}
+        mt = build_model_tables(parsed, tables)
+        by = {(e["name"], e.get("alias")): e for e in mt}
+        # base ACCOUNT: id == name, no alias
+        base = next(e for e in mt if e["name"] == "ACCOUNT" and "alias" not in e)
+        assert base.get("id") == "ACCOUNT"
+        # role-play ACCOUNT: alias set, name is physical, NO id (I4: id must == name)
+        obo = by[("ACCOUNT", "ON_BEHALF_ACCOUNT")]
+        assert "id" not in obo
+        assert obo["name"] == "ACCOUNT"
+        # both USER roles present as distinct aliased entries over one physical table
+        assert ("USER", "OWNER") in by
+        assert ("USER", "RESOLVED_BY") in by
+        assert "id" not in by[("USER", "OWNER")]
+
+    def test_joins_reference_alias(self):
+        parsed = _parsed_roleplay()
+        tables = {t["alias"]: t["name"] for t in parsed["tables"]}
+        mt = build_model_tables(parsed, tables)
+        fact = next(e for e in mt if e["name"] == "CASE")
+        withs = {j["with"] for j in fact["joins"]}
+        # each role-play join targets the alias, never the bare physical name twice
+        assert withs == {"ACCOUNT", "ON_BEHALF_ACCOUNT", "OWNER", "RESOLVED_BY"}
+        obo = next(j for j in fact["joins"] if j["with"] == "ON_BEHALF_ACCOUNT")
+        # `with` carries the alias; the `on` clause uses physical names on both sides
+        assert obo["on"] == "[CASE::ON_BEHALF_OF] = [ACCOUNT::ID]"
+
+
+# ---------------------------------------------------------------------------
 # build_columns_and_formulas
 # ---------------------------------------------------------------------------
 
