@@ -2228,7 +2228,19 @@ v0.28.1) to add `USERATTRIBUTE()`/`USERATTRIBUTEINCLUDES()` — the same class o
 folded into this item rather than a duplicate backlog entry.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `agents/shared/mappings/tableau/tableau-formula-translation.md`,
 `tools/ts-cli/`.
-**Status:** OPEN.
+**Status:** PARTIAL.
+
+**Update 2026-07-23 (ts-cli v0.88.0):** shipped the three unambiguous, documented
+mappings — `USERNAME()` → `ts_username`, `ISUSERNAME(s)` → `( ts_username = s )`, and
+`ISMEMBEROF("group")` → `( ts_groups = "group" )` (this last one wired into the CLI for
+the first time; it previously passed through untranslated and un-rejected). All three
+removed from `_UNMAPPED_FUNCTIONS` / documented in `tableau-formula-translation.md` +
+`coverage-matrix.md`. **Remaining (deferred, unchanged target):** `FULLNAME()`/`ISFULLNAME(s)`
+— no confirmed ThoughtSpot display-name variable; `USERDOMAIN()` — `ts_email_domain` is a
+candidate but the domain-only-vs-full-email value shape is unverified; `USERATTRIBUTE(attr)`/
+`USERATTRIBUTEINCLUDES(attr, val)` — `ts_var(...)` is only accepted in RLS RULES, not in
+Model/Answer formulas today, so no faithful in-formula translation exists. All four stay
+rejected at translate time pending the live verification / product research described below.
 
 ### Problem
 

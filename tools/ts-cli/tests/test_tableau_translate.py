@@ -771,6 +771,35 @@ class TestMapFunctions:
         expr = "COT([a],[b])"
         assert map_functions(expr) == expr
 
+    # -----------------------------------------------------------------------
+    # User-identity → RLS system variables (BL-071 subset) — only the
+    # unambiguous, documented mappings. USERNAME() is a bare system variable
+    # reference; ISUSERNAME/ISMEMBEROF are composite equality checks against
+    # it/ts_groups. FULLNAME/ISFULLNAME/USERDOMAIN/USERATTRIBUTE(INCLUDES)
+    # stay unmapped — see TestValidateOutput regression checks below.
+    # -----------------------------------------------------------------------
+
+    def test_username(self):
+        assert map_functions("USERNAME()") == "ts_username"
+
+    def test_isusername(self):
+        assert map_functions("ISUSERNAME([User])") == "( ts_username = [User] )"
+
+    def test_ismemberof(self):
+        assert map_functions('ISMEMBEROF("Sales")') == '( ts_groups = "Sales" )'
+
+    def test_username_wrong_arity_left_untranslated(self):
+        expr = "USERNAME([x])"
+        assert map_functions(expr) == expr
+
+    def test_isusername_wrong_arity_left_untranslated(self):
+        expr = "ISUSERNAME([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_ismemberof_wrong_arity_left_untranslated(self):
+        expr = "ISMEMBEROF([a],[b])"
+        assert map_functions(expr) == expr
+
     def test_dateparse_flips_args(self):
         assert map_functions("DATEPARSE('yyyy-MM-dd', [DateStr])") == \
             "to_date ( [DateStr] , 'yyyy-MM-dd' )"
@@ -1413,9 +1442,20 @@ class TestValidateOutput:
         errors = validate_output("SPLIT ( [Name] , '-' , 1 )")
         assert any("SPLIT" in e for e in errors)
 
-    def test_username_flagged(self):
+    def test_fullname_still_flagged(self):
+        # USERNAME/ISUSERNAME now translate (BL-071, ts-cli v0.88.0) and were
+        # removed from _UNMAPPED_FUNCTIONS — see test_username_no_longer_
+        # flagged below. FULLNAME has no confirmed ThoughtSpot display-name
+        # variable and stays rejected (scope boundary, BL-071).
+        errors = validate_output("if ( FULLNAME ( ) = 'x' ) then 1 else 0")
+        assert any("FULLNAME" in e for e in errors)
+
+    def test_username_no_longer_flagged(self):
+        # Regression guard: USERNAME/ISUSERNAME were removed from
+        # _UNMAPPED_FUNCTIONS once functions.py started translating them
+        # (BL-071, ts-cli v0.88.0) — validate_output must stop rejecting them.
         errors = validate_output("if ( USERNAME ( ) = 'x' ) then 1 else 0")
-        assert any("USERNAME" in e for e in errors)
+        assert not any("USERNAME" in e for e in errors)
 
     def test_untranslated_datepart_flagged(self):
         errors = validate_output("DATEPART ( 'minute' , [TS] )")

@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.88.0 inverse trig + COT mapped) -->
+<!-- currency: tableau — 2026-07 (v0.88.0 inverse trig + COT mapped, USERNAME/ISUSERNAME/ISMEMBEROF -> RLS variables) -->
 
 # Tableau → ThoughtSpot Formula Translation
 
@@ -71,12 +71,19 @@ As of ts-cli **v0.88.0**, `ACOS`, `ASIN`, `ATAN`, and `COT` are also implemented
 "Inverse trig + COT" entries in the function table below) and removed from
 `_UNMAPPED_FUNCTIONS` — they no longer skip with an "unmapped Tableau function" reason.
 
+Also as of ts-cli **v0.88.0**, `USERNAME`, `ISUSERNAME`, and `ISMEMBEROF` are implemented
+(see the "User identity → RLS system variables" entry below and the `ISMEMBEROF` note
+further down) and removed from `_UNMAPPED_FUNCTIONS`.
+
 Functions with no CLI implementation are **rejected at translate time** instead of being
 passed through untranslated: `SPLIT`, `PROPER`, `ASCII`, `CHAR`, `REGEXP_EXTRACT_NTH`,
-`MAKEDATE`, `MAKETIME`, `MAKEDATETIME`, `ISDATE`, `USERNAME`, `FULLNAME`, `ISUSERNAME`,
-`ISFULLNAME`, `USERDOMAIN`. (`FINDNTH`, `REGEXP_MATCH`, `REGEXP_EXTRACT`, and
-`REGEXP_REPLACE` were rejected here too before ts-cli v0.81.0 — see the pass-through
-note below; they are now mapped, not rejected.)
+`MAKEDATE`, `MAKETIME`, `MAKEDATETIME`, `ISDATE`, `FULLNAME`, `ISFULLNAME`, `USERDOMAIN`.
+(`FINDNTH`, `REGEXP_MATCH`, `REGEXP_EXTRACT`, and `REGEXP_REPLACE` were rejected here too
+before ts-cli v0.81.0 — see the pass-through note below; they are now mapped, not rejected.
+`USERNAME`/`ISUSERNAME` were rejected here too before ts-cli v0.88.0 — see above; they are
+now mapped, not rejected. `FULLNAME`/`ISFULLNAME` stay rejected — no confirmed ThoughtSpot
+display-name variable exists. `USERDOMAIN` stays rejected — `ts_email_domain` is a candidate
+but the domain-only-vs-full-email value shape is unverified. See BL-071.)
 The same fail-loud treatment applies to all five date converters (`DATEPART`, `DATENAME`,
 `DATETRUNC`, `DATEDIFF`, `DATEADD`) when the unit isn't in that function's unit map — the
 call is left in place rather than mapped to a fabricated ThoughtSpot function name (e.g.
@@ -1089,11 +1096,14 @@ model import. A missing formula produces a functional model with reduced coverag
 | `INTERSECTION(geom1, geom2)` | Geospatial set intersection — no ThoughtSpot equivalent. Omit + log. |
 | `SYMDIFFERENCE(geom1, geom2)` | Geospatial symmetric difference — no ThoughtSpot equivalent. Omit + log. |
 | `VALIDATE(geom)` | Geospatial geometry validation (boolean) — no ThoughtSpot equivalent. Omit + log. |
-| `USERATTRIBUTE(attr)` | Embedded-RLS custom user attribute — no CLI translation yet. **Plausible native translation:** ABAC `ts_var(attr_var)` referencing an admin-created formula variable (same JWT user-attribute mechanism as `ISMEMBEROF`→`ts_groups`, reclassified 2026-06-28) — needs live verification against a Model formula/RLS context before wiring in. See BL-071. |
+| `FULLNAME()` / `ISFULLNAME(s)` | Tableau's display-name identity function — no confirmed ThoughtSpot system variable exists for a user's display name (distinct from `ts_username`, which is the login/user name). Stays rejected rather than ship an unverified semantic. See BL-071. |
+| `USERDOMAIN()` | `ts_email_domain` (`thoughtspot-formula-patterns.md`) is a candidate, but whether it returns the domain only or the full email address (Tableau's `USERDOMAIN()` semantics) is unverified. Stays rejected rather than ship an unverified semantic. See BL-071. |
+| `USERATTRIBUTE(attr)` | Embedded-RLS custom user attribute — no CLI translation yet. **Plausible native translation:** ABAC `ts_var(attr_var)` referencing an admin-created formula variable (same JWT user-attribute mechanism as `ISMEMBEROF`→`ts_groups`, reclassified 2026-06-28) — but `ts_var(...)` is only accepted in RLS RULES, not in Model/Answer formulas today, so no faithful in-formula translation exists. See BL-071. |
 | `USERATTRIBUTEINCLUDES(attr, val)` | Embedded-RLS multi-value attribute membership test — same disposition as `USERATTRIBUTE` above. See BL-071. |
 
 **Formerly untranslatable, now mapped:**
-- `ISMEMBEROF("group")` → `ts_groups = 'group'` — multi-value list membership handled natively with `=` (reclassified 2026-06-28)
+- `ISMEMBEROF("group")` → `( ts_groups = "group" )` — multi-value list membership handled natively with `=` (reclassified 2026-06-28; CLI-translated v0.88.0, BL-071)
+- `USERNAME()` → `ts_username` / `ISUSERNAME(s)` → `( ts_username = s )` — direct system-variable reference + composite equality check (CLI-translated v0.88.0, BL-071). `FULLNAME()`/`ISFULLNAME(s)`/`USERDOMAIN()` remain untranslatable — see rows above
 - `DATETIME(expr)` → `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp; if the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15 (reclassified 2026-06-28)
 - SQL-lookup Tableau Parameters → query the warehouse at migration time and populate `list_choice[]` with a point-in-time snapshot. See "SQL-lookup parameters (query at migration time)" section below (reclassified 2026-06-28)
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)

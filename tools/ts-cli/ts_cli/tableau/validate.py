@@ -34,7 +34,11 @@ _UNMAPPED_FUNCTIONS = [
     # tableau-formula-translation.md lines ~989-996) — still rejected here.
     "REGEXP_EXTRACT_NTH",
     "MAKEDATE", "MAKETIME", "MAKEDATETIME", "ISDATE",
-    "USERNAME", "FULLNAME", "ISUSERNAME", "ISFULLNAME", "USERDOMAIN",
+    # USERNAME/ISUSERNAME now translate (BL-071, ts-cli v0.88.0 — see
+    # functions.py) and were removed from this list. FULLNAME/ISFULLNAME/
+    # USERDOMAIN stay rejected — no confirmed ThoughtSpot display-name
+    # variable / unverified value shape, see BL-071.
+    "FULLNAME", "ISFULLNAME", "USERDOMAIN",
     # ACOS/ASIN/ATAN/COT now translate (BL-072, ts-cli v0.88.0 — see
     # functions.py) and were removed from this list.
     "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
