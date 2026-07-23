@@ -851,7 +851,9 @@ def _generate_flow(
     """Build phased model TML files from scratch and write them to disk."""
     from ts_cli.model_builder import build_model_tml, split_for_phased_import
     from ts_cli.tableau.build_model import apply_prefix_and_double_agg
-    from ts_cli.tableau.reconcile import clean_columns, drop_junk_formulas, strip_suffix_in_expr
+    from ts_cli.tableau.reconcile import (
+        clean_columns, drop_junk_columns, drop_junk_formulas, strip_suffix_in_expr,
+    )
     from ts_cli.tableau_translate import dump_tml_yaml
 
     # Tier-1: strip Custom-SQL suffixes, drop junk, dedupe, and set the table so
@@ -861,12 +863,17 @@ def _generate_flow(
     # stamping tables[0] on all of them would mis-qualify columns that
     # actually belong to other tables (worse than the pre-existing bare
     # column_id, which _build_model_columns's own single_table guard leaves
-    # alone). Multi-table sources have no Custom-SQL suffixes/junk anyway —
-    # that only comes from single-table sqlproxy sources — so leaving
-    # cleaned_cols untouched here is safe.
+    # alone). Multi-table datasources DO still carry the
+    # __tableau_internal_object_id__ junk pseudo-column (Tableau writes one per
+    # physical table, not just for single-table sqlproxy sources — confirmed
+    # live on Ads Commercial Dashboard: 26 leaked into Model TML before this
+    # fix) — drop_junk_columns() strips those without clean_columns' table
+    # stamp/dedup (both wrong here, see its docstring).
     if len(ds.get("tables", [])) == 1:
         _table_name = ds["tables"][0]["name"]
         cleaned_cols = clean_columns(cleaned_cols, _table_name)
+    else:
+        cleaned_cols = drop_junk_columns(cleaned_cols)
     for f in cleaned_formulas:
         f["expr"] = strip_suffix_in_expr(f["expr"])
 
