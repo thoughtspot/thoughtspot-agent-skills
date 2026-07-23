@@ -387,6 +387,28 @@ def _is_extract_wrapper(tbl: str) -> bool:
     return _strip_brackets(tbl).split(".", 1)[0] == "Extract"
 
 
+def _wrapper_relation_names(ds: ET.Element) -> set[str]:
+    """Relation ``name``s that are hyper-Extract cache wrappers (see
+    ``_is_extract_wrapper``) — the single source of truth for "this relation is
+    not a physical table."
+
+    Shared by ``_extract_tables`` (skips emitting these as Table TML) and
+    ``_metadata_column_records`` (skips the wrapper's own duplicate
+    metadata-records so column ownership always resolves from the live
+    relation, never the wrapper — see the ``col_table_map`` XREF/dropped-column
+    fix: a federated Custom-SQL + hyper-Extract datasource writes its column
+    metadata TWICE, once under the live ``<connection>`` and once — mirrored,
+    GUID-named — under ``<extract>``'s own ``<connection>``, and a naive
+    ``.//metadata-record`` walk over the whole datasource picked up both,
+    with the extract's document-order-later copy silently winning).
+    """
+    return {
+        rel.get("name", "")
+        for rel in ds.findall(".//relation[@type='table']")
+        if rel.get("name") and _is_extract_wrapper(rel.get("table", ""))
+    }
+
+
 def _extract_tables(ds: ET.Element) -> list[dict]:
     """Extract physical table definitions from a datasource.
 
@@ -521,19 +543,46 @@ def _metadata_column_records(ds: ET.Element) -> dict[str, dict[str, str]]:
     — but ``remote-name`` stays the clean physical name (``LineItemId``) in
     every case, colliding or not, which is exactly why it — not the internal
     name — belongs in ``db_column_name``.
+
+    A federated Custom-SQL + hyper-Extract datasource writes each column's
+    metadata-record TWICE: once under the live ``<connection>`` (``parent-name``
+    = the real relation, e.g. ``[Custom SQL Query]``) and once more, mirrored,
+    under ``<extract>``'s own ``<connection>`` (``parent-name`` = the Extract
+    wrapper's GUID-mangled relation name, e.g. ``[_9BBB0...]`` — see
+    ``_is_extract_wrapper``). Both sit under this same ``<datasource>``, so a
+    plain ``.//metadata-record`` walk finds both for one ``local-name``; records
+    owned by a wrapper relation are skipped here so the live copy — the one
+    ``_extract_tables`` actually emits as a physical table — always wins,
+    regardless of document order. Without this, ``table`` (and ``remote_name``,
+    which the extract's mirror can itself have internally disambiguated, e.g.
+    ``Sales Person1``) resolve to a relation ``_extract_tables`` excludes,
+    dangling the column's eventual ``column_id`` ("XREF: column_id not found")
+    and dropping it from the emitted Table TML.
+
+    ``table`` is ``parent`` verbatim (bracket-stripped) — NOT ``parent.split(".")``
+    — because ``parent-name`` is always a single relation ``name`` reference (the
+    same identifier ``_extract_tables`` uses), never a dotted schema-qualified
+    path; a file-backed relation's own name can legitimately embed a literal
+    ``.`` (e.g. a CSV extract's Tableau-assigned ``some_file.csv1``), which a
+    ``.split(".")[-1]`` would wrongly truncate to ``csv1`` — a table
+    ``_extract_tables`` never emits, dangling ``column_id`` the same way the
+    wrapper-name bug above did.
     """
+    wrapper_names = _wrapper_relation_names(ds)
     idx: dict[str, dict[str, str]] = {}
     for rec in ds.findall(".//metadata-record[@class='column']"):
         local_name = (rec.findtext("local-name") or "").strip("[]")
         if not local_name:
             continue
+        parent = (rec.findtext("parent-name") or "").strip("[]")
+        if parent in wrapper_names:
+            continue
         entry = idx.setdefault(local_name, {})
         remote_name = (rec.findtext("remote-name") or "").strip()
         if remote_name:
             entry["remote_name"] = remote_name
-        parent = (rec.findtext("parent-name") or "").strip("[]")
         if parent:
-            entry["table"] = parent.split(".")[-1]
+            entry["table"] = parent
     return idx
 
 
