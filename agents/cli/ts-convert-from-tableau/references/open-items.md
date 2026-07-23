@@ -82,12 +82,35 @@ liveboard migrations and the verified `thoughtspot-liveboard-tml.md` schema
 
 ---
 
-## #13 — REGEXP family + FINDNTH — PASS-THROUGH ONLY
+## #13 — REGEXP family + FINDNTH + REPLACE — PASS-THROUGH, VERIFIED 2026-07-23
 
-REGEXP_EXTRACT/MATCH/REPLACE, FINDNTH have no native TS equivalent — mapped to
-sql_*_op pass-through (warehouse-dialect-specific) or omit+log.
+`REGEXP_EXTRACT`/`REGEXP_MATCH`/`REGEXP_REPLACE`/`FINDNTH` have no native TS
+equivalent — mapped to `sql_*_op` pass-through (warehouse-dialect-specific).
+`REGEXP_EXTRACT_NTH` has no documented template and remains omit+log.
 
-Status: Pass-through implemented; not verified against live cluster
+Prior to ts-cli v0.81.0 this item's own status line ("pass-through
+implemented") was itself stale/inaccurate — the four functions above were
+actually in `_UNMAPPED_FUNCTIONS` (`validate.py`) and rejected at translate
+time with no pass-through ever emitted (an AST-spike finding). `REPLACE`
+separately mapped to a bare `replace(...)` native call, which is not a real
+ThoughtSpot function.
+
+Status: VERIFIED 2026-07-23 — v0.81.0 wires all four (plus the `REPLACE`
+re-map) into `map_functions()` per the documented templates
+(`tableau-formula-translation.md` lines ~989-996) and removes them from
+`_UNMAPPED_FUNCTIONS`. Regression on
+`ElevateYourTableauSkills-10AdvancedTricks.twbx` (real workbook): 12
+previously-dropped formulas (6× `FINDNTH`/`REGEXP_MATCH`/`REGEXP_EXTRACT` in
+"Dimensions - 3x3", 6× `REGEXP_EXTRACT` in "Orders+") now translate — 38/54
+→ 50/54 formulas translated; the remaining 4 skips are unrelated table-calc
+functions (`LAST`/`LOOKUP`/`WINDOW_MAX`/`WINDOW_MIN`, U10/U11). Live
+`VALIDATE_ONLY` (se-thoughtspot, connection `APJ_TAB`, against the real
+`AMAZON_SALES_DATA` table): one minimal model per formula type —
+`REGEXP_MATCH`, `REGEXP_EXTRACT`, `FINDNTH`, and `REPLACE` all return
+`status_code: OK`. Negative control: the pre-fix bare `replace(...)` form
+live-fails with error 14516 ("Search did not find \"replace (\"..."),
+confirming the bug this fix removes. No persistent objects were created
+(`ts metadata search` confirms).
 
 ---
 
@@ -294,3 +317,22 @@ add `<object-graph>` handling if joins are genuinely missing. Do **not** port sp
 existing relationship parsing may already cover it.
 
 Status: DEFERRED — needs a modern relationship-based .twb to confirm whether a gap exists.
+
+---
+
+## #23 — LOD keyword no-space-before-colon bug — VERIFIED 2026-07-23
+
+`ts_cli/tableau/lod.py::_parse_lod_content`'s keyword regex required `\s+` (one or
+more whitespace chars) between the `FIXED`/`INCLUDE`/`EXCLUDE` keyword and the
+colon. A grand-total LOD written with no space before the colon (`{FIXED:
+SUM(...)}`, vs. the always-worked `{FIXED : SUM(...)}`) failed the keyword match,
+fell through to treat the literal word "FIXED" as a dimension, and silently
+emitted invalid `{ FIXED }` TML syntax (a `group_aggregate(..., { FIXED }, {})`
+call that fails ThoughtSpot import). Affected 3 formulas in the benchmark.
+
+Status: VERIFIED 2026-07-23 — v0.81.0 relaxes the regex to `\s*` (tolerates zero
+whitespace before the colon); unit tests cover all four forms (`{FIXED [Dim] :
+agg}`, `{FIXED : agg}`, `{FIXED: agg}`, and the INCLUDE/EXCLUDE equivalents).
+Live `VALIDATE_ONLY` (se-thoughtspot, `APJ_TAB`) on a `{FIXED: SUM(...)}`-derived
+`group_aggregate(...)` formula against the real `AMAZON_SALES_DATA` table
+returns `status_code: OK`.

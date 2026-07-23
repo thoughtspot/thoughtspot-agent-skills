@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.28.1 spatial + user-attribute fail-loud) -->
+<!-- currency: tableau — 2026-07 (v0.81.0 REGEXP/FINDNTH mapped + REPLACE pass-through + LOD no-space fix) -->
 
 # Tableau → ThoughtSpot Formula Translation
 
@@ -44,7 +44,7 @@ After all steps, **validate** (`validate_output`): reject any formula still cont
 `END`, `CASE`, `WHEN`, `unique_count` (underscore), `date_trunc`, `ELSEIF`, or
 `NOT IN (...)` (unsupported — rewrite as negated conditions), plus any surviving call to
 an unmapped Tableau function (the unmapped-function list — see "CLI implementation
-status" below: `SPLIT`, `REGEXP_*`, `PROPER`, etc., and any `DATEPART`/`DATENAME`/
+status" below: `SPLIT`, `REGEXP_EXTRACT_NTH`, `PROPER`, etc., and any `DATEPART`/`DATENAME`/
 `DATETRUNC`/`DATEDIFF`/`DATEADD` call whose unit wasn't recognized). There is **no**
 "bare `+` on strings" validation rule — Step 12 rewrites string `+` into `concat()` before
 validation runs; a residual, un-rewritten `+` (e.g. a concat operand that is itself a
@@ -68,9 +68,11 @@ untranslated in the output with no error. Nested same-function calls inside thes
 arguments (e.g. `UPPER(LEFT(s, 3))`) are translated recursively.
 
 Functions with no CLI implementation are **rejected at translate time** instead of being
-passed through untranslated: `SPLIT`, `FINDNTH`, `PROPER`, `ASCII`, `CHAR`, `REGEXP_MATCH`,
-`REGEXP_EXTRACT`, `REGEXP_EXTRACT_NTH`, `REGEXP_REPLACE`, `MAKEDATE`, `MAKETIME`,
-`MAKEDATETIME`, `ISDATE`, `USERNAME`, `FULLNAME`, `ISUSERNAME`, `ISFULLNAME`, `USERDOMAIN`.
+passed through untranslated: `SPLIT`, `PROPER`, `ASCII`, `CHAR`, `REGEXP_EXTRACT_NTH`,
+`MAKEDATE`, `MAKETIME`, `MAKEDATETIME`, `ISDATE`, `USERNAME`, `FULLNAME`, `ISUSERNAME`,
+`ISFULLNAME`, `USERDOMAIN`. (`FINDNTH`, `REGEXP_MATCH`, `REGEXP_EXTRACT`, and
+`REGEXP_REPLACE` were rejected here too before ts-cli v0.81.0 — see the pass-through
+note below; they are now mapped, not rejected.)
 The same fail-loud treatment applies to all five date converters (`DATEPART`, `DATENAME`,
 `DATETRUNC`, `DATEDIFF`, `DATEADD`) when the unit isn't in that function's unit map — the
 call is left in place rather than mapped to a fabricated ThoughtSpot function name (e.g.
@@ -87,6 +89,23 @@ here as untranslatable and none of the 13 was actually enforced in `_UNMAPPED_FU
 the other 8 silently passed through untranslated and failed import opaquely. `USERATTRIBUTE`/
 `USERATTRIBUTEINCLUDES` were not handled anywhere before v0.28.1. See BL-071 for the
 ABAC `ts_var()` translation candidate for the user-attribute family.
+
+As of ts-cli **v0.81.0**, a LOD keyword whitespace bug is fixed: `{FIXED: agg}` /
+`{INCLUDE: agg}` / `{EXCLUDE: agg}` (no space before the colon) previously fell
+through the keyword regex (which required at least one whitespace character after
+the keyword) and silently emitted invalid `{ FIXED }` TML syntax; the regex now
+tolerates zero-or-more whitespace before the colon.
+
+Also as of ts-cli **v0.81.0**, `REGEXP_EXTRACT`, `REGEXP_MATCH`, `REGEXP_REPLACE`, and
+`FINDNTH` are wired into `map_functions()` (see the pass-through table below — the
+templates there are used verbatim) and removed from `_UNMAPPED_FUNCTIONS`; they no
+longer skip with an "unmapped Tableau function" reason. `REGEXP_EXTRACT_NTH` has no
+documented pass-through template and remains rejected at translate time.
+
+Also as of ts-cli **v0.81.0**, `REPLACE` is re-mapped: it previously translated to a
+bare `replace(...)` call, which is **not a valid ThoughtSpot formula function**
+(live-confirmed) — it now uses the same `sql_string_op` pass-through form as its
+regex siblings above.
 
 ### CLI command
 
@@ -139,11 +158,15 @@ command detects pass-through conflicts automatically and skips them.
 | `MID(s, start, len)` | `substr ( s , start - 1 , len )` | Adjust for 0-based indexing |
 | `LEN(s)` | `strlen ( s )` | |
 | `FIND(s, sub)` | `strpos ( s , sub )` | 1-based, returns 0 when absent — identical contract to Tableau FIND, so `FIND(...) > 0` idioms translate unchanged (live-verified 2026-06-13, se-thoughtspot: strpos('needle_haystack','needle')=1, not-found=0). NOTE: official TS docs describe strpos as 0-based/−1 — live behavior differs; trust this entry. |
-| `REPLACE(s, old, new)` | `replace ( s , old , new )` | |
+| `REPLACE(s, old, new)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed) — scalar pass-through (PT1), CLI-translated (v0.81.0). See "Pass-Through Fallback" below |
 | `UPPER(s)` | `sql_string_op ( "UPPER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
 | `LOWER(s)` | `sql_string_op ( "LOWER({0})" , s )` | No native upper/lower in ThoughtSpot — scalar pass-through (PT1) |
 | `TRIM(s)` | `trim ( s )` | |
 | `SPLIT(s, delim, n)` | Use `substr`/`strpos` combination | No direct equivalent; chain: Tableau `SPLIT` → Snowflake `SPLIT_PART` → ThoughtSpot `substr`/`strpos` |
+| `REGEXP_EXTRACT(s, pat)` | `sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , s , pat )` | No native regex — scalar pass-through (PT1), CLI-translated (v0.81.0) |
+| `REGEXP_MATCH(s, pat)` | `sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , s , pat )` | No native regex; returns boolean — scalar pass-through (PT1), CLI-translated (v0.81.0) |
+| `REGEXP_REPLACE(s, pat, r)` | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , s , pat , r )` | No native regex — scalar pass-through (PT1), CLI-translated (v0.81.0) |
+| `FINDNTH(s, sub, n)` | `sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , s , sub , n )` | No native nth-occurrence — scalar pass-through (PT1), CLI-translated (v0.81.0) |
 | `DATEDIFF('day', a, b)` | `diff_days ( b , a )` | **Arg order reversed vs Tableau.** TS `diff_*` takes `(end, start)` (see formula-patterns.md "Argument order note"); Tableau `DATEDIFF(unit, start, end)` returns end−start. Same flip for `diff_months`, `diff_years`, `diff_time` (seconds). `'hour'`/`'minute'` → `diff_time ( b , a ) / 3600` / `/ 60`. `'week'` → `diff_days ( b , a ) / 7` ⚠ flag: boundary-crossing + week-start semantics differ from Tableau — verify per workbook. |
 | `DATETRUNC('month', d)` | `start_of_month ( d )` | Also `start_of_quarter`, `start_of_week`, `start_of_year` |
 | `DATETRUNC('day', d)` | `date ( d )` | Truncating to day is just the date part — ThoughtSpot has no separate `start_of_day` function |
@@ -993,6 +1016,7 @@ sql_<type>_aggregate_op ( "SQL expression with {0}, {1} placeholders" , column_0
 | `REGEXP_MATCH(s, pat)` | `sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , s , pat )` | No native regex; returns boolean. |
 | `REGEXP_REPLACE(s, pat, r)` | `sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , s , pat , r )` | No native regex. |
 | `FINDNTH(s, sub, n)` | `sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , s , sub , n )` | No native nth-occurrence; else omit + log. |
+| `REPLACE(s, sub, r)` | `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , sub , r )` | Bare `replace(...)` is NOT a valid ThoughtSpot formula function (live-confirmed) — must use this pass-through form, not a native call. |
 
 ### Rules
 
@@ -1081,6 +1105,8 @@ model import. A missing formula produces a functional model with reduced coverag
 - `LOOKUP(agg, ±n)` → `sql_*_aggregate_op("LAG/LEAD(...) OVER (...)")` (answer-level, gated) — see Row-Offset Table Calculations section
 - `FIRST()`, `LAST()` (standalone) → `sql_*_aggregate_op("FIRST_VALUE/LAST_VALUE(...) OVER (...)")` (answer-level, gated) — see Row-Offset Table Calculations section
 - `SIZE()` → `sql_int_aggregate_op("COUNT(*) OVER (PARTITION BY ...)")` (answer-level, gated) — see Row-Offset Table Calculations section
+- `REGEXP_EXTRACT`, `REGEXP_MATCH`, `REGEXP_REPLACE`, `FINDNTH` → `sql_*_op()` pass-through (see "Pass-Through Fallback" section); CLI-translated as of ts-cli v0.81.0. `REGEXP_EXTRACT_NTH` remains untranslated (no documented template)
+- `REPLACE(s, old, new)` → `sql_string_op ( "REPLACE({0}, {1}, {2})" , s , old , new )` — re-mapped off the invalid bare `replace(...)` native call (ts-cli v0.81.0; see "Pass-Through Fallback" section)
 
 ---
 

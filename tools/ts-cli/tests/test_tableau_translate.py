@@ -711,6 +711,42 @@ class TestMapFunctions:
         expr = "ZN(1"
         assert map_functions(expr) == expr
 
+    # -----------------------------------------------------------------------
+    # Fix 2 — REGEXP_*/FINDNTH pass-through mappings (tableau-formula-
+    # translation.md lines ~992-995, used verbatim) + Fix 3 — REPLACE
+    # re-mapped off the invalid bare `replace(...)` native call.
+    # -----------------------------------------------------------------------
+
+    def test_regexp_extract(self):
+        assert map_functions("REGEXP_EXTRACT([x], 'p')") == \
+            'sql_string_op ( "REGEXP_SUBSTR({0}, {1})" , [x] , \'p\' )'
+
+    def test_regexp_match(self):
+        assert map_functions("REGEXP_MATCH([x], 'p')") == \
+            'sql_bool_op ( "REGEXP_LIKE ({0}, {1})" , [x] , \'p\' )'
+
+    def test_regexp_replace(self):
+        assert map_functions("REGEXP_REPLACE([x], 'p', 'r')") == \
+            'sql_string_op ( "REGEXP_REPLACE({0},{1},{2})" , [x] , \'p\' , \'r\' )'
+
+    def test_findnth(self):
+        assert map_functions("FINDNTH([x], 'sub', 2)") == \
+            'sql_int_op ( "REGEXP_INSTR({0},{1},1,{2})" , [x] , \'sub\' , 2 )'
+
+    def test_replace_passthrough(self):
+        # Fix 3: bare `replace(...)` is not a valid ThoughtSpot formula function
+        # (live-confirmed). Must re-map to the sql_string_op pass-through form.
+        assert map_functions("REPLACE([x], 'a', 'b')") == \
+            'sql_string_op ( "REPLACE({0}, {1}, {2})" , [x] , \'a\' , \'b\' )'
+
+    def test_regexp_extract_wrong_arg_count_left_untranslated(self):
+        expr = "REGEXP_EXTRACT([x])"
+        assert map_functions(expr) == expr
+
+    def test_findnth_wrong_arg_count_left_untranslated(self):
+        expr = "FINDNTH([x], 'sub')"
+        assert map_functions(expr) == expr
+
 
 # ---------------------------------------------------------------------------
 # Date function mapping
@@ -1139,6 +1175,31 @@ class TestConvertLod:
         result = convert_lod("{FIXED : MAX([Date])}")
         assert "group_aggregate ( MAX([Date]) , {} , {} )" in result
 
+    def test_grand_fixed_no_space_before_colon(self):
+        """Fix 1 (LOD keyword whitespace bug): {FIXED: agg} with NO space between
+        the keyword and the colon was silently falling through to emit invalid
+        `{ FIXED }` TML syntax — the keyword regex required `\\s+` (one or more
+        whitespace chars) between FIXED and the colon. Must parse identically to
+        the space-before-colon form above."""
+        result = convert_lod("{FIXED: MAX([Date])}")
+        assert result == "group_aggregate ( MAX([Date]) , {} , {} )"
+        assert "{ FIXED }" not in result
+        assert "FIXED" not in result.replace("group_aggregate", "")
+
+    def test_include_no_space_before_colon(self):
+        result = convert_lod("{INCLUDE: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_exclude_no_space_before_colon(self):
+        result = convert_lod("{EXCLUDE: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_fixed_with_dims_no_space_before_colon(self):
+        """A dimensioned FIXED LOD with no space before the colon (space still
+        present between the keyword and the dimension list)."""
+        result = convert_lod("{FIXED [Dim]: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , { [Dim] } , {} )"
+
     def test_exclude_with_calc_ref_in_dims(self):
         """E1: EXCLUDE LOD with Calculation_* ref in dimension list."""
         result = convert_lod(
@@ -1338,6 +1399,27 @@ class TestValidateOutput:
     def test_not_in_flagged(self):
         errors = validate_output("if ( [A] NOT IN ('x') ) then 1 else 0")
         assert any("NOT IN" in e for e in errors)
+
+    def test_regexp_and_findnth_no_longer_flagged(self):
+        # Fix 2: these are now wired to sql_*_op pass-throughs in
+        # map_functions(), so the raw Tableau call should never survive to
+        # validate_output in a real pipeline run — but the fail-loud
+        # unmapped-function check itself must no longer flag them either,
+        # now that they're removed from _UNMAPPED_FUNCTIONS.
+        for fn, args in (
+            ("REGEXP_MATCH", "[x] , 'p'"),
+            ("REGEXP_EXTRACT", "[x] , 'p'"),
+            ("REGEXP_REPLACE", "[x] , 'p' , 'r'"),
+            ("FINDNTH", "[x] , 'sub' , 2"),
+        ):
+            errors = validate_output(f"{fn} ( {args} )")
+            assert not any(fn in e for e in errors), f"{fn} should no longer be flagged as unmapped"
+
+    def test_regexp_extract_nth_still_flagged(self):
+        # REGEXP_EXTRACT_NTH has no documented pass-through template and is
+        # NOT wired — it must remain rejected at translate time.
+        errors = validate_output("REGEXP_EXTRACT_NTH ( [x] , 'p' , 2 )")
+        assert any("REGEXP_EXTRACT_NTH" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
