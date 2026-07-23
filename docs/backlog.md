@@ -63,6 +63,10 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | BL-123 | Product currency gaps (2026-07-22 audit) | weekly sweep |
 | BL-122 | Cross-skill prompt/discovery extraction | next converter edit |
+| BL-127 | Roll out context-budget rule to all conversion skills | next converter edit |
+| BL-129 | One-pass CLI guidance + batch ops across converters | next converter edit |
+| BL-130 | Canonical data-type audit across converters (DATE_TIME) | 2026-09-30 |
+| BL-131 | Tableau native Sets → ThoughtSpot cohorts | 2026-09-30 |
 | BL-095 | connections add-tables missing authenticationType | 2026-08-31 |
 | BL-085 | Tableau build-model: TWB parse codification (Part 2) | 2026-08-31 |
 | BL-120 | Live e2e verification for ts-convert-from-qlik | first live pass |
@@ -94,6 +98,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-034 | tools/ & ts-cli quality polish | 2026-10-31 |
+| BL-128 | Skill-size audit: extract detail from heavy converter skills | opportunistic |
 | BL-036 | Databricks-native connection creation | 2026-10-31 |
 | BL-066 | Codify formula promotion as `ts model promote-formula` | 2026-10-31 |
 | BL-080 | `ts metadata permissions` + answer-promote pre-flight | 2026-09-30 |
@@ -3397,6 +3402,11 @@ Three near-identical prose blocks duplicated across 4+ conversion skills:
   once (2026-06-16). See also BL-111 (`--connection` filter on `ts metadata search`)
 - **11.5** ~~Post-import verification + import error table~~ — DONE (BL-063 phase 1c,
   PR #288: extracted to `ts-tml-import-gate.md` §4/§5)
+- **11.6 (added 2026-07-23)** Embed exact CLI command+flag examples in each step. In the 2026-07-23
+  Tableau benchmark, agents made **5–7 `ts … --help` discovery calls per run** (both ours AND #252)
+  because steps described commands in prose without exact flags. PR #319 embedded a canonical
+  copy-pasteable invocation per step in `ts-convert-from-tableau` → **0 `--help` probes**, ~25% fewer
+  tokens on the Ads run. Apply to every conversion skill — highest-ROI slice of this item.
 
 **Target:** extract shared references when next editing the conversion skills.
 
@@ -3481,3 +3491,102 @@ which is more resilient to expiry.
 
 **Blocked on:** `se-thoughtspot` instance being reachable (returning 404 as of
 2026-07-22).
+
+---
+
+## BL-127 — Roll out the "context-budget" rule to all conversion skills `Tier 2`
+
+**Filed:** 2026-07-23.
+**Source:** 2026-07-23 ours-vs-#252 Tableau benchmark (generalizable finding).
+**Affects:** `ts-convert-from-looker`, `ts-convert-from-snowflake-sv`, `ts-convert-from-databricks-mv`,
+`ts-convert-from-sisense` SKILL.md.
+**Status:** OPEN.
+
+Reading large tool `--out` JSON (a real `parse` output is tens of thousands of tokens) into agent context
+is a recurring, avoidable token sink. `ts-convert-from-tableau` (and powerbi/qlik) carry an explicit
+"**Context budget — never Read the big `--out` files; use the stdout summary / `json.load()` from disk /
+targeted `offset`+`limit`**" rule; **looker (1,834-line skill), snowflake-sv (1,341), databricks-mv (997),
+and sisense lack it**. In benchmark runs the rule kept generated-JSON Read calls at 0.
+
+**Approach:** port the tableau/powerbi wording (name each skill's real `--out` artifacts) into a prominent
+section near the top of each missing skill. Verify by an agent run keeping `read_calls_on_generated_json` at 0.
+**Target:** next converter edit.
+
+---
+
+## BL-128 — Skill-size audit: extract reference-heavy detail from the heavy converter skills `Tier 3`
+
+**Filed:** 2026-07-23.
+**Source:** 2026-07-23 benchmark; PR #314 (tableau 4,436 → ~2,900 lines).
+**Affects:** `ts-convert-from-looker` (1,834), `ts-convert-from-snowflake-sv` (1,341),
+`ts-convert-from-databricks-mv` (997) SKILL.md.
+**Status:** OPEN.
+
+SKILL.md size is a per-run token tax (the file is read every run, sometimes in multiple slices). PR #314
+cut tableau ~34% by moving reference-heavy detail (templates, rule tables, report formats) into
+`references/*.md` while keeping the procedural spine + links inline — **no logic change**. powerbi/qlik/sisense
+(~100 lines each, defer to shared mappings) are the lean model. Apply the same extraction to the three heavy
+skills above.
+
+**Approach:** per skill, move bulk templates/tables/examples to `references/`, keep every step heading +
+procedural instructions inline, leave a link; verify all step headings survive + link checker clean.
+**Target:** opportunistic, per skill.
+
+---
+
+## BL-129 — One-pass CLI guidance + batch operations across converters `Tier 2`
+
+**Filed:** 2026-07-23.
+**Source:** 2026-07-23 benchmark; PR #319 (`verify --dir` + one-pass build-model guidance).
+**Affects:** all `ts-convert-*` SKILL.md + their `ts <src> verify`/build CLIs.
+**Status:** OPEN (tableau done in #319).
+
+Two generalizable token/latency wins found on Tableau, likely present in the other converters:
+1. **No unnecessary per-object loops in skill prose.** `ts tableau build-model` already emits ALL datasources'
+   models+tables in one call, but the SKILL.md prose ("one model per datasource") led agents to loop it per
+   datasource (3× build + 3× lint + 3× verify on a 3-datasource workbook). Fixed by guiding a single pass.
+   Audit looker/snowflake-sv/databricks-mv/qlik/sisense/powerbi skill prose for the same per-object looping.
+2. **Batch verify.** Added `ts tableau verify --dir` (verify every model in a dir in one call) so verify isn't
+   looped per model. Check whether sibling converters' `verify`/validate commands need the same `--dir`.
+3. **Embed exact CLI command+flags per step** (see BL-122) — removed 5–7 `--help` probes/run.
+
+**Verify:** an agent run on a multi-object workbook uses ~1 build + 1 lint + 1 verify (not N+N+N), same output.
+**Target:** next converter edit.
+
+---
+
+## BL-130 — Canonical data-type audit across all converters (DATE_TIME vs DATETIME etc.) `Tier 2`
+
+**Filed:** 2026-07-23.
+**Source:** 2026-07-23 benchmark; PR #315 (databricks-mv emitted invalid `DATETIME`).
+**Affects:** every converter that emits Table TML `db_column_properties.data_type`.
+**Status:** databricks-mv fixed (#315); OTHERS UNAUDITED.
+
+`databricks/mv_tml.py` mapped `timestamp`→`DATETIME`, which ThoughtSpot **rejects** at import
+(live-confirmed error: "Data type DATETIME is not valid"); the canonical value is `DATE_TIME`
+(`agents/shared/schemas/thoughtspot-table-tml.md`). Snowflake's map was already correct. Audit every
+converter's type map against the schema's canonical values — a wrong type is a silent import-breaker that
+local lint does NOT catch.
+
+**Approach:** grep each converter's type-map module against the Table-TML schema type table; add a unit test
+per converter asserting each source type → a schema-valid TS type. Consider a shared validator.
+**Target:** 2026-09-30.
+
+---
+
+## BL-131 — Tableau native Sets → ThoughtSpot cohorts `Tier 2`
+
+**Filed:** 2026-07-23.
+**Source:** 2026-07-23 benchmark (Set Control workbook).
+**Affects:** `ts-convert-from-tableau` `build-model` / SKILL.md Step 5b.
+**Status:** OPEN.
+
+Workbooks built around native Tableau **Sets** (`<group>`/`<groupfilter>` elements — in/out membership) are
+not converted: `build-model` emits no `cohort.tml` for them, and the challenger's parser doesn't extract the
+Set-membership fields at all (silent "column not found" risk at import). Set-referencing *formulas* translate
+as ordinary formulas, but the Sets themselves need mapping to ThoughtSpot cohorts / column sets (currently
+hand-assembly). Both converters share this gap.
+
+**Approach:** extract `<group>` Set definitions in parse; emit ThoughtSpot cohort/column-set constructs (or a
+GROUP_BASED formula) per Set; document the mapping in the coverage matrix. Non-trivial — scope a design first.
+**Target:** 2026-09-30.
