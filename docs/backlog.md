@@ -124,6 +124,8 @@ are roughly ordered by value÷effort.
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
 | BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | — |
 | BL-116 | Live destructive dependency-manager smoke | — |
+| BL-132 | from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake) | next DBX edit |
+| BL-133 | `ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing) | opportunistic |
 
 ### Tier 4 — Deferred
 
@@ -2842,6 +2844,16 @@ duplicate.
 **Target:** scope after the next full repo audit (angle 11 output feeds the plan);
 Snowflake-from pipeline is the natural first program (BL-063-style phased PRs).
 
+**Two axes of "the standard" (2026-07-24 clarification).** "Databricks-from standard" here
+means the **codification / empirical-verification** axis only (a → c above). It is NOT the
+whole bar. A second, orthogonal axis — **token/runtime efficiency** — was pioneered on the
+*Tableau* converter, not Databricks: the context-budget rule (BL-127), one-pass CLI guidance
++ batch `--dir` operations (BL-129), and shared prompt/discovery extraction (BL-122). So no
+single converter is uniformly "highest": Databricks-from leads on codification, Tableau leads
+on efficiency. When bringing a converter "up to standard," treat it as the **union** — codify
+the mechanical pipeline (this item) AND apply BL-122/127/129 — and cross-check both axes per
+converter rather than assuming DBX-from alone is the target.
+
 ---
 
 ## BL-101 — Surface chart-axis-role classification in `ts metadata report` (schema 1.0 contract change) `Tier 3`
@@ -3427,3 +3439,58 @@ are skipped **silently** — no warning that the Phase-2 set step is still owed.
    not silently dropped in a pipeline run.
 2. Optionally add the Set count to the migration report's coverage summary.
 **Target:** opportunistic. (Distinct from BL-024 row-offset table-calcs.)
+
+---
+
+## BL-132 — from-Databricks build-model: promote duplicate `column_id` to a formula (I8/I5 parity) `Tier 3`
+
+**Filed:** 2026-07-24.
+**Source:** surfaced during the Databricks role-play round-trip verification (PR #330) — a
+TS→MV→TS round-trip of the SUPPORT_CASE model, where the model has both a raw fact/measure
+column and an aggregate metric over the *same* physical column.
+**Affects:** `ts databricks build-model` (`mv_build_model.build_columns_and_formulas`).
+
+**Symptom:** `ts tml lint` I8 — `column_id 'SFCASE::TIMETORESOLVE__C' appears 2 times in
+columns[]` — so the emitted Model TML is rejected on import. Two `columns[]` entries resolve
+to the same `TABLE::col` because the source referenced the physical column twice (e.g. a raw
+`MEASURE` column `F_TIME_TO_RESOLVE` **and** `AVG(TIMETORESOLVE__C)`).
+
+**Why it matters:** the from-**Snowflake** build-model (`sv_build_model`) already handles this
+— it detects a duplicate `column_id` and promotes the extra occurrence(s) to `formulas[]`
+(I8, and the related I5 `COUNT(DISTINCT)` → `unique count(...)` rule). The from-Databricks
+build-model lacks that promotion, so the two converters diverge on the same input shape. This
+is a converter-parity gap, orthogonal to role-play.
+
+**Approach:** port the duplicate-`column_id` detection + formula-promotion from `sv_build_model`
+into `mv_build_model` (ideally via a shared helper so the rule has one home), keeping one
+`column_id` entry and expressing the other aggregation(s) as `formulas[]`. Add a unit test with
+a fact-column + aggregate-metric-on-same-column fixture; re-run the SUPPORT_CASE round-trip to
+confirm a clean `ts tml lint`.
+
+**Target:** next Databricks converter edit (fold into BL-100's Databricks parity pass).
+
+---
+
+## BL-133 — `ts metadata delete`: partial-success handling for batch deletes `Tier 3`
+
+**Filed:** 2026-07-24.
+**Source:** fixture teardown after the role-play PRs — deleting a model + its tables in one
+call failed the whole batch when one GUID was already gone.
+**Affects:** `ts metadata delete` (`commands/metadata.py`) + the `metadata/delete` API call.
+
+**Symptom:** `ts metadata delete <g1> <g2> ... <gN>` returns a single 400 (`13003 Metadata
+object not found corresponding to the metadata_identifier: ...`) and deletes **nothing** if
+*any* one GUID in the batch is missing — the call is all-or-nothing. Deleting each GUID
+individually succeeds, so the objects were deletable; only the batch atomicity bit.
+
+**Why it matters:** teardown/cleanup scripts (and the dependency-manager rollback path) often
+pass a set of GUIDs where some may already be gone; today that aborts the entire cleanup and
+forces a per-GUID retry loop.
+
+**Approach:** options — (a) pre-filter the batch against `metadata search` and drop GUIDs that
+don't resolve before calling delete; (b) on a 400, fall back to per-GUID deletes and report a
+per-object outcome map (`{guid: deleted|not_found|error}`) to stdout; (c) surface a
+`--ignore-missing` flag. Keep the JSON-to-stdout contract. Add a unit test for the fallback
+outcome map. Low effort; mostly a resilience/UX improvement.
+
+**Target:** opportunistic.
