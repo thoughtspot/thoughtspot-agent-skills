@@ -57,7 +57,9 @@ a wholesale port. In particular:
     out of scope here.
 
 Pure functions only — no I/O, no network, no ThoughtSpot/Tableau connection.
-Backs ``ts tableau verify``.
+Backs ``ts tableau verify`` (single ``--model``) and ``ts tableau verify --dir``
+(``verify_conversion_dir`` loops ``verify_conversion`` over every model in a
+`build-model` output directory and aggregates the reports into one call).
 """
 from __future__ import annotations
 
@@ -414,6 +416,46 @@ def check_limitation_coverage(tiers: dict[str, str]) -> dict:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+
+def verify_conversion_dir(parsed: dict, models: list[tuple[str, dict]]) -> dict:
+    """Aggregate ``verify_conversion`` across every model in a `build-model` output
+    directory — backs ``ts tableau verify --dir`` (one call instead of one per model).
+
+    ``models`` is a list of ``(label, model_tml)`` pairs, typically ``(file_path,
+    parsed_tml_dict)`` for each ``*.model.tml`` the caller discovered. Each model is
+    verified independently against the same ``parsed`` workbook via
+    :func:`verify_conversion` — this function does no cross-model comparison of its
+    own, it only loops the existing per-model check and rolls the results up.
+
+    Returns ``{"ok": bool, "models": [{"model_file": label, **report}, ...],
+    "summary": {"n_models", "errors", "warnings", "models_with_errors"}}``. ``ok`` is
+    False iff any model's report is not ok (mirrors the single-model exit-code
+    contract: the aggregate exit code is non-zero if any model has an ERROR).
+    """
+    per_model: list[dict] = []
+    total_errors = 0
+    total_warnings = 0
+    models_with_errors: list[str] = []
+
+    for label, model_tml in models:
+        report = verify_conversion(parsed, model_tml)
+        per_model.append({"model_file": label, **report})
+        total_errors += report["summary"]["errors"]
+        total_warnings += report["summary"]["warnings"]
+        if not report["ok"]:
+            models_with_errors.append(label)
+
+    return {
+        "ok": len(models_with_errors) == 0,
+        "models": per_model,
+        "summary": {
+            "n_models": len(models),
+            "errors": total_errors,
+            "warnings": total_warnings,
+            "models_with_errors": models_with_errors,
+        },
+    }
 
 
 def verify_conversion(parsed: dict, model_tml: dict) -> dict:

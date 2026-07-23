@@ -12,11 +12,17 @@ catch a wiring regression between the command and the pure module.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
 from ts_cli.cli import app
-from ts_cli.tableau.verify import _similarity, normalize_expr, verify_conversion
+from ts_cli.tableau.verify import (
+    _similarity,
+    normalize_expr,
+    verify_conversion,
+    verify_conversion_dir,
+)
 
 try:
     runner = CliRunner(mix_stderr=False)
@@ -226,6 +232,60 @@ def test_limitation_coverage_is_advisory_never_error():
     assert limitation["stats"]["untranslatable_detected"] == 1
 
 
+# ---------------------------------------------------------------------------
+# verify_conversion_dir — pure aggregation across N models (`verify --dir`)
+# ---------------------------------------------------------------------------
+
+def test_verify_conversion_dir_all_clean_is_ok():
+    parsed = _parsed(calcs=[_calc("Total Amount", "SUM([Amount])")])
+    clean_model = _model_tml(
+        formulas=[{"id": "formula_Total Amount", "name": "Total Amount",
+                  "expr": "sum ( [ORDERS::Amount] )"}],
+        columns=[_formula_column("Total Amount", "formula_Total Amount")],
+    )
+    models = [("a.model.tml", clean_model), ("b.model.tml", clean_model),
+              ("c.model.tml", clean_model)]
+
+    agg = verify_conversion_dir(parsed, models)
+
+    assert agg["ok"] is True
+    assert agg["summary"]["n_models"] == 3
+    assert agg["summary"]["errors"] == 0
+    assert agg["summary"]["models_with_errors"] == []
+    assert [m["model_file"] for m in agg["models"]] == ["a.model.tml", "b.model.tml", "c.model.tml"]
+    # Each entry carries the full per-model report shape (not just a summary).
+    assert all("checks" in m and "summary" in m for m in agg["models"])
+
+
+def test_verify_conversion_dir_aggregates_errors_and_worst_finding_gates_ok():
+    parsed = _parsed(calcs=[_calc("Total Amount", "SUM([Amount])")])
+    clean_model = _model_tml(
+        formulas=[{"id": "formula_Total Amount", "name": "Total Amount",
+                  "expr": "sum ( [ORDERS::Amount] )"}],
+        columns=[_formula_column("Total Amount", "formula_Total Amount")],
+    )
+    # "Total Amount" never emitted here -> structural ERROR (a genuine drop).
+    broken_model = _model_tml(formulas=[], columns=[])
+    models = [("clean.model.tml", clean_model), ("broken.model.tml", broken_model)]
+
+    agg = verify_conversion_dir(parsed, models)
+
+    assert agg["ok"] is False  # gated by the single broken model
+    assert agg["summary"]["n_models"] == 2
+    assert agg["summary"]["errors"] >= 1
+    assert agg["summary"]["models_with_errors"] == ["broken.model.tml"]
+    clean_entry = next(m for m in agg["models"] if m["model_file"] == "clean.model.tml")
+    broken_entry = next(m for m in agg["models"] if m["model_file"] == "broken.model.tml")
+    assert clean_entry["ok"] is True
+    assert broken_entry["ok"] is False
+
+
+def test_verify_conversion_dir_empty_models_is_ok_with_zero_count():
+    agg = verify_conversion_dir(_parsed(), [])
+    assert agg["ok"] is True
+    assert agg["summary"]["n_models"] == 0
+    assert agg["models"] == []
+
 
 # ---------------------------------------------------------------------------
 # CliRunner — the real `ts tableau verify` command, end to end
@@ -291,3 +351,98 @@ def test_cli_verify_flags_drop_and_exits_nonzero(tmp_path):
     assert report["ok"] is False
     structural = next(c for c in report["checks"] if c["name"] == "structural")
     assert any("Total Amount" in f["message"] for f in structural["findings"])
+
+
+# ---------------------------------------------------------------------------
+# CliRunner — `ts tableau verify --dir` (Fix C: aggregate every model in one call)
+# ---------------------------------------------------------------------------
+
+_CLEAN_MODEL_TML = {
+    "model": {
+        "name": "Orders",
+        "model_tables": [{"name": "ORDERS"}],
+        "formulas": [{"id": "formula_Total Amount", "name": "Total Amount",
+                     "expr": "sum ( [ORDERS::Amount] )"}],
+        "columns": [_formula_column("Total Amount", "formula_Total Amount")],
+    }
+}
+
+_BROKEN_MODEL_TML = {
+    # "Total Amount" is translatable but never emitted — a genuine silent drop.
+    "model": {"name": "Orders", "model_tables": [{"name": "ORDERS"}],
+             "formulas": [], "columns": []}
+}
+
+
+def _make_parsed(tmp_path) -> Path:
+    twb = tmp_path / "smoke.twb"
+    twb.write_text(_SMOKE_TWB)
+    parsed_path = tmp_path / "parsed.json"
+    r1 = runner.invoke(app, ["tableau", "parse", str(twb), "--output", str(parsed_path)])
+    assert r1.exit_code == 0, r1.stdout + r1.stderr
+    return Path(parsed_path)
+
+
+def test_cli_verify_dir_aggregates_and_excludes_phase0(tmp_path):
+    parsed_path = _make_parsed(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "a.model.tml").write_text(json.dumps(_CLEAN_MODEL_TML))
+    (out / "b.model.tml").write_text(json.dumps(_BROKEN_MODEL_TML))
+    # A phase0 base model has no formulas at all — if --dir wrongly included it,
+    # it would ALSO report as broken (double-counting the same underlying drop).
+    (out / "a.phase0.model.tml").write_text(json.dumps(_BROKEN_MODEL_TML))
+
+    result = runner.invoke(app, ["tableau", "verify", "--parse", str(parsed_path),
+                                "--dir", str(out)])
+    assert result.exit_code != 0
+    report = json.loads(result.stdout)
+    assert report["ok"] is False
+    assert report["summary"]["n_models"] == 2  # phase0 excluded
+    model_files = {Path(m["model_file"]).name for m in report["models"]}
+    assert model_files == {"a.model.tml", "b.model.tml"}
+    assert Path(report["summary"]["models_with_errors"][0]).name == "b.model.tml"
+
+
+def test_cli_verify_dir_all_clean_exits_zero(tmp_path):
+    parsed_path = _make_parsed(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "a.model.tml").write_text(json.dumps(_CLEAN_MODEL_TML))
+    (out / "b.model.tml").write_text(json.dumps(_CLEAN_MODEL_TML))
+
+    result = runner.invoke(app, ["tableau", "verify", "--parse", str(parsed_path),
+                                "--dir", str(out)])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["ok"] is True
+    assert report["summary"]["n_models"] == 2
+    assert report["summary"]["errors"] == 0
+
+
+def test_cli_verify_dir_no_matching_files_errors(tmp_path):
+    parsed_path = _make_parsed(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "orders.table.tml").write_text("table: {}\n")  # no *.model.tml present
+
+    result = runner.invoke(app, ["tableau", "verify", "--parse", str(parsed_path),
+                                "--dir", str(out)])
+    assert result.exit_code != 0
+
+
+def test_cli_verify_requires_exactly_one_of_model_or_dir(tmp_path):
+    parsed_path = _make_parsed(tmp_path)
+
+    neither = runner.invoke(app, ["tableau", "verify", "--parse", str(parsed_path)])
+    assert neither.exit_code != 0
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "a.model.tml").write_text(json.dumps(_CLEAN_MODEL_TML))
+    model_path = tmp_path / "orders.model.tml"
+    model_path.write_text(json.dumps(_CLEAN_MODEL_TML))
+
+    both = runner.invoke(app, ["tableau", "verify", "--parse", str(parsed_path),
+                              "--model", str(model_path), "--dir", str(out)])
+    assert both.exit_code != 0

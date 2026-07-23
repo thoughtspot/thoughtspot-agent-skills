@@ -213,6 +213,15 @@ The flow is interactive, but most of the wall-clock cost is avoidable. Apply the
 - **Don't fetch what you don't need.** Skip `ts connections list` / `ts connections get`
   whenever the user names the connection or the tables are reused (Steps 4/4.5). Skip the
   whole model/table layer entirely in scope 3 (LB only).
+- **One `build-model` call per workbook, not one per datasource** (Step 5a/5b) — it already
+  emits every used datasource's Model + Table TML in a single invocation. Then one `ts tml
+  lint --dir` and one `ts tableau verify --dir` over the whole output directory (Step 6) —
+  not one lint/verify per model. A 3-datasource workbook needs 1 build-model + 1 lint + 1
+  verify, not 3 of each.
+- **Never `--help` a `ts tableau`/`ts tml` command this skill documents.** Every step below
+  gives the exact, copy-pasteable invocation (real flag names, from the command's own
+  `--help`) — use it as written rather than probing the CLI to rediscover flags it already
+  tells you.
 
 ### Steps (Audit mode)
 
@@ -1138,18 +1147,26 @@ mkdir -p /tmp/ts_tableau_mig/output/{workbook_name}
 > **Prerequisite:** ts-cli v0.77.0+.
 
 `ts tableau build-model` (GENERATE mode, no `--existing-guid`) emits Table TML
-automatically — **no hand-assembly**. It writes one `.table.tml` per physical table
-identified in Step 3 with `type="table"` to `{output_dir}/{TABLE_NAME}.table.tml`.
-**Custom SQL relations are excluded** — those are handled in Step 5c.
+automatically — **no hand-assembly**. **Run it ONCE for the whole workbook** (below) —
+the same call also emits every datasource's Model TML (Step 5b), so 5a and 5b describe
+one command's two outputs, not two commands. It writes one `.table.tml` per physical
+table identified in Step 3 with `type="table"` to `{output_dir}/{TABLE_NAME}.table.tml`,
+across every datasource the workbook uses — a table shared by multiple datasources (e.g.
+Set Control's `Orders`, used by all 3 of its datasources) is written once and shared, not
+regenerated per datasource. **Custom SQL relations are excluded** — those are handled in
+Step 5c.
 
 ```bash
-ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
-  --datasource "{datasource_name}" --output-dir {output_dir} \
-  --database "{database}" --schema "{schema}"
+ts tableau build-model "{workdir}/{workbook}.twb" --connection "{connection_name}" \
+  --output-dir {output_dir} --database "{database}" --schema "{schema}"
 ```
 
 Pass `--database`/`-D` and `--schema`/`-s` with the `db`/`schema` values resolved in
-Step 4.5, so the emitted table(s) bind to the real physical location.
+Step 4.5, so the emitted table(s) bind to the real physical location. Optional flags:
+`--datasource "{name}"` scopes the call to one datasource — use it only to intentionally
+narrow (e.g. re-running after fixing one datasource's `--table-name-map`), never as a
+default per-datasource loop; `--model-name "{name}"` overrides the derived model name
+(only meaningful together with `--datasource`); `--dry-run` reports without writing files.
 
 - **Single-table datasources** (the common case): one `.table.tml` with every
   physical column.
@@ -1184,39 +1201,55 @@ entry with matching `formula_id`.
 
 Generate one model per datasource the workbook **actually uses** — don't blindly merge
 independent datasources, but also don't materialize an unused model for every datasource.
-How that model TML is produced depends on whether the datasource participates in a blend:
+That's a rule about the **output** (strict separation between models), not an instruction
+to run the command once per datasource — see below. How each datasource's model TML is
+produced depends on whether it participates in a blend:
 
-**Single-datasource models (the common case — no blend) — GENERATE mode.** When a
-datasource has no entry in `blend_graph` (from Step 3e), build its base model TML with
-`ts tableau build-model` in GENERATE mode (no `--existing-guid`) instead of hand-assembling
-it:
+**Single-datasource models (the common case — no blend) — GENERATE mode, ONE call for
+the whole workbook.** When a datasource has no entry in `blend_graph` (from Step 3e), its
+base model TML comes from `ts tableau build-model` in GENERATE mode (no `--existing-guid`)
+— **this is the exact same call already made in Step 5a, not a second invocation**:
 
 ```bash
-ts tableau build-model {workdir}/{workbook}.twb \
+ts tableau build-model "{workdir}/{workbook}.twb" \
   --connection "{connection_name}" \
-  --datasource "{datasource_name}" \
   --output-dir {output_dir} \
+  --database "{database}" --schema "{schema}" \
   [--table-name-map {workdir}/table_name_map.json]
 ```
 
-This runs the same TWB-parse → translate → assemble pipeline described below and writes
-two model TML files: `{slug}.phase0.model.tml` (base — `model_tables`, physical
-`columns`, `joins`, `parameters`; **no formulas**) and `{slug}.model.tml` (full model
-with all formulas, topologically ordered). Step 5b uses `*.phase0.model.tml` — that file
-is the Phase-1 base model imported in Step 7. Formulas are added independently in Step 7
-Phase 2, via a separate `build-model --existing-guid` call that re-derives them from the
-TWB against the live, already-imported model.
+Run it **once per workbook, with no `--datasource`** — it emits every non-blended
+datasource's model + table TML in that single call. A 3-datasource workbook (e.g. Set
+Control) emits 3 `{slug}.model.tml`/`{slug}.phase0.model.tml` pairs plus the shared
+`.table.tml` file(s) from this **one** call — never 3 separate `build-model` runs. Pass
+`--datasource "{datasource_name}"` only when you intentionally want to (re)build just one
+datasource (e.g. retrying after fixing that datasource's `--table-name-map` entry) — do
+NOT loop it per datasource as the default flow.
 
-`--table-name-map` (optional): a JSON file `{"twb_table_name": "thoughtspot_table_name"}`.
-Supply it **only** when the ThoughtSpot table's TML `name` (from Step 5a) differs from the
-TWB relation name — warehouse-normalized names, or a published-datasource TWB where the
-relation is literally named `sqlproxy`. Omit the flag when the names already match; the
-default (no map) behavior is unchanged.
+This runs the same TWB-parse → translate → assemble pipeline described below and writes,
+**for each datasource**, two model TML files: `{slug}.phase0.model.tml` (base —
+`model_tables`, physical `columns`, `joins`, `parameters`; **no formulas**) and
+`{slug}.model.tml` (full model with all formulas, topologically ordered). Step 7 Phase 1
+imports each `*.phase0.model.tml` as that datasource's base model. Formulas are added
+independently in Step 7 Phase 2, via a separate `build-model --existing-guid` call **per
+model** — that phase is inherently one-call-per-GUID (each already-imported model has its
+own GUID to merge into) and is unaffected by the "one call" rule above.
+
+`--table-name-map` (optional): a JSON file `{"twb_table_name": "thoughtspot_table_name"}`,
+applied workbook-wide (one file covers every datasource's renames — it's looked up by
+table name, not scoped to a single datasource). Supply it **only** when the ThoughtSpot
+table's TML `name` (from Step 5a) differs from the TWB relation name — warehouse-
+normalized names, or a published-datasource TWB where the relation is literally named
+`sqlproxy`. Omit the flag when the names already match; the default (no map) behavior is
+unchanged.
 
 **Published/sqlproxy datasources bound to an existing table/view — reconcile columns.**
 When the datasource is published (`sqlproxy`) and binds to a pre-existing ThoughtSpot
 table/view (the consultant/stand-in case), the emitted columns carry Tableau's
-`(Custom SQL Query N)` suffixes and may diverge from the view's real names. Reconcile:
+`(Custom SQL Query N)` suffixes and may diverge from the view's real names. This is a
+deliberate, targeted exception to the "one call for the whole workbook" rule above — each
+`--reconcile-table` run binds one specific datasource to one specific existing table GUID,
+so `--datasource` is required here, not a loop to avoid. Reconcile:
 
 1. **Plan** — get suggested mappings + drops (no write). `--reconcile-table` requires
    `--profile` (the CLI hard-exits with "--profile is required when using
@@ -1331,6 +1364,11 @@ ts tableau translate-formulas \
   --datasource "{datasource_name}" \
   --output {workdir}/formulas_translated.json
 ```
+
+Optional flags (omit unless needed): `--csq-map {workdir}/csq_map.json` — maps a Custom
+SQL Query alias to its table name, needed when a formula references a Custom SQL relation
+by alias; `--date-columns COL_A,COL_B` — comma-separated date columns to rewrite date
+arithmetic against.
 
 **Output** (`formulas_translated.json`):
 
@@ -1544,15 +1582,24 @@ behaves wrong, or rejects it on import):
 - **I8** — no duplicate `column_id` across `columns[]`. *(Hard import rejection: "columns should have unique column_id values".)*
 
 `ts tml lint` reads the same `--dir`/`--order` input as `ts tml import`
-and exits non-zero on any finding, so it gates the import:
+and exits non-zero on any finding, so it gates the import. **Run it once over the
+whole output directory** — not per model file — so the cross-reference check
+(model→table/sql_view) sees every table alongside every model in one pass:
 
 ```bash
 ts tml lint --dir /tmp/ts_tableau_mig/output/{workbook_name} --order tableau
 ```
 
+Optional flags (rarely needed here): `--model-phase base` drops `*.phaseN.model.tml`
+for N>=1 (keeps bare `.model.tml` and `.phase0.model.tml` — not relevant to this skill's
+2-file phase0/full split); `--pattern '{glob}'` restricts `--dir` to matching filenames.
+
 Do not import until it reports `"clean": true`. Fix any finding and re-lint.
 
 #### Migration-fidelity gate (`ts tableau verify` — silent drops + mistranslations)
+
+> **Prerequisite:** `--dir` (below) requires ts-cli v0.83.0+. On an older CLI, fall back
+> to one `--model` call per base Model TML file.
 
 `ts tml lint` proves the TML is *structurally* valid; it does not prove the model is a
 faithful copy of the workbook. Run **`ts tableau verify`** to diff the parsed TWB
@@ -1566,15 +1613,26 @@ catches what a TWB-only coverage count and a server-side `VALIDATE_ONLY` import 
 - **Mistranslations** — a formula whose TML translation barely resembles its Tableau
   source (token-level similarity buckets: MATCH / PARTIAL / LOW / MISSING).
 
+**Run it once over the whole output directory with `--dir`** — not once per model:
+
 ```bash
 ts tableau verify \
   --parse /tmp/ts_tableau_mig/{workbook_name}_parsed.json \
-  --model /tmp/ts_tableau_mig/output/{workbook_name}/{model_slug}.model.tml
+  --dir /tmp/ts_tableau_mig/output/{workbook_name}
 ```
 
-Run once per base model in a multi-model migration — one `--model` file per call. It prints
-a JSON report to stdout, a human summary to stderr, and exits non-zero when any check has an
-**ERROR**. How to act on it:
+`--dir` verifies every full Model TML in that directory (`*.model.tml`, excluding the
+formula-less `*.phase0.model.tml` base models) in one call, aggregating the per-model
+reports into one JSON report + one combined exit code — non-zero if ANY model has an
+ERROR. A multi-datasource workbook's models are still each checked independently (no
+cross-model coupling); this is one CLI call producing N per-model results, not a
+looser check. (`--model {path}` still verifies a single model file on its own, for the
+rare case a single model needs re-checking after a fix — optional flags are mutually
+exclusive: exactly one of `--model`/`--dir` per call.)
+
+It prints a JSON report to stdout (top-level `models[]`, one entry per model, plus a
+`summary` with the aggregate `errors`/`warnings`/`models_with_errors`) and a human summary
+to stderr. How to act on it:
 
 - **structural ERROR** (a translatable formula / table / join dropped) — a blocker to a
   *faithful* migration. Investigate before importing: fix the build, or confirm the drop is
@@ -1587,9 +1645,9 @@ a JSON report to stdout, a human summary to stderr, and exits non-zero when any 
   echoes, and does not replace, the Step 11.5 / Step 12 coverage report, which stays the
   authoritative gap list.
 
-Treat a `structural` ERROR as the gate; PARTIAL/LOW and advisory findings are review
-prompts. (Cross-reference dangling-ref checking is `ts tml lint --dir`'s job, above — verify
-is about source-vs-output fidelity, not TML internal consistency.)
+Treat a `structural` ERROR (on any model) as the gate; PARTIAL/LOW and advisory findings
+are review prompts. (Cross-reference dangling-ref checking is `ts tml lint --dir`'s job,
+above — verify is about source-vs-output fidelity, not TML internal consistency.)
 
 Validate (up to 10 fix cycles). `--policy VALIDATE_ONLY` checks without persisting:
 
@@ -2248,6 +2306,10 @@ dashboard spec from Steps 9/9b/9c and run:
 ts tableau build-liveboard --input dashboard_spec.json --output-dir ./out
 ```
 
+Optional flags (only needed if `--input` is a bare `ts tableau parse` output rather than a
+full spec — not the case here, since the spec below already carries `model_name`):
+`--model-name`, `--model-fqn` (GUID — more robust than name), `--report-name`.
+
 The spec is one object per dashboard → visuals → fields, each field tagged with its Tableau
 `shelf` (`columns`/`rows`/`color`) or an explicit `role`, plus `measure: true/false`; carry
 the Step 9c grid placement as each visual's `tile`. The command does the role-aware axis
@@ -2812,6 +2874,7 @@ suggested-but-unverified with its tokens for manual follow-up.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.34.0 | 2026-07-23 | **Token-reduction — one `build-model`/`lint`/`verify` call per workbook, exact CLI examples (no `--help` probing).** Benchmark runs made 5-7 `ts tableau … --help` calls per session because steps described commands in prose without exact flags — every `ts tableau`/`ts tml lint` step this skill uses now embeds a canonical copy-pasteable invocation (real flag names, sourced from each command's own `--help`) plus a one-line note on the key optional flags (`translate-formulas` `--csq-map`/`--date-columns`, `build-liveboard` `--model-name`/`--model-fqn`/`--report-name`, `tml lint` `--model-phase`/`--pattern`). Separately: Step 5b's "one per datasource (strict separation)" framing was leading agents to run `build-model` once per datasource (3 build + 3 lint + 3 verify on a 3-datasource workbook) even though a single call over the whole workbook already emits every used datasource's Model + Table TML (confirmed live on `TableauSetControlUseCases.twbx`: 1 call → 3 `.model.tml` pairs + the shared `.table.tml`, byte-identical to the old 3-call loop). Steps 5a/5b now state the one-call rule explicitly (`--datasource` is for intentional scoping only, never a default loop) while keeping the per-datasource *output* separation unchanged; Step 6 now runs `ts tml lint --dir` and the new `ts tableau verify --dir` (ts-cli v0.83.0+) once each over the whole output directory instead of once per model. New "Efficiency" bullets in Step 0 restate all three rules. No conversion-output change — procedure + CLI-doc precision only. Arbiter: Set Control (3 datasources) now needs 1 build-model + 1 lint + 1 verify, was 3+3+3. Prereq ts-cli v0.83.0. |
 | 1.33.0 | 2026-07-23 | **Multi-table/federated follow-ups — strip db_column_name disambig suffix, dedupe Extract-wrapper tables (BL follow-up #2/#3/#4).** **#2:** Tableau's caption-collision disambiguation suffix (` (table_name)`, e.g. `LineItemId (agg_booked_monthly)`) no longer leaks into a generated Table TML's `db_column_name` — now sourced from the metadata-record's `remote-name` (the real warehouse column name), matching Step 3's own documented rule. Was breaking join cross-references between the colliding tables ("column_id not found" at import) — live regression on `Ads Commercial Dashboard.twb`: `ts tml lint --dir` went from 2 XREF findings to clean. Columns are also now stamped with their owning table from the same metadata, so multi-table `column_id` is `TABLE::col`-qualified (previously bare once two tables' same-physical-name columns lost their (accidental) suffix-based uniqueness). **#4:** the hyper `Extract` cache wrapper relation (schema-scoped `[Extract]`, written by Tableau alongside every live-source table) is no longer parsed as a physical table — was emitting a duplicate `.table.tml` per table (Ads: 25 → 13 tables) that silently overwrote a shared table run-to-run across datasources (`TableauSetControlUseCases.twbx` Set Control: `Orders` + `Extract` → `Orders` only). Per Step 3b: use the live-source relation, ignore `[Extract]`. **#3 (live-verified, not a code bug today):** `VALIDATE_ONLY` on se-thoughtspot/`APJ_TAB` confirms ThoughtSpot rejects a bare `column_id` (no `TABLE::` prefix) even on a single-table model (error 14547); audited every GENERATE-flow branch and found today's single-table path already qualifies correctly, pinned by a new regression test. Added invariant I12 + a `ts tml lint` check (bare `column_id` on a single-table model) as the permanent guard. Prereq ts-cli v0.82.0. |
 | 1.32.0 | 2026-07-23 | **Formula translation fixes — wire documented REGEXP/FINDNTH mappings, fix REPLACE + LOD no-space bugs.** `ts tableau build-model` no longer drops `REGEXP_EXTRACT`/`REGEXP_MATCH`/`REGEXP_REPLACE`/`FINDNTH` as "unmapped Tableau function" — they were already documented (`tableau-formula-translation.md` "Pass-Through Fallback") but never wired into `functions.py::map_functions`/removed from `validate.py::_UNMAPPED_FUNCTIONS` (an AST-spike finding). `REPLACE` re-mapped off an invalid bare `replace(...)` native call (live-confirmed error 14516) onto the same `sql_string_op` pass-through form. Fixed an LOD keyword-whitespace bug: a grand-total `{FIXED: agg}`/`{INCLUDE: agg}`/`{EXCLUDE: agg}` (no space before the colon) previously fell through the keyword regex and silently emitted invalid `{ FIXED }` TML. Regression on `ElevateYourTableauSkills-10AdvancedTricks.twbx`: 38/54 → 50/54 formulas now translate. Live-verified `VALIDATE_ONLY` (se-thoughtspot/`APJ_TAB`): all 5 formula types return OK; bare `replace(...)` negative control confirms 14516. `references/coverage-matrix.md` moves these from Unmapped to Mapped (#126-130); reference doc's self-contradictory "passed through untranslated" line corrected. Prereq ts-cli v0.81.0. |
 | 1.31.0 | 2026-07-23 | **Docs refactor — context-budget rule + reference extraction (no logic changes).** Added a "Context budget — never Read big tool-output files" section listing the real `--out`/`--output` JSON and generated-TML paths this skill produces. Extracted reference-heavy detail (long TML templates, worked examples, exhaustive rule tables, edge-case enumerations) out of Steps 5, 10, A4, 7, 12, and 3's field-mapping detail into `references/step-5-tml-generation.md`, `references/step-10-liveboard-generation.md`, `references/step-7-review-templates.md`, `references/audit-mode-report.md`, `references/migration-report-format.md`, and `references/step-3-parse-fields.md`, each linked back from its step's spine. Cuts SKILL.md from 4,402 to ~2,900 lines (~34%); every Step heading and all step logic/prompts/commands are unchanged. |

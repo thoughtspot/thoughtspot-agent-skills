@@ -1390,14 +1390,60 @@ def _print_verify_summary(report: dict) -> None:
             typer.echo(f"    - [{f['severity']}] {f['message']}", err=True)
 
 
+def _discover_dir_model_files(directory: str) -> list[str]:
+    """Resolve `--dir` into a sorted list of full Model TML paths for `verify --dir`.
+
+    Matches every `*.model.tml` file directly in `directory` (non-recursive, reusing
+    `ts tml`'s own --dir scanner for consistency), excluding phased base models
+    (`*.phase0.model.tml`) — those carry no formulas yet (see `build-model`'s
+    phase-0/full split) and aren't what the migration-fidelity check compares.
+    Raises SystemExit with a clear message on a missing/invalid --dir or no matches.
+    """
+    from ts_cli.commands.tml import collect_tml_paths
+
+    matched = collect_tml_paths([], directory, patterns=["*.model.tml"])
+    full_models = [p for p in matched if not p.lower().endswith(".phase0.model.tml")]
+    if not full_models:
+        typer.echo(
+            f"--dir matched no full Model TML (*.model.tml, excluding "
+            f"*.phase0.model.tml) in: {directory}",
+            err=True,
+        )
+        raise SystemExit(1)
+    return full_models
+
+
+def _print_verify_dir_summary(agg: dict) -> None:
+    summary = agg["summary"]
+    typer.echo(
+        f"Verify --dir: {summary['n_models']} model(s) — "
+        f"{summary['errors']} error(s), {summary['warnings']} warning(s) "
+        f"({len(summary['models_with_errors'])} model(s) with errors)",
+        err=True,
+    )
+    for entry in agg["models"]:
+        s = entry["summary"]
+        typer.echo(
+            f"  [{'ERROR' if not entry['ok'] else 'OK'}] {entry['model_file']} — "
+            f"{s.get('errors', 0)} error(s), {s.get('warnings', 0)} warning(s)",
+            err=True,
+        )
+
+
 @app.command("verify")
 def verify_cmd(
     input_file: str = typer.Option(
         ..., "--parse", "--input", "-i",
         help="`ts tableau parse` output JSON (also accepted as --input, matching "
              "build-liveboard's convention)"),
-    model_file: str = typer.Option(..., "--model", "-m",
-                                    help="Generated Model TML file to verify against"),
+    model_file: Optional[str] = typer.Option(
+        None, "--model", "-m",
+        help="Generated Model TML file to verify against. Mutually exclusive with --dir."),
+    dir_: Optional[str] = typer.Option(
+        None, "--dir",
+        help="Directory of `build-model` output — verify every full Model TML "
+             "(*.model.tml, excluding *.phase0.model.tml) in one call. Mutually "
+             "exclusive with --model."),
 ) -> None:
     """Diff a parsed Tableau workbook against its generated Model TML.
 
@@ -1414,20 +1460,41 @@ def verify_cmd(
     Model<->table-TML dangling-reference checking is provided separately by
     `ts tml lint --dir` and is intentionally out of scope here.
 
-    Emits the full report as JSON to stdout; a human-readable summary to
-    stderr. Exit code is non-zero if any check carries an ERROR finding.
+    With `--model`: verifies that single Model TML file, printing the full report
+    as JSON to stdout (a human-readable summary to stderr). Exit code is non-zero
+    if any check carries an ERROR finding.
+
+    With `--dir`: verifies every full Model TML in that directory (as `--model`
+    would, one call each) and aggregates the reports into one JSON report + one
+    combined exit code (non-zero if ANY model has an ERROR) — so a multi-datasource
+    workbook's models are checked in a single call instead of one per model.
+    Exactly one of `--model`/`--dir` is required.
 
     \\b
       ts tableau verify --parse parsed.json --model out/orders.model.tml
+      ts tableau verify --parse parsed.json --dir out/
     """
-    from ts_cli.tableau.verify import verify_conversion
+    if bool(model_file) == bool(dir_):
+        typer.echo("Exactly one of --model or --dir is required.", err=True)
+        raise SystemExit(1)
+
+    from ts_cli.tableau.verify import verify_conversion, verify_conversion_dir
 
     parsed = _load_json(Path(input_file), "Parse file")
-    model_tml = _load_yaml_tml(Path(model_file), "Model TML file")
 
-    report = verify_conversion(parsed, model_tml)
-    _print_verify_summary(report)
+    if model_file:
+        model_tml = _load_yaml_tml(Path(model_file), "Model TML file")
+        report = verify_conversion(parsed, model_tml)
+        _print_verify_summary(report)
+        print(json.dumps(report, indent=2))
+        if not report["ok"]:
+            raise SystemExit(1)
+        return
 
-    print(json.dumps(report, indent=2))
-    if not report["ok"]:
+    model_paths = _discover_dir_model_files(dir_)
+    models = [(p, _load_yaml_tml(Path(p), f"Model TML file ({p})")) for p in model_paths]
+    agg = verify_conversion_dir(parsed, models)
+    _print_verify_dir_summary(agg)
+    print(json.dumps(agg, indent=2))
+    if not agg["ok"]:
         raise SystemExit(1)
