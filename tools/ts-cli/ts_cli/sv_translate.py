@@ -18,16 +18,48 @@ from ts_cli.sv_sql import translate_sql_expr
 
 # --- identifier resolution --------------------------------------------------
 
-def _build_alias_map(parsed: dict) -> dict[str, str]:
-    """Map lowercase table alias -> uppercase table name (last part of FQN).
+def build_node_id_map(parsed: dict) -> dict[str, str]:
+    """Map each SV table alias -> its ThoughtSpot model node id (role-play aware).
 
-    Also maps the table name itself (lowercased) as a fallback — SV DDL
-    uses source table names in some positions (e.g. ``non additive by
-    (TABLE.COL)``), not the alias."""
+    A physical table referenced by more than one SV table is *reused* — a
+    role-playing pattern (e.g. one ``USER`` table played as ``CASE_OWNER``,
+    ``INCIDENT_OWNER`` and ``INCIDENT_RESOLVED_BY``). Each reused instance whose
+    alias differs from the physical name becomes its own node, identified by the
+    alias, so column references and joins stay unambiguous. A single-use table
+    (or the one instance whose alias equals the physical name) uses the physical
+    table name as its node id — no alias needed.
+
+    Returns ``{sv_alias: node_id}``. Keyed by the alias exactly as parsed."""
+    tables = parsed.get("tables", [])
+    phys_count: dict[str, int] = {}
+    for t in tables:
+        phys_count[t["name"]] = phys_count.get(t["name"], 0) + 1
+    node_of: dict[str, str] = {}
+    for t in tables:
+        alias, phys = t["alias"], t["name"]
+        reused = phys_count[phys] > 1
+        node_of[alias] = alias if (reused and alias != phys) else phys
+    return node_of
+
+
+def _build_alias_map(parsed: dict) -> dict[str, str]:
+    """Map lowercase table alias -> ThoughtSpot node id (role-play aware).
+
+    Node ids come from :func:`build_node_id_map`, so a reused physical table's
+    role-playing instances resolve to distinct nodes (``[ON_BEHALF_ACCOUNT::ID]``
+    vs ``[ACCOUNT::ID]``) instead of collapsing onto the shared physical name.
+
+    Also maps the table name itself (lowercased) as a fallback — SV DDL uses
+    source table names in some positions (e.g. ``non additive by (TABLE.COL)``),
+    not the alias. For a reused physical name the first-seen node wins (bare
+    physical-name references to an all-aliased reused table are ambiguous and
+    not expected in valid SV DDL)."""
+    node_of = build_node_id_map(parsed)
     alias_map: dict[str, str] = {}
     for t in parsed["tables"]:
-        alias_map[t["alias"].lower()] = t["name"]
-        alias_map[t["name"].lower()] = t["name"]
+        node = node_of[t["alias"]]
+        alias_map[t["alias"].lower()] = node
+        alias_map.setdefault(t["name"].lower(), node)
     return alias_map
 
 
@@ -57,7 +89,9 @@ def _build_relationship_pk_map(
     pk_map: dict[str, tuple[str, str]] = {}
     for r in parsed.get("relationships", []):
         to_table = r["to_table"]
-        to_col = r["to_column"]
+        # parse-sv emits `to_cols` (a list, for composite keys); older callers
+        # used a singular `to_column`. Accept either, taking the first key column.
+        to_col = r.get("to_column") or (r.get("to_cols") or [None])[0]
         pk_map[r["name"]] = (to_table, to_col)
     return pk_map
 
