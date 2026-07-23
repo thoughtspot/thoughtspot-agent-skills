@@ -209,3 +209,55 @@ def test_multi_table_assigns_owned_columns_and_collects_unowned(tmp_path):
     assert customers_cols == {"Customer Name"}
     assert "Mystery Column" not in orders_cols
     assert "Mystery Column" not in customers_cols
+
+
+# ---------------------------------------------------------------------------
+# 6. Fix #4 — hyper Extract wrapper must not be emitted as a duplicate table
+# ---------------------------------------------------------------------------
+
+EXTRACT_WRAPPER_TWB = """<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.b' caption='SetCtrl'>
+    <connection class='federated'>
+      <relation name='Orders' type='table' table='[Orders$]'/>
+      <metadata-records>
+        <metadata-record class='column'>
+          <remote-name>Sales</remote-name>
+          <local-name>[Sales]</local-name>
+          <parent-name>[Orders]</parent-name>
+          <local-type>real</local-type>
+        </metadata-record>
+      </metadata-records>
+    </connection>
+    <extract enabled='true'>
+      <connection class='hyper'>
+        <relation name='Extract' type='table' table='[Extract].[Extract]'/>
+      </connection>
+    </extract>
+    <column name='[Sales]' caption='Sales' datatype='real' role='measure'/>
+  </datasource>
+</workbook>
+"""
+
+
+def test_extract_wrapper_table_not_duplicated_end_to_end(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(EXTRACT_WRAPPER_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    table_files = list(out_dir.glob("*.table.tml"))
+    assert len(table_files) == 1
+    doc = yaml.safe_load(table_files[0].read_text())
+    assert doc["table"]["name"] == "Orders"
+
+    lint_result = runner.invoke(app, ["tml", "lint", "--dir", str(out_dir)])
+    payload = json.loads(lint_result.stdout)
+    assert payload["clean"] is True, payload

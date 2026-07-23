@@ -6,6 +6,8 @@ from ts_cli.tableau.twb import (
     extract_table_calc_addressing,
     detect_orphan_calcs,
     _extract_sql_views,
+    _extract_tables,
+    _is_extract_wrapper,
 )
 
 BLEND_XML = """
@@ -138,3 +140,93 @@ def test_extract_sql_views_none_when_no_text_relation():
                          "</datasource></datasources></workbook>")
     ds = root.find(".//datasource")
     assert _extract_sql_views(ds) == []
+
+
+# ---------------------------------------------------------------------------
+# Fix #4 — hyper Extract wrapper relations must not be emitted as tables
+# ---------------------------------------------------------------------------
+
+def test_is_extract_wrapper_detects_extract_schema():
+    assert _is_extract_wrapper("[Extract].[Extract]") is True
+    # the wrapper's own identifier commonly re-embeds the live table's full
+    # dotted db path + a GUID — must still be recognized via the FIRST segment
+    assert _is_extract_wrapper(
+        "[Extract].[agg_booked_monthly (dev_trusted_gold.bar_media.agg_booked_monthly)_8E5C5306]"
+    ) is True
+
+
+def test_is_extract_wrapper_false_for_live_source():
+    assert _is_extract_wrapper("[dev_trusted_gold].[bar_media].[agg_booked_monthly]") is False
+    assert _is_extract_wrapper("[Orders$]") is False
+    assert _is_extract_wrapper("") is False
+
+
+EXTRACT_WRAPPER_XML = """
+<datasource caption='SetCtrl'>
+  <connection class='federated'>
+    <relation name='Orders' table='[Orders$]' type='table'/>
+  </connection>
+  <extract enabled='true'>
+    <connection class='hyper'>
+      <relation name='Extract' table='[Extract].[Extract]' type='table'/>
+    </connection>
+  </extract>
+</datasource>
+"""
+
+
+def test_extract_tables_skips_extract_wrapper_relation():
+    ds = ET.fromstring(EXTRACT_WRAPPER_XML)
+    tables = _extract_tables(ds)
+    assert [t["name"] for t in tables] == ["Orders"]
+
+
+HASH_SUFFIXED_EXTRACT_XML = """
+<datasource caption='Ads'>
+  <connection class='federated'>
+    <relation name='agg_booked_monthly' table='[dev_trusted_gold].[bar_media].[agg_booked_monthly]' type='table'/>
+  </connection>
+  <object-graph>
+    <objects>
+      <object caption='agg_booked_monthly' id='agg_booked_monthly (x)_HASH'>
+        <properties context='extract'>
+          <relation name='agg_booked_monthly (dev_trusted_gold.bar_media.agg_booked_monthly)_8E5C5306'
+                    table='[Extract].[agg_booked_monthly (dev_trusted_gold.bar_media.agg_booked_monthly)_8E5C5306]'
+                    type='table'/>
+        </properties>
+      </object>
+    </objects>
+  </object-graph>
+</datasource>
+"""
+
+
+def test_extract_tables_skips_hash_suffixed_extract_wrapper():
+    # Reproduces the Ads Commercial Dashboard shape: the hash-suffixed Extract
+    # relation's own bracket segment embeds the live table's dotted db path,
+    # which is exactly what broke the naive "_strip_brackets().split('.')[-1]"
+    # alias_of derivation this fix sidesteps by excluding the relation outright.
+    ds = ET.fromstring(HASH_SUFFIXED_EXTRACT_XML)
+    tables = _extract_tables(ds)
+    assert [t["name"] for t in tables] == ["agg_booked_monthly"]
+
+
+def test_extract_tables_keeps_self_join_alias():
+    # A genuine self-join alias (d_partner1 -> alias_of d_partner) must survive
+    # the Extract-wrapper filter — it is a distinct, real join role, not a
+    # hyper-cache duplicate.
+    xml = """
+    <datasource caption='Ads'>
+      <connection class='federated'>
+        <relation name='d_partner' table='[db].[s].[d_partner]' type='table'/>
+        <relation name='d_partner1' table='[db].[s].[d_partner]' type='table'/>
+      </connection>
+    </datasource>
+    """
+    ds = ET.fromstring(xml)
+    tables = _extract_tables(ds)
+    by_name = {t["name"]: t for t in tables}
+    assert set(by_name) == {"d_partner", "d_partner1"}
+    assert by_name["d_partner1"]["alias_of"] == "d_partner"
+
+

@@ -324,6 +324,23 @@ def _strip_brackets(s: str) -> str:
     return s.replace("[", "").replace("]", "")
 
 
+def _is_extract_wrapper(tbl: str) -> bool:
+    """True when a relation's ``table`` path is schema-scoped to ``Extract`` —
+    Tableau's hyper-extract cache mirror of a table's live source, written
+    alongside (and with the same ``<relation type='table'>`` shape as) the real
+    relation. Per the skill's Step 3b ("Use the live-source relation; ignore
+    the ``[Extract]`` relation"), these must never be treated as physical
+    tables in their own right — see BL follow-up #4.
+
+    Only the FIRST bracketed segment (the schema) is checked. The wrapper's own
+    identifier commonly re-embeds the live table's full dotted db path plus a
+    GUID (e.g. ``[Extract].[agg_booked_monthly (db.schema.agg_booked_monthly)_8E5C...]``),
+    so splitting once on the first ``.`` (rather than stripping all brackets and
+    splitting on every ``.``) is what keeps this robust to those embedded dots.
+    """
+    return _strip_brackets(tbl).split(".", 1)[0] == "Extract"
+
+
 def _extract_tables(ds: ET.Element) -> list[dict]:
     """Extract physical table definitions from a datasource.
 
@@ -331,12 +348,21 @@ def _extract_tables(ds: ET.Element) -> list[dict]:
     the same physical table twice, Tableau assigns a distinct ``name`` (e.g.
     ``d_partner1``) while keeping the same ``table`` path. We preserve that alias
     so downstream model TML can reference both table instances independently.
+
+    Hyper-extract cache wrapper relations (``table`` schema-scoped to
+    ``[Extract]`` — see ``_is_extract_wrapper``) are skipped entirely: they
+    duplicate a real table under a mangled name and are never referenced by
+    joins, columns, or formulas (those all key off the live-source table name).
+    Emitting them as Table TML would write spurious duplicate tables that
+    overwrite each other run-to-run when multiple datasources share one.
     """
     tables = []
     seen = set()
     for rel in ds.findall(".//relation[@type='table']"):
-        rel_name = rel.get("name", "")
         tbl = rel.get("table", "")
+        if _is_extract_wrapper(tbl):
+            continue
+        rel_name = rel.get("name", "")
         physical_name = _strip_brackets(tbl).split(".")[-1] if tbl else ""
         name = rel_name or physical_name
         if not name or name in seen:
