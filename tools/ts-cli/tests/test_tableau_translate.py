@@ -1527,6 +1527,35 @@ class TestValidatePreImport:
         ])
         assert len(issues) == 0
 
+    # -- Nested-if-in-comparison (BL-060) --
+
+    def test_comparison_directly_followed_by_if_warns(self):
+        issues = validate_pre_import([
+            {"name": "Bad Compare", "expr": "sum([x]) > if [a] then 1 else 0 end"},
+        ])
+        assert len(issues) == 1
+        assert any("wrap the conditional in parentheses" in w for w in issues[0]["warnings"])
+
+    def test_comparison_followed_by_if_various_operators(self):
+        for op in ("<", ">", "<=", ">=", "==", "!="):
+            issues = validate_pre_import([
+                {"name": "Bad", "expr": f"sum([x]) {op} if [a] then 1 else 0 end"},
+            ])
+            assert len(issues) == 1, f"operator {op} did not trigger the warning"
+            assert any("wrap the conditional in parentheses" in w for w in issues[0]["warnings"])
+
+    def test_normal_comparison_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "Normal Compare", "expr": "if sum([x]) > 5 then 1 else 0 end"},
+        ])
+        assert len(issues) == 0
+
+    def test_comparison_followed_by_parenthesized_if_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "Already Wrapped", "expr": "sum([x]) > (if [a] then 1 else 0 end)"},
+        ])
+        assert len(issues) == 0
+
 
 # ---------------------------------------------------------------------------
 # Strip ifnull(X, 0) (BL-046 #1)

@@ -98,6 +98,52 @@ def validate_output(expr: str) -> list[str]:
     return errors
 
 
+def _check_if_then_else_structure(expr: str, expr_stripped: str) -> list[str]:
+    """if/then/else structural checks (BL-046 #5, BL-060) against a single
+    formula expression. ``expr_stripped`` has ``[col refs]`` and ``'strings'``
+    already removed (by the caller) to avoid false matches inside those.
+
+    Extracted out of ``validate_pre_import`` to keep that function's
+    cyclomatic complexity from creeping past the module-health ratchet as
+    more if/then/else checks are added over time (each is an independent,
+    unrelated check — not a deepening of one code path).
+    """
+    warnings: list[str] = []
+    lower_s = expr_stripped.lower()
+
+    # Use negative lookbehind to exclude *_if functions (sum_if, count_if, etc.)
+    if_count = len(re.findall(r'(?<![a-zA-Z_])\bif\b', lower_s))
+    then_count = len(re.findall(r'(?<![a-zA-Z_])\bthen\b', lower_s))
+    else_count = len(re.findall(r'(?<![a-zA-Z_])\belse\b', lower_s))
+
+    if if_count > 0:
+        if then_count < if_count:
+            warnings.append(f"if without matching then ({if_count} if, {then_count} then)")
+        if else_count < if_count:
+            warnings.append(f"if/then without else ({if_count} if, {else_count} else)")
+    if else_count > if_count:
+        warnings.append(f"Orphaned else clause ({else_count} else, {if_count} if)")
+
+    # Bare else) — missing default value in aggregate context
+    if re.search(r'\belse\s*\)', expr, re.IGNORECASE):
+        warnings.append(
+            "Bare 'else)' — missing default value after else "
+            "(likely needs 'else 0)' or 'else null)')"
+        )
+
+    # Nested-if-in-comparison (BL-060) — a comparison operator binding
+    # directly before 'if' (e.g. "sum(X) < if(Y) then Z else W") is valid
+    # Tableau syntax but fails ThoughtSpot import: the comparison binds
+    # before the if/then/else, so ThoughtSpot needs explicit parens around
+    # the conditional.
+    if re.search(r'[<>=!]=?\s*if\b', expr_stripped, re.IGNORECASE):
+        warnings.append(
+            "Comparison operator directly followed by 'if' — wrap the conditional in parentheses: "
+            "(if ... then ... else ...)")
+
+    return warnings
+
+
 def validate_pre_import(
     translated: list[dict],
     column_names: set[str] | None = None,
@@ -143,24 +189,11 @@ def validate_pre_import(
         if b_depth != 0:
             warnings.append(f"Unbalanced brackets (depth={b_depth})")
 
-        # if/then/else structural validation (BL-046 #5)
+        # if/then/else structural validation (BL-046 #5, BL-060)
         # Strip [col refs] and 'strings' to avoid false matches
         expr_stripped = re.sub(r'\[[^\]]*\]', '', expr)
         expr_stripped = re.sub(r"'[^']*'", '', expr_stripped)
-        lower_s = expr_stripped.lower()
-
-        # Use negative lookbehind to exclude *_if functions (sum_if, count_if, etc.)
-        if_count = len(re.findall(r'(?<![a-zA-Z_])\bif\b', lower_s))
-        then_count = len(re.findall(r'(?<![a-zA-Z_])\bthen\b', lower_s))
-        else_count = len(re.findall(r'(?<![a-zA-Z_])\belse\b', lower_s))
-
-        if if_count > 0:
-            if then_count < if_count:
-                warnings.append(f"if without matching then ({if_count} if, {then_count} then)")
-            if else_count < if_count:
-                warnings.append(f"if/then without else ({if_count} if, {else_count} else)")
-        if else_count > if_count:
-            warnings.append(f"Orphaned else clause ({else_count} else, {if_count} if)")
+        warnings.extend(_check_if_then_else_structure(expr, expr_stripped))
 
         # Check for unresolved Custom SQL Query references
         if "Custom SQL Query" in expr:
@@ -206,13 +239,6 @@ def validate_pre_import(
             warnings.append(
                 "max([col]='value')=false pattern — rewrite as "
                 "count_if([col] != 'value') = 0 or similar"
-            )
-
-        # Bare else) — missing default value in aggregate context
-        if re.search(r'\belse\s*\)', expr, re.IGNORECASE):
-            warnings.append(
-                "Bare 'else)' — missing default value after else "
-                "(likely needs 'else 0)' or 'else null)')"
             )
 
         # Name clash with existing column
