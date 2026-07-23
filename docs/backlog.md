@@ -2232,7 +2232,7 @@ folded into this item rather than a duplicate backlog entry.
 
 **Update 2026-07-23 (ts-cli v0.88.0):** shipped the three unambiguous, documented
 mappings — `USERNAME()` → `ts_username`, `ISUSERNAME(s)` → `( ts_username = s )`, and
-`ISMEMBEROF("group")` → `( ts_groups = "group" )` (this last one wired into the CLI for
+`ISMEMBEROF("group")` → `( ts_groups = 'group' )` (this last one wired into the CLI for
 the first time; it previously passed through untranslated and un-rejected). All three
 removed from `_UNMAPPED_FUNCTIONS` / documented in `tableau-formula-translation.md` +
 `coverage-matrix.md`. **Remaining (deferred, unchanged target):** `FULLNAME()`/`ISFULLNAME(s)`
