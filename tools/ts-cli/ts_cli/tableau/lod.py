@@ -26,8 +26,14 @@ def _parse_lod_content(content: str) -> tuple[str, str, str] | None:
     Returns None if the content doesn't look like an LOD expression.
     """
     stripped = content.strip()
+    # `\s*` (not `\s+`): a grand-total LOD's keyword may be followed
+    # immediately by the colon with NO whitespace (`{FIXED: agg}`) — the
+    # dimension list, when present, still supplies its own separating space
+    # (`{FIXED [Dim] : agg}`). Requiring `\s+` here caused the keyword match to
+    # fail on the no-space form, falling through to treat "FIXED" itself as a
+    # dimension and emitting invalid `{ FIXED }` TML syntax.
     keyword_match = re.match(
-        r"(FIXED|INCLUDE|EXCLUDE)\s+", stripped, re.IGNORECASE,
+        r"(FIXED|INCLUDE|EXCLUDE)\s*", stripped, re.IGNORECASE,
     )
     if keyword_match:
         keyword = keyword_match.group(1).upper()

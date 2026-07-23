@@ -1139,6 +1139,31 @@ class TestConvertLod:
         result = convert_lod("{FIXED : MAX([Date])}")
         assert "group_aggregate ( MAX([Date]) , {} , {} )" in result
 
+    def test_grand_fixed_no_space_before_colon(self):
+        """Fix 1 (LOD keyword whitespace bug): {FIXED: agg} with NO space between
+        the keyword and the colon was silently falling through to emit invalid
+        `{ FIXED }` TML syntax — the keyword regex required `\\s+` (one or more
+        whitespace chars) between FIXED and the colon. Must parse identically to
+        the space-before-colon form above."""
+        result = convert_lod("{FIXED: MAX([Date])}")
+        assert result == "group_aggregate ( MAX([Date]) , {} , {} )"
+        assert "{ FIXED }" not in result
+        assert "FIXED" not in result.replace("group_aggregate", "")
+
+    def test_include_no_space_before_colon(self):
+        result = convert_lod("{INCLUDE: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_exclude_no_space_before_colon(self):
+        result = convert_lod("{EXCLUDE: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , query_groups () , query_filters () )"
+
+    def test_fixed_with_dims_no_space_before_colon(self):
+        """A dimensioned FIXED LOD with no space before the colon (space still
+        present between the keyword and the dimension list)."""
+        result = convert_lod("{FIXED [Dim]: SUM([Sales])}")
+        assert result == "group_aggregate ( SUM([Sales]) , { [Dim] } , {} )"
+
     def test_exclude_with_calc_ref_in_dims(self):
         """E1: EXCLUDE LOD with Calculation_* ref in dimension list."""
         result = convert_lod(
