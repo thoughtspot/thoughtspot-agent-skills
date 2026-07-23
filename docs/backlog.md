@@ -3,6 +3,10 @@
 Improvement ideas identified but not yet scheduled. Each item includes context on
 why it matters and what the approach would be.
 
+> **Tableau converter parked 2026-07-23.** All done items archived; remaining open items
+> (BL-020, BL-024, BL-069-residual, BL-071/072 remainders, BL-076, BL-091, BL-094) are
+> deferred with per-item park notes below.
+
 ---
 
 ## Archived (completed)
@@ -545,7 +549,14 @@ does the converter handle them?
 
 **Source:** BL-018 parity review (2026-06-13)
 **Affects:** ts-convert-from-tableau, tableau-tml-rules.md
-**Status:** Not started
+**Status:** Not started. Per the 2026-07-23 triage, only sub-item 2 (data-source `<filter>` →
+`model.filters[]`) is real and unimplemented; sub-item 1 (range-predicate parsing) is
+deprioritized by this item's own text and sub-item 4 (verified queries) is moot (no Tableau
+equivalent); sub-item 3 (Custom SQL → SQL View) shipped separately (PR #188).
+**Park note (2026-07-23):** deferred as feature-sized — sub-item 2 needs new XML parsing for
+categorical/quantitative/relative-date/context filter shapes, boolean-formula generation, and
+`model.filters[]` wiring with `apply_on_tables` scoping. Decision owed: whether to scope it
+down to categorical-only first or build all filter shapes in one pass.
 **Related:** BL-009 (general Tableau mapping gaps), BL-018 (SV equivalent)
 
 ### Problem
@@ -834,7 +845,16 @@ as the SV coverage matrix:
 
 **Source:** Sigma-vs-ThoughtSpot Tableau-migration comparison over a 140-workbook corpus (2026-06-14)
 **Affects:** ts-convert-from-tableau (primarily); pattern applies to any converter that translates table calcs
-**Status:** Implemented (2026-06-14) — tiered decision tree in SKILL.md + formula translation reference. Needs live verification against workbooks with INDEX/LOOKUP calcs.
+**Status:** PARTIAL. Only the safety-net tier shipped (v0.78.0): omit + log for
+INDEX/LOOKUP/FIRST/LAST/PREVIOUS_VALUE (`row_offset_ambiguous`/`window_ambiguous`,
+`classify.py:34-71` & `validate.py:73`), plus a native `SIZE()` → `COUNT(*) OVER()`
+translation. **Tiers 1 (route `INDEX()<=N` to the Top-N/query-set machinery) and 2
+(gated `sql_*_aggregate_op` pass-through via recovered worksheet shelf-sort) are NOT
+implemented anywhere.** This is the single largest remaining gap in the Tableau
+backlog (source data: `INDEX()` blocks 39 of 140 real workbooks).
+**Park note (2026-07-23):** deferred as feature-sized; tiers 1-2 need design work
+(Top-N-filter detection tied to table calcs, and shelf-sort-driven pass-through
+emission for `sql_*_aggregate_op`) before implementation can start.
 **Related:** BL-009 (Tableau mapping gaps), BL-020/BL-023 (coverage matrix)
 
 ### Problem
@@ -1961,25 +1981,24 @@ mandatory-recurse rule. Set *actions* (`<action>` elements — a different XML c
 
 **Source:** codification sweep 2026-06-29 (angle #11b), architectural observation.
 **Affects:** `tools/ts-cli/ts_cli/tableau_translate.py`, `tools/ts-cli/ts_cli/model_builder.py`.
-**Status:** DONE (2026-07-02) — shipped on feat/tableau-module-split.
-**Follow-ups sweep:** completed 2026-07-03 — remaining open items: ensure_else_clause dead
-locals (next touch), quote-blindness, string-concat operand grammar (both dated 2026-07-03).
-**Priority rationale:** `check_module_health` (radon) confirms this file holds the repo's
-worst complexity — `ensure_else_clause` **F (47)**, `validate_pre_import` **E (32)**,
-`normalize_operator_spacing` **D (27)**, `translate_formulas` **D (25)**, `build_dependency_dag`
-**D (21)** — 5 of the repo's highest-complexity functions in one 2,543-line module. It is the
-single largest maintainability risk as contributor count grows, and the complexity ratchet now
-prevents it from getting *worse* but does not pay down the existing debt. Prioritise ahead of
-the 2026-12-31 target.
+**Status:** OPEN (residual only). The module-per-concern split is DONE (shipped 2026-07-02
+on feat/tableau-module-split) — see History below. Per the 2026-07-23 triage ("BL-069 (1
+residual bug)"), this item now tracks solely one live-reproduced defect: the
+**string-concat operand-grammar bug** in `convert_string_concat` (full detail under
+Follow-ups > "String-concat operand grammar"). The dead-locals cleanup and quote-blindness
+follow-ups remain noted below as pre-existing, non-blocking items — not part of this item's
+active scope.
+**Park note (2026-07-23):** the Tableau converter is parked; this residual is a known small
+open bug, fix on the next Tableau touch.
 
-### Problem
+### History (module split — DONE)
 
-`tableau_translate.py` is 2543 lines in a single module covering: dependency DAG building,
+`tableau_translate.py` was 2543 lines in a single module covering: dependency DAG building,
 parameter conflict detection, name clash resolution, pre-transforms (5), main translation
-pipeline, post-transforms (2), and YAML serialization. `model_builder.py` is 1025 lines
+pipeline, post-transforms (2), and YAML serialization. `model_builder.py` was 1025 lines
 covering TWB parsing, ref resolution, TML assembly, and phased import splitting.
 
-Both files work well but are hard to navigate and test in isolation. The `ts audit run`
+Both files worked well but were hard to navigate and test in isolation. The `ts audit run`
 design (BL-065) uses a module-per-angle pattern that keeps each file 200-500 lines — the
 same structure would benefit the Tableau pipeline.
 
@@ -2099,6 +2118,12 @@ candidate but the domain-only-vs-full-email value shape is unverified; `USERATTR
 Model/Answer formulas today, so no faithful in-formula translation exists. All four stay
 rejected at translate time pending the live verification / product research described below.
 
+**Park note (2026-07-23):** deferred pending product confirmation on the remaining four —
+no confirmed display-name variable for `FULLNAME`/`ISFULLNAME`; domain-vs-full-email value
+shape unverified for `USERDOMAIN`; `ts_var()` is only valid in RLS rules, not Model/Answer
+formulas, for `USERATTRIBUTE`/`USERATTRIBUTEINCLUDES`. Decision owed: confirm ThoughtSpot's
+display-name variable and formula-editor `ts_var()` support before resuming.
+
 ### Problem
 
 Tableau's user-context function family — `USERNAME()`, `FULLNAME()`, `ISUSERNAME(s)`,
@@ -2173,6 +2198,10 @@ translation exists yet.
 and documented in `tableau-formula-translation.md` + `coverage-matrix.md` (#132/#133).
 **Remaining (deferred, unchanged target):** hierarchies (`<drill-paths>`) and value aliases
 (`<aliases>`) — the other two sub-items, untouched by this change.
+
+**Park note (2026-07-23):** deferred; needs a design fork decision before implementation —
+Model column-ordering vs. AI-context emission for hierarchies, and CASE-formula vs.
+column-level display mapping for value aliases (see Approach below for both options).
 
 ### Problem
 
@@ -2287,6 +2316,9 @@ ts-convert-from-tableau is the largest conversion skill (1,709 lines of translat
 tests) with zero end-to-end TWB→TML→import smoke and no .twb fixture tracked — add a small
 fixture workbook + end-to-end smoke. ts-object-answer-promote needs its deferred smoke
 backfilled. Remove both ALLOWLIST entries when the smokes land.
+
+**Park note (2026-07-23):** deferred; the Tableau half needs a committed `.twb` fixture plus
+an E2E import test written against it before this can close.
 
 **Target:** 2026-09-30.
 
@@ -2565,6 +2597,9 @@ to `tentpole_product_metrics.PERIOD_TYPE`, changing the grain. Needs a data-leve
 (compare a few aggregates against Tableau) once warehouse access is available. This is the
 migrate-mode analogue of audit angle #15 (conversion fidelity, parked).
 
+**Park note (2026-07-23):** DATA-BLOCKED, not a code gap — needs Tableau's own numbers for
+the cited CPG tentpole case before this can be verified either way.
+
 **Target:** when data access is available.
 
 ---
@@ -2601,6 +2636,9 @@ the SQL Views as unconnected `model_tables[]` with no `joins`. Needs join extrac
 `type='text'` relation children plus cardinality inference (deterministic only via a data probe;
 CTE-grain heuristic otherwise). This is the multi-query analogue of the single-view case shipped
 in #188 and overlaps the deferred "logical-relationship → join cardinality" gap.
+
+**Park note (2026-07-23):** deferred; needs a cardinality-inference design decision (data-probe
+vs. CTE-grain heuristic, per this item's own text) before implementation can start.
 
 **Target:** next multi-query build-model work; needed for FedEx VEDR (2 joined Custom SQL sources).
 
