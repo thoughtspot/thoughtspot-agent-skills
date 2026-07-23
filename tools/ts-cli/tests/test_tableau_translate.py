@@ -733,6 +733,81 @@ class TestMapFunctions:
     def test_degrees(self):
         assert map_functions("DEGREES([R])") == "( [R] * 180 / 3.14159265358979 )"
 
+    # -----------------------------------------------------------------------
+    # Inverse trig + COT (BL-072 sub-item) — ThoughtSpot's inverse trig
+    # functions return degrees where Tableau's return radians (by symmetry
+    # with the shipped SIN/COS/TAN radians-to-degrees conversion above), so
+    # the composite converts TS degrees back to radians with * pi/180. COT
+    # has no native ThoughtSpot function; it composites off `tan` the same
+    # way Tableau defines COT(x) = 1/tan(x), with x converted to degrees
+    # for the inner `tan` call.
+    # -----------------------------------------------------------------------
+
+    def test_acos_converts_degrees_to_radians(self):
+        assert map_functions("ACOS([x])") == "( acos ( [x] ) * 3.14159265358979 / 180 )"
+
+    def test_asin_converts_degrees_to_radians(self):
+        assert map_functions("ASIN([x])") == "( asin ( [x] ) * 3.14159265358979 / 180 )"
+
+    def test_atan_converts_degrees_to_radians(self):
+        assert map_functions("ATAN([x])") == "( atan ( [x] ) * 3.14159265358979 / 180 )"
+
+    def test_cot_converts_via_tan_composite(self):
+        assert map_functions("COT([x])") == "( 1 / tan ( [x] * 180 / 3.14159265358979 ) )"
+
+    def test_acos_wrong_arity_left_untranslated(self):
+        expr = "ACOS([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_asin_wrong_arity_left_untranslated(self):
+        expr = "ASIN([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_atan_wrong_arity_left_untranslated(self):
+        expr = "ATAN([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_cot_wrong_arity_left_untranslated(self):
+        expr = "COT([a],[b])"
+        assert map_functions(expr) == expr
+
+    # -----------------------------------------------------------------------
+    # User-identity → RLS system variables (BL-071 subset) — only the
+    # unambiguous, documented mappings. USERNAME() is a bare system variable
+    # reference; ISUSERNAME/ISMEMBEROF are composite equality checks against
+    # it/ts_groups. FULLNAME/ISFULLNAME/USERDOMAIN/USERATTRIBUTE(INCLUDES)
+    # stay unmapped — see TestValidateOutput regression checks below.
+    # -----------------------------------------------------------------------
+
+    def test_username(self):
+        assert map_functions("USERNAME()") == "ts_username"
+
+    def test_username_whitespace_arg_treated_as_zero_arity(self):
+        # USERNAME( ) — whitespace between the parens — must still be
+        # treated as zero-arg, matching the whitespace-tolerant convention
+        # used elsewhere in this file (PI/TODAY/NOW/SIZE). Regression guard:
+        # the arg splitter yields [" "] here, not [], so a naive
+        # `len(a) == 0` check leaves this variant untranslated.
+        assert map_functions("USERNAME( )") == "ts_username"
+
+    def test_isusername(self):
+        assert map_functions("ISUSERNAME([User])") == "( ts_username = [User] )"
+
+    def test_ismemberof(self):
+        assert map_functions('ISMEMBEROF("Sales")') == '( ts_groups = "Sales" )'
+
+    def test_username_wrong_arity_left_untranslated(self):
+        expr = "USERNAME([x])"
+        assert map_functions(expr) == expr
+
+    def test_isusername_wrong_arity_left_untranslated(self):
+        expr = "ISUSERNAME([a],[b])"
+        assert map_functions(expr) == expr
+
+    def test_ismemberof_wrong_arity_left_untranslated(self):
+        expr = "ISMEMBEROF([a],[b])"
+        assert map_functions(expr) == expr
+
     def test_dateparse_flips_args(self):
         assert map_functions("DATEPARSE('yyyy-MM-dd', [DateStr])") == \
             "to_date ( [DateStr] , 'yyyy-MM-dd' )"
@@ -1375,9 +1450,20 @@ class TestValidateOutput:
         errors = validate_output("SPLIT ( [Name] , '-' , 1 )")
         assert any("SPLIT" in e for e in errors)
 
-    def test_username_flagged(self):
+    def test_fullname_still_flagged(self):
+        # USERNAME/ISUSERNAME now translate (BL-071, ts-cli v0.88.0) and were
+        # removed from _UNMAPPED_FUNCTIONS — see test_username_no_longer_
+        # flagged below. FULLNAME has no confirmed ThoughtSpot display-name
+        # variable and stays rejected (scope boundary, BL-071).
+        errors = validate_output("if ( FULLNAME ( ) = 'x' ) then 1 else 0")
+        assert any("FULLNAME" in e for e in errors)
+
+    def test_username_no_longer_flagged(self):
+        # Regression guard: USERNAME/ISUSERNAME were removed from
+        # _UNMAPPED_FUNCTIONS once functions.py started translating them
+        # (BL-071, ts-cli v0.88.0) — validate_output must stop rejecting them.
         errors = validate_output("if ( USERNAME ( ) = 'x' ) then 1 else 0")
-        assert any("USERNAME" in e for e in errors)
+        assert not any("USERNAME" in e for e in errors)
 
     def test_untranslated_datepart_flagged(self):
         errors = validate_output("DATEPART ( 'minute' , [TS] )")
@@ -1391,11 +1477,13 @@ class TestValidateOutput:
         errors = validate_output("DATEADD ( 'fortnight' , 2 , [D] )")
         assert any("DATEADD" in e for e in errors)
 
-    def test_inverse_trig_and_cot_rejected(self):
+    def test_inverse_trig_and_cot_no_longer_rejected(self):
+        # Regression guard: ACOS/ASIN/ATAN/COT were removed from
+        # _UNMAPPED_FUNCTIONS once functions.py started translating them
+        # (BL-072, ts-cli v0.88.0) — validate_output must stop rejecting them.
         for fn in ("ACOS", "ASIN", "ATAN", "COT"):
             errors = validate_output(f"{fn} ( [X] )")
-            assert errors, f"{fn} should be rejected as unmapped"
-            assert any(fn in e for e in errors)
+            assert not any(fn in e for e in errors), f"{fn} should no longer be flagged as unmapped"
 
     def test_spatial_functions_rejected(self):
         # Full 13-function Tableau spatial set (audit 13.8) — none has a
