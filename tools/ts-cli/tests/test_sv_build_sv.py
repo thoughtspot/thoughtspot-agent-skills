@@ -517,3 +517,85 @@ class TestBuildSvDdl:
             translated_formulas=translated)
         assert "DIV0(SUM(t.AMOUNT), COUNT(t.ID))" in ddl
         assert len(info["skipped_formulas"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Role-playing (aliased) dimensions — reverse direction (TS Model -> SV)
+# ---------------------------------------------------------------------------
+
+def _roleplay_model_tml():
+    """ORDERS joins CUSTOMERS twice: the base CUSTOMERS and a BILL_TO role-play."""
+    return {"model": {
+        "name": "RP Model",
+        "model_tables": [
+            {"id": "ORDERS", "name": "ORDERS", "joins": [
+                {"name": "j1", "with": "CUSTOMERS",
+                 "on": "[ORDERS::Customer Id] = [CUSTOMERS::Customer Id]",
+                 "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"},
+                {"name": "j2", "with": "BILL_TO",
+                 "on": "[ORDERS::Bill To Id] = [CUSTOMERS::Customer Id]",
+                 "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"},
+            ]},
+            {"name": "CUSTOMERS"},
+            {"name": "CUSTOMERS", "alias": "BILL_TO"},
+        ],
+        "columns": [
+            {"name": "Customer Name", "column_id": "CUSTOMERS::Customer Name",
+             "properties": {"column_type": "ATTRIBUTE"}},
+            {"name": "Bill To Name", "column_id": "BILL_TO::Customer Name",
+             "properties": {"column_type": "ATTRIBUTE"}},
+        ],
+        "formulas": [],
+    }}
+
+
+def _roleplay_table_tmls():
+    return {"ORDERS": {"table": {"name": "ORDERS", "db": "DB", "schema": "S",
+                                 "db_table": "ORDERS", "columns": [
+        {"name": "Customer Id", "db_column_name": "CUSTOMER_ID",
+         "db_column_properties": {"data_type": "INT64"}},
+        {"name": "Bill To Id", "db_column_name": "BILL_TO_ID",
+         "db_column_properties": {"data_type": "INT64"}}]}},
+        "CUSTOMERS": {"table": {"name": "CUSTOMERS", "db": "DB", "schema": "S",
+                                "db_table": "CUSTOMERS", "columns": [
+        {"name": "Customer Id", "db_column_name": "CUSTOMER_ID",
+         "db_column_properties": {"data_type": "INT64"}},
+        {"name": "Customer Name", "db_column_name": "CUSTOMER_NAME",
+         "db_column_properties": {"data_type": "VARCHAR"}}]}}}
+
+
+class TestBuildSvRolePlay:
+    def _ddl(self):
+        ddl, info = build_sv_ddl(
+            model_tml=_roleplay_model_tml(),
+            table_tmls=_roleplay_table_tmls(), sv_name="DB.S.RP_SV")
+        return ddl, info
+
+    def test_aliased_table_declared_with_as(self):
+        ddl, _ = self._ddl()
+        # role-play instance declared as `<alias> as <FQN>`
+        assert "BILL_TO as DB.S.CUSTOMERS" in ddl
+        # base CUSTOMERS declared bare (no alias)
+        assert any(line.strip().startswith("DB.S.CUSTOMERS")
+                   for line in ddl.splitlines())
+
+    def test_primary_key_has_no_square_brackets(self):
+        ddl, _ = self._ddl()
+        assert "primary key (" in ddl
+        assert "[primary key" not in ddl  # brackets are invalid CREATE syntax
+
+    def test_relationships_use_logical_names_not_fqn(self):
+        ddl, _ = self._ddl()
+        # right side references the alias / logical name, never the FQN
+        assert "references BILL_TO(" in ddl
+        assert "references CUSTOMERS(" in ddl
+        assert "references DB.S.CUSTOMERS(" not in ddl
+        # left side is the logical table too
+        assert "as ORDERS(" in ddl
+
+    def test_roleplay_dimension_resolves_via_physical(self):
+        ddl, info = self._ddl()
+        # both the base and the role-play NAME column survive (not collapsed)
+        assert info["dimensions"] == 2
+        # role-play dimension owned by BILL_TO, physical column resolved
+        assert "BILL_TO.bill_to_name as bill_to.CUSTOMER_NAME" in ddl

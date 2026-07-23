@@ -56,11 +56,16 @@ def resolve_column_id(
     column_id: str,
     model_table_map: dict[str, str],
     col_index: dict[tuple[str, str], dict],
+    phys_by_node: dict[str, str] | None = None,
 ) -> tuple[str, str, str]:
     """Resolve TABLE::COL → (sv_table_name, db_column_name, data_type).
 
-    model_table_map: model_table name/id → sv_table_name (to_snake of the
-    table's display name or alias).
+    model_table_map: node key (alias-or-name) → sv_table_name.
+    phys_by_node: node key → physical table name. The column index is keyed by the
+    physical table name, so a role-play prefix (e.g. ON_BEHALF_ACCOUNT) must be
+    translated to its physical table (ACCOUNT) before the lookup — otherwise the
+    db_column_name/data_type fall back to the raw column and the SV table's own
+    dimensions collapse.
     """
     if "::" not in column_id:
         raise ValueError(f"column_id missing '::': {column_id}")
@@ -71,7 +76,8 @@ def resolve_column_id(
         raise ValueError(
             f"column_id references unknown table '{table_part}': {column_id}")
 
-    entry = col_index.get((table_part, col_part))
+    phys = (phys_by_node or {}).get(table_part, table_part)
+    entry = col_index.get((phys, col_part)) or col_index.get((table_part, col_part))
     if entry is None:
         return sv_table, col_part, ""
     return sv_table, entry["db_column_name"], entry.get("data_type", "")
@@ -285,39 +291,57 @@ def build_ca_json(
 # DDL assembly — main entry point
 # ---------------------------------------------------------------------------
 
+def _model_table_identity(mt: dict) -> tuple[str, str]:
+    """Return (node_key, physical_name) for a model_table entry.
+
+    The node key is the identity that `column_id` prefixes and join `with:`/`on:`
+    tokens reference — the **alias** for a role-playing instance of a reused
+    physical table, otherwise the table's `id`/`name`. The physical name is the
+    ThoughtSpot Table object (used for Table-TML/column-index lookups and the SV
+    FQN). For a role-play these differ (ON_BEHALF_ACCOUNT vs ACCOUNT); for a plain
+    table they are the same."""
+    node_key = mt.get("alias") or mt.get("id") or mt.get("name", "")
+    physical = mt.get("name", node_key)
+    return node_key, physical
+
+
 def _build_table_maps(
     model_tables: list[dict],
     table_tmls: dict[str, dict],
-) -> tuple[dict[str, str], dict[str, str], list[str]]:
-    """Map model_table entries to display names and FQNs.
+) -> tuple[dict[str, str], dict[str, str], list[str], dict[str, str]]:
+    """Map model_table entries to SV table identifiers, FQNs, and physical names.
 
-    Returns (mt_names, mt_fqns, mt_order).
+    Returns (mt_names, mt_fqns, mt_order, mt_phys). ``mt_names`` maps a node key
+    (alias-or-name) to the SV logical table identifier — the alias for a role-play,
+    so a reused physical table yields distinct SV tables. ``mt_phys`` maps the node
+    key to the physical table name for column-index lookups.
     """
     mt_names: dict[str, str] = {}
     mt_fqns: dict[str, str] = {}
     mt_order: list[str] = []
+    mt_phys: dict[str, str] = {}
 
     for mt in model_tables:
-        mt_id = mt.get("id") or mt.get("name", "")
-        mt_name = mt.get("name", mt_id)
-        mt_names[mt_id] = mt_name
-        if mt_id != mt_name:
-            mt_names[mt_name] = mt_name
-        mt_order.append(mt_id)
+        node_key, physical = _model_table_identity(mt)
+        # SV logical table = the node key (alias for a role-play, else the name).
+        mt_names[node_key] = node_key
+        mt_phys[node_key] = physical
+        # Physical-name fallback so join `on:` clauses (which use physical names on
+        # both sides) and un-aliased column_ids still resolve.
+        mt_names.setdefault(physical, physical)
+        mt_phys.setdefault(physical, physical)
+        mt_order.append(node_key)
 
-        ttml = table_tmls.get(mt_name, {})
+        ttml = table_tmls.get(physical, {})
         tbl = ttml.get("table", {})
         fqn_parts = []
         for k in ("db", "schema", "db_table"):
             v = tbl.get(k)
             if v:
                 fqn_parts.append(v)
-        if fqn_parts:
-            mt_fqns[mt_id] = ".".join(fqn_parts)
-        else:
-            mt_fqns[mt_id] = mt_name
+        mt_fqns[node_key] = ".".join(fqn_parts) if fqn_parts else physical
 
-    return mt_names, mt_fqns, mt_order
+    return mt_names, mt_fqns, mt_order, mt_phys
 
 
 def _collect_join_data(
@@ -334,7 +358,7 @@ def _collect_join_data(
     used_rel_names: set[str] = set()
 
     for mt in model_tables:
-        mt_id = mt.get("id") or mt.get("name", "")
+        mt_id, _phys = _model_table_identity(mt)
         for join in mt.get("joins", []):
             with_table = join.get("with", "")
             on_expr = join.get("on", "")
@@ -381,23 +405,37 @@ def _build_tables_clause(
     """Build the tables() clause entries."""
     parts = []
     for mt_id in mt_order:
-        mt_name = mt_names.get(mt_id, mt_id)
-        fqn = mt_fqns.get(mt_id, mt_name)
-        pk_cols = mt_pks.get(mt_name) or mt_pks.get(mt_id)
+        sv_ident = mt_names.get(mt_id, mt_id)
+        fqn = mt_fqns.get(mt_id, sv_ident)
+        # A role-playing instance (SV table name differs from the physical table's
+        # own name) must be declared with an explicit alias: `<alias> as <FQN>`.
+        # Otherwise the same physical table would appear multiple times unaliased,
+        # which is invalid SV DDL and leaves the alias referenced by relationships
+        # undefined.
+        physical_last = fqn.rsplit(".", 1)[-1]
+        table_ref = f"{sv_ident} as {fqn}" if sv_ident != physical_last else fqn
+        pk_cols = mt_pks.get(sv_ident) or mt_pks.get(mt_id)
         if pk_cols:
             unique_pks = list(dict.fromkeys(pk_cols))
             pk_str = ", ".join(unique_pks)
-            parts.append(f"{fqn} [primary key ({pk_str})]")
+            # No square brackets: `[...]` is GET_DDL *display* notation for the
+            # optional clause, not valid CREATE SEMANTIC VIEW input syntax.
+            parts.append(f"{table_ref} primary key ({pk_str})")
         else:
-            parts.append(fqn)
+            parts.append(table_ref)
     return parts
 
 
 def _build_relationships_clause(
     join_data: list[dict],
-    mt_fqns: dict[str, str],
+    mt_names: dict[str, str],
 ) -> tuple[list[str], list[str], list[dict]]:
     """Build the relationships() clause entries.
+
+    Endpoints reference the SV **logical table name** (the alias/name declared in
+    the tables() clause), never the fully-qualified physical name — Snowflake SV
+    relationship syntax is `rel as LEFT(fk) references RIGHT(pk)` over the logical
+    tables. For a role-play, that logical name is the alias (e.g. CASE_OWNER).
 
     Returns (rel_clause_parts, rel_names_list, dropped_joins).
     """
@@ -407,20 +445,18 @@ def _build_relationships_clause(
 
     for jd in join_data:
         ref_pairs = [(lc, rc) for _, lc, _, rc in jd["pairs"]]
+        left = mt_names.get(jd["left_id"], jd["left_table"])
+        right = mt_names.get(jd["right_table"], jd["right_table"])
 
         if len(ref_pairs) == 1:
             fk, pk = ref_pairs[0]
             rel_clause_parts.append(
-                f"{jd['name']} as {mt_fqns.get(jd['left_id'], jd['left_table'])}"
-                f"({fk}) references "
-                f"{mt_fqns.get(jd['right_table'], jd['right_table'])}({pk})")
+                f"{jd['name']} as {left}({fk}) references {right}({pk})")
         else:
             fk_list = ", ".join(p[0] for p in ref_pairs)
             pk_list = ", ".join(p[1] for p in ref_pairs)
             rel_clause_parts.append(
-                f"{jd['name']} as {mt_fqns.get(jd['left_id'], jd['left_table'])}"
-                f"({fk_list}) references "
-                f"{mt_fqns.get(jd['right_table'], jd['right_table'])}({pk_list})")
+                f"{jd['name']} as {left}({fk_list}) references {right}({pk_list})")
 
         rel_names_list.append(jd["name"])
 
@@ -440,6 +476,7 @@ def _classify_columns(
     translated: dict[str, dict],
     model_table_map: dict[str, str],
     col_index: dict[tuple[str, str], dict],
+    phys_by_node: dict[str, str] | None = None,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict], list[dict]]:
     """Classify model columns into dims, time_dims, metrics, skipped, unmapped.
 
@@ -465,7 +502,7 @@ def _classify_columns(
         _classify_physical_column(
             col, alias, col_name, props, formulas_by_id,
             model_table_map, col_index,
-            dims, time_dims, metrics_list, unmapped_props)
+            dims, time_dims, metrics_list, unmapped_props, phys_by_node)
 
     return dims, time_dims, metrics_list, skipped_formulas, unmapped_props
 
@@ -512,6 +549,7 @@ def _classify_physical_column(
     col_index: dict[tuple[str, str], dict],
     dims: list[dict], time_dims: list[dict],
     metrics_list: list[dict], unmapped_props: list[dict],
+    phys_by_node: dict[str, str] | None = None,
 ) -> None:
     """Route a physical column to dims, time_dims, or metrics."""
     column_id = col.get("column_id", "")
@@ -520,7 +558,7 @@ def _classify_physical_column(
 
     try:
         sv_table, db_col, data_type = resolve_column_id(
-            column_id, model_table_map, col_index)
+            column_id, model_table_map, col_index, phys_by_node)
     except ValueError:
         return
 
@@ -636,24 +674,20 @@ def build_sv_ddl(
     translated = translated_formulas or {}
     col_index = build_column_index(table_tmls)
 
-    mt_names, mt_fqns, mt_order = _build_table_maps(model_tables, table_tmls)
+    mt_names, mt_fqns, mt_order, mt_phys = _build_table_maps(
+        model_tables, table_tmls)
     join_data, mt_pks = _collect_join_data(model_tables, mt_names, col_index)
 
     tables_clause = _build_tables_clause(mt_order, mt_names, mt_fqns, mt_pks)
     rel_clause, rel_names_list, dropped_joins = _build_relationships_clause(
-        join_data, mt_fqns)
+        join_data, mt_names)
 
-    model_table_map: dict[str, str] = {}
-    for mt in model_tables:
-        mt_id = mt.get("id") or mt.get("name", "")
-        mt_name = mt.get("name", mt_id)
-        model_table_map[mt_id] = mt_name
-        if mt_id != mt_name:
-            model_table_map[mt_name] = mt_name
-
+    # Column classification owns each dimension by its node key (the alias for a
+    # role-play), resolving physical columns via mt_phys so the column index (keyed
+    # by physical table name) still hits.
     dims, time_dims, metrics_list, skipped_formulas, unmapped_props = (
         _classify_columns(
-            columns, formulas_by_id, translated, model_table_map, col_index))
+            columns, formulas_by_id, translated, mt_names, col_index, mt_phys))
 
     _dedupe_aliases(dims + time_dims + metrics_list)
     metrics_list = order_metrics(metrics_list)

@@ -1291,6 +1291,7 @@ cleanup needed — the CLI manages its own cache.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.0 | 2026-07-23 | Role-playing (aliased) dimension support in `ts snowflake build-sv` (ts-cli v0.90.0): a Model with a reused physical table (role-play) now emits `<alias> as <FQN>` in `tables()`, references the SV logical name (not the FQN) in `relationships()`, and owns role-play dimensions by their alias (no longer collapsed/dropped). Also fixes two pre-existing bugs that made emitted DDL un-creatable: invalid `[primary key]` square brackets, and fully-qualified names in relationships. Live-verified: round-tripped SUPPORT_CASE_SV creates in Snowflake and re-parses to 13 tables / 12 relationships / 51 dimensions with all role-plays intact. |
 | 1.4.0 | 2026-07-22 | Steps 7–9 rewired onto `ts snowflake build-sv`: relationship building, column classification, DDL assembly now deterministic CLI (model format). Formula translation (Step 8) reordered before build-sv. Inline `to_snake()` code block removed. Worksheet format retains manual DDL assembly path. (BL-063 phase 1b) |
 | 1.3.2 | 2026-07-11 | Remove the dead `direct-api-auth.md` reference-table row (retired repo-wide — curl + `/tmp/ts_token.txt` fallback now prohibited by `ts-cli.md`/`security.md`, no step logic used it) (BL-109). |
 | 1.3.1 | 2026-07-11 | Document `sql_view` → `base_table.definition:` (D-Direct) auto-map option; emission deferred to BL-031 (audit 13.4). |
