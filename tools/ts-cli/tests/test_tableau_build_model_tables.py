@@ -209,3 +209,170 @@ def test_multi_table_assigns_owned_columns_and_collects_unowned(tmp_path):
     assert customers_cols == {"Customer Name"}
     assert "Mystery Column" not in orders_cols
     assert "Mystery Column" not in customers_cols
+
+
+# ---------------------------------------------------------------------------
+# 5. Fix #2 — Tableau disambiguation suffix must not leak into db_column_name
+#    (BL follow-up: regression from the Ads Commercial Dashboard workbook)
+# ---------------------------------------------------------------------------
+
+COLLISION_TWB = """<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.a' caption='Ads'>
+    <connection class='federated'>
+      <relation name='agg_booked_monthly' type='table' table='[db].[s].[agg_booked_monthly]'/>
+      <relation name='v_lineitem_budgetline' type='table' table='[db].[s].[v_lineitem_budgetline]'/>
+      <metadata-records>
+        <metadata-record class='column'>
+          <remote-name>LineItemId</remote-name>
+          <local-name>[LineItemId (agg_booked_monthly)]</local-name>
+          <parent-name>[agg_booked_monthly]</parent-name>
+          <local-type>integer</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>Amount</remote-name>
+          <local-name>[Amount]</local-name>
+          <parent-name>[agg_booked_monthly]</parent-name>
+          <local-type>real</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>LineItemId</remote-name>
+          <local-name>[LineItemId (v_lineitem_budgetline)]</local-name>
+          <parent-name>[v_lineitem_budgetline]</parent-name>
+          <local-type>integer</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>Budget</remote-name>
+          <local-name>[Budget]</local-name>
+          <parent-name>[v_lineitem_budgetline]</parent-name>
+          <local-type>real</local-type>
+        </metadata-record>
+      </metadata-records>
+      <object-graph>
+        <relationships>
+          <relationship>
+            <expression op='='>
+              <expression op='[LineItemId (agg_booked_monthly)]'/>
+              <expression op='[LineItemId (v_lineitem_budgetline)]'/>
+            </expression>
+          </relationship>
+        </relationships>
+      </object-graph>
+    </connection>
+    <column name='[LineItemId (agg_booked_monthly)]' caption='LineItemId (agg booked monthly)' datatype='integer' role='dimension'/>
+    <column name='[Amount]' caption='Amount' datatype='real' role='measure'/>
+    <column name='[LineItemId (v_lineitem_budgetline)]' caption='LineItemId (v lineitem budgetline)' datatype='integer' role='dimension'/>
+    <column name='[Budget]' caption='Budget' datatype='real' role='measure'/>
+  </datasource>
+</workbook>
+"""
+
+
+def test_column_collision_strips_disambiguation_suffix_end_to_end(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(COLLISION_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    by_name = {
+        yaml.safe_load(f.read_text())["table"]["name"]: yaml.safe_load(f.read_text())["table"]
+        for f in out_dir.glob("*.table.tml")
+    }
+    assert set(by_name) == {"agg_booked_monthly", "v_lineitem_budgetline"}
+
+    for name in ("agg_booked_monthly", "v_lineitem_budgetline"):
+        line_item = next(c for c in by_name[name]["columns"] if c["db_column_name"] == "LineItemId")
+        # the physical column is clean — no Tableau disambiguation suffix
+        assert " (" not in line_item["db_column_name"]
+
+    # the join XREF check is the arbiter: the join's `on:` clause references
+    # plain `LineItemId`, which must now resolve against the Table TML.
+    lint_result = runner.invoke(app, ["tml", "lint", "--dir", str(out_dir)])
+    payload = json.loads(lint_result.stdout)
+    assert payload["clean"] is True, payload
+
+
+def test_single_table_model_column_id_is_table_qualified_not_bare(tmp_path):
+    # Fix #3 (BL follow-up): live-verified (se-thoughtspot, 2026-07-23) that a
+    # bare column_id fails import on a single-table model, while TABLE::col
+    # validates. This pins today's GENERATE flow already produces the
+    # qualified form for the common (one physical table) case — a regression
+    # here would only be caught otherwise by a live import.
+    twb = tmp_path / "wb.twb"
+    twb.write_text(LINT_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    model_files = [f for f in out_dir.glob("*.model.tml") if "phase0" not in f.name]
+    assert len(model_files) == 1
+    doc = yaml.safe_load(model_files[0].read_text())
+    column_ids = [c["column_id"] for c in doc["model"]["columns"] if c.get("column_id")]
+    assert column_ids, "expected physical column_id entries"
+    assert all("::" in cid for cid in column_ids), column_ids
+    assert all(cid.startswith("Orders::") for cid in column_ids), column_ids
+
+
+# ---------------------------------------------------------------------------
+# 6. Fix #4 — hyper Extract wrapper must not be emitted as a duplicate table
+# ---------------------------------------------------------------------------
+
+EXTRACT_WRAPPER_TWB = """<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.b' caption='SetCtrl'>
+    <connection class='federated'>
+      <relation name='Orders' type='table' table='[Orders$]'/>
+      <metadata-records>
+        <metadata-record class='column'>
+          <remote-name>Sales</remote-name>
+          <local-name>[Sales]</local-name>
+          <parent-name>[Orders]</parent-name>
+          <local-type>real</local-type>
+        </metadata-record>
+      </metadata-records>
+    </connection>
+    <extract enabled='true'>
+      <connection class='hyper'>
+        <relation name='Extract' type='table' table='[Extract].[Extract]'/>
+      </connection>
+    </extract>
+    <column name='[Sales]' caption='Sales' datatype='real' role='measure'/>
+  </datasource>
+</workbook>
+"""
+
+
+def test_extract_wrapper_table_not_duplicated_end_to_end(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(EXTRACT_WRAPPER_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    table_files = list(out_dir.glob("*.table.tml"))
+    assert len(table_files) == 1
+    doc = yaml.safe_load(table_files[0].read_text())
+    assert doc["table"]["name"] == "Orders"
+
+    lint_result = runner.invoke(app, ["tml", "lint", "--dir", str(out_dir)])
+    payload = json.loads(lint_result.stdout)
+    assert payload["clean"] is True, payload

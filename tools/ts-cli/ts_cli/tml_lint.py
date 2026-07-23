@@ -1,9 +1,13 @@
-"""Pre-import TML linter — the model invariants that `--policy VALIDATE_ONLY` does NOT catch.
+"""Pre-import TML linter — model invariants worth catching before any round trip to
+ThoughtSpot, whether or not the server's own validation surfaces them.
 
-ThoughtSpot accepts TML that violates these and then behaves wrong (silently drops a
-formula, flips a measure to an attribute, breaks a join at query time). Catching them
-locally — before import — is the only way to fail loud. Rules mirror invariants
-I1/I2/I4/I5/I8 in `agents/shared/schemas/ts-model-conversion-invariants.md`.
+Most of these (I1/I2/I4/I5) are invariants `--policy VALIDATE_ONLY` does NOT catch —
+ThoughtSpot accepts the TML and then behaves wrong later (silently drops a formula,
+flips a measure to an attribute, breaks a join at query time). A couple (I8, I12) ARE
+caught by the server (including under VALIDATE_ONLY) but are cheap, purely-structural
+checks worth failing on locally, without a live call, especially across a batch of
+generated TML. Rules mirror invariants I1/I2/I4/I5/I8/I12 in
+`agents/shared/schemas/ts-model-conversion-invariants.md`.
 
 Pure functions over a parsed TML dict so they are trivially unit-testable.
 """
@@ -16,9 +20,9 @@ from typing import Any
 def lint_tml(data: dict) -> list[str]:
     """Return a list of invariant-violation strings for one parsed TML doc. Empty = clean.
 
-    Auto-detects table vs model TML by the top-level key. Only the model invariants
-    (I1/I2/I4/I5) plus the guid-placement rule are checked here — these are the ones the
-    server's VALIDATE_ONLY policy does not surface.
+    Auto-detects table vs model TML by the top-level key. Checks the model invariants
+    (I1/I2/I4/I5/I8/I12) plus the guid-placement rule — see the module docstring for
+    which of these the server's VALIDATE_ONLY policy does and doesn't also surface.
     """
     if not isinstance(data, dict):
         return ["Top-level TML value must be a mapping"]
@@ -101,6 +105,33 @@ def lint_tml(data: dict) -> list[str]:
                 f"column_id entry and express the other aggregation(s) as formulas[]."
             )
 
+    findings.extend(_check_bare_column_id_single_table(model_tables, columns))
+
+    return findings
+
+
+def _check_bare_column_id_single_table(model_tables: list, columns: list) -> list[str]:
+    """I12 — a bare (no "::") column_id on a single-table model is rejected at
+    import ("These column_id/formula_id values are incorrect") — live-verified
+    2026-07-23, se-thoughtspot. Scoped to single-table models: multi-table
+    column-ownership resolution is a separate, harder problem (BL follow-up
+    #2/#4) with its own pre-existing, out-of-scope unresolvable-column cases
+    this check must not false-positive on. A missing column_id is out of scope
+    too (not what this check targets — see I1 for formula-only columns).
+    """
+    if len(model_tables) != 1:
+        return []
+    findings: list[str] = []
+    for c in columns:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("column_id")
+        if isinstance(cid, str) and cid and "::" not in cid:
+            findings.append(
+                f"I12: column_id '{cid}' is not TABLE::col-qualified — "
+                f"ThoughtSpot rejects this at import ('These column_id/formula_id "
+                f"values are incorrect'), even on a single-table model."
+            )
     return findings
 
 
