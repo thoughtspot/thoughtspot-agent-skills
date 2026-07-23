@@ -171,6 +171,48 @@ def build_param_name_map(root: ET.Element) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# 6b. Native Set detection (BL-131)
+# ---------------------------------------------------------------------------
+
+# Tableau's internal combined-field mechanism for multi-field dashboard
+# Actions/Tooltips is ALSO written as a datasource-scoped <group> element
+# (auto-named "Action (...)"/"Tooltip (...)"), but its <groupfilter> is a
+# 'crossjoin' of several level-members children — a cross-product key for
+# action-target matching, not a user-created Set. Excluding it is what keeps
+# this an accurate Set count (live-reproduced: 469 of these vs. ~120 real
+# Sets across the test corpus) — the "unrelated <group> usage" build-model
+# must not count.
+_NON_SET_GROUPFILTER_FUNCTIONS = {"crossjoin"}
+
+
+def count_native_sets(root: ET.Element) -> int:
+    """Count native Tableau Sets (BL-131) — real user-created ``<group>``
+    elements under a datasource.
+
+    Covers every Set flavor the skill's Phase-2a/2b/2c set->cohort step
+    handles (static union/member/except, level-members, Top-N/Bottom-N
+    ``function='end'``, condition-based ``function='filter'``), since
+    ``build-model``'s automated GENERATE pass does not perform that
+    conversion — see SKILL.md Step 5b.
+
+    Excludes two ``<group>`` shapes that are not Sets at all: Tableau's
+    internal ``crossjoin`` combined-field mechanism (used for multi-field
+    dashboard Actions/Tooltips — see ``_NON_SET_GROUPFILTER_FUNCTIONS``), and
+    the Pivot-field construct (a ``<group>`` with plain ``<field>`` children,
+    no ``<groupfilter>`` at all).
+    """
+    count = 0
+    for g in root.findall(".//datasource//group"):
+        gf = g.find("groupfilter")
+        if gf is None:
+            continue
+        if gf.get("function") in _NON_SET_GROUPFILTER_FUNCTIONS:
+            continue
+        count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
 # TWB XML parser
 # ---------------------------------------------------------------------------
 
@@ -229,6 +271,10 @@ def parse_twb(twb_path: str | Path) -> dict:
         "datasources": datasources,
         "parameters": parameters,
         "param_map": param_map,
+        # BL-131: native Tableau Sets are not auto-converted by build-model's
+        # GENERATE pass (set->cohort is an agent-guided Phase-2a/2b/2c step) —
+        # surfaced here so the caller can nudge instead of silently skipping.
+        "sets_detected": count_native_sets(root),
     }
 
 

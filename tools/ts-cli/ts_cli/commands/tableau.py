@@ -1305,6 +1305,18 @@ def build_model_cmd(
     typer.echo(f"Parsing {twb_path.name}...", err=True)
     parsed = parse_twb(twb_path)
 
+    # BL-131: native Tableau Sets (<group> — static/Top-N/condition-based)
+    # are not auto-converted by this GENERATE pass; set->cohort is an
+    # agent-guided Phase-2a/2b/2c step (SKILL.md Step 5b). Nudge instead of
+    # silently skipping them.
+    sets_detected = parsed.get("sets_detected", 0)
+    if sets_detected > 0:
+        typer.echo(
+            f"WARNING: {sets_detected} Tableau Set(s) detected — not auto-converted "
+            "by build-model; run the Phase-2a/2b/2c set→cohort step (SKILL.md Step 5b).",
+            err=True,
+        )
+
     # Filter datasources
     datasources = parsed["datasources"]
     if datasource_name:
@@ -1352,6 +1364,7 @@ def build_model_cmd(
             # --reconcile-plan already printed its JSON — stop without
             # printing the all_results wrapper or writing any TML.
             return
+        result["sets_detected"] = sets_detected
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))
