@@ -44,6 +44,7 @@ from ts_cli.tableau_translate import (
     strip_comments,
     strip_ifnull_zero,
     strip_parameter_prefix,
+    substitute_sql_view_parameters,
     translate_formulas,
     translate_single,
     validate_output,
@@ -365,6 +366,63 @@ class TestBuildParamRenames:
         assert "Platform/Placement" in renames
         assert renames["Platform/Placement"] == "Platform Placement"
         assert "Metric" not in renames
+
+
+class TestSubstituteSqlViewParameters:
+    def test_known_parameter_default_substituted(self):
+        sql_views = [{"name": "CSQ1", "sql_query": "SELECT * FROM t WHERE region = '<[Parameters].[Region]>'"}]
+        parameters = [{"name": "Region", "default_value": "West"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters)
+
+        assert sql_views[0]["sql_query"] == "SELECT * FROM t WHERE region = 'West'"
+        assert "<[Parameters]" not in sql_views[0]["sql_query"]
+        assert len(issues) == 1
+        assert issues[0]["name"] == "CSQ1"
+        assert any("inlined" in w for w in issues[0]["warnings"])
+
+    def test_unknown_parameter_flagged_needs_review(self):
+        sql_views = [{"name": "CSQ2", "sql_query": "SELECT * FROM t WHERE d >= <[Parameters].[Mystery Param]>"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters=[])
+
+        # Token left in place — nothing safe to substitute.
+        assert "<[Parameters].[Mystery Param]>" in sql_views[0]["sql_query"]
+        assert len(issues) == 1
+        assert any("NEEDS-REVIEW" in w and "Mystery Param" in w for w in issues[0]["warnings"])
+
+    def test_mixed_known_and_unknown_tokens_in_one_query(self):
+        sql_views = [{
+            "name": "CSQ3",
+            "sql_query": (
+                "SELECT * FROM t WHERE region = '<[Parameters].[Region]>' "
+                "AND d >= <[Parameters].[Unknown]>"
+            ),
+        }]
+        parameters = [{"name": "Region", "default_value": "East"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters)
+
+        assert "'East'" in sql_views[0]["sql_query"]
+        assert "<[Parameters].[Unknown]>" in sql_views[0]["sql_query"]
+        assert len(issues) == 1
+        warnings = issues[0]["warnings"]
+        assert any("inlined" in w for w in warnings)
+        assert any("NEEDS-REVIEW" in w for w in warnings)
+
+    def test_no_parameter_token_no_issue(self):
+        sql_views = [{"name": "CSQ4", "sql_query": "SELECT * FROM t"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters=[{"name": "Region", "default_value": "West"}])
+        assert issues == []
+        assert sql_views[0]["sql_query"] == "SELECT * FROM t"
+
+    def test_multiple_sql_views_only_offending_one_reported(self):
+        sql_views = [
+            {"name": "Clean", "sql_query": "SELECT 1"},
+            {"name": "Dirty", "sql_query": "SELECT * FROM t WHERE x = <[Parameters].[N]>"},
+        ]
+        parameters = [{"name": "N", "default_value": "5"}]
+        issues = substitute_sql_view_parameters(sql_views, parameters)
+        assert len(issues) == 1
+        assert issues[0]["name"] == "Dirty"
+        assert sql_views[1]["sql_query"] == "SELECT * FROM t WHERE x = 5"
 
 
 # ---------------------------------------------------------------------------
@@ -1524,6 +1582,35 @@ class TestValidatePreImport:
     def test_else_with_value_no_warning(self):
         issues = validate_pre_import([
             {"name": "ElseOK", "expr": "sum(if [X] > 0 then [Y] else 0)"},
+        ])
+        assert len(issues) == 0
+
+    # -- Nested-if-in-comparison (BL-060) --
+
+    def test_comparison_directly_followed_by_if_warns(self):
+        issues = validate_pre_import([
+            {"name": "Bad Compare", "expr": "sum([x]) > if [a] then 1 else 0 end"},
+        ])
+        assert len(issues) == 1
+        assert any("wrap the conditional in parentheses" in w for w in issues[0]["warnings"])
+
+    def test_comparison_followed_by_if_various_operators(self):
+        for op in ("<", ">", "<=", ">=", "==", "!="):
+            issues = validate_pre_import([
+                {"name": "Bad", "expr": f"sum([x]) {op} if [a] then 1 else 0 end"},
+            ])
+            assert len(issues) == 1, f"operator {op} did not trigger the warning"
+            assert any("wrap the conditional in parentheses" in w for w in issues[0]["warnings"])
+
+    def test_normal_comparison_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "Normal Compare", "expr": "if sum([x]) > 5 then 1 else 0 end"},
+        ])
+        assert len(issues) == 0
+
+    def test_comparison_followed_by_parenthesized_if_no_warning(self):
+        issues = validate_pre_import([
+            {"name": "Already Wrapped", "expr": "sum([x]) > (if [a] then 1 else 0 end)"},
         ])
         assert len(issues) == 0
 

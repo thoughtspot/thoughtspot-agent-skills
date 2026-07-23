@@ -2,6 +2,7 @@
 from __future__ import annotations
 import xml.etree.ElementTree as ET
 from ts_cli.tableau.twb import (
+    count_native_sets,
     extract_blends,
     extract_table_calc_addressing,
     detect_orphan_calcs,
@@ -302,3 +303,118 @@ def test_build_column_table_map_unaffected_by_shared_helper_refactor():
     col_map = _build_column_table_map(ds, tables)
     assert col_map["LineItemId (agg_booked_monthly)"] == "agg_booked_monthly"
     assert col_map["LineItemId (v_lineitem_budgetline)"] == "v_lineitem_budgetline"
+
+
+# ---------------------------------------------------------------------------
+# count_native_sets (BL-131) — native Tableau Sets, not auto-converted by
+# build-model (Phase-2a/2b/2c set->cohort is an agent-guided step).
+# ---------------------------------------------------------------------------
+
+# A static union set (real Set — live-reproduced shape from
+# TableauSetControlUseCases.twbx's "Customer Group 1").
+STATIC_SET_XML = """
+<workbook><datasources>
+  <datasource caption='Orders'>
+    <group name='[Customer Group 1]'>
+      <groupfilter function='union'>
+        <groupfilter function='member' level='[Customer Name]' member='&quot;Aaron Bergman&quot;'/>
+        <groupfilter function='member' level='[Customer Name]' member='&quot;Aaron Hawkins&quot;'/>
+      </groupfilter>
+    </group>
+  </datasource>
+</datasources></workbook>
+"""
+
+# A Top-N ranked set (also a real Set — BL-009 Phase 2b) — must count too.
+TOPN_SET_XML = """
+<workbook><datasources>
+  <datasource caption='Orders'>
+    <group name='[State Top N]'>
+      <groupfilter count='5' end='top' function='end' units='records'>
+        <groupfilter direction='DESC' expression='SUM([Sales])' function='order'/>
+        <groupfilter function='level-members' level='[State]'/>
+      </groupfilter>
+    </group>
+  </datasource>
+</datasources></workbook>
+"""
+
+# Tableau's internal combined-field mechanism for multi-field dashboard
+# Actions/Tooltips — a <group> element, but NOT a user-created Set (live-
+# reproduced shape from Ads Commercial Dashboard's "Action (...)" groups).
+# Must be excluded from the count.
+CROSSJOIN_GROUP_XML = """
+<workbook><datasources>
+  <datasource caption='Orders'>
+    <group name='[Action (Region,Category)]'>
+      <groupfilter function='crossjoin'>
+        <groupfilter function='level-members' level='[Region]'/>
+        <groupfilter function='level-members' level='[Category]'/>
+      </groupfilter>
+    </group>
+  </datasource>
+</datasources></workbook>
+"""
+
+# Tableau's Pivot construct — a <group> with no <groupfilter> child at all
+# (plain <field> children instead). Not a Set either.
+PIVOT_GROUP_XML = """
+<workbook><datasources>
+  <datasource caption='Orders'>
+    <group name='Pivot Field Values'>
+      <field name='[2000-01]'/>
+      <field name='[2001-02]'/>
+    </group>
+  </datasource>
+</datasources></workbook>
+"""
+
+
+def test_count_native_sets_static_union():
+    root = ET.fromstring(STATIC_SET_XML)
+    assert count_native_sets(root) == 1
+
+
+def test_count_native_sets_topn_counts_as_a_set():
+    root = ET.fromstring(TOPN_SET_XML)
+    assert count_native_sets(root) == 1
+
+
+def test_count_native_sets_excludes_crossjoin_action_tooltip_groups():
+    root = ET.fromstring(CROSSJOIN_GROUP_XML)
+    assert count_native_sets(root) == 0
+
+
+def test_count_native_sets_excludes_pivot_groups_with_no_groupfilter():
+    root = ET.fromstring(PIVOT_GROUP_XML)
+    assert count_native_sets(root) == 0
+
+
+def test_count_native_sets_zero_when_no_groups():
+    root = ET.fromstring("<workbook><datasources><datasource caption='Orders'>"
+                         "<relation name='t' type='table' table='[db].[t]'/>"
+                         "</datasource></datasources></workbook>")
+    assert count_native_sets(root) == 0
+
+
+def test_count_native_sets_mixed_workbook_counts_only_real_sets():
+    root = ET.fromstring("""
+    <workbook><datasources>
+      <datasource caption='Orders'>
+        <group name='[Customer Group 1]'>
+          <groupfilter function='union'>
+            <groupfilter function='member' level='[Customer Name]' member='&quot;X&quot;'/>
+          </groupfilter>
+        </group>
+        <group name='[Action (Region)]'>
+          <groupfilter function='crossjoin'>
+            <groupfilter function='level-members' level='[Region]'/>
+          </groupfilter>
+        </group>
+        <group name='Pivot Field Values'>
+          <field name='[a]'/>
+        </group>
+      </datasource>
+    </datasources></workbook>
+    """)
+    assert count_native_sets(root) == 1

@@ -98,7 +98,6 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | BL-034 | tools/ & ts-cli quality polish | 2026-10-31 |
 | BL-128 | Skill-size audit: extract detail from heavy converter skills | opportunistic |
-| BL-131 | Tableau Sets: warn when automated run skips Phase-2 set step | opportunistic |
 | BL-036 | Databricks-native connection creation | 2026-10-31 |
 | BL-066 | Codify formula promotion as `ts model promote-formula` | 2026-10-31 |
 | BL-080 | `ts metadata permissions` + answer-promote pre-flight | 2026-09-30 |
@@ -114,7 +113,6 @@ are roughly ordered by value÷effort.
 | BL-072 | Tableau hierarchies and value aliases (+ inverse-trig) | 2026-12-31 |
 | BL-088 | Audit mode: classify Tableau Sets | 2026-09-30 |
 | BL-092 | Drop extract table for SQL View | — |
-| BL-093 | Substitute or flag Tableau parameters in Custom SQL | — |
 | BL-101 | Chart-axis-role in `ts metadata report` | — |
 | BL-102 | Databricks MV `parameters:` parse + emit | — |
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
@@ -131,7 +129,6 @@ are roughly ordered by value÷effort.
 | BL-038 | ts-recipe-formula-weighted-average | demand-driven |
 | BL-039 | ts-object-answer-promote: embedded Answers + sets | demand-driven |
 | BL-041 | ts-recipe-model-timezone-bridge-snowflake | demand-driven |
-| BL-060 | Tableau: nested-if-in-comparison detection | if pattern recurs |
 | BL-061 | Integrate tml_lint() into build-model | next build-model touch |
 | BL-091 | Multi-table model grain semantics verification | when data access available |
 | BL-096 | se-thoughtspot SpotQL endpoints 500 | next build re-verify |
@@ -1726,11 +1723,13 @@ Consumer counting for individual sets: `ts metadata dependents <set-guid> --type
 
 ---
 
-## BL-060 — Tableau: detect nested-if-in-comparison formula pattern `Tier 4`
+## BL-060 — Tableau: detect nested-if-in-comparison formula pattern
 
 **Source:** Ads Commercial Dashboard migration (2026-06-27) — 1 formula hit this pattern
-**Affects:** `tools/ts-cli/ts_cli/tableau_translate.py` (`validate_pre_import()`)
-**Status:** Open — deferred from the build-model pipeline work (PR on `feat/build-model-pipeline`)
+**Affects:** `tools/ts-cli/ts_cli/tableau/validate.py` (`validate_pre_import()`)
+**Status:** DONE (ts-cli v0.85.0, `fix/tableau-quick-closeout` commit 50603af) — `[<>=!]=?\s*if\b`
+regex check added to `validate_pre_import()`, mirroring the shipped BL-062 bare-else check.
+Live-confirmed on Ads Commercial Dashboard's `Dimensions: TrafficLight` formula.
 
 ### Problem
 
@@ -2765,11 +2764,16 @@ the extract table should be dropped. Not a blocker for live-connection reports (
 
 ---
 
-## BL-093 — Tableau: substitute or flag Tableau parameters embedded in Custom SQL `Tier 3`
+## BL-093 — Tableau: substitute or flag Tableau parameters embedded in Custom SQL
 
 **Source:** 2026-07-06 PR #188, seussrecs.twb (`WHERE rec_date >= <[Parameters].[Parameter 1]>`).
-**Affects:** ts-convert-from-tableau, `build-model` (`_extract_sql_views` / SQL View emission).
-**Status:** OPEN.
+**Affects:** ts-convert-from-tableau, `build-model` (`_generate_flow` / SQL View emission).
+**Status:** DONE (ts-cli v0.85.0, `fix/tableau-quick-closeout` commit b036302) — new
+`substitute_sql_view_parameters()` (`ts_cli/tableau/params.py`) scans each SQL View's
+`sql_query` for `<[Parameters].[Name]>` tokens: a token naming a parsed parameter gets that
+parameter's default value substituted in (+ a `validation_warnings` note the value is now
+static); an unresolved token gets a `NEEDS-REVIEW` warning instead and is left in place —
+never silently passed through to import. `references/coverage-matrix.md` #131 added.
 
 Tableau lets a Custom SQL body reference a workbook parameter inline as `<[Parameters].[Name]>`.
 That token is not valid warehouse SQL, so the emitted `sql_view.sql_query` will fail at import
@@ -3574,12 +3578,19 @@ per converter asserting each source type → a schema-valid TS type. Consider a 
 
 ---
 
-## BL-131 — Tableau Sets: warn when an automated/Stage-1 run skips the Phase-2 set→cohort step `Tier 3`
+## BL-131 — Tableau Sets: warn when an automated/Stage-1 run skips the Phase-2 set→cohort step
 
 **Filed:** 2026-07-23. **Corrected:** 2026-07-23 (original framing was wrong — see below).
 **Source:** 2026-07-23 benchmark (Set Control workbook), Stage-1 non-interactive run.
 **Affects:** `ts-convert-from-tableau` SKILL.md (Step 3/5b) — surfacing only.
-**Status:** OPEN (small; NOT a missing-capability item).
+**Status:** DONE (ts-cli v0.85.0, `fix/tableau-quick-closeout` commit 45db8e9) — new
+`count_native_sets()` (`ts_cli/tableau/twb.py`) counts datasource-scoped `<group>` Set elements
+(excluding Tableau's internal `crossjoin` combined-field mechanism used for multi-field dashboard
+Actions/Tooltips, and the Pivot-field `<group>` shape — neither is a user Set). `build-model` now
+prints a stderr WARNING and adds `sets_detected` to each datasource's result JSON when count > 0.
+Live-confirmed: `TableauSetControlUseCases.twbx` → `sets_detected: 10` + warning; a no-Set
+workbook → 0, no warning; Ads Commercial Dashboard (14 crossjoin groups, 0 real Sets) → 0,
+correctly not warned.
 
 **Correction:** Tableau Sets → ThoughtSpot cohorts **is already supported** (shipped under BL-009) — static
 sets → `GROUP_BASED` column-set cohort (incl. `%null%`, `except` member-lists, formula-anchored); Top-N/Bottom-N

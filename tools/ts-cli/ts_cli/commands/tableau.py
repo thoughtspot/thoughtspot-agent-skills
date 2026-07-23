@@ -936,6 +936,16 @@ def _generate_flow(
 
     sql_views = ds.get("sql_views", [])
 
+    # BL-093: resolve <[Parameters].[Name]> tokens Tableau lets a Custom SQL
+    # body embed — substitute the parsed parameter's default (SQL is then
+    # valid, value is now static) or flag NEEDS-REVIEW when unresolved.
+    # Mutates sql_views' sql_query in place before it's consumed below.
+    from ts_cli.tableau.params import substitute_sql_view_parameters
+    sql_view_param_warnings = substitute_sql_view_parameters(sql_views, parsed["parameters"])
+    for vi in sql_view_param_warnings:
+        for w in vi["warnings"]:
+            typer.echo(f"  ! SQL View {vi['name']}: {w}", err=True)
+
     model_tml = build_model_tml(
         model_name=name,
         connection_name=connection_name,
@@ -972,8 +982,9 @@ def _generate_flow(
         "name_renames": rename_map,
         "sql_views": len(sql_views),
     }
-    if validation_issues:
-        result["validation_warnings"] = validation_issues
+    all_validation_warnings = list(validation_issues) + sql_view_param_warnings
+    if all_validation_warnings:
+        result["validation_warnings"] = all_validation_warnings
     if _junk_dropped:
         result["junk_formulas_dropped"] = _junk_dropped
     if result_reconcile_dropped is not None:
@@ -1294,6 +1305,18 @@ def build_model_cmd(
     typer.echo(f"Parsing {twb_path.name}...", err=True)
     parsed = parse_twb(twb_path)
 
+    # BL-131: native Tableau Sets (<group> — static/Top-N/condition-based)
+    # are not auto-converted by this GENERATE pass; set->cohort is an
+    # agent-guided Phase-2a/2b/2c step (SKILL.md Step 5b). Nudge instead of
+    # silently skipping them.
+    sets_detected = parsed.get("sets_detected", 0)
+    if sets_detected > 0:
+        typer.echo(
+            f"WARNING: {sets_detected} Tableau Set(s) detected — not auto-converted "
+            "by build-model; run the Phase-2a/2b/2c set→cohort step (SKILL.md Step 5b).",
+            err=True,
+        )
+
     # Filter datasources
     datasources = parsed["datasources"]
     if datasource_name:
@@ -1341,6 +1364,7 @@ def build_model_cmd(
             # --reconcile-plan already printed its JSON — stop without
             # printing the all_results wrapper or writing any TML.
             return
+        result["sets_detected"] = sets_detected
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))

@@ -456,3 +456,106 @@ def test_write_table_tml_files_forwards_parsed_db_table_for_aliased_table(tmp_pa
     doc = yaml.safe_load(table_file.read_text())
     assert doc["table"]["name"] == "d_partner1"
     assert doc["table"]["db_table"] == "d_partner"  # NOT "d_partner1"
+
+
+# ---------------------------------------------------------------------------
+# 5. BL-093 — substitute/flag Tableau parameters embedded in Custom SQL,
+#    end-to-end through _generate_flow into the emitted .sql_view.tml.
+# ---------------------------------------------------------------------------
+
+def test_sql_view_parameter_default_substituted_end_to_end(tmp_path):
+    ds = _ds(tables=[])
+    ds["sql_views"] = [{
+        "name": "Custom SQL Query",
+        "sql_query": "SELECT * FROM orders WHERE region = '<[Parameters].[Region]>'",
+        "columns": [],
+    }]
+    parsed = {"parameters": [{"name": "Region", "default_value": "West"}]}
+
+    result = _run_generate_flow(ds, tmp_path, parsed=parsed)
+
+    sv_file = next(tmp_path.glob("*.sql_view.tml"))
+    written_sql = sv_file.read_text()
+    assert "<[Parameters]" not in written_sql
+    assert "West" in written_sql
+
+    assert "validation_warnings" in result
+    warnings = [w for issue in result["validation_warnings"] for w in issue["warnings"]]
+    assert any("inlined" in w for w in warnings)
+
+
+def test_sql_view_parameter_unknown_flagged_needs_review_end_to_end(tmp_path):
+    ds = _ds(tables=[])
+    ds["sql_views"] = [{
+        "name": "Custom SQL Query",
+        "sql_query": "SELECT * FROM orders WHERE region = '<[Parameters].[Mystery]>'",
+        "columns": [],
+    }]
+    parsed = {"parameters": []}
+
+    result = _run_generate_flow(ds, tmp_path, parsed=parsed)
+
+    sv_file = next(tmp_path.glob("*.sql_view.tml"))
+    written_sql = sv_file.read_text()
+    # Nothing safe to substitute — token left in place, never silently dropped.
+    assert "<[Parameters].[Mystery]>" in written_sql
+
+    warnings = [w for issue in result["validation_warnings"] for w in issue["warnings"]]
+    assert any("NEEDS-REVIEW" in w and "Mystery" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# 6. BL-131 — warn (+ sets_detected) when a workbook has native Tableau Sets
+#    that build-model's automated GENERATE pass does not convert.
+# ---------------------------------------------------------------------------
+
+SET_TWB = """<?xml version='1.0'?>
+<workbook>
+  <datasource name='federated.a' caption='Orders'>
+    <relation name='Orders' type='table' table='[db].[s].[Orders]'/>
+    <column name='[Region]' datatype='string' role='dimension' caption='Region'/>
+    <group name='[Customer Group 1]'>
+      <groupfilter function='union'>
+        <groupfilter function='member' level='[Customer Name]' member='&quot;Aaron Bergman&quot;'/>
+      </groupfilter>
+    </group>
+  </datasource>
+</workbook>
+"""
+
+
+def test_build_model_warns_and_reports_sets_detected_when_workbook_has_sets(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(SET_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "WARNING: 1 Tableau Set(s) detected" in result.stderr
+    assert "Phase-2a/2b/2c set→cohort step" in result.stderr
+
+    payload = json.loads(result.stdout)
+    assert payload[0]["sets_detected"] == 1
+
+
+def test_build_model_no_warning_and_zero_sets_detected_without_sets(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(LINT_TWB)  # no <group> Sets in this fixture
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "Tableau Set(s) detected" not in result.stderr
+
+    payload = json.loads(result.stdout)
+    assert payload[0]["sets_detected"] == 0
