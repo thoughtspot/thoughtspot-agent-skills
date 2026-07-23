@@ -71,6 +71,7 @@ from ts_cli.tableau.classify import (
     UNTRANSLATABLE_TIERS,
     classify_formulas,
 )
+from ts_cli.tableau.naming import detect_name_clashes
 from ts_cli.tml_lint import lint_tml
 
 # ---------------------------------------------------------------------------
@@ -117,6 +118,7 @@ def _flatten_datasource(parsed: dict, model_name: str) -> dict:
         "calculated_fields": parsed.get("calculated_fields", parsed.get("formulas", [])),
         "orphan_calcs": parsed.get("orphan_calcs", []),
         "calc_map": parsed.get("calc_map", {}),
+        "col_table_map": parsed.get("col_table_map", {}),
     }
 
 
@@ -297,10 +299,39 @@ def _join_check(ds: dict, model_tables: list[dict]) -> tuple[list[dict], dict]:
     return findings, stats
 
 
-def _formula_drop_check(model: dict, tiers: dict[str, str]) -> tuple[list[dict], dict, list[str]]:
+def _expected_model_names(ds: dict, tiers: dict[str, str]) -> dict[str, str]:
+    """Reproduce generation time's column/formula name-clash rename
+    (``naming.detect_name_clashes`` — ``translate_formulas()`` renames a calc
+    to ``"Formula <X>"`` when its caption collides with a physical column's
+    internal/local name) so structural drop-checking knows a formula found
+    under ITS renamed name is present, not silently dropped.
+
+    Live-reproduced on Ads Commercial Dashboard: a "Region" calc (tier
+    ``parameter_ref``) collides with ``col_table_map``'s bare "Region" key
+    (from a physical column whose own display caption is "Delivery Region" —
+    the clash is on the internal name Tableau tracks, not the final caption)
+    and is auto-renamed to "Formula Region" at generation time — correctly
+    emitted, but this check had no way to know the rename recipe and reported
+    "Region" as a missing/dropped formula.
+
+    Uses the exact same inputs ``translate_formulas()`` does (all calc
+    captions vs. ``col_table_map`` keys) so the two can never drift apart —
+    verify never re-derives its own clash policy. Returns
+    ``{original_name: renamed_name}`` for only the formulas that clash.
+    """
+    formula_names = {n for n in tiers}
+    column_names = set(ds.get("col_table_map", {}).keys())
+    return detect_name_clashes(formula_names, column_names)
+
+
+def _formula_drop_check(
+    ds: dict, model: dict, tiers: dict[str, str]
+) -> tuple[list[dict], dict, list[str]]:
     """Every TRANSLATABLE-tiered formula (per classify.py) must have a
-    matching model.formulas[] entry; an UNTRANSLATABLE-tiered one is expected
-    to be absent and is never checked here."""
+    matching model.formulas[] entry — either under its own name, or under the
+    name-clash rename generation would have applied (see
+    `_expected_model_names`). An UNTRANSLATABLE-tiered one is expected to be
+    absent and is never checked here."""
     translatable = sorted(n for n, t in tiers.items() if t in TRANSLATABLE_TIERS)
     untranslatable_count = sum(1 for t in tiers.values() if t in UNTRANSLATABLE_TIERS)
     model_formula_names = {
@@ -313,7 +344,12 @@ def _formula_drop_check(model: dict, tiers: dict[str, str]) -> tuple[list[dict],
         "formulas_in_model": len(model_formula_names),
     }
 
-    missing_formulas = [n for n in translatable if n.strip().lower() not in model_formula_names]
+    name_clashes = _expected_model_names(ds, tiers)
+    missing_formulas = [
+        n for n in translatable
+        if n.strip().lower() not in model_formula_names
+        and name_clashes.get(n, "").strip().lower() not in model_formula_names
+    ]
     findings: list[dict] = []
     if missing_formulas:
         findings.append(_finding(
@@ -331,7 +367,7 @@ def check_structural(ds: dict, model: dict, tiers: dict[str, str]) -> dict:
     model_tables = model.get("model_tables", []) or []
     table_findings, table_stats = _table_check(ds, model_tables)
     join_findings, join_stats = _join_check(ds, model_tables)
-    formula_findings, formula_stats, missing_formulas = _formula_drop_check(model, tiers)
+    formula_findings, formula_stats, missing_formulas = _formula_drop_check(ds, model, tiers)
 
     return {
         "stats": {**table_stats, **join_stats, **formula_stats},
@@ -351,6 +387,7 @@ def check_formula_equivalence(ds: dict, model: dict, tiers: dict[str, str]) -> d
         f.get("name", "").strip().lower(): f for f in model.get("formulas", []) or []
         if isinstance(f, dict)
     }
+    name_clashes = _expected_model_names(ds, tiers)
 
     for cf in ds.get("calculated_fields", []):
         name = _formula_name(cf)
@@ -361,6 +398,9 @@ def check_formula_equivalence(ds: dict, model: dict, tiers: dict[str, str]) -> d
             continue
 
         tf = model_formulas.get(name.strip().lower())
+        if tf is None:
+            renamed = name_clashes.get(name, "")
+            tf = model_formulas.get(renamed.strip().lower()) if renamed else None
         if tf is None:
             # Already surfaced (with the full missing-name list) as a
             # structural ERROR — record it here for the formula-level report

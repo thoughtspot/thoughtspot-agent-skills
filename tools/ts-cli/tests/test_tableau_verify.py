@@ -167,6 +167,57 @@ def test_translatable_drop_is_flagged_but_untranslatable_absence_is_not():
 
 
 # ---------------------------------------------------------------------------
+# Fix #B — a calc field renamed by the column/formula name-clash safety net
+# (naming.py::detect_name_clashes, "Formula <X>") must NOT be flagged as a
+# silent drop. Live-reproduced on Ads Commercial Dashboard: a "Region" calc
+# (parameter_ref tier) collides with a physical column's internal name
+# (col_table_map key "Region", from a column whose OWN display caption is
+# "Delivery Region" — the clash is on the internal name, not the caption) and
+# is auto-renamed to "Formula Region" at generation time — correctly emitted,
+# but verify didn't know the rename recipe and reported "Region" missing.
+# ---------------------------------------------------------------------------
+
+def test_column_formula_name_clash_rename_is_not_flagged_as_drop():
+    parsed = _parsed(calcs=[
+        _calc("Region", "IF [Parameters].[Parameter 2] = 'On' THEN [Region] ELSE '' END",
+              role="dimension", datatype="string"),
+    ])
+    parsed["col_table_map"] = {"Region": "AGG_PARTNER_DELIVERY_DAILY"}
+    model = _model_tml(
+        formulas=[{"id": "formula_Formula Region", "name": "Formula Region",
+                  "expr": "if ( [AGG_PARTNER_DELIVERY_DAILY::Region] = 'On' ) "
+                          "then [AGG_PARTNER_DELIVERY_DAILY::Region] else ''"}],
+        columns=[_formula_column("Formula Region", "formula_Formula Region")],
+    )
+
+    report = verify_conversion(parsed, model)
+
+    structural = next(c for c in report["checks"] if c["name"] == "structural")
+    assert structural["severity"] != "ERROR", structural["findings"]
+    assert not any("Region" in f["message"] for f in structural["findings"])
+    assert report["ok"] is True, report
+
+
+def test_name_clash_rename_still_flags_a_genuine_drop():
+    """The clash-rename allowance must not blanket-suppress real drops: if
+    NEITHER the original nor the "Formula <X>" name is present, it's still a
+    drop."""
+    parsed = _parsed(calcs=[
+        _calc("Region", "IF [Parameters].[Parameter 2] = 'On' THEN [Region] ELSE '' END",
+              role="dimension", datatype="string"),
+    ])
+    parsed["col_table_map"] = {"Region": "AGG_PARTNER_DELIVERY_DAILY"}
+    model = _model_tml(formulas=[])  # neither "Region" nor "Formula Region" present
+
+    report = verify_conversion(parsed, model)
+
+    structural = next(c for c in report["checks"] if c["name"] == "structural")
+    assert structural["severity"] == "ERROR"
+    assert any("Region" in f["message"] for f in structural["findings"])
+    assert report["ok"] is False
+
+
+# ---------------------------------------------------------------------------
 # Formula equivalence — garbled TML translation scores LOW/PARTIAL
 # ---------------------------------------------------------------------------
 

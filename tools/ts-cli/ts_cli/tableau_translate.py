@@ -405,6 +405,12 @@ def translate_formulas(
     return {
         "translated": translated,
         "skipped": skipped,
+        # {original_caption: "Formula <original_caption>"} for every formula
+        # renamed by the column/formula name-clash safety net (BL-050 #9) —
+        # the actual mapping, not just a count, so a caller (build-model's
+        # CLI result JSON, `ts tableau verify`) can surface which formula
+        # ended up under which name instead of it reading as a silent drop.
+        "name_clashes": dict(name_clashes),
         "stats": {
             "total": len(formulas),
             "translated": len(translated),

@@ -386,10 +386,15 @@ def _translate_and_validate(
     resolved_calcs: list[dict],
     scoped_columns: dict,
     parsed: dict,
-) -> tuple[list, list, list]:
+) -> tuple[list, list, list, dict]:
     """Translate a datasource's calculated fields and run pre-import validation.
 
-    Returns (translated, skipped, validation_issues); echoes progress to stderr.
+    Returns (translated, skipped, validation_issues, name_clashes); echoes
+    progress to stderr. ``name_clashes`` (Fix #B) is
+    ``{original_caption: "Formula <original_caption>"}`` for every formula
+    renamed because its caption collided with a physical column's
+    internal/local name — surfaced so the caller can report the rename
+    instead of it reading as a silently dropped formula.
     """
     from ts_cli.tableau_translate import translate_formulas, validate_pre_import
 
@@ -403,6 +408,7 @@ def _translate_and_validate(
 
     translated = translate_result["translated"]
     skipped = translate_result["skipped"]
+    name_clashes = translate_result.get("name_clashes", {})
     typer.echo(
         f"  Translated: {len(translated)}/{len(ds['calculated_fields'])} formulas",
         err=True,
@@ -411,6 +417,8 @@ def _translate_and_validate(
         typer.echo(f"  Skipped: {len(skipped)}", err=True)
         for s in skipped[:5]:
             typer.echo(f"    - {s['name']}: {s['reason'][:80]}", err=True)
+    if name_clashes:
+        typer.echo(f"  Name clashes (column vs. formula) renamed: {name_clashes}", err=True)
 
     # Pre-import validation (catches issues before ThoughtSpot rejects them)
     col_names = {c["name"] for c in ds["columns"]}
@@ -422,7 +430,7 @@ def _translate_and_validate(
             for w in vi["warnings"]:
                 typer.echo(f"    ! {vi['name']}: {w}", err=True)
 
-    return translated, skipped, validation_issues
+    return translated, skipped, validation_issues, name_clashes
 
 
 def _collect_cascade_victims(
@@ -709,6 +717,7 @@ def _write_table_tml_files(
     schema: str,
     out_path,
     col_table_map: Optional[dict] = None,
+    table_registry: Optional[dict] = None,
 ) -> dict:
     """Write one ``{table_slug}.table.tml`` per physical table via the pure
     ``ts_cli.tableau.tables.build_table_tml`` (Task A1) — call it, don't
@@ -733,6 +742,25 @@ def _write_table_tml_files(
     default) would silently diverge from what the model references, breaking
     ``ts tml lint --dir``'s cross-reference check.
 
+    ``table_registry`` (Fix #B — BL follow-up, Set Control "Sub-Category" XREF):
+    when a `build-model` run spans MULTIPLE datasources that declare a
+    same-named physical table (a common Tableau pattern — several datasources
+    copied from one connection, each used by a different set of worksheets),
+    each datasource only carries the subset of that table's columns IT
+    references. Without a registry, writing `{slug}.table.tml` per-datasource
+    means the LAST datasource processed silently overwrites the file, dropping
+    any column only an earlier datasource referenced — live-reproduced on
+    ``TableauSetControlUseCases.twbx``, where "Sets"/"Hex Map" (no
+    Sub-Category) processed after "Set Control" (has it) clobbered it, leaving
+    a Model TML column_id with no matching Table TML column (`ts tml lint`
+    XREF). Passing one dict, shared across every datasource in the same
+    `build-model` invocation, accumulates the UNION of columns ever seen for
+    that table name (first-seen definition wins per db_column_name — the
+    normal case is identical column defs across datasources anyway) instead of
+    each datasource's write clobbering the last. ``None`` (the default)
+    preserves the old per-call behavior for any caller that doesn't share a
+    registry across multiple datasources.
+
     Returns ``{"table_files": [...], "tables_written": N,
     "table_columns_unassigned": [...]}`` — the last key only for multi-table.
     """
@@ -756,7 +784,21 @@ def _write_table_tml_files(
     paths: list = []
     for t in tables:
         t_cols = by_table.get(t["name"], [])
-        table_dict = {"name": t["name"], "columns": t_cols}
+        if table_registry is not None:
+            merged = table_registry.setdefault(t["name"], {})
+            for c in t_cols:
+                key = c.get("db_column_name") or c.get("name")
+                if key not in merged:
+                    merged[key] = c
+            t_cols = list(merged.values())
+        # Fix #C: forward the parser's own db_table (a dotted db.schema.table
+        # path — see twb.py._extract_tables) so build_table_tml can prefer it
+        # over re-slugging `name`. Matters when the table is a Tableau-
+        # assigned ALIAS for a physical table joined twice (`alias_of`,
+        # e.g. Ads Commercial Dashboard's `d_partner1` aliasing `d_partner`)
+        # — re-deriving from `name` there would slug the alias, a table name
+        # that does not exist in the warehouse.
+        table_dict = {"name": t["name"], "columns": t_cols, "db_table": t.get("db_table")}
         cmap = {c["name"]: c.get("db_column_name", c["name"]) for c in t_cols}
         obj, _dropped = build_table_tml(
             table_dict, connection_name, database, schema,
@@ -847,11 +889,14 @@ def _generate_flow(
     reconcile_plan_mode: bool = False,
     column_name_map: Optional[dict] = None,
     profile: Optional[str] = None,
+    table_registry: Optional[dict] = None,
 ) -> dict:
     """Build phased model TML files from scratch and write them to disk."""
     from ts_cli.model_builder import build_model_tml, split_for_phased_import
     from ts_cli.tableau.build_model import apply_prefix_and_double_agg
-    from ts_cli.tableau.reconcile import clean_columns, drop_junk_formulas, strip_suffix_in_expr
+    from ts_cli.tableau.reconcile import (
+        clean_columns, drop_junk_columns, drop_junk_formulas, strip_suffix_in_expr,
+    )
     from ts_cli.tableau_translate import dump_tml_yaml
 
     # Tier-1: strip Custom-SQL suffixes, drop junk, dedupe, and set the table so
@@ -861,12 +906,17 @@ def _generate_flow(
     # stamping tables[0] on all of them would mis-qualify columns that
     # actually belong to other tables (worse than the pre-existing bare
     # column_id, which _build_model_columns's own single_table guard leaves
-    # alone). Multi-table sources have no Custom-SQL suffixes/junk anyway —
-    # that only comes from single-table sqlproxy sources — so leaving
-    # cleaned_cols untouched here is safe.
+    # alone). Multi-table datasources DO still carry the
+    # __tableau_internal_object_id__ junk pseudo-column (Tableau writes one per
+    # physical table, not just for single-table sqlproxy sources — confirmed
+    # live on Ads Commercial Dashboard: 26 leaked into Model TML before this
+    # fix) — drop_junk_columns() strips those without clean_columns' table
+    # stamp/dedup (both wrong here, see its docstring).
     if len(ds.get("tables", [])) == 1:
         _table_name = ds["tables"][0]["name"]
         cleaned_cols = clean_columns(cleaned_cols, _table_name)
+    else:
+        cleaned_cols = drop_junk_columns(cleaned_cols)
     for f in cleaned_formulas:
         f["expr"] = strip_suffix_in_expr(f["expr"])
 
@@ -947,6 +997,7 @@ def _generate_flow(
         result.update(_write_table_tml_files(
             ds["tables"], cleaned_cols, connection_name, database, schema, out_path,
             col_table_map=ds.get("col_table_map"),
+            table_registry=table_registry,
         ))
 
     return result
@@ -993,10 +1044,18 @@ def _process_datasource(
     reconcile_plan_mode: bool,
     database: str = "",
     schema: str = "",
+    table_registry: Optional[dict] = None,
 ) -> Optional[dict]:
     """Run the full per-datasource pipeline (translate, merge-or-generate) for
     one TWB datasource. Returns None to signal --reconcile-plan already
     printed its JSON and the caller should stop without further output.
+
+    ``table_registry`` — see ``_write_table_tml_files`` — is a single dict the
+    caller creates ONCE per `build-model` invocation and passes to every
+    datasource's call here, so Table TML for a physical table name shared by
+    more than one datasource accumulates the union of referenced columns
+    instead of the last datasource's write silently clobbering the rest
+    (Fix #B).
     """
     from ts_cli.model_builder import (
         build_formula_levels,
@@ -1047,7 +1106,7 @@ def _process_datasource(
         ds["calculated_fields"], ds["calc_map"],
     )
 
-    translated, skipped, validation_issues = _translate_and_validate(
+    translated, skipped, validation_issues, name_clashes = _translate_and_validate(
         ds, resolved_calcs, scoped_columns, parsed,
     )
 
@@ -1055,6 +1114,12 @@ def _process_datasource(
     cleaned_cols, cleaned_formulas, rename_map = resolve_name_collisions(
         ds["columns"], translated, parsed["parameters"],
     )
+    # Fix #B: merge in the column/formula name-clash renames (a distinct
+    # collision class — formula-vs-physical-column, detected earlier inside
+    # translate_formulas — from resolve_name_collisions' own formula-vs-
+    # parameter renames) so every rename this run applied is visible in one
+    # place (`result["name_renames"]`), not just the parameter-collision kind.
+    rename_map = {**name_clashes, **rename_map}
     if rename_map:
         typer.echo(f"  Renamed: {rename_map}", err=True)
 
@@ -1096,6 +1161,7 @@ def _process_datasource(
         reconcile_plan_mode=reconcile_plan_mode,
         column_name_map=col_name_map,
         profile=profile,
+        table_registry=table_registry,
     )
     if result.get("reconcile_plan"):
         # _generate_flow already printed the plan JSON to stdout — signal
@@ -1241,6 +1307,16 @@ def build_model_cmd(
             )
             raise SystemExit(1)
 
+    # Fix #B: shared across every datasource in THIS invocation so a physical
+    # table name declared by more than one datasource (a common Tableau
+    # pattern — several datasources copied from one connection, each used by
+    # a different set of worksheets) accumulates the union of referenced
+    # columns in its Table TML instead of the last datasource processed
+    # silently overwriting an earlier one's columns. See
+    # `_write_table_tml_files`'s docstring for the live-reproduced bug this
+    # closes (TableauSetControlUseCases.twbx "Sub-Category" XREF).
+    table_registry: dict = {}
+
     all_results = []
     for ds in datasources:
         result = _process_datasource(
@@ -1259,6 +1335,7 @@ def build_model_cmd(
             reconcile_plan_mode=reconcile_plan,
             database=database,
             schema=schema,
+            table_registry=table_registry,
         )
         if result is None:
             # --reconcile-plan already printed its JSON — stop without

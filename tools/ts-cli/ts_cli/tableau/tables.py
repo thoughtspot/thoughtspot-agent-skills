@@ -72,6 +72,30 @@ def _col_role(col):
     return "ATTRIBUTE", None
 
 
+def _parsed_db_table(table: dict) -> str | None:
+    """The physical warehouse table name from the parser's own ``db_table``
+    field (Fix #C), when present — a dotted ``db.schema.table`` path (see
+    ``ts_cli/tableau/twb.py::_extract_tables``), so only its LAST segment is
+    the table name proper (``db``/``schema`` are already their own separate
+    Table TML fields).
+
+    This is the REAL underlying table, which can differ from the table's
+    logical ``name`` when the same physical table is joined twice under a
+    Tableau-assigned alias (``alias_of`, e.g. ``d_partner1`` aliasing
+    ``d_partner``) — re-deriving db_table from ``name`` in that case slugs
+    the ALIAS, not the real table, and ThoughtSpot rejects the import
+    ("table not found") because that alias name was never a real warehouse
+    table. Returns ``None`` when the parser didn't supply a ``db_table``
+    (e.g. hand-built table dicts in tests/other converters), so the caller
+    can fall back to the name-slug default.
+    """
+    raw = table.get("db_table")
+    if not raw:
+        return None
+    physical = str(raw).split(".")[-1].strip("[]")
+    return _dbname(physical) if physical else None
+
+
 def _table_columns(table, cmap):
     cols = []
     for c in table.get("columns", []):
@@ -105,7 +129,11 @@ def build_table_tml(table: dict, connection_name: str, db: str, schema: str, *,
     table_map = table_map or {}
     cmap = (column_map or {}).get(table["name"], {})
     cols = _table_columns(table, cmap)
-    db_table = table_map.get(table["name"]) or _dbname(table["name"])
+    db_table = (
+        table_map.get(table["name"])
+        or _parsed_db_table(table)
+        or _dbname(table["name"])
+    )
     tbl = {
         "name": table["name"],
         "db": db,

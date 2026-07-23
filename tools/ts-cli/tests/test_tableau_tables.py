@@ -34,6 +34,54 @@ def test_build_table_tml_display_name_and_db_table_default():
     assert t["db_table"] == "Orders"  # _dbname("Orders") with no spaces/punctuation
 
 
+# ---------------------------------------------------------------------------
+# Fix #C — db_table prefers the parser's own db_table field (a dotted
+# db.schema.table path — see twb.py._extract_tables) over re-slugging `name`.
+# Live-reproduced on Ads Commercial Dashboard: `d_partner1` is a Tableau-
+# assigned ALIAS for a physical table joined twice — its logical `name` is
+# "d_partner1" but the parser's `db_table` field says the real warehouse
+# table is "dev_trusted_gold.bar_media.d_partner". Before this fix,
+# build_table_tml re-slugged `name` and emitted `db_table: d_partner1` — a
+# table that does not exist in the warehouse (only `d_partner` does).
+# ---------------------------------------------------------------------------
+
+def test_build_table_tml_prefers_parsed_db_table_over_name_reslug_for_aliased_table():
+    table = {
+        "name": "d_partner1",
+        "db_table": "dev_trusted_gold.bar_media.d_partner",
+        "alias_of": "d_partner",
+        "columns": [{"name": "Region", "data_type": "string", "column_type": "ATTRIBUTE"}],
+    }
+    obj, _ = build_table_tml(table, "APJ_TAB", "DB", "PUBLIC")
+    assert obj["table"]["db_table"] == "d_partner"  # NOT "d_partner1"
+    assert obj["table"]["name"] == "d_partner1"      # display name is untouched
+
+
+def test_build_table_tml_parsed_db_table_last_segment_only_no_dotted_path_leak():
+    # db_table must never end up as the full db.schema.table path — db/schema
+    # are already their own separate Table TML fields.
+    table = {"name": "Orders", "db_table": "dev_trusted_gold.bar_media.Orders", "columns": []}
+    obj, _ = build_table_tml(table, "CONN", "DB", "SCHEMA")
+    assert obj["table"]["db_table"] == "Orders"
+    assert "." not in obj["table"]["db_table"]
+
+
+def test_build_table_tml_table_map_still_wins_over_parsed_db_table():
+    table = {"name": "d_partner1", "db_table": "dev_trusted_gold.bar_media.d_partner", "columns": []}
+    obj, _ = build_table_tml(
+        table, "CONN", "DB", "SCHEMA", table_map={"d_partner1": "EXPLICIT_OVERRIDE"},
+    )
+    assert obj["table"]["db_table"] == "EXPLICIT_OVERRIDE"
+
+
+def test_build_table_tml_no_parsed_db_table_falls_back_to_name_slug():
+    # Hand-built table dicts (e.g. unit tests, other converters) with no
+    # `db_table` field at all must keep today's re-slug fallback.
+    table = {"name": "Sales Orders", "columns": []}
+    obj, _ = build_table_tml(table, "CONN", "DB", "SCHEMA")
+    assert obj["table"]["db_table"] == "Sales_Orders"
+
+
 def test_build_table_tml_type_map_covers_all_spec_values():
     table = {"name": "Types", "columns": [
         {"name": "A", "data_type": "int"},

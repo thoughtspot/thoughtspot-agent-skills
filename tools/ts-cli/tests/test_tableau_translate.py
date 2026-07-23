@@ -2223,6 +2223,10 @@ class TestBatchIntegration:
         )
         assert result["stats"]["name_clashes"] == 1
         assert result["translated"][0]["name"] == "Formula Sales"
+        # Fix #B — the actual rename mapping is surfaced (not just a count) so
+        # a caller can tell "Sales" ended up emitted as "Formula Sales" rather
+        # than reading as a silently dropped formula.
+        assert result["name_clashes"] == {"Sales": "Formula Sales"}
 
     def test_ifnull_and_agg_if_stats(self):
         """Batch stats report ifnull stripping and agg_if conversions."""
