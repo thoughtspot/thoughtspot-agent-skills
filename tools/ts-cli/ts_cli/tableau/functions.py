@@ -209,7 +209,8 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     # unambiguous, documented mappings — FULLNAME/ISFULLNAME/USERDOMAIN/
     # USERATTRIBUTE(INCLUDES) stay in _UNMAPPED_FUNCTIONS (validate.py),
     # see tableau-formula-translation.md for the disposition of each.
-    ("USERNAME", lambda a: "ts_username" if len(a) == 0 else None),
+    ("USERNAME", lambda a: (
+        "ts_username" if len(a) == 0 or (len(a) == 1 and not a[0].strip()) else None)),
     ("ISUSERNAME", lambda a: f"( ts_username = {a[0]} )" if len(a) == 1 else None),
     ("ISMEMBEROF", lambda a: f"( ts_groups = {a[0]} )" if len(a) == 1 else None),
 ]

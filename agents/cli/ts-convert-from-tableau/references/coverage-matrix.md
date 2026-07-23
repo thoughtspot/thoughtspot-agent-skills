@@ -64,7 +64,7 @@ Use this as the canonical limitations reference.
 | 38 | `SIGN(x)/SQUARE(x)` | `if/then` composite / `pow(x,2)` | CLI-translated (v0.26.0) |
 | 39 | `MIN/MAX` (scalar, 2-arg) | `least ( a , b )` / `greatest ( a , b )` | CLI-translated (since v0.17.0; scan-abort bug fixed v0.26.0); 2-arg form only — 1-arg is the aggregate `min()`/`max()` |
 | 40 | Division by zero | `safe_divide()` or `if ( b = 0 ) then null else a/b` | |
-| 108 | `ISMEMBEROF("group")` | `( ts_groups = "group" )` | Multi-value list membership handled natively with `=`. CLI-translated as of v0.88.0 (BL-071) — previously a documented skill-level mapping only; `ISMEMBEROF(...)` passed through untranslated and was not caught by the fail-loud validator |
+| 108 | `ISMEMBEROF("group")` | `( ts_groups = 'group' )` | Multi-value list membership handled natively with `=`. CLI-translated as of v0.88.0 (BL-071) — previously a documented skill-level mapping only; `ISMEMBEROF(...)` passed through untranslated and was not caught by the fail-loud validator |
 | 134 | `USERNAME()` / `ISUSERNAME(s)` | `ts_username` / `( ts_username = s )` | CLI-translated (v0.88.0, BL-071 subset). `USERNAME()` is a bare system-variable reference; `ISUSERNAME(s)` is the composite equality check. Formerly rejected loudly at translate time (former U7, ts-cli v0.26.0-v0.87.0). `FULLNAME()`/`ISFULLNAME(s)`/`USERDOMAIN()` remain rejected — see U7 in Unmapped Constructs below |
 
 ### Formula Translation — Aggregates

@@ -782,6 +782,14 @@ class TestMapFunctions:
     def test_username(self):
         assert map_functions("USERNAME()") == "ts_username"
 
+    def test_username_whitespace_arg_treated_as_zero_arity(self):
+        # USERNAME( ) — whitespace between the parens — must still be
+        # treated as zero-arg, matching the whitespace-tolerant convention
+        # used elsewhere in this file (PI/TODAY/NOW/SIZE). Regression guard:
+        # the arg splitter yields [" "] here, not [], so a naive
+        # `len(a) == 0` check leaves this variant untranslated.
+        assert map_functions("USERNAME( )") == "ts_username"
+
     def test_isusername(self):
         assert map_functions("ISUSERNAME([User])") == "( ts_username = [User] )"
 

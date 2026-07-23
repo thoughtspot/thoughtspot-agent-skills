@@ -1102,7 +1102,7 @@ model import. A missing formula produces a functional model with reduced coverag
 | `USERATTRIBUTEINCLUDES(attr, val)` | Embedded-RLS multi-value attribute membership test — same disposition as `USERATTRIBUTE` above. See BL-071. |
 
 **Formerly untranslatable, now mapped:**
-- `ISMEMBEROF("group")` → `( ts_groups = "group" )` — multi-value list membership handled natively with `=` (reclassified 2026-06-28; CLI-translated v0.88.0, BL-071)
+- `ISMEMBEROF("group")` → `( ts_groups = 'group' )` — multi-value list membership handled natively with `=` (reclassified 2026-06-28; CLI-translated v0.88.0, BL-071)
 - `USERNAME()` → `ts_username` / `ISUSERNAME(s)` → `( ts_username = s )` — direct system-variable reference + composite equality check (CLI-translated v0.88.0, BL-071). `FULLNAME()`/`ISFULLNAME(s)`/`USERDOMAIN()` remain untranslatable — see rows above
 - `DATETIME(expr)` → `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp; if the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15 (reclassified 2026-06-28)
 - SQL-lookup Tableau Parameters → query the warehouse at migration time and populate `list_choice[]` with a point-in-time snapshot. See "SQL-lookup parameters (query at migration time)" section below (reclassified 2026-06-28)
