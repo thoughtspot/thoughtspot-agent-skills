@@ -171,45 +171,14 @@ def build_param_name_map(root: ET.Element) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# 6b. Native Set detection (BL-131)
+# 6b. Native Set detection (BL-131) + 6c. Set -> cohort extraction (BL-067 part 1)
+#
+# Split into ts_cli.tableau.set_extract (module-per-concern, BL-069 pattern) to
+# keep this file's line count in budget. Re-exported here so existing callers/
+# tests importing them from ts_cli.tableau.twb keep working unchanged.
 # ---------------------------------------------------------------------------
 
-# Tableau's internal combined-field mechanism for multi-field dashboard
-# Actions/Tooltips is ALSO written as a datasource-scoped <group> element
-# (auto-named "Action (...)"/"Tooltip (...)"), but its <groupfilter> is a
-# 'crossjoin' of several level-members children — a cross-product key for
-# action-target matching, not a user-created Set. Excluding it is what keeps
-# this an accurate Set count (live-reproduced: 469 of these vs. ~120 real
-# Sets across the test corpus) — the "unrelated <group> usage" build-model
-# must not count.
-_NON_SET_GROUPFILTER_FUNCTIONS = {"crossjoin"}
-
-
-def count_native_sets(root: ET.Element) -> int:
-    """Count native Tableau Sets (BL-131) — real user-created ``<group>``
-    elements under a datasource.
-
-    Covers every Set flavor the skill's Phase-2a/2b/2c set->cohort step
-    handles (static union/member/except, level-members, Top-N/Bottom-N
-    ``function='end'``, condition-based ``function='filter'``), since
-    ``build-model``'s automated GENERATE pass does not perform that
-    conversion — see SKILL.md Step 5b.
-
-    Excludes two ``<group>`` shapes that are not Sets at all: Tableau's
-    internal ``crossjoin`` combined-field mechanism (used for multi-field
-    dashboard Actions/Tooltips — see ``_NON_SET_GROUPFILTER_FUNCTIONS``), and
-    the Pivot-field construct (a ``<group>`` with plain ``<field>`` children,
-    no ``<groupfilter>`` at all).
-    """
-    count = 0
-    for g in root.findall(".//datasource//group"):
-        gf = g.find("groupfilter")
-        if gf is None:
-            continue
-        if gf.get("function") in _NON_SET_GROUPFILTER_FUNCTIONS:
-            continue
-        count += 1
-    return count
+from ts_cli.tableau.set_extract import count_native_sets, extract_sets  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +224,7 @@ def parse_twb(twb_path: str | Path) -> dict:
         joins += _extract_noodle_joins(ds, sql_views)
         calcs, calc_map = _extract_calculated_fields(ds)
         col_table_map = _build_column_table_map(ds, tables)
+        sets = extract_sets(ds)
 
         datasources.append({
             "name": ds_name,
@@ -265,6 +235,10 @@ def parse_twb(twb_path: str | Path) -> dict:
             "calculated_fields": calcs,
             "calc_map": calc_map,
             "col_table_map": col_table_map,
+            # BL-067: classified native Tableau Sets (see extract_sets) — the
+            # structural extraction half of set->cohort conversion; TML emission
+            # (build_cohort_tml) is a separate build-model-time step.
+            "sets": sets,
         })
 
     return {
