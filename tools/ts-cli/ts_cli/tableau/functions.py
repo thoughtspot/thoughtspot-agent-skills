@@ -167,6 +167,18 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("TAN", lambda a: f"tan ( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
     ("RADIANS", lambda a: f"( {a[0]} * 3.14159265358979 / 180 )" if len(a) == 1 else None),
     ("DEGREES", lambda a: f"( {a[0]} * 180 / 3.14159265358979 )" if len(a) == 1 else None),
+
+    # Inverse trig + COT (BL-072 sub-item). Tableau ACOS/ASIN/ATAN return
+    # radians; ThoughtSpot acos/asin/atan return degrees (by symmetry with
+    # the shipped SIN/COS/TAN radians-to-degrees conversion above) — convert
+    # TS degrees back to radians with * pi/180. COT(x) = 1/tan(x) with x in
+    # radians (Tableau); tan ( ) here needs its argument in degrees, same as
+    # the shipped TAN conversion.
+    ("ACOS", lambda a: f"( acos ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
+    ("ASIN", lambda a: f"( asin ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
+    ("ATAN", lambda a: f"( atan ( {a[0]} ) * 3.14159265358979 / 180 )" if len(a) == 1 else None),
+    ("COT", lambda a: f"( 1 / tan ( {a[0]} * 180 / 3.14159265358979 ) )" if len(a) == 1 else None),
+
     ("DATEPARSE", lambda a: f"to_date ( {a[1]} , {a[0]} )" if len(a) == 2 else None),
 
     # Pass-through rescues (tableau-formula-translation.md "Functions with no

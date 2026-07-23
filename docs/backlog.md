@@ -2296,7 +2296,14 @@ translation exists yet.
 **Source:** task-21 gap documentation, 2026-07-03.
 **Affects:** `agents/cli/ts-convert-from-tableau/`, `agents/shared/mappings/tableau/`,
 `tools/ts-cli/`.
-**Status:** OPEN.
+**Status:** PARTIAL.
+
+**Update 2026-07-23 (ts-cli v0.88.0):** the inverse-trig sub-item is DONE — `ACOS`/`ASIN`/
+`ATAN(x)` → `( acos/asin/atan ( x ) * 3.14159265358979 / 180 )` and `COT(x)` →
+`( 1 / tan ( x * 180 / 3.14159265358979 ) )`, all four removed from `_UNMAPPED_FUNCTIONS`
+and documented in `tableau-formula-translation.md` + `coverage-matrix.md` (#132/#133).
+**Remaining (deferred, unchanged target):** hierarchies (`<drill-paths>`) and value aliases
+(`<aliases>`) — the other two sub-items, untouched by this change.
 
 ### Problem
 
@@ -2330,9 +2337,11 @@ independent fix worth bundling here rather than opening a third backlog item for
   either reject it at translate time (add to `_UNMAPPED_FUNCTIONS`, joining U1–U7) or emit
   a `1/tan(...)` composite. Independent of the hierarchy/alias work and can ship first.
   **Update 2026-07-03:** fail-loud shipped in ts-cli v0.26.5 (all four in
-  `_UNMAPPED_FUNCTIONS`, coverage-matrix U8). Remaining scope: the translations
-  themselves — `* pi/180` composites pending live verification that ThoughtSpot
-  inverse trig returns degrees, and the `1/tan(...)` composite decision for `COT`.
+  `_UNMAPPED_FUNCTIONS`, coverage-matrix U8). **Update 2026-07-23 (ts-cli v0.88.0):
+  DONE** — `* pi/180` composites shipped for `ACOS`/`ASIN`/`ATAN` (derived from the
+  already-shipped SIN/COS/TAN radians-to-degrees convention rather than a fresh live
+  check, per the brief for this change), and `COT` ships as a `1/tan(...)` composite.
+  All four removed from `_UNMAPPED_FUNCTIONS`.
 - All three sub-items are parser/codegen work in the Tableau translation pipeline (module
   home per BL-069's refactor), not skill-prompt changes — follow the codification pattern
   (repo-audit angle #11) rather than adding LLM judgment steps

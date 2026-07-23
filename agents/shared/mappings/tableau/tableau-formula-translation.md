@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-07 (v0.81.0 REGEXP/FINDNTH mapped + REPLACE pass-through + LOD no-space fix) -->
+<!-- currency: tableau — 2026-07 (v0.88.0 inverse trig + COT mapped) -->
 
 # Tableau → ThoughtSpot Formula Translation
 
@@ -66,6 +66,10 @@ function table directly (not just documents it) for: `LEFT`, `RIGHT`, `MID`, `UP
 and `DATEPARSE`. Before v0.26.0 these were silent pass-throughs — the Tableau syntax was left
 untranslated in the output with no error. Nested same-function calls inside these functions'
 arguments (e.g. `UPPER(LEFT(s, 3))`) are translated recursively.
+
+As of ts-cli **v0.88.0**, `ACOS`, `ASIN`, `ATAN`, and `COT` are also implemented (see the
+"Inverse trig + COT" entries in the function table below) and removed from
+`_UNMAPPED_FUNCTIONS` — they no longer skip with an "unmapped Tableau function" reason.
 
 Functions with no CLI implementation are **rejected at translate time** instead of being
 passed through untranslated: `SPLIT`, `PROPER`, `ASCII`, `CHAR`, `REGEXP_EXTRACT_NTH`,
@@ -210,6 +214,8 @@ command detects pass-through conflicts automatically and skips them.
 | `DATEPART('week', d)` | `week_number_of_year ( d )` | |
 | `EXP(n)` | `exp ( n )` | |
 | `SIN(n)` / `COS(n)` / `TAN(n)` | `sin ( n * 180 / 3.14159265358979 )` / `cos ( n * 180 / 3.14159265358979 )` / `tan ( n * 180 / 3.14159265358979 )` | Tableau trig is in radians; ThoughtSpot trig is in degrees — convert. (Inverse trig `acos/asin/atan` also return degrees in ThoughtSpot vs radians in Tableau.) |
+| `ACOS(n)` / `ASIN(n)` / `ATAN(n)` | `( acos ( n ) * 3.14159265358979 / 180 )` / `( asin ( n ) * 3.14159265358979 / 180 )` / `( atan ( n ) * 3.14159265358979 / 180 )` | Tableau inverse trig returns radians; ThoughtSpot's returns degrees (by symmetry with the `SIN`/`COS`/`TAN` row above) — convert TS degrees back to radians. CLI-translated (v0.88.0, BL-072) |
+| `COT(n)` | `( 1 / tan ( n * 180 / 3.14159265358979 ) )` | No native `cot()` — composites off `tan`, matching Tableau's own `COT(n) = 1/tan(n)` definition (inner `tan` argument converted to degrees, same as the `TAN` row above). CLI-translated (v0.88.0, BL-072) |
 | `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
 | `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, se-thoughtspot). |
 | `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with`; mirrors the `RIGHT(s, n)` idiom above |

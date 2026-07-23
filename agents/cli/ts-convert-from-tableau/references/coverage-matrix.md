@@ -53,7 +53,9 @@ Use this as the canonical limitations reference.
 | 29 | `DATEPARSE(format, s)` | `to_date ( s , format )` | CLI-translated (v0.26.0); args flipped vs Tableau |
 | 30 | `TODAY`/`NOW`/`DATE`/`YEAR`/`MONTH`/`DAY` | `today`/`now`/`date`/`year`/`month_number`/`day` | |
 | 31 | `ABS`/`ROUND`/`CEILING`/`FLOOR`/`SQRT`/`POWER`/`LOG`/`LN`/`EXP` | `abs`/`round`/`ceil`/`floor`/`sqrt`/`pow`/`log10`/`ln`/`exp` | |
-| 32 | `SIN/COS/TAN` | Radians-to-degrees conversion applied | CLI-translated (v0.26.0). Inverse trig (`ACOS`/`ASIN`/`ATAN`) and `COT` are rejected loudly at translate time as of ts-cli v0.26.5 (see U8). `ACOS`/`ASIN`/`ATAN` are translatable in principle: ThoughtSpot's inverse trig functions return degrees where Tableau's return radians, so a `* pi/180` composite applies — the same conversion family as the shipped SIN/COS/TAN handling. `COT` has no direct ThoughtSpot function and would need a `1/tan(...)` composite. Tracked in BL-072 |
+| 32 | `SIN/COS/TAN` | Radians-to-degrees conversion applied | CLI-translated (v0.26.0) |
+| 132 | `ACOS(x)/ASIN(x)/ATAN(x)` | `( acos ( x ) * 3.14159265358979 / 180 )` (same shape for `asin`/`atan`) | CLI-translated (v0.88.0, BL-072). ThoughtSpot's inverse trig functions return degrees where Tableau's return radians (by symmetry with the shipped SIN/COS/TAN handling above) — the composite converts TS degrees back to radians. Formerly rejected loudly at translate time (former U8, ts-cli v0.26.5-v0.87.0) |
+| 133 | `COT(x)` | `( 1 / tan ( x * 180 / 3.14159265358979 ) )` | CLI-translated (v0.88.0, BL-072). No direct ThoughtSpot function — composites off `tan`, matching Tableau's own `COT(x) = 1/tan(x)` definition (inner `tan` argument converted to degrees, same as the shipped TAN handling). Formerly rejected loudly (former U8) |
 | 33 | `PI()/RADIANS()/DEGREES()` | Literal composites | CLI-translated (v0.26.0); no native equivalent |
 | 34 | `INT(x)` | `if ( x >= 0 ) then floor ( x ) else ceil ( x )` | Partial; truncate-toward-zero |
 | 35 | `FLOAT(x)/STR(x)` | `to_double(x)/to_string(x)` | |
@@ -191,7 +193,7 @@ Use this as the canonical limitations reference.
 
 ## Unmapped Constructs (Limitations)
 
-### Rejected at Translate Time (ts-cli v0.26.0; U8 added v0.26.5)
+### Rejected at Translate Time (ts-cli v0.26.0; U8 retired v0.88.0 — see #132/#133)
 
 These functions have no CLI implementation. `ts tableau translate-formulas` detects them
 (`validate.py::_UNMAPPED_FUNCTIONS`) and skips the formula with an `unmapped Tableau
@@ -206,7 +208,6 @@ through untranslated.
 | U5 | `MAKEDATE(y, m, d)` / `MAKETIME(h, m, s)` / `MAKEDATETIME(date, time)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U6 | `ISDATE(s)` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
 | U7 | `USERNAME()` / `FULLNAME()` / `ISUSERNAME(s)` / `ISFULLNAME(s)` / `USERDOMAIN()` | Rejected with reason at translate time (ts-cli v0.26.0) — manual translation required |
-| U8 | `ACOS(x)` / `ASIN(x)` / `ATAN(x)` / `COT(x)` | Rejected with reason at translate time (ts-cli v0.26.5) — `* pi/180` composites / `1/tan()` tracked in BL-072, pending live degree-vs-radian verification |
 | U9 | `USERATTRIBUTE(attr)` / `USERATTRIBUTEINCLUDES(attr, val)` | Rejected with reason at translate time (ts-cli v0.28.1) — sibling of U7; ABAC `ts_var()` referencing a formula variable is a plausible native translation pending live verification. Tracked in BL-071 |
 | U10 | `WINDOW_SUM/AVG/MAX/MIN/STDEV/VAR/MEDIAN/PERCENTILE/COUNT` | Rejected with reason at translate time (ts-cli v0.75.0). Live-confirmed hard-fail otherwise (error 14516, "Search did not find '<FUNC> ( ... )'") — `translate_formulas()` was not actually converting these (former #57-59 rows here mistiered them `moving`/Mapped) even though `moving_sum/average/max/min` are architecturally the right ThoughtSpot equivalent (see `tableau-formula-translation.md` "Window / Moving Functions"). The blocker is the required sort attribute: Tableau encodes it as worksheet "Compute Using" addressing, which `ts tableau parse` already extracts (`table_calc_addressing` — #72) but `build-model`'s automated pipeline has no wiring to consume. Tracked as a follow-on to actually wire that context through |
 | U11 | `LOOKUP(agg, N)` / `INDEX()` / `FIRST()` / `LAST()` (standalone row-offset, not as `WINDOW_*`/`RUNNING_*` offset args) | Rejected with reason at translate time (ts-cli v0.75.0). Same addressing-context gap as U10 — `first_value()`/`last_value()`/`moving_sum()`/`rank()` are the architecturally-correct native equivalents per the tiered decision tree (`tableau-formula-translation.md` "Row-Offset Table Calculations"), but `build-model` can't resolve the sort column automatically today. Formerly mistiered `row_offset_native` (Mapped, former #64-69) though never actually converted — live-confirmed hard-fail (error 14516) |

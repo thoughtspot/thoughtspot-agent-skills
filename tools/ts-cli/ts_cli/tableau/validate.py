@@ -35,7 +35,8 @@ _UNMAPPED_FUNCTIONS = [
     "REGEXP_EXTRACT_NTH",
     "MAKEDATE", "MAKETIME", "MAKEDATETIME", "ISDATE",
     "USERNAME", "FULLNAME", "ISUSERNAME", "ISFULLNAME", "USERDOMAIN",
-    "ACOS", "ASIN", "ATAN", "COT",  # inverse trig + COT — translations tracked in BL-072 (needs live degree/radian check)
+    # ACOS/ASIN/ATAN/COT now translate (BL-072, ts-cli v0.88.0 — see
+    # functions.py) and were removed from this list.
     "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
     # Spatial — full 13-function Tableau set (help.tableau.com Spatial Functions,
     # verified 2026-07-03). No ThoughtSpot spatial data type or constructors exist.
