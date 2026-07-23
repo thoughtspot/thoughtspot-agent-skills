@@ -234,6 +234,137 @@ def test_extract_tables_keeps_self_join_alias():
 
 
 # ---------------------------------------------------------------------------
+# col_table_map / _extract_columns must not own columns by the Extract-wrapper
+# relation's internal name — that relation is excluded by _extract_tables, so
+# a column stamped to it dangles (column_id points at a table the model never
+# emits) and is dropped ("XREF: column_id not found"). Reproduces
+# "Demo WB 3 with SQL join.twbx": a federated Custom-SQL + hyper-Extract
+# datasource writes its column metadata TWICE — once under the live
+# <connection>, once (mirrored, GUID-named) under <extract>/<connection> — and
+# since both sit under the same <datasource> element, a naive
+# ``.//metadata-record`` walk picks up both and the extract's (document-order-
+# later) copy silently wins.
+# ---------------------------------------------------------------------------
+
+TWO_RELATION_EXTRACT_XML = """
+<datasource caption='Orders'>
+  <connection class='federated'>
+    <relation name='Orders' table='[public].[Orders]' type='table'/>
+    <metadata-records>
+      <metadata-record class='column'>
+        <remote-name>region</remote-name>
+        <local-name>[Region]</local-name>
+        <parent-name>[Orders]</parent-name>
+        <local-type>string</local-type>
+      </metadata-record>
+      <metadata-record class='column'>
+        <remote-name>amount</remote-name>
+        <local-name>[Amount]</local-name>
+        <parent-name>[Orders]</parent-name>
+        <local-type>real</local-type>
+      </metadata-record>
+    </metadata-records>
+  </connection>
+  <column name='[Region]' caption='Region' datatype='string' role='dimension'/>
+  <column name='[Amount]' caption='Amount' datatype='real' role='measure'/>
+  <extract enabled='true'>
+    <connection class='hyper' schema='Extract' tablename='Extract'>
+      <relation type='collection'>
+        <relation name='Orders_9BBB0000000000000000000000000'
+                  table='[Extract].[Orders_9BBB0000000000000000000000000]' type='table'/>
+      </relation>
+      <metadata-records>
+        <metadata-record class='column'>
+          <remote-name>region</remote-name>
+          <local-name>[Region]</local-name>
+          <parent-name>[Orders_9BBB0000000000000000000000000]</parent-name>
+          <local-type>string</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>amount1</remote-name>
+          <local-name>[Amount]</local-name>
+          <parent-name>[Orders_9BBB0000000000000000000000000]</parent-name>
+          <local-type>real</local-type>
+        </metadata-record>
+      </metadata-records>
+    </connection>
+  </extract>
+</datasource>
+"""
+
+
+def test_build_column_table_map_remaps_extract_wrapper_owned_columns_to_live_source():
+    ds = ET.fromstring(TWO_RELATION_EXTRACT_XML)
+    tables = _extract_tables(ds)
+    assert [t["name"] for t in tables] == ["Orders"]  # wrapper excluded, as before
+
+    col_map = _build_column_table_map(ds, tables)
+    assert col_map["Region"] == "Orders"
+    assert col_map["Amount"] == "Orders"
+    # Never the wrapper's own (excluded) internal relation name.
+    assert "Orders_9BBB0000000000000000000000000" not in col_map.values()
+
+
+def test_extract_columns_table_field_uses_live_source_not_extract_wrapper():
+    ds = ET.fromstring(TWO_RELATION_EXTRACT_XML)
+    tables = _extract_tables(ds)
+    columns = _extract_columns(ds, tables)
+    by_name = {c["name"]: c for c in columns}
+    assert by_name["Region"]["table"] == "Orders"
+    assert by_name["Amount"]["table"] == "Orders"
+
+
+def test_extract_columns_db_column_name_unaffected_by_extract_wrapper_disambiguation():
+    # The extract's own metadata-record can carry an internally-disambiguated
+    # remote-name (Tableau appends a numeric suffix — 'amount1' here, 'Sales
+    # Person1' in the live repro — when the hyper extract joins two sources
+    # with a colliding column name). That must never leak into db_column_name;
+    # the live connection's remote-name is the real warehouse identity.
+    ds = ET.fromstring(TWO_RELATION_EXTRACT_XML)
+    tables = _extract_tables(ds)
+    columns = _extract_columns(ds, tables)
+    by_name = {c["name"]: c for c in columns}
+    assert by_name["Amount"]["db_column_name"] == "amount"
+
+
+DOTTED_RELATION_NAME_XML = """
+<datasource caption='Orders'>
+  <connection class='federated'>
+    <relation name='dim_sales_team_clean_updated.csv1'
+              table='[dim_sales_team_clean_updated#csv]' type='table'/>
+    <metadata-records>
+      <metadata-record class='column'>
+        <remote-name>Manager Name</remote-name>
+        <local-name>[Manager Name]</local-name>
+        <parent-name>[dim_sales_team_clean_updated.csv1]</parent-name>
+        <local-type>string</local-type>
+      </metadata-record>
+    </metadata-records>
+  </connection>
+  <column name='[Manager Name]' caption='Manager Name' datatype='string' role='dimension'/>
+</datasource>
+"""
+
+
+def test_build_column_table_map_preserves_literal_dot_in_relation_name():
+    # A file-backed relation's own `name` can legitimately embed a literal '.'
+    # (e.g. a CSV extract Tableau names 'dim_sales_team_clean_updated.csv1') —
+    # metadata-record `parent-name` referencing it must resolve to the whole
+    # relation name, not get truncated at the last '.' to 'csv1' (a table
+    # `_extract_tables` never emits, which reproduces the same dangling-
+    # column_id XREF as the wrapper-name bug above).
+    ds = ET.fromstring(DOTTED_RELATION_NAME_XML)
+    tables = _extract_tables(ds)
+    assert [t["name"] for t in tables] == ["dim_sales_team_clean_updated.csv1"]
+
+    col_map = _build_column_table_map(ds, tables)
+    assert col_map["Manager Name"] == "dim_sales_team_clean_updated.csv1"
+
+    columns = _extract_columns(ds, tables)
+    assert columns[0]["table"] == "dim_sales_team_clean_updated.csv1"
+
+
+# ---------------------------------------------------------------------------
 # Fix #2 — Tableau disambiguation suffix must not leak into db_column_name
 # ---------------------------------------------------------------------------
 
