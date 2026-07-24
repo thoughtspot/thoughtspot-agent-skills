@@ -79,7 +79,7 @@ Item #1 (which candidate class this consequence narrows down to — item 2
 above, "target formula measures") remains open at the recommendation-scoring
 level; only the TML-emission and association-id mechanics are closed here.
 
-Residual: SpotQL-vs-SearchData routing (does `ts spotql generate-sql` reflect the
+Residual: SpotQL-vs-SearchData routing (does `ts agentql generate-sql` reflect the
 switch?) still unconfirmed — secondary, affects only Step 7's verification method.
 
 ## #0 (historical) — original OPEN text
@@ -99,7 +99,7 @@ scanned physical table is the aggregate, not the detail fact.
 **Two things to establish on the working cluster, in order:**
 1. Does routing fire for a **Search Data API** query? (Expected yes per product
    owner.) This unblocks #1/#4/#6/#10 verification.
-2. Does **`ts spotql generate-sql`** reflect routing, or only the Search Data /
+2. Does **`ts agentql generate-sql`** reflect routing, or only the Search Data /
    Spotter execution path? (Earlier assumption that SpotQL ignores routing is
    UNPROVEN — on champ-staging nothing routed, so the two paths were
    indistinguishable. May be an open item for the SpotQL team.) This decides
@@ -133,7 +133,7 @@ DDL/TML/association work has already been done.
 
 **Live-test script:** associate a DAILY-bucketed aggregate Model with a primary Model
 (`ts aggregate generate` → import), run a MONTHLY-grouped query against the primary
-(`ts spotql generate-sql "SELECT DATE_TRUNC('MONTH', ...) ..." --model <primary_guid>`
+(`ts agentql generate-sql "SELECT DATE_TRUNC('MONTH', ...) ..." --model <primary_guid>`
 or a Search/Liveboard tile), inspect `executable_sql` (or the answer's generated SQL)
 for the aggregate table's physical name.
 
@@ -1052,7 +1052,7 @@ clarification:**
    propagated-and-attached RLS rule as unverified for ENFORCEMENT in the same
    provisional sense the routing-verification caveat already applies to every other
    recommendation in this skill. SKILL.md Step 7 now documents the procedure:
-   re-run the same aggregate-hit `ts spotql generate-sql` check authenticated as a
+   re-run the same aggregate-hit `ts agentql generate-sql` check authenticated as a
    restricted user (swap `--profile`) and confirm the returned rows actually respect the
    rule. This item stays OPEN until someone actually runs it against a live
    aggregate-aware cluster with a real RLS rule.
@@ -1099,9 +1099,9 @@ Summary of tracked items:
   `spotql_ops.classify_model_columns`) and SKILL.md Step 5a gates on it, offering the
   promotion (plain measure → `sum([physical])` formula, backup first). Unit-tested. Optional
   follow-up: codify the promotion as a `ts` command.
-- **F10/F11/F13 — CORRECTED (earlier claim was wrong).** `ts spotql generate-sql` DOES
+- **F10/F11/F13 — CORRECTED (earlier claim was wrong).** `ts agentql generate-sql` DOES
   reflect routing for ALL measure kinds incl. semi-additive; the earlier failures were
-  query-construction errors. Step 7 must pick the wrapper via `ts spotql classify-columns`:
+  query-construction errors. Step 7 must pick the wrapper via `ts agentql classify-columns`:
   raw→`SUM`, aggregate-formula→`AGG` (SUM nests → NESTED_AGGREGATE), semi-additive
   last_value→`SUM` (AGG → NON_CONVERTIBLE_FUNCTION). Re-verified live: `SUM("Inventory
   Balance")`→monthly agg, `AGG("Amount")`→dimensional agg. Step 7's hardcoded `SUM("Sales")`
