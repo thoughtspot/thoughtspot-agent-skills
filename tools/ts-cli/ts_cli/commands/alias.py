@@ -61,20 +61,15 @@ def _read_json_envelope(input_file: Optional[str]) -> dict:
 
 
 def _get_sf_cursor(sf_profile: Optional[str]):
-    """Get a Snowflake cursor via the standard profile mechanism.
-
-    NOTE: `ts_cli.commands.snowflake._connect` does not exist yet as of this
-    commit — wiring it (or extracting the connect pattern from
-    `ts_cli.commands.load._connect_python`, as `snowflake.py::_exec_python`
-    already does) is a follow-up task. Only `--source db` and
-    `--translator cortex` reach this function; `--source ai` with the default
-    `claude` translator and `--source file` without a Snowflake locale-config
-    table never do.
-    """
+    """Get a Snowflake cursor via the standard profile mechanism."""
     if not sf_profile:
         return None
-    from ts_cli.commands.snowflake import _connect
-    return _connect(sf_profile)
+    from ts_cli.commands.load import load_snowflake_profile, _connect_python
+    profile = load_snowflake_profile(sf_profile)
+    wh = profile.get("default_warehouse", "")
+    rl = profile.get("default_role", "")
+    conn = _connect_python(profile, wh, rl)
+    return conn.cursor()
 
 
 def _call_llm(prompt: str, translator: str, api_key_env: str,
