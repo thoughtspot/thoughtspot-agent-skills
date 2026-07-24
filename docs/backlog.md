@@ -124,8 +124,8 @@ are roughly ordered by value÷effort.
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
 | BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | — |
 | BL-116 | Live destructive dependency-manager smoke | — |
-| BL-132 | from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake) | next DBX edit |
-| BL-133 | `ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing) | opportunistic |
+| ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
+| ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
 
 ### Tier 4 — Deferred
 
@@ -3442,7 +3442,15 @@ are skipped **silently** — no warning that the Phase-2 set step is still owed.
 
 ---
 
-## BL-132 — from-Databricks build-model: promote duplicate `column_id` to a formula (I8/I5 parity) `Tier 3`
+## BL-132 — from-Databricks build-model: promote duplicate `column_id` to a formula (I8/I5 parity) — DONE `Tier 3`
+
+**Status:** DONE — PR #332 (2026-07-24). Shared helper `formula_common.promote_duplicate_column_ids`
+keeps the first occurrence of a `column_id` and re-expresses later duplicates as `fn ( [TABLE::col] )`
+aggregation formulas (SUM/AVERAGE/MIN/MAX/COUNT/MEDIAN/STDDEV/VARIANCE + I5's COUNT_DISTINCT →
+`unique count`); wired into **both** `mv_build_model` and `sv_build_model`. Investigation found the
+premise below was inaccurate — the from-Snowflake path had the identical bug (nothing to "mirror"),
+so the fix was written new and applied to both directions. A duplicate that is not a re-expressible
+aggregate is left in place so `ts tml lint` I8 still surfaces it. ts-cli v0.92.0.
 
 **Filed:** 2026-07-24.
 **Source:** surfaced during the Databricks role-play round-trip verification (PR #330) — a
@@ -3471,7 +3479,17 @@ confirm a clean `ts tml lint`.
 
 ---
 
-## BL-133 — `ts metadata delete`: partial-success handling for batch deletes `Tier 3`
+## BL-133 — `ts metadata delete`: partial-success handling for batch deletes — DONE `Tier 3`
+
+**Status:** DONE — PR #333 (2026-07-24), refined by PR #335. `ts metadata delete` tries the batch
+first and, on failure, falls back to per-GUID deletes, reporting a `{deleted, not_found, errors,
+outcomes}` map to stdout (`deleted` key preserved for back-compat). The delete API is the source of
+truth for each object's fate (approach (b)+(c); the search pre-filter (a) was dropped to avoid a
+pre-filter under-count skipping a real object). New `--ignore-missing` flag treats already-gone
+GUIDs as success; genuine errors always exit non-zero. PR #335 (from an angle-17-style `/code-review`
+of #333) tightened `not_found` detection to key off the structured error code `13003` rather than a
+bare "not found" substring, closing a false-positive that `--ignore-missing` could have silently
+swallowed. ts-cli v0.93.0 → v0.94.0.
 
 **Filed:** 2026-07-24.
 **Source:** fixture teardown after the role-play PRs — deleting a model + its tables in one
