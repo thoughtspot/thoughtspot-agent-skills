@@ -171,29 +171,105 @@ def search(
     print(json.dumps(filter_by_connection(all_results, connection)))
 
 
+# A batch metadata/delete is atomic: one missing GUID fails the whole call
+# (400, code 13003) and deletes nothing. These markers distinguish that
+# already-gone case from a genuine error so a per-GUID fallback can classify
+# each outcome. Matched case-insensitively against the 400 response body.
+_DELETE_NOT_FOUND_MARKERS = ("13003", "not found")
+
+
+def classify_delete_response(ok: bool, status: int, body_text: str) -> str:
+    """Classify one delete response as ``deleted`` / ``not_found`` / ``error: …``.
+
+    ``not_found`` is reserved for the missing-object 400 (code 13003 /
+    "not found" in the body) — the case that is safe to treat as already-done.
+    Any other non-2xx is a genuine ``error`` so it is never silently swallowed.
+    Pure — no I/O — so the classification is unit-testable in isolation.
+    """
+    if ok:
+        return "deleted"
+    low = (body_text or "").lower()
+    if status == 400 and any(m in low for m in _DELETE_NOT_FOUND_MARKERS):
+        return "not_found"
+    snippet = " ".join((body_text or "").split())[:200]
+    return f"error: HTTP {status}{': ' + snippet if snippet else ''}"
+
+
+def resolve_delete_outcomes(guids: List[str], delete_one) -> dict:
+    """Per-GUID delete producing an ordered ``{guid: outcome}`` map.
+
+    ``delete_one(guid)`` returns ``(ok, status, body_text)`` for a single-GUID
+    delete; the delete API is the source of truth for each object's fate.
+    Requested GUIDs are de-duplicated, order preserved. Pure of the transport —
+    ``delete_one`` is injected — so the fallback map is unit-testable without a
+    live connection.
+    """
+    outcomes: dict = {}
+    for guid in dict.fromkeys(guids):
+        outcomes[guid] = classify_delete_response(*delete_one(guid))
+    return outcomes
+
+
 @app.command("delete")
 def delete_objects(
     guids: List[str] = typer.Argument(..., help="One or more GUIDs to delete"),
     type: str = typer.Option("LOGICAL_TABLE", "--type", "-t",
                              help="Object type: LOGICAL_TABLE, LIVEBOARD, ANSWER"),
+    ignore_missing: bool = typer.Option(
+        False, "--ignore-missing",
+        help="Treat already-gone GUIDs (not_found) as success rather than "
+             "exiting non-zero. Genuine errors still exit non-zero."),
     profile: Optional[str] = _profile_option,
 ) -> None:
-    """Delete one or more ThoughtSpot objects by GUID.
+    """Delete one or more ThoughtSpot objects by GUID, with partial-success handling.
 
-    Output: HTTP 204 on success (no body). Raises on error.
+    A single batch delete is atomic — if any one GUID is already gone the whole
+    call fails and nothing is deleted. This command tries the batch first (one
+    fast call when every GUID is present), and on failure falls back to per-GUID
+    deletes so present objects are still removed. It reports a per-object outcome
+    map to stdout and exits non-zero if any GUID could not be deleted (unless the
+    only failures are not_found and --ignore-missing is set).
+
+    Output (JSON to stdout):
+      {"deleted": [...], "not_found": [...], "errors": {guid: msg},
+       "outcomes": {guid: "deleted"|"not_found"|"error: ..."}}
 
     Examples:
 
     \b
       ts metadata delete abc-123
       ts metadata delete abc-123 def-456 --type LIVEBOARD
+      ts metadata delete abc-123 stale-guid --ignore-missing
     """
     client = ThoughtSpotClient(resolve_profile(profile))
-    client.post(
-        "/api/rest/2.0/metadata/delete",
-        json={"metadata": [{"identifier": g, "type": type} for g in guids]},
-    )
-    print(json.dumps({"deleted": guids}))
+
+    def _delete(subset: List[str]):
+        return client.post(
+            "/api/rest/2.0/metadata/delete",
+            json={"metadata": [{"identifier": g, "type": type} for g in subset]},
+            raise_for_status=False,
+        )
+
+    requested = list(dict.fromkeys(guids))
+    batch = _delete(requested)
+    if batch.ok:
+        outcomes = {g: "deleted" for g in requested}
+    else:
+        # Atomic batch failed (nothing deleted) — isolate each GUID's fate.
+        def delete_one(guid: str):
+            resp = _delete([guid])
+            return resp.ok, resp.status_code, getattr(resp, "text", "") or ""
+
+        outcomes = resolve_delete_outcomes(requested, delete_one)
+
+    deleted = [g for g, s in outcomes.items() if s == "deleted"]
+    not_found = [g for g, s in outcomes.items() if s == "not_found"]
+    errors = {g: s for g, s in outcomes.items() if s.startswith("error")}
+    print(json.dumps({"deleted": deleted, "not_found": not_found,
+                      "errors": errors, "outcomes": outcomes}))
+
+    if errors or (not_found and not ignore_missing):
+        raise typer.Exit(1)
 
 
 @app.command("get")
