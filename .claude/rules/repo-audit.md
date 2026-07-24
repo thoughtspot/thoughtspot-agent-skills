@@ -50,6 +50,7 @@ for new codification opportunities.
 | 9 | Conversion consistency | The conversion skills agree with each other against the invariants | `conversion-consistency-auditor` agent, `check_coverage_matrix`, `check_formula_catalog` |
 | 10 | Security | No secrets, no v1 endpoints, credential-handling rules honoured | `check_secrets`, `check_no_v1_endpoints` |
 | 11 | Codification | (a) Repeated skill logic that should become `ts` CLI / shared reference / validator; (b) *agentic → deterministic*: skill steps that are mechanical transformations (parsing, type mapping, TML emission, formula rewriting) currently executed by the LLM but codifiable as deterministic Python — yielding faster, cheaper, more reproducible results. The Tableau `translate-formulas` pipeline (ts-cli v0.17.0) is the reference pattern. | `jscpd` (code-duplication report, sweep) + MANUAL |
+| 17 | Change correctness (delta bug-hunt) | Correctness bugs and `.claude/rules`/CLAUDE.md violations in the code that landed **since the last full audit** — the backstop for what slipped past per-PR review. Distinct from angle 4 (which is code *health*: complexity, dead code, duplication) — this hunts for *behavioural bugs*. | **full sweep only:** a `max`-level `/code-review` agent over the `<last-full-audit-sha>..HEAD` diff (see below) + **per-PR `/code-review` (recommended, primary net)** |
 | 12 | Synthesis / advise | Prioritise findings, route each to a bucket | MANUAL (the sweep's final step) |
 
 #### Code-health tooling (the sweep runs these; not per-PR gates)
@@ -68,6 +69,37 @@ sweep** — an agent/reviewer interprets and filters the output — rather than 
 
 `radon`/`vulture` are Python dev deps (`pip install radon vulture`); `jscpd`/`agentlinter`
 run via `npx`. None are required to commit — they inform the sweep.
+
+#### Angle 17 — Change correctness (the `max` `/code-review` backstop)
+
+Per-PR review is the *primary* net for behavioural bugs — cheapest to fix when the author
+still has context. The recommended flow is `/code-review` (bug-focused; `low`/`medium` for
+small diffs, `high`+ for risky ones) on the working diff before opening a PR, alongside CI.
+This angle does **not** replace that; it is the **deep-sweep backstop** for what slipped
+through, and it runs **only in the `full` sweep** (never the weekly `external` one, never
+per-PR — a `max` review is a heavy fan-out and only the on-demand/nudged full cadence
+justifies the cost).
+
+Three rules keep it tractable and honest:
+
+1. **Delta-scoped, not whole-repo.** The review target is the diff since the last full audit —
+   `<sha>..HEAD` where `<sha>` is the commit of the most recent `docs/audit/*-full.md`
+   (the same range the activity trigger already measures). This mirrors the currency-anchor
+   principle for external angles: review only what changed since the last deep look, never
+   re-flag settled code.
+2. **`max` level + confidence filter.** The `/code-review` agent runs at `max` effort and
+   adversarially verifies each candidate, reporting only high-confidence findings. It ignores
+   the standard false-positive classes (nitpicks, style, lint/typecheck-catchable issues,
+   pre-existing issues, findings on unmodified lines) — same discipline as a standalone
+   `/code-review`.
+3. **Two-bucket exit, same as every angle.** A one-off bug → a dated `BL-NNN` (or a fix PR);
+   a *recurring class* of bug → promote to a `check_*.py` validator (preferred — that is the
+   management goal, and it stops the sweep re-finding it next time).
+
+It emits the standard findings schema, so synthesis (angle 12) dedups and routes it with
+everything else. A future refinement is to fan it out into per-lens finders (bugs / rules
+adherence / git-history context) with an explicit verify stage, mirroring a full
+`/code-review`; the initial wiring is a single `max` finder to keep the change small.
 
 ### External / dynamic — "are our assumptions still true as the products move?"
 
@@ -203,3 +235,4 @@ that repo's validators. The date/age/activity machinery is unchanged.
 | 2026-06-17 | Rubric established | 12 internal angles + external 13/14/16; 15 parked; weekly external cadence |
 | 2026-06 | Full (inaugural, 12-angle) | PRs #90–#100; BL-026/027/028/029. See `docs/audit/`. |
 | 2026-06-29 | Angle #11 expanded | Added "agentic → deterministic" sub-dimension: classify skill steps as judgment-required vs mechanical, codify mechanical steps as ts-cli commands |
+| 2026-07-24 | Angle 17 added | `max` `/code-review` backstop over the `<last-full-audit-sha>..HEAD` delta, full sweep only; per-PR `/code-review` remains the primary bug net |
