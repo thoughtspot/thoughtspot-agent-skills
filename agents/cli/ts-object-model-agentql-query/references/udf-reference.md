@@ -1,9 +1,9 @@
-# SpotQL UDF reference
+# AgentQL UDF reference
 
-The SpotQL date/time functions and aggregate/window support. Use these **instead of**
+The AgentQL date/time functions and aggregate/window support. Use these **instead of**
 standard PostgreSQL date functions — `DATE_TRUNC`, `NOW()`, `CURRENT_DATE`, `AGE`, and
-`INTERVAL` arithmetic are all forbidden in SpotQL. Lifted from agent-expressibility-eval's
-SpotQL UDF reference (verified against build 26.7.0.cl-72; re-verified on champ-staging
+`INTERVAL` arithmetic are all forbidden in AgentQL. Lifted from agent-expressibility-eval's
+AgentQL UDF reference (verified against build 26.7.0.cl-72; re-verified on champ-staging
 2026-06-25).
 
 ## Extraction UDFs — date column → integer
@@ -74,7 +74,7 @@ WHERE DIFF_MONTH(START_OF_CURRENT_MONTH(), "t1"."Order Date") BETWEEN 1 AND 12
 > `last_value(sum(...))`, …) must be wrapped in `AGG("col")` so it isn't re-aggregated.
 > **Do not `SUM` it** — `SUM("aggregate formula")` errors with
 > `NESTED_AGGREGATE_NOT_SUPPORTED`. Use real aggregates (`SUM`/`AVG`/…) only on **raw**
-> measure columns. `AGG()`'s argument must be a bare column reference. See `spotql-rules.md`
+> measure columns. `AGG()`'s argument must be a bare column reference. See `agentql-rules.md`
 > § Aggregation for how to tell the two apart.
 
 ## Window functions — `OVER (PARTITION BY … ORDER BY …)`
@@ -89,7 +89,7 @@ broken on older builds and are now fixed (verified champ-staging 2026-06-25 / SC
 See `limitations.md` for the dated, ticket-linked list.
 
 For "compare to N rows back" (N>1) or "true rolling N-period average", there is no working
-SpotQL form — see `patterns.md` / say it can't be done.
+AgentQL form — see `patterns.md` / say it can't be done.
 
 ## CAST
 

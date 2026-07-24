@@ -669,7 +669,7 @@ def test_resolve_accepts_physical_table_col_path():
 
 def test_build_select_ratio_measure_emits_both_component_sums():
     # A ratio candidate must emit numerator + denominator sums (walker path,
-    # since SpotQL rejects multi-component measures).
+    # since AgentQL rejects multi-component measures).
     from ts_cli.aggregate.sqlgen import build_select
     from ts_cli.aggregate.measures import classify_measure
     model = {"model": {"model_tables": [

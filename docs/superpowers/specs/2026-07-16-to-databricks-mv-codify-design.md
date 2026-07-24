@@ -151,7 +151,7 @@ Reuse the from-direction harness:
 
 Procedure: seed fixtures → point a TS Model at them → `ts databricks build-mv` →
 create the MV on Databricks → run a battery of equivalent queries (grains,
-filters, windows) against **both** the TS Model (SpotQL) and the Databricks MV
+filters, windows) against **both** the TS Model (AgentQL) and the Databricks MV
 (SQL) → assert equal numbers. Recorded in
 `docs/audit/2026-07-16-dbx-to-fidelity-matrix.md` following the
 `2026-07-09-dbx-semantic-claim-matrix.md` template (statement ledger + teardown

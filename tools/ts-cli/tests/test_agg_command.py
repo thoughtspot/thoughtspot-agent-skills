@@ -1071,7 +1071,7 @@ def test_generate_rejects_snowflake_materialized_view_cleanly(tmp_path):
     assert "002212" in result.stderr
 
 
-# --- Task 18: SpotQL-first DDL generation, sqlgen as fallback ---------------
+# --- Task 18: AgentQL-first DDL generation, sqlgen as fallback ---------------
 
 _SPOTQL_MODEL = {"model": {"name": "Sales Model", "model_tables": [{"name": "FACT"}],
                            "columns": [
@@ -1105,7 +1105,7 @@ def _write_spotql_fixture(tmp_path):
 
 def _patch_primary_export(monkeypatch):
     """Fake the primary Model export (`_patch_and_write_primary`'s
-    `_export_tml`), independent of the SpotQL `_run` monkeypatch below —
+    `_export_tml`), independent of the AgentQL `_run` monkeypatch below —
     `generate` always re-exports the primary regardless of which DDL path
     was used."""
     import ts_cli.client as client_mod
@@ -1132,7 +1132,7 @@ def _patch_primary_export(monkeypatch):
 
 
 def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatch):
-    """Default behaviour (no --no-spotql): `generate` builds SpotQL for the
+    """Default behaviour (no --no-spotql): `generate` builds AgentQL for the
     candidate's grain, calls the existing `ts spotql generate-sql` client
     path (monkeypatched here, never a real network call), and wraps the
     returned join-correct `executable_sql` as DDL — never touching
@@ -1175,7 +1175,7 @@ def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatc
 
 
 def test_generate_falls_back_to_sqlgen_when_spotql_status_not_success(tmp_path, monkeypatch):
-    """SpotQL generate-sql returning a non-SUCCESS status (e.g. a rejected
+    """AgentQL generate-sql returning a non-SUCCESS status (e.g. a rejected
     statement) must fall back to sqlgen.build_select, with a stderr note that
     role-playing/ambiguous-path dimensions may be wrong on that fallback."""
     tdir = _write_spotql_fixture(tmp_path)
@@ -1202,13 +1202,13 @@ def test_generate_falls_back_to_sqlgen_when_spotql_status_not_success(tmp_path, 
     assert "role-playing" in result.stderr.lower()
 
     ddl = (tmp_path / "cand_1" / "ddl.sql").read_text()
-    # sqlgen.build_select's physical-column-resolution shape, not the SpotQL wrap.
+    # sqlgen.build_select's physical-column-resolution shape, not the AgentQL wrap.
     assert 'SUM("FACT"."AMOUNT") AS "sales_sum"' in ddl
     assert '"src"' not in ddl
 
 
 def test_generate_falls_back_to_sqlgen_when_spotql_run_raises(tmp_path, monkeypatch):
-    """An exception from the SpotQL client path (e.g. no ThoughtSpot profile
+    """An exception from the AgentQL client path (e.g. no ThoughtSpot profile
     configured, network error) must not crash `generate` — it falls back to
     sqlgen.build_select just like a rejected statement."""
     tdir = _write_spotql_fixture(tmp_path)
@@ -1235,13 +1235,13 @@ def test_generate_falls_back_to_sqlgen_when_spotql_run_raises(tmp_path, monkeypa
 
 
 def test_generate_no_spotql_flag_never_calls_spotql_run(tmp_path, monkeypatch):
-    """--no-spotql skips the SpotQL attempt entirely — the built-in join
+    """--no-spotql skips the AgentQL attempt entirely — the built-in join
     walker is used directly, matching pre-Task-18 behaviour."""
     tdir = _write_spotql_fixture(tmp_path)
     _patch_primary_export(monkeypatch)
 
     def fake_run(path, spotql, model, profile):
-        raise AssertionError("SpotQL must not be attempted with --no-spotql")
+        raise AssertionError("AgentQL must not be attempted with --no-spotql")
 
     monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
 
@@ -1257,7 +1257,7 @@ def test_generate_no_spotql_flag_never_calls_spotql_run(tmp_path, monkeypatch):
 
 
 def test_profile_spotql_path_used_when_model_guid_given(tmp_path, monkeypatch):
-    """`ts aggregate profile --model-guid ... --profile ...` builds SpotQL per
+    """`ts aggregate profile --model-guid ... --profile ...` builds AgentQL per
     candidate and wraps the returned executable_sql as
     `SELECT COUNT(*) FROM (<ts_sql_no_limit>) _agg` for the compression count."""
     tdir = _write_spotql_fixture(tmp_path)
@@ -1304,11 +1304,11 @@ def test_profile_spotql_falls_back_to_sqlgen_on_failure(tmp_path, monkeypatch):
 
 def test_profile_without_model_guid_never_calls_spotql(tmp_path, monkeypatch):
     """Backward compatibility: omitting --model-guid (every pre-Task-18 caller)
-    must never attempt the SpotQL path at all."""
+    must never attempt the AgentQL path at all."""
     tdir = _write_spotql_fixture(tmp_path)
 
     def fake_run(path, spotql, model, profile):
-        raise AssertionError("SpotQL must not be attempted without --model-guid")
+        raise AssertionError("AgentQL must not be attempted without --model-guid")
 
     monkeypatch.setattr("ts_cli.commands.spotql._run", fake_run)
 

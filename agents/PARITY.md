@@ -16,7 +16,7 @@
 | ts-object-model-aggregates | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |
 | ts-object-model-erd | Y | — | — | — |
-| ts-object-model-spotql-query | Y | — | — | — |
+| ts-object-model-agentql-query | Y | — | — | — |
 | ts-profile-databricks | Y | — | — | — |
 | ts-profile-snowflake | — | Y | — | — |
 | ts-profile-tableau | Y | — | — | — |

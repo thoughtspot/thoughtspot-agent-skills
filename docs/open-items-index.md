@@ -24,7 +24,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
-| ts-object-model-spotql-query | 4 | **0** | 4 | 0 |
+| ts-object-model-agentql-query | 4 | **0** | 4 | 0 |
 ### Untagged (62 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.

@@ -1,11 +1,11 @@
-# Calling SpotQL from your own product or agent
+# Calling AgentQL from your own product or agent
 
-Reference material for invoking SpotQL directly over HTTP — when you are **not** using the
-`ts` CLI but building SpotQL into your own product, agent, or script. The CLI
+Reference material for invoking AgentQL directly over HTTP — when you are **not** using the
+`ts` CLI but building AgentQL into your own product, agent, or script. The CLI
 (`ts spotql generate-sql` / `fetch-data`) is the easier path; this doc is for everyone who
 needs the raw API. Verified live on `champ-staging`, 2026-06-25.
 
-> **These are callosum endpoints, not the public REST API.** SpotQL lives under
+> **These are callosum endpoints, not the public REST API.** AgentQL lives under
 > `/callosum/v1/v2/data/spotql/`, not `/api/rest/2.0/`. It is **not** in the published
 > ThoughtSpot REST API spec (the SpotterCode/dev-docs reference does not index it). The
 > shapes below are empirical — confirm against your own build.
@@ -57,7 +57,7 @@ POST {base_url}/callosum/v1/v2/data/spotql/fetch-data     — compile + execute
 `fetch-data` body:
 
 ```json
-{ "spotql_query": "<SpotQL>", "model_identifier": "<Model GUID>" }
+{ "spotql_query": "<AgentQL>", "model_identifier": "<Model GUID>" }
 ```
 
 `generate-sql` body — the playground schema also lists `connection_type`. It is
@@ -65,7 +65,7 @@ POST {base_url}/callosum/v1/v2/data/spotql/fetch-data     — compile + execute
 succeeds). Include it only if your build requires it.
 
 ```json
-{ "spotql_query": "<SpotQL>", "model_identifier": "<Model GUID>", "connection_type": "<optional>" }
+{ "spotql_query": "<AgentQL>", "model_identifier": "<Model GUID>", "connection_type": "<optional>" }
 ```
 
 The `model_identifier` is the Model's GUID — a `LOGICAL_TABLE` of subtype `WORKSHEET`,

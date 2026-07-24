@@ -1,13 +1,13 @@
-"""ts spotql — run SpotQL (Semantic SQL) against a ThoughtSpot Model.
+"""ts spotql — run AgentQL (Semantic SQL) against a ThoughtSpot Model.
 
 Two endpoints (V2, under /callosum/v1/v2/data/spotql/):
-  generate-sql — validates a SpotQL statement and returns the warehouse SQL it
+  generate-sql — validates an AgentQL statement and returns the warehouse SQL it
                  compiles to, without executing it.
-  fetch-data   — executes the SpotQL statement and returns result rows.
+  fetch-data   — executes the AgentQL statement and returns result rows.
 
-Both take the same body: {"spotql_query": "<SpotQL>", "model_identifier": "<Model GUID>"}.
-The caller (an agent or a person) writes the SpotQL; these commands do not do
-natural-language → SpotQL. Output is JSON to stdout so skills can pipe it.
+Both take the same body: {"spotql_query": "<AgentQL>", "model_identifier": "<Model GUID>"}.
+The caller (an agent or a person) writes the AgentQL; these commands do not do
+natural-language → AgentQL. Output is JSON to stdout so skills can pipe it.
 
 Query errors (a malformed statement, an unknown column) come back as HTTP 400 with a
 structured error envelope, NOT a transport failure — so these commands ask the client
@@ -16,8 +16,8 @@ not to raise on non-2xx and surface the error in the JSON `errors` field instead
 Response-normalisation logic verified against build 26.7.0.cl-72 (spotQL-testing).
 
 classify-columns (BL-087) is a third, unrelated capability bolted onto this group
-because it feeds the same SUM-vs-AGG decision Step 3 of ts-object-model-spotql-query
-makes before writing SpotQL: it wraps `ts_cli.spotql_ops` (the pure aggregate-function
+because it feeds the same SUM-vs-AGG decision Step 3 of ts-object-model-agentql-query
+makes before writing AgentQL: it wraps `ts_cli.spotql_ops` (the pure aggregate-function
 classifier) with two I/O modes — Model TML export, or a bare list of expressions.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ import typer
 from ts_cli.client import ThoughtSpotClient, resolve_profile
 from ts_cli.spotql_ops import classify_expr, classify_model_columns
 
-app = typer.Typer(help="SpotQL (Semantic SQL) query commands.")
+app = typer.Typer(help="AgentQL (Semantic SQL) query commands.")
 
 _profile_option = typer.Option(
     None, "--profile", "-p", envvar="TS_PROFILE",
@@ -130,7 +130,7 @@ def extract_validation_code(text: str) -> str:
 
 
 def normalise_response(data: Any) -> dict:
-    """Normalise a raw SpotQL response (2xx success or 4xx error envelope) to:
+    """Normalise a raw AgentQL response (2xx success or 4xx error envelope) to:
 
     {status, executable_sql, errors: [{code, message}], columns, rows}
 
@@ -187,11 +187,11 @@ def _run(path: str, spotql: str, model: str, profile: Optional[str]) -> dict:
 
 @app.command("generate-sql")
 def generate_sql(
-    spotql: str = typer.Argument(..., help="The SpotQL (Semantic SQL) statement"),
+    spotql: str = typer.Argument(..., help="The AgentQL (Semantic SQL) statement"),
     model: str = _model_option,
     profile: Optional[str] = _profile_option,
 ) -> None:
-    """Validate a SpotQL statement and return the warehouse SQL it compiles to.
+    """Validate an AgentQL statement and return the warehouse SQL it compiles to.
 
     Does NOT execute the query. Output: JSON {status, executable_sql, errors}.
     A non-SUCCESS status with a populated errors[] means the statement was rejected.
@@ -208,13 +208,13 @@ def generate_sql(
 
 @app.command("fetch-data")
 def fetch_data(
-    spotql: str = typer.Argument(..., help="The SpotQL (Semantic SQL) statement"),
+    spotql: str = typer.Argument(..., help="The AgentQL (Semantic SQL) statement"),
     model: str = _model_option,
     profile: Optional[str] = _profile_option,
 ) -> None:
-    """Execute a SpotQL statement and return result rows.
+    """Execute an AgentQL statement and return result rows.
 
-    Output: JSON {status, columns, rows, errors}. Columns are {index, type} — SpotQL
+    Output: JSON {status, columns, rows, errors}. Columns are {index, type} — AgentQL
     returns per-query column GUIDs (not stable names), so the SELECT ordinal is the
     usable identifier. A non-SUCCESS status with errors[] means execution failed.
 
@@ -323,7 +323,7 @@ def classify_columns_cmd(
     profile: Optional[str] = _profile_option,
 ) -> None:
     """Classify ThoughtSpot columns/formula expressions as attribute vs. measure vs.
-    aggregate-formula-measure — the decision that drives SUM-vs-AGG in SpotQL and
+    aggregate-formula-measure — the decision that drives SUM-vs-AGG in AgentQL and
     MEASURE/ATTRIBUTE + aggregation inference when promoting Answer formulas to a Model.
 
     Exactly one input mode:
@@ -333,7 +333,7 @@ def classify_columns_cmd(
        entry. Output: JSON array of
        {"name", "column_type", "kind": "attribute"|"raw_measure"|"aggregate_measure",
         "needs_agg": bool, "aggregation": "SUM"|None}.
-       `kind == "aggregate_measure"` (equivalently `needs_agg: true`) means SpotQL
+       `kind == "aggregate_measure"` (equivalently `needs_agg: true`) means AgentQL
        must wrap the column in `AGG(...)` — never a real aggregate, or ThoughtSpot
        rejects the query with NESTED_AGGREGATE_NOT_SUPPORTED. `"raw_measure"` means
        a real aggregate (`SUM`/`AVG`/...). `"attribute"` means group by it.

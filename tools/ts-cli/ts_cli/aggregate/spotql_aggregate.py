@@ -1,4 +1,4 @@
-"""Build a SpotQL SELECT for an aggregate candidate's grain, and wrap
+"""Build an AgentQL SELECT for an aggregate candidate's grain, and wrap
 ThoughtSpot's compiled warehouse SQL as aggregate-table DDL (pure, no I/O).
 
 Task 18 pivoted aggregate DDL generation away from the hand-rolled join
@@ -6,20 +6,20 @@ walker in sqlgen.py, which resolves joins itself and gets role-playing /
 ambiguous-path dimensions wrong (live-proven: it grouped revenue by
 inventory-balance month instead of order month — silently wrong aggregates).
 ThoughtSpot's own SQL generation for the same grain is correct because it has
-the full semantic model. `build_spotql` constructs the SpotQL statement for a
+the full semantic model. `build_spotql` constructs the AgentQL statement for a
 candidate's grain; the I/O layer (`commands/aggregate.py`) sends it to
 `ts spotql generate-sql` against the primary Model (reusing
 `ts_cli.commands.spotql`'s client path — never reimplemented here);
 `wrap_as_ddl` turns the returned `executable_sql` into aggregate-table DDL.
-`sqlgen.build_select` remains as a fallback for when SpotQL generation is
+`sqlgen.build_select` remains as a fallback for when AgentQL generation is
 unavailable or errors — see `commands/aggregate.py`.
 
-Task 19 (this module's current shape) corrects two invalid-SpotQL bugs Task
+Task 19 (this module's current shape) corrects two invalid-AgentQL bugs Task
 18 shipped, both proven on a live aggregate-aware cluster (2026-07-14):
 
 1. **Measures are referenced by the primary measure's display name, never a
    real aggregate function over a physical column/component name.**
-   `SUM("t1"."DM_ORDER_DETAIL::LINE_TOTAL")` -> `QUERY_GEN_ERROR`. SpotQL is a
+   `SUM("t1"."DM_ORDER_DETAIL::LINE_TOTAL")` -> `QUERY_GEN_ERROR`. AgentQL is a
    semantic-layer language over display names, not physical column
    references — a measure column/formula already carries its own aggregation
    in the model, so selecting it bare (`"t1"."Line Total"`) at the candidate's
@@ -30,7 +30,7 @@ Task 19 (this module's current shape) corrects two invalid-SpotQL bugs Task
    MAX/COUNT) — see `_measure_rows`/`UnsupportedMeasureError` for AVG/RATIO.
 2. **Dates are selected as the RAW column by display name — no bucket
    function.** `start_of_month("t1"."Order Date")` -> `QUERY_GEN_ERROR`.
-   SpotQL has no date-truncation/bucketing UDF at all (confirmed live, not
+   AgentQL has no date-truncation/bucketing UDF at all (confirmed live, not
    just per the forbidden-DATE_TRUNC docs cited below). Bucketing now happens
    entirely in `wrap_as_ddl`'s outer aggregating SELECT, via a per-dialect
    DATE_TRUNC over the derived table's positional column-alias list (reusing
@@ -50,14 +50,14 @@ column-alias list on the derived table (`FROM (<inner>) "src"("g1", "g2",
 carries a bucket, it emits an outer *aggregating* SELECT — `DATE_TRUNC(bucket,
 gN)` for that date, `reagg(gN)` for each measure, GROUP BY dims + the
 DATE_TRUNC expressions — because `build_spotql`'s own GROUP BY is only ever
-at the RAW date grain (SpotQL cannot bucket), so a coarser target grain needs
+at the RAW date grain (AgentQL cannot bucket), so a coarser target grain needs
 this second aggregation pass. This exact shape was proven live end-to-end:
-raw-date SpotQL (measure by name) -> join-correct detail SQL -> `CREATE TABLE
+raw-date AgentQL (measure by name) -> join-correct detail SQL -> `CREATE TABLE
 AS SELECT dims, DATE_TRUNC('MONTH', g_date), SUM(g_measure) FROM (spotql_sql)
 src(...) GROUP BY dims, DATE_TRUNC(...)` -> a 192-row monthly aggregate whose
 total equalled the ungrouped detail total exactly (594,188,083.19). When no
 date descriptor has a bucket, `wrap_as_ddl` still does the pass-through
-positional rename — SpotQL's own GROUP BY already lands on the final target
+positional rename — AgentQL's own GROUP BY already lands on the final target
 grain, so no second aggregation is needed.
 
 **Task 24 correction (live-proven, aggregate-aware cluster, 2026-07-14):**
@@ -82,16 +82,16 @@ columns.
 
 Scope: this only handles measures whose rewrite plan decomposes to exactly
 one stored component — direct SUM/MIN/MAX/COUNT. AVG/RATIO plans store TWO
-components (numerator/denominator), and SpotQL has no way to select a
+components (numerator/denominator), and AgentQL has no way to select a
 formula's separate components by name (only the whole formula, which yields
 the ratio, not the parts) — `_measure_rows` raises `UnsupportedMeasureError`
-for these rather than emit a guess at invalid SpotQL; see that class's
+for these rather than emit a guess at invalid AgentQL; see that class's
 docstring. `agents/cli/ts-object-model-aggregates/references/open-items.md`
-#14 tracks AVG/RATIO SpotQL-component expressibility as an explicit follow-up.
+#14 tracks AVG/RATIO AgentQL-component expressibility as an explicit follow-up.
 
 Bucket values (`HOURLY`/`DAILY`/`WEEKLY`/`MONTHLY`/`QUARTERLY`/`YEARLY`) are
 carried through unchanged from the candidate's date grain — they're never
-turned into a SpotQL expression here; `wrap_as_ddl` is the only place they
+turned into an AgentQL expression here; `wrap_as_ddl` is the only place they
 become a DATE_TRUNC call, via `sqlgen._date_trunc`'s per-dialect mapping.
 """
 from __future__ import annotations
@@ -106,11 +106,11 @@ _ALIAS = "t1"
 
 class UnsupportedMeasureError(Exception):
     """A candidate references a measure whose rewrite plan stores more than
-    one component (AVG/RATIO — numerator + denominator). SpotQL references a
+    one component (AVG/RATIO — numerator + denominator). AgentQL references a
     semantic measure/formula by its display name only: selecting the whole
     formula by name yields the ratio, not the separate components a
     decomposable aggregate table needs stored individually, and there is no
-    SpotQL syntax to reach into a formula and select just its numerator or
+    AgentQL syntax to reach into a formula and select just its numerator or
     denominator. Rather than emit a guess that `ts spotql generate-sql` would
     reject (or, worse, one that happens to parse but computes the wrong
     thing), `build_spotql` raises this so the candidate falls back to
@@ -137,8 +137,8 @@ class _Row:
 
 
 def _sq(ident: str) -> str:
-    """Quote a SpotQL identifier. SpotQL identifiers are always double-quoted
-    regardless of the target warehouse dialect — this is SpotQL syntax, not
+    """Quote an AgentQL identifier. AgentQL identifiers are always double-quoted
+    regardless of the target warehouse dialect — this is AgentQL syntax, not
     warehouse SQL; the warehouse dialect only matters once ThoughtSpot
     compiles this statement (see `wrap_as_ddl`, which quotes per-dialect)."""
     return '"' + ident.replace('"', '""') + '"'
@@ -166,8 +166,8 @@ def _dim_rows(candidate: dict) -> List[_Row]:
 
 
 def _date_rows(candidate: dict) -> List[_Row]:
-    """Raw date column, by display name, unaliased (spotql-rules.md: never
-    alias a plain Model column) — no bucket function. SpotQL has no
+    """Raw date column, by display name, unaliased (agentql-rules.md: never
+    alias a plain Model column) — no bucket function. AgentQL has no
     date-truncation UDF (module docstring); bucketing + re-aggregation is
     entirely `wrap_as_ddl`'s job, driven by the `bucket` carried on the
     returned descriptor."""
@@ -182,7 +182,7 @@ def _date_rows(candidate: dict) -> List[_Row]:
 def _measure_rows(candidate: dict, plans: dict) -> List[_Row]:
     """One select item per decomposable measure, referencing the measure's
     OWN display name (`plan["name"]`) — never a physical column wrapped in a
-    real aggregate function (module docstring: that shape is invalid SpotQL
+    real aggregate function (module docstring: that shape is invalid AgentQL
     and would double-aggregate anyway; the model already carries the
     measure's aggregation).
 
@@ -197,7 +197,7 @@ def _measure_rows(candidate: dict, plans: dict) -> List[_Row]:
     single-name reference — see `UnsupportedMeasureError`.
 
     Iterates `measure_columns` in the same order generate._component_columns
-    does, so a candidate that reaches SpotQL generation keeps the same
+    does, so a candidate that reaches AgentQL generation keeps the same
     output-column order the aggregate Table spec declares."""
     rows: List[_Row] = []
     for m in candidate.get("measure_columns", []) or []:
@@ -208,11 +208,11 @@ def _measure_rows(candidate: dict, plans: dict) -> List[_Row]:
         if len(components) != 1:
             raise UnsupportedMeasureError(
                 f"measure '{m}' ({plan['class']}) decomposes into "
-                f"{len(components)} stored components — SpotQL can only "
+                f"{len(components)} stored components — AgentQL can only "
                 "reference a semantic measure/formula by its whole display "
                 "name, which yields the ratio, not the separate numerator/"
                 "denominator an aggregate table needs stored individually. "
-                "Scoped out of the SpotQL path (falls back to "
+                "Scoped out of the AgentQL path (falls back to "
                 "sqlgen.build_select); see open-items.md #14.")
         comp = components[0]
         rows.append(_Row(_col(plan["name"]), _sq(comp["alias"]), comp["alias"],
@@ -221,16 +221,16 @@ def _measure_rows(candidate: dict, plans: dict) -> List[_Row]:
 
 
 def build_profiling_spotql(candidate: dict, source_name: str) -> Optional[str]:
-    """Measure-FREE grain SpotQL for ROW-COUNT profiling.
+    """Measure-FREE grain AgentQL for ROW-COUNT profiling.
 
     A candidate's distinct row count depends only on its grain (dimensions +
     date columns), never on which measures it stores — so profiling needn't
     reference measures at all. That matters because `build_spotql` raises on
     AVG/RATIO measures (#14): once such a measure is decomposable it joins every
     candidate's measure set, which would force EVERY candidate onto the built-in
-    walker for profiling (losing SpotQL's correct joins on role-playing /
+    walker for profiling (losing AgentQL's correct joins on role-playing /
     ambiguous-path dimensions). Counting a measure-free grain SELECT keeps
-    profiling on the SpotQL path regardless of measure kinds.
+    profiling on the AgentQL path regardless of measure kinds.
 
     Returns None for a grand-total grain (no dims/dates) — that aggregate is
     exactly one row, which the caller counts as 1 without a query."""
@@ -245,7 +245,7 @@ def build_profiling_spotql(candidate: dict, source_name: str) -> Optional[str]:
 
 
 def build_spotql(candidate: dict, plans: dict, source_name: str) -> Tuple[str, List[dict]]:
-    """SpotQL SELECT over the primary's semantic columns for `candidate`'s
+    """AgentQL SELECT over the primary's semantic columns for `candidate`'s
     grain: dimensions (quoted, unaliased), raw date columns (quoted,
     unaliased, no bucket function — see module docstring), and one item per
     decomposable measure covering `candidate["measure_columns"]`, referenced

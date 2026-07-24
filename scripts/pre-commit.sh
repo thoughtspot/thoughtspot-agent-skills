@@ -230,7 +230,7 @@ fi
 # commit) when a shared mapping OR schema file is edited. Presence is hard-gated in CI
 # (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.
 # (.claude/rules/repo-audit.md, angle 13.)
-if echo "$STAGED" | grep -qE '^agents/shared/(mappings|schemas)/.*\.md$|^agents/cli/ts-object-model-spotql-query/references/limitations\.md$'; then
+if echo "$STAGED" | grep -qE '^agents/shared/(mappings|schemas)/.*\.md$|^agents/cli/ts-object-model-agentql-query/references/limitations\.md$'; then
   "$PYTHON_BIN" tools/validate/check_mapping_currency.py --root "$REPO_ROOT" --staged || true
 fi
 

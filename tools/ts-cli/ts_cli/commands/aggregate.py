@@ -398,7 +398,7 @@ def flag_suspect_base_rows(payload: dict) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Task 18: SpotQL-first SQL generation (DDL + profiling), sqlgen as fallback.
+# Task 18: AgentQL-first SQL generation (DDL + profiling), sqlgen as fallback.
 #
 # ThoughtSpot's own SQL generation resolves joins against the FULL semantic
 # model, so it gets role-playing / ambiguous-path dimensions right where
@@ -406,7 +406,7 @@ def flag_suspect_base_rows(payload: dict) -> bool:
 # (live-proven: it grouped revenue by inventory-balance month instead of
 # order month). Both `generate` and `profile` therefore try
 # build_spotql -> `ts spotql generate-sql` -> wrap first, and fall back to
-# sqlgen.build_select only when SpotQL generation is unavailable or errors
+# sqlgen.build_select only when AgentQL generation is unavailable or errors
 # (network/profile issue, --no-spotql, or a rejected statement) — never a
 # hard failure, since the SQL-gen endpoint being down must not block the
 # whole advisor workflow. A fallback always emits a stderr note that
@@ -414,13 +414,13 @@ def flag_suspect_base_rows(payload: dict) -> bool:
 #
 # Task 19 correction (live-proven, aggregate-aware cluster): build_spotql now
 # references measures by display name (never a real aggregate fn over a
-# physical column — invalid SpotQL) and selects raw date columns with no
-# bucket function (SpotQL has none) — see spotql_aggregate.py's module
+# physical column — invalid AgentQL) and selects raw date columns with no
+# bucket function (AgentQL has none) — see spotql_aggregate.py's module
 # docstring. wrap_as_ddl does the date bucketing + measure re-aggregation
 # in an outer SELECT instead. Unchanged here: the try/except-and-fall-back
 # shape below already treats spotql_aggregate.UnsupportedMeasureError
-# (AVG/RATIO measures, out of SpotQL's expressible scope) like any other
-# best-effort SpotQL failure.
+# (AVG/RATIO measures, out of AgentQL's expressible scope) like any other
+# best-effort AgentQL failure.
 # ──────────────────────────────────────────────────────────────────────────────
 
 _SPOTQL_FALLBACK_NOTE = (
@@ -443,10 +443,10 @@ def _spotql_generate_sql(spotql: str, model_guid: str, ts_profile: Optional[str]
 def _spotql_ddl_or_none(model_tml: dict, cand: dict, plans: dict, model_guid: str,
                         ts_profile: Optional[str], target: str, dialect: str,
                         materialization: str, warehouse: Optional[str]) -> Optional[str]:
-    """Try the SpotQL-based DDL path for one candidate. Returns None on ANY
+    """Try the AgentQL-based DDL path for one candidate. Returns None on ANY
     failure (unavailable model_guid, a non-SUCCESS generate-sql status, or an
     exception/SystemExit from the client) so the caller falls back to
-    sqlgen.build_select — SpotQL is the preferred path here, not a hard
+    sqlgen.build_select — AgentQL is the preferred path here, not a hard
     dependency, so this never raises."""
     if not model_guid:
         return None
@@ -455,21 +455,21 @@ def _spotql_ddl_or_none(model_tml: dict, cand: dict, plans: dict, model_guid: st
         spotql, descriptors = build_spotql(cand, plans, model_tml["model"]["name"])
         result = _spotql_generate_sql(spotql, model_guid, ts_profile)
         if result["status"] != "SUCCESS" or not result["executable_sql"]:
-            _err(f"SpotQL generate-sql did not return SUCCESS for candidate "
+            _err(f"AgentQL generate-sql did not return SUCCESS for candidate "
                  f"{cand.get('id')} (status={result['status']}, "
                  f"errors={result['errors']}) — {_SPOTQL_FALLBACK_NOTE}")
             return None
         return wrap_as_ddl(result["executable_sql"], descriptors, target, dialect,
                            materialization, warehouse=warehouse)
     except (Exception, SystemExit) as exc:  # noqa: BLE001 — best-effort path
-        _err(f"SpotQL DDL generation raised {exc!r} for candidate "
+        _err(f"AgentQL DDL generation raised {exc!r} for candidate "
              f"{cand.get('id')} — {_SPOTQL_FALLBACK_NOTE}")
         return None
 
 
 def _spotql_profile_sql_or_none(model_tml: dict, cand: dict, plans: dict, model_guid: str,
                                 ts_profile: Optional[str]) -> Optional[str]:
-    """Same SpotQL-first attempt as `_spotql_ddl_or_none`, but for profiling:
+    """Same AgentQL-first attempt as `_spotql_ddl_or_none`, but for profiling:
     wraps the returned executable_sql (LIMIT stripped) in
     `SELECT COUNT(*) FROM (...) _agg` instead of DDL. Returns None on any
     failure so the caller falls back to sqlgen's build_select/build_profile_sql."""
@@ -478,9 +478,9 @@ def _spotql_profile_sql_or_none(model_tml: dict, cand: dict, plans: dict, model_
     from ts_cli.aggregate.spotql_aggregate import (_strip_trailing_limit,
                                                    build_profiling_spotql)
     try:
-        # Row-count profiling uses a MEASURE-FREE grain SpotQL: the distinct
+        # Row-count profiling uses a MEASURE-FREE grain AgentQL: the distinct
         # grain row count is measure-independent, so this keeps profiling on the
-        # SpotQL path (correct joins) even for candidates carrying an AVG/RATIO
+        # AgentQL path (correct joins) even for candidates carrying an AVG/RATIO
         # measure that build_spotql can't express (#14). `plans` is unused here
         # for that reason (kept in the signature for caller symmetry with
         # `_spotql_ddl_or_none`, which does need it).
@@ -489,14 +489,14 @@ def _spotql_profile_sql_or_none(model_tml: dict, cand: dict, plans: dict, model_
             return "SELECT 1 AS agg_rows"   # grand-total grain: exactly one row
         result = _spotql_generate_sql(spotql, model_guid, ts_profile)
         if result["status"] != "SUCCESS" or not result["executable_sql"]:
-            _err(f"SpotQL generate-sql did not return SUCCESS for candidate "
+            _err(f"AgentQL generate-sql did not return SUCCESS for candidate "
                  f"{cand.get('id')} (status={result['status']}) — "
                  f"{_SPOTQL_FALLBACK_NOTE}")
             return None
         inner = _strip_trailing_limit(result["executable_sql"])
         return f"SELECT COUNT(*) AS agg_rows FROM (\n{inner}\n) _agg"
     except (Exception, SystemExit) as exc:  # noqa: BLE001 — best-effort path
-        _err(f"SpotQL profiling SQL generation raised {exc!r} for candidate "
+        _err(f"AgentQL profiling SQL generation raised {exc!r} for candidate "
              f"{cand.get('id')} — {_SPOTQL_FALLBACK_NOTE}")
         return None
 
@@ -507,7 +507,7 @@ def _build_profile_statements(payload: dict, model_tml: dict, table_tmls: dict,
                               ts_profile: Optional[str] = None,
                               no_spotql: bool = False) -> tuple:
     """Base-count + per-candidate profiling SQL for the top-K candidates by
-    coverage. Each candidate tries the SpotQL path first (only when
+    coverage. Each candidate tries the AgentQL path first (only when
     `model_guid` is supplied and `no_spotql` is False — omitting `--model-guid`
     is the pre-Task-18 default and must never attempt a ThoughtSpot call),
     falling back to sqlgen.build_select. Candidates whose sqlgen SELECT can't
@@ -568,7 +568,7 @@ def profile(
         None, help="Connected mode: Snowflake role (default: profile's default_role)"),
     model_guid: Optional[str] = typer.Option(
         None, "--model-guid",
-        help="Primary Model GUID — enables SpotQL-based profiling SQL (Task 18): "
+        help="Primary Model GUID — enables AgentQL-based profiling SQL (Task 18): "
              "ThoughtSpot's own SQL generation resolves joins correctly on "
              "role-playing/ambiguous-path dimensions, where the built-in join "
              "walker can be wrong. Omit to always use the built-in walker "
@@ -588,7 +588,7 @@ def profile(
     execution; otherwise `--snowflake-profile` connects and profiles directly.
     Writes `agg_rows`/`base_rows` back into `<dir>/candidates.json`.
 
-    Per-candidate profiling SQL prefers SpotQL (see `--model-guid` above),
+    Per-candidate profiling SQL prefers AgentQL (see `--model-guid` above),
     falling back to the built-in join walker when unavailable or `--no-spotql`
     is set; the base-row count is always a plain single-table count
     (sqlgen.build_base_count_sql), unaffected by this choice.
@@ -739,10 +739,10 @@ def _require_warehouse_for_dynamic_table(dialect: str, materialization: str,
 def _fallback_ddl_or_exit(model_tml: dict, table_tmls: dict, cand: dict, plans: dict,
                           dialect: str, target: str, materialization: str,
                           warehouse: Optional[str], candidate_id: str) -> str:
-    """The pre-Task-18 sqlgen.build_select-based DDL path — used when SpotQL
+    """The pre-Task-18 sqlgen.build_select-based DDL path — used when AgentQL
     generation is unavailable/erroring or --no-spotql was passed. Its
     hand-rolled join walker can be wrong on role-playing/ambiguous-path
-    dimensions (the bug Task 18's SpotQL-first default path fixes); this
+    dimensions (the bug Task 18's AgentQL-first default path fixes); this
     remains only as the documented fallback. Exits cleanly (never a bare
     traceback) on either an unresolvable SELECT or a rejected DDL shape
     (e.g. the Snowflake materialized-view join guard)."""
@@ -916,10 +916,10 @@ def generate(
              "flags the name-based fallback."),
     no_spotql: bool = typer.Option(
         False, "--no-spotql",
-        help="Skip ThoughtSpot SpotQL SQL generation (Task 18's default path) "
+        help="Skip ThoughtSpot AgentQL SQL generation (Task 18's default path) "
              "and use the built-in join walker directly. That walker can be "
              "wrong on role-playing/ambiguous-path dimensions — use only when "
-             "SpotQL generate-sql is known unavailable for this Model/profile."),
+             "AgentQL generate-sql is known unavailable for this Model/profile."),
 ) -> None:
     """Emit DDL + Table TML + aggregate Model TML + patched primary TML.
 
@@ -927,13 +927,13 @@ def generate(
     `agg_model.tml.yaml`, `primary_patched.tml.yaml` to `<out-dir>` (default
     `<dir>/<candidate>`). The skill gates each import separately.
 
-    DDL SELECT source (Task 18): by default, builds a SpotQL statement for
+    DDL SELECT source (Task 18): by default, builds an AgentQL statement for
     the candidate's grain and asks ThoughtSpot to compile it against the
     primary Model (`--model-guid`/`--profile`, reusing `ts spotql
     generate-sql`'s client path) — ThoughtSpot resolves joins against the
     full semantic model, so this is correct on role-playing/ambiguous-path
     dimensions where the built-in join walker (sqlgen.build_select) can be
-    wrong. Falls back to that walker automatically if SpotQL generation is
+    wrong. Falls back to that walker automatically if AgentQL generation is
     unavailable or errors, or always with `--no-spotql`; a fallback always
     prints a stderr note that the result may be wrong on such dimensions.
 
@@ -955,12 +955,12 @@ def generate(
     cand, model_tml, table_tmls, plans = _read_generate_context(d, candidate, tables_dir)
     name = _aggregate_name(model_tml, cand, agg_name)
     target = f"{db}.{schema}.{name}"
-    # Applies regardless of DDL source (SpotQL-wrapped or sqlgen fallback) —
+    # Applies regardless of DDL source (AgentQL-wrapped or sqlgen fallback) —
     # neither wrap_as_ddl nor sqlgen.build_ddl enforces this on its own.
     _require_warehouse_for_dynamic_table(dialect, materialization, warehouse)
 
     # Fail-closed RLS guard runs before any file is written or any network
-    # call (SpotQL/primary export) is made — an unsecurable candidate (or a
+    # call (AgentQL/primary export) is made — an unsecurable candidate (or a
     # tables-dir too incomplete to assess RLS) must exit with zero side
     # effects, not a partial set of artifacts.
     from ts_cli.commands.aggregate_rls import _propagate_rls_or_fail_closed

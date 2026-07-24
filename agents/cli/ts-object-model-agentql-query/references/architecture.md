@@ -1,28 +1,28 @@
-# Why SpotQL — the architecture, and what it buys you over raw DB SQL
+# Why AgentQL — the architecture, and what it buys you over raw DB SQL
 
-SpotQL looks like SQL, but it is **not** the SQL that runs against your warehouse. This
+AgentQL looks like SQL, but it is **not** the SQL that runs against your warehouse. This
 file explains what actually executes, why that design exists, and the trust/correctness
 guarantees it gives you that hand-written database SQL cannot. Read it when someone asks
-"what's the point of SpotQL?", "why not just send SQL to the warehouse?", or "is this
+"what's the point of AgentQL?", "why not just send SQL to the warehouse?", or "is this
 safe to trust?".
 
-> One-line version: **The LLM's (or your) SpotQL is treated as *intent*. ThoughtSpot
+> One-line version: **The LLM's (or your) AgentQL is treated as *intent*. ThoughtSpot
 > compiles it into deterministic warehouse SQL that honours every rule codified in the
 > Model — and only that compiled SQL is ever executed.**
 
 ---
 
-## The core principle: ThoughtSpot does not execute SpotQL
+## The core principle: ThoughtSpot does not execute AgentQL
 
-ThoughtSpot never runs the SpotQL statement against the database. The flow is:
+ThoughtSpot never runs the AgentQL statement against the database. The flow is:
 
 ```
-SpotQL  ──►  ThoughtSpot QueryGen  ──►  warehouse SQL  ──►  warehouse executes
+AgentQL  ──►  ThoughtSpot QueryGen  ──►  warehouse SQL  ──►  warehouse executes
 (intent)     (applies the Model's        (deterministic,
               semantic rules)             governed)
 ```
 
-The SpotQL is parsed into a **QuerySpec** and handed to ThoughtSpot's **Query Generation**
+The AgentQL is parsed into a **QuerySpec** and handed to ThoughtSpot's **Query Generation**
 engine — the *same* engine that powers Liveboards, Answers, Search and Spotter. QueryGen
 emits the actual warehouse SQL, applying every rule built into the Model. That compiled SQL
 is what `generate-sql` returns and what `fetch-data` executes.
@@ -34,7 +34,7 @@ LLM-authored SQL reaches the warehouse.
 
 ---
 
-## What the semantic layer guarantees (rules SpotQL respects, raw SQL doesn't)
+## What the semantic layer guarantees (rules AgentQL respects, raw SQL doesn't)
 
 These rules live in the Model. Because QueryGen — not the LLM — writes the executed SQL,
 **every one is enforced automatically**, on every query, with no way to bypass them:
@@ -63,16 +63,16 @@ Beyond the per-rule guarantees above, the architecture itself buys you:
   engine produces the *executed* SQL. Wrong intent yields a wrong-but-governed answer or a
   validation error — never an ungoverned query against your data.
 - **Determinism & traceability.** The same question compiles to the same QuerySpec → the
-  same warehouse SQL → the same numbers, regardless of which LLM produced the SpotQL or how
+  same warehouse SQL → the same numbers, regardless of which LLM produced the AgentQL or how
   it phrased it. You can inspect the generated SQL (`generate-sql`) and audit exactly what ran.
-- **Consistency with the rest of ThoughtSpot.** Because SpotQL rides the same QueryGen as
-  Liveboards/Answers/Search/Spotter, a SpotQL result *matches* what a pinned Liveboard shows.
+- **Consistency with the rest of ThoughtSpot.** Because AgentQL rides the same QueryGen as
+  Liveboards/Answers/Search/Spotter, an AgentQL result *matches* what a pinned Liveboard shows.
   There are no divergent "shadow metrics" defined in ad-hoc SQL drifting from the governed ones.
-- **Physical-layer abstraction & dialect portability.** SpotQL references the **Model**
+- **Physical-layer abstraction & dialect portability.** AgentQL references the **Model**
   (business names), not physical tables/columns. Warehouse refactors, renames, and
-  repartitioning don't break it, and the same SpotQL compiles to the target warehouse's
+  repartitioning don't break it, and the same AgentQL compiles to the target warehouse's
   dialect (Snowflake / Databricks / BigQuery / …).
-- **Single point of change.** Fix a definition once in the Model and every SpotQL query
+- **Single point of change.** Fix a definition once in the Model and every AgentQL query
   inherits it. Raw SQL embeds the logic in each query, so a definition change means hunting
   down and editing every copy.
 - **Governed scale.** End-to-end governance is enforced while scaling to large row counts;
@@ -81,9 +81,9 @@ Beyond the per-rule guarantees above, the architecture itself buys you:
 
 ---
 
-## Where SpotQL sits in the Spotter NL architecture
+## Where AgentQL sits in the Spotter NL architecture
 
-SpotQL is the **expressibility fallback** in a hybrid natural-language flow. Both paths end
+AgentQL is the **expressibility fallback** in a hybrid natural-language flow. Both paths end
 in the same deterministic, governed QueryGen step — the difference is only how the user's
 intent is captured.
 
@@ -91,7 +91,7 @@ intent is captured.
 flowchart LR
     Q[NL question] --> LLM
     LLM -->|"primary: familiar default"| A[Search Tokens]
-    LLM -->|"fallback: tokens can't<br/>express — sub-queries, LoD"| B["Semantic SQL (SpotQL)"]
+    LLM -->|"fallback: tokens can't<br/>express — sub-queries, LoD"| B["Semantic SQL (AgentQL)"]
     A --> QS[QuerySpec]
     B --> QS
     QS --> QG["QueryGen — applies Model rules:<br/>RLS/CLS, joins, metrics,<br/>calendars, multi-fact"]
@@ -109,7 +109,7 @@ flowchart LR
   NL question ──► LLM ──►  │  Path A (primary): Search Tokens         │ ─┐
                           │     → familiar, default path              │  │
                           ├─────────────────────────────────────────┤  ├─► QuerySpec ─► QueryGen ─► deterministic
-                          │  Path B (fallback): Semantic SQL (SpotQL) │  │   (Model rules)   warehouse SQL ─► execute
+                          │  Path B (fallback): Semantic SQL (AgentQL) │  │   (Model rules)   warehouse SQL ─► execute
                           │     → when tokens can't express the       │ ─┘
                           │       question (sub-queries, LoD, etc.)   │
                           └─────────────────────────────────────────┘
@@ -120,22 +120,22 @@ flowchart LR
                             summary + optional generated-SQL view
                             → user can confirm / correct / challenge
 
-  The LLM output — tokens OR SpotQL — is INTENT. It is never executed directly.
+  The LLM output — tokens OR AgentQL — is INTENT. It is never executed directly.
   QueryGen produces and runs the SQL, with all Model rules (RLS/CLS, joins, metrics,
   calendars, multi-fact resolution) applied. Verifiability holds on both paths.
 ```
 
-**Why a hybrid, not SpotQL-only:** Token-based Answers and SpotQL **co-exist** — SpotQL is
+**Why a hybrid, not AgentQL-only:** Token-based Answers and AgentQL **co-exist** — AgentQL is
 not a replacement. Token-based Answers stay the primary path: they are familiar and carry
 the verification experience users already trust, letting a business user confirm or correct
-how Spotter interpreted their intent before acting. SpotQL is the **expressibility fallback**,
+how Spotter interpreted their intent before acting. AgentQL is the **expressibility fallback**,
 taken when the token grammar can't express the question. It closes two gaps in the
 token-only approach:
 
 - **Spotter training lag.** Tokenised answers require Spotter to be trained to emit
   syntactically valid TML for each analytical feature; new Search Data capabilities (e.g.
-  Sets, LoD formulas) lag behind in Spotter. SpotQL decouples *expressibility* from that
-  training cycle — if Search Data can answer it, SpotQL can express it now.
+  Sets, LoD formulas) lag behind in Spotter. AgentQL decouples *expressibility* from that
+  training cycle — if Search Data can answer it, AgentQL can express it now.
 - **Analytical gaps.** Some questions Search Data can answer aren't reachable through the
   token grammar but are straightforward to state in SQL.
 
@@ -145,20 +145,20 @@ are always applied and results are not hallucinations.
 
 ---
 
-## Preserving trust as expressibility grows — SpotQL Verification
+## Preserving trust as expressibility grows — AgentQL Verification
 
 Determinism (above) guarantees the *executed SQL* is governed and reproducible. It does **not**
 guarantee the user knows ThoughtSpot understood their *question* — and that interpretability is
 what has made ThoughtSpot uniquely trustworthy. With Token-based Answers, the search tokens
 themselves are the verification layer: a business user can read and correct them without knowing
-SQL. SpotQL raises the accuracy ceiling, but a more expressive query is harder to eyeball — and
-left unaddressed, a SpotQL answer risks becoming a "black box" indistinguishable from the opaque
+SQL. AgentQL raises the accuracy ceiling, but a more expressive query is harder to eyeball — and
+left unaddressed, an AgentQL answer risks becoming a "black box" indistinguishable from the opaque
 AI outputs competitors ship.
 
 The mitigation is a **verification layer unified across both transformers**, so users get one
 consistent standard of verifiability *regardless of whether an answer was produced by tokens or
-SpotQL*. The principle is co-existence **and parity** — verification is not a token-only feature
-the SpotQL path quietly loses. It lets users **confirm, correct, or challenge** how the AI
+AgentQL*. The principle is co-existence **and parity** — verification is not a token-only feature
+the AgentQL path quietly loses. It lets users **confirm, correct, or challenge** how the AI
 interpreted intent, surfaced at the altitude each persona needs:
 
 | Persona | Need | What verification surfaces |
@@ -168,15 +168,15 @@ interpreted intent, surfaced at the altitude each persona needs:
 | **Developer / embedder** | Configurable integrity | Control over which verification elements are shown or hidden on embedded surfaces (full detail → plain-language summary only). |
 
 **Why this is the moat, not a footnote.** Human-in-the-loop verification is ThoughtSpot's core
-differentiator against black-box LLM search. Extending SpotQL *without* extending verification
+differentiator against black-box LLM search. Extending AgentQL *without* extending verification
 would regress Spotter to the standard LLM baseline and erode the accuracy advantage. With it, the
 competitive narrative shifts from *"will the AI be accurate?"* to *"how easily can you verify the
-AI's accuracy?"* — and the **verifiable-by-anyone** guarantee holds even as SpotQL widens what
+AI's accuracy?"* — and the **verifiable-by-anyone** guarantee holds even as AgentQL widens what
 Spotter can answer.
 
 > **Scope note:** the verification layer is being built for the **ad-hoc Spotter conversational
-> flow** first. Pinnable SpotQL Answers, full Edit-Answer functionality, and verification of
-> already-pinned answers (Liveboards) are deferred to later phases — see the SpotQL Verification
+> flow** first. Pinnable AgentQL Answers, full Edit-Answer functionality, and verification of
+> already-pinned answers (Liveboards) are deferred to later phases — see the AgentQL Verification
 > and Pinnability PRDs.
 
 ---
@@ -194,6 +194,6 @@ Spotter can answer.
 
 ## Related
 
-- `spotql-rules.md` — the dialect constraints that make a statement valid (the *how*).
-- `limitations.md` — what SpotQL can't express today (the boundary of the expressibility gap).
+- `agentql-rules.md` — the dialect constraints that make a statement valid (the *how*).
+- `limitations.md` — what AgentQL can't express today (the boundary of the expressibility gap).
 - `integration.md` — calling the deterministic `generate-sql` / `fetch-data` endpoints directly.

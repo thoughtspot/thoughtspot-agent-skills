@@ -147,7 +147,7 @@ def _consolidated_dimsets(base: set, consolidatable: set, max_width: int) -> set
     attribute columns — column_id-backed — so formula dimensions like a
     concat(...) employee name, which can't be stored/joined in an aggregate,
     and date columns are excluded). Capped at `max_width`. Cross-fact
-    infeasible grains are not special-cased here — the join walker / SpotQL
+    infeasible grains are not special-cased here — the join walker / AgentQL
     generation fails closed on them downstream (never a silent wrong number).
     Only emits a set when it actually combines >1 dim."""
     from collections import defaultdict
