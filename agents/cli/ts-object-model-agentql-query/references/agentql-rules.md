@@ -72,14 +72,14 @@ expression.
   Verified live (nebula-aggregate-aware, 2026-07-13) at grand-total, grouped-by-dimension,
   and monthly grain — every result matched Snowflake ground truth (`sum(filled_inventory)`
   at the latest balance date). The trigger is the **outermost** op only: `sum(last_value(...))`
-  is a normal aggregate-formula (`AGG`, previous bullet), not this case. `ts spotql
+  is a normal aggregate-formula (`AGG`, previous bullet), not this case. `ts agentql
   classify-columns` detects this and returns `kind: semiadditive_measure`, `wrapper: SUM`
   — follow the `wrapper` field; don't re-derive it by eye. (Earlier docs wrongly showed
   `AGG("Inventory Balance")` as correct — that was never verified against a live semi-additive
   measure and is wrong; corrected here.)
 
-  > Quick test if unsure which kind a column is: run `ts spotql classify-columns` (it parses
-  > the outer op for you). Or compile a probe: `ts spotql generate-sql 'SELECT
+  > Quick test if unsure which kind a column is: run `ts agentql classify-columns` (it parses
+  > the outer op for you). Or compile a probe: `ts agentql generate-sql 'SELECT
   > AGG("t1"."<col>") FROM "<Model>" AS "t1"'` — `NESTED_AGGREGATE` means raw (use `SUM`),
   > `NON_CONVERTIBLE_FUNCTION` means semi-additive (use `SUM`), success means aggregate-formula
   > (use `AGG`).

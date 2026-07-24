@@ -21,7 +21,7 @@ ts_cli/
   sv_build_model.py    — Snowflake SV → ThoughtSpot Model TML assembly (build_model_tml_sv); inline Scenario B joins (equi/range/ASOF), SV synonym→display name, private columns, fact table detection, strip_formulas for two-pass import; imports formula_common shared transforms (BL-100 PR3; pure functions, no I/O)
   sv_introspect.py     — INFORMATION_SCHEMA → tables-spec + tables map (map_snowflake_type, build_tables_spec, build_tables_map, detect_column_gaps); Snowflake type → ThoughtSpot type mapping, cross-schema query building, column gap detection against existing TS tables (BL-100 PR4; pure functions, no I/O)
   sv_build_sv.py       — ThoughtSpot Model TML → Snowflake Semantic View DDL (build_sv_ddl); column_id resolution, column classification (dimension/metric/time_dimension), to_snake aliasing, relationship naming with collision avoidance, metric topological ordering, CA extension JSON, synonym/comment handling (BL-100 PR5; pure functions, no I/O)
-  spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts spotql classify-columns` (pure functions, no I/O)
+  spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts agentql classify-columns` (pure functions, no I/O)
   promote.py           — Formula promotion merge (extract_answer_formulas/detect_duplicates/map_references/build_merged_model) behind `ts model promote-formula` (pure functions, no I/O; BL-066)
   aggregate/
     __init__.py          — package marker
@@ -100,7 +100,7 @@ ts_cli/
     tableau.py    — ts tableau (signin, datasources, download, parse, classify-formulas, translate-formulas, build-model, build-liveboard, verify)
     qlik.py       — ts qlik (parse, build-model, build-liveboard) — Qlik Sense → ThoughtSpot converter (I/O only; logic in ts_cli/qlik/). `--mode` selects the extractor: offline / engine-artifacts (positional <source>) or the live qlik-cloud (--tenant/--app-id/--api-key) / engine (--engine/--app-id/--header) paths; live modes need the `[qlik]` extra
     snowflake.py  — ts snowflake (diff, lint-ddl, exec, parse-sv, translate-formulas, build-model, introspect, build-sv)
-    spotql.py     — ts spotql (generate-sql, fetch-data, classify-columns)
+    spotql.py     — ts agentql (generate-sql, fetch-data, classify-columns)
     spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2

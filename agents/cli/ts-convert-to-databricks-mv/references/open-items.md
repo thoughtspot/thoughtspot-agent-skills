@@ -282,7 +282,7 @@ props.get("aggregation"))`); the formula-backed branch calls `_formula_sql` →
 wrapping step.
 
 **Live reproduction:**
-- `ts spotql classify-columns --model <guid>` classifies this exact formula as
+- `ts agentql classify-columns --model <guid>` classifies this exact formula as
   `"kind": "raw_measure"`, `"aggregation": "SUM"`, `"wrapper": "SUM"` —
   ThoughtSpot's own query engine treats it as an unaggregated per-row
   expression and applies `SUM(...)` at query time. Confirmed via `searchdata`:

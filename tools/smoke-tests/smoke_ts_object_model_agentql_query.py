@@ -36,8 +36,8 @@ def step_model_is_worksheet(profile: str, model_guid: str) -> None:
         raise RuntimeError(f"GUID '{model_guid}' is not a Model/WORKSHEET (type={header.get('type')}).")
 
 
-def step_generate_sql(profile: str, model_guid: str, spotql: str) -> str:
-    res = run_ts(["spotql", "generate-sql", spotql, "--model", model_guid], profile)
+def step_generate_sql(profile: str, model_guid: str, agentql: str) -> str:
+    res = run_ts(["agentql", "generate-sql", agentql, "--model", model_guid], profile)
     if res.get("status") != "SUCCESS":
         raise RuntimeError(f"generate-sql status={res.get('status')} errors={res.get('errors')}")
     if not res.get("executable_sql"):
@@ -45,8 +45,8 @@ def step_generate_sql(profile: str, model_guid: str, spotql: str) -> str:
     return res["executable_sql"]
 
 
-def step_fetch_data(profile: str, model_guid: str, spotql: str, min_rows: int) -> int:
-    res = run_ts(["spotql", "fetch-data", spotql, "--model", model_guid], profile)
+def step_fetch_data(profile: str, model_guid: str, agentql: str, min_rows: int) -> int:
+    res = run_ts(["agentql", "fetch-data", agentql, "--model", model_guid], profile)
     if res.get("status") != "SUCCESS":
         raise RuntimeError(f"fetch-data status={res.get('status')} errors={res.get('errors')}")
     n = len(res.get("rows", []))
@@ -57,7 +57,7 @@ def step_fetch_data(profile: str, model_guid: str, spotql: str, min_rows: int) -
 
 def step_error_path(profile: str, model_guid: str) -> str:
     """An invalid query must come back as a structured error, not a crash."""
-    res = run_ts(["spotql", "generate-sql", "SELECT *", "--model", model_guid], profile)
+    res = run_ts(["agentql", "generate-sql", "SELECT *", "--model", model_guid], profile)
     if res.get("status") == "SUCCESS":
         raise RuntimeError("expected the invalid query 'SELECT *' to fail, got SUCCESS")
     if not res.get("errors"):
@@ -83,12 +83,12 @@ def main() -> int:
     r.step("Model exists and is a WORKSHEET", step_model_is_worksheet, args.ts_profile, args.model_guid)
 
     ok, sql = r.step("generate-sql → SUCCESS + warehouse SQL",
-                     step_generate_sql, args.ts_profile, args.model_guid, args.spotql)
+                     step_generate_sql, args.ts_profile, args.model_guid, args.agentql)
     if ok and sql:
         r.info(f"  warehouse SQL: {sql[:80]}...")
 
     ok, n = r.step("fetch-data → SUCCESS + rows",
-                   step_fetch_data, args.ts_profile, args.model_guid, args.spotql, args.min_rows)
+                   step_fetch_data, args.ts_profile, args.model_guid, args.agentql, args.min_rows)
     if ok:
         r.info(f"  rows returned: {n}")
 

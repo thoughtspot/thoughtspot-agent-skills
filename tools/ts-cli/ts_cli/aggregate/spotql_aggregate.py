@@ -8,7 +8,7 @@ inventory-balance month instead of order month — silently wrong aggregates).
 ThoughtSpot's own SQL generation for the same grain is correct because it has
 the full semantic model. `build_spotql` constructs the AgentQL statement for a
 candidate's grain; the I/O layer (`commands/aggregate.py`) sends it to
-`ts spotql generate-sql` against the primary Model (reusing
+`ts agentql generate-sql` against the primary Model (reusing
 `ts_cli.commands.spotql`'s client path — never reimplemented here);
 `wrap_as_ddl` turns the returned `executable_sql` into aggregate-table DDL.
 `sqlgen.build_select` remains as a fallback for when AgentQL generation is
@@ -111,7 +111,7 @@ class UnsupportedMeasureError(Exception):
     formula by name yields the ratio, not the separate components a
     decomposable aggregate table needs stored individually, and there is no
     AgentQL syntax to reach into a formula and select just its numerator or
-    denominator. Rather than emit a guess that `ts spotql generate-sql` would
+    denominator. Rather than emit a guess that `ts agentql generate-sql` would
     reject (or, worse, one that happens to parse but computes the wrong
     thing), `build_spotql` raises this so the candidate falls back to
     `sqlgen.build_select` (see `commands/aggregate.py`'s `_spotql_ddl_or_none`

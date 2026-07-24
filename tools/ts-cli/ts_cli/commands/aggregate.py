@@ -405,7 +405,7 @@ def flag_suspect_base_rows(payload: dict) -> bool:
 # sqlgen.build_select's hand-rolled join walker can silently get them wrong
 # (live-proven: it grouped revenue by inventory-balance month instead of
 # order month). Both `generate` and `profile` therefore try
-# build_spotql -> `ts spotql generate-sql` -> wrap first, and fall back to
+# build_spotql -> `ts agentql generate-sql` -> wrap first, and fall back to
 # sqlgen.build_select only when AgentQL generation is unavailable or errors
 # (network/profile issue, --no-spotql, or a rejected statement) — never a
 # hard failure, since the SQL-gen endpoint being down must not block the
@@ -418,7 +418,7 @@ def flag_suspect_base_rows(payload: dict) -> bool:
 # bucket function (AgentQL has none) — see spotql_aggregate.py's module
 # docstring. wrap_as_ddl does the date bucketing + measure re-aggregation
 # in an outer SELECT instead. Unchanged here: the try/except-and-fall-back
-# shape below already treats spotql_aggregate.UnsupportedMeasureError
+# shape below already treats agentql_aggregate.UnsupportedMeasureError
 # (AVG/RATIO measures, out of AgentQL's expressible scope) like any other
 # best-effort AgentQL failure.
 # ──────────────────────────────────────────────────────────────────────────────
@@ -431,7 +431,7 @@ _SPOTQL_FALLBACK_NOTE = (
 
 
 def _spotql_generate_sql(spotql: str, model_guid: str, ts_profile: Optional[str]) -> dict:
-    """Call the existing `ts spotql generate-sql` client path — a local
+    """Call the existing `ts agentql generate-sql` client path — a local
     import (not a top-of-file one) so tests can monkeypatch
     `ts_cli.commands.spotql._run` directly, the same pattern this module
     already uses to reuse `_collect_dependents`/`_export_tml` from sibling
@@ -575,7 +575,7 @@ def profile(
              "(pre-Task-18 behaviour; no ThoughtSpot connection needed)."),
     ts_profile: Optional[str] = typer.Option(
         None, "--profile", "-p", envvar="TS_PROFILE",
-        help="ThoughtSpot profile — used with --model-guid to call `ts spotql "
+        help="ThoughtSpot profile — used with --model-guid to call `ts agentql "
              "generate-sql`. Ignored if --model-guid is omitted."),
     no_spotql: bool = typer.Option(
         False, "--no-spotql",
@@ -929,7 +929,7 @@ def generate(
 
     DDL SELECT source (Task 18): by default, builds an AgentQL statement for
     the candidate's grain and asks ThoughtSpot to compile it against the
-    primary Model (`--model-guid`/`--profile`, reusing `ts spotql
+    primary Model (`--model-guid`/`--profile`, reusing `ts agentql
     generate-sql`'s client path) — ThoughtSpot resolves joins against the
     full semantic model, so this is correct on role-playing/ambiguous-path
     dimensions where the built-in join walker (sqlgen.build_select) can be

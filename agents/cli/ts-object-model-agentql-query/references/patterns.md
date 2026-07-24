@@ -113,7 +113,7 @@ FROM "Model" AS "t1" GROUP BY "t1"."Product Category"
 errors `NON_CONVERTIBLE_FUNCTION` ("Non standard sql function QueryGroups"). This is the
 one measure kind that takes `SUM` over `AGG`; verified live at grand-total, grouped, and
 monthly grain (nebula-aggregate-aware, 2026-07-13), all matching Snowflake ground truth.
-Run `ts spotql classify-columns` and follow the `wrapper` field (`semiadditive_measure` →
+Run `ts agentql classify-columns` and follow the `wrapper` field (`semiadditive_measure` →
 `SUM`) rather than guessing. Note the inverse case — `sum(last_value(...))`, where the
 outer op is additive — is a normal aggregate-formula and takes `AGG()`.
 

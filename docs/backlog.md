@@ -2533,17 +2533,17 @@ step the Critical TML invariants exist to protect). Candidates: `ts model mine-l
 
 ---
 
-## BL-087 — Shared `ts spotql classify-columns` (dedupe divergent keyword lists)
+## BL-087 — Shared `ts agentql classify-columns` (dedupe divergent keyword lists)
 
 **Source:** 2026-07-03 codification review row 24.
 **Affects:** ts-object-model-agentql-query, ts-object-answer-promote, `tools/ts-cli/`.
-**Status:** DONE 2026-07-03 (ts-cli v0.31.0) — `ts spotql classify-columns` shipped
+**Status:** DONE 2026-07-03 (ts-cli v0.31.0) — `ts agentql classify-columns` shipped
 (`ts_cli/spotql_ops.py` + `commands/spotql.py`); both skills adopt it (spotql-query
 v1.3.0, answer-promote v1.3.0).
 
 Column classification is duplicated between the two skills with DIFFERENT keyword lists
 (spotql SKILL.md ~:137-146 vs promote ~:700-722) — live drift, and exactly the ts-cli.md
-"two skills duplicate the same logic" trigger. One `ts spotql classify-columns --model
+"two skills duplicate the same logic" trigger. One `ts agentql classify-columns --model
 {guid}` command; both skills adopt it.
 
 **Target:** 2026-09-30.
@@ -2673,7 +2673,7 @@ Two distinct findings:
 ## BL-096 — se-thoughtspot build: AgentQL `generate-sql`/`fetch-data` endpoints return an empty-body 500 `Tier 4`
 
 **Source:** 2026-07-09 BL-063 PR1 Task 5 live TS-side number-match run against se-thoughtspot (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, "TS-side number-match results (Task 5, live 2026-07-09)" execution-path note).
-**Affects:** `ts-object-model-agentql-query` skill; `ts spotql fetch-data` (and any command depending on it).
+**Affects:** `ts-object-model-agentql-query` skill; `ts agentql fetch-data` (and any command depending on it).
 **Status:** OPEN.
 
 The AgentQL endpoints (`/callosum/v1/v2/data/spotql/generate-sql` / `fetch-data`) return
@@ -2684,7 +2684,7 @@ worked around this by fetching data via the stable v2 `POST /api/rest/2.0/search
 endpoint instead (spec confirmed via `get-rest-api-reference(apiName: "searchData")`),
 through a scratch script reusing `ts_cli.client.ThoughtSpotClient` for auth — the
 documented open-items-style exception in `.claude/rules/ts-cli.md`, since ts-cli has no
-`searchdata` command yet. `ts spotql classify-columns --model` is unaffected (it
+`searchdata` command yet. `ts agentql classify-columns --model` is unaffected (it
 classifies from exported TML, with no server-side AgentQL dependency).
 
 **Target:** re-verify on the next se-thoughtspot build; if the 500 persists, add a

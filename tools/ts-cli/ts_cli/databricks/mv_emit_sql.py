@@ -232,7 +232,7 @@ _SIMPLE_FN: dict = {
 # --- Raw-measure aggregation wrapper (Task 18 Finding 1 fix) ---------------
 # A formula-backed MEASURE whose translated SQL contains no aggregate at all
 # (e.g. safe_divide over two RAW physical-column refs) is what
-# `ts spotql classify-columns` calls a "raw_measure": ThoughtSpot itself
+# `ts agentql classify-columns` calls a "raw_measure": ThoughtSpot itself
 # treats it as an unaggregated per-row expression and applies the column's
 # declared aggregation (SUM by default) at query time. Databricks has no such
 # implicit behavior -- CREATE VIEW rejects the un-aggregated expression with

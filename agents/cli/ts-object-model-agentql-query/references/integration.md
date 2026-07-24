@@ -2,7 +2,7 @@
 
 Reference material for invoking AgentQL directly over HTTP — when you are **not** using the
 `ts` CLI but building AgentQL into your own product, agent, or script. The CLI
-(`ts spotql generate-sql` / `fetch-data`) is the easier path; this doc is for everyone who
+(`ts agentql generate-sql` / `fetch-data`) is the easier path; this doc is for everyone who
 needs the raw API. Verified live on `champ-staging`, 2026-06-25.
 
 > **These are callosum endpoints, not the public REST API.** AgentQL lives under

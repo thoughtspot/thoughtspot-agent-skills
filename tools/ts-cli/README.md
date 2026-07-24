@@ -973,7 +973,7 @@ Tables that failed after all retries are included with `null` as the GUID.
 
 ---
 
-### `ts spotql generate-sql` / `ts spotql fetch-data`
+### `ts agentql generate-sql` / `ts agentql fetch-data`
 
 Run AgentQL (Semantic SQL) against a ThoughtSpot Model. The caller supplies the AgentQL
 statement and the Model's GUID — these commands do **not** do natural-language → AgentQL.
@@ -983,14 +983,14 @@ statement and the Model's GUID — these commands do **not** do natural-language
 - `fetch-data` executes the statement and returns result rows.
 
 ```bash
-ts spotql generate-sql '<AgentQL>' --model <model-guid> --profile <name>
-ts spotql fetch-data   '<AgentQL>' --model <model-guid> --profile <name>
+ts agentql generate-sql '<AgentQL>' --model <model-guid> --profile <name>
+ts agentql fetch-data   '<AgentQL>' --model <model-guid> --profile <name>
 ```
 
 **Example:**
 
 ```bash
-ts spotql fetch-data \
+ts agentql fetch-data \
   'SELECT "Product Category", SUM("Amount") AS total_amount
    FROM "Dunder Mifflin Sales & Inventory" AS "t1" GROUP BY "Product Category"' \
   --model 4da3a07f-fe29-4d20-8758-260eb1315071 --profile champ-staging
@@ -1013,7 +1013,7 @@ these are structured query errors, not transport failures.
 
 ---
 
-### `ts spotql classify-columns`
+### `ts agentql classify-columns`
 
 Classify ThoughtSpot columns/formula expressions as attribute vs. measure vs.
 aggregate-formula-measure — the decision that drives `SUM`-vs-`AGG` in AgentQL and the
@@ -1030,9 +1030,9 @@ Two mutually-exclusive input modes:
 | Expressions | `--exprs-file <path>` (or stdin) | Classifies a bare JSON array of `{"name", "expr"}` objects not yet attached to a Model column (e.g. Answer formulas being promoted) | No |
 
 ```bash
-ts spotql classify-columns --model <model-guid> --profile <name>
-ts spotql classify-columns --exprs-file formulas_to_add.json
-echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql classify-columns
+ts agentql classify-columns --model <model-guid> --profile <name>
+ts agentql classify-columns --exprs-file formulas_to_add.json
+echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts agentql classify-columns
 ```
 
 **Output (JSON to stdout):**
@@ -1702,7 +1702,7 @@ ts aggregate profile --dir /tmp/agg --tables-dir /tmp/agg/tables \
 | `--warehouse` | profile's `default_warehouse` | Connected mode: Snowflake warehouse |
 | `--role` | profile's `default_role` | Connected mode: Snowflake role |
 | `--model-guid` | — | Primary Model GUID — enables AgentQL-based profiling SQL per candidate (ThoughtSpot resolves joins correctly on role-playing/ambiguous-path dimensions; the built-in join walker can be wrong there). Omit to always use the built-in walker (pre-Task-18 default; no ThoughtSpot connection needed). |
-| `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile — used with `--model-guid` to call `ts spotql generate-sql`. Ignored if `--model-guid` is omitted. |
+| `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile — used with `--model-guid` to call `ts agentql generate-sql`. Ignored if `--model-guid` is omitted. |
 | `--no-spotql` | `false` | Even with `--model-guid`, use the built-in join walker directly |
 
 The three modes are mutually exclusive: `--results` ingests, `--emit-sql` writes a

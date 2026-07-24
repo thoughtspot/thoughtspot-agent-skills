@@ -4,7 +4,7 @@
 
 What AgentQL can't do, and what fails *silently* (wrong numbers, no error).
 **AgentQL behaviour is build-specific and moving fast** — treat this as a
-dated snapshot, not gospel. When in doubt, probe with `ts spotql generate-sql` /
+dated snapshot, not gospel. When in doubt, probe with `ts agentql generate-sql` /
 `fetch-data` (see the retest use case in `use-cases.md`).
 
 > **Backing-store-specific:** if the Model is backed by a **Snowflake Semantic

@@ -206,7 +206,7 @@ has no cached credential in this environment, and it is not confirmed Spotter-en
 close: run against a Spotter-enabled instance (ideally the customer's own model, since the
 value depends on that model's data) and confirm (a) `tokens`/`display_tokens` come back
 non-empty for a real question, (b) the returned Search reproduces the source measure's
-number when run via `ts spotql fetch-data` or a coverage answer, and (c) the FORBIDDEN
+number when run via `ts agentql fetch-data` or a coverage answer, and (c) the FORBIDDEN
 path fires cleanly for a user without `CAN_USE_SPOTTER`.
 
 Status: SPEC-VERIFIED via MCP 2026-07-15; LIVE-VERIFICATION PENDING (run on a
