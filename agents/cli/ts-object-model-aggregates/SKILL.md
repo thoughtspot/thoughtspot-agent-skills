@@ -40,7 +40,7 @@ Dependent-walking reuses the same alias-aware v2 `metadata dependents` path
 aggregate-aware cluster (routing fires for formula measures, date re-aggregation, the
 `aggregated_models` TML shape, first-match precedence, dependent types, token casing,
 filter precision — see [references/open-items.md](references/open-items.md) #0/#1/#2/#6/#7/#8/#10),
-and the DDL-from-SpotQL path is proven end-to-end. Row-level security is now auto-
+and the DDL-from-AgentQL path is proven end-to-end. Row-level security is now auto-
 propagated onto every generated aggregate (#17, WIRED) rather than gated manually, but
 its live enforcement is unverified — treat every propagated RLS rule as provisional
 until Step 7's RLS leak-test passes. The remaining OPEN items (#3 model
@@ -66,7 +66,7 @@ into a single prompt to cut round-trips.
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [ts-profile-snowflake (Claude Code)](../../claude/ts-profile-snowflake/SKILL.md) | Claude Code: Snowflake profile for connected-mode profiling/history/DDL execution (Cortex Code CLI users use their native `cortex connections` instead) |
 | [../ts-dependency-manager/SKILL.md](../ts-dependency-manager/SKILL.md) | The `ts dependency backup`/`rollback` pattern this skill reuses for the primary Model's TML in Step 6/7 |
-| [../ts-object-model-spotql-query/SKILL.md](../ts-object-model-spotql-query/SKILL.md) | Used in Step 7 to compile a test query to warehouse SQL and confirm which table (primary vs. aggregate) it hits |
+| [../ts-object-model-agentql-query/SKILL.md](../ts-object-model-agentql-query/SKILL.md) | Used in Step 7 to compile a test query to warehouse SQL and confirm which table (primary vs. aggregate) it hits |
 | [../../shared/schemas/thoughtspot-model-tml.md](../../shared/schemas/thoughtspot-model-tml.md) | Model TML structure — `model_tables`, `aggregated_models`, GUID/import rules |
 | [../../shared/schemas/thoughtspot-table-tml.md](../../shared/schemas/thoughtspot-table-tml.md) | Table TML structure — column definitions for the registered aggregate table |
 | [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | RLS rule syntax (Table objects) and measure formula patterns |
@@ -339,7 +339,7 @@ ts aggregate profile --dir "{workdir}" --tables-dir "{workdir}/tables" \
 ```
 
 `--model-guid`/`--profile` (both already established in Step 3) let each candidate's
-profiling SQL prefer SpotQL — the same ThoughtSpot-generated-SQL path Step 6 uses for
+profiling SQL prefer AgentQL — the same ThoughtSpot-generated-SQL path Step 6 uses for
 DDL — so the row counts reflect the correct join path on role-playing/ambiguous-path
 dimensions, falling back to the built-in walker automatically on any failure.
 
@@ -599,12 +599,12 @@ Writes five files to `{workdir}/{candidate_id}/`: `ddl.sql`, `table_spec.json`,
 `table.tml.yaml`, `agg_model.tml.yaml`, `primary_patched.tml.yaml`. Stdout:
 `{"candidate", "aggregate_name", "files"}`.
 
-**DDL SELECT source:** by default `ts aggregate generate` builds SpotQL for the
+**DDL SELECT source:** by default `ts aggregate generate` builds AgentQL for the
 candidate's grain and asks ThoughtSpot (via `--model-guid`/`--profile`, already
 passed above) to compile it — this resolves joins against the full semantic
 model, avoiding wrong joins the built-in walker can produce on role-playing /
 ambiguous-path dimensions (e.g. grouping by the wrong role-played date column).
-It falls back to the built-in walker automatically if SpotQL generation is
+It falls back to the built-in walker automatically if AgentQL generation is
 unavailable or errors, printing a stderr note when it does; pass `--no-spotql`
 to force that walker directly. If `ddl.sql`'s SELECT looks wrong for a Model
 with role-playing dimensions, check stderr for a fallback note before assuming
@@ -873,9 +873,9 @@ later candidate.
 
 For each candidate imported in Step 6, spot-check that a query which should route
 does, and one that shouldn't, doesn't, via
-[ts-object-model-spotql-query](../ts-object-model-spotql-query/SKILL.md) or directly.
+[ts-object-model-agentql-query](../ts-object-model-agentql-query/SKILL.md) or directly.
 
-**First get the correct SpotQL wrapper per measure — do NOT guess.** `ts spotql
+**First get the correct AgentQL wrapper per measure — do NOT guess.** `ts spotql
 generate-sql` DOES reflect aggregate-aware routing (including for semi-additive
 measures — this was verified live 2026-07-15), but only when each measure is referenced
 with the right aggregation wrapper, and the wrong one errors instead of routing:
@@ -1043,5 +1043,6 @@ Remove once you're confident every generated aggregate is correct: rm -rf {workd
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.2 | 2026-07-24 | Rename SpotQL → AgentQL in prose (external product name only; the `ts spotql` CLI and all identifiers are unchanged). No behaviour change. |
 | 1.0.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.0.0 | 2026-07-11 | Initial release. Audits a Model's dependent Liveboards/Answers into query signatures (`ts aggregate signatures`), generalizes them into ranked candidate grains with a cost-based marginal-gain curve (`ts aggregate recommend`, optionally reweighted by Snowflake query history via `ts aggregate history`), profiles candidates in connected or manual mode (`ts aggregate profile`), and generates the warehouse DDL + aggregate Table/Model TML + `aggregated_models` association patch per approved candidate (`ts aggregate generate`) — gated at every artifact by a confirmation step, an RLS/CLS parity hard gate, and a post-import routing verification with rollback via `ts dependency backup`/`rollback`. Ships with eleven OPEN items in `references/open-items.md` covering routing semantics, `aggregated_models` TML shape, multi-aggregate precedence, and join-pruning fidelity — all must be VERIFIED against a live 26.6+ instance before this skill is considered merge-ready (tracked as Task 11 on `wip/ts-object-model-aggregates`). |

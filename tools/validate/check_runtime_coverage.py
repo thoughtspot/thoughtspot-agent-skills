@@ -37,8 +37,8 @@ from _dirs import ALL_RUNTIMES
 # ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
-    ("ts-object-model-spotql-query", "coco-snowsight"):
-        "SpotQL query loop + ts CLI execution not available in Snowsight stored-proc runtime",
+    ("ts-object-model-agentql-query", "coco-snowsight"):
+        "AgentQL query loop + ts CLI execution not available in Snowsight stored-proc runtime",
     ("ts-variable-timezone", "coco-snowsight"):
         "REST v2 template/variables endpoint not available in Snowsight stored-proc runtime",
     ("ts-audit", "coco-snowsight"):

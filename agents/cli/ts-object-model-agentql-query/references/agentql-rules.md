@@ -1,11 +1,11 @@
-# SpotQL rules — what makes a statement valid
+# AgentQL rules — what makes a statement valid
 
-SpotQL is a **restricted PostgreSQL dialect** with ThoughtSpot extensions. It runs against
+AgentQL is a **restricted PostgreSQL dialect** with ThoughtSpot extensions. It runs against
 a single ThoughtSpot **Model** (which maps to one or more warehouse tables behind the
-scenes). Read this before writing any SpotQL. Distilled from the agent-expressibility-eval
-SpotQL rules (system_prompt_v8) and verified live on champ-staging 2026-06-25.
+scenes). Read this before writing any AgentQL. Distilled from the agent-expressibility-eval
+AgentQL rules (system_prompt_v8) and verified live on champ-staging 2026-06-25.
 
-> Source-of-truth note: these are constraints of the SpotQL engine, not of this skill.
+> Source-of-truth note: these are constraints of the AgentQL engine, not of this skill.
 > When a statement is rejected, the fix is almost always a rule below — not a retry.
 
 ## The shape of a valid query
@@ -129,7 +129,7 @@ expression.
     `SUM(col) … GROUP BY` fails with `QUERY_GEN_ERROR`
     (GroupAggregateOptimizationTransformer) no matter how the outer query consumes the
     CTE. Attribute-only `GROUP BY` branches and raw-column branches are fine.
-  If you need ordered or limited results from a set operation, it cannot be done in SpotQL
+  If you need ordered or limited results from a set operation, it cannot be done in AgentQL
   today. See `limitations.md` for details.
 - **No self-join of a CTE** (`[SELF_JOIN]`) and **no non-equi `JOIN … ON`** (only `=`
   allowed; use `CROSS JOIN` + `WHERE` for ranges).
@@ -137,7 +137,7 @@ expression.
   `GENERATOR`), **no `LENGTH()`**, **no `GROUP BY 1` ordinals**, **no `col NOT IN (...)`**
   (rewrite as `!=` chained with `AND`).
 - **No forbidden date functions**: `DATE_TRUNC`, `NOW()`, `CURRENT_DATE`, `AGE`, `INTERVAL`
-  arithmetic. Use the SpotQL UDFs in `udf-reference.md`.
+  arithmetic. Use the AgentQL UDFs in `udf-reference.md`.
 - **Every CTE must reference a real column** — a CTE selecting only literals errors with
   `QueryTable has no owner tables`.
 
@@ -181,7 +181,7 @@ Only `CAST` a `VARCHAR`/`TEXT` column to numeric/date. Columns already `DOUBLE`,
 
 ## When you can't answer it
 
-If the question needs something SpotQL can't express (ordered/limited set operation results,
+If the question needs something AgentQL can't express (ordered/limited set operation results,
 non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`, subqueries, offset->1 `LAG`/`LEAD`,
 true rolling N-period frames, a column the Model doesn't have, or a non-CDW Model), don't
 force a wrong query. State plainly what's not supported and why. The full, current list

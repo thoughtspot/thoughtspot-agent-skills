@@ -1,8 +1,8 @@
-# SpotQL patterns
+# AgentQL patterns
 
 Condensed recipes for the recurring shapes. Each says when to use it and gives a skeleton.
 Compose them (e.g. period-over-period inside a top-N). Distilled from
-agent-expressibility-eval's SpotQL pattern library. Read `spotql-rules.md` and
+agent-expressibility-eval's AgentQL pattern library. Read `agentql-rules.md` and
 `udf-reference.md` first — these patterns assume those rules.
 
 ## Last N complete periods
@@ -129,7 +129,7 @@ with no fact rows vanish from every ordinary query — this pattern surfaces the
 changing the Model's join definition**.
 
 **Why it works (both verified live, nebula-spotQL 2026-07-10):**
-1. **An attribute-only CTE compiles to a scan of the dimension table alone** — SpotQL only
+1. **An attribute-only CTE compiles to a scan of the dimension table alone** — AgentQL only
    pulls the fact table (and the Model's inner join) into the generated SQL when a measure
    demands it. So a CTE selecting just the member attribute returns the *full* member list.
 2. **Outer joins between CTEs compile and execute verbatim** — `LEFT OUTER JOIN`,
@@ -162,7 +162,7 @@ WHERE "s"."Total Sales" IS NULL
 
 ## When there's no working form
 
-Still no reliable SpotQL form today: non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`,
+Still no reliable AgentQL form today: non-`MEDIAN` percentiles, per-group `STDDEV`/`VAR`,
 subqueries (`IN (SELECT …)` / `FROM (SELECT …)`), `QUALIFY` and `FILTER (WHERE …)` (both
 silently dropped), `ROLLUP`/`CUBE`, self-joins, non-equi joins, and ORDER BY / LIMIT on set
 operator results. Don't emit a query that looks right but returns wrong numbers — explain
@@ -221,7 +221,7 @@ SELECT "t1"."Country" FROM "Model" AS "t1" WHERE "t1"."Country" = 'canada' GROUP
 
 **Rules:**
 - Each branch must have the same number of columns with compatible types.
-- Each branch independently follows all SpotQL rules (alias, aggregation, GROUP BY).
+- Each branch independently follows all AgentQL rules (alias, aggregation, GROUP BY).
 - Branches can use different aggregate functions (`SUM` in one, `AVG` in another).
 - HAVING, ILIKE, window functions all work inside individual branches.
 - **Cannot** apply ORDER BY or LIMIT to the combined result (silently mishandled).

@@ -17,7 +17,7 @@ def test_build_spotql_two_dims_bucketed_date_sum_measure():
     assert 'FROM "Sales Model" AS "t1"' in spotql
     assert '"t1"."Category"' in spotql
     assert '"t1"."Region"' in spotql
-    # Task 19: raw date column by display name, NO bucket function — SpotQL
+    # Task 19: raw date column by display name, NO bucket function — AgentQL
     # has none (start_of_month(...) -> QUERY_GEN_ERROR, live-proven).
     assert '"t1"."Order Date"' in spotql
     assert "start_of_month" not in spotql
@@ -43,7 +43,7 @@ def test_build_spotql_two_dims_bucketed_date_sum_measure():
 
 
 def test_build_spotql_never_aliases_plain_columns_or_dates():
-    # spotql-rules.md: "Never alias a plain Model column" — dims and date
+    # agentql-rules.md: "Never alias a plain Model column" — dims and date
     # columns (bucketed or raw — Task 19 never emits a bucket function, so
     # every date is now a plain column reference) must be selected bare, no AS.
     cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": "Order Date",
@@ -84,10 +84,10 @@ def test_build_spotql_min_max_count_measures_by_display_name():
 
 
 def test_build_spotql_avg_measure_raises_unsupported():
-    # AVG decomposes to two stored components (sum + count) — SpotQL can only
+    # AVG decomposes to two stored components (sum + count) — AgentQL can only
     # reference the whole "Avg Sale" formula by name (yields the ratio, not
-    # the parts), so there's no valid single-expression SpotQL for either
-    # component. Must raise cleanly, never emit a guess at invalid SpotQL.
+    # the parts), so there's no valid single-expression AgentQL for either
+    # component. Must raise cleanly, never emit a guess at invalid AgentQL.
     plans = {"Avg Sale": classify_measure("Avg Sale", expr="average ( [Sales] )")}
     cand = {"id": "cand_1", "dimensions": ["Category"], "date_column": None,
             "bucket": None, "measure_columns": ["Avg Sale"], "covered": [0],
@@ -413,9 +413,9 @@ def test_wrap_as_ddl_bucketed_snowflake_materialized_view_guard_still_fires():
 
 def test_build_profiling_spotql_is_measure_free_grain():
     from ts_cli.aggregate.spotql_aggregate import build_profiling_spotql
-    # F1(c): profiling SpotQL references ONLY the grain (no measures), so a
+    # F1(c): profiling AgentQL references ONLY the grain (no measures), so a
     # candidate with an unrepresentable AVG/RATIO measure still profiles via
-    # SpotQL instead of the walker.
+    # AgentQL instead of the walker.
     cand = {"dimensions": ["Customer State", "Product Category"],
             "date_column": None, "bucket": None,
             "measure_columns": ["Amount", "Average Revenue Per Unit"]}

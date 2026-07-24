@@ -65,7 +65,7 @@ are roughly ordered by value÷effort.
 |---|---|---|
 | BL-100 | Bring remaining converters to DBX-from standard (Snowflake pipeline first) | post-audit |
 | ~~BL-064~~ | ~~External audit product-currency fixes (medium-severity residuals)~~ | DONE |
-| ~~BL-118~~ | ~~Codify SpotQL SV/MV backing behaviour~~ | DONE (PR #301) |
+| ~~BL-118~~ | ~~Codify AgentQL SV/MV backing behaviour~~ | DONE (PR #301) |
 | ~~BL-063~~ | ~~Extract CLI formula translation~~ | DONE |
 | ~~BL-029~~ | ~~Coverage matrix for ts-convert-to-databricks-mv~~ | DONE |
 
@@ -81,7 +81,7 @@ are roughly ordered by value÷effort.
 | BL-095 | connections add-tables missing authenticationType | 2026-08-31 |
 | BL-120 | Live e2e verification for ts-convert-from-qlik | first live pass |
 | BL-115 | Smoke test for ts-convert-from-looker | first live pass |
-| BL-126 | Migrate SpotQL smoke test from champ-staging to se-thoughtspot | blocked on instance |
+| BL-126 | Migrate AgentQL smoke test from champ-staging to se-thoughtspot | blocked on instance |
 | BL-076 | Smoke test backfills: answer-promote + from-tableau | 2026-09-30 |
 | BL-084 | Codify profile substrate as `ts profiles add/update/remove` | 2026-10-31 |
 | BL-071 | Tableau user-function → ThoughtSpot RLS variables | 2026-09-30 |
@@ -138,7 +138,7 @@ are roughly ordered by value÷effort.
 | BL-039 | ts-object-answer-promote: embedded Answers + sets | demand-driven |
 | BL-041 | ts-recipe-model-timezone-bridge-snowflake | demand-driven |
 | BL-091 | Multi-table model grain semantics verification | when data access available |
-| BL-096 | se-thoughtspot SpotQL endpoints 500 | next build re-verify |
+| BL-096 | se-thoughtspot AgentQL endpoints 500 | next build re-verify |
 | BL-098 | DBX trailing/leading sparse data (item 3 only) | next DBX live-verify |
 | BL-103 | searchConnection with OAuth hierarchy | next OAuth connection |
 | BL-104 | Evaluate DBX BI compatibility mode | evaluation item |
@@ -149,13 +149,13 @@ are roughly ordered by value÷effort.
 
 ---
 
-## BL-118 — Codify SpotQL semantic-view / metric-view backing behaviour into `ts-object-model-spotql-query` — DONE `Tier 1`
+## BL-118 — Codify AgentQL semantic-view / metric-view backing behaviour into `ts-object-model-agentql-query` — DONE `Tier 1`
 
 **Status:** DONE — PR #301 (2026-07-22). `references/snowflake-sv-backing.md` (R1–R7 + Databricks MV comparison)
 committed; `limitations.md` updated with the measure-statistics silent-wrong-answer trap; SKILL.md references
 table cross-linked; skill bumped to v1.5.0.
 
-**Why it matters.** SpotQL/Semantic-SQL behaviour differs materially when a Model is backed by a
+**Why it matters.** AgentQL/Semantic-SQL behaviour differs materially when a Model is backed by a
 Snowflake Semantic View (SV) or a Databricks Metric View (MV) rather than regular tables. These
 behaviours were characterised live (2026-07-21) across three Models holding identical Dunder Mifflin
 data.
@@ -177,7 +177,7 @@ data.
   automatically for SV/MV-backed Models.
 
 **Approach.**
-1. Recreate + extend `agents/cli/ts-object-model-spotql-query/references/snowflake-sv-backing.md`
+1. Recreate + extend `agents/cli/ts-object-model-agentql-query/references/snowflake-sv-backing.md`
    (rules R1–R7 from the prior draft + the measure-statistics trap + a Databricks MV sibling note).
 2. Add a `references/limitations.md` ⚠️ silent-wrong-answer row: `AVG`/`MIN`/`MAX` on a measure over an
    SV/MV backing is silently dropped and returns the native aggregation (regular Model hard-errors);
@@ -190,7 +190,7 @@ data.
   both SV fixes), `docs/spotql-snowflake-sv-findings.md`, `docs/spotql-sv-backing-rules-PLAN.md`,
   `docs/search-data-probe-findings.md`, `docs/spotql-limitations.md`.
 - Shareable artifact: https://claude.ai/code/artifact/b0d02cee-19d3-4967-ae0c-59001a668f44
-- In flight: `docs/cross-model-stitching-analysis.md` (xModel fan-out avoidance in author-written SpotQL;
+- In flight: `docs/cross-model-stitching-analysis.md` (xModel fan-out avoidance in author-written AgentQL;
   no engine-level chasm protection) — feeds the xModel stitching guidance in step 4.
 
 **Branch.** A worktree branch `feat/spotql-measure-statistics-trap` (off `main`) was staged for this work
@@ -2536,7 +2536,7 @@ step the Critical TML invariants exist to protect). Candidates: `ts model mine-l
 ## BL-087 — Shared `ts spotql classify-columns` (dedupe divergent keyword lists)
 
 **Source:** 2026-07-03 codification review row 24.
-**Affects:** ts-object-model-spotql-query, ts-object-answer-promote, `tools/ts-cli/`.
+**Affects:** ts-object-model-agentql-query, ts-object-answer-promote, `tools/ts-cli/`.
 **Status:** DONE 2026-07-03 (ts-cli v0.31.0) — `ts spotql classify-columns` shipped
 (`ts_cli/spotql_ops.py` + `commands/spotql.py`); both skills adopt it (spotql-query
 v1.3.0, answer-promote v1.3.0).
@@ -2670,13 +2670,13 @@ Two distinct findings:
 
 ---
 
-## BL-096 — se-thoughtspot build: SpotQL `generate-sql`/`fetch-data` endpoints return an empty-body 500 `Tier 4`
+## BL-096 — se-thoughtspot build: AgentQL `generate-sql`/`fetch-data` endpoints return an empty-body 500 `Tier 4`
 
 **Source:** 2026-07-09 BL-063 PR1 Task 5 live TS-side number-match run against se-thoughtspot (diagnostics recorded in `docs/audit/2026-07-08-dbx-window-claim-matrix.md`, "TS-side number-match results (Task 5, live 2026-07-09)" execution-path note).
-**Affects:** `ts-object-model-spotql-query` skill; `ts spotql fetch-data` (and any command depending on it).
+**Affects:** `ts-object-model-agentql-query` skill; `ts spotql fetch-data` (and any command depending on it).
 **Status:** OPEN.
 
-The SpotQL endpoints (`/callosum/v1/v2/data/spotql/generate-sql` / `fetch-data`) return
+The AgentQL endpoints (`/callosum/v1/v2/data/spotql/generate-sql` / `fetch-data`) return
 a bare, empty-body HTTP 500 for any payload on this se-thoughtspot build — including an
 empty request body, which a live handler would reject as a structured 400 — so `ts
 spotql fetch-data` was unusable (its output normalises to `status: UNKNOWN`). Task 5
@@ -2685,11 +2685,11 @@ endpoint instead (spec confirmed via `get-rest-api-reference(apiName: "searchDat
 through a scratch script reusing `ts_cli.client.ThoughtSpotClient` for auth — the
 documented open-items-style exception in `.claude/rules/ts-cli.md`, since ts-cli has no
 `searchdata` command yet. `ts spotql classify-columns --model` is unaffected (it
-classifies from exported TML, with no server-side SpotQL dependency).
+classifies from exported TML, with no server-side AgentQL dependency).
 
 **Target:** re-verify on the next se-thoughtspot build; if the 500 persists, add a
-`searchdata`-based fallback to ts-cli's SpotQL commands. No date set — revisit next
-time SpotQL commands are exercised live.
+`searchdata`-based fallback to ts-cli's AgentQL commands. No date set — revisit next
+time AgentQL commands are exercised live.
 
 ---
 
@@ -3298,18 +3298,18 @@ Platform-specific documentation gaps identified by the product-currency speciali
 
 ---
 
-## BL-126 — Migrate SpotQL smoke test from `champ-staging` to `se-thoughtspot` profile `Tier 2`
+## BL-126 — Migrate AgentQL smoke test from `champ-staging` to `se-thoughtspot` profile `Tier 2`
 
 **Filed:** 2026-07-22.
 **Source:** Pre-push smoke failure — `champ-staging` token expired; SE profile uses
 username/password (more resilient).
-**Affects:** `tools/smoke-tests/smoke_ts_object_model_spotql_query.py`,
+**Affects:** `tools/smoke-tests/smoke_ts_object_model_agentql_query.py`,
 `tools/smoke-tests/smoke-config.local.json`
 **Status:** OPEN — blocked until `se-thoughtspot` instance is reachable.
 
 ### Problem
 
-The SpotQL smoke test (`smoke_ts_object_model_spotql_query.py`) hard-references
+The AgentQL smoke test (`smoke_ts_object_model_agentql_query.py`) hard-references
 `champ-staging` in its docstring and `smoke-config.local.json` overrides the default
 profile to `champ-staging` for this skill. That profile uses token auth which expires
 and requires manual refresh. The `se-thoughtspot` profile uses username/password auth
@@ -3317,12 +3317,12 @@ which is more resilient to expiry.
 
 ### Proposed fix
 
-1. Find or create a SpotQL-capable Model on `se-thoughtspot` (must be backed by
-   Snowflake, not Falcon — SpotQL requires an external warehouse).
-2. Write a simple SpotQL query for it.
+1. Find or create an AgentQL-capable Model on `se-thoughtspot` (must be backed by
+   Snowflake, not Falcon — AgentQL requires an external warehouse).
+2. Write a simple AgentQL query for it.
 3. Update `smoke-config.local.json` to remove the `champ-staging` override (the
    `default_ts_profile` is already `se-thoughtspot`).
-4. Update the docstring in `smoke_ts_object_model_spotql_query.py`.
+4. Update the docstring in `smoke_ts_object_model_agentql_query.py`.
 
 **Blocked on:** `se-thoughtspot` instance being reachable (returning 404 as of
 2026-07-22).

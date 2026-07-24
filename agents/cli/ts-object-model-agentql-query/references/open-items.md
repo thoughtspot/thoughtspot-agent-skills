@@ -1,10 +1,10 @@
-# Open items — ts-object-model-spotql-query
+# Open items — ts-object-model-agentql-query
 
 Tracks API behaviour this skill relies on and its verification status. Per the repo
 convention, all items must be VERIFIED (or explicitly deferred) before the skill merges to
 main.
 
-## #1 — SpotQL endpoints + bearer auth — VERIFIED (live) 2026-06-25
+## #1 — AgentQL endpoints + bearer auth — VERIFIED (live) 2026-06-25
 
 `POST /callosum/v1/v2/data/spotql/generate-sql` and `.../fetch-data`, body
 `{"spotql_query", "model_identifier": <Model GUID>}`. Verified live on champ-staging
@@ -24,10 +24,10 @@ unit-tested in `tools/ts-cli/tests/test_spotql.py`.
 
 ## #2 — External-CDW-only constraint — VERIFIED (live) 2026-06-25
 
-SpotQL only supports Models backed by an external cloud data warehouse. A Falcon / imported
+AgentQL only supports Models backed by an external cloud data warehouse. A Falcon / imported
 / system Model (`DEFAULT` datasource) returns `"This API only supports external cloud data
 warehouses. The model's datasource type (DEFAULT) is not supported."` Confirmed against the
-"Discover Monitoring Data" Model. Documented in SKILL.md and spotql-rules.md.
+"Discover Monitoring Data" Model. Documented in SKILL.md and agentql-rules.md.
 
 ## #3 — `AGG()` on aggregate-formula columns — VERIFIED (live) 2026-06-25
 
@@ -44,12 +44,12 @@ Findings:
 - A bare reference to the aggregate-formula column also compiles.
 
 Conclusion: **aggregate-formula columns must use `AGG()`, never `SUM()`; raw measures use
-`SUM()`/etc.** Encoded in `spotql-rules.md` § Aggregation and `udf-reference.md`. No
-translation layer needed — `AGG()` is native SpotQL the API accepts directly.
+`SUM()`/etc.** Encoded in `agentql-rules.md` § Aggregation and `udf-reference.md`. No
+translation layer needed — `AGG()` is native AgentQL the API accepts directly.
 
 ## #4 — `connection_type` + callosum endpoint surface — VERIFIED (live) 2026-06-25
 
-The SpotQL endpoints are **callosum** (`POST /callosum/v1/v2/data/spotql/generate-sql` and
+The AgentQL endpoints are **callosum** (`POST /callosum/v1/v2/data/spotql/generate-sql` and
 `.../fetch-data`), **not** the public `/api/rest/2.0/` REST API — the SpotterCode MCP / dev
 docs do not index them. Documented for integrators in `references/integration.md`.
 
@@ -84,7 +84,7 @@ changing (`PERCENTILE_CONT` is Closed as MEDIAN-only yet still errors live):
    against an external-CDW model (e.g. the Dunder Mifflin smoke model) — the probe, not the
    ticket, is the source of truth.
 4. **Update the file**: remove rows that now work (and relax the matching rule in
-   `spotql-rules.md` / `udf-reference.md` / `patterns.md`); add newly-confirmed limitations
+   `agentql-rules.md` / `udf-reference.md` / `patterns.md`); add newly-confirmed limitations
    with their SCAL ref. **Bump the currency anchor** to clear the nudge.
 
 This pairs with the skill's known-limitation-retest use case (`use-cases.md` #6) — the

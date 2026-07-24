@@ -80,7 +80,7 @@ individual months. Only then register/import.
 
 ## 5. Routing verification
 
-Snapshot measures use the **`SUM(...)`** SpotQL wrapper (per `ts spotql
+Snapshot measures use the **`SUM(...)`** AgentQL wrapper (per `ts spotql
 classify-columns`; `AGG(...)` errors `NON_CONVERTIBLE_FUNCTION`). Confirm
 `SUM("Inventory Balance")` at month grain routes to the aggregate and returns the
 verified numbers.

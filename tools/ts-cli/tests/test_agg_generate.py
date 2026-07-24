@@ -364,7 +364,7 @@ def test_min_max_primary_measure_becomes_formula_over_reagg_component():
 def test_ratio_measure_flows_through_generate_end_to_end():
     # F5: a safe_divide ratio must produce two hidden component sums in the
     # table spec AND a safe_divide formula in the model (routable aggregate
-    # measure) — the walker handles the multi-component SELECT (SpotQL rejects
+    # measure) — the walker handles the multi-component SELECT (AgentQL rejects
     # it and falls back).
     model = {"model": {"name": "M", "columns": [
         {"name": "Category", "column_id": "FACT::CATEGORY",

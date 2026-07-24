@@ -1,4 +1,4 @@
-"""Unit tests for SpotQL response normalisation in ts_cli/commands/spotql.py.
+"""Unit tests for AgentQL response normalisation in ts_cli/commands/spotql.py.
 
 Covers the pure functions only — no live ThoughtSpot connection:
   - generate-sql success (executable_sql, no status field)

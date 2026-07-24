@@ -19,7 +19,7 @@ effects and require live credentials.
 | `smoke_ts_object_model_coach.py` | ts-object-model-coach | Yes (TS) |
 | `smoke_ts_object_model_aggregates.py` | ts-object-model-aggregates | Yes (TS + SF) |
 | `smoke_ts_object_model_erd.py` | ts-object-model-erd | Yes (TS) |
-| `smoke_ts_object_model_spotql_query.py` | ts-object-model-spotql-query | Yes (TS) |
+| `smoke_ts_object_model_agentql_query.py` | ts-object-model-agentql-query | Yes (TS) |
 | `smoke_ts_load_source_data.py` | ts-load-source-data | Offline |
 | `smoke_ts_recipe_formula_business_days_snowflake.py` | ts-recipe-formula-business-days-snowflake | Yes (SF) |
 | `smoke_ts_recipe_formula_hms_display_snowflake.py` | ts-recipe-formula-hms-display-snowflake | Yes (SF) |

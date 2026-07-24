@@ -3,9 +3,9 @@
 Codifies aggregate-function detection that two skills previously duplicated with
 DIFFERENT, drifted keyword lists (BL-087, 2026-07-03 codification review row 24):
 
-- `ts-object-model-spotql-query` SKILL.md (~:137-146) — a prose table classifying each
+- `ts-object-model-agentql-query` SKILL.md (~:137-146) — a prose table classifying each
   `model.columns[]` entry as an attribute, a raw measure, or an "aggregate-formula
-  measure" (whose backing formula must be wrapped in SpotQL `AGG(...)`, never `SUM`,
+  measure" (whose backing formula must be wrapped in AgentQL `AGG(...)`, never `SUM`,
   or ThoughtSpot rejects the query with `NESTED_AGGREGATE_NOT_SUPPORTED`).
 - `ts-object-answer-promote` SKILL.md (~:700-722) — an inline `AGGREGATE_FUNCS` regex
   plus `infer_column_type`/`infer_aggregation`, applied to Answer formula expressions
@@ -18,7 +18,7 @@ beyond it. This module is now the single canonical source; both skills call thro
 `ts spotql classify-columns` instead of carrying their own copy.
 
 **Semi-additive sub-case (live-verified 2026-07-13, nebula-aggregate-aware).** Most
-aggregate-formula measures must be referenced in SpotQL as `AGG(...)` (a real
+aggregate-formula measures must be referenced in AgentQL as `AGG(...)` (a real
 `SUM(...)` errors `NESTED_AGGREGATE_NOT_SUPPORTED`). The exception is a *semi-additive*
 measure whose **outermost** function is `last_value`/`first_value` — the classic
 `last_value(sum(col), query_groups(), {date})` snapshot form. There `AGG(...)` fails
@@ -49,7 +49,7 @@ AGGREGATE_FUNCS = re.compile(
 )
 
 # Semi-additive window functions that, when they are the OUTERMOST call in a formula,
-# must be referenced in SpotQL via SUM(...) not AGG(...). See the module docstring.
+# must be referenced in AgentQL via SUM(...) not AGG(...). See the module docstring.
 SEMIADDITIVE_OUTER_FUNCS = {"last_value", "first_value"}
 
 _LEADING_FUNC = re.compile(r"([A-Za-z_]\w*)\s*\(")
@@ -124,12 +124,12 @@ def classify_model_columns(model_tml: dict[str, Any]) -> list[dict[str, Any]]:
       (`SUM`/`AVG`/...) is applied on top — read from `properties.aggregation`
       if present, else default `SUM`.
     - **aggregate-formula** — a `formula_id` whose `formulas[].expr` DOES contain
-      an aggregate call (e.g. `sum(...)`, `group_aggregate(...)`). SpotQL must
+      an aggregate call (e.g. `sum(...)`, `group_aggregate(...)`). AgentQL must
       wrap a reference to this column in `AGG(...)`, never a real aggregate —
       stacking a second aggregate on top errors `NESTED_AGGREGATE_NOT_SUPPORTED`.
     - **semi-additive** — an aggregate-formula whose OUTERMOST call is
       `last_value`/`first_value` (the `last_value(sum(col), query_groups(),
-      {date})` snapshot form). This one inverts the rule above: SpotQL must wrap
+      {date})` snapshot form). This one inverts the rule above: AgentQL must wrap
       it in `SUM(...)`, and `AGG(...)` errors `NON_CONVERTIBLE_FUNCTION`. See the
       module docstring for why, and why `sum(last_value(...))` is NOT this case.
 
@@ -140,7 +140,7 @@ def classify_model_columns(model_tml: dict[str, Any]) -> list[dict[str, Any]]:
     Returns one dict per column: `{"name", "column_type", "kind":
     "attribute"|"raw_measure"|"aggregate_measure"|"semiadditive_measure",
     "needs_agg": bool, "aggregation": "SUM"|None, "wrapper": "AGG"|"SUM"|None}`.
-    The `wrapper` field is the directly-actionable output — the SpotQL function to
+    The `wrapper` field is the directly-actionable output — the AgentQL function to
     wrap a reference to this column in (`None` for attributes, which go in
     `GROUP BY`). `kind == "aggregate_measure"` (equivalently `needs_agg is True`)
     means `AGG(...)`; `"semiadditive_measure"` means `SUM(...)` (NOT `AGG` —

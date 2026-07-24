@@ -15,7 +15,7 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 
 | ID | Severity | Category | One-line |
 |----|----------|----------|----------|
-| F1 | HIGH | correctness | Base row count came from `model_tables[0]` (a dim, no fact join) → garbage compression. **Fixed (part a: fact-anchored base_rows + tests)**; sanity-guard + internal-SpotQL fix remain |
+| F1 | HIGH | correctness | Base row count came from `model_tables[0]` (a dim, no fact join) → garbage compression. **Fixed (part a: fact-anchored base_rows + tests)**; sanity-guard + internal-AgentQL fix remain |
 | F6 | LOW (was HIGH) | robustness | INVALIDATED as a bug — the crash was a malformed test candidate (`date_grains` as strings); real bucketed candidates work. Residual: add input-shape validation |
 | F8 | MED | correctness | Hard-coded `DOUBLE` for every sum; `SUM(int)`=INT64 → registration failed. **FIXED** — component types now read from base Table TMLs (+ tests) |
 | F9 | CRITICAL | capability+UX | Aggregates inert unless PRIMARY measures are formulas. **ADDRESSED** — `recommend` now emits `routing_ineligible_measures`; SKILL.md 5a preflight gate + promotion instructions (optional: codify promotion as a CLI cmd) |
@@ -24,7 +24,7 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 | F12 | HIGH | capability | Role-playing date columns + column-name routing: date aggregates must key on the column users query (or the conformed shared date) |
 | F4 | MED | capability | No "one wide table vs N narrow" combine analysis (the highest-value decision, done fully by hand) |
 | F15 | MED | correctness/UX | Emits stored components as hidden model columns; should be formula-only over physical cols (also blocks in-place edit) |
-| F10/11/13 | MED | verification | **CORRECTED**: SpotQL *does* verify routing incl. semi-additive; Step 7 must pick the wrapper (`AGG` vs `SUM`) via `classify-columns`; its hardcoded `SUM("Sales")` example is wrong for aggregate-formula measures |
+| F10/11/13 | MED | verification | **CORRECTED**: AgentQL *does* verify routing incl. semi-additive; Step 7 must pick the wrapper (`AGG` vs `SUM`) via `classify-columns`; its hardcoded `SUM("Sales")` example is wrong for aggregate-formula measures |
 | F14 | MED | verification | RLS leak-test (restricted user) not run — routed queries so far ran as bypass admin (open-item #17) |
 | F2 | MED | packaging | `ts` uv-tool env lacks `snowflake-connector-python`; connected profiling dies with a bare ImportError |
 | F16 | LOW | UX | **FIXED** — model name is now aggregate-first `<aggregate> (<source>)` |
@@ -48,7 +48,7 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 - *Part (b) DONE:* `commands/aggregate.flag_suspect_base_rows` warns + sets
   `base_rows_suspect` when `base_rows < max(agg_rows)` (an aggregate can't exceed its base),
   in both connected and manual profile paths (unit-tested).
-- *Remaining (c):* fix the internal SpotQL construction so profiling stops falling back to
+- *Remaining (c):* fix the internal AgentQL construction so profiling stops falling back to
   the walker (needs live repro of why generate-sql returned QUERY_GEN_ERROR per candidate).
 - *Verify live (on skill re-run):* re-profile; base must be ~1.2M, not 8.
 
@@ -192,7 +192,7 @@ Each phase = its own PR. Live re-verification on the aggregate-aware cluster is 
 The two aggregates are built and routing-verified, but to match the three refinements:
 1. **Recreate A & B formula-only** (F15) — the in-place update is blocked; recreate fresh
    (formula over physical component, no component columns), re-patch primary with new GUIDs,
-   delete the old models. Verify routing after (SpotQL with `AGG`/`SUM` wrappers).
+   delete the old models. Verify routing after (AgentQL with `AGG`/`SUM` wrappers).
 2. **Apply naming** (F16): "Sales by Customer & Product (Dunder Mifflin Sales & Inventory)" and
    "Monthly Sales & Inventory (Dunder Mifflin Sales & Inventory)".
 3. **Apply descriptions** (F17).
@@ -223,8 +223,8 @@ route re-run of Dunder Mifflin):
   classifies it `SEMIADDITIVE` (decomposable=False → stays correctly excluded from candidates, no
   wrong-number risk); `recommend` surfaces it under `semiadditive_measures` with a pointer to the
   hand-build recipe (`references/semiadditive-recipe.md`, verified live: month-end pattern +
-  mandatory 3,828 numeric gate). **Why auto-gen is deferred:** the SpotQL-compiler-reuse shortcut
-  does NOT work — SpotQL has no date-bucket fn (build_spotql groups by raw date) and
+  mandatory 3,828 numeric gate). **Why auto-gen is deferred:** the AgentQL-compiler-reuse shortcut
+  does NOT work — AgentQL has no date-bucket fn (build_spotql groups by raw date) and
   `wrap_as_ddl` buckets with a PLAIN re-aggregation, but a period-end snapshot needs a *window*
   (`last_value OVER (PARTITION BY grain ORDER BY date)`) neither layer emits. Full auto-generation
   therefore requires a new windowed-DDL generator — real, wrong-numbers-sensitive work, left as a
@@ -233,5 +233,5 @@ route re-run of Dunder Mifflin):
   (overlap); disjoint single-dims never combine. Add a consolidated-union candidate per date-col
   group, BUT guard multi-fact join feasibility (a naive union can mix facts with no join path,
   e.g. Amount×BalanceDate) — cap to dims reachable from the measures' fact.
-- **F12 conformed date**, **F4 combine-vs-split**, **F1(c)** SpotQL fallback root cause,
+- **F12 conformed date**, **F4 combine-vs-split**, **F1(c)** AgentQL fallback root cause,
   **F14** restricted-user RLS leak-test (needs a non-bypass profile).

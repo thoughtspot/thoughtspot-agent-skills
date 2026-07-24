@@ -975,16 +975,16 @@ Tables that failed after all retries are included with `null` as the GUID.
 
 ### `ts spotql generate-sql` / `ts spotql fetch-data`
 
-Run SpotQL (Semantic SQL) against a ThoughtSpot Model. The caller supplies the SpotQL
-statement and the Model's GUID — these commands do **not** do natural-language → SpotQL.
+Run AgentQL (Semantic SQL) against a ThoughtSpot Model. The caller supplies the AgentQL
+statement and the Model's GUID — these commands do **not** do natural-language → AgentQL.
 
 - `generate-sql` validates the statement and returns the warehouse SQL it compiles to
   (does not execute).
 - `fetch-data` executes the statement and returns result rows.
 
 ```bash
-ts spotql generate-sql '<SpotQL>' --model <model-guid> --profile <name>
-ts spotql fetch-data   '<SpotQL>' --model <model-guid> --profile <name>
+ts spotql generate-sql '<AgentQL>' --model <model-guid> --profile <name>
+ts spotql fetch-data   '<AgentQL>' --model <model-guid> --profile <name>
 ```
 
 **Example:**
@@ -1001,12 +1001,12 @@ ts spotql fetch-data \
 - `generate-sql` → `{status, executable_sql, errors}`
 - `fetch-data` → `{status, columns, rows, errors}`
 
-`columns` are `{index, type}` — SpotQL returns per-query column GUIDs (not stable names),
+`columns` are `{index, type}` — AgentQL returns per-query column GUIDs (not stable names),
 so the SELECT ordinal is the usable identifier. A query that is rejected or fails to
 execute returns a non-`SUCCESS` `status` with a populated `errors[]` (and exit code 0) —
 these are structured query errors, not transport failures.
 
-> **SpotQL requires an external cloud data warehouse.** The endpoints only support Models
+> **AgentQL requires an external cloud data warehouse.** The endpoints only support Models
 > backed by an external CDW (Snowflake, Databricks, BigQuery, …). A Model over Falcon /
 > imported / system data (`DEFAULT` datasource) returns
 > `"This API only supports external cloud data warehouses"`.
@@ -1016,10 +1016,10 @@ these are structured query errors, not transport failures.
 ### `ts spotql classify-columns`
 
 Classify ThoughtSpot columns/formula expressions as attribute vs. measure vs.
-aggregate-formula-measure — the decision that drives `SUM`-vs-`AGG` in SpotQL and the
+aggregate-formula-measure — the decision that drives `SUM`-vs-`AGG` in AgentQL and the
 MEASURE/ATTRIBUTE + aggregation inference when promoting Answer formulas to a Model.
 Codifies BL-087: this was previously two DIFFERENT, drifted keyword lists duplicated
-between `ts-object-model-spotql-query` and `ts-object-answer-promote`; both skills now
+between `ts-object-model-agentql-query` and `ts-object-answer-promote`; both skills now
 call through this one command.
 
 Two mutually-exclusive input modes:
@@ -1039,7 +1039,7 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts spotql cla
 
 - `--model` mode → array of `{name, column_type, kind, needs_agg, aggregation, wrapper}`
   — one entry per `model.columns[]` entry. `wrapper` is the directly-actionable output —
-  the SpotQL function to wrap the column reference in (`None` for attributes). `kind` is
+  the AgentQL function to wrap the column reference in (`None` for attributes). `kind` is
   `"attribute"`, `"raw_measure"`, `"aggregate_measure"`, or `"semiadditive_measure"`:
   - `"aggregate_measure"` (equivalently `needs_agg: true`, `wrapper: "AGG"`) — wrap in
     `AGG(...)`; a real aggregate errors `NESTED_AGGREGATE_NOT_SUPPORTED`.
@@ -1701,13 +1701,13 @@ ts aggregate profile --dir /tmp/agg --tables-dir /tmp/agg/tables \
 | `--dialect` | `snowflake` | SQL dialect for generated statements |
 | `--warehouse` | profile's `default_warehouse` | Connected mode: Snowflake warehouse |
 | `--role` | profile's `default_role` | Connected mode: Snowflake role |
-| `--model-guid` | — | Primary Model GUID — enables SpotQL-based profiling SQL per candidate (ThoughtSpot resolves joins correctly on role-playing/ambiguous-path dimensions; the built-in join walker can be wrong there). Omit to always use the built-in walker (pre-Task-18 default; no ThoughtSpot connection needed). |
+| `--model-guid` | — | Primary Model GUID — enables AgentQL-based profiling SQL per candidate (ThoughtSpot resolves joins correctly on role-playing/ambiguous-path dimensions; the built-in join walker can be wrong there). Omit to always use the built-in walker (pre-Task-18 default; no ThoughtSpot connection needed). |
 | `--profile` / `-p` | `TS_PROFILE` env var | ThoughtSpot profile — used with `--model-guid` to call `ts spotql generate-sql`. Ignored if `--model-guid` is omitted. |
 | `--no-spotql` | `false` | Even with `--model-guid`, use the built-in join walker directly |
 
 The three modes are mutually exclusive: `--results` ingests, `--emit-sql` writes a
 script (no connection), otherwise `--snowflake-profile` connects and profiles
-directly. Each candidate's profiling SQL prefers SpotQL when `--model-guid` is
+directly. Each candidate's profiling SQL prefers AgentQL when `--model-guid` is
 given (falling back to the built-in join walker on any failure); the base-row
 count is always a plain single-table count either way. Candidates whose SELECT
 can't be built deterministically by either path are skipped (reported, not
@@ -1746,12 +1746,12 @@ ts aggregate history --dir /tmp/agg --snowflake-profile my-sf \
 Emit the DDL and TML for one approved candidate — never imports; the calling skill
 gates each import separately.
 
-**DDL SELECT source (default: SpotQL):** builds a SpotQL statement for the
+**DDL SELECT source (default: AgentQL):** builds an AgentQL statement for the
 candidate's grain and asks ThoughtSpot to compile it against the primary Model
 (`--model-guid`/`--profile`) — this resolves joins against the full semantic
 model, so it's correct on role-playing/ambiguous-path dimensions where the
 built-in join walker (`sqlgen.build_select`) can silently be wrong. Falls back
-to that walker automatically if SpotQL generation is unavailable or errors, or
+to that walker automatically if AgentQL generation is unavailable or errors, or
 always with `--no-spotql`; a fallback prints a stderr note that the result may
 be wrong on such dimensions.
 
@@ -1794,7 +1794,7 @@ ts aggregate generate --dir /tmp/agg --candidate cand_3 \
 | `--agg-name` | derived from root table + grain | Override the aggregate table/model base name |
 | `--out-dir` | `<dir>/<candidate>` | Output directory |
 | `--agg-model-guid` | — | Aggregate Model's GUID, once known (import `agg_model.tml.yaml` first, then pass its returned GUID here). Used as the `aggregated_models` association `id` — the aggregate Model and its backing Table share a name, so a name-based id is ambiguous (`DUPLICATE_OBJECT_FOUND` on a live cluster). Omit on the first, pre-import pass; a stderr warning flags the name-based fallback. |
-| `--no-spotql` | `false` | Skip SpotQL SQL generation and use the built-in join walker directly — see the DDL SELECT source note above |
+| `--no-spotql` | `false` | Skip AgentQL SQL generation and use the built-in join walker directly — see the DDL SELECT source note above |
 
 **Output:** writes `ddl.sql`, `table_spec.json`, `table.tml.yaml`,
 `agg_model.tml.yaml`, and `primary_patched.tml.yaml` (the primary Model TML with the

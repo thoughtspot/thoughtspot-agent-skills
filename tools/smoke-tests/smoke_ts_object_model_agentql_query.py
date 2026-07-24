@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-smoke_ts_object_model_spotql_query.py — live smoke test for ts-object-model-spotql-query.
+smoke_ts_object_model_agentql_query.py — live smoke test for ts-object-model-agentql-query.
 
-Exercises the verified SpotQL paths against a real ThoughtSpot instance:
+Exercises the verified AgentQL paths against a real ThoughtSpot instance:
   1. ThoughtSpot auth
   2. Confirm the target Model exists and is a WORKSHEET (Model)
-  3. generate-sql on a known-good SpotQL → status SUCCESS + non-empty executable_sql
-  4. fetch-data on the same SpotQL → status SUCCESS + at least --min-rows rows
+  3. generate-sql on a known-good AgentQL → status SUCCESS + non-empty executable_sql
+  4. fetch-data on the same AgentQL → status SUCCESS + at least --min-rows rows
   5. Error path: a deliberately invalid query (SELECT *) returns a structured
      non-SUCCESS status with errors[] (and exit 0) — not a crash
 
 Usage:
-    python smoke_ts_object_model_spotql_query.py \\
+    python smoke_ts_object_model_agentql_query.py \\
         --ts-profile champ-staging \\
         --model-guid 4da3a07f-fe29-4d20-8758-260eb1315071 \\
-        --spotql 'SELECT "t1"."Product Category", SUM("t1"."Amount") AS "Total Sales" FROM "Dunder Mifflin Sales & Inventory" AS "t1" GROUP BY "t1"."Product Category"' \\
+        --agentql 'SELECT "t1"."Product Category", SUM("t1"."Amount") AS "Total Sales" FROM "Dunder Mifflin Sales & Inventory" AS "t1" GROUP BY "t1"."Product Category"' \\
         --min-rows 1
 """
 from __future__ import annotations
@@ -69,11 +69,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ts-profile", required=True, help="ThoughtSpot profile name")
     parser.add_argument("--model-guid", required=True, help="Model (WORKSHEET) GUID, external-CDW-backed")
-    parser.add_argument("--spotql", required=True, help="A known-good SpotQL statement against the Model")
+    parser.add_argument("--agentql", required=True, help="A known-good AgentQL statement against the Model")
     parser.add_argument("--min-rows", type=int, default=1, help="Minimum rows expected from fetch-data")
     args = parser.parse_args()
 
-    print(f"smoke_ts_object_model_spotql_query — model: {args.model_guid!r}")
+    print(f"smoke_ts_object_model_agentql_query — model: {args.model_guid!r}")
     r = SmokeTestResult()
 
     ok, _ = r.step("ThoughtSpot auth", ts_auth_check, args.ts_profile)
