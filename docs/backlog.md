@@ -146,6 +146,7 @@ are roughly ordered by value÷effort.
 | BL-113 | Live provisioning step for load smoke | next SF live session |
 | BL-114 | Document export_with_column_aliases | GA or skill need |
 | BL-119 | Smoke test for ts-convert-from-sisense | first Sisense bundle |
+| BL-134 | Smoke test for ts-object-model-alias | first live verification |
 
 ---
 
@@ -3512,3 +3513,23 @@ per-object outcome map (`{guid: deleted|not_found|error}`) to stdout; (c) surfac
 outcome map. Low effort; mostly a resilience/UX improvement.
 
 **Target:** opportunistic.
+
+---
+
+## BL-134 — Write a smoke test for `ts-object-model-alias` `Tier 4`
+
+**Filed:** 2026-07-24.
+**Source:** new skill `ts-object-model-alias` (Task 5/6 of the column-alias feature).
+**Affects:** `tools/smoke-tests/smoke_ts_object_model_alias.py` (new);
+`tools/validate/check_smoke_tests.py` (ALLOWLIST entry).
+**Status:** OPEN.
+
+`ts-object-model-alias` has an `ALLOWLIST` exemption in check_smoke_tests.py; this backlog
+item is the dated exit that exemption's comment references. The underlying `ts alias
+export/translate/build/import` commands are unit-tested (`tools/ts-cli/tests/test_alias.py`,
+`test_alias_translate.py`) and code-backed, but a live smoke test needs a ThoughtSpot instance
+with the column-alias feature flag enabled (Beta, 10.13.0.cl+ — see BL-114) to exercise the
+full `export → translate --source file → build --merge → import → export` round-trip against
+a real Model.
+
+**Target:** first live verification once a column-alias-enabled test instance is available.

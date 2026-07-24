@@ -49,6 +49,8 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
         "Complex search-query / formula manipulation not supported in stored-proc model",
     ("ts-object-model-aggregates", "coco-snowsight"):
         "CoCo: multi-step CLI orchestration + warehouse DDL execution doesn't fit stored-proc model",
+    ("ts-object-model-alias", "coco-snowsight"):
+        "CLI only — depends on ts CLI for all operations",
     ("ts-object-model-coach", "coco-snowsight"):
         "Interactive coaching workflow doesn't fit Snowsight stored-proc execution model",
     ("ts-object-model-erd", "coco-snowsight"):
