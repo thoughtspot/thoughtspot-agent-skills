@@ -11,6 +11,7 @@ import re
 
 from ts_cli.databricks.mv_translate import normalize_tables, reused_physicals
 from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
+                                   promote_duplicate_column_ids,
                                    resolve_name_collisions)
 
 
@@ -66,6 +67,13 @@ def build_columns_and_formulas(
     #    parameter renames never fire (MVs have no parameters).
     physical, formula_entries, rename_map = resolve_name_collisions(
         physical, formula_entries, [])
+
+    # 2b. I8/I5: a raw measure + an aggregate metric on the SAME physical column
+    #     (e.g. F_TIME_TO_RESOLVE + AVG(TIMETORESOLVE__C)) both classify as
+    #     physical column candidates with an identical TABLE::col — promote the
+    #     duplicate(s) to aggregation formulas so column_id stays unique.
+    physical, formula_entries, _ = promote_duplicate_column_ids(
+        physical, formula_entries)
 
     # 3. formula-text pipeline via the shared helpers (safety net — translate
     #    already inlined cross-refs, so these are usually no-ops).

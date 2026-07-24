@@ -13,6 +13,7 @@ Key SV-specific differences from the Databricks builder:
 from __future__ import annotations
 
 from ts_cli.formula_common import (add_formula_prefix, fix_double_aggregation,
+                                   promote_duplicate_column_ids,
                                    resolve_name_collisions)
 from ts_cli.sv_translate import build_node_id_map
 
@@ -70,6 +71,12 @@ def build_columns_and_formulas(
 
     physical, formula_entries, rename_map = resolve_name_collisions(
         physical, formula_entries, [])
+
+    # I8/I5: a raw fact + a simple-agg metric on the SAME physical column both
+    # classify as physical column candidates with an identical TABLE::col —
+    # promote the duplicate(s) to aggregation formulas so column_id stays unique.
+    physical, formula_entries, _ = promote_duplicate_column_ids(
+        physical, formula_entries)
 
     formula_exprs = {f["name"]: f["expr"] for f in formula_entries}
     formula_names = set(formula_exprs)
