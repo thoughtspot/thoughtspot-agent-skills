@@ -82,6 +82,7 @@ are roughly ordered by value÷effort.
 | BL-120 | Live e2e verification for ts-convert-from-qlik | first live pass |
 | BL-115 | Smoke test for ts-convert-from-looker | first live pass |
 | BL-126 | Migrate AgentQL smoke test from champ-staging to se-thoughtspot | blocked on instance |
+| BL-135 | Live e2e verification for ts-object-model-alias | first live pass |
 | BL-076 | Smoke test backfills: answer-promote + from-tableau | 2026-09-30 |
 | BL-084 | Codify profile substrate as `ts profiles add/update/remove` | 2026-10-31 |
 | BL-071 | Tableau user-function → ThoughtSpot RLS variables | 2026-09-30 |
@@ -146,7 +147,7 @@ are roughly ordered by value÷effort.
 | BL-113 | Live provisioning step for load smoke | next SF live session |
 | BL-114 | Document export_with_column_aliases | GA or skill need |
 | BL-119 | Smoke test for ts-convert-from-sisense | first Sisense bundle |
-| BL-134 | Smoke test for ts-object-model-alias | first live verification |
+| ~~BL-134~~ | ~~Smoke test for ts-object-model-alias~~ | DONE (feat/ts-object-model-alias) |
 
 ---
 
@@ -3516,20 +3517,46 @@ outcome map. Low effort; mostly a resilience/UX improvement.
 
 ---
 
-## BL-134 — Write a smoke test for `ts-object-model-alias` `Tier 4`
+## BL-134 — Write a smoke test for `ts-object-model-alias` — DONE `Tier 4`
 
 **Filed:** 2026-07-24.
 **Source:** new skill `ts-object-model-alias` (Task 5/6 of the column-alias feature).
 **Affects:** `tools/smoke-tests/smoke_ts_object_model_alias.py` (new);
 `tools/validate/check_smoke_tests.py` (ALLOWLIST entry).
-**Status:** OPEN.
+**Status:** DONE — landed on `feat/ts-object-model-alias` (Task 6/6). `smoke_ts_object_model_alias.py`
+covers the pure-function pipeline (`parse_csv_aliases` → `translations_to_columns`/`merge_aliases` →
+`build_alias_tml` → structure/size assertions, plus the AI prompt/response round-trip via
+`build_translation_prompt`/`parse_translation_response`) with no live ThoughtSpot or Snowflake
+connection needed — mirrors the offline-smoke pattern used by `ts-convert-from-qlik`,
+`ts-load-source-data`, and `ts-object-model-erd`. `ts-object-model-alias` removed from the
+`check_smoke_tests.py` ALLOWLIST.
 
-`ts-object-model-alias` has an `ALLOWLIST` exemption in check_smoke_tests.py; this backlog
-item is the dated exit that exemption's comment references. The underlying `ts alias
-export/translate/build/import` commands are unit-tested (`tools/ts-cli/tests/test_alias.py`,
-`test_alias_translate.py`) and code-backed, but a live smoke test needs a ThoughtSpot instance
-with the column-alias feature flag enabled (Beta, 10.13.0.cl+ — see BL-114) to exercise the
-full `export → translate --source file → build --merge → import → export` round-trip against
-a real Model.
+`ts alias export/translate/build/import` was already unit-tested (`tools/ts-cli/tests/test_alias.py`,
+`test_alias_translate.py`) and code-backed; this closes the "no smoke test exists" gap the
+ALLOWLIST exemption was covering. A genuine gap remains — no *live* round-trip has been run
+against a real ThoughtSpot instance with the column-alias feature flag enabled — tracked
+separately as **BL-135** (mirrors how BL-120 was split out once BL-119/the Qlik offline smoke
+test landed).
 
 **Target:** first live verification once a column-alias-enabled test instance is available.
+
+---
+
+## BL-135 — Live end-to-end verification for `ts-object-model-alias` `Tier 2`
+
+**Filed:** 2026-07-24.
+**Source:** Task 6/6 of the `ts-object-model-alias` feature, split out of BL-134 once its
+offline smoke test landed (mirrors BL-120, split out of BL-119 for `ts-convert-from-qlik`).
+**Affects:** `agents/cli/ts-object-model-alias/SKILL.md`; `ts alias export/translate/build/import`.
+**Status:** OPEN.
+
+`ts-object-model-alias` shipped code-backed (`ts alias`, unit tests in `test_alias.py`/
+`test_alias_translate.py`, and an offline smoke test — `smoke_ts_object_model_alias.py` —
+covering the pure-function pipeline). Still needs a live round-trip against a real
+ThoughtSpot instance with the column-alias feature flag enabled (Beta, 10.13.0.cl+ — see
+BL-114): `export` an existing Model's columns + any existing aliases, `translate` (AI and/or
+CSV/table source), `build --merge`, `import` (exercising both the <5 MB sync and 5–25 MB
+async-with-polling paths), then a re-`export` to confirm the aliases actually took effect.
+No such instance was available during Tasks 1–6.
+
+**Target:** first live-verification pass once a column-alias-enabled ThoughtSpot instance is available.
