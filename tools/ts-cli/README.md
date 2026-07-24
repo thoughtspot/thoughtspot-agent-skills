@@ -2688,3 +2688,134 @@ the model), an unreadable/invalid `--model`/`--tables` file, a structural
 `ValueError` while building an MV (e.g. a duplicate emitted column name, or
 the `build_view_ddl` `$$`-collision guard), or any produced MV ends up with
 zero measures.
+
+---
+
+## `ts alias` — column alias management
+
+Composable pipeline for managing column aliases on a ThoughtSpot Model — display
+names/descriptions per (column, locale, org, group) — covering three use cases:
+language localization, tenant-based renaming, and layering locale translation on
+top of tenant-specific names. Each command reads a JSON envelope from stdin and
+writes one to stdout (or TML YAML for `build`), so the four compose with `|`:
+
+```bash
+ts alias export --model <guid> -p prod \
+  | ts alias translate --source ai --locales de-DE,fr-FR \
+  | ts alias build --merge \
+  | ts alias import --model <guid> -p prod
+```
+
+| Command | Description |
+|---|---|
+| `ts alias export --model <guid>` | Export model columns + existing aliases |
+| `ts alias translate --source ai\|file\|db` | Generate aliases from AI, CSV, or a Snowflake table |
+| `ts alias build [--merge]` | Assemble `column_alias` TML YAML |
+| `ts alias import --model <guid>` | Upload alias TML (sync or async based on size) |
+
+### `ts alias export`
+
+Exports a Model's columns and any existing column aliases via the TML export API
+(`export_options.export_with_column_aliases: true`).
+
+```bash
+ts alias export --model <guid> -p prod
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Model GUID |
+| `--profile` / `-p` | first profile / `TS_PROFILE` | ThoughtSpot profile |
+
+**Output:** JSON to stdout — `{"model": {"guid", "name", "fqn"}, "columns":
+[{"name", "description", "type"}, ...], "existing_aliases": {"columns": [...]}
+| null}`.
+
+### `ts alias translate`
+
+Generates alias translations from one of three sources and writes a
+translations envelope. `--source ai` translates every column for the given
+`--locales` (language localization only — `--orgs` is rejected). `--source
+file` parses a `--csv` of tenant-specific aliases (optionally filtered by
+`--locales`/`--orgs`/`--groups`). `--source db` queries a Snowflake
+`--table` of the same shape. Either of the last two can layer an AI locale
+translation on top (`--ai-locales`, `--locale-config`, or
+`--locale-config-table`) for the tenant + locale use case. `--init-table`
+emits the standard `TS_COLUMN_ALIASES` / `TS_ALIAS_LOCALES` DDL and exits.
+
+```bash
+ts alias export --model <guid> -p prod | ts alias translate --source ai --locales de-DE,fr-FR
+ts alias export --model <guid> -p prod | ts alias translate --source file --csv aliases.csv
+ts alias export --model <guid> -p prod | ts alias translate --source db --sf-profile sf --table DB.SCHEMA.TS_COLUMN_ALIASES
+ts alias translate --init-table --sf-profile sf
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--source` | *(required unless `--init-table`)* | `ai`, `file`, or `db` |
+| `--locales` | — | Comma-separated locale codes (required for `--source ai`; optional filter for file/db) |
+| `--orgs` | — | Comma-separated org names to filter (file/db only) |
+| `--groups` | — | Comma-separated group names to filter (file/db only) |
+| `--input` | stdin | Input JSON envelope file |
+| `--translator` | `claude` | AI backend: `claude` or `cortex` |
+| `--api-key-env` | `ANTHROPIC_API_KEY` | Env var name for the Anthropic API key |
+| `--sf-profile` | — | Snowflake profile name |
+| `--table` | — | Snowflake table (`--source db`) |
+| `--csv` | — | CSV file path (`--source file`) |
+| `--ai-locales` | — | Comma-separated locales for an AI overlay on file/db |
+| `--locale-config` | — | YAML file for a per-org locale config |
+| `--locale-config-table` | — | Snowflake table for a per-org locale config |
+| `--init-table` | `false` | Emit DDL for the alias + locale tables, then exit |
+| `--profile` / `-p` | first profile / `TS_PROFILE` | ThoughtSpot profile |
+
+A malformed AI response (wrong shape, wrong count, unknown column) is retried
+once with a stricter prompt; a second failure raises.
+
+**Output:** JSON to stdout — `{"model", "translations": [{"column", "locale",
+"alias", "description", "org", "group"}, ...], "existing_aliases"}`.
+
+### `ts alias build`
+
+Assembles `column_alias` TML YAML from a translations envelope. With
+`--merge`, existing aliases (from the export envelope) are preserved and only
+overwritten where the `(column, locale, org, group)` key matches a new
+translation; without it, the new translations fully replace prior aliases.
+
+```bash
+ts alias translate ... | ts alias build
+ts alias translate ... | ts alias build --merge
+ts alias build --input translations.json --merge
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--input` | stdin | Translations JSON envelope file |
+| `--merge` | `false` | Merge with existing aliases instead of replacing them |
+
+**Output:** `column_alias` TML YAML to stdout. `tml_size_bytes: <n>` and any
+size warning/error go to stderr. Warns above 20 MB; errors (exit 1) above the
+25 MB platform import limit.
+
+### `ts alias import`
+
+Uploads `column_alias` TML to ThoughtSpot, picking sync vs. async import
+based on payload size.
+
+```bash
+ts alias build ... | ts alias import --model <guid> -p prod
+ts alias import --model <guid> -p prod --file alias.yaml
+ts alias import --model <guid> -p prod --dry-run --file alias.yaml
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | *(required)* | Model GUID |
+| `--profile` / `-p` | first profile / `TS_PROFILE` | ThoughtSpot profile |
+| `--file` | stdin | TML file path |
+| `--dry-run` | `false` | Validate only (`VALIDATE_ONLY` import policy) |
+
+Payloads under 5 MB import synchronously. 5–25 MB import asynchronously and
+poll `.../tml/async/status` until `COMPLETED`/`FAILED` (~10–15 minutes for
+large payloads). Above 25 MB is rejected before any API call.
+
+**Output:** JSON to stdout — the import (or async status) response.

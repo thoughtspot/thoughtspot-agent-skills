@@ -14,6 +14,7 @@
 | ts-load-source-data | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
 | ts-object-model-aggregates | Y | — | — | — |
+| ts-object-model-alias | Y | — | — | — |
 | ts-object-model-coach | Y | — | — | — |
 | ts-object-model-erd | Y | — | — | — |
 | ts-object-model-agentql-query | Y | — | — | — |
