@@ -76,6 +76,9 @@ def _call_llm(prompt: str, translator: str, api_key_env: str,
               sf_profile: Optional[str]) -> str:
     """Call the configured LLM backend (Snowflake Cortex or Claude) and return raw text."""
     if translator == "cortex":
+        if not sf_profile:
+            print("Error: --sf-profile required for cortex translator", file=sys.stderr)
+            raise SystemExit(1)
         from ts_cli.alias_translate import build_cortex_sql
         cursor = _get_sf_cursor(sf_profile)
         cursor.execute(build_cortex_sql(prompt))
@@ -167,12 +170,17 @@ def _run_ai_batches(
         print(f"Translating: org={org}, locale={locale} "
               f"({i}/{total}, {len(cols)} columns)", file=sys.stderr)
 
+        prompt_cols = [
+            {"name": c.get("alias") or c.get("column", ""),
+             "description": c.get("description") or ""}
+            for c in cols
+        ]
         prompt = build_translation_prompt(
-            cols, locale,
+            prompt_cols, locale,
             source_context=f"These are column aliases for org '{org}'"
                            if org != _WILDCARD else None,
         )
-        col_names = [c.get("name") or c.get("alias", "") for c in cols]
+        col_names = [c.get("column", c.get("name", "")) for c in cols]
         group = cols[0].get("group", _WILDCARD)
         results.extend(_translate_with_retry(
             prompt, col_names, locale, org, group,
@@ -448,11 +456,16 @@ def translate_cmd(
         print("Error: --source is required (ai, file, or db).", file=sys.stderr)
         raise SystemExit(1)
 
-    if source == "ai" and orgs:
-        print("Error: --orgs is not valid with --source ai. "
+    if source == "ai" and (orgs or groups):
+        bad_flag = "--orgs" if orgs else "--groups"
+        print(f"Error: {bad_flag} is not valid with --source ai. "
               "AI translation is for language localization only. "
               "Use --source file or --source db for org/group aliases.",
               file=sys.stderr)
+        raise SystemExit(1)
+
+    if source == "ai" and not locales:
+        print("Error: --locales is required for --source ai", file=sys.stderr)
         raise SystemExit(1)
 
     envelope = _read_json_envelope(input_file)

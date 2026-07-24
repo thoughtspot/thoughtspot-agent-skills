@@ -407,7 +407,7 @@ Mechanics:
 - Guardrails: validate returned column count matches input; validate
   no column names were fabricated; retry once on malformed response
 
-## Supported Locales (28)
+## Supported Locales (27)
 
 ```
 da-DK  de-DE  de-CH  en-AU  en-CA  en-DE  en-IN  en-NZ  en-GB  en-US
