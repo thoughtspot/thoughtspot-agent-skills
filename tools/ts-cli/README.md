@@ -351,8 +351,15 @@ Delete one or more ThoughtSpot objects by GUID.
 ```bash
 ts metadata delete abc-123
 ts metadata delete abc-123 def-456 --type LIVEBOARD
+ts metadata delete abc-123 stale-guid --ignore-missing
 ts metadata delete abc-123 --profile se-thoughtspot
 ```
+
+A batch delete is atomic — if any one GUID is already gone the whole call
+fails and nothing is deleted. This command tries the batch first (one fast
+call when every GUID is present) and, on failure, falls back to per-GUID
+deletes so present objects are still removed, reporting a per-object outcome
+map. Useful for teardown/cleanup where some GUIDs may already be gone.
 
 **Options:**
 
@@ -360,8 +367,11 @@ ts metadata delete abc-123 --profile se-thoughtspot
 |---|---|---|
 | `--profile`, `-p` | first profile | Profile to use |
 | `--type`, `-t` | `LOGICAL_TABLE` | Object type: `LOGICAL_TABLE`, `LIVEBOARD`, `ANSWER` |
+| `--ignore-missing` | off | Treat already-gone GUIDs (`not_found`) as success instead of exiting non-zero. Genuine errors still exit non-zero. |
 
-**Output:** `{"deleted": ["guid1", "guid2", ...]}` on success.
+**Output:** `{"deleted": [...], "not_found": [...], "errors": {guid: msg}, "outcomes": {guid: "deleted"|"not_found"|"error: ..."}}`.
+Exits non-zero if any GUID could not be deleted, unless the only failures are
+`not_found` and `--ignore-missing` is set.
 
 ---
 
