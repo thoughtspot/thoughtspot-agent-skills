@@ -66,8 +66,29 @@ class TestClassifyDeleteResponse:
             '{"error":{"code":13003,"message":"Metadata object not found ..."}}')
         assert out == "not_found"
 
-    def test_400_not_found_text_is_not_found(self):
-        assert classify_delete_response(False, 400, "object NOT FOUND") == "not_found"
+    def test_400_top_level_code_13003_is_not_found(self):
+        assert classify_delete_response(
+            False, 400, '{"code": 13003, "message": "gone"}') == "not_found"
+
+    def test_400_documented_phrase_non_json_is_not_found(self):
+        # non-JSON body carrying the documented message still classifies
+        assert classify_delete_response(
+            False, 400,
+            "13003 Metadata object not found corresponding to the "
+            "metadata_identifier: abc") == "not_found"
+
+    def test_400_metadata_object_not_found_phrase_is_not_found(self):
+        assert classify_delete_response(
+            False, 400, "Metadata Object Not Found for xyz") == "not_found"
+
+    def test_400_unrelated_not_found_is_error(self):
+        # REGRESSION GUARD (code-review finding): a *different* 400 whose message
+        # merely contains "not found" (e.g. a wrong --type) must NOT be swallowed
+        # as not_found — else --ignore-missing would hide a real failure.
+        assert classify_delete_response(
+            False, 400,
+            '{"error":{"code":13005,"message":"connection not found"}}'
+        ).startswith("error")
 
     def test_403_is_error(self):
         assert classify_delete_response(False, 403, "forbidden").startswith("error")
