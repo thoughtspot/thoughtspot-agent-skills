@@ -171,25 +171,55 @@ def search(
     print(json.dumps(filter_by_connection(all_results, connection)))
 
 
-# A batch metadata/delete is atomic: one missing GUID fails the whole call
-# (400, code 13003) and deletes nothing. These markers distinguish that
-# already-gone case from a genuine error so a per-GUID fallback can classify
-# each outcome. Matched case-insensitively against the 400 response body.
-_DELETE_NOT_FOUND_MARKERS = ("13003", "not found")
+# A batch metadata/delete is atomic: one missing GUID fails the whole call and
+# deletes nothing. ThoughtSpot's stable error code for a missing metadata object
+# is 13003; the documented message is "Metadata object not found ...". We key
+# `not_found` off the specific code (preferred, structured) and fall back to the
+# specific phrase — NOT a bare "not found", which would also match unrelated 400s
+# (e.g. "connection not found") and, with --ignore-missing, silently hide a real
+# failure.
+_DELETE_NOT_FOUND_CODE = "13003"
+_DELETE_NOT_FOUND_PHRASE = "metadata object not found"
+
+
+def _body_signals_not_found(body_text: str) -> bool:
+    """True when a delete 400 body indicates the object was already gone.
+
+    Prefers the structured error code (``13003``) wherever it appears in the
+    JSON — nested under ``error`` or at the top level, under any of the common
+    key spellings — and falls back to the documented message for a non-JSON or
+    unexpected-shape body. Deliberately does not match a bare "not found".
+    """
+    if not body_text:
+        return False
+    try:
+        body = json.loads(body_text)
+    except (ValueError, TypeError):
+        body = None
+    if isinstance(body, dict):
+        containers = [body]
+        err = body.get("error")
+        if isinstance(err, dict):
+            containers.append(err)
+        for c in containers:
+            for key in ("code", "errorCode", "error_code"):
+                if str(c.get(key, "")) == _DELETE_NOT_FOUND_CODE:
+                    return True
+    low = body_text.lower()
+    return _DELETE_NOT_FOUND_CODE in low or _DELETE_NOT_FOUND_PHRASE in low
 
 
 def classify_delete_response(ok: bool, status: int, body_text: str) -> str:
     """Classify one delete response as ``deleted`` / ``not_found`` / ``error: …``.
 
-    ``not_found`` is reserved for the missing-object 400 (code 13003 /
-    "not found" in the body) — the case that is safe to treat as already-done.
+    ``not_found`` is reserved for the missing-object 400 (see
+    ``_body_signals_not_found``) — the case that is safe to treat as already-done.
     Any other non-2xx is a genuine ``error`` so it is never silently swallowed.
     Pure — no I/O — so the classification is unit-testable in isolation.
     """
     if ok:
         return "deleted"
-    low = (body_text or "").lower()
-    if status == 400 and any(m in low for m in _DELETE_NOT_FOUND_MARKERS):
+    if status == 400 and _body_signals_not_found(body_text):
         return "not_found"
     snippet = " ".join((body_text or "").split())[:200]
     return f"error: HTTP {status}{': ' + snippet if snippet else ''}"
