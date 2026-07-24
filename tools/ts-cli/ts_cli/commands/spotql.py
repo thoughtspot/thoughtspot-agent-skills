@@ -1,4 +1,4 @@
-"""ts spotql — run AgentQL (Semantic SQL) against a ThoughtSpot Model.
+"""ts agentql — run AgentQL (Semantic SQL) against a ThoughtSpot Model.
 
 Two endpoints (V2, under /callosum/v1/v2/data/spotql/):
   generate-sql — validates an AgentQL statement and returns the warehouse SQL it
@@ -199,7 +199,7 @@ def generate_sql(
     Examples:
 
     \\b
-      ts spotql generate-sql 'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' -m <guid>
+      ts agentql generate-sql 'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' -m <guid>
     """
     r = _run(_GENERATE_PATH, spotql, model, profile)
     print(_json.dumps({"status": r["status"], "executable_sql": r["executable_sql"],
@@ -221,7 +221,7 @@ def fetch_data(
     Examples:
 
     \\b
-      ts spotql fetch-data 'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' -m <guid>
+      ts agentql fetch-data 'SELECT "Region", SUM("Sales") AS s FROM "ORDERS" AS "t1" GROUP BY "Region"' -m <guid>
     """
     r = _run(_FETCH_PATH, spotql, model, profile)
     print(_json.dumps({"status": r["status"], "columns": r["columns"],
@@ -349,10 +349,10 @@ def classify_columns_cmd(
     Examples:
 
     \\b
-      ts spotql classify-columns --model 4da3a07f-fe29-4d20-8758-260eb1315071 --profile prod
-      ts spotql classify-columns --exprs-file formulas_to_add.json
+      ts agentql classify-columns --model 4da3a07f-fe29-4d20-8758-260eb1315071 --profile prod
+      ts agentql classify-columns --exprs-file formulas_to_add.json
       echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' \\
-        | ts spotql classify-columns
+        | ts agentql classify-columns
     """
     if model and exprs_file:
         raise SystemExit(

@@ -17,9 +17,9 @@ main.
   Note: an older spotQL-testing finding saw V2 bearer 401 on champ-clone-spotql (build
   26.7.0.cl-72). Behaviour is build/cluster-specific; bearer works on current staging.
 - Query errors return HTTP 400 with `{"error": {"message": {"code", "debug": "[CODE] …"}}}`
-  — surfaced (not crashed) via `ts spotql`'s `raise_for_status=False` path.
+  — surfaced (not crashed) via `ts agentql`'s `raise_for_status=False` path.
 
-Implemented as `ts spotql generate-sql` / `fetch-data` (ts-cli v0.13.0). Pure normalisation
+Implemented as `ts agentql generate-sql` / `fetch-data` (ts-cli v0.13.0). Pure normalisation
 unit-tested in `tools/ts-cli/tests/test_spotql.py`.
 
 ## #2 — External-CDW-only constraint — VERIFIED (live) 2026-06-25
@@ -80,7 +80,7 @@ changing (`PERCENTILE_CONT` is Closed as MEDIAN-only yet still errors live):
      fields `summary,status`.
 2. **Diff against `limitations.md`** — flag rows whose SCAL ticket status changed
    (Open→Closed = candidate "now works" to remove; new Open child = candidate new row).
-3. **Re-probe each flagged construct live** with `ts spotql generate-sql` / `fetch-data`
+3. **Re-probe each flagged construct live** with `ts agentql generate-sql` / `fetch-data`
    against an external-CDW model (e.g. the Dunder Mifflin smoke model) — the probe, not the
    ticket, is the source of truth.
 4. **Update the file**: remove rows that now work (and relax the matching rule in

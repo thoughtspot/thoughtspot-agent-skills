@@ -95,10 +95,10 @@ VERIFIED in `references/open-items.md`; version bump at PR time.
 - *Verified live:* promoting Amount/Quantity flipped routing on (2026-07-15).
 
 **F10/11/13 — Step 7 verification method (CORRECTED).**
-- *Truth:* `ts spotql generate-sql` DOES reflect routing, including semi-additive, when the
+- *Truth:* `ts agentql generate-sql` DOES reflect routing, including semi-additive, when the
   measure is referenced with the right wrapper. `classify-columns` returns it:
   `raw→SUM`, `aggregate_measure→AGG`, `semiadditive_measure→SUM`.
-- *Fix (DONE, SKILL.md Step 7 rewritten):* Step 7 now runs `ts spotql classify-columns`
+- *Fix (DONE, SKILL.md Step 7 rewritten):* Step 7 now runs `ts agentql classify-columns`
   first and references each measure with the right wrapper (raw→SUM, aggregate_measure→AGG,
   semiadditive→SUM); the wrong `SUM("Sales")` example is gone; Search Data API +
   QUERY_HISTORY noted as an optional deeper check.

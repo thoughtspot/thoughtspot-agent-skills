@@ -1,4 +1,4 @@
-"""Pure helpers behind `ts spotql classify-columns` (no I/O).
+"""Pure helpers behind `ts agentql classify-columns` (no I/O).
 
 Codifies aggregate-function detection that two skills previously duplicated with
 DIFFERENT, drifted keyword lists (BL-087, 2026-07-03 codification review row 24):
@@ -15,7 +15,7 @@ DIFFERENT, drifted keyword lists (BL-087, 2026-07-03 codification review row 24)
 lists) — every function the spotql-query prose named ("sum, count, group_aggregate,
 last_value, first_value, ...") is already covered by it, so nothing needed folding in
 beyond it. This module is now the single canonical source; both skills call through
-`ts spotql classify-columns` instead of carrying their own copy.
+`ts agentql classify-columns` instead of carrying their own copy.
 
 **Semi-additive sub-case (live-verified 2026-07-13, nebula-aggregate-aware).** Most
 aggregate-formula measures must be referenced in AgentQL as `AGG(...)` (a real

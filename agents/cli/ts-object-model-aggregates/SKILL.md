@@ -289,7 +289,7 @@ Aggregate-aware routing on this product fires ONLY for **formula** measures — 
 measure column produces an aggregate that queries never route to
 ([open-items.md #0](references/open-items.md)). `recommend` reports every targeted plain
 measure in `routing_ineligible_measures` (`[{measure, reason, remedy}]`, via
-`ts spotql classify-columns`). **If it is non-empty, stop and resolve it before Step 6:**
+`ts agentql classify-columns`). **If it is non-empty, stop and resolve it before Step 6:**
 tell the user which measures won't route, and offer to **promote** each to a formula
 measure on the primary Model — redefine e.g. `Amount` from a plain `SUM` measure column
 (`column_id: <T>::<col>`) to a formula measure `Amount = sum ( [<T>::<col>] )`, keeping the
@@ -875,13 +875,13 @@ For each candidate imported in Step 6, spot-check that a query which should rout
 does, and one that shouldn't, doesn't, via
 [ts-object-model-agentql-query](../ts-object-model-agentql-query/SKILL.md) or directly.
 
-**First get the correct AgentQL wrapper per measure — do NOT guess.** `ts spotql
+**First get the correct AgentQL wrapper per measure — do NOT guess.** `ts agentql
 generate-sql` DOES reflect aggregate-aware routing (including for semi-additive
 measures — this was verified live 2026-07-15), but only when each measure is referenced
 with the right aggregation wrapper, and the wrong one errors instead of routing:
 
 ```bash
-ts spotql classify-columns --model {model_guid} --profile "{profile_name}"
+ts agentql classify-columns --model {model_guid} --profile "{profile_name}"
 ```
 
 Each measure's `kind`/`wrapper` tells you how to reference it in the SELECT:
@@ -897,7 +897,7 @@ a `FROM "<model>" AS "t1"` alias, dimension columns in `GROUP BY`), e.g. for an
 aggregate-formula measure:
 
 ```bash
-ts spotql generate-sql \
+ts agentql generate-sql \
   'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{profile_name}"
 ```
@@ -925,7 +925,7 @@ authenticated as a user who is actually subject to the base table's RLS rule ins
 `{profile_name}`:
 
 ```bash
-ts spotql generate-sql \
+ts agentql generate-sql \
   'SELECT "Product Category", AGG("Amount") FROM "<Model>" AS "t1" GROUP BY "Product Category"' \
   --model {model_guid} --profile "{restricted_user_profile}"
 ```
@@ -1043,6 +1043,7 @@ Remove once you're confident every generated aggregate is correct: rm -rf {workd
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.3 | 2026-07-24 | Update CLI references `ts spotql` → `ts agentql` (the command was renamed; `ts spotql` still works as a deprecated alias). No behaviour change. |
 | 1.0.2 | 2026-07-24 | Rename SpotQL → AgentQL in prose (external product name only; the `ts spotql` CLI and all identifiers are unchanged). No behaviour change. |
 | 1.0.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.0.0 | 2026-07-11 | Initial release. Audits a Model's dependent Liveboards/Answers into query signatures (`ts aggregate signatures`), generalizes them into ranked candidate grains with a cost-based marginal-gain curve (`ts aggregate recommend`, optionally reweighted by Snowflake query history via `ts aggregate history`), profiles candidates in connected or manual mode (`ts aggregate profile`), and generates the warehouse DDL + aggregate Table/Model TML + `aggregated_models` association patch per approved candidate (`ts aggregate generate`) — gated at every artifact by a confirmation step, an RLS/CLS parity hard gate, and a post-import routing verification with rollback via `ts dependency backup`/`rollback`. Ships with eleven OPEN items in `references/open-items.md` covering routing semantics, `aggregated_models` TML shape, multi-aggregate precedence, and join-pruning fidelity — all must be VERIFIED against a live 26.6+ instance before this skill is considered merge-ready (tracked as Task 11 on `wip/ts-object-model-aggregates`). |

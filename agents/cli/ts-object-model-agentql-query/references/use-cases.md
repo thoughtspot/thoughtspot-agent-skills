@@ -1,7 +1,7 @@
 # Building on this skill
 
-This skill is the **AgentQL query primitive**: write AgentQL → `ts spotql generate-sql`
-(warehouse SQL) → `ts spotql fetch-data` (rows). Each command emits JSON, so anything that
+This skill is the **AgentQL query primitive**: write AgentQL → `ts agentql generate-sql`
+(warehouse SQL) → `ts agentql fetch-data` (rows). Each command emits JSON, so anything that
 needs to run many questions and compare results is a thin loop over this primitive — not a
 separate tool. The six common uses below are *compositions*, documented here rather than
 built into the skill, so the skill stays small and a consumer (a future
@@ -14,7 +14,7 @@ The composable unit is one record per question:
  "status": "SUCCESS", "columns": [...], "rows": [...], "errors": []}
 ```
 
-— the agent supplies `question`/`spotql`; the two `ts spotql` calls supply the rest.
+— the agent supplies `question`/`spotql`; the two `ts agentql` calls supply the rest.
 
 ## 1. Introductory tutorial
 
@@ -27,7 +27,7 @@ structured error and the rule it maps to.
 
 ## 2. Drop-in for your own agent
 
-Reuse the primitive directly: `ts spotql generate-sql` / `fetch-data` return JSON your code
+Reuse the primitive directly: `ts agentql generate-sql` / `fetch-data` return JSON your code
 consumes. The generation rules in `agentql-rules.md` + `udf-reference.md` + `patterns.md` are
 the grounding to give your own model when it writes AgentQL. Start from this skill's flow and
 keep or replace the presentation layer.

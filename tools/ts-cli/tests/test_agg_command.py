@@ -1133,7 +1133,7 @@ def _patch_primary_export(monkeypatch):
 
 def test_generate_default_path_uses_spotql_and_wraps_ts_sql(tmp_path, monkeypatch):
     """Default behaviour (no --no-spotql): `generate` builds AgentQL for the
-    candidate's grain, calls the existing `ts spotql generate-sql` client
+    candidate's grain, calls the existing `ts agentql generate-sql` client
     path (monkeypatched here, never a real network call), and wraps the
     returned join-correct `executable_sql` as DDL — never touching
     sqlgen.build_select's hand-rolled join walker."""

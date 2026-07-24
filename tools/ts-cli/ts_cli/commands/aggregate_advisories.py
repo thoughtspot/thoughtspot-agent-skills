@@ -15,7 +15,7 @@ def routing_ineligible_measures(model_tml: dict, candidates: list) -> list:
     Aggregate-aware routing on this product fires only for FORMULA measures
     (open-item #0); a plain measure column (`kind == 'raw_measure'`) yields an
     aggregate nothing ever routes to. Reuses `spotql_ops.classify_model_columns`
-    (the same classifier `ts spotql classify-columns` exposes) so the skill can
+    (the same classifier `ts agentql classify-columns` exposes) so the skill can
     surface the gap and offer the promotion (plain measure -> `sum([physical])`)
     before generating anything."""
     from ts_cli.spotql_ops import classify_model_columns

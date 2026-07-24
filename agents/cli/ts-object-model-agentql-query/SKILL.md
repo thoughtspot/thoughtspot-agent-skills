@@ -5,10 +5,11 @@ description: Ask a question of a ThoughtSpot Model and get the answer as data �
 
 # ThoughtSpot: Query a Model with AgentQL
 
-> **AgentQL was previously called SpotQL.** The query language, the `ts spotql` CLI, and the
-> underlying API are unchanged; only the external name is new. You will still see `spotql` in
-> command names, endpoint paths, and the `spotql_query` request field — those are stable
-> identifiers, not the product name.
+> **AgentQL was previously called SpotQL.** The query language and the underlying API are
+> unchanged; only the name is new. The CLI command is now **`ts agentql`** (the old
+> `ts spotql` still works as a deprecated hidden alias). The server contract keeps the
+> `spotql` spelling — the callosum `/data/spotql/*` endpoints and the `spotql_query` request
+> field are stable identifiers, not the product name.
 
 Turn a question about a ThoughtSpot **Model** into an answer. You (the agent) write an
 AgentQL statement grounded in the rules in `references/`, then run it through two `ts`
@@ -74,8 +75,8 @@ The one requirement is below: the Model must be backed by an external cloud data
 ## Prerequisites
 
 - A ThoughtSpot profile — run `/ts-profile-thoughtspot` if none exists.
-- The `ts` CLI (`pip install -e tools/ts-cli`), version **0.31.0+** (provides `ts spotql`,
-  including `ts spotql classify-columns` for Step 2).
+- The `ts` CLI (`pip install -e tools/ts-cli`), version **0.31.0+** (provides `ts agentql`,
+  including `ts agentql classify-columns` for Step 2).
 - The target Model is backed by an **external cloud data warehouse** (see the note above).
 
 All ThoughtSpot calls go through the `ts` CLI, which handles auth, token caching, and the
@@ -144,7 +145,7 @@ For a Model it is rooted at `model:` with these parts:
 eyeball the TML for this: run
 
 ```bash
-ts spotql classify-columns --model {model_guid} --profile "{profile}"
+ts agentql classify-columns --model {model_guid} --profile "{profile}"
 ```
 
 This calls the same aggregate-function detector `ts-object-answer-promote` uses (BL-087 —
@@ -198,7 +199,7 @@ question. The essentials (full list in the rules file):
 ### Step 4 — Validate and get the warehouse SQL
 
 ```bash
-ts spotql generate-sql '{spotql}' --model {model_guid} --profile "{profile}"
+ts agentql generate-sql '{spotql}' --model {model_guid} --profile "{profile}"
 ```
 
 Returns JSON `{status, executable_sql, errors}`. If `status` is `SUCCESS`, `executable_sql`
@@ -209,7 +210,7 @@ against the rules, and retry. Do not execute a statement that failed validation.
 ### Step 5 — Execute
 
 ```bash
-ts spotql fetch-data '{spotql}' --model {model_guid} --profile "{profile}"
+ts agentql fetch-data '{spotql}' --model {model_guid} --profile "{profile}"
 ```
 
 Returns JSON `{status, columns, rows, errors}`. `columns` are `{index, type}` — AgentQL
@@ -261,6 +262,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.1.0 | 2026-07-24 | Rename the CLI command **`ts spotql` → `ts agentql`** (and all skill/doc references to it). `ts spotql` still works as a deprecated hidden alias, so existing scripts don't break. The server contract is unchanged: the callosum `/data/spotql/*` endpoints and the `spotql_query` request field keep the `spotql` spelling. (ts-cli v0.95.0.) |
 | 2.0.0 | 2026-07-24 | Rename the external product name **SpotQL → AgentQL** across the skill and every reference. Breaking: the skill directory and slash command are renamed `ts-object-model-spotql-query` → `ts-object-model-agentql-query` (re-point the `~/.claude/skills/` and `~/.snowflake/cortex/skills/` symlinks), and `references/spotql-rules.md` → `references/agentql-rules.md`. **No behaviour change:** the `ts spotql` CLI, the callosum endpoints, and the `spotql_query` request field are unchanged stable identifiers, so existing integrations and scripts keep working. |
 | 1.5.0 | 2026-07-22 | Add `references/snowflake-sv-backing.md` — rules R1–R7 for Snowflake Semantic View-backed Models (NULL-key `100072` fix, window-via-CTE, no FROM-subqueries, measure-statistics trap) with Databricks MV comparison; new silent-wrong-answer row in `limitations.md` for secondary aggregates on SV/MV measures. Live-verified 2026-07-21 on `ashok-direct-query` + native Snowflake + Databricks. |
 | 1.4.0 | 2026-07-13 | Semi-additive measures use `SUM(...)`, not `AGG(...)`: a measure whose outermost formula op is `last_value`/`first_value` errors `NON_CONVERTIBLE_FUNCTION` under `AGG()` and must be wrapped in `SUM()` (identity pass-through over the per-group snapshot). `ts spotql classify-columns` now returns this as `kind: semiadditive_measure` + a directly-actionable `wrapper` field (ts-cli v0.52.0). Corrects earlier docs that wrongly showed `AGG("Inventory Balance")` as verified. `sum(last_value(...))` (additive outer op) stays `AGG`. Live-verified at grand-total/grouped/monthly grain on nebula-aggregate-aware. |
