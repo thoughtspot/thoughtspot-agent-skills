@@ -30,7 +30,7 @@ into a single prompt to cut round-trips.
 
 ## Prerequisites
 
-- `ts` CLI installed and on PATH, version **0.96.0+** (provides `ts alias export/translate/build/import`)
+- `ts` CLI installed and on PATH, version **0.98.0+** (provides `ts alias export/translate/build/import`)
 - ThoughtSpot profile configured — run `/ts-profile-thoughtspot` if not
 - Column alias export/import (`export_with_column_aliases`) is **Beta** as of ThoughtSpot
   Cloud 10.13.0.cl. Confirm with a ThoughtSpot admin that the feature is enabled on the
@@ -61,11 +61,12 @@ Steps:
   7.  Generate aliases .................................. auto
   8.  Review generated aliases .......................... you confirm (may edit)
   9.  Choose mode (merge / replace) ..................... you choose
- 10.  Build + import ................................... auto (checkpoint before import)
- 11.  Verify (re-export + compare) ...................... auto
+ 10.  Choose output (import / TML file / CSV file) ...... you choose
+ 11.  Build + deliver .................................. auto (checkpoint before import)
+ 12.  Verify (re-export + compare) ...................... auto (import path only)
 
-Confirmation required: Steps 2, 4, 5, 6, 8, 9, and the pre-import checkpoint in Step 10
-Auto-executed: Steps 1, 3, 7, 11
+Confirmation required: Steps 2, 4, 5, 6, 8, 9, 10, and the pre-import checkpoint in Step 11
+Auto-executed: Steps 1, 3, 7, 12
 
 Ready to start? [Y / N]
 ---
@@ -337,9 +338,34 @@ Recommend **Merge** whenever Step 3 showed existing aliases on the Model.
 
 ---
 
-## Step 10 — Build + Import
+## Step 10 — Choose Output
 
-Build the TML from the (possibly edited) translations file:
+```
+How should the aliases be delivered?
+
+  1  Import to ThoughtSpot   — build TML and import via API   [default]
+  2  Save as TML file        — generate column_alias TML YAML to disk
+  3  Save as CSV file        — generate ThoughtSpot CSV upload format to disk
+
+Enter 1, 2, or 3:
+```
+
+Save as `{output_mode}` (`import`, `tml`, or `csv`). Option 1 continues to Step 11's
+import path. Options 2 and 3 write a file and skip the import/verify steps.
+
+**When to use each:**
+- **Import** — the primary automated path; aliases are applied immediately
+- **TML file** — for review before manual upload, version control, or bulk automation
+- **CSV file** — for manual upload via the ThoughtSpot UI column-alias CSV import
+
+---
+
+## Step 11 — Build + Deliver
+
+Build from the (possibly edited) translations file. The `--merge` and `--format` flags
+control mode and output shape:
+
+### Output: Import to ThoughtSpot (default)
 
 ```bash
 # Merge mode (recommended when existing aliases are present)
@@ -388,9 +414,39 @@ any API call — see Error Handling.
 If the user wants to validate without committing, add `--dry-run` first (uses the
 `VALIDATE_ONLY` import policy) and confirm no errors before running the real import.
 
+### Output: TML file
+
+```bash
+# Merge mode
+ts alias build --input /tmp/ts_alias_translations_{guid}.json --merge \
+  > {model_name}_aliases.yaml
+
+# Replace mode
+ts alias build --input /tmp/ts_alias_translations_{guid}.json \
+  > {model_name}_aliases.yaml
+```
+
+Report the file path and size. Skip Step 12 (verify) — there is nothing to verify
+against ThoughtSpot since no import was performed.
+
+### Output: CSV file
+
+```bash
+ts alias build --input /tmp/ts_alias_translations_{guid}.json --format csv \
+  > {model_name}_aliases.csv
+
+# With merge (preserves existing aliases in the output)
+ts alias build --input /tmp/ts_alias_translations_{guid}.json --merge --format csv \
+  > {model_name}_aliases.csv
+```
+
+The CSV uses ThoughtSpot's upload format: `Column,locale,alias,description,org_name,group_name`.
+Report the file path and row count. Skip Step 12 — the user will upload this CSV manually
+via the ThoughtSpot UI.
+
 ---
 
-## Step 11 — Verify
+## Step 12 — Verify (import path only)
 
 Re-export and compare against what was intended:
 
@@ -449,8 +505,73 @@ rm -f /tmp/ts_alias_export_*.json /tmp/ts_alias_translations_*.json /tmp/ts_alia
 
 ---
 
+## Technical Reference — Column Alias TML Structure
+
+The `column_alias` TML document has specific structural requirements that differ from
+other TML types. These were identified through live testing (2026-07-25) and are enforced
+by the `ts alias build` command.
+
+### Model reference: `obj_id`, not `fqn`
+
+The model reference uses `obj_id` (format: `{model_name}-{first_8_chars_of_guid}`),
+not `fqn`. Using `fqn` causes a silent failure — ThoughtSpot returns `status_code: OK`
+but the aliases are not persisted.
+
+```yaml
+# Correct
+column_alias:
+  model:
+    name: T4_PER_ORG_MODEL
+    obj_id: T4_PER_ORG_MODEL-96edf61f
+
+# Wrong — silently accepted, aliases not persisted
+column_alias:
+  model:
+    name: T4_PER_ORG_MODEL
+    fqn: 96edf61f-1bd9-49ed-ba6b-6aa7928a2b60
+```
+
+### Alias entries: `entries:` list wrapper required
+
+Each group must contain an `entries:` list wrapping the alias/description. Flat
+alias/description fields directly on the group are silently ignored.
+
+```yaml
+# Correct
+groups:
+- name: TS_WILDCARD_ALL
+  entries:
+  - alias: Produkt-ID
+    description: ''
+
+# Wrong — silently accepted, aliases not persisted
+groups:
+- name: TS_WILDCARD_ALL
+  alias: Produkt-ID
+```
+
+### Description field always present
+
+Every entry must include `description:` — use an empty string `''` when no
+description is needed. Omitting it may cause import issues.
+
+### CSV upload format (ThoughtSpot UI)
+
+The ThoughtSpot column-alias CSV upload expects these exact headers:
+
+```
+Column,locale,alias,description,org_name,group_name
+```
+
+Note: `Column` is capitalised; `org_name` and `group_name` are required (use
+`TS_WILDCARD_ALL` for "applies to all"). The `ts alias build --format csv` command
+emits this format.
+
+---
+
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-25 | Fix TML structure (entries wrapper, obj_id); add --format csv output; add Technical Reference |
 | 1.0.0 | 2026-07-24 | Initial release |

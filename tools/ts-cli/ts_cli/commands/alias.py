@@ -510,6 +510,8 @@ def build_cmd(
         help="Translations JSON file (default: stdin)"),
     merge: bool = typer.Option(False, "--merge",
         help="Merge new translations with existing aliases"),
+    fmt: Optional[str] = typer.Option(None, "--format",
+        help="Output format: tml (default) or csv (ThoughtSpot upload format)"),
 ) -> None:
     """Assemble column_alias TML YAML from translations.
 
@@ -517,8 +519,9 @@ def build_cmd(
     --merge, preserves existing aliases and only overwrites matching
     (column, locale, org, group) keys.
 
-    Output: column_alias TML YAML to stdout. Emits tml_size_bytes to
-    stderr. Warns when TML exceeds 20 MB; errors at 25 MB.
+    Output: column_alias TML YAML to stdout (default). With --format csv,
+    emits ThoughtSpot's CSV upload format instead (Column, locale, alias,
+    description, org_name, group_name).
 
     Examples:
 
@@ -526,11 +529,18 @@ def build_cmd(
       ts alias translate ... | ts alias build
       ts alias translate ... | ts alias build --merge
       ts alias build --input translations.json --merge
+      ts alias build --input translations.json --format csv > aliases.csv
     """
     from ts_cli.alias import (
         translations_to_columns, merge_aliases, build_alias_tml,
-        estimate_tml_size,
+        build_alias_csv, estimate_tml_size,
     )
+
+    output_format = (fmt or "tml").lower()
+    if output_format not in ("tml", "csv"):
+        print(f"Error: Unknown format {output_format!r}. Use tml or csv.",
+              file=sys.stderr)
+        raise SystemExit(1)
 
     envelope = _read_json_envelope(input_file)
     model_info = envelope.get("model", {})
@@ -546,6 +556,12 @@ def build_cmd(
         final_columns = merge_aliases(existing_cols, new_columns)
     else:
         final_columns = new_columns
+
+    if output_format == "csv":
+        csv_out = build_alias_csv(final_columns)
+        print(f"rows: {csv_out.count(chr(10)) - 1}", file=sys.stderr)
+        print(csv_out, end="")
+        return
 
     tml_yaml = build_alias_tml(model_name, model_fqn, final_columns)
     size = estimate_tml_size(tml_yaml)

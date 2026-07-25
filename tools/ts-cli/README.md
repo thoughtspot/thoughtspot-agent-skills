@@ -2710,7 +2710,7 @@ ts alias export --model <guid> -p prod \
 |---|---|
 | `ts alias export --model <guid>` | Export model columns + existing aliases |
 | `ts alias translate --source ai\|file\|db` | Generate aliases from AI, CSV, or a Snowflake table |
-| `ts alias build [--merge]` | Assemble `column_alias` TML YAML |
+| `ts alias build [--merge] [--format tml\|csv]` | Assemble alias output (TML or CSV) |
 | `ts alias import --model <guid>` | Upload alias TML (sync or async based on size) |
 
 ### `ts alias export`
@@ -2785,16 +2785,20 @@ translation; without it, the new translations fully replace prior aliases.
 ts alias translate ... | ts alias build
 ts alias translate ... | ts alias build --merge
 ts alias build --input translations.json --merge
+ts alias build --input translations.json --format csv > aliases.csv
 ```
 
 | Option | Default | Description |
 |---|---|---|
 | `--input` | stdin | Translations JSON envelope file |
 | `--merge` | `false` | Merge with existing aliases instead of replacing them |
+| `--format` | `tml` | Output format: `tml` (column_alias YAML) or `csv` (ThoughtSpot CSV upload format) |
 
-**Output:** `column_alias` TML YAML to stdout. `tml_size_bytes: <n>` and any
+**Output (tml):** `column_alias` TML YAML to stdout. `tml_size_bytes: <n>` and any
 size warning/error go to stderr. Warns above 20 MB; errors (exit 1) above the
 25 MB platform import limit.
+
+**Output (csv):** ThoughtSpot CSV upload format (`Column,locale,alias,description,org_name,group_name`) to stdout. Row count emitted to stderr.
 
 ### `ts alias import`
 

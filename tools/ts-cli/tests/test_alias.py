@@ -114,7 +114,7 @@ def test_merge_overwrite_existing():
     de_locale = [loc for loc in rev["locales"] if loc["name"] == "de-DE"][0]
     de_org = de_locale["orgs"][0]
     de_grp = de_org["groups"][0]
-    assert de_grp["alias"] == "Erlöse"
+    assert de_grp["entries"][0]["alias"] == "Erlöse"
 
 
 def test_merge_preserves_unmatched():
@@ -147,7 +147,7 @@ def test_translations_to_columns_org_scoped():
     assert org_names == {"Org 1", "Org 2"}
 
 
-from ts_cli.alias import build_alias_tml, estimate_tml_size
+from ts_cli.alias import build_alias_tml, build_alias_csv, estimate_tml_size, _make_obj_id
 
 
 def test_build_alias_tml_basic():
@@ -159,7 +159,7 @@ def test_build_alias_tml_basic():
     tml = build_alias_tml("Sales Model", "MODEL_abc123", columns)
     assert "column_alias:" in tml
     assert "Sales Model" in tml
-    assert "MODEL_abc123" in tml
+    assert "obj_id: Sales Model-MODEL_ab" in tml
     assert "Umsatz" in tml
 
 
@@ -173,7 +173,54 @@ def test_build_alias_tml_roundtrip_structure():
     parsed = yaml.safe_load(tml)
     assert "column_alias" in parsed
     assert parsed["column_alias"]["model"]["name"] == "Sales"
+    assert parsed["column_alias"]["model"]["obj_id"] == "Sales-MODEL_1"
+    assert "fqn" not in parsed["column_alias"]["model"]
     assert parsed["column_alias"]["columns"][0]["name"] == "Revenue"
+
+
+def test_make_obj_id_standard_guid():
+    assert _make_obj_id("MyModel", "96edf61f-1bd9-49ed-ba6b-6aa7928a2b60") == "MyModel-96edf61f"
+
+
+def test_make_obj_id_no_dashes():
+    assert _make_obj_id("M", "abcdefgh") == "M-abcdefgh"
+
+
+def test_build_alias_csv_basic():
+    columns = translations_to_columns([
+        {"column": "Revenue", "locale": "de-DE", "alias": "Umsatz",
+         "description": "Gesamtumsatz", "org": "TS_WILDCARD_ALL",
+         "group": "TS_WILDCARD_ALL"},
+        {"column": "Region", "locale": "de-DE", "alias": "Gebiet",
+         "description": "", "org": "TS_WILDCARD_ALL",
+         "group": "TS_WILDCARD_ALL"},
+    ])
+    csv_text = build_alias_csv(columns)
+    lines = [l.strip() for l in csv_text.strip().splitlines()]
+    assert lines[0] == '"Column","locale","alias","description","org_name","group_name"'
+    assert len(lines) == 3
+    assert '"Revenue"' in lines[1] or '"Revenue"' in lines[2]
+    assert '"Umsatz"' in csv_text
+    assert '"Gebiet"' in csv_text
+
+
+def test_build_alias_csv_entries_structure():
+    """CSV output correctly flattens the entries wrapper."""
+    columns = [
+        {"name": "COL_A", "locales": [
+            {"name": "ja-JP", "orgs": [
+                {"name": "TS_WILDCARD_ALL", "groups": [
+                    {"name": "TS_WILDCARD_ALL", "entries": [
+                        {"alias": "列A", "description": ""}
+                    ]}
+                ]}
+            ]}
+        ]}
+    ]
+    csv_text = build_alias_csv(columns)
+    lines = csv_text.strip().split("\n")
+    assert len(lines) == 2
+    assert '"列A"' in lines[1]
 
 
 def test_estimate_tml_size():

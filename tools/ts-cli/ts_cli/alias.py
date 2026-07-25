@@ -72,12 +72,11 @@ def translations_to_columns(translations: list[dict]) -> list[dict]:
         col_map.setdefault(col, {})
         col_map[col].setdefault(loc, {})
         col_map[col][loc].setdefault(org, {})
-        entry: dict[str, Any] = {"name": grp}
+        alias_entry: dict[str, Any] = {}
         if t.get("alias"):
-            entry["alias"] = t["alias"]
-        if t.get("description"):
-            entry["description"] = t["description"]
-        col_map[col][loc][org][grp] = entry
+            alias_entry["alias"] = t["alias"]
+        alias_entry["description"] = t.get("description") or ""
+        col_map[col][loc][org][grp] = alias_entry
 
     columns: list[dict] = []
     for col_name in col_map:
@@ -85,7 +84,10 @@ def translations_to_columns(translations: list[dict]) -> list[dict]:
         for loc_name, orgs in col_map[col_name].items():
             org_list: list[dict] = []
             for org_name, groups in orgs.items():
-                group_list = list(groups.values())
+                group_list = [
+                    {"name": grp_name, "entries": [entry]}
+                    for grp_name, entry in groups.items()
+                ]
                 org_list.append({"name": org_name, "groups": group_list})
             locales.append({"name": loc_name, "orgs": org_list})
         columns.append({"name": col_name, "locales": locales})
@@ -102,11 +104,13 @@ def _flatten_columns(columns: list[dict]) -> dict[tuple, dict]:
                 org_name = org["name"]
                 for group in (org.get("groups") or []):
                     grp_name = group["name"]
-                    key = (col_name, loc_name, org_name, grp_name)
-                    flat[key] = {
-                        "alias": group.get("alias", ""),
-                        "description": group.get("description"),
-                    }
+                    entries = group.get("entries") or [group]
+                    for entry in entries:
+                        key = (col_name, loc_name, org_name, grp_name)
+                        flat[key] = {
+                            "alias": entry.get("alias", ""),
+                            "description": entry.get("description"),
+                        }
     return flat
 
 
@@ -128,18 +132,41 @@ def merge_aliases(
     return translations_to_columns(all_translations)
 
 
+def _make_obj_id(name: str, guid: str) -> str:
+    """Build the ThoughtSpot obj_id format: NAME-first8chars."""
+    short = guid.split("-")[0] if "-" in guid else guid[:8]
+    return f"{name}-{short}"
+
+
 def build_alias_tml(
     model_name: str,
     model_fqn: str,
     columns: list[dict],
 ) -> str:
+    obj_id = _make_obj_id(model_name, model_fqn)
     doc: dict[str, Any] = {
         "column_alias": {
-            "model": {"name": model_name, "fqn": model_fqn},
+            "model": {"name": model_name, "obj_id": obj_id},
             "columns": columns,
         }
     }
     return yaml.dump(doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def build_alias_csv(columns: list[dict]) -> str:
+    """Flatten the columns structure into ThoughtSpot's CSV upload format."""
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+    writer.writerow(["Column", "locale", "alias", "description", "org_name", "group_name"])
+    flat = _flatten_columns(columns)
+    for (col, loc, org, grp), entry in sorted(flat.items()):
+        writer.writerow([
+            col, loc,
+            entry.get("alias", ""),
+            entry.get("description") or "",
+            org, grp,
+        ])
+    return output.getvalue()
 
 
 def estimate_tml_size(tml_yaml: str) -> int:
@@ -154,7 +181,7 @@ def _extract_alias_data(parsed: dict) -> tuple[dict, str | None]:
     alias_data = parsed.get("column_alias") or {}
     existing_aliases = {"columns": alias_data.get("columns") or []}
     model_ref = alias_data.get("model") or {}
-    return existing_aliases, model_ref.get("fqn")
+    return existing_aliases, model_ref.get("fqn") or model_ref.get("obj_id")
 
 
 def _extract_model_data(parsed: dict, info: dict) -> tuple[dict, list[dict]]:
