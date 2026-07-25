@@ -418,3 +418,52 @@ def test_owner_org_not_duplicated_when_already_requested():
 def test_owner_org_counts_towards_coverage():
     matrix = build_value_matrix([_cluster()], _ORGS, source="uniform", owner_org="Primary")
     assert matrix["coverage"]["complete"] is True
+
+
+# ---------------------------------------------------------------------------
+# Root publish type — regression: apply published everything as LOGICAL_TABLE
+# ---------------------------------------------------------------------------
+
+from ts_cli.publish_plan import publish_type_for_root  # noqa: E402
+
+
+@pytest.mark.parametrize("root_type,expected", [
+    ("liveboard", "LIVEBOARD"),
+    ("pinboard", "LIVEBOARD"),
+    ("answer", "ANSWER"),
+    ("model", "LOGICAL_TABLE"),
+    ("worksheet", "LOGICAL_TABLE"),
+    ("table", "LOGICAL_TABLE"),
+    ("view", "LOGICAL_TABLE"),
+    ("LIVEBOARD", "LIVEBOARD"),   # case-insensitive
+    (None, "LOGICAL_TABLE"),      # unknown falls back to the data-layer type
+])
+def test_publish_type_for_root(root_type, expected):
+    assert publish_type_for_root(root_type) == expected
+
+
+def test_apply_plan_publishes_a_liveboard_as_liveboard():
+    # Regression: the publish step reused object_type (LOGICAL_TABLE, correct for
+    # the tables being parameterized) for the ROOT as well, so a Liveboard closure
+    # was published with the wrong type.
+    closure = {"root": {"guid": "lb-1", "name": "LB", "type": "liveboard"},
+               "tables": _CLOSURE["tables"]}
+    plan = build_apply_plan(closure, _MATRIX, publish_orgs=["ORG1"])
+    assert plan["publish"]["type"] == "LIVEBOARD"
+    # the tables underneath are still parameterized as logical tables
+    assert plan["parameterize"][0]["metadata_type"] == "LOGICAL_TABLE"
+
+
+def test_apply_plan_publishes_an_answer_as_answer():
+    closure = {"root": {"guid": "a-1", "name": "A", "type": "answer"},
+               "tables": _CLOSURE["tables"]}
+    plan = build_apply_plan(closure, _MATRIX, publish_orgs=["ORG1"])
+    assert plan["publish"]["type"] == "ANSWER"
+
+
+def test_rollback_unpublishes_with_the_same_type():
+    closure = {"root": {"guid": "lb-1", "type": "liveboard"}, "tables": _CLOSURE["tables"]}
+    plan = build_apply_plan(closure, _MATRIX, publish_orgs=["ORG1"])
+    unpublish = rollback_steps(plan["rollback"])[0]
+    assert unpublish["action"] == "unpublish"
+    assert unpublish["type"] == "LIVEBOARD"

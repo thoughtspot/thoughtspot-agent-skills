@@ -1272,6 +1272,12 @@ Per cluster: `field`, `current_value`, `tables`, `spans_tables`,
 Safe to re-run on a partly configured Model: already-parameterized clusters are
 reported rather than re-suggested. That is the add-a-tenant path.
 
+Accepts a Liveboard or Answer GUID too. Those have no parameterizable fields of
+their own, so `export` walks down to the Tables beneath them and reports
+`root.type` accordingly; `apply` then publishes the root with the matching type.
+When the data layer is already wired, publishing a Liveboard is just
+`ts publish push --type LIVEBOARD`.
+
 ---
 
 ### `ts publish resolve`

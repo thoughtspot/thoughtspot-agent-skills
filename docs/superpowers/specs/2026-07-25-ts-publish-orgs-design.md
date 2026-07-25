@@ -227,8 +227,12 @@ does **not** exist on this build.
 Named `ts-publish-orgs`, requiring a new `ts-publish-*` family in
 `.claude/rules/skill-naming.md` (justified in §7).
 
-Scope for 1.0.0 is the **data layer only**: Tables and Models. Liveboards and
-Answers use the identical call and are a later minor version.
+Scope for the **skill's** 1.0.0 is the data layer: Tables and Models. The **CLI**
+covers Liveboards and Answers as well, because it costs almost nothing to do so:
+they carry no parameterizable fields of their own, so `export` simply walks down
+to the Tables beneath them and `apply` publishes the root with its own type. A
+Liveboard whose data layer is already wired needs only
+`ts publish push --type LIVEBOARD`.
 
 Pipeline mirrors `ts-object-model-alias`, with a rollback arm from
 `ts-dependency-manager`:
@@ -483,9 +487,14 @@ a governance table both need a Snowflake or Databricks profile and are worth
 building once the skill is exercised against a real tenant layout; `pattern`
 plus `file` covers the same ground meanwhile. Not dropped, just not speculative.
 
-### One correction from live testing
+### Corrections from live testing
 
-Falcon-backed tables (no connection block) cannot be parameterized: they are the
+**Root publish type.** `apply` originally published the closure root using the
+same type it used to parameterize the Tables (`LOGICAL_TABLE`), so a Liveboard or
+Answer closure would have been published with the wrong type. The publish type is
+now derived from `root.type` via `publish_type_for_root`.
+
+**Falcon-backed tables.** Tables with no connection block cannot be parameterized: they are the
 "default system tables" the docs exclude. The first cut of `export` happily
 proposed variables for them. Clusters now carry `parameterizable`, `recommended`
 is gated on it, `selectable_clusters` never returns one, and `export` warns

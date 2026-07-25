@@ -366,6 +366,25 @@ def _value_for(
 # Apply plan — the `ts publish apply` / `rollback` engine
 # ---------------------------------------------------------------------------
 
+# TML export reports the root's kind in lower case; the publish API wants its own
+# enum. Everything in the data layer (model / worksheet / table / view) publishes
+# as LOGICAL_TABLE.
+_ROOT_TYPE_TO_PUBLISH_TYPE = {
+    "liveboard": "LIVEBOARD",
+    "pinboard": "LIVEBOARD",
+    "answer": "ANSWER",
+}
+
+
+def publish_type_for_root(root_type: Optional[str]) -> str:
+    """Map an exported root's type to the publish API's metadata type.
+
+    Falls back to LOGICAL_TABLE, which covers Models, Worksheets, Tables and
+    Views, and is the safe default for an unrecognised kind.
+    """
+    return _ROOT_TYPE_TO_PUBLISH_TYPE.get((root_type or "").lower(), "LOGICAL_TABLE")
+
+
 def build_apply_plan(
     closure: Dict[str, Any],
     matrix: Dict[str, Any],
@@ -410,7 +429,11 @@ def build_apply_plan(
 
     publish = None
     if publish_orgs:
-        publish = {"identifiers": [closure["root"]["guid"]], "type": object_type,
+        # The root may be a Liveboard or Answer even though every table beneath it
+        # parameterizes as a LOGICAL_TABLE, so the publish type is derived from the
+        # root rather than reusing object_type.
+        publish = {"identifiers": [closure["root"]["guid"]],
+                   "type": publish_type_for_root(closure["root"].get("type")),
                    "orgs": list(publish_orgs)}
 
     return {
