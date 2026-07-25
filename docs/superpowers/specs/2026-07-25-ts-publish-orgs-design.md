@@ -1,6 +1,6 @@
 # ts-publish-orgs — design
 
-**Status:** DRAFT, API surface live-verified
+**Status:** IN PROGRESS — API surface live-verified; CLI steps 1-6 shipped (ts-cli v0.99.0), skill not yet authored
 **Branch:** `wip/ts-publish-orgs`
 **Date:** 2026-07-25
 **Verification instance:** `nebula-damian-alias` (SW/DEV build, Orgs enabled: Primary + ORG1/ORG2/ORG3, Snowflake connections `APJ` and `SnowflakeConnection`). All endpoints below confirmed present and exercised live on 2026-07-25.
@@ -438,22 +438,45 @@ live verification (§2.5). One remains.
 
 ---
 
-## 10. Build order
+## 10. Build order and status
 
-1. Extend `.claude/rules/skill-naming.md` + `check_skill_naming.py` with the
-   `ts-publish-*` family
-2. `ts variables create` / `delete`
-3. `ts metadata parameterize` / `unparameterize`
-4. `ts publish push` / `unpush` / `status`
-5. `ts publish export` (field variance clustering)
-6. `ts publish resolve` (value matrix, six sources, coverage check)
-7. `ts publish build` / `apply` / `verify` / `rollback`
-8. Cherry-pick org-scoped token auth from `feat/ts-org-migrate`, then close Open
-   Item #1 and add substitution checking to `verify`
-9. `agents/cli/ts-publish-orgs/SKILL.md`
-10. `tools/smoke-tests/smoke_ts_publish_orgs.py`
-11. README.md, `agents/cli/SETUP.md`, `EXPECTED_DIVERGENCES` in
-    `check_runtime_coverage.py` (CLI-only; no Snowsight analogue), CHANGELOG.md
+| # | Step | Status |
+|---|---|---|
+| 1 | `ts-publish-*` family in `skill-naming.md` + `check_skill_naming.py` | **DONE** (`bf41b3b`) |
+| 2 | `ts variables create` / `delete` | **DONE** (`8c58d9c`, v0.98.0) |
+| 3 | `ts metadata parameterize` / `unparameterize` | **DONE** (`8c58d9c`) |
+| 4 | `ts publish push` / `unpush` / `status` | **DONE** (`8c58d9c`) |
+| 5 | `ts publish export` (field-variance clustering) | **DONE** (`61ea50a`) |
+| 6 | `ts publish resolve` (value matrix + coverage check) | **DONE** (`bc60b37`, v0.99.0) |
+| 7 | `ts publish apply` / `rollback` | TODO |
+| 8 | Org-scoped token auth from `feat/ts-org-migrate`, then close Open Item #1 and add substitution checking to `verify` | TODO (blocked) |
+| 9 | `agents/cli/ts-publish-orgs/SKILL.md` | TODO |
+| 10 | `tools/smoke-tests/smoke_ts_publish_orgs.py` | TODO |
+| 11 | README.md, `agents/cli/SETUP.md`, `agents/PARITY.md`, `EXPECTED_DIVERGENCES` in `check_runtime_coverage.py` (CLI-only; no Snowsight analogue) | TODO |
 
-Steps 2 to 4 are useful standalone and can ship ahead of the skill. The design
-is no longer blocked: only Step 8 depends on the remaining open item.
+Steps 2 to 6 are shipped, unit-tested (75 new tests) and live-verified end to
+end on `nebula-damian-alias`. They are useful standalone: the whole workflow can
+be driven by hand today.
+
+### Two design changes made during the build
+
+**`build` merged into `apply`.** The original five-stage pipeline had `build`
+emit a plan for review before `apply` executed it. In practice `resolve` already
+produces the reviewable artefact (the value matrix), so a separate `build` would
+only re-emit it in a different shape. `apply --dry-run` prints the ordered plan
+instead, which gives the same review step with one command fewer.
+
+**`--source warehouse` and `--source db` deferred.** `resolve` ships with four
+sources (`uniform`, `pattern`, `file`, `existing`). Warehouse introspection and
+a governance table both need a Snowflake or Databricks profile and are worth
+building once the skill is exercised against a real tenant layout; `pattern`
+plus `file` covers the same ground meanwhile. Not dropped, just not speculative.
+
+### One correction from live testing
+
+Falcon-backed tables (no connection block) cannot be parameterized: they are the
+"default system tables" the docs exclude. The first cut of `export` happily
+proposed variables for them. Clusters now carry `parameterizable`, `recommended`
+is gated on it, `selectable_clusters` never returns one, and `export` warns
+naming the tables. Worth remembering when the skill picks a Model: a Falcon-backed
+Model cannot be published at all.
