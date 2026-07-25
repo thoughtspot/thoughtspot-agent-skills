@@ -309,3 +309,76 @@ def test_coverage_report_flags_a_blank_value_as_missing():
                    {"variable": "v", "org": "ORG2", "value": "y"}]
     report = coverage_report(assignments, ["v"], _ORGS)
     assert report["missing"] == [{"variable": "v", "org": "ORG1"}]
+
+
+# ---------------------------------------------------------------------------
+# Apply plan / rollback (ts publish apply, ts publish rollback)
+# ---------------------------------------------------------------------------
+
+from ts_cli.publish_plan import build_apply_plan, rollback_steps  # noqa: E402
+
+_CLOSURE = {
+    "root": {"guid": "model-1", "name": "M"},
+    "tables": [{"guid": "g1", "name": "T1", "connection": "APJ", "fields": {
+        "databaseName": {"value": "AGENT_SKILLS", "variable": None},
+        "schemaName": {"value": "ALIAS_TESTS", "variable": None},
+    }}],
+}
+_MATRIX = {
+    "orgs": ["ORG1"],
+    "variables": [{"name": "apj_schema", "type": "TABLE_MAPPING", "field": "schemaName",
+                   "tables": ["g1"], "exists": False, "sensitive": False}],
+    "assignments": [{"variable": "apj_schema", "org": "ORG1", "value": "TENANT1"}],
+}
+
+
+def test_apply_plan_creates_assigns_and_parameterizes():
+    plan = build_apply_plan(_CLOSURE, _MATRIX)
+    assert plan["create_variables"] == [
+        {"name": "apj_schema", "type": "TABLE_MAPPING", "sensitive": False}]
+    assert plan["assign_values"] == _MATRIX["assignments"]
+    assert plan["parameterize"] == [{"metadata_identifier": "g1", "metadata_type": "LOGICAL_TABLE",
+                                     "field_names": ["schemaName"], "variable": "apj_schema"}]
+    assert plan["publish"] is None
+
+
+def test_apply_plan_records_the_original_value_for_rollback():
+    plan = build_apply_plan(_CLOSURE, _MATRIX)
+    assert plan["rollback"]["parameterized"] == [{
+        "metadata_identifier": "g1", "metadata_type": "LOGICAL_TABLE",
+        "field_name": "schemaName", "original_value": "ALIAS_TESTS"}]
+
+
+def test_apply_plan_only_lists_variables_it_creates_for_deletion():
+    matrix = {**_MATRIX, "variables": [{**_MATRIX["variables"][0], "exists": True}]}
+    plan = build_apply_plan(_CLOSURE, matrix)
+    assert plan["create_variables"] == []
+    assert plan["rollback"]["created_variables"] == []
+
+
+def test_apply_plan_skips_a_field_already_bound_to_a_token():
+    closure = {"root": {"guid": "m"}, "tables": [{"guid": "g1", "fields": {
+        "schemaName": {"value": "${apj_schema}", "variable": "apj_schema"}}}]}
+    plan = build_apply_plan(closure, _MATRIX)
+    assert plan["parameterize"] == []
+    assert plan["rollback"]["parameterized"] == []
+
+
+def test_apply_plan_includes_publish_when_orgs_given():
+    plan = build_apply_plan(_CLOSURE, _MATRIX, publish_orgs=["ORG1"])
+    assert plan["publish"] == {"identifiers": ["model-1"], "type": "LOGICAL_TABLE",
+                               "orgs": ["ORG1"]}
+
+
+def test_rollback_order_is_unpublish_then_unparameterize_then_delete():
+    plan = build_apply_plan(_CLOSURE, _MATRIX, publish_orgs=["ORG1"])
+    actions = [s["action"] for s in rollback_steps(plan["rollback"])]
+    assert actions == ["unpublish", "unparameterize", "delete_variables"]
+
+
+def test_rollback_skips_a_field_with_no_recorded_original():
+    record = {"parameterized": [{"metadata_identifier": "g1", "field_name": "schemaName",
+                                 "original_value": None}]}
+    step = rollback_steps(record)[0]
+    assert step["action"] == "skip"
+    assert "no recorded original value" in step["reason"]

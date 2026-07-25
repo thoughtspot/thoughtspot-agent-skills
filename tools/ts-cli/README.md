@@ -1308,6 +1308,47 @@ Output: `{"orgs", "variables", "assignments", "coverage": {"complete", "missing"
 
 ---
 
+### `ts publish apply`
+
+Create the variables, assign their values, parameterize the fields, and optionally publish.
+
+```bash
+ts publish apply -c export.json -m matrix.json --dry-run
+ts publish apply -c export.json -m matrix.json --rollback-out rb.json -p prod
+ts publish apply -c export.json -m matrix.json --publish-to ORG1 --rollback-out rb.json -p prod
+```
+
+Fixed order, because the platform requires it: create before assign, assign before
+publish. Refuses to start if the matrix has coverage gaps, since publishing would be
+refused anyway and a partial apply is worse than none.
+
+Re-running is safe: an existing variable is reused, a field already bound to a token
+is left alone.
+
+**Pass `--rollback-out`.** `unparameterize` substitutes a static value rather than
+clearing the field, so the original values must be recorded somewhere or there is no
+way back. Nothing else records them.
+
+Omit `--publish-to` to wire everything up and stop short of publishing.
+
+---
+
+### `ts publish rollback`
+
+Undo an apply.
+
+```bash
+ts publish rollback -i rb.json --dry-run
+ts publish rollback -i rb.json -p prod
+```
+
+Reverse order: unpublish (with `include_dependencies`, so the Connection grant is
+retracted too), restore each field's static value, then delete the variables that run
+created. A variable that already existed is never deleted, so one shared with another
+Model is safe. A field with no recorded original is skipped and reported.
+
+---
+
 ### `ts publish push`
 
 Publish objects from the Primary Org to target Orgs. No copies are made and GUIDs are

@@ -345,3 +345,92 @@ def _value_for(
     if source == "existing":
         return (existing_values.get(name) or {}).get(org["name"])
     raise ValueError(f"Unknown source '{source}'. Expected uniform, pattern, file or existing.")
+
+
+# ---------------------------------------------------------------------------
+# Apply plan — the `ts publish apply` / `rollback` engine
+# ---------------------------------------------------------------------------
+
+def build_apply_plan(
+    closure: Dict[str, Any],
+    matrix: Dict[str, Any],
+    *,
+    publish_orgs: Optional[List[str]] = None,
+    object_type: str = "LOGICAL_TABLE",
+) -> Dict[str, Any]:
+    """Turn a closure plus a value matrix into an ordered plan and a rollback record.
+
+    Order matters and is not negotiable: a variable must exist before it can take
+    a value, and must have a value in every target Org before anything using it is
+    published (publish fails closed otherwise).
+
+    The rollback record captures each field's ORIGINAL static value, because
+    ``unparameterize`` substitutes a value rather than clearing the field. Without
+    it there is no way back. Only variables this run creates are listed for
+    deletion, so an existing variable shared with another Model is never removed.
+
+    Pure — no I/O.
+    """
+    originals: Dict[str, Dict[str, Any]] = {
+        t["guid"]: (t.get("fields") or {}) for t in closure.get("tables") or []
+    }
+
+    create: List[Dict[str, Any]] = []
+    parameterize: List[Dict[str, Any]] = []
+    rollback_fields: List[Dict[str, Any]] = []
+
+    for variable in matrix.get("variables") or []:
+        name, field = variable["name"], variable["field"]
+        if not variable.get("exists"):
+            create.append({"name": name, "type": variable.get("type", "TABLE_MAPPING"),
+                           "sensitive": bool(variable.get("sensitive"))})
+        for guid in variable.get("tables") or []:
+            current = ((originals.get(guid) or {}).get(field) or {})
+            if current.get("variable"):
+                continue  # already bound to a token; nothing to do and nothing to undo
+            parameterize.append({"metadata_identifier": guid, "metadata_type": object_type,
+                                 "field_names": [field], "variable": name})
+            rollback_fields.append({"metadata_identifier": guid, "metadata_type": object_type,
+                                    "field_name": field, "original_value": current.get("value")})
+
+    publish = None
+    if publish_orgs:
+        publish = {"identifiers": [closure["root"]["guid"]], "type": object_type,
+                   "orgs": list(publish_orgs)}
+
+    return {
+        "create_variables": create,
+        "assign_values": list(matrix.get("assignments") or []),
+        "parameterize": parameterize,
+        "publish": publish,
+        "rollback": {
+            "created_variables": [c["name"] for c in create],
+            "parameterized": rollback_fields,
+            "published": publish,
+        },
+    }
+
+
+def rollback_steps(record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Order the undo actions for a rollback record.
+
+    Reverse of apply: unpublish first (while the objects still resolve), then
+    unparameterize back to the recorded static values, then delete the variables
+    this run created — a variable cannot be deleted while still bound.
+
+    A field with no recorded original value is skipped and reported, since
+    ``unparameterize`` cannot run without one.
+    """
+    steps: List[Dict[str, Any]] = []
+    if record.get("published"):
+        steps.append({"action": "unpublish", **record["published"]})
+    for field in record.get("parameterized") or []:
+        if field.get("original_value") in (None, ""):
+            steps.append({"action": "skip", "reason": "no recorded original value",
+                          "metadata_identifier": field.get("metadata_identifier"),
+                          "field_name": field.get("field_name")})
+            continue
+        steps.append({"action": "unparameterize", **field})
+    if record.get("created_variables"):
+        steps.append({"action": "delete_variables", "names": list(record["created_variables"])})
+    return steps

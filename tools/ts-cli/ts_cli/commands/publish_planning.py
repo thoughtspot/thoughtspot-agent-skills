@@ -244,3 +244,173 @@ def resolve(
             print(f"Coverage gap: variable '{gap['variable']}' has no value for org "
                   f"'{gap['org']}'. Publishing will be refused until it does.", file=sys.stderr)
     print(json.dumps(matrix))
+
+
+def _write_rollback(record: Dict[str, Any], path: Optional[str]) -> None:
+    if not path:
+        return
+    with open(path, "w") as handle:
+        json.dump(record, handle, indent=2)
+    print(f"Rollback record written to {path}", file=sys.stderr)
+
+
+def _run_apply(client: ThoughtSpotClient, plan: Dict[str, Any]) -> None:
+    """Execute an apply plan in order, reporting each step on stderr.
+
+    Order is load-bearing: create before assign, assign before publish. Variable
+    creation tolerates an already-exists failure so a re-run is idempotent.
+    """
+    from urllib.parse import quote
+
+    for variable in plan["create_variables"]:
+        resp = client.post("/api/rest/2.0/template/variables/create", raise_for_status=False,
+                           json={"type": variable["type"], "name": variable["name"],
+                                 "is_sensitive": variable["sensitive"]})
+        if resp.ok:
+            print(f"created variable {variable['name']}", file=sys.stderr)
+        elif "already exists" in (resp.text or "").lower():
+            print(f"variable {variable['name']} already exists, reusing", file=sys.stderr)
+        else:
+            raise typer.BadParameter(
+                f"Could not create variable '{variable['name']}': "
+                f"HTTP {resp.status_code} {' '.join((resp.text or '').split())[:300]}")
+
+    for assignment in plan["assign_values"]:
+        client.post(
+            f"/api/rest/2.0/template/variables/{quote(assignment['variable'], safe='')}/update-values",
+            json={"operation": "REPLACE",
+                  "variable_assignment": [{"assigned_values": [assignment["value"]],
+                                           "org_identifier": assignment["org"]}]})
+    print(f"assigned {len(plan['assign_values'])} value(s)", file=sys.stderr)
+
+    for step in plan["parameterize"]:
+        client.post("/api/rest/2.0/metadata/parameterize-fields", json={
+            "metadata_type": step["metadata_type"],
+            "metadata_identifier": step["metadata_identifier"],
+            "field_type": "ATTRIBUTE",
+            "field_names": step["field_names"],
+            "variable_identifier": step["variable"]})
+    print(f"parameterized {len(plan['parameterize'])} field(s)", file=sys.stderr)
+
+
+@app.command("apply")
+def apply_plan(
+    closure: str = typer.Option(..., "--closure", "-c", help="`ts publish export` JSON file"),
+    matrix: str = typer.Option(..., "--matrix", "-m", help="`ts publish resolve` JSON file"),
+    publish_to: List[str] = typer.Option([], "--publish-to",
+                                         help="Also publish to these orgs after wiring "
+                                              "(repeatable). Omit to stop before publishing."),
+    rollback_out: Optional[str] = typer.Option(None, "--rollback-out",
+                                               help="Write the rollback record here. Strongly "
+                                                    "recommended: unparameterize needs the "
+                                                    "original values and nothing else records them."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the ordered plan and exit"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Create the variables, assign their values, parameterize the fields, and optionally publish.
+
+    Runs in a fixed order because the platform requires it: a variable must exist
+    before it takes a value, and must have a value in every target org before
+    anything using it is published.
+
+    Re-running is safe: an already-existing variable is reused, and a field already
+    bound to a token is left alone.
+
+    Output: the plan as JSON to stdout (always), progress on stderr.
+
+    Examples:
+
+    \b
+      ts publish apply -c export.json -m matrix.json --dry-run
+      ts publish apply -c export.json -m matrix.json --rollback-out rb.json -p prod
+      ts publish apply -c export.json -m matrix.json --publish-to ORG1 --rollback-out rb.json -p prod
+    """
+    from ts_cli.publish_plan import build_apply_plan
+
+    with open(closure) as handle:
+        closure_doc = json.load(handle)
+    with open(matrix) as handle:
+        matrix_doc = json.load(handle)
+
+    if not (matrix_doc.get("coverage") or {}).get("complete", True):
+        gaps = ", ".join(f"{g['variable']}@{g['org']}"
+                         for g in matrix_doc["coverage"].get("missing") or [])
+        raise typer.BadParameter(
+            f"The value matrix has coverage gaps ({gaps}). Publishing would be refused, "
+            f"so this stops before changing anything. Re-run `ts publish resolve` with "
+            f"values for every target org.")
+
+    plan = build_apply_plan(closure_doc, matrix_doc, publish_orgs=list(publish_to) or None)
+    print(json.dumps(plan))
+    if dry_run:
+        print("Dry run: nothing was changed.", file=sys.stderr)
+        return
+
+    client = ThoughtSpotClient(resolve_profile(profile))
+    _write_rollback(plan["rollback"], rollback_out)
+    _run_apply(client, plan)
+
+    if plan["publish"]:
+        from ts_cli.commands.publish import _post_with_explanation, build_publish_payload
+        payload = build_publish_payload(plan["publish"]["identifiers"], plan["publish"]["type"],
+                                        plan["publish"]["orgs"])
+        _post_with_explanation(client, "/api/rest/2.0/security/metadata/publish", payload,
+                               plan["publish"]["identifiers"], plan["publish"]["type"])
+        print(f"published to {', '.join(plan['publish']['orgs'])}", file=sys.stderr)
+
+
+@app.command("rollback")
+def rollback(
+    input: str = typer.Option(..., "--input", "-i", help="Rollback record from `ts publish apply`"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the ordered steps and exit"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Undo an apply: unpublish, restore static values, delete the variables it created.
+
+    Reverse order of apply. Unpublish uses include_dependencies so the Connection
+    grant is retracted too; without that the target orgs keep it.
+
+    Only variables the recorded run created are deleted, so a variable shared with
+    another Model is never removed. A field with no recorded original value is
+    skipped and reported, because unparameterize cannot run without one.
+
+    Examples:
+
+    \b
+      ts publish rollback -i rb.json --dry-run
+      ts publish rollback -i rb.json -p prod
+    """
+    from ts_cli.commands.publish import build_unpublish_payload
+    from ts_cli.publish_plan import rollback_steps
+
+    with open(input) as handle:
+        record = json.load(handle)
+    steps = rollback_steps(record)
+    print(json.dumps(steps))
+    if dry_run:
+        print("Dry run: nothing was changed.", file=sys.stderr)
+        return
+
+    client = ThoughtSpotClient(resolve_profile(profile))
+    for step in steps:
+        action = step["action"]
+        if action == "skip":
+            print(f"skipped {step['metadata_identifier']}.{step['field_name']}: "
+                  f"{step['reason']}", file=sys.stderr)
+        elif action == "unpublish":
+            client.post("/api/rest/2.0/security/metadata/unpublish",
+                        json=build_unpublish_payload(step["identifiers"], step["type"],
+                                                     step["orgs"], include_dependencies=True))
+            print(f"unpublished from {', '.join(step['orgs'])}", file=sys.stderr)
+        elif action == "unparameterize":
+            client.post("/api/rest/2.0/metadata/unparameterize", json={
+                "metadata_type": step.get("metadata_type", "LOGICAL_TABLE"),
+                "metadata_identifier": step["metadata_identifier"],
+                "field_type": "ATTRIBUTE",
+                "field_name": step["field_name"],
+                "value": step["original_value"]})
+        elif action == "delete_variables":
+            client.post("/api/rest/2.0/template/variables/delete",
+                        json={"identifiers": step["names"]})
+            print(f"deleted variable(s) {', '.join(step['names'])}", file=sys.stderr)
+    print("rollback complete", file=sys.stderr)
