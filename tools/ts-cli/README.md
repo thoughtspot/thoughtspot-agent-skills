@@ -1274,6 +1274,40 @@ reported rather than re-suggested. That is the add-a-tenant path.
 
 ---
 
+### `ts publish resolve`
+
+Build the per-org value matrix for an exported closure.
+
+```bash
+ts publish export <guid> -p prod | ts publish resolve --org ORG1 --org ORG2 --source uniform -p prod
+ts publish resolve -i export.json --org ORG1 --source pattern --pattern "schemaName={ORG_UPPER}" -p prod
+ts publish resolve -i export.json --org ORG1 --source file --csv values.csv -p prod
+```
+
+Reads a `ts publish export` envelope from `--input` or stdin. Sources:
+
+| Source | Behaviour |
+|---|---|
+| `uniform` (default) | The current value, replicated to every org. The shared-table case: still a real variable, so publish validation stays on and a later divergence is one `ts variables set` rather than a structural change. |
+| `pattern` | A per-field template expanded per org. Placeholders: `{ORG}`, `{ORG_UPPER}`, `{ORG_LOWER}`, `{ORG_ID}`, `{VALUE}`. A field with no pattern keeps its current value. An unknown placeholder is rejected rather than passed through. |
+| `file` | A CSV of `org_name,variable_name,value`. |
+| `existing` | Values already assigned on the instance. The re-publish / add-a-tenant path. |
+
+Selects the recommended fields (`databaseName`, `schemaName`) by default; `--field`
+widens or narrows that. Fields on Falcon-backed tables are never selectable.
+
+Always emits a **coverage check**. Publishing fails closed on a gap and reports the
+variable by GUID and the org by numeric id, so catching it here names both instead:
+
+```
+Coverage gap: variable 'apj_schema' has no value for org 'ORG3'.
+Publishing will be refused until it does.
+```
+
+Output: `{"orgs", "variables", "assignments", "coverage": {"complete", "missing"}}`.
+
+---
+
 ### `ts publish push`
 
 Publish objects from the Primary Org to target Orgs. No copies are made and GUIDs are

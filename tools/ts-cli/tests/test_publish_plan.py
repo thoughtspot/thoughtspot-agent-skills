@@ -180,3 +180,132 @@ def test_suggest_variable_name_avoids_collisions_within_one_run():
     second = suggest_variable_name("APJ", "schemaName", "OTHER", taken, disambiguate=False)
     assert first == "apj_schema"
     assert second == "apj_schema_2"
+
+
+# ---------------------------------------------------------------------------
+# Value matrix (ts publish resolve)
+# ---------------------------------------------------------------------------
+
+from ts_cli.publish_plan import (  # noqa: E402
+    build_value_matrix,
+    coverage_report,
+    expand_pattern,
+    parse_pattern_args,
+    selectable_clusters,
+)
+
+_ORGS = [{"name": "ORG1", "id": 11}, {"name": "ORG2", "id": 22}]
+
+
+def _cluster(field="schemaName", value="SALES", variable=None, name="apj_schema",
+             parameterizable=True, recommended=True):
+    return {"field": field, "current_value": value, "suggested_variable": name,
+            "variable": variable, "already_parameterized": variable is not None,
+            "tables": ["g1"], "table_names": ["T1"], "connection": "APJ",
+            "spans_tables": 1, "parameterizable": parameterizable,
+            "recommended": recommended}
+
+
+@pytest.mark.parametrize("template,expected", [
+    ("{ORG_UPPER}_DB", "ORG1_DB"),
+    ("{ORG_LOWER}_db", "org1_db"),
+    ("tenant_{ORG}", "tenant_Org1"),
+    ("t{ORG_ID}", "t11"),
+    ("{VALUE}", "SALES"),
+    ("static", "static"),
+])
+def test_expand_pattern(template, expected):
+    assert expand_pattern(template, "Org1", 11, "SALES") == expected
+
+
+def test_expand_pattern_rejects_unknown_placeholder():
+    with pytest.raises(ValueError, match="TENANT"):
+        expand_pattern("{TENANT}_db", "Org1", 11, "SALES")
+
+
+def test_parse_pattern_args():
+    assert parse_pattern_args(["schemaName={ORG_UPPER}", "databaseName=SHARED"]) == {
+        "schemaName": "{ORG_UPPER}", "databaseName": "SHARED"}
+
+
+def test_parse_pattern_args_rejects_malformed():
+    with pytest.raises(ValueError, match="field=pattern"):
+        parse_pattern_args(["schemaName"])
+
+
+def test_selectable_clusters_defaults_to_recommended_only():
+    clusters = [_cluster(), _cluster(field="tableName", name="apj_table", recommended=False)]
+    assert [c["field"] for c in selectable_clusters(clusters)] == ["schemaName"]
+
+
+def test_selectable_clusters_honours_explicit_fields():
+    clusters = [_cluster(), _cluster(field="tableName", name="apj_table", recommended=False)]
+    picked = selectable_clusters(clusters, fields=["tableName"])
+    assert [c["field"] for c in picked] == ["tableName"]
+
+
+def test_selectable_clusters_never_returns_unparameterizable():
+    clusters = [_cluster(parameterizable=False)]
+    assert selectable_clusters(clusters, fields=["schemaName"]) == []
+
+
+def test_uniform_source_repeats_current_value_for_every_org():
+    matrix = build_value_matrix([_cluster()], _ORGS, source="uniform")
+    assert matrix["assignments"] == [
+        {"variable": "apj_schema", "org": "ORG1", "value": "SALES"},
+        {"variable": "apj_schema", "org": "ORG2", "value": "SALES"},
+    ]
+
+
+def test_pattern_source_expands_per_org():
+    matrix = build_value_matrix([_cluster()], _ORGS, source="pattern",
+                                patterns={"schemaName": "{ORG_UPPER}_SALES"})
+    assert [a["value"] for a in matrix["assignments"]] == ["ORG1_SALES", "ORG2_SALES"]
+
+
+def test_pattern_source_falls_back_to_current_value_when_field_unmatched():
+    matrix = build_value_matrix([_cluster()], _ORGS, source="pattern",
+                                patterns={"databaseName": "{ORG_UPPER}_DB"})
+    assert [a["value"] for a in matrix["assignments"]] == ["SALES", "SALES"]
+
+
+def test_file_source_uses_supplied_rows():
+    rows = [{"org_name": "ORG1", "variable_name": "apj_schema", "value": "A"},
+            {"org_name": "ORG2", "variable_name": "apj_schema", "value": "B"}]
+    matrix = build_value_matrix([_cluster()], _ORGS, source="file", csv_rows=rows)
+    assert [a["value"] for a in matrix["assignments"]] == ["A", "B"]
+
+
+def test_file_source_leaves_a_gap_when_a_row_is_missing():
+    rows = [{"org_name": "ORG1", "variable_name": "apj_schema", "value": "A"}]
+    matrix = build_value_matrix([_cluster()], _ORGS, source="file", csv_rows=rows)
+    assert matrix["coverage"]["complete"] is False
+    assert matrix["coverage"]["missing"] == [{"variable": "apj_schema", "org": "ORG2"}]
+
+
+def test_matrix_reuses_the_existing_variable_name_when_already_parameterized():
+    matrix = build_value_matrix([_cluster(variable="already_bound")], _ORGS, source="uniform")
+    assert matrix["variables"][0]["name"] == "already_bound"
+    assert matrix["variables"][0]["exists"] is True
+
+
+def test_matrix_marks_new_variables_for_creation():
+    matrix = build_value_matrix([_cluster()], _ORGS, source="uniform")
+    assert matrix["variables"] == [{
+        "name": "apj_schema", "type": "TABLE_MAPPING", "field": "schemaName",
+        "tables": ["g1"], "exists": False, "sensitive": False,
+    }]
+
+
+def test_coverage_report_is_complete_when_every_org_has_a_value():
+    assignments = [{"variable": "v", "org": "ORG1", "value": "x"},
+                   {"variable": "v", "org": "ORG2", "value": "y"}]
+    report = coverage_report(assignments, ["v"], _ORGS)
+    assert report == {"complete": True, "missing": []}
+
+
+def test_coverage_report_flags_a_blank_value_as_missing():
+    assignments = [{"variable": "v", "org": "ORG1", "value": ""},
+                   {"variable": "v", "org": "ORG2", "value": "y"}]
+    report = coverage_report(assignments, ["v"], _ORGS)
+    assert report["missing"] == [{"variable": "v", "org": "ORG1"}]

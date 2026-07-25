@@ -22,6 +22,7 @@ ts_cli/
   sv_introspect.py     — INFORMATION_SCHEMA → tables-spec + tables map (map_snowflake_type, build_tables_spec, build_tables_map, detect_column_gaps); Snowflake type → ThoughtSpot type mapping, cross-schema query building, column gap detection against existing TS tables (BL-100 PR4; pure functions, no I/O)
   sv_build_sv.py       — ThoughtSpot Model TML → Snowflake Semantic View DDL (build_sv_ddl); column_id resolution, column classification (dimension/metric/time_dimension), to_snake aliasing, relationship naming with collision avoidance, metric topological ordering, CA extension JSON, synonym/comment handling (BL-100 PR5; pure functions, no I/O)
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts agentql classify-columns` (pure functions, no I/O)
+  publish_plan.py      — Orgs Publishing planning engine: field-variance clustering (build_clusters/extract_table_fields/suggest_variable_name) + the value matrix (build_value_matrix/expand_pattern/coverage_report) behind `ts publish export`/`resolve`. Clusters by DISTINCT VALUE because a variable holds one value per scope, so N tables sharing a schema need one variable, not N (pure functions, no I/O)
   promote.py           — Formula promotion merge (extract_answer_formulas/detect_duplicates/map_references/build_merged_model) behind `ts model promote-formula` (pure functions, no I/O; BL-066)
   aggregate/
     __init__.py          — package marker
@@ -103,6 +104,7 @@ ts_cli/
     spotql.py     — ts agentql (generate-sql, fetch-data, classify-columns)
     spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
     parameterize.py — ts metadata parameterize / unparameterize (attaches to metadata.app); binds template variables to Table/Connection fields. field_type is derived from metadata_type so the code-10002 mismatch is unreachable; warns when one variable is bound to several fields (same token written into each)
+    publish_planning.py — ts publish export / resolve (attaches to publish.app); dependency-closure walk + planning I/O over publish_plan.py. Split from publish.py under the file-size gate
     publish.py    — ts publish (push, unpush, status) — Orgs Publishing. Pure payload builders + explain_publish_error, which resolves the API's GUID/numeric-id failure messages into named, actionable text. status reads metadata_header.orgIds, so it needs no per-Org auth
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
@@ -130,7 +132,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.99.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.100.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

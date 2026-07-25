@@ -173,3 +173,175 @@ def build_clusters(
             cluster["suggested_variable"] = name
         clusters.append(cluster)
     return clusters
+
+
+# ---------------------------------------------------------------------------
+# Value matrix — the `ts publish resolve` engine
+# ---------------------------------------------------------------------------
+
+# Placeholders accepted in a --pattern template.
+_PLACEHOLDER_RE = re.compile(r"\{([A-Z_]+)\}")
+_KNOWN_PLACEHOLDERS = ("ORG", "ORG_UPPER", "ORG_LOWER", "ORG_ID", "VALUE")
+
+
+def expand_pattern(template: str, org_name: str, org_id: Any, current_value: str) -> str:
+    """Expand a per-field pattern for one Org.
+
+    Placeholders: ``{ORG}``, ``{ORG_UPPER}``, ``{ORG_LOWER}``, ``{ORG_ID}`` and
+    ``{VALUE}`` (the field's current value in the Primary Org). An unknown
+    placeholder raises rather than being left in the output, because a literal
+    ``{TENANT}`` reaching the warehouse would surface as a confusing runtime
+    error long after the typo.
+    """
+    unknown = [p for p in _PLACEHOLDER_RE.findall(template or "") if p not in _KNOWN_PLACEHOLDERS]
+    if unknown:
+        raise ValueError(
+            f"Unknown placeholder(s) in pattern '{template}': {', '.join(unknown)}. "
+            f"Expected one of: {', '.join('{' + p + '}' for p in _KNOWN_PLACEHOLDERS)}"
+        )
+    return (template
+            .replace("{ORG_UPPER}", str(org_name).upper())
+            .replace("{ORG_LOWER}", str(org_name).lower())
+            .replace("{ORG_ID}", str(org_id))
+            .replace("{ORG}", str(org_name))
+            .replace("{VALUE}", str(current_value)))
+
+
+def parse_pattern_args(raw: Iterable[str]) -> Dict[str, str]:
+    """Parse repeated ``--pattern field=template`` arguments into a mapping."""
+    patterns: Dict[str, str] = {}
+    for entry in raw or ():
+        if "=" not in entry:
+            raise ValueError(f"Malformed --pattern '{entry}'. Expected field=pattern, "
+                             f"e.g. schemaName={{ORG_UPPER}}")
+        field, template = entry.split("=", 1)
+        patterns[field.strip()] = template
+    return patterns
+
+
+def selectable_clusters(
+    clusters: Iterable[Dict[str, Any]], fields: Optional[Iterable[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Choose which clusters to build a matrix for.
+
+    Defaults to the recommended ones (databaseName / schemaName). An explicit
+    field list overrides that, which is how a caller opts tableName in. A cluster
+    that cannot be parameterized at all is never returned, whatever was asked
+    for: proposing a variable for a Falcon-backed table is a dead end.
+    """
+    wanted = set(fields) if fields else None
+    out = []
+    for cluster in clusters:
+        if not cluster.get("parameterizable", True):
+            continue
+        if wanted is None:
+            if cluster.get("recommended"):
+                out.append(cluster)
+        elif cluster["field"] in wanted:
+            out.append(cluster)
+    return out
+
+
+def _variable_name(cluster: Dict[str, Any]) -> str:
+    """The variable a cluster will use: the bound one, else the suggestion."""
+    return cluster.get("variable") or cluster.get("suggested_variable")
+
+
+def coverage_report(
+    assignments: List[Dict[str, Any]], variable_names: Iterable[str], orgs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Check every variable has a non-empty value in every target Org.
+
+    Publishing fails closed on a gap, reporting the variable by GUID and the Org
+    by numeric id. Catching it here instead produces a message with names in it.
+    A blank value counts as missing, not as a value.
+    """
+    have = {(a["variable"], a["org"]) for a in assignments if str(a.get("value") or "").strip()}
+    missing = [{"variable": name, "org": org["name"]}
+               for name in variable_names
+               for org in orgs
+               if (name, org["name"]) not in have]
+    return {"complete": not missing, "missing": missing}
+
+
+def build_value_matrix(
+    clusters: Iterable[Dict[str, Any]],
+    orgs: List[Dict[str, Any]],
+    *,
+    source: str,
+    patterns: Optional[Dict[str, str]] = None,
+    csv_rows: Optional[Iterable[Dict[str, str]]] = None,
+    existing_values: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """Produce the variable set, the per-Org value assignments, and a coverage check.
+
+    Sources:
+
+    ``uniform``   the field's current value, replicated to every Org. The shared-table
+                  case: still a real variable, so publish validation stays on and a
+                  later divergence is one `update-values` call rather than a
+                  structural change.
+    ``pattern``   a per-field template expanded per Org. A field with no pattern
+                  falls back to its current value rather than becoming a gap.
+    ``file``      rows of ``{org_name, variable_name, value}``.
+    ``existing``  values already assigned on the instance, keyed
+                  ``{variable: {org: value}}``. The re-publish / add-a-tenant path.
+
+    Pure — no I/O. The caller supplies rows and existing values.
+    """
+    clusters = list(clusters)
+    rows = list(csv_rows or ())
+    existing_values = existing_values or {}
+
+    variables: List[Dict[str, Any]] = []
+    assignments: List[Dict[str, Any]] = []
+
+    for cluster in clusters:
+        name = _variable_name(cluster)
+        if not name:
+            continue
+        variables.append({
+            "name": name,
+            "type": "TABLE_MAPPING",
+            "field": cluster["field"],
+            "tables": list(cluster["tables"]),
+            "exists": bool(cluster.get("variable")),
+            "sensitive": False,
+        })
+        for org in orgs:
+            value = _value_for(cluster, name, org, source, patterns or {}, rows, existing_values)
+            if value is not None:
+                assignments.append({"variable": name, "org": org["name"], "value": value})
+
+    return {
+        "orgs": [o["name"] for o in orgs],
+        "variables": variables,
+        "assignments": assignments,
+        "coverage": coverage_report(assignments, [v["name"] for v in variables], orgs),
+    }
+
+
+def _value_for(
+    cluster: Dict[str, Any], name: str, org: Dict[str, Any], source: str,
+    patterns: Dict[str, str], rows: List[Dict[str, str]],
+    existing_values: Dict[str, Dict[str, str]],
+) -> Optional[str]:
+    """Resolve one (variable, Org) value for the chosen source.
+
+    Returns None when the source has nothing for this pair, which becomes a
+    coverage gap rather than a silent blank.
+    """
+    current = cluster.get("current_value")
+    if source == "uniform":
+        return current
+    if source == "pattern":
+        template = patterns.get(cluster["field"])
+        return expand_pattern(template, org["name"], org.get("id"), current) if template else current
+    if source == "file":
+        for row in rows:
+            if row.get("org_name") == org["name"] and row.get("variable_name") == name:
+                return row.get("value")
+        return None
+    if source == "existing":
+        return (existing_values.get(name) or {}).get(org["name"])
+    raise ValueError(f"Unknown source '{source}'. Expected uniform, pattern, file or existing.")
