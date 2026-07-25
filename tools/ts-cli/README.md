@@ -1243,6 +1243,37 @@ than clearing the field, so the caller must know the original.
 
 ---
 
+### `ts publish export`
+
+Discover an object's dependency closure and cluster its parameterizable fields.
+
+```bash
+ts publish export <model-or-table-guid> --profile <name>
+```
+
+Walks Model → Tables → Connection and groups each table's `db` / `schema` /
+`db_table` by **distinct value**. Each cluster is one variable to create: a
+variable holds one value per scope, so twenty tables sharing a schema need one
+variable, not twenty. On a real 4-table model this collapses 6 fields into 2
+recommended variables.
+
+Per cluster: `field`, `current_value`, `tables`, `spans_tables`,
+`already_parameterized` (+ `variable`), `parameterizable`, `recommended`,
+`suggested_variable`.
+
+- `recommended` marks `databaseName` and `schemaName`, the conventional per-tenant
+  discriminators. `tableName` is left off because tenant tables normally share a name.
+- `parameterizable` is false for Falcon-backed tables (no connection block) — the
+  "default system tables" the docs exclude. The command also warns on stderr.
+- Suggested names are `{connection}_{db|schema|table}`, with the value folded in
+  when a field carries several values (`apj_sales_schema` vs `apj_shared_ref_schema`),
+  and are collision-checked against variables already on the instance.
+
+Safe to re-run on a partly configured Model: already-parameterized clusters are
+reported rather than re-suggested. That is the add-a-tenant path.
+
+---
+
 ### `ts publish push`
 
 Publish objects from the Primary Org to target Orgs. No copies are made and GUIDs are
