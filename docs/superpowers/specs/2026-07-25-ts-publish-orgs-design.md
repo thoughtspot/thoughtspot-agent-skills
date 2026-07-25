@@ -1,6 +1,6 @@
 # ts-publish-orgs — design
 
-**Status:** IN PROGRESS — API surface live-verified; CLI steps 1-6 shipped (ts-cli v0.99.0), skill not yet authored
+**Status:** IN PROGRESS — API surface live-verified; CLI steps 1-7 shipped (ts-cli v0.100.0), skill not yet authored
 **Branch:** `wip/ts-publish-orgs`
 **Date:** 2026-07-25
 **Verification instance:** `nebula-damian-alias` (SW/DEV build, Orgs enabled: Primary + ORG1/ORG2/ORG3, Snowflake connections `APJ` and `SnowflakeConnection`). All endpoints below confirmed present and exercised live on 2026-07-25.
@@ -448,15 +448,16 @@ live verification (§2.5). One remains.
 | 4 | `ts publish push` / `unpush` / `status` | **DONE** (`8c58d9c`) |
 | 5 | `ts publish export` (field-variance clustering) | **DONE** (`61ea50a`) |
 | 6 | `ts publish resolve` (value matrix + coverage check) | **DONE** (`bc60b37`, v0.99.0) |
-| 7 | `ts publish apply` / `rollback` | TODO |
+| 7 | `ts publish apply` / `rollback` | **DONE** (`21c73a7`, v0.100.0) |
 | 8 | Org-scoped token auth from `feat/ts-org-migrate`, then close Open Item #1 and add substitution checking to `verify` | TODO (blocked) |
 | 9 | `agents/cli/ts-publish-orgs/SKILL.md` | TODO |
 | 10 | `tools/smoke-tests/smoke_ts_publish_orgs.py` | TODO |
 | 11 | README.md, `agents/cli/SETUP.md`, `agents/PARITY.md`, `EXPECTED_DIVERGENCES` in `check_runtime_coverage.py` (CLI-only; no Snowsight analogue) | TODO |
 
-Steps 2 to 6 are shipped, unit-tested (75 new tests) and live-verified end to
-end on `nebula-damian-alias`. They are useful standalone: the whole workflow can
-be driven by hand today.
+Steps 2 to 7 are shipped, unit-tested (82 new tests) and live-verified end to end
+on `nebula-damian-alias`: `export` → `resolve` → `apply --publish-to ORG1` →
+`rollback` returns the cluster to its exact prior state. The whole workflow is
+drivable from the CLI today; what remains is the interactive skill on top.
 
 ### Two design changes made during the build
 
