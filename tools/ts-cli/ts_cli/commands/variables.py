@@ -14,6 +14,109 @@ app = typer.Typer(help="Template variable management commands.")
 _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
                                help="Profile name (default: first profile or TS_PROFILE env var)")
 
+# Variable types accepted by POST /api/rest/2.0/template/variables/create.
+# CONNECTION_PROPERTY_PER_PRINCIPAL is disabled by default and needs ThoughtSpot
+# Support to enable it on the instance.
+VARIABLE_TYPES = (
+    "TABLE_MAPPING",                     # databaseName / schemaName / tableName
+    "CONNECTION_PROPERTY",               # accountName / warehouse / user / password / role
+    "CONNECTION_PROPERTY_PER_PRINCIPAL",  # as above, per user or group (support-gated)
+    "FORMULA_VARIABLE",                  # formula and rule logic via ts_var()
+)
+
+
+def build_create_variable_payload(
+    var_type: str, name: str, *, sensitive: bool = False, data_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the request body for POST /api/rest/2.0/template/variables/create.
+
+    ``data_type`` is required for FORMULA_VARIABLE and rejected for every other
+    type. Its *value* is deliberately not validated: the published docs give two
+    conflicting lists (VARCHAR/BIGINT/INT/FLOAT vs VARCHAR/INT32/INT64/DOUBLE),
+    so an unrecognised-but-valid type must not be blocked client-side. The API
+    is left to reject a genuinely bad one.
+
+    Pure — no I/O — so it is unit-testable without a live instance.
+    """
+    if var_type not in VARIABLE_TYPES:
+        raise ValueError(f"Unknown variable type '{var_type}'. Expected one of: {', '.join(VARIABLE_TYPES)}")
+    if var_type == "FORMULA_VARIABLE":
+        if not data_type:
+            raise ValueError("data_type is required for FORMULA_VARIABLE (e.g. VARCHAR, DATE)")
+    elif data_type:
+        raise ValueError(f"--data-type is only valid for FORMULA_VARIABLE, not {var_type}")
+
+    payload: Dict[str, Any] = {"type": var_type, "name": name, "is_sensitive": sensitive}
+    if data_type:
+        payload["data_type"] = data_type
+    return payload
+
+
+@app.command("create")
+def create_variable(
+    name: str = typer.Argument(..., help="Variable name (must be unique across ALL orgs on the instance)"),
+    type: str = typer.Option(..., "--type", "-t",
+                             help=f"Variable type: {' | '.join(VARIABLE_TYPES)}"),
+    sensitive: bool = typer.Option(False, "--sensitive",
+                                   help="Mark the variable as holding sensitive values (e.g. a password). "
+                                        "Assign the value from your own terminal — never through a skill prompt."),
+    data_type: Optional[str] = typer.Option(None, "--data-type",
+                                            help="Value data type. Required for FORMULA_VARIABLE "
+                                                 "(e.g. VARCHAR, INT64, DATE); invalid for other types."),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Create a template variable for parameterizing metadata objects.
+
+    Names are unique instance-wide, not per-org — creating a duplicate fails.
+    Run `ts variables search` first if unsure.
+
+    A new variable has no values. Assign them per-org with `ts variables set`
+    before publishing anything that depends on it: publish fails closed when a
+    variable has no value in a target org.
+
+    Output: JSON variable object from POST /api/rest/2.0/template/variables/create,
+    including the generated `id`.
+
+    Examples:
+
+    \\b
+      ts variables create apj_schema --type TABLE_MAPPING
+      ts variables create sf_password --type CONNECTION_PROPERTY --sensitive
+      ts variables create region_var --type FORMULA_VARIABLE --data-type VARCHAR
+    """
+    payload = build_create_variable_payload(type, name, sensitive=sensitive, data_type=data_type)
+    client = ThoughtSpotClient(resolve_profile(profile))
+    resp = client.post("/api/rest/2.0/template/variables/create", json=payload)
+    print(json.dumps(resp.json()))
+
+
+@app.command("delete")
+def delete_variables(
+    variables: List[str] = typer.Argument(..., help="One or more variable names or IDs"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Delete one or more template variables.
+
+    Uses POST /api/rest/2.0/template/variables/delete, which takes a batch
+    `identifiers[]` array. (The per-identifier
+    POST /api/rest/2.0/template/variables/{identifier}/delete path is deprecated;
+    the batch endpoint was confirmed live on 2026-07-25.)
+
+    Deletion fails if the variable is still bound to an object — unparameterize
+    the fields first with `ts metadata unparameterize`.
+
+    Output: empty on success (HTTP 204). Raises on error.
+
+    Examples:
+
+    \\b
+      ts variables delete apj_schema
+      ts variables delete apj_schema apj_db region_var
+    """
+    client = ThoughtSpotClient(resolve_profile(profile))
+    client.post("/api/rest/2.0/template/variables/delete",
+                json={"identifiers": list(dict.fromkeys(variables))})
+
 
 @app.command("search")
 def search(

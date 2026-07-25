@@ -1172,6 +1172,129 @@ Uses the same per-identifier endpoint as `ts variables set` (see above).
 
 ---
 
+### `ts variables create`
+
+Create a template variable for parameterizing metadata objects.
+
+```bash
+ts variables create <name> --type <TYPE> --profile <name> [--sensitive] [--data-type <TYPE>]
+# e.g. ts variables create apj_schema --type TABLE_MAPPING --profile prod
+#      ts variables create sf_password --type CONNECTION_PROPERTY --sensitive --profile prod
+#      ts variables create region_var --type FORMULA_VARIABLE --data-type VARCHAR --profile prod
+```
+
+Types: `TABLE_MAPPING` (databaseName / schemaName / tableName), `CONNECTION_PROPERTY`,
+`CONNECTION_PROPERTY_PER_PRINCIPAL` (support-gated), `FORMULA_VARIABLE`.
+
+Names are unique **instance-wide**, not per-org, so a duplicate fails. `--data-type` is
+required for `FORMULA_VARIABLE` and rejected for every other type; its value is passed
+through unvalidated because the published docs give two conflicting lists.
+
+A `TABLE_MAPPING` variable holds exactly **one** value per scope. Assign values per org with
+`ts variables set` before publishing anything that uses it.
+
+---
+
+### `ts variables delete`
+
+Delete one or more template variables.
+
+```bash
+ts variables delete <variable> [<variable> ...] --profile <name>
+```
+
+Uses the batch endpoint `POST /api/rest/2.0/template/variables/delete` (`identifiers[]`);
+the per-identifier `.../{identifier}/delete` path is deprecated. Fails while the variable is
+still bound to an object, so run `ts metadata unparameterize` first.
+
+---
+
+### `ts metadata parameterize`
+
+Bind a template variable to one or more fields of a Table or Connection, replacing the
+static value with a `${variable}` token.
+
+```bash
+ts metadata parameterize <guid|name> --variable <var> --field <field> [--field ...] \
+  [--type LOGICAL_TABLE|CONNECTION|CONNECTION_CONFIG] --profile <name>
+# e.g. ts metadata parameterize T1_PUBLISH --variable apj_schema --field schemaName --profile prod
+```
+
+`field_type` is derived from `--type`, so the type-mismatch error (`code 10002`) is
+unreachable. Logical Table fields are limited to `databaseName`, `schemaName`, `tableName`;
+Connection property names pass through unvalidated.
+
+Passing several `--field` values binds the **same** token to each of them, which is rarely
+intended — the command warns on stderr. Use one variable per distinct value.
+
+---
+
+### `ts metadata unparameterize`
+
+Remove a variable from a field, restoring a static value.
+
+```bash
+ts metadata unparameterize <guid|name> --field <field> --value <static> \
+  [--type LOGICAL_TABLE|CONNECTION|CONNECTION_CONFIG] --profile <name>
+```
+
+One field per call. `--value` is mandatory: the endpoint substitutes a static value rather
+than clearing the field, so the caller must know the original.
+
+---
+
+### `ts publish push`
+
+Publish objects from the Primary Org to target Orgs. No copies are made and GUIDs are
+unchanged; per-org variation comes from the bound variables.
+
+```bash
+ts publish push <guid> [<guid> ...] --org <org> [--org ...] \
+  [--type LOGICAL_TABLE|LIVEBOARD|ANSWER] --profile <name>
+```
+
+`LOGICAL_TABLE` covers both Tables and Models. `--org` accepts an org name or its numeric id.
+Requires ADMINISTRATION with all-Orgs access, run from the Primary Org.
+
+Publishing **fails closed** when a referenced variable has no value in a target org, and when
+the object has no variable bound at all. Both errors are translated into an actionable
+message naming the variable, org and object (the raw API error reports only GUIDs and numeric
+ids). `--skip-validation` exists but is discouraged: it disables every check and lets an
+unparameterized object publish so the target org silently reads the Primary Org's database.
+
+The Connection is granted to target orgs automatically as a dependency; connections cannot be
+published directly.
+
+---
+
+### `ts publish unpush`
+
+Retract published objects from target Orgs.
+
+```bash
+ts publish unpush <guid> [<guid> ...] --org <org> [--org ...] \
+  [--keep-dependencies] [--force] --profile <name>
+```
+
+Dependencies are retracted by default, which is what actually removes the Connection grant
+from the target orgs. `--keep-dependencies` leaves them in place.
+
+---
+
+### `ts publish status`
+
+Report which objects are published to which Orgs.
+
+```bash
+ts publish status [<guid> ...] [--type LOGICAL_TABLE|LIVEBOARD|ANSWER] [--published-only] --profile <name>
+```
+
+Reads `metadata_header.orgIds` from the Primary Org, so no per-org authentication is needed.
+Output: `[{"guid", "name", "subtype", "owner_org", "published_to": [...], "is_published"}]`,
+where `published_to` excludes the owning org.
+
+---
+
 ### `ts tableau signin`
 
 Sign in to Tableau Server/Cloud and verify credentials.
