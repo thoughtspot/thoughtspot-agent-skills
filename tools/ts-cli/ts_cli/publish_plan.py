@@ -272,6 +272,7 @@ def build_value_matrix(
     patterns: Optional[Dict[str, str]] = None,
     csv_rows: Optional[Iterable[Dict[str, str]]] = None,
     existing_values: Optional[Dict[str, Dict[str, str]]] = None,
+    owner_org: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Produce the variable set, the per-Org value assignments, and a coverage check.
 
@@ -287,9 +288,22 @@ def build_value_matrix(
     ``existing``  values already assigned on the instance, keyed
                   ``{variable: {org: value}}``. The re-publish / add-a-tenant path.
 
+    ``owner_org`` (the Primary Org) is always included and always keeps the
+    field's CURRENT value, whatever source is chosen. Two reasons, both learned
+    the hard way:
+
+    * Parameterizing replaces the static db/schema with tokens. If the owner Org
+      has no value the FQN collapses and the **source** object breaks — Snowflake
+      returns "Object 'T1_PUBLISH' does not exist". ThoughtSpot's publish
+      validation only checks TARGET orgs, so nothing else catches it.
+    * Expanding a pattern for the owner Org would silently repoint the source
+      object at different data. Publishing must not change what Primary reads.
+
     Pure — no I/O. The caller supplies rows and existing values.
     """
     clusters = list(clusters)
+    if owner_org and owner_org not in {o["name"] for o in orgs}:
+        orgs = [{"name": owner_org, "id": None}] + list(orgs)
     rows = list(csv_rows or ())
     existing_values = existing_values or {}
 
@@ -309,7 +323,8 @@ def build_value_matrix(
             "sensitive": False,
         })
         for org in orgs:
-            value = _value_for(cluster, name, org, source, patterns or {}, rows, existing_values)
+            effective = "uniform" if org["name"] == owner_org else source
+            value = _value_for(cluster, name, org, effective, patterns or {}, rows, existing_values)
             if value is not None:
                 assignments.append({"variable": name, "org": org["name"], "value": value})
 

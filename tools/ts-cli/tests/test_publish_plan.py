@@ -382,3 +382,39 @@ def test_rollback_skips_a_field_with_no_recorded_original():
     step = rollback_steps(record)[0]
     assert step["action"] == "skip"
     assert "no recorded original value" in step["reason"]
+
+
+# ---------------------------------------------------------------------------
+# Owner-org coverage — regression for a live-found bug
+# ---------------------------------------------------------------------------
+
+def test_owner_org_is_always_covered():
+    # Live-found: parameterizing replaces the static db/schema with tokens, so if
+    # the owner (Primary) org has no value the FQN collapses and the SOURCE object
+    # breaks — Snowflake returns "Object 'T1_PUBLISH' does not exist". ThoughtSpot's
+    # publish validation only checks TARGET orgs, so nothing else catches this.
+    matrix = build_value_matrix([_cluster()], _ORGS, source="uniform", owner_org="Primary")
+    assert {a["org"] for a in matrix["assignments"]} == {"Primary", "ORG1", "ORG2"}
+    assert matrix["orgs"][0] == "Primary"
+
+
+def test_owner_org_keeps_its_current_value_even_under_a_pattern():
+    # A pattern must never repoint the source org: publishing should not change
+    # what Primary reads.
+    matrix = build_value_matrix([_cluster()], _ORGS, source="pattern",
+                                patterns={"schemaName": "{ORG_UPPER}_X"}, owner_org="Primary")
+    by_org = {a["org"]: a["value"] for a in matrix["assignments"]}
+    assert by_org["Primary"] == "SALES"        # unchanged current value
+    assert by_org["ORG1"] == "ORG1_X"
+
+
+def test_owner_org_not_duplicated_when_already_requested():
+    orgs = [{"name": "Primary", "id": 0}, {"name": "ORG1", "id": 11}]
+    matrix = build_value_matrix([_cluster()], orgs, source="uniform", owner_org="Primary")
+    assert matrix["orgs"] == ["Primary", "ORG1"]
+    assert len([a for a in matrix["assignments"] if a["org"] == "Primary"]) == 1
+
+
+def test_owner_org_counts_towards_coverage():
+    matrix = build_value_matrix([_cluster()], _ORGS, source="uniform", owner_org="Primary")
+    assert matrix["coverage"]["complete"] is True

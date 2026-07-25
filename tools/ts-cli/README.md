@@ -1296,6 +1296,13 @@ Reads a `ts publish export` envelope from `--input` or stdin. Sources:
 Selects the recommended fields (`databaseName`, `schemaName`) by default; `--field`
 widens or narrows that. Fields on Falcon-backed tables are never selectable.
 
+**The owner (Primary) org is always included, and always keeps its current value**,
+whatever source is chosen. Parameterizing swaps the static db/schema for tokens, so
+without a value there the FQN collapses and the *source* object breaks — Snowflake
+returns `Object 'T1_PUBLISH' does not exist`. ThoughtSpot's publish validation only
+checks target orgs, so nothing else catches it. Expanding a pattern for the owner org
+is also refused, since publishing must not silently repoint what Primary reads.
+
 Always emits a **coverage check**. Publishing fails closed on a gap and reports the
 variable by GUID and the org by numeric id, so catching it here names both instead:
 

@@ -123,6 +123,7 @@ def export_closure(
         "connections": connections,
         "clusters": clusters,
         "existing_variables": sorted(existing.values()),
+        "owner_org": published[0]["owner_org"] if published else None,
         "published_to": published[0]["published_to"] if published else [],
         "unparameterizable_tables": unparameterizable,
     }))
@@ -161,6 +162,27 @@ def _existing_values(client: ThoughtSpotClient) -> Dict[str, Dict[str, str]]:
     return out
 
 
+def _resolve_orgs(client: ThoughtSpotClient, names: List[str]) -> List[Dict[str, Any]]:
+    """Map requested org names to {name, id}, failing on an unknown one."""
+    by_name = {name: oid for oid, name in _org_index(client).items()}
+    unknown = [n for n in names if n not in by_name]
+    if unknown:
+        raise typer.BadParameter(
+            f"Unknown org(s): {', '.join(unknown)}. Known orgs: {', '.join(sorted(by_name))}")
+    return [{"name": n, "id": by_name[n]} for n in names]
+
+
+def _load_csv_rows(source: str, path: Optional[str]) -> Optional[List[Dict[str, str]]]:
+    """Read the value CSV, but only for --source file."""
+    if source != "file":
+        return None
+    if not path:
+        raise typer.BadParameter("--csv is required for --source file")
+    import csv as csv_module
+    with open(path) as handle:
+        return list(csv_module.DictReader(handle))
+
+
 @app.command("resolve")
 def resolve(
     org: List[str] = typer.Option(..., "--org", help="Target org name (repeatable)"),
@@ -192,6 +214,12 @@ def resolve(
       file      a CSV of org_name,variable_name,value.
       existing  values already assigned on the instance (re-publish / add-a-tenant).
 
+    The owner (Primary) org is always included and always keeps its current
+    value, whatever source is chosen. Parameterizing replaces the static
+    db/schema with tokens, so without a value there the SOURCE object breaks, and
+    ThoughtSpot's publish validation only checks target orgs. Expanding a pattern
+    for the owner org would silently repoint the source data.
+
     Always emits a coverage check. Publishing fails closed on a gap and reports
     GUIDs and numeric ids; catching it here names the variable and org instead.
 
@@ -216,24 +244,17 @@ def resolve(
             "parameterized; otherwise try --field to widen the selection.")
 
     client = ThoughtSpotClient(resolve_profile(profile))
-    known = _org_index(client)
-    by_name = {name: oid for oid, name in known.items()}
-    unknown = [o for o in org if o not in by_name]
-    if unknown:
-        raise typer.BadParameter(
-            f"Unknown org(s): {', '.join(unknown)}. Known orgs: {', '.join(sorted(by_name))}")
-    orgs = [{"name": o, "id": by_name[o]} for o in org]
+    orgs = _resolve_orgs(client, list(org))
+    rows = _load_csv_rows(source, csv)
 
-    rows = None
-    if source == "file":
-        if not csv:
-            raise typer.BadParameter("--csv is required for --source file")
-        import csv as csv_module
-        with open(csv) as handle:
-            rows = list(csv_module.DictReader(handle))
+    owner_org = envelope.get("owner_org")
+    if owner_org and owner_org not in org:
+        print(f"Including owner org '{owner_org}': parameterizing replaces the static "
+              f"db/schema with tokens, so without a value there the SOURCE object breaks. "
+              f"It keeps its current value.", file=sys.stderr)
 
     matrix = build_value_matrix(
-        clusters, orgs, source=source,
+        clusters, orgs, source=source, owner_org=owner_org,
         patterns=parse_pattern_args(pattern),
         csv_rows=rows,
         existing_values=_existing_values(client) if source == "existing" else None,

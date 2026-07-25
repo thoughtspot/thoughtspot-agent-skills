@@ -179,6 +179,16 @@ publication status needs **no per-Org authentication**.
 granted to the target Orgs. `include_dependencies: true` retracts both. Rollback
 must therefore use `true`.
 
+**Parameterizing breaks the SOURCE object unless the owner Org also has a value.**
+Found by publishing `T1_PUBLISH` to ORG3 with values assigned for ORG3 only. The
+publish succeeded, but a `searchdata` query in the Primary Org then failed with
+`SQL compilation error: Object 'T1_PUBLISH' does not exist or not authorized`:
+`${apj_db}.${apj_schema}` resolved to nothing, collapsing the FQN to a bare table
+name. Assigning Primary values restored it immediately. ThoughtSpot's publish
+validation checks only the TARGET orgs, so nothing on the platform side catches
+this. `ts publish resolve` therefore always includes the owner Org and always
+gives it the field's current value, never a pattern expansion.
+
 **`obj_id` is auto-populated** (e.g. `T1_PUBLISH-4be2cc25`) on all tables
 regardless of publish state. Nothing for the skill to assign.
 
