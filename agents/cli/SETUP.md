@@ -93,6 +93,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-aggregates \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-alias \
       ~/.snowflake/cortex/skills/ts-object-model-alias
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-publish-orgs \
+      ~/.snowflake/cortex/skills/ts-publish-orgs
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.snowflake/cortex/skills/ts-object-model-coach
@@ -174,6 +176,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-aggregates \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-alias \
       ~/.claude/skills/ts-object-model-alias
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-publish-orgs \
+      ~/.claude/skills/ts-publish-orgs
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.claude/skills/ts-object-model-coach

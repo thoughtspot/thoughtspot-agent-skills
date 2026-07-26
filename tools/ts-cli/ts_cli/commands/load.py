@@ -450,6 +450,21 @@ def generate(
 SF_PROFILES_PATH = Path.home() / ".claude" / "snowflake-profiles.json"
 
 
+def get_sf_cursor(sf_profile: Optional[str]):
+    """Snowflake cursor via the standard profile mechanism.
+
+    The one implementation shared by every command that reads a governance table
+    (`ts alias --source db`, `ts publish --source db`). Returns None when no
+    profile is given, so callers can treat "no Snowflake configured" uniformly.
+    """
+    if not sf_profile:
+        return None
+    profile = load_snowflake_profile(sf_profile)
+    conn = _connect_python(profile, profile.get("default_warehouse", ""),
+                           profile.get("default_role", ""))
+    return conn.cursor()
+
+
 def load_snowflake_profile(profile_name: str) -> dict:
     """Load a Snowflake profile by name, raising SystemExit if not found."""
     from ts_cli.profile_ops import get_profile, load_platform_profiles

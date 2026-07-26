@@ -55,6 +55,10 @@ FAMILY_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
         re.compile(r"ts-setup-[a-z][a-z0-9]*"),
         "toolset / proc installation: ts-setup-{specifier}",
     ),
+    "ts-publish-*": (
+        re.compile(r"ts-publish-[a-z][a-z0-9]*"),
+        "distribute a master object without copying it: ts-publish-{target}",
+    ),
     "ts-recipe-*": (
         re.compile(r"ts-recipe-(formula|answer|liveboard|model)-[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*"),
         "analytical recipe: ts-recipe-{ts-artifact-type}-{concept}[-{platform}]",

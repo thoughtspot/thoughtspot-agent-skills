@@ -3560,3 +3560,59 @@ async-with-polling paths), then a re-`export` to confirm the aliases actually to
 No such instance was available during Tasks 1–6.
 
 **Target:** first live-verification pass once a column-alias-enabled ThoughtSpot instance is available.
+
+---
+
+## BL-136 — Generic warehouse row-source for governance tables (Snowflake + Databricks) `Tier 2`
+
+**Affects:** `ts alias translate --source db`; `ts publish export --objects-table`,
+`ts publish resolve --source db --init-table`, `ts publish run --objects-table/--values-table`;
+`get_sf_cursor` in `tools/ts-cli/ts_cli/commands/load.py`.
+**Status:** OPEN (raised 2026-07-26).
+
+**Why it matters.** Every `--source db` path in the repo is Snowflake-only. A customer on
+Databricks can use the CSV path but not the governed-table path, even though Databricks is
+otherwise a first-class platform here (`ts-profile-databricks`, `ts load databricks`, two
+conversion skills, a whole `agents/databricks/` runtime). The asymmetry is an accident of
+which platform each feature was built against first, not a deliberate scoping decision.
+
+It matters more for `ts publish` than for `ts alias`, because a publication manifest is
+operational state a customer will want governed, reviewed and scheduled, and the natural
+home for it is the warehouse they already run.
+
+**Why it is not a small change.** The two platforms do not currently share a shape:
+
+| | Snowflake | Databricks |
+|---|---|---|
+| Path | Python connector, DB-API cursor (`get_sf_cursor`) | `databricks` CLI, Statement Execution API (`_run_dbx_sql` in `load.py`) |
+| Credentials | profile + keyring | `~/.databrickscfg`, token never in-repo |
+| Result | cursor + `cursor.description` | JSON payload |
+
+So there is no cursor to abstract over. The abstraction has to sit one level up, at "give me
+rows".
+
+**Approach.** Introduce a row-source function in `commands/load.py`, beside the two existing
+connection paths:
+
+```python
+def fetch_table_rows(platform: str, profile: str, table: str) -> list[dict]:
+    """Read every row of a governance table as a list of dicts, lower-cased keys."""
+```
+
+with a Snowflake backend wrapping `get_sf_cursor` and zipping `cursor.description`, and a
+Databricks backend wrapping the existing statement-execution helper and mapping its JSON
+result. Callers then drop their private `_fetch_table_rows` and select the backend from
+whichever profile flag was given (`--sf-profile` / `--dbx-profile`), or an explicit
+`--warehouse snowflake|databricks`.
+
+The normalisation contract already exists: `parse_object_rows` and `parse_value_rows` in
+`ts_cli/publish_plan.py` lower-case headers precisely because a DB cursor returns them
+upper-case and a hand-written CSV does not. A Databricks backend inherits that for free.
+
+**Also needed.** The `--init-table` DDL is Snowflake-flavoured (`TIMESTAMP_NTZ`,
+`CURRENT_TIMESTAMP()`, `VARCHAR`). A Databricks variant needs `TIMESTAMP`,
+`current_timestamp()`, `STRING`, and no `PRIMARY KEY` clause on older runtimes. Emit per
+platform rather than hoping one dialect parses on both.
+
+**Target:** alongside the first customer engagement that governs a publication manifest in
+Databricks. Not blocking `ts-publish-orgs`, whose file path covers the same ground.

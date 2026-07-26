@@ -1172,6 +1172,290 @@ Uses the same per-identifier endpoint as `ts variables set` (see above).
 
 ---
 
+### `ts variables create`
+
+Create a template variable for parameterizing metadata objects.
+
+```bash
+ts variables create <name> --type <TYPE> --profile <name> [--sensitive] [--data-type <TYPE>]
+# e.g. ts variables create apj_schema --type TABLE_MAPPING --profile prod
+#      ts variables create sf_password --type CONNECTION_PROPERTY --sensitive --profile prod
+#      ts variables create region_var --type FORMULA_VARIABLE --data-type VARCHAR --profile prod
+```
+
+Types: `TABLE_MAPPING` (databaseName / schemaName / tableName), `CONNECTION_PROPERTY`,
+`CONNECTION_PROPERTY_PER_PRINCIPAL` (support-gated), `FORMULA_VARIABLE`.
+
+Names are unique **instance-wide**, not per-org, so a duplicate fails. `--data-type` is
+required for `FORMULA_VARIABLE` and rejected for every other type; its value is passed
+through unvalidated because the published docs give two conflicting lists.
+
+A `TABLE_MAPPING` variable holds exactly **one** value per scope. Assign values per org with
+`ts variables set` before publishing anything that uses it.
+
+---
+
+### `ts variables delete`
+
+Delete one or more template variables.
+
+```bash
+ts variables delete <variable> [<variable> ...] --profile <name>
+```
+
+Uses the batch endpoint `POST /api/rest/2.0/template/variables/delete` (`identifiers[]`);
+the per-identifier `.../{identifier}/delete` path is deprecated. Fails while the variable is
+still bound to an object, so run `ts metadata unparameterize` first.
+
+---
+
+### `ts metadata parameterize`
+
+Bind a template variable to one or more fields of a Table or Connection, replacing the
+static value with a `${variable}` token.
+
+```bash
+ts metadata parameterize <guid|name> --variable <var> --field <field> [--field ...] \
+  [--type LOGICAL_TABLE|CONNECTION|CONNECTION_CONFIG] --profile <name>
+# e.g. ts metadata parameterize T1_PUBLISH --variable apj_schema --field schemaName --profile prod
+```
+
+`field_type` is derived from `--type`, so the type-mismatch error (`code 10002`) is
+unreachable. Logical Table fields are limited to `databaseName`, `schemaName`, `tableName`;
+Connection property names pass through unvalidated.
+
+Passing several `--field` values binds the **same** token to each of them, which is rarely
+intended — the command warns on stderr. Use one variable per distinct value.
+
+---
+
+### `ts metadata unparameterize`
+
+Remove a variable from a field, restoring a static value.
+
+```bash
+ts metadata unparameterize <guid|name> --field <field> --value <static> \
+  [--type LOGICAL_TABLE|CONNECTION|CONNECTION_CONFIG] --profile <name>
+```
+
+One field per call. `--value` is mandatory: the endpoint substitutes a static value rather
+than clearing the field, so the caller must know the original.
+
+---
+
+### `ts publish export`
+
+Discover an object's dependency closure and cluster its parameterizable fields.
+
+```bash
+ts publish export <guid> [<guid> ...] [--with-dependents] --profile <name>
+```
+
+Takes **any anchor type** and as many as you like. Cascade only travels downward, so
+the two directions are asymmetric and the command handles both:
+
+| Anchor | Down (always) | Up (`--with-dependents`) |
+|---|---|---|
+| Liveboard / Answer | the Model and Tables needing variables; publishing cascades back to them | siblings sharing that Model |
+| Model / Table | the Tables directly | every Answer and Liveboard riding on it |
+
+Tables reached by more than one root are de-duplicated, so nothing is parameterized
+twice, and clustering runs once across the union so two roots sharing a schema need
+one variable rather than two.
+
+Walks Model → Tables → Connection and groups each table's `db` / `schema` /
+`db_table` by **distinct value**. Each cluster is one variable to create: a
+variable holds one value per scope, so twenty tables sharing a schema need one
+variable, not twenty. On a real 4-table model this collapses 6 fields into 2
+recommended variables.
+
+Per cluster: `field`, `current_value`, `tables`, `spans_tables`,
+`already_parameterized` (+ `variable`), `parameterizable`, `recommended`,
+`suggested_variable`.
+
+- `recommended` marks `databaseName` and `schemaName`, the conventional per-tenant
+  discriminators. `tableName` is left off because tenant tables normally share a name.
+- `parameterizable` is false for Falcon-backed tables (no connection block) — the
+  "default system tables" the docs exclude. The command also warns on stderr.
+- Suggested names are `{connection}_{db|schema|table}`, with the value folded in
+  when a field carries several values (`apj_sales_schema` vs `apj_shared_ref_schema`),
+  and are collision-checked against variables already on the instance.
+
+Safe to re-run on a partly configured Model: already-parameterized clusters are
+reported rather than re-suggested. That is the add-a-tenant path.
+
+Also reports `cohort_columns`. A cohort column anywhere in the closure blocks
+publishing the Model and everything on it, used or not, so this turns a last-step
+refusal into a warning before any work is done. The check covers intermediate
+Models, not just the roots, because that is where the column is owned.
+
+---
+
+### `ts publish resolve`
+
+Build the per-org value matrix for an exported closure.
+
+```bash
+ts publish export <guid> -p prod | ts publish resolve --org ORG1 --org ORG2 --source uniform -p prod
+ts publish resolve -i export.json --org ORG1 --source pattern --pattern "schemaName={ORG_UPPER}" -p prod
+ts publish resolve -i export.json --org ORG1 --source file --csv values.csv -p prod
+```
+
+Reads a `ts publish export` envelope from `--input` or stdin. Sources:
+
+| Source | Behaviour |
+|---|---|
+| `uniform` (default) | The current value, replicated to every org. The shared-table case: still a real variable, so publish validation stays on and a later divergence is one `ts variables set` rather than a structural change. |
+| `pattern` | A per-field template expanded per org. Placeholders: `{ORG}`, `{ORG_UPPER}`, `{ORG_LOWER}`, `{ORG_ID}`, `{VALUE}`. A field with no pattern keeps its current value. An unknown placeholder is rejected rather than passed through. |
+| `file` | A CSV of `org_name,variable_name,value`. |
+| `existing` | Values already assigned on the instance. The re-publish / add-a-tenant path. |
+
+Selects the recommended fields (`databaseName`, `schemaName`) by default; `--field`
+widens or narrows that. Fields on Falcon-backed tables are never selectable.
+
+**The owner (Primary) org is always included, and always keeps its current value**,
+whatever source is chosen. Parameterizing swaps the static db/schema for tokens, so
+without a value there the FQN collapses and the *source* object breaks — Snowflake
+returns `Object 'T1_PUBLISH' does not exist`. ThoughtSpot's publish validation only
+checks target orgs, so nothing else catches it. Expanding a pattern for the owner org
+is also refused, since publishing must not silently repoint what Primary reads.
+
+Always emits a **coverage check**. Publishing fails closed on a gap and reports the
+variable by GUID and the org by numeric id, so catching it here names both instead:
+
+```
+Coverage gap: variable 'apj_schema' has no value for org 'ORG3'.
+Publishing will be refused until it does.
+```
+
+Output: `{"orgs", "variables", "assignments", "coverage": {"complete", "missing"}}`.
+
+---
+
+### `ts publish apply`
+
+Create the variables, assign their values, parameterize the fields, and optionally publish.
+
+```bash
+ts publish apply -c export.json -m matrix.json --dry-run
+ts publish apply -c export.json -m matrix.json --rollback-out rb.json -p prod
+ts publish apply -c export.json -m matrix.json --publish-to ORG1 --rollback-out rb.json -p prod
+```
+
+Fixed order, because the platform requires it: create before assign, assign before
+publish. Refuses to start if the matrix has coverage gaps, since publishing would be
+refused anyway and a partial apply is worse than none.
+
+Re-running is safe: an existing variable is reused, a field already bound to a token
+is left alone.
+
+**Pass `--rollback-out`.** `unparameterize` substitutes a static value rather than
+clearing the field, so the original values must be recorded somewhere or there is no
+way back. Nothing else records them.
+
+Omit `--publish-to` to wire everything up and stop short of publishing.
+
+---
+
+### `ts publish rollback`
+
+Undo an apply.
+
+```bash
+ts publish rollback -i rb.json --dry-run
+ts publish rollback -i rb.json -p prod
+```
+
+Reverse order: unpublish (with `include_dependencies`, so the Connection grant is
+retracted too), restore each field's static value, then delete the variables that run
+created. A variable that already existed is never deleted, so one shared with another
+Model is safe. A field with no recorded original is skipped and reported.
+
+---
+
+### `ts publish run`
+
+Run a whole publication end to end, unattended. The scheduled counterpart to the
+interactive `export | resolve | apply` pipeline: same engine, no prompts, one exit code.
+
+```bash
+ts publish run --org ORG1 --org ORG2 \
+  --objects-table DB.SCH.TS_PUBLISH_OBJECTS \
+  --values-table  DB.SCH.TS_PUBLISH_VARIABLES \
+  --sf-profile sf --rollback-out rb.json -p prod
+
+ts publish run --org ORG1 --objects-file objects.csv --values-file values.csv \
+  --rollback-out rb.json -p prod --dry-run
+```
+
+Refuses, before touching the instance, if a variable has no value in a target org or
+if a cohort column makes the selection unpublishable. Exits `1` with the reason on
+stderr; `0` on success. Suitable for cron or any Python scheduler.
+
+Manifest tables (`--init-table` on `ts publish resolve` prints the DDL):
+
+```sql
+TS_PUBLISH_OBJECTS   (identifier, type, with_dependents)
+TS_PUBLISH_VARIABLES (org_name, variable_name, value)
+```
+
+Both are readable as CSV instead, with the same columns. Secrets never belong in
+either: a variable marked sensitive is populated out of band by an admin.
+
+---
+
+### `ts publish push`
+
+Publish objects from the Primary Org to target Orgs. No copies are made and GUIDs are
+unchanged; per-org variation comes from the bound variables.
+
+```bash
+ts publish push <guid> [<guid> ...] --org <org> [--org ...] \
+  [--type LOGICAL_TABLE|LIVEBOARD|ANSWER] --profile <name>
+```
+
+`LOGICAL_TABLE` covers both Tables and Models. `--org` accepts an org name or its numeric id.
+Requires ADMINISTRATION with all-Orgs access, run from the Primary Org.
+
+Publishing **fails closed** when a referenced variable has no value in a target org, and when
+the object has no variable bound at all. Both errors are translated into an actionable
+message naming the variable, org and object (the raw API error reports only GUIDs and numeric
+ids). `--skip-validation` exists but is discouraged: it disables every check and lets an
+unparameterized object publish so the target org silently reads the Primary Org's database.
+
+The Connection is granted to target orgs automatically as a dependency; connections cannot be
+published directly.
+
+---
+
+### `ts publish unpush`
+
+Retract published objects from target Orgs.
+
+```bash
+ts publish unpush <guid> [<guid> ...] --org <org> [--org ...] \
+  [--keep-dependencies] [--force] --profile <name>
+```
+
+Dependencies are retracted by default, which is what actually removes the Connection grant
+from the target orgs. `--keep-dependencies` leaves them in place.
+
+---
+
+### `ts publish status`
+
+Report which objects are published to which Orgs.
+
+```bash
+ts publish status [<guid> ...] [--type LOGICAL_TABLE|LIVEBOARD|ANSWER] [--published-only] --profile <name>
+```
+
+Reads `metadata_header.orgIds` from the Primary Org, so no per-org authentication is needed.
+Output: `[{"guid", "name", "subtype", "owner_org", "published_to": [...], "is_published"}]`,
+where `published_to` excludes the owning org.
+
+---
+
 ### `ts tableau signin`
 
 Sign in to Tableau Server/Cloud and verify credentials.
