@@ -7,10 +7,13 @@ from ts_cli.csr_plan import (
     CSR_TABLE_DDL,
     OPERATIONS,
     build_csr_steps,
+    build_csr_tml,
     build_update_payload,
+    csr_tml_filename,
     diff_csr,
     explain_csr_error,
     normalise_fetch_response,
+    parse_csr_tml_export,
     parse_rule_flags,
     parse_rule_rows,
 )
@@ -360,3 +363,76 @@ def test_explain_returns_none_for_an_unrecognised_body():
 
 def test_explain_tolerates_an_empty_body():
     assert explain_csr_error("", None) is None
+
+
+def test_filename_matches_the_platform_export_name():
+    assert csr_tml_filename("T2_PUBLISH") == "T2_PUBLISH_CSR.column_security_rules.tml"
+
+
+def test_tml_carries_the_mandatory_table_reference():
+    # Omitting `table:` fails the import with code 14502 and a message naming an empty
+    # table. It is the single most load-bearing field in the document.
+    doc = build_csr_tml("T2_PUBLISH", {"PROD_NM": ["Analyst"]})
+    assert doc["column_security_rules"]["table"] == {"name": "T2_PUBLISH"}
+
+
+def test_tml_declares_only_restricted_columns_with_their_groups():
+    doc = build_csr_tml("T2", {"PROD_NM": ["Analyst", "Finance"]})
+    assert doc["column_security_rules"]["rules"] == [
+        {"column_name": "PROD_NM",
+         "accessible_groups": {"group_name": ["Analyst", "Finance"]}}]
+
+
+def test_tml_sorts_rules_and_groups_for_a_stable_document():
+    doc = build_csr_tml("T2", {"ZED": ["B", "A"], "ALPHA": ["C"]})
+    rules = doc["column_security_rules"]["rules"]
+    assert [r["column_name"] for r in rules] == ["ALPHA", "ZED"]
+    assert rules[1]["accessible_groups"]["group_name"] == ["A", "B"]
+
+
+def test_tml_for_a_column_secured_for_nobody_has_an_empty_group_list():
+    doc = build_csr_tml("T2", {"COST": []})
+    assert doc["column_security_rules"]["rules"][0]["accessible_groups"] == {
+        "group_name": []}
+
+
+def test_tml_omits_guid_unless_given():
+    # `guid:` at the document root is what makes an import an in-place update. Omitting
+    # it on a first import is deliberate; including a stale one is an error.
+    assert "guid" not in build_csr_tml("T2", {"COST": ["A"]})
+    assert build_csr_tml("T2", {"COST": ["A"]}, guid="g-1")["guid"] == "g-1"
+
+
+def test_tml_refuses_an_empty_table_name():
+    with pytest.raises(ValueError, match="table"):
+        build_csr_tml("", {"COST": ["A"]})
+
+
+def test_parse_export_pulls_the_csr_document_out_of_a_tml_export_response():
+    edocs = [
+        {"info": {"type": "logical_table", "name": "T2"}, "edoc": "table:\n  name: T2\n"},
+        {"info": {"type": "column_security_rules", "name": "T2_CSR", "id": "g-9"},
+         "edoc": ("column_security_rules:\n"
+                  "  table:\n    name: T2\n"
+                  "  rules:\n"
+                  "  - column_name: PROD_NM\n"
+                  "    accessible_groups:\n      group_name:\n      - Analyst\n")},
+    ]
+    parsed = parse_csr_tml_export(edocs)
+    assert len(parsed) == 1
+    assert parsed[0]["table_name"] == "T2"
+    assert parsed[0]["rules"] == {"PROD_NM": ["Analyst"]}
+    assert parsed[0]["guid"] == "g-9"
+    assert "column_security_rules" in parsed[0]["yaml"]
+
+
+def test_parse_export_returns_empty_when_no_csr_document_came_back():
+    # The export flag is Beta. A cluster without it returns the table and nothing else,
+    # and that must read as "no CSR here", not as a crash.
+    edocs = [{"info": {"type": "logical_table"}, "edoc": "table:\n  name: T2\n"}]
+    assert parse_csr_tml_export(edocs) == []
+
+
+def test_parse_export_tolerates_junk():
+    assert parse_csr_tml_export(None) == []
+    assert parse_csr_tml_export([{"info": None, "edoc": None}]) == []

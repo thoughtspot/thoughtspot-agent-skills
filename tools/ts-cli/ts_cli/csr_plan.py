@@ -442,3 +442,102 @@ def explain_csr_error(body_text: str,
             "CAN_MANAGE_WORKSHEET_VIEWS_TABLES with RBAC enabled.")
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# The TML route -- CSR is a sibling document, exactly the column_alias pattern
+# ---------------------------------------------------------------------------
+
+CSR_TML_TYPE = "column_security_rules"
+
+
+def csr_tml_filename(table_name: str) -> str:
+    """The filename the platform itself uses for an exported CSR document."""
+    return f"{table_name}_CSR.{CSR_TML_TYPE}.tml"
+
+
+def build_csr_tml(table_name: str, rules: Dict[str, List[str]],
+                  guid: Optional[str] = None) -> Dict[str, Any]:
+    """Assemble a `column_security_rules` TML document.
+
+    The ``table:`` reference is MANDATORY. Omitting it fails the import with code 14502
+    and `Referenced table with name  not found`, the empty name interpolated into the
+    message. It is required even when the document is imported alongside its table.
+
+    ``guid`` is omitted unless supplied: at the document root it is what turns an import
+    into an in-place update, so a first import must not carry one and an update must.
+
+    Only restricted columns appear, each with the groups that may see it. This is the
+    inverse of CLS, which enumerates every visible column per group.
+
+    Pure -- no I/O.
+    """
+    name = str(table_name or "").strip()
+    if not name:
+        raise ValueError("A table name is required: the `table:` reference is mandatory "
+                         "and an empty one fails the import with code 14502")
+
+    document: Dict[str, Any] = {}
+    if guid:
+        document["guid"] = guid
+    document[CSR_TML_TYPE] = {
+        "table": {"name": name},
+        "rules": [
+            {"column_name": column,
+             "accessible_groups": {"group_name": sorted(set(rules[column] or []))}}
+            for column in sorted(rules)
+        ],
+    }
+    return document
+
+
+def _rules_from_tml(body: Dict[str, Any]) -> Dict[str, List[str]]:
+    """{column: [groups]} from a parsed column_security_rules document body."""
+    rules: Dict[str, List[str]] = {}
+    for rule in (body.get("rules") or []):
+        if not isinstance(rule, dict):
+            continue
+        column = _str(rule.get("column_name"))
+        if not column:
+            continue
+        groups = (rule.get("accessible_groups") or {}).get("group_name") or []
+        rules[column] = [_str(g) for g in groups]
+    return rules
+
+
+def parse_csr_tml_export(edocs: Any) -> List[Dict[str, Any]]:
+    """Pull the CSR documents out of a `metadata/tml/export` response.
+
+    An export asked for with ``export_column_security_rules`` returns the table's own
+    document alongside the CSR sibling, so the CSR one has to be picked out by
+    ``info.type``.
+
+    An empty result is a legitimate answer, not a failure: the export option is Beta,
+    and a table with no secured columns has no CSR document to return.
+    """
+    import yaml
+
+    parsed: List[Dict[str, Any]] = []
+    for item in (edocs or ()):
+        if not isinstance(item, dict):
+            continue
+        info = item.get("info") or {}
+        if not isinstance(info, dict) or info.get("type") != CSR_TML_TYPE:
+            continue
+        text = item.get("edoc") or ""
+        if not text:
+            continue
+        try:
+            document = yaml.safe_load(text) or {}
+        except yaml.YAMLError:
+            continue
+        body = document.get(CSR_TML_TYPE) or {}
+        if not isinstance(body, dict):
+            continue
+        parsed.append({
+            "table_name": _str((body.get("table") or {}).get("name")),
+            "rules": _rules_from_tml(body),
+            "guid": _str(document.get("guid") or info.get("id")),
+            "yaml": text,
+        })
+    return parsed
