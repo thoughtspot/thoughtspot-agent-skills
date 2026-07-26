@@ -8,7 +8,16 @@ The assertions encode behaviour that was verified live and that the published
 ThoughtSpot documentation gets wrong or leaves unsaid, so a regression here means
 the skill would produce a plan that breaks something.
 """
-from ts_cli.publish_plan import (
+import sys
+from pathlib import Path
+
+# Test the ts_cli in THIS checkout, not whatever happens to be installed. An
+# editable install usually points at the primary clone, so on a worktree branch
+# the hook would otherwise import the wrong copy: a new module fails to import,
+# and worse, a modified one passes against the stale code.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ts-cli"))
+
+from ts_cli.publish_plan import (  # noqa: E402
     build_apply_plan,
     build_clusters,
     build_value_matrix,
