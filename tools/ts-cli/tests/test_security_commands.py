@@ -115,3 +115,83 @@ def test_the_group_is_registered_under_ts_security():
     result = runner.invoke(app, ["security", "column-rules", "--help"])
     assert result.exit_code == 0
     assert "get" in result.output
+
+
+def test_set_defaults_to_replace(patched):
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                 "--rule", "PROD_NM=Analyst,Finance", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    body = next(b for p, b in client.calls if p == UPDATE)
+    assert body == {
+        "identifier": "T2", "clear_csr": False,
+        "column_security_rules": [
+            {"column_identifier": "PROD_NM", "is_unsecured": False,
+             "group_access": [{"operation": "REPLACE",
+                               "group_identifiers": ["Analyst", "Finance"]}]}]}
+
+
+def test_set_add_and_remove_change_the_operation(patched):
+    for flag, operation in (("--add", "ADD"), ("--remove", "REMOVE")):
+        client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+        runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                            "--rule", "COST=Finance", flag, "-p", "x"])
+        body = next(b for p, b in client.calls if p == UPDATE)
+        assert body["column_security_rules"][0]["group_access"][0]["operation"] \
+            == operation
+
+
+def test_set_refuses_add_and_remove_together(patched):
+    patched(FakeClient())
+    result = msg_runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                     "--rule", "COST=Finance", "--add", "--remove",
+                                     "-p", "x"])
+    assert result.exit_code != 0
+    assert "--add" in result.output
+
+
+def test_set_dry_run_prints_the_payload_and_posts_nothing(patched):
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                 "--rule", "COST=Finance", "--dry-run", "-p", "x"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["identifier"] == "T2"
+    assert not [p for p, _ in client.calls if p == UPDATE]
+
+
+def test_set_rejects_a_malformed_rule_flag(patched):
+    patched(FakeClient())
+    result = msg_runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                     "--rule", "PROD_NM", "-p", "x"])
+    assert result.exit_code != 0
+    assert "COL=GROUP" in result.output
+
+
+def test_clear_sends_clear_csr_with_the_required_empty_array(patched):
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "clear", "--table", "T2",
+                                 "-p", "x"])
+    assert result.exit_code == 0, result.output
+    body = next(b for p, b in client.calls if p == UPDATE)
+    assert body == {"identifier": "T2", "clear_csr": True,
+                    "column_security_rules": []}
+
+
+def test_clear_one_column_unsecures_just_that_column(patched):
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    runner.invoke(app, ["security", "column-rules", "clear", "--table", "T2",
+                        "--column", "COST", "-p", "x"])
+    body = next(b for p, b in client.calls if p == UPDATE)
+    assert body == {"identifier": "T2", "clear_csr": False,
+                    "column_security_rules": [
+                        {"column_identifier": "COST", "is_unsecured": True}]}
+
+
+def test_set_asserts_the_org_context_before_writing(monkeypatch, patched):
+    seen = []
+    patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    monkeypatch.setattr("ts_cli.commands.security.assert_org_context",
+                        lambda client, org, profile=None: seen.append(org))
+    runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                        "--rule", "COST=Finance", "--org", "ORG1", "-p", "x"])
+    assert seen == ["ORG1"]

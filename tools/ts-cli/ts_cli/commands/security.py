@@ -42,7 +42,6 @@ from ts_cli.commands.share import (  # noqa: F401 -- re-exported for security_pl
     assert_org_context,
 )
 from ts_cli.csr_plan import (
-    OPERATIONS,
     build_update_payload,
     explain_csr_error,
     normalise_fetch_response,
@@ -153,3 +152,120 @@ def get_cmd(
         for row in _fetch_rules(client, list(tables)):
             rows.append({"org": org_name, **row})
     print(json.dumps(rows))
+
+
+# ---------------------------------------------------------------------------
+# ts security column-rules set / clear -- one-shot imperatives, no manifest
+# ---------------------------------------------------------------------------
+
+def _one_shot(profile: Optional[str], org: Optional[str], payload: Dict[str, Any],
+              label: str, dry_run: bool) -> None:
+    """Apply one `rules/update` body to one table, or print it under --dry-run.
+
+    The Org context is asserted before writing. Org scoping fails SILENTLY when the
+    platform does not honour the field it was given, and a silent failure here writes
+    one tenant's column security into another tenant's Org.
+    """
+    if dry_run:
+        print(json.dumps(payload))
+        return
+    client = _client_for_org(profile, org)
+    if org:
+        assert_org_context(client, org, profile)
+    _post_update(client, payload, label)
+
+
+@column_rules_app.command("set")
+def set_cmd(
+    table: str = typer.Option(..., "--table", help="Table GUID or name"),
+    rule: List[str] = typer.Option(..., "--rule",
+                                   help='Restricted column and its groups: '
+                                        '"COL=GROUP[,GROUP...]" (repeatable). '
+                                        'Use "COL=" to secure a column for nobody.'),
+    add: bool = typer.Option(False, "--add",
+                             help="Add these groups to each column's access list "
+                                  "instead of replacing it"),
+    remove: bool = typer.Option(False, "--remove",
+                                help="Remove these groups from each column's access list"),
+    org: Optional[str] = typer.Option(None, "--org", help="Apply in this Org"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Print the payload without sending it"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Restrict columns on one table to named groups.
+
+    Declarative by default: the groups you pass are what the column ends up with
+    (REPLACE), so running the same command twice converges and `get` before and after
+    diffs cleanly. --add and --remove reach the incremental operations when a
+    read-modify-write is not what you want.
+
+    Only the columns named are touched. A column already secured and not mentioned here
+    is left exactly as it was; use `clear --column` to unsecure one, or
+    `resolve --prune` to unsecure everything absent from a manifest.
+
+    Output (JSON to stdout, --dry-run only): the request payload.
+
+    Examples:
+
+    \b
+      ts security column-rules set --table T2_PUBLISH --rule "PROD_NM=Analyst" -p prod
+      ts security column-rules set --table T2 --rule "COST=Finance,Audit" \\
+        --rule "SALARY=" --org ORG1 -p prod
+      ts security column-rules set --table T2 --rule "COST=Audit" --add -p prod
+    """
+    from ts_cli.csr_plan import parse_rule_flags
+
+    if add and remove:
+        raise typer.BadParameter(
+            "--add and --remove are mutually exclusive: one call carries one operation.")
+    operation = "ADD" if add else "REMOVE" if remove else "REPLACE"
+
+    try:
+        rules = parse_rule_flags(list(rule))
+        payload = build_update_payload(table, rules, operation=operation)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    _one_shot(profile, org, payload,
+              f"{table}: {operation} {', '.join(sorted(rules))}", dry_run)
+
+
+@column_rules_app.command("clear")
+def clear_cmd(
+    table: str = typer.Option(..., "--table", help="Table GUID or name"),
+    column: Optional[str] = typer.Option(None, "--column",
+                                         help="Unsecure only this column. Omit to "
+                                              "unsecure every column on the table."),
+    org: Optional[str] = typer.Option(None, "--org", help="Apply in this Org"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Print the payload without sending it"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Unsecure one column, or every column on a table.
+
+    With --column this sends `is_unsecured: true` for that column alone. Without it,
+    `clear_csr: true` unsecures the whole table -- accompanied by the empty
+    `column_security_rules: []` the request schema requires, which is why the flag
+    appears not to work when sent on its own.
+
+    This removes protection. Capture `get` first if you may need to put it back.
+
+    Output (JSON to stdout, --dry-run only): the request payload.
+
+    Examples:
+
+    \b
+      ts security column-rules clear --table T2_PUBLISH --column COST -p prod
+      ts security column-rules clear --table T2_PUBLISH --org ORG1 -p prod
+    """
+    try:
+        if column:
+            payload = build_update_payload(table, {}, unsecure=[column])
+            label = f"{table}: unsecure {column}"
+        else:
+            payload = build_update_payload(table, {}, clear=True)
+            label = f"{table}: clear all column security rules"
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    _one_shot(profile, org, payload, label, dry_run)
