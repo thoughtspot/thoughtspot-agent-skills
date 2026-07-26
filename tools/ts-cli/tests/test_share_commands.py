@@ -203,3 +203,99 @@ def test_explain_share_error_translates_a_missing_principal():
 def test_explain_share_error_returns_none_for_an_unrecognised_body():
     assert explain_share_error('{"error":{"message":"something else entirely"}}') is None
     assert explain_share_error("") is None
+
+
+# ---------------------------------------------------------------------------
+# Org scoping — the silent-wrong-org guard
+# ---------------------------------------------------------------------------
+
+def _patch_org_index(monkeypatch, index):
+    """Stub the orgs/search lookup and clear the per-profile cache."""
+    from ts_cli.commands import share as share_module
+
+    share_module._ORG_INDEX_CACHE.clear()
+    monkeypatch.setattr(share_module, "_org_name_to_id", lambda client, key: index)
+    monkeypatch.setattr(share_module, "ThoughtSpotClient",
+                        lambda profile_name, org=None: ("client", profile_name, org))
+    monkeypatch.setattr(share_module, "resolve_profile", lambda p: p or "p")
+    return share_module
+
+
+def test_client_for_org_resolves_a_name_to_its_numeric_id(monkeypatch):
+    """auth/token/full honours org_id (int) and SILENTLY IGNORES a name.
+
+    Verified live 2026-07-26 on nebula-damian-alias: TS_ORG=ORG1 minted a token whose
+    current_org was {id: 0, name: Primary}. Passing the name through would apply a
+    tenant's grants in the Primary Org while reporting success, so the name must be
+    resolved to its id before the client is built.
+    """
+    share_module = _patch_org_index(monkeypatch, {"ORG1": 12750490, "Primary": 0})
+    assert share_module._client_for_org("p", "ORG1") == ("client", "p", "12750490")
+
+
+def test_client_for_org_passes_a_numeric_org_through(monkeypatch):
+    share_module = _patch_org_index(monkeypatch, {"ORG1": 12750490})
+    assert share_module._client_for_org("p", "12750490") == ("client", "p", "12750490")
+
+
+def test_client_for_org_without_an_org_builds_an_unscoped_client(monkeypatch):
+    share_module = _patch_org_index(monkeypatch, {"ORG1": 12750490})
+    assert share_module._client_for_org("p") == ("client", "p", None)
+
+
+def test_client_for_org_refuses_an_unknown_org_name(monkeypatch):
+    import typer
+
+    share_module = _patch_org_index(monkeypatch, {"ORG1": 12750490, "Primary": 0})
+    with pytest.raises(typer.BadParameter, match="NoSuchOrg"):
+        share_module._client_for_org("p", "NoSuchOrg")
+
+
+def test_assert_org_context_refuses_a_session_in_the_wrong_org(monkeypatch):
+    """The defence-in-depth guard: org scoping can fail silently, so read it back."""
+    import typer
+
+    from ts_cli.commands import share as share_module
+
+    share_module._ORG_INDEX_CACHE.clear()
+    monkeypatch.setattr(share_module, "_org_name_to_id",
+                        lambda client, key: {"ORG1": 12750490, "Primary": 0})
+    monkeypatch.setattr(share_module, "resolve_profile", lambda p: p or "p")
+    monkeypatch.setattr(share_module, "ThoughtSpotClient",
+                        lambda profile_name, org=None: ("client", profile_name, org))
+
+    class _Resp:
+        @staticmethod
+        def json():
+            return {"current_org": {"id": 0, "name": "Primary"}}
+
+    class _Client:
+        @staticmethod
+        def get(_path):
+            return _Resp()
+
+    with pytest.raises(typer.BadParameter, match="Primary"):
+        share_module.assert_org_context(_Client(), "ORG1", "p")
+
+
+def test_assert_org_context_accepts_a_matching_session(monkeypatch):
+    from ts_cli.commands import share as share_module
+
+    share_module._ORG_INDEX_CACHE.clear()
+    monkeypatch.setattr(share_module, "_org_name_to_id",
+                        lambda client, key: {"ORG1": 12750490})
+    monkeypatch.setattr(share_module, "resolve_profile", lambda p: p or "p")
+    monkeypatch.setattr(share_module, "ThoughtSpotClient",
+                        lambda profile_name, org=None: ("client", profile_name, org))
+
+    class _Resp:
+        @staticmethod
+        def json():
+            return {"current_org": {"id": 12750490, "name": "ORG1"}}
+
+    class _Client:
+        @staticmethod
+        def get(_path):
+            return _Resp()
+
+    assert share_module.assert_org_context(_Client(), "ORG1", "p") is None

@@ -306,10 +306,16 @@ def permission_rows(details: Any) -> List[Dict[str, Any]]:
     is awkward to eyeball or diff. One row per (object, principal) is what an operator
     actually reads, and what a before/after comparison needs.
 
-    ``permission`` is the EFFECTIVE access (privileges included); ``shared_permission``
-    is what sharing itself granted. When checking whether `ts share` did its job, read
-    ``shared_permission`` -- an admin group shows MODIFY under ``permission`` whether or
-    not anything was ever shared with it.
+    **Read ``permission`` to confirm a share landed, not ``shared_permission``.** The
+    field names suggest the opposite, and they mislead: verified live 2026-07-26, a
+    successful `READ_ONLY` share put `READ_ONLY` in ``permission`` and left
+    ``shared_permission`` at `NO_ACCESS` -- which it was for every principal both before
+    and after. So ``shared_permission`` is not "what sharing granted" on this build, and
+    trusting it makes a working share look like a no-op.
+
+    The reliable signal is a principal APPEARING against an object it was absent from,
+    with a non-`NO_ACCESS` ``permission``. Sharing to a group also adds a row per member
+    user, so one group grant shows up as several rows.
 
     Accepts either the ``{"metadata_permission_details": [...]}`` envelope or a bare list.
     """

@@ -31,6 +31,7 @@ from ts_cli.commands.share import (
     _resolve_object,
     _table_columns,
     app,
+    assert_org_context,
 )
 
 
@@ -287,8 +288,12 @@ def _check_groups_exist(profile: Optional[str], grants: List[Dict[str, Any]]) ->
 
     missing: List[str] = []
     for org_name in sorted(wanted):
+        client = _client_for_org(profile, org_name)
+        # Without this the check could read Primary's groups and pass a manifest whose
+        # groups exist only there -- validating the wrong Org is worse than not checking.
+        assert_org_context(client, org_name, profile)
         try:
-            available = _existing_groups(_client_for_org(profile, org_name))
+            available = _existing_groups(client)
         except Exception as exc:
             print(f"Warning: could not list groups in org '{org_name}' ({exc}); "
                   f"skipping the existence check there.", file=sys.stderr)
@@ -517,7 +522,13 @@ def apply_cmd(
         return
 
     for step in steps:
-        client = _client_for_org(profile, step["org_name"] or None)
+        org_name = step["org_name"] or None
+        client = _client_for_org(profile, org_name)
+        # Confirm the session really is in the Org the step names before granting
+        # anything: org scoping fails silently, and a silent failure grants a tenant's
+        # data in the wrong Org (see share.assert_org_context).
+        if org_name:
+            assert_org_context(client, org_name, profile)
         _apply_step(client, step, message, notify)
     print(f"applied {len(steps)} share call(s)", file=sys.stderr)
 

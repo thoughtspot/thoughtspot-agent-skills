@@ -1548,11 +1548,26 @@ always produce the same plan and a `--dry-run` is diffable between runs.
 `--notify` is off by default, against the API's own default of `true`: a bulk tenant-wide
 grant should not email every member of every group.
 
+**Org names are resolved to numeric ids before the token is minted.** `auth/token/full`
+honours `org_id` (an int) and **silently ignores** `org_identifier` (a name), falling back
+to the caller's default Org — verified live: `TS_ORG=ORG1` produced a session whose
+`current_org` was `{id: 0, name: Primary}`. Passing a name through would apply a tenant's
+grants in the Primary Org while reporting success, so `ts share` resolves the name itself
+and refuses an unknown one. Before any grant, and before the group-existence check, it also
+reads the session's actual Org back and stops on a mismatch — a silent wrong-Org write is
+the one failure here with no louder symptom.
+
 `status` output is one row per (object, principal):
 `[{"org", "guid", "name", "type", "principal_type", "principal_id", "principal_name",
-"permission", "shared_permission"}]`. Read **`shared_permission`** when checking whether a
-share landed — `permission` is effective access, and shows `MODIFY` for an admin group
-whether or not anything was ever shared with it.
+"permission", "shared_permission"}]`.
+
+**Read `permission`, not `shared_permission`.** The names suggest the opposite and they
+mislead: verified live, a successful `READ_ONLY` share put `READ_ONLY` in `permission` and
+left `shared_permission` at `NO_ACCESS` — which it was for every principal both before and
+after. The signal that a share landed is a principal **appearing** against an object it was
+absent from, with a non-`NO_ACCESS` `permission`, so diff a before-and-after run rather
+than reading one in isolation (an object's admins and owner always appear). Sharing to a
+group also adds a row per member user, so one group grant shows up as several rows.
 
 ---
 

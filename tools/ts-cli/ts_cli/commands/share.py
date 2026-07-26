@@ -93,14 +93,70 @@ def build_share_payload(
 # Shared I/O helpers
 # ---------------------------------------------------------------------------
 
+_ORG_INDEX_CACHE: Dict[str, Dict[str, int]] = {}
+
+
+def _org_name_to_id(client: ThoughtSpotClient, profile_key: str) -> Dict[str, int]:
+    """{org name: numeric id} from POST /api/rest/2.0/orgs/search, cached per profile."""
+    if profile_key not in _ORG_INDEX_CACHE:
+        resp = client.post("/api/rest/2.0/orgs/search", json={})
+        _ORG_INDEX_CACHE[profile_key] = {o["name"]: o["id"] for o in resp.json()
+                                         if o.get("name") is not None and "id" in o}
+    return _ORG_INDEX_CACHE[profile_key]
+
+
+def _resolve_org_id(profile: Optional[str], org: str) -> int:
+    """An Org name (or numeric id) to its numeric id, refusing an unknown name.
+
+    This resolution is MANDATORY, not a convenience. `auth/token/full` honours
+    `org_id` (an int) and **silently ignores** `org_identifier` (a name), falling back
+    to the caller's default Org -- verified live 2026-07-26 on nebula-damian-alias:
+    `TS_ORG=ORG1` minted a token whose `current_org` was `{id: 0, name: Primary}`.
+    Passing a name straight through would therefore apply a tenant's grants in the
+    Primary Org while reporting success. There is no louder failure to fall back on,
+    so the name has to be resolved here.
+    """
+    if str(org).isdigit():
+        return int(org)
+    index = _org_name_to_id(ThoughtSpotClient(resolve_profile(profile)), str(profile))
+    if org not in index:
+        raise typer.BadParameter(
+            f"Org '{org}' does not exist. Known orgs: {', '.join(sorted(index))}")
+    return index[org]
+
+
 def _client_for_org(profile: Optional[str], org: Optional[str] = None) -> ThoughtSpotClient:
-    """A client scoped to one Org.
+    """A client scoped to one Org, by numeric id.
 
     Groups are per-Org, so a grant naming a group only resolves inside that Org's
     context. Each Org gets its own client (and its own cached token) rather than the
     process switching TS_ORG between calls.
+
+    The Org name is resolved to a numeric id first -- see `_resolve_org_id` for why
+    passing the name through is unsafe rather than merely unsupported.
     """
-    return ThoughtSpotClient(resolve_profile(profile), org=org)
+    if not org:
+        return ThoughtSpotClient(resolve_profile(profile))
+    return ThoughtSpotClient(resolve_profile(profile), org=str(_resolve_org_id(profile, org)))
+
+
+def assert_org_context(client: ThoughtSpotClient, expected_org: str,
+                       profile: Optional[str] = None) -> None:
+    """Refuse to proceed unless the session really is in ``expected_org``.
+
+    Defence in depth over `_resolve_org_id`. Org scoping fails SILENTLY when the
+    platform does not honour the field it was given, and a silent failure here writes
+    a tenant's grants into the wrong Org. So before any mutating call, the session's
+    actual Org is read back and compared, and a mismatch stops the run.
+    """
+    expected_id = _resolve_org_id(profile, expected_org)
+    resp = client.get("/api/rest/2.0/auth/session/user")
+    actual = (resp.json() or {}).get("current_org") or {}
+    if actual.get("id") != expected_id:
+        raise typer.BadParameter(
+            f"Refusing to share: asked for org '{expected_org}' (id {expected_id}) but the "
+            f"session is in '{actual.get('name')}' (id {actual.get('id')}). Applying grants "
+            f"in the wrong Org would expose the wrong tenant's data.")
 
 
 def _read_json_envelope(input_file: Optional[str]) -> Dict[str, Any]:
@@ -199,15 +255,19 @@ def _fetch_permissions(client: ThoughtSpotClient, targets: List[Dict[str, str]],
                        groups: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Read current grants for a set of objects, normalised to flat rows.
 
-    ``permission_type: DEFINED`` asks for access that came from SHARING rather than from
-    group privileges -- which is what a before/after check on `ts share` should compare.
+    ``permission_type`` is deliberately NOT sent. Passing ``DEFINED`` (sharing-derived
+    access only) looked right but returns an empty principal list for an object nothing
+    has been shared with -- verified live 2026-07-26 -- so `status` would print `[]` and
+    read as "nobody can see this" when the object's admins and owner plainly can. The
+    API's default returns every principal with BOTH columns, and ``shared_permission``
+    already isolates what sharing granted, so the sharing view is preserved without
+    hiding the rest.
     """
     if not targets:
         return []
     body: Dict[str, Any] = {
         "metadata": [{"identifier": t["guid"], "type": t["type"]} for t in targets],
         "record_offset": 0, "record_size": -1,
-        "permission_type": "DEFINED",
     }
     if groups:
         body["principals"] = [{"type": "USER_GROUP", "identifier": g} for g in groups]
@@ -321,9 +381,17 @@ def status_cmd(
     """Report who can see each object -- and, with --columns, each of its columns.
 
     The read-back half of the pipeline, and the way to check an apply landed.
-    ``shared_permission`` is what SHARING granted; ``permission`` is effective access,
-    which shows MODIFY for an admin group whether or not anything was shared with it.
-    Compare ``shared_permission`` when verifying `ts share apply`.
+
+    Read ``permission``, NOT ``shared_permission``. The names suggest the opposite, but
+    verified live 2026-07-26: a successful READ_ONLY share showed READ_ONLY in
+    ``permission`` and left ``shared_permission`` at NO_ACCESS, as it was for every
+    principal beforehand. The signal that a share landed is a principal appearing
+    against an object it was absent from, with a non-NO_ACCESS ``permission``. Diff a
+    before-and-after run rather than reading one in isolation, since an object's admins
+    and owner always appear.
+
+    Sharing to a group also adds a row per member user, so one group grant shows up as
+    several rows.
 
     Output (JSON to stdout):
       [{"org", "guid", "name", "type", "principal_type", "principal_id",
