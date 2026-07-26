@@ -64,10 +64,14 @@ Steps:
   9.  Dry-run the plan ................................. auto
  10.  Apply and publish ................................ you confirm (checkpoint)
  11.  Verify ........................................... auto
+ 12.  Share to end users ............................... separate capability
 
 Confirmation required: Steps 2, 4, 5, 6, 8, and the checkpoint in Step 10
 Auto-executed: Steps 1, 3, 7, 9, 11
 Reversible: a rollback record is written before anything changes
+
+Note: publishing makes objects present in a target Org, not visible. Sharing is a
+separate capability and Step 12 hands off to it.
 
 Ready to start? [Y / N]
 ---
@@ -351,6 +355,55 @@ Publication summary:
 
 ---
 
+## Step 12 — Share to end users (separate capability)
+
+Publishing makes an object *present* in a target Org. It does not make it *visible*: a
+published object and its dependencies are visible only to that Org's administrators until
+someone shares them onward.
+
+**This skill deliberately stops here.** Sharing is its own capability, not part of
+publication, because it is needed whether or not anything was published, and because the
+same mechanism carries column-level security. Coupling the two would put a security
+operation inside a deployment operation.
+
+Tell the user plainly what remains:
+
+```
+Published to {orgs}. The objects are present but visible only to each Org's
+administrators.
+
+To make them usable, share them in each target Org:
+  - the Model to the groups that should query it
+  - the Liveboards and Answers to their audiences
+
+That is a separate step. Column-level security uses the same sharing mechanism,
+so the two are usually done together.
+```
+
+Until a dedicated sharing skill exists, point the user at
+`POST /api/rest/2.0/security/metadata/share` (`shareMetadata`), or offer to run it for them
+with explicit confirmation of the principals and share mode.
+
+**Do not guess the audience.** Sharing decides who sees tenant data, so the principals and
+the share mode are the user's call, never a default.
+
+### Which column-security mechanism applies
+
+Worth stating when the user asks, because the choice is constrained by what this skill did:
+
+| | Published objects (this skill) | Unpublished objects |
+|---|---|---|
+| Mechanism | Column-level **sharing** | Column security **rules** |
+| API | `security/metadata/share` | `security/column/rules/update` |
+| Liveboard filters on secured columns | Liveboard locks; replicate instead of publishing | Liveboard stays interactive |
+
+Column security rules **cannot be defined on published objects**, so publishing commits the
+tenant to column-level sharing. If the deployment needs interactive Liveboards whose filters
+sit on secured columns, that is an argument for the shared-Org architecture rather than
+Org-per-tenant.
+
+---
+
 ## Rollback
 
 To undo a publication:
@@ -418,6 +471,7 @@ record of the original static values.
 | `ts variables create` fails with `Duplicate template variable name` | Names are unique **instance-wide**, not per Org. `ts variables search` to find the existing one, then reuse it via `--source existing` |
 | `ts variables delete` fails with "dependent objects" | The variable is still bound. `ts metadata unparameterize` the fields first |
 | Source Org queries fail with `Object '...' does not exist` after publishing | The owner Org has no value for a variable. Assign one; the skill includes Primary automatically, so this indicates a hand-edited matrix |
+| Users in the target Org cannot see the published objects | Expected. Publication makes objects present, not visible. Share them in that Org (Step 12) |
 | `parameterize-fields` returns 500 `NullPointerException` | The target is a Falcon-backed table. See `references/open-items.md` #2 |
 
 ---

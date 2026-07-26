@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**135 total items** across 17 skills — **64 open**, 61 verified, 10 deferred
+**136 total items** across 17 skills — **65 open**, 61 verified, 10 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -19,14 +19,14 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
+| ts-publish-orgs | 8 | **3** | 4 | 1 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-convert-from-tableau | 17 | **2** | 12 | 3 |
-| ts-publish-orgs | 7 | **2** | 4 | 1 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-agentql-query | 4 | **0** | 4 | 0 |
-### Untagged (64 items)
+### Untagged (65 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -96,4 +96,5 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-object-model-coach | #15 | Cross-Model consistency heuristic calibration | OPEN |
 | ts-publish-orgs | #6 | Connection-property variables are not discovered | OPEN |
 | ts-publish-orgs | #7 | `--source db` is Snowflake-only | OPEN |
+| ts-publish-orgs | #8 | Sharing is a separate capability, not yet built | OPEN |
 

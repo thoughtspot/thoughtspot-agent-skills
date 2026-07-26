@@ -119,3 +119,25 @@ Spec-read only; not yet exercised live.
 Every `--source db` path in the repo assumes Snowflake. Databricks users have the CSV path
 only. Tracked as [BL-136](../../../../docs/backlog.md); the two platforms share no cursor
 shape, so the abstraction belongs at "give me rows".
+
+---
+
+## #8 — Sharing is a separate capability, not yet built — OPEN (by design)
+
+Publication makes an object present in a target Org; it is visible only to that Org's
+administrators until shared. This skill stops at that boundary on purpose.
+
+Sharing is deliberately **not** part of publication: it is needed whether or not anything
+was published, and the same `shareMetadata` mechanism also carries column-level security.
+Folding it in would put a security operation inside a deployment operation.
+
+Step 12 hands off. Until a `ts-security-sharing` skill exists, the user is pointed at
+`POST /api/rest/2.0/security/metadata/share`.
+
+**To verify when that skill is built.** The `shareMetadata` spec lists its supported types
+as Liveboards, Visualizations, Answers, Models, Views, Connections and Collections, and does
+**not** list `LOGICAL_COLUMN`. Column-level sharing is known to work in practice, so either
+the list is incomplete or columns take a different shape. Confirm live before designing a
+CLI around it.
+
+---
