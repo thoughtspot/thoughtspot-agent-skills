@@ -189,6 +189,13 @@ validation checks only the TARGET orgs, so nothing on the platform side catches
 this. `ts publish resolve` therefore always includes the owner Org and always
 gives it the field's current value, never a pattern expansion.
 
+**Publishing cascades to dependencies, but not to siblings.** Publishing a
+Liveboard alone to ORG3 also published its Model and its Table; `orgIds` on both
+gained the target Org without either being named in the call. A saved Answer
+built on the same Model did **not** come along: it is a sibling of the Liveboard,
+not a dependency. So the data layer never needs publishing explicitly, but every
+Answer does.
+
 **`obj_id` is auto-populated** (e.g. `T1_PUBLISH-4be2cc25`) on all tables
 regardless of publish state. Nothing for the skill to assign.
 

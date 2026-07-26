@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-26
+- fix: `ts publish export` looks the root up as its own type (ts-cli v0.104.0). The publication-status lookup inside `export` hardcoded `LOGICAL_TABLE`, so for a Liveboard or Answer root it matched nothing, left `owner_org` null, and thereby switched off `resolve`'s owner-Org protection for exactly the closures that still parameterize Tables underneath. That would have reintroduced the Primary-Org outage via the Liveboard path. Verified live across all four root types (table, model, answer, liveboard), each now reporting `owner_org: Primary`.
 - fix: `ts publish apply` derives the publish type from the closure root (ts-cli v0.103.0). It previously reused the type it uses to parameterize Tables (`LOGICAL_TABLE`) for the root as well, so a Liveboard or Answer closure would have been published with the wrong metadata type. `publish_type_for_root` now maps `liveboard`/`pinboard` → `LIVEBOARD`, `answer` → `ANSWER`, and everything in the data layer → `LOGICAL_TABLE`, and `rollback` unpublishes with the same type. Confirms Liveboard/Answer coverage end to end: `export` accepts their GUIDs and walks down to the Tables beneath them (they carry no parameterizable fields of their own), and `push`/`unpush`/`status` already took `--type`. 12 new tests.
 
 ## 2026-07-25

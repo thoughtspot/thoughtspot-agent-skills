@@ -99,7 +99,7 @@ def export_closure(
       ts publish export 4be2cc25-... --profile prod
       ts publish export <model-guid> --profile prod | jq '.clusters'
     """
-    from ts_cli.publish_plan import build_clusters
+    from ts_cli.publish_plan import build_clusters, publish_type_for_root
 
     client = ThoughtSpotClient(resolve_profile(profile))
     root, tables = _walk_closure(client, guid)
@@ -107,8 +107,14 @@ def export_closure(
     clusters = build_clusters(tables, existing_variables=set(existing.values()))
 
     org_index = _org_index(client)
+    # Look the root up as its OWN type. Hardcoding LOGICAL_TABLE here silently
+    # returned nothing for a Liveboard or Answer root, which left owner_org None
+    # and switched off resolve's owner-Org protection for exactly the closures
+    # that still parameterize Tables underneath.
     status_resp = client.post("/api/rest/2.0/metadata/search", json={
-        "metadata": [{"identifier": guid, "type": "LOGICAL_TABLE"}], "include_headers": True})
+        "metadata": [{"identifier": guid,
+                      "type": publish_type_for_root(root.get("type"))}],
+        "include_headers": True})
     published = publication_rows(status_resp.json(), org_index)
 
     connections = sorted({t["connection"] for t in tables if t.get("connection")})
