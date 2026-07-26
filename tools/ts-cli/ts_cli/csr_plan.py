@@ -28,7 +28,7 @@ matter and each has caught somebody already:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 OPERATIONS: Tuple[str, ...] = ("ADD", "REMOVE", "REPLACE")
 
@@ -132,3 +132,162 @@ def parse_rule_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, str]]:
                values["column_name"], values["group_name"])
         parsed[key] = dict(values)
     return list(parsed.values())
+
+
+# ---------------------------------------------------------------------------
+# Payload building -- one `security/column/rules/update` body
+# ---------------------------------------------------------------------------
+
+def build_update_payload(
+    table_identifier: str,
+    rules: Dict[str, List[str]],
+    *,
+    operation: str = "REPLACE",
+    unsecure: Optional[Iterable[str]] = None,
+    clear: bool = False,
+) -> Dict[str, Any]:
+    """Build the request body for POST /api/rest/2.0/security/column/rules/update.
+
+    ``column_security_rules`` is ALWAYS present, including when ``clear`` is set. The
+    field is required by the request schema, which is why `clear_csr: true` on its own
+    is rejected even though the prose implies the flag suffices. Emitting both is not
+    belt-and-braces; it is the only accepted form.
+
+    ``operation`` defaults to REPLACE so the call is idempotent: what the caller passes
+    is what the column ends up with, and running it twice converges. ADD and REMOVE are
+    reachable for the incremental cases.
+
+    An empty group list for a column is preserved rather than dropped. Under REPLACE it
+    declares the column secured with no group able to see it, which is a real state a
+    manifest has to be able to express.
+
+    One table per call: ``identifier`` is a scalar in the API, so the documented
+    "all or none" rollback covers this body and nothing beyond it.
+
+    Pure -- no I/O.
+    """
+    identifier = str(table_identifier or "").strip()
+    if not identifier:
+        raise ValueError("A table identifier (GUID or name) is required")
+
+    if operation not in OPERATIONS:
+        raise ValueError(
+            f"operation '{operation}' is not valid. Expected one of: "
+            f"{', '.join(OPERATIONS)}.")
+
+    pruned = _dedupe(str(c).strip() for c in (unsecure or ()) if str(c).strip())
+
+    if clear:
+        if rules or pruned:
+            raise ValueError(
+                "clear cannot be combined with rules or unsecure: clear_csr already "
+                "unsecures every column on the table, so pairing it with per-column "
+                "instructions is ambiguous about what should survive.")
+        return {"identifier": identifier, "clear_csr": True,
+                "column_security_rules": []}
+
+    if not rules and not pruned:
+        raise ValueError(
+            "nothing to do: pass at least one rule, one column to unsecure, or clear.")
+
+    # Sorted so the same inputs always produce the same body, which is what makes a
+    # --dry-run plan diffable between runs.
+    entries: List[Dict[str, Any]] = [
+        {"column_identifier": column,
+         "is_unsecured": False,
+         "group_access": [{"operation": operation,
+                           "group_identifiers": _dedupe(rules[column] or [])}]}
+        for column in sorted(rules)
+    ]
+    entries += [{"column_identifier": column, "is_unsecured": True}
+                for column in sorted(pruned)]
+
+    return {"identifier": identifier, "clear_csr": False,
+            "column_security_rules": entries}
+
+
+# ---------------------------------------------------------------------------
+# Step assembly -- the `ts security column-rules apply` engine
+# ---------------------------------------------------------------------------
+
+def _table_index(tables: Optional[List[Dict[str, Any]]]) -> Dict[Tuple[str, str],
+                                                                 Dict[str, Any]]:
+    """{(org, table name): resolution entry} for the tables the command layer resolved."""
+    return {(str(t.get("org_name") or ""), str(t.get("table_name") or "")): t
+            for t in (tables or ())}
+
+
+def build_csr_steps(
+    rows: List[Dict[str, str]],
+    tables: Optional[List[Dict[str, Any]]] = None,
+    *,
+    operation: str = "REPLACE",
+    prune: bool = False,
+) -> List[Dict[str, Any]]:
+    """Turn manifest rows into one step per (org, table): one API call each.
+
+    ``update`` takes a single table, so the batching question that `ts share` has does
+    not arise here. What does arise is ordering: everything is sorted, so the same
+    manifest always yields the same plan and a --dry-run diffs cleanly between runs.
+
+    ``tables`` carries what only the command layer can know: the table's GUID, whether
+    it is published, and which of its columns are secured today. It is optional so the
+    pure function stays testable, and so `set` can build a step without a resolution
+    pass.
+
+    **Publication.** CSR cannot be defined on a published object, so a step whose table
+    is published is marked ``blocked`` rather than silently planned. `apply` refuses
+    blocked steps unless overridden. Failing at plan time is the house style, and it is
+    also parent spec 5.1's CSR_BLOCKER at CLI level.
+
+    **Pruning.** With ``prune``, columns secured today but absent from the manifest are
+    listed in ``unsecure``. Without it they are left alone. The asymmetry is deliberate:
+    an incomplete manifest under prune-by-default would silently unsecure columns and
+    expose data, whereas leaving stale protection in place is visible and recoverable.
+    Only one of those two failure modes leaks.
+
+    Pure -- no I/O.
+    """
+    if operation not in OPERATIONS:
+        raise ValueError(
+            f"operation '{operation}' is not valid. Expected one of: "
+            f"{', '.join(OPERATIONS)}.")
+
+    index = _table_index(tables)
+    grouped: Dict[Tuple[str, str], Dict[str, List[str]]] = {}
+    for row in rows or ():
+        key = (row["org_name"], row["table_name"])
+        rules = grouped.setdefault(key, {})
+        groups = rules.setdefault(row["column_name"], [])
+        # A blank group_name is the "secured, nobody" sentinel: it means the ABSENCE of
+        # a group, so it must not travel as a literal "" identifier.
+        if row["group_name"]:
+            groups.append(row["group_name"])
+
+    steps: List[Dict[str, Any]] = []
+    for key in sorted(grouped):
+        org_name, table_name = key
+        entry = index.get(key) or {}
+        rules = {column: sorted(set(groups))
+                 for column, groups in grouped[key].items()}
+
+        secured_today = [str(c) for c in (entry.get("secured_columns") or [])]
+        unsecure = (sorted(set(secured_today) - set(rules)) if prune else [])
+
+        blocked = ""
+        if entry.get("published"):
+            blocked = (
+                f"CSR_BLOCKED: '{table_name}' is published, and column security rules "
+                f"cannot be defined on a published object. Use column-level sharing "
+                f"(`ts share`) for published tables.")
+
+        steps.append({
+            "org_name": org_name,
+            "table_identifier": str(entry.get("table_guid") or table_name),
+            "table_name": table_name,
+            "operation": operation,
+            "rules": rules,
+            "unsecure": unsecure,
+            "blocked": blocked,
+        })
+    return steps
