@@ -196,6 +196,13 @@ built on the same Model did **not** come along: it is a sibling of the Liveboard
 not a dependency. So the data layer never needs publishing explicitly, but every
 Answer does.
 
+**A cohort column on a Model blocks the whole Model from publishing.** Verified:
+an unused `COHORT_SIMPLE` column on a Model refused publication of the Model, an
+Answer on it, and a Liveboard on it, all with `code 13151`. The Table beneath the
+Model published fine. The docs say only that "cohort publishing is not
+supported"; the real scope is Model-wide and independent of whether anything uses
+the column. The skill should check for one before proposing a publish.
+
 **`obj_id` is auto-populated** (e.g. `T1_PUBLISH-4be2cc25`) on all tables
 regardless of publish state. Nothing for the skill to assign.
 

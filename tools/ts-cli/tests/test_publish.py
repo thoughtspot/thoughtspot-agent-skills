@@ -262,3 +262,84 @@ def test_explain_invalid_org_strips_enclosing_json_escaping():
 
 def test_explain_returns_none_for_unrecognised_error():
     assert explain_publish_error("some other failure", {}, _ORG_INDEX, {}) is None
+
+
+# ---------------------------------------------------------------------------
+# code 13152 — unpublish blocked by dependents still published
+# ---------------------------------------------------------------------------
+
+# The exact body observed live when unpublishing a Liveboard with
+# include_dependencies=true while a sibling Answer still held the same Model.
+_13152_BODY = (
+    '{"error":{"message":{"debug":{"code":13152,'
+    '"incident_id_guid":"a932d3df-1d2c-4be0-8b55-6f2f36ea7d3e",'
+    '"debug":"[\\"Operation Unsuccessful. Following objects have dependents present: '
+    '{\\\\\\"443705360\\\\\\":[\\\\\\"0930baf3-3224-40dc-be5f-e1b1e827ac29\\\\\\"]}\\"]"}}}}'
+)
+_MODEL_INDEX = {"0930baf3-3224-40dc-be5f-e1b1e827ac29": "T1_PUBLISH_MODEL"}
+
+
+def test_explain_dependents_present_resolves_names():
+    msg = explain_publish_error(_13152_BODY, {}, _ORG_INDEX, _MODEL_INDEX)
+    assert "T1_PUBLISH_MODEL" in msg
+    assert "ORG3" in msg
+
+
+def test_explain_dependents_present_gives_the_working_order():
+    # The deadlock has a correct sequence and nothing else documents it.
+    msg = explain_publish_error(_13152_BODY, {}, _ORG_INDEX, _MODEL_INDEX)
+    assert "--keep-dependencies" in msg
+
+
+def test_explain_dependents_present_degrades_to_guids():
+    msg = explain_publish_error(_13152_BODY, {}, {}, {})
+    assert "0930baf3-3224-40dc-be5f-e1b1e827ac29" in msg
+    assert "443705360" in msg
+
+
+def test_explain_dependents_present_handles_several_orgs_and_objects():
+    body = ('Following objects have dependents present: '
+            '{"12750490":["guid-a","guid-b"],"443705360":["guid-c"]}')
+    msg = explain_publish_error(body, {}, _ORG_INDEX, {})
+    for token in ("ORG1", "ORG3", "guid-a", "guid-b", "guid-c"):
+        assert token in msg
+
+
+def test_guids_in_body_extraction():
+    from ts_cli.commands.publish import guids_in_body
+    assert guids_in_body(_13152_BODY) >= {"0930baf3-3224-40dc-be5f-e1b1e827ac29"}
+    # the incident id is GUID-shaped too; harmless, it simply will not resolve
+    assert guids_in_body("no guids here") == set()
+
+
+# ---------------------------------------------------------------------------
+# Cohort column dependency — a documented limitation reported only by GUID
+# ---------------------------------------------------------------------------
+
+_COHORT_BODY = (
+    '{"error":{"message":{"debug":{"code":13151,"debug":"[\\"Error Message: '
+    'Cannot publish/unpublish objects with Cohort Column as dependency. '
+    'ColumnId: f72fafa0-c0d5-4707-9dd8-24364b175e3d\\"]"}}}}'
+)
+
+
+def test_explain_cohort_dependency_names_the_column():
+    idx = {"f72fafa0-c0d5-4707-9dd8-24364b175e3d": "RSET_QTY_ON_HAND_BINS"}
+    msg = explain_publish_error(_COHORT_BODY, {}, _ORG_INDEX, idx)
+    assert "RSET_QTY_ON_HAND_BINS" in msg
+    assert "cohort" in msg.lower()
+    # Verified live: the block is Model-wide, not usage-based, so the guidance
+    # must not suggest that content avoiding the column will publish.
+    assert "whether or not they actually use the column" in msg
+
+
+def test_explain_cohort_dependency_degrades_to_guid():
+    msg = explain_publish_error(_COHORT_BODY, {}, _ORG_INDEX, {})
+    assert "f72fafa0-c0d5-4707-9dd8-24364b175e3d" in msg
+
+
+def test_cohort_check_precedes_the_generic_missing_variable_match():
+    # Both share code 13151; the cohort text must not fall through to the
+    # variable-coverage branch and produce a misleading message.
+    msg = explain_publish_error(_COHORT_BODY, {}, _ORG_INDEX, {})
+    assert "not defined for org" not in msg

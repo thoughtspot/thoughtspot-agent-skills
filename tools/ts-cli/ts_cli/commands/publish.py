@@ -134,7 +134,57 @@ _NO_VARIABLE_RE = re.compile(
 # The identifier is the last thing in the message, so it runs straight into the
 # enclosing JSON's escaping (\"]"}}}}). Stop at the first character that cannot
 # appear in an org name rather than anchoring at end-of-string.
+# Unpublish refuses to orphan dependents. The payload is an org-id -> [object guid]
+# map embedded in the message, doubly JSON-escaped by the enclosing error envelope.
+# Cohort publishing is an explicitly unsupported limitation, but the refusal
+# identifies the offending column only by GUID.
+_COHORT_RE = re.compile(r"Cohort Column as dependency\.\s*ColumnId:\s*([^\s\"'\\\]]+)")
+
+_DEPENDENTS_PHRASE = "Following objects have dependents present:"
+_DEP_PAIR_RE = re.compile(r'"?(\d+)"?\s*:\s*\[([^\]]*)\]')
+_GUIDISH_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_BARE_ID_RE = re.compile(r'"([^"\s,\[\]]+)"')
+
 _INVALID_ORG_RE = re.compile(r"Org not found corresponding to the org_identifier:\s*([^\s\"'\\\]}]+)")
+
+
+def guids_in_body(body_text: str) -> set:
+    """GUID-shaped tokens appearing anywhere in an error body.
+
+    Used to resolve names for objects the caller never named. A 13152 failure
+    reports the BLOCKING object (a shared Model, say), which is not in the
+    request, so the caller's own identifier list cannot resolve it. Sweeping the
+    body also picks up the incident id, which is harmless: it simply will not
+    match anything.
+    """
+    return set(_GUIDISH_RE.findall(body_text or ""))
+
+
+def _explain_dependents_present(
+    body_text: str, org_index: Dict[int, str], object_index: Dict[str, str],
+) -> Optional[str]:
+    """Render a 13152 (unpublish blocked by dependents) into an ordered fix."""
+    idx = body_text.find(_DEPENDENTS_PHRASE)
+    if idx == -1:
+        return None
+    # Strip the envelope's escaping so the embedded map parses as plain text.
+    tail = body_text[idx + len(_DEPENDENTS_PHRASE):].replace("\\", "")
+
+    blocked: List[str] = []
+    for org_raw, guid_blob in _DEP_PAIR_RE.findall(tail):
+        org = org_index.get(int(org_raw), org_raw)
+        ids = _GUIDISH_RE.findall(guid_blob) or _BARE_ID_RE.findall(guid_blob)
+        named = ", ".join(f"'{object_index[i]}'" if i in object_index else i for i in ids)
+        blocked.append(f"{named} in org '{org}'")
+    if not blocked:
+        return None
+
+    return (
+        f"Cannot unpublish: {'; '.join(blocked)} still has published dependents there. "
+        f"Unpublishing would orphan them, so it was refused and nothing changed. "
+        f"Retract the dependent objects first with --keep-dependencies, then retract "
+        f"this one (which will cascade to its own dependencies)."
+    )
 
 
 def explain_publish_error(
@@ -161,6 +211,19 @@ def explain_publish_error(
     def _obj(guid: str) -> str:
         return f"'{object_index[guid]}'" if guid in object_index else guid
 
+    match = _COHORT_RE.search(body_text)
+    if match:
+        col = match.group(1)
+        named = f"'{object_index[col]}'" if col in object_index else col
+        return (
+            f"Cannot publish: cohort column {named} is defined on the Model in this "
+            f"object's closure. Cohort publishing is not supported, and the block is "
+            f"Model-wide: it stops the Model and every Answer or Liveboard built on it, "
+            f"whether or not they actually use the column (verified live). Delete the "
+            f"cohort column from the Model to publish. Tables below the Model are "
+            f"unaffected and can still be published."
+        )
+
     match = _MISSING_VALUE_RE.search(body_text)
     if match:
         var_guid, org_ids_raw, obj_guid = match.groups()
@@ -184,6 +247,10 @@ def explain_publish_error(
             f"same value in each org rather than passing --skip-validation."
         )
 
+    dependents = _explain_dependents_present(body_text, org_index, object_index)
+    if dependents:
+        return dependents
+
     match = _INVALID_ORG_RE.search(body_text.strip())
     if match:
         known = ", ".join(sorted(org_index.values()))
@@ -199,15 +266,29 @@ def _org_index(client: ThoughtSpotClient) -> Dict[int, str]:
 
 
 def _name_index(client: ThoughtSpotClient, guids: List[str], obj_type: str) -> Dict[str, str]:
-    """Map object GUID to display name, best-effort (used only for error messages)."""
-    try:
-        resp = client.post("/api/rest/2.0/metadata/search",
-                           json={"metadata": [{"identifier": g, "type": obj_type} for g in guids],
-                                 "include_headers": True})
-        return {r.get("metadata_id"): r.get("metadata_name") for r in resp.json() if r.get("metadata_id")}
-    except Exception:
-        # Never let a nicety break the real operation's error reporting.
-        return {}
+    """Map object GUID to display name, best-effort (used only for error messages).
+
+    Tries the caller's type first, then the other publishable types, because a
+    failure can name an object the caller never mentioned and of a different kind
+    (a shared Model blocking a Liveboard unpublish, for instance). Stops as soon
+    as every GUID is resolved.
+    """
+    names: Dict[str, str] = {}
+    for candidate in dict.fromkeys([obj_type, *PUBLISHABLE_TYPES, "LOGICAL_COLUMN"]):
+        remaining = [g for g in guids if g not in names]
+        if not remaining:
+            break
+        try:
+            resp = client.post("/api/rest/2.0/metadata/search",
+                               json={"metadata": [{"identifier": g, "type": candidate}
+                                                  for g in remaining],
+                                     "include_headers": True})
+            names.update({r.get("metadata_id"): r.get("metadata_name")
+                          for r in resp.json() if r.get("metadata_id")})
+        except Exception:
+            # Never let a nicety break the real operation's error reporting.
+            continue
+    return names
 
 
 def _variable_index(client: ThoughtSpotClient) -> Dict[str, str]:
@@ -245,8 +326,11 @@ def _post_with_explanation(client: ThoughtSpotClient, path: str, payload: dict,
     if resp.ok:
         return
     body = getattr(resp, "text", "") or ""
+    # Include GUIDs that appear only in the error body: the blocking object in a
+    # 13152 is a dependency, never something the caller named.
+    lookup = list(dict.fromkeys([*guids, *guids_in_body(body)]))
     explanation = explain_publish_error(
-        body, _variable_index(client), _org_index(client), _name_index(client, guids, obj_type),
+        body, _variable_index(client), _org_index(client), _name_index(client, lookup, obj_type),
     )
     if explanation:
         print(explanation, file=sys.stderr)
