@@ -12,7 +12,11 @@ two must not be modelled the same way:
   group. Three CSR rules on a 40-column table become roughly 40 x G grants under CLS.
 - CSR is a separate axis from the share ACL. Turning it on does not change an object's
   grant list (verified live 2026-07-26).
-- CSR cannot be defined on PUBLISHED objects.
+- CSR on a PUBLISHED object is refused by this CLI by default -- but that is a
+  conservative choice, not a platform restriction. Live-verified 2026-07-27: an
+  owning-Org CSR update against a genuinely published table returned HTTP 204 and took
+  effect. What is still unverified is whether a TENANT Org can see or use a rule set
+  that way, so `build_csr_steps` blocks by default and `--allow-published` overrides it.
 
 Endpoint shape confirmed against the canonical spec (`get-rest-api-reference`,
 operations `fetchColumnSecurityRules` and `updateColumnSecurityRules`). Four things
@@ -236,10 +240,15 @@ def build_csr_steps(
     pure function stays testable, and so `set` can build a step without a resolution
     pass.
 
-    **Publication.** CSR cannot be defined on a published object, so a step whose table
-    is published is marked ``blocked`` rather than silently planned. `apply` refuses
-    blocked steps unless overridden. Failing at plan time is the house style, and it is
-    also parent spec 5.1's CSR_BLOCKER at CLI level.
+    **Publication.** A step whose table is published is marked ``blocked`` rather than
+    silently planned, and `apply` refuses blocked steps unless overridden. This is a
+    conservative CLI default, not a platform restriction: live-verified 2026-07-27, an
+    owning-Org CSR update against a genuinely published table returned HTTP 204 and took
+    effect, the table staying published throughout. What is still unverified is whether
+    a TENANT Org can see or use a rule set that way -- applying one could silently
+    produce protection the tenant never receives, which is what the refusal guards
+    against. `--allow-published` is the escape hatch. Failing at plan time is the house
+    style, and it is also parent spec 5.1's CSR_BLOCKER at CLI level.
 
     A table entry may also carry ``publication_known: False``, meaning the command layer
     could not read publication state at all (a failed `metadata/search`). That blocks the
@@ -284,9 +293,11 @@ def build_csr_steps(
         blocked = ""
         if entry.get("published"):
             blocked = (
-                f"CSR_BLOCKED: '{table_name}' is published, and column security rules "
-                f"cannot be defined on a published object. Use column-level sharing "
-                f"(`ts share`) for published tables.")
+                f"CSR_BLOCKED: '{table_name}' is published. The platform does accept "
+                f"CSR from the owning Org (live-verified), but whether a tenant Org can "
+                f"see or use it is unverified, so this is refused by default. Pass "
+                f"--allow-published to override, or use column-level sharing "
+                f"(`ts share`) instead.")
         elif not entry.get("publication_known", True):
             blocked = (
                 f"CSR_BLOCKED: publication state could not be determined for "
@@ -406,13 +417,27 @@ def diff_csr(before: List[Dict[str, Any]],
 # Error translation
 # ---------------------------------------------------------------------------
 
-# The bare error codes are word-anchored: unanchored, `10023` also matches inside
-# `1002345`, so an unrelated failure would be explained as the feature flag -- a
-# confident paraphrase of something we did not recognise, which is exactly what
-# `explain_csr_error`'s None contract exists to avoid. `\b` still matches the codes as
-# they really appear (`"code":10023,`), since punctuation is a word boundary.
+# Code 10023 is OVERLOADED -- live-verified 2026-07-27 reading CSR from a target Org
+# on `nebula-damian-alias`, a cluster where the feature is demonstrably ON (an
+# owning-Org CSR update had just succeeded moments earlier):
+#
+#   HTTP 500 {"error":{"message":{"debug":{"code":10023, ...,
+#             "debug":"[\"User does not have access to rea[d]...\"]"}}}}
+#
+# So 10023 means EITHER "the feature is feature-flagged off" (body text "Column
+# Security rule feature is disabled") OR "the caller lacks access to read/modify CSR
+# in this Org" -- a different failure entirely, and the one this fix exists for.
+# Keying on the bare code, as this used to, announced the feature was off when the
+# real problem was Org-scoped access -- the same defect class as the 14502 overload
+# below. Disambiguation is now on the accompanying message text, never the code
+# alone: the disabled-form text is required for the feature-flag reading, and the
+# access-form text is required for the access reading. A bare 10023 with NEITHER
+# text present is genuinely ambiguous and falls through to `None`, like anything else
+# unrecognised, rather than guessing which of the two it is.
 _FEATURE_DISABLED_RE = re.compile(
-    r"\b10023\b|Column Security rule feature is disabled", re.IGNORECASE)
+    r"Column Security rule feature is disabled", re.IGNORECASE)
+_ACCESS_DENIED_RE = re.compile(r"does not have access", re.IGNORECASE)
+_CODE_10023_RE = re.compile(r"\b10023\b")
 
 # Code 14502 covers TWO genuinely different cases, live-verified 2026-07-27 to be
 # distinct rather than the same failure with cosmetic wording:
@@ -467,6 +492,15 @@ def explain_csr_error(body_text: str,
             "capability is Beta and needs 10.12.0.cl or later, plus the flag enabled "
             "by ThoughtSpot. This is not an access-control problem and no payload "
             "change will fix it: ask for the flag, then re-run.")
+
+    if _CODE_10023_RE.search(body) and _ACCESS_DENIED_RE.search(body):
+        return (
+            "Code 10023, but this is an access failure, not the feature-flag case "
+            "that shares its code -- the feature is not disabled. The caller lacks "
+            "access to read or modify column security rules in the Org this call ran "
+            "in. Groups and privileges are per-Org, so a token scoped to a tenant Org "
+            "can lack what the Primary Org token has. Re-run with a profile or Org "
+            "that holds the needed privilege.")
 
     if _MISSING_TABLE_RE.search(body):
         named = _MISSING_TABLE_NAMED_RE.search(body)

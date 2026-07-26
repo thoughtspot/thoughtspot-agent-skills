@@ -192,11 +192,22 @@ def _try_search(client: ThoughtSpotClient, metadata: Dict[str, Any],
 
     Resolution walks several candidate types; a 400 on one of them is expected, not
     an error worth surfacing.
+
+    The catch MUST include `SystemExit`, not just `Exception`. `ts_cli/client.py`
+    raises `SystemExit` -- not a plain exception -- on every API error it translates
+    (see its `raise SystemExit(...)` calls), and `SystemExit` derives from
+    `BaseException`, which `except Exception` does not catch. Live-verified
+    2026-07-27: resolving a table BY NAME probes untyped first
+    (`{"identifier": name}`), which the platform rejects with an expected HTTP 400
+    (code 10002, "Specify the metadata_type for identifier ..."); before this fix that
+    `SystemExit` propagated straight out of `_resolve_object` and killed the process
+    instead of falling through to the typed-candidate loop. Do not "simplify" this
+    back to `except Exception` alone -- that silently reintroduces the crash.
     """
     try:
         return _search(client, {"metadata": [metadata], "include_headers": True,
                                 "record_size": record_size})
-    except Exception:
+    except (Exception, SystemExit):
         return []
 
 

@@ -14,10 +14,13 @@ flag and neither can silently disagree with the other about what a plan meant.
 One plan-time refusal, re-checked by BOTH executors -- `build` and `apply` -- because a
 plan file is something a human can edit in between:
 
-- A PUBLISHED table is CSR_BLOCKED. CSR cannot be defined on a published object. So is a
-  table whose publication state could not be read, since only a successful read can
-  support the claim that it is unpublished. `apply --allow-published` is the one
-  override; `build` has none.
+- A PUBLISHED table is CSR_BLOCKED by default -- a conservative CLI choice, not a
+  platform restriction. Live-verified 2026-07-27: an owning-Org CSR update against a
+  genuinely published table returned HTTP 204 and took effect. What is still unverified
+  is whether a TENANT Org can see or use a rule set applied that way, so this stays
+  refused unless overridden. A table whose publication state could not be read is
+  blocked the same way, since only a successful read can support the claim that it is
+  unpublished. `apply --allow-published` is the one override; `build` has none.
 
 Alongside it sits a default, not a refusal: pruning only ever happens when asked for. A
 manifest instructs about the columns it names; the columns it omits are left alone unless
@@ -265,8 +268,11 @@ def resolve_cmd(
     unsecure columns and expose data, whereas leaving stale protection in place is
     visible and recoverable.
 
-    A published table is marked CSR_BLOCKED here rather than failing mid-apply. CSR
-    cannot be defined on a published object; use `ts share` column grants there.
+    A published table is marked CSR_BLOCKED here rather than failing mid-apply. This is
+    a conservative default, not a platform restriction: live-verified 2026-07-27, CSR
+    from the owning Org succeeds on a published table, but whether a tenant Org can see
+    or use the result is unverified. Use `--allow-published` to override, or `ts share`
+    column grants instead.
 
     Output (JSON to stdout):
       {"rows": [...], "tables": [...], "steps": [...],
@@ -339,22 +345,32 @@ def _refuse_blocked(steps: List[Dict[str, Any]], allow_published: bool) -> None:
     Re-checked here rather than trusted from `resolve`, because the plan is a file a
     human can edit in between, and because `apply` is the last point at which refusing
     still costs nothing.
+
+    The refusal is conservative, not a platform restriction: live-verified 2026-07-27,
+    an owning-Org CSR update against a genuinely published table succeeds (HTTP 204).
+    So these steps CAN succeed with --allow-published; what is unverified is whether a
+    tenant Org can see or use the result once applied that way.
     """
     blocked = [s for s in steps if s.get("blocked")]
     if not blocked or allow_published:
         if blocked:
             print(f"Warning: --allow-published set; applying {len(blocked)} step(s) the "
-                  f"plan marked CSR_BLOCKED. The platform is expected to reject these.",
-                  file=sys.stderr)
+                  f"plan marked CSR_BLOCKED. The platform accepts CSR from the owning "
+                  f"Org (live-verified); whether a tenant Org can see or use the result "
+                  f"is unverified.", file=sys.stderr)
         return
 
-    lines = ["Refusing to apply: the plan contains steps that cannot succeed.", ""]
+    lines = ["Refusing to apply: the plan contains steps this CLI blocks by default.", ""]
     lines += [f"  {s['blocked']}" for s in blocked]
     lines += ["",
-              "Column security rules cannot be defined on a published object. Either "
-              "unpublish the table, or secure its columns with `ts share` column "
-              "grants instead. Where publication state could not be READ, re-run "
-              "`resolve` once it can be. --allow-published sends them anyway."]
+              "This is a conservative default, not a platform restriction: an "
+              "owning-Org CSR update does succeed on a published table (live-verified "
+              "2026-07-27), but whether a tenant Org can see or use the result is "
+              "unverified, so applying it could silently produce protection the "
+              "tenant never receives. Either unpublish the table, secure its columns "
+              "with `ts share` column grants instead, or pass --allow-published to "
+              "send it anyway. Where publication state could not be READ, re-run "
+              "`resolve` once it can be."]
     print("\n".join(lines), file=sys.stderr)
     raise typer.Exit(1)
 
@@ -392,8 +408,9 @@ def apply_cmd(
     dry_run: bool = typer.Option(False, "--dry-run",
         help="Print the payloads without sending them"),
     allow_published: bool = typer.Option(False, "--allow-published",
-        help="Send steps the plan marked CSR_BLOCKED. The platform is expected to "
-             "reject them; this exists for probing, not for routine use."),
+        help="Send steps the plan marked CSR_BLOCKED. The platform accepts CSR from "
+             "the owning Org (live-verified); whether a tenant Org can see or use it "
+             "is unverified, which is why this stays opt-in rather than routine."),
     profile: Optional[str] = _profile_option,
 ) -> None:
     """Apply a plan over the API: one `rules/update` call per (Org, table).

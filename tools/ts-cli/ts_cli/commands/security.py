@@ -5,7 +5,7 @@ The second of the two column-security mechanisms. `ts share` carries the first
 
 | | CLS (`ts share`) | CSR (here) |
 |---|---|---|
-| Works on published objects | yes | NO |
+| Works on published objects | yes | refused BY DEFAULT (the platform itself accepts an owning-Org CSR update on a published table, live-verified 2026-07-27; whether a tenant Org can see or use it is unverified, so this CLI blocks unless `--allow-published`) |
 | Declares | every VISIBLE column per group | only the RESTRICTED columns |
 | Liveboard filter on a secured column | locks | stays interactive |
 | Availability | GA | Beta 10.12+, feature-flagged OFF by default |
@@ -106,6 +106,12 @@ def _published_orgs(client: ThoughtSpotClient, guid: str) -> Optional[List[Any]]
     `ts publish status` rather than restated here: `orgIds` includes the OWNING Org, and
     reading it as "published into" made every table on an Orgs-enabled cluster look
     published.
+
+    Feeds the CSR_BLOCKED refusal, which is conservative rather than a platform
+    restriction: live-verified 2026-07-27, an owning-Org CSR update against a genuinely
+    published table returned HTTP 204 and took effect. What is still unverified is
+    whether a TENANT Org can see or use a rule set applied that way, so the CLI blocks
+    by default here and `--allow-published` is the override.
 
     None is distinct from an empty list, and the difference is the whole point. ``[]``
     means the read succeeded and the table is published nowhere; None means the read
@@ -335,8 +341,11 @@ def export_cmd(
     without it the CSR document simply is not in the response.
 
     Preserving this document is what makes a tenant's CSR configuration restorable
-    later. Once CSR is supported on published objects, restoring is a single import
-    rather than a reconstruction from CLS grants.
+    later, published or not -- an owning-Org CSR update on a published table already
+    succeeds (live-verified 2026-07-27; tenant-Org visibility of the result is the
+    still-open question, not whether the owning Org can set it). Once that path is used
+    instead of `CSR_BLOCKED`, restoring is a single import rather than a reconstruction
+    from CLS grants.
 
     An empty result is a legitimate answer: a table with no secured columns has no
     document to return.

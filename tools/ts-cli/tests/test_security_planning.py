@@ -361,10 +361,10 @@ def test_apply_refuses_a_blocked_step(tmp_path, planning_client):
 
 
 def test_allow_published_overrides_the_refusal(tmp_path, planning_client):
-    # msg_runner, not runner: the warning that the platform is expected to reject these
-    # steps anyway is printed to stderr, and only msg_runner's mixed output can see it.
-    # With `runner` this assertion would be silently unreachable, so deleting the
-    # warning print would not fail any test.
+    # msg_runner, not runner: the warning that tenant-Org use of an owning-Org CSR
+    # update is unverified is printed to stderr, and only msg_runner's mixed output
+    # can see it. With `runner` this assertion would be silently unreachable, so
+    # deleting the warning print would not fail any test.
     client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
     plan = _plan(blocked="CSR_BLOCKED: 'T2' is published")
     result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
@@ -372,7 +372,7 @@ def test_allow_published_overrides_the_refusal(tmp_path, planning_client):
                                      "-p", "x"])
     assert result.exit_code == 0, result.output
     assert [p for p, _ in client.calls if p == UPDATE]
-    assert "platform is expected to reject" in result.output
+    assert "unverified" in result.output
 
 
 def test_apply_sends_prune_unsecures_alongside_the_rules(tmp_path, planning_client):

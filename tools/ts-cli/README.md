@@ -1584,7 +1584,7 @@ two must not be modelled the same way:
 
 | | CLS (`ts share`) | CSR (here) |
 |---|---|---|
-| Works on published objects | yes | no, refused at plan time |
+| Works on published objects | yes | refused BY DEFAULT at plan time (the platform itself accepts an owning-Org CSR update on a published table -- see below) |
 | Declares | every VISIBLE column per group | only the RESTRICTED columns |
 | Liveboard filter on a secured column | locks | stays interactive |
 | Availability | GA | Beta, 10.12+, feature-flagged off by default |
@@ -1634,11 +1634,17 @@ from the manifest, and it is opt-in: the alternative default would silently unse
 columns whenever a manifest was incomplete, which leaks data, whereas leaving stale
 protection in place is visible and recoverable.
 
-**Published tables are refused at plan time**, as `CSR_BLOCKED`: CSR cannot be defined
-on a published object. `resolve` marks the affected step in the plan rather than failing
-outright; `build` and `apply` both then refuse any plan containing one, before anything
-is rendered or sent. Only `apply --allow-published` can override the refusal, for
-probing rather than routine use -- `build` has no equivalent flag.
+**Published tables are refused at plan time by default**, as `CSR_BLOCKED` -- but this is
+a conservative CLI choice, not a platform restriction. **Live-verified 2026-07-27:** with
+a table genuinely published to a tenant Org, a CSR update issued from the OWNING Org
+returned HTTP 204 and took effect, and the table stayed published throughout. What is
+still unverified is whether a TENANT Org can see or use a rule set applied that way, so
+applying one could silently produce protection the tenant never receives. `resolve` marks
+the affected step in the plan rather than failing outright; `build` and `apply` both then
+refuse any plan containing one, before anything is rendered or sent. `apply
+--allow-published` overrides the refusal, for probing rather than routine use -- `build`
+has no equivalent flag. See the live-verification doc (§Q6) for the full evidence and the
+remaining open question.
 
 A table whose publication state could not be READ is blocked the same way, with its own
 reason. Only a successful read supports the claim that a table is unpublished, so a failed

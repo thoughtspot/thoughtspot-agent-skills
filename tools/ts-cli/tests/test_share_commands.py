@@ -92,6 +92,72 @@ def test_client_accepts_an_explicit_org_overriding_the_env(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# ts share resolve -- _try_search / _resolve_object and the SystemExit gotcha
+# ---------------------------------------------------------------------------
+
+def test_try_search_swallows_a_system_exit():
+    """`client.py` raises SystemExit (not Exception) on an API error. `_try_search`'s
+    whole documented purpose is to swallow one candidate's failure so the next can
+    run; before the fix `except Exception` let a SystemExit through and killed the
+    process instead.
+    """
+    from ts_cli.commands.share import _try_search
+
+    class _Client:
+        @staticmethod
+        def post(_path, json=None):
+            raise SystemExit(1)
+
+    assert _try_search(_Client(), {"identifier": "T2_PUBLISH"}, 10) == []
+
+
+def test_try_search_swallows_a_plain_exception():
+    from ts_cli.commands.share import _try_search
+
+    class _Client:
+        @staticmethod
+        def post(_path, json=None):
+            raise RuntimeError("boom")
+
+    assert _try_search(_Client(), {"identifier": "T2_PUBLISH"}, 10) == []
+
+
+def test_resolve_object_falls_through_to_a_typed_probe_after_a_system_exit():
+    """Live-observed 2026-07-27: resolving a table BY NAME probes untyped first
+    (`{"identifier": name}`), which the platform rejects with HTTP 400 code 10002
+    ("Specify the metadata_type for identifier T2_PUBLISH"). `client.py` turns that
+    into a SystemExit. Before the fix, `_resolve_object` died right there instead of
+    falling through to the typed-candidate loop, so resolving a table BY NAME failed
+    outright even though the same call by GUID worked.
+    """
+    from ts_cli.commands.share import GRANTABLE_TYPES, _resolve_object
+
+    class _Resp:
+        def __init__(self, hits):
+            self._hits = hits
+
+        def json(self):
+            return self._hits
+
+    class _Client:
+        @staticmethod
+        def post(_path, json=None):
+            body = json or {}
+            metadata = (body.get("metadata") or [{}])[0]
+            if "type" not in metadata:
+                raise SystemExit(1)  # the untyped probe's expected 400
+            if metadata["type"] == GRANTABLE_TYPES[0]:
+                return _Resp([{"metadata_id": "tbl-1", "metadata_name": "T2_PUBLISH",
+                              "metadata_type": GRANTABLE_TYPES[0],
+                              "metadata_header": {"id": "tbl-1", "name": "T2_PUBLISH"}}])
+            return _Resp([])
+
+    resolved = _resolve_object(_Client(), "T2_PUBLISH")
+    assert resolved == {"guid": "tbl-1", "name": "T2_PUBLISH",
+                        "type": GRANTABLE_TYPES[0], "subtype": ""}
+
+
+# ---------------------------------------------------------------------------
 # ts share resolve — the pure helpers
 # ---------------------------------------------------------------------------
 

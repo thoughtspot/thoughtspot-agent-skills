@@ -1,10 +1,13 @@
 # `ts security column-rules` CLI design
 
 **Date:** 2026-07-26
-**Status:** LIVE-VERIFIED on `nebula-damian-alias`, 2026-07-27. All six §8 questions plus
-Q7 (added during verification) answered; four defects found and fixed (see §8 and
+**Status:** LIVE-VERIFIED on `nebula-damian-alias`, 2026-07-27, across two verification
+rounds. All six §8 questions plus Q7 (added during verification) answered or partially
+answered (Q6, second round); six defects found and fixed (see §8 and
 [`docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`](../verification/2026-07-26-ts-security-column-rules-live-verification.md)).
-Two items remain open (§8).
+Two items remain open (§8): whether a tenant Org can see or use CSR set from the owning
+Org on a published table, and whether a table-level `NO_ACCESS` clears existing column
+grants (carried forward from `ts share`).
 **Branch:** `feat/ts-security-column-rules`
 
 Step 2 of the build order in
@@ -183,11 +186,25 @@ replace, `set` must read-modify-write and this section changes.
 "secured, nobody" sentinel, which only REPLACE can express. Adding or removing nothing
 would report success having changed nothing.
 
-### 3.3 Published tables are refused, not attempted
+### 3.3 Published tables are refused by default, not attempted
 
-CSR cannot be defined on published objects (parent spec §2, plan §4.3). `resolve` reads each
-table's publication state and marks affected rows `CSR_BLOCKED`; `apply` refuses those rows
-unless `--allow-published` is passed.
+**Corrected 2026-07-27, second verification round.** The premise this section originally
+stated -- "CSR cannot be defined on published objects" (parent spec §2, plan §4.3) -- is
+FALSE. Live-verified: with a table genuinely published to a tenant Org, a CSR update
+issued from the OWNING Org returned HTTP 204 and took effect, and the table stayed
+published throughout. See §8 Q6 for the full evidence.
+
+The refusal stays in place, but the justification changes. It is a conservative CLI
+default, not a platform restriction: the platform accepts CSR on a published object from
+the owning Org, but whether a TENANT Org can see or use the result is unverified, so
+applying it could silently produce protection the tenant never receives. `resolve` reads
+each table's publication state and marks affected rows `CSR_BLOCKED`; `apply` refuses
+those rows unless `--allow-published` is passed, which remains the escape hatch for
+probing this open question, not for routine use.
+
+The parent spec's comparison table and `docs/multi-tenancy-platform-plan.md` §4.3 both
+still carry the disproven "cannot be defined on published objects" claim. Both are out of
+scope for this branch (see the top of this document) and should be corrected separately.
 
 This is parent spec §5.1's `CSR_BLOCKER` at CLI level. It fails at plan time rather than
 mid-apply, matching the house style that `apply` refuses before touching anything if the
@@ -313,12 +330,13 @@ paraphrase. Same contract as `explain_share_error`.
 
 | Trigger | Translation |
 |---|---|
-| `403` with code `10023` | Column Security Rules are feature-flagged off on this cluster. Beta, 10.12.0.cl or later. The flag has to be enabled before any CSR call works, and this is not a permissions problem. |
+| Code `10023`, body says the feature is disabled (`"Column Security rule feature is disabled"`) | Column Security Rules are feature-flagged off on this cluster. Beta, 10.12.0.cl or later. The flag has to be enabled before any CSR call works, and this is not a permissions problem. |
+| Code `10023`, body says access is denied instead (`"does not have access"`) | **Live-verified 2026-07-27 (second round, defect 6 above).** Code 10023 is OVERLOADED: this is an access failure, not the feature flag, even though it shares the same code. The caller lacks access to read or modify column security rules in the Org the call ran in; groups and privileges are per-Org, so a token scoped to a tenant Org can lack what the Primary Org token has. The pre-fix build translated every 10023 as the feature flag regardless, which would misdiagnose this case exactly as the 14502 rows below misdiagnosed each other before their own fix. |
 | Code `14502`, name interpolated as EMPTY (doubled space: `Referenced table with name  not found`) | The CSR TML document is missing its mandatory `table:` reference. |
 | Code `14502`, a NAME present (`Referenced table with name T2_PUBLISH not found.`) | **Live-verified 2026-07-27 (§8 Q5, Finding B).** The `table:` reference is fine; that table just does not exist in the Org being imported into. CSR documents are portable only to Orgs with a same-named table. The pre-fix build conflated this with the row above and misdiagnosed a correct document as broken. |
 | `"Column '<name>' is not secured, cannot mark as unsecured"` | **Live-verified 2026-07-27 (§8 Q4, Finding C).** `is_unsecured: true` on a column with no rule today is a genuine error, not a no-op. Surfaces the platform's own wording plus a note that a stale `--prune` plan is the likely cause. |
 | `clear_csr` rejected without the array | `column_security_rules` is a required field, so `clear_csr: true` must ship with `[]`. Only reachable from a hand-rolled payload; the builder always emits both. |
-| `403` without code `10023` | A genuine permissions problem: `ADMINISTRATION`, `DATAMANAGEMENT` (RBAC disabled), or `CAN_MANAGE_WORKSHEET_VIEWS_TABLES` (RBAC enabled). |
+| `403` without code `10023` present, and neither the disabled nor the access-denied body text present | A genuine permissions problem: `ADMINISTRATION`, `DATAMANAGEMENT` (RBAC disabled), or `CAN_MANAGE_WORKSHEET_VIEWS_TABLES` (RBAC enabled). |
 
 ---
 
@@ -357,15 +375,21 @@ capture/restore, in
 | 3 | `fetch` response casing and envelope in practice | **Bare array, snake_case**, e.g. `[{"table_guid":"...","obj_id":null,"column_security_rules":[]}]`. The schema was accurate; the docs' prose `data`-envelope camelCase example was wrong. Our parser reads both; the camelCase branch is dead on this build (kept, unexercised). |
 | 4 | `is_unsecured: true` on a column that was never secured | **Errors, HTTP 400** (`"Column 'PROD_CAT_L1' is not secured, cannot mark as unsecured"`), contradicting the parent spec's guess of "likely harmless no-op". Matters for `--prune`: a plan is safe when fresh, but a column unsecured between `resolve` and `apply` makes that entry stale and the apply fails partway. Now translated by `explain_csr_error` (Finding C). |
 | 5 | Does the CSR TML import into a different Org, given `table:` is by name? | **Resolves per-Org by name.** Importing into an Org lacking the named table fails 14502 with the name present (not empty) -- the reference is fine, the table just is not there. A CSR document is portable only to Orgs with a same-named table. Answers parent spec open item #3. This is also Finding B: the pre-fix `explain_csr_error` misdiagnosed this exact case as a missing `table:` reference. |
-| 6 | The refusal shape for CSR on a published object | **Still open** -- needs T2_PUBLISH actually published first. |
+| 6 | The refusal shape for CSR on a published object | **PARTIALLY ANSWERED, second verification round (2026-07-27).** With `T2_PUBLISH` genuinely published to ORG1, a CSR update issued from the OWNING Org returned HTTP 204 and took effect -- the platform does NOT refuse it. This disproves the "CSR cannot be defined on a published object" premise §3.3 and the parent spec relied on; §3.3 is corrected. Still unknown: whether a TENANT Org can see or use a rule set that way -- reading CSR as ORG1 returned a 10023 access error, and modifying from ORG1 failed on a per-Org group-identifier mismatch before it could test read-only-ness, so neither result settles the tenant-visibility question. Full evidence in the live-verification doc's Q6 section. |
 | 7 *(added during verification)* | Does an empty `group_identifiers: []` under REPLACE get accepted? | **Accepted (204/200)**, reads back as a column with no groups. "Secured for nobody" is a real reachable state, validating both the `"COL="` CLI flag form and the blank `group_name` manifest sentinel. |
 
-Item 6 needs T2_PUBLISH actually published first, which also settles the `ts share`
-verification record's open item about an end-to-end grant on a published object in a
-tenant Org. **Still open.**
+**Item 6, remaining unknown:** whether a tenant Org can see or use CSR set from the owning
+Org on a published table. This also carries forward the `ts share` verification record's
+open item about an end-to-end grant on a published object in a tenant Org. **Still open.**
 
 Folded in from that same record: whether a table-level `NO_ACCESS` clears existing column
 grants. **Still open**, carried forward unchanged.
+
+**Documents beyond this branch's scope that still carry the disproven claim.** The parent
+spec's comparison table (`2026-07-26-ts-security-sharing-design.md`) and
+`docs/multi-tenancy-platform-plan.md` §4.3 both state "CSR cannot be defined on published
+objects" as platform fact. Both are programme documents this branch does not edit; they
+should be corrected separately now that Q6 has disproven the claim.
 
 Other things settled during verification:
 
@@ -399,6 +423,23 @@ Other things settled during verification:
    likely cause and re-running `resolve` refreshes it.
 4. **The per-column `REPLACE` caveat was stale** (Q1 above) -- removed from `set --help`
    and the README now that it is live-verified.
+
+### Two more defects found during the second verification round (2026-07-27)
+
+5. **`_try_search` (shared by `ts share` and this CLI's `_resolve_object`) could not
+   actually swallow anything.** `ts_cli/client.py` raises `SystemExit` on an API error,
+   and `SystemExit` derives from `BaseException`, which `except Exception` does not
+   catch. Resolving a table BY NAME probes untyped first, which the platform rejects
+   with an expected HTTP 400; that `SystemExit` propagated straight out instead of
+   falling through to the typed-candidate loop, so `resolve --table T2_PUBLISH` (by
+   name) failed outright even though the same call by GUID worked. This is
+   pre-existing in the shipped `ts share` (PR #346), inherited by reuse, not introduced
+   here. Fixed by catching `(Exception, SystemExit)` explicitly.
+6. **Error code 10023 is overloaded.** `explain_csr_error` treated it as always meaning
+   "feature-flagged off". Live-verified: reading CSR from a target Org returned 10023 on
+   a cluster where the feature is demonstrably ON, with a message about lacking access
+   instead. Same defect class as the 14502 overload (defect 2 above). Fixed by
+   disambiguating on the accompanying message text rather than the bare code.
 
 Findings land in `docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`.
 

@@ -5,10 +5,12 @@
 **Authenticated as:** `tsadmin` (ADMINISTRATION), same session Org (`Primary`) as the `ts share`
 verification (`docs/superpowers/verification/2026-07-26-ts-share-live-verification.md`)
 **CLI:** ts-cli 0.109.0 from branch `feat/ts-security-column-rules`
-**Tables under test:** `T1`, `T2`, `T3_PUBLISH` (design spec §8's chosen set)
+**Tables under test:** `T1`, `T2`, `T3_PUBLISH` (design spec §8's chosen set); `T2_PUBLISH`,
+parameterized and published for the second round (§11)
 **Orgs on the cluster:** `Primary` (0), `ORG1` (12750490), `ORG2` (535312919), `ORG3` (443705360)
 
-**Cluster state: returned to baseline, proven by a final read.** See §9.
+**Cluster state: returned to baseline, proven by a final read.** See §9 (first round) and
+§11 (second round, `T2_PUBLISH` fully restored -- schema, publication and CSR).
 
 ---
 
@@ -22,7 +24,8 @@ verification found. This is what made the *earlier* `_published_orgs` defect
 `[0]` as "published to Org 0", marking every table on this Org-enabled cluster
 `CSR_BLOCKED`. That earlier fix is why this round's plans were not refused outright.
 Because nothing here is actually published, §8 Q6 (the refusal shape on a published
-object) stays open -- see §8.
+object) stays open in THIS round -- taken up with a genuinely published table in the
+second round, §11.
 
 Baseline `get` across all three tables, captured before any change:
 
@@ -249,12 +252,198 @@ start.
 
 ---
 
-## 10. Open items
+## 10. Open items (as they stood at the end of the first round)
 
 | # | Item | Status |
 |---|---|---|
 | 1 | §8 Q6 -- the refusal shape for CSR on a published object | OPEN -- needs a table published first. Not published on this cluster (see Scope note); this is the same gap the `ts share` verification left open for an end-to-end grant on a published object in a tenant Org. |
 | 2 | Carried forward from the `ts share` verification: does a table-level `NO_ACCESS` clear existing column grants? | OPEN -- untested here too. Unrelated to CSR's own mechanism, but cheap to settle alongside item 1 once a published object is available. |
+
+Neither blocks `ts security column-rules`. Both are worth resolving before
+`ts-security-columns` (parent spec §4) needs to reason about published objects.
+
+Item 1 is taken up in the second round below (§11); item 2 remains open (see §14).
+
+---
+
+## 11. Second round (2026-07-27) -- Q6: CSR on a genuinely published object
+
+This round closes item 1 above: get an actual published table and test CSR against it,
+rather than reasoning about the refusal in the abstract.
+
+### Setup -- publishing needs parameterization first
+
+`T2_PUBLISH` was not parameterized yet. Trying `ts publish push` against it unprepared
+was the first thing attempted, to confirm the sibling command's own failure mode:
+
+```
+$ ts publish push T2_PUBLISH --org ORG1 -p nebula-damian-alias
+Object 'T2_PUBLISH' is not parameterized, so it cannot be published...
+```
+
+**Fails CLOSED with a translated, actionable message**, not a bare API error -- good
+sibling-command behaviour, and the reason Q6 needed a variable at all. `T2_PUBLISH`'s
+schema field was then bound to a template variable (the table's schema was `ALIAS_TESTS`
+beforehand) and the table was published to ORG1. `metadata_header` afterwards read:
+
+```
+orgIds=[0, 12750490]  ownerOrgId=0  is_published: true
+```
+
+`published_org_ids(header)` on this same header returned `[12750490]` -- see §12 for why
+this matters beyond Q6.
+
+### CSR from the OWNING Org: succeeds and takes effect
+
+```
+$ ts security column-rules set --table T2_PUBLISH --rule "PROD_NM=Analyst" \
+    -p nebula-damian-alias
+```
+
+Returned **HTTP 204**. Read-back:
+
+```
+  PROD_NM  -> ['Analyst']
+```
+
+`T2_PUBLISH` remained published (`orgIds` unchanged) throughout. **The platform does NOT
+refuse CSR on a published object**, at least on this build and from the owning Org. This
+disproves the premise the design spec §3.3, the parent spec's comparison table, and
+`docs/multi-tenancy-platform-plan.md` §4.3 all stated -- "CSR cannot be defined on
+published objects" -- as a claim about platform behaviour. `CSR_BLOCKED` and
+`--allow-published` are UNCHANGED by this finding; see "What this does not settle" below
+for why the refusal stays.
+
+### Reading CSR as the tenant Org (ORG1): a 10023 access error
+
+```
+$ ts security column-rules get T2_PUBLISH --org ORG1 -p nebula-damian-alias
+```
+
+Observed verbatim, **HTTP 500**:
+
+```json
+{"error":{"message":{"debug":{"code":10023, ..., "debug":"[\"User does not have access to rea[d]...\"]"}}}}
+```
+
+Code 10023 here means an access failure, not the feature flag -- the cluster's CSR
+feature is demonstrably ON (the owning-Org update above just succeeded). This is Finding
+F (§13) and is what shows code 10023 is overloaded.
+
+### Modifying CSR as the tenant Org (ORG1): blocked before read-only-ness could be tested
+
+```
+$ ts security column-rules set --table T2_PUBLISH --rule "PROD_NM=Analyst" \
+    --org ORG1 -p nebula-damian-alias
+```
+
+Failed on `Invalid group identifiers: Analyst` -- groups are per-Org, and `Analyst` in
+ORG1 is a different principal from `Analyst` in the owning Org (the same gotcha
+`explain_share_error` already translates for `ts share`). This failure is a group-naming
+artefact of the test setup, not a signal about CSR's own access model, so it does not
+tell us whether ORG1 could modify CSR on this table if it named a group that actually
+exists there.
+
+### What this round settles, and what it does not
+
+**Settled:** the platform accepts CSR on a published object from the owning Org. The
+CLI's blanket "cannot be defined" justification was wrong and is corrected (design spec
+§3.3, this branch's docstrings, README, CLAUDE.md).
+
+**Still unknown:** whether a TENANT Org can see or use a CSR rule set that way. The one
+read attempt from ORG1 hit an access error (10023, access-form) that may be a per-Org
+privilege artefact of the test user rather than a product rule -- the test user's ORG1
+privileges were never confirmed independently of this call. The one modify attempt from
+ORG1 failed on a per-Org group-name mismatch before it could test read-only-ness either
+way. Neither result closes the question. `CSR_BLOCKED` therefore stays the default:
+refusing is the conservative choice given a genuine unknown, `--allow-published` is the
+escape hatch for an operator who wants to try it anyway, and this open question is now
+named explicitly rather than hidden behind a false certainty.
+
+### Cleanup -- full restoration, proven by a final read
+
+1. CSR cleared on `T2_PUBLISH` (`clear --table T2_PUBLISH`) -- confirmed **zero CSR
+   rows** by a final `get`.
+2. `T2_PUBLISH` unpublished from ORG1 -- `metadata_header.orgIds` back to `[0]`.
+3. The schema field's template-variable binding removed (`unparameterize`) -- the
+   table's schema back to the literal `ALIAS_TESTS` it carried before this round.
+4. The template variable itself deleted.
+
+All four confirmed by a final read, matching the state before this round started.
+
+---
+
+## 12. Second round -- other confirmations
+
+- **Publication detection is correct in BOTH directions.** The `ts share` verification
+  round had only exercised the UNPUBLISHED case (`orgIds == [0]` reading as not
+  published). This round exercises the PUBLISHED case for the first time: header
+  `orgIds=[0, 12750490] ownerOrgId=0`, and `published_org_ids(header)` returned
+  `[12750490]` -- the owning Org correctly excluded, the tenant Org correctly included.
+  The other half of the Critical-1 fix (`orgIds` includes the owning Org, so reading
+  every id in it as "published into" over-blocks) is now live-verified for a genuinely
+  published table, not just reasoned about.
+- **`ts publish push` fails closed on an unparameterized object** with a translated,
+  actionable message (§11 above) rather than a bare API error -- confirmed good
+  sibling-command behaviour, and the reason this round needed to parameterize
+  `T2_PUBLISH` before it could test Q6 at all.
+
+---
+
+## 13. Second round -- two more defects found and fixed
+
+### 13.1 Finding E -- `_try_search` could not actually swallow anything
+
+`ts_cli/commands/share.py`'s `_try_search` (shared by `ts share` and this CLI's
+`_resolve_object`) wrapped its one `metadata/search` attempt in `except Exception`, to
+let resolution fall through to the next candidate type. `ts_cli/client.py` raises
+`SystemExit` on an API error, not a plain exception, and `SystemExit` derives from
+`BaseException`, which `except Exception` does not catch.
+
+**Observed:** resolving a table BY NAME (`ts security column-rules resolve --table
+T2_PUBLISH`) probes untyped first (`{"identifier": "T2_PUBLISH"}`), which the platform
+rejects with:
+
+```
+HTTP 400 code 10002: Invalid parameter values: {"metadata":"Specify the metadata_type for identifier T2_PUBLISH"}
+```
+
+That `SystemExit` propagated straight out of `_resolve_object` and killed the process
+instead of falling through to the typed-candidate loop -- resolving by NAME failed
+outright, though the same call by GUID worked, and the README's own examples resolve by
+name. `ts share status T2_PUBLISH` (also by name) hit the identical crash: this defect
+is PRE-EXISTING in the shipped `ts share` (PR #346), inherited here by reusing
+`_resolve_object` as designed, not introduced by this branch.
+
+**Fix:** catch `(Exception, SystemExit)` explicitly in `_try_search`, with the docstring
+now naming `client.py` as the `SystemExit` raiser so a future reader does not
+"simplify" it back to `except Exception` alone. Confirmed `ts share`'s existing test
+suite still passes after the fix (32/32 in `test_share_commands.py`).
+
+### 13.2 Finding F -- error code 10023 is overloaded
+
+§11's ORG1 read (`does not have access to read`) and the first round's feature-flag
+case (`Column Security rule feature is disabled`) both carry code 10023, and
+`explain_csr_error`'s pre-fix regex keyed on the bare code alone -- so it would have
+announced the feature was flagged off on a cluster where it plainly is not, sending an
+operator to ask ThoughtSpot to enable a flag that is already on. Same defect class as
+the 14502 overload (first round, Finding B).
+
+**Fix:** disambiguate on the accompanying message text, not the code alone. Only the
+disabled-form text (`"Column Security rule feature is disabled"`) produces the
+feature-flag message; the access-form text (`"does not have access"`) alongside code
+10023 produces a distinct message naming the Org-scoped access problem and that groups
+and privileges are per-Org. A bare 10023 with neither text present falls through to
+`None`, like any other unrecognised body, rather than guessing which of the two it is.
+
+---
+
+## 14. Open items, updated
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Whether a tenant Org can see or use CSR set from the owning Org on a published table | **STILL OPEN** (§11). Narrowed from "the refusal shape on a published object" (now settled: the platform accepts it from the owning Org) to specifically the tenant-visibility question. |
+| 2 | Carried forward from the `ts share` verification: does a table-level `NO_ACCESS` clear existing column grants? | STILL OPEN, unchanged. Unrelated to CSR's own mechanism. |
 
 Neither blocks `ts security column-rules`. Both are worth resolving before
 `ts-security-columns` (parent spec §4) needs to reason about published objects.

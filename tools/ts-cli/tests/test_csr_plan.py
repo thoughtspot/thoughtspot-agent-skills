@@ -375,6 +375,43 @@ def test_explain_translates_a_403_without_10023_as_a_permissions_problem():
     assert "DATAMANAGEMENT" in message
 
 
+def test_explain_translates_the_access_form_of_code_10023():
+    # Live-verified 2026-07-27: reading CSR from a target Org returned this exact
+    # shape on a cluster where the feature is demonstrably ON (an owning-Org CSR
+    # update had just succeeded). Code 10023 here means an access failure, not the
+    # feature flag -- the same bare number, a completely different problem.
+    body = ('{"error":{"message":{"debug":{"code":10023,"type":"...",'
+           '"debug":"[\\"User does not have access to rea[d]...\\"]"}}}}')
+    message = explain_csr_error(body, 500)
+    assert message is not None
+    assert "access" in message.lower()
+    assert "feature-flagged" not in message
+    assert "per-Org" in message
+
+
+def test_explain_10023_feature_flag_and_access_forms_do_not_bleed_into_each_other():
+    feature = explain_csr_error(
+        '{"error":{"code":10023,"message":"Column Security rule feature is disabled"}}',
+        403)
+    access = explain_csr_error(
+        '{"error":{"code":10023,"debug":"User does not have access to read"}}', 500)
+    assert feature != access
+    # Distinct, unique markers rather than the word "access" alone: the feature-flag
+    # message legitimately says "not an access-control problem", so a bare substring
+    # check on "access" would pass even if the two messages bled into each other.
+    assert "feature-flagged" in feature and "feature-flagged" not in access
+    assert "10.12" in feature and "10.12" not in access
+    assert "per-Org" in access and "per-Org" not in feature
+    assert "lacks access" in access and "lacks access" not in feature
+
+
+def test_explain_returns_none_for_a_bare_code_10023_with_no_disambiguating_text():
+    # Code 10023 is overloaded (feature flag vs access failure); with neither the
+    # disabled-form nor the access-form text present, this must not guess either way.
+    # status_code=500 (not 403) so the unrelated generic-403 fallback doesn't fire.
+    assert explain_csr_error('{"error":{"code":10023}}', 500) is None
+
+
 def test_explain_translates_the_missing_table_reference():
     # A genuinely EMPTY name -- the doubled space is the empty interpolation. The
     # document really is missing its `table:` reference.
@@ -440,7 +477,11 @@ def test_explain_does_not_match_the_missing_table_code_inside_a_longer_number():
 
 def test_explain_still_matches_the_codes_as_they_really_appear():
     # Word-anchoring must not break the real forms: punctuation is a word boundary.
-    assert "feature-flagged" in explain_csr_error('{"error":{"code":10023}}', 403)
+    # (10023 alone, with neither disambiguating text, is intentionally None -- see
+    # test_explain_returns_none_for_a_bare_code_10023_with_no_disambiguating_text --
+    # so the word-boundary check for 10023 rides along with the access-form test.)
+    assert "access" in explain_csr_error(
+        '{"error":{"code":10023,"debug":"does not have access"}}', 500).lower()
     assert "table:" in explain_csr_error("Error Code: 14502, import failed", 400)
 
 
