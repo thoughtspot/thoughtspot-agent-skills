@@ -196,3 +196,99 @@ def test_resolve_db_source_requires_sf_profile(monkeypatch):
                                      "--source", "db", "-p", "x"])
     assert result.exit_code != 0
     assert "--sf-profile" in result.output
+
+
+def _plan(**overrides):
+    step = {"org_name": "ORG1", "table_identifier": "guid-1", "table_name": "T2",
+            "operation": "REPLACE", "rules": {"COST": ["Finance"]},
+            "unsecure": [], "blocked": ""}
+    step.update(overrides)
+    return {"rows": [], "tables": [], "steps": [step],
+            "summary": {"blocked": 1 if step["blocked"] else 0}}
+
+
+def _write_plan(tmp_path, plan):
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan))
+    return str(path)
+
+
+@pytest.fixture
+def planning_client(monkeypatch):
+    def _install(client):
+        monkeypatch.setattr("ts_cli.commands.security_planning._client_for_org",
+                            lambda profile, org=None: client)
+        monkeypatch.setattr("ts_cli.commands.security_planning.assert_org_context",
+                            lambda *a, **k: None)
+        return client
+    return _install
+
+
+def test_apply_posts_one_update_per_step(tmp_path, planning_client):
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                 _write_plan(tmp_path, _plan()), "-p", "x"])
+    assert result.exit_code == 0, result.output
+    posted = [b for p, b in client.calls if p == UPDATE]
+    assert posted == [{"identifier": "guid-1", "clear_csr": False,
+                       "column_security_rules": [
+                           {"column_identifier": "COST", "is_unsecured": False,
+                            "group_access": [{"operation": "REPLACE",
+                                              "group_identifiers": ["Finance"]}]}]}]
+
+
+def test_apply_dry_run_posts_nothing(tmp_path, planning_client):
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                 _write_plan(tmp_path, _plan()), "--dry-run", "-p", "x"])
+    assert result.exit_code == 0
+    assert not [p for p, _ in client.calls if p == UPDATE]
+    assert json.loads(result.stdout)["payloads"][0]["identifier"] == "guid-1"
+
+
+def test_apply_refuses_a_blocked_step(tmp_path, planning_client):
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    plan = _plan(blocked="CSR_BLOCKED: 'T2' is published")
+    result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                     _write_plan(tmp_path, plan), "-p", "x"])
+    assert result.exit_code == 1
+    assert "CSR_BLOCKED" in result.output
+    assert not [p for p, _ in client.calls if p == UPDATE]
+
+
+def test_allow_published_overrides_the_refusal(tmp_path, planning_client):
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    plan = _plan(blocked="CSR_BLOCKED: 'T2' is published")
+    result = runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                 _write_plan(tmp_path, plan), "--allow-published",
+                                 "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert [p for p, _ in client.calls if p == UPDATE]
+
+
+def test_apply_sends_prune_unsecures_alongside_the_rules(tmp_path, planning_client):
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    plan = _plan(unsecure=["SALARY"])
+    runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                        _write_plan(tmp_path, plan), "-p", "x"])
+    body = next(b for p, b in client.calls if p == UPDATE)
+    assert {"column_identifier": "SALARY", "is_unsecured": True} \
+        in body["column_security_rules"]
+
+
+def test_apply_explains_the_feature_flag(tmp_path, planning_client):
+    body = '{"error":{"code":10023,"message":"Column Security rule feature is disabled"}}'
+    planning_client(FakeClient({UPDATE: FakeResponse(None, 403, body)}))
+    result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                     _write_plan(tmp_path, _plan()), "-p", "x"])
+    assert result.exit_code == 1
+    assert "feature-flagged" in result.output
+
+
+def test_apply_refuses_a_plan_with_no_steps(tmp_path, planning_client):
+    planning_client(FakeClient())
+    plan = {"rows": [], "tables": [], "steps": [], "summary": {}}
+    result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                     _write_plan(tmp_path, plan), "-p", "x"])
+    assert result.exit_code != 0
+    assert "no steps" in result.output.lower()

@@ -289,3 +289,106 @@ def resolve_cmd(
     summary = _plan_summary(steps, blocked_count)
     print(json.dumps({"rows": rows, "tables": tables, "steps": steps,
                       "summary": summary}))
+
+
+# ---------------------------------------------------------------------------
+# ts security column-rules apply -- the API-route executor
+# ---------------------------------------------------------------------------
+
+def _steps_from_plan(input_file: Optional[str]) -> List[Dict[str, Any]]:
+    """The steps out of a plan envelope, refusing an empty one."""
+    envelope = _read_json_envelope(input_file)
+    steps = envelope.get("steps") or []
+    if not steps:
+        raise typer.BadParameter(
+            "The plan has no steps. Applying it would report success having changed "
+            "nothing. Re-run `ts security column-rules resolve`.")
+    return steps
+
+
+def _refuse_blocked(steps: List[Dict[str, Any]], allow_published: bool) -> None:
+    """Refuse blocked steps before anything is written.
+
+    Re-checked here rather than trusted from `resolve`, because the plan is a file a
+    human can edit in between, and because `apply` is the last point at which refusing
+    still costs nothing.
+    """
+    blocked = [s for s in steps if s.get("blocked")]
+    if not blocked or allow_published:
+        if blocked:
+            print(f"Warning: --allow-published set; applying {len(blocked)} step(s) the "
+                  f"plan marked CSR_BLOCKED. The platform is expected to reject these.",
+                  file=sys.stderr)
+        return
+
+    lines = ["Refusing to apply: the plan contains steps that cannot succeed.", ""]
+    lines += [f"  {s['blocked']}" for s in blocked]
+    lines += ["",
+              "Column security rules cannot be defined on a published object. Either "
+              "unpublish the table, or secure its columns with `ts share` column "
+              "grants instead. --allow-published sends them anyway."]
+    print("\n".join(lines), file=sys.stderr)
+    raise typer.Exit(1)
+
+
+@column_rules_app.command("apply")
+def apply_cmd(
+    input_file: Optional[str] = typer.Option(None, "--input",
+        help="Plan JSON from `resolve`. Omit to read stdin."),
+    dry_run: bool = typer.Option(False, "--dry-run",
+        help="Print the payloads without sending them"),
+    allow_published: bool = typer.Option(False, "--allow-published",
+        help="Send steps the plan marked CSR_BLOCKED. The platform is expected to "
+             "reject them; this exists for probing, not for routine use."),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Apply a plan over the API: one `rules/update` call per (Org, table).
+
+    `update` takes one table per call, so its documented "all or none" rollback covers
+    each call and not the run. A failure part-way leaves earlier tables applied, and the
+    command stops rather than continuing, so the plan and reality diverge at a known
+    point. Re-running a REPLACE plan is safe: it converges.
+
+    Blocked steps are refused before anything is written. Verify with
+    `get` before and after and diff the two.
+
+    Output (JSON to stdout): {"payloads": [...]} under --dry-run; a per-step progress
+    log on stderr otherwise.
+
+    Examples:
+
+    \b
+      ts security column-rules resolve --source file --csv rules.csv -p prod \\
+        > plan.json
+      ts security column-rules apply --input plan.json --dry-run -p prod
+      ts security column-rules apply --input plan.json -p prod
+    """
+    steps = _steps_from_plan(input_file)
+    _refuse_blocked(steps, allow_published)
+
+    payloads: List[Dict[str, Any]] = []
+    for step in steps:
+        try:
+            payloads.append(build_update_payload(
+                step["table_identifier"], step.get("rules") or {},
+                operation=step.get("operation") or "REPLACE",
+                unsecure=step.get("unsecure") or None))
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"{step.get('org_name')}/{step.get('table_name')}: {exc}") from exc
+
+    if dry_run:
+        print(json.dumps({"payloads": payloads}))
+        return
+
+    for step, payload in zip(steps, payloads):
+        org_name = step.get("org_name") or ""
+        client = _client_for_org(profile, org_name or None)
+        if org_name:
+            assert_org_context(client, org_name, profile)
+        _post_update(client, payload,
+                     f"[{org_name or 'current org'}] {step.get('table_name')}: "
+                     f"{step.get('operation')} "
+                     f"{', '.join(sorted(step.get('rules') or {}))}")
+
+    print(json.dumps({"payloads": payloads}))
