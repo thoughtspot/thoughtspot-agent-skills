@@ -376,9 +376,50 @@ def test_explain_translates_a_403_without_10023_as_a_permissions_problem():
 
 
 def test_explain_translates_the_missing_table_reference():
+    # A genuinely EMPTY name -- the doubled space is the empty interpolation. The
+    # document really is missing its `table:` reference.
     body = 'Error Code: 14502 Referenced table with name  not found'
     message = explain_csr_error(body, 400)
     assert "table:" in message
+    assert "T2_PUBLISH" not in message
+
+
+def test_explain_distinguishes_a_named_but_absent_table_from_a_missing_reference():
+    # Live-verified 2026-07-27: this exact body comes from importing a CSR document
+    # into an Org that does not have T2_PUBLISH -- the `table:` reference is fine, the
+    # table just is not there. Sending the operator to edit `table:` would be wrong.
+    body = ('[{"response": {"status": {"error_message": "Referenced table with name '
+           'T2_PUBLISH not found.", "status_code": "ERROR", "error_code": 14502}}, '
+           '"request_index": 0}]')
+    message = explain_csr_error(body, 400)
+    assert "T2_PUBLISH" in message
+    assert "portable" in message
+    # Must not bleed into the empty-reference wording.
+    assert "missing its `table:` reference" not in message
+
+
+def test_explain_named_and_empty_table_messages_do_not_bleed_into_each_other():
+    empty = explain_csr_error(
+        'Error Code: 14502 Referenced table with name  not found', 400)
+    named = explain_csr_error(
+        'Error Code: 14502 Referenced table with name T3 not found.', 400)
+    assert empty != named
+    assert "T3" in named and "T3" not in empty
+    assert "missing its `table:` reference" in empty
+    assert "missing its `table:` reference" not in named
+
+
+def test_explain_translates_unsecuring_a_never_secured_column():
+    # Live-verified 2026-07-27: `is_unsecured: true` on a column with no rule today is
+    # a genuine HTTP 400, not a harmless no-op. Body is the raw response text, quoted
+    # verbatim from observation.
+    body = ('{"error":{"message":{"debug":{"code":10002,"debug":"[\\"Column '
+            '\'PROD_CAT_L1\' is not secured, cannot mark as unsecured\\"]"}}}}')
+    message = explain_csr_error(body, 400)
+    assert message is not None
+    assert "PROD_CAT_L1" in message
+    assert "resolve" in message
+    assert "--prune" in message
 
 
 def test_explain_translates_a_clear_csr_rejection():

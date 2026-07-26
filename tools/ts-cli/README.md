@@ -1622,11 +1622,12 @@ single call, not a whole `apply` run: a failure part-way through leaves the tabl
 already processed changed, and the command stops rather than continuing, so the plan
 and reality diverge at a known point. Re-running a REPLACE plan is safe -- it converges.
 
-**Only the columns named are expected to be touched.** A column already secured and not
-mentioned in a manifest, or in a `set` call, should be left exactly as it was -- what the
-API spec implies, but **not yet live-verified**: it is item 1 of the design spec's §8 live
-verification plan (whether a per-column `REPLACE` is scoped to that column, or `update` is
-a whole-table replace). Until that is settled, capture `get` before and after a change.
+**Only the columns named are touched.** A column already secured and not mentioned in a
+manifest, or in a `set` call, is left exactly as it was. **Live-verified** (2026-07-27,
+cluster `nebula-damian-alias`): securing one column for one group, then a separate column
+for a different group in a second `set` call, left both rules in place side by side -- a
+per-column `REPLACE` is genuinely scoped to that column, not a whole-table replace.
+Verified for REPLACE on a single table; `set` itself is unchanged.
 
 `resolve --prune` is the only way to unsecure columns that are secured today but absent
 from the manifest, and it is opt-in: the alternative default would silently unsecure

@@ -662,3 +662,39 @@ def test_import_explains_the_feature_flag(tmp_path, planning_client):
                                      str(doc), "-p", "x"])
     assert result.exit_code == 1
     assert "feature-flagged" in result.output
+
+
+def test_import_fails_when_the_platform_reports_success_but_buries_a_failure(
+        tmp_path, planning_client):
+    # Live-observed 2026-07-27: HTTP 200 from `metadata/tml/import`, with the failure
+    # buried in the body. Before this fix, `import_cmd` only checked `resp.ok`, so this
+    # exact response printed its body and exited 0 -- importing nothing while reporting
+    # success.
+    payload = [{"response": {"status": {
+        "error_message": "Referenced table with name T2_PUBLISH not found.",
+        "status_code": "ERROR", "error_code": 14502}}, "request_index": 0}]
+    client = planning_client(FakeClient({IMPORT: FakeResponse(payload, 200)}))
+    doc = tmp_path / "T2_PUBLISH_CSR.column_security_rules.tml"
+    doc.write_text("column_security_rules:\n  table:\n    name: T2_PUBLISH\n  "
+                    "rules: []\n")
+    result = msg_runner.invoke(app, ["security", "column-rules", "import", "--file",
+                                     str(doc), "-p", "x"])
+    assert result.exit_code != 0
+    # The message is routed through explain_csr_error, not the raw JSON blob.
+    assert "T2_PUBLISH" in result.output
+    assert "portable" in result.output
+    # The call really was made -- this is a body-level failure, not a refused call.
+    assert any(p == IMPORT for p, _ in client.calls)
+
+
+def test_import_succeeds_when_every_item_reports_ok(tmp_path, planning_client):
+    payload = [{"response": {"status": {"status_code": "OK"},
+                             "object": [{"header": {"id_guid": "g-1"}}]},
+               "request_index": 0}]
+    planning_client(FakeClient({IMPORT: FakeResponse(payload, 200)}))
+    doc = tmp_path / "T2_CSR.column_security_rules.tml"
+    doc.write_text("column_security_rules:\n  table:\n    name: T2\n  rules: []\n")
+    result = runner.invoke(app, ["security", "column-rules", "import", "--file",
+                                 str(doc), "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == payload

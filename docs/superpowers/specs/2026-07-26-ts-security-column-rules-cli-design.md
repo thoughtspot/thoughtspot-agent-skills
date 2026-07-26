@@ -1,7 +1,10 @@
 # `ts security column-rules` CLI design
 
 **Date:** 2026-07-26
-**Status:** DESIGN, approved. API surface confirmed against the SpotterCode MCP spec; behaviour still to be live-verified on `nebula-damian-alias`.
+**Status:** LIVE-VERIFIED on `nebula-damian-alias`, 2026-07-27. All six §8 questions plus
+Q7 (added during verification) answered; four defects found and fixed (see §8 and
+[`docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`](../verification/2026-07-26-ts-security-column-rules-live-verification.md)).
+Two items remain open (§8).
 **Branch:** `feat/ts-security-column-rules`
 
 Step 2 of the build order in
@@ -62,16 +65,23 @@ read-modify-write of the whole table.
 ### 1.5 Other spec facts worth recording
 
 - Success on `update` is documented as **204 No Content**. Live probing saw 200. Treat any
-  2xx as success and do not parse a body.
+  2xx as success and do not parse a body. **Live-verified 2026-07-27** (§8 Q2): the spec's
+  reading was right, no change needed.
 - The `fetch` response is documented inconsistently: the prose example shows a `data`
   envelope with camelCase keys (`columnSecurityRules`, `objId`, `sourceTableDetails`),
   while the response schema shows a bare array with snake_case keys
   (`column_security_rules`, `obj_id`, `source_table_details`). Parse both defensively, the
-  way `_normalise_response` does elsewhere in the repo.
+  way `_normalise_response` does elsewhere in the repo. **Live-verified 2026-07-27** (§8
+  Q3): the schema was the accurate one. `nebula-damian-alias` returned a bare array with
+  snake_case keys, e.g. `[{"table_guid":"...","obj_id":null,"column_security_rules":[]}]`.
+  The camelCase `data`-envelope branch is dead on this build; kept because another build
+  could differ, but it has never been exercised against a real response.
 - Required permissions: `ADMINISTRATION`, or `DATAMANAGEMENT` (RBAC disabled), or
   `CAN_MANAGE_WORKSHEET_VIEWS_TABLES` (RBAC enabled).
 - Both endpoints are Beta, 10.12.0.cl or later, and feature-flagged off by default
-  (parent spec §2.6: `403 code 10023`).
+  (parent spec §2.6: `403 code 10023`). The flag is **enabled** on `nebula-damian-alias`
+  (`fetch` returned 200, never 403/10023), so the flag-detection path itself was not
+  exercised live.
 
 ---
 
@@ -304,7 +314,9 @@ paraphrase. Same contract as `explain_share_error`.
 | Trigger | Translation |
 |---|---|
 | `403` with code `10023` | Column Security Rules are feature-flagged off on this cluster. Beta, 10.12.0.cl or later. The flag has to be enabled before any CSR call works, and this is not a permissions problem. |
-| Code `14502`, `Referenced table with name  not found` | The CSR TML document is missing its mandatory `table:` reference. Note the doubled space in the platform message, which is the empty name interpolated. |
+| Code `14502`, name interpolated as EMPTY (doubled space: `Referenced table with name  not found`) | The CSR TML document is missing its mandatory `table:` reference. |
+| Code `14502`, a NAME present (`Referenced table with name T2_PUBLISH not found.`) | **Live-verified 2026-07-27 (§8 Q5, Finding B).** The `table:` reference is fine; that table just does not exist in the Org being imported into. CSR documents are portable only to Orgs with a same-named table. The pre-fix build conflated this with the row above and misdiagnosed a correct document as broken. |
+| `"Column '<name>' is not secured, cannot mark as unsecured"` | **Live-verified 2026-07-27 (§8 Q4, Finding C).** `is_unsecured: true` on a column with no rule today is a genuine error, not a no-op. Surfaces the platform's own wording plus a note that a stale `--prune` plan is the likely cause. |
 | `clear_csr` rejected without the array | `column_security_rules` is a required field, so `clear_csr: true` must ship with `[]`. Only reachable from a hand-rolled payload; the builder always emits both. |
 | `403` without code `10023` | A genuine permissions problem: `ADMINISTRATION`, `DATAMANAGEMENT` (RBAC disabled), or `CAN_MANAGE_WORKSHEET_VIEWS_TABLES` (RBAC enabled). |
 
@@ -331,30 +343,62 @@ function in `csr_plan.py`. The cases that matter most:
 
 ---
 
-## 8. Live verification plan
+## 8. Live verification plan -- RESULTS (2026-07-27)
 
 Cluster: profile `nebula-damian-alias`, Orgs Primary / ORG1 / ORG2 / ORG3, tables
-T1 / T2 / T3_PUBLISH. CSR is enabled there.
+T1 / T2 / T3_PUBLISH. CSR is enabled there. Full account, including the baseline
+capture/restore, in
+[`docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`](../verification/2026-07-26-ts-security-column-rules-live-verification.md).
 
-Baseline `get` captured across all three tables before any change, restored afterwards,
-and the before-and-after diff shown. Six things the spec cannot answer:
-
-| # | Question | Why it matters |
+| # | Question | Result |
 |---|---|---|
-| 1 | Does a per-column `REPLACE` leave other columns' rules untouched, or is `update` a whole-table replace? | Decides whether `set` must read-modify-write. The single most important unknown. |
-| 2 | 204 with no body, or the 200 seen live? | Response handling |
-| 3 | `fetch` response casing and envelope in practice | Which branch of `normalise_fetch_response` is real |
-| 4 | `is_unsecured: true` on a column that was never secured | No-op or error; affects `--prune` safety |
-| 5 | Does the CSR TML import into a different Org, given `table:` is by name? | Parent spec open item #3; blocks §5.3 preservation being useful |
-| 6 | The refusal shape for CSR on a published object | Confirms §3.3 and gives §6 its fourth row |
+| 1 | Does a per-column `REPLACE` leave other columns' rules untouched, or is `update` a whole-table replace? | **Scoped.** Securing `PROD_NM` for one group, then `UNIT_PRICE_AMT` for a different group in a SEPARATE `set` call, left both rules in place side by side. The single most important unknown, answered safely. §3.2's caveat and `set --help`/README's "not yet live-verified" wording are removed. |
+| 2 | 204 with no body, or the 200 seen live? | **200, as already assumed.** The spec's "treat any 2xx as success, don't parse a body" reading was right; no code change needed. |
+| 3 | `fetch` response casing and envelope in practice | **Bare array, snake_case**, e.g. `[{"table_guid":"...","obj_id":null,"column_security_rules":[]}]`. The schema was accurate; the docs' prose `data`-envelope camelCase example was wrong. Our parser reads both; the camelCase branch is dead on this build (kept, unexercised). |
+| 4 | `is_unsecured: true` on a column that was never secured | **Errors, HTTP 400** (`"Column 'PROD_CAT_L1' is not secured, cannot mark as unsecured"`), contradicting the parent spec's guess of "likely harmless no-op". Matters for `--prune`: a plan is safe when fresh, but a column unsecured between `resolve` and `apply` makes that entry stale and the apply fails partway. Now translated by `explain_csr_error` (Finding C). |
+| 5 | Does the CSR TML import into a different Org, given `table:` is by name? | **Resolves per-Org by name.** Importing into an Org lacking the named table fails 14502 with the name present (not empty) -- the reference is fine, the table just is not there. A CSR document is portable only to Orgs with a same-named table. Answers parent spec open item #3. This is also Finding B: the pre-fix `explain_csr_error` misdiagnosed this exact case as a missing `table:` reference. |
+| 6 | The refusal shape for CSR on a published object | **Still open** -- needs T2_PUBLISH actually published first. |
+| 7 *(added during verification)* | Does an empty `group_identifiers: []` under REPLACE get accepted? | **Accepted (204/200)**, reads back as a column with no groups. "Secured for nobody" is a real reachable state, validating both the `"COL="` CLI flag form and the blank `group_name` manifest sentinel. |
 
 Item 6 needs T2_PUBLISH actually published first, which also settles the `ts share`
 verification record's open item about an end-to-end grant on a published object in a
-tenant Org.
+tenant Org. **Still open.**
 
 Folded in from that same record: whether a table-level `NO_ACCESS` clears existing column
-grants. It is untested, it is why `ts share` refuses revoke-and-grant in one manifest, and
-it is cheap to settle while on the cluster.
+grants. **Still open**, carried forward unchanged.
+
+Other things settled during verification:
+
+- **Feature flag is enabled** on this cluster (`fetch` returned 200, not 403/10023), so
+  the flag-detection path (`_FEATURE_DISABLED_RE`) was not exercised live.
+- **Org-scoped auth lands correctly**: requesting `ORG1` minted a token whose session
+  `current_org` was `{'id': 12750490, 'name': 'ORG1'}`, matching the resolved numeric id,
+  so `assert_org_context` passed rather than catching a fallback (§3.4 worked as designed,
+  it just never had to catch anything on this run).
+- **Two emitter divergences from the platform's own export, both benign.** The platform's
+  exported document includes `table.fqn` (the table GUID) alongside `table.name`; ours
+  emits `name` only, which is arguably better for cross-Org portability since a GUID from
+  one Org will not resolve in another (see Q5). For a column secured for nobody the
+  platform omits the `accessible_groups` key entirely; ours emits
+  `accessible_groups: {group_name: []}`. Our parser round-trips the platform's bare form
+  correctly (verified: reads back as `[]`).
+
+### Four defects found and fixed
+
+1. **`import` reported SUCCESS on a failed import.** `metadata/tml/import` returns HTTP
+   200 even when the item failed; `import_cmd` only checked `resp.ok`. Fixed with a new
+   platform-neutral `tml_import_failures` helper in `tml_common.py`, wired into
+   `import_cmd`. Not wired into `ts alias import` / `ts tml import` in this PR (same gap
+   very likely present there too) -- flagged as a follow-up, not fixed here, to keep the
+   blast radius small.
+2. **`explain_csr_error` misdiagnosed a real 14502** (Q5 above) as a missing `table:`
+   reference when the table name was present but absent from the target Org. Fixed by
+   distinguishing an empty-name interpolation from a named-but-absent table.
+3. **Unsecuring a never-secured column had no translation** (Q4 above). Fixed: the
+   platform's own wording is now surfaced, plus a note that a stale `--prune` plan is the
+   likely cause and re-running `resolve` refreshes it.
+4. **The per-column `REPLACE` caveat was stale** (Q1 above) -- removed from `set --help`
+   and the README now that it is live-verified.
 
 Findings land in `docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`.
 

@@ -413,8 +413,37 @@ def diff_csr(before: List[Dict[str, Any]],
 # they really appear (`"code":10023,`), since punctuation is a word boundary.
 _FEATURE_DISABLED_RE = re.compile(
     r"\b10023\b|Column Security rule feature is disabled", re.IGNORECASE)
-_MISSING_TABLE_RE = re.compile(r"\b14502\b|Referenced table with name\s+not found",
+
+# Code 14502 covers TWO genuinely different cases, live-verified 2026-07-27 to be
+# distinct rather than the same failure with cosmetic wording:
+#   - EMPTY name  -- "Referenced table with name  not found" (doubled space, an empty
+#     name interpolated). The document really is missing its `table:` reference.
+#   - NAMED but absent -- "Referenced table with name T2_PUBLISH not found." The
+#     reference is fine; that table just does not exist in the Org being imported
+#     into. This is the normal, expected outcome of importing a CSR document into an
+#     Org that lacks the table, and it is how `table:` was confirmed to resolve
+#     per-Org by name (design spec §8 Q5).
+# Treating both as "the reference is missing" (the pre-fix behaviour) sends the
+# operator to edit a document that is already correct. `_MISSING_TABLE_NAMED_RE`
+# is what tells them apart: it only matches when a real, non-empty name sits between
+# "with name" and "not found". A bare `14502` mention with no such phrase at all
+# (e.g. a log line naming only the code) can't be told apart, so it falls back to the
+# empty-reference wording -- the same call `explain_csr_error` always made before this
+# distinction existed.
+_MISSING_TABLE_RE = re.compile(r"\b14502\b|Referenced table with name\b",
                                re.IGNORECASE)
+_MISSING_TABLE_NAMED_RE = re.compile(
+    r"Referenced table with name\s+(\S[^\n]*?)\s+not found", re.IGNORECASE)
+
+# Live-verified 2026-07-27: `is_unsecured: true` on a column with no rule today is a
+# genuine HTTP 400, not a harmless no-op -- the platform's own wording is the useful
+# part, so this is surfaced rather than paraphrased away. See `--prune`'s staleness
+# note on `explain_csr_error` below.
+_UNSECURE_NEVER_SECURED_RE = re.compile(
+    r"is not secured,\s*cannot mark as unsecured", re.IGNORECASE)
+_UNSECURE_COLUMN_NAME_RE = re.compile(r"Column '([^']+)' is not secured",
+                                      re.IGNORECASE)
+
 _RULES_REQUIRED_RE = re.compile(
     r"column_security_rules\D{0,40}(is )?required|required\D{0,40}column_security_rules",
     re.IGNORECASE)
@@ -440,11 +469,30 @@ def explain_csr_error(body_text: str,
             "change will fix it: ask for the flag, then re-run.")
 
     if _MISSING_TABLE_RE.search(body):
+        named = _MISSING_TABLE_NAMED_RE.search(body)
+        table_name = named.group(1).strip() if named else ""
+        if table_name:
+            return (
+                f"The column_security_rules document's `table:` reference is fine -- "
+                f"'{table_name}' just does not exist in the Org being imported into. "
+                f"CSR documents are portable only to Orgs that have a same-named "
+                f"table. Editing this document will not help; import into an Org "
+                f"where '{table_name}' exists, or create it there first.")
         return (
             "The column_security_rules document is missing its `table:` reference, so "
             "the platform resolved an empty table name (note the doubled space in its "
             "message). The reference is mandatory even when the document is imported "
             "alongside the table it belongs to.")
+
+    if _UNSECURE_NEVER_SECURED_RE.search(body):
+        name = _UNSECURE_COLUMN_NAME_RE.search(body)
+        column = f" '{name.group(1)}'" if name else ""
+        return (
+            f"Column{column} is not secured, so it cannot be marked unsecured -- the "
+            f"platform's own wording. The likely cause is a stale plan: `--prune` "
+            f"computes `unsecure` from columns confirmed secured when `resolve` ran, "
+            f"and one of them has since been unsecured by something else. Re-run "
+            f"`resolve` to refresh the plan against current state, then re-apply.")
 
     if _RULES_REQUIRED_RE.search(body):
         return (

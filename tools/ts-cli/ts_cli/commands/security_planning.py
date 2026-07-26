@@ -47,6 +47,7 @@ from ts_cli.csr_plan import (
     CSR_TABLE_DDL,
     build_csr_steps,
     build_update_payload,
+    explain_csr_error,
     parse_rule_flags,
     parse_rule_rows,
 )
@@ -581,6 +582,30 @@ def build_cmd(
     print(json.dumps({"documents": documents, "written": written}))
 
 
+def _report_import_failures(failures: List[Dict[str, Any]], table_name: str) -> None:
+    """Print each failed item's translated message to stderr and exit non-zero.
+
+    `metadata/tml/import` returns HTTP 200 even when every item failed -- the
+    per-item outcome is buried in the body (live-observed 2026-07-27: importing a CSR
+    document into an Org missing the referenced table). `resp.ok` alone cannot see
+    this, so `import_cmd` calls `tml_import_failures` first and routes here when it
+    finds any: printing the raw body and exiting 0 would silently import nothing while
+    reporting success, the exact failure mode this whole feature guards against.
+
+    Each failure is run through `explain_csr_error` first; only when nothing matches
+    does the platform's own `error_message` stand alone.
+    """
+    print(f"Could not import {table_name}'s column security rules: the HTTP call "
+          f"succeeded, but the platform's own per-item status says the import did "
+          f"not.", file=sys.stderr)
+    for failure in failures:
+        raw = failure.get("error_message") or ""
+        explanation = explain_csr_error(raw) or raw or (
+            f"error_code {failure.get('error_code')}")
+        print(f"  [{failure.get('request_index')}] {explanation}", file=sys.stderr)
+    raise typer.Exit(1)
+
+
 @column_rules_app.command("import")
 def import_cmd(
     file: Optional[str] = typer.Option(None, "--file",
@@ -598,6 +623,13 @@ def import_cmd(
     The `table:` reference is checked locally first. Without it the platform fails with
     code 14502 and `Referenced table with name  not found`, whose doubled space is the
     empty name interpolated -- a message that points nowhere useful.
+
+    A per-Org name that IS present but does not resolve -- the normal outcome of
+    importing into an Org lacking a same-named table -- is not caught locally, and the
+    platform answers with HTTP 200: the failure is buried in the response body, not the
+    status code (live-observed 2026-07-27). This command reads that body and exits
+    non-zero when it finds a failed item, translating the message via
+    `explain_csr_error` where it can.
 
     Output (JSON to stdout): the import response, or the request body under --dry-run.
 
@@ -651,4 +683,15 @@ def import_cmd(
     if not resp.ok:
         _fail(resp, f"Could not import {body['table']['name']}'s column security rules")
 
-    print(json.dumps(resp.json()))
+    # `tml_import_failures` lives in tml_common.py, not here, because the same gap is
+    # very likely present in `ts alias import` and `ts tml import` -- both only check
+    # `resp.ok` too. This PR fixes it for CSR only, to keep the blast radius small;
+    # wiring the other two callers to the same helper is a follow-up, not done here.
+    from ts_cli.tml_common import tml_import_failures
+
+    result = resp.json()
+    failures = tml_import_failures(result)
+    if failures:
+        _report_import_failures(failures, body["table"]["name"])
+
+    print(json.dumps(result))

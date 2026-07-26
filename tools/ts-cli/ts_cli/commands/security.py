@@ -236,12 +236,14 @@ def set_cmd(
     diffs cleanly. --add and --remove reach the incremental operations when a
     read-modify-write is not what you want.
 
-    Only the columns named are expected to be touched: a column already secured and not
-    mentioned here should be left exactly as it was. NOT YET LIVE-VERIFIED -- it is what
-    the API spec implies, and it is design spec section 8 item 1 (whether a per-column
-    REPLACE is scoped to that column, or `update` is a whole-table replace). Until it is
-    settled, capture `get` before and after. Use `clear --column` to unsecure one column,
-    or `resolve --prune` to unsecure everything absent from a manifest.
+    Only the columns named are touched: a column already secured and not mentioned here
+    is left exactly as it was. Live-verified (2026-07-27, cluster
+    `nebula-damian-alias`): securing `PROD_NM` for one group, then `UNIT_PRICE_AMT` for
+    a different group in a SEPARATE `set` call, left both rules in place side by side --
+    a per-column `REPLACE` is genuinely scoped, not a whole-table replace. Verified for
+    REPLACE on a single table; `set` itself is otherwise unchanged. Use `clear --column`
+    to unsecure one column, or `resolve --prune` to unsecure everything absent from a
+    manifest.
 
     Output (JSON to stdout, --dry-run only): the request payload.
 
