@@ -85,6 +85,29 @@ def test_resolve_uniform_builds_one_step_per_org_table(monkeypatch):
     assert plan["summary"]["blocked"] == 0
 
 
+def test_resolve_without_prune_does_not_fetch_current_state(monkeypatch):
+    # Discriminates from an implementation that always fetches `/rules/fetch` and
+    # computes `unsecure` unconditionally -- exactly the prune-by-default behaviour
+    # the design forbids, since of the two failure directions only "silently unsecures
+    # columns" leaks. A single FakeClient is captured in a closure (rather than a
+    # fresh one per `_client_for_org` call) so its `calls` list survives the command.
+    client = FakeClient({FETCH: FakeResponse([])})
+    monkeypatch.setattr("ts_cli.commands.security_planning._client_for_org",
+                        lambda profile, org=None: client)
+    monkeypatch.setattr("ts_cli.commands.security_planning.assert_org_context",
+                        lambda *a, **k: None)
+    monkeypatch.setattr("ts_cli.commands.security_planning._resolve_table",
+                        lambda client, name: {"guid": "guid-1", "name": name})
+    monkeypatch.setattr("ts_cli.commands.security_planning._published_orgs",
+                        lambda client, guid: [])
+
+    result = runner.invoke(app, ["security", "column-rules", "resolve",
+                                 "--source", "uniform", "--table", "T2",
+                                 "--org", "ORG1", "--rule", "COST=Finance", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert all(call[0] != FETCH for call in client.calls)
+
+
 def _patch_published(monkeypatch, org_ids):
     monkeypatch.setattr("ts_cli.commands.security_planning._client_for_org",
                         lambda profile, org=None: FakeClient({FETCH: FakeResponse([])}))
@@ -164,3 +187,12 @@ def test_resolve_file_source_requires_csv(monkeypatch):
                                      "--source", "file", "-p", "x"])
     assert result.exit_code != 0
     assert "--csv" in result.output
+
+
+def test_resolve_db_source_requires_sf_profile(monkeypatch):
+    # --table-name defaults to TS_COLUMN_SECURITY_RULES, so --sf-profile is the only
+    # flag that can actually be missing here; the error must name only that one.
+    result = msg_runner.invoke(app, ["security", "column-rules", "resolve",
+                                     "--source", "db", "-p", "x"])
+    assert result.exit_code != 0
+    assert "--sf-profile" in result.output

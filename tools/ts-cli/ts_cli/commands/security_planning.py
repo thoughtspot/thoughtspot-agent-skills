@@ -113,9 +113,14 @@ def _load_manifest_rows(source: str, csv_path: Optional[str], table: Optional[st
         import csv as csv_module
         with Path(csv_path).open() as handle:
             return list(csv_module.DictReader(handle))
-    if not sf_profile or not table:
-        raise typer.BadParameter("--sf-profile and --table-name are required for "
-                                 "--source db")
+    # `table` is never empty on the only real call path: `resolve_cmd` always passes
+    # `table_name or "TS_COLUMN_SECURITY_RULES"`, so only a missing --sf-profile can
+    # actually trigger a usage error here. `table` is still checked, in case a future
+    # caller invokes this helper directly without that default.
+    if not table:
+        raise typer.BadParameter("--table-name is required for --source db")
+    if not sf_profile:
+        raise typer.BadParameter("--sf-profile is required for --source db")
     cursor = _get_sf_cursor(sf_profile)
     cursor.execute(f"SELECT * FROM {table}")  # noqa: S608 - operator-supplied table name
     columns = [c[0] for c in cursor.description]
@@ -129,8 +134,14 @@ def _resolve_tables_for_rows(profile: Optional[str], rows: List[Dict[str, str]],
     Reads three things the pure engine cannot know: the table's GUID, whether it is
     published, and -- only when pruning -- which of its columns are secured today.
 
-    The publication read is free: it comes off the same metadata_header the GUID
-    resolution already fetched.
+    The publication read costs one additional `metadata/search` call per table, not
+    zero: `_resolve_table` delegates to `ts share`'s `_resolve_object`, whose
+    `_descriptor` discards `orgIds` when it builds {guid, name, type, subtype} -- even
+    though the metadata_header carrying them was already fetched during resolution.
+    Folding the publication check into that same call would mean either changing that
+    shared helper (also used by `ts share`, which has no need of `orgIds`) or
+    duplicating its ambiguity-refusal logic here; the extra round-trip was accepted
+    instead of doing either.
     """
     wanted: Dict[str, List[str]] = {}
     for row in rows:
