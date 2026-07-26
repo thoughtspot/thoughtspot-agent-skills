@@ -1571,6 +1571,132 @@ group also adds a row per member user, so one group grant shows up as several ro
 
 ---
 
+### `ts security column-rules` -- Column Security Rules (CSR)
+
+Restricts named columns on a Table to named groups, over
+`POST /api/rest/2.0/security/column/rules/update` (read via the sibling `.../fetch`).
+**Beta**, requires **10.12.0.cl or later**, and is **feature-flagged off by default**:
+until ThoughtSpot enables it on a cluster, every call returns 403 with code 10023,
+which the CLI detects and explains rather than surfacing a bare "Forbidden".
+
+CSR is **not** column-level sharing. `ts share` carries that mechanism (CLS), and the
+two must not be modelled the same way:
+
+| | CLS (`ts share`) | CSR (here) |
+|---|---|---|
+| Works on published objects | yes | no, refused at plan time |
+| Declares | every VISIBLE column per group | only the RESTRICTED columns |
+| Liveboard filter on a secured column | locks | stays interactive |
+| Availability | GA | Beta, 10.12+, feature-flagged off by default |
+
+Two routes over one plan, mirroring `ts alias` and `ts share`:
+
+```bash
+# 1. Plan
+ts security column-rules resolve --source uniform --org ORG1 --org ORG2 \
+  --table T2_PUBLISH --rule "COST=Finance" --rule "SALARY=" -p prod > plan.json
+
+# 2a. Route A: apply the plan over the API
+ts security column-rules apply --input plan.json --dry-run -p prod
+ts security column-rules apply --input plan.json -p prod
+
+# 2b. Route B: apply the plan over TML instead
+ts security column-rules build --input plan.json --out ./plan/csr
+ts security column-rules import \
+  --file ./plan/csr/T2_PUBLISH_CSR.column_security_rules.tml --org ORG1 -p prod
+```
+
+The two routes agree on everything but one thing: `is_unsecured` (pruning a column) has
+no TML equivalent, so a plan carrying `unsecure` entries can only be fully carried out
+by `apply` -- `build` reports the gap on stderr and simply omits those columns from the
+document.
+
+**`update` takes one table per call.** Its documented "all or none" rollback covers a
+single call, not a whole `apply` run: a failure part-way through leaves the tables
+already processed changed, and the command stops rather than continuing, so the plan
+and reality diverge at a known point. Re-running a REPLACE plan is safe -- it converges.
+
+**Only the columns named are touched.** A column already secured and not mentioned in a
+manifest, or in a `set` call, is left exactly as it was. `resolve --prune` is the only
+way to unsecure columns that are secured today but absent from the manifest, and it is
+opt-in: the alternative default would silently unsecure columns whenever a manifest was
+incomplete, which leaks data, whereas leaving stale protection in place is visible and
+recoverable.
+
+**Published tables are refused at plan time**, as `CSR_BLOCKED`: CSR cannot be defined
+on a published object. `resolve` and `build` mark the affected step rather than failing
+mid-apply; `apply --allow-published` overrides the refusal, for probing rather than
+routine use.
+
+Manifest table (`TS_COLUMN_SECURITY_RULES`), readable as CSV with the same columns:
+
+```sql
+TS_COLUMN_SECURITY_RULES (org_name, table_name, column_name, group_name)
+-- group_name: blank = secured, no group can see it
+-- PRIMARY KEY (org_name, table_name, column_name, group_name)
+```
+
+#### The eight commands
+
+`get` reads current CSR, one row per (table, column), for one or more tables and Orgs:
+
+```bash
+ts security column-rules get T1 T2 T3_PUBLISH --org ORG1 --org ORG2 -p prod
+```
+
+`export` pulls each table's `column_security_rules` TML document (needs
+`export_options.export_column_security_rules: true`, itself Beta):
+
+```bash
+ts security column-rules export T2_PUBLISH --out ./plan/csr --org ORG1 -p prod
+```
+
+`resolve` turns a rule manifest into a reviewable plan, from `--source uniform`
+(explicit `--table`/`--org`/`--rule` flags), `file` (`--csv`), or `db`
+(`--sf-profile`/`--table-name`); `--init-table` prints the DDL above and exits:
+
+```bash
+ts security column-rules resolve --source uniform --org ORG1 --org ORG2 \
+  --table T2_PUBLISH --rule "COST=Finance" --rule "SALARY=" -p prod
+```
+
+`apply` sends a plan over the API, one `rules/update` call per (Org, table):
+
+```bash
+ts security column-rules apply --input plan.json -p prod
+```
+
+`build` renders a plan into `column_security_rules` TML documents, emit-only (no
+profile, no connection, nothing sent):
+
+```bash
+ts security column-rules build --input plan.json --out ./plan/csr
+```
+
+`import` uploads a `column_security_rules` TML document (`create_new: false`, so a
+`guid:` at the document root updates in place rather than creating a new one):
+
+```bash
+ts security column-rules import --file T2_CSR.column_security_rules.tml -p prod
+```
+
+`set` is a one-shot imperative that needs no manifest. It is declarative (REPLACE) by
+default, so it is idempotent: running it twice converges, and a `get` before and after
+diffs cleanly. `--add` / `--remove` reach the incremental operations instead:
+
+```bash
+ts security column-rules set --table T2 --rule "COST=Finance,Audit" --rule "SALARY=" \
+  --org ORG1 -p prod
+```
+
+`clear` unsecures one column (`--column`) or every column on a table (omit it):
+
+```bash
+ts security column-rules clear --table T2_PUBLISH --column COST -p prod
+```
+
+---
+
 ### `ts tableau signin`
 
 Sign in to Tableau Server/Cloud and verify credentials.
