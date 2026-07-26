@@ -128,7 +128,7 @@ class ThoughtSpotClient:
     or refresh credentials, which stores them in the OS credential store.
     """
 
-    def __init__(self, profile_name: str):
+    def __init__(self, profile_name: str, *, org: Optional[str] = None):
         profiles = load_profiles()
         if profile_name not in profiles:
             available = ", ".join(profiles.keys()) or "(none)"
@@ -140,10 +140,15 @@ class ThoughtSpotClient:
         self._profile = profiles[profile_name]
         self._profile_name = profile_name
         self._slug = _slugify(profile_name)
-        # Optional org context: TS_ORG env var (or profile `org_id`/`org`) scopes the minted
-        # token to a non-default org. Passed as `org_identifier` to auth/token/full (accepts
-        # an org id or name). Without it, calls run in the user's default org.
-        self._org = (os.environ.get("TS_ORG") or self._profile.get("org_id")
+        # Optional org context, highest precedence first: an explicit `org` argument, then
+        # the TS_ORG env var, then the profile's `org_id`/`org`. It scopes the minted token
+        # to a non-default org, passed to auth/token/full (accepts an org id or name).
+        # Without it, calls run in the user's default org.
+        #
+        # The explicit argument exists because a per-Org operation (`ts share`, where groups
+        # are per-Org) needs several org-scoped clients alive in ONE process. Mutating
+        # TS_ORG between them would leak org context into every client built afterwards.
+        self._org = (org or os.environ.get("TS_ORG") or self._profile.get("org_id")
                      or self._profile.get("org") or "")
         self._base_url = self._profile["base_url"].rstrip("/")
         self._verify_ssl: bool = self._profile.get("verify_ssl", True)
