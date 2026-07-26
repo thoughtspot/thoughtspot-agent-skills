@@ -1456,6 +1456,106 @@ where `published_to` excludes the owning org.
 
 ---
 
+### `ts share` — object and column grants
+
+Grants over `POST /api/rest/2.0/security/metadata/share`. The sharing capability of the
+single-model multi-tenancy pattern: it makes objects visible to end users, and the same
+mechanism carries column-level security. Publishing an object to a tenant Org makes it
+*present* there; sharing is what makes it *visible* to that tenant's users.
+
+Sharing is deliberately **not** part of `ts publish`: it is needed whether or not anything
+was published, and folding it in would put a security operation inside a deployment one.
+
+Three behaviours the implementation rests on, all verified live on 2026-07-26:
+
+| Finding | Consequence |
+|---|---|
+| `message` is **top-level** in the payload, beside `notify_on_share` — not inside `notification`, despite every published example | The nested form fails with `Variable "$message" of required type "String!" was not provided`. Nothing works until this is right |
+| `LOGICAL_COLUMN` **is** accepted by the endpoint, despite being absent from the documented supported-types list | Column-level security is expressible through the same command |
+| Sharing a **table grants every column** in it | Table and column grants are mutually exclusive per (org, table, group) — see the exclusivity rule below |
+
+The pipeline mirrors `ts publish` and the `ts alias` source conventions:
+
+```bash
+# 1. Resolve the objects, list their columns, read who can already see them
+ts share export <guid> [<guid> ...] [--org ORG1 --org ORG2] -p prod
+
+# 2. Build the grant manifest, resolve names to GUIDs, refuse an unsafe plan
+ts share export <guid> -p prod | ts share resolve --org ORG1 --org ORG2 \
+  --source uniform --group Analyst --share-mode READ_ONLY -p prod > grants.json
+
+# ...or grant at COLUMN level instead of object level
+ts share export <guid> -p prod | ts share resolve --org ORG1 --source uniform \
+  --group Analyst --share-mode READ_ONLY --column PROD_NM --column AMOUNT -p prod
+
+# ...or take per-Org variation from a CSV or a governed Snowflake table
+ts share resolve -i export.json --source file --csv grants.csv -p prod
+ts share resolve -i export.json --source db --sf-profile sf \
+  --table DB.SCH.TS_SHARE_GRANTS -p prod
+ts share resolve --init-table                    # CREATE TABLE DDL, then exit
+
+# 3. Apply
+ts share apply -i grants.json --dry-run
+ts share apply -i grants.json -p prod
+
+# Read back who can see what
+ts share status <guid> --org ORG1 --org ORG2 --columns -p prod
+```
+
+**The exclusivity rule.** Sharing a table grants access to *every* column in it, so a
+table grant silently defeats any column grants beside it and column security stops
+applying. A manifest containing both for the same (org, table, group) is **refused** — by
+`resolve`, and again by `apply`, because the manifest is a file a human can edit in
+between. The check ignores `share_mode`, `NO_ACCESS` included: whether a table-level
+`NO_ACCESS` clears existing column grants is unverified, so a revoke-then-grant sequence
+cannot be safely ordered inside one manifest and belongs in two applies.
+
+| Table | Grant at |
+|---|---|
+| No secured columns | table level |
+| Has secured columns | column level only, never both |
+
+The `ALL` group is the usual default for a published model and the most dangerous one on a
+secured table. The same rule applies to it: column grants, never a table grant.
+
+**Groups are per-Org.** A group in the Primary Org is a different principal from a
+same-named group in a tenant Org, so each `--org` runs through its own org-scoped token.
+`resolve` checks every group in its own Org and names all the missing pairs at plan time,
+rather than letting the run hit `code 13003` mid-apply. `--skip-group-check` opts out.
+
+**The audience is never inferred.** `--group` and `--share-mode` are required for
+`--source uniform` and have no defaults — sharing decides who sees tenant data.
+
+Grant manifest (`TS_SHARE_GRANTS`), readable as CSV with the same columns:
+
+```sql
+TS_SHARE_GRANTS (org_name, object_identifier, object_type, column_name,
+                 group_name, share_mode)
+-- object_type: LOGICAL_TABLE | LIVEBOARD | ANSWER
+-- column_name: blank = object grant; set = column grant
+-- share_mode:  READ_ONLY | MODIFY | NO_ACCESS
+-- PRIMARY KEY (org_name, object_identifier, column_name, group_name)
+```
+
+Two rows with the same key and the same `share_mode` de-duplicate; the same key with
+*different* modes is refused rather than resolved by a coin-flip.
+
+`apply` batches into the fewest safe calls: one per (Org, metadata type, audience).
+Objects share a call only when their principal and share-mode set is identical, so no
+object is ever exposed to another's audience. Everything is sorted, so the same grants
+always produce the same plan and a `--dry-run` is diffable between runs.
+
+`--notify` is off by default, against the API's own default of `true`: a bulk tenant-wide
+grant should not email every member of every group.
+
+`status` output is one row per (object, principal):
+`[{"org", "guid", "name", "type", "principal_type", "principal_id", "principal_name",
+"permission", "shared_permission"}]`. Read **`shared_permission`** when checking whether a
+share landed — `permission` is effective access, and shows `MODIFY` for an admin group
+whether or not anything was ever shared with it.
+
+---
+
 ### `ts tableau signin`
 
 Sign in to Tableau Server/Cloud and verify credentials.

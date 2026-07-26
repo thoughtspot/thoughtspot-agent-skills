@@ -24,6 +24,7 @@ ts_cli/
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts agentql classify-columns` (pure functions, no I/O)
   publish_plan.py      — Orgs Publishing planning engine: field-variance clustering (build_clusters/extract_table_fields/suggest_variable_name) + the value matrix (build_value_matrix/expand_pattern/coverage_report) behind `ts publish export`/`resolve`/`apply`/`rollback` (incl. build_apply_plan/rollback_steps, which record each field's ORIGINAL static value because unparameterize substitutes rather than clears). Clusters by DISTINCT VALUE because a variable holds one value per scope, so N tables sharing a schema need one variable, not N (pure functions, no I/O)
   publish_apply.py     — Orgs Publishing apply-plan assembly: multi-root closure merge (merge_closures/publish_targets/publish_type_for_root) + ordered plan and rollback record (build_apply_plan/rollback_steps); split from publish_plan.py under the file-size gate and re-exported from it (pure functions, no I/O)
+  share_plan.py        — `ts share` planning engine: grant-manifest parsing (parse_grant_rows), the table/column exclusivity rule (find_exclusivity_conflicts/format_conflicts — sharing a table grants EVERY column, so a table grant and a column grant for one (org, table, group) are REFUSED, never merged; the check ignores share_mode, NO_ACCESS included, because a revoke-then-grant sequence cannot be safely ordered inside one manifest), API-call batching by audience (build_share_steps — one call per (org, metadata_type, principal-set), everything sorted so a --dry-run plan is diffable), and fetch-permissions flattening (permission_rows) behind `ts share resolve`/`apply`/`status` (pure functions, no I/O)
   promote.py           — Formula promotion merge (extract_answer_formulas/detect_duplicates/map_references/build_merged_model) behind `ts model promote-formula` (pure functions, no I/O; BL-066)
   aggregate/
     __init__.py          — package marker
@@ -107,6 +108,8 @@ ts_cli/
     parameterize.py — ts metadata parameterize / unparameterize (attaches to metadata.app); binds template variables to Table/Connection fields. field_type is derived from metadata_type so the code-10002 mismatch is unreachable; warns when one variable is bound to several fields (same token written into each)
     publish_planning.py — ts publish export / resolve / apply / rollback / run (attaches to publish.app); adds the manifest layer (TS_PUBLISH_OBJECTS / TS_PUBLISH_VARIABLES, --init-table, --source db) mirroring `ts alias`, and `run` as the unattended schedulable entry point over the same engine; dependency-closure walk + planning I/O over publish_plan.py. Split from publish.py under the file-size gate
     publish.py    — ts publish (push, unpush, status) — Orgs Publishing. Pure payload builders + explain_publish_error, which resolves the API's GUID/numeric-id failure messages into named, actionable text. status reads metadata_header.orgIds, so it needs no per-Org auth
+    share.py      — ts share (status) + the shared substrate for the whole group — object and column grants over security/metadata/share. Holds build_share_payload, where `message` is TOP-LEVEL beside notify_on_share (NOT inside `notification`, despite every published example — the nested form fails with `Variable "$message" of required type "String!" was not provided`) and LOGICAL_COLUMN is accepted despite being absent from the documented supported-types list; both verified live 2026-07-26. Also _client_for_org (one org-scoped client per target Org, because groups are per-Org), _resolve_object (refuses an ambiguous name rather than sharing the wrong object), _table_columns (column GUIDs via include_details — they are absent from TML), and explain_share_error. notify_on_share defaults to False, against the API default
+    share_planning.py — ts share export / resolve / apply (attaches to share.app); the manifest layer (TS_SHARE_GRANTS, --init-table, --source uniform|file|db) mirroring `ts alias`/`ts publish`, plus the two plan-time refusals: the exclusivity conflict (re-checked in apply, because the manifest is a file a human can edit in between) and a group that does not exist in its Org. Split from share.py under the file-size gate
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
     audit.py      — ts audit run / report
@@ -133,7 +136,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.107.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.108.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
