@@ -1624,9 +1624,10 @@ incomplete, which leaks data, whereas leaving stale protection in place is visib
 recoverable.
 
 **Published tables are refused at plan time**, as `CSR_BLOCKED`: CSR cannot be defined
-on a published object. `resolve` and `build` mark the affected step rather than failing
-mid-apply; `apply --allow-published` overrides the refusal, for probing rather than
-routine use.
+on a published object. `resolve` marks the affected step in the plan rather than failing
+outright; `build` and `apply` both then refuse any plan containing one, before anything
+is rendered or sent. Only `apply --allow-published` can override the refusal, for
+probing rather than routine use -- `build` has no equivalent flag.
 
 Manifest table (`TS_COLUMN_SECURITY_RULES`), readable as CSV with the same columns:
 
@@ -1653,9 +1654,11 @@ ts security column-rules export T2_PUBLISH --out ./plan/csr --org ORG1 -p prod
 
 `resolve` turns a rule manifest into a reviewable plan, from `--source uniform`
 (explicit `--table`/`--org`/`--rule` flags), `file` (`--csv`), or `db`
-(`--sf-profile`/`--table-name`); `--init-table` prints the DDL above and exits:
+(`--sf-profile`/`--table-name`); `--init-table` prints the manifest table's
+`CREATE TABLE` DDL and exits:
 
 ```bash
+ts security column-rules resolve --init-table                    # CREATE TABLE DDL, then exit
 ts security column-rules resolve --source uniform --org ORG1 --org ORG2 \
   --table T2_PUBLISH --rule "COST=Finance" --rule "SALARY=" -p prod
 ```
