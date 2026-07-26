@@ -331,6 +331,27 @@ def _refuse_blocked(steps: List[Dict[str, Any]], allow_published: bool) -> None:
     raise typer.Exit(1)
 
 
+def _refuse_missing_org(steps: List[Dict[str, Any]]) -> None:
+    """Refuse any step with no org_name before the first call.
+
+    `parse_rule_rows` already refuses a blank `org_name` at plan time, so no plan
+    `resolve` produces can reach here missing one -- this guards the same plan-is-a-file
+    threat model as `_refuse_blocked`: a human can strip a field between `resolve` and
+    `apply`. Skipping the Org-context assertion for a blank `org_name` would write to
+    whatever Org the profile falls back to, silently, and report success having written
+    one tenant's column security into another tenant's Org. Refusing it costs nothing,
+    since no legitimate plan is ever affected.
+    """
+    missing = [s for s in steps if not (s.get("org_name") or "").strip()]
+    if not missing:
+        return
+    names = ", ".join(str(s.get("table_name") or "?") for s in missing)
+    raise typer.BadParameter(
+        f"{len(missing)} plan step(s) have no org_name ({names}). A plan step must "
+        "name its Org: applying one against the profile's default Org could write one "
+        "tenant's column security into another tenant's Org.")
+
+
 @column_rules_app.command("apply")
 def apply_cmd(
     input_file: Optional[str] = typer.Option(None, "--input",
@@ -365,6 +386,7 @@ def apply_cmd(
     """
     steps = _steps_from_plan(input_file)
     _refuse_blocked(steps, allow_published)
+    _refuse_missing_org(steps)
 
     payloads: List[Dict[str, Any]] = []
     for step in steps:
@@ -382,12 +404,11 @@ def apply_cmd(
         return
 
     for step, payload in zip(steps, payloads):
-        org_name = step.get("org_name") or ""
-        client = _client_for_org(profile, org_name or None)
-        if org_name:
-            assert_org_context(client, org_name, profile)
+        org_name = step["org_name"]
+        client = _client_for_org(profile, org_name)
+        assert_org_context(client, org_name, profile)
         _post_update(client, payload,
-                     f"[{org_name or 'current org'}] {step.get('table_name')}: "
+                     f"[{org_name}] {step.get('table_name')}: "
                      f"{step.get('operation')} "
                      f"{', '.join(sorted(step.get('rules') or {}))}")
 

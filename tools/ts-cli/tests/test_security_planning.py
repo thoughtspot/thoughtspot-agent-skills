@@ -242,7 +242,10 @@ def test_apply_dry_run_posts_nothing(tmp_path, planning_client):
     result = runner.invoke(app, ["security", "column-rules", "apply", "--input",
                                  _write_plan(tmp_path, _plan()), "--dry-run", "-p", "x"])
     assert result.exit_code == 0
-    assert not [p for p, _ in client.calls if p == UPDATE]
+    # Not just "no UPDATE call": no call of any kind. FakeClient records every POST and
+    # GET, so this also catches a --dry-run that still constructs a client and probes
+    # the session (e.g. an Org-context check) before honouring the flag.
+    assert client.calls == []
     assert json.loads(result.stdout)["payloads"][0]["identifier"] == "guid-1"
 
 
@@ -257,13 +260,18 @@ def test_apply_refuses_a_blocked_step(tmp_path, planning_client):
 
 
 def test_allow_published_overrides_the_refusal(tmp_path, planning_client):
+    # msg_runner, not runner: the warning that the platform is expected to reject these
+    # steps anyway is printed to stderr, and only msg_runner's mixed output can see it.
+    # With `runner` this assertion would be silently unreachable, so deleting the
+    # warning print would not fail any test.
     client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
     plan = _plan(blocked="CSR_BLOCKED: 'T2' is published")
-    result = runner.invoke(app, ["security", "column-rules", "apply", "--input",
-                                 _write_plan(tmp_path, plan), "--allow-published",
-                                 "-p", "x"])
+    result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                     _write_plan(tmp_path, plan), "--allow-published",
+                                     "-p", "x"])
     assert result.exit_code == 0, result.output
     assert [p for p, _ in client.calls if p == UPDATE]
+    assert "platform is expected to reject" in result.output
 
 
 def test_apply_sends_prune_unsecures_alongside_the_rules(tmp_path, planning_client):
@@ -292,3 +300,32 @@ def test_apply_refuses_a_plan_with_no_steps(tmp_path, planning_client):
                                      _write_plan(tmp_path, plan), "-p", "x"])
     assert result.exit_code != 0
     assert "no steps" in result.output.lower()
+
+
+def test_apply_refuses_a_step_with_no_org_name(tmp_path, planning_client):
+    # No legitimate plan reaches this state -- parse_rule_rows already refuses a blank
+    # org_name at resolve time -- but a plan file is something a human can hand-edit in
+    # between resolve and apply, and a silent write to the profile's default Org is
+    # exactly the failure mode that Org-context assertion exists to prevent.
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    plan = _plan(org_name="")
+    result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                     _write_plan(tmp_path, plan), "-p", "x"])
+    assert result.exit_code != 0
+    assert "org_name" in result.output
+    assert not [p for p, _ in client.calls if p == UPDATE]
+
+
+def test_apply_surfaces_an_empty_step_as_a_usage_error(tmp_path, planning_client):
+    # rules={} and unsecure=[] together make build_update_payload's own "nothing to do"
+    # ValueError fire. It must surface as a named usage error, not an unhandled
+    # traceback, and it must name the offending Org/table so the operator can find the
+    # broken row in the plan file.
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    plan = _plan(rules={}, unsecure=[])
+    result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                     _write_plan(tmp_path, plan), "-p", "x"])
+    assert result.exit_code != 0
+    assert "ORG1" in result.output and "T2" in result.output
+    assert "nothing to do" in result.output.lower()
+    assert not [p for p, _ in client.calls if p == UPDATE]
