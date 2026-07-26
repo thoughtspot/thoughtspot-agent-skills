@@ -97,6 +97,22 @@ second rule, confirmed by reading back through the API. Two gotchas:
 - `clear_csr: true` alone is rejected; `column_security_rules: []` must accompany it,
   though the docs imply the flag is sufficient.
 
+**Corrected 2026-07-26 against the canonical spec** (`get-rest-api-reference`, operations
+`fetchColumnSecurityRules` and `updateColumnSecurityRules`). Four things this section got
+wrong or missed; see
+[`2026-07-26-ts-security-column-rules-cli-design.md`](2026-07-26-ts-security-column-rules-cli-design.md) §1
+for the detail:
+
+- CSR is **not** purely declarative. Each column rule's `group_access` names an
+  `operation`: `ADD`, `REMOVE` or `REPLACE`. The API is both incremental and declarative,
+  which is what makes an idempotent `set` possible.
+- `update` takes **one table per call** (`identifier` is a scalar). The "all or none"
+  rollback is per call, not per run, so multi-table work is a loop the caller owns.
+- The `clear_csr` rejection above is **schema validation, not a bug**:
+  `column_security_rules` is a required field. It will not be "fixed", so always emit both.
+- Per-column **`is_unsecured: true`** exists, distinct from whole-table `clear_csr`.
+  Unsecuring one column does not require a read-modify-write of the table.
+
 ### 2.5 CSR is independent of the share ACL
 
 With CSR active on two columns, the table's grant list was unchanged. CSR governs column
@@ -268,7 +284,11 @@ None block building `ts share`, which rests only on verified behaviour.
 
 1. **`ts share` CLI** — object + column grants, the manifest, the exclusivity check.
    Unblocks `ts-publish-orgs` Step 12 immediately.
-2. **`ts security column-rules get|set|clear`** — the CSR API path.
+2. **`ts security column-rules`**, the CSR path, both routes. Designed in
+   [`2026-07-26-ts-security-column-rules-cli-design.md`](2026-07-26-ts-security-column-rules-cli-design.md):
+   `get` / `export` read, `resolve` plans, `apply` executes over the API, and
+   `build` / `import` executes over TML. Scoped wider than the "API path" named here
+   because the two routes share one plan, and §5.3's TML preservation needs the export.
 3. **`ts-security-columns` skill** — the decision layer over both, CSR path mirroring
    `ts alias`.
 4. **Migration additions** — `CSR_BLOCKER`, the opt-in mapping, CSR TML preservation.
