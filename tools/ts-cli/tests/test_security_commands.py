@@ -114,7 +114,8 @@ def test_get_explains_the_feature_flag_instead_of_a_bare_403(patched):
 def test_the_group_is_registered_under_ts_security():
     result = runner.invoke(app, ["security", "column-rules", "--help"])
     assert result.exit_code == 0
-    assert "get" in result.output
+    for command in ("get", "set", "clear", "export"):
+        assert command in result.output
 
 
 def test_set_defaults_to_replace(patched):
@@ -217,3 +218,62 @@ def test_set_asserts_the_org_context_before_writing(monkeypatch, patched):
     kinds = [p for p, _ in client.calls]
     assert "assert_org_context" in kinds and UPDATE in kinds
     assert kinds.index("assert_org_context") < kinds.index(UPDATE)
+
+
+EXPORT = "/api/rest/2.0/metadata/tml/export"
+
+_CSR_EDOC = ("column_security_rules:\n"
+             "  table:\n    name: T2\n"
+             "  rules:\n"
+             "  - column_name: PROD_NM\n"
+             "    accessible_groups:\n      group_name:\n      - Analyst\n")
+
+
+def test_export_asks_for_both_flags_the_beta_option_needs(patched):
+    client = patched(FakeClient({EXPORT: FakeResponse([])}))
+    runner.invoke(app, ["security", "column-rules", "export", "T2", "-p", "x"])
+    body = next(b for p, b in client.calls if p == EXPORT)
+    assert body["export_associated"] is True
+    assert body["export_options"] == {"export_column_security_rules": True}
+    assert body["metadata"] == [{"identifier": "T2", "type": "LOGICAL_TABLE"}]
+
+
+def test_export_prints_the_parsed_documents(patched):
+    patched(FakeClient({EXPORT: FakeResponse(
+        [{"info": {"type": "column_security_rules", "id": "g-9"}, "edoc": _CSR_EDOC}])}))
+    result = runner.invoke(app, ["security", "column-rules", "export", "T2", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["documents"][0]["table_name"] == "T2"
+    assert payload["documents"][0]["rules"] == {"PROD_NM": ["Analyst"]}
+
+
+def test_export_writes_files_named_the_way_the_platform_names_them(patched, tmp_path):
+    patched(FakeClient({EXPORT: FakeResponse(
+        [{"info": {"type": "column_security_rules", "id": "g-9"}, "edoc": _CSR_EDOC}])}))
+    result = runner.invoke(app, ["security", "column-rules", "export", "T2",
+                                 "--out", str(tmp_path), "-p", "x"])
+    assert result.exit_code == 0, result.output
+    written = tmp_path / "T2_CSR.column_security_rules.tml"
+    assert written.exists()
+    assert "column_security_rules" in written.read_text()
+
+
+_NO_CSR = [{"info": {"type": "logical_table"}, "edoc": "table:\n  name: T2\n"}]
+
+
+def test_export_returns_an_empty_document_list_when_nothing_is_secured(patched):
+    patched(FakeClient({EXPORT: FakeResponse(_NO_CSR)}))
+    result = runner.invoke(app, ["security", "column-rules", "export", "T2", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["documents"] == []
+
+
+def test_export_says_on_stderr_that_it_found_nothing(patched):
+    # Split from the test above: the message is a manual stderr print, so it needs the
+    # mixing runner, which in turn makes result.stdout unparseable.
+    patched(FakeClient({EXPORT: FakeResponse(_NO_CSR)}))
+    result = msg_runner.invoke(app, ["security", "column-rules", "export", "T2",
+                                     "-p", "x"])
+    assert result.exit_code == 0
+    assert "no column security rules" in result.output.lower()

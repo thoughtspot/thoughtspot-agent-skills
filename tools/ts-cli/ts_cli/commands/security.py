@@ -269,3 +269,75 @@ def clear_cmd(
         raise typer.BadParameter(str(exc)) from exc
 
     _one_shot(profile, org, payload, label, dry_run)
+
+
+# ---------------------------------------------------------------------------
+# ts security column-rules export -- the TML route's read stage
+# ---------------------------------------------------------------------------
+
+@column_rules_app.command("export")
+def export_cmd(
+    tables: List[str] = typer.Argument(..., help="Table GUIDs or names to export"),
+    org: Optional[str] = typer.Option(None, "--org", help="Export from this Org"),
+    out: Optional[str] = typer.Option(None, "--out",
+                                      help="Directory to write the .tml files into. "
+                                           "Omit to print them only."),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Export each table's `column_security_rules` TML document.
+
+    CSR round-trips through TML as a sibling document, exactly the `column_alias`
+    pattern, so the export needs BOTH `export_associated: true` and
+    `export_options.export_column_security_rules: true`. The option is Beta (10.12+);
+    without it the CSR document simply is not in the response.
+
+    Preserving this document is what makes a tenant's CSR configuration restorable
+    later. Once CSR is supported on published objects, restoring is a single import
+    rather than a reconstruction from CLS grants.
+
+    An empty result is a legitimate answer: a table with no secured columns has no
+    document to return.
+
+    Output (JSON to stdout):
+      {"documents": [{"table_name", "rules", "guid", "yaml"}], "written": [paths]}
+
+    Examples:
+
+    \b
+      ts security column-rules export T2_PUBLISH -p prod
+      ts security column-rules export T1 T2 --out ./plan/csr --org ORG1 -p prod
+    """
+    from pathlib import Path
+
+    from ts_cli.csr_plan import csr_tml_filename, parse_csr_tml_export
+
+    client = _client_for_org(profile, org)
+    resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+        "metadata": [{"identifier": t, "type": "LOGICAL_TABLE"}
+                     for t in dict.fromkeys(tables)],
+        "export_associated": True,
+        "export_fqn": True,
+        "edoc_format": "YAML",
+        "export_options": {"export_column_security_rules": True},
+    }, raise_for_status=False)
+    if not resp.ok:
+        _fail(resp, "Could not export column security rules")
+
+    documents = parse_csr_tml_export(resp.json())
+    if not documents:
+        print("No column security rules found on: "
+              f"{', '.join(dict.fromkeys(tables))}. Either nothing is secured, or the "
+              f"export option is unavailable on this build (Beta, 10.12+).",
+              file=sys.stderr)
+
+    written: List[str] = []
+    if out and documents:
+        directory = Path(out)
+        directory.mkdir(parents=True, exist_ok=True)
+        for document in documents:
+            path = directory / csr_tml_filename(document["table_name"])
+            path.write_text(document["yaml"])
+            written.append(str(path))
+            print(f"wrote {path}", file=sys.stderr)
+
+    print(json.dumps({"documents": documents, "written": written}))
