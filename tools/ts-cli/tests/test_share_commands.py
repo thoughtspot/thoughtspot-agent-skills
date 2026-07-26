@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from ts_cli.commands.share import build_share_payload
+from ts_cli.commands.share import build_share_payload, expand_uniform_grants, resolve_guids
 
 
 def _perm(group="Analyst", mode="READ_ONLY"):
@@ -84,3 +84,90 @@ def test_client_accepts_an_explicit_org_overriding_the_env(monkeypatch):
 
     default = client_module.ThoughtSpotClient("p")
     assert default._org == "Primary"
+
+
+# ---------------------------------------------------------------------------
+# ts share resolve — the pure helpers
+# ---------------------------------------------------------------------------
+
+_OBJECTS = [
+    {"guid": "tbl-1", "name": "T2_PUBLISH", "type": "LOGICAL_TABLE", "subtype": "",
+     "columns": [{"guid": "col-prod", "name": "PROD_NM"},
+                 {"guid": "col-amt", "name": "AMOUNT"}]},
+    {"guid": "lb-1", "name": "Sales LB", "type": "LIVEBOARD", "subtype": "", "columns": []},
+]
+
+
+def test_expand_uniform_grants_object_level_across_orgs_and_groups():
+    grants = expand_uniform_grants(_OBJECTS, ["ORG1", "ORG2"], ["Analyst"], "READ_ONLY")
+    assert len(grants) == 4  # 2 objects x 2 orgs x 1 group
+    assert {g["org_name"] for g in grants} == {"ORG1", "ORG2"}
+    assert all(g["column_name"] == "" for g in grants)
+    assert all(g["share_mode"] == "READ_ONLY" for g in grants)
+
+
+def test_expand_uniform_grants_column_level_only_touches_named_columns():
+    grants = expand_uniform_grants(_OBJECTS, ["ORG1"], ["Analyst"], "READ_ONLY",
+                                   columns=["PROD_NM"])
+    assert [g["column_name"] for g in grants] == ["PROD_NM"]
+    assert grants[0]["object_identifier"] == "T2_PUBLISH"
+
+
+def test_expand_uniform_grants_rejects_a_column_no_object_has():
+    with pytest.raises(ValueError, match="NOPE"):
+        expand_uniform_grants(_OBJECTS, ["ORG1"], ["Analyst"], "READ_ONLY", columns=["NOPE"])
+
+
+def test_expand_uniform_grants_requires_groups():
+    with pytest.raises(ValueError, match="--group"):
+        expand_uniform_grants(_OBJECTS, ["ORG1"], [], "READ_ONLY")
+
+
+def test_expand_uniform_grants_requires_orgs():
+    with pytest.raises(ValueError, match="--org"):
+        expand_uniform_grants(_OBJECTS, [], ["Analyst"], "READ_ONLY")
+
+
+def test_expand_uniform_grants_rejects_an_unknown_share_mode():
+    with pytest.raises(ValueError, match="WRITE"):
+        expand_uniform_grants(_OBJECTS, ["ORG1"], ["Analyst"], "WRITE")
+
+
+def test_resolve_guids_fills_object_and_column_guids():
+    grants = [{"org_name": "ORG1", "object_identifier": "T2_PUBLISH",
+               "object_type": "LOGICAL_TABLE", "column_name": "PROD_NM",
+               "group_name": "Analyst", "share_mode": "READ_ONLY"}]
+    resolved = resolve_guids(grants, _OBJECTS)
+    assert resolved[0]["object_guid"] == "tbl-1"
+    assert resolved[0]["column_guid"] == "col-prod"
+
+
+def test_resolve_guids_matches_an_object_by_guid_as_well_as_name():
+    grants = [{"org_name": "ORG1", "object_identifier": "tbl-1",
+               "object_type": "LOGICAL_TABLE", "column_name": "",
+               "group_name": "Analyst", "share_mode": "READ_ONLY"}]
+    assert resolve_guids(grants, _OBJECTS)[0]["object_guid"] == "tbl-1"
+
+
+def test_resolve_guids_rejects_an_object_not_in_the_envelope():
+    grants = [{"org_name": "ORG1", "object_identifier": "MISSING",
+               "object_type": "LOGICAL_TABLE", "column_name": "",
+               "group_name": "Analyst", "share_mode": "READ_ONLY"}]
+    with pytest.raises(ValueError, match="MISSING"):
+        resolve_guids(grants, _OBJECTS)
+
+
+def test_resolve_guids_rejects_a_column_the_table_does_not_have():
+    grants = [{"org_name": "ORG1", "object_identifier": "T2_PUBLISH",
+               "object_type": "LOGICAL_TABLE", "column_name": "NOPE",
+               "group_name": "Analyst", "share_mode": "READ_ONLY"}]
+    with pytest.raises(ValueError, match="NOPE"):
+        resolve_guids(grants, _OBJECTS)
+
+
+def test_resolve_guids_corrects_a_manifest_object_type_from_the_envelope():
+    """A manifest that guessed LOGICAL_TABLE for a Liveboard is corrected, not trusted."""
+    grants = [{"org_name": "ORG1", "object_identifier": "Sales LB",
+               "object_type": "LOGICAL_TABLE", "column_name": "",
+               "group_name": "Analyst", "share_mode": "READ_ONLY"}]
+    assert resolve_guids(grants, _OBJECTS)[0]["object_type"] == "LIVEBOARD"
