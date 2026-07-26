@@ -46,6 +46,7 @@ from ts_cli.csr_plan import (
     explain_csr_error,
     normalise_fetch_response,
 )
+from ts_cli.publish_plan import published_org_ids
 
 app = typer.Typer(help="Security configuration (column security rules).")
 column_rules_app = typer.Typer(
@@ -98,24 +99,38 @@ def _post_update(client: ThoughtSpotClient, payload: Dict[str, Any],
     print(f"applied {label}", file=sys.stderr)
 
 
-def _published_orgs(client: ThoughtSpotClient, guid: str) -> List[int]:
-    """The Org ids a table is published into, read from ``metadata_header.orgIds``.
+def _published_orgs(client: ThoughtSpotClient, guid: str) -> Optional[List[Any]]:
+    """The Org ids a table is published into, or None when that could not be read.
 
-    CSR cannot be defined on a published object, and this is the same field
-    `ts publish status` reads, so no per-Org auth is needed to answer the question.
+    The `metadata_header` reading is `publish_plan.published_org_ids`, shared with
+    `ts publish status` rather than restated here: `orgIds` includes the OWNING Org, and
+    reading it as "published into" made every table on an Orgs-enabled cluster look
+    published.
+
+    None is distinct from an empty list, and the difference is the whole point. ``[]``
+    means the read succeeded and the table is published nowhere; None means the read
+    failed -- a 403 on a cluster where the CSR flag is off, a 500, or no hit for the guid
+    -- so publication state is UNKNOWN and the caller blocks the step rather than
+    treating it as unpublished. `resolve` writes nothing, so a false block costs a
+    re-run while a false pass applies CSR to a published object.
     """
     resp = client.post("/api/rest/2.0/metadata/search",
                        json={"metadata": [{"identifier": guid, "type": "LOGICAL_TABLE"}],
                              "include_headers": True},
                        raise_for_status=False)
     if not getattr(resp, "ok", False):
-        return []
+        print(f"Warning: could not read publication state for '{guid}': "
+              f"HTTP {getattr(resp, 'status_code', '?')}. Treating it as unknown, which "
+              f"blocks the step.", file=sys.stderr)
+        return None
     data = resp.json()
     hits = data if isinstance(data, list) else (data.get("metadata") or [])
     if not hits:
-        return []
-    header = hits[0].get("metadata_header") or {}
-    return [int(o) for o in (header.get("orgIds") or []) if str(o).lstrip("-").isdigit()]
+        print(f"Warning: '{guid}' returned no metadata/search hit, so its publication "
+              f"state is unknown. Treating it as unknown, which blocks the step.",
+              file=sys.stderr)
+        return None
+    return published_org_ids(hits[0].get("metadata_header") or {})
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +190,28 @@ def _one_shot(profile: Optional[str], org: Optional[str], payload: Dict[str, Any
     _post_update(client, payload, label)
 
 
+def _refuse_empty_groups_for_increment(rules: Dict[str, List[str]],
+                                       operation: str) -> None:
+    """Refuse ``--rule "COL="`` under --add or --remove.
+
+    An empty group list is meaningful only under REPLACE, where it declares the column
+    secured with nobody able to see it. ADDING or REMOVING nothing is not a state, it is
+    a no-op: the call would return success having changed nothing, which reads as
+    "secured" to whoever ran it. Refusing costs nothing -- REPLACE expresses the only
+    thing the empty form can mean.
+    """
+    if operation == "REPLACE":
+        return
+    empty = sorted(column for column, groups in rules.items() if not groups)
+    if not empty:
+        return
+    raise typer.BadParameter(
+        f"--rule \"{empty[0]}=\" names no groups, and {operation} has nothing to act on: "
+        f"it would report success having changed nothing. \"COL=\" is meaningful only "
+        f"under the default REPLACE, where it means secured with no group able to see "
+        f"it. Columns affected: {', '.join(empty)}.")
+
+
 @column_rules_app.command("set")
 def set_cmd(
     table: str = typer.Option(..., "--table", help="Table GUID or name"),
@@ -199,9 +236,12 @@ def set_cmd(
     diffs cleanly. --add and --remove reach the incremental operations when a
     read-modify-write is not what you want.
 
-    Only the columns named are touched. A column already secured and not mentioned here
-    is left exactly as it was; use `clear --column` to unsecure one, or
-    `resolve --prune` to unsecure everything absent from a manifest.
+    Only the columns named are expected to be touched: a column already secured and not
+    mentioned here should be left exactly as it was. NOT YET LIVE-VERIFIED -- it is what
+    the API spec implies, and it is design spec section 8 item 1 (whether a per-column
+    REPLACE is scoped to that column, or `update` is a whole-table replace). Until it is
+    settled, capture `get` before and after. Use `clear --column` to unsecure one column,
+    or `resolve --prune` to unsecure everything absent from a manifest.
 
     Output (JSON to stdout, --dry-run only): the request payload.
 
@@ -222,6 +262,7 @@ def set_cmd(
 
     try:
         rules = parse_rule_flags(list(rule))
+        _refuse_empty_groups_for_increment(rules, operation)
         payload = build_update_payload(table, rules, operation=operation)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc

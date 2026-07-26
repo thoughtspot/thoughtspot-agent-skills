@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 import typer
 
 from ts_cli.client import ThoughtSpotClient, resolve_profile
+from ts_cli.publish_plan import published_org_ids
 
 app = typer.Typer(help="Publish objects from the Primary Org to target Orgs.")
 
@@ -92,10 +93,9 @@ def build_unpublish_payload(
 def publication_rows(search_results: List[dict], org_index: Dict[int, str]) -> List[dict]:
     """Summarise `metadata/search` results as per-object publication state.
 
-    `metadata_header.orgIds` lists the owning Org plus every Org the object is
-    published to, so publication state is readable from the Primary Org with no
-    extra authentication. The owning Org is excluded from ``published_to`` so the
-    field means "additionally visible in".
+    The `metadata_header` reading is `publish_plan.published_org_ids`, which is where
+    that field's semantics are stated -- shared with `ts security column-rules` rather
+    than restated, because the two readings had already diverged.
 
     Unknown Org ids degrade to their string form rather than being dropped.
 
@@ -105,8 +105,7 @@ def publication_rows(search_results: List[dict], org_index: Dict[int, str]) -> L
     for result in search_results:
         header = result.get("metadata_header") or {}
         owner_org_id = header.get("ownerOrgId")
-        org_ids = header.get("orgIds") or []
-        published = [org_index.get(i, str(i)) for i in org_ids if i != owner_org_id]
+        published = [org_index.get(i, str(i)) for i in published_org_ids(header)]
         rows.append({
             "guid": result.get("metadata_id"),
             "name": result.get("metadata_name"),

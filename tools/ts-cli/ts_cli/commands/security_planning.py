@@ -11,12 +11,17 @@ The plan JSON is the pivot between the two routes. `apply` executes it over the 
 `build` renders it to TML and `import` pushes that, so neither route needs a --route
 flag and neither can silently disagree with the other about what a plan meant.
 
-Two plan-time refusals, both re-checked in `apply` because a plan file is something a
-human can edit in between:
+One plan-time refusal, re-checked by BOTH executors -- `build` and `apply` -- because a
+plan file is something a human can edit in between:
 
-- A PUBLISHED table is CSR_BLOCKED. CSR cannot be defined on a published object.
-- Pruning only ever happens when asked for. A manifest instructs about the columns it
-  names; the columns it omits are left alone unless --prune says otherwise.
+- A PUBLISHED table is CSR_BLOCKED. CSR cannot be defined on a published object. So is a
+  table whose publication state could not be read, since only a successful read can
+  support the claim that it is unpublished. `apply --allow-published` is the one
+  override; `build` has none.
+
+Alongside it sits a default, not a refusal: pruning only ever happens when asked for. A
+manifest instructs about the columns it names; the columns it omits are left alone unless
+--prune says otherwise.
 """
 from __future__ import annotations
 
@@ -132,7 +137,8 @@ def _resolve_tables_for_rows(profile: Optional[str], rows: List[Dict[str, str]],
     """Resolve every (org, table) named in the manifest, per Org.
 
     Reads three things the pure engine cannot know: the table's GUID, whether it is
-    published, and -- only when pruning -- which of its columns are secured today.
+    published (or whether that could be read at all), and -- only when pruning -- which
+    of its columns are secured today.
 
     The publication read costs one additional `metadata/search` call per table, not
     zero: `_resolve_table` delegates to `ts share`'s `_resolve_object`, whose
@@ -160,16 +166,35 @@ def _resolve_tables_for_rows(profile: Optional[str], rows: List[Dict[str, str]],
             resolved = _resolve_table(client, table_name)
             secured: List[str] = []
             if prune:
-                secured = [r["column_name"]
-                           for r in _fetch_rules(client, [resolved["guid"]])]
+                secured = _secured_columns(client, resolved["guid"])
+            published = _published_orgs(client, resolved["guid"])
             tables.append({
                 "org_name": org_name,
                 "table_name": table_name,
                 "table_guid": resolved["guid"],
-                "published": bool(_published_orgs(client, resolved["guid"])),
+                # None from `_published_orgs` is "could not read", not "not published":
+                # `build_csr_steps` blocks an unknown rather than planning against it.
+                "published": bool(published),
+                "publication_known": published is not None,
                 "secured_columns": secured,
             })
     return tables
+
+
+def _secured_columns(client: Any, table_guid: str) -> List[str]:
+    """The columns secured on ONE table today, for --prune's stale-column list.
+
+    `_fetch_rules` flattens every top-level entry in the response, so the rows are
+    filtered back to the table that was asked about. Without the filter, an entry for any
+    other table would contribute its column names to this table's ``unsecure`` list --
+    the protection-removing direction, and the one direction this feature must never take
+    by accident.
+
+    An entry that names no table at all is kept: exactly one table was requested, so an
+    unattributable row can only be that one, and dropping it would silently stop pruning.
+    """
+    return [row["column_name"] for row in _fetch_rules(client, [table_guid])
+            if str(row.get("table_guid") or "") in ("", table_guid)]
 
 
 def _report_plan_notices(steps: List[Dict[str, Any]]) -> int:
@@ -177,8 +202,9 @@ def _report_plan_notices(steps: List[Dict[str, Any]]) -> int:
 
     Split out of `resolve_cmd` (below the module-health complexity cap), mirroring how
     `share_planning.py` extracts `_grant_summary` and friends out of its own `resolve`.
-    Both notices are advisory at plan time: a `blocked` step is refused later in
-    `apply`; an `unsecure` step only matters if `--prune` was passed.
+    Both notices are advisory at plan time: a `blocked` step is refused later by whichever
+    executor runs, `build` or `apply`; an `unsecure` step only matters if `--prune` was
+    passed.
     """
     blocked = [s for s in steps if s["blocked"]]
     for step in blocked:
@@ -326,21 +352,27 @@ def _refuse_blocked(steps: List[Dict[str, Any]], allow_published: bool) -> None:
     lines += ["",
               "Column security rules cannot be defined on a published object. Either "
               "unpublish the table, or secure its columns with `ts share` column "
-              "grants instead. --allow-published sends them anyway."]
+              "grants instead. Where publication state could not be READ, re-run "
+              "`resolve` once it can be. --allow-published sends them anyway."]
     print("\n".join(lines), file=sys.stderr)
     raise typer.Exit(1)
 
 
 def _refuse_missing_org(steps: List[Dict[str, Any]]) -> None:
-    """Refuse any step with no org_name before the first call.
+    """Refuse any step with no org_name, in BOTH executors, before anything is written.
 
     `parse_rule_rows` already refuses a blank `org_name` at plan time, so no plan
     `resolve` produces can reach here missing one -- this guards the same plan-is-a-file
-    threat model as `_refuse_blocked`: a human can strip a field between `resolve` and
-    `apply`. Skipping the Org-context assertion for a blank `org_name` would write to
+    threat model as `_refuse_blocked`: a human can strip a field between `resolve` and an
+    executor. Refusing it costs nothing, since no legitimate plan is ever affected.
+
+    In `apply`, skipping the Org-context assertion for a blank `org_name` would write to
     whatever Org the profile falls back to, silently, and report success having written
-    one tenant's column security into another tenant's Org. Refusing it costs nothing,
-    since no legitimate plan is ever affected.
+    one tenant's column security into another tenant's Org.
+
+    `build` needs it too, and this is a change from Task 9's apply-only ruling: `org_name`
+    was a warning label there, but it is now the output directory that keeps two Orgs'
+    documents for one table apart. A blank one collapses them into the same path.
     """
     missing = [s for s in steps if not (s.get("org_name") or "").strip()]
     if not missing:
@@ -390,9 +422,13 @@ def apply_cmd(
 
     payloads: List[Dict[str, Any]] = []
     for step in steps:
+        # Every field is read with .get: a hand-edited plan missing one is a usage error
+        # naming the step, never a KeyError traceback. An absent `table_identifier` is
+        # NOT quietly substituted with `table_name` -- one is a resolved GUID and the
+        # other an ambiguous name, and `build_update_payload` refuses the empty string.
         try:
             payloads.append(build_update_payload(
-                step["table_identifier"], step.get("rules") or {},
+                step.get("table_identifier") or "", step.get("rules") or {},
                 operation=step.get("operation") or "REPLACE",
                 unsecure=step.get("unsecure") or None))
         except ValueError as exc:
@@ -419,6 +455,74 @@ def apply_cmd(
 # ts security column-rules build / import -- the TML-route executor
 # ---------------------------------------------------------------------------
 
+def _build_documents(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Render each step into a `column_security_rules` document.
+
+    Same standard as `apply`: a hand-edited plan missing `table_name`, or carrying an
+    empty one, is a usage error naming the step rather than a KeyError or a bare
+    ValueError traceback. The two executors read a malformed plan the same way.
+    """
+    from ts_cli.csr_plan import build_csr_tml
+    from ts_cli.tml_common import dump_tml_yaml
+
+    documents: List[Dict[str, Any]] = []
+    for step in steps:
+        if step.get("unsecure"):
+            print(f"Warning: {step.get('org_name')}/{step.get('table_name')} has "
+                  f"{len(step['unsecure'])} column(s) to unsecure, which the TML route "
+                  f"cannot express (no is_unsecured equivalent). Use `apply` for those.",
+                  file=sys.stderr)
+        try:
+            document = build_csr_tml(step.get("table_name") or "",
+                                     step.get("rules") or {})
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"{step.get('org_name')}/{step.get('table_name')}: {exc}") from exc
+        documents.append({"table_name": step.get("table_name") or "",
+                          "org_name": step.get("org_name") or "",
+                          "yaml": dump_tml_yaml(document)})
+    return documents
+
+
+def _document_paths(directory: Path,
+                    documents: List[Dict[str, Any]]) -> List[Path]:
+    """One output path per document, namespaced by Org, refusing any collision.
+
+    Steps are per (Org, table) but the platform's own filename is derived from the table
+    alone, so two Orgs' documents for one table resolve to the SAME file: the second
+    write wins and the first Org's rules are lost silently, while `written` reports the
+    path twice. Importing that file into the first Org then gives it the other tenant's
+    column security. Under `--source uniform` the two documents happen to be identical,
+    but `--source file` and `--source db` exist to express per-Org variation.
+
+    The Org name becomes a subdirectory rather than a filename prefix, so the filename
+    stays byte-identical to what the platform exports and `import` can consume either.
+
+    A collision is refused rather than overwritten: `written` must never list one path
+    twice. An Org name carrying a path separator is refused for the same reason -- it
+    would write outside --out, and a plan is a file a human can edit.
+    """
+    from ts_cli.csr_plan import csr_tml_filename
+
+    paths: List[Path] = []
+    for document in documents:
+        org_name = str(document.get("org_name") or "")
+        if "/" in org_name or "\\" in org_name or org_name in (".", ".."):
+            raise typer.BadParameter(
+                f"Plan step org_name '{org_name}' is not usable as a directory name: "
+                f"`build --out` writes each Org's documents into their own subdirectory, "
+                f"and a path separator would write outside --out.")
+        path = directory / org_name / csr_tml_filename(document["table_name"])
+        if path in paths:
+            raise typer.BadParameter(
+                f"Two plan steps would both write {path}. One (Org, table) is one "
+                f"document, so this plan has a duplicate step: writing it would keep "
+                f"only the last one's rules while reporting both as written. "
+                f"De-duplicate the plan and re-run.")
+        paths.append(path)
+    return paths
+
+
 @column_rules_app.command("build")
 def build_cmd(
     input_file: Optional[str] = typer.Option(None, "--input",
@@ -436,43 +540,40 @@ def build_cmd(
     import creates rather than updates in place; add the guid to the document by hand
     for an in-place update.
 
+    --out writes one file per (Org, table), into a subdirectory per Org:
+    `<out>/<org_name>/<TABLE>_CSR.column_security_rules.tml`. A plan step is per (Org,
+    table) but the platform's filename is derived from the table alone, so without the
+    Org subdirectory two Orgs' documents for one table would land on the same path and
+    the first Org's rules would be lost. The filename itself is exactly what the platform
+    exports.
+
     Note the prune asymmetry: `is_unsecured` has no TML equivalent, so a plan carrying
     `unsecure` entries cannot express them here. Those steps are reported and the
     columns are simply absent from the document. Use `apply` when pruning matters.
 
     Output (JSON to stdout):
-      {"documents": [{"table_name", "yaml"}], "written": [paths]}
+      {"documents": [{"table_name", "org_name", "yaml"}], "written": [paths]}
 
     Examples:
 
     \b
       ts security column-rules build --input plan.json
       ts security column-rules build --input plan.json --out ./plan/csr
+      # -> ./plan/csr/ORG1/T2_PUBLISH_CSR.column_security_rules.tml
     """
-    from ts_cli.csr_plan import build_csr_tml, csr_tml_filename
-    from ts_cli.tml_common import dump_tml_yaml
-
     steps = _steps_from_plan(input_file)
     _refuse_blocked(steps, False)
+    # org_name is load-bearing here, not a label: it is the output subdirectory.
+    _refuse_missing_org(steps)
 
-    documents: List[Dict[str, Any]] = []
-    for step in steps:
-        if step.get("unsecure"):
-            print(f"Warning: {step.get('org_name')}/{step.get('table_name')} has "
-                  f"{len(step['unsecure'])} column(s) to unsecure, which the TML route "
-                  f"cannot express (no is_unsecured equivalent). Use `apply` for those.",
-                  file=sys.stderr)
-        document = build_csr_tml(step["table_name"], step.get("rules") or {})
-        documents.append({"table_name": step["table_name"],
-                          "org_name": step.get("org_name") or "",
-                          "yaml": dump_tml_yaml(document)})
+    documents = _build_documents(steps)
 
     written: List[str] = []
     if out:
         directory = Path(out)
-        directory.mkdir(parents=True, exist_ok=True)
-        for document in documents:
-            path = directory / csr_tml_filename(document["table_name"])
+        paths = _document_paths(directory, documents)
+        for document, path in zip(documents, paths):
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(document["yaml"])
             written.append(str(path))
             print(f"wrote {path}", file=sys.stderr)
@@ -508,10 +609,11 @@ def import_cmd(
     \b
       # `build`'s stdout is the plan-level JSON envelope, not a bare TML document, so
       # a build | import pipe would hand `import` the wrong shape. Write to disk and
-      # read the file back instead:
+      # read the file back instead -- from the Org subdirectory `build` wrote it into,
+      # which is what keeps two Orgs' documents for one table apart:
       ts security column-rules build --input plan.json --out ./csr
       ts security column-rules import \\
-        --file ./csr/T2_PUBLISH_CSR.column_security_rules.tml --org ORG1 -p prod
+        --file ./csr/ORG1/T2_PUBLISH_CSR.column_security_rules.tml --org ORG1 -p prod
     """
     import yaml
 

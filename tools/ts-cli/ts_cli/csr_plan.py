@@ -68,7 +68,7 @@ def _text(row: Dict[str, Any], key: str) -> str:
 
 def _dedupe(values: Iterable[str]) -> List[str]:
     """Order-preserving dedupe, so a plan is stable but reads in the operator's order."""
-    return list(dict.fromkeys(v for v in values))
+    return list(dict.fromkeys(values))
 
 
 def parse_rule_flags(rules: Iterable[str]) -> Dict[str, List[str]]:
@@ -241,6 +241,12 @@ def build_csr_steps(
     blocked steps unless overridden. Failing at plan time is the house style, and it is
     also parent spec 5.1's CSR_BLOCKER at CLI level.
 
+    A table entry may also carry ``publication_known: False``, meaning the command layer
+    could not read publication state at all (a failed `metadata/search`). That blocks the
+    step too, with its own reason: an unreadable gate must not degrade to an open one,
+    and "not published" is a claim only a successful read can support. The key defaults
+    to known when absent, so a caller with nothing to say about it is taken at its word.
+
     **Pruning.** With ``prune``, columns secured today but absent from the manifest are
     listed in ``unsecure``. Without it they are left alone. The asymmetry is deliberate:
     an incomplete manifest under prune-by-default would silently unsecure columns and
@@ -281,6 +287,12 @@ def build_csr_steps(
                 f"CSR_BLOCKED: '{table_name}' is published, and column security rules "
                 f"cannot be defined on a published object. Use column-level sharing "
                 f"(`ts share`) for published tables.")
+        elif not entry.get("publication_known", True):
+            blocked = (
+                f"CSR_BLOCKED: publication state could not be determined for "
+                f"'{table_name}', so whether CSR can be defined on it is unknown. "
+                f"Re-run once the read succeeds, or pass --allow-published to `apply` "
+                f"to send it anyway.")
 
         steps.append({
             "org_name": org_name,
@@ -394,9 +406,14 @@ def diff_csr(before: List[Dict[str, Any]],
 # Error translation
 # ---------------------------------------------------------------------------
 
+# The bare error codes are word-anchored: unanchored, `10023` also matches inside
+# `1002345`, so an unrelated failure would be explained as the feature flag -- a
+# confident paraphrase of something we did not recognise, which is exactly what
+# `explain_csr_error`'s None contract exists to avoid. `\b` still matches the codes as
+# they really appear (`"code":10023,`), since punctuation is a word boundary.
 _FEATURE_DISABLED_RE = re.compile(
-    r"10023|Column Security rule feature is disabled", re.IGNORECASE)
-_MISSING_TABLE_RE = re.compile(r"14502|Referenced table with name\s+not found",
+    r"\b10023\b|Column Security rule feature is disabled", re.IGNORECASE)
+_MISSING_TABLE_RE = re.compile(r"\b14502\b|Referenced table with name\s+not found",
                                re.IGNORECASE)
 _RULES_REQUIRED_RE = re.compile(
     r"column_security_rules\D{0,40}(is )?required|required\D{0,40}column_security_rules",

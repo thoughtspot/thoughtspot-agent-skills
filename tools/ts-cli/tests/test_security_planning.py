@@ -140,6 +140,107 @@ def test_resolve_reports_the_block_on_stderr(monkeypatch):
     assert "CSR_BLOCKED" in result.output
 
 
+SEARCH = "/api/rest/2.0/metadata/search"
+
+
+def _patch_resolution(monkeypatch, client):
+    """Wire resolve's I/O EXCEPT `_published_orgs`, so the real header parsing runs.
+
+    The five tests above patch `_published_orgs` wholesale, which is precisely why a
+    defect in its reading of `metadata_header.orgIds` was invisible to them: it read
+    `orgIds` as "published into" when the field also carries the OWNING Org, so on an
+    Orgs-enabled cluster every table resolved as published and every plan was refused.
+    These tests feed the real header shapes through instead.
+    """
+    monkeypatch.setattr("ts_cli.commands.security_planning._client_for_org",
+                        lambda profile, org=None: client)
+    monkeypatch.setattr("ts_cli.commands.security_planning.assert_org_context",
+                        lambda *a, **k: None)
+    monkeypatch.setattr("ts_cli.commands.security_planning._resolve_table",
+                        lambda client, name: {"guid": "guid-1", "name": name})
+    return client
+
+
+def _search_response(org_ids, owner_org_id, status=200):
+    return FakeResponse([{"metadata_id": "guid-1",
+                          "metadata_header": {"orgIds": org_ids,
+                                              "ownerOrgId": owner_org_id}}], status)
+
+
+def test_resolve_reads_an_unpublished_header_as_not_published(monkeypatch):
+    # The documented unpublished header: orgIds carries the owning Org and nothing else.
+    _patch_resolution(monkeypatch, FakeClient({FETCH: FakeResponse([]),
+                                               SEARCH: _search_response([0], 0)}))
+    result = runner.invoke(app, _RESOLVE_ARGS)
+    assert result.exit_code == 0, result.output
+    plan = json.loads(result.stdout)
+    assert plan["tables"][0]["published"] is False
+    assert plan["steps"][0]["blocked"] == ""
+    assert plan["summary"]["blocked"] == 0
+
+
+def test_resolve_reads_a_header_published_to_one_other_org_as_published(monkeypatch):
+    _patch_resolution(monkeypatch, FakeClient({FETCH: FakeResponse([]),
+                                               SEARCH: _search_response([0, 1], 0)}))
+    result = runner.invoke(app, _RESOLVE_ARGS)
+    assert result.exit_code == 0, result.output
+    plan = json.loads(result.stdout)
+    assert plan["tables"][0]["published"] is True
+    assert plan["steps"][0]["blocked"].startswith("CSR_BLOCKED")
+
+
+def test_resolve_reads_a_header_published_to_several_orgs_as_published(monkeypatch):
+    _patch_resolution(monkeypatch, FakeClient({FETCH: FakeResponse([]),
+                                               SEARCH: _search_response([0, 1, 2], 0)}))
+    result = runner.invoke(app, _RESOLVE_ARGS)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["tables"][0]["published"] is True
+
+
+def test_resolve_blocks_a_table_whose_publication_state_could_not_be_read(monkeypatch):
+    # Failing closed: `resolve` writes nothing, so a false block costs a re-run while a
+    # false pass applies CSR to a published object. A 403 here is plausible on exactly
+    # the clusters where CSR itself is flagged off.
+    _patch_resolution(monkeypatch, FakeClient({FETCH: FakeResponse([]),
+                                               SEARCH: FakeResponse(None, 403)}))
+    result = runner.invoke(app, _RESOLVE_ARGS)
+    assert result.exit_code == 0, result.output
+    plan = json.loads(result.stdout)
+    assert plan["tables"][0]["publication_known"] is False
+    assert "could not be determined" in plan["steps"][0]["blocked"]
+    assert plan["summary"]["blocked"] == 1
+
+
+def test_resolve_warns_on_stderr_when_publication_state_is_undetermined(monkeypatch):
+    # Split per the two-runner rule: the warning is a manual stderr print.
+    _patch_resolution(monkeypatch, FakeClient({FETCH: FakeResponse([]),
+                                               SEARCH: FakeResponse(None, 500)}))
+    result = msg_runner.invoke(app, _RESOLVE_ARGS)
+    assert result.exit_code == 0
+    assert "could not read publication state" in result.output
+
+
+def test_resolve_prune_ignores_secured_columns_belonging_to_another_table(monkeypatch):
+    # `_fetch_rules` flattens every top-level entry in the response. An entry for a
+    # DIFFERENT table must not contribute its columns to this table's unsecure list --
+    # that is the protection-removing direction.
+    fetched = [
+        {"table_guid": "guid-1", "column_security_rules": [
+            {"column": {"id": "c1", "name": "COST"}, "groups": []},
+            {"column": {"id": "c2", "name": "SALARY"}, "groups": []}]},
+        {"table_guid": "guid-OTHER", "column_security_rules": [
+            {"column": {"id": "c9", "name": "SOMEONE_ELSES_COLUMN"}, "groups": []}]},
+    ]
+    _patch_resolution(monkeypatch, FakeClient({FETCH: FakeResponse(fetched),
+                                               SEARCH: _search_response([0], 0)}))
+    result = runner.invoke(app, _RESOLVE_ARGS + ["--prune"])
+    assert result.exit_code == 0, result.output
+    step = json.loads(result.stdout)["steps"][0]
+    # SALARY belongs to this table and is genuinely stale, so pruning must still find it:
+    # an implementation that filtered everything out would pass a bare "not in" assertion.
+    assert step["unsecure"] == ["SALARY"]
+
+
 def test_resolve_prune_reads_current_state_and_lists_stale_columns(monkeypatch):
     fetched = [{"table_guid": "guid-1", "column_security_rules": [
         {"column": {"id": "c1", "name": "COST"}, "groups": []},
@@ -331,6 +432,22 @@ def test_apply_surfaces_an_empty_step_as_a_usage_error(tmp_path, planning_client
     assert not [p for p, _ in client.calls if p == UPDATE]
 
 
+def test_apply_surfaces_a_step_with_no_table_identifier_as_a_usage_error(
+        tmp_path, planning_client):
+    # A missing key must not traceback, and must NOT be quietly substituted with
+    # table_name: one is a resolved GUID, the other an ambiguous name.
+    client = planning_client(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    step = _plan()["steps"][0]
+    del step["table_identifier"]
+    plan = {"rows": [], "tables": [], "steps": [step], "summary": {"blocked": 0}}
+    result = msg_runner.invoke(app, ["security", "column-rules", "apply", "--input",
+                                     _write_plan(tmp_path, plan), "-p", "x"])
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "ORG1" in result.output and "T2" in result.output
+    assert client.calls == []
+
+
 IMPORT = "/api/rest/2.0/metadata/tml/import"
 
 
@@ -351,14 +468,109 @@ def test_build_renders_one_document_per_step(tmp_path, planning_client):
     assert client.calls == []
 
 
-def test_build_writes_platform_named_files(tmp_path, planning_client):
+def test_build_writes_platform_named_files_under_a_per_org_directory(tmp_path,
+                                                                     planning_client):
     client = planning_client(FakeClient())
     out = tmp_path / "out"
     result = runner.invoke(app, ["security", "column-rules", "build", "--input",
                                  _write_plan(tmp_path, _plan()), "--out", str(out)])
     assert result.exit_code == 0, result.output
-    assert (out / "T2_CSR.column_security_rules.tml").exists()
+    # The Org is a directory, so the FILENAME stays exactly what the platform exports --
+    # which is what `export` writes too, and what `import --file` is pointed at.
+    assert (out / "ORG1" / "T2_CSR.column_security_rules.tml").exists()
+    assert json.loads(result.stdout)["written"] == [
+        str(out / "ORG1" / "T2_CSR.column_security_rules.tml")]
     assert client.calls == []
+
+
+def _two_org_plan():
+    """One table, two Orgs, DIFFERENT rules -- what --source file/db exist to express."""
+    common = {"table_identifier": "guid-1", "table_name": "T2", "operation": "REPLACE",
+              "unsecure": [], "blocked": ""}
+    return {"rows": [], "tables": [], "summary": {"blocked": 0}, "steps": [
+        dict(common, org_name="ORG1", rules={"COST": ["Finance_ORG1"]}),
+        dict(common, org_name="ORG2", rules={"COST": ["Finance_ORG2"]}),
+    ]}
+
+
+def test_build_writes_one_file_per_org_for_the_same_table(tmp_path, planning_client):
+    # A plan step is per (Org, table) but the platform's filename comes from the table
+    # alone, so a flat layout wrote ONE file containing only the second Org's rules and
+    # reported the same path twice in `written`. Importing that file into ORG1 would give
+    # ORG1 the other tenant's column security.
+    planning_client(FakeClient())
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                 _write_plan(tmp_path, _two_org_plan()),
+                                 "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    org1 = out / "ORG1" / "T2_CSR.column_security_rules.tml"
+    org2 = out / "ORG2" / "T2_CSR.column_security_rules.tml"
+    assert json.loads(result.stdout)["written"] == [str(org1), str(org2)]
+    assert "Finance_ORG1" in org1.read_text() and "Finance_ORG2" not in org1.read_text()
+    assert "Finance_ORG2" in org2.read_text() and "Finance_ORG1" not in org2.read_text()
+
+
+def test_build_refuses_two_steps_that_would_write_the_same_file(tmp_path,
+                                                                planning_client):
+    # Refuse rather than overwrite: the same path appearing twice in `written` must be
+    # impossible, however the plan was edited.
+    planning_client(FakeClient())
+    plan = _two_org_plan()
+    plan["steps"][1]["org_name"] = "ORG1"
+    out = tmp_path / "out"
+    result = msg_runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                     _write_plan(tmp_path, plan), "--out", str(out)])
+    assert result.exit_code != 0
+    # Whitespace-normalised: the usage error is rendered in a wrapped box, so the phrase
+    # is split across lines in the raw output.
+    assert "Two plan steps would both write" in " ".join(result.output.split())
+    # Nothing at all was written: the paths are all resolved before the first write, so a
+    # collision cannot leave a half-written directory behind.
+    assert not out.exists()
+
+
+def test_build_refuses_an_org_name_that_would_escape_the_out_directory(tmp_path,
+                                                                       planning_client):
+    planning_client(FakeClient())
+    plan = _plan(org_name="../elsewhere")
+    out = tmp_path / "out"
+    result = msg_runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                     _write_plan(tmp_path, plan), "--out", str(out)])
+    assert result.exit_code != 0
+    assert not out.exists()
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_build_refuses_a_step_with_no_org_name(tmp_path, planning_client):
+    # Task 9 made this apply-only, when `build` used org_name as a warning label. It is
+    # now the output directory that keeps two Orgs' documents for one table apart, so a
+    # blank one collapses them onto the same path.
+    planning_client(FakeClient())
+    out = tmp_path / "out"
+    result = msg_runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                     _write_plan(tmp_path, _plan(org_name="")),
+                                     "--out", str(out)])
+    assert result.exit_code != 0
+    assert "org_name" in result.output
+    assert not out.exists()
+
+
+def test_build_surfaces_a_step_with_no_table_name_as_a_usage_error(tmp_path,
+                                                                   planning_client):
+    # A hand-edited plan is a usage error naming the step, not a KeyError traceback --
+    # the same standard `apply` already held itself to.
+    planning_client(FakeClient())
+    step = _plan()["steps"][0]
+    del step["table_name"]
+    plan = {"rows": [], "tables": [], "steps": [step], "summary": {"blocked": 0}}
+    out = tmp_path / "out"
+    result = msg_runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                     _write_plan(tmp_path, plan), "--out", str(out)])
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "ORG1" in result.output
+    assert not out.exists()
 
 
 def test_build_refuses_a_blocked_step(tmp_path, planning_client):

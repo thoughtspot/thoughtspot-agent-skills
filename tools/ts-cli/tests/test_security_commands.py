@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from ts_cli.cli import app
+from ts_cli.commands.security import _published_orgs
 
 # `runner` for stdout-JSON assertions; `msg_runner` for anything a manual
 # print(file=sys.stderr) emits, which the separated runner silently drops. See the
@@ -74,6 +75,68 @@ def patched(monkeypatch):
         return client
 
     return _install
+
+
+SEARCH = "/api/rest/2.0/metadata/search"
+
+
+def _search_client(payload, status=200):
+    return FakeClient({SEARCH: FakeResponse(payload, status)})
+
+
+def _header_hits(org_ids, owner_org_id):
+    return [{"metadata_id": "g1", "metadata_header": {"orgIds": org_ids,
+                                                      "ownerOrgId": owner_org_id}}]
+
+
+def test_published_orgs_reads_an_unpublished_header_as_published_nowhere():
+    # The documented shape of an UNPUBLISHED object on an Orgs-enabled cluster: orgIds
+    # carries the OWNING Org. Reading that as "published into" made every table on such
+    # a cluster CSR_BLOCKED, which refused every plan and made the feature unusable on
+    # its own target cluster. Same header as test_publish.py's
+    # test_publication_rows_excludes_owner_org_from_published_to.
+    assert _published_orgs(_search_client(_header_hits([0], 0)), "g1") == []
+
+
+def test_published_orgs_reads_one_additional_org():
+    assert _published_orgs(_search_client(_header_hits([0, 1], 0)), "g1") == [1]
+
+
+def test_published_orgs_reads_several_additional_orgs():
+    hits = _header_hits([0, 12750490, 535312919], 0)
+    assert _published_orgs(_search_client(hits), "g1") == [12750490, 535312919]
+
+
+def test_published_orgs_excludes_a_non_primary_owner():
+    # The owner is not always Org 0, so the exclusion has to be of `ownerOrgId` and not
+    # of the Primary Org's id.
+    assert _published_orgs(_search_client(_header_hits([5, 7], 5)), "g1") == [7]
+
+
+def test_published_orgs_reads_the_metadata_envelope_form_too():
+    hits = {"metadata": _header_hits([0, 1], 0)}
+    assert _published_orgs(_search_client(hits), "g1") == [1]
+
+
+def test_published_orgs_tolerates_a_header_with_no_org_ids():
+    hits = [{"metadata_id": "g1", "metadata_header": {}}]
+    assert _published_orgs(_search_client(hits), "g1") == []
+
+
+def test_published_orgs_returns_none_when_the_read_fails():
+    # None, not []: a failed read cannot support the claim that a table is unpublished.
+    # Returning [] here made a 403 (plausible where the CSR flag is off) or a 500 read as
+    # "not published", so the gate degraded to nothing.
+    assert _published_orgs(_search_client(None, 403), "g1") is None
+
+
+def test_published_orgs_returns_none_when_nothing_matched_the_guid():
+    assert _published_orgs(_search_client([]), "g1") is None
+
+
+def test_published_orgs_warns_on_stderr_when_it_could_not_determine_the_state(capsys):
+    _published_orgs(_search_client(None, 500), "g1")
+    assert "could not read publication state" in capsys.readouterr().err
 
 
 def test_get_prints_normalised_rows_as_json(patched):
@@ -149,6 +212,38 @@ def test_set_refuses_add_and_remove_together(patched):
                                      "-p", "x"])
     assert result.exit_code != 0
     assert "--add" in result.output
+
+
+@pytest.mark.parametrize("flag", ["--add", "--remove"])
+def test_set_refuses_an_empty_group_list_under_add_or_remove(patched, flag):
+    # "COL=" means "secured, nobody", which only REPLACE can express. ADDING or REMOVING
+    # an empty group list changes nothing, so the call would return success having done
+    # nothing -- and read as "secured" to whoever ran it.
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = msg_runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                     "--rule", "SALARY=", flag, "-p", "x"])
+    assert result.exit_code != 0
+    assert "SALARY" in result.output
+    assert client.calls == []
+
+
+def test_set_still_allows_an_empty_group_list_under_the_default_replace(patched):
+    # The refusal above must not swallow the form's one legitimate use.
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                 "--rule", "SALARY=", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    body = next(b for p, b in client.calls if p == UPDATE)
+    assert body["column_security_rules"][0]["group_access"][0] == {
+        "operation": "REPLACE", "group_identifiers": []}
+
+
+def test_set_add_still_works_when_every_named_column_has_groups(patched):
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                 "--rule", "COST=Finance", "--add", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert [p for p, _ in client.calls if p == UPDATE]
 
 
 def test_set_dry_run_prints_the_payload_and_posts_nothing(patched):

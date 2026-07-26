@@ -13,6 +13,7 @@ from ts_cli.publish_plan import (
     build_clusters,
     extract_table_fields,
     parse_variable_token,
+    published_org_ids,
     slugify,
     suggest_variable_name,
 )
@@ -22,6 +23,34 @@ def _table(name, guid, db="AGENT_SKILLS", schema="ALIAS_TESTS", db_table=None, c
     return {"guid": guid, "table": {"name": name, "db": db, "schema": schema,
                                     "db_table": db_table or name,
                                     "connection": {"name": connection}}}
+
+
+# ---------------------------------------------------------------------------
+# metadata_header.orgIds -- the ONE reading, shared with ts security column-rules
+# ---------------------------------------------------------------------------
+
+def test_published_org_ids_excludes_the_owning_org():
+    # orgIds carries the OWNER plus every Org published to, so an object published
+    # nowhere still lists one id. Reading that as "published into" is what made every
+    # table on an Orgs-enabled cluster look published to `ts security column-rules`.
+    assert published_org_ids({"orgIds": [0], "ownerOrgId": 0}) == []
+
+
+def test_published_org_ids_returns_the_orgs_published_into():
+    assert published_org_ids({"orgIds": [0, 1], "ownerOrgId": 0}) == [1]
+    assert published_org_ids({"orgIds": [0, 1, 2], "ownerOrgId": 0}) == [1, 2]
+
+
+def test_published_org_ids_excludes_a_non_primary_owner():
+    assert published_org_ids({"orgIds": [5, 7], "ownerOrgId": 5}) == [7]
+
+
+def test_published_org_ids_tolerates_a_header_with_neither_field():
+    assert published_org_ids({}) == []
+
+
+def test_published_org_ids_keeps_ids_uncoerced_so_a_caller_can_index_them():
+    assert published_org_ids({"orgIds": [0, 12750490], "ownerOrgId": 0}) == [12750490]
 
 
 # ---------------------------------------------------------------------------

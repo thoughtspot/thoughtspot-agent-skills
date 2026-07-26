@@ -43,6 +43,29 @@ _RECOMMENDED_FIELDS = ("databaseName", "schemaName")
 _TOKEN_RE = re.compile(r"^\$\{([^}\s]+)\}$")
 
 
+def published_org_ids(header: Dict[str, Any]) -> List[Any]:
+    """The Org ids an object is published INTO, read from one ``metadata_header``.
+
+    THE one place this field's semantics are stated. ``metadata_header.orgIds`` lists
+    the OWNING Org plus every Org the object is published to, so ``ownerOrgId`` is
+    excluded here and the result means "additionally visible in": an empty list is an
+    object that is published nowhere. Reading it needs no per-Org authentication, which
+    is why publication state is answerable from the Primary Org.
+
+    Restating that reading at each call site is how it diverged before: `ts publish
+    status` excluded the owner and `ts security column-rules` did not, so on an
+    Orgs-enabled cluster every table read as published. Both now call this.
+
+    Ids come back exactly as the platform gave them, uncoerced, so a caller can map them
+    against an Org index (and one that only needs "is it published" can take the truth
+    value).
+
+    Pure -- no I/O.
+    """
+    owner_org_id = header.get("ownerOrgId")
+    return [org_id for org_id in (header.get("orgIds") or []) if org_id != owner_org_id]
+
+
 def parse_variable_token(value: Optional[str]) -> Optional[str]:
     """Return the variable name when ``value`` is entirely a ``${var}`` token.
 

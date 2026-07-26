@@ -104,6 +104,17 @@ resolve ──plan.json────┤
 that parent spec §5.3 wants preserved into a migration plan directory. `set` and `clear`
 are one-shot imperatives over a single table for interactive use, bypassing the manifest.
 
+**Corrected during implementation.** `build --out DIR` writes
+`DIR/<org_name>/<TABLE>_CSR.column_security_rules.tml`, one file per (Org, table), not
+one file per table. A plan step is per (Org, table) while the platform's own filename is
+derived from the table alone, so a flat layout collapsed a multi-Org plan into a single
+file carrying only the LAST Org's rules -- and then reported the same path once per step.
+Importing it into the first Org would have given that tenant another tenant's column
+security, which `--source file` and `--source db` exist to make different (§4). The Org
+becomes a directory rather than a filename prefix so the filename stays byte-identical to
+what the platform exports, which `export` writes too. A residual path collision (a
+hand-edited plan with a duplicate step) is refused, never overwritten.
+
 The shape mirrors the two shipped pipelines deliberately. `resolve` / `apply` and the
 `--source uniform|file|db` conventions come from `ts share` and `ts publish`;
 `export` / `build` / `import` comes from `ts alias`, which CSR resembles structurally
@@ -153,6 +164,15 @@ This is a deliberate narrowing of §1.1: all three operations are reachable, but
 is the idempotent one, because the skill (parent spec §4) needs a converging "make it look
 like this" call rather than a sequence whose result depends on prior state.
 
+Whether a per-column REPLACE leaves the table's OTHER secured columns untouched is §8's
+item 1 and is not yet live-verified, so `set --help` and the CLI README both state it as
+expected-not-verified rather than as fact. If `update` turns out to be a whole-table
+replace, `set` must read-modify-write and this section changes.
+
+`--add` and `--remove` refuse an empty group list (`--rule "COL="`): that form is the
+"secured, nobody" sentinel, which only REPLACE can express. Adding or removing nothing
+would report success having changed nothing.
+
 ### 3.3 Published tables are refused, not attempted
 
 CSR cannot be defined on published objects (parent spec §2, plan §4.3). `resolve` reads each
@@ -171,6 +191,22 @@ Folding it into the resolution call would mean either changing that shared helpe
 `ts share` also uses, or duplicating its ambiguity-refusal logic. The extra read was
 accepted instead. The cost is one additional round-trip per table at plan time, on a
 command that is already doing per-table lookups.
+
+**Also corrected during implementation, twice over.** The publication read is
+`publish_plan.published_org_ids`, shared with `ts publish status`, because
+`metadata_header.orgIds` carries the OWNING Org as well as the Orgs published to. Reading
+every id in it as "published into" marked every table on an Orgs-enabled cluster
+`CSR_BLOCKED`, which refused every plan and made the feature unusable on its own target
+cluster. The field's semantics are now stated in exactly one place, since restating them is
+how the two readings diverged in the first place.
+
+Second, a FAILED read (403, 500, no hit for the guid) is no longer taken as "not
+published". It warns on stderr and blocks the step with its own reason
+(`CSR_BLOCKED: publication state could not be determined for '<table>'`), so `apply`'s
+existing refusal handles it and `--allow-published` stays the operator's explicit
+override. Only a successful read supports the claim that a table is unpublished, and since
+`resolve` writes nothing, a false block costs a re-run while a false pass applies CSR to a
+published object. `build` re-checks both, and has no override.
 
 ### 3.4 Org scoping is asserted, not assumed
 

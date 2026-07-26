@@ -232,6 +232,37 @@ def test_an_unpublished_table_is_not_blocked():
     assert build_csr_steps(rows, tables)[0]["blocked"] == ""
 
 
+def test_a_table_whose_publication_state_is_unknown_is_blocked():
+    # An unreadable gate must not degrade to an open one: only a successful read supports
+    # the claim that a table is unpublished.
+    rows = _rows(("ORG1", "T2", "COST", "Finance"))
+    tables = [{"org_name": "ORG1", "table_name": "T2", "table_guid": "guid-1",
+               "published": False, "publication_known": False, "secured_columns": []}]
+    step = build_csr_steps(rows, tables)[0]
+    assert step["blocked"].startswith("CSR_BLOCKED")
+    assert "could not be determined" in step["blocked"]
+
+
+def test_publication_is_taken_as_known_when_the_caller_says_nothing_about_it():
+    # `set` and the pure tests build steps without a resolution pass, so the key's
+    # absence must not block.
+    rows = _rows(("ORG1", "T2", "COST", "Finance"))
+    assert build_csr_steps(rows)[0]["blocked"] == ""
+
+
+def test_build_csr_steps_refuses_an_unknown_operation():
+    # The only validation of `resolve --operation`, and untested until now.
+    rows = _rows(("ORG1", "T2", "COST", "Finance"))
+    with pytest.raises(ValueError, match="UPSERT"):
+        build_csr_steps(rows, operation="UPSERT")
+
+
+def test_build_csr_steps_names_the_three_valid_operations_when_it_refuses():
+    rows = _rows(("ORG1", "T2", "COST", "Finance"))
+    with pytest.raises(ValueError, match="ADD, REMOVE, REPLACE"):
+        build_csr_steps(rows, operation="replace")
+
+
 def test_prune_unsecures_only_columns_absent_from_the_manifest():
     rows = _rows(("ORG1", "T2", "COST", "Finance"))
     tables = [{"org_name": "ORG1", "table_name": "T2", "table_guid": "g",
@@ -353,6 +384,23 @@ def test_explain_translates_the_missing_table_reference():
 def test_explain_translates_a_clear_csr_rejection():
     body = "column_security_rules is required"
     assert "clear_csr" in explain_csr_error(body, 400)
+
+
+def test_explain_does_not_match_the_feature_flag_code_inside_a_longer_number():
+    # `10023` unanchored also matches inside `1002345`, which would explain an unrelated
+    # failure as the feature flag -- a confident paraphrase of something unrecognised,
+    # which is exactly what the None contract exists to avoid.
+    assert explain_csr_error('{"error":{"code":1002345,"message":"nope"}}', 500) is None
+
+
+def test_explain_does_not_match_the_missing_table_code_inside_a_longer_number():
+    assert explain_csr_error('{"error":{"code":145021,"message":"nope"}}', 400) is None
+
+
+def test_explain_still_matches_the_codes_as_they_really_appear():
+    # Word-anchoring must not break the real forms: punctuation is a word boundary.
+    assert "feature-flagged" in explain_csr_error('{"error":{"code":10023}}', 403)
+    assert "table:" in explain_csr_error("Error Code: 14502, import failed", 400)
 
 
 def test_explain_returns_none_for_an_unrecognised_body():

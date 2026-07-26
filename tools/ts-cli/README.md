@@ -1603,8 +1603,14 @@ ts security column-rules apply --input plan.json -p prod
 # 2b. Route B: apply the plan over TML instead
 ts security column-rules build --input plan.json --out ./plan/csr
 ts security column-rules import \
-  --file ./plan/csr/T2_PUBLISH_CSR.column_security_rules.tml --org ORG1 -p prod
+  --file ./plan/csr/ORG1/T2_PUBLISH_CSR.column_security_rules.tml --org ORG1 -p prod
 ```
+
+`build --out` writes one file per (Org, table), into a subdirectory per Org, because a
+plan step is per (Org, table) while the platform's filename is derived from the table
+alone. Without the subdirectory, two Orgs' documents for one table would resolve to the
+same path and the first Org's rules would be lost silently. The filename inside it is
+exactly what the platform exports, so `import` consumes either.
 
 The two routes agree on everything but one thing: `is_unsecured` (pruning a column) has
 no TML equivalent, so a plan carrying `unsecure` entries can only be fully carried out
@@ -1616,18 +1622,28 @@ single call, not a whole `apply` run: a failure part-way through leaves the tabl
 already processed changed, and the command stops rather than continuing, so the plan
 and reality diverge at a known point. Re-running a REPLACE plan is safe -- it converges.
 
-**Only the columns named are touched.** A column already secured and not mentioned in a
-manifest, or in a `set` call, is left exactly as it was. `resolve --prune` is the only
-way to unsecure columns that are secured today but absent from the manifest, and it is
-opt-in: the alternative default would silently unsecure columns whenever a manifest was
-incomplete, which leaks data, whereas leaving stale protection in place is visible and
-recoverable.
+**Only the columns named are expected to be touched.** A column already secured and not
+mentioned in a manifest, or in a `set` call, should be left exactly as it was -- what the
+API spec implies, but **not yet live-verified**: it is item 1 of the design spec's §8 live
+verification plan (whether a per-column `REPLACE` is scoped to that column, or `update` is
+a whole-table replace). Until that is settled, capture `get` before and after a change.
+
+`resolve --prune` is the only way to unsecure columns that are secured today but absent
+from the manifest, and it is opt-in: the alternative default would silently unsecure
+columns whenever a manifest was incomplete, which leaks data, whereas leaving stale
+protection in place is visible and recoverable.
 
 **Published tables are refused at plan time**, as `CSR_BLOCKED`: CSR cannot be defined
 on a published object. `resolve` marks the affected step in the plan rather than failing
 outright; `build` and `apply` both then refuse any plan containing one, before anything
 is rendered or sent. Only `apply --allow-published` can override the refusal, for
 probing rather than routine use -- `build` has no equivalent flag.
+
+A table whose publication state could not be READ is blocked the same way, with its own
+reason. Only a successful read supports the claim that a table is unpublished, so a failed
+`metadata/search` (a 403 where the CSR flag is off, a 500, no hit) warns on stderr and
+blocks the step rather than passing it as unpublished. `resolve` writes nothing, so a
+false block costs a re-run while a false pass applies CSR to a published object.
 
 Manifest table (`TS_COLUMN_SECURITY_RULES`), readable as CSV with the same columns:
 
@@ -1670,10 +1686,12 @@ ts security column-rules apply --input plan.json -p prod
 ```
 
 `build` renders a plan into `column_security_rules` TML documents, emit-only (no
-profile, no connection, nothing sent):
+profile, no connection, nothing sent), one file per (Org, table) under `<out>/<org>/`:
 
 ```bash
 ts security column-rules build --input plan.json --out ./plan/csr
+# -> ./plan/csr/ORG1/T2_PUBLISH_CSR.column_security_rules.tml
+# -> ./plan/csr/ORG2/T2_PUBLISH_CSR.column_security_rules.tml
 ```
 
 `import` uploads a `column_security_rules` TML document (`create_new: false`, so a
