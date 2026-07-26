@@ -329,3 +329,90 @@ def test_apply_surfaces_an_empty_step_as_a_usage_error(tmp_path, planning_client
     assert "ORG1" in result.output and "T2" in result.output
     assert "nothing to do" in result.output.lower()
     assert not [p for p, _ in client.calls if p == UPDATE]
+
+
+IMPORT = "/api/rest/2.0/metadata/tml/import"
+
+
+def test_build_renders_one_document_per_step(tmp_path, planning_client):
+    # A client is wired in (though `build` should never reach it) so that if `build`
+    # ever regresses into contacting the platform, `client.calls == []` below fails
+    # loudly instead of silently passing against an unconfigured FakeClient.
+    client = planning_client(FakeClient())
+    result = runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                 _write_plan(tmp_path, _plan())])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["documents"][0]["table_name"] == "T2"
+    assert "column_security_rules" in payload["documents"][0]["yaml"]
+    # The table reference is what an import fails on with code 14502 when absent.
+    assert "name: T2" in payload["documents"][0]["yaml"]
+    # Emit-only: no network call of any kind, not just no call to one endpoint.
+    assert client.calls == []
+
+
+def test_build_writes_platform_named_files(tmp_path, planning_client):
+    client = planning_client(FakeClient())
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                 _write_plan(tmp_path, _plan()), "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert (out / "T2_CSR.column_security_rules.tml").exists()
+    assert client.calls == []
+
+
+def test_build_refuses_a_blocked_step(tmp_path, planning_client):
+    client = planning_client(FakeClient())
+    plan = _plan(blocked="CSR_BLOCKED: 'T2' is published")
+    result = msg_runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                     _write_plan(tmp_path, plan)])
+    assert result.exit_code == 1
+    assert "CSR_BLOCKED" in result.output
+    assert client.calls == []
+
+
+def test_import_sends_the_document_with_create_new_false(tmp_path, planning_client):
+    client = planning_client(FakeClient({IMPORT: FakeResponse([{"response": {}}])}))
+    doc = tmp_path / "T2_CSR.column_security_rules.tml"
+    doc.write_text("column_security_rules:\n  table:\n    name: T2\n  rules: []\n")
+    result = runner.invoke(app, ["security", "column-rules", "import", "--file",
+                                 str(doc), "-p", "x"])
+    assert result.exit_code == 0, result.output
+    body = next(b for p, b in client.calls if p == IMPORT)
+    assert body["create_new"] is False
+    assert body["metadata_tmls"] == [doc.read_text()]
+
+
+def test_import_dry_run_posts_nothing(tmp_path, planning_client):
+    client = planning_client(FakeClient({IMPORT: FakeResponse([{"response": {}}])}))
+    doc = tmp_path / "T2_CSR.column_security_rules.tml"
+    doc.write_text("column_security_rules:\n  table:\n    name: T2\n  rules: []\n")
+    result = runner.invoke(app, ["security", "column-rules", "import", "--file",
+                                 str(doc), "--dry-run", "-p", "x"])
+    assert result.exit_code == 0
+    # Not just "no IMPORT call": no call of any kind, the same standard applied to
+    # `apply --dry-run` above.
+    assert client.calls == []
+
+
+def test_import_refuses_a_document_with_no_table_reference(tmp_path, planning_client):
+    # Catching it here turns code 14502's opaque "table with name  not found" into
+    # something that names the actual problem before the round trip.
+    planning_client(FakeClient({IMPORT: FakeResponse([{"response": {}}])}))
+    doc = tmp_path / "bad.column_security_rules.tml"
+    doc.write_text("column_security_rules:\n  rules: []\n")
+    result = msg_runner.invoke(app, ["security", "column-rules", "import", "--file",
+                                     str(doc), "-p", "x"])
+    assert result.exit_code != 0
+    assert "table:" in result.output
+
+
+def test_import_explains_the_feature_flag(tmp_path, planning_client):
+    body = '{"error":{"code":10023,"message":"Column Security rule feature is disabled"}}'
+    planning_client(FakeClient({IMPORT: FakeResponse(None, 403, body)}))
+    doc = tmp_path / "T2_CSR.column_security_rules.tml"
+    doc.write_text("column_security_rules:\n  table:\n    name: T2\n  rules: []\n")
+    result = msg_runner.invoke(app, ["security", "column-rules", "import", "--file",
+                                     str(doc), "-p", "x"])
+    assert result.exit_code == 1
+    assert "feature-flagged" in result.output

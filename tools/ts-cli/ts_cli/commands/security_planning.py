@@ -413,3 +413,134 @@ def apply_cmd(
                      f"{', '.join(sorted(step.get('rules') or {}))}")
 
     print(json.dumps({"payloads": payloads}))
+
+
+# ---------------------------------------------------------------------------
+# ts security column-rules build / import -- the TML-route executor
+# ---------------------------------------------------------------------------
+
+@column_rules_app.command("build")
+def build_cmd(
+    input_file: Optional[str] = typer.Option(None, "--input",
+        help="Plan JSON from `resolve`. Omit to read stdin."),
+    out: Optional[str] = typer.Option(None, "--out",
+        help="Directory to write the .tml files into. Omit to print them only."),
+) -> None:
+    """Render a plan into `column_security_rules` TML documents.
+
+    The TML route's middle stage, mirroring `ts alias build`. Emit-only: no profile, no
+    connection, nothing sent. The point is that the document is reviewable before it is
+    imported, which is why this is a separate command rather than a flag on `apply`.
+
+    Each document carries its mandatory `table:` reference. `guid:` is omitted, so an
+    import creates rather than updates in place; add the guid to the document by hand
+    for an in-place update.
+
+    Note the prune asymmetry: `is_unsecured` has no TML equivalent, so a plan carrying
+    `unsecure` entries cannot express them here. Those steps are reported and the
+    columns are simply absent from the document. Use `apply` when pruning matters.
+
+    Output (JSON to stdout):
+      {"documents": [{"table_name", "yaml"}], "written": [paths]}
+
+    Examples:
+
+    \b
+      ts security column-rules build --input plan.json
+      ts security column-rules build --input plan.json --out ./plan/csr
+    """
+    from ts_cli.csr_plan import build_csr_tml, csr_tml_filename
+    from ts_cli.tml_common import dump_tml_yaml
+
+    steps = _steps_from_plan(input_file)
+    _refuse_blocked(steps, False)
+
+    documents: List[Dict[str, Any]] = []
+    for step in steps:
+        if step.get("unsecure"):
+            print(f"Warning: {step.get('org_name')}/{step.get('table_name')} has "
+                  f"{len(step['unsecure'])} column(s) to unsecure, which the TML route "
+                  f"cannot express (no is_unsecured equivalent). Use `apply` for those.",
+                  file=sys.stderr)
+        document = build_csr_tml(step["table_name"], step.get("rules") or {})
+        documents.append({"table_name": step["table_name"],
+                          "org_name": step.get("org_name") or "",
+                          "yaml": dump_tml_yaml(document)})
+
+    written: List[str] = []
+    if out:
+        directory = Path(out)
+        directory.mkdir(parents=True, exist_ok=True)
+        for document in documents:
+            path = directory / csr_tml_filename(document["table_name"])
+            path.write_text(document["yaml"])
+            written.append(str(path))
+            print(f"wrote {path}", file=sys.stderr)
+
+    print(json.dumps({"documents": documents, "written": written}))
+
+
+@column_rules_app.command("import")
+def import_cmd(
+    file: Optional[str] = typer.Option(None, "--file",
+        help="A .column_security_rules.tml file. Omit to read the YAML from stdin."),
+    org: Optional[str] = typer.Option(None, "--org", help="Import into this Org"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+        help="Validate the document and print what would be sent"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Import a `column_security_rules` TML document.
+
+    The TML route's write stage, mirroring `ts alias import`. `create_new` is False, so
+    a document carrying a `guid:` updates in place.
+
+    The `table:` reference is checked locally first. Without it the platform fails with
+    code 14502 and `Referenced table with name  not found`, whose doubled space is the
+    empty name interpolated -- a message that points nowhere useful.
+
+    Output (JSON to stdout): the import response, or the request body under --dry-run.
+
+    Examples:
+
+    \b
+      ts security column-rules import --file T2_CSR.column_security_rules.tml -p prod
+      ts security column-rules build --input plan.json | \\
+        ts security column-rules import --org ORG1 -p prod
+    """
+    import yaml
+
+    if file:
+        text = Path(file).read_text()
+    elif not sys.stdin.isatty():
+        text = sys.stdin.read()
+    else:
+        raise typer.BadParameter("Provide --file <path> or pipe the TML in")
+
+    try:
+        document = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise typer.BadParameter(f"Could not parse the TML: {exc}") from exc
+
+    body = (document.get("column_security_rules") or {}) if isinstance(
+        document, dict) else {}
+    if not (body.get("table") or {}).get("name"):
+        raise typer.BadParameter(
+            "This document has no `table:` reference. It is mandatory: without it the "
+            "import fails with code 14502 and `Referenced table with name  not found`. "
+            "Add table.name and re-run.")
+
+    payload = {"metadata_tmls": [text], "import_policy": "ALL_OR_NONE",
+               "create_new": False}
+    if dry_run:
+        print(json.dumps(payload))
+        return
+
+    client = _client_for_org(profile, org)
+    if org:
+        assert_org_context(client, org, profile)
+    resp = client.post("/api/rest/2.0/metadata/tml/import", json=payload,
+                       raise_for_status=False)
+    if not resp.ok:
+        _fail(resp, f"Could not import {body['table']['name']}'s column security rules")
+
+    print(json.dumps(resp.json()))
