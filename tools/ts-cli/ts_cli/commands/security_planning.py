@@ -504,8 +504,14 @@ def import_cmd(
 
     \b
       ts security column-rules import --file T2_CSR.column_security_rules.tml -p prod
-      ts security column-rules build --input plan.json | \\
-        ts security column-rules import --org ORG1 -p prod
+
+    \b
+      # `build`'s stdout is the plan-level JSON envelope, not a bare TML document, so
+      # a build | import pipe would hand `import` the wrong shape. Write to disk and
+      # read the file back instead:
+      ts security column-rules build --input plan.json --out ./csr
+      ts security column-rules import \\
+        --file ./csr/T2_PUBLISH_CSR.column_security_rules.tml --org ORG1 -p prod
     """
     import yaml
 

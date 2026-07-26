@@ -371,6 +371,37 @@ def test_build_refuses_a_blocked_step(tmp_path, planning_client):
     assert client.calls == []
 
 
+def test_build_still_emits_the_document_but_omits_pruned_columns(tmp_path,
+                                                                  planning_client):
+    # The one real capability gap between the two routes: `is_unsecured` has no TML
+    # equivalent, so a step's `unsecure` entries cannot appear in the document. The
+    # document must still be produced for the columns the plan does secure.
+    planning_client(FakeClient())
+    plan = _plan(unsecure=["SALARY"])
+    result = runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                 _write_plan(tmp_path, plan)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    yaml_text = payload["documents"][0]["yaml"]
+    assert "COST" in yaml_text
+    assert "SALARY" not in yaml_text
+
+
+def test_build_warns_on_stderr_when_pruning_cannot_be_expressed(tmp_path,
+                                                                 planning_client):
+    # Split from the test above per the two-runner rule: the warning is a manual
+    # stderr print, so only msg_runner's mixed output can see it. The warning names
+    # the org/table and the count -- not the column names themselves.
+    planning_client(FakeClient())
+    plan = _plan(unsecure=["SALARY"])
+    result = msg_runner.invoke(app, ["security", "column-rules", "build", "--input",
+                                     _write_plan(tmp_path, plan)])
+    assert result.exit_code == 0, result.output
+    assert "ORG1/T2" in result.output
+    assert "cannot express" in result.output
+    assert "apply" in result.output
+
+
 def test_import_sends_the_document_with_create_new_false(tmp_path, planning_client):
     client = planning_client(FakeClient({IMPORT: FakeResponse([{"response": {}}])}))
     doc = tmp_path / "T2_CSR.column_security_rules.tml"
@@ -398,13 +429,16 @@ def test_import_dry_run_posts_nothing(tmp_path, planning_client):
 def test_import_refuses_a_document_with_no_table_reference(tmp_path, planning_client):
     # Catching it here turns code 14502's opaque "table with name  not found" into
     # something that names the actual problem before the round trip.
-    planning_client(FakeClient({IMPORT: FakeResponse([{"response": {}}])}))
+    client = planning_client(FakeClient({IMPORT: FakeResponse([{"response": {}}])}))
     doc = tmp_path / "bad.column_security_rules.tml"
     doc.write_text("column_security_rules:\n  rules: []\n")
     result = msg_runner.invoke(app, ["security", "column-rules", "import", "--file",
                                      str(doc), "-p", "x"])
     assert result.exit_code != 0
     assert "table:" in result.output
+    # The refusal fires before the round trip: no call of any kind, matching the
+    # standard already applied to the dry-run and build tests.
+    assert client.calls == []
 
 
 def test_import_explains_the_feature_flag(tmp_path, planning_client):
