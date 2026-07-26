@@ -1,9 +1,14 @@
-"""Unit tests for ts_cli.commands.share — payload builders and pure helpers."""
+"""Unit tests for the `ts share` command layer — payload builders and pure helpers.
+
+`share.py` holds the payload builder, the shared lookups and the error translator;
+`share_planning.py` holds the export/resolve/apply pipeline and its pure helpers.
+"""
 from __future__ import annotations
 
 import pytest
 
-from ts_cli.commands.share import build_share_payload, expand_uniform_grants, resolve_guids
+from ts_cli.commands.share import build_share_payload, explain_share_error
+from ts_cli.commands.share_planning import expand_uniform_grants, resolve_guids
 
 
 def _perm(group="Analyst", mode="READ_ONLY"):
@@ -171,3 +176,30 @@ def test_resolve_guids_corrects_a_manifest_object_type_from_the_envelope():
                "object_type": "LOGICAL_TABLE", "column_name": "",
                "group_name": "Analyst", "share_mode": "READ_ONLY"}]
     assert resolve_guids(grants, _OBJECTS)[0]["object_type"] == "LIVEBOARD"
+
+
+# ---------------------------------------------------------------------------
+# ts share apply — error translation
+# ---------------------------------------------------------------------------
+
+def test_explain_share_error_translates_the_nested_message_mistake():
+    body = ('{"error":{"message":"Variable \\"$message\\" of required type '
+            '\\"String!\\" was not provided."}}')
+    text = explain_share_error(body)
+    assert text is not None
+    assert "top level" in text.lower()
+    assert "notification" in text
+
+
+def test_explain_share_error_translates_a_missing_principal():
+    body = ('{"error":{"message":{"code":13003,"debug":"Principal object does not exist '
+            'corresponding to the identifier Analystt"}}}')
+    text = explain_share_error(body)
+    assert text is not None
+    assert "Analystt" in text
+    assert "per-Org" in text
+
+
+def test_explain_share_error_returns_none_for_an_unrecognised_body():
+    assert explain_share_error('{"error":{"message":"something else entirely"}}') is None
+    assert explain_share_error("") is None

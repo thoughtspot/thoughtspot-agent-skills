@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, load, metadata, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, share, sisense, snowflake, spotql, spotter, tables, tableau, tml, users, variables  # noqa: F401 — dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, all at import
+from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, load, metadata, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tml, users, variables  # noqa: F401 — dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, all at import
 
 app = typer.Typer(
     name="ts",
