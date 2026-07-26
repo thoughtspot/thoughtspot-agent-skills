@@ -365,9 +365,11 @@ def test_apply_plan_skips_a_field_already_bound_to_a_token():
 
 
 def test_apply_plan_includes_publish_when_orgs_given():
+    # publish is a list: the API takes one type per call, and a selection can mix
+    # a Liveboard, an Answer and a Model.
     plan = build_apply_plan(_CLOSURE, _MATRIX, publish_orgs=["ORG1"])
-    assert plan["publish"] == {"identifiers": ["model-1"], "type": "LOGICAL_TABLE",
-                               "orgs": ["ORG1"]}
+    assert plan["publish"] == [{"identifiers": ["model-1"], "type": "LOGICAL_TABLE",
+                                "orgs": ["ORG1"]}]
 
 
 def test_rollback_order_is_unpublish_then_unparameterize_then_delete():
@@ -449,7 +451,7 @@ def test_apply_plan_publishes_a_liveboard_as_liveboard():
     closure = {"root": {"guid": "lb-1", "name": "LB", "type": "liveboard"},
                "tables": _CLOSURE["tables"]}
     plan = build_apply_plan(closure, _MATRIX, publish_orgs=["ORG1"])
-    assert plan["publish"]["type"] == "LIVEBOARD"
+    assert [p["type"] for p in plan["publish"]] == ["LIVEBOARD"]
     # the tables underneath are still parameterized as logical tables
     assert plan["parameterize"][0]["metadata_type"] == "LOGICAL_TABLE"
 
@@ -458,7 +460,7 @@ def test_apply_plan_publishes_an_answer_as_answer():
     closure = {"root": {"guid": "a-1", "name": "A", "type": "answer"},
                "tables": _CLOSURE["tables"]}
     plan = build_apply_plan(closure, _MATRIX, publish_orgs=["ORG1"])
-    assert plan["publish"]["type"] == "ANSWER"
+    assert [p["type"] for p in plan["publish"]] == ["ANSWER"]
 
 
 def test_rollback_unpublishes_with_the_same_type():
@@ -467,3 +469,87 @@ def test_rollback_unpublishes_with_the_same_type():
     unpublish = rollback_steps(plan["rollback"])[0]
     assert unpublish["action"] == "unpublish"
     assert unpublish["type"] == "LIVEBOARD"
+
+
+# ---------------------------------------------------------------------------
+# Multi-root closures — any anchor type, walk down always
+# ---------------------------------------------------------------------------
+
+from ts_cli.publish_plan import merge_closures, publish_targets  # noqa: E402
+
+
+def _closure(guid, name, typ, tables):
+    return {"root": {"guid": guid, "name": name, "type": typ}, "tables": tables,
+            "owner_org": "Primary"}
+
+
+_T_A = {"guid": "tA", "name": "A", "connection": "APJ", "fields": {
+    "schemaName": {"value": "SALES", "variable": None}}}
+_T_B = {"guid": "tB", "name": "B", "connection": "APJ", "fields": {
+    "schemaName": {"value": "SALES", "variable": None}}}
+
+
+def test_merge_closures_dedupes_shared_tables():
+    # A Liveboard and an Answer on the same Model resolve the same Table. It must
+    # appear once, or it would be parameterized twice.
+    merged = merge_closures([_closure("lb", "LB", "liveboard", [_T_A]),
+                             _closure("an", "AN", "answer", [_T_A])])
+    assert [t["guid"] for t in merged["tables"]] == ["tA"]
+    assert [r["guid"] for r in merged["roots"]] == ["lb", "an"]
+
+
+def test_merge_closures_unions_distinct_tables():
+    merged = merge_closures([_closure("lb", "LB", "liveboard", [_T_A]),
+                             _closure("m", "M", "model", [_T_B])])
+    assert sorted(t["guid"] for t in merged["tables"]) == ["tA", "tB"]
+
+
+def test_merge_closures_clusters_across_all_roots():
+    # Two roots sharing a schema value still need only ONE variable.
+    merged = merge_closures([_closure("lb", "LB", "liveboard", [_T_A]),
+                             _closure("m", "M", "model", [_T_B])])
+    schema = [c for c in merged["clusters"] if c["field"] == "schemaName"]
+    assert len(schema) == 1
+    assert sorted(schema[0]["tables"]) == ["tA", "tB"]
+
+
+def test_merge_closures_keeps_owner_org():
+    merged = merge_closures([_closure("lb", "LB", "liveboard", [_T_A])])
+    assert merged["owner_org"] == "Primary"
+
+
+def test_merge_closures_rejects_an_empty_set():
+    with pytest.raises(ValueError, match="at least one"):
+        merge_closures([])
+
+
+def test_publish_targets_derives_a_type_per_root():
+    merged = merge_closures([_closure("lb", "LB", "liveboard", [_T_A]),
+                             _closure("an", "AN", "answer", [_T_A]),
+                             _closure("m", "M", "model", [_T_B])])
+    assert publish_targets(merged) == [
+        {"identifier": "lb", "type": "LIVEBOARD"},
+        {"identifier": "an", "type": "ANSWER"},
+        {"identifier": "m", "type": "LOGICAL_TABLE"},
+    ]
+
+
+def test_apply_plan_publishes_every_root_grouped_by_type():
+    merged = merge_closures([_closure("lb", "LB", "liveboard", [_T_A]),
+                             _closure("an", "AN", "answer", [_T_A])])
+    matrix = {"orgs": ["ORG1"], "variables": [
+        {"name": "apj_schema", "type": "TABLE_MAPPING", "field": "schemaName",
+         "tables": ["tA"], "exists": False, "sensitive": False}],
+        "assignments": [{"variable": "apj_schema", "org": "ORG1", "value": "X"}]}
+    plan = build_apply_plan(merged, matrix, publish_orgs=["ORG1"])
+    by_type = {p["type"]: p["identifiers"] for p in plan["publish"]}
+    assert by_type == {"LIVEBOARD": ["lb"], "ANSWER": ["an"]}
+
+
+def test_rollback_unpublishes_every_root():
+    merged = merge_closures([_closure("lb", "LB", "liveboard", [_T_A]),
+                             _closure("an", "AN", "answer", [_T_A])])
+    matrix = {"orgs": ["ORG1"], "variables": [], "assignments": []}
+    plan = build_apply_plan(merged, matrix, publish_orgs=["ORG1"])
+    actions = [s for s in rollback_steps(plan["rollback"]) if s["action"] == "unpublish"]
+    assert {a["type"] for a in actions} == {"LIVEBOARD", "ANSWER"}

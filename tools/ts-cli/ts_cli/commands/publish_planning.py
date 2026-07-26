@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 import typer
 
 from ts_cli.client import ThoughtSpotClient, resolve_profile
+from ts_cli.publish_plan import publish_type_for_root
 from ts_cli.commands.publish import (
     _org_index,
     _profile_option,
@@ -33,8 +34,12 @@ from ts_cli.commands.publish import (
 def _walk_closure(client: ThoughtSpotClient, guid: str):
     """Export a Model (or Table) with its associated objects and split the result.
 
-    Returns ``(root, tables)`` where ``root`` describes the requested object and
-    ``tables`` is one ``extract_table_fields`` record per Table in the closure.
+    Returns ``(root, tables, member_guids)``. ``root`` describes the requested
+    object, ``tables`` is one ``extract_table_fields`` record per Table, and
+    ``member_guids`` is every object in the closure including intermediate Models
+    -- which the cohort pre-check needs, since a cohort column is owned by the
+    Model rather than by the root or by any Table.
+
     A sibling whose TML fails to parse is warned about and skipped rather than
     sinking the whole walk.
     """
@@ -50,10 +55,13 @@ def _walk_closure(client: ThoughtSpotClient, guid: str):
 
     root: Dict[str, Any] = {}
     tables: List[Dict[str, Any]] = []
+    members: List[str] = []
     for item in resp.json():
         info = item.get("info") or {}
         if (info.get("status") or {}).get("status_code") == "ERROR":
             continue
+        if info.get("id"):
+            members.append(info["id"])
         try:
             doc = parse_edoc(item.get("edoc", ""))
         except Exception as exc:
@@ -67,72 +75,136 @@ def _walk_closure(client: ThoughtSpotClient, guid: str):
 
     if not root:
         root = {"guid": guid, "name": (tables[0]["name"] if tables else None), "type": "table"}
-    return root, tables
+    return root, tables, members
+
+
+def _expand_dependents(client: ThoughtSpotClient, guids: List[str]) -> List[str]:
+    """Add every Answer and Liveboard riding on the given objects.
+
+    Cascade carries dependencies DOWNWARD on publish but never reaches siblings,
+    so an Answer beside a Liveboard on the same Model must be published in its own
+    right. This is the upward walk that finds them. Order is preserved and the
+    originals stay first.
+    """
+    found = list(guids)
+    for guid in guids:
+        try:
+            resp = client.post("/api/rest/2.0/metadata/search", json={
+                "metadata": [{"identifier": guid, "type": "LOGICAL_TABLE"}],
+                "include_dependent_objects": True,
+                "dependent_object_version": "V2",
+                "record_size": -1, "record_offset": 0})
+        except Exception as exc:
+            print(f"Warning: could not walk dependents of {guid}: {exc}", file=sys.stderr)
+            continue
+        from ts_cli.commands.metadata import _normalize_dependents_response
+        for row in _normalize_dependents_response(resp.json()):
+            if row["type"] in ("ANSWER", "LIVEBOARD") and row["guid"] not in found:
+                found.append(row["guid"])
+    return found
+
+
+def _cohort_columns(client: ThoughtSpotClient, member_guids: List[str]) -> List[str]:
+    """Names of cohort columns owned by any object in the closure.
+
+    A cohort column on a Model blocks publishing that Model and every Answer and
+    Liveboard on it, used or not (verified live). Catching it here turns a
+    last-step refusal into something the caller sees before doing any work.
+    """
+    try:
+        resp = client.post("/api/rest/2.0/metadata/search",
+                           json={"metadata": [{"type": "LOGICAL_COLUMN"}],
+                                 "include_headers": True, "record_size": -1})
+    except Exception:
+        return []
+    owners = set(member_guids)
+    return sorted({
+        r.get("metadata_name") for r in resp.json()
+        if str((r.get("metadata_header") or {}).get("type", "")).startswith("COHORT")
+        and (r.get("metadata_header") or {}).get("owner") in owners
+    } - {None})
 
 
 @app.command("export")
 def export_closure(
-    guid: str = typer.Argument(..., help="GUID of the Model (or Table) to plan publication for"),
+    guids: List[str] = typer.Argument(..., help="One or more GUIDs to plan publication for. "
+                                                "Any type: Table, Model, Answer or Liveboard."),
+    with_dependents: bool = typer.Option(False, "--with-dependents",
+                                         help="Also include every Answer and Liveboard riding "
+                                              "on the given objects. Publish cascades DOWN to "
+                                              "dependencies but never UP to siblings, so those "
+                                              "need publishing in their own right."),
     profile: Optional[str] = _profile_option,
 ) -> None:
-    """Discover an object's dependency closure and cluster its parameterizable fields.
+    """Discover the closure of one or more objects and cluster their parameterizable fields.
 
-    Walks Model to Tables to Connection, reads each table's current db / schema /
-    table values, and groups them by distinct value. Each cluster is one variable
-    to create: every table in a cluster needs the same value for that field, so
-    twenty tables sharing a schema need one variable, not twenty.
+    Works from any anchor. From a Liveboard or Answer the walk goes down to the
+    Model and Tables that need variables; publishing then cascades back down to
+    them. From a Model or Table it finds the Tables directly, and
+    --with-dependents adds the content riding on top.
 
-    Clusters already carrying a `${token}` are reported as
-    `already_parameterized` with the variable they use, so the command is safe to
-    re-run on a partly configured Model. That is the add-a-tenant path.
-
-    `recommended` marks databaseName and schemaName, the conventional per-tenant
-    discriminators. tableName is left unrecommended because tenant tables
-    normally share a name. It is a default for review, not a restriction.
+    Fields are grouped by DISTINCT VALUE across every root, so two objects sharing
+    a schema still need one variable rather than one each. Tables reached by more
+    than one root are de-duplicated, so nothing is parameterized twice.
 
     Output (JSON to stdout):
-      {"root", "tables", "connection", "clusters", "existing_variables", "published_to"}
+      {"roots", "tables", "connections", "clusters", "existing_variables",
+       "owner_org", "unparameterizable_tables", "cohort_columns"}
 
     Examples:
 
     \b
-      ts publish export 4be2cc25-... --profile prod
-      ts publish export <model-guid> --profile prod | jq '.clusters'
+      ts publish export <model-guid> --profile prod
+      ts publish export <liveboard-guid> --profile prod
+      ts publish export <model-guid> --with-dependents --profile prod
+      ts publish export <lb-guid> <answer-guid> --profile prod
     """
-    from ts_cli.publish_plan import build_clusters, publish_type_for_root
+    from ts_cli.publish_plan import merge_closures
 
     client = ThoughtSpotClient(resolve_profile(profile))
-    root, tables = _walk_closure(client, guid)
+    targets = list(dict.fromkeys(guids))
+    if with_dependents:
+        expanded = _expand_dependents(client, targets)
+        if len(expanded) > len(targets):
+            print(f"--with-dependents added {len(expanded) - len(targets)} object(s) "
+                  f"riding on the selection.", file=sys.stderr)
+        targets = expanded
+
     existing = _variable_index(client)
-    clusters = build_clusters(tables, existing_variables=set(existing.values()))
-
     org_index = _org_index(client)
-    # Look the root up as its OWN type. Hardcoding LOGICAL_TABLE here silently
-    # returned nothing for a Liveboard or Answer root, which left owner_org None
-    # and switched off resolve's owner-Org protection for exactly the closures
-    # that still parameterize Tables underneath.
-    status_resp = client.post("/api/rest/2.0/metadata/search", json={
-        "metadata": [{"identifier": guid,
-                      "type": publish_type_for_root(root.get("type"))}],
-        "include_headers": True})
-    published = publication_rows(status_resp.json(), org_index)
 
-    connections = sorted({t["connection"] for t in tables if t.get("connection")})
-    unparameterizable = sorted({t["name"] for t in tables if not t.get("connection")})
-    if unparameterizable:
-        print(f"Warning: {len(unparameterizable)} table(s) have no connection and are "
-              f"Falcon-backed, so they cannot be parameterized or published: "
-              f"{', '.join(unparameterizable)}", file=sys.stderr)
-    print(json.dumps({
-        "root": root,
-        "tables": tables,
-        "connections": connections,
-        "clusters": clusters,
-        "existing_variables": sorted(existing.values()),
-        "owner_org": published[0]["owner_org"] if published else None,
-        "published_to": published[0]["published_to"] if published else [],
-        "unparameterizable_tables": unparameterizable,
-    }))
+    closures = []
+    closure_members: set = set()
+    for guid in targets:
+        root, tables, members = _walk_closure(client, guid)
+        closure_members.update(members)
+        status = client.post("/api/rest/2.0/metadata/search", json={
+            "metadata": [{"identifier": guid,
+                          "type": publish_type_for_root(root.get("type"))}],
+            "include_headers": True})
+        rows = publication_rows(status.json(), org_index)
+        closures.append({"root": root, "tables": tables,
+                         "existing_variables": set(existing.values()),
+                         "owner_org": rows[0]["owner_org"] if rows else None,
+                         "published_to": rows[0]["published_to"] if rows else []})
+
+    merged = merge_closures(closures)
+    merged["published_to"] = sorted({o for c in closures for o in c["published_to"]})
+    # Check every object in the closure, not just the roots: a cohort column is
+    # owned by the Model, so selecting only a Liveboard would otherwise miss it --
+    # which is exactly the selection that fails at publish time.
+    merged["cohort_columns"] = _cohort_columns(client, sorted(closure_members))
+
+    if merged["unparameterizable_tables"]:
+        print(f"Warning: {len(merged['unparameterizable_tables'])} table(s) are Falcon-backed "
+              f"and cannot be parameterized or published: "
+              f"{', '.join(merged['unparameterizable_tables'])}", file=sys.stderr)
+    if merged["cohort_columns"]:
+        print(f"Warning: cohort column(s) {', '.join(merged['cohort_columns'])} are defined on "
+              f"this selection. Cohort publishing is not supported, and the block is Model-wide: "
+              f"it stops the Model and every Answer or Liveboard on it, used or not.",
+              file=sys.stderr)
+    print(json.dumps(merged))
 
 
 def _read_input(path: Optional[str]) -> Dict[str, Any]:
@@ -377,13 +449,14 @@ def apply_plan(
     _write_rollback(plan["rollback"], rollback_out)
     _run_apply(client, plan)
 
-    if plan["publish"]:
+    for entry in plan["publish"] or []:
+        # One call per type: the publish API takes a single `type` per request.
         from ts_cli.commands.publish import _post_with_explanation, build_publish_payload
-        payload = build_publish_payload(plan["publish"]["identifiers"], plan["publish"]["type"],
-                                        plan["publish"]["orgs"])
+        payload = build_publish_payload(entry["identifiers"], entry["type"], entry["orgs"])
         _post_with_explanation(client, "/api/rest/2.0/security/metadata/publish", payload,
-                               plan["publish"]["identifiers"], plan["publish"]["type"])
-        print(f"published to {', '.join(plan['publish']['orgs'])}", file=sys.stderr)
+                               entry["identifiers"], entry["type"])
+        print(f"published {len(entry['identifiers'])} {entry['type']} to "
+              f"{', '.join(entry['orgs'])}", file=sys.stderr)
 
 
 @app.command("rollback")

@@ -1248,8 +1248,20 @@ than clearing the field, so the caller must know the original.
 Discover an object's dependency closure and cluster its parameterizable fields.
 
 ```bash
-ts publish export <model-or-table-guid> --profile <name>
+ts publish export <guid> [<guid> ...] [--with-dependents] --profile <name>
 ```
+
+Takes **any anchor type** and as many as you like. Cascade only travels downward, so
+the two directions are asymmetric and the command handles both:
+
+| Anchor | Down (always) | Up (`--with-dependents`) |
+|---|---|---|
+| Liveboard / Answer | the Model and Tables needing variables; publishing cascades back to them | siblings sharing that Model |
+| Model / Table | the Tables directly | every Answer and Liveboard riding on it |
+
+Tables reached by more than one root are de-duplicated, so nothing is parameterized
+twice, and clustering runs once across the union so two roots sharing a schema need
+one variable rather than two.
 
 Walks Model → Tables → Connection and groups each table's `db` / `schema` /
 `db_table` by **distinct value**. Each cluster is one variable to create: a
@@ -1272,11 +1284,10 @@ Per cluster: `field`, `current_value`, `tables`, `spans_tables`,
 Safe to re-run on a partly configured Model: already-parameterized clusters are
 reported rather than re-suggested. That is the add-a-tenant path.
 
-Accepts a Liveboard or Answer GUID too. Those have no parameterizable fields of
-their own, so `export` walks down to the Tables beneath them and reports
-`root.type` accordingly; `apply` then publishes the root with the matching type.
-When the data layer is already wired, publishing a Liveboard is just
-`ts publish push --type LIVEBOARD`.
+Also reports `cohort_columns`. A cohort column anywhere in the closure blocks
+publishing the Model and everything on it, used or not, so this turns a last-step
+refusal into a warning before any work is done. The check covers intermediate
+Models, not just the roots, because that is where the column is owned.
 
 ---
 

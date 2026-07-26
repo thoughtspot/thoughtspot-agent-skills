@@ -23,6 +23,7 @@ ts_cli/
   sv_build_sv.py       — ThoughtSpot Model TML → Snowflake Semantic View DDL (build_sv_ddl); column_id resolution, column classification (dimension/metric/time_dimension), to_snake aliasing, relationship naming with collision avoidance, metric topological ordering, CA extension JSON, synonym/comment handling (BL-100 PR5; pure functions, no I/O)
   spotql_ops.py        — Aggregate-function classification (AGGREGATE_FUNCS/is_aggregate_expr/classify_expr/outermost_func/classify_model_columns; incl. semi-additive last_value/first_value → SUM wrapper) behind `ts agentql classify-columns` (pure functions, no I/O)
   publish_plan.py      — Orgs Publishing planning engine: field-variance clustering (build_clusters/extract_table_fields/suggest_variable_name) + the value matrix (build_value_matrix/expand_pattern/coverage_report) behind `ts publish export`/`resolve`/`apply`/`rollback` (incl. build_apply_plan/rollback_steps, which record each field's ORIGINAL static value because unparameterize substitutes rather than clears). Clusters by DISTINCT VALUE because a variable holds one value per scope, so N tables sharing a schema need one variable, not N (pure functions, no I/O)
+  publish_apply.py     — Orgs Publishing apply-plan assembly: multi-root closure merge (merge_closures/publish_targets/publish_type_for_root) + ordered plan and rollback record (build_apply_plan/rollback_steps); split from publish_plan.py under the file-size gate and re-exported from it (pure functions, no I/O)
   promote.py           — Formula promotion merge (extract_answer_formulas/detect_duplicates/map_references/build_merged_model) behind `ts model promote-formula` (pure functions, no I/O; BL-066)
   aggregate/
     __init__.py          — package marker
@@ -132,7 +133,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.105.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.106.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 
