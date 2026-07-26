@@ -94,6 +94,10 @@ run time can be predicted and the batching validated against the round-trip budg
 New command group `ts migrate` in `tools/ts-cli`.
 
 ```
+ts migrate scan-sets --source-profile P1 [--source-org O1 ...] \
+                     [--model <name|guid> ...] [--all-models] \
+                     [--models-file F] [--models-table T] [--out-dir ./scan/]
+
 ts migrate audit  --source-profile P1 [--source-org O1] \
                   --target-profile P2 [--target-org O2] \
                   [--model <name|guid> ...] [--all-models] \
@@ -119,6 +123,107 @@ Migration is scoped **per Model** by default (the natural unit — bespoke conte
 attaches to Models); `--all-models` enumerates every published Model in the clean
 Org and processes each in turn.
 
+## Phase 0 — `ts migrate scan-sets` (read-only, source-side only)
+
+**Added 2026-07-26 after live testing established that Sets block migration.**
+
+### Why this is a separate command
+
+Sets are a hard blocker (see *Sets are a migration blocker* below). Before planning any
+wave — or committing to build Phase 2 at all — the programme needs one number: **how many
+tenants actually use Sets.** That answer decides whether Sets support gates the whole
+programme or just a tail of stragglers.
+
+This is deliberately **not** a mode of `audit`:
+
+- It needs **no target Org**, so it runs before any clean Org exists.
+- It is far cheaper: a metadata scan, no TML export and no column matching.
+- Its output is a fleet roll-up, not a per-tenant mapping file.
+
+### Surface
+
+```
+ts migrate scan-sets --source-profile P1 [--source-org O1 ...] \
+                     [--model <name|guid> ...] [--all-models] \
+                     [--models-file objects.csv] [--models-table DB.SCH.T] \
+                     [--out-dir ./scan/]
+```
+
+Scoping mirrors `audit` (`--model` repeatable, `--all-models`) and adds the manifest forms
+used elsewhere in the CLI, so a targeted list of migration-candidate Models can be scanned
+without sweeping every Model on the cluster. `--source-org` is repeatable for a fleet pass.
+
+### What it does
+
+1. For each in-scope Model, find `LOGICAL_COLUMN`s of subtype `COHORT_*` owned by it.
+   **Query metadata, never TML** — see the detection note below.
+2. For each cohort column found, walk dependents with `--type LOGICAL_COLUMN` to list the
+   Answers and Liveboards that actually use it.
+3. Emit `sets-scan.json` + `sets-scan.md`.
+
+```json
+{
+  "scanned":  {"orgs": 12, "models": 340},
+  "summary":  {"orgs_blocked": 3, "models_blocked": 4, "objects_affected": 17},
+  "blocked":  [
+    {"org": "Tenant1", "model": "Sales", "model_guid": "...",
+     "cohort_columns": [{"name": "RSET_QTY_BINS", "guid": "..."}],
+     "dependents": [{"type": "ANSWER", "name": "Q4 cohort view", "guid": "..."}]}
+  ]
+}
+```
+
+The per-object detail is the point. "Blocked" alone is a dead end; "blocked by these four
+Answers" is a decision the tenant can act on — some Set-based content is stale or rebuilds
+trivially as a filter, and retiring it converts a blocked tenant into a migratable one
+without waiting for the platform.
+
+---
+
+## Sets are a migration blocker
+
+**Verified live 2026-07-26** (nebula, Orgs-enabled). Three facts:
+
+1. A Set creates a `LOGICAL_COLUMN` of subtype `COHORT_SIMPLE` **owned by the Model**.
+2. That column **does not appear in the Model's TML at all** — the Model exported 10
+   columns and the cohort column was not among them. It is visible only via
+   `metadata/search`.
+3. A cohort column **blocks publishing** the Model and every Answer and Liveboard on it,
+   used or not. Published objects are also read-only in target Orgs, so a Set cannot be
+   added to a published Model afterwards either.
+
+**Therefore Sets cannot live on a published Model.** Not "should not" — cannot.
+
+Fact 2 is the dangerous one: because the cohort column is invisible in TML, a
+lift-and-shift would **silently drop Sets** rather than fail. Nobody would notice until a
+tenant asked where theirs went.
+
+### Handling
+
+`ts migrate apply` **refuses** when any in-scope Model has a cohort column. There is no
+override flag. The alternatives were considered and rejected:
+
+| Option | Why not |
+|---|---|
+| Migrate, leave Set-dependent content in the source Org | Splits the tenant across two Orgs for months. Worse for users than waiting |
+| Retain the tenant scaffolding Model for Set content | Two Models in one Org with identical column names after the rename step. Search and Spotter see both; users get duplicates. A hybrid state to unwind later |
+| A `--force` style flag | Silently leaving content behind is precisely the failure mode fact 2 already makes likely |
+
+A blocked tenant either retires or rebuilds the dependent content (use `scan-sets` to see
+what that is), or waits for Sets support on published objects — expected in roughly 3 to 6
+months from 2026-07.
+
+Set-usage is therefore a **risk class in the existing batching strategy**, not a hard stop
+on the programme: low-risk tenants migrate now, Sets-using tenants form a later batch.
+
+### Detection note
+
+Cohort columns must be found through `metadata/search` for `COHORT_*` subtypes. Inspecting
+TML is not sufficient and will report a clean Model that is in fact blocked.
+`ts publish export` already implements this correctly and is the reference.
+
+---
+
 ## Phase 1 — `ts migrate audit` (read-only)
 
 1. Open source and target sessions (two `ThoughtSpotClient` instances; see auth).
@@ -135,7 +240,8 @@ Org and processes each in turn.
    `column_id`) as review items.
 5. Emit `column-mapping.csv` — one row per tenant column per Model, pre-filled.
    The `status` column takes one of `MATCHED`, `GAP` (unused gap), `GAP_BLOCKER`
-   (used gap), `BINDING_MISMATCH`. Matched rows are resolved; `GAP`/`GAP_BLOCKER`
+   (used gap), `SET_BLOCKER` (the Model carries a cohort column — see *Sets are a
+   migration blocker*), `BINDING_MISMATCH`. Matched rows are resolved; `GAP`/`GAP_BLOCKER`
    rows have a blank `published_column` field for the user to fill
    (`Department → String1`).
 6. Emit `audit-report.md` + `audit-report.json`: object inventory to migrate,
@@ -159,7 +265,8 @@ Per (source Org → clean Org) pair, per Model, driven by the approved mapping a
 state ledger:
 
 0. **Load & validate mapping** — abort if any `GAP_BLOCKER` row has an empty
-   `published_column`.
+   `published_column`, or if any Model carries a `SET_BLOCKER`. The Set case has no
+   override: see *Sets are a migration blocker*.
 1. **Backup** — export every source object in scope (reuse the `ts dependency
    backup` all-or-nothing pattern) to `--plan/backup/`. Nothing is written if any
    export fails.
