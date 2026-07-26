@@ -37,6 +37,9 @@ from _dirs import ALL_RUNTIMES
 # ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
+    ("ts-publish-orgs", "coco-snowsight"):
+        "Orgs Publishing is a ThoughtSpot admin operation driven entirely by the ts CLI; "
+        "no Snowsight stored-procedure equivalent",
     ("ts-object-model-agentql-query", "coco-snowsight"):
         "AgentQL query loop + ts CLI execution not available in Snowsight stored-proc runtime",
     ("ts-variable-timezone", "coco-snowsight"):
