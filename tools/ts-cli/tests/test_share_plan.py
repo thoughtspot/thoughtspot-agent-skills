@@ -5,9 +5,11 @@ import pytest
 
 from ts_cli.share_plan import (
     GrantConflictError,
+    build_share_steps,
     find_exclusivity_conflicts,
     format_conflicts,
     parse_grant_rows,
+    permission_rows,
 )
 
 
@@ -149,3 +151,145 @@ def test_format_conflicts_names_org_table_group_and_the_fix():
 
 def test_grant_conflict_error_is_a_value_error():
     assert issubclass(GrantConflictError, ValueError)
+
+
+# ---------------------------------------------------------------------------
+# build_share_steps
+# ---------------------------------------------------------------------------
+
+def _resolved(**overrides):
+    row = {"org_name": "ORG1", "object_identifier": "T2_PUBLISH",
+           "object_type": "LOGICAL_TABLE", "column_name": "",
+           "group_name": "Analyst", "share_mode": "READ_ONLY",
+           "object_guid": "obj-guid-1", "column_guid": ""}
+    row.update(overrides)
+    return row
+
+
+def test_build_share_steps_object_grant_uses_object_guid():
+    steps = build_share_steps([_resolved()])
+    assert len(steps) == 1
+    step = steps[0]
+    assert step["org_name"] == "ORG1"
+    assert step["metadata_type"] == "LOGICAL_TABLE"
+    assert step["metadata_identifiers"] == ["obj-guid-1"]
+    assert step["permissions"] == [
+        {"principal": {"type": "USER_GROUP", "identifier": "Analyst"},
+         "share_mode": "READ_ONLY"}]
+
+
+def test_build_share_steps_column_grant_uses_logical_column_and_column_guid():
+    steps = build_share_steps([
+        _resolved(column_name="PROD_NM", column_guid="col-guid-1")])
+    assert steps[0]["metadata_type"] == "LOGICAL_COLUMN"
+    assert steps[0]["metadata_identifiers"] == ["col-guid-1"]
+
+
+def test_build_share_steps_batches_objects_sharing_one_permission_set():
+    steps = build_share_steps([
+        _resolved(object_identifier="T1", object_guid="g1"),
+        _resolved(object_identifier="T2", object_guid="g2"),
+    ])
+    assert len(steps) == 1
+    assert steps[0]["metadata_identifiers"] == ["g1", "g2"]
+
+
+def test_build_share_steps_merges_principals_on_one_object():
+    steps = build_share_steps([
+        _resolved(group_name="Analyst", share_mode="READ_ONLY"),
+        _resolved(group_name="Auditor", share_mode="MODIFY"),
+    ])
+    assert len(steps) == 1
+    assert steps[0]["permissions"] == [
+        {"principal": {"type": "USER_GROUP", "identifier": "Analyst"},
+         "share_mode": "READ_ONLY"},
+        {"principal": {"type": "USER_GROUP", "identifier": "Auditor"},
+         "share_mode": "MODIFY"},
+    ]
+
+
+def test_build_share_steps_splits_objects_with_different_permission_sets():
+    steps = build_share_steps([
+        _resolved(object_identifier="T1", object_guid="g1", group_name="Analyst"),
+        _resolved(object_identifier="T2", object_guid="g2", group_name="Auditor"),
+    ])
+    assert len(steps) == 2
+    assert {tuple(s["metadata_identifiers"]) for s in steps} == {("g1",), ("g2",)}
+
+
+def test_build_share_steps_splits_by_org():
+    steps = build_share_steps([
+        _resolved(org_name="ORG1"), _resolved(org_name="ORG2")])
+    assert sorted(s["org_name"] for s in steps) == ["ORG1", "ORG2"]
+
+
+def test_build_share_steps_never_mixes_object_and_column_types_in_one_call():
+    steps = build_share_steps([
+        _resolved(group_name="Analyst"),
+        _resolved(object_identifier="T9", object_guid="g9", group_name="Analyst",
+                  column_name="PROD_NM", column_guid="col-9"),
+    ])
+    assert {s["metadata_type"] for s in steps} == {"LOGICAL_TABLE", "LOGICAL_COLUMN"}
+
+
+def test_build_share_steps_labels_describe_each_target():
+    steps = build_share_steps([
+        _resolved(column_name="PROD_NM", column_guid="col-guid-1")])
+    assert steps[0]["labels"] == ["T2_PUBLISH.PROD_NM"]
+
+
+def test_build_share_steps_requires_a_resolved_guid():
+    with pytest.raises(ValueError, match="object_guid"):
+        build_share_steps([_resolved(object_guid="")])
+
+
+def test_build_share_steps_requires_a_resolved_column_guid():
+    with pytest.raises(ValueError, match="column_guid"):
+        build_share_steps([_resolved(column_name="PROD_NM", column_guid="")])
+
+
+def test_build_share_steps_is_deterministic():
+    rows = [_resolved(object_identifier="T2", object_guid="g2"),
+            _resolved(object_identifier="T1", object_guid="g1")]
+    assert build_share_steps(rows) == build_share_steps(list(reversed(rows)))
+
+
+# ---------------------------------------------------------------------------
+# permission_rows
+# ---------------------------------------------------------------------------
+
+def test_permission_rows_flattens_the_fetch_permissions_shape():
+    payload = {"metadata_permission_details": [{
+        "metadata_id": "obj-guid-1",
+        "metadata_name": "T2_PUBLISH",
+        "metadata_type": "LOGICAL_TABLE",
+        "principal_permission_info": [{
+            "principal_type": "USER_GROUP",
+            "principal_sub_type": "LOCAL_GROUP",
+            "principal_permissions": [{
+                "principal_id": "grp-1", "principal_name": "Analyst",
+                "permission": "READ_ONLY", "shared_permission": "READ_ONLY",
+                "group_permission": []}]}]}]}
+    assert permission_rows(payload) == [{
+        "guid": "obj-guid-1", "name": "T2_PUBLISH", "type": "LOGICAL_TABLE",
+        "principal_type": "USER_GROUP", "principal_id": "grp-1",
+        "principal_name": "Analyst", "permission": "READ_ONLY",
+        "shared_permission": "READ_ONLY",
+    }]
+
+
+def test_permission_rows_accepts_a_bare_list():
+    payload = [{"metadata_id": "g", "metadata_name": "n", "metadata_type": "LOGICAL_COLUMN",
+                "principal_permission_info": [{
+                    "principal_type": "USER",
+                    "principal_permissions": [{"principal_id": "u", "principal_name": "su",
+                                               "permission": "MODIFY"}]}]}]
+    rows = permission_rows(payload)
+    assert rows[0]["principal_name"] == "su"
+    assert rows[0]["shared_permission"] == ""
+
+
+def test_permission_rows_tolerates_empty_and_missing_sections():
+    assert permission_rows(None) == []
+    assert permission_rows({}) == []
+    assert permission_rows({"metadata_permission_details": [{"metadata_id": "g"}]}) == []

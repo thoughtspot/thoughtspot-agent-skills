@@ -181,3 +181,146 @@ def format_conflicts(conflicts: List[Dict[str, Any]]) -> str:
         "To change granularity, run the revoke and the grant as two separate applies.",
     ]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Plan assembly -- the `ts share apply` engine
+# ---------------------------------------------------------------------------
+
+def _step_key(grant: Dict[str, Any]) -> Tuple[str, str]:
+    """(org, metadata_type) -- the two axes a single share call cannot span.
+
+    One call carries one metadata_type and runs in one Org's context, because
+    groups are per-Org.
+    """
+    metadata_type = "LOGICAL_COLUMN" if grant.get("column_name") else grant["object_type"]
+    return grant["org_name"], metadata_type
+
+
+def _target(grant: Dict[str, Any]) -> Tuple[str, str]:
+    """(guid, human label) for the thing being granted, with the guid required.
+
+    A missing guid means resolution did not run or did not find the object. Building
+    a payload around an empty identifier would share nothing while reporting success.
+    """
+    if grant.get("column_name"):
+        guid = str(grant.get("column_guid") or "")
+        if not guid:
+            raise ValueError(
+                f"Grant for column '{grant['column_name']}' of "
+                f"'{grant['object_identifier']}' has no column_guid. Run "
+                f"`ts share resolve` so column names are resolved to GUIDs.")
+        return guid, f"{grant['object_identifier']}.{grant['column_name']}"
+    guid = str(grant.get("object_guid") or "")
+    if not guid:
+        raise ValueError(
+            f"Grant for '{grant['object_identifier']}' has no object_guid. Run "
+            f"`ts share resolve` so object names are resolved to GUIDs.")
+    return guid, str(grant["object_identifier"])
+
+
+def build_share_steps(grants: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Batch resolved grants into the fewest safe `security/metadata/share` calls.
+
+    One call takes one ``metadata_type``, many ``metadata_identifiers`` and one
+    ``permissions`` list that applies to ALL of those identifiers. So objects batch
+    together only when their principal/share_mode set is identical -- otherwise a
+    batch would hand one object's audience access to another's data.
+
+    Everything is sorted -- steps, identifiers within a step, and principals within a
+    step -- so the same set of grants always yields the same plan whatever order the
+    manifest listed them in. That is what makes a --dry-run plan diffable between runs.
+    """
+    # (org, metadata_type) -> guid -> {"label": str, "pairs": {(group, mode)}}
+    targets: Dict[Tuple[str, str], Dict[str, Dict[str, Any]]] = {}
+    for grant in grants or ():
+        key = _step_key(grant)
+        guid, label = _target(grant)
+        entry = targets.setdefault(key, {}).setdefault(guid, {"label": label, "pairs": set()})
+        entry["pairs"].add((grant["group_name"], grant["share_mode"]))
+
+    steps: List[Dict[str, Any]] = []
+    for (org, metadata_type) in sorted(targets):
+        # Group the objects of this (org, type) by their audience, so objects sharing
+        # an identical principal set travel in one call and nothing else does.
+        by_audience: Dict[Tuple[Tuple[str, str], ...], List[Tuple[str, str]]] = {}
+        for guid, entry in targets[(org, metadata_type)].items():
+            audience = tuple(sorted(entry["pairs"]))
+            by_audience.setdefault(audience, []).append((guid, entry["label"]))
+
+        for audience in sorted(by_audience):
+            members = sorted(by_audience[audience])
+            steps.append({
+                "org_name": org,
+                "metadata_type": metadata_type,
+                "metadata_identifiers": [guid for guid, _ in members],
+                "permissions": [
+                    {"principal": {"type": "USER_GROUP", "identifier": group},
+                     "share_mode": mode}
+                    for group, mode in audience
+                ],
+                "labels": [label for _, label in members],
+            })
+    return steps
+
+
+# ---------------------------------------------------------------------------
+# Read-back -- the `ts share status` normaliser
+# ---------------------------------------------------------------------------
+
+def _str(value: Any) -> str:
+    """Missing or null field to an empty string, without a branch at each call site."""
+    return "" if value is None else str(value)
+
+
+def _dicts(container: Any, key: str) -> List[Dict[str, Any]]:
+    """The dict members of ``container[key]``, tolerating a missing or odd shape.
+
+    A read-back must not fail louder than the write it is checking, so anything
+    unexpected is skipped rather than raised on.
+    """
+    if not isinstance(container, dict):
+        return []
+    return [item for item in (container.get(key) or []) if isinstance(item, dict)]
+
+
+def _permission_row(entry: Dict[str, Any], info: Dict[str, Any],
+                    principal: Dict[str, Any]) -> Dict[str, Any]:
+    """One (object, principal) row from the three nesting levels it spans."""
+    return {
+        "guid": _str(entry.get("metadata_id")),
+        "name": _str(entry.get("metadata_name")),
+        "type": _str(entry.get("metadata_type")),
+        "principal_type": _str(info.get("principal_type")),
+        "principal_id": _str(principal.get("principal_id")),
+        "principal_name": _str(principal.get("principal_name")),
+        "permission": _str(principal.get("permission")),
+        "shared_permission": _str(principal.get("shared_permission")),
+    }
+
+
+def permission_rows(details: Any) -> List[Dict[str, Any]]:
+    """Flatten a `security/metadata/fetch-permissions` response into flat rows.
+
+    The response nests three levels deep (object -> principal type -> principal), which
+    is awkward to eyeball or diff. One row per (object, principal) is what an operator
+    actually reads, and what a before/after comparison needs.
+
+    ``permission`` is the EFFECTIVE access (privileges included); ``shared_permission``
+    is what sharing itself granted. When checking whether `ts share` did its job, read
+    ``shared_permission`` -- an admin group shows MODIFY under ``permission`` whether or
+    not anything was ever shared with it.
+
+    Accepts either the ``{"metadata_permission_details": [...]}`` envelope or a bare list.
+    """
+    if isinstance(details, list):
+        entries = [item for item in details if isinstance(item, dict)]
+    else:
+        entries = _dicts(details, "metadata_permission_details")
+
+    return [
+        _permission_row(entry, info, principal)
+        for entry in entries
+        for info in _dicts(entry, "principal_permission_info")
+        for principal in _dicts(info, "principal_permissions")
+    ]
