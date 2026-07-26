@@ -101,14 +101,13 @@ _PUBLISH_TABLES_DDL = (
 
 
 def _get_sf_cursor(sf_profile: Optional[str]):
-    """Snowflake cursor via the standard profile mechanism (same as ts alias)."""
-    if not sf_profile:
-        return None
-    from ts_cli.commands.load import load_snowflake_profile, _connect_python
-    profile = load_snowflake_profile(sf_profile)
-    conn = _connect_python(profile, profile.get("default_warehouse", ""),
-                           profile.get("default_role", ""))
-    return conn.cursor()
+    """Delegates to the shared helper in commands/load.py.
+
+    Imported lazily, as elsewhere in this module, so the Snowflake connector is
+    not pulled in on every CLI invocation.
+    """
+    from ts_cli.commands.load import get_sf_cursor
+    return get_sf_cursor(sf_profile)
 
 
 def _fetch_table_rows(sf_profile: Optional[str], table: Optional[str],

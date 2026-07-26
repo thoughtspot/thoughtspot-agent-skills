@@ -61,15 +61,13 @@ def _read_json_envelope(input_file: Optional[str]) -> dict:
 
 
 def _get_sf_cursor(sf_profile: Optional[str]):
-    """Get a Snowflake cursor via the standard profile mechanism."""
-    if not sf_profile:
-        return None
-    from ts_cli.commands.load import load_snowflake_profile, _connect_python
-    profile = load_snowflake_profile(sf_profile)
-    wh = profile.get("default_warehouse", "")
-    rl = profile.get("default_role", "")
-    conn = _connect_python(profile, wh, rl)
-    return conn.cursor()
+    """Delegates to the shared helper in commands/load.py.
+
+    Imported lazily, as elsewhere in this module, so the Snowflake connector is
+    not pulled in on every CLI invocation.
+    """
+    from ts_cli.commands.load import get_sf_cursor
+    return get_sf_cursor(sf_profile)
 
 
 def _call_llm(prompt: str, translator: str, api_key_env: str,
