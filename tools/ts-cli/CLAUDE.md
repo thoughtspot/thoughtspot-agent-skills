@@ -105,7 +105,7 @@ ts_cli/
     spotql.py     — ts agentql (generate-sql, fetch-data, classify-columns)
     spotter.py    — ts spotter (answer) — natural-language → Spotter answer via ai/answer/create; the "Spotter last-mile" for the conversion skills (pure normalise_answer_response + thin I/O)
     parameterize.py — ts metadata parameterize / unparameterize (attaches to metadata.app); binds template variables to Table/Connection fields. field_type is derived from metadata_type so the code-10002 mismatch is unreachable; warns when one variable is bound to several fields (same token written into each)
-    publish_planning.py — ts publish export / resolve / apply / rollback (attaches to publish.app); dependency-closure walk + planning I/O over publish_plan.py. Split from publish.py under the file-size gate
+    publish_planning.py — ts publish export / resolve / apply / rollback / run (attaches to publish.app); adds the manifest layer (TS_PUBLISH_OBJECTS / TS_PUBLISH_VARIABLES, --init-table, --source db) mirroring `ts alias`, and `run` as the unattended schedulable entry point over the same engine; dependency-closure walk + planning I/O over publish_plan.py. Split from publish.py under the file-size gate
     publish.py    — ts publish (push, unpush, status) — Orgs Publishing. Pure payload builders + explain_publish_error, which resolves the API's GUID/numeric-id failure messages into named, actionable text. status reads metadata_header.orgIds, so it needs no per-Org auth
     dependency.py — ts dependency (mutate, backup, rollback) — BL-083
     dependency_apply.py — ts dependency apply-change (Step 9 destructive orchestrator; attaches to dependency.app) — BL-083 PR2
@@ -133,7 +133,7 @@ Each command group is a separate module in `commands/`. `cli.py` imports and reg
 ## Version sync
 
 `ts_cli/__init__.py __version__` must always match `pyproject.toml version`. Bump both together.
-Current version: **0.106.0**. Run `python tools/validate/check_version_sync.py` to verify.
+Current version: **0.107.0**. Run `python tools/validate/check_version_sync.py` to verify.
 
 ## Required dependencies
 

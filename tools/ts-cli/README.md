@@ -1373,6 +1373,37 @@ Model is safe. A field with no recorded original is skipped and reported.
 
 ---
 
+### `ts publish run`
+
+Run a whole publication end to end, unattended. The scheduled counterpart to the
+interactive `export | resolve | apply` pipeline: same engine, no prompts, one exit code.
+
+```bash
+ts publish run --org ORG1 --org ORG2 \
+  --objects-table DB.SCH.TS_PUBLISH_OBJECTS \
+  --values-table  DB.SCH.TS_PUBLISH_VARIABLES \
+  --sf-profile sf --rollback-out rb.json -p prod
+
+ts publish run --org ORG1 --objects-file objects.csv --values-file values.csv \
+  --rollback-out rb.json -p prod --dry-run
+```
+
+Refuses, before touching the instance, if a variable has no value in a target org or
+if a cohort column makes the selection unpublishable. Exits `1` with the reason on
+stderr; `0` on success. Suitable for cron or any Python scheduler.
+
+Manifest tables (`--init-table` on `ts publish resolve` prints the DDL):
+
+```sql
+TS_PUBLISH_OBJECTS   (identifier, type, with_dependents)
+TS_PUBLISH_VARIABLES (org_name, variable_name, value)
+```
+
+Both are readable as CSV instead, with the same columns. Secrets never belong in
+either: a variable marked sensitive is populated out of band by an admin.
+
+---
+
 ### `ts publish push`
 
 Publish objects from the Primary Org to target Orgs. No copies are made and GUIDs are

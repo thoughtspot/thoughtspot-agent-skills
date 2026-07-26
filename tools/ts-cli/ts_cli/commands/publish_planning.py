@@ -78,6 +78,118 @@ def _walk_closure(client: ThoughtSpotClient, guid: str):
     return root, tables, members
 
 
+# Mirrors the ts alias convention: one table per concern, emitted by --init-table.
+# TS_PUBLISH_OBJECTS answers "what do we publish"; TS_PUBLISH_VARIABLES answers
+# "what value does each variable take in each Org". Secrets never belong here --
+# a variable marked sensitive is populated out of band by an admin.
+_PUBLISH_TABLES_DDL = (
+    "CREATE TABLE IF NOT EXISTS TS_PUBLISH_OBJECTS (\n"
+    "    identifier       VARCHAR NOT NULL,\n"
+    "    type             VARCHAR,\n"
+    "    with_dependents  BOOLEAN DEFAULT FALSE,\n"
+    "    updated_at       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),\n"
+    "    PRIMARY KEY (identifier)\n"
+    ");\n\n"
+    "CREATE TABLE IF NOT EXISTS TS_PUBLISH_VARIABLES (\n"
+    "    org_name         VARCHAR NOT NULL,\n"
+    "    variable_name    VARCHAR NOT NULL,\n"
+    "    value            VARCHAR NOT NULL,\n"
+    "    updated_at       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),\n"
+    "    PRIMARY KEY (org_name, variable_name)\n"
+    ");"
+)
+
+
+def _get_sf_cursor(sf_profile: Optional[str]):
+    """Snowflake cursor via the standard profile mechanism (same as ts alias)."""
+    if not sf_profile:
+        return None
+    from ts_cli.commands.load import load_snowflake_profile, _connect_python
+    profile = load_snowflake_profile(sf_profile)
+    conn = _connect_python(profile, profile.get("default_warehouse", ""),
+                           profile.get("default_role", ""))
+    return conn.cursor()
+
+
+def _fetch_table_rows(sf_profile: Optional[str], table: Optional[str],
+                      what: str) -> List[Dict[str, Any]]:
+    """Read every row of a manifest table as a list of dicts."""
+    if not sf_profile or not table:
+        print(f"Error: --sf-profile and --table are required to read {what} from a database",
+              file=sys.stderr)
+        raise SystemExit(1)
+    cursor = _get_sf_cursor(sf_profile)
+    cursor.execute(f"SELECT * FROM {table}")  # noqa: S608 - operator-supplied table name
+    columns = [c[0] for c in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _read_object_manifest(objects_file: Optional[str], objects_table: Optional[str],
+                          sf_profile: Optional[str]) -> List[Dict[str, Any]]:
+    """Load the object manifest from a CSV or a Snowflake table."""
+    from ts_cli.publish_plan import parse_object_rows
+    if objects_file:
+        import csv as csv_module
+        with open(objects_file) as handle:
+            return parse_object_rows(csv_module.DictReader(handle))
+    if objects_table:
+        return parse_object_rows(_fetch_table_rows(sf_profile, objects_table, "objects"))
+    return []
+
+
+def _targets_from_manifest(client: ThoughtSpotClient,
+                           manifest: List[Dict[str, Any]]) -> List[str]:
+    """Manifest rows to a de-duplicated target list, honouring per-row dependents."""
+    expandable = [m["identifier"] for m in manifest if m["with_dependents"]]
+    targets = [m["identifier"] for m in manifest]
+    if expandable:
+        targets = _expand_dependents(client, expandable) + targets
+    return list(dict.fromkeys(targets))
+
+
+def _publish_all(client: ThoughtSpotClient, plan: Dict[str, Any]) -> None:
+    """Execute a plan's publish steps, one call per type."""
+    from ts_cli.commands.publish import _post_with_explanation, build_publish_payload
+    for entry in plan.get("publish") or []:
+        payload = build_publish_payload(entry["identifiers"], entry["type"], entry["orgs"])
+        _post_with_explanation(client, "/api/rest/2.0/security/metadata/publish", payload,
+                               entry["identifiers"], entry["type"])
+        print(f"published {len(entry['identifiers'])} {entry['type']} to "
+              f"{', '.join(entry['orgs'])}", file=sys.stderr)
+
+
+def build_closure(client: ThoughtSpotClient, targets: List[str]) -> Dict[str, Any]:
+    """Walk every target, merge the closures, and attach publication + cohort state.
+
+    Shared by `ts publish export` and `ts publish run` so the interactive and the
+    scheduled paths plan from identical data.
+    """
+    from ts_cli.publish_plan import merge_closures
+
+    existing = _variable_index(client)
+    org_index = _org_index(client)
+
+    closures: List[Dict[str, Any]] = []
+    members: set = set()
+    for guid in targets:
+        root, tables, seen = _walk_closure(client, guid)
+        members.update(seen)
+        status = client.post("/api/rest/2.0/metadata/search", json={
+            "metadata": [{"identifier": guid,
+                          "type": publish_type_for_root(root.get("type"))}],
+            "include_headers": True})
+        rows = publication_rows(status.json(), org_index)
+        closures.append({"root": root, "tables": tables,
+                         "existing_variables": set(existing.values()),
+                         "owner_org": rows[0]["owner_org"] if rows else None,
+                         "published_to": rows[0]["published_to"] if rows else []})
+
+    merged = merge_closures(closures)
+    merged["published_to"] = sorted({o for c in closures for o in c["published_to"]})
+    merged["cohort_columns"] = _cohort_columns(client, sorted(members))
+    return merged
+
+
 def _expand_dependents(client: ThoughtSpotClient, guids: List[str]) -> List[str]:
     """Add every Answer and Liveboard riding on the given objects.
 
@@ -127,8 +239,17 @@ def _cohort_columns(client: ThoughtSpotClient, member_guids: List[str]) -> List[
 
 @app.command("export")
 def export_closure(
-    guids: List[str] = typer.Argument(..., help="One or more GUIDs to plan publication for. "
-                                                "Any type: Table, Model, Answer or Liveboard."),
+    guids: List[str] = typer.Argument(None, help="One or more GUIDs to plan publication for. "
+                                                 "Any type: Table, Model, Answer or Liveboard. "
+                                                 "Omit when using --objects-file/--objects-table."),
+    objects_file: Optional[str] = typer.Option(None, "--objects-file",
+                                               help="CSV manifest of objects to publish "
+                                                    "(identifier,type,with_dependents)"),
+    objects_table: Optional[str] = typer.Option(None, "--objects-table",
+                                                help="Snowflake table holding the same manifest, "
+                                                     "e.g. DB.SCHEMA.TS_PUBLISH_OBJECTS"),
+    sf_profile: Optional[str] = typer.Option(None, "--sf-profile",
+                                             help="Snowflake profile for --objects-table"),
     with_dependents: bool = typer.Option(False, "--with-dependents",
                                          help="Also include every Answer and Liveboard riding "
                                               "on the given objects. Publish cascades DOWN to "
@@ -161,8 +282,15 @@ def export_closure(
     """
     from ts_cli.publish_plan import merge_closures
 
+    manifest = _read_object_manifest(objects_file, objects_table, sf_profile)
+    if manifest and guids:
+        raise typer.BadParameter("Give either GUID arguments or a manifest, not both")
+    if not manifest and not guids:
+        raise typer.BadParameter("Provide GUIDs, --objects-file or --objects-table")
+
     client = ThoughtSpotClient(resolve_profile(profile))
-    targets = list(dict.fromkeys(guids))
+    targets = (_targets_from_manifest(client, manifest) if manifest
+               else list(dict.fromkeys(guids)))
     if with_dependents:
         expanded = _expand_dependents(client, targets)
         if len(expanded) > len(targets):
@@ -250,22 +378,30 @@ def _resolve_orgs(client: ThoughtSpotClient, names: List[str]) -> List[Dict[str,
     return [{"name": n, "id": by_name[n]} for n in names]
 
 
-def _load_csv_rows(source: str, path: Optional[str]) -> Optional[List[Dict[str, str]]]:
-    """Read the value CSV, but only for --source file."""
-    if source != "file":
-        return None
-    if not path:
-        raise typer.BadParameter("--csv is required for --source file")
-    import csv as csv_module
-    with open(path) as handle:
-        return list(csv_module.DictReader(handle))
+def _load_value_rows(source: str, path: Optional[str], table: Optional[str],
+                     sf_profile: Optional[str]) -> Optional[List[Dict[str, str]]]:
+    """Read the variable-value manifest for --source file or --source db.
+
+    Both produce the same rows (org_name, variable_name, value), so the matrix
+    builder does not care which was used.
+    """
+    from ts_cli.publish_plan import parse_value_rows
+    if source == "file":
+        if not path:
+            raise typer.BadParameter("--csv is required for --source file")
+        import csv as csv_module
+        with open(path) as handle:
+            return parse_value_rows(csv_module.DictReader(handle))
+    if source == "db":
+        return parse_value_rows(_fetch_table_rows(sf_profile, table, "variable values"))
+    return None
 
 
 @app.command("resolve")
 def resolve(
-    org: List[str] = typer.Option(..., "--org", help="Target org name (repeatable)"),
+    org: List[str] = typer.Option([], "--org", help="Target org name (repeatable)"),
     source: str = typer.Option("uniform", "--source",
-                               help="uniform | pattern | file | existing"),
+                               help="uniform | pattern | file | db | existing"),
     input: Optional[str] = typer.Option(None, "--input", "-i",
                                         help="`ts publish export` JSON (default: stdin)"),
     pattern: List[str] = typer.Option([], "--pattern",
@@ -274,6 +410,14 @@ def resolve(
     csv: Optional[str] = typer.Option(None, "--csv",
                                       help="CSV with columns org_name,variable_name,value "
                                            "(--source file)"),
+    table: Optional[str] = typer.Option(None, "--table",
+                                        help="Snowflake table with the same columns "
+                                             "(--source db), e.g. DB.SCHEMA.TS_PUBLISH_VARIABLES"),
+    sf_profile: Optional[str] = typer.Option(None, "--sf-profile",
+                                             help="Snowflake profile for --source db"),
+    init_table: bool = typer.Option(False, "--init-table",
+                                    help="Print CREATE TABLE DDL for the manifest tables "
+                                         "(TS_PUBLISH_OBJECTS, TS_PUBLISH_VARIABLES) and exit"),
     field: List[str] = typer.Option([], "--field",
                                     help="Restrict to these fields (default: the recommended "
                                          "databaseName and schemaName)"),
@@ -290,6 +434,8 @@ def resolve(
       pattern   a per-field template expanded per org, e.g. schemaName={ORG_UPPER}.
                 A field with no pattern keeps its current value.
       file      a CSV of org_name,variable_name,value.
+      db        a Snowflake table with those same columns, for a governed,
+                scheduled deployment. --init-table prints the DDL.
       existing  values already assigned on the instance (re-publish / add-a-tenant).
 
     The owner (Primary) org is always included and always keeps its current
@@ -314,6 +460,12 @@ def resolve(
     """
     from ts_cli.publish_plan import build_value_matrix, parse_pattern_args, selectable_clusters
 
+    if init_table:
+        print(_PUBLISH_TABLES_DDL)
+        return
+    if not org:
+        raise typer.BadParameter("--org is required (repeatable) unless --init-table")
+
     envelope = _read_input(input)
     clusters = selectable_clusters(envelope.get("clusters") or [], fields=list(field) or None)
     if not clusters:
@@ -323,7 +475,7 @@ def resolve(
 
     client = ThoughtSpotClient(resolve_profile(profile))
     orgs = _resolve_orgs(client, list(org))
-    rows = _load_csv_rows(source, csv)
+    rows = _load_value_rows(source, csv, table, sf_profile)
 
     owner_org = envelope.get("owner_org")
     if owner_org and owner_org not in org:
@@ -449,14 +601,7 @@ def apply_plan(
     _write_rollback(plan["rollback"], rollback_out)
     _run_apply(client, plan)
 
-    for entry in plan["publish"] or []:
-        # One call per type: the publish API takes a single `type` per request.
-        from ts_cli.commands.publish import _post_with_explanation, build_publish_payload
-        payload = build_publish_payload(entry["identifiers"], entry["type"], entry["orgs"])
-        _post_with_explanation(client, "/api/rest/2.0/security/metadata/publish", payload,
-                               entry["identifiers"], entry["type"])
-        print(f"published {len(entry['identifiers'])} {entry['type']} to "
-              f"{', '.join(entry['orgs'])}", file=sys.stderr)
+    _publish_all(client, plan)
 
 
 @app.command("rollback")
@@ -514,3 +659,112 @@ def rollback(
                         json={"identifiers": step["names"]})
             print(f"deleted variable(s) {', '.join(step['names'])}", file=sys.stderr)
     print("rollback complete", file=sys.stderr)
+
+
+@app.command("run")
+def run_publication(
+    org: List[str] = typer.Option(..., "--org", help="Target org name (repeatable)"),
+    objects_file: Optional[str] = typer.Option(None, "--objects-file",
+                                               help="CSV manifest of objects to publish"),
+    objects_table: Optional[str] = typer.Option(None, "--objects-table",
+                                                help="Snowflake table holding the object manifest"),
+    values_file: Optional[str] = typer.Option(None, "--values-file",
+                                              help="CSV of org_name,variable_name,value"),
+    values_table: Optional[str] = typer.Option(None, "--values-table",
+                                               help="Snowflake table with the same columns"),
+    sf_profile: Optional[str] = typer.Option(None, "--sf-profile",
+                                             help="Snowflake profile for the manifest tables"),
+    source: Optional[str] = typer.Option(None, "--source",
+                                         help="Override the value source. Inferred from the "
+                                              "flags given: db, file, else uniform."),
+    pattern: List[str] = typer.Option([], "--pattern", help="field=template (--source pattern)"),
+    field: List[str] = typer.Option([], "--field", help="Restrict to these fields"),
+    rollback_out: Optional[str] = typer.Option(None, "--rollback-out",
+                                               help="Write the rollback record here. Strongly "
+                                                    "recommended for an unattended run."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan only, change nothing"),
+    profile: Optional[str] = _profile_option,
+) -> None:
+    """Run a whole publication end to end, unattended.
+
+    The scheduled counterpart to the interactive `export | resolve | apply`
+    pipeline: same engine, no prompts, one exit code. Suitable for cron or any
+    Python scheduler.
+
+    Reads what to publish and what each variable should be from a CSV or a
+    Snowflake table, plans the whole thing, and refuses to change anything unless
+    the plan is complete. Specifically it stops before touching the instance if a
+    variable has no value in a target org, or if a cohort column makes the
+    selection unpublishable.
+
+    Exits 0 on success, 1 on any refusal, with the reason on stderr.
+
+    Output: the executed plan as JSON to stdout, progress on stderr.
+
+    Examples:
+
+    \b
+      ts publish run --org ORG1 --org ORG2 \\
+        --objects-table DB.SCH.TS_PUBLISH_OBJECTS \\
+        --values-table  DB.SCH.TS_PUBLISH_VARIABLES \\
+        --sf-profile sf --rollback-out rb.json -p prod
+
+      ts publish run --org ORG1 --objects-file objects.csv \\
+        --values-file values.csv --rollback-out rb.json -p prod --dry-run
+    """
+    from ts_cli.publish_plan import (
+        build_apply_plan, build_value_matrix, parse_pattern_args, selectable_clusters,
+    )
+
+    if not (objects_file or objects_table):
+        raise typer.BadParameter("Provide --objects-file or --objects-table")
+    manifest = _read_object_manifest(objects_file, objects_table, sf_profile)
+    if not manifest:
+        raise typer.BadParameter("The object manifest is empty; nothing to publish")
+
+    client = ThoughtSpotClient(resolve_profile(profile))
+    targets = _targets_from_manifest(client, manifest)
+    print(f"selected {len(targets)} object(s)", file=sys.stderr)
+
+    closure = build_closure(client, targets)
+    if closure["cohort_columns"]:
+        print(f"Refusing to publish: cohort column(s) "
+              f"{', '.join(closure['cohort_columns'])} are defined on this selection. "
+              f"Cohort publishing is not supported and the block is Model-wide.",
+              file=sys.stderr)
+        raise typer.Exit(1)
+
+    clusters = selectable_clusters(closure["clusters"], fields=list(field) or None)
+    if not clusters:
+        raise typer.BadParameter(
+            "No parameterizable fields selected. Falcon-backed tables cannot be "
+            "parameterized; otherwise use --field to widen the selection.")
+
+    # Values
+    resolved_source = source or ("db" if values_table else "file" if values_file else "uniform")
+    rows = _load_value_rows(resolved_source, values_file, values_table, sf_profile)
+
+    orgs = _resolve_orgs(client, list(org))
+    matrix = build_value_matrix(
+        clusters, orgs, source=resolved_source,
+        patterns=parse_pattern_args(pattern), csv_rows=rows,
+        existing_values=_existing_values(client) if resolved_source == "existing" else None,
+        owner_org=closure.get("owner_org"),
+    )
+    if not matrix["coverage"]["complete"]:
+        for gap in matrix["coverage"]["missing"]:
+            print(f"Coverage gap: variable '{gap['variable']}' has no value for org "
+                  f"'{gap['org']}'", file=sys.stderr)
+        print("Refusing to publish: publishing would be rejected and a partial apply "
+              "is worse than none.", file=sys.stderr)
+        raise typer.Exit(1)
+
+    plan = build_apply_plan(closure, matrix, publish_orgs=list(org))
+    print(json.dumps(plan))
+    if dry_run:
+        print("Dry run: nothing was changed.", file=sys.stderr)
+        return
+
+    _write_rollback(plan["rollback"], rollback_out)
+    _run_apply(client, plan)
+    _publish_all(client, plan)

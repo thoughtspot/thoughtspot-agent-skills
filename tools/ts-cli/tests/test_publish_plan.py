@@ -553,3 +553,67 @@ def test_rollback_unpublishes_every_root():
     plan = build_apply_plan(merged, matrix, publish_orgs=["ORG1"])
     actions = [s for s in rollback_steps(plan["rollback"]) if s["action"] == "unpublish"]
     assert {a["type"] for a in actions} == {"LIVEBOARD", "ANSWER"}
+
+
+# ---------------------------------------------------------------------------
+# Manifest-driven selection (file / DB table), mirroring `ts alias --source db`
+# ---------------------------------------------------------------------------
+
+from ts_cli.publish_plan import parse_object_rows, parse_value_rows  # noqa: E402
+
+
+def test_parse_object_rows_minimal():
+    rows = [{"identifier": "guid-a"}, {"identifier": "guid-b"}]
+    assert parse_object_rows(rows) == [
+        {"identifier": "guid-a", "type": None, "with_dependents": False},
+        {"identifier": "guid-b", "type": None, "with_dependents": False},
+    ]
+
+
+def test_parse_object_rows_reads_type_and_dependents():
+    rows = [{"identifier": "g", "type": "liveboard", "with_dependents": "true"}]
+    assert parse_object_rows(rows) == [
+        {"identifier": "g", "type": "LIVEBOARD", "with_dependents": True}]
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("true", True), ("TRUE", True), ("yes", True), ("Y", True), ("1", True),
+    ("false", False), ("no", False), ("0", False), ("", False), (None, False),
+])
+def test_parse_object_rows_truthiness(raw, expected):
+    rows = [{"identifier": "g", "with_dependents": raw}]
+    assert parse_object_rows(rows)[0]["with_dependents"] is expected
+
+
+def test_parse_object_rows_is_case_insensitive_on_headers():
+    # A DB cursor typically returns upper-case column names.
+    rows = [{"IDENTIFIER": "g", "TYPE": "answer", "WITH_DEPENDENTS": "Y"}]
+    assert parse_object_rows(rows) == [
+        {"identifier": "g", "type": "ANSWER", "with_dependents": True}]
+
+
+def test_parse_object_rows_dedupes_preserving_order():
+    rows = [{"identifier": "b"}, {"identifier": "a"}, {"identifier": "b"}]
+    assert [r["identifier"] for r in parse_object_rows(rows)] == ["b", "a"]
+
+
+def test_parse_object_rows_rejects_a_row_with_no_identifier():
+    with pytest.raises(ValueError, match="identifier"):
+        parse_object_rows([{"type": "ANSWER"}])
+
+
+def test_parse_value_rows_normalises_headers():
+    rows = [{"ORG_NAME": "ORG1", "VARIABLE_NAME": "apj_schema", "VALUE": "A"}]
+    assert parse_value_rows(rows) == [
+        {"org_name": "ORG1", "variable_name": "apj_schema", "value": "A"}]
+
+
+def test_parse_value_rows_skips_blank_rows():
+    rows = [{"org_name": "", "variable_name": "", "value": ""},
+            {"org_name": "ORG1", "variable_name": "v", "value": "x"}]
+    assert len(parse_value_rows(rows)) == 1
+
+
+def test_parse_value_rows_rejects_an_incomplete_row():
+    with pytest.raises(ValueError, match="org_name"):
+        parse_value_rows([{"variable_name": "v", "value": "x"}])

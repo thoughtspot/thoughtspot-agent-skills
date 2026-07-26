@@ -176,6 +176,70 @@ def build_clusters(
 
 
 # ---------------------------------------------------------------------------
+# Manifest parsing — file and DB-table driven selection
+# ---------------------------------------------------------------------------
+
+_TRUTHY = {"true", "t", "yes", "y", "1"}
+
+
+def _lower_keys(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise a row's headers. A DB cursor returns them upper-case; a CSV
+    written by hand rarely does."""
+    return {str(k).strip().lower(): v for k, v in (row or {}).items()}
+
+
+def parse_object_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Parse a publication manifest of objects to publish.
+
+    Columns: ``identifier`` (required), ``type`` (optional; inferred from the
+    object when omitted), ``with_dependents`` (optional; expand upward to the
+    Answers and Liveboards riding on this object).
+
+    De-duplicated on identifier with order preserved, so a manifest that lists an
+    object twice does not publish it twice.
+    """
+    parsed: Dict[str, Dict[str, Any]] = {}
+    for raw in rows or ():
+        row = _lower_keys(raw)
+        identifier = str(row.get("identifier") or "").strip()
+        if not identifier:
+            raise ValueError(f"Manifest row has no identifier: {raw!r}")
+        if identifier in parsed:
+            continue
+        obj_type = str(row.get("type") or "").strip().upper() or None
+        parsed[identifier] = {
+            "identifier": identifier,
+            "type": obj_type,
+            "with_dependents": str(row.get("with_dependents") or "").strip().lower() in _TRUTHY,
+        }
+    return list(parsed.values())
+
+
+def parse_value_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Parse a variable-value manifest into the shape ``build_value_matrix`` wants.
+
+    Columns: ``org_name``, ``variable_name``, ``value``. Fully blank rows are
+    skipped so a trailing newline in a CSV is harmless; a partially filled row is
+    an error, because silently dropping it would surface later as a coverage gap
+    with no explanation.
+    """
+    out: List[Dict[str, str]] = []
+    for raw in rows or ():
+        row = _lower_keys(raw)
+        org = str(row.get("org_name") or "").strip()
+        name = str(row.get("variable_name") or "").strip()
+        value = row.get("value")
+        if not org and not name and not str(value or "").strip():
+            continue
+        for field, given in (("org_name", org), ("variable_name", name)):
+            if not given:
+                raise ValueError(f"Manifest row is missing {field}: {raw!r}")
+        out.append({"org_name": org, "variable_name": name,
+                    "value": "" if value is None else str(value)})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Value matrix — the `ts publish resolve` engine
 # ---------------------------------------------------------------------------
 
