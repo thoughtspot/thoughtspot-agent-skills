@@ -8,6 +8,9 @@ from ts_cli.csr_plan import (
     OPERATIONS,
     build_csr_steps,
     build_update_payload,
+    diff_csr,
+    explain_csr_error,
+    normalise_fetch_response,
     parse_rule_flags,
     parse_rule_rows,
 )
@@ -245,3 +248,115 @@ def test_without_prune_nothing_is_unsecured_however_stale():
 def test_steps_carry_the_operation_through():
     rows = _rows(("ORG1", "T2", "COST", "Finance"))
     assert build_csr_steps(rows, operation="ADD")[0]["operation"] == "ADD"
+
+
+# The prose example in the API docs shows a `data` envelope with camelCase keys; the
+# response schema shows a bare array with snake_case keys. Both are parsed, because
+# which one a given build returns is not knowable from the spec.
+
+_SNAKE = [{
+    "table_guid": "tg-1", "obj_id": "oid-1",
+    "column_security_rules": [
+        {"column": {"id": "c1", "name": "SALARY"},
+         "groups": [{"id": "g1", "name": "HR"}, {"id": "g2", "name": "Finance"}],
+         "source_table_details": {"id": "st-1", "name": "EMPLOYEE"}}]}]
+
+_CAMEL = {"data": [{
+    "guid": "tg-1", "objId": "oid-1",
+    "columnSecurityRules": [
+        {"column": {"id": "c1", "name": "SALARY"},
+         "groups": [{"id": "g1", "name": "HR"}, {"id": "g2", "name": "Finance"}],
+         "sourceTableDetails": {"id": "st-1", "name": "EMPLOYEE"}}]}]}
+
+
+def test_normalise_parses_the_snake_case_bare_array():
+    assert normalise_fetch_response(_SNAKE) == [
+        {"table_guid": "tg-1", "obj_id": "oid-1", "column_id": "c1",
+         "column_name": "SALARY", "group_names": ["Finance", "HR"],
+         "source_table_name": "EMPLOYEE"}]
+
+
+def test_normalise_parses_the_camel_case_data_envelope_identically():
+    assert normalise_fetch_response(_CAMEL) == normalise_fetch_response(_SNAKE)
+
+
+def test_normalise_sorts_group_names_so_a_diff_is_not_order_sensitive():
+    assert normalise_fetch_response(_SNAKE)[0]["group_names"] == ["Finance", "HR"]
+
+
+def test_normalise_tolerates_a_table_with_no_rules():
+    assert normalise_fetch_response([{"table_guid": "tg-1"}]) == []
+
+
+def test_normalise_tolerates_null_groups():
+    data = [{"table_guid": "tg", "column_security_rules": [
+        {"column": {"id": "c", "name": "COST"}, "groups": None}]}]
+    assert normalise_fetch_response(data)[0]["group_names"] == []
+
+
+def test_normalise_tolerates_junk():
+    assert normalise_fetch_response(None) == []
+    assert normalise_fetch_response({}) == []
+    assert normalise_fetch_response("nonsense") == []
+
+
+def _row(name, groups):
+    return {"table_guid": "tg", "obj_id": "", "column_id": "c",
+            "column_name": name, "group_names": groups, "source_table_name": ""}
+
+
+def test_diff_reports_an_added_rule():
+    diff = diff_csr([], [_row("SALARY", ["HR"])])
+    assert diff["added"] == [_row("SALARY", ["HR"])]
+    assert diff["removed"] == [] and diff["changed"] == []
+
+
+def test_diff_reports_a_removed_rule():
+    diff = diff_csr([_row("SALARY", ["HR"])], [])
+    assert diff["removed"] == [_row("SALARY", ["HR"])]
+
+
+def test_diff_reports_a_changed_group_list():
+    diff = diff_csr([_row("SALARY", ["HR"])], [_row("SALARY", ["HR", "Finance"])])
+    assert diff["changed"] == [
+        {"table_guid": "tg", "column_name": "SALARY",
+         "before_groups": ["HR"], "after_groups": ["HR", "Finance"]}]
+
+
+def test_diff_of_an_unchanged_state_is_empty_everywhere():
+    rows = [_row("SALARY", ["HR"])]
+    assert diff_csr(rows, list(rows)) == {"added": [], "removed": [], "changed": []}
+
+
+def test_explain_translates_the_feature_flag_403():
+    body = '{"error":{"code":10023,"message":"Column Security rule feature is disabled"}}'
+    message = explain_csr_error(body, 403)
+    assert "feature-flagged" in message
+    assert "10.12" in message
+    assert "permission" not in message.lower()
+
+
+def test_explain_translates_a_403_without_10023_as_a_permissions_problem():
+    message = explain_csr_error('{"error":{"message":"Forbidden"}}', 403)
+    assert "DATAMANAGEMENT" in message
+
+
+def test_explain_translates_the_missing_table_reference():
+    body = 'Error Code: 14502 Referenced table with name  not found'
+    message = explain_csr_error(body, 400)
+    assert "table:" in message
+
+
+def test_explain_translates_a_clear_csr_rejection():
+    body = "column_security_rules is required"
+    assert "clear_csr" in explain_csr_error(body, 400)
+
+
+def test_explain_returns_none_for_an_unrecognised_body():
+    # None means the caller surfaces the raw error, rather than a confident paraphrase
+    # of something we do not actually recognise.
+    assert explain_csr_error("some new failure nobody has seen", 500) is None
+
+
+def test_explain_tolerates_an_empty_body():
+    assert explain_csr_error("", None) is None
