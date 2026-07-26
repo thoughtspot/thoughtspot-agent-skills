@@ -156,7 +156,9 @@ def test_set_dry_run_prints_the_payload_and_posts_nothing(patched):
                                  "--rule", "COST=Finance", "--dry-run", "-p", "x"])
     assert result.exit_code == 0
     assert json.loads(result.stdout)["identifier"] == "T2"
-    assert not [p for p, _ in client.calls if p == UPDATE]
+    # --dry-run never constructs a client at all, so no call of any kind should be
+    # recorded -- not just an absence of the UPDATE path specifically.
+    assert client.calls == []
 
 
 def test_set_rejects_a_malformed_rule_flag(patched):
@@ -187,11 +189,31 @@ def test_clear_one_column_unsecures_just_that_column(patched):
                         {"column_identifier": "COST", "is_unsecured": True}]}
 
 
+def test_clear_rejects_an_explicitly_empty_column(patched):
+    # --column "" (e.g. an unset shell variable spliced into `--column "$COL"`) must NOT
+    # silently fall through to the whole-table clear branch -- that would strip every
+    # column's security on a routine scripting mistake, which is the one failure
+    # direction this feature must never take silently. An explicit empty string is
+    # distinct from an omitted flag (column is None) and must be refused.
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = msg_runner.invoke(app, ["security", "column-rules", "clear", "--table", "T2",
+                                     "--column", "", "-p", "x"])
+    assert result.exit_code != 0
+    assert not [p for p, _ in client.calls if p == UPDATE]
+
+
 def test_set_asserts_the_org_context_before_writing(monkeypatch, patched):
-    seen = []
-    patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
-    monkeypatch.setattr("ts_cli.commands.security.assert_org_context",
-                        lambda client, org, profile=None: seen.append(org))
+    # The assertion and the POST are recorded into the SAME ordered list (the fake
+    # client's own `.calls`) so the test can prove the assertion ran BEFORE the write,
+    # not merely that it ran. An implementation that posted first and asserted
+    # afterwards -- exactly the bug this assertion exists to prevent -- would still
+    # pass a test that only checked "did assert_org_context get called at all".
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    monkeypatch.setattr(
+        "ts_cli.commands.security.assert_org_context",
+        lambda c, org, profile=None: client.calls.append(("assert_org_context", org)))
     runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
                         "--rule", "COST=Finance", "--org", "ORG1", "-p", "x"])
-    assert seen == ["ORG1"]
+    kinds = [p for p, _ in client.calls]
+    assert "assert_org_context" in kinds and UPDATE in kinds
+    assert kinds.index("assert_org_context") < kinds.index(UPDATE)

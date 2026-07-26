@@ -259,7 +259,7 @@ def clear_cmd(
       ts security column-rules clear --table T2_PUBLISH --org ORG1 -p prod
     """
     try:
-        if column:
+        if column is not None:
             payload = build_update_payload(table, {}, unsecure=[column])
             label = f"{table}: unsecure {column}"
         else:
