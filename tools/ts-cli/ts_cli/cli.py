@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, load, metadata, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tml, users, variables  # noqa: F401 — dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, all at import
+from ts_cli.commands import aggregate, alias, audit, auth, connections, databricks, dependency, dependency_apply, load, metadata, model, orgs, parameterize, powerbi, profiles, publish, publish_planning, qlik, security, share, share_planning, sisense, snowflake, spotql, spotter, tables, tableau, tml, users, variables  # noqa: F401 — dependency_apply registers `apply-change` on dependency.app, parameterize registers `parameterize`/`unparameterize` on metadata.app, publish_planning registers `export`/`resolve` on publish.app, share_planning registers `export`/`resolve`/`apply` on share.app, security_planning registers `resolve`/`build`/`apply`/`import` on security.column_rules_app, all at import
 
 app = typer.Typer(
     name="ts",
@@ -26,6 +26,7 @@ app.add_typer(tml.app, name="tml")
 app.add_typer(profiles.app, name="profiles")
 app.add_typer(publish.app, name="publish")
 app.add_typer(share.app, name="share")
+app.add_typer(security.app, name="security")
 app.add_typer(spotql.app, name="agentql")
 app.add_typer(spotql.app, name="spotql", hidden=True)  # deprecated alias for `ts agentql`; kept for back-compat
 app.add_typer(spotter.app, name="spotter")
