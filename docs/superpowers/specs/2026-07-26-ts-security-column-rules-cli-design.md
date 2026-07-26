@@ -155,14 +155,22 @@ like this" call rather than a sequence whose result depends on prior state.
 
 ### 3.3 Published tables are refused, not attempted
 
-CSR cannot be defined on published objects (parent spec §2, plan §4.3). `resolve` already
-reads each table's `metadata_header` to turn a name into a GUID, so it records `orgIds` from
-the same response and marks affected rows `CSR_BLOCKED`. `apply` refuses those rows unless
-`--allow-published` is passed.
+CSR cannot be defined on published objects (parent spec §2, plan §4.3). `resolve` reads each
+table's publication state and marks affected rows `CSR_BLOCKED`; `apply` refuses those rows
+unless `--allow-published` is passed.
 
-This is parent spec §5.1's `CSR_BLOCKER` at CLI level, and it costs one field off a call
-already being made. It fails at plan time rather than mid-apply, matching the house style
-that `apply` refuses before touching anything if the plan is incomplete.
+This is parent spec §5.1's `CSR_BLOCKER` at CLI level. It fails at plan time rather than
+mid-apply, matching the house style that `apply` refuses before touching anything if the
+plan is incomplete.
+
+**Corrected during implementation.** This section originally claimed the publication read
+was free, coming off the same `metadata_header` the GUID resolution already fetched. That
+is wrong. The shared `_resolve_object` helper discards `orgIds` when it builds its
+descriptor, so reading publication state costs one extra `metadata/search` per table.
+Folding it into the resolution call would mean either changing that shared helper, which
+`ts share` also uses, or duplicating its ambiguity-refusal logic. The extra read was
+accepted instead. The cost is one additional round-trip per table at plan time, on a
+command that is already doing per-table lookups.
 
 ### 3.4 Org scoping is asserted, not assumed
 
