@@ -3569,3 +3569,69 @@ low-risk tenants migrate now, Sets-using tenants form a later batch.
 One `LOGICAL_COLUMN` search per Org, sliced per Model — deliberately not one call per
 Model, because being cheap enough to run fleet-wide is the command's whole justification.
 Dependents are walked only for Models that actually carry a cohort column.
+
+---
+
+## `ts migrate apply` / `rollback` — Phase 2: move one tenant onto the published Model
+
+Runs the **per-tenant** half of the migration. Cutover is deliberately *not* included:
+users move only once the Org has been verified in its final state, and until then the
+rollback is the untouched source Org.
+
+```bash
+# ALWAYS read the plan first — every step is destructive in someone's Org
+ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --dry-run
+
+ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan \
+  --sets-scan ./scan/sets-scan.json
+ts migrate apply --source-org ACME --target-org "ACME NEW" -d ./plan --resume
+```
+
+`--plan-dir` holds the approved `column-mapping.csv` from `ts migrate audit`, and
+receives `backup/` and the `state.json` ledger.
+
+### The step order, and why it is what it is
+
+| # | Step | Why here |
+|---|---|---|
+| 1 | `backup` | Nothing is written before a complete copy exists. All-or-nothing: a partial backup reads as a safety net that is not there |
+| 2 | `lift_scaffolding` | Tables + Models as **one batch**, so intra-batch references remap on import |
+| 3 | `lift_content` | Views → Answers → Liveboards; references only remap for objects already in the batch |
+| 4 | `rename` | Once per column, cascading to every dependent automatically — O(columns), not O(objects) |
+| 5 | `repoint` | A 1:1-by-name match, which only works *after* the rename aligned the names |
+| 6 | `cleanup_models` | Before Tables. **A refusal here is the check working** — see below |
+| 7 | `cleanup_tables` | Before the connection |
+| 8 | `cleanup_connection` | Last: connection deletion does **not** cascade to its Tables |
+
+### Two behaviours that look like errors and are not
+
+**A scaffolding Model that refuses to delete is a missed repoint.** By step 6 nothing
+should reference the scaffolding. A Model with dependents means content was left behind,
+and forcing past the refusal orphans it. This is the reason cleanup is surgical rather
+than a wholesale Org delete, which would take the un-repointed content silently.
+
+**An RLS rule is re-read after any write that touches a table carrying one.** A malformed
+`rls_rules` block imports with `status_code: OK`, is discarded, *and destroys the rule
+already on the table* (**BL-144**) — silent in the direction that removes security. `OK`
+is never sufficient evidence here.
+
+### Connection handling
+
+Connection names are **per-Org**, so the target Org can hold a connection named exactly
+as the source's — and then every lifted Table's `connection` block resolves unchanged.
+A different name is not fatal: `apply` rewrites one field per Table. No connection at all
+*is* fatal, because publishing a Table into an Org does not grant that Org a usable
+connection; provision it with `ts tenancy` first.
+
+### Rollback
+
+```bash
+ts migrate rollback --target-org "ACME NEW" -d ./plan --dry-run
+ts migrate rollback --target-org "ACME NEW" -d ./plan
+```
+
+Deletes what the ledger records this run as creating, in the safe order (content →
+Models → Tables). **The source Org is never touched** — `apply` leaves it untouched
+precisely so rollback never has to restore into it. Before cutover the target Org holds
+nothing but this migration's output, so abandoning the whole attempt is better served by
+deleting the Org outright (`ts tenancy teardown`).

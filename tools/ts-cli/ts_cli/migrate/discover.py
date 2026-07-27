@@ -144,3 +144,70 @@ def column_dependents(client, column_guid: str) -> List[dict]:
     """
     from ts_cli.commands.metadata import _collect_dependents
     return _collect_dependents(client, column_guid)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 discovery — what `apply` lifts, and what it binds to
+# ---------------------------------------------------------------------------
+
+def scaffolding_objects(client, model_names: List[str]) -> dict:
+    """`{"tables": [...], "models": [...]}` of source GUIDs for the named Models.
+
+    The Tables come from each Model's own `model_tables[]` rather than from a search,
+    because a search would sweep up every Table in the Org -- including ones this tenant's
+    Models do not use, which would then be lifted, renamed and deleted for nothing.
+    """
+    models: List[str] = []
+    tables: List[str] = []
+    for name in model_names:
+        guid = find_model_by_name(client, name)
+        if not guid:
+            continue
+        models.append(guid)
+        doc = export_parsed(client, guid)
+        body = doc.get("model") or doc.get("worksheet") or {}
+        for entry in body.get("model_tables") or []:
+            fqn = entry.get("fqn")
+            if fqn and fqn not in tables:
+                tables.append(fqn)
+    return {"tables": tables, "models": models}
+
+
+def bespoke_content(client, model_guids: List[str]) -> dict:
+    """Tenant-authored dependents of the given Models, split by lift order.
+
+    Views before Answers before Liveboards: intra-batch references remap on import, but
+    only for objects already in the batch, and the reference direction runs
+    Liveboard -> Answer -> View.
+    """
+    buckets = {"views": [], "answers": [], "liveboards": []}
+    key = {"LOGICAL_TABLE": "views", "ANSWER": "answers", "LIVEBOARD": "liveboards"}
+    for guid in model_guids:
+        for dep in list_dependents(client, guid):
+            dep_type = str(dep.get("type") or dep.get("metadata_type") or "").upper()
+            dep_guid = dep.get("id") or dep.get("metadata_id")
+            bucket = key.get(dep_type)
+            if bucket and dep_guid and dep_guid not in buckets[bucket]:
+                buckets[bucket].append(dep_guid)
+    return buckets
+
+
+def connection_names(client) -> List[str]:
+    """Connection display names visible in this client's Org.
+
+    Names, never GUIDs: a Table TML's `connection` block resolves by name, and that is
+    exactly what makes a same-named connection in the target Org let lifted TML import
+    unchanged.
+    """
+    resp = client.post("/api/rest/2.0/connection/search", json={"record_size": -1})
+    return [c.get("name") for c in resp.json() if c.get("name")]
+
+
+def connection_name_of(client, table_guids: List[str]) -> str:
+    """The connection the tenant's scaffolding Tables sit on. Empty string if unknown."""
+    for guid in table_guids:
+        doc = export_parsed(client, guid)
+        conn = (doc.get("table") or {}).get("connection") or {}
+        if conn.get("name"):
+            return conn["name"]
+    return ""
