@@ -3640,7 +3640,17 @@ mid-apply. The shipped reference topology at `tools/fixtures/tenancy-reference.y
 cannot drift from the environment it describes.
 
 Warehouse tables remain `ts load`'s job, as this item anticipated; `ts tenancy` owns the
-Org/user/group topology only. Production tenant onboarding is BL-143.
+Org/user/group topology only.
+
+**The guided path is `/ts-setup-tenancy`** (second PR). The CLI alone did not satisfy this
+item's own wording -- "a cluster state a newcomer can stand up from scratch and immediately
+use to run the whole pattern" -- because the end-to-end sequence spans five command groups
+and carries real judgement. The skill builds one of four scenarios: `topology`, `per-org`
+(the PRE-migration state, which is `ts migrate audit`'s input), `published` (the
+post-migration target) and `mixed` (the half-migrated state a real cluster occupies for the
+whole duration of a migration, and where the untested interactions live).
+
+Production tenant onboarding is BL-143.
 
 **Why it mattered.** Today, exercising publication, sharing, aliasing and column security
 end to end requires a cluster someone has hand-built, and reproducing it is undocumented

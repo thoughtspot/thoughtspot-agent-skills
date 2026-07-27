@@ -3469,6 +3469,39 @@ A captured reference topology ships at
 | **Passwords are never a flag** | `--password-env` names a variable you export yourself; the value is read from the environment and never echoed. Federated accounts never receive one |
 | **`{TENANT}` templating** | One spec, N tenants: `--tenant ACME` substitutes `{TENANT}` / `{TENANT_UPPER}` / `{TENANT_LOWER}`, matching `ts publish resolve --pattern` |
 
+### Calling it from Python
+
+The planning engine is **pure** — no I/O, no typer, no client — so it can be imported and
+driven directly when you want the decisions without the command layer. That is a
+deliberate design property (`.claude/rules/ts-cli.md`), not an accident, and it is what
+makes the whole decision surface unit-testable without a live instance.
+
+```python
+import yaml
+from ts_cli.tenancy_spec import parse_spec, validate_spec, substitute_tenant
+from ts_cli.tenancy_plan import build_apply_plan, diff_topology, format_plan
+
+doc  = yaml.safe_load(open("tools/fixtures/tenancy-reference.yaml"))
+doc  = substitute_tenant(doc, "ACME")          # optional: resolve {TENANT}
+spec = parse_spec(doc)
+
+problems = validate_spec(spec)                  # ALL problems, not just the first
+if problems:
+    raise SystemExit("\n".join(problems))
+
+# `current` is the live reading; omit it to plan against an empty cluster.
+for line in format_plan(build_apply_plan(spec)):
+    print(line)
+```
+
+`current` has the shape `{"orgs": [...], "groups": {org: [...]}, "users": [...],
+"members": {org: {group: [user]}}}`. `ts tenancy`'s own `_read_cluster` builds it, and
+`diff_topology(spec, current)` is what `verify` reports.
+
+Reading live state still needs the command layer (`ts_cli.commands.tenancy._read_cluster`),
+which owns the auth and the per-Org clients. Prefer the CLI unless you specifically want
+the planning decisions in-process.
+
 **Production note.** The engine is production-capable — a real tenant's Org, groups and
 users are the same operation — but production onboarding is usually *partial* (the Org is
 created, users arrive via SSO), and selective application (`--only orgs,groups`) plus a

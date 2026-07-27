@@ -26,5 +26,6 @@
 | ts-recipe-formula-business-days-snowflake | Y | — | — | — |
 | ts-recipe-formula-hms-display-snowflake | Y | — | — | — |
 | ts-security-columns | Y | — | — | — |
+| ts-setup-tenancy | Y | — | — | — |
 | ts-setup-sv | — | — | Y | — |
 | ts-variable-timezone | Y | — | — | — |
