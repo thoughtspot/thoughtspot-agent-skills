@@ -42,8 +42,8 @@ example):** in the flat shape there is no `table_paths` indirection, so this
 module infers a bracket ref's identifier resolves against the owning table's
 own name (a `[<TABLE_NAME>::COL]`-style self-reference), implemented by seeding
 the path map with a `{own_table: (own_table, [])}` fallback entry before
-resolving refs. Task 23 / live testing must confirm this against a real
-flat-shape export — see open-items.md #17.
+resolving refs. Live testing must confirm this against a real flat-shape
+export — tracked as open-items.md #19.
 
 Rule exprs reference `[<path_id>::<COLUMN>]` and ThoughtSpot system vars
 (`ts_groups`, `ts_groups_int`, `ts_username`, `ts_var(...)`, etc.) — the system

@@ -171,7 +171,9 @@ def main() -> int:
 
     print()
     if total_fail:
-        print(f"{total_fail} unresolved open item(s) in PR-changed files.")
+        # Only --base scopes failures to the PR diff; without it every file is in scope.
+        scope = "in PR-changed files" if changed is not None else "across all skills"
+        print(f"{total_fail} unresolved open item(s) {scope}.")
         print(
             "Resolve items by running the test procedures and recording findings "
             "in the 'Finding:' section, then change Status from UNTESTED to VERIFIED."
