@@ -6,6 +6,14 @@
 § *Remaining spike (implementation task #1)*
 **Baseline:** captured, restored, diff proven (§6).
 
+> **§1 and §3 have since been resolved — read
+> [`2026-07-27-ts-migrate-binding-resolution.md`](2026-07-27-ts-migrate-binding-resolution.md)
+> before acting on them.** Both were framed against an assumed topology (one shared clean
+> Org) that the repo owner corrected to **one fresh Org per tenant, each with its own
+> connection**. Under the real topology: connection names are per-Org, so a same-named
+> connection makes §1's rewrite unnecessary; and the dedupe key includes the connection, so
+> §3 is a fact but not a blocker. §2 stands and is now an explicit provisioning step.
+
 ## The question, and the answer
 
 > Confirm that a **batch import into a fresh Org remaps intra-batch references cleanly** —
