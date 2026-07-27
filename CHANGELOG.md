@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-07-27
+- feat: add `ts-security-columns` skill — the decision layer over ThoughtSpot's two column-security mechanisms. Chooses between column security rules (CSR) and column-level sharing (CLS) **per (Org, object)** rather than per object, because the mechanism is selected by the audience: the same published table needs CSR for its owning Org's users and CLS for a tenant's, simultaneously. Carries a hard confirmation gate for Strict Object Mode (unreadable by any API; CLS grants silently no-op without it), refuses to recommend anything when no mechanism works, and states plainly that an object-level `NO_ACCESS` is not a revoke. Adds a `ts-security-*` skill family mirroring the `ts security` CLI group
+- fix: correct `ts-publish-orgs` Step 12, which stated the disproven "column security rules cannot be defined on published objects"; it now explains the Org-scoping and hands off to `/ts-security-columns` (skill v1.1.0)
 - fix: `ts share export --org <tenant>` could not see objects native to that Org — it resolved the object and listed its columns with the default-Org client, scoping only the permissions read. Now resolves across the default Org and every `--org`, listing columns through whichever Org could see the object
 - fix: translate CSR error code `10038` — a tenant Org refused CSR on an object published into it (the spec documents this as 403; the build returns 500, so the generic 403 fallback never fired). `10023`'s translation now says to check publication before auditing privileges, because the error is state-dependent
 - chore: bump ts-cli to v0.110.0

@@ -37,6 +37,10 @@ from _dirs import ALL_RUNTIMES
 # ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
+    ("ts-security-columns", "coco-snowsight"):
+        "A decision layer over two ts CLI pipelines with a mandatory interactive "
+        "confirmation gate (Strict Object Mode is unreadable by any API); there is no "
+        "stored-procedure shape for a hard human stop, and CoCo cannot invoke the ts CLI.",
     ("ts-publish-orgs", "coco-snowsight"):
         "Orgs Publishing is a ThoughtSpot admin operation driven entirely by the ts CLI; "
         "no Snowsight stored-procedure equivalent",

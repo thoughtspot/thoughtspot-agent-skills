@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**136 total items** across 17 skills — **65 open**, 61 verified, 10 deferred
+**142 total items** across 18 skills — **66 open**, 66 verified, 10 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -23,10 +23,11 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-convert-from-tableau | 17 | **2** | 12 | 3 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
+| ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-object-model-agentql-query | 4 | **0** | 4 | 0 |
-### Untagged (65 items)
+### Untagged (66 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -97,4 +98,5 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-publish-orgs | #6 | Connection-property variables are not discovered | OPEN |
 | ts-publish-orgs | #7 | `--source db` is Snowflake-only | OPEN |
 | ts-publish-orgs | #8 | Sharing is a separate capability, not yet built | OPEN |
+| ts-security-columns | #6 | Does `ts share status` distinguish a failed revoke? | OPEN |
 

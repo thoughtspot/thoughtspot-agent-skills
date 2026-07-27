@@ -380,9 +380,9 @@ That is a separate step. Column-level security uses the same sharing mechanism,
 so the two are usually done together.
 ```
 
-Until a dedicated sharing skill exists, point the user at
-`POST /api/rest/2.0/security/metadata/share` (`shareMetadata`), or offer to run it for them
-with explicit confirmation of the principals and share mode.
+Sharing is driven by `ts share` (object and column grants). For column-level security
+specifically, hand off to **`/ts-security-columns`**, which chooses between the two
+mechanisms per Org rather than assuming one.
 
 **Do not guess the audience.** Sharing decides who sees tenant data, so the principals and
 the share mode are the user's call, never a default.
@@ -391,16 +391,34 @@ the share mode are the user's call, never a default.
 
 Worth stating when the user asks, because the choice is constrained by what this skill did:
 
-| | Published objects (this skill) | Unpublished objects |
-|---|---|---|
-| Mechanism | Column-level **sharing** | Column security **rules** |
-| API | `security/metadata/share` | `security/column/rules/update` |
-| Liveboard filters on secured columns | Liveboard locks; replicate instead of publishing | Liveboard stays interactive |
+The mechanism is chosen by the **audience**, not by the object. Publication state alone
+does not decide it — the same published table needs different mechanisms for different
+Orgs' users, at the same time:
 
-Column security rules **cannot be defined on published objects**, so publishing commits the
-tenant to column-level sharing. If the deployment needs interactive Liveboards whose filters
-sit on secured columns, that is an argument for the shared-Org architecture rather than
-Org-per-tenant.
+| Whose users you are protecting | Mechanism | API |
+|---|---|---|
+| The **owning** Org's own users | Column security **rules** (CSR) | `security/column/rules/update` |
+| A **tenant** Org's users, on an object published to them | Column-level **sharing** (CLS) | `security/metadata/share` |
+
+**Correction, live-verified 2026-07-27.** This section previously said column security
+rules "cannot be defined on published objects". That is false, and the true situation is
+subtler. The platform **accepts** CSR on a published object and enforces it — but only in
+the Org that defined it. Every tenant Org keeps the column fully visible, with no error and
+no warning either way. Separately, a tenant Org cannot define its own rule on an object
+published into it (`10038 FORBIDDEN`). So CSR is right for the owning Org's users and
+unavailable for tenants; CLS is the mechanism that reaches tenants.
+
+CLS carries its own precondition: it only takes effect when the cluster is in **Strict
+Object Mode**, which no API exposes. Grants applied without it succeed silently and do
+nothing.
+
+Liveboard filters still differ: under CLS a Liveboard filtered on a secured column
+**locks**; under CSR it stays interactive. If the deployment needs interactive Liveboards
+whose filters sit on secured columns for *tenant* users, that remains an argument for the
+shared-Org architecture rather than Org-per-tenant.
+
+**Run `/ts-security-columns`** — it makes this choice per (Org, object), gates the Strict
+Object Mode confirmation, and drives whichever pipeline results.
 
 ---
 
@@ -480,4 +498,5 @@ record of the original static values.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-07-27 | Correct Step 12's column-security guidance: CSR *can* be defined on published objects but is Org-scoped, and the mechanism is chosen by audience not publication state; hand off to `/ts-security-columns` |
 | 1.0.0 | 2026-07-26 | Initial release |
