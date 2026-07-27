@@ -3908,3 +3908,67 @@ have been expensive to retrofit, so it was done first.
 
 **Target:** after the migration additions (parent spec §5 of
 `2026-07-26-ts-security-sharing-design.md`), so the skill covers the finished platform.
+
+---
+
+## BL-144 -- PLATFORM: a column-less RLS expression imports `OK` and silently WIPES existing rules `Tier 1`
+
+**Filed:** 2026-07-27.
+**Source:** RLS-on-published verification for `ts-org-migrate`, on `nebula-damian-alias`.
+See `docs/superpowers/verification/2026-07-27-ts-migrate-binding-resolution.md`.
+
+An RLS `expr` that references no column is accepted by TML import with `status_code: OK`,
+but the `rules` array is **discarded** -- and if the table already carried a valid rule,
+**that rule is destroyed too**. Verified in sequence on one table:
+
+| # | `expr` | Import | Rule afterwards |
+|---|---|---|---|
+| 1 | `[T_1::PROD_NM] = ts_username` | `OK` | present, correct |
+| 2 | `[T_1::PROD_NM] = ts_orgid` | `ERROR` -- unknown keyword | unchanged (rule 1 intact) |
+| 3 | `ts_orgid = 0` | **`OK`** | **GONE** -- rule 1 destroyed |
+
+Row 2 is the control that makes this a defect rather than a syntax complaint: the *same*
+unknown keyword errors loudly when a column reference is present, and passes silently when
+it is not. The rule is discarded before keyword validation, so the caller is told the
+import succeeded.
+
+**Why Tier 1.** The failure is silent in the direction that removes security. An operator
+who applies a malformed rule believes RLS is in force; the table is in fact unfiltered, and
+any rule that *was* protecting it is gone. Nothing in the response distinguishes this from
+a successful application.
+
+**Ask:** reject a rule whose expression references no column, rather than dropping it; and
+never let a rejected rule delete the rule it was meant to replace.
+
+**Mitigation until fixed** -- any code path writing `rls_rules` must **read back and assert
+the rule survived**, never trusting `status_code: OK`. Applies to `ts migrate apply` when
+it lifts tables carrying RLS.
+
+---
+
+## BL-145 -- `ts_orgid` is not a valid RLS keyword; Org-aware RLS needs ABAC formula variables `Tier 2`
+
+**Filed:** 2026-07-27.
+**Source:** as BL-144.
+
+The natural predicate for a published single-model tenancy -- filter rows by the querying
+user's Org -- has no system variable on this build. `ts_orgid` is rejected:
+`Search did not find "ts_orgid" in your data or metadata`. The documented system variables
+are only `ts_username` and `ts_groups`.
+
+The documented Org-aware route is `ts_var(varName)` against an **ABAC formula variable**,
+whose values can be set per Org. On `nebula-damian-alias` that is also unavailable:
+`ts_var(apj_schema)` is rejected at parse time, and the `VariableType` enum on
+`template/variables/create` accepts neither `FORMULA`, `RLS` nor `USER_PARAMETER`. The
+only variable observed is `TABLE_MAPPING` -- the *publishing* parameterization class, which
+is a different mechanism from ABAC formula variables despite the shared endpoint.
+
+So on this cluster the two Org-aware options are: a `ts_groups` predicate against a
+per-Org group whose name matches a tenant-key column value, or enabling ABAC via RLS.
+
+**Blocks:** open question 4 in the org-migrate design cannot be fully answered until an
+Org-aware predicate is available; only the *does RLS carry at all* half is testable today
+(via `ts_username`).
+
+**Next:** confirm with the platform team whether ABAC via RLS is a flag that can be enabled
+on this cluster, and whether an Org-scoped system variable is planned.
