@@ -164,3 +164,43 @@ def test_markdown_states_there_is_no_override():
     someone would go looking for the flag."""
     md = render_scan_markdown(build_scan_report(["T1"], 1, [_blocked()]))
     assert "no override" in md.lower()
+
+
+# ---------------------------------------------------------------------------
+# Regression: an Org-scoped search returns objects it does not OWN
+# ---------------------------------------------------------------------------
+
+def test_list_models_filters_to_models_the_org_actually_owns():
+    """Live-observed 2026-07-27: an Org-scoped `metadata/search` returns every object
+    VISIBLE in that Org, including Primary-owned shared and system ones. Without an owner
+    filter the fleet scan counted one Primary-owned Model once per tenant Org and reported
+    it as each tenant's blocker — inflating the single number the whole command exists to
+    produce.
+
+    Same failure mode as `tenancy._groups_in_org`: the row's own header is the authority,
+    not which client fetched it.
+    """
+    from ts_cli.migrate import discover
+
+    rows = [
+        {"metadata_id": "m_own", "metadata_name": "TenantModel",
+         "metadata_header": {"ownerOrgId": 7}},
+        {"metadata_id": "m_primary", "metadata_name": "SharedModel",
+         "metadata_header": {"ownerOrgId": 0}},
+    ]
+
+    class _Client:
+        @staticmethod
+        def post(_path, json=None):
+            class _R:
+                @staticmethod
+                def json():
+                    return rows
+            return _R()
+
+    owned = discover.list_models(_Client(), owner_org_id=7)
+    assert [m["name"] for m in owned] == ["TenantModel"]
+
+    # Without the filter the caller still gets everything visible — the audit path relies
+    # on that, so the narrowing must stay opt-in.
+    assert len(discover.list_models(_Client())) == 2

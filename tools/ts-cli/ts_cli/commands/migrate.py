@@ -63,6 +63,22 @@ def audit(
     _err(f"Audit complete: {len(report['models'])} model(s), overall {ready}. Files in {out_dir}")
 
 
+def _owning_org_id(client) -> Optional[int]:
+    """Numeric id of the Org this client's session is actually in.
+
+    Read back from the session rather than assumed from the `--source-org` argument,
+    because `auth/token/full` silently ignores a non-numeric org identifier and falls back
+    to the caller's default Org. Attributing a scan to the Org that was ASKED for rather
+    than the one it ran in would mislabel every blocked Model in the report.
+    """
+    try:
+        current = (client.get("/api/rest/2.0/auth/session/user").json()
+                   or {}).get("current_org") or {}
+        return current.get("id")
+    except (Exception, SystemExit):
+        return None
+
+
 def _resolve_scan_models(client, model: List[str], all_models: bool,
                          models_file: Optional[str],
                          models_table: Optional[str], sf_profile: Optional[str]) -> List[dict]:
@@ -74,7 +90,9 @@ def _resolve_scan_models(client, model: List[str], all_models: bool,
     from ts_cli.migrate import discover
 
     if all_models:
-        return discover.list_models(client)
+        # Restrict to Models this Org OWNS. Without it a Primary-owned Model is counted
+        # once per tenant Org and reported as each tenant's blocker -- observed live.
+        return discover.list_models(client, owner_org_id=_owning_org_id(client))
 
     identifiers = list(model)
     if models_file:
@@ -146,6 +164,13 @@ def scan_sets(
     """
     from pathlib import Path
 
+    # Reuse `ts share`'s Org helpers rather than building a client from a raw name.
+    # `auth/token/full` SILENTLY IGNORES a non-numeric `org_identifier` and falls back to
+    # the caller's default Org, so passing "ORG1" straight through scans Primary while
+    # reporting it as ORG1. `_client_for_org` resolves the name to a numeric id and
+    # `assert_org_context` reads the session back before we trust it. Observed live
+    # 2026-07-27: without this, --source-org ORG1 --source-org ORG2 scanned Primary twice.
+    from ts_cli.commands.share import _client_for_org, assert_org_context
     from ts_cli.migrate import discover, sets_scan
 
     orgs: List[Optional[str]] = list(source_org) or [None]
@@ -154,7 +179,11 @@ def scan_sets(
 
     for org in orgs:
         label = org or "(default)"
-        client = ThoughtSpotClient(resolve_profile(source_profile), org=org)
+        client = _client_for_org(source_profile, org)
+        if org:
+            # Defence in depth: refuse to report a scan under an Org name it did not
+            # actually run in. A mislabelled blocker count is worse than no count.
+            assert_org_context(client, org, source_profile)
         models = _resolve_scan_models(client, model, all_models, models_file,
                                       models_table, sf_profile)
         if not models:

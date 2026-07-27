@@ -40,6 +40,9 @@ def model_columns(client, model_guid: str, doc: Optional[dict] = None) -> List[C
 def _search(client, meta_filter: dict) -> list:
     resp = client.post("/api/rest/2.0/metadata/search", json={
         "metadata": [meta_filter],
+        # Headers carry `ownerOrgId`, which `list_models` needs to tell an Org's OWN
+        # objects from ones merely visible in it.
+        "include_headers": True,
         "record_size": -1,
         "record_offset": 0,
     })
@@ -58,9 +61,30 @@ def find_model_by_name(client, name: str) -> Optional[str]:
     return None
 
 
-def list_models(client) -> List[dict]:
+def list_models(client, owner_org_id: Optional[int] = None) -> List[dict]:
+    """Models visible to this client, optionally narrowed to those the Org OWNS.
+
+    `owner_org_id` is not a convenience filter. An Org-scoped `metadata/search` returns
+    every object VISIBLE in that Org, which includes Primary-owned shared and system
+    objects -- so a fleet scan without this counts one Primary-owned Model once per tenant
+    Org and reports it as each tenant's blocker. Observed live 2026-07-27: the same
+    `T1_PUBLISH_MODEL` GUID came back as a blocker under both ORG1 and ORG2.
+
+    That matters because the number this feeds is the whole point of the Phase 0 scan. A
+    tenant's blocker is a Model that tenant OWNS; a Primary-owned Model showing up in its
+    search results is visibility, not ownership.
+
+    Same failure mode as `tenancy._groups_in_org`: the row's own header is the authority,
+    not which client fetched it.
+    """
     items = _search(client, {"type": "LOGICAL_TABLE", "subtypes": ["WORKSHEET", "AGGR_WORKSHEET"]})
-    return [{"guid": i.get("metadata_id"), "name": i.get("metadata_name")} for i in items]
+    out = []
+    for i in items:
+        header = i.get("metadata_header") or {}
+        if owner_org_id is not None and header.get("ownerOrgId") != owner_org_id:
+            continue
+        out.append({"guid": i.get("metadata_id"), "name": i.get("metadata_name")})
+    return out
 
 
 def list_dependents(client, model_guid: str) -> List[dict]:
