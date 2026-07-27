@@ -3765,7 +3765,14 @@ third round (data-plane, real non-admin users). See
 **Affects:** `docs/superpowers/specs/2026-07-26-ts-security-sharing-design.md` (§1's
 CSR-vs-CLS comparison table, row "Works on published objects"); `docs/multi-tenancy-platform-plan.md`
 §4.3 ("Publication constrains the column-security mechanism").
-**Status:** OPEN.
+**Status:** DONE (2026-07-27) -- fixed on `feat/ts-security-column-rules` (PR #347). §1's
+comparison table row now reads "Accepted and enforced, but Org-scoped" with a pointer to a
+new §2.7; §2.7 records the corrected behaviour and supersedes the old flat "No"; §6's open
+items #2 and #3 are answered and a new open item #5 records the still-unresolved question of
+whether a tenant Org can be given usable CSR at all. `docs/multi-tenancy-platform-plan.md`
+§4.3's opening claim is rewritten to the corrected mechanism (accepted, but Org-scoped),
+keeping the existing table and sequencing conclusion, plus a note that this makes the
+per-Org (`org_name`-keyed) shape of the `TS_COLUMN_SECURITY_RULES` manifest load-bearing.
 
 **Why it matters.** Both documents state that CSR cannot be defined on published objects.
 Live testing disproved the mechanism, not the conclusion: the platform accepts a CSR

@@ -167,7 +167,14 @@ published Model anyway.
 
 ### 4.3 Publication constrains the column-security mechanism
 
-Column security rules **cannot be defined on published objects**. So:
+Column security rules **can** be defined on a published object -- the platform accepts the
+write (`HTTP 204`) and enforces it in the Org where it was defined. The constraint is not an
+API refusal; it is about *where the rule takes effect*: it does not travel with publication.
+Live-verified with real non-admin user sessions on `nebula-damian-alias`: a rule restricting
+a column stayed enforced in the owning Org but the same column remained fully visible in a
+tenant Org the object was published to, with no error and no warning in either Org. See
+`docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md` §15.
+So, in practice:
 
 | | Org per tenant (published) | Shared org (not published) |
 |---|---|---|
@@ -177,8 +184,14 @@ Column security rules **cannot be defined on published objects**. So:
 The column-security skill therefore cannot be a single implementation. It must detect
 publication state and choose the mechanism, and the two have materially different
 capabilities. This also means the migration path has a sequencing constraint: reduce object
-count with column-level sharing first, then move to rules if and when they become available
-on published objects.
+count with column-level sharing first, then move to rules once each tenant Org's own CSR
+configuration, against that Org's own groups, is set up and verified there -- there is no
+single owning-Org rule that reaches every tenant automatically.
+
+This also makes the per-Org shape of the column-security manifest load-bearing rather than
+incidental: `TS_COLUMN_SECURITY_RULES` is keyed by `org_name` precisely because a rule has
+to be configured in each Org against that Org's own groups, not written once from the
+owning Org and expected to propagate.
 
 ---
 
