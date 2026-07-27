@@ -76,7 +76,42 @@ symmetrically on rename-back. Dependents reference the column by its logical
 identity (anchored to the unchanged `column_id` physical binding), not the name
 string. Recorded in memory `feedback_ts_column_alias_rename_propagates`.
 
-### Remaining spike (implementation task #1)
+### Remaining spike (implementation task #1) — RUN 2026-07-27, see below
+
+**Result: the mechanism works; three preconditions in front of it do not.** Full account:
+[`2026-07-27-ts-migrate-batch-import-spike.md`](../verification/2026-07-27-ts-migrate-batch-import-spike.md).
+
+1. **Connections are per-Org, never shared, and differently named** (`APJ` in Primary,
+   `APJ_ORG1` in ORG1). A tenant Table's TML carries its own Org's connection, which is an
+   **external** reference — nothing in the batch can remap it. The "zero per-object
+   reference rewriting" claim holds for intra-batch references and not for this one. Every
+   lifted Table needs its `connection` block rewritten: one field per Table, O(tables).
+   Since step 4 deletes the scaffolding and nothing is queried through it, *any* valid
+   connection in the target will do.
+2. **Publishing a Table into an Org does not give that Org a usable connection.** Verified
+   directly: a fresh Org with a published Table still lists zero connections and still
+   refuses a Table import. So the clean Org needs its OWN connection provisioned first —
+   a `ts tenancy` concern, not a `ts migrate` one.
+3. **Tables dedupe by PHYSICAL binding, not logical name.** A renamed, guid-stripped Table
+   still matched an existing one (`Cannot create a new table ... Existing Table GUID: …`).
+   Lift-and-shift needs the tenant's binding to be distinct from anything already modelled
+   in the target.
+
+**The mechanism itself showed up working:** `Warning: No table with fqn <dead-guid> found
+for table_id <name>` proves the importer tries the fqn, then falls back to the NAME — which
+is exactly what intra-batch remapping relies on. Names must therefore be unique in the
+target Org.
+
+**Throughput:** 2 API calls for 3 objects (export and import both batch), ≈0.6–0.9s/object.
+Calls scale with batches, not objects, as the Efficiency & Scale section assumes. Re-measure
+at realistic batch sizes.
+
+**Consequences.** Add a step 0 to the architecture below (the clean Org must have its own
+connection, and every lifted Table's connection block is rewritten to it), and have
+`audit` report two new blockers: no connection in the target, and a scaffolding Table
+whose physical binding collides with something already there.
+
+### Original spike definition
 
 Confirm that a **batch import into a fresh Org remaps intra-batch references
 cleanly** — i.e. importing scaffolding Tables + Models + content together binds
