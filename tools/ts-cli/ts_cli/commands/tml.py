@@ -675,3 +675,73 @@ def lint_tml_cmd(
 
     print(json.dumps({"clean": not any_findings, "results": results}))
     raise SystemExit(1 if any_findings else 0)
+
+
+def _liveboard_viz_names(client: ThoughtSpotClient, identifier: str) -> List[str]:
+    """Answer names of a Liveboard's visualizations, for per-tile render probing.
+
+    Best-effort: exports the board TML and reads ``visualizations[].answer.name``. Returns
+    [] on any parse failure — the caller still reports the board-level failure, just
+    without per-tile attribution."""
+    resp = client.post("/api/rest/2.0/metadata/tml/export",
+                        json={"metadata": [{"identifier": identifier}]}, raise_for_status=False)
+    try:
+        lb = yaml.safe_load(resp.json()[0]["edoc"]).get("liveboard", {})
+    except (ValueError, AttributeError, KeyError, TypeError, IndexError):
+        return []
+    names = []
+    for v in lb.get("visualizations", []):
+        nm = (v.get("answer", {}) or {}).get("name")
+        if nm:
+            names.append(nm)
+    return names
+
+
+@app.command("verify-render")
+def verify_render_cmd(
+    liveboard: str = typer.Argument(..., help="GUID or name of the imported Liveboard to verify"),
+    profile: Optional[str] = _profile_option,
+    org: Optional[str] = typer.Option(None, "--org",
+                                       help="Org id/name the Liveboard lives in (default: profile/env org)"),
+) -> None:
+    """Verify an imported Liveboard actually RENDERS — not merely that it imported.
+
+    A hand-authored or subtly mis-bound answer can import cleanly yet fail at query time
+    with "No data source found for the query" (the tile shows blank/broken in the UI, and
+    `ts tml import` still reports success). This calls `metadata/liveboard/data` for the
+    board; on failure it re-probes each tile so the offending visualization is named, not
+    just a board-level 500.
+
+    Output: JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles":[{visual,error}]}`.
+    Exit 0 if the board renders, 1 otherwise — so a skill's import step can gate on it.
+
+    \b
+      ts tml verify-render <liveboard-guid> --profile myprofile
+    """
+    from ts_cli.render_check import classify_render, render_summary
+    client = ThoughtSpotClient(resolve_profile(profile), org=org)
+
+    def _data(body: dict) -> tuple:
+        r = client.post("/api/rest/2.0/metadata/liveboard/data", json=body,
+                        raise_for_status=False, timeout=180)
+        try:
+            return r.status_code, r.json()
+        except ValueError:
+            return r.status_code, {"error": r.text[:300]}
+
+    status, body = _data({"metadata_identifier": liveboard})
+    board = classify_render(status, body)
+
+    per_viz: Optional[list] = None
+    if not board["rendered"]:
+        # Re-probe each tile so we can name the culprit, not just report a board-level 500.
+        per_viz = []
+        for name in _liveboard_viz_names(client, liveboard):
+            st, bd = _data({"metadata_identifier": liveboard, "visualization_identifiers": [name]})
+            entry = classify_render(st, bd)
+            entry["visual"] = name
+            per_viz.append(entry)
+
+    summary = render_summary(liveboard, board, per_viz)
+    print(json.dumps(summary))
+    raise SystemExit(0 if summary["ok"] else 1)

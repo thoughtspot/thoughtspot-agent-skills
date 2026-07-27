@@ -616,6 +616,32 @@ ts tml lint --file model.tml && ts tml import --file model.tml --policy ALL_OR_N
 
 ---
 
+### `ts tml verify-render <liveboard>`
+
+Verify an imported Liveboard actually **renders**, not merely that it imported. A
+hand-authored or subtly mis-bound answer can import cleanly (valid TML, resolvable column
+names) yet fail at query time with `No data source found for the query` — the tile shows
+blank/broken in the UI while `ts tml import` reported success. This calls
+`metadata/liveboard/data` for the board; on failure it re-probes each tile so the
+offending visualization is named, not just a board-level 500.
+
+```bash
+ts tml verify-render <liveboard-guid> --profile myprofile
+ts tml verify-render <liveboard-guid> --profile myprofile --org 1417628299
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `liveboard` (arg) | required | GUID or name of the imported Liveboard |
+| `--profile`, `-p` | first profile | Profile to use |
+| `--org` | profile/env org | Org id or name the Liveboard lives in |
+
+**Output:** JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles": [{visual, error}]}`.
+**Exit code** is `0` if the board renders, `1` otherwise — so a conversion skill can gate its
+import step on it (`ts tml import ... && ts tml verify-render <guid>`).
+
+---
+
 ### `ts dependency mutate` / `backup` / `rollback` / `apply-change`
 
 BL-083: codifies the `ts-dependency-manager` skill's safety-critical REMOVE/REPOINT
