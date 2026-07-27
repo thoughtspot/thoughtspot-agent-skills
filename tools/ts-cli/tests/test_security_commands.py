@@ -78,6 +78,7 @@ def patched(monkeypatch):
 
 
 SEARCH = "/api/rest/2.0/metadata/search"
+ORGS = "/api/rest/2.0/orgs/search"
 
 
 def _search_client(payload, status=200):
@@ -87,6 +88,21 @@ def _search_client(payload, status=200):
 def _header_hits(org_ids, owner_org_id):
     return [{"metadata_id": "g1", "metadata_header": {"orgIds": org_ids,
                                                       "ownerOrgId": owner_org_id}}]
+
+
+def _resolvable_hit(guid="tg-1", name="T2", org_ids=(0,), owner_org_id=0):
+    """One `metadata/search` hit that resolves AND carries a publication header.
+
+    `set`'s publication guard resolves the table via `_resolve_object` (untyped
+    attempt, which matches on the first non-empty hit regardless of `type`) and then
+    reads publication state off the SAME hit's `metadata_header` via `_published_orgs`
+    -- both calls land on `SEARCH`, so one FakeResponse configured this way serves
+    both. `org_ids=(0,)` (the owning Org only) is "not published anywhere"; add a
+    tenant Org id to simulate a published table.
+    """
+    return [{"metadata_id": guid, "metadata_name": name, "metadata_type": "LOGICAL_TABLE",
+             "metadata_header": {"id": guid, "name": name, "orgIds": list(org_ids),
+                                 "ownerOrgId": owner_org_id}}]
 
 
 def test_published_orgs_reads_an_unpublished_header_as_published_nowhere():
@@ -182,7 +198,8 @@ def test_the_group_is_registered_under_ts_security():
 
 
 def test_set_defaults_to_replace(patched):
-    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204),
+                                 SEARCH: FakeResponse(_resolvable_hit())}))
     result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
                                  "--rule", "PROD_NM=Analyst,Finance", "-p", "x"])
     assert result.exit_code == 0, result.output
@@ -197,7 +214,8 @@ def test_set_defaults_to_replace(patched):
 
 def test_set_add_and_remove_change_the_operation(patched):
     for flag, operation in (("--add", "ADD"), ("--remove", "REMOVE")):
-        client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+        client = patched(FakeClient({UPDATE: FakeResponse(None, 204),
+                                     SEARCH: FakeResponse(_resolvable_hit())}))
         runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
                             "--rule", "COST=Finance", flag, "-p", "x"])
         body = next(b for p, b in client.calls if p == UPDATE)
@@ -229,7 +247,8 @@ def test_set_refuses_an_empty_group_list_under_add_or_remove(patched, flag):
 
 def test_set_still_allows_an_empty_group_list_under_the_default_replace(patched):
     # The refusal above must not swallow the form's one legitimate use.
-    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204),
+                                 SEARCH: FakeResponse(_resolvable_hit())}))
     result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
                                  "--rule", "SALARY=", "-p", "x"])
     assert result.exit_code == 0, result.output
@@ -239,7 +258,8 @@ def test_set_still_allows_an_empty_group_list_under_the_default_replace(patched)
 
 
 def test_set_add_still_works_when_every_named_column_has_groups(patched):
-    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204),
+                                 SEARCH: FakeResponse(_resolvable_hit())}))
     result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
                                  "--rule", "COST=Finance", "--add", "-p", "x"])
     assert result.exit_code == 0, result.output
@@ -263,6 +283,82 @@ def test_set_rejects_a_malformed_rule_flag(patched):
                                      "--rule", "PROD_NM", "-p", "x"])
     assert result.exit_code != 0
     assert "COL=GROUP" in result.output
+
+
+# ---------------------------------------------------------------------------
+# `set` refuses a published table -- the fix for the live finding that CSR set on a
+# published table is a scoping trap: the platform accepts and enforces the write in
+# the owning Org, but the rule never reaches any tenant Org the table is published to.
+# ---------------------------------------------------------------------------
+
+def test_set_refuses_a_published_table_and_posts_nothing(patched):
+    client = patched(FakeClient({
+        UPDATE: FakeResponse(None, 204),
+        SEARCH: FakeResponse(_resolvable_hit(name="T2_PUBLISH", org_ids=(0, 12750490))),
+        ORGS: FakeResponse([{"id": 12750490, "name": "ORG1"}])}))
+    result = msg_runner.invoke(app, ["security", "column-rules", "set", "--table",
+                                     "T2_PUBLISH", "--rule", "UNIT_PRICE_AMT=Analyst",
+                                     "-p", "x"])
+    assert result.exit_code != 0
+    # Names the actual reason (scoped to this Org, tenant keeps the column visible),
+    # not a bare "cannot" -- and names the Org it is published to when known.
+    assert "scoping trap" in result.output
+    assert "ORG1" in result.output
+    assert not [p for p, _ in client.calls if p == UPDATE]
+
+
+def test_set_allow_published_proceeds(patched):
+    client = patched(FakeClient({
+        UPDATE: FakeResponse(None, 204),
+        SEARCH: FakeResponse(_resolvable_hit(name="T2_PUBLISH", org_ids=(0, 12750490))),
+        ORGS: FakeResponse([{"id": 12750490, "name": "ORG1"}])}))
+    result = runner.invoke(app, ["security", "column-rules", "set", "--table",
+                                 "T2_PUBLISH", "--rule", "UNIT_PRICE_AMT=Analyst",
+                                 "--allow-published", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert [p for p, _ in client.calls if p == UPDATE]
+
+
+def test_set_allow_published_warns_on_stderr(patched):
+    patched(FakeClient({
+        UPDATE: FakeResponse(None, 204),
+        SEARCH: FakeResponse(_resolvable_hit(name="T2_PUBLISH", org_ids=(0, 12750490))),
+        ORGS: FakeResponse([{"id": 12750490, "name": "ORG1"}])}))
+    result = msg_runner.invoke(app, ["security", "column-rules", "set", "--table",
+                                     "T2_PUBLISH", "--rule", "UNIT_PRICE_AMT=Analyst",
+                                     "--allow-published", "-p", "x"])
+    assert result.exit_code == 0
+    assert "--allow-published set" in result.output
+
+
+def test_set_on_an_unpublished_table_is_unaffected(patched):
+    client = patched(FakeClient({
+        UPDATE: FakeResponse(None, 204),
+        SEARCH: FakeResponse(_resolvable_hit(name="T2", org_ids=(0,)))}))
+    result = runner.invoke(app, ["security", "column-rules", "set", "--table", "T2",
+                                 "--rule", "COST=Finance", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert [p for p, _ in client.calls if p == UPDATE]
+
+
+def test_clear_is_not_blocked_on_a_published_table(patched):
+    # Deliberate asymmetry with `set`: `clear` removes protection the operator asked
+    # to remove, which creates no false belief, so it is never guarded against
+    # publication -- and it never even reads publication state to decide.
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "clear", "--table",
+                                 "T2_PUBLISH", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert [p for p, _ in client.calls if p == UPDATE]
+    assert not [p for p, _ in client.calls if p == SEARCH]
+
+
+def test_clear_is_not_blocked_on_a_published_table_with_a_column(patched):
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    result = runner.invoke(app, ["security", "column-rules", "clear", "--table",
+                                 "T2_PUBLISH", "--column", "UNIT_PRICE_AMT", "-p", "x"])
+    assert result.exit_code == 0, result.output
+    assert [p for p, _ in client.calls if p == UPDATE]
 
 
 def test_clear_sends_clear_csr_with_the_required_empty_array(patched):
@@ -304,7 +400,8 @@ def test_set_asserts_the_org_context_before_writing(monkeypatch, patched):
     # not merely that it ran. An implementation that posted first and asserted
     # afterwards -- exactly the bug this assertion exists to prevent -- would still
     # pass a test that only checked "did assert_org_context get called at all".
-    client = patched(FakeClient({UPDATE: FakeResponse(None, 204)}))
+    client = patched(FakeClient({UPDATE: FakeResponse(None, 204),
+                                 SEARCH: FakeResponse(_resolvable_hit())}))
     monkeypatch.setattr(
         "ts_cli.commands.security.assert_org_context",
         lambda c, org, profile=None: client.calls.append(("assert_org_context", org)))

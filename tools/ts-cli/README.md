@@ -1580,11 +1580,23 @@ until ThoughtSpot enables it on a cluster, every call returns 403 with code 1002
 which the CLI detects and explains rather than surfacing a bare "Forbidden".
 
 CSR is **not** column-level sharing. `ts share` carries that mechanism (CLS), and the
-two must not be modelled the same way:
+two must not be modelled the same way -- they are different mechanisms on different
+axes:
+
+- **CSR is two steps over two orthogonal mechanisms.** The object must first be
+  shared (the Model, and optionally the Table) or the user cannot open it at all; CSR
+  then filters columns *within* that access. Access and column visibility are separate
+  decisions, which is why CSR composes cleanly with a table-level share.
+- **CLS is one step.** The grant IS the security: sharing specific columns is the one
+  act that decides both whether the user reaches the object and which columns they
+  see. That is also why CLS refuses to mix a table grant and a column grant for the
+  same (Org, table, group) -- under CLS they are the same mechanism at different
+  granularities, so the broader defeats the narrower. CSR has no equivalent rule,
+  because it is never the mechanism deciding access in the first place.
 
 | | CLS (`ts share`) | CSR (here) |
 |---|---|---|
-| Works on published objects | yes | refused BY DEFAULT at plan time (the platform itself accepts an owning-Org CSR update on a published table -- see below) |
+| Works on published objects | yes | refused BY DEFAULT at plan time AND by `set` (the platform itself accepts an owning-Org CSR update on a published table and enforces it there -- but the rule does not travel with publication, so every tenant Org keeps the column visible; see below) |
 | Declares | every VISIBLE column per group | only the RESTRICTED columns |
 | Liveboard filter on a secured column | locks | stays interactive |
 | Availability | GA | Beta, 10.12+, feature-flagged off by default |
@@ -1634,17 +1646,23 @@ from the manifest, and it is opt-in: the alternative default would silently unse
 columns whenever a manifest was incomplete, which leaks data, whereas leaving stale
 protection in place is visible and recoverable.
 
-**Published tables are refused at plan time by default**, as `CSR_BLOCKED` -- but this is
-a conservative CLI choice, not a platform restriction. **Live-verified 2026-07-27:** with
-a table genuinely published to a tenant Org, a CSR update issued from the OWNING Org
-returned HTTP 204 and took effect, and the table stayed published throughout. What is
-still unverified is whether a TENANT Org can see or use a rule set applied that way, so
-applying one could silently produce protection the tenant never receives. `resolve` marks
-the affected step in the plan rather than failing outright; `build` and `apply` both then
-refuse any plan containing one, before anything is rendered or sent. `apply
---allow-published` overrides the refusal, for probing rather than routine use -- `build`
-has no equivalent flag. See the live-verification doc (§Q6) for the full evidence and the
-remaining open question.
+**Published tables are refused by default** -- at plan time as `CSR_BLOCKED` (`resolve`
+/`build`/`apply`), and by `set` directly -- but this is not a platform restriction. It is
+a scoping trap. **Live-verified 2026-07-27, conclusively** (data-plane, real non-admin
+users, both Orgs): with a table genuinely published to a tenant Org, a CSR update issued
+from the OWNING Org returned HTTP 204, took effect, and stayed enforced there -- a
+restricted column stayed hidden in the owning Org. But the SAME table, opened in the
+tenant Org it was published to, showed the restricted column in full: no error, no
+warning, either way. **A CSR rule is scoped to the Org that defined it and does not
+travel with publication.** Setting one on a published table protects the owning Org and
+silently leaves every tenant Org exposed, which is exactly the false belief refusing by
+default exists to prevent. `resolve` marks the affected step in the plan rather than
+failing outright; `build` and `apply` both then refuse any plan containing one, before
+anything is rendered or sent; `set` refuses directly, with no separate plan stage.
+`--allow-published` overrides the refusal (`apply --allow-published`, `set
+--allow-published`) for the case where owning-Org-only scope is genuinely what is
+wanted -- `build` has no equivalent flag. See the live-verification doc (§Q6) for the
+full evidence.
 
 A table whose publication state could not be READ is blocked the same way, with its own
 reason. Only a successful read supports the claim that a table is unpublished, so a failed
@@ -1710,14 +1728,20 @@ ts security column-rules import --file T2_CSR.column_security_rules.tml -p prod
 
 `set` is a one-shot imperative that needs no manifest. It is declarative (REPLACE) by
 default, so it is idempotent: running it twice converges, and a `get` before and after
-diffs cleanly. `--add` / `--remove` reach the incremental operations instead:
+diffs cleanly. `--add` / `--remove` reach the incremental operations instead. `set`
+refuses a published table by default, the same as the manifest route -- `--allow-published`
+overrides it:
 
 ```bash
 ts security column-rules set --table T2 --rule "COST=Finance,Audit" --rule "SALARY=" \
   --org ORG1 -p prod
 ```
 
-`clear` unsecures one column (`--column`) or every column on a table (omit it):
+`clear` unsecures one column (`--column`) or every column on a table (omit it). Unlike
+`set`, `clear` is **not** blocked on a published table -- deliberately: `set` guards
+against creating a false belief that a column is protected everywhere, while `clear`
+only ever removes protection the operator explicitly asked to remove, including the
+legitimate case of cleaning stale CSR off a table that turned out to be published:
 
 ```bash
 ts security column-rules clear --table T2_PUBLISH --column COST -p prod

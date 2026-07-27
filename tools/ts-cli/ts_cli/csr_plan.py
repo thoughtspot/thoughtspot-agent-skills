@@ -12,11 +12,17 @@ two must not be modelled the same way:
   group. Three CSR rules on a 40-column table become roughly 40 x G grants under CLS.
 - CSR is a separate axis from the share ACL. Turning it on does not change an object's
   grant list (verified live 2026-07-26).
-- CSR on a PUBLISHED object is refused by this CLI by default -- but that is a
-  conservative choice, not a platform restriction. Live-verified 2026-07-27: an
-  owning-Org CSR update against a genuinely published table returned HTTP 204 and took
-  effect. What is still unverified is whether a TENANT Org can see or use a rule set
-  that way, so `build_csr_steps` blocks by default and `--allow-published` overrides it.
+- CSR on a PUBLISHED object is refused by this CLI by default -- not because the
+  platform refuses it, but because of what it actually does. Live-verified 2026-07-27
+  (data-plane, real non-admin users, both Orgs): the platform ACCEPTS an owning-Org
+  CSR update against a genuinely published table (HTTP 204) and ENFORCES it there --
+  and that is where it stops. The rule does not travel with publication: the SAME
+  table, opened in the tenant Org it was published to, showed the restricted column in
+  full, no error and no warning either way. A CSR rule is scoped to the Org that
+  defined it. Setting one on a published table protects the owning Org and silently
+  leaves every tenant Org's copy of the column exposed, which is why `build_csr_steps`
+  blocks by default and `--allow-published` is the explicit override for the case
+  where owning-Org-only scope is genuinely what is wanted.
 
 Endpoint shape confirmed against the canonical spec (`get-rest-api-reference`,
 operations `fetchColumnSecurityRules` and `updateColumnSecurityRules`). Four things
@@ -241,13 +247,16 @@ def build_csr_steps(
     pass.
 
     **Publication.** A step whose table is published is marked ``blocked`` rather than
-    silently planned, and `apply` refuses blocked steps unless overridden. This is a
-    conservative CLI default, not a platform restriction: live-verified 2026-07-27, an
-    owning-Org CSR update against a genuinely published table returned HTTP 204 and took
-    effect, the table staying published throughout. What is still unverified is whether
-    a TENANT Org can see or use a rule set that way -- applying one could silently
-    produce protection the tenant never receives, which is what the refusal guards
-    against. `--allow-published` is the escape hatch. Failing at plan time is the house
+    silently planned, and `apply` refuses blocked steps unless overridden. Live-verified
+    2026-07-27, conclusively: an owning-Org CSR update against a genuinely published
+    table returns HTTP 204 and IS enforced there, the table staying published
+    throughout -- but the rule does not travel with publication. The SAME table, opened
+    in the tenant Org it is published to, showed the restricted column in full to a real
+    non-admin user, no error and no warning. A CSR rule is scoped to the Org that
+    defined it, so applying one to a published table silently produces protection the
+    tenant never receives -- exactly the scoping trap this refusal guards against, not a
+    platform limitation. `--allow-published` is the escape hatch for owning-Org-only
+    scope, when that is genuinely what is wanted. Failing at plan time is the house
     style, and it is also parent spec 5.1's CSR_BLOCKER at CLI level.
 
     A table entry may also carry ``publication_known: False``, meaning the command layer
@@ -293,15 +302,20 @@ def build_csr_steps(
         blocked = ""
         if entry.get("published"):
             blocked = (
-                f"CSR_BLOCKED: '{table_name}' is published. The platform does accept "
-                f"CSR from the owning Org (live-verified), but whether a tenant Org can "
-                f"see or use it is unverified, so this is refused by default. Pass "
-                f"--allow-published to override, or use column-level sharing "
-                f"(`ts share`) instead.")
+                f"CSR_BLOCKED: '{table_name}' is published. The platform accepts CSR "
+                f"from the owning Org (live-verified) and enforces it there, but a CSR "
+                f"rule is scoped to the Org it was defined in and does NOT travel with "
+                f"publication (live-verified 2026-07-27): every Org this table is "
+                f"published to keeps the restricted column fully visible, with no error "
+                f"and no warning. This is not a platform limitation, it is a scoping "
+                f"trap -- refusing by default stops an operator creating protection "
+                f"they believe is global when it is local. Pass --allow-published if "
+                f"owning-Org-only scope is genuinely what you want, or use column-level "
+                f"sharing (`ts share`) instead, which does apply per-Org.")
         elif not entry.get("publication_known", True):
             blocked = (
                 f"CSR_BLOCKED: publication state could not be determined for "
-                f"'{table_name}', so whether CSR can be defined on it is unknown. "
+                f"'{table_name}', so whether it is safe to define CSR on it is unknown. "
                 f"Re-run once the read succeeds, or pass --allow-published to `apply` "
                 f"to send it anyway.")
 

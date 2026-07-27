@@ -10,7 +10,10 @@ parameterized and published for the second round (§11)
 **Orgs on the cluster:** `Primary` (0), `ORG1` (12750490), `ORG2` (535312919), `ORG3` (443705360)
 
 **Cluster state: returned to baseline, proven by a final read.** See §9 (first round) and
-§11 (second round, `T2_PUBLISH` fully restored -- schema, publication and CSR).
+§11 (second round, `T2_PUBLISH` fully restored -- schema, publication and CSR). A third
+round (§15, 2026-07-27) is a manual UI data-plane test run by the repo owner on his own
+test cluster; that cluster's restoration is his own, outside this document's tool
+access, and not re-verified here.
 
 ---
 
@@ -447,3 +450,92 @@ and privileges are per-Org. A bare 10023 with neither text present falls through
 
 Neither blocks `ts security column-rules`. Both are worth resolving before
 `ts-security-columns` (parent spec §4) needs to reason about published objects.
+
+---
+
+## 15. Third round (2026-07-27) -- Q6 conclusively answered: CSR is Org-scoped
+
+Item 1 above (§14) is now closed. The first two rounds were both API-level probing from
+an admin session; this round is a manual data-plane test on the repo owner's own test
+cluster, driven from the ThoughtSpot UI as real non-admin users, which is what settles
+the tenant-visibility question the second round's 10023/group-mismatch results could
+not.
+
+### Setup
+
+- Table `T2_PUBLISH`, owned by the Primary Org, published to tenant Org ORG1.
+- A CSR rule restricted column `UNIT_PRICE_AMT` to group `Analyst`.
+- `Analyst` exists in the Primary Org and does **NOT** exist in ORG1 -- confirmed: ORG1's
+  only groups are `Administrator`, `All`, `Demo Retail Group`. This is deliberate: if the
+  rule were somehow honoured in ORG1, no ORG1 user could ever satisfy it (no `Analyst`
+  group to belong to), so any visibility of the column in ORG1 can only mean the rule
+  was not applied there at all, not that some ORG1 user happened to qualify.
+- The object was shared (Model, and the Table) in BOTH Orgs, so real non-admin users
+  could actually open it and the test reflects what a user sees, not an API response.
+
+### Results, observed in the UI as non-admin users
+
+- **In Primary:** `guest4` (member of `Consumer`, not `Analyst`) could **NOT** see
+  `UNIT_PRICE_AMT`, on both the Table and the Model. CSR **is** enforced in the owning
+  Org, even though the table is published -- consistent with the second round's API-level
+  finding that the owning-Org write succeeds and takes effect.
+- **In ORG1:** the column **WAS** displayed, fully, to a non-admin user with no group
+  that could possibly satisfy the rule. CSR set in the owning Org is **NOT** enforced for
+  the tenant.
+
+### Conclusion
+
+**A CSR rule is scoped to the Org it was defined in.** Setting CSR on a published table
+therefore protects the owning Org and silently leaves every tenant Org unprotected. No
+error, no warning, at write time or at read time in either Org. An operator can secure a
+column, publish the object, and believe every tenant is protected while none of them
+are.
+
+This is the exact opposite of what the design originally assumed. The design said "the
+platform refuses CSR on published objects" (already disproven in the second round: it
+returns 204 and enforces it locally). The true situation, now settled, is worse and more
+subtle than either the original assumption or the second round's open question: it
+*succeeds*, it *appears* to work (nothing about the write, or about reading CSR back
+from the owning Org, looks wrong), and it creates a false belief rather than an error.
+
+### The parent comparison table's row is right in outcome, wrong in mechanism
+
+The parent spec's comparison table (and `docs/multi-tenancy-platform-plan.md` §4.3)
+state "works on published objects: No" for CSR. The practical *outcome* that row is
+gesturing at -- CSR does not protect a published object's tenants -- is correct. The
+*mechanism* it implies -- that the platform refuses the operation -- is not: the
+platform accepts the write and silently confines it to the defining Org. A reader who
+takes the row at face value would expect an error and be surprised there is none. Both
+documents still need this correction; it is out of scope for this branch (see the top
+of the design spec) and should be made separately.
+
+### Per-Org configuration is not a workaround, it is the model
+
+The tenant-side result means CSR has to be configured **per-Org, against that Org's own
+groups** -- there is no single owning-Org rule that reaches every tenant. This is exactly
+what the `org_name` key in the `TS_COLUMN_SECURITY_RULES` manifest table is for: a
+manifest row names the Org it applies to, and `resolve --source uniform --org ORG1
+--org ORG2 ...` (or `file`/`db` with per-Org rows) is how an operator expresses "secure
+this column in every one of these Orgs, against each Org's own group names" rather than
+expecting one write to propagate.
+
+### Cleanup
+
+The finding was produced and verified entirely on the repo owner's own test cluster,
+outside this fix task's own tool access (no cluster contact was made to produce this
+report). Restoration of that cluster's state is the repo owner's own responsibility and
+is not re-verified here.
+
+---
+
+## 16. Open items, final
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Whether a tenant Org can see or use CSR set from the owning Org on a published table | **ANSWERED (§15).** It cannot: CSR is scoped to the Org that defined it and does not travel with publication. `set` now carries the same CSR_BLOCKED guard as `resolve`/`build`/`apply`. |
+| 2 | Carried forward from the `ts share` verification: does a table-level `NO_ACCESS` clear existing column grants? | STILL OPEN, unchanged. Unrelated to CSR's own mechanism. |
+
+Only item 2 remains, and it does not block `ts security column-rules`. The parent
+spec's comparison table and `docs/multi-tenancy-platform-plan.md` §4.3 both still need
+the mechanism correction described in §15 above -- tracked there, not fixed on this
+branch.

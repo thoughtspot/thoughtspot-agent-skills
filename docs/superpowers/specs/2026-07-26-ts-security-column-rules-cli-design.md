@@ -1,12 +1,13 @@
 # `ts security column-rules` CLI design
 
 **Date:** 2026-07-26
-**Status:** LIVE-VERIFIED on `nebula-damian-alias`, 2026-07-27, across two verification
-rounds. All six §8 questions plus Q7 (added during verification) answered or partially
-answered (Q6, second round); six defects found and fixed (see §8 and
+**Status:** LIVE-VERIFIED on `nebula-damian-alias`, 2026-07-27, across two API-level
+verification rounds, PLUS a third, conclusive data-plane round (2026-07-27, manual UI
+test against real non-admin users) that fully answers Q6. All seven §8 questions
+(including Q7, added during verification) are now ANSWERED; six defects found and fixed
+(see §8 and
 [`docs/superpowers/verification/2026-07-26-ts-security-column-rules-live-verification.md`](../verification/2026-07-26-ts-security-column-rules-live-verification.md)).
-Two items remain open (§8): whether a tenant Org can see or use CSR set from the owning
-Org on a published table, and whether a table-level `NO_ACCESS` clears existing column
+One item remains open (§8): whether a table-level `NO_ACCESS` clears existing column
 grants (carried forward from `ts share`).
 **Branch:** `feat/ts-security-column-rules`
 
@@ -22,6 +23,33 @@ Programme context: [`docs/multi-tenancy-platform-plan.md`](../../multi-tenancy-p
 ---
 
 ## 1. What the MCP spec corrected
+
+### 1.0 The two-mechanism model: why CSR and CLS differ
+
+CSR (this CLI) and CLS (`ts share`'s column grants) are not two flavours of the same
+thing. They sit on different axes, and that difference is decision-relevant: choosing
+between them is what the future `ts-security-columns` skill (parent spec §4) exists to
+do.
+
+**CSR is two steps over two orthogonal mechanisms.** The object must first be shared
+-- the Model, and optionally the Table -- or the user cannot open it at all. CSR then
+filters columns *within* that access. Access and column visibility are separate
+decisions, made by separate mechanisms (`ts share` for the first, CSR for the second).
+
+**CLS is one step.** The grant IS the security: sharing specific columns is the single
+act that decides both whether the user reaches the object and which columns they see.
+There is no separate "can open it" decision to make first, because the column grant
+itself is what grants it.
+
+This is *why* the table/column exclusivity rule exists for CLS but not for CSR (see
+`share_plan.find_exclusivity_conflicts`). Under CLS, a table grant and a column grant
+for the same (Org, table, group) are the SAME mechanism at different granularities --
+the table grant already implies every column, so the broader defeats the narrower, and
+mixing them is refused rather than merged. CSR has no equivalent rule, because it is
+never the mechanism deciding access in the first place: it composes cleanly with a
+table-level share, since the two operate on different axes entirely. A CSR rule
+narrows what a column-visible user sees; it never widens or substitutes for the share
+that let them in.
 
 The parent spec's §2.4 recorded CSR from live probing. Reading the canonical spec
 (`get-rest-api-reference`, operations `fetchColumnSecurityRules` and
@@ -188,23 +216,45 @@ would report success having changed nothing.
 
 ### 3.3 Published tables are refused by default, not attempted
 
-**Corrected 2026-07-27, second verification round.** The premise this section originally
-stated -- "CSR cannot be defined on published objects" (parent spec §2, plan §4.3) -- is
-FALSE. Live-verified: with a table genuinely published to a tenant Org, a CSR update
-issued from the OWNING Org returned HTTP 204 and took effect, and the table stayed
-published throughout. See §8 Q6 for the full evidence.
+**Corrected 2026-07-27, second verification round; completed 2026-07-27, third round
+(conclusive).** The premise this section originally stated -- "CSR cannot be defined on
+published objects" (parent spec §2, plan §4.3) -- is FALSE. Live-verified: with a table
+genuinely published to a tenant Org, a CSR update issued from the OWNING Org returned
+HTTP 204, took effect, and the table stayed published throughout.
 
-The refusal stays in place, but the justification changes. It is a conservative CLI
-default, not a platform restriction: the platform accepts CSR on a published object from
-the owning Org, but whether a TENANT Org can see or use the result is unverified, so
-applying it could silently produce protection the tenant never receives. `resolve` reads
-each table's publication state and marks affected rows `CSR_BLOCKED`; `apply` refuses
-those rows unless `--allow-published` is passed, which remains the escape hatch for
-probing this open question, not for routine use.
+The second round left one thing open: whether a TENANT Org could see or use a rule set
+that way. A third, conclusive round settled it with a manual data-plane test against
+real non-admin users in both the owning Org and the tenant Org: the restricted column
+stayed hidden in the owning Org, but the SAME column was fully visible in the tenant
+Org it was published to -- no error, no warning, either way. **A CSR rule is scoped to
+the Org that defined it and does not travel with publication.** See §8 Q6 (now
+ANSWERED) for the full evidence.
+
+The refusal stays in place, and the justification is now settled rather than
+conservative-pending-verification: the platform accepts CSR on a published object from
+the owning Org and enforces it there, but it never reaches any tenant Org the table is
+published to, so applying it silently produces protection an operator can easily
+believe is global when it is local to one Org. This is not a platform limitation, it is
+a scoping trap. `resolve` reads each table's publication state and marks affected rows
+`CSR_BLOCKED`; `apply` and `set` both refuse those rows unless `--allow-published` is
+passed, which remains the escape hatch for the case where owning-Org-only scope is
+genuinely what is wanted, not for routine use.
+
+**`set` originally had no such check at all**, unlike `resolve`/`build`/`apply` -- the
+same operation (CSR on `T2_PUBLISH`) was `CSR_BLOCKED` through the manifest route and
+silently permitted through `set`. Given the finding above, `set` was the more dangerous
+gap: it is the shortest route to silently shipping an exposed column to every tenant
+while believing it is protected. Fixed: `set` now runs the same publication check and
+refuses by default, with its own `--allow-published`. `clear` is deliberately NOT
+guarded the same way -- `set` creates a false belief that data is protected, while
+`clear` only ever removes protection the operator explicitly asked to remove, and
+guarding it would also block the legitimate remediation of cleaning stale CSR off a
+table that turned out to be published.
 
 The parent spec's comparison table and `docs/multi-tenancy-platform-plan.md` §4.3 both
-still carry the disproven "cannot be defined on published objects" claim. Both are out of
-scope for this branch (see the top of this document) and should be corrected separately.
+still carry the disproven "cannot be defined on published objects" claim, now further
+out of date given the conclusive finding above. Both are out of scope for this branch
+(see the top of this document) and should be corrected separately.
 
 This is parent spec §5.1's `CSR_BLOCKER` at CLI level. It fails at plan time rather than
 mid-apply, matching the house style that `apply` refuses before touching anything if the
@@ -375,15 +425,16 @@ capture/restore, in
 | 3 | `fetch` response casing and envelope in practice | **Bare array, snake_case**, e.g. `[{"table_guid":"...","obj_id":null,"column_security_rules":[]}]`. The schema was accurate; the docs' prose `data`-envelope camelCase example was wrong. Our parser reads both; the camelCase branch is dead on this build (kept, unexercised). |
 | 4 | `is_unsecured: true` on a column that was never secured | **Errors, HTTP 400** (`"Column 'PROD_CAT_L1' is not secured, cannot mark as unsecured"`), contradicting the parent spec's guess of "likely harmless no-op". Matters for `--prune`: a plan is safe when fresh, but a column unsecured between `resolve` and `apply` makes that entry stale and the apply fails partway. Now translated by `explain_csr_error` (Finding C). |
 | 5 | Does the CSR TML import into a different Org, given `table:` is by name? | **Resolves per-Org by name.** Importing into an Org lacking the named table fails 14502 with the name present (not empty) -- the reference is fine, the table just is not there. A CSR document is portable only to Orgs with a same-named table. Answers parent spec open item #3. This is also Finding B: the pre-fix `explain_csr_error` misdiagnosed this exact case as a missing `table:` reference. |
-| 6 | The refusal shape for CSR on a published object | **PARTIALLY ANSWERED, second verification round (2026-07-27).** With `T2_PUBLISH` genuinely published to ORG1, a CSR update issued from the OWNING Org returned HTTP 204 and took effect -- the platform does NOT refuse it. This disproves the "CSR cannot be defined on a published object" premise §3.3 and the parent spec relied on; §3.3 is corrected. Still unknown: whether a TENANT Org can see or use a rule set that way -- reading CSR as ORG1 returned a 10023 access error, and modifying from ORG1 failed on a per-Org group-identifier mismatch before it could test read-only-ness, so neither result settles the tenant-visibility question. Full evidence in the live-verification doc's Q6 section. |
+| 6 | The refusal shape for CSR on a published object | **ANSWERED, third verification round (2026-07-27, conclusive).** The second round established that the platform accepts an owning-Org CSR update on a published object (HTTP 204, takes effect) rather than refusing it -- disproving the "CSR cannot be defined on a published object" premise §3.3 and the parent spec relied on. The third round, a manual data-plane test with real non-admin users in both the owning Org and the tenant Org, settled what the second round left open: the restricted column stayed hidden in the owning Org, but the SAME column was fully visible in the tenant Org the table was published to -- no error, no warning, either way. **A CSR rule is scoped to the Org that defined it and does not travel with publication.** §3.3 is corrected accordingly, and `set` now carries the same publication guard as `resolve`/`build`/`apply`. Full evidence in the live-verification doc's Q6 section. |
 | 7 *(added during verification)* | Does an empty `group_identifiers: []` under REPLACE get accepted? | **Accepted (204/200)**, reads back as a column with no groups. "Secured for nobody" is a real reachable state, validating both the `"COL="` CLI flag form and the blank `group_name` manifest sentinel. |
 
-**Item 6, remaining unknown:** whether a tenant Org can see or use CSR set from the owning
-Org on a published table. This also carries forward the `ts share` verification record's
-open item about an end-to-end grant on a published object in a tenant Org. **Still open.**
+**Item 6 is now fully answered** (see the row above and the live-verification doc's §Q6
+third round). It also closes the `ts share` verification record's open item about an
+end-to-end grant on a published object in a tenant Org, for CSR's own mechanism at
+least: the answer is that the rule simply does not apply there.
 
 Folded in from that same record: whether a table-level `NO_ACCESS` clears existing column
-grants. **Still open**, carried forward unchanged.
+grants. **Still open**, carried forward unchanged -- unrelated to CSR's own mechanism.
 
 **Documents beyond this branch's scope that still carry the disproven claim.** The parent
 spec's comparison table (`2026-07-26-ts-security-sharing-design.md`) and

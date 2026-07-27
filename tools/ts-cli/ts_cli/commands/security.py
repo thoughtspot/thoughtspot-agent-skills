@@ -5,7 +5,7 @@ The second of the two column-security mechanisms. `ts share` carries the first
 
 | | CLS (`ts share`) | CSR (here) |
 |---|---|---|
-| Works on published objects | yes | refused BY DEFAULT (the platform itself accepts an owning-Org CSR update on a published table, live-verified 2026-07-27; whether a tenant Org can see or use it is unverified, so this CLI blocks unless `--allow-published`) |
+| Works on published objects | yes | refused BY DEFAULT (the platform accepts an owning-Org CSR update on a published table and enforces it there, live-verified 2026-07-27 -- but the rule is scoped to the defining Org and does NOT travel with publication, so every tenant Org keeps the column visible unless `--allow-published` is passed) |
 | Declares | every VISIBLE column per group | only the RESTRICTED columns |
 | Liveboard filter on a secured column | locks | stays interactive |
 | Availability | GA | Beta 10.12+, feature-flagged OFF by default |
@@ -107,11 +107,14 @@ def _published_orgs(client: ThoughtSpotClient, guid: str) -> Optional[List[Any]]
     reading it as "published into" made every table on an Orgs-enabled cluster look
     published.
 
-    Feeds the CSR_BLOCKED refusal, which is conservative rather than a platform
-    restriction: live-verified 2026-07-27, an owning-Org CSR update against a genuinely
-    published table returned HTTP 204 and took effect. What is still unverified is
-    whether a TENANT Org can see or use a rule set applied that way, so the CLI blocks
-    by default here and `--allow-published` is the override.
+    Feeds the CSR_BLOCKED refusal in both `set` and `resolve`/`build`/`apply`. Not a
+    platform restriction: live-verified 2026-07-27, an owning-Org CSR update against a
+    genuinely published table returns HTTP 204 and IS enforced in that Org. What it does
+    NOT do is travel with publication -- the same table, opened in a tenant Org it is
+    published to, showed the restricted column in full to a real non-admin user, no
+    error and no warning either way (live-verified 2026-07-27, data-plane, both Orgs). A
+    CSR rule is scoped to the Org that defined it, so this blocks by default and
+    `--allow-published` is the explicit override for owning-Org-only scope.
 
     None is distinct from an empty list, and the difference is the whole point. ``[]``
     means the read succeeded and the table is published nowhere; None means the read
@@ -196,6 +199,85 @@ def _one_shot(profile: Optional[str], org: Optional[str], payload: Dict[str, Any
     _post_update(client, payload, label)
 
 
+def _org_names_for_ids(client: ThoughtSpotClient, ids: List[Any]) -> List[str]:
+    """Best-effort Org id -> name, for a refusal message; falls back to the numeric id.
+
+    A refusal must not itself fail just because a names lookup did not: an id
+    `orgs/search` cannot explain (a failed call, or an id it omits) is reported
+    numerically instead of blocking the refusal from being shown at all.
+    """
+    index: Dict[Any, str] = {}
+    resp = client.post("/api/rest/2.0/orgs/search", json={}, raise_for_status=False)
+    if getattr(resp, "ok", False):
+        data = resp.json()
+        if isinstance(data, list):
+            index = {o.get("id"): o.get("name") for o in data
+                     if isinstance(o, dict) and o.get("id") is not None}
+    return [str(index.get(i, i)) for i in ids]
+
+
+def _refuse_set_if_published(profile: Optional[str], org: Optional[str], table: str,
+                             allow_published: bool) -> None:
+    """Refuse `set` on a published table, the scoping trap this fix exists for.
+
+    `resolve`/`build`/`apply` already refuse a published table as CSR_BLOCKED, but
+    `set` had NO such check at all -- live-verified 2026-07-27, `set --table
+    T2_PUBLISH` succeeded on a published table while `resolve` on the identical input
+    reported CSR_BLOCKED. That asymmetry made `set` the shortest route to the finding
+    this fix guards against: CSR is scoped to the Org it is defined in, so setting it
+    on a published table protects the OWNING Org and silently leaves every TENANT
+    Org's copy of the column visible -- no error, no warning, no platform refusal.
+
+    Resolves the table through `_resolve_object` first, rather than trusting the raw
+    `--table` value: `_published_orgs` takes the first search hit with no
+    disambiguation of its own, and a name collision here would check the wrong
+    table's publication state. The actual `rules/update` call still sends the
+    caller's original `--table` value unchanged (see `set_cmd`) -- this resolution is
+    only for the publication check.
+
+    Skipped entirely under --dry-run, matching `_one_shot`: a dry run never
+    constructs a client or makes a network call, so it cannot check something that
+    needs one.
+    """
+    client = _client_for_org(profile, org)
+    if org:
+        assert_org_context(client, org, profile)
+    resolved = _resolve_object(client, table)
+    published = _published_orgs(client, resolved["guid"])
+
+    if published == []:
+        return  # confirmed unpublished: nothing to guard against
+
+    if published is None:
+        reason = ("its publication state could not be determined, so there is no "
+                  "way to know whether a tenant Org would be silently left with "
+                  "the column visible")
+    else:
+        org_names = ", ".join(_org_names_for_ids(client, published))
+        reason = (
+            f"it is published to {org_names}. This is not a platform limitation: "
+            f"the platform accepts the write and enforces it right here, in the "
+            f"Org you are in now (live-verified 2026-07-27) -- it is a scoping "
+            f"trap. A CSR rule applies only to the Org that defined it and does "
+            f"NOT travel with publication, so {org_names} would keep the "
+            f"restricted column(s) fully visible, with no error and no warning "
+            f"(also live-verified 2026-07-27). An operator can secure a column, "
+            f"publish the object, and believe every tenant is protected when none "
+            f"of them are")
+
+    if allow_published:
+        print(f"Warning: --allow-published set; setting column security on "
+              f"'{resolved['name']}' even though {reason}. Every Org not named "
+              f"above is unaffected by this rule.", file=sys.stderr)
+        return
+
+    raise typer.BadParameter(
+        f"Refusing to set column security on '{resolved['name']}': {reason}. Pass "
+        f"--allow-published if owning-Org-only scope is genuinely what you want "
+        f"here, or use `ts share` column grants (CLS) instead -- those apply "
+        f"per-Org.")
+
+
 def _refuse_empty_groups_for_increment(rules: Dict[str, List[str]],
                                        operation: str) -> None:
     """Refuse ``--rule "COL="`` under --add or --remove.
@@ -233,6 +315,12 @@ def set_cmd(
     org: Optional[str] = typer.Option(None, "--org", help="Apply in this Org"),
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="Print the payload without sending it"),
+    allow_published: bool = typer.Option(False, "--allow-published",
+        help="Set column security on a published table anyway. The platform accepts "
+             "the write and enforces it in this Org (live-verified), but a CSR rule "
+             "does not travel with publication, so every tenant Org this table is "
+             "published to keeps the column visible regardless -- this is the "
+             "explicit override for owning-Org-only scope, not a routine flag."),
     profile: Optional[str] = _profile_option,
 ) -> None:
     """Restrict columns on one table to named groups.
@@ -251,12 +339,21 @@ def set_cmd(
     to unsecure one column, or `resolve --prune` to unsecure everything absent from a
     manifest.
 
+    Refuses a published table by default, matching `resolve`/`build`/`apply`: setting
+    CSR there is the shortest route to believing a column is protected everywhere when
+    it is protected only in this Org (live-verified 2026-07-27 -- see `--allow-published`
+    above for the full reason). This is a scoping trap, not a platform limitation: the
+    write succeeds and is enforced here, but it never reaches any tenant Org the table
+    is published to. Pass --allow-published to proceed anyway, or secure the column
+    with `ts share` column grants (CLS) instead, which do apply per-Org. Skipped
+    entirely under --dry-run, which never touches the network.
+
     Output (JSON to stdout, --dry-run only): the request payload.
 
     Examples:
 
     \b
-      ts security column-rules set --table T2_PUBLISH --rule "PROD_NM=Analyst" -p prod
+      ts security column-rules set --table T2 --rule "PROD_NM=Analyst" -p prod
       ts security column-rules set --table T2 --rule "COST=Finance,Audit" \\
         --rule "SALARY=" --org ORG1 -p prod
       ts security column-rules set --table T2 --rule "COST=Audit" --add -p prod
@@ -274,6 +371,9 @@ def set_cmd(
         payload = build_update_payload(table, rules, operation=operation)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+    if not dry_run:
+        _refuse_set_if_published(profile, org, table, allow_published)
 
     _one_shot(profile, org, payload,
               f"{table}: {operation} {', '.join(sorted(rules))}", dry_run)
@@ -299,6 +399,15 @@ def clear_cmd(
 
     This removes protection. Capture `get` first if you may need to put it back.
 
+    Deliberately NOT guarded against a published table, unlike `set`. `set` guards
+    because it creates a false belief -- an operator secures a column, publishes the
+    object, and believes every tenant is protected when the rule never left the owning
+    Org (live-verified 2026-07-27). `clear` removes protection the operator explicitly
+    asked to remove, which creates no false belief the other way, and blocking it would
+    also block the legitimate remediation of cleaning stale CSR off a table that turned
+    out to be published. Do NOT add the same guard here for symmetry with `set` -- the
+    two are not symmetric risks, and this asymmetry is intentional.
+
     Output (JSON to stdout, --dry-run only): the request payload.
 
     Examples:
@@ -307,6 +416,8 @@ def clear_cmd(
       ts security column-rules clear --table T2_PUBLISH --column COST -p prod
       ts security column-rules clear --table T2_PUBLISH --org ORG1 -p prod
     """
+    # No publication guard here, unlike `set` -- see the docstring above. Deliberate
+    # asymmetry: do not add one for symmetry's sake.
     try:
         if column is not None:
             payload = build_update_payload(table, {}, unsecure=[column])
@@ -342,10 +453,11 @@ def export_cmd(
 
     Preserving this document is what makes a tenant's CSR configuration restorable
     later, published or not -- an owning-Org CSR update on a published table already
-    succeeds (live-verified 2026-07-27; tenant-Org visibility of the result is the
-    still-open question, not whether the owning Org can set it). Once that path is used
-    instead of `CSR_BLOCKED`, restoring is a single import rather than a reconstruction
-    from CLS grants.
+    succeeds (live-verified 2026-07-27), but it only ever protects the owning Org: CSR
+    does not travel with publication (also live-verified 2026-07-27), so a tenant Org
+    needs its OWN document, naming its OWN groups, imported separately. Once that
+    per-Org import is used instead of `CSR_BLOCKED`, restoring is a single import rather
+    than a reconstruction from CLS grants.
 
     An empty result is a legitimate answer: a table with no secured columns has no
     document to return.
