@@ -32,7 +32,7 @@ what this routine migrates.
 | Term | Meaning |
 |------|---------|
 | **Source Org** | The old tenant Org (`Tenant1`) holding the tenant's original Tables, Models, and bespoke content. |
-| **Clean Org** | The fresh target Org (`cleanTenant1`) that already received the governed **published Tables + Models** via Publishing. Starts with no bespoke content. |
+| **Clean Org** | The fresh target Org (`cleanTenant1`) that already received the governed **published Tables + Models** via Publishing. Starts with no bespoke content. **One per tenant, and permanent** — see *Topology* below. |
 | **Published Model/Table** | The governed object in the clean Org (its own GUID/fqn in that Org). Migration destination. |
 | **Tenant scaffolding** | Copies of the source Org's Tables + Models lifted into the clean Org purely as an intermediate; deleted at the end. |
 | **Bespoke content** | Tenant-authored Sets, Views, Answers, Liveboards — the objects actually being migrated. |
@@ -41,6 +41,28 @@ what this routine migrates.
 Each migration run processes exactly one **(source Org → clean Org)** pair.
 Cross-cluster and same-cluster-different-Org are both supported: each side is a
 `ts` profile plus an optional org identifier (see *Auth & Org Scoping*).
+
+### Topology — one permanent clean Org per tenant (settled 2026-07-27)
+
+The clean Org is **not** a shared staging area recycled between tenants. Each tenant
+gets its own (`ACME` → `ACME NEW`), and that Org is the tenant's **permanent** home —
+users cut over to it at the end and the source Org is retired.
+
+Two consequences shape the whole routine:
+
+- **The clean Org is user-free until the final step.** For the entire migration it is
+  therefore *disposable*: any failure before cutover is aborted with a wholesale
+  `delete Org`. A separate temporary staging Org was considered and rejected — it
+  would add nothing (the property already exists) while forcing a **second** lift of
+  the largest object set, the bespoke content, to get it back out again.
+- **The rollback is the source Org itself**, untouched until cutover — not the
+  scaffolding, and not a staging Org. Scaffolding cleanup can therefore run *before*
+  cutover, so the clean Org is verified in its final state.
+
+**Each clean Org is provisioned its own connection, named identically to the source
+Org's.** Connection names are per-Org (verified 2026-07-27), so `ACME NEW` may hold an
+`APJ_ACME` while `ACME` still does. This is what lets lifted Table TML resolve
+unchanged, and it is deleted after cutover.
 
 ## Why this architecture
 
@@ -76,32 +98,37 @@ symmetrically on rename-back. Dependents reference the column by its logical
 identity (anchored to the unchanged `column_id` physical binding), not the name
 string. Recorded in memory `feedback_ts_column_alias_rename_propagates`.
 
-### Remaining spike (implementation task #1) — RUN 2026-07-27, see below
+### Remaining spike (implementation task #1) — RUN 2026-07-27, RESOLVED
 
-**Result: the mechanism works; three preconditions in front of it do not.** Full account:
-[`2026-07-27-ts-migrate-batch-import-spike.md`](../verification/2026-07-27-ts-migrate-batch-import-spike.md).
+**Result: the mechanism works, and of the three preconditions the spike surfaced, two
+dissolve under the settled topology.** Full accounts:
+[the spike](../verification/2026-07-27-ts-migrate-batch-import-spike.md) and
+[its resolution](../verification/2026-07-27-ts-migrate-binding-resolution.md).
 
-1. **Connections are per-Org, never shared, and differently named** (`APJ` in Primary,
-   `APJ_ORG1` in ORG1). A tenant Table's TML carries its own Org's connection, which is an
-   **external** reference — nothing in the batch can remap it. The "zero per-object
-   reference rewriting" claim holds for intra-batch references and not for this one. Every
-   lifted Table needs its `connection` block rewritten: one field per Table, O(tables).
-   Since step 4 deletes the scaffolding and nothing is queried through it, *any* valid
-   connection in the target will do.
+1. **Connections are per-Org, never shared** (`APJ` in Primary, `APJ_ORG1` in ORG1). A
+   tenant Table's TML carries its own Org's connection, which is an **external**
+   reference — nothing in the batch can remap it.
+   **Dissolved:** connection *names* are scoped per-Org, not cluster-unique (verified by
+   rename, since `connection/create` validates warehouse connectivity even with
+   `validate: false` and so cannot be probed with a placeholder). Naming the clean Org's
+   connection identically to the source's makes the lifted TML resolve **unchanged**.
+   The naming is now load-bearing, so `audit` **verifies** it rather than assuming it; a
+   mismatch falls back to rewriting the `connection` block, which still works. An
+   optimisation with a correct fallback, not a single point of failure.
 2. **Publishing a Table into an Org does not give that Org a usable connection.** Verified
    directly: a fresh Org with a published Table still lists zero connections and still
-   refuses a Table import. So the clean Org needs its OWN connection provisioned first —
-   a `ts tenancy` concern, not a `ts migrate` one.
-3. **Tables dedupe by PHYSICAL binding, not logical name.** A renamed, guid-stripped Table
-   still matched an existing one (`Cannot create a new table ... Existing Table GUID: …`).
-   **This is the common case, not an edge case:** tenants need not be segmented by database
-   or schema, and a normal deployment has every tenant referencing the SAME physical table
-   with RLS segmenting the rows. In that topology every tenant's scaffolding shares one
-   binding — with each other and with the clean Org's published Tables — so this blocks
-   lift-and-shift for every tenant and is the likeliest of the three to stop `apply`
-   outright. The strongest option is probably to bind lifted Models to the Table already
-   in the target rather than creating one, which would also simplify step 1; that needs
-   its own verification.
+   refuses a Table import.
+   **Stands, and is now by design** — step 0 provisions each clean Org its own connection.
+   A `ts tenancy` concern, not a `ts migrate` one.
+3. **Tables dedupe by PHYSICAL binding, not logical name** — the key is
+   **(connection + db + schema + db_table)**, proven in both directions with a control
+   import into an Org that already held a *published* Table on the binding.
+   **Stands as a fact, dissolved as a blocker.** The connection is part of the key, so a
+   tenant's scaffolding on its own connection never collides with published Tables on
+   Primary's. This is precisely the RLS-segmented-fleet case that made the finding look
+   fatal: every tenant shares one physical table but reaches it through its own connection.
+   Whether a *published* Table participates in the dedupe is **moot by construction** — a
+   tenant Org can never hold Primary's connection, so the colliding case is unreachable.
 
 **The mechanism itself showed up working:** `Warning: No table with fqn <dead-guid> found
 for table_id <name>` proves the importer tries the fqn, then falls back to the NAME — which
@@ -112,10 +139,12 @@ target Org.
 Calls scale with batches, not objects, as the Efficiency & Scale section assumes. Re-measure
 at realistic batch sizes.
 
-**Consequences.** Add a step 0 to the architecture below (the clean Org must have its own
-connection, and every lifted Table's connection block is rewritten to it), and have
-`audit` report two new blockers: no connection in the target, and a scaffolding Table
-whose physical binding collides with something already there.
+**Deleting a connection does NOT cascade to its Tables** — `deleteConnection`: *"If a
+connection has dependent objects, make sure you remove its associations before the delete
+operation."* Spec-sourced, deliberately not live-tested (the only connections on the test
+cluster carry real fixture Tables, and a cascade that succeeded would destroy an Org to
+learn what the spec already states). Teardown is therefore **ordered**: scaffolding Models,
+then Tables, then the connection. That order is correct whichever way the platform behaves.
 
 ### Original spike definition
 
@@ -289,6 +318,14 @@ TML is not sufficient and will report a clean Model that is in fact blocked.
    per-Model column diffs, blockers, physical-binding warnings, and a readiness
    verdict per Model.
 
+Three target-side checks, added after the 2026-07-27 binding work:
+
+| Check | Severity | Why |
+|---|---|---|
+| Target Org has no connection | **fatal** | Publishing does not grant one; no Table import can succeed |
+| Target connection name differs from the source's | **warning** | Triggers the `connection`-block rewrite path rather than blocking |
+| Scaffolding Table collides on the **same connection** | **fatal** | Only reachable when source and target share a connection, which the per-tenant-Org topology precludes |
+
 The audit changes nothing and can be re-run freely.
 
 ### `column-mapping.csv` shape
@@ -303,11 +340,20 @@ Sales,Region,DM_CUST::REGION,Region,MATCHED
 ## Phase 2 — `ts migrate apply`
 
 Per (source Org → clean Org) pair, per Model, driven by the approved mapping and a
-state ledger:
+state ledger. Steps 0–7 are **per tenant**; the alias merge and cutover that follow are
+**per wave** (see *Wave-level steps*).
 
 0. **Load & validate mapping** — abort if any `GAP_BLOCKER` row has an empty
    `published_column`, or if any Model carries a `SET_BLOCKER`. The Set case has no
-   override: see *Sets are a migration blocker*.
+   override: see *Sets are a migration blocker*. Also assert the rename map is
+   **injective** and that no target `published_column` already exists in the source
+   Model — the map is generated, and a generation bug would otherwise produce a
+   duplicate column name silently.
+0b. **Provision the clean Org** — create the Org and **its own connection, named
+   identically to the source Org's**, so lifted Table TML resolves unchanged (see
+   *Topology*). A `ts tenancy` concern invoked from here, not reimplemented. If the
+   name cannot be matched, record it in the ledger — step 2 then rewrites each lifted
+   Table's `connection` block instead.
 1. **Backup** — export every source object in scope (reuse the `ts dependency
    backup` all-or-nothing pattern) to `--plan/backup/`. Nothing is written if any
    export fails.
@@ -326,7 +372,46 @@ state ledger:
    published Models via `ts dependency apply-change` (now a 1:1 name match).
    `search_query` sanitisation and dangling-join handling are already enforced by
    that engine (per memory `feedback_ts_tml_import_constraints`).
-6. **Cleanup** — delete the tenant scaffolding Tables + Models from the clean Org.
+6. **Cleanup** — delete the tenant scaffolding from the clean Org, **in order**:
+   Models, then Tables, then the connection provisioned in step 0b. Deleting a
+   connection does not cascade to its Tables. This runs *before* cutover so the clean
+   Org is verified in its final state; the rollback throughout is the untouched source
+   Org, not the scaffolding.
+   The ordering is also a **safety net**: by this point step 5 has repointed everything,
+   so nothing should reference the scaffolding — and a Model that still has dependents
+   *refuses to delete*, surfacing a missed repoint. (A wholesale Org delete would take
+   the un-repointed content with it silently. This is the main reason cleanup is
+   surgical rather than an Org drop.)
+
+### Wave-level steps (serialised, once per wave — not per tenant)
+
+7. **Alias merge** — append the wave's tenants' per-Org column aliases to the Primary
+   Org's Model and import **once for the whole wave**.
+8. **Cutover** — move each tenant's users to its clean Org and retire the source Org.
+
+**Why the alias step is per wave, not per tenant.** Aliases live on the *Primary* Org's
+Model, and until delta load ships (est. ThoughtSpot 26.10) there is no partial update:
+every append re-imports the whole document. Per-tenant that makes tenant *k* pay the
+cost of all *k* before it — O(N²) across the fleet — and past 5 MB the import goes async
+at 10–15 min a go. At 50 columns that threshold lands around tenant 500, so the back half
+of a 1000-tenant fleet would spend ~100 hours importing. Batching per wave turns 1000
+imports into 20.
+
+Serialising it is required regardless: two concurrent full-document writes clobber each
+other's aliases.
+
+**Size is not the near-term ceiling.** The 25 MB limit in
+[the alias design](2026-07-24-ts-object-model-alias-design.md) assumes 3 locales;
+migration is single-locale per Org, so 50 cols × 1000 Orgs ≈ 10 MB. `apply` still
+projects post-merge size at wave start and refuses above 20 MB, so a fleet that *will*
+hit the ceiling finds out before the wave rather than at the import.
+
+**The failure to guard.** `ts alias build --merge` merges onto whatever the export
+returned. A partial or soft-failed export silently drops the aliases of every
+already-cut-over tenant — their users see `String_1` where they saw `Region`, with no
+error anywhere. Before any merge, `apply` **asserts the exported alias count matches the
+expected count for cut-over Orgs and fails closed**. This is the one catastrophic step in
+the routine and the check is a count comparison.
 
 Every step records progress in the **state ledger** so a re-run with `--resume`
 skips completed work; imports of already-created objects use `--no-create-new`
@@ -480,12 +565,34 @@ agents/cli/ts-org-migrate/SKILL.md        # orchestration skill (+ references/)
 
 ## Open Questions
 
-1. **Batch-import reference remapping into a fresh Org** — the spike above;
-   confirms exact import batching/ordering (§*Remaining spike*).
+1. ~~**Batch-import reference remapping into a fresh Org**~~ — RESOLVED 2026-07-27.
+   The importer tries `fqn` then falls back to name; the mechanism works. Still
+   undemonstrated at realistic batch size: that a *full* batch binds content to the
+   newly-created Models. Re-run once `apply` exists.
 2. **Same-cluster org-scoped auth** — with ~2000 Orgs on a few clusters, source and
    clean Orgs are frequently on the *same* cluster, so org-scoped auth is **likely
    required, not deferrable**. Confirm the `org_identifier` mechanism on the token
    exchange early (candidate for the same spike).
-3. **Connection binding of scaffolding Tables in the clean Org** — confirm tenant
-   scaffolding Tables can bind to the clean Org's published connection (same
-   physical warehouse) so the rename→repoint path holds.
+3. ~~**Connection binding of scaffolding Tables in the clean Org**~~ — RESOLVED
+   2026-07-27. The dedupe key is (connection + db + schema + db_table) and connection
+   names are per-Org, so a same-named connection in the clean Org lets scaffolding bind
+   without colliding with the published Tables. See
+   [the resolution](../verification/2026-07-27-ts-migrate-binding-resolution.md).
+4. **Does RLS on a published Model enforce for users in the Org it is published to?**
+   **The highest-stakes open item in the programme** — if it does not, every tenant sees
+   every other tenant's rows. Untested, and the prior is genuinely mixed: CSR is
+   Org-scoped and does **not** travel with publication (verified 2026-07-27), so
+   "defined in Primary" is not on its own sufficient. RLS is structurally different —
+   it lives in the Table TML as part of the object definition, where CSR is a separate
+   Org-scoped security object — which is why it is expected to carry.
+   For a published single model the rule predicate is `ts_orgid` or `ts_vars`, not
+   `ts_groups`; both are intrinsically Org-aware (`ts_orgid` resolves against the
+   *querying* user's Org), so the per-Org-group principal question that would arise with
+   `ts_groups` does not apply here.
+   **The test must use a real non-admin user in the tenant Org.** An admin session
+   bypasses RLS, and an owning-Org check passes even when the tenant-side behaviour is
+   wrong — that is exactly how the CSR trap was missed until a real tenant user looked.
+5. **Does the alias set survive cutover intact as the fleet grows?** The wave-level merge
+   (Phase 2 step 7) is a full-document read-modify-write whose blast radius is every
+   already-migrated tenant. The count assertion guards it; worth an end-to-end rehearsal
+   across two waves before the first production wave.
