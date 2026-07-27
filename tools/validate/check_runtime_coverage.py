@@ -37,6 +37,9 @@ from _dirs import ALL_RUNTIMES
 # ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
+    ("ts-migrate-orgs", "coco-snowsight"):
+        "CLI-only: drives a destructive cross-Org cutover through the `ts` CLI "
+        "and a local state ledger, neither of which exists in Snowsight.",
     ("ts-setup-tenancy", "coco-snowsight"):
         "Provisions Orgs, users and groups on a ThoughtSpot cluster through the ts CLI "
         "and orchestrates other CLI skills; CoCo runs inside Snowsight with no shell and "

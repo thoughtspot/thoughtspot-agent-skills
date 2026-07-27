@@ -12,6 +12,7 @@
 | ts-convert-to-snowflake-sv | Y | — | Y | — |
 | ts-dependency-manager | Y | — | — | — |
 | ts-load-source-data | Y | — | — | — |
+| ts-migrate-orgs | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
 | ts-object-model-aggregates | Y | — | — | — |
 | ts-object-model-alias | Y | — | — | — |

@@ -101,6 +101,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-security-columns \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-setup-tenancy \
       ~/.snowflake/cortex/skills/ts-setup-tenancy
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-migrate-orgs \
+      ~/.snowflake/cortex/skills/ts-migrate-orgs
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.snowflake/cortex/skills/ts-object-model-coach
@@ -190,6 +192,8 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-security-columns \
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-setup-tenancy \
       ~/.claude/skills/ts-setup-tenancy
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-migrate-orgs \
+      ~/.claude/skills/ts-migrate-orgs
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-coach \
       ~/.claude/skills/ts-object-model-coach

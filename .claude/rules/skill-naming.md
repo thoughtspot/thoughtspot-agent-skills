@@ -35,6 +35,7 @@ extend the rule with a new one.
 | 9 | `ts-load-*` | `ts-load-{specifier}` | Load source data into a warehouse. Specifier describes the data domain or purpose. | `ts-load-source-data` |
 | 10 | `ts-publish-*` | `ts-publish-{target}` | Distribute a master object to a set of destinations **without copying it**, including the variable definition and metadata parameterization that distribution requires. Second token is the destination class. | `ts-publish-orgs` |
 | 11 | `ts-security-*` | `ts-security-{aspect}` | Cross-object, cross-Org security configuration that **chooses between mechanisms** rather than driving one. Second token names the aspect secured (`columns`, `rls`). | `ts-security-columns`, `ts-security-rls` *(planned)* |
+| 12 | `ts-migrate-*` | `ts-migrate-{destination-class}` | Move an **existing estate** onto a new platform pattern and **retire the old one**. Second token is the destination class. Spans many object types across two Orgs and is destructive at the source. | `ts-migrate-orgs` |
 
 ---
 
@@ -166,7 +167,29 @@ Distinct from `ts-object-*` (single-object scoped — these skills produce a ver
 these change no object definition at all), from `ts-audit` (read-only), and from
 `ts-publish-*` (which distributes an object — these restrict one).
 
-### 12. None of the above match
+### 12. Does the skill move an existing estate onto a new pattern and retire the old one?
+
+→ **`ts-migrate-*`**. Pattern: `ts-migrate-{destination-class}`.
+
+The destination class is the second token (`orgs` today; a future
+`ts-migrate-instances` would slot in the same way). This family mirrors the
+`ts migrate` CLI group, the same way `ts-security-*` mirrors `ts security`.
+
+It is the **counterpart** to `ts-publish-*`, and the pair is the clearest way to
+see the boundary. Publishing *distributes a master object outward* and changes
+nothing that already exists. Migration runs the other direction: it takes the
+copies a tenant already has, moves their content onto the published master, and
+**deletes the originals**. One is additive and reversible by retraction; the
+other is a destructive cutover with a state ledger and a rollback.
+
+Distinct from `ts-dependency-*`, which rewrites the graph *within one Org* as an
+operation — a migration spans two Orgs, several object types, a backup, a
+rename, a repoint and a teardown, and *uses* the dependency engine as one step.
+Distinct from `ts-convert-*` (no format change — the same TML lands in a
+different Org) and from `ts-object-*` (a migration's unit is a tenant, not an
+object).
+
+### 13. None of the above match
 
 → **Extend the rule**. See "Adding a new family" below. The validator
 will fail until either (a) a new family is added or (b) the skill is
